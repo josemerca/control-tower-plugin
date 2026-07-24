@@ -1,0 +1,7 @@
+{
+  "name": "control-tower",
+  "owner": { "name": "José Agüera" },
+  "plugins": [
+    { "name": "control-tower-loop", "source": "./", "description": "Loop agéntico portable" }
+  ]
+}
