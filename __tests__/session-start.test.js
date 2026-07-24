@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
 
@@ -29,6 +29,19 @@ describe('session-start hook', () => {
   it('sin STATE.md → salida vacía', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     expect(runHook(dir)).toBe('')
+    rmSync(dir, { recursive: true, force: true })
+  })
+  it('stdin malformado → salida vacía, exit 0 (no crash)', () => {
+    const r = spawnSync('node', [hook], { input: 'no-json{', encoding: 'utf8' })
+    expect(r.status).toBe(0)
+    expect((r.stdout || '').trim()).toBe('')
+  })
+  it('sin fuga de stderr cuando cwd no es un repo git', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    mkdirSync(join(dir, '.agent'))
+    writeFileSync(join(dir, '.agent', 'STATE.md'), '---\ntask: "X"\n---\n## Current State\nhola')
+    const r = spawnSync('node', [hook], { input: JSON.stringify({ cwd: dir }), encoding: 'utf8' })
+    expect(r.stderr).toBe('')
     rmSync(dir, { recursive: true, force: true })
   })
 })

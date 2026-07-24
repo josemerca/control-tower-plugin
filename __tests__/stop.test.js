@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const hook = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'stop.js')
@@ -48,6 +48,19 @@ describe('stop hook', () => {
     const dir = initRepo()
     writeState(dir, 'sha_viejo')
     expect(run(dir, true)).toBe('')
+    rmSync(dir, { recursive: true, force: true })
+  })
+  it('stdin malformado → salida vacía, exit 0 (no crash)', () => {
+    const r = spawnSync('node', [hook], { input: 'no-json{', encoding: 'utf8' })
+    expect(r.status).toBe(0)
+    expect((r.stdout || '').trim()).toBe('')
+  })
+  it('no ejecuta comandos inyectados vía last_commit (bloquea, sin efectos)', () => {
+    const dir = initRepo()
+    writeState(dir, '$(touch pwned)')
+    const out = JSON.parse(run(dir))
+    expect(out.decision).toBe('block')
+    expect(existsSync(join(dir, 'pwned'))).toBe(false)
     rmSync(dir, { recursive: true, force: true })
   })
 })

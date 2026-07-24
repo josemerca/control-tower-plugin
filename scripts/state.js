@@ -3,8 +3,9 @@ import { parse, stringify } from 'yaml'
 const FM = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/
 
 export function parseState(md) {
-  const m = md.match(FM)
-  if (!m) return { meta: {}, body: md.trim() }
+  const s = (md ?? '').replace(/^﻿/, '').trimStart()
+  const m = s.match(FM)
+  if (!m) return { meta: {}, body: s.trim() }
   return { meta: parse(m[1]) ?? {}, body: m[2].trim() }
 }
 

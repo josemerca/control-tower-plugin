@@ -28,6 +28,13 @@ describe('parseState', () => {
     expect(meta).toEqual({})
     expect(body).toBe('solo prosa')
   })
+  it('tolera BOM inicial y aún extrae el frontmatter', () => {
+    const withBom = '﻿' + SAMPLE
+    expect(parseState(withBom).meta.status).toBe('in_progress')
+  })
+  it('tolera líneas en blanco iniciales', () => {
+    expect(parseState('\n\n' + SAMPLE).meta.github_issue).toBe(482)
+  })
 })
 
 describe('renderState', () => {

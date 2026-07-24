@@ -1,20 +1,28 @@
 #!/usr/bin/env node
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { parseState, shouldBlockStop } from '../scripts/state.js'
 
-const input = JSON.parse(readFileSync(0, 'utf8'))
+let input
+try { input = JSON.parse(readFileSync(0, 'utf8')) } catch { process.exit(0) }
 const cwd = input.cwd || process.cwd()
 const statePath = join(cwd, '.agent', 'STATE.md')
 
 if (!existsSync(statePath)) process.exit(0)
 
 let headSha = ''
-try { headSha = execSync('git rev-parse HEAD', { cwd, encoding: 'utf8' }).trim() } catch { process.exit(0) }
+try { headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() } catch { process.exit(0) }
 
 const { meta } = parseState(readFileSync(statePath, 'utf8'))
-const stateSha = meta.last_commit ? execSync(`git rev-parse ${meta.last_commit}^{commit} 2>/dev/null || echo ${meta.last_commit}`, { cwd, encoding: 'utf8' }).trim() : ''
+let stateSha = ''
+if (meta.last_commit) {
+  try {
+    stateSha = execFileSync('git', ['rev-parse', `${meta.last_commit}^{commit}`], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+  } catch {
+    stateSha = String(meta.last_commit)
+  }
+}
 
 if (shouldBlockStop({ headSha, stateSha, stopHookActive: input.stop_hook_active })) {
   process.stdout.write(JSON.stringify({
