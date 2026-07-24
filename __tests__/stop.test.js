@@ -63,4 +63,11 @@ describe('stop hook', () => {
     expect(existsSync(join(dir, 'pwned'))).toBe(false)
     rmSync(dir, { recursive: true, force: true })
   })
+  it('sin fuga de stderr cuando cwd no es un repo git', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    writeState(dir, 'sha_viejo')
+    const r = spawnSync('node', [hook], { input: JSON.stringify({ cwd: dir, hook_event_name: 'Stop' }), encoding: 'utf8' })
+    expect(r.stderr).toBe('')
+    rmSync(dir, { recursive: true, force: true })
+  })
 })

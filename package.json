@@ -2,8 +2,9 @@
   "name": "control-tower-loop",
   "version": "0.1.0",
   "type": "module",
+  "engines": { "node": ">=24" },
   "scripts": {
-    "build": "esbuild hooks/session-start.js hooks/stop.js --bundle --platform=node --format=esm --outdir=dist --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\"",
+    "build": "node scripts/build.mjs",
     "test": "npm run build && vitest run"
   },
   "devDependencies": {

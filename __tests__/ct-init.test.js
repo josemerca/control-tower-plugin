@@ -24,4 +24,11 @@ describe('ct-init.sh', () => {
     expect(readFileSync(join(dir, '.agent', 'STATE.md'), 'utf8')).toBe('MÍO')
     rmSync(dir, { recursive: true, force: true })
   })
+  it('idempotente: no pisa un AGENTS.md existente', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    writeFileSync(join(dir, 'AGENTS.md'), 'MÍO-AGENTS')
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe('MÍO-AGENTS')
+    rmSync(dir, { recursive: true, force: true })
+  })
 })
