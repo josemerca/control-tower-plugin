@@ -8,12 +8,13 @@ const SPEC = `# Spec X
 | 1 | #— login model | backend | modelo User | – | AC-1.1, AC-1.2 | schema §6 |
 | 2 | refresh token | backend | refresh flow | #1 | AC-2.1 | – |
 | 3 | UI login | ui | pantalla | #1, #2 | AC-3.1 | design-system |
+| 4 | #42 notifications | backend | notif engine | #1 | – | logging |
 `
 
 describe('parseSlices', () => {
   const s = parseSlices(SPEC)
   it('extrae todas las filas de datos (no el separador)', () => {
-    expect(s).toHaveLength(3)
+    expect(s).toHaveLength(4)
   })
   it('tipa n, type, deps, ac', () => {
     expect(s[0]).toMatchObject({ n: 1, type: 'backend', deps: [], ac: ['AC-1.1', 'AC-1.2'], protected: 'schema §6' })
@@ -22,6 +23,20 @@ describe('parseSlices', () => {
   })
   it('deps vacío/– → []', () => {
     expect(s[0].deps).toEqual([])
+  })
+  it('issue: extrae #NN si existe, null en otro caso', () => {
+    expect(s[0].issue).toEqual(null) // #— login model → no coincide /#(\d+)/
+    expect(s[1].issue).toEqual(null) // refresh token → sin issue
+    expect(s[3].issue).toEqual('#42') // #42 notifications → extrae #42
+  })
+  it('entrega: preserva el texto de la celda', () => {
+    expect(s[0].entrega).toEqual('modelo User')
+    expect(s[1].entrega).toEqual('refresh flow')
+    expect(s[2].entrega).toEqual('pantalla')
+    expect(s[3].entrega).toEqual('notif engine')
+  })
+  it('ac: – y vacío → []', () => {
+    expect(s[3].ac).toEqual([]) // #42 notifications → AC es –
   })
   it('sin tabla §9 → []', () => {
     expect(parseSlices('# spec sin tabla')).toEqual([])
