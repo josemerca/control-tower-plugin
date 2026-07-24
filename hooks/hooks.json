@@ -2,10 +2,10 @@
   "hooks": {
     "SessionStart": [
       { "matcher": "startup|resume|clear|compact",
-        "hooks": [ { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/session-start.js" } ] }
+        "hooks": [ { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/session-start.js" } ] }
     ],
     "Stop": [
-      { "hooks": [ { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/stop.js", "timeout": 10 } ] }
+      { "hooks": [ { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/dist/stop.js", "timeout": 10 } ] }
     ]
   }
 }

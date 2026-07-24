@@ -56,6 +56,24 @@ describe('composeHydration', () => {
   })
 })
 
+describe('parseState CRLF', () => {
+  it('tolera frontmatter con CRLF', () => {
+    const crlf = SAMPLE.replace(/\n/g, '\r\n')
+    expect(parseState(crlf).meta.status).toBe('in_progress')
+  })
+})
+
+describe('composeHydration sin commits', () => {
+  it('omite la sección de commits si gitLog está vacío', () => {
+    const out = composeHydration('ESTADO', '')
+    expect(out).toContain('ESTADO')
+    expect(out).not.toContain('Últimos commits')
+  })
+  it('incluye la sección si hay commits', () => {
+    expect(composeHydration('ESTADO', 'abc log')).toContain('Últimos commits')
+  })
+})
+
 describe('shouldBlockStop', () => {
   it('bloquea si HEAD avanzó más allá del STATE', () => {
     expect(shouldBlockStop({ headSha: 'def', stateSha: 'abc' })).toBe(true)

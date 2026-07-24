@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
-const hook = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'stop.js')
+const hook = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'stop.js')
 
 function initRepo() {
   const dir = mkdtempSync(join(tmpdir(), 'ct-'))

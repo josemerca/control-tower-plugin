@@ -1,6 +1,6 @@
 import { parse, stringify } from 'yaml'
 
-const FM = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/
+const FM = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
 
 export function parseState(md) {
   const s = (md ?? '').replace(/^﻿/, '').trimStart()
@@ -15,7 +15,9 @@ export function renderState({ meta, body }) {
 
 export function composeHydration(stateText, gitLog) {
   if (!stateText || !stateText.trim()) return ''
-  return `# Estado del slice (hidratación automática)\n\n${stateText.trim()}\n\n## Últimos commits\n${(gitLog || '').trim()}`
+  const head = `# Estado del slice (hidratación automática)\n\n${stateText.trim()}`
+  const log = (gitLog || '').trim()
+  return log ? `${head}\n\n## Últimos commits\n${log}` : head
 }
 
 export function shouldBlockStop({ headSha, stateSha, stopHookActive }) {

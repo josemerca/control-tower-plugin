@@ -6,7 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
 
-const hook = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'session-start.js')
+const hook = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'session-start.js')
 
 function runHook(cwd) {
   const out = execFileSync('node', [hook], {
