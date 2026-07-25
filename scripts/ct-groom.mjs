@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { parseSlices } from './slices.js'
 import { groomPlan } from './groom.js'
 import { flattenIssuePages, realIssuesOnly, findByMarker } from './gh-issues.js'
-import { pickCurrentIteration } from './project-fields.js'
+import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
 
 function arg(flag, def = undefined) {
   const i = process.argv.indexOf(flag)
@@ -82,6 +82,9 @@ mutation($project: ID!, $item: ID!, $field: ID!, $iteration: String!) {
 let projectMeta = null
 function ensureProjectMeta() {
   if (projectMeta) return projectMeta
+  // TODO: asume que el Project v2 vive bajo el mismo owner que --repo. Un
+  // project de organización sobre un repo de otro owner (o viceversa)
+  // necesitaría un --project-owner explícito; no cubierto todavía.
   const owner = repo.split('/')[0]
   let view
   try {
@@ -115,11 +118,14 @@ function ensureProjectMeta() {
   return projectMeta
 }
 
-// añade un issue recién creado (por su URL) al Project v2 y fija su Sprint a
-// la iteración vigente. Solo se llama para issues creados EN ESTA corrida
-// (ver el bucle de abajo) — un issue que ya existía no se re-procesa, así
-// que en una segunda corrida idempotente no hay llamadas a gh project ni a
-// graphql en absoluto.
+// añade un issue (nuevo o preexistente, identificado por su URL) al Project
+// v2 y fija su Sprint a la iteración vigente. Se llama tanto para issues
+// creados en esta corrida como, más abajo, para issues preexistentes a los
+// que les falte el item de project (ver hasProjectItem): el alta del issue y
+// el alta en el project son dos llamadas de red desacopladas (a diferencia
+// de las labels, que van dentro de `gh issue create` y no pueden quedar a
+// medias), así que una interrupción entre ambas dejaría el issue fuera del
+// project para siempre si no se re-comprobara en cada corrida.
 function addToProjectWithSprint(issueUrl, order) {
   const meta = ensureProjectMeta()
   let item
@@ -194,10 +200,35 @@ try {
   process.exit(1)
 }
 
+// Items ya presentes en el Project v2 — se listan una sola vez por corrida
+// (igual que milestones/existingIssues arriba) para poder detectar issues
+// preexistentes a los que, por una interrupción previa, les falte el item
+// de project (ver hasProjectItem en project-fields.js). --limit alto: el
+// default de `gh project item-list` es 30, insuficiente en un sandbox/epic
+// con más slices que eso.
+let existingProjectItems = []
+if (project) {
+  ensureProjectMeta()
+  try {
+    const itemsRaw = JSON.parse(gh(['project', 'item-list', String(project), '--owner', projectMeta.owner, '--limit', '200', '--format', 'json']))
+    existingProjectItems = itemsRaw.items || []
+  } catch (e) {
+    console.error(`no se pudieron listar los items del project ${project}: ${e.message}`)
+    process.exit(1)
+  }
+}
+
 for (const iss of plan.issues) {
   const marker = `<!-- ct-order:${iss.order} -->`
   const found = findByMarker(existingIssues, marker)
-  if (found) { console.log(`issue orden #${iss.order} ya existe (#${found.number}), no se duplica`); continue }
+  if (found) {
+    console.log(`issue orden #${iss.order} ya existe (#${found.number}), no se duplica`)
+    if (project && !hasProjectItem(existingProjectItems, repo, found.number)) {
+      console.log(`issue #${found.number} no estaba en el project ${project} (hueco de una corrida anterior interrumpida) — añadiéndolo ahora`)
+      addToProjectWithSprint(`https://github.com/${repo}/issues/${found.number}`, iss.order)
+    }
+    continue
+  }
   const num = gh(['issue', 'create', '--repo', repo, '--title', iss.title, '--body', iss.body,
     '--milestone', milestone, ...iss.labels.flatMap((l) => ['--label', l])])
   console.log(`issue creado orden #${iss.order}: ${num}`)

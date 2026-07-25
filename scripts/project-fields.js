@@ -28,3 +28,17 @@ export function pickCurrentIteration(iterations, todayIso) {
     return todayDay >= start && todayDay < start + it.duration
   }) || null
 }
+
+// Cierra el hueco de idempotencia entre "issue creado" y "issue añadido al
+// Project v2": son dos llamadas de red desacopladas (a diferencia de las
+// labels, que van en la misma llamada `gh issue create` y no pueden quedar a
+// medias). Si el proceso se interrumpe entre ambas, una re-ejecución
+// encuentra el issue por su marcador `ct-order` y, sin esta comprobación,
+// haría `continue` sin volver a intentar el `item-add` — el issue quedaría
+// fuera del project para siempre y en silencio.
+//
+// items: la forma cruda de `gh project item-list --format json` (`.items`),
+// cada uno con `content.repository` ("owner/repo") y `content.number`.
+export function hasProjectItem(items, repo, issueNumber) {
+  return (items || []).some((it) => it?.content?.repository === repo && it?.content?.number === issueNumber)
+}

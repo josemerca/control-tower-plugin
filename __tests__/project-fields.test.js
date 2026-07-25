@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { pickCurrentIteration } from '../scripts/project-fields.js'
+import { pickCurrentIteration, hasProjectItem } from '../scripts/project-fields.js'
 
 describe('pickCurrentIteration', () => {
   const iterations = [
@@ -48,5 +48,33 @@ describe('pickCurrentIteration', () => {
       if (prevTz === undefined) delete process.env.TZ
       else process.env.TZ = prevTz
     }
+  })
+})
+
+describe('hasProjectItem', () => {
+  const items = [
+    { content: { repository: 'o/r', number: 2 } },
+    { content: { repository: 'o/r', number: 3 } },
+    { content: { repository: 'other/repo', number: 2 } }, // mismo número, otro repo: no debe casar
+  ]
+
+  it('detecta un issue ya presente en el project', () => {
+    expect(hasProjectItem(items, 'o/r', 2)).toBe(true)
+    expect(hasProjectItem(items, 'o/r', 3)).toBe(true)
+  })
+
+  it('un issue con el mismo número pero de otro repo no cuenta como presente', () => {
+    expect(hasProjectItem(items, 'other/repo', 3)).toBe(false)
+  })
+
+  it('devuelve false si el issue no está en la lista de items', () => {
+    expect(hasProjectItem(items, 'o/r', 999)).toBe(false)
+  })
+
+  it('defensivo: lista vacía/ausente o content ausente no revienta', () => {
+    expect(hasProjectItem([], 'o/r', 2)).toBe(false)
+    expect(hasProjectItem(undefined, 'o/r', 2)).toBe(false)
+    expect(hasProjectItem([{ content: null }], 'o/r', 2)).toBe(false)
+    expect(hasProjectItem([{}], 'o/r', 2)).toBe(false)
   })
 })
