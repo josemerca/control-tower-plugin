@@ -92,15 +92,6 @@ describe('dispatch-check --dry-run', () => {
     expect(threw).toBe(true)
   })
 
-  it('con CT_CLAIM_FIXTURE, la espera de asentamiento se salta (rápido incluso con --settle-ms alto)', () => {
-    const fixture = { candLabels: ['touches:db'], openIssues: [], readback: [{ n: 3, labels: ['status:in-progress', 'touches:db'] }] }
-    const t0 = Date.now()
-    const out = execFileSync('node', [script, '3', '--repo', 'o/r', '--dry-run', '--settle-ms', '5000'],
-      { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify(fixture) } })
-    const elapsed = Date.now() - t0
-    expect(out).toMatch(/claimed #3/)
-    expect(elapsed).toBeLessThan(1000) // muy por debajo de los 5000ms configurados: la espera no debió ejecutarse
-  })
 })
 
 describe('dispatch-check — fix review round 1 (Critical 1: fixture atado a --dry-run)', () => {
@@ -146,43 +137,9 @@ describe('dispatch-check — fix review round 1 (Minor 1: validación de flags)'
   })
 })
 
-describe('dispatch-check — fix review round 1 (Minor 2: --settle-ms/CT_CLAIM_SETTLE_MS malformado falla ruidosamente)', () => {
-  it('--settle-ms "2000ms" (no numérico) → exit 2, mensaje claro', () => {
-    let threw = false
-    try {
-      execFileSync('node', [script, '5', '--repo', 'o/r', '--dry-run', '--settle-ms', '2000ms'],
-        { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify({ candLabels: [], openIssues: [], readback: [{ n: 5, labels: ['status:in-progress'] }] }) } })
-    } catch (e) {
-      threw = true
-      expect(e.status).toBe(2)
-      expect((e.stdout || '') + (e.stderr || '')).toMatch(/settle-ms/i)
-    }
-    expect(threw).toBe(true)
-  })
-
-  it('CT_CLAIM_SETTLE_MS malformado por entorno → exit 2', () => {
-    let threw = false
-    try {
-      execFileSync('node', [script, '5', '--repo', 'o/r', '--dry-run'],
-        { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_SETTLE_MS: 'nope', CT_CLAIM_FIXTURE: JSON.stringify({ candLabels: [], openIssues: [], readback: [{ n: 5, labels: ['status:in-progress'] }] }) } })
-    } catch (e) {
-      threw = true
-      expect(e.status).toBe(2)
-    }
-    expect(threw).toBe(true)
-  })
-
-  it('--settle-ms 0 explícito sigue siendo válido (no es un error)', () => {
-    const fixture = { candLabels: ['touches:db'], openIssues: [], readback: [{ n: 3, labels: ['status:in-progress', 'touches:db'] }] }
-    const out = execFileSync('node', [script, '3', '--repo', 'o/r', '--dry-run', '--settle-ms', '0'],
-      { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify(fixture) } })
-    expect(out).toMatch(/claimed #3/)
-  })
-})
-
 describe('dispatch-check — fix review round 1 (Critical 2: fallos de gh() no dejan locks huérfanos silenciosos)', () => {
   it('el claim inicial falla (gh caído) → exit 1, mensaje claro, sin crash sin capturar', () => {
-    const r = runReal(['11', '--repo', 'o/r', '--settle-ms', '10'], {
+    const r = runReal(['11', '--repo', 'o/r'], {
       FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[]]),
       FAKE_GH_EDIT_FAIL_SUBSTR: '--add-label status:in-progress',
@@ -194,7 +151,7 @@ describe('dispatch-check — fix review round 1 (Critical 2: fallos de gh() no d
   it('el readback tras el claim falla → revierte, avisa que la carrera no se pudo confirmar, exit 1', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-fakegh-'))
     const counterFile = join(dir, 'list-count')
-    const r = runReal(['13', '--repo', 'o/r', '--settle-ms', '10'], {
+    const r = runReal(['13', '--repo', 'o/r'], {
       FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[]]), // primera llamada (colisión): sin choque
       FAKE_GH_LIST_FAIL_AT: '1', // segunda llamada (readback post-claim): falla
@@ -216,7 +173,7 @@ describe('dispatch-check — fix review round 1 (Critical 2: fallos de gh() no d
       { number: 17, labels: [{ name: 'status:in-progress' }, { name: 'touches:db' }] }, // nosotros
       { number: 5, labels: [{ name: 'status:in-progress' }, { name: 'touches:db' }] },  // otro, número menor → perdemos
     ]
-    const r = runReal(['17', '--repo', 'o/r', '--settle-ms', '10'], {
+    const r = runReal(['17', '--repo', 'o/r'], {
       FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[], readbackConLoss]), // 1ª: sin choque; 2ª: readback con pérdida
       FAKE_GH_COUNTER_FILE: counterFile,
@@ -255,7 +212,7 @@ describe('dispatch-check — fix review round 1 (Critical 2: fallos de gh() no d
 // hook realmente construye la ventana que dice construir.
 describe('dispatch-check — T11 hook CT_CLAIM_PRECLAIM_DELAY_MS', () => {
   it('CT_CLAIM_PRECLAIM_DELAY_MS malformado ("300ms") → exit 2, mensaje claro', () => {
-    const r = runReal(['5', '--repo', 'o/r', '--settle-ms', '10'], {
+    const r = runReal(['5', '--repo', 'o/r'], {
       CT_CLAIM_PRECLAIM_DELAY_MS: '300ms',
       FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[]]),
@@ -265,7 +222,7 @@ describe('dispatch-check — T11 hook CT_CLAIM_PRECLAIM_DELAY_MS', () => {
   })
 
   it('CT_CLAIM_PRECLAIM_DELAY_MS negativo → exit 2', () => {
-    const r = runReal(['5', '--repo', 'o/r', '--settle-ms', '10'], {
+    const r = runReal(['5', '--repo', 'o/r'], {
       CT_CLAIM_PRECLAIM_DELAY_MS: '-50',
       FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[]]),
@@ -275,7 +232,7 @@ describe('dispatch-check — T11 hook CT_CLAIM_PRECLAIM_DELAY_MS', () => {
   })
 
   it('"0" explícito por entorno → válido (no es un error), mismo resultado que ausente', () => {
-    const r = runReal(['3', '--repo', 'o/r', '--settle-ms', '0'], {
+    const r = runReal(['3', '--repo', 'o/r'], {
       CT_CLAIM_PRECLAIM_DELAY_MS: '0',
       FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[], [{ number: 3, labels: [{ name: 'status:in-progress' }, { name: 'touches:db' }] }]]),
@@ -297,7 +254,7 @@ describe('dispatch-check — T11 hook CT_CLAIM_PRECLAIM_DELAY_MS', () => {
       const samples = []
       for (let i = 0; i < 4; i++) {
         const t0 = Date.now()
-        const r = runReal(['3', '--repo', 'o/r', '--settle-ms', '0'], {
+        const r = runReal(['3', '--repo', 'o/r'], {
           FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
           FAKE_GH_LIST_SEQUENCE: JSON.stringify([[], [{ number: 3, labels: [{ name: 'status:in-progress' }, { name: 'touches:db' }] }]]),
           ...envOverrides,
@@ -334,13 +291,50 @@ describe('dispatch-check — T11 hook CT_CLAIM_PRECLAIM_DELAY_MS', () => {
     expect(out).toMatch(/claimed #3/)
     expect(elapsed).toBeLessThan(1000)
   })
+
+  // Fix round 1 (review de T11), Minor 1: la validación de
+  // CT_CLAIM_PRECLAIM_DELAY_MS vive DESPUÉS del guard de --release en el
+  // script — --release ni siquiera pasa por ese punto del código. Antes del
+  // fix, un valor malformado colgado en el entorno abortaba --release con
+  // exit 2 sin ejecutar la mutación, dejando el issue atascado en
+  // status:in-progress. Este test demuestra que --release ahora es inmune:
+  // ni siquiera un valor claramente inválido lo afecta.
+  it('--release con CT_CLAIM_PRECLAIM_DELAY_MS malformado en el entorno → --release procede igual, no le afecta', () => {
+    const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'],
+      { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_PRECLAIM_DELAY_MS: 'not-a-number' } })
+    expect(out).toMatch(/released #9.*in-review/)
+  })
+
+  // Fix round 1, Minor 2: tope superior de 60000ms. Sin tope, "1e12" (~31
+  // años en ms) se acepta como "número >= 0" válido y es indistinguible en
+  // la práctica de un cuelgue.
+  it('CT_CLAIM_PRECLAIM_DELAY_MS por encima del tope (60000ms) → exit 2, mensaje claro', () => {
+    const r = runReal(['5', '--repo', 'o/r'], {
+      CT_CLAIM_PRECLAIM_DELAY_MS: '1e12',
+      FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[]]),
+    })
+    expect(r.code).toBe(2)
+    expect(r.out).toMatch(/CT_CLAIM_PRECLAIM_DELAY_MS inválido/)
+  })
+
+  // El límite exacto (60000ms) debe seguir siendo válido — se comprueba por
+  // la ruta --dry-run/fixture (la validación es incondicional, pero
+  // sleepSync() solo se invoca en la ruta real) para no pagar 60s reales de
+  // espera en la suite.
+  it('CT_CLAIM_PRECLAIM_DELAY_MS exactamente en el tope (60000ms) → sigue siendo válido', () => {
+    const fixture = { candLabels: ['touches:db'], openIssues: [], readback: [{ n: 3, labels: ['status:in-progress', 'touches:db'] }] }
+    const out = execFileSync('node', [script, '3', '--repo', 'o/r', '--dry-run'],
+      { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_PRECLAIM_DELAY_MS: '60000', CT_CLAIM_FIXTURE: JSON.stringify(fixture) } })
+    expect(out).toMatch(/claimed #3/)
+  })
 })
 
 describe('dispatch-check — enumeración de issues abiertos sin --limit fijo (review final, finding 2)', () => {
   it('allOpen() usa --paginate y nunca --limit', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-dc-nolimit-'))
     const logFile = join(dir, 'gh-argv-log')
-    const r = runReal(['3', '--repo', 'o/r', '--settle-ms', '10'], {
+    const r = runReal(['3', '--repo', 'o/r'], {
       FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[], [{ number: 3, labels: [{ name: 'status:in-progress' }, { name: 'touches:db' }] }]]),
       FAKE_GH_ARGV_LOG_FILE: logFile,

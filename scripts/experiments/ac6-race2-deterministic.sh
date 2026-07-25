@@ -6,8 +6,7 @@
 # cruda de la última corrida.
 #
 # Qué construye: la interleaving exacta que el AC6 original (T10, 14 rondas
-# de 2 claimants naturales, --settle-ms incluido en 0) nunca alcanzó por
-# construcción del scheduler:
+# de 2 claimants naturales) nunca alcanzó por construcción del scheduler:
 #
 #   1. LOW  comprobación de colisión → limpia (ninguno ha escrito todavía)
 #   2. HIGH comprobación de colisión → limpia
@@ -17,14 +16,22 @@
 #   → si ambos exit 0, es un doble claim real, no solo "posible en teoría".
 #
 # Mecanismo: CT_CLAIM_PRECLAIM_DELAY_MS (hook en dispatch-check.mjs, ver
-# comentario junto a su definición) se fija a un valor grande SOLO en LOW,
-# para forzar que LOW pase su comprobación de colisión y se quede dormido
-# mientras HIGH completa su ciclo entero (escritura + settle + readback +
-# decisión). HIGH usa CT_CLAIM_PRECLAIM_DELAY_MS=0 (comportamiento normal).
-# No hace falta barrera de arranque aquí: la asimetría de tiempos (varios
-# segundos de LOW vs. cientos de ms del ciclo completo de HIGH) domina
-# cualquier sesgo de unos pocos ms al lanzar los dos procesos en background
-# desde bash.
+# comentario junto a su definición) se fija a CT_AC6_PRECLAIM_LOW_MS SOLO en
+# LOW ("skew"), para forzar que LOW pase su comprobación de colisión y se
+# quede dormido mientras HIGH completa su ciclo entero (escritura + readback +
+# decisión). HIGH usa CT_CLAIM_PRECLAIM_DELAY_MS=0 (comportamiento normal). No
+# hace falta barrera de arranque aquí: mientras el skew sea mayor que el ciclo
+# completo de HIGH, la asimetría de tiempos domina cualquier sesgo de unos
+# pocos ms al lanzar los dos procesos en background desde bash.
+#
+# (fix round 2, T11 review — decisión de José): este script ya NO pasa
+# --settle-ms — ese flag y toda la espera de asentamiento se retiraron de
+# dispatch-check.mjs. Tres barridos de skew (500, 3000 y 8000ms, cada uno
+# contra lo que entonces eran los dos valores de settle) no consiguieron medir
+# que el settle aportara nada frente a la latencia real de red de GitHub
+# (650-1900ms por request, medida en el experimento CAS de T9) — ver
+# task-11-report.md §5. El único knob que queda para reproducir el doble
+# claim es el skew de este propio script.
 #
 # Tras cada ronda se comprueba la INVARIANTE REAL contra GitHub (no el exit
 # code, que es solo lo que cada proceso CREE): a lo sumo un issue con el
@@ -39,20 +46,64 @@ TOKEN_LABEL="${CT_AC6_TOKEN_LABEL:-touches:t11}"
 SCRATCH="$(cd "$(dirname "$0")" && pwd)"
 RESULTS_DIR="$SCRATCH/race2-results"
 mkdir -p "$RESULTS_DIR"
+ROUNDS="${CT_AC6_ROUNDS:-3}"
 
-# LOW debe quedarse dormido más tiempo del que HIGH tarda en completar su
-# ciclo entero (escritura + settle + readback), para cualquiera de los dos
-# valores de settle-ms que se prueban (0 y 2000). 8s da margen de sobra
-# incluso para el settle de 2000ms + latencia de red variable.
+# El skew debe superar el ciclo completo de HIGH (comprobación de colisión +
+# escritura + readback, todo ello sin ninguna espera artificial ya). En la
+# práctica, unos pocos cientos de ms de latencia real de red ya bastan para
+# ese ciclo — 8000ms deja un margen generoso.
 PRECLAIM_LOW_MS="${CT_AC6_PRECLAIM_LOW_MS:-8000}"
+
+# Comparación exacta por label, no substring (fix round 1, Minor 3): un CSV
+# de labels comparado con `== *"status:in-progress"*` daría un falso
+# positivo si algún otro label contuviera esa cadena. Se compara elemento a
+# elemento tras partir por coma.
+has_label() {
+  local csv="$1" target="$2" IFS=','
+  local l
+  for l in $csv; do
+    [[ "$l" == "$target" ]] && return 0
+  done
+  return 1
+}
+
+# Preflight (fix round 1, findings Important 2 y 3): sin esto, si el fixture
+# (los issues LOW/HIGH, o el label del token) no existe — por ejemplo porque
+# una corrida anterior lo limpió, como pasó de verdad en esta task — el
+# script seguía adelante en silencio, sin token compartido, y el resultado
+# ("VIOLADO" o "OK") no medía nada sobre el lock: medía un fixture roto. Es
+# imposible ahora que un fixture ausente se lea como éxito o como fallo del
+# lock: se aborta ruidosamente antes de la primera ronda.
+preflight() {
+  echo "-- preflight --"
+  if ! gh label create "$TOKEN_LABEL" --repo "$REPO" --color 5319e7 \
+      --description "T11 AC6 harness — temporal" --force >/dev/null; then
+    echo "FATAL: no se pudo crear/actualizar el label '$TOKEN_LABEL' en $REPO. Abortando sin correr ninguna ronda." >&2
+    exit 1
+  fi
+  for n in "$LOW" "$HIGH"; do
+    if ! gh issue view "$n" --repo "$REPO" --json number >/dev/null 2>&1; then
+      echo "FATAL: el issue #$n (fixture LOW/HIGH) no existe en $REPO. Abortando sin correr ninguna ronda." >&2
+      echo "       Ajusta CT_AC6_LOW/CT_AC6_HIGH a issues existentes, o recrea el fixture." >&2
+      exit 1
+    fi
+  done
+  echo "OK: label '$TOKEN_LABEL' listo, issues #$LOW y #$HIGH existen."
+}
 
 reset_pair() {
   gh issue edit "$LOW" --repo "$REPO" \
     --remove-label status:in-progress --remove-label status:in-review --remove-label status:ready >/dev/null 2>&1 || true
   gh issue edit "$HIGH" --repo "$REPO" \
     --remove-label status:in-progress --remove-label status:in-review --remove-label status:ready >/dev/null 2>&1 || true
-  gh issue edit "$LOW" --repo "$REPO" --add-label status:ready --add-label "$TOKEN_LABEL" >/dev/null
-  gh issue edit "$HIGH" --repo "$REPO" --add-label status:ready --add-label "$TOKEN_LABEL" >/dev/null
+  if ! gh issue edit "$LOW" --repo "$REPO" --add-label status:ready --add-label "$TOKEN_LABEL" >/dev/null; then
+    echo "FATAL: no se pudo poner #$LOW en status:ready + $TOKEN_LABEL. Abortando (no se corre la ronda con un fixture a medias)." >&2
+    exit 1
+  fi
+  if ! gh issue edit "$HIGH" --repo "$REPO" --add-label status:ready --add-label "$TOKEN_LABEL" >/dev/null; then
+    echo "FATAL: no se pudo poner #$HIGH en status:ready + $TOKEN_LABEL. Abortando (no se corre la ronda con un fixture a medias)." >&2
+    exit 1
+  fi
 }
 
 label_state() {
@@ -60,24 +111,24 @@ label_state() {
 }
 
 run_round() {
-  local round="$1" settle="$2"
+  local round="$1"
   reset_pair
   echo "--- pre-round label state ---"
   echo "#$LOW: $(label_state "$LOW")"
   echo "#$HIGH: $(label_state "$HIGH")"
 
-  local outlow="$RESULTS_DIR/round-${round}-settle${settle}-low.out"
-  local outhigh="$RESULTS_DIR/round-${round}-settle${settle}-high.out"
+  local outlow="$RESULTS_DIR/round-${round}-skew${PRECLAIM_LOW_MS}-low.out"
+  local outhigh="$RESULTS_DIR/round-${round}-skew${PRECLAIM_LOW_MS}-high.out"
 
-  CT_CLAIM_PRECLAIM_DELAY_MS=$PRECLAIM_LOW_MS node "$SCRIPT" "$LOW" --repo "$REPO" --settle-ms "$settle" >"$outlow" 2>&1 &
+  CT_CLAIM_PRECLAIM_DELAY_MS=$PRECLAIM_LOW_MS node "$SCRIPT" "$LOW" --repo "$REPO" >"$outlow" 2>&1 &
   PID_LOW=$!
-  CT_CLAIM_PRECLAIM_DELAY_MS=0 node "$SCRIPT" "$HIGH" --repo "$REPO" --settle-ms "$settle" >"$outhigh" 2>&1 &
+  CT_CLAIM_PRECLAIM_DELAY_MS=0 node "$SCRIPT" "$HIGH" --repo "$REPO" >"$outhigh" 2>&1 &
   PID_HIGH=$!
 
   wait "$PID_LOW"; CODE_LOW=$?
   wait "$PID_HIGH"; CODE_HIGH=$?
 
-  echo "=== round $round (settle-ms=$settle) ==="
+  echo "=== round $round (skew=${PRECLAIM_LOW_MS}ms) ==="
   echo "-- LOW  #$LOW  exit=$CODE_LOW --"
   cat "$outlow"
   echo "-- HIGH #$HIGH exit=$CODE_HIGH --"
@@ -90,8 +141,8 @@ run_round() {
   echo "#$HIGH: $labels_high"
 
   local n_inprogress=0
-  [[ "$labels_low" == *"status:in-progress"* ]] && n_inprogress=$((n_inprogress+1))
-  [[ "$labels_high" == *"status:in-progress"* ]] && n_inprogress=$((n_inprogress+1))
+  has_label "$labels_low" "status:in-progress" && n_inprogress=$((n_inprogress+1))
+  has_label "$labels_high" "status:in-progress" && n_inprogress=$((n_inprogress+1))
   echo "INVARIANTE (a lo sumo 1 in-progress con token compartido): in_progress_count=$n_inprogress $( [[ $n_inprogress -le 1 ]] && echo OK || echo VIOLADO )"
   if [[ "$CODE_LOW" -eq 0 && "$CODE_HIGH" -eq 0 ]]; then
     echo "DOBLE CLAIM POR EXIT CODE: ambos procesos exit 0"
@@ -99,5 +150,5 @@ run_round() {
   echo
 }
 
-for r in 1 2 3; do run_round "$r" 0; done
-for r in 1 2 3; do run_round "$r" 2000; done
+preflight
+for r in $(seq 1 "$ROUNDS"); do run_round "$r"; done
