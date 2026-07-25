@@ -4,26 +4,25 @@ export const SERIALIZING_TOUCHES = ['migration', 'ci', 'pbxproj']
 export function selectNext(issues, { mergedIssues = [], runningTouches = [], concurrencyCap = 1 } = {}) {
   const merged = new Set(mergedIssues)
   const claimedTouches = new Set(runningTouches)
-  const usedSerializers = new Set(
-    runningTouches.filter((t) => SERIALIZING_TOUCHES.includes(t)),
-  )
+  const hasSerializingTouchInRunning = runningTouches.some((t) => SERIALIZING_TOUCHES.includes(t))
   const ready = issues
     .filter((i) => i.status === 'ready')
     .filter((i) => (i.deps || []).every((d) => merged.has(d)))
     .sort((a, b) => a.order - b.order)
 
   const selected = []
+  let hasSerializingInBatch = hasSerializingTouchInRunning
   for (const i of ready) {
     if (selected.length >= concurrencyCap) break
     const touches = i.touches || []
     // colisión con lo ya corriendo o ya seleccionado esta tanda
     if (touches.some((t) => claimedTouches.has(t))) continue
     // serialización: solo un touches serializante por tanda (incluye los ya corriendo)
-    const sers = touches.filter((t) => SERIALIZING_TOUCHES.includes(t))
-    if (sers.some((t) => usedSerializers.has(t))) continue
+    const hasSerializingTouch = touches.some((t) => SERIALIZING_TOUCHES.includes(t))
+    if (hasSerializingTouch && hasSerializingInBatch) continue
     selected.push(i)
     touches.forEach((t) => claimedTouches.add(t))
-    sers.forEach((t) => usedSerializers.add(t))
+    if (hasSerializingTouch) hasSerializingInBatch = true
   }
   return selected
 }

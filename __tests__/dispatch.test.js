@@ -36,6 +36,31 @@ describe('selectNext', () => {
     const out = selectNext(ISSUES, { mergedIssues: [1], runningTouches: [], concurrencyCap: 9 })
     expect(out.map((i) => i.n)).toEqual([...out.map((i) => i.n)].sort((a, b) => a - b))
   })
+  it('serialización cross-type: solo uno de touches:ci o touches:migration', () => {
+    const issues = [
+      { n: 1, order: 1, status: 'ready', deps: [], touches: ['ci'] },
+      { n: 2, order: 2, status: 'ready', deps: [], touches: ['migration'] },
+    ]
+    const out = selectNext(issues, { mergedIssues: [], runningTouches: [], concurrencyCap: 9 })
+    const serializingCount = out.filter((i) => i.touches.some((t) => ['ci', 'migration'].includes(t))).length
+    expect(serializingCount).toBe(1)
+    expect(out[0].n).toBe(1) // menor orden
+  })
+  it('runningTouches:migration bloquea candidato con touches:ci', () => {
+    const issues = [
+      { n: 1, order: 1, status: 'ready', deps: [], touches: ['ci'] },
+    ]
+    const out = selectNext(issues, { mergedIssues: [], runningTouches: ['migration'], concurrencyCap: 9 })
+    expect(out.find((i) => i.n === 1)).toBeUndefined()
+  })
+  it('no-serializing disjuntos se paralelizan (control negativo)', () => {
+    const issues = [
+      { n: 1, order: 1, status: 'ready', deps: [], touches: ['api'] },
+      { n: 2, order: 2, status: 'ready', deps: [], touches: ['ui'] },
+    ]
+    const out = selectNext(issues, { mergedIssues: [], runningTouches: [], concurrencyCap: 2 })
+    expect(out).toHaveLength(2)
+  })
 })
 
 describe('resolveAccount', () => {
