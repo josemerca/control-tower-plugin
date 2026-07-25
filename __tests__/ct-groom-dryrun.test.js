@@ -165,11 +165,36 @@ describe('ct-groom — flags colgantes no cuelan valores falsos (review final, f
     rmSync(dir, { recursive: true, force: true })
   })
 
-  // NOTA: --repo NO se valida aquí de la misma forma (no hay comprobación de
-  // `typeof === 'string'`, solo el `if (!repo)` ya existente más abajo, fuera
-  // de --dry-run) — un `--repo` colgante da `true` (booleano), que es truthy
-  // y por tanto pasa ese `!repo` sin avisar. Es un hueco real y preexistente,
-  // pero NO es el que reporta el finding 3 (que solo señala --milestone/
-  // --project) — se deja fuera de esta tanda de fixes a propósito, en vez de
-  // ampliar el alcance sin que un humano lo pida.
+  // Re-review: --repo tenía el mismo hueco (solo `if (!repo)`, que un
+  // `true` colgante pasa sin avisar por ser truthy) — ahora validado igual
+  // que ct-next.mjs/dispatch-check.mjs (`typeof !== 'string'`).
+  it('--repo como último token (sin valor) → exit 2, nunca "true" colándose hacia gh', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--dry-run', '--milestone', 'Epic', '--repo'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect((e.stdout || '') + (e.stderr || '').toString()).toMatch(/--repo/i)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('--repo seguido de otro flag (sin valor real) → exit 2', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect((e.stdout || '') + (e.stderr || '').toString()).toMatch(/--repo/i)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
 })

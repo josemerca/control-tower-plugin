@@ -141,8 +141,11 @@ function loadIssues() {
   // testearla sin red y detectar una deriva de formato con groom.js.
   let raw
   try {
+    // per_page=100 (re-review): el default REST es 30/página — con --paginate
+    // igual se traen todos, pero a 3x más round-trips de los necesarios. 100
+    // es el máximo que admite este endpoint.
     raw = realIssuesOnly(flattenIssuePages(JSON.parse(
-      gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=open', '--paginate', '--slurp']))))
+      gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=open', '-f', 'per_page=100', '--paginate', '--slurp']))))
   } catch (e) {
     console.error(`no se pudieron listar issues abiertos de ${repo}: ${e.message}`)
     process.exit(1)
@@ -163,7 +166,7 @@ function loadIssues() {
     // contra gh 2.86). Normalizamos aquí, en el wrapper, para no tener que
     // enseñarle a la capa pura dos formatos de la misma cosa.
     const rawClosed = realIssuesOnly(flattenIssuePages(JSON.parse(
-      gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=closed', '--paginate', '--slurp']))))
+      gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=closed', '-f', 'per_page=100', '--paginate', '--slurp']))))
     closed = rawClosed.map((i) => ({
       number: i.number,
       body: i.body,

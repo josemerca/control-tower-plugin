@@ -53,6 +53,18 @@ if (project !== undefined && (project === true || !Number.isFinite(Number(projec
   console.error(`--project inválido: "${project === true ? '(sin valor)' : project}" — debe ser un entero positivo`)
   process.exit(2)
 }
+// --repo: un `--repo` colgante (arg() endurecido) da `true`, no un string —
+// `if (!repo)` de más abajo no lo detecta porque `true` es truthy. Menos
+// peligroso que milestone/project (acaba en `gh api repos/true/...`, 404,
+// aborta antes de mutar nada), pero inconsistente con ct-next.mjs/
+// dispatch-check.mjs, que ya validan `typeof !== 'string'` en vez de un
+// check solo-falsy. No exigimos --repo aquí (sigue siendo opcional en
+// --dry-run, ver más abajo): solo rechazamos el caso "se pasó el flag pero
+// sin valor real".
+if (repo !== undefined && typeof repo !== 'string') {
+  console.error('--repo inválido: "(sin valor)" — usa --repo <owner/repo>')
+  process.exit(2)
+}
 
 let specMd
 try {

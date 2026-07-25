@@ -450,4 +450,34 @@ describe('ct-next — enumeración de issues sin --limit fijo (review final, fin
     expect(log).toMatch(/state=open/)
     expect(log).toMatch(/state=closed/)
   })
+
+  // Re-review: el normalizado `state_reason` (REST, minúsculas) →
+  // `stateReason` (lo que espera filterMergedIssues, mayúsculas) no tenía NI
+  // UN test — exactamente la superficie de regresión señalada en el finding
+  // 2. Sin este normalizado, TODO issue cerrado deja de contar como
+  // mergeado, y cualquier slice con dependencias queda permanentemente sin
+  // despachar (el bug que esta rama ya tuvo una vez). Escenario: el issue
+  // cerrado #1 (orden 1) tiene `state_reason: 'completed'` tal cual lo
+  // devuelve el endpoint REST; el issue abierto #2 (orden 2, ready) declara
+  // `merge-after #1` (orden). Si el normalizado se rompe (se borra el
+  // `.toUpperCase()`, o se vuelve a leer `i.stateReason`), #1 deja de contar
+  // como mergeado y #2 nunca se selecciona.
+  it('normaliza state_reason (REST, minúsculas) a stateReason (mayúsculas) — un dep mergeada vía state_reason:"completed" desbloquea el slice', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'ct-next-statereason-'))
+    dirs.push(repoRoot)
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const openIssue2 = {
+      number: 2, title: '#2 endpoint', labels: [{ name: 'status:ready' }],
+      body: 'algo\n## Dependencias\n- merge-after #1\n\n<!-- ct-order:2 -->',
+    }
+    const closedIssue1 = { number: 1, state_reason: 'completed', body: '<!-- ct-order:1 -->' }
+    const r = runReal(['--repo', 'o/r', '--cap', '1', '--dry-run'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue2], [closedIssue1]]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+    })
+    expect(r.code).toBe(0)
+    expect(r.out).toContain('#2')
+    expect(r.out).not.toMatch(/no hay slices despachables/i)
+  })
 })

@@ -97,9 +97,13 @@ const labelsOf = (n) => JSON.parse(gh(['issue', 'view', String(n), '--repo', rep
 // --slurp`, sin tope), reutilizando el mismo helper de aplanado/filtrado de
 // PRs que ct-groom.mjs/ct-next.mjs (scripts/gh-issues.js) — ese endpoint
 // también devuelve pull requests. Toda la lógica de colisión y desempate
-// sigue siendo enteramente client-side en `claim.js`.
+// sigue siendo enteramente client-side en `claim.js`. per_page=100 (re-review):
+// el default REST es 30/página; con --paginate igual se traen todas, pero
+// `allOpen()` se llama DOS veces por claim (colisión + readback post-settle),
+// así que menos páginas por llamada recorta ~3x los round-trips dentro de la
+// ventana de asentamiento. 100 es el máximo que admite este endpoint.
 const allOpen = () => realIssuesOnly(flattenIssuePages(JSON.parse(
-  gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=open', '--paginate', '--slurp']))))
+  gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=open', '-f', 'per_page=100', '--paginate', '--slurp']))))
   .map((i) => ({ n: i.number, labels: (i.labels || []).map((l) => l.name) }))
 
 const manualReleaseHint = () => `gh issue edit ${issue} --repo ${repo} --add-label status:ready --remove-label status:in-progress`
