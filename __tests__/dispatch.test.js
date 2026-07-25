@@ -12,13 +12,14 @@ const ISSUES = [
 // computeReadyCandidates: fix round 1 de la review de W-B (finding Important
 // — la duplicación del filtro ready/deps-mergeadas entre selectNext y
 // explainNoSelection era un riesgo de deriva silenciosa). Ahora es la única
-// fuente de verdad de ese cómputo; estos tests la cubren directamente. Esto
-// no es un test que "falle si selectNext y explainNoSelection divergen" en
-// el sentido de detectar una reintroducción futura de lógica duplicada
-// (eso requeriría un chequeo estático del código fuente, no un test de
-// comportamiento) — es la mejor mitigación disponible sin ese chequeo:
-// mientras ambas funciones sigan llamando aquí (lo hacen, ver su código),
-// no pueden divergir en ESTE cálculo.
+// fuente de verdad de ese cómputo; estos tests la cubren directamente.
+// (Fix round 2, finding 1: la nota que había aquí antes afirmaba que no
+// existía una comprobación de comportamiento barata capaz de detectar una
+// futura divergencia entre selectNext y explainNoSelection — la review
+// corrigió eso, con razón: SÍ la hay, ver el describe
+// 'explainNoSelection / selectNext — oráculo de identidad de candidato' más
+// abajo, que compara contra el selectNext REAL, no contra este mismo
+// helper.)
 describe('computeReadyCandidates', () => {
   it('ready: solo status:ready, en el orden original', () => {
     const { ready } = computeReadyCandidates(ISSUES, [1])
@@ -37,6 +38,23 @@ describe('computeReadyCandidates', () => {
     const { ready, readyDepsMet } = computeReadyCandidates(issues, [])
     expect(ready).toEqual([])
     expect(readyDepsMet).toEqual([])
+  })
+  // Fix round 2, finding 2: en TODOS los fixtures de este fichero (los viejos
+  // y los tres de arriba), el orden del array de entrada ya coincide con el
+  // orden del campo `order` — así que una implementación que filtrara bien
+  // pero se olvidara del `.sort` pasaría igualmente todos los tests
+  // existentes. Este fixture entra deliberadamente DESORDENADO respecto a
+  // `order` (30, 10, 20) para que la aserción solo pueda pasar si de verdad
+  // se ordena.
+  it('readyDepsMet sale ordenado por `order` ascendente aunque el array de entrada venga desordenado', () => {
+    const issues = [
+      { n: 100, order: 30, status: 'ready', deps: [], touches: [] },
+      { n: 200, order: 10, status: 'ready', deps: [], touches: [] },
+      { n: 300, order: 20, status: 'ready', deps: [], touches: [] },
+    ]
+    const { readyDepsMet } = computeReadyCandidates(issues, [])
+    expect(readyDepsMet.map((i) => i.order)).toEqual([10, 20, 30])
+    expect(readyDepsMet.map((i) => i.n)).toEqual([200, 300, 100])
   })
 })
 
@@ -229,6 +247,56 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
       wouldDispatchIfCapAllowed: false,
       blockedEvenWithCap: { reason: 'collision', kind: 'token', issue: 2, token: 'api', withIssue: 1 },
     })
+  })
+})
+
+// Fix round 2, finding 1 de la re-review: el fix round 1 afirmaba que no
+// había una comprobación de comportamiento barata capaz de detectar una
+// futura divergencia entre selectNext y explainNoSelection/
+// explainSelectionGap — la review corrigió esa afirmación, con razón: SÍ la
+// hay. Estos tests comparan el candidato que `explainNoSelection` cita en
+// sus razones 'collision'/'deps-unmet' contra lo que el `selectNext` REAL
+// (no una segunda llamada a computeReadyCandidates, sino el algoritmo de
+// selección completo) decidiría si se le diera un hueco más de cap.
+//
+// Nota sobre por qué se llama a selectNext con `runningTouches: []` en vez
+// de las mismas runningTouches que causaron el bloqueo original: si se
+// mantuvieran, `selectNext(..., concurrencyCap: remainingCap + 1)` seguiría
+// devolviendo `[]` de todas formas — ni una colisión de touches ni una dep
+// sin mergear se deshacen dándole un hueco más de cap (ambas bloquean con
+// independencia del cap; verificado leyendo el bucle de selectNext: el
+// `continue` por colisión no depende de `concurrencyCap`), así que nunca
+// habría un `[0]` real con el que comparar la identidad del candidato. Lo
+// que sí es comparable, y es exactamente el riesgo que nos preocupa, es
+// "¿el candidato que explainNoSelection identifica como EL bloqueado es el
+// mismo que el algoritmo de selección de verdad elegiría como primero, dado
+// vía libre (sin interferencia externa y con cap de sobra)?" — si en el
+// futuro alguien reintroduce un cómputo de candidatos local y con errores en
+// uno de los dos sitios, esta comparación se rompe porque invoca el
+// selectNext REAL, no una re-derivación del mismo helper compartido.
+describe('explainNoSelection / selectNext — oráculo de identidad de candidato (fix round 2, finding 1)', () => {
+  it('collision: el issue que cita explainNoSelection es el mismo [0] que selectNext elegiría sin interferencia y con un hueco más de cap', () => {
+    const issues = [
+      { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['api'] },
+      { n: 2, order: 2, status: 'ready', deps: [], touches: ['api'] }, // choca con #1 en vuelo
+    ]
+    const plan = planDispatch(issues, { mergedIssues: [], cap: 9 })
+    expect(plan.blockReason.reason).toBe('collision')
+
+    const clean = selectNext(issues, { mergedIssues: [], runningTouches: [], concurrencyCap: plan.remainingCap + 1 })
+    expect(clean[0]?.n).toBe(plan.blockReason.issue)
+  })
+
+  it('deps-unmet: el selectNext real (sin interferencia y con cap de sobra) también coincide en no seleccionar nada', () => {
+    const issues = [{ n: 2, order: 2, status: 'ready', deps: [1, 3], touches: [] }]
+    const plan = planDispatch(issues, { mergedIssues: [3], cap: 1 }) // falta mergear el 1
+    expect(plan.blockReason.reason).toBe('deps-unmet')
+
+    const clean = selectNext(issues, { mergedIssues: [3], runningTouches: [], concurrencyCap: plan.remainingCap + 1 })
+    // deps-unmet bloquea con independencia del cap y de las touches — si el
+    // selectNext real seleccionara algo aquí, sería la señal de que
+    // explainSelectionGap divergió del filtro de deps que usa selectNext.
+    expect(clean).toEqual([])
   })
 })
 

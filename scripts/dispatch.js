@@ -27,6 +27,28 @@ export function computeReadyCandidates(issues, mergedIssues) {
   return { ready, readyDepsMet }
 }
 
+// touchesConflict: el ÚNICO predicate de colisión de touches (fix round 2
+// de la review de W-B, finding 3 — antes la regla vivía duplicada: en línea
+// dentro del bucle de selectNext, y otra vez, por separado, dentro de
+// collisionAgainstRunning). Decide si `touches` choca con `claimedTouches` —
+// token compartido literal, o (si `hasSerializingClaimed` es cierto) por
+// entrar en el grupo serializante migration/ci/pbxproj aunque el token
+// exacto sea distinto. Devuelve `null` si no hay colisión, o
+// `{ kind, token }` si la hay — `token` es el que usa collisionAgainstRunning
+// para atribuir la colisión a un issue concreto; selectNext solo necesita
+// saber si el resultado es no-null (para el `continue`) y si `touches` tenía
+// algún touch serializante (para actualizar su propio estado de tanda,
+// `hasSerializingInBatch` — ver más abajo, esa acumulación de estado NO se
+// tocó: sigue siendo selectNext quien decide cuándo avanza, este helper solo
+// centraliza el criterio "¿choca esto?", no el bucle que lo usa).
+function touchesConflict(touches, claimedTouches, hasSerializingClaimed) {
+  const sharedToken = touches.find((t) => claimedTouches.has(t))
+  if (sharedToken) return { kind: 'token', token: sharedToken }
+  const serializingTouch = touches.find((t) => SERIALIZING_TOUCHES.includes(t))
+  if (serializingTouch && hasSerializingClaimed) return { kind: 'serializing', token: serializingTouch }
+  return null
+}
+
 export function selectNext(issues, { mergedIssues = [], runningTouches = [], concurrencyCap = 1 } = {}) {
   const claimedTouches = new Set(runningTouches)
   const hasSerializingTouchInRunning = runningTouches.some((t) => SERIALIZING_TOUCHES.includes(t))
@@ -37,14 +59,16 @@ export function selectNext(issues, { mergedIssues = [], runningTouches = [], con
   for (const i of ready) {
     if (selected.length >= concurrencyCap) break
     const touches = i.touches || []
-    // colisión con lo ya corriendo o ya seleccionado esta tanda
-    if (touches.some((t) => claimedTouches.has(t))) continue
-    // serialización: solo un touches serializante por tanda (incluye los ya corriendo)
-    const hasSerializingTouch = touches.some((t) => SERIALIZING_TOUCHES.includes(t))
-    if (hasSerializingTouch && hasSerializingInBatch) continue
+    // colisión con lo ya corriendo o ya seleccionado esta tanda (token
+    // compartido), o conflicto de serialización cruzada con lo ya
+    // acumulado en ESTA tanda (`hasSerializingInBatch`, que sí se va
+    // actualizando conforme el bucle selecciona — esa acumulación es
+    // deliberadamente estado local del bucle, no algo que el predicate
+    // compartido deba conocer).
+    if (touchesConflict(touches, claimedTouches, hasSerializingInBatch)) continue
     selected.push(i)
     touches.forEach((t) => claimedTouches.add(t))
-    if (hasSerializingTouch) hasSerializingInBatch = true
+    if (touches.some((t) => SERIALIZING_TOUCHES.includes(t))) hasSerializingInBatch = true
   }
   return selected
 }
@@ -76,20 +100,21 @@ function collisionAgainstRunning(cand, inFlight) {
   const hasSerializingInRunning = runningTouches.some((t) => SERIALIZING_TOUCHES.includes(t))
   const touches = cand.touches || []
 
-  const sharedToken = touches.find((t) => claimedTouches.has(t))
-  if (sharedToken) {
-    const withIssue = inFlight.find((i) => (i.touches || []).includes(sharedToken))
-    return { reason: 'collision', kind: 'token', issue: cand.n, token: sharedToken, withIssue: withIssue ? withIssue.n : null }
+  // Mismo predicate que usa selectNext (touchesConflict, arriba) — la regla
+  // de "¿choca esto?" es una única fuente de verdad; lo que sigue aquí es
+  // SOLO atribución (a qué issue en vuelo, con qué token) para el mensaje,
+  // que selectNext no necesita.
+  const conflict = touchesConflict(touches, claimedTouches, hasSerializingInRunning)
+  if (!conflict) return null
+
+  if (conflict.kind === 'token') {
+    const withIssue = inFlight.find((i) => (i.touches || []).includes(conflict.token))
+    return { reason: 'collision', kind: 'token', issue: cand.n, token: conflict.token, withIssue: withIssue ? withIssue.n : null }
   }
 
-  const candSerializingTouch = touches.find((t) => SERIALIZING_TOUCHES.includes(t))
-  if (candSerializingTouch && hasSerializingInRunning) {
-    const withIssue = inFlight.find((i) => (i.touches || []).some((t) => SERIALIZING_TOUCHES.includes(t)))
-    const runningToken = (withIssue?.touches || []).find((t) => SERIALIZING_TOUCHES.includes(t))
-    return { reason: 'collision', kind: 'serializing', issue: cand.n, token: candSerializingTouch, runningToken, withIssue: withIssue ? withIssue.n : null }
-  }
-
-  return null
+  const withIssue = inFlight.find((i) => (i.touches || []).some((t) => SERIALIZING_TOUCHES.includes(t)))
+  const runningToken = (withIssue?.touches || []).find((t) => SERIALIZING_TOUCHES.includes(t))
+  return { reason: 'collision', kind: 'serializing', issue: cand.n, token: conflict.token, runningToken, withIssue: withIssue ? withIssue.n : null }
 }
 
 // explainSelectionGap: la misma cadena de motivos que explainNoSelection,
