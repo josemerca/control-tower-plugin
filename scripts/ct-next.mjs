@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { selectNext, resolveAccount, buildCmuxArgv } from './dispatch.js'
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
 import { shQuote } from './shquote.js'
+import { mapGhIssue, filterMergedIssues } from './gh-issue-map.js'
 
 // `arg()` solo devuelve un string cuando el flag realmente trae un valor: si
 // el flag es el último token de argv, o el token siguiente es a su vez otro
@@ -46,30 +47,15 @@ const fx = (dryRun && process.env.CT_NEXT_FIXTURE) ? JSON.parse(process.env.CT_N
 
 const gh = (a) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] })
 
-// Extrae la lista de acceptance criteria del body que genera
-// groom.js#buildIssueBody bajo "## Acceptance criteria" (líneas "- ..."),
-// ignorando el placeholder "(rellenar desde el spec)". Un issue que no venga
-// de ct-groom (creado a mano, sin esa sección) cae al array vacío — nunca
-// undefined, para que renderKickoff/buildStateSeed (que indexan slice.ac como
-// array) no revienten.
-function extractAc(body) {
-  if (!body) return []
-  const m = body.match(/## Acceptance criteria[^\n]*\n([\s\S]*?)(\n##\s|\n<!--|$)/)
-  if (!m) return []
-  return m[1].split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.startsWith('- '))
-    .map((l) => l.slice(2).trim())
-    .filter((l) => l && l !== '(rellenar desde el spec)')
-}
-
 function loadIssues() {
   if (fx) return fx
   // issues open con labels → {n, order, status, deps, touches, entrega, type, ac, issue}.
   // Enumeración directa vía `gh issue list --state open`, NUNCA el índice de
   // búsqueda (`--search`/`gh search issues`): tiene latencia de indexado y
-  // podría no reflejar un label recién escrito por otro runner. Filtrado por
-  // labels/marcadores enteramente client-side, en JS.
+  // podría no reflejar un label recién escrito por otro runner. El mapeo en
+  // sí (mapGhIssue/filterMergedIssues) es lógica pura extraída a
+  // gh-issue-map.js — ver __tests__/gh-issue-map.test.js — para poder
+  // testearla sin red y detectar una deriva de formato con groom.js.
   let raw
   try {
     raw = JSON.parse(gh(['issue', 'list', '--repo', repo, '--state', 'open', '--limit', '200',
@@ -78,30 +64,8 @@ function loadIssues() {
     console.error(`no se pudieron listar issues abiertos de ${repo}: ${e.message}`)
     process.exit(1)
   }
-  const issues = raw.map((i) => {
-    const labels = i.labels.map((l) => l.name)
-    const status = (labels.find((l) => l.startsWith('status:')) || 'status:backlog').slice('status:'.length)
-    const touches = labels.filter((l) => l.startsWith('touches:')).map((l) => l.slice('touches:'.length))
-    const type = (labels.find((l) => l.startsWith('type:')) || 'type:').slice('type:'.length)
-    const orderM = i.body && i.body.match(/ct-order:(\d+)/)
-    const deps = [...(i.body || '').matchAll(/merge-after #(\d+)/g)].map((m) => parseInt(m[1], 10))
-    return {
-      n: i.number,
-      order: orderM ? parseInt(orderM[1], 10) : i.number,
-      status,
-      deps,
-      touches,
-      type,
-      entrega: i.title.replace(/^#\d+\s*/, ''),
-      ac: extractAc(i.body),
-      issue: `#${i.number}`,
-    }
-  })
-  // mergedIssues: issues cerrados cuyo PR se mergeó (aproximación: closed con
-  // stateReason COMPLETED). Verificado contra gh 2.86 (`gh issue list --json
-  // bogus` lista los campos válidos sin tocar red): el campo se llama
-  // `stateReason`, tal cual, y gh lo expone en el casing del enum GraphQL
-  // (mayúsculas: "COMPLETED", "NOT_PLANNED", …) — el filtro del brief matchea.
+  const issues = raw.map(mapGhIssue)
+
   let closed
   try {
     closed = JSON.parse(gh(['issue', 'list', '--repo', repo, '--state', 'closed', '--limit', '200', '--json', 'number,stateReason']))
@@ -109,7 +73,7 @@ function loadIssues() {
     console.error(`no se pudieron listar issues cerrados de ${repo}: ${e.message}`)
     process.exit(1)
   }
-  const mergedIssues = closed.filter((i) => i.stateReason === 'COMPLETED' || i.stateReason === 'completed').map((i) => i.number)
+  const mergedIssues = filterMergedIssues(closed)
   return { issues, mergedIssues }
 }
 
@@ -135,6 +99,36 @@ if (fx) {
     console.error(`no se pudo resolver la raíz del repo git local: ${e.message}`)
     process.exit(1)
   }
+}
+
+const manualWorktreeCleanupHint = (wt, branch) => `git worktree remove --force ${wt} && git branch -D ${branch}`
+
+// Si un paso POSTERIOR a `git worktree add` falla (seed de STATE.md, o el
+// lanzamiento de cmux), el worktree y la rama ya existen en disco. Sin
+// limpieza, reintentar el mismo slice vuelve a fallar en `git worktree add`
+// (ruta y rama ya ocupadas) hasta que un humano limpie a mano — y T10 es
+// justo donde esto se encontraría por primera vez contra un repo real
+// (review round 1, finding Important). Intentamos deshacerlo automáticamente
+// aquí mismo — mismo patrón que dispatch-check.mjs revirtiendo el label de
+// claim cuando un paso posterior falla — y el mensaje distingue "limpiado,
+// puedes reintentar" de "no pude limpiar, hazlo a mano con este comando
+// exacto" (igual que manualReleaseHint() de dispatch-check.mjs). Sale con
+// exit 1 en cualquier caso: fallar el dispatch de ESTE slice nunca debe
+// decidirse en silencio.
+function cleanupOrphanedWorktree(s, wt, branch, reason) {
+  console.error(`no se pudo completar el dispatch de #${s.n} tras crear el worktree (${reason}).`)
+  try {
+    execFileSync('git', ['worktree', 'remove', '--force', wt], { cwd: repoRoot, stdio: 'inherit' })
+    execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot, stdio: 'inherit' })
+    console.error(`worktree y rama de #${s.n} limpiados automáticamente (${wt}, ${branch}) — puedes reintentar el dispatch de este slice.`)
+  } catch (e) {
+    console.error(`ATENCIÓN: no se pudo limpiar automáticamente el worktree de #${s.n}. Queda huérfano en ${wt} con la rama ${branch} (${e.message}) — bórralo a mano con: ${manualWorktreeCleanupHint(wt, branch)}`)
+  }
+  // Los slices de esta misma tanda ya lanzados con éxito ANTES de este fallo
+  // (si cap > 1) siguen corriendo en su propio cmux, independiente de este
+  // proceso — no se tocan ni se detienen aquí.
+  console.error('Los slices de esta tanda ya lanzados con éxito antes de este fallo (si los hubo) siguen corriendo en su propio cmux — no se han tocado.')
+  process.exit(1)
 }
 
 for (const s of selected) {
@@ -179,14 +173,12 @@ for (const s of selected) {
     mkdirSync(`${wt}/.agent`, { recursive: true })
     writeFileSync(`${wt}/.agent/STATE.md`, stateSeed)
   } catch (e) {
-    console.error(`no se pudo sembrar .agent/STATE.md en ${wt}: ${e.message}`)
-    process.exit(1)
+    cleanupOrphanedWorktree(s, wt, branch, `no se pudo sembrar .agent/STATE.md: ${e.message}`)
   }
   try {
     execFileSync('cmux', cmuxArgv, { env: { ...process.env, CLAUDE_CONFIG_DIR: configDir }, stdio: 'inherit' })
   } catch (e) {
-    console.error(`no se pudo lanzar cmux para #${s.n}: ${e.message}`)
-    process.exit(1)
+    cleanupOrphanedWorktree(s, wt, branch, `no se pudo lanzar cmux: ${e.message}`)
   }
   console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir})`)
 }

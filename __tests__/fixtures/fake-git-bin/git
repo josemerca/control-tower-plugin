@@ -1,0 +1,48 @@
+#!/usr/bin/env node
+// Stub de `git` para los tests de ct-next.mjs (review round 1, finding
+// Important sobre worktree huérfano): NUNCA toca un repo real. Controlado
+// enteramente por variables de entorno para simular `worktree add`,
+// `worktree remove` y `branch -D` exitosos o fallidos en puntos concretos, y
+// registra cada invocación (comando + argv) en un fichero de log para que el
+// test verifique qué intentó ct-next.mjs y en qué orden — igual que
+// fake-gh-bin/gh hace para los tests de dispatch-check.
+import { appendFileSync } from 'node:fs'
+
+const argv = process.argv.slice(2)
+const joined = argv.join(' ')
+
+if (process.env.FAKE_GIT_LOG_FILE) {
+  appendFileSync(process.env.FAKE_GIT_LOG_FILE, joined + '\n')
+}
+
+if (argv[0] === 'rev-parse' && argv[1] === '--show-toplevel') {
+  process.stdout.write(`${process.env.FAKE_GIT_TOPLEVEL || '/tmp/fake-repo-root'}\n`)
+  process.exit(0)
+}
+
+if (argv[0] === 'worktree' && argv[1] === 'add') {
+  if (process.env.FAKE_GIT_WORKTREE_ADD_FAIL) {
+    console.error('fake-git: worktree add failed (simulado)')
+    process.exit(1)
+  }
+  process.exit(0)
+}
+
+if (argv[0] === 'worktree' && argv[1] === 'remove') {
+  if (process.env.FAKE_GIT_WORKTREE_REMOVE_FAIL) {
+    console.error('fake-git: worktree remove failed (simulado)')
+    process.exit(1)
+  }
+  process.exit(0)
+}
+
+if (argv[0] === 'branch' && argv[1] === '-D') {
+  if (process.env.FAKE_GIT_BRANCH_DELETE_FAIL) {
+    console.error('fake-git: branch -D failed (simulado)')
+    process.exit(1)
+  }
+  process.exit(0)
+}
+
+console.error(`fake-git: comando no soportado en el stub: ${joined}`)
+process.exit(1)

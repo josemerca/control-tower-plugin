@@ -1,10 +1,13 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { shQuote } from '../scripts/shquote.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-next.mjs')
+const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
 
 function run(args, envOverrides = {}) {
   try {
@@ -109,6 +112,7 @@ describe('shQuote (Override 1: escapado POSIX del prompt de kickoff)', () => {
   }
 
   const cases = {
+    'cadena vacía': '',
     'texto plano': 'hola mundo',
     'variable de entorno': 'no expandas $HOME por favor',
     backticks: 'esto `no` es un comando',
@@ -123,4 +127,129 @@ describe('shQuote (Override 1: escapado POSIX del prompt de kickoff)', () => {
       expect(shellRoundTrip(value)).toBe(value)
     })
   }
+})
+
+// Review round 1, finding Important: si `git worktree add` funciona pero un
+// paso posterior (seed de STATE.md o lanzamiento de cmux) falla, el worktree
+// y la rama quedan huérfanos. Estos tests ejercitan la ruta REAL (no fixture,
+// no --dry-run) con stubs de `git`/`gh`/`cmux` (nunca un repo real, nunca un
+// worktree fuera de un directorio temporal, nunca un cmux real) para
+// verificar que ct-next.mjs intenta limpiar y distingue "limpiado" de "no
+// pude limpiar, hazlo a mano".
+describe('ct-next — worktree huérfano en fallo parcial (review round 1, Important)', () => {
+  const fakePath = [
+    join(fixturesDir, 'fake-git-bin'),
+    join(fixturesDir, 'fake-gh-bin'),
+    join(fixturesDir, 'fake-cmux-bin'),
+    process.env.PATH,
+  ].join(':')
+
+  const dirs = []
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  })
+
+  function runReal(args, envOverrides = {}) {
+    try {
+      const out = execFileSync('node', [script, ...args], {
+        encoding: 'utf8',
+        env: { ...process.env, PATH: fakePath, ...envOverrides },
+      })
+      return { code: 0, out }
+    } catch (e) {
+      return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }
+    }
+  }
+
+  function makeRepoRoot() {
+    const d = mkdtempSync(join(tmpdir(), 'ct-next-repo-'))
+    dirs.push(d)
+    return d
+  }
+
+  const openIssue42 = { number: 42, title: '#42 algo', labels: [{ name: 'status:ready' }], body: '' }
+
+  it('el seed de STATE.md falla (wt ya existe como fichero, no directorio) → limpia y avisa que se puede reintentar', () => {
+    const repoRoot = makeRepoRoot()
+    mkdirSync(join(repoRoot, '.worktrees'), { recursive: true })
+    // Pre-crea la ruta del worktree COMO FICHERO: `git worktree add` está
+    // stubbeado (no toca disco), así que sigue siendo un fichero cuando
+    // ct-next.mjs intenta mkdirSync(`${wt}/.agent`, {recursive:true}) — eso
+    // revienta con ENOTDIR de forma determinista, sin depender de permisos.
+    writeFileSync(join(repoRoot, '.worktrees', '42'), '')
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/no se pudo sembrar \.agent\/STATE\.md/)
+    expect(r.out).toMatch(/limpiados automáticamente/)
+    expect(r.out).toMatch(/puedes reintentar/)
+    expect(r.out).not.toMatch(/ATENCIÓN/)
+  })
+
+  it('el seed de STATE.md falla Y la limpieza automática también falla → ATENCIÓN con el comando manual exacto', () => {
+    const repoRoot = makeRepoRoot()
+    mkdirSync(join(repoRoot, '.worktrees'), { recursive: true })
+    writeFileSync(join(repoRoot, '.worktrees', '42'), '')
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GIT_WORKTREE_REMOVE_FAIL: '1',
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/ATENCIÓN.*no se pudo limpiar/s)
+    expect(r.out).toMatch(new RegExp(`git worktree remove --force ${join(repoRoot, '.worktrees', '42').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} && git branch -D feat/42`))
+  })
+
+  it('el lanzamiento de cmux falla (seed ya escrito de verdad) → limpia y avisa que se puede reintentar', () => {
+    const repoRoot = makeRepoRoot()
+    // Aquí el wt es un directorio real y escribible: mkdirSync/writeFileSync
+    // (Override 2) escriben de verdad un STATE.md bajo un directorio temporal
+    // (permitido — nunca fuera de un tmp dir), y es cmux quien falla.
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_CMUX_FAIL: '1',
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/no se pudo lanzar cmux/)
+    expect(r.out).toMatch(/limpiados automáticamente/)
+    expect(r.out).toMatch(/puedes reintentar/)
+  })
+
+  it('cap 2, el primer slice se lanza con éxito y el segundo falla en cmux → el mensaje deja claro dónde se paró y qué sigue vivo', () => {
+    const repoRoot = makeRepoRoot()
+    const openIssue43 = { number: 43, title: '#43 otro', labels: [{ name: 'status:ready' }], body: '' }
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const logFile = join(repoRoot, 'git-log')
+    const r = runReal(['--repo', 'o/r', '--cap', '2'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42, openIssue43], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_CMUX_FAIL_NAME_SUBSTR: '#43', // solo falla el segundo slice
+      FAKE_GIT_LOG_FILE: logFile,
+    })
+    expect(r.code).toBe(1)
+    // #42 se lanzó con éxito ANTES del fallo de #43 — su línea de éxito debe
+    // aparecer, y el mensaje de #43 debe dejar explícito que lo ya lanzado
+    // sigue corriendo sin tocarse.
+    const idxLanzado42 = r.out.indexOf('lanzado #42')
+    const idxFallo43 = r.out.indexOf('no se pudo lanzar cmux')
+    expect(idxLanzado42).toBeGreaterThan(-1)
+    expect(idxFallo43).toBeGreaterThan(-1)
+    expect(idxLanzado42).toBeLessThan(idxFallo43)
+    expect(r.out).toMatch(/ya lanzados con éxito antes de este fallo.*siguen corriendo.*no se han tocado/is)
+    // El log de git confirma que SOLO se intentó limpiar el worktree/rama de
+    // #43 (el segundo), nunca el de #42 (el primero, que sí tuvo éxito).
+    const gitLog = readFileSync(logFile, 'utf8')
+    expect(gitLog).toMatch(/worktree remove --force .*\/43/)
+    expect(gitLog).not.toMatch(/worktree remove --force .*\/42/)
+  })
 })
