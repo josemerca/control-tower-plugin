@@ -63,6 +63,51 @@ function sleepSync(ms) {
   Atomics.wait(sab, 0, 0, ms)
 }
 
+// HOOK DE PRUEBA — CT_CLAIM_PRECLAIM_DELAY_MS.
+//
+// Qué hace: si está definida, inserta una espera síncrona justo DESPUÉS de
+// que la comprobación de colisión (paso 1) haya pasado limpia, y ANTES de
+// escribir el label de claim `status:in-progress` (paso 2). Ningún otro
+// punto del script se ve afectado.
+//
+// Por qué existe: el AC6 original (T10) solo pudo observar la mitad
+// falsificable de la garantía de exclusión mutua — `claimLost()` únicamente
+// puede hacer perder al claimant de número MAYOR, así que el de número menor
+// nunca pierde por construcción. Para ejercer de verdad la ventana de doble
+// claim (T11) hace falta poder pausar un claimant justo entre su
+// comprobación de colisión y su escritura, de forma determinista — sin este
+// hook esa ventana depende del scheduler del SO y catorce rondas de
+// `--settle-ms 0` no la alcanzaron ni una vez, lo cual es ausencia de
+// evidencia, no evidencia de ausencia.
+//
+// Por qué es seguro que exista fuera de tests, sin atarlo a --dry-run como
+// CT_CLAIM_FIXTURE: a diferencia del fixture (que sustituye datos reales por
+// datos fabricados y por tanto SÍ podría hacer decidir con información
+// falsa), este hook SOLO puede añadir una espera. No cambia qué se decide
+// (colisión/no colisión, gana/pierde la carrera), no cambia qué se escribe
+// en GitHub, no salta ningún paso ni reordena nada. Con la variable ausente
+// (el caso de producción real, y el de todos los tests existentes que no la
+// fijan) el valor es exactamente 0 y `sleepSync(0)` es un no-op — el camino
+// de código es IDÉNTICO al de antes de este cambio. Que quede activa por
+// accidente en producción degradaría latencia, nunca corrección.
+//
+// No hace falta un segundo hook simétrico entre la escritura y el readback:
+// ese punto ya tiene un control equivalente, `--settle-ms`/
+// `CT_CLAIM_SETTLE_MS` (ver más abajo), que ya es exactamente "una espera
+// síncrona entre escribir y releer" — reutilizarlo con valores distintos por
+// proceso alcanza para construir la interleaving del harness sin duplicar el
+// mecanismo.
+let preclaimDelayMs = 0
+const preclaimRaw = process.env.CT_CLAIM_PRECLAIM_DELAY_MS
+if (preclaimRaw !== undefined) {
+  const n = Number(preclaimRaw)
+  if (!Number.isFinite(n) || n < 0) {
+    console.error(`CT_CLAIM_PRECLAIM_DELAY_MS inválido: "${preclaimRaw}" — debe ser un número >= 0`)
+    process.exit(2)
+  }
+  preclaimDelayMs = n
+}
+
 // CT_CLAIM_FIXTURE es exclusivamente para tests. Si queda colgada en el
 // entorno (una variable que un test no limpió, un wrapper que no la borra) SIN
 // --dry-run, el script NO debe decidir con datos fabricados ni, sobre todo,
@@ -140,6 +185,12 @@ if (collisions.length) {
   console.error(`COLLISION: #${issue} choca con ${collisions.map((c) => `#${c.n}[${c.tokens.join(',')}]`).join(' ')}`)
   process.exit(1)
 }
+
+// Hook de prueba (ver comentario junto a la definición de preclaimDelayMs
+// más arriba): solo en la ruta real, igual que el resto de esperas de este
+// script. Con la variable ausente, preclaimDelayMs es 0 y sleepSync(0) no
+// hace nada — camino de código idéntico al de antes de este hook.
+if (!dryRun && !fx) sleepSync(preclaimDelayMs)
 
 // 2) claim
 if (!dryRun && !fx) {

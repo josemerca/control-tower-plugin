@@ -245,6 +245,97 @@ describe('dispatch-check — fix review round 1 (Critical 2: fallos de gh() no d
 // simula HTTP-pagination de verdad, pero SÍ registra el argv exacto que
 // dispatch-check.mjs le pasa — la forma correcta de comprobar, sin red, que
 // el comando ya no lleva el tope fijo.
+// T11 — AC6 robusto: hook de prueba CT_CLAIM_PRECLAIM_DELAY_MS. El hook solo
+// puede añadir una espera síncrona entre "colisión limpia" y "escribir el
+// claim" en la ruta REAL (nunca --dry-run/fixture, que son puramente
+// síncronos y sin red). Estos tests comprueban: (a) validación de la propia
+// variable, (b) que ausente == 0 espera == camino idéntico al de antes del
+// hook, y (c) que presente sí retrasa medible y verificablemente la
+// escritura — sin lo cual el harness adversarial no podría confiar en que el
+// hook realmente construye la ventana que dice construir.
+describe('dispatch-check — T11 hook CT_CLAIM_PRECLAIM_DELAY_MS', () => {
+  it('CT_CLAIM_PRECLAIM_DELAY_MS malformado ("300ms") → exit 2, mensaje claro', () => {
+    const r = runReal(['5', '--repo', 'o/r', '--settle-ms', '10'], {
+      CT_CLAIM_PRECLAIM_DELAY_MS: '300ms',
+      FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[]]),
+    })
+    expect(r.code).toBe(2)
+    expect(r.out).toMatch(/CT_CLAIM_PRECLAIM_DELAY_MS inválido/)
+  })
+
+  it('CT_CLAIM_PRECLAIM_DELAY_MS negativo → exit 2', () => {
+    const r = runReal(['5', '--repo', 'o/r', '--settle-ms', '10'], {
+      CT_CLAIM_PRECLAIM_DELAY_MS: '-50',
+      FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[]]),
+    })
+    expect(r.code).toBe(2)
+    expect(r.out).toMatch(/CT_CLAIM_PRECLAIM_DELAY_MS inválido/)
+  })
+
+  it('"0" explícito por entorno → válido (no es un error), mismo resultado que ausente', () => {
+    const r = runReal(['3', '--repo', 'o/r', '--settle-ms', '0'], {
+      CT_CLAIM_PRECLAIM_DELAY_MS: '0',
+      FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[], [{ number: 3, labels: [{ name: 'status:in-progress' }, { name: 'touches:db' }] }]]),
+    })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/claimed #3/)
+  })
+
+  // Comparación relativa, no umbrales absolutos: un umbral absoluto bajo
+  // (p.ej. "<500ms") es fràgil frente al coste variable de arrancar un
+  // subproceso node + 3 invocaciones del stub de gh en una máquina bajo
+  // carga (se observó >500ms de solo overhead en una corrida real). En vez
+  // de eso, cada rama se ejecuta dos veces (ausente vs 300ms) y se compara
+  // la DIFERENCIA entre medias: eso aísla el efecto del hook del ruido del
+  // entorno, y es exactamente lo que el harness de T11 necesita confiar que
+  // es cierto.
+  it('valor positivo retrasa medible la escritura del claim frente a ausente (mismo resultado final, más lento)', () => {
+    const runsOf = (envOverrides) => {
+      const samples = []
+      for (let i = 0; i < 4; i++) {
+        const t0 = Date.now()
+        const r = runReal(['3', '--repo', 'o/r', '--settle-ms', '0'], {
+          FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
+          FAKE_GH_LIST_SEQUENCE: JSON.stringify([[], [{ number: 3, labels: [{ name: 'status:in-progress' }, { name: 'touches:db' }] }]]),
+          ...envOverrides,
+        })
+        samples.push({ elapsed: Date.now() - t0, r })
+      }
+      return samples
+    }
+    const baseline = runsOf({})
+    const delayed = runsOf({ CT_CLAIM_PRECLAIM_DELAY_MS: '600' })
+    for (const s of [...baseline, ...delayed]) {
+      expect(s.r.code).toBe(0)
+      expect(s.r.out).toMatch(/claimed #3/)
+    }
+    // Mediana en vez de media: aísla el retraso del hook de un outlier puntual
+    // por contención de CPU en la máquina (ya observado: un pico aislado de
+    // ~150ms en una corrida), sin taparlo con umbrales absolutos frágiles.
+    const median = (arr) => { const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length / 2)] }
+    const medBaseline = median(baseline.map((s) => s.elapsed))
+    const medDelayed = median(delayed.map((s) => s.elapsed))
+    // el hook debe añadir ~600ms sobre el baseline; se exige al menos 300ms
+    // (mitad del valor nominal) de margen de holgura para no ser frágil, pero
+    // un valor por debajo de eso significaría que el hook no está durmiendo
+    // lo que dice dormir.
+    expect(medDelayed - medBaseline).toBeGreaterThanOrEqual(300)
+  }, 20000)
+
+  it('con --dry-run/fixture, CT_CLAIM_PRECLAIM_DELAY_MS alto NO retrasa nada (el hook nunca toca la ruta pura)', () => {
+    const fixture = { candLabels: ['touches:db'], openIssues: [], readback: [{ n: 3, labels: ['status:in-progress', 'touches:db'] }] }
+    const t0 = Date.now()
+    const out = execFileSync('node', [script, '3', '--repo', 'o/r', '--dry-run'],
+      { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_PRECLAIM_DELAY_MS: '5000', CT_CLAIM_FIXTURE: JSON.stringify(fixture) } })
+    const elapsed = Date.now() - t0
+    expect(out).toMatch(/claimed #3/)
+    expect(elapsed).toBeLessThan(1000)
+  })
+})
+
 describe('dispatch-check — enumeración de issues abiertos sin --limit fijo (review final, finding 2)', () => {
   it('allOpen() usa --paginate y nunca --limit', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-dc-nolimit-'))
