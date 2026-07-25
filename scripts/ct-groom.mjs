@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { parseSlices } from './slices.js'
 import { groomPlan } from './groom.js'
+import { flattenIssuePages, realIssuesOnly, findByMarker } from './gh-issues.js'
 
 function arg(flag, def = undefined) {
   const i = process.argv.indexOf(flag)
@@ -71,12 +72,20 @@ for (const l of wantedLabels) {
 // cualificador de exclusión, así que el marcador `<!-- ct-order:N -->` no hace
 // matching de substring fiable, y el índice de búsqueda tiene latencia para
 // issues recién creados (falso negativo → duplicado; falso positivo → un
-// slice que debía crearse se salta en silencio). En su lugar, enumeramos todos
-// los issues UNA vez y comparamos el marcador como substring literal del body
-// en JS — mismo patrón que el fix de milestones. Un fallo del fetch aborta.
+// slice que debía crearse se salta en silencio). En su lugar, enumeramos TODOS
+// los issues, con paginación real (`--paginate`, sin tope de `--limit`) sobre
+// el endpoint REST — un `--limit` fijo dejaría fuera issues antiguos con
+// marcador en un repo grande, reintroduciendo el mismo fallo por truncado en
+// vez de por latencia. Ese endpoint también devuelve pull requests y, sin
+// `--slurp`, `--paginate` concatenaría varios documentos JSON sueltos que
+// romperían el `JSON.parse`; ver scripts/gh-issues.js para el detalle y los
+// tests puros de ese filtrado/aplanado. Comparamos el marcador como substring
+// literal del body en JS — mismo patrón que el fix de milestones. Un fallo
+// del fetch aborta.
 let existingIssues
 try {
-  existingIssues = JSON.parse(gh(['issue', 'list', '--repo', repo, '--state', 'all', '--json', 'number,body', '--limit', '1000']))
+  const raw = JSON.parse(gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=all', '--paginate', '--slurp']))
+  existingIssues = realIssuesOnly(flattenIssuePages(raw))
 } catch (e) {
   console.error(`no se pudo listar issues de ${repo}: ${e.message}`)
   process.exit(1)
@@ -84,7 +93,7 @@ try {
 
 for (const iss of plan.issues) {
   const marker = `<!-- ct-order:${iss.order} -->`
-  const found = existingIssues.find((i) => (i.body || '').includes(marker))
+  const found = findByMarker(existingIssues, marker)
   if (found) { console.log(`issue orden #${iss.order} ya existe (#${found.number}), no se duplica`); continue }
   const num = gh(['issue', 'create', '--repo', repo, '--title', iss.title, '--body', iss.body,
     '--milestone', milestone, ...iss.labels.flatMap((l) => ['--label', l])])
