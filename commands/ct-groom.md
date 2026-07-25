@@ -13,4 +13,11 @@ Es idempotente: re-ejecutarlo no duplica milestone ni issues (marca cada issue c
 
 Los issues se crean en `status:backlog`, nunca `status:ready` — es una gate humana deliberada: un humano tiene que promoverlos a `status:ready` (a mano, o editando el label) antes de que `/ct-next` los considere despachables. Si `/ct-next` responde "No hay slices despachables" justo después de un groom, es casi seguro que sea esto.
 
-`/ct-groom` no emite labels `touches:`/`area:` (se deja al formulario de creación de issues, a propósito): hasta que se añadan a mano, la maquinaria de colisión y serialización de `/ct-next`/`dispatch-check` queda inerte para los issues de este epic.
+La tabla §9 del spec admite dos columnas opcionales, `Área` y `Toca` (acepta también `Area` sin tilde), con valores separados por coma (`–`/`-`/vacío = ninguno):
+```
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|-------|------|---------|-----|--------|-----------|------|------|
+| 1 | modelo | backend | tabla users | – | AC-1.1 | schema | api | db, migration |
+| 2 | api | backend | endpoint | #1 | AC-2.1 | – | api | – |
+```
+`/ct-groom` traduce cada valor en labels `area:<x>`/`touches:<y>` sobre el issue — son las mismas que `claim.js#tokensOf` y `dispatch.js#SERIALIZING_TOUCHES` usan para detectar colisión y forzar serialización. Si un slice no declara `Área`/`Toca` (o el spec ni siquiera trae esas columnas), no se emite ninguna label de ese tipo y la maquinaria de colisión/serialización queda inerte para ese slice, igual que antes.

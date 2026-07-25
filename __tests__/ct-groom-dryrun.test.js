@@ -66,6 +66,34 @@ describe('ct-groom --dry-run', () => {
     expect(threw).toBe(true)
   })
 
+  it('spec con órdenes de slice duplicados sale con código distinto de 0 y mensaje nombrando el duplicado', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const DUP_SPEC = `## 9. Slices
+| # | Slice (issue) | Tipo | Entrega | Dep | Acepta (AC) | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | login | backend | modelo | – | AC-1.1 | schema |
+| 1 | login-bis | backend | modelo bis | – | AC-1.2 | – |
+`
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, DUP_SPEC)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      // exit 2, no exit 1 crudo de una excepción sin capturar: mismo código que
+      // el resto de errores de validación de este wrapper (spec inexistente,
+      // --milestone/--project/--repo inválidos).
+      expect(e.status).toBe(2)
+      expect(e.stderr.toString()).toMatch(/duplicad/)
+      expect(e.stderr.toString()).toMatch(/1/)
+      // convención del wrapper: console.error + process.exit, NUNCA un stack
+      // trace de Node volcado por una excepción sin capturar.
+      expect(e.stderr.toString()).not.toMatch(/at \S+ \(file:/)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('sin --repo fuera de --dry-run sale con código distinto de 0 y mensaje de uso', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)

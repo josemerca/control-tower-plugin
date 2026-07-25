@@ -74,7 +74,18 @@ try {
   process.exit(2)
 }
 const slices = parseSlices(specMd)
-const plan = groomPlan(slices, { milestone, specPath: specFile, specSection: section })
+// groomPlan lanza si hay órdenes de slice duplicados en la tabla §9 (T14/W-A):
+// se captura aquí y se reporta con la misma convención que el resto de errores
+// de validación de este wrapper (spec inexistente, --milestone/--project/
+// --repo inválidos) — mensaje limpio por console.error + exit(2), nunca el
+// stack trace crudo de una excepción sin capturar.
+let plan
+try {
+  plan = groomPlan(slices, { milestone, specPath: specFile, specSection: section })
+} catch (e) {
+  console.error(e.message)
+  process.exit(2)
+}
 
 if (dryRun) {
   console.log(JSON.stringify({ ...plan, repo, project: project ? Number(project) : null }, null, 2))
