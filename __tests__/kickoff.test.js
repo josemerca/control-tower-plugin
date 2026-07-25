@@ -48,14 +48,29 @@ describe('renderKickoff', () => {
 // ejecutar nunca (ver el brief: "instruir al agente vía el prompt no es
 // aceptable [para el claim] porque un prompt es advisory" — el release SÍ
 // se deja en el prompt a propósito, pero con el mismo cuidado de literalidad).
-describe('renderKickoff — instrucción de --release (W-C)', () => {
-  it('incluye el comando literal de dispatch-check --release, con el issue y el repo reales sustituidos', () => {
-    const k = renderKickoff({ ...SLICE, n: 42 }, { repo: 'o/r' })
-    expect(k).toContain('dispatch-check.mjs 42 --repo o/r --release')
+//
+// Fix round 1 (review de W-C), finding 1 — CRÍTICO EN LA PRÁCTICA: `${CLAUDE_
+// PLUGIN_ROOT}` solo lo sustituye Claude Code al renderizar `commands/*.md` y
+// `hooks/hooks.json` — NO es una variable de entorno del shell de la sesión
+// del agente (verificado por el reviewer: `env | grep CLAUDE` en una sesión
+// con el plugin cargado muestra CLAUDE_CONFIG_DIR/CLAUDE_CODE_*, pero nunca
+// CLAUDE_PLUGIN_ROOT). Un kickoff que emita ese token literal produciría
+// `node ${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-check.mjs ...` → el agente lo
+// ejecutaría tal cual y obtendría `Cannot find module` — en CADA despacho con
+// éxito, no un caso límite. `ct-next.mjs` ya resuelve `dispatchCheckPath`
+// como ruta absoluta real (relativa a su propia ubicación): renderKickoff
+// debe recibirla y usarla tal cual, nunca el token sin expandir.
+describe('renderKickoff — instrucción de --release (W-C, fix round 1: ruta real, no ${CLAUDE_PLUGIN_ROOT})', () => {
+  const FAKE_DISPATCH_CHECK_PATH = '/plugin/root/scripts/dispatch-check.mjs'
+
+  it('incluye el comando literal de dispatch-check --release con la ruta ABSOLUTA real recibida, con issue y repo sustituidos', () => {
+    const k = renderKickoff({ ...SLICE, n: 42 }, { repo: 'o/r', dispatchCheckPath: FAKE_DISPATCH_CHECK_PATH })
+    expect(k).toContain(`node ${FAKE_DISPATCH_CHECK_PATH} 42 --repo o/r --release`)
   })
-  it('usa ${CLAUDE_PLUGIN_ROOT} para el path del script, igual que el resto de comandos del plugin', () => {
-    const k = renderKickoff({ ...SLICE, n: 7 }, { repo: 'menoplus-app/menoplus' })
-    expect(k).toContain('${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-check.mjs 7 --repo menoplus-app/menoplus --release')
+
+  it('NUNCA emite el token ${CLAUDE_PLUGIN_ROOT} sin expandir — no es una env var real del shell de la sesión del agente', () => {
+    const k = renderKickoff({ ...SLICE, n: 7 }, { repo: 'menoplus-app/menoplus', dispatchCheckPath: FAKE_DISPATCH_CHECK_PATH })
+    expect(k).not.toContain('CLAUDE_PLUGIN_ROOT')
   })
 })
 

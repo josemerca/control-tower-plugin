@@ -16,7 +16,7 @@ const ADDENDA = {
   bugfix: 'Addendum bugfix: reproduce-first (test que falla con el síntoma exacto), causa raíz, fix mínimo, test de regresión.',
 }
 
-export function renderKickoff(slice, { repo }) {
+export function renderKickoff(slice, { repo, dispatchCheckPath }) {
   const addendum = ADDENDA[slice.type] || ''
   return [
     `Estás implementando UN slice (${slice.entrega}) del repo ${repo}, issue ${slice.issue || `orden #${slice.n}`}.`,
@@ -31,7 +31,16 @@ export function renderKickoff(slice, { repo }) {
     // tomada), con el Phase 3 PR conformance gate como backstop eventual. El
     // comando es LITERAL, con issue/repo ya sustituidos — no una descripción
     // que el agente tenga que traducir por su cuenta y pueda no ejecutar.
-    `Al acabar: commit refs al issue, actualiza .agent/STATE.md, abre PR, libera el claim con \`node \${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-check.mjs ${slice.n} --repo ${repo} --release\`, deja el estado mergeable y PARA.`,
+    //
+    // Fix round 1 (review de W-C), finding 1: `${CLAUDE_PLUGIN_ROOT}` NO es
+    // una env var del shell de la sesión del agente — solo la sustituye
+    // Claude Code al renderizar `commands/*.md`/`hooks/hooks.json`. Un
+    // kickoff (un prompt de texto plano, no un fichero de comando) que
+    // emitiera ese token literal produciría un `Cannot find module` en TODO
+    // despacho con éxito. `dispatchCheckPath` llega ya resuelto como ruta
+    // absoluta real (ct-next.mjs la calcula relativa a su propia ubicación)
+    // y se interpola tal cual — nunca el token sin expandir.
+    `Al acabar: commit refs al issue, actualiza .agent/STATE.md, abre PR, libera el claim con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --release\`, deja el estado mergeable y PARA.`,
   ].filter(Boolean).join('\n')
 }
 

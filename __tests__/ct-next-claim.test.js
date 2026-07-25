@@ -11,7 +11,7 @@
 // nunca llame a dispatch-check en absoluto.
 import { describe, it, expect, afterEach } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync, cpSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -67,12 +67,37 @@ const FIXTURE = JSON.stringify({
   mergedIssues: [1],
 })
 
-describe('ct-next — --dry-run muestra el claim sin ejecutarlo (W-C, punto 5)', () => {
-  it('imprime que se reclamaría el issue seleccionado, con su número, y deja claro que no se ejecuta', () => {
+// La ruta real de dispatch-check.mjs, tal y como la resuelve ct-next.mjs
+// (relativa a su propia ubicación) — usada para comprobar que la línea de
+// --dry-run es un comando copiable de verdad, no un nombre suelto.
+const realDispatchCheckPath = join(dirname(script), 'dispatch-check.mjs')
+const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
+describe('ct-next — --dry-run muestra el claim sin ejecutarlo (W-C, punto 5; fix round 1, minor: línea copiable y guarda real)', () => {
+  it('imprime el comando REAL y copiable (node <ruta> <issue> --repo <repo>), y deja claro que no se ejecuta', () => {
     const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE })
     expect(r.code).toBe(0)
-    expect(r.out).toMatch(/dispatch-check.*\b2\b.*--repo menoplus-app\/menoplus/)
+    expect(r.out).toMatch(new RegExp(`node ${escapeRegExp(realDispatchCheckPath)} 2 --repo menoplus-app/menoplus`))
     expect(r.out).toMatch(/no se ejecuta/i)
+  })
+
+  // Fix round 1, minor: el test de arriba solo comprueba la FORMA del texto
+  // impreso — una regresión que SÍ invocara dispatch-check.mjs de verdad en
+  // --dry-run seguiría en verde mientras el texto pareciera correcto, aunque
+  // esa invocación intentara hablar con `gh` real contra
+  // menoplus-app/menoplus. Se pasa por runReal() (PATH con los stubs) +
+  // FAKE_GH_ARGV_LOG_FILE y se comprueba que NUNCA se registra un `gh issue
+  // edit` — eso es una guarda de comportamiento, no de formato.
+  it('NUNCA invoca dispatch-check.mjs de verdad en --dry-run: ningún `gh issue edit` queda registrado', () => {
+    const repoRoot = makeRepoRoot()
+    const argvLog = join(repoRoot, 'gh-argv-log')
+    const r = runReal(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], {
+      CT_NEXT_FIXTURE: FIXTURE,
+      FAKE_GH_ARGV_LOG_FILE: argvLog,
+    })
+    expect(r.code).toBe(0)
+    const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
+    expect(log).not.toMatch(/issue edit/)
   })
 })
 
@@ -146,8 +171,68 @@ describe('ct-next — fallo inesperado de dispatch-check (no exit 0/1) aborta TO
     expect(r.out).toMatch(/fallo inesperado/i)
     expect(r.out).toMatch(/exit 2/)
     expect(r.out).toMatch(/abort/i)
+    // Fix round 1, minor: el aborto puede dispararse DESPUÉS de haber
+    // lanzado con éxito algún slice anterior de la misma tanda (cap > 1) —
+    // igual que ya hace cleanupOrphanedWorktree, el mensaje de aborto tiene
+    // que dejar explícito que esos slices siguen corriendo sin tocarse.
+    expect(r.out).toMatch(/ya lanzados.*siguen corriendo.*no se han tocado/is)
     const gitLogTxt = existsSync(gitLog) ? readFileSync(gitLog, 'utf8') : ''
     expect(gitLogTxt).not.toMatch(/worktree add/) // ni #42 ni #43 llegaron a crear worktree
+  })
+})
+
+// Fix round 1 (review de W-C), finding 2 — IMPORTANT: si dispatch-check.mjs
+// falta o se renombra, Node sale con exit 1 (MODULE_NOT_FOUND) — el MISMO
+// exit code que dispatch-check.mjs usa para "colisión/carrera perdida". Sin
+// una guarda dedicada, attemptClaim clasificaría esto como un resultado
+// ESPERADO del protocolo: se saltarían TODOS los slices de la tanda
+// ("saltando #N...") y el proceso terminaría con exit 0 sin haber
+// despachado nada — un no-op silencioso que además contradice el propio
+// mensaje de aborto de "fallo inesperado" (que dice cubrir justo este caso).
+describe('ct-next — dispatch-check.mjs ausente (W-C, fix round 1, finding 2)', () => {
+  // No se toca el scripts/dispatch-check.mjs REAL del repo (renombrarlo
+  // temporalmente arriesgaría a cualquier otro fichero de test que lo
+  // invoque directamente y que vitest pudiera correr en paralelo, en otro
+  // worker). En su lugar se copian ct-next.mjs y SOLO los módulos hermanos
+  // que de verdad importa (ninguno de ellos importa dispatch-check.mjs) a
+  // un directorio temporal DENTRO del propio repo — para que la resolución
+  // de "yaml" (que usa scripts/state.js) siga encontrando node_modules
+  // subiendo directorios — y deliberadamente NO se copia dispatch-check.mjs:
+  // así `dispatchCheckPath`, resuelto relativo a la nueva ubicación del
+  // ct-next.mjs copiado, apunta a un fichero que de verdad no existe.
+  const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
+  const scriptsDir = join(projectRoot, 'scripts')
+  const SIBLING_FILES = ['ct-next.mjs', 'dispatch.js', 'kickoff.js', 'shquote.js', 'gh-issue-map.js', 'gh-issues.js', 'state.js']
+
+  it('dispatch-check.mjs no existe en la ruta resuelta → aborta al arrancar con esa ruta, ANTES de tratarlo como colisión', () => {
+    const copyDir = mkdtempSync(join(projectRoot, 'tmp-missing-dispatch-check-'))
+    try {
+      for (const f of SIBLING_FILES) cpSync(join(scriptsDir, f), join(copyDir, f))
+      const copiedScript = join(copyDir, 'ct-next.mjs')
+      const expectedMissingPath = join(copyDir, 'dispatch-check.mjs')
+      expect(existsSync(expectedMissingPath)).toBe(false) // precondición: de verdad no está
+
+      const repoRoot = makeRepoRoot()
+      const r = spawnSync('node', [copiedScript, '--repo', 'o/r', '--cap', '1'], {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: fakePath,
+          FAKE_GIT_TOPLEVEL: repoRoot,
+          FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+        },
+      })
+      const out = (r.stdout || '') + (r.stderr || '')
+      expect(r.status).toBe(1)
+      expect(out).toMatch(/no se encontró dispatch-check\.mjs/i)
+      expect(out).toContain(expectedMissingPath)
+      // Nunca debe leerse como "colisión" ni intentar saltar el slice: el
+      // guard de arranque tiene que cortar ANTES de llegar ahí.
+      expect(out).not.toMatch(/saltando #42/)
+      expect(out).not.toMatch(/COLLISION/)
+    } finally {
+      rmSync(copyDir, { recursive: true, force: true })
+    }
   })
 })
 

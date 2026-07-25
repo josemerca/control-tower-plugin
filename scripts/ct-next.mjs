@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { planDispatch, resolveAccount, buildCmuxArgv } from './dispatch.js'
@@ -20,6 +20,22 @@ import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 // lado de ct-next.mjs dentro del plugin, con independencia de dónde esté
 // instalado.
 const dispatchCheckPath = join(dirname(fileURLToPath(import.meta.url)), 'dispatch-check.mjs')
+
+// Fix round 1 (review de W-C), finding 2 — IMPORTANT: Node sale con exit 1
+// (MODULE_NOT_FOUND) cuando el fichero que se le pide ejecutar no existe —
+// el MISMO código que dispatch-check.mjs usa para "colisión/carrera
+// perdida" (ver el contrato de exit codes en su cabecera). Sin este guard,
+// un dispatch-check.mjs ausente o renombrado (plugin mal instalado o
+// incompleto) haría que attemptClaim() lo clasificara como un resultado
+// ESPERADO del protocolo: TODOS los slices de la tanda se saltarían
+// ("saltando #N...") y el proceso terminaría con exit 0 sin haber
+// despachado nada — un no-op silencioso, además de contradecir el propio
+// mensaje de "fallo inesperado" de más abajo (que ya afirma cubrir este
+// caso). Se comprueba UNA vez al arrancar, antes de tocar `gh` o crear nada.
+if (!existsSync(dispatchCheckPath)) {
+  console.error(`no se encontró dispatch-check.mjs en ${dispatchCheckPath} — el plugin parece estar incompleto o mal instalado (¿se movió/borró el fichero?). Abortando antes de intentar ningún claim: sin él, cada slice se leería en falso como "colisión" y la tanda entera terminaría en un no-op silencioso.`)
+  process.exit(1)
+}
 
 // `arg()` solo devuelve un string cuando el flag realmente trae un valor: si
 // el flag es el último token de argv, o el token siguiente es a su vez otro
@@ -405,7 +421,7 @@ for (const s of selected) {
   // slice.ac como array y usan slice.issue con `??`/`||` — sin este default
   // revientan con un TypeError en vez de imprimir el plan.
   const sliceForKickoff = { ...s, ac: s.ac || [], issue: s.issue ?? null }
-  const kickoff = renderKickoff(sliceForKickoff, { repo })
+  const kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath })
   const stateSeed = buildStateSeed(sliceForKickoff, { branch, base: 'main' })
   // Override 1 (shell quoting): --command es UN argv element (buildCmuxArgv
   // ya lo garantiza), pero la STRING dentro de ese argv element es una línea
@@ -433,7 +449,11 @@ for (const s of selected) {
     // invocarlo aquí rompería la garantía de "sin red" de --dry-run con
     // CT_NEXT_FIXTURE, así que en --dry-run ct-next.mjs directamente NO llama
     // a dispatch-check.mjs — ningún gh real se toca.
-    console.log(`dispatch-check ${s.n} --repo ${repo}   # se reclamaría #${s.n} (status:ready → status:in-progress) antes de crear el worktree; en --dry-run no se ejecuta, ningún gh real se toca`)
+    // Fix round 1, minor: `node ${dispatchCheckPath} ...` (no un nombre
+    // suelto "dispatch-check ...") para que la línea sea copiable y
+    // ejecutable tal cual, igual que sus vecinas (`git worktree add ...`,
+    // `cmux ...`).
+    console.log(`node ${dispatchCheckPath} ${s.n} --repo ${repo}   # se reclamaría #${s.n} (status:ready → status:in-progress) antes de crear el worktree; en --dry-run no se ejecuta, ningún gh real se toca`)
     console.log(`CLAUDE_CONFIG_DIR=${configDir}`)
     console.log(`git worktree add -b ${branch} ${wt} main`)
     console.log(`seed ${wt}/.agent/STATE.md:\n${stateSeed}`)
@@ -457,6 +477,12 @@ for (const s of selected) {
     }
     const statusDesc = typeof claim.status === 'number' ? `exit ${claim.status}` : 'sin exit code numérico (fallo inesperado al lanzar el subproceso)'
     console.error(`dispatch-check devolvió un fallo inesperado (${statusDesc}) al intentar reclamar #${s.n} — no es una colisión ni una carrera perdida (eso sale con exit 1), así que probablemente es un bug o una mala configuración (p.ej. --repo mal formado, o dispatch-check.mjs no encontrado en ${dispatchCheckPath}). Abortando toda la tanda: no sigo con el resto de candidatos a ciegas.`)
+    // Fix round 1, minor: este aborto puede dispararse DESPUÉS de haber
+    // lanzado con éxito algún slice anterior de la misma tanda (cap > 1) —
+    // igual que ya hace cleanupOrphanedWorktree más abajo, hay que dejar
+    // explícito que esos slices siguen corriendo en su propio cmux, sin
+    // tocarse.
+    console.error('Los slices de esta tanda ya lanzados con éxito antes de este fallo (si los hubo) siguen corriendo en su propio cmux — no se han tocado.')
     process.exit(1)
   }
 
