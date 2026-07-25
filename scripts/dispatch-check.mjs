@@ -6,10 +6,12 @@
 // dispatchers concurrentes pasan su comprobación de colisión antes de que
 // cualquiera de los dos haya escrito, PUEDEN QUEDAR AMBOS reclamando el
 // mismo token compartido. Esto no es hipotético: está reproducido de forma
-// determinista en 6/6 rondas con el harness adversarial
-// (scripts/experiments/ac6-race2-deterministic.sh), verificado contra el
-// estado real de los labels en GitHub, no solo por exit code — ver
-// task-11-report.md. La mitigación real HOY, mientras el claim siga viviendo
+// determinista y repetible con el harness adversarial
+// (scripts/experiments/ac6-race2-deterministic.sh — 3/3 rondas en su corrida
+// más reciente, y sin excepciones en ninguna de las corridas hechas durante
+// su desarrollo con otros parámetros), verificado contra el estado real de
+// los labels en GitHub, no solo por exit code — ver task-11-report.md §3
+// para el detalle completo. La mitigación real HOY, mientras el claim siga viviendo
 // en labels, es operativa, no de código: NO lanzar dos dispatchers a la vez
 // sobre el mismo repo. Este script no puede garantizar exclusión mutua bajo
 // concurrencia real; que quede dicho aquí sin adornos para que quien lo lea
@@ -41,22 +43,41 @@ const dryRun = has('--dry-run')
 const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release] [--dry-run]'
 if (Number.isNaN(issue) || typeof repo !== 'string' || repo.length === 0) { console.error(usage); process.exit(2) }
 
+// --settle-ms/CT_CLAIM_SETTLE_MS ya NO EXISTEN (T11, fix round 2 — ver el
+// comentario de cabecera de este fichero para el porqué). Si el flag
+// aparece en argv, se RECHAZA explícitamente con exit 2 en vez de
+// ignorarlo en silencio: alguien que lo invoque por costumbre
+// (`--settle-ms 2000`, de un script o de memoria muscular) con un exit 0
+// limpio se quedaría creyendo que hay una espera de asentamiento activa —
+// exactamente el "invita a confiar en él" que motivó eliminarla. Ignorarlo
+// en silencio habría reintroducido esa falsa confianza por otra vía.
+if (has('--settle-ms') || process.env.CT_CLAIM_SETTLE_MS !== undefined) {
+  console.error('--settle-ms/CT_CLAIM_SETTLE_MS ya no existen: la espera de asentamiento se eliminó a propósito (ver el comentario de cabecera de dispatch-check.mjs y task-11-report.md). Quítalo de la invocación/entorno — no hace nada, y dejarlo puesto invita a creer que sigue activo.')
+  process.exit(2)
+}
+
 // NO HAY ESPERA DE ASENTAMIENTO ("settle wait") EN ESTE SCRIPT — se eliminó a
 // propósito (T11, fix round 2). Existió una versión anterior con
 // --settle-ms/CT_CLAIM_SETTLE_MS (una espera entre escribir el claim y
 // releerlo, con 2000ms de default), vendida como mitigación de la ventana de
-// doble claim. Se retiró porque una ventana temporal no CIERRA una condición
-// de carrera, solo reduce su probabilidad — y el harness adversarial de T11
-// (scripts/experiments/ac6-race2-deterministic.sh) barrió tres valores de
-// skew (500, 3000 y 8000ms) contra settle=0 y settle=2000 sin conseguir medir
-// que el settle aportara nada: en los tres puntos medidos, ambos valores de
-// settle dieron el mismo resultado (ver task-11-report.md §5 para el barrido
-// completo y por qué el muestreo era demasiado grueso para resolver un
-// posible efecto de ~2s enmascarado por la propia latencia de red de GitHub,
-// que en el experimento CAS de T9 se midió entre 650 y 1900ms por request).
-// Un mecanismo de protección que no se puede demostrar que protege, con el
-// coste que este equipo estaba dispuesto a pagar en medirlo, es peor que no
-// tenerlo: invita a confiar en él. La garantía real hoy está en el
+// doble claim.
+//
+// LA RAZÓN DE ELIMINARLA NO ES "SE DEMOSTRÓ QUE NO SERVÍA DE NADA" — eso no
+// está demostrado, y afirmarlo sería tan impreciso como la promesa original.
+// La razón es más simple y no depende de esa medición: una ventana temporal
+// no CIERRA una condición de carrera, solo reduce su probabilidad, y no
+// queremos mitigar una carrera real con un temporizador, mida lo que mida.
+// Esa razón se sostiene sola.
+//
+// Lo que sí se midió (task-11-report.md §5, resumen y detalle): tres
+// barridos de skew (500, 3000 y 8000ms) contra settle=0 y settle=2000 dieron
+// el mismo resultado en ambos valores de settle. Un cuarto punto, skew=1000,
+// SÍ divergió (settle=0 → doble claim 3/3; settle=2000 → sin doble claim
+// 3/3) — pero es n=1 (una sola ronda de 3 medida en ese punto, sin repetir
+// en puntos vecinos), no concluyente por sí solo. Los datos, en conjunto,
+// no permiten afirmar ni que el settle aportaba 0 de margen ni que aportaba
+// ~2s: el muestreo no alcanza para resolverlo, y no se ha completado el
+// barrido fino que sí lo resolvería. La garantía real hoy está en el
 // comentario de cabecera de este fichero: ninguna bajo concurrencia.
 //
 // Sleep síncrono y bloqueante (sin async/await, para no reestructurar todo el

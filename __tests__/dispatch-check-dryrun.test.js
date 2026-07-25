@@ -94,6 +94,44 @@ describe('dispatch-check --dry-run', () => {
 
 })
 
+// T11 fix round 3 (re-review): --settle-ms/CT_CLAIM_SETTLE_MS se eliminaron
+// del código (ver el comentario de cabecera de dispatch-check.mjs). Si se
+// ignoraran en silencio, alguien que invoque el script con --settle-ms por
+// costumbre obtendría un exit 0 limpio y se quedaría creyendo que hay una
+// espera de asentamiento activa — exactamente la falsa confianza que motivó
+// eliminarla. Deben rechazarse explícitamente con exit 2.
+describe('dispatch-check — T11 fix round 3 (--settle-ms/CT_CLAIM_SETTLE_MS rechazados explícitamente)', () => {
+  it('--settle-ms en argv → exit 2, mensaje apunta a la cabecera del fichero', () => {
+    let threw = false
+    try {
+      execFileSync('node', [script, '5', '--repo', 'o/r', '--dry-run', '--settle-ms', '2000'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect((e.stdout || '') + (e.stderr || '')).toMatch(/--settle-ms.*ya no existen?/i)
+    }
+    expect(threw).toBe(true)
+  })
+
+  it('CT_CLAIM_SETTLE_MS en el entorno → exit 2, aunque no se pase el flag', () => {
+    let threw = false
+    try {
+      execFileSync('node', [script, '5', '--repo', 'o/r', '--dry-run'],
+        { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_SETTLE_MS: '2000' } })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect((e.stdout || '') + (e.stderr || '')).toMatch(/--settle-ms.*ya no existen?/i)
+    }
+    expect(threw).toBe(true)
+  })
+
+  it('sin --settle-ms ni CT_CLAIM_SETTLE_MS → no le afecta (camino normal)', () => {
+    const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    expect(out).toMatch(/released #9.*in-review/)
+  })
+})
+
 describe('dispatch-check — fix review round 1 (Critical 1: fixture atado a --dry-run)', () => {
   it('CT_CLAIM_FIXTURE puesto SIN --dry-run → exit 2, no decide con el fixture ni toca gh', () => {
     const fixture = { candLabels: ['touches:db'], openIssues: [], readback: [{ n: 3, labels: ['status:in-progress', 'touches:db'] }] }

@@ -26,12 +26,14 @@
 #
 # (fix round 2, T11 review — decisión de José): este script ya NO pasa
 # --settle-ms — ese flag y toda la espera de asentamiento se retiraron de
-# dispatch-check.mjs. Tres barridos de skew (500, 3000 y 8000ms, cada uno
-# contra lo que entonces eran los dos valores de settle) no consiguieron medir
-# que el settle aportara nada frente a la latencia real de red de GitHub
-# (650-1900ms por request, medida en el experimento CAS de T9) — ver
-# task-11-report.md §5. El único knob que queda para reproducir el doble
-# claim es el skew de este propio script.
+# dispatch-check.mjs. La razón NO es que se demostrara que el settle no
+# aportaba nada (eso no está demostrado): es que no queremos mitigar una
+# carrera real con una ventana temporal, mida lo que mida esa ventana. Lo que
+# sí se midió (task-11-report.md §5): tres puntos de skew (500, 3000 y
+# 8000ms) dieron el mismo resultado contra settle=0 y settle=2000; un cuarto
+# punto, skew=1000, SÍ divergió (settle=0 → doble claim 3/3; settle=2000 →
+# sin doble claim 3/3) — n=1, no concluyente. El único knob que queda para
+# reproducir el doble claim es el skew de este propio script.
 #
 # Tras cada ronda se comprueba la INVARIANTE REAL contra GitHub (no el exit
 # code, que es solo lo que cada proceso CREE): a lo sumo un issue con el
