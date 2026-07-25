@@ -1,0 +1,48 @@
+#!/usr/bin/env node
+// Stub de `gh` para tests: NUNCA toca la red ni ningún repo real. Controlado
+// enteramente por variables de entorno para que los tests de
+// dispatch-check-dryrun.test.js puedan simular fallos de `gh` (auth, rate
+// limit, red) en puntos concretos de la secuencia de claim sin llamar al `gh`
+// real. Ver ese fichero de test para el uso de cada variable.
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+
+const argv = process.argv.slice(2)
+const joined = argv.join(' ')
+
+function nextCallIndex(counterFile) {
+  if (!counterFile) return 0
+  let n = 0
+  if (existsSync(counterFile)) n = parseInt(readFileSync(counterFile, 'utf8'), 10) || 0
+  writeFileSync(counterFile, String(n + 1))
+  return n
+}
+
+if (argv[0] === 'issue' && argv[1] === 'edit') {
+  const failSubstr = process.env.FAKE_GH_EDIT_FAIL_SUBSTR
+  if (failSubstr && joined.includes(failSubstr)) {
+    console.error('fake-gh: issue edit failed (simulado)')
+    process.exit(1)
+  }
+  process.exit(0)
+}
+
+if (argv[0] === 'issue' && argv[1] === 'view') {
+  process.stdout.write(process.env.FAKE_GH_VIEW_LABELS || '[]')
+  process.exit(0)
+}
+
+if (argv[0] === 'issue' && argv[1] === 'list') {
+  const callIndex = nextCallIndex(process.env.FAKE_GH_COUNTER_FILE)
+  const failAt = process.env.FAKE_GH_LIST_FAIL_AT !== undefined ? Number(process.env.FAKE_GH_LIST_FAIL_AT) : null
+  if (failAt !== null && callIndex === failAt) {
+    console.error('fake-gh: issue list failed (simulado)')
+    process.exit(1)
+  }
+  const seq = JSON.parse(process.env.FAKE_GH_LIST_SEQUENCE || '[[]]')
+  const out = seq[Math.min(callIndex, seq.length - 1)]
+  process.stdout.write(JSON.stringify(out))
+  process.exit(0)
+}
+
+console.error(`fake-gh: comando no soportado en el stub: ${joined}`)
+process.exit(1)
