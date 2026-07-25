@@ -80,4 +80,27 @@ describe('buildCmuxArgv', () => {
     const ci = argv.indexOf('--command')
     expect(argv[ci + 1]).toBe("claude 'a b'\n#2") // intacto, sin escapar
   })
+
+  // T10, hallazgo en vivo contra el sandbox: `cmux` es un cliente que habla
+  // con un daemon ya en marcha por socket Unix — un env var puesto en
+  // `execFileSync('cmux', argv, {env})` muere con ese proceso cliente y
+  // NUNCA llega al pty real que crea el daemon. Sin pasar `--env
+  // KEY=VALUE` explícitamente en el argv, CLAUDE_CONFIG_DIR no llega a la
+  // sesión y esta se queda colgada en el selector interactivo de cuenta.
+  it('sin env → ningún --env en el argv (compat con llamadas previas)', () => {
+    const argv = buildCmuxArgv({ name: 'x', cwd: '/wt', command: 'claude' })
+    expect(argv).not.toContain('--env')
+  })
+  it('con env → un --env KEY=VALUE por entrada, ANTES de --command', () => {
+    const argv = buildCmuxArgv({ name: 'x', cwd: '/wt', command: 'claude', env: { CLAUDE_CONFIG_DIR: '/Users/x/.claude-personal' } })
+    const ei = argv.indexOf('--env')
+    expect(ei).toBeGreaterThan(-1)
+    expect(argv[ei + 1]).toBe('CLAUDE_CONFIG_DIR=/Users/x/.claude-personal')
+    expect(argv.indexOf('--env')).toBeLessThan(argv.indexOf('--command'))
+  })
+  it('con varias entradas de env → un --env por cada una', () => {
+    const argv = buildCmuxArgv({ command: 'claude', env: { A: '1', B: '2' } })
+    const envPairs = argv.reduce((acc, tok, i) => (tok === '--env' ? [...acc, argv[i + 1]] : acc), [])
+    expect(envPairs).toEqual(['A=1', 'B=2'])
+  })
 })

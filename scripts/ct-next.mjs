@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs'
 import { selectNext, resolveAccount, buildCmuxArgv } from './dispatch.js'
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
 import { shQuote } from './shquote.js'
-import { mapGhIssue, filterMergedIssues } from './gh-issue-map.js'
+import { buildDispatchInput } from './gh-issue-map.js'
 
 // `arg()` solo devuelve un string cuando el flag realmente trae un valor: si
 // el flag es el último token de argv, o el token siguiente es a su vez otro
@@ -64,17 +64,20 @@ function loadIssues() {
     console.error(`no se pudieron listar issues abiertos de ${repo}: ${e.message}`)
     process.exit(1)
   }
-  const issues = raw.map(mapGhIssue)
 
   let closed
   try {
-    closed = JSON.parse(gh(['issue', 'list', '--repo', repo, '--state', 'closed', '--limit', '200', '--json', 'number,stateReason']))
+    // `body` es imprescindible aquí (no solo number,stateReason): es la única
+    // forma de recuperar el marcador <!-- ct-order:N --> de un issue YA
+    // CERRADO, y sin ese marcador buildDispatchInput no puede traducir un dep
+    // en espacio de orden hacia el número de issue real de una dependencia
+    // que ya se mergeó (ver gh-issue-map.js#buildOrderIndex).
+    closed = JSON.parse(gh(['issue', 'list', '--repo', repo, '--state', 'closed', '--limit', '200', '--json', 'number,stateReason,body']))
   } catch (e) {
     console.error(`no se pudieron listar issues cerrados de ${repo}: ${e.message}`)
     process.exit(1)
   }
-  const mergedIssues = filterMergedIssues(closed)
-  return { issues, mergedIssues }
+  return buildDispatchInput(raw, closed)
 }
 
 const { issues, mergedIssues } = loadIssues()
@@ -149,7 +152,14 @@ for (const s of selected) {
   // interpretándose dentro de las comillas dobles. shQuote() hace el
   // escapado POSIX real (comillas simples).
   const command = `claude --dangerously-skip-permissions ${shQuote(kickoff)}`
-  const cmuxArgv = buildCmuxArgv({ name, cwd: wt, command })
+  // CLAUDE_CONFIG_DIR viaja como --env de cmux, NUNCA como env local del
+  // proceso `cmux` cliente (ver dispatch.js#buildCmuxArgv): `cmux` es un
+  // cliente que habla con un daemon ya en marcha por socket Unix, y es el
+  // daemon —no este proceso— quien crea el pty real. Un env var puesto en
+  // el `execFileSync('cmux', ...)` local muere con ese proceso cliente sin
+  // llegar nunca al pty; verificado en vivo contra el sandbox (T10): sin
+  // --env, la sesión se queda colgada en el selector interactivo de cuenta.
+  const cmuxArgv = buildCmuxArgv({ name, cwd: wt, command, env: { CLAUDE_CONFIG_DIR: configDir } })
 
   if (dryRun) {
     console.log(`\n=== slice #${s.n} (${s.entrega}) ===`)
@@ -176,7 +186,7 @@ for (const s of selected) {
     cleanupOrphanedWorktree(s, wt, branch, `no se pudo sembrar .agent/STATE.md: ${e.message}`)
   }
   try {
-    execFileSync('cmux', cmuxArgv, { env: { ...process.env, CLAUDE_CONFIG_DIR: configDir }, stdio: 'inherit' })
+    execFileSync('cmux', cmuxArgv, { stdio: 'inherit' })
   } catch (e) {
     cleanupOrphanedWorktree(s, wt, branch, `no se pudo lanzar cmux: ${e.message}`)
   }

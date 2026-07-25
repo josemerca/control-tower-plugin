@@ -36,6 +36,12 @@ describe('ct-next --dry-run', () => {
     expect(r.out).toContain('cmux')
     expect(r.out).toContain('new-workspace')
     expect(r.out).toMatch(/\.claude-personal/) // account map: menoplus → personal
+    // T10, hallazgo en vivo: CLAUDE_CONFIG_DIR tiene que viajar como --env
+    // DENTRO del argv de cmux (protocolo del daemon), no como env local del
+    // proceso `cmux` cliente — si no, la sesión queda colgada en el
+    // selector interactivo de cuenta en vez de arrancar con la cuenta ya
+    // resuelta. Pin end-to-end de que ct-next.mjs realmente lo emite así.
+    expect(r.out).toMatch(/cmux .*--env CLAUDE_CONFIG_DIR=\S*\.claude-personal/)
   })
 
   it('no reproduce la garantía de fixture con un slice sin ac/issue (defensivo: no crashea)', () => {
