@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process'
 import { parseSlices } from './slices.js'
 import { groomPlan } from './groom.js'
 import { flattenIssuePages, realIssuesOnly, findByMarker } from './gh-issues.js'
+import { pickCurrentIteration } from './project-fields.js'
 
 function arg(flag, def = undefined) {
   const i = process.argv.indexOf(flag)
@@ -36,6 +37,108 @@ if (dryRun) {
 
 if (!repo) { console.error('--repo requerido fuera de --dry-run'); process.exit(2) }
 const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).trim()
+
+// Project v2 + Sprint (T9): introspección en runtime, no se hardcodean IDs.
+// Cada llamada de abajo se probó a mano contra un Project v2 real (sandbox)
+// antes de cablearla aquí; ver task-9-report.md para las queries/mutaciones
+// verificadas y sus respuestas reales.
+const PROJECT_FIELDS_QUERY = `
+query($id: ID!) {
+  node(id: $id) {
+    ... on ProjectV2 {
+      fields(first: 50) {
+        nodes {
+          ... on ProjectV2IterationField {
+            id
+            name
+            configuration {
+              iterations { id title startDate duration }
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+
+const SET_ITEM_ITERATION_MUTATION = `
+mutation($project: ID!, $item: ID!, $field: ID!, $iteration: String!) {
+  updateProjectV2ItemFieldValue(input: {
+    projectId: $project
+    itemId: $item
+    fieldId: $field
+    value: { iterationId: $iteration }
+  }) {
+    projectV2Item { id }
+  }
+}`
+
+// Se resuelve una sola vez por ejecución (no por issue): el owner/projectId/
+// fieldId/iterationId vigente son los mismos para todos los slices de esta
+// tanda. Si el fetch falla, o el project no tiene un campo de iteración
+// llamado "Sprint", o ninguna iteración cubre la fecha de hoy, abortamos —
+// mismo criterio que milestones/issues más arriba: no hay caso benigno que
+// tratar como "seguir sin Sprint".
+let projectMeta = null
+function ensureProjectMeta() {
+  if (projectMeta) return projectMeta
+  const owner = repo.split('/')[0]
+  let view
+  try {
+    view = JSON.parse(gh(['project', 'view', String(project), '--owner', owner, '--format', 'json']))
+  } catch (e) {
+    console.error(`no se pudo leer el project ${project} (owner ${owner}): ${e.message}`)
+    process.exit(1)
+  }
+  const projectId = view.id
+
+  let fieldsRaw
+  try {
+    fieldsRaw = JSON.parse(gh(['api', 'graphql', '-f', `query=${PROJECT_FIELDS_QUERY}`, '-f', `id=${projectId}`]))
+  } catch (e) {
+    console.error(`no se pudieron leer los campos del project ${project}: ${e.message}`)
+    process.exit(1)
+  }
+  const nodes = fieldsRaw?.data?.node?.fields?.nodes || []
+  const sprintField = nodes.find((n) => n && n.name === 'Sprint')
+  if (!sprintField) {
+    console.error(`el project ${project} no tiene un campo de iteración llamado "Sprint" — créalo antes de usar --project`)
+    process.exit(1)
+  }
+  const today = new Date().toISOString()
+  const current = pickCurrentIteration(sprintField.configuration?.iterations, today)
+  if (!current) {
+    console.error(`el campo Sprint del project ${project} no tiene una iteración vigente para hoy (${today.slice(0, 10)})`)
+    process.exit(1)
+  }
+  projectMeta = { owner, projectId, fieldId: sprintField.id, iterationId: current.id, iterationTitle: current.title }
+  return projectMeta
+}
+
+// añade un issue recién creado (por su URL) al Project v2 y fija su Sprint a
+// la iteración vigente. Solo se llama para issues creados EN ESTA corrida
+// (ver el bucle de abajo) — un issue que ya existía no se re-procesa, así
+// que en una segunda corrida idempotente no hay llamadas a gh project ni a
+// graphql en absoluto.
+function addToProjectWithSprint(issueUrl, order) {
+  const meta = ensureProjectMeta()
+  let item
+  try {
+    item = JSON.parse(gh(['project', 'item-add', String(project), '--owner', meta.owner, '--url', issueUrl, '--format', 'json']))
+  } catch (e) {
+    console.error(`no se pudo añadir el issue orden #${order} al project ${project}: ${e.message}`)
+    process.exit(1)
+  }
+  try {
+    gh(['api', 'graphql', '-f', `query=${SET_ITEM_ITERATION_MUTATION}`,
+      '-f', `project=${meta.projectId}`, '-f', `item=${item.id}`,
+      '-f', `field=${meta.fieldId}`, '-f', `iteration=${meta.iterationId}`])
+  } catch (e) {
+    console.error(`no se pudo fijar el Sprint del issue orden #${order} en el project ${project}: ${e.message}`)
+    process.exit(1)
+  }
+  console.log(`issue orden #${order} añadido al project ${project}, sprint=${meta.iterationTitle}`)
+}
 
 // milestone idempotente — el filtrado por título se hace en JS, no dentro de un
 // filtro jq: un título con `"` o `\` rompería el programa jq si se interpolara
@@ -102,9 +205,5 @@ for (const iss of plan.issues) {
   // esta misma ejecución compartieran marcador (no debería pasar, pero así la
   // comprobación de arriba sigue siendo correcta dentro de la misma corrida)
   existingIssues.push({ number: null, body: iss.body })
-  if (project) {
-    // Project v2 + Sprint: se implementa en T9 (requiere introspección graphql
-    // contra un Project v2 real para descubrir field/iteration IDs en runtime;
-    // ver NOTA de introspección en el brief de T5, §7).
-  }
+  if (project) addToProjectWithSprint(num, iss.order)
 }
