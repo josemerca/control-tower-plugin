@@ -105,15 +105,24 @@ function formatBlockReason(reason, cap) {
   return formatReason(reason)
 }
 
-const usage = 'uso: ct-next.mjs --repo <o/r> [--cap N] [--dry-run]'
+const usage = 'uso: ct-next.mjs --repo <o/r> [--cap N] [--base <rama>] [--dry-run]'
 const repo = arg('--repo')
 const capArg = arg('--cap', '1')
+const baseArg = arg('--base')
 const dryRun = has('--dry-run')
 
 if (typeof repo !== 'string' || repo.length === 0) { console.error(usage); process.exit(2) }
 const cap = typeof capArg === 'string' ? parseInt(capArg, 10) : NaN
 if (!Number.isFinite(cap) || cap < 1) {
   console.error(`--cap inválido: "${capArg === true ? '(sin valor)' : capArg}" — debe ser un entero >= 1`)
+  process.exit(2)
+}
+// --base <rama>: mismo patrón de validación que --repo/--cap (`arg()` ya
+// devuelve `true`, no un string, cuando el flag es el último token o va
+// seguido de otro flag) — un `--base` colgante nunca debe colarse hacia
+// `git worktree add`/el STATE.md sembrado como el string literal "true".
+if (baseArg !== undefined && typeof baseArg !== 'string') {
+  console.error(`--base inválido: "${baseArg === true ? '(sin valor)' : baseArg}" — falta el nombre de la rama (¿--base al final de la línea, o seguido de otro flag?)`)
   process.exit(2)
 }
 
@@ -141,6 +150,47 @@ const fx = (dryRun && process.env.CT_NEXT_FIXTURE) ? JSON.parse(process.env.CT_N
 // límite" de verdad (un runaway real seguiría abortando).
 const GH_MAX_BUFFER = 20 * 1024 * 1024
 const gh = (a) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: GH_MAX_BUFFER })
+
+// detectDefaultBranch (W-D): antes de este cambio, ct-next.mjs asumía "main"
+// a ciegas tanto en `git worktree add ... main` como en `base: 'main'` del
+// STATE.md sembrado. En un repo cuya rama por defecto real sea distinta
+// (p.ej. "master", o cualquier otra convención) eso fallaba de forma
+// confusa (worktree add contra una rama que no existe), o peor, sembraba un
+// STATE.md con un `base` que miente sobre la rama real.
+//
+// Se resuelve vía `gh repo view --json defaultBranchRef`: es la fuente
+// autoritativa (la rama por defecto tal y como está configurada AHORA en
+// GitHub), no una copia local que puede quedar desactualizada si el default
+// branch cambió después del clone — el mismo motivo por el que el resto de
+// este fichero (y dispatch-check.mjs) prefieren el endpoint REST en vivo a
+// un índice/caché local (`gh search`/`gh issue list`). Alternativas
+// consideradas y descartadas: `git symbolic-ref refs/remotes/origin/HEAD` es
+// puramente local (sin red) pero solo existe si alguien corrió `git remote
+// set-head origin -a` (no siempre cierto tras un clone) y puede quedar
+// desactualizado sin avisar; `git remote show origin` sí es autoritativo
+// pero hace un fetch completo de refs del remoto solo para leer una línea de
+// texto a parsear, más lento que una llamada JSON dirigida. ct-next.mjs YA
+// requiere red para `gh` en la ruta real (loadIssues), así que esto no
+// añade una dependencia nueva.
+//
+// Si no se puede determinar (gh caído, sin red, repo sin default branch
+// legible), abortamos con un mensaje claro que señala `--base` como salida —
+// NUNCA asumimos "main" en silencio: eso es exactamente el bug que se está
+// arreglando.
+function detectDefaultBranch(repoSlug) {
+  let out
+  try {
+    out = gh(['repo', 'view', repoSlug, '--json', 'defaultBranchRef', '-q', '.defaultBranchRef.name']).trim()
+  } catch (e) {
+    console.error(`no se pudo determinar la rama por defecto de ${repoSlug}: ${e.message}. Usa --base <rama> para indicarla explícitamente si ya sabes cuál es.`)
+    process.exit(1)
+  }
+  if (!out) {
+    console.error(`no se pudo determinar la rama por defecto de ${repoSlug}: "gh repo view" no devolvió ningún nombre de rama. Usa --base <rama> para indicarla explícitamente.`)
+    process.exit(1)
+  }
+  return out
+}
 
 // Guarda de identidad de repo (finding 1 de la review final, el más grave de
 // toda la revisión): `repoRoot` (más abajo) sale de `git rev-parse
@@ -187,11 +237,18 @@ function ensureRepoIdentity(root, expectedRepo) {
 }
 
 let repoRoot
+let resolvedBase
 if (fx) {
   // Solo se usa para construir strings en la rama --dry-run (el fixture está
   // atado a --dry-run más arriba): nunca llega a un `git worktree add` real,
   // así que tampoco pasa (ni necesita pasar) la guarda de identidad de arriba.
   repoRoot = '/tmp/fake-repo'
+  // --base sigue ganando aunque haya fixture (mismo orden de precedencia que
+  // la ruta real, más abajo). Si no hay override ni el fixture trae `base`,
+  // "main" es un relleno puramente sintético para tests offline — nunca toca
+  // `gh repo view` real, así que no reintroduce el bug que este cambio
+  // arregla (asumir "main" contra un repo DE VERDAD).
+  resolvedBase = typeof baseArg === 'string' ? baseArg : (fx.base || 'main')
 } else {
   try {
     repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim()
@@ -200,6 +257,7 @@ if (fx) {
     process.exit(1)
   }
   ensureRepoIdentity(repoRoot, repo)
+  resolvedBase = typeof baseArg === 'string' ? baseArg : detectDefaultBranch(repo)
 }
 
 function loadIssues() {
@@ -280,6 +338,10 @@ const { selected, inFlight, blockReason } = planDispatch(issues, { mergedIssues,
 // claim manual). Se imprime ANTES del plan de cada slice, tanto si se
 // selecciona algo como si no.
 if (dryRun) {
+  // W-D: la rama base ya no es un literal "main" fijo — mostrarla explícita
+  // en --dry-run (incluso cuando no se seleccione ningún slice) para que el
+  // humano vea de qué rama se ramificaría antes de que corra de verdad.
+  console.log(`rama base resuelta: ${resolvedBase}`)
   if (inFlight.length) {
     const detail = inFlight
       .map((i) => `#${i.n} [${(i.touches.length ? i.touches.map((t) => `touches:${t}`).join(', ') : 'sin touches')}]`)
@@ -422,7 +484,7 @@ for (const s of selected) {
   // revientan con un TypeError en vez de imprimir el plan.
   const sliceForKickoff = { ...s, ac: s.ac || [], issue: s.issue ?? null }
   const kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath })
-  const stateSeed = buildStateSeed(sliceForKickoff, { branch, base: 'main' })
+  const stateSeed = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase })
   // Override 1 (shell quoting): --command es UN argv element (buildCmuxArgv
   // ya lo garantiza), pero la STRING dentro de ese argv element es una línea
   // de comando que cmux ejecuta vía shell. `JSON.stringify` es escapado JSON,
@@ -455,7 +517,7 @@ for (const s of selected) {
     // `cmux ...`).
     console.log(`node ${dispatchCheckPath} ${s.n} --repo ${repo}   # se reclamaría #${s.n} (status:ready → status:in-progress) antes de crear el worktree; en --dry-run no se ejecuta, ningún gh real se toca`)
     console.log(`CLAUDE_CONFIG_DIR=${configDir}`)
-    console.log(`git worktree add -b ${branch} ${wt} main`)
+    console.log(`git worktree add -b ${branch} ${wt} ${resolvedBase}`)
     console.log(`seed ${wt}/.agent/STATE.md:\n${stateSeed}`)
     console.log(`cmux ${cmuxArgv.map((a) => (a.includes(' ') ? JSON.stringify(a) : a)).join(' ')}`)
     continue
@@ -487,7 +549,7 @@ for (const s of selected) {
   }
 
   try {
-    execFileSync('git', ['worktree', 'add', '-b', branch, wt, 'main'], { cwd: repoRoot, stdio: 'inherit' })
+    execFileSync('git', ['worktree', 'add', '-b', branch, wt, resolvedBase], { cwd: repoRoot, stdio: 'inherit' })
   } catch (e) {
     // Si el worktree o la rama ya existen, `git worktree add` falla con
     // exit != 0 — lo dejamos fallar ruidoso en vez de reusar en silencio

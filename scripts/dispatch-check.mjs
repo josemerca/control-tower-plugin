@@ -134,12 +134,44 @@ const allOpen = () => realIssuesOnly(flattenIssuePages(JSON.parse(
 
 const manualReleaseHint = () => `gh issue edit ${issue} --repo ${repo} --add-label status:ready --remove-label status:in-progress`
 
+// setStatus: única función que muta el label `status:` de un issue — el
+// claim (status:ready → status:in-progress), el revert por carrera perdida,
+// el revert por fallo de readback, y --release (status:in-progress →
+// status:in-review) pasan los cuatro por aquí. El plan (decisión ya tomada
+// por José) es migrar el lock a una primitiva atómica real — un create de
+// `POST /repos/{owner}/{repo}/git/refs`, ya validado en un experimento
+// anterior como test-and-set real: 201 para el ganador, 422 "Reference
+// already exists" para cada perdedor, en 5 rondas de 8 intentos realmente
+// concurrentes — y esta extracción reduce esa migración futura a un solo
+// punto de edición en vez de cuatro.
+//
+// Devuelve { ok: true } o { ok: false, error }, y NO imprime ni sale del
+// proceso por su cuenta: qué mensaje mostrar en fallo, si hace falta uno de
+// éxito, y si el fallo debe abortar (exit 1) o solo avisar y seguir difieren
+// en cada uno de los cuatro call sites (ver más abajo y en el claim-then-
+// verify) — esa decisión es de cada caller, no de setStatus. Se eligió
+// "devuelve un resultado" en vez de una callback de mensajes porque el
+// control de flujo alrededor de cada mutación ya es distinto sitio a sitio
+// (dos de los cuatro sitios llaman a process.exit(1) inmediatamente en
+// fallo; los otros dos delegan esa decisión a un catch/if exterior que ya
+// existía antes de esta extracción) — forzar ese control de flujo dentro de
+// setStatus habría sido más complejo que dejarlo donde ya estaba. Mismo
+// patrón que `attemptRevertClaim` en ct-next.mjs: una mutación gh que
+// reporta éxito/fallo sin decidir qué hacer con ese resultado.
+function setStatus(issue, from, to) {
+  try {
+    gh(['issue', 'edit', String(issue), '--repo', repo, '--add-label', to, '--remove-label', from])
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: e }
+  }
+}
+
 if (release) {
   if (!dryRun && !fx) {
-    try {
-      gh(['issue', 'edit', String(issue), '--repo', repo, '--add-label', 'status:in-review', '--remove-label', 'status:in-progress'])
-    } catch (e) {
-      console.error(`no se pudo liberar #${issue} a in-review: ${e.message}. Sigue en status:in-progress; reintenta el --release.`)
+    const result = setStatus(issue, 'status:in-progress', 'status:in-review')
+    if (!result.ok) {
+      console.error(`no se pudo liberar #${issue} a in-review: ${result.error.message}. Sigue en status:in-progress; reintenta el --release.`)
       process.exit(1)
     }
   }
@@ -236,10 +268,9 @@ if (!dryRun && !fx) sleepSync(preclaimDelayMs)
 
 // 2) claim
 if (!dryRun && !fx) {
-  try {
-    gh(['issue', 'edit', String(issue), '--repo', repo, '--add-label', 'status:in-progress', '--remove-label', 'status:ready'])
-  } catch (e) {
-    console.error(`no se pudo escribir el claim de #${issue}: ${e.message}`)
+  const result = setStatus(issue, 'status:ready', 'status:in-progress')
+  if (!result.ok) {
+    console.error(`no se pudo escribir el claim de #${issue}: ${result.error.message}`)
     process.exit(1)
   }
 }
@@ -260,11 +291,11 @@ if (fx) {
     // desempate.
     console.error(`no se pudo re-leer el estado tras el claim de #${issue}: ${e.message} — no se puede confirmar la carrera`)
     if (!dryRun) {
-      try {
-        gh(['issue', 'edit', String(issue), '--repo', repo, '--add-label', 'status:ready', '--remove-label', 'status:in-progress'])
+      const result = setStatus(issue, 'status:in-progress', 'status:ready')
+      if (result.ok) {
         console.error(`#${issue} revertido a status:ready (carrera no confirmada)`)
-      } catch (e2) {
-        console.error(`ATENCIÓN: #${issue} puede haber quedado bloqueado en status:in-progress (no se pudo revertir: ${e2.message}). Libéralo a mano con: ${manualReleaseHint()}`)
+      } else {
+        console.error(`ATENCIÓN: #${issue} puede haber quedado bloqueado en status:in-progress (no se pudo revertir: ${result.error.message}). Libéralo a mano con: ${manualReleaseHint()}`)
       }
     }
     process.exit(1)
@@ -274,10 +305,9 @@ if (fx) {
 if (claimLost(readback, issue)) {
   console.error(`carrera perdida: #${issue} liberado (otro claim menor con token compartido ganó)`) // lost
   if (!dryRun && !fx) {
-    try {
-      gh(['issue', 'edit', String(issue), '--repo', repo, '--add-label', 'status:ready', '--remove-label', 'status:in-progress'])
-    } catch (e) {
-      console.error(`ATENCIÓN: no se pudo revertir el claim de #${issue} tras perder la carrera (${e.message}). Queda bloqueado en status:in-progress — libéralo a mano con: ${manualReleaseHint()}`)
+    const result = setStatus(issue, 'status:in-progress', 'status:ready')
+    if (!result.ok) {
+      console.error(`ATENCIÓN: no se pudo revertir el claim de #${issue} tras perder la carrera (${result.error.message}). Queda bloqueado en status:in-progress — libéralo a mano con: ${manualReleaseHint()}`)
     }
   }
   process.exit(1)

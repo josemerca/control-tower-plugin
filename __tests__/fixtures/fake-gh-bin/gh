@@ -75,5 +75,21 @@ if (argv[0] === 'api' && /^repos\/[^/]+\/[^/]+\/issues$/.test(argv[1] || '')) {
   process.exit(0)
 }
 
+// `gh repo view <repo> --json defaultBranchRef -q .defaultBranchRef.name`
+// (W-D): ct-next.mjs resuelve la rama por defecto real del repo en vez de
+// asumir "main" a ciegas. FAKE_GH_DEFAULT_BRANCH controla el valor devuelto
+// (default: "main", para que los tests existentes que no fijan esta
+// variable — y que no les importa qué rama base se use — sigan pasando sin
+// cambios). FAKE_GH_REPO_VIEW_FAIL simula que gh no puede resolverlo (repo
+// no encontrado, auth caída, sin red, etc.).
+if (argv[0] === 'repo' && argv[1] === 'view') {
+  if (process.env.FAKE_GH_REPO_VIEW_FAIL) {
+    console.error('fake-gh: repo view failed (simulado)')
+    process.exit(1)
+  }
+  process.stdout.write(`${process.env.FAKE_GH_DEFAULT_BRANCH || 'main'}\n`)
+  process.exit(0)
+}
+
 console.error(`fake-gh: comando no soportado en el stub: ${joined}`)
 process.exit(1)
