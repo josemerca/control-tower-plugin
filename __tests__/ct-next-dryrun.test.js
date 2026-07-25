@@ -72,7 +72,16 @@ describe('ct-next — fixture atado a --dry-run', () => {
 })
 
 describe('ct-next — nada despachable', () => {
-  it('imprime mensaje claro y exit 0 cuando no hay slices ready con deps mergeadas', () => {
+  // W-B (§8): este test existía antes de W-B y esperaba el mensaje genérico
+  // "no hay slices despachables". El brief de W-B pide explícitamente que ese
+  // mensaje deje de ser genérico y distinga la causa (nada ready / deps sin
+  // mergear / colisión con trabajo en vuelo / cap lleno) — este escenario
+  // concreto (un #2 ready cuya única dep, #1, no está mergeada) es EXACTAMENTE
+  // el caso "deps-unmet", así que la aserción se actualiza para reflejar el
+  // mensaje nuevo, más específico, en vez del genérico que este cambio retira
+  // a propósito. Los casos restantes (none-ready/collision/cap-full) se
+  // cubren en el describe de abajo.
+  it('imprime el motivo "deps sin mergear" y exit 0 cuando el único ready tiene una dep sin mergear', () => {
     const fixtureNadaReady = JSON.stringify({
       issues: [
         { n: 1, order: 1, status: 'in-review', deps: [], touches: ['api'], entrega: 'login', type: 'backend' },
@@ -82,7 +91,104 @@ describe('ct-next — nada despachable', () => {
     })
     const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fixtureNadaReady })
     expect(r.code).toBe(0)
-    expect(r.out).toMatch(/no hay slices despachables/i)
+    expect(r.out).toMatch(/dependencias sin mergear/i)
+    expect(r.out).toMatch(/#2/)
+    expect(r.out).toMatch(/#1/)
+  })
+})
+
+// W-B (§8): un mensaje único ("nada ready con deps mergeadas y sin colisión")
+// obligaba a adivinar entre cuatro causas con remedios distintos. Cada test
+// de abajo fija, contra el wrapper real (vía CT_NEXT_FIXTURE), el mensaje
+// exacto para una causa — usando planDispatch/explainNoSelection (ya
+// probados sin red en dispatch.test.js) por debajo.
+describe('ct-next — motivo de bloqueo distinguible (W-B, §8)', () => {
+  it('nada en status:ready → mensaje "none-ready"', () => {
+    const fx = JSON.stringify({
+      issues: [{ n: 1, order: 1, status: 'in-review', deps: [], touches: [], entrega: 'x', type: 'backend' }],
+      mergedIssues: [],
+    })
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fx })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/no hay ningún issue en status:ready/i)
+  })
+
+  it('ready + deps mergeadas pero colisiona con touches en vuelo → nombra el issue en vuelo y el token compartido', () => {
+    const fx = JSON.stringify({
+      issues: [
+        { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['api'], entrega: 'en curso', type: 'backend' },
+        { n: 2, order: 2, status: 'ready', deps: [], touches: ['api'], entrega: 'choca', type: 'backend' },
+      ],
+      mergedIssues: [],
+    })
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '9', '--dry-run'], { CT_NEXT_FIXTURE: fx })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/#2/)
+    expect(r.out).toMatch(/#1/)
+    expect(r.out).toMatch(/api/)
+    expect(r.out).toMatch(/en vuelo/i)
+  })
+
+  it('ready + deps mergeadas pero colisiona con serialización (migration en vuelo vs. ci ready) → nombra ambos tokens', () => {
+    const fx = JSON.stringify({
+      issues: [
+        { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['migration'], entrega: 'en curso', type: 'backend' },
+        { n: 2, order: 2, status: 'ready', deps: [], touches: ['ci'], entrega: 'choca', type: 'backend' },
+      ],
+      mergedIssues: [],
+    })
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '9', '--dry-run'], { CT_NEXT_FIXTURE: fx })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/#2/)
+    expect(r.out).toMatch(/#1/)
+    expect(r.out).toMatch(/migration/)
+    expect(r.out).toMatch(/ci/)
+  })
+
+  it('cap ya copado por trabajo en vuelo → dice cuántos hay en vuelo y cuál es el cap, aunque haya ready sin colisión', () => {
+    const fx = JSON.stringify({
+      issues: [
+        { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['db'], entrega: 'en curso', type: 'backend' },
+        { n: 2, order: 2, status: 'ready', deps: [], touches: ['ui'], entrega: 'sin colisión', type: 'backend' },
+      ],
+      mergedIssues: [],
+    })
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fx })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/cap.*1/i)
+    expect(r.out).toMatch(/#1/)
+    expect(r.out).not.toContain('#2 (') // #2 nunca llega a evaluarse/lanzarse: el cap ya está lleno
+  })
+})
+
+// W-B (§8), punto 4 del brief: "el dry-run tiene que hacer visible el estado
+// en vuelo: qué está in-progress y qué tokens tiene retenidos por eso" — sin
+// esto, un --dry-run que SÍ selecciona algo podía dar la falsa impresión de
+// que no hay nada corriendo ya, cuando en realidad el cap ya estaba parcialmente
+// ocupado por invocaciones anteriores.
+describe('ct-next --dry-run — visibilidad del trabajo en vuelo (W-B, §8)', () => {
+  it('sin nada en vuelo → lo dice explícitamente ("ninguno")', () => {
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/en vuelo.*ninguno/is)
+  })
+
+  it('con algo en vuelo (y aun así se despacha otro) → lista el issue en vuelo y sus tokens retenidos', () => {
+    const fx = JSON.stringify({
+      issues: [
+        { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['migration'], entrega: 'en curso', type: 'backend' },
+        { n: 2, order: 2, status: 'ready', deps: [], touches: ['ui'], entrega: 'nuevo', type: 'backend' },
+      ],
+      mergedIssues: [],
+    })
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '2', '--dry-run'], { CT_NEXT_FIXTURE: fx })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/en vuelo/i)
+    expect(r.out).toMatch(/#1/)
+    expect(r.out).toMatch(/migration/)
+    // y el segundo slice se despacha igual, sin colisión
+    expect(r.out).toContain('#2')
+    expect(r.out).toContain('git worktree add')
   })
 })
 
@@ -389,7 +495,9 @@ describe('ct-next — guarda de identidad de repo (review final, finding 1)', ()
       FAKE_GH_COUNTER_FILE: counterFile,
     })
     expect(r.code).toBe(0)
-    expect(r.out).toMatch(/no hay slices despachables/i)
+    // W-B: sin issues abiertos, el motivo pasa a ser "none-ready" (el mensaje
+    // genérico que este test comprobaba antes ya no se emite).
+    expect(r.out).toMatch(/no hay ningún issue en status:ready/i)
   })
 
   it('la guarda también se aplica en --dry-run sin fixture: un --repo que no coincide aborta igual, no solo en la corrida real', () => {

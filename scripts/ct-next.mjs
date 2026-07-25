@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
-import { selectNext, resolveAccount, buildCmuxArgv } from './dispatch.js'
+import { planDispatch, resolveAccount, buildCmuxArgv } from './dispatch.js'
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
 import { shQuote } from './shquote.js'
 import { buildDispatchInput } from './gh-issue-map.js'
@@ -21,6 +21,41 @@ const arg = (f, d) => {
   return (typeof v === 'string' && !v.startsWith('--')) ? v : true
 }
 const has = (f) => process.argv.includes(f)
+
+// formatBlockReason: traduce el `blockReason` que devuelve planDispatch
+// (scripts/dispatch.js, lógica pura y testeada sin red) al mensaje que ve el
+// humano. W-B (§8): antes había un único mensaje genérico
+// ("nada ready con deps mergeadas y sin colisión") para cuatro causas muy
+// distintas con remedios distintos — obligaba a adivinar. Este wrapper solo
+// formatea texto; la DECISIÓN de cuál es la causa ya la tomó planDispatch.
+function formatBlockReason(reason, cap) {
+  switch (reason?.reason) {
+    case 'cap-full':
+      // El listado de qué issues concretos están en vuelo ya se ve, en
+      // --dry-run, en la línea "En vuelo" impresa justo antes (más abajo);
+      // aquí solo hace falta el conteo y el cap para que el mensaje sea
+      // autosuficiente también en la corrida real (sin --dry-run).
+      return `El cap (${cap}) ya está copado por trabajo en vuelo: ${reason.inFlightCount} slice(s) en status:in-progress — sube --cap, o espera a que termine alguno.`
+    case 'none-ready':
+      return 'No hay ningún issue en status:ready — no hay nada que despachar todavía.'
+    case 'deps-unmet': {
+      const list = reason.blocked
+        .map((b) => `#${b.n} (falta mergear ${b.unmetDeps.map((d) => `#${d}`).join(', ')})`)
+        .join(', ')
+      return `Hay slice(s) en status:ready pero con dependencias sin mergear: ${list} — espera a que se mergeen esas dependencias.`
+    }
+    case 'collision': {
+      if (reason.kind === 'serializing') {
+        return `#${reason.issue} está ready con deps mergeadas, pero no se puede serializar: su touches:${reason.token} entra en el mismo grupo serializante (migration/ci/pbxproj) que touches:${reason.runningToken}, ya en vuelo en #${reason.withIssue} — espera a que termine.`
+      }
+      return `#${reason.issue} está ready con deps mergeadas, pero colisiona con trabajo en vuelo: comparte el token '${reason.token}' con #${reason.withIssue} (status:in-progress) — espera a que termine, o resuelve el token.`
+    }
+    default:
+      // No debería alcanzarse (ver el razonamiento en dispatch.js#explainNoSelection),
+      // pero nunca imprimimos "undefined" en silencio ante una entrada inesperada.
+      return 'No hay slices despachables (nada ready con deps mergeadas y sin colisión).'
+  }
+}
 
 const usage = 'uso: ct-next.mjs --repo <o/r> [--cap N] [--dry-run]'
 const repo = arg('--repo')
@@ -180,9 +215,35 @@ function loadIssues() {
 }
 
 const { issues, mergedIssues } = loadIssues()
-const selected = selectNext(issues, { mergedIssues, runningTouches: [], concurrencyCap: cap })
+// planDispatch (dispatch.js) es quien decide TODO lo que antes se hacía aquí
+// a medias: antes este wrapper llamaba a selectNext con `runningTouches: []`
+// hardcodeado, así que dos invocaciones sucesivas de /ct-next --cap 1 nunca
+// se veían entre sí — ni para colisión de touches ni para el cap, que
+// contaba solo lo lanzado EN ESTA tanda. planDispatch deriva el trabajo en
+// vuelo (status:in-progress) de los mismos `issues` ya cargados, resta ese
+// trabajo del cap antes de seleccionar, y explica el motivo exacto cuando no
+// selecciona nada (W-B, §8) — este wrapper solo formatea lo que ya decidió.
+const { selected, inFlight, blockReason } = planDispatch(issues, { mergedIssues, cap })
+
+// Visibilidad del trabajo en vuelo en --dry-run (punto 4 del brief de W-B):
+// sin esto, un --dry-run que SÍ selecciona algo podía dar la falsa
+// impresión de que no hay nada corriendo ya, cuando el cap podía estar
+// parcialmente ocupado por invocaciones anteriores de /ct-next (o por un
+// claim manual). Se imprime ANTES del plan de cada slice, tanto si se
+// selecciona algo como si no.
+if (dryRun) {
+  if (inFlight.length) {
+    const detail = inFlight
+      .map((i) => `#${i.n} [${(i.touches.length ? i.touches.map((t) => `touches:${t}`).join(', ') : 'sin touches')}]`)
+      .join(', ')
+    console.log(`En vuelo (${inFlight.length}/${cap} del cap ocupados): ${detail}`)
+  } else {
+    console.log(`En vuelo: ninguno (0/${cap} del cap ocupados).`)
+  }
+}
+
 if (!selected.length) {
-  console.log('No hay slices despachables (nada ready con deps mergeadas y sin colisión).')
+  console.log(formatBlockReason(blockReason, cap))
   process.exit(0)
 }
 
