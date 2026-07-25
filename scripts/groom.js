@@ -5,6 +5,7 @@ export function buildIssueTitle(slice) {
 
 export function buildLabels(slice) {
   const labels = []
+  // Omit empty type to avoid emitting garbage literal "type:" to GitHub
   if (slice.type) labels.push(`type:${slice.type}`)
   labels.push('status:backlog')
   return labels
@@ -15,12 +16,14 @@ export function buildIssueBody(slice, { specPath, specSection }) {
   lines.push(`> Slice #${slice.n} del epic. Spec: [${specPath}#${specSection}](${specPath}#${specSection})`)
   lines.push('')
   lines.push('## Acceptance criteria (EARS, 1:1 con tests)')
-  if (slice.ac.length) for (const a of slice.ac) lines.push(`- ${a}`)
+  const ac = slice.ac || []
+  if (ac.length) for (const a of ac) lines.push(`- ${a}`)
   else lines.push('- (rellenar desde el spec)')
   lines.push('')
-  if (slice.deps.length) {
+  const deps = slice.deps || []
+  if (deps.length) {
     lines.push('## Dependencias')
-    for (const d of slice.deps) lines.push(`- merge-after #${d}`)
+    for (const d of deps) lines.push(`- merge-after #${d}`)
     lines.push('')
   }
   lines.push('## Out of scope / Protected')

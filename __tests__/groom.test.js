@@ -27,4 +27,19 @@ describe('groom puro', () => {
     expect(plan.issues).toHaveLength(1)
     expect(plan.issues[0].labels).toContain('type:backend')
   })
+  it('body emite marcador ct-order exacto', () => {
+    const b = buildIssueBody(SLICE, { specPath: 'x', specSection: '9' })
+    expect(b).toContain('<!-- ct-order:2 -->')
+  })
+  it('buildIssueBody defensivo: undefined ac + deps', () => {
+    const incomplete = { n: 5, type: 'frontend', entrega: 'fix', ac: undefined, deps: undefined, protected: '–' }
+    const b = buildIssueBody(incomplete, { specPath: 'x', specSection: '9' })
+    expect(b).not.toThrow
+    expect(b).toContain('(rellenar desde el spec)')
+    expect(b).not.toContain('merge-after')
+  })
+  it('buildLabels con type vacío: solo status:backlog', () => {
+    const empty = { n: 1, type: '', entrega: 'x', deps: [], ac: [], protected: '–' }
+    expect(buildLabels(empty)).toEqual(['status:backlog'])
+  })
 })
