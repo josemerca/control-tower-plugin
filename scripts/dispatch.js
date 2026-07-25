@@ -1,14 +1,36 @@
 // Lógica pura del dispatcher: selección de slices, account map, argv de cmux.
 export const SERIALIZING_TOUCHES = ['migration', 'ci', 'pbxproj']
 
-export function selectNext(issues, { mergedIssues = [], runningTouches = [], concurrencyCap = 1 } = {}) {
+// computeReadyCandidates: cómputo compartido de "qué issues están en
+// status:ready" (`ready`) y, de esos, "cuáles tienen TODAS sus deps
+// mergeadas" (`readyDepsMet`, ya ordenado por `order` ascendente — el mismo
+// orden en que selectNext los procesa). Extraído (fix round 1 de la review
+// de W-B) porque explainNoSelection re-derivaba esta misma cadena de filtros
+// de forma independiente a selectNext: la sincronía entre las dos dependía
+// de un comentario, no del compilador ni de un test — un cambio futuro en el
+// criterio de "candidato ready" (un rename de campo, un filtro nuevo) podía
+// desincronizar el explicador EN SILENCIO, dejando que afirmara con
+// seguridad una causa de bloqueo equivocada. Con esta única función como
+// fuente de verdad, selectNext y explainNoSelection ya no pueden divergir en
+// ESTE cálculo — solo queda la posibilidad de que alguien, en el futuro,
+// vuelva a inlinear el filtro en uno de los dos sitios en vez de llamar
+// aquí; eso no lo detecta ningún test automatizado (sería un chequeo
+// estático de "no reintroduzcas este patrón", no de comportamiento), así que
+// queda documentado aquí en vez de fingido con una aserción que en realidad
+// solo comprobaría esta misma función contra sí misma.
+export function computeReadyCandidates(issues, mergedIssues) {
   const merged = new Set(mergedIssues)
-  const claimedTouches = new Set(runningTouches)
-  const hasSerializingTouchInRunning = runningTouches.some((t) => SERIALIZING_TOUCHES.includes(t))
-  const ready = issues
-    .filter((i) => i.status === 'ready')
+  const ready = issues.filter((i) => i.status === 'ready')
+  const readyDepsMet = ready
     .filter((i) => (i.deps || []).every((d) => merged.has(d)))
     .sort((a, b) => a.order - b.order)
+  return { ready, readyDepsMet }
+}
+
+export function selectNext(issues, { mergedIssues = [], runningTouches = [], concurrencyCap = 1 } = {}) {
+  const claimedTouches = new Set(runningTouches)
+  const hasSerializingTouchInRunning = runningTouches.some((t) => SERIALIZING_TOUCHES.includes(t))
+  const { readyDepsMet: ready } = computeReadyCandidates(issues, mergedIssues)
 
   const selected = []
   let hasSerializingInBatch = hasSerializingTouchInRunning
@@ -43,49 +65,15 @@ export function collectInFlight(issues) {
     .map((i) => ({ n: i.n, touches: i.touches || [] }))
 }
 
-// explainNoSelection: cuando selectNext no elige nada, un único mensaje
-// genérico ("nada ready con deps mergeadas y sin colisión") obliga al humano
-// a adivinar entre cuatro causas muy distintas con remedios distintos. Esta
-// función distingue, en orden de prioridad:
-//   1. 'cap-full'    — el cap ya está copado por trabajo en vuelo, ni se
-//                       llega a mirar si hay algo despachable.
-//   2. 'none-ready'  — no hay NINGÚN issue en status:ready.
-//   3. 'deps-unmet'  — hay ready, pero ninguno tiene todas sus deps
-//                       mergeadas.
-//   4. 'collision'   — hay al menos un ready con deps mergeadas, pero choca
-//                       con trabajo en vuelo (token compartido, o conflicto
-//                       de serialización migration/ci/pbxproj).
-// Prioridad 1 primero porque, si el cap ya está lleno, ninguna de las otras
-// causas es siquiera relevante (no se va a despachar nada aunque hubiera
-// candidatos perfectos). Nunca hace falta recorrer TODOS los candidatos
-// ready-con-deps-mergeadas para el caso 4: selectNext los procesa en orden
-// ascendente y solo salta uno por colisión (`continue`), así que si el
-// primero de la lista (menor orden) no choca, se habría seleccionado —
-// contradicción con que `selected` esté vacío. Por tanto, si llegamos aquí
-// con candidatos y `selected` vacío, el primero de ellos es necesariamente el
-// que explica el bloqueo.
-export function explainNoSelection(issues, { mergedIssues = [], inFlight = [], cap = 1 } = {}) {
-  const inFlightCount = inFlight.length
-  if (inFlightCount >= cap) return { reason: 'cap-full', inFlightCount, cap }
-
-  const ready = issues.filter((i) => i.status === 'ready')
-  if (ready.length === 0) return { reason: 'none-ready' }
-
-  const merged = new Set(mergedIssues)
-  const readyDepsMet = ready
-    .filter((i) => (i.deps || []).every((d) => merged.has(d)))
-    .sort((a, b) => a.order - b.order)
-  if (readyDepsMet.length === 0) {
-    return {
-      reason: 'deps-unmet',
-      blocked: ready.map((i) => ({ n: i.n, unmetDeps: (i.deps || []).filter((d) => !merged.has(d)) })),
-    }
-  }
-
+// collisionAgainstRunning: dado el candidato de menor orden que SÍ está
+// ready con deps mergeadas, decide si colisiona con el trabajo en vuelo —
+// token compartido literal, o conflicto de serialización cruzada
+// (migration/ci/pbxproj con tokens distintos). null significa "no colisiona"
+// (es decir: se seleccionaría si hubiera hueco de cap).
+function collisionAgainstRunning(cand, inFlight) {
   const runningTouches = inFlight.flatMap((i) => i.touches || [])
   const claimedTouches = new Set(runningTouches)
   const hasSerializingInRunning = runningTouches.some((t) => SERIALIZING_TOUCHES.includes(t))
-  const cand = readyDepsMet[0]
   const touches = cand.touches || []
 
   const sharedToken = touches.find((t) => claimedTouches.has(t))
@@ -101,9 +89,67 @@ export function explainNoSelection(issues, { mergedIssues = [], inFlight = [], c
     return { reason: 'collision', kind: 'serializing', issue: cand.n, token: candSerializingTouch, runningToken, withIssue: withIssue ? withIssue.n : null }
   }
 
-  // No debería alcanzarse con datos consistentes (ver razonamiento arriba),
-  // pero nunca devolvemos undefined en silencio ante una entrada inesperada.
-  return { reason: 'unknown' }
+  return null
+}
+
+// explainSelectionGap: la misma cadena de motivos que explainNoSelection,
+// pero IGNORANDO el cap por completo — responde "si el cap no fuera ahora
+// mismo el factor limitante (pero el trabajo en vuelo siguiera reteniendo
+// sus tokens), ¿se seleccionaría algo igualmente?". `null` = sí (por tanto
+// subir --cap SÍ ayudaría); un objeto de razón no-null es lo que seguiría
+// bloqueando aunque el cap no limitara. Nunca hace falta recorrer TODOS los
+// candidatos ready-con-deps-mergeadas para el caso de colisión: selectNext
+// los procesa en orden ascendente y solo salta uno por colisión
+// (`continue`, nunca `break`), así que si el primero de la lista (menor
+// orden) no choca, se habría seleccionado — el primero es siempre el que
+// explica el bloqueo cuando lo hay.
+function explainSelectionGap(issues, { mergedIssues = [], inFlight = [] } = {}) {
+  const { ready, readyDepsMet } = computeReadyCandidates(issues, mergedIssues)
+  if (ready.length === 0) return { reason: 'none-ready' }
+  if (readyDepsMet.length === 0) {
+    const merged = new Set(mergedIssues)
+    return {
+      reason: 'deps-unmet',
+      blocked: ready.map((i) => ({ n: i.n, unmetDeps: (i.deps || []).filter((d) => !merged.has(d)) })),
+    }
+  }
+  return collisionAgainstRunning(readyDepsMet[0], inFlight)
+}
+
+// explainNoSelection: cuando selectNext no elige nada, un único mensaje
+// genérico ("nada ready con deps mergeadas y sin colisión") obliga al humano
+// a adivinar entre cuatro causas muy distintas con remedios distintos. Esta
+// función distingue, en orden de prioridad:
+//   1. 'cap-full'    — el cap ya está copado por trabajo en vuelo. Incluye
+//                       `wouldDispatchIfCapAllowed` (fix Minor 1 de la
+//                       review): sin esto, un cap lleno SIEMPRE sugería
+//                       "sube --cap", incluso cuando el candidato que
+//                       quedaría también estaría bloqueado por otra causa
+//                       (deps sin mergear, o colisión) — subir el cap en ese
+//                       caso no cambiaría nada, y decir lo contrario es peor
+//                       que no decir nada.
+//   2. 'none-ready'  — no hay NINGÚN issue en status:ready.
+//   3. 'deps-unmet'  — hay ready, pero ninguno tiene todas sus deps
+//                       mergeadas.
+//   4. 'collision'   — hay al menos un ready con deps mergeadas, pero choca
+//                       con trabajo en vuelo (token compartido, o conflicto
+//                       de serialización migration/ci/pbxproj).
+export function explainNoSelection(issues, { mergedIssues = [], inFlight = [], cap = 1 } = {}) {
+  const inFlightCount = inFlight.length
+  // Se calcula SIEMPRE (incluso si el cap ya está lleno): es exactamente lo
+  // que hace falta para poblar `wouldDispatchIfCapAllowed`/
+  // `blockedEvenWithCap` sin duplicar la lógica de colisión/deps una segunda
+  // vez para el caso "cap lleno".
+  const gap = explainSelectionGap(issues, { mergedIssues, inFlight })
+  if (inFlightCount >= cap) {
+    return { reason: 'cap-full', inFlightCount, cap, wouldDispatchIfCapAllowed: gap === null, blockedEvenWithCap: gap }
+  }
+  // No debería alcanzarse con datos consistentes (`gap` no-null aquí
+  // significaría que selectNext tampoco habría seleccionado nada por otra
+  // razón — pero entonces planDispatch nunca habría llamado a esta función
+  // con `selected.length === 0` sin ser precisamente por eso), pero nunca
+  // devolvemos undefined en silencio ante una entrada inesperada.
+  return gap ?? { reason: 'unknown' }
 }
 
 // planDispatch: compone collectInFlight + selectNext + explainNoSelection en

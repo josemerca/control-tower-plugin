@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { selectNext, resolveAccount, buildCmuxArgv, collectInFlight, planDispatch } from '../scripts/dispatch.js'
+import { selectNext, resolveAccount, buildCmuxArgv, collectInFlight, planDispatch, computeReadyCandidates } from '../scripts/dispatch.js'
 
 const ISSUES = [
   { n: 1, order: 1, status: 'in-review', deps: [], touches: ['api'] },
@@ -8,6 +8,37 @@ const ISSUES = [
   { n: 4, order: 4, status: 'ready',     deps: [],  touches: ['migration'] },
   { n: 5, order: 5, status: 'ready',     deps: [],  touches: ['migration'] },
 ]
+
+// computeReadyCandidates: fix round 1 de la review de W-B (finding Important
+// — la duplicación del filtro ready/deps-mergeadas entre selectNext y
+// explainNoSelection era un riesgo de deriva silenciosa). Ahora es la única
+// fuente de verdad de ese cómputo; estos tests la cubren directamente. Esto
+// no es un test que "falle si selectNext y explainNoSelection divergen" en
+// el sentido de detectar una reintroducción futura de lógica duplicada
+// (eso requeriría un chequeo estático del código fuente, no un test de
+// comportamiento) — es la mejor mitigación disponible sin ese chequeo:
+// mientras ambas funciones sigan llamando aquí (lo hacen, ver su código),
+// no pueden divergir en ESTE cálculo.
+describe('computeReadyCandidates', () => {
+  it('ready: solo status:ready, en el orden original', () => {
+    const { ready } = computeReadyCandidates(ISSUES, [1])
+    expect(ready.map((i) => i.n)).toEqual([2, 3, 4, 5])
+  })
+  it('readyDepsMet: además filtra por deps mergeadas, ordenado por `order` ascendente', () => {
+    const { readyDepsMet } = computeReadyCandidates(ISSUES, [])
+    expect(readyDepsMet.map((i) => i.n)).toEqual([3, 4, 5]) // #2 fuera: dep #1 no mergeada
+  })
+  it('con deps mergeadas, readyDepsMet incluye también al que las tenía pendientes', () => {
+    const { readyDepsMet } = computeReadyCandidates(ISSUES, [1])
+    expect(readyDepsMet.map((i) => i.n)).toEqual([2, 3, 4, 5])
+  })
+  it('sin ningún ready → ambos arrays vacíos', () => {
+    const issues = [{ n: 1, order: 1, status: 'in-review', deps: [], touches: [] }]
+    const { ready, readyDepsMet } = computeReadyCandidates(issues, [])
+    expect(ready).toEqual([])
+    expect(readyDepsMet).toEqual([])
+  })
+})
 
 describe('selectNext', () => {
   it('no elige un slice cuya dep no está mergeada', () => {
@@ -112,7 +143,10 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
     expect(plan.blockReason).toMatchObject({ reason: 'collision', issue: 2, token: 'api', withIssue: 1 })
   })
 
-  it('el cap ya está copado por trabajo en vuelo → no despacha nada, aunque haya ready sin colisión', () => {
+  // Fix Minor 1 de la review: `wouldDispatchIfCapAllowed` distingue si subir
+  // --cap de verdad ayudaría. Aquí #2 no colisiona con nada en vuelo, así
+  // que SÍ ayudaría (blockedEvenWithCap: null).
+  it('el cap ya está copado por trabajo en vuelo → no despacha nada, aunque haya ready sin colisión (subir --cap SÍ ayudaría)', () => {
     const issues = [
       { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['api'] },
       { n: 2, order: 2, status: 'ready', deps: [], touches: ['ui'] }, // sin colisión de touches
@@ -120,7 +154,9 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
     const plan = planDispatch(issues, { mergedIssues: [], cap: 1 }) // cap 1, ya hay 1 en vuelo
     expect(plan.selected).toEqual([])
     expect(plan.remainingCap).toBe(0)
-    expect(plan.blockReason).toEqual({ reason: 'cap-full', inFlightCount: 1, cap: 1 })
+    expect(plan.blockReason).toEqual({
+      reason: 'cap-full', inFlightCount: 1, cap: 1, wouldDispatchIfCapAllowed: true, blockedEvenWithCap: null,
+    })
   })
 
   it('cap 2 con 1 en vuelo → queda 1 hueco, se despacha uno más si no colisiona', () => {
@@ -157,13 +193,42 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
     expect(plan.blockReason).toEqual({ reason: 'collision', kind: 'serializing', issue: 2, token: 'ci', runningToken: 'migration', withIssue: 1 })
   })
 
-  it('cap-full tiene prioridad como motivo reportado, aunque el ready también tenga deps sin mergear', () => {
+  // Fix Minor 1: aquí, aun sin el cap lleno, el único ready seguiría bloqueado
+  // por deps sin mergear — subir --cap NO ayudaría. `blockedEvenWithCap`
+  // lleva el motivo real (deps-unmet) para que el mensaje no prometa en
+  // falso que "sube --cap" resolvería algo.
+  it('cap-full tiene prioridad como motivo reportado, pero anota que subir --cap NO ayudaría (el ready también tiene deps sin mergear)', () => {
     const issues = [
       { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['x'] },
       { n: 2, order: 2, status: 'ready', deps: [99], touches: [] },
     ]
     const plan = planDispatch(issues, { mergedIssues: [], cap: 1 })
-    expect(plan.blockReason).toEqual({ reason: 'cap-full', inFlightCount: 1, cap: 1 })
+    expect(plan.blockReason).toEqual({
+      reason: 'cap-full',
+      inFlightCount: 1,
+      cap: 1,
+      wouldDispatchIfCapAllowed: false,
+      blockedEvenWithCap: { reason: 'deps-unmet', blocked: [{ n: 2, unmetDeps: [99] }] },
+    })
+  })
+
+  // Misma idea que el test anterior, pero la razón subyacente que sobrevive
+  // a subir el cap es una COLISIÓN (no deps-unmet) — confirma que
+  // `blockedEvenWithCap` propaga cualquiera de las razones de
+  // explainSelectionGap, no solo deps-unmet.
+  it('cap-full con el único ready colisionando (aparte de estar en vuelo) → blockedEvenWithCap trae la colisión', () => {
+    const issues = [
+      { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['api'] },
+      { n: 2, order: 2, status: 'ready', deps: [], touches: ['api'] }, // choca con #1 en vuelo, no solo con el cap
+    ]
+    const plan = planDispatch(issues, { mergedIssues: [], cap: 1 })
+    expect(plan.blockReason).toEqual({
+      reason: 'cap-full',
+      inFlightCount: 1,
+      cap: 1,
+      wouldDispatchIfCapAllowed: false,
+      blockedEvenWithCap: { reason: 'collision', kind: 'token', issue: 2, token: 'api', withIssue: 1 },
+    })
   })
 })
 

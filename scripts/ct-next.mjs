@@ -22,20 +22,18 @@ const arg = (f, d) => {
 }
 const has = (f) => process.argv.includes(f)
 
-// formatBlockReason: traduce el `blockReason` que devuelve planDispatch
-// (scripts/dispatch.js, lógica pura y testeada sin red) al mensaje que ve el
-// humano. W-B (§8): antes había un único mensaje genérico
-// ("nada ready con deps mergeadas y sin colisión") para cuatro causas muy
-// distintas con remedios distintos — obligaba a adivinar. Este wrapper solo
-// formatea texto; la DECISIÓN de cuál es la causa ya la tomó planDispatch.
-function formatBlockReason(reason, cap) {
+// formatReason: traduce el `blockReason` que devuelve planDispatch
+// (scripts/dispatch.js, lógica pura y testeada sin red) a un mensaje para el
+// humano, para las causas que NO son "cap lleno" (ver formatBlockReason para
+// esa). W-B (§8): antes había un único mensaje genérico ("nada ready con
+// deps mergeadas y sin colisión") para cuatro causas muy distintas con
+// remedios distintos — obligaba a adivinar. Este wrapper solo formatea
+// texto; la DECISIÓN de cuál es la causa ya la tomó planDispatch. Extraída
+// de formatBlockReason (fix Minor 1 de la review) para poder reutilizarla
+// también dentro del mensaje de "cap lleno", cuando subir --cap tampoco
+// bastaría (ver más abajo).
+function formatReason(reason) {
   switch (reason?.reason) {
-    case 'cap-full':
-      // El listado de qué issues concretos están en vuelo ya se ve, en
-      // --dry-run, en la línea "En vuelo" impresa justo antes (más abajo);
-      // aquí solo hace falta el conteo y el cap para que el mensaje sea
-      // autosuficiente también en la corrida real (sin --dry-run).
-      return `El cap (${cap}) ya está copado por trabajo en vuelo: ${reason.inFlightCount} slice(s) en status:in-progress — sube --cap, o espera a que termine alguno.`
     case 'none-ready':
       return 'No hay ningún issue en status:ready — no hay nada que despachar todavía.'
     case 'deps-unmet': {
@@ -55,6 +53,26 @@ function formatBlockReason(reason, cap) {
       // pero nunca imprimimos "undefined" en silencio ante una entrada inesperada.
       return 'No hay slices despachables (nada ready con deps mergeadas y sin colisión).'
   }
+}
+
+function formatBlockReason(reason, cap) {
+  if (reason?.reason === 'cap-full') {
+    // El listado de qué issues concretos están en vuelo ya se ve, en
+    // --dry-run, en la línea "En vuelo" impresa justo antes (más abajo); aquí
+    // solo hace falta el conteo y el cap para que el mensaje sea
+    // autosuficiente también en la corrida real (sin --dry-run).
+    const base = `El cap (${cap}) ya está copado por trabajo en vuelo: ${reason.inFlightCount} slice(s) en status:in-progress`
+    // Fix Minor 1 de la review: sin `wouldDispatchIfCapAllowed`, este mensaje
+    // SIEMPRE sugería "sube --cap", incluso cuando el candidato que quedaría
+    // libre seguiría bloqueado por otra causa (deps sin mergear, o colisión
+    // con lo ya en vuelo) — subir el cap en ese caso no cambiaría nada, y
+    // afirmar que sí es peor que no decir nada.
+    if (reason.wouldDispatchIfCapAllowed) {
+      return `${base} — sube --cap, o espera a que termine alguno.`
+    }
+    return `${base} — aunque subieras --cap no bastaría todavía: ${formatReason(reason.blockedEvenWithCap)}`
+  }
+  return formatReason(reason)
 }
 
 const usage = 'uso: ct-next.mjs --repo <o/r> [--cap N] [--dry-run]'

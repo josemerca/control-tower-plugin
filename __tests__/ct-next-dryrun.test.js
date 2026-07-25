@@ -158,6 +158,32 @@ describe('ct-next — motivo de bloqueo distinguible (W-B, §8)', () => {
     expect(r.out).toMatch(/cap.*1/i)
     expect(r.out).toMatch(/#1/)
     expect(r.out).not.toContain('#2 (') // #2 nunca llega a evaluarse/lanzarse: el cap ya está lleno
+    // Aquí subir --cap SÍ resolvería algo (#2 no colisiona con nada en
+    // vuelo), así que el mensaje sigue sugiriéndolo tal cual (fix Minor 1: no
+    // se toca el mensaje para el caso en que subir --cap SÍ ayuda).
+    expect(r.out).toMatch(/sube --cap/i)
+    expect(r.out).not.toMatch(/no bastaría/i)
+  })
+
+  // Fix Minor 1 de la review de W-B: antes, "cap lleno" siempre sugería
+  // "sube --cap" — incluso cuando el único candidato que quedaría también
+  // estaría bloqueado por otra causa (aquí, deps sin mergear). Subir el cap
+  // en ese caso no cambiaría nada; el mensaje ahora lo dice explícitamente en
+  // vez de prometer en falso.
+  it('cap ya copado Y el ready también tiene deps sin mergear → dice que subir --cap no bastaría, y por qué', () => {
+    const fx = JSON.stringify({
+      issues: [
+        { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['x'], entrega: 'en curso', type: 'backend' },
+        { n: 2, order: 2, status: 'ready', deps: [1], touches: [], entrega: 'con dep pendiente', type: 'backend' },
+      ],
+      mergedIssues: [], // la dep de #2 (orden 1, o sea #1) no está mergeada
+    })
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fx })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/cap.*1/i)
+    expect(r.out).toMatch(/no bastaría/i)
+    expect(r.out).toMatch(/dependencias sin mergear/i)
+    expect(r.out).not.toMatch(/sube --cap, o espera/i) // no promete que subir el cap resuelva nada
   })
 })
 
