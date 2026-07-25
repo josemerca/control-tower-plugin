@@ -34,7 +34,6 @@ describe('groom puro', () => {
   it('buildIssueBody defensivo: undefined ac + deps', () => {
     const incomplete = { n: 5, type: 'frontend', entrega: 'fix', ac: undefined, deps: undefined, protected: '–' }
     const b = buildIssueBody(incomplete, { specPath: 'x', specSection: '9' })
-    expect(b).not.toThrow
     expect(b).toContain('(rellenar desde el spec)')
     expect(b).not.toContain('merge-after')
   })

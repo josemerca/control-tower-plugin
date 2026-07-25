@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,9 +9,17 @@ import { shQuote } from '../scripts/shquote.js'
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-next.mjs')
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
 
+// stdio explícito (finding 11 de la review final): sin esto, execFileSync
+// además de capturar el stderr del hijo en `e.stderr` (lo que ya usan las
+// aserciones de abajo) también lo reenvía al proceso padre — es decir, a la
+// salida de `npm test`. Todas las líneas que aparecían así son la salida
+// ESPERADA de rutas de fallo deliberadas (tests de error de uso, colisión,
+// etc.), pero un lector no puede distinguir ese ruido esperado de un fallo
+// real sin leer el código. `stdio: ['ignore','pipe','pipe']` mantiene stdout/
+// stderr disponibles vía `e.stdout`/`e.stderr` sin ecoarlos al padre.
 function run(args, envOverrides = {}) {
   try {
-    const out = execFileSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, ...envOverrides } })
+    const out = execFileSync('node', [script, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...envOverrides } })
     return { code: 0, out }
   } catch (e) {
     return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }
@@ -159,6 +167,7 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
     try {
       const out = execFileSync('node', [script, ...args], {
         encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'], // finding 11: no ecoar el ruido esperado al padre
         env: { ...process.env, PATH: fakePath, ...envOverrides },
       })
       return { code: 0, out }
@@ -196,7 +205,31 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
     expect(r.out).not.toMatch(/ATENCIÓN/)
   })
 
-  it('el seed de STATE.md falla Y la limpieza automática también falla → ATENCIÓN con el comando manual exacto', () => {
+  // Finding 10 de la review final: los dos pasos de limpieza se intentan por
+  // SEPARADO, así que el hint manual nunca junta ambos comandos con `&&` — si
+  // lo hiciera, y solo uno de los dos pasos hubiera fallado de verdad, el
+  // hint sería inejecutable tal cual (el paso que sí tuvo éxito volvería a
+  // fallar al reintentarlo, y por el `&&` el otro nunca llegaría a correr).
+  it('el worktree remove falla pero el branch -D (intentado por separado) sí tiene éxito → ATENCIÓN solo con el comando de worktree, sin && y sin mencionar la rama', () => {
+    const repoRoot = makeRepoRoot()
+    mkdirSync(join(repoRoot, '.worktrees'), { recursive: true })
+    writeFileSync(join(repoRoot, '.worktrees', '42'), '')
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const wtPath = join(repoRoot, '.worktrees', '42')
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GIT_WORKTREE_REMOVE_FAIL: '1',
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/ATENCIÓN.*no se pudo limpiar automáticamente el worktree/s)
+    expect(r.out).toMatch(new RegExp(`git worktree remove --force ${wtPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
+    expect(r.out).not.toMatch(/&&/) // nunca encadenado
+    expect(r.out).not.toMatch(/git branch -D feat\/42/) // la rama ya se borró de verdad, no hace falta el hint
+  })
+
+  it('el branch -D falla pero el worktree remove (intentado por separado) sí tiene éxito → ATENCIÓN solo con el comando de rama, sin && y sin mencionar el worktree', () => {
     const repoRoot = makeRepoRoot()
     mkdirSync(join(repoRoot, '.worktrees'), { recursive: true })
     writeFileSync(join(repoRoot, '.worktrees', '42'), '')
@@ -205,11 +238,33 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
       FAKE_GIT_TOPLEVEL: repoRoot,
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
       FAKE_GH_COUNTER_FILE: counterFile,
-      FAKE_GIT_WORKTREE_REMOVE_FAIL: '1',
+      FAKE_GIT_BRANCH_DELETE_FAIL: '1',
     })
     expect(r.code).toBe(1)
-    expect(r.out).toMatch(/ATENCIÓN.*no se pudo limpiar/s)
-    expect(r.out).toMatch(new RegExp(`git worktree remove --force ${join(repoRoot, '.worktrees', '42').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} && git branch -D feat/42`))
+    expect(r.out).toMatch(/ATENCIÓN.*no se pudo limpiar automáticamente la rama/s)
+    expect(r.out).toMatch(/git branch -D feat\/42/)
+    expect(r.out).not.toMatch(/&&/)
+    expect(r.out).not.toMatch(/git worktree remove --force/) // el worktree ya se borró de verdad, no hace falta el hint
+  })
+
+  it('worktree remove Y branch -D fallan los dos → ATENCIÓN con ambos comandos, separados (nunca con &&)', () => {
+    const repoRoot = makeRepoRoot()
+    mkdirSync(join(repoRoot, '.worktrees'), { recursive: true })
+    writeFileSync(join(repoRoot, '.worktrees', '42'), '')
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const wtPath = join(repoRoot, '.worktrees', '42')
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GIT_WORKTREE_REMOVE_FAIL: '1',
+      FAKE_GIT_BRANCH_DELETE_FAIL: '1',
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/ATENCIÓN.*no se pudo limpiar automáticamente el worktree y la rama/s)
+    expect(r.out).toMatch(new RegExp(`git worktree remove --force ${wtPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`))
+    expect(r.out).toMatch(/git branch -D feat\/42/)
+    expect(r.out).not.toMatch(/&&/)
   })
 
   it('el lanzamiento de cmux falla (seed ya escrito de verdad) → limpia y avisa que se puede reintentar', () => {
@@ -257,5 +312,142 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
     const gitLog = readFileSync(logFile, 'utf8')
     expect(gitLog).toMatch(/worktree remove --force .*\/43/)
     expect(gitLog).not.toMatch(/worktree remove --force .*\/42/)
+  })
+})
+
+// Finding 1 de la review final (el más grave de toda la revisión): `repoRoot`
+// sale de `git rev-parse --show-toplevel` en el cwd de la sesión, que puede
+// no tener nada que ver con `--repo`. Sin guarda, `/ct-next --repo
+// otro-org/otro-repo` corrido desde una sesión de control-tower crearía el
+// worktree/rama/STATE.md/cmux DENTRO de control-tower. fake-git-bin resuelve
+// `git remote get-url origin` a "https://github.com/o/r.git" por defecto (para
+// no romper el resto de la suite, que usa `--repo o/r`); estos tests fijan
+// FAKE_GIT_REMOTE_ORIGIN/FAKE_GIT_REMOTE_FAIL para ejercitar el mismatch.
+describe('ct-next — guarda de identidad de repo (review final, finding 1)', () => {
+  const fakePath = [
+    join(fixturesDir, 'fake-git-bin'),
+    join(fixturesDir, 'fake-gh-bin'),
+    join(fixturesDir, 'fake-cmux-bin'),
+    process.env.PATH,
+  ].join(':')
+
+  const dirs = []
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  })
+
+  function runReal(args, envOverrides = {}) {
+    try {
+      const out = execFileSync('node', [script, ...args], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, PATH: fakePath, ...envOverrides },
+      })
+      return { code: 0, out }
+    } catch (e) {
+      return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }
+    }
+  }
+
+  function makeRepoRoot() {
+    const d = mkdtempSync(join(tmpdir(), 'ct-next-identity-'))
+    dirs.push(d)
+    return d
+  }
+
+  it('--repo no coincide con el remote origin del checkout local → exit 1, mensaje claro, ningún worktree creado', () => {
+    const repoRoot = makeRepoRoot()
+    const r = runReal(['--repo', 'menoplus-app/menoplus', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GIT_REMOTE_ORIGIN: 'https://github.com/control-tower/control-tower.git',
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/no coincide/i)
+    expect(r.out).toMatch(/menoplus-app\/menoplus/)
+    expect(r.out).toMatch(/control-tower\/control-tower/)
+    expect(existsSync(join(repoRoot, '.worktrees'))).toBe(false)
+  })
+
+  it('checkout sin remote "origin" → exit 1, mensaje claro (no crash sin capturar), ningún worktree creado', () => {
+    const repoRoot = makeRepoRoot()
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GIT_REMOTE_FAIL: '1',
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/no tiene remote "origin"/i)
+    expect(existsSync(join(repoRoot, '.worktrees'))).toBe(false)
+  })
+
+  it('--repo SÍ coincide con el remote origin (distintas formas de URL) → pasa la guarda', () => {
+    const repoRoot = makeRepoRoot()
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const r = runReal(['--repo', 'menoplus-app/menoplus', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GIT_REMOTE_ORIGIN: 'git@github.com:menoplus-app/menoplus.git',
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+    })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/no hay slices despachables/i)
+  })
+
+  it('la guarda también se aplica en --dry-run sin fixture: un --repo que no coincide aborta igual, no solo en la corrida real', () => {
+    const repoRoot = makeRepoRoot()
+    const r = runReal(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GIT_REMOTE_ORIGIN: 'https://github.com/control-tower/control-tower.git',
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/no coincide/i)
+  })
+})
+
+// Finding 2 de la review final: `gh issue list --limit 200` devuelve más
+// nuevo primero, así que un tope fijo deja fuera justo los issues VIEJOS de
+// los que dependen otros. fake-gh-bin no simula HTTP-pagination de verdad,
+// pero SÍ registra el argv exacto que ct-next.mjs le pasa — la forma correcta
+// de comprobar, sin red, que el comando ya no lleva el tope fijo.
+describe('ct-next — enumeración de issues sin --limit fijo (review final, finding 2)', () => {
+  const fakePath = [
+    join(fixturesDir, 'fake-git-bin'),
+    join(fixturesDir, 'fake-gh-bin'),
+    join(fixturesDir, 'fake-cmux-bin'),
+    process.env.PATH,
+  ].join(':')
+  const dirs = []
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  })
+  function runReal(args, envOverrides = {}) {
+    try {
+      const out = execFileSync('node', [script, ...args], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, PATH: fakePath, ...envOverrides },
+      })
+      return { code: 0, out }
+    } catch (e) {
+      return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }
+    }
+  }
+
+  it('la enumeración de issues abiertos y cerrados usa --paginate y nunca --limit', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'ct-next-nolimit-'))
+    dirs.push(repoRoot)
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const logFile = join(repoRoot, 'gh-argv-log')
+    const r = runReal(['--repo', 'o/r', '--cap', '1', '--dry-run'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GH_ARGV_LOG_FILE: logFile,
+    })
+    expect(r.code).toBe(0)
+    const log = readFileSync(logFile, 'utf8')
+    expect(log).toMatch(/--paginate/)
+    expect(log).not.toMatch(/--limit/)
+    expect(log).toMatch(/state=open/)
+    expect(log).toMatch(/state=closed/)
   })
 })

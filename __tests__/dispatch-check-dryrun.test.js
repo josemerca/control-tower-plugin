@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -10,10 +10,22 @@ const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'd
 // 2): NUNCA toca la red ni ningún repo real. Se controla por variables de
 // entorno — ver __tests__/fixtures/fake-gh-bin/gh.
 const fakeGhDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-gh-bin')
+
+// stdio explícito en TODAS las invocaciones de abajo (finding 11 de la review
+// final): sin esto, execFileSync además de capturar el stderr del hijo en
+// `e.stderr` (lo que ya usan las aserciones) también lo reenvía al proceso
+// padre — la salida de `npm test`. Todas esas líneas son la salida ESPERADA
+// de rutas de fallo deliberadas (error de uso, colisión, carrera perdida...),
+// pero un lector no puede distinguir ese ruido esperado de un fallo real sin
+// leer el código. `stdio: ['ignore','pipe','pipe']` mantiene stdout/stderr
+// disponibles vía `e.stdout`/`e.stderr` sin ecoarlos al padre.
+const QUIET_STDIO = ['ignore', 'pipe', 'pipe']
+
 function runReal(args, envOverrides = {}) {
   try {
     const out = execFileSync('node', [script, ...args], {
       encoding: 'utf8',
+      stdio: QUIET_STDIO,
       env: { ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}`, ...envOverrides },
     })
     return { code: 0, out }
@@ -24,7 +36,7 @@ function runReal(args, envOverrides = {}) {
 function run(issue, fixture) {
   try {
     const out = execFileSync('node', [script, String(issue), '--repo', 'o/r', '--dry-run'],
-      { encoding: 'utf8', env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify(fixture) } })
+      { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify(fixture) } })
     return { code: 0, out }
   } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') } }
 }
@@ -50,7 +62,7 @@ describe('dispatch-check --dry-run', () => {
 
   it('--release → exit 0 e imprime la transición in-progress → in-review', () => {
     try {
-      const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { encoding: 'utf8' })
+      const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
       expect(out).toMatch(/released #9.*in-review/)
     } catch (e) {
       throw new Error(`no debería fallar: ${e.status} ${(e.stdout || '') + (e.stderr || '')}`)
@@ -60,7 +72,7 @@ describe('dispatch-check --dry-run', () => {
   it('error de uso (sin --repo) → exit 2', () => {
     let threw = false
     try {
-      execFileSync('node', [script, '9', '--dry-run'], { encoding: 'utf8' })
+      execFileSync('node', [script, '9', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
     } catch (e) {
       threw = true
       expect(e.status).toBe(2)
@@ -72,7 +84,7 @@ describe('dispatch-check --dry-run', () => {
   it('error de uso (issue no numérico) → exit 2', () => {
     let threw = false
     try {
-      execFileSync('node', [script, 'nope', '--repo', 'o/r', '--dry-run'], { encoding: 'utf8' })
+      execFileSync('node', [script, 'nope', '--repo', 'o/r', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
     } catch (e) {
       threw = true
       expect(e.status).toBe(2)
@@ -84,7 +96,7 @@ describe('dispatch-check --dry-run', () => {
     const fixture = { candLabels: ['touches:db'], openIssues: [], readback: [{ n: 3, labels: ['status:in-progress', 'touches:db'] }] }
     const t0 = Date.now()
     const out = execFileSync('node', [script, '3', '--repo', 'o/r', '--dry-run', '--settle-ms', '5000'],
-      { encoding: 'utf8', env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify(fixture) } })
+      { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify(fixture) } })
     const elapsed = Date.now() - t0
     expect(out).toMatch(/claimed #3/)
     expect(elapsed).toBeLessThan(1000) // muy por debajo de los 5000ms configurados: la espera no debió ejecutarse
@@ -99,7 +111,7 @@ describe('dispatch-check — fix review round 1 (Critical 1: fixture atado a --d
       // Sin PATH a fake-gh: si el script intentara invocar `gh` de verdad aquí,
       // fallaría igualmente (no hay red/auth), pero la aserción real es que
       // NUNCA llega a intentarlo — ver el mensaje de error esperado.
-      execFileSync('node', [script, '3', '--repo', 'o/r'], { encoding: 'utf8', env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify(fixture) } })
+      execFileSync('node', [script, '3', '--repo', 'o/r'], { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify(fixture) } })
     } catch (e) {
       threw = true
       expect(e.status).toBe(2)
@@ -113,7 +125,7 @@ describe('dispatch-check — fix review round 1 (Minor 1: validación de flags)'
   it('--repo colgante (último token, sin valor) → exit 2', () => {
     let threw = false
     try {
-      execFileSync('node', [script, '5', '--dry-run', '--repo'], { encoding: 'utf8' })
+      execFileSync('node', [script, '5', '--dry-run', '--repo'], { encoding: 'utf8', stdio: QUIET_STDIO })
     } catch (e) {
       threw = true
       expect(e.status).toBe(2)
@@ -125,7 +137,7 @@ describe('dispatch-check — fix review round 1 (Minor 1: validación de flags)'
   it('--repo seguido de otro flag (sin valor real) → exit 2', () => {
     let threw = false
     try {
-      execFileSync('node', [script, '5', '--repo', '--dry-run'], { encoding: 'utf8' })
+      execFileSync('node', [script, '5', '--repo', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
     } catch (e) {
       threw = true
       expect(e.status).toBe(2)
@@ -139,7 +151,7 @@ describe('dispatch-check — fix review round 1 (Minor 2: --settle-ms/CT_CLAIM_S
     let threw = false
     try {
       execFileSync('node', [script, '5', '--repo', 'o/r', '--dry-run', '--settle-ms', '2000ms'],
-        { encoding: 'utf8', env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify({ candLabels: [], openIssues: [], readback: [{ n: 5, labels: ['status:in-progress'] }] }) } })
+        { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify({ candLabels: [], openIssues: [], readback: [{ n: 5, labels: ['status:in-progress'] }] }) } })
     } catch (e) {
       threw = true
       expect(e.status).toBe(2)
@@ -152,7 +164,7 @@ describe('dispatch-check — fix review round 1 (Minor 2: --settle-ms/CT_CLAIM_S
     let threw = false
     try {
       execFileSync('node', [script, '5', '--repo', 'o/r', '--dry-run'],
-        { encoding: 'utf8', env: { ...process.env, CT_CLAIM_SETTLE_MS: 'nope', CT_CLAIM_FIXTURE: JSON.stringify({ candLabels: [], openIssues: [], readback: [{ n: 5, labels: ['status:in-progress'] }] }) } })
+        { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_SETTLE_MS: 'nope', CT_CLAIM_FIXTURE: JSON.stringify({ candLabels: [], openIssues: [], readback: [{ n: 5, labels: ['status:in-progress'] }] }) } })
     } catch (e) {
       threw = true
       expect(e.status).toBe(2)
@@ -163,7 +175,7 @@ describe('dispatch-check — fix review round 1 (Minor 2: --settle-ms/CT_CLAIM_S
   it('--settle-ms 0 explícito sigue siendo válido (no es un error)', () => {
     const fixture = { candLabels: ['touches:db'], openIssues: [], readback: [{ n: 3, labels: ['status:in-progress', 'touches:db'] }] }
     const out = execFileSync('node', [script, '3', '--repo', 'o/r', '--dry-run', '--settle-ms', '0'],
-      { encoding: 'utf8', env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify(fixture) } })
+      { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify(fixture) } })
     expect(out).toMatch(/claimed #3/)
   })
 })
@@ -223,5 +235,30 @@ describe('dispatch-check — fix review round 1 (Critical 2: fallos de gh() no d
     })
     expect(r.code).toBe(1)
     expect(r.out).toMatch(/no se pudo liberar #19/i)
+  })
+})
+
+// Finding 2 de la review final: `allOpen()` usaba `gh issue list --limit 200`
+// — como devuelve más nuevo primero, un tope fijo puede dejar fuera un
+// `in-progress` colisionante VIEJO, y entonces `detectCollisions`/
+// `claimLost` fallan ABIERTOS (el lock deja de bloquear). fake-gh-bin no
+// simula HTTP-pagination de verdad, pero SÍ registra el argv exacto que
+// dispatch-check.mjs le pasa — la forma correcta de comprobar, sin red, que
+// el comando ya no lleva el tope fijo.
+describe('dispatch-check — enumeración de issues abiertos sin --limit fijo (review final, finding 2)', () => {
+  it('allOpen() usa --paginate y nunca --limit', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-dc-nolimit-'))
+    const logFile = join(dir, 'gh-argv-log')
+    const r = runReal(['3', '--repo', 'o/r', '--settle-ms', '10'], {
+      FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[], [{ number: 3, labels: [{ name: 'status:in-progress' }, { name: 'touches:db' }] }]]),
+      FAKE_GH_ARGV_LOG_FILE: logFile,
+    })
+    expect(r.code).toBe(0)
+    const log = readFileSync(logFile, 'utf8')
+    rmSync(dir, { recursive: true, force: true })
+    expect(log).toMatch(/--paginate/)
+    expect(log).not.toMatch(/--limit/)
+    expect(log).toMatch(/state=open/)
   })
 })

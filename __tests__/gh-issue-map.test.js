@@ -17,6 +17,21 @@ describe('mapGhIssue — defensivo con labels/marcadores ausentes', () => {
     const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [{ name: 'status:ready' }], body: '' })
     expect(mapped.touches).toEqual([])
   })
+  // Finding 5 de la review final: gh-issue-map.js#mapGhIssue solo miraba
+  // `touches:`, dropeando `area:` por completo, mientras claim.js#tokensOf ya
+  // trataba ambos prefijos como igual-de-relevantes para colisión (spec §14:
+  // conflicto = token `area:` O `touches:` compartido). Consecuencia real:
+  // ct-next.mjs podía co-despachar dos slices que solo comparten un `area:`
+  // (p.ej. `area:api` en ambos) sin detectarlo en la selección — worktrees y
+  // agentes ya lanzados — y solo dispatch-check.mjs lo rechazaba después.
+  it('con label area: (sin touches:) → también entra en touches, igual que claim.js#tokensOf', () => {
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [{ name: 'area:api' }], body: '' })
+    expect(mapped.touches).toEqual(['api'])
+  })
+  it('con area: Y touches: a la vez → ambos entran, cada uno pelado de su propio prefijo', () => {
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [{ name: 'area:api' }, { name: 'touches:db' }], body: '' })
+    expect(mapped.touches).toEqual(['api', 'db'])
+  })
   it('sin label type: → type es cadena vacía, no el literal "type:"', () => {
     const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [{ name: 'status:ready' }], body: '' })
     expect(mapped.type).toBe('')
@@ -173,6 +188,20 @@ describe('buildDispatchInput — reproduce y fija el mismatch orden/issue del sa
     const { issues, mergedIssues } = buildDispatchInput(open, closed)
     const selected = selectNext(issues, { mergedIssues, runningTouches: [], concurrencyCap: 1 })
     expect(selected.map((i) => i.n)).toEqual([11])
+  })
+})
+
+// Reproduce el escenario exacto del finding 5 end-to-end: dos issues `ready`
+// que solo comparten un label `area:api` (nunca `touches:`) — antes del fix,
+// selectNext (que decide qué co-despachar) no veía ese `area:` en absoluto y
+// los lanzaba a los dos con cap 2; con el fix, ambos producen el mismo token
+// pelado 'api' y la colisión se detecta en la SELECCIÓN, no después.
+describe('mapGhIssue + selectNext — colisión por area: compartido se detecta en la selección (finding 5)', () => {
+  it('dos issues ready que comparten SOLO area:api → con cap 2 solo se selecciona uno', () => {
+    const a = mapGhIssue({ number: 1, title: '#1 a', labels: [{ name: 'status:ready' }, { name: 'area:api' }], body: '<!-- ct-order:1 -->' })
+    const b = mapGhIssue({ number: 2, title: '#2 b', labels: [{ name: 'status:ready' }, { name: 'area:api' }], body: '<!-- ct-order:2 -->' })
+    const selected = selectNext([a, b], { mergedIssues: [], runningTouches: [], concurrencyCap: 2 })
+    expect(selected.map((i) => i.n)).toEqual([1])
   })
 })
 

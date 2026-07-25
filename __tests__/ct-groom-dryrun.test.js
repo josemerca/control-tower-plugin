@@ -7,6 +7,15 @@ import { fileURLToPath } from 'node:url'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-groom.mjs')
 
+// stdio explícito (finding 11 de la review final): sin esto, execFileSync
+// además de capturar el stderr del hijo en `e.stderr` también lo reenvía al
+// proceso padre — la salida de `npm test`. Varios tests de este fichero
+// disparan rutas de error a propósito (spec inexistente, --repo faltante,
+// flags colgantes de la sección de finding 3 más abajo); ese stderr es
+// esperado, y stdio:['ignore','pipe','pipe'] lo mantiene disponible vía
+// `e.stderr` sin ecoarlo al padre.
+const QUIET_STDIO = ['ignore', 'pipe', 'pipe']
+
 const SPEC = `## 9. Slices
 | # | Slice (issue) | Tipo | Entrega | Dep | Acepta (AC) | Protegido |
 |---|---|---|---|---|---|---|
@@ -18,7 +27,7 @@ describe('ct-groom --dry-run', () => {
   it('imprime el plan sin tocar gh', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
-    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8' })
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
     const plan = JSON.parse(out)
     expect(plan.milestone).toBe('Epic')
     expect(plan.issues).toHaveLength(2)
@@ -30,7 +39,7 @@ describe('ct-groom --dry-run', () => {
   it('--project 7 aparece como número 7 en el JSON del dry-run', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
-    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--project', '7', '--dry-run'], { encoding: 'utf8' })
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--project', '7', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
     const plan = JSON.parse(out)
     expect(plan.project).toBe(7)
     rmSync(dir, { recursive: true, force: true })
@@ -39,7 +48,7 @@ describe('ct-groom --dry-run', () => {
   it('sin --project, el plan lleva project: null', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
-    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8' })
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
     const plan = JSON.parse(out)
     expect(plan.project).toBeNull()
     rmSync(dir, { recursive: true, force: true })
@@ -48,7 +57,7 @@ describe('ct-groom --dry-run', () => {
   it('spec inexistente sale con código distinto de 0 y mensaje de uso', () => {
     let threw = false
     try {
-      execFileSync('node', [script, '/no/existe/spec.md', '--repo', 'o/r', '--dry-run'], { encoding: 'utf8' })
+      execFileSync('node', [script, '/no/existe/spec.md', '--repo', 'o/r', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
     } catch (e) {
       threw = true
       expect(e.status).not.toBe(0)
@@ -62,7 +71,7 @@ describe('ct-groom --dry-run', () => {
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
     let threw = false
     try {
-      execFileSync('node', [script, spec, '--milestone', 'Epic'], { encoding: 'utf8' })
+      execFileSync('node', [script, spec, '--milestone', 'Epic'], { encoding: 'utf8', stdio: QUIET_STDIO })
     } catch (e) {
       threw = true
       expect(e.status).not.toBe(0)
@@ -71,4 +80,96 @@ describe('ct-groom --dry-run', () => {
     expect(threw).toBe(true)
     rmSync(dir, { recursive: true, force: true })
   })
+})
+
+// Finding 3 de la review final: el `arg()` de ct-groom.mjs (a diferencia de
+// ct-next.mjs/dispatch-check.mjs) tomaba `process.argv[i+1]` literal sin
+// comprobar que fuera un valor real. Verificado en vivo contra el sandbox:
+// `--milestone` como último token hacía que `milestone` fuera el booleano
+// `true`, y una corrida real CREABA un milestone titulado "true" enganchando
+// todos los issues del epic; `--milestone --dry-run` se comía `--dry-run`
+// como valor; `--project` sin valor se convertía en `1` (`Number(true)===1`).
+describe('ct-groom — flags colgantes no cuelan valores falsos (review final, finding 3)', () => {
+  it('--milestone como último token (sin valor) → exit 2, nunca crea/usa un milestone "true"', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--dry-run', '--milestone'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect((e.stdout || '') + (e.stderr || '').toString()).toMatch(/--milestone/i)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('--milestone seguido de otro flag (--dry-run) sin valor real → exit 2, no se come el flag siguiente', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect((e.stdout || '') + (e.stderr || '').toString()).toMatch(/--milestone/i)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('--project como último token (sin valor) → exit 2, nunca se convierte en 1', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--dry-run', '--project'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect((e.stdout || '') + (e.stderr || '').toString()).toMatch(/--project/i)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('--project seguido de otro flag (sin valor real) → exit 2', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--project', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect((e.stdout || '') + (e.stderr || '').toString()).toMatch(/--project/i)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('--project no numérico → exit 2', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--project', 'nope', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect((e.stdout || '') + (e.stderr || '').toString()).toMatch(/--project/i)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // NOTA: --repo NO se valida aquí de la misma forma (no hay comprobación de
+  // `typeof === 'string'`, solo el `if (!repo)` ya existente más abajo, fuera
+  // de --dry-run) — un `--repo` colgante da `true` (booleano), que es truthy
+  // y por tanto pasa ese `!repo` sin avisar. Es un hueco real y preexistente,
+  // pero NO es el que reporta el finding 3 (que solo señala --milestone/
+  // --project) — se deja fuera de esta tanda de fixes a propósito, en vez de
+  // ampliar el alcance sin que un humano lo pida.
 })

@@ -5,12 +5,15 @@ import { selectNext, resolveAccount, buildCmuxArgv } from './dispatch.js'
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
 import { shQuote } from './shquote.js'
 import { buildDispatchInput } from './gh-issue-map.js'
+import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 
 // `arg()` solo devuelve un string cuando el flag realmente trae un valor: si
 // el flag es el último token de argv, o el token siguiente es a su vez otro
 // flag (empieza por `--`), devolvemos `true` (presente-sin-valor) en vez de
-// colarlo como valor. Mismo patrón que dispatch-check.mjs/ct-groom.mjs — un
-// `--repo` colgante nunca llega a `execFileSync` como valor real.
+// colarlo como valor. Mismo patrón que dispatch-check.mjs — ct-groom.mjs
+// ahora también lo copia (fix de la review final: tenía el `arg()` sin
+// endurecer, ver ct-groom.mjs) — un `--repo` colgante nunca llega a
+// `execFileSync` como valor real.
 const arg = (f, d) => {
   const i = process.argv.indexOf(f)
   if (i === -1) return d
@@ -45,21 +48,101 @@ if (process.env.CT_NEXT_FIXTURE && !dryRun) {
 // puede ser no-nulo cuando `dryRun` es cierto.
 const fx = (dryRun && process.env.CT_NEXT_FIXTURE) ? JSON.parse(process.env.CT_NEXT_FIXTURE) : null
 
-const gh = (a) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] })
+// maxBuffer explícito (finding 7 de la review final): el default de Node para
+// execFileSync es 1 MiB, y las enumeraciones de abajo ya no llevan `--limit`
+// (ver finding 2) — un repo con unos pocos cientos de issues, cada uno con su
+// body, puede superar 1 MiB de JSON con facilidad. Node aborta ruidosamente
+// si se excede (no trunca en silencio), así que el peligro no es corrupción
+// de datos sino que el comando se vuelva inusable contra un repo real. 20 MiB
+// es generoso para miles de issues/PRs con body completo sin ser "sin
+// límite" de verdad (un runaway real seguiría abortando).
+const GH_MAX_BUFFER = 20 * 1024 * 1024
+const gh = (a) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: GH_MAX_BUFFER })
+
+// Guarda de identidad de repo (finding 1 de la review final, el más grave de
+// toda la revisión): `repoRoot` (más abajo) sale de `git rev-parse
+// --show-toplevel` en el cwd en el que arrancó la sesión — que puede no
+// tener NADA que ver con `--repo`. Sin esta guarda, correr `/ct-next --repo
+// otro-org/otro-repo` desde una sesión de control-tower crea `feat/<n>` +
+// `.worktrees/<n>` DENTRO de control-tower, siembra un STATE.md ahí y lanza
+// un agente con un kickoff que dice estar implementando un slice de
+// otro-org/otro-repo. Resolvemos la identidad real del checkout vía `git
+// remote get-url origin` — no `gh repo view --json nameWithOwner`: eso
+// dispara una llamada de red solo para leer algo que `git remote` ya sabe en
+// local, y además `gh repo view` internamente también depende del remote
+// para resolver el repo por defecto — y abortamos si no coincide, o si no
+// podemos verificarla (repo sin remote `origin`: lo tratamos como "no
+// verificable", nunca como "sigue sin comprobar", mismo criterio que el
+// resto del script para cualquier fallo de lectura). Se aplica tanto en la
+// ruta real como en --dry-run (ver el `else` de más abajo, que cubre ambas):
+// un --dry-run ya exige estar dentro de un repo git real para poder resolver
+// `repoRoot` (eso no es nuevo, ya lo hacía antes de este fix), así que la
+// guarda no añade ningún requisito de entorno nuevo a --dry-run — solo
+// cierra el hueco de que un --dry-run imprima, con total confianza, un plan
+// (rutas de worktree, kickoff) que en realidad corresponde a un repo
+// distinto del que el humano cree estar mirando. Un --dry-run que valida
+// MENOS que la corrida real sería exactamente la trampa que esta guarda
+// existe para evitar.
+function ensureRepoIdentity(root, expectedRepo) {
+  let originUrl
+  try {
+    originUrl = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8' }).trim()
+  } catch (e) {
+    console.error(`no se pudo verificar que ${root} es el checkout de ${expectedRepo}: no tiene remote "origin" (${e.message}). Por seguridad, ct-next.mjs NO continúa — podría estar corriendo dentro del repo equivocado (p.ej. una sesión de control-tower en vez de ${expectedRepo}). Añade un remote origin que apunte a ${expectedRepo}, o ejecuta ct-next.mjs desde el checkout correcto.`)
+    process.exit(1)
+  }
+  const m = originUrl.match(/github\.com[:/]+([^/]+)\/(.+?)(?:\.git)?\/?$/)
+  if (!m) {
+    console.error(`no se pudo interpretar el remote "origin" de ${root} ("${originUrl}") como un repo de GitHub owner/repo. Por seguridad, ct-next.mjs NO continúa.`)
+    process.exit(1)
+  }
+  const actualRepo = `${m[1]}/${m[2]}`
+  if (actualRepo.toLowerCase() !== expectedRepo.toLowerCase()) {
+    console.error(`--repo ${expectedRepo} no coincide con el checkout local en ${root} (remote origin → ${actualRepo}). Aborta: ejecuta ct-next.mjs desde un checkout de ${expectedRepo}, o corrige --repo.`)
+    process.exit(1)
+  }
+}
+
+let repoRoot
+if (fx) {
+  // Solo se usa para construir strings en la rama --dry-run (el fixture está
+  // atado a --dry-run más arriba): nunca llega a un `git worktree add` real,
+  // así que tampoco pasa (ni necesita pasar) la guarda de identidad de arriba.
+  repoRoot = '/tmp/fake-repo'
+} else {
+  try {
+    repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim()
+  } catch (e) {
+    console.error(`no se pudo resolver la raíz del repo git local: ${e.message}`)
+    process.exit(1)
+  }
+  ensureRepoIdentity(repoRoot, repo)
+}
 
 function loadIssues() {
   if (fx) return fx
   // issues open con labels → {n, order, status, deps, touches, entrega, type, ac, issue}.
-  // Enumeración directa vía `gh issue list --state open`, NUNCA el índice de
-  // búsqueda (`--search`/`gh search issues`): tiene latencia de indexado y
-  // podría no reflejar un label recién escrito por otro runner. El mapeo en
-  // sí (mapGhIssue/filterMergedIssues) es lógica pura extraída a
+  // Enumeración vía el endpoint REST `gh api repos/<repo>/issues`, NUNCA el
+  // índice de búsqueda (`--search`/`gh search issues`): tiene latencia de
+  // indexado y podría no reflejar un label recién escrito por otro runner.
+  // Tampoco `gh issue list --limit N` con un tope fijo (finding 2 de la
+  // review final): ese endpoint devuelve más nuevo primero, así que un
+  // `--limit` fijo deja fuera justo los issues VIEJOS — que son los que
+  // suelen tener dependientes. Dos consecuencias silenciosas observadas: una
+  // dependencia mergeada que cae fuera de `mergedIssues` deja un slice
+  // permanentemente indespachable, y (en dispatch-check.mjs) un
+  // `in-progress` colisionante que cae fuera de `allOpen()` hace que el lock
+  // falle abierto. En su lugar usamos paginación real (`--paginate --slurp`,
+  // sin tope) igual que ct-groom.mjs, y reutilizamos su mismo helper de
+  // aplanado/filtrado de PRs (scripts/gh-issues.js) — ese endpoint también
+  // devuelve pull requests (comparten namespace en la API v3). El mapeo en sí
+  // (mapGhIssue/filterMergedIssues) es lógica pura extraída a
   // gh-issue-map.js — ver __tests__/gh-issue-map.test.js — para poder
   // testearla sin red y detectar una deriva de formato con groom.js.
   let raw
   try {
-    raw = JSON.parse(gh(['issue', 'list', '--repo', repo, '--state', 'open', '--limit', '200',
-      '--json', 'number,title,labels,body']))
+    raw = realIssuesOnly(flattenIssuePages(JSON.parse(
+      gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=open', '--paginate', '--slurp']))))
   } catch (e) {
     console.error(`no se pudieron listar issues abiertos de ${repo}: ${e.message}`)
     process.exit(1)
@@ -72,7 +155,20 @@ function loadIssues() {
     // CERRADO, y sin ese marcador buildDispatchInput no puede traducir un dep
     // en espacio de orden hacia el número de issue real de una dependencia
     // que ya se mergeó (ver gh-issue-map.js#buildOrderIndex).
-    closed = JSON.parse(gh(['issue', 'list', '--repo', repo, '--state', 'closed', '--limit', '200', '--json', 'number,stateReason,body']))
+    //
+    // El campo de estado del endpoint REST es `state_reason`, en minúsculas
+    // (p.ej. "completed") — DISTINTO del `stateReason` que expone `gh issue
+    // list --json stateReason` vía GraphQL, en mayúsculas ("COMPLETED"), que
+    // es lo que espera filterMergedIssues (ver gh-issue-map.js, verificado
+    // contra gh 2.86). Normalizamos aquí, en el wrapper, para no tener que
+    // enseñarle a la capa pura dos formatos de la misma cosa.
+    const rawClosed = realIssuesOnly(flattenIssuePages(JSON.parse(
+      gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=closed', '--paginate', '--slurp']))))
+    closed = rawClosed.map((i) => ({
+      number: i.number,
+      body: i.body,
+      stateReason: i.state_reason ? String(i.state_reason).toUpperCase() : null,
+    }))
   } catch (e) {
     console.error(`no se pudieron listar issues cerrados de ${repo}: ${e.message}`)
     process.exit(1)
@@ -90,22 +186,6 @@ if (!selected.length) {
 const repoName = repo.split('/').pop()
 const configDir = resolveAccount(repoName, ACCOUNT_MAP)
 
-let repoRoot
-if (fx) {
-  // Solo se usa para construir strings en la rama --dry-run (el fixture está
-  // atado a --dry-run más arriba): nunca llega a un `git worktree add` real.
-  repoRoot = '/tmp/fake-repo'
-} else {
-  try {
-    repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim()
-  } catch (e) {
-    console.error(`no se pudo resolver la raíz del repo git local: ${e.message}`)
-    process.exit(1)
-  }
-}
-
-const manualWorktreeCleanupHint = (wt, branch) => `git worktree remove --force ${wt} && git branch -D ${branch}`
-
 // Si un paso POSTERIOR a `git worktree add` falla (seed de STATE.md, o el
 // lanzamiento de cmux), el worktree y la rama ya existen en disco. Sin
 // limpieza, reintentar el mismo slice vuelve a fallar en `git worktree add`
@@ -113,19 +193,46 @@ const manualWorktreeCleanupHint = (wt, branch) => `git worktree remove --force $
 // justo donde esto se encontraría por primera vez contra un repo real
 // (review round 1, finding Important). Intentamos deshacerlo automáticamente
 // aquí mismo — mismo patrón que dispatch-check.mjs revirtiendo el label de
-// claim cuando un paso posterior falla — y el mensaje distingue "limpiado,
-// puedes reintentar" de "no pude limpiar, hazlo a mano con este comando
-// exacto" (igual que manualReleaseHint() de dispatch-check.mjs). Sale con
-// exit 1 en cualquier caso: fallar el dispatch de ESTE slice nunca debe
-// decidirse en silencio.
+// claim cuando un paso posterior falla. Sale con exit 1 en cualquier caso:
+// fallar el dispatch de ESTE slice nunca debe decidirse en silencio.
+//
+// Los dos pasos de limpieza (`worktree remove` y `branch -D`) se intentan por
+// SEPARADO, cada uno en su propio try/catch (finding 10 de la review final):
+// si estuvieran en el mismo try, un fallo en el primero saltaría el segundo
+// sin ni siquiera intentarlo, dejando la rama huérfana también. Y el hint
+// manual que se imprime cuando algo queda pendiente nunca junta ambos
+// comandos con `&&`: si `worktree remove` tuvo éxito pero `branch -D` fue el
+// que falló, un hint con `&&` sería inejecutable tal cual — el primer
+// comando fallaría (el worktree ya no existe) y por cortocircuito el
+// segundo, que es el que de verdad hace falta, nunca llegaría a correr. El
+// mensaje solo lista los comandos de los pasos que de verdad quedaron
+// pendientes.
 function cleanupOrphanedWorktree(s, wt, branch, reason) {
   console.error(`no se pudo completar el dispatch de #${s.n} tras crear el worktree (${reason}).`)
+
+  let worktreeErr = null
   try {
     execFileSync('git', ['worktree', 'remove', '--force', wt], { cwd: repoRoot, stdio: 'inherit' })
-    execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot, stdio: 'inherit' })
-    console.error(`worktree y rama de #${s.n} limpiados automáticamente (${wt}, ${branch}) — puedes reintentar el dispatch de este slice.`)
   } catch (e) {
-    console.error(`ATENCIÓN: no se pudo limpiar automáticamente el worktree de #${s.n}. Queda huérfano en ${wt} con la rama ${branch} (${e.message}) — bórralo a mano con: ${manualWorktreeCleanupHint(wt, branch)}`)
+    worktreeErr = e
+  }
+
+  let branchErr = null
+  try {
+    execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot, stdio: 'inherit' })
+  } catch (e) {
+    branchErr = e
+  }
+
+  if (!worktreeErr && !branchErr) {
+    console.error(`worktree y rama de #${s.n} limpiados automáticamente (${wt}, ${branch}) — puedes reintentar el dispatch de este slice.`)
+  } else {
+    const pendingCmds = []
+    if (worktreeErr) pendingCmds.push(`git worktree remove --force ${wt}`)
+    if (branchErr) pendingCmds.push(`git branch -D ${branch}`)
+    const what = worktreeErr && branchErr ? 'el worktree y la rama' : worktreeErr ? 'el worktree' : 'la rama'
+    const errMsg = (worktreeErr || branchErr).message
+    console.error(`ATENCIÓN: no se pudo limpiar automáticamente ${what} de #${s.n} (${errMsg}). Pendiente de borrar a mano — ejecuta cada comando por separado: ${pendingCmds.join(' ; ')}`)
   }
   // Los slices de esta misma tanda ya lanzados con éxito ANTES de este fallo
   // (si cap > 1) siguen corriendo en su propio cmux, independiente de este

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
 import { detectCollisions, claimLost } from './claim.js'
+import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 
 // `arg()` solo devuelve un string cuando el flag realmente trae un valor: si
 // el flag es el último token de argv, o el token siguiente es a su vez otro
@@ -75,15 +76,31 @@ if (process.env.CT_CLAIM_FIXTURE && !dryRun) {
 // puede ser no-nulo cuando `dryRun` es cierto.
 const fx = (dryRun && process.env.CT_CLAIM_FIXTURE) ? JSON.parse(process.env.CT_CLAIM_FIXTURE) : null
 
-const gh = (a) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] })
+// maxBuffer explícito (finding 7 de la review final): el default de Node para
+// execFileSync es 1 MiB. `allOpen()` ya no lleva `--limit` (ver más abajo), así
+// que en un repo con unos pocos cientos de issues abiertos el JSON puede
+// superar 1 MiB con facilidad. Node aborta ruidosamente si se excede (no
+// trunca en silencio), pero eso haría inusable el comando contra un repo real.
+// 20 MiB es generoso para miles de issues sin ser "sin límite" de verdad.
+const GH_MAX_BUFFER = 20 * 1024 * 1024
+const gh = (a) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: GH_MAX_BUFFER })
 const labelsOf = (n) => JSON.parse(gh(['issue', 'view', String(n), '--repo', repo, '--json', 'labels', '-q', '[.labels[].name]']))
-// Listado directo de issues abiertos vía `gh issue list` — NUNCA el índice de
-// búsqueda (`--search` / `gh search issues`), que tiene latencia de indexado y
-// podría no reflejar todavía el label recién escrito por otro runner. Solo se
-// filtra por `--state open` (estado, no label); toda la lógica de colisión y
-// desempate sigue siendo enteramente client-side en `claim.js`.
-const allOpen = () => JSON.parse(gh(['issue', 'list', '--repo', repo, '--state', 'open', '--limit', '200', '--json', 'number,labels']))
-  .map((i) => ({ n: i.number, labels: i.labels.map((l) => l.name) }))
+// Listado directo de issues abiertos vía el endpoint REST `gh api
+// repos/<repo>/issues` — NUNCA el índice de búsqueda (`--search` / `gh search
+// issues`), que tiene latencia de indexado y podría no reflejar todavía el
+// label recién escrito por otro runner. Tampoco `gh issue list --limit 200`
+// (finding 2 de la review final): ese endpoint devuelve más nuevo primero, así
+// que un `--limit` fijo deja fuera justo los issues VIEJOS — y un
+// `in-progress` colisionante que caiga fuera de esta lista hace que
+// `detectCollisions`/`claimLost` fallen ABIERTOS (el lock deja de bloquear,
+// en vez de fallar cerrado). En su lugar usamos paginación real (`--paginate
+// --slurp`, sin tope), reutilizando el mismo helper de aplanado/filtrado de
+// PRs que ct-groom.mjs/ct-next.mjs (scripts/gh-issues.js) — ese endpoint
+// también devuelve pull requests. Toda la lógica de colisión y desempate
+// sigue siendo enteramente client-side en `claim.js`.
+const allOpen = () => realIssuesOnly(flattenIssuePages(JSON.parse(
+  gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=open', '--paginate', '--slurp']))))
+  .map((i) => ({ n: i.number, labels: (i.labels || []).map((l) => l.name) }))
 
 const manualReleaseHint = () => `gh issue edit ${issue} --repo ${repo} --add-label status:ready --remove-label status:in-progress`
 

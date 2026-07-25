@@ -33,7 +33,20 @@ export function extractOrder(body) {
 export function mapGhIssue(i) {
   const labels = (i.labels || []).map((l) => l.name)
   const status = (labels.find((l) => l.startsWith('status:')) || 'status:backlog').slice('status:'.length)
-  const touches = labels.filter((l) => l.startsWith('touches:')).map((l) => l.slice('touches:'.length))
+  // touches: incluye TANTO `touches:` como `area:` (fix de la review final,
+  // finding 5): claim.js#tokensOf ya trataba ambos prefijos como
+  // igual-de-relevantes para colisión (y el spec §14 define el conflicto como
+  // un token `area:` O `touches:` compartido), pero este mapeo solo miraba
+  // `touches:` — así que `selectNext` (selección/co-dispatch en ct-next.mjs)
+  // podía lanzar dos slices que comparten SOLO un `area:` (p.ej. `area:api`
+  // en ambos) sin detectar la colisión, y solo dispatch-check.mjs la
+  // detectaba después, con los worktrees y agentes ya lanzados. Se despoja el
+  // prefijo (el que sea) igual que antes para no romper la convención ya
+  // testeada de tokens "pelados" que usan SERIALIZING_TOUCHES/runningTouches
+  // en dispatch.js.
+  const touches = labels
+    .filter((l) => l.startsWith('touches:') || l.startsWith('area:'))
+    .map((l) => l.slice(l.indexOf(':') + 1))
   const type = (labels.find((l) => l.startsWith('type:')) || 'type:').slice('type:'.length)
   const body = i.body || ''
   const order = extractOrder(body)

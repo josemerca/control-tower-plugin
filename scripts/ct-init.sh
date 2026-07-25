@@ -12,6 +12,22 @@ else
   echo "STATE.md ya existe, no se pisa"
 fi
 
+GITIGNORE="$TARGET/.gitignore"
+touch "$GITIGNORE"
+# .worktrees/ (fix de la review final, finding 6): ct-next.mjs escribe cada
+# worktree de slice en <repoRoot>/.worktrees/<n>, dentro del propio checkout.
+# Si el repo destino no lo ignora, un `git add -A` en el checkout principal
+# se traga un working tree anidado entero, y un `git clean -fdx` destruye
+# worktrees vivos. Idempotente: solo añade la línea si no está ya (grep
+# exacto de línea completa), igual que el resto de este script no pisa lo
+# que ya existe.
+if ! grep -qxF '.worktrees/' "$GITIGNORE"; then
+  echo '.worktrees/' >> "$GITIGNORE"
+  echo "añadido .worktrees/ a $GITIGNORE"
+else
+  echo ".worktrees/ ya está en $GITIGNORE, no se duplica"
+fi
+
 if [ ! -f "$TARGET/AGENTS.md" ]; then
   cat > "$TARGET/AGENTS.md" <<'EOF'
 # AGENTS.md

@@ -6,9 +6,26 @@ import { groomPlan } from './groom.js'
 import { flattenIssuePages, realIssuesOnly, findByMarker } from './gh-issues.js'
 import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
 
-function arg(flag, def = undefined) {
-  const i = process.argv.indexOf(flag)
-  return i !== -1 ? (process.argv[i + 1] ?? true) : def
+// `arg()` solo devuelve un string cuando el flag realmente trae un valor: si
+// el flag es el último token de argv, o el token siguiente es a su vez otro
+// flag (empieza por `--`), devolvemos `true` (presente-sin-valor) en vez de
+// colarlo como valor. Mismo patrón que dispatch-check.mjs/ct-next.mjs — fix de
+// la review final (finding 3): la versión anterior de este `arg()` tomaba
+// literalmente `process.argv[i + 1]`, sin comprobar que fuera un valor real.
+// Verificado en vivo contra el sandbox: `--milestone` como último token de
+// argv hacía que `milestone` fuera el booleano `true`, y una corrida real
+// entonces CREABA un milestone en GitHub literalmente titulado "true" y le
+// enganchaba todos los issues del epic; `--milestone --dry-run` se comía el
+// `--dry-run` como si fuera el valor del milestone; `--project` sin valor se
+// convertía en `1` en el JSON del dry-run (`Number(true) === 1`). Los
+// call-sites de milestone/project de más abajo, además de este endurecimiento
+// del propio `arg()`, validan explícitamente que el valor recibido no sea
+// `true` (presente-sin-valor) antes de usarlo.
+const arg = (f, d) => {
+  const i = process.argv.indexOf(f)
+  if (i === -1) return d
+  const v = process.argv[i + 1]
+  return (typeof v === 'string' && !v.startsWith('--')) ? v : true
 }
 const has = (flag) => process.argv.includes(flag)
 
@@ -19,6 +36,23 @@ const milestone = arg('--milestone', 'Epic')
 const section = arg('--section', '9')
 const project = arg('--project')
 const dryRun = has('--dry-run')
+
+// Validación explícita: con el `arg()` endurecido de arriba, un `--milestone`
+// colgante (último token, o seguido de otro flag) devuelve `true` en vez de
+// colar el flag siguiente como valor — pero sigue siendo responsabilidad del
+// call-site rechazarlo en vez de dejarlo fluir hacia `gh` como si fuera un
+// título de milestone real.
+if (milestone === true || typeof milestone !== 'string' || milestone.length === 0) {
+  console.error(`--milestone requiere un valor: recibido "${milestone === true ? '(sin valor)' : milestone}"`)
+  process.exit(2)
+}
+// Mismo criterio para --project: si se pasó el flag pero sin valor numérico
+// real, abortamos en vez de dejar que `Number(true) === 1` decida en
+// silencio contra qué Project v2 operar.
+if (project !== undefined && (project === true || !Number.isFinite(Number(project)) || Number(project) <= 0)) {
+  console.error(`--project inválido: "${project === true ? '(sin valor)' : project}" — debe ser un entero positivo`)
+  process.exit(2)
+}
 
 let specMd
 try {
@@ -36,7 +70,15 @@ if (dryRun) {
 }
 
 if (!repo) { console.error('--repo requerido fuera de --dry-run'); process.exit(2) }
-const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] }).trim()
+// maxBuffer explícito (finding 7 de la review final): el default de Node para
+// execFileSync es 1 MiB. El `--paginate` de más abajo sobre TODOS los issues y
+// PRs de un repo (con bodies completos) puede superar eso con facilidad en un
+// repo con unos pocos cientos de issues — Node aborta ruidosamente en vez de
+// truncar en silencio (bien), pero eso haría /ct-groom inusable contra un
+// repo real. 20 MiB es generoso para miles de issues/PRs con body completo
+// sin ser "sin límite" de verdad (un runaway real seguiría abortando).
+const GH_MAX_BUFFER = 20 * 1024 * 1024
+const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: GH_MAX_BUFFER }).trim()
 
 // Project v2 + Sprint (T9): introspección en runtime, no se hardcodean IDs.
 // Cada llamada de abajo se probó a mano contra un Project v2 real (sandbox)
