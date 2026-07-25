@@ -25,7 +25,13 @@ export function renderKickoff(slice, { repo }) {
     `Hidrátate de .agent/STATE.md y del issue de GitHub; los criterios de aceptación son ${slice.ac.join(', ') || '(ver issue)'}.`,
     `Sigue superpowers:subagent-driven-development (impl → spec-review → code-review) con TDD.`,
     addendum,
-    `Al acabar: commit refs al issue, actualiza .agent/STATE.md, abre PR, deja el estado mergeable y PARA.`,
+    // W-C: el claim (status:ready → status:in-progress) lo hace /ct-next en
+    // código, ANTES de crear este worktree — no por el prompt. El release
+    // (in-progress → in-review) SÍ se deja aquí a propósito (decisión ya
+    // tomada), con el Phase 3 PR conformance gate como backstop eventual. El
+    // comando es LITERAL, con issue/repo ya sustituidos — no una descripción
+    // que el agente tenga que traducir por su cuenta y pueda no ejecutar.
+    `Al acabar: commit refs al issue, actualiza .agent/STATE.md, abre PR, libera el claim con \`node \${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-check.mjs ${slice.n} --repo ${repo} --release\`, deja el estado mergeable y PARA.`,
   ].filter(Boolean).join('\n')
 }
 

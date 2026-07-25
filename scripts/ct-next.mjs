@@ -1,11 +1,25 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import { planDispatch, resolveAccount, buildCmuxArgv } from './dispatch.js'
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
 import { shQuote } from './shquote.js'
 import { buildDispatchInput } from './gh-issue-map.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
+
+// W-C: dispatch-check.mjs implementa el protocolo de claim completo (colisión
+// + escritura + claim-then-verify) y ya está testeado en solitario, pero
+// hasta ahora nada en el plugin lo invocaba — ningún issue llegaba nunca a
+// status:in-progress en el loop real, así que el `runningTouches` del que
+// depende W-B (para el cap y la colisión con trabajo en vuelo) estaba siempre
+// vacío. Se resuelve la ruta SIEMPRE relativa a la propia ubicación de este
+// fichero (import.meta.url, la URL real de ESTE módulo) — nunca una ruta
+// absoluta fija ni un string de shell — porque dispatch-check.mjs vive al
+// lado de ct-next.mjs dentro del plugin, con independencia de dónde esté
+// instalado.
+const dispatchCheckPath = join(dirname(fileURLToPath(import.meta.url)), 'dispatch-check.mjs')
 
 // `arg()` solo devuelve un string cuando el flag realmente trae un valor: si
 // el flag es el último token de argv, o el token siguiente es a su vez otro
@@ -289,32 +303,91 @@ const configDir = resolveAccount(repoName, ACCOUNT_MAP)
 // segundo, que es el que de verdad hace falta, nunca llegaría a correr. El
 // mensaje solo lista los comandos de los pasos que de verdad quedaron
 // pendientes.
+// W-C, punto 1: invoca dispatch-check.mjs como subproceso, con un argv array
+// (NUNCA un string de shell) — process.execPath en vez de la cadena "node"
+// para no depender de que "node" resuelva en PATH al mismo binario que ya
+// está ejecutando este propio script. Contrato de exit code de
+// dispatch-check.mjs (ver su propia cabecera, T11): 0 = reclamado, 1 = no
+// arrancar (colisión o carrera perdida), 2 = error de uso. stdio heredado a
+// propósito: el mensaje que imprime dispatch-check (colisión, carrera
+// perdida, o "claimed #N → in-progress") ya explica el motivo bien — este
+// wrapper lo deja pasar tal cual en vez de parsearlo y reformatearlo.
+function attemptClaim(s) {
+  try {
+    execFileSync(process.execPath, [dispatchCheckPath, String(s.n), '--repo', repo], { stdio: 'inherit' })
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, status: e.status }
+  }
+}
+
+// W-C, punto 3: revierte un claim ya obtenido cuando el dispatch falla
+// DESPUÉS de reclamar (git worktree add, el seed de STATE.md, o cmux) — sin
+// esto el issue queda huérfano en status:in-progress sin nadie trabajándolo,
+// justo el modo de fallo que dispatch-check.mjs se esfuerza en evitar puertas
+// adentro (su propio claim-then-verify). dispatch-check.mjs no tiene un flag
+// de "abortar": --release es la transición in-progress → in-review de un PR
+// YA abierto, y aquí no hubo nunca trabajo real, así que revertimos con la
+// misma mutación de label que dispatch-check usa puertas adentro para sus
+// propios revert (carrera perdida, fallo de readback) — reutilizando el
+// `gh()` ya definido en este fichero, no una llamada suelta a execFileSync.
+function attemptRevertClaim(s) {
+  try {
+    gh(['issue', 'edit', String(s.n), '--repo', repo, '--add-label', 'status:ready', '--remove-label', 'status:in-progress'])
+    return null
+  } catch (e) {
+    return e
+  }
+}
+const manualRevertClaimHint = (s) => `gh issue edit ${s.n} --repo ${repo} --add-label status:ready --remove-label status:in-progress`
+
+// Igual que el resto de mensajes de este fichero: nunca se listan (ni se
+// imprime su comando manual) los pasos que SÍ tuvieron éxito — solo los que
+// de verdad quedaron pendientes.
+function formatSpanishList(items) {
+  if (items.length <= 1) return items[0] || ''
+  return `${items.slice(0, -1).join(', ')} y ${items[items.length - 1]}`
+}
+
 function cleanupOrphanedWorktree(s, wt, branch, reason) {
   console.error(`no se pudo completar el dispatch de #${s.n} tras crear el worktree (${reason}).`)
 
-  let worktreeErr = null
+  const attempts = [
+    { label: 'el worktree', cmd: `git worktree remove --force ${wt}`, err: null },
+    { label: 'la rama', cmd: `git branch -D ${branch}`, err: null },
+    { label: 'el claim (status:in-progress → status:ready)', cmd: manualRevertClaimHint(s), err: null },
+  ]
+
   try {
     execFileSync('git', ['worktree', 'remove', '--force', wt], { cwd: repoRoot, stdio: 'inherit' })
   } catch (e) {
-    worktreeErr = e
+    attempts[0].err = e
   }
 
-  let branchErr = null
   try {
     execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot, stdio: 'inherit' })
   } catch (e) {
-    branchErr = e
+    attempts[1].err = e
   }
 
-  if (!worktreeErr && !branchErr) {
-    console.error(`worktree y rama de #${s.n} limpiados automáticamente (${wt}, ${branch}) — puedes reintentar el dispatch de este slice.`)
+  // Los tres pasos se intentan por SEPARADO (mismo motivo que ya regía para
+  // worktree/rama antes de W-C): si estuvieran en un único try, un fallo en
+  // el primero saltaría los siguientes sin ni siquiera intentarlos, dejando
+  // más cosas huérfanas de las necesarias. Un `&&` en el hint manual tendría
+  // el mismo problema al revés (si el primer comando de la cadena ya no hace
+  // falta porque tuvo éxito, re-ejecutarlo fallaría y el `&&` cortocircuitaría
+  // el resto) — por eso el hint de abajo siempre lista los comandos pendientes
+  // separados por `;`, nunca encadenados.
+  attempts[2].err = attemptRevertClaim(s)
+
+  const failed = attempts.filter((a) => a.err)
+  if (!failed.length) {
+    console.error(`worktree y rama de #${s.n} limpiados automáticamente (${wt}, ${branch}); claim revertido automáticamente a status:ready — puedes reintentar el dispatch de este slice.`)
   } else {
-    const pendingCmds = []
-    if (worktreeErr) pendingCmds.push(`git worktree remove --force ${wt}`)
-    if (branchErr) pendingCmds.push(`git branch -D ${branch}`)
-    const what = worktreeErr && branchErr ? 'el worktree y la rama' : worktreeErr ? 'el worktree' : 'la rama'
-    const errMsg = (worktreeErr || branchErr).message
-    console.error(`ATENCIÓN: no se pudo limpiar automáticamente ${what} de #${s.n} (${errMsg}). Pendiente de borrar a mano — ejecuta cada comando por separado: ${pendingCmds.join(' ; ')}`)
+    const what = formatSpanishList(failed.map((a) => a.label))
+    const errMsg = failed.map((a) => a.err.message).join('; ')
+    const pendingCmds = failed.map((a) => a.cmd)
+    console.error(`ATENCIÓN: no se pudo limpiar automáticamente ${what} de #${s.n} (${errMsg}). Pendiente a mano — ejecuta cada comando por separado: ${pendingCmds.join(' ; ')}`)
   }
   // Los slices de esta misma tanda ya lanzados con éxito ANTES de este fallo
   // (si cap > 1) siguen corriendo en su propio cmux, independiente de este
@@ -352,6 +425,15 @@ for (const s of selected) {
 
   if (dryRun) {
     console.log(`\n=== slice #${s.n} (${s.entrega}) ===`)
+    // W-C, punto 5: el plan tiene que dejar claro que se INTENTARÍA un claim
+    // (dispatch-check.mjs, status:ready → status:in-progress) para este issue
+    // concreto ANTES de crear el worktree — sin invocar dispatch-check de
+    // verdad. dispatch-check.mjs, incluso en su propio --dry-run sin fixture,
+    // hace lecturas reales contra gh (solo la escritura del claim se salta);
+    // invocarlo aquí rompería la garantía de "sin red" de --dry-run con
+    // CT_NEXT_FIXTURE, así que en --dry-run ct-next.mjs directamente NO llama
+    // a dispatch-check.mjs — ningún gh real se toca.
+    console.log(`dispatch-check ${s.n} --repo ${repo}   # se reclamaría #${s.n} (status:ready → status:in-progress) antes de crear el worktree; en --dry-run no se ejecuta, ningún gh real se toca`)
     console.log(`CLAUDE_CONFIG_DIR=${configDir}`)
     console.log(`git worktree add -b ${branch} ${wt} main`)
     console.log(`seed ${wt}/.agent/STATE.md:\n${stateSeed}`)
@@ -359,13 +441,42 @@ for (const s of selected) {
     continue
   }
 
+  // W-C, punto 1/2: el claim se hace ANTES de crear el worktree. Exit 1
+  // (colisión o carrera perdida) es un resultado ESPERADO del protocolo — se
+  // salta este slice y se sigue con el resto de la tanda, si queda alguno.
+  // Cualquier otro resultado (exit 2, o un fallo al lanzar el subproceso en
+  // absoluto) NO es un resultado esperado del protocolo — sería un bug o una
+  // mala configuración que fallaría igual para todos los slices restantes de
+  // esta misma tanda, así que abortamos la tanda entera en vez de reintentar
+  // a ciegas slice a slice.
+  const claim = attemptClaim(s)
+  if (!claim.ok) {
+    if (claim.status === 1) {
+      console.error(`saltando #${s.n}: no se pudo reclamar (motivo arriba, de dispatch-check) — sigo con el resto de esta tanda, si queda algún candidato.`)
+      continue
+    }
+    const statusDesc = typeof claim.status === 'number' ? `exit ${claim.status}` : 'sin exit code numérico (fallo inesperado al lanzar el subproceso)'
+    console.error(`dispatch-check devolvió un fallo inesperado (${statusDesc}) al intentar reclamar #${s.n} — no es una colisión ni una carrera perdida (eso sale con exit 1), así que probablemente es un bug o una mala configuración (p.ej. --repo mal formado, o dispatch-check.mjs no encontrado en ${dispatchCheckPath}). Abortando toda la tanda: no sigo con el resto de candidatos a ciegas.`)
+    process.exit(1)
+  }
+
   try {
     execFileSync('git', ['worktree', 'add', '-b', branch, wt, 'main'], { cwd: repoRoot, stdio: 'inherit' })
   } catch (e) {
     // Si el worktree o la rama ya existen, `git worktree add` falla con
     // exit != 0 — lo dejamos fallar ruidoso en vez de reusar en silencio
-    // algo que podría no corresponder a este slice.
+    // algo que podría no corresponder a este slice. El claim YA se obtuvo
+    // (paso de arriba): sin revertirlo aquí, este issue quedaría huérfano en
+    // status:in-progress con nada corriendo — mismo motivo que
+    // cleanupOrphanedWorktree más abajo, pero aquí no hay worktree/rama que
+    // limpiar (git worktree add falló antes de crear nada).
     console.error(`no se pudo crear el worktree para #${s.n} en ${wt}: ${e.message}`)
+    const claimErr = attemptRevertClaim(s)
+    if (!claimErr) {
+      console.error(`claim de #${s.n} revertido automáticamente a status:ready — puedes reintentar el dispatch de este slice.`)
+    } else {
+      console.error(`ATENCIÓN: no se pudo revertir automáticamente el claim de #${s.n} (${claimErr.message}). Queda bloqueado en status:in-progress — revierte a mano con: ${manualRevertClaimHint(s)}`)
+    }
     process.exit(1)
   }
   try {

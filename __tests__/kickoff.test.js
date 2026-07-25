@@ -41,6 +41,24 @@ describe('renderKickoff', () => {
   })
 })
 
+// W-C: la liberación del claim (status:in-progress → status:in-review) sigue
+// viviendo en el kickoff (la decide el agente, no el código) — pero tiene que
+// ser el comando LITERAL con los valores reales sustituidos, no una
+// descripción que el agente tenga que traducir por su cuenta y pueda no
+// ejecutar nunca (ver el brief: "instruir al agente vía el prompt no es
+// aceptable [para el claim] porque un prompt es advisory" — el release SÍ
+// se deja en el prompt a propósito, pero con el mismo cuidado de literalidad).
+describe('renderKickoff — instrucción de --release (W-C)', () => {
+  it('incluye el comando literal de dispatch-check --release, con el issue y el repo reales sustituidos', () => {
+    const k = renderKickoff({ ...SLICE, n: 42 }, { repo: 'o/r' })
+    expect(k).toContain('dispatch-check.mjs 42 --repo o/r --release')
+  })
+  it('usa ${CLAUDE_PLUGIN_ROOT} para el path del script, igual que el resto de comandos del plugin', () => {
+    const k = renderKickoff({ ...SLICE, n: 7 }, { repo: 'menoplus-app/menoplus' })
+    expect(k).toContain('${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-check.mjs 7 --repo menoplus-app/menoplus --release')
+  })
+})
+
 describe('buildStateSeed', () => {
   it('produce STATE.md parseable con los campos del slice', () => {
     const seed = buildStateSeed(SLICE, { branch: 'feat/7', base: 'main' })
