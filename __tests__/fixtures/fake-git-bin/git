@@ -20,6 +20,27 @@ if (argv[0] === 'rev-parse' && argv[1] === '--show-toplevel') {
   process.exit(0)
 }
 
+// `git rev-parse --verify --quiet <ref>^{commit}` (W-D, fix round 1,
+// Important): ct-next.mjs comprueba OFFLINE, contra el checkout local, que
+// la rama base resuelta (vía `gh repo view` o `--base`) existe de verdad
+// ANTES de reclamar/despachar nada — ver verifyBaseExistsLocally en
+// ct-next.mjs. Por defecto (ninguna de las dos variables de abajo fijada)
+// CUALQUIER ref "existe", para que los tests existentes (que no fijan
+// ninguna de las dos y asumían implícitamente que "main" resolvía) sigan
+// pasando sin cambios. FAKE_GIT_BASE_NOT_LOCAL hace fallar la comprobación
+// de la rama LOCAL; FAKE_GIT_BASE_NOT_REMOTE hace fallar la de
+// `origin/<rama>` — se distinguen por si el ref empieza por "origin/", para
+// poder simular por separado "no existe en ningún sitio" y "existe en
+// origin pero no en local".
+if (argv[0] === 'rev-parse' && argv[1] === '--verify' && argv[2] === '--quiet') {
+  const ref = argv[3] || ''
+  const isRemoteRef = ref.startsWith('origin/')
+  const shouldFail = isRemoteRef ? process.env.FAKE_GIT_BASE_NOT_REMOTE : process.env.FAKE_GIT_BASE_NOT_LOCAL
+  if (shouldFail) process.exit(1)
+  process.stdout.write('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n')
+  process.exit(0)
+}
+
 // Guarda de identidad de repo de ct-next.mjs (review final, finding 1):
 // FAKE_GIT_REMOTE_FAIL simula un checkout sin remote `origin` (exit != 0,
 // nada en stdout). Por defecto el origin es "https://github.com/o/r.git",

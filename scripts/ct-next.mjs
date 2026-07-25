@@ -121,8 +121,13 @@ if (!Number.isFinite(cap) || cap < 1) {
 // devuelve `true`, no un string, cuando el flag es el último token o va
 // seguido de otro flag) — un `--base` colgante nunca debe colarse hacia
 // `git worktree add`/el STATE.md sembrado como el string literal "true".
-if (baseArg !== undefined && typeof baseArg !== 'string') {
-  console.error(`--base inválido: "${baseArg === true ? '(sin valor)' : baseArg}" — falta el nombre de la rama (¿--base al final de la línea, o seguido de otro flag?)`)
+// Fix round 1, Minor 1 (review de W-D): igual que --repo (`repo.length ===
+// 0`), una cadena VACÍA también se rechaza aquí — sin esto, `--base ''` pasa
+// la comprobación de `typeof` y se cuela hasta `git worktree add … ''`,
+// donde falla tarde con un error interno de git en vez de con el exit 2 y
+// mensaje claro que sí tienen los demás casos de flag mal puesto.
+if (baseArg !== undefined && (typeof baseArg !== 'string' || baseArg.length === 0)) {
+  console.error(`--base inválido: "${baseArg === true ? '(sin valor)' : baseArg}" — falta el nombre de la rama (¿--base al final de la línea, seguido de otro flag, o con un valor vacío?)`)
   process.exit(2)
 }
 
@@ -185,11 +190,55 @@ function detectDefaultBranch(repoSlug) {
     console.error(`no se pudo determinar la rama por defecto de ${repoSlug}: ${e.message}. Usa --base <rama> para indicarla explícitamente si ya sabes cuál es.`)
     process.exit(1)
   }
-  if (!out) {
-    console.error(`no se pudo determinar la rama por defecto de ${repoSlug}: "gh repo view" no devolvió ningún nombre de rama. Usa --base <rama> para indicarla explícitamente.`)
+  // Fix round 1, Minor 3 (review de W-D): además de la cadena vacía
+  // (`.defaultBranchRef` ausente/nulo en el JSON), rechazamos también el
+  // literal "null" — si `.defaultBranchRef.name` no existiera y `-q` (jq)
+  // lo emitiera como el string "null" en vez de una cadena vacía, esta
+  // guarda lo dejaría colar como si fuera un nombre de rama real.
+  if (!out || out === 'null') {
+    console.error(`no se pudo determinar la rama por defecto de ${repoSlug}: "gh repo view" no devolvió ningún nombre de rama utilizable (salida: ${JSON.stringify(out)}). Usa --base <rama> para indicarla explícitamente.`)
     process.exit(1)
   }
   return out
+}
+
+// Verificación local de que la rama base resuelta EXISTE en el checkout (fix
+// round 1, Important): `detectDefaultBranch`/`--base` resuelven un NOMBRE
+// (contra GitHub, o a mano), pero `git worktree add -b <branch> <wt>
+// <resolvedBase>` necesita que ese nombre resuelva como referencia real EN
+// EL CHECKOUT LOCAL. Dos escenarios reales sin esta comprobación: un --base
+// con un typo ("mian"), o una rama por defecto que existe en GitHub pero
+// nunca se fetcheó en local (`git clone --single-branch`, checkout viejo).
+// Sin esta guarda, la secuencia sería: se hace el claim (status:ready →
+// status:in-progress) → `git worktree add` falla con un error interno de
+// git ("fatal: invalid reference…") → se revierte el claim → exit 1. El
+// estado queda consistente (no hay corrupción), pero se quema un ciclo
+// entero de claim/revert por algo que se podía saber OFFLINE, sin tocar gh,
+// antes de reclamar nada.
+//
+// Se comprueba con `git rev-parse --verify --quiet <ref>^{commit}` (silencia
+// su propio error; el mensaje lo decidimos nosotros) contra DOS referencias:
+// la rama local, y `origin/<rama>` (la copia remote-tracking) — para poder
+// distinguir "no existe en ningún sitio que este checkout conozca" (typo
+// probable) de "existe en origin pero no se ha fetcheado/creado en local"
+// (arreglo: `git fetch`), en vez de dar el mismo mensaje genérico para dos
+// causas con remedios distintos.
+function verifyBaseExistsLocally(base) {
+  const existsAsCommit = (ref) => {
+    try {
+      execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: repoRoot, stdio: 'ignore' })
+      return true
+    } catch {
+      return false
+    }
+  }
+  if (existsAsCommit(base)) return
+  if (existsAsCommit(`origin/${base}`)) {
+    console.error(`la rama base "${base}" existe en origin pero no en tu checkout local (probablemente falta un \`git fetch\`). Corre \`git fetch origin ${base}\` (o crea la rama local con \`git branch ${base} origin/${base}\`) y reintenta, o pasa --base <otra-rama> que sí tengas en local.`)
+    process.exit(1)
+  }
+  console.error(`la rama base "${base}" no existe ni en tu checkout local ni como origin/${base} — revisa el nombre (¿--base con un typo?), o corre \`git fetch\` si es una rama remota reciente que tu checkout todavía no conoce.`)
+  process.exit(1)
 }
 
 // Guarda de identidad de repo (finding 1 de la review final, el más grave de
@@ -238,17 +287,32 @@ function ensureRepoIdentity(root, expectedRepo) {
 
 let repoRoot
 let resolvedBase
+// Fix round 1, Minor 2 (review de W-D): distingue "el valor de resolvedBase
+// viene del relleno sintético de fixture" (nunca resuelto de verdad, ni
+// contra GitHub ni contra el checkout local) de "viene de una resolución
+// real" — para que el banner de --dry-run no afirme "resuelta" sobre un
+// valor que no se resolvió.
+let baseIsFixtureDefault = false
 if (fx) {
   // Solo se usa para construir strings en la rama --dry-run (el fixture está
   // atado a --dry-run más arriba): nunca llega a un `git worktree add` real,
-  // así que tampoco pasa (ni necesita pasar) la guarda de identidad de arriba.
+  // así que tampoco pasa (ni necesita pasar) la guarda de identidad de arriba
+  // ni la verificación local de existencia de la rama base (más abajo) —
+  // esta ruta es enteramente sintética por diseño.
   repoRoot = '/tmp/fake-repo'
   // --base sigue ganando aunque haya fixture (mismo orden de precedencia que
-  // la ruta real, más abajo). Si no hay override ni el fixture trae `base`,
-  // "main" es un relleno puramente sintético para tests offline — nunca toca
-  // `gh repo view` real, así que no reintroduce el bug que este cambio
-  // arregla (asumir "main" contra un repo DE VERDAD).
-  resolvedBase = typeof baseArg === 'string' ? baseArg : (fx.base || 'main')
+  // la ruta real, más abajo). Sin override, "main" es un relleno puramente
+  // sintético para tests offline — nunca toca `gh repo view` ni `git`
+  // reales, así que no reintroduce el bug que este cambio arregla (asumir
+  // "main" contra un repo DE VERDAD). (Fix round 1, Minor 2: se quitó el
+  // `fx.base` que había aquí antes — ningún fixture de los tests lo fijaba y
+  // ningún test lo cubría, era código muerto.)
+  if (typeof baseArg === 'string') {
+    resolvedBase = baseArg
+  } else {
+    resolvedBase = 'main'
+    baseIsFixtureDefault = true
+  }
 } else {
   try {
     repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim()
@@ -258,6 +322,9 @@ if (fx) {
   }
   ensureRepoIdentity(repoRoot, repo)
   resolvedBase = typeof baseArg === 'string' ? baseArg : detectDefaultBranch(repo)
+  // Fix round 1, Important: verificación local ANTES del bucle de despacho,
+  // offline (ni gh ni red) — ver el comentario de verifyBaseExistsLocally.
+  verifyBaseExistsLocally(resolvedBase)
 }
 
 function loadIssues() {
@@ -340,8 +407,12 @@ const { selected, inFlight, blockReason } = planDispatch(issues, { mergedIssues,
 if (dryRun) {
   // W-D: la rama base ya no es un literal "main" fijo — mostrarla explícita
   // en --dry-run (incluso cuando no se seleccione ningún slice) para que el
-  // humano vea de qué rama se ramificaría antes de que corra de verdad.
-  console.log(`rama base resuelta: ${resolvedBase}`)
+  // humano vea de qué rama se ramificaría antes de que corra de verdad. Fix
+  // round 1, Minor 2: cuando el valor viene del relleno sintético de
+  // fixture (`baseIsFixtureDefault`), el banner lo marca como "(fixture)" en
+  // vez de afirmar "resuelta" sobre un valor que en realidad nunca se
+  // resolvió (ni contra GitHub ni contra el checkout local).
+  console.log(`rama base resuelta: ${resolvedBase}${baseIsFixtureDefault ? ' (fixture)' : ''}`)
   if (inFlight.length) {
     const detail = inFlight
       .map((i) => `#${i.n} [${(i.touches.length ? i.touches.map((t) => `touches:${t}`).join(', ') : 'sin touches')}]`)

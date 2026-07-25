@@ -159,3 +159,100 @@ function existsSyncSafe(path) {
     return ''
   }
 }
+
+// Fix round 1 de la review de W-D: un Important (la rama base se resolvía
+// contra GitHub pero nunca se comprobaba que existiera EN EL CHECKOUT
+// LOCAL — `git worktree add` fallaba tarde, ya después del claim, quemando
+// un ciclo de claim/revert por algo que se podía saber offline) y tres
+// Minor (--base '' se colaba; el banner de --dry-run mentía "resuelta" en
+// modo fixture; la guarda de respuesta vacía de gh era intestable con el
+// fixture, y no rechazaba el literal "null").
+describe('ct-next — rama base: fix round 1 de la review (Important + Minor 1/2/3)', () => {
+  it('Important: la rama base existe en origin pero no en el checkout local → exit 1, sugiere `git fetch`, no crea worktree ni intenta el claim', () => {
+    const repoRoot = makeRepoRoot()
+    const argvLog = join(repoRoot, 'gh-argv-log')
+    const gitLog = join(repoRoot, 'git-log')
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GIT_BASE_NOT_LOCAL: '1',
+      FAKE_GH_ARGV_LOG_FILE: argvLog,
+      FAKE_GIT_LOG_FILE: gitLog,
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/existe en origin pero no en tu checkout local/i)
+    expect(r.out).toMatch(/git fetch/i)
+    expect(existsSyncSafe(gitLog)).not.toMatch(/worktree add/)
+    expect(existsSyncSafe(argvLog)).not.toMatch(/issue edit/) // el claim nunca se intenta
+  })
+
+  it('Important: la rama base no existe ni en local ni en origin → exit 1, mensaje distinto (typo probable), no crea worktree', () => {
+    const repoRoot = makeRepoRoot()
+    const gitLog = join(repoRoot, 'git-log')
+    const r = runReal(['--repo', 'o/r', '--cap', '1', '--base', 'mian'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GIT_BASE_NOT_LOCAL: '1',
+      FAKE_GIT_BASE_NOT_REMOTE: '1',
+      FAKE_GIT_LOG_FILE: gitLog,
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/no existe ni en tu checkout local ni como origin\/mian/i)
+    expect(r.out).toMatch(/typo/i)
+    expect(existsSyncSafe(gitLog)).not.toMatch(/worktree add/)
+  })
+
+  it('Important: la rama base SÍ existe localmente (caso feliz, por defecto en el stub) → sigue funcionando igual que antes de este fix', () => {
+    // No fija FAKE_GIT_BASE_NOT_LOCAL/FAKE_GIT_BASE_NOT_REMOTE: el stub
+    // considera "existe" cualquier ref por defecto — mismo comportamiento
+    // que ya cubre el describe de arriba, repetido aquí explícitamente junto
+    // al resto de los tests de este fix round para dejar constancia de que
+    // el caso feliz no se rompió al añadir la verificación.
+    const repoRoot = makeRepoRoot()
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+    })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/lanzado #42/)
+  })
+
+  it('Minor 1: --base vacío ("") → exit 2, igual que --base sin valor', () => {
+    const r = runReal(['--repo', 'o/r', '--cap', '1', '--base', ''])
+    expect(r.code).toBe(2)
+    expect(r.out).toMatch(/--base/i)
+  })
+
+  it('Minor 2: --dry-run con fixture y SIN --base → el banner marca "(fixture)" (el valor no se resolvió de verdad)', () => {
+    const r = runReal(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/rama base resuelta: main \(fixture\)/)
+  })
+
+  it('Minor 2: --dry-run con fixture Y --base explícito → el banner NO marca "(fixture)" (sí se dio un valor real)', () => {
+    const r = runReal(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run', '--base', 'develop'], { CT_NEXT_FIXTURE: FIXTURE })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/rama base resuelta: develop\n/)
+    expect(r.out).not.toMatch(/\(fixture\)/)
+  })
+
+  it('Minor 3: `gh repo view` devuelve la cadena vacía → exit 1, "no devolvió ningún nombre de rama utilizable" (alcanzable gracias a `??` en el stub)', () => {
+    const repoRoot = makeRepoRoot()
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_DEFAULT_BRANCH: '',
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/no devolvió ningún nombre de rama utilizable/i)
+  })
+
+  it('Minor 3: `gh repo view` devuelve el literal "null" → se rechaza igual que la cadena vacía', () => {
+    const repoRoot = makeRepoRoot()
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_DEFAULT_BRANCH: 'null',
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/no devolvió ningún nombre de rama utilizable/i)
+  })
+})
