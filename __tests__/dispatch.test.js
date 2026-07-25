@@ -298,6 +298,48 @@ describe('explainNoSelection / selectNext — oráculo de identidad de candidato
     // explainSelectionGap divergió del filtro de deps que usa selectNext.
     expect(clean).toEqual([])
   })
+
+  // Fix round 3 (re-review): el test de colisión de arriba tiene un ÚNICO
+  // candidato ready+deps-mergeadas (#2; #1 queda fuera porque está
+  // in-progress, no ready). Con un solo elemento, `readyDepsMet[0]` y
+  // `readyDepsMet[readyDepsMet.length - 1]` SON EL MISMO elemento — así que
+  // ese test no tiene poder discriminante contra la clase de regresión que
+  // motivó escribir el oráculo: "el explicador elige mal entre VARIOS
+  // candidatos" (una re-derivación que filtre u ordene distinto, un
+  // off-by-one de índice). El sabotaje que se usó para demostrar que el
+  // oráculo detecta divergencias (ver el report de fix round 2) se hizo
+  // contra un fixture de DOS candidatos y nunca se commiteó — quedaba una
+  // prueba de no-tautología más fuerte que el test que sí quedó en el repo.
+  // Este test es ESE fixture de dos candidatos, ahora commiteado como
+  // variante del oráculo (no reemplaza al de arriba: ambos se quedan, uno
+  // cubre el caso más común de un único candidato bloqueado, este cubre el
+  // caso con poder discriminante real entre varios).
+  it('collision con VARIOS candidatos que chocan con el mismo token en vuelo: el issue citado es el de MENOR orden, no cualquiera (fixture con poder discriminante real)', () => {
+    const issues = [
+      { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['x'] },
+      { n: 10, order: 1, status: 'ready', deps: [], touches: ['x'] }, // choca con #1 en vuelo, orden 1 (el de menor orden)
+      { n: 20, order: 2, status: 'ready', deps: [], touches: ['x'] }, // también choca, orden 2
+    ]
+    const plan = planDispatch(issues, { mergedIssues: [], cap: 9 })
+    expect(plan.blockReason.reason).toBe('collision')
+
+    const clean = selectNext(issues, { mergedIssues: [], runningTouches: [], concurrencyCap: plan.remainingCap + 1 })
+    // Sin `runningTouches` externas, #10 (orden 1) ya no choca con nada y se
+    // selecciona primero; #20 (orden 2) SÍ sigue chocando — pero ahora con
+    // el propio `claimedTouches` de la tanda (ambos comparten el mismo
+    // token 'x' entre sí), no con trabajo en vuelo, así que queda fuera y
+    // `clean` solo trae a #10. Lo que importa para el oráculo es que
+    // `readyDepsMet` tenía DOS elementos y la identificación de "el
+    // primero" tuvo que ejercitarse de verdad: si `explainNoSelection`
+    // citara #20 (p. ej. por un `readyDepsMet[length - 1]` en vez de
+    // `readyDepsMet[0]`, o un sort invertido), `clean[0]` seguiría siendo
+    // #10 (calculado por el `selectNext` real, no tocado) y la comparación
+    // de abajo fallaría — a diferencia del test de un solo candidato de
+    // arriba, donde `[0]` y `[length - 1]` son el mismo elemento y el mismo
+    // sabotaje pasaría desapercibido.
+    expect(clean.map((i) => i.n)).toEqual([10])
+    expect(clean[0].n).toBe(plan.blockReason.issue)
+  })
 })
 
 describe('resolveAccount', () => {
