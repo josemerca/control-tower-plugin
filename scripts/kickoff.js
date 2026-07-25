@@ -30,7 +30,7 @@ export function renderKickoff(slice, { repo }) {
 }
 
 export function buildStateSeed(slice, { branch, base }) {
-  const issueNum = slice.issue ? parseInt(String(slice.issue).replace('#', ''), 10) : null
+  const issueNum = slice.issue != null ? parseInt(String(slice.issue).replace('#', ''), 10) : null
   return renderState({
     meta: {
       task: slice.entrega,
