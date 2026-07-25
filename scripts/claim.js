@@ -20,12 +20,12 @@ export function detectCollisions(candLabels, openIssues) {
 
 export function claimLost(readback, self) {
   const mine = readback.find((i) => i.n === self)
+  // Nuestro issue no aparece en el readback → estado ambiguo, no bloqueamos.
   if (!mine) return false
-  const myTokens = tokensOf(mine.labels)
   for (const iss of readback) {
     if (iss.n === self) continue
     if (!(iss.labels || []).includes('status:in-progress')) continue
-    const shared = tokensOf(iss.labels).some((t) => myTokens.includes(t))
+    const shared = conflictTokens(mine.labels, iss.labels).length > 0
     if (shared && iss.n < self) return true // desempate determinista: gana el menor número
   }
   return false

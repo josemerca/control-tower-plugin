@@ -8,6 +8,9 @@ describe('conflictTokens', () => {
   it('ignora labels no area/touches', () => {
     expect(conflictTokens(['status:ready', 'type:backend'], ['status:in-progress', 'type:backend'])).toEqual([])
   })
+  it('comparte múltiples tokens area: y touches:', () => {
+    expect(conflictTokens(['area:api', 'touches:db'], ['area:api', 'touches:db'])).toEqual(['area:api', 'touches:db'])
+  })
 })
 
 describe('detectCollisions', () => {
@@ -18,6 +21,14 @@ describe('detectCollisions', () => {
     ]
     const c = detectCollisions(['touches:db'], open)
     expect(c).toEqual([{ n: 10, tokens: ['touches:db'] }])
+  })
+  it('ignora in-progress que no comparten token', () => {
+    const open = [
+      { n: 10, labels: ['status:in-progress', 'touches:ui'] },
+      { n: 11, labels: ['status:in-progress', 'touches:db'] },
+    ]
+    const c = detectCollisions(['touches:db'], open)
+    expect(c).toEqual([{ n: 11, tokens: ['touches:db'] }])
   })
 })
 
@@ -38,5 +49,18 @@ describe('claimLost (claim-then-verify)', () => {
   })
   it('sin otros in-progress compartiendo token → no perdemos', () => {
     expect(claimLost([{ n: 7, labels: ['status:in-progress', 'touches:db'] }], 7)).toBe(false)
+  })
+  it('ignoramos in-progress de número menor si no comparten token', () => {
+    const rb = [
+      { n: 7, labels: ['status:in-progress', 'touches:db'] },  // nosotros
+      { n: 5, labels: ['status:in-progress', 'touches:ui'] },  // otro, menor pero sin token compartido
+    ]
+    expect(claimLost(rb, 7)).toBe(false)
+  })
+  it('nuestro issue ausente del readback → no perdemos', () => {
+    const rb = [
+      { n: 5, labels: ['status:in-progress', 'touches:db'] },
+    ]
+    expect(claimLost(rb, 7)).toBe(false)
   })
 })
