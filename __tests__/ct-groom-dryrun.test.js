@@ -26,4 +26,49 @@ describe('ct-groom --dry-run', () => {
     expect(plan.issues[1].body).toContain('merge-after #1')
     rmSync(dir, { recursive: true, force: true })
   })
+
+  it('--project 7 aparece como número 7 en el JSON del dry-run', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--project', '7', '--dry-run'], { encoding: 'utf8' })
+    const plan = JSON.parse(out)
+    expect(plan.project).toBe(7)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('sin --project, el plan lleva project: null', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8' })
+    const plan = JSON.parse(out)
+    expect(plan.project).toBeNull()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('spec inexistente sale con código distinto de 0 y mensaje de uso', () => {
+    let threw = false
+    try {
+      execFileSync('node', [script, '/no/existe/spec.md', '--repo', 'o/r', '--dry-run'], { encoding: 'utf8' })
+    } catch (e) {
+      threw = true
+      expect(e.status).not.toBe(0)
+      expect(e.stderr.toString()).toMatch(/no se pudo leer el spec/)
+    }
+    expect(threw).toBe(true)
+  })
+
+  it('sin --repo fuera de --dry-run sale con código distinto de 0 y mensaje de uso', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--milestone', 'Epic'], { encoding: 'utf8' })
+    } catch (e) {
+      threw = true
+      expect(e.status).not.toBe(0)
+      expect(e.stderr.toString()).toMatch(/--repo requerido/)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
 })
