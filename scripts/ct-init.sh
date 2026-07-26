@@ -180,13 +180,23 @@ comando una vez con ruta relativa y otra con absoluta)/milestone/labels
 (`type:`/`area:`/`touches:`, cada uno solo si su columna está en la tabla;
 `status:` queda fuera adrede) Y las secciones del body que el dispatcher
 obedece de verdad (`## Dependencias`, `## Acceptance criteria`, comparadas
-solo dentro de su propia cabecera — igualdad exacta, salvo AC) contra lo
-que la tabla produce hoy, y **reporta** cualquier diferencia (exit `3` si
-queda algo real sin resolver, incluida una de esas dos secciones
-duplicada) — nunca la aplica sin que se pida `--reconcile` explícitamente.
-"No duplica" no es "converge". Un issue cuyo slice ya no está en la tabla
-(huérfano) se avisa, no se toca solo. `--dry-run --repo` ya necesita
-red/auth de `gh` (antes era 100% offline).
+solo dentro de su propia cabecera — igualdad exacta; AC tolera exactamente
+dos formas literales conocidas, nunca un prefijo abierto) contra lo que la
+tabla produce hoy, y **reporta** cualquier diferencia (exit `3` si queda
+algo real sin resolver, incluida una de esas dos secciones duplicada) —
+nunca la aplica sin que se pida `--reconcile` explícitamente. "No duplica"
+no es "converge". Un issue cuyo slice ya no está en la tabla (huérfano) se
+avisa, no se toca solo. `--dry-run --repo` ya necesita red/auth de `gh`
+(antes era 100% offline).
+
+**`--reconcile` es EXPERIMENTAL**: aplica lo detectado (título/milestone/
+labels/enlace-al-spec/AC/dependencias) vía `gh issue edit`, pero varias
+rondas de review ya le encontraron formas distintas de corromper un body
+real (todas arregladas al encontrarlas) — al usarlo, `/ct-groom` avisa por
+stderr antes de tocar nada, y conviene revisar el diff del issue en GitHub
+después de cada corrida en vez de confiar a ciegas en el mensaje
+"reconciliado". Sin `--reconcile`, nada de esto aplica: detectar y
+reportar (el comportamiento por defecto) nunca escribe nada.
 
 Detalle completo (todas las condiciones de abort, columnas opcionales,
 avisos no fatales, el reporte de divergencia, sus límites, y `--reconcile`):

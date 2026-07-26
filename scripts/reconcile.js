@@ -40,6 +40,42 @@
 // (gh-issue-map.js#normalizeToLF) y, si aplica, `buildReconcileBody`
 // reconvierte el resultado al final de línea original antes de devolverlo.
 //
+// Review round 5 — mismo diagnóstico que la ronda 4, aplicado a las OTRAS
+// dos cosas con forma de delimitador que viven en el mismo body: "se
+// endurecieron las vallas a fondo y se dejaron intactas comentarios HTML y
+// encabezados que no son '## '". Dos Critical más, cerrados en
+// gh-issue-map.js (ver stepLine/ATX_HEADING_RE ahí):
+//   1. Un comentario HTML MULTILÍNEA (abre `<!--` sin cerrar en la misma
+//      línea) no ocultaba su interior — una cabecera conocida "comentada"
+//      dentro se leía como estructura real, y --reconcile podía escribir
+//      DENTRO del comentario y borrar su propio `-->` de cierre.
+//   2. Solo "## " a columna 0 terminaba una sección — "#", "###", "####",
+//      un "##" con tabulador, o indentado 1-3 espacios (todos cabeceras
+//      reales en GitHub) no terminaban nada: su contenido se tragaba en el
+//      splice de la sección anterior.
+//
+// Y en este fichero, un Importante y un Menor más:
+//   3. `hasDrift` cuenta duplicateMachineSections, pero `reconcileGaps`
+//      solo cubría ac/deps — una divergencia real (duplicado) que
+//      --reconcile no puede aplicar salía 0. Ahora `reconcileGaps` también
+//      trae `duplicates` (ver el comentario de esa función).
+//   4. La justificación de por qué un AC duplicado cuenta era la MISMA que
+//      la de Dependencias (unión) — falso: solo Dependencias une, AC
+//      descarta la segunda copia en silencio (ver el comentario de
+//      DUPLICATE_CHECKS). Se mantiene `machine: true` para AC — descartar
+//      en silencio una edición humana real es tan grave como una unión
+//      indebida — pero con la justificación correcta.
+// Y, en gh-issue-map.js, Importante 4: `extractAc` localizaba la sección
+// por prefijo abierto (`{ exact: false }`) — el único hueco legítimo es un
+// conjunto CERRADO de dos cadenas (AC_HEADING_FORMS), no un prefijo.
+//
+// Además, decisión de producto: `--reconcile` se documenta como
+// EXPERIMENTAL (ver ct-groom.mjs y commands/ct-groom.md) — cinco rondas de
+// review, cada una encontrando una forma nueva de corromper un body real,
+// son evidencia suficiente de que la mitad de APLICACIÓN de esta feature
+// (a diferencia de la de DETECCIÓN, que nunca escribe nada) sigue sin
+// conocerse por completo.
+//
 // Este módulo decide QUÉ cuenta como divergencia (diffIssue/hasDrift), CÓMO
 // se reporta (formatDrift) y CÓMO se aplica: buildReconcileEditArgs para
 // título/milestone/labels, vía los flags de `gh issue edit`; buildReconcileBody
@@ -51,6 +87,7 @@
 import {
   extractAc, extractDeps, extractSectionContent, locateSection, locateLine,
   extractSpecLink, specLinkAnchor, countHeadingLines, detectLineEnding, normalizeToLF,
+  AC_HEADING_FORMS,
 } from './gh-issue-map.js'
 
 // ownedLabelsOnly: el spec solo es autoridad sobre un prefijo (`type:`,
@@ -111,9 +148,9 @@ export function diffAc(currentAc, wantedAc) {
 // esta es la extracción que F5 usa para comparar Y para decidir si
 // `buildReconcileBody` puede aplicar el arreglo (mismo dominio en
 // detección y en aplicación). `extractAc` ya es, de por sí, section-scoped
-// con tolerancia de sufijo (`{ exact: false }`, ver gh-issue-map.js) — se
-// reexporta aquí sin más para que diffIssue no tenga que decidir dos
-// criterios distintos.
+// contra el conjunto cerrado AC_HEADING_FORMS (ver gh-issue-map.js,
+// Importante 4) — se reexporta aquí sin más para que diffIssue no tenga que
+// decidir dos criterios distintos.
 function depsInSection(body) {
   return extractDeps(extractSectionContent(body, '## Dependencias') || '')
 }
@@ -121,16 +158,36 @@ function acInSection(body) {
   return extractAc(body)
 }
 
-// DUPLICATE_CHECKS: qué cabeceras se comprueban por duplicado, con qué
-// criterio de match (exact salvo AC, igual que locateSection), y si un
-// duplicado es "machine" (cambia lo que el dispatcher hace de verdad, así
-// que CUENTA para el exit code — review round 4, importante 5) o solo
+// DUPLICATE_CHECKS: qué cabeceras se comprueban por duplicado (`headings`:
+// un string, o AC_HEADING_FORMS — el conjunto cerrado de dos formas
+// aceptables, igual que locateSection), y si un duplicado es "machine"
+// (cuenta para el exit code — review round 4, importante 5) o solo
 // cosmético (Descripción/Protegido: una nota, nunca cuenta).
+//
+// La justificación de por qué Dependencias/AC SÍ cuentan NO es la misma
+// para las dos, y la ronda 4 la había escrito como si lo fuera — corregido
+// en la ronda 5 (menor: "la justificación de los duplicados de AC es
+// falsa"):
+//   - Dependencias: gh-issue-map.js#extractDeps, la que usa el DISPATCHER
+//     real (mapGhIssue), escanea el body ENTERO con una regex global, sin
+//     ninguna noción de sección — dos "## Dependencias" con `merge-after`
+//     distintos se UNEN de verdad: el dispatcher obedece la suma de ambas
+//     copias, no "la primera".
+//   - Acceptance criteria: extractAc es section-scoped (locateSection
+//     SIEMPRE devuelve la PRIMERA aparición) — el dispatcher NUNCA ve la
+//     segunda copia, no hay unión. Pero eso no la hace inocua: si un
+//     humano edita la copia equivocada (la segunda, tras un merge conflictivo
+//     mal resuelto o un copiar-pegar), esa edición queda invisible para el
+//     agente sin que nada lo avise — silenciosamente se sigue usando la
+//     PRIMERA copia, que puede ser la vieja. Es un mecanismo distinto al de
+//     Dependencias (descartar en vez de unir), pero el resultado — el
+//     dispatcher actuando sobre datos que ya no reflejan lo que un humano
+//     escribió a propósito — es igual de real, así que sigue contando.
 const DUPLICATE_CHECKS = [
-  { prefix: '## Descripción', label: 'Descripción', exact: true, machine: false },
-  { prefix: '## Acceptance criteria', label: 'Acceptance criteria', exact: false, machine: true },
-  { prefix: '## Dependencias', label: 'Dependencias', exact: true, machine: true },
-  { prefix: '## Out of scope / Protected', label: 'Out of scope / Protected', exact: true, machine: false },
+  { headings: '## Descripción', label: 'Descripción', machine: false },
+  { headings: AC_HEADING_FORMS, label: 'Acceptance criteria', machine: true },
+  { headings: '## Dependencias', label: 'Dependencias', machine: true },
+  { headings: '## Out of scope / Protected', label: 'Out of scope / Protected', machine: false },
 ]
 
 // diffIssue: compara un issue EXISTENTE de verdad (la forma cruda de `gh api
@@ -212,7 +269,7 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
   const currentProtected = extractSectionContent(body, '## Out of scope / Protected')
   const protectedDiffers = currentProtected === null || currentProtected.trim() !== (wantedIssue.protectedLine || '').trim()
 
-  const duplicates = DUPLICATE_CHECKS.filter((c) => countHeadingLines(body, c.prefix, { exact: c.exact }) > 1)
+  const duplicates = DUPLICATE_CHECKS.filter((c) => countHeadingLines(body, c.headings) > 1)
   const duplicateSections = duplicates.map((c) => c.label)
   const duplicateMachineSections = duplicates.filter((c) => c.machine).map((c) => c.label)
 
@@ -261,24 +318,41 @@ export function hasDrift(diff) {
 }
 
 // reconcileGaps / hasReconcileGap: --reconcile puede REPORTAR una
-// divergencia de ac/deps sin poder APLICARLA — la cabecera de la sección
-// puede no existir (un humano la renombró o la borró), y sin ella
-// `buildReconcileBody` no tiene dónde escribir el arreglo (ni inventa una
-// posición para deps cuando tampoco hay un ancla segura — review round 4,
-// Critical 3). `bodyResult` es el resultado de `buildReconcileBody` (más
-// abajo, trae `unresolvedAc`/`unresolvedDeps`) — un gap real es "el diff
-// dice que diverge Y buildReconcileBody no pudo tocarlo". title/milestone/
-// labels/specLink nunca tienen gap: siempre se resuelven vía flags o un
-// splice de una sola línea, sin depender de localizar una sección con
-// cabecera.
+// divergencia sin poder APLICARLA. Dos formas distintas de esto:
+//   - ac/deps: la cabecera de la sección puede no existir (un humano la
+//     renombró o la borró), y sin ella `buildReconcileBody` no tiene dónde
+//     escribir el arreglo (ni inventa una posición para deps cuando
+//     tampoco hay un ancla segura — review round 4, Critical 3).
+//     `bodyResult` es el resultado de `buildReconcileBody` (más abajo, trae
+//     `unresolvedAc`/`unresolvedDeps`) — un gap real es "el diff dice que
+//     diverge Y buildReconcileBody no pudo tocarlo".
+//   - duplicates (review round 5, Importante 3): una sección "machine"
+//     duplicada (diff.duplicateMachineSections) CUENTA para hasDrift, pero
+//     --reconcile no tiene ningún código que decida cuál copia es la
+//     correcta y fusione o borre la sobrante — no es un gap de "no sé dónde
+//     escribir" como ac/deps, es un gap de "no hay escritura segura
+//     posible en absoluto". Sin este campo, `ct-groom.mjs` (que bajo
+//     --reconcile usa SOLO `hasReconcileGap` para decidir su exit code, ver
+//     el comentario junto al `process.exit` final de ese fichero) veía
+//     `anyReconcileGapRemains` en `false` cuando el ÚNICO drift era un
+//     duplicado (ac/deps seguían de acuerdo en contenido) — cero llamadas a
+//     `gh`, nada cambia, la línea de divergencia se imprime, y el proceso
+//     salía 0: rompía además la paridad documentada con `--dry-run
+//     --reconcile` sobre el MISMO body, que sí salía 3 (esa rama usa
+//     `anyUnresolvedDrift`, no `anyReconcileGapRemains`).
+//
+// title/milestone/labels/specLink nunca tienen gap: siempre se resuelven
+// vía flags o un splice de una sola línea, sin depender de localizar una
+// sección con cabecera.
 export function reconcileGaps(diff, bodyResult) {
   return {
     ac: Boolean((diff.ac.missing.length || diff.ac.extra.length) && bodyResult.unresolvedAc),
     deps: Boolean((diff.deps.missing.length || diff.deps.extra.length) && bodyResult.unresolvedDeps),
+    duplicates: Boolean((diff.duplicateMachineSections || []).length),
   }
 }
 export function hasReconcileGap(gaps) {
-  return Boolean(gaps.ac || gaps.deps)
+  return Boolean(gaps.ac || gaps.deps || gaps.duplicates)
 }
 
 // formatDrift: una línea humana por campo. Título/milestone/enlace-al-spec/
@@ -302,7 +376,15 @@ export function formatDrift(diff) {
   for (const a of diff.ac.missing) lines.push(`divergencia: ${head}: falta el criterio de aceptación "${a}" (lo pide el spec, el issue no lo tiene)`)
   for (const a of diff.ac.extra) lines.push(`divergencia: ${head}: sobra el criterio de aceptación "${a}" (lo tiene el issue, el spec ya no lo produce)`)
   for (const section of diff.duplicateMachineSections || []) {
-    lines.push(`divergencia: ${head}: la sección "## ${section}" aparece más de una vez en el body — el dispatcher no distingue "la primera": une o elimina la copia sobrante a mano`)
+    // Menor (review round 5): "el dispatcher no distingue la primera" era
+    // preciso para Dependencias (une ambas copias, escaneo de todo el
+    // body) pero FALSO para Acceptance criteria (el dispatcher SÍ usa solo
+    // la primera — el riesgo ahí es que esa primera copia ya no sea la que
+    // un humano quiso, no que el dispatcher las mezcle). El mensaje ya no
+    // afirma un mecanismo único para las dos: nombra el riesgo real,
+    // suficiente para que revisar a mano tenga sentido sin necesitar saber
+    // cuál mecanismo aplica.
+    lines.push(`divergencia: ${head}: la sección "## ${section}" aparece más de una vez en el body — el dispatcher no reconstruye la intención de un humano a partir de "la primera" ni de "la unión": revisa y une o elimina la copia sobrante a mano`)
   }
   if (diff.descripcionDiffers) lines.push(`nota: ${head}: la sección "## Descripción" difiere del spec (prosa — no cuenta para el exit code; --reconcile no la reescribe)`)
   if (diff.protectedDiffers) lines.push(`nota: ${head}: la sección "## Out of scope / Protected" difiere del spec (prosa — no cuenta para el exit code; --reconcile no la reescribe)`)
@@ -402,7 +484,7 @@ export function buildReconcileBody(existingBody, wantedIssue) {
 
   const acDiff = diffAc(acInSection(body), wantedIssue.ac)
   if (acDiff.missing.length || acDiff.extra.length) {
-    const acLoc = locateSection(body, '## Acceptance criteria', { exact: false })
+    const acLoc = locateSection(body, AC_HEADING_FORMS)
     if (acLoc) {
       body = body.slice(0, acLoc.headingEnd) + renderAcContent(wantedIssue.ac) + '\n' + body.slice(acLoc.contentEnd)
       changed = true
@@ -444,7 +526,19 @@ export function buildReconcileBody(existingBody, wantedIssue) {
       // El spec ya no declara deps para este slice, pero el issue conserva
       // la sección — se retira ENTERA (cabecera incluida), no solo su
       // contenido.
-      body = body.slice(0, depsLoc.headingStart) + body.slice(depsLoc.contentEnd)
+      //
+      // Menor (review round 5): `body.slice(0, depsLoc.headingStart)`
+      // conserva la línea en blanco que ya separaba a la sección ANTERIOR
+      // de "## Dependencias" (buildIssueBody siempre deja una entre
+      // secciones), y `body.slice(depsLoc.contentEnd)` empieza con el '\n'
+      // que separaba a Dependencias de la sección SIGUIENTE — concatenar
+      // ambos tal cual deja DOS líneas en blanco seguidas en el punto de la
+      // costura. Se recorta un '\n' sobrante del final del primer trozo
+      // (si no hay ninguno, p.ej. porque Dependencias era la primera
+      // sección del body, no hay nada que recortar y el `replace` es un
+      // no-op) para dejar exactamente una.
+      const before = body.slice(0, depsLoc.headingStart).replace(/\n$/, '')
+      body = before + body.slice(depsLoc.contentEnd)
       changed = true
     }
   }

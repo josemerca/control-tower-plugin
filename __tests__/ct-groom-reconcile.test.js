@@ -585,4 +585,72 @@ describe('ct-groom (corrida real) — un "## Dependencias"/"## Acceptance criter
     expect(res.stderr).toMatch(/divergencia.*Dependencias.*aparece más de una vez/is)
     rmSync(dir, { recursive: true, force: true })
   })
+
+  // Importante 3 (review round 5): con --reconcile, este MISMO duplicado
+  // (título/milestone/labels/ac/deps ya coinciden con el spec — la ÚNICA
+  // divergencia es que "## Dependencias" aparece dos veces con el MISMO
+  // contenido) no tiene NINGÚN gap de ac/deps que reportar (los conjuntos
+  // ya coinciden), así que antes de este fix `anyReconcileGapRemains`
+  // quedaba en `false` — cero llamadas a `gh issue edit` (nada que
+  // cambiar), la línea de divergencia se imprimía igual, y el proceso
+  // salía 0. Ahora `reconcileGaps` también cubre duplicateMachineSections:
+  // debe seguir saliendo 3, con el mismo aviso de "no se puede aplicar".
+  it('el MISMO duplicado, con --reconcile → sigue saliendo 3 (no 0): --reconcile no tiene con qué resolver un duplicado, cero llamadas a `gh issue edit`', () => {
+    const { dir, spec } = writeSpec(SPEC_2)
+    const argvLog = join(dir, 'argv.log')
+    const issue1WithDuplicateDeps = {
+      number: 501,
+      title: '#1 login',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }],
+      body: [
+        `> Slice #1 del epic. Spec: [${spec}#9](${spec}#9)`, '',
+        '## Descripción', 'modelo', '',
+        '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-1.1', '',
+        '## Dependencias', '- merge-after #2', '',
+        '## Dependencias', '- merge-after #2', '', // copia duplicada, MISMO contenido — ac/deps ya coinciden con el spec
+        '## Out of scope / Protected', '- 🚫 schema', '',
+        '<!-- ct-order:1 -->',
+      ].join('\n'),
+    }
+    const issue2Matching = {
+      number: 502,
+      title: '#2 signup',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }],
+      body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, { specPath: spec, specSection: '9' }),
+    }
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], {
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[issue1WithDuplicateDeps, issue2Matching]]),
+      FAKE_GH_ARGV_LOG_FILE: argvLog,
+    })
+    expect(res.status).toBe(3) // antes de este fix, esto salía 0 — rompía además la paridad con --dry-run --reconcile sobre el mismo body
+    expect(res.stderr).toMatch(/divergencia.*Dependencias.*aparece más de una vez/is)
+    expect(res.stderr).toMatch(/--reconcile no puede aplicar del todo esta divergencia.*secciones duplicadas/is)
+    const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
+    expect(log).not.toMatch(/issue edit 501/) // nada que aplicar de verdad: ac/deps ya coincidían, solo sobra una copia
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// Decisión de producto (review round 5): --reconcile se documenta como
+// EXPERIMENTAL — el aviso se imprime por stderr en cuanto el flag está
+// presente, ANTES de cualquier validación o mutación, y NUNCA aparece sin
+// el flag (el comportamiento por defecto no gana avisos nuevos).
+describe('ct-groom — aviso de "--reconcile es EXPERIMENTAL" (review round 5, decisión de producto)', () => {
+  it('con --reconcile → el aviso aparece por stderr', () => {
+    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], baseEnv(spec))
+    expect(res.stderr).toMatch(/--reconcile es EXPERIMENTAL/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+  it('SIN --reconcile → el aviso NUNCA aparece (el comportamiento por defecto no gana avisos nuevos)', () => {
+    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], baseEnv(spec))
+    expect(res.stderr).not.toMatch(/EXPERIMENTAL/)
+    rmSync(dir, { recursive: true, force: true })
+  })
 })

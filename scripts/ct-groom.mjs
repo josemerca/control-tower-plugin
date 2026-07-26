@@ -53,6 +53,24 @@ const dryRun = has('--dry-run')
 // por defecto es detectar y reportar divergencia, nunca tocar nada sin que
 // se pida explícitamente (ver el bloque de reconciliación más abajo).
 const reconcileFlag = has('--reconcile')
+// Decisión de producto (review round 5): --reconcile se marca EXPERIMENTAL.
+// Cinco rondas de review, cada una encontrando una forma NUEVA de corromper
+// un body real (vallas de código con longitud/carácter equivocados,
+// comentarios HTML multilínea, encabezados que no son "## " literal,
+// secciones duplicadas) son evidencia de que la relación entre "markdown
+// que un humano puede escribir de verdad" y "lo que el escáner cubre" no
+// se conoce todavía por completo. La mitad de DETECCIÓN de esta feature
+// (todo lo de arriba, sin --reconcile) nunca escribe nada — es segura por
+// construcción. La mitad de APLICACIÓN sí escribe en datos reales del
+// usuario, así que el aviso se imprime en cuanto se sabe que el flag está
+// presente — ANTES de cualquier validación o mutación, con o sin
+// --dry-run (el aviso es sobre el RIESGO del flag, no sobre si esta
+// corrida en concreto llega a mutar algo) — y NUNCA aparece sin el flag:
+// el comportamiento por defecto (detectar, reportar, exit 3) no cambia ni
+// gana avisos nuevos.
+if (reconcileFlag) {
+  console.error('aviso: --reconcile es EXPERIMENTAL — en las pruebas de esta feature ha corrompido bodies de issues reales de cuatro formas distintas ya encontradas y arregladas (vallas de código con el carácter/longitud de cierre equivocados, comentarios HTML multilínea, encabezados que no son "## " literal, secciones duplicadas que no se pueden resolver solas) — revisa el diff del issue en GitHub después de cada corrida, no confíes en el mensaje "reconciliado" a ciegas.')
+}
 
 // Validación explícita: con el `arg()` endurecido de arriba, un `--milestone`
 // colgante (último token, o seguido de otro flag) devuelve `true` en vez de
@@ -347,11 +365,15 @@ function driftCategories(diff) {
 // QUE REALMENTE DIVERGEN, --reconcile no pudo (o no podrá) aplicar —
 // nunca "solo prosa" cuando en realidad es AC/deps sin sección localizable:
 // ese era exactamente el bug que hacía salir 0 sobre una divergencia de
-// máquina real.
+// máquina real. `gaps.duplicates` (review round 5, Importante 3): una
+// sección "machine" duplicada — --reconcile no decide cuál copia es la
+// correcta, así que tampoco puede aplicar nada ahí; sin nombrarlo aquí,
+// esta misma divergencia salía 0 en silencio bajo --reconcile.
 function describeGaps(gaps) {
   const parts = []
   if (gaps.ac) parts.push('criterios de aceptación (no se encontró la sección "## Acceptance criteria" en el body)')
   if (gaps.deps) parts.push('dependencias (no se encontró la sección "## Dependencias" en el body)')
+  if (gaps.duplicates) parts.push('secciones duplicadas (## Dependencias/## Acceptance criteria — --reconcile no decide cuál copia es la correcta: une o borra la sobrante a mano)')
   return parts.join(' y ')
 }
 

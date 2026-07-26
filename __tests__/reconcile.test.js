@@ -399,20 +399,20 @@ describe('buildReconcileEditArgs — título/milestone/labels vía flags de `gh 
 })
 
 describe('reconcileGaps / hasReconcileGap — divergencia real que --reconcile no pudo aplicar', () => {
-  const DIFF_CLEAN = { ac: { missing: [], extra: [] }, deps: { missing: [], extra: [] } }
+  const DIFF_CLEAN = { ac: { missing: [], extra: [] }, deps: { missing: [], extra: [] }, duplicateMachineSections: [] }
   it('sin divergencia de ac/deps → sin gap, aunque bodyResult marque unresolved (no debería pasar, pero no basta por sí solo)', () => {
     const gaps = reconcileGaps(DIFF_CLEAN, { body: null, unresolvedAc: true, unresolvedDeps: true })
-    expect(gaps).toEqual({ ac: false, deps: false })
+    expect(gaps).toEqual({ ac: false, deps: false, duplicates: false })
     expect(hasReconcileGap(gaps)).toBe(false)
   })
   it('AC diverge Y no se pudo localizar la sección → gap.ac = true', () => {
-    const diff = { ac: { missing: ['AC-1.2'], extra: [] }, deps: { missing: [], extra: [] } }
+    const diff = { ac: { missing: ['AC-1.2'], extra: [] }, deps: { missing: [], extra: [] }, duplicateMachineSections: [] }
     const gaps = reconcileGaps(diff, { body: null, unresolvedAc: true, unresolvedDeps: false })
     expect(gaps.ac).toBe(true)
     expect(hasReconcileGap(gaps)).toBe(true)
   })
   it('AC diverge pero SÍ se pudo aplicar (unresolvedAc: false) → sin gap', () => {
-    const diff = { ac: { missing: ['AC-1.2'], extra: [] }, deps: { missing: [], extra: [] } }
+    const diff = { ac: { missing: ['AC-1.2'], extra: [] }, deps: { missing: [], extra: [] }, duplicateMachineSections: [] }
     const gaps = reconcileGaps(diff, { body: 'algo', unresolvedAc: false, unresolvedDeps: false })
     expect(gaps.ac).toBe(false)
     expect(hasReconcileGap(gaps)).toBe(false)
@@ -420,10 +420,33 @@ describe('reconcileGaps / hasReconcileGap — divergencia real que --reconcile n
   // Critical 3 (review round 4): deps AHORA sí puede quedar unresolved
   // (antes hardcodeado a false) — cuando no hay ancla segura donde insertar.
   it('deps diverge Y no se pudo localizar un ancla segura → gap.deps = true', () => {
-    const diff = { ac: { missing: [], extra: [] }, deps: { missing: [2], extra: [] } }
+    const diff = { ac: { missing: [], extra: [] }, deps: { missing: [2], extra: [] }, duplicateMachineSections: [] }
     const gaps = reconcileGaps(diff, { body: null, unresolvedAc: false, unresolvedDeps: true })
     expect(gaps.deps).toBe(true)
     expect(hasReconcileGap(gaps)).toBe(true)
+  })
+
+  // Importante 3 (review round 5): "con --reconcile, la divergencia que
+  // --reconcile no puede aplicar sale 0" — hasDrift cuenta
+  // duplicateMachineSections, pero antes de este fix reconcileGaps solo
+  // miraba ac/deps: un duplicado, sin NINGÚN gap de ac/deps a la vez
+  // (ac/deps siguen de acuerdo en contenido — el duplicado es el único
+  // drift), pasaba con hasReconcileGap en false, así que ct-groom.mjs
+  // (que bajo --reconcile usa solo hasReconcileGap para su exit code)
+  // salía 0 sobre una divergencia real sin aplicar ni una sola llamada a
+  // `gh`.
+  it('duplicateMachineSections no vacío, sin ningún gap de ac/deps → gap.duplicates = true de todos modos', () => {
+    const diff = { ac: { missing: [], extra: [] }, deps: { missing: [], extra: [] }, duplicateMachineSections: ['Dependencias'] }
+    const gaps = reconcileGaps(diff, { body: null, unresolvedAc: false, unresolvedDeps: false })
+    expect(gaps.ac).toBe(false)
+    expect(gaps.deps).toBe(false)
+    expect(gaps.duplicates).toBe(true)
+    expect(hasReconcileGap(gaps)).toBe(true)
+  })
+  it('sin duplicateMachineSections (o campo ausente) → gap.duplicates = false', () => {
+    expect(reconcileGaps(DIFF_CLEAN, { body: null, unresolvedAc: false, unresolvedDeps: false }).duplicates).toBe(false)
+    const diffSinCampo = { ac: { missing: [], extra: [] }, deps: { missing: [], extra: [] } }
+    expect(reconcileGaps(diffSinCampo, { body: null, unresolvedAc: false, unresolvedDeps: false }).duplicates).toBe(false)
   })
 })
 
@@ -578,6 +601,46 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
     expect(extractDeps(extractSectionContent(newBody, '## Descripción'))).toEqual([99]) // la valla no se tocó
     const realDepsSection = extractSectionContent(newBody, '## Dependencias')
     expect(extractDeps(realDepsSection)).toEqual([1, 3]) // la sección REAL sí se actualizó
+  })
+
+  // Review round 5, Critical 1 — end-to-end: unas deps VIEJAS comentadas
+  // "mientras decidimos con pagos" no deben secuestrar el splice de
+  // --reconcile ni perder su "-->" de cierre.
+  it('reconciliar deps con una mención de "## Dependencias" dentro de un comentario HTML multilínea no corrompe el comentario ni pierde su cierre', () => {
+    const withComment = [
+      '> Slice #2 del epic. Spec: [spec.md#9](spec.md#9)', '',
+      '## Descripción', 'Ejemplo:', '<!--', '## Dependencias', '- merge-after #99 (pospuesto, negociado con pagos)', '-->', 'fin.', '',
+      '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-2.1', '',
+      '## Dependencias', '- merge-after #1', '',
+      '## Out of scope / Protected', '- 🚫 schema §6', '',
+      '<!-- ct-order:2 -->',
+    ].join('\n')
+    const { body: newBody } = buildReconcileBody(withComment, { ...WANTED_BASE, deps: [1, 3] })
+    expect(newBody).toContain('<!--\n## Dependencias\n- merge-after #99 (pospuesto, negociado con pagos)\n-->') // el comentario sobrevive intacto, CON su cierre
+    expect(newBody).toContain('fin.')
+    const realDepsSection = extractSectionContent(newBody, '## Dependencias')
+    expect(extractDeps(realDepsSection)).toEqual([1, 3]) // la sección REAL sí se actualizó
+    // Ninguna sección/protegido desapareció (lo que pasaría si el "-->" se
+    // hubiera comido junto con todo lo que viene detrás, hasta EOF).
+    expect(newBody).toContain('## Out of scope / Protected')
+    expect(newBody).toContain('<!-- ct-order:2 -->')
+  })
+
+  // Review round 5, Critical 2 — end-to-end: reproducción exacta del
+  // mecanismo de corrupción del reviewer. Un "### Notas de implementación"
+  // con una advertencia real, escrito JUSTO DEBAJO del contenido de AC (y
+  // por tanto, antes del fix, "dentro" del rango que --reconcile sustituye
+  // al splicear AC), no debe perderse cuando AC se reconcilia — el splice
+  // tiene que parar en esa cabecera, no en la siguiente "## " literal.
+  it('reconciliar AC con un "### Notas de implementación" (advertencia real) pegado justo debajo del contenido de AC no se lo traga el splice', () => {
+    const withSubheading = GENERATED.replace(
+      '- AC-2.1\n\n## Dependencias',
+      '- AC-2.1\n\n### Notas de implementación\nla dependencia la negociamos con pagos: NO tocar sin hablar con Ana\n\n## Dependencias',
+    )
+    const { body: newBody } = buildReconcileBody(withSubheading, { ...WANTED_BASE, ac: ['AC-2.1', 'AC-2.2'] })
+    expect(newBody).toContain('### Notas de implementación')
+    expect(newBody).toContain('NO tocar sin hablar con Ana')
+    expect(extractAc(newBody)).toEqual(['AC-2.1', 'AC-2.2'])
   })
 
   // Menor: CRLF — el resultado final conserva el final de línea del

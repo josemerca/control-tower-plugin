@@ -1281,6 +1281,33 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
     rmSync(dir, { recursive: true, force: true })
   })
 
+  // Decisión de producto (review round 5): el aviso de "--reconcile es
+  // EXPERIMENTAL" se imprime en cuanto el flag está presente, CON o SIN
+  // --dry-run — el aviso es sobre el riesgo del flag, no sobre si esta
+  // corrida en concreto llega a mutar algo de verdad.
+  it('--dry-run --reconcile → el aviso de EXPERIMENTAL también aparece (mismo riesgo, aunque dry-run nunca mute)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run', '--reconcile'],
+      { encoding: 'utf8', env: fakeEnv() })
+    expect(res.status).toBe(0) // sin issues existentes, nada diverge — el aviso vive en stderr, no afecta el exit
+    expect(res.stderr).toMatch(/--reconcile es EXPERIMENTAL/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+  it('--dry-run SIN --reconcile → el aviso NUNCA aparece', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
+    let stderrOut = ''
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
+        { encoding: 'utf8', stdio: QUIET_STDIO, env: fakeEnv() })
+    } catch (e) {
+      stderrOut = e.stderr ? e.stderr.toString() : ''
+    }
+    expect(stderrOut).not.toMatch(/EXPERIMENTAL/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('fallo al listar issues de GitHub bajo --dry-run (con --repo) aborta igual que la corrida real — el plan nunca se imprime', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
     const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)

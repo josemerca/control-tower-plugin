@@ -37,6 +37,25 @@ export function normalizeToLF(text) {
 // Y longitud — ver stepFence más abajo.
 const FENCE_LINE_RE = /^ {0,3}(`{3,}|~{3,})/
 
+// ATX_HEADING_RE (review round 5, Critical 2 — el reviewer atacó su propio
+// terminador del round 4 y encontró que solo reconocía "## " literal a
+// columna 0): CommonMark considera cabecera ATX cualquier línea con 1 a 6
+// "#", indentada hasta 3 espacios, seguida de un espacio/tabulador o de fin
+// de línea. Antes, un "#", "###", "####", un "##" separado por TABULADOR, o
+// uno indentado 1-3 espacios — los cinco, cabeceras reales en GitHub — no
+// terminaban ninguna sección: todo lo que hubiera debajo (hasta la
+// siguiente "## " exacta) se consideraba parte del CONTENIDO de la sección
+// anterior. Verificado con el ejemplo del reviewer: un "### Notas de
+// implementación" con una advertencia real ("no tocar sin hablar con Ana")
+// desaparecía al reconciliar porque quedaba "dentro" de la sección previa,
+// y el splice de --reconcile lo sustituía sin más.
+const ATX_HEADING_RE = /^ {0,3}#{1,6}([ \t]|$)/
+
+// COMMENT_OPEN_TOKEN / COMMENT_CLOSE_TOKEN: los delimitadores de un
+// comentario HTML — ver stepLine más abajo (Critical 1, review round 5).
+const COMMENT_OPEN_TOKEN = '<!--'
+const COMMENT_CLOSE_TOKEN = '-->'
+
 // stepFence (review round 4, Critical 1 — el reviewer atacó su propio
 // escáner del round 3 y encontró que CUALQUIER delimitador conmutaba el
 // estado, sin mirar tipo ni longitud): CommonMark solo cierra una valla con
@@ -50,11 +69,24 @@ const FENCE_LINE_RE = /^ {0,3}(`{3,}|~{3,})/
 // documenta de sí mismo: un bloque de 4 backticks mostrando, como ejemplo,
 // un bloque de 3 backticks con "## Dependencias" dentro.
 //
-// Recibe el estado previo `{ inFence, char, len }` y la línea actual;
-// devuelve `{ state, isFenceDelim }` — `isFenceDelim` es cierto cuando la
-// línea EN SÍ es un delimitador real (abre o cierra), y esas líneas nunca
-// cuentan como cabecera/terminador por sí mismas, independientemente del
-// nuevo valor de `inFence`.
+// Recibe el estado previo `{ inFence, fenceChar, fenceLen }` y la línea
+// actual; devuelve `{ state, isFenceDelim }` — `isFenceDelim` es cierto
+// cuando la línea EN SÍ es un delimitador real (abre o cierra), y esas
+// líneas nunca cuentan como cabecera/terminador por sí mismas,
+// independientemente del nuevo valor de `inFence`.
+//
+// Menor (review round 5): además de carácter y longitud, CommonMark exige
+// que una línea de CIERRE no lleve nada detrás salvo espacio en blanco — un
+// "info string" (p.ej. el "js" de "```js") solo es válido en la APERTURA.
+// Antes, una línea como "```js" dentro de un bloque YA abierto (pensada
+// como CONTENIDO de ejemplo — p.ej. mostrando otro fence con lenguaje —, no
+// como cierre) se leía igualmente como cierre en falso porque solo se
+// miraba el carácter+longitud del delimitador, ignorando el resto de la
+// línea. Fallaba seguro (no corrompía nada: como mucho hacía localizable de
+// más una cabecera que en realidad seguía "dentro" del ejemplo), pero el
+// mensaje de error que dependiera de dónde termina esa sección podía culpar
+// a una cabecera que sigue visiblemente presente más abajo, en vez de
+// explicar que el cierre nunca fue tal.
 function stepFence(line, state) {
   const m = FENCE_LINE_RE.exec(line)
   if (!m) return { state, isFenceDelim: false }
@@ -62,41 +94,100 @@ function stepFence(line, state) {
   const len = m[1].length
   if (!state.inFence) {
     // Fuera de cualquier valla: esta línea SIEMPRE abre una nueva,
-    // recordando su carácter y longitud exactos.
-    return { state: { inFence: true, char, len }, isFenceDelim: true }
+    // recordando su carácter y longitud exactos. Un info string detrás (la
+    // apertura SÍ lo tolera) no importa aquí.
+    return { state: { inFence: true, fenceChar: char, fenceLen: len }, isFenceDelim: true }
   }
-  if (char === state.char && len >= state.len) {
-    // Cierra: mismo carácter, longitud igual o mayor que la apertura.
-    return { state: { inFence: false, char: null, len: 0 }, isFenceDelim: true }
+  const rest = line.slice(m[0].length)
+  if (char === state.fenceChar && len >= state.fenceLen && /^\s*$/.test(rest)) {
+    // Cierra: mismo carácter, longitud igual o mayor que la apertura, y
+    // nada más que espacio en blanco detrás del delimitador.
+    return { state: { inFence: false, fenceChar: null, fenceLen: 0 }, isFenceDelim: true }
   }
   // Un delimitador de OTRO carácter (p.ej. "~~~" dentro de un bloque abierto
-  // con "```"), o del mismo carácter pero más corto, NO cierra la valla —
-  // es contenido normal dentro de ella (`state` no cambia; `isFenceDelim`
-  // false porque, a efectos de este escáner, esta línea no delimita nada
-  // por sí sola — sigue dentro de la valla ya abierta, que es justo lo que
-  // decide si predicate() se evalúa o no en el llamador).
+  // con "```"), del mismo carácter pero más corto, o con texto detrás
+  // (info string, p.ej. "```js") NO cierra la valla — es contenido normal
+  // dentro de ella (`state` no cambia; `isFenceDelim` false porque, a
+  // efectos de este escáner, esta línea no delimita nada por sí sola —
+  // sigue dentro de la valla ya abierta, que es justo lo que decide si
+  // predicate() se evalúa o no en el llamador).
   return { state, isFenceDelim: false }
 }
 
-// scanLines: recorre `body` línea a línea, llevando el estado de valla con
-// `stepFence` (carácter + longitud, no un simple booleano — ver arriba), y
-// devuelve la primera línea (índice + offset absoluto en la cadena) que
-// satisface `predicate`, IGNORANDO por completo las líneas dentro de una
-// valla (o que son ellas mismas el delimitador). Es el mecanismo
-// compartido detrás de locateSection/locateLine — review round 3
-// (Critical 1): antes, tanto la cabecera como el terminador de sección se
-// buscaban con una regex sobre la cadena COMPLETA, sin distinguir "dentro
-// de una valla de código" de "estructura real del documento".
+function initLineState() {
+  return { inFence: false, fenceChar: null, fenceLen: 0, inComment: false }
+}
+
+// stepLine (review round 5, Critical 1 — "endureciste las vallas a fondo y
+// dejaste intactas las otras dos cosas con forma de delimitador que viven
+// en el mismo body"): un comentario HTML multilínea es EXACTAMENTE el mismo
+// tipo de riesgo que una valla de código sin cerrar — nada rastreaba su
+// INTERIOR, así que una cabecera conocida "comentada" dentro de un
+// `<!-- ... -->` que abre en una línea y cierra varias líneas después (p.ej.
+// unas deps viejas comentadas "mientras decidimos") se leía como si fuera
+// estructura real del documento. Con eso, `locateSection` devolvía la copia
+// comentada, `--reconcile` escribía DENTRO del comentario, y como el fin de
+// contenido llega hasta la siguiente cabecera real, el splice se comía el
+// propio `-->` de cierre — en GitHub, un comentario sin cerrar se traga
+// todo hasta EOF.
+//
+// La distinción que importa: el marcador `<!-- ct-order:N -->` (y
+// cualquier comentario que ABRE y CIERRA en la MISMA línea) es una línea
+// real y autocontenida — SIGUE siendo válida como terminador de sección,
+// igual que antes. Lo que NO puede seguir pasando es que la mera presencia
+// de "<!--" en una línea (sin "-->" detrás, EN ESA MISMA línea) se trate
+// como el marcador: eso es la APERTURA de un comentario multilínea, cuyo
+// interior (hasta la línea que por fin trae "-->") queda tan invisible para
+// el escáner como el interior de una valla.
+//
+// Devuelve `{ state, wasHidden }` — `wasHidden` es cierto cuando, ANTES de
+// procesar esta línea, el escáner ya estaba dentro de una valla o de un
+// comentario multilínea abiertos por una línea ANTERIOR: es lo que decide,
+// en cada llamador, si esta línea es candidata a heading/terminador. La
+// propia línea que ABRE la valla/el comentario nunca es `wasHidden` (era
+// visible cuando se alcanzó), pero tampoco necesita serlo a propósito: ni
+// un delimitador de valla ni un "<!--" se parecen nunca a una cabecera ATX
+// o a un marcador autocontenido, así que da igual si se evalúan o no contra
+// esos predicados — nunca matchean por accidente.
+function stepLine(line, state) {
+  const wasHidden = state.inFence || state.inComment
+  if (state.inComment) {
+    if (line.includes(COMMENT_CLOSE_TOKEN)) return { state: { ...state, inComment: false }, wasHidden }
+    return { state, wasHidden }
+  }
+  if (state.inFence) {
+    const step = stepFence(line, state)
+    return { state: step.state, wasHidden }
+  }
+  const fenceStep = stepFence(line, state)
+  if (fenceStep.isFenceDelim) return { state: fenceStep.state, wasHidden }
+  const openIdx = line.indexOf(COMMENT_OPEN_TOKEN)
+  if (openIdx !== -1) {
+    const closesSameLine = line.indexOf(COMMENT_CLOSE_TOKEN, openIdx + COMMENT_OPEN_TOKEN.length) !== -1
+    if (!closesSameLine) return { state: { ...state, inComment: true }, wasHidden }
+  }
+  return { state, wasHidden }
+}
+
+// scanLines: recorre `body` línea a línea, llevando el estado combinado de
+// valla+comentario con `stepLine`, y devuelve la primera línea (índice +
+// offset absoluto en la cadena) que satisface `predicate`, IGNORANDO por
+// completo las líneas ocultas dentro de una valla o de un comentario
+// multilínea. Es el mecanismo compartido detrás de locateSection/locateLine
+// — review round 3 (Critical 1): antes, tanto la cabecera como el
+// terminador de sección se buscaban con una regex sobre la cadena COMPLETA,
+// sin distinguir "dentro de una valla de código" (y, desde la ronda 5,
+// "dentro de un comentario HTML") de "estructura real del documento".
 function scanLines(body, predicate) {
   const src = body || ''
   const lines = src.split('\n')
   let offset = 0
-  let fence = { inFence: false, char: null, len: 0 }
+  let state = initLineState()
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    const step = stepFence(line, fence)
-    fence = step.state
-    if (!step.isFenceDelim && !fence.inFence && predicate(line, i)) {
+    const step = stepLine(line, state)
+    state = step.state
+    if (!step.wasHidden && predicate(line, i)) {
       return { index: i, offset, line }
     }
     offset += line.length + 1
@@ -104,28 +195,45 @@ function scanLines(body, predicate) {
   return null
 }
 
+// headingMatcher: `headings` es un string (la cabecera exacta) o un array
+// de strings (un conjunto CERRADO de cabeceras aceptables — ver AC_HEADING_FORMS
+// más abajo, review round 5, Importante 4). Siempre igualdad exacta módulo
+// espacios finales (`trimEnd()`, que también absorbe un `\r` de CRLF ya que
+// `trim`/`trimEnd` lo tratan como whitespace) contra CUALQUIERA de las
+// alternativas — nunca prefijo abierto (ver el porqué en locateSection).
+function headingMatcher(headings) {
+  const list = Array.isArray(headings) ? headings : [headings]
+  return (line) => list.includes(line.trimEnd())
+}
+
 // locateSection: encuentra dónde vive una sección del body (buildIssueBody
 // en groom.js genera un puñado de secciones con cabecera fija: "##
 // Acceptance criteria…", "## Dependencias", "## Out of scope / Protected",
 // "## Descripción") — delimitada por su propia cabecera y por el mismo
 // criterio de "fin de sección" que ya usaba extractAc: la siguiente
-// cabecera "## …", el marcador `<!-- ct-order -->`, o el fin del body.
-// Devuelve `null` si la cabecera no aparece en absoluto.
+// cabecera ATX, el marcador autocontenido `<!-- ct-order -->`, o el fin del
+// body. Devuelve `null` si la cabecera no aparece en absoluto.
 //
-// `exact` (review round 4, Critical 2 — el reviewer atacó su propio
-// `startsWith` del round 3 y encontró que servía igual para las CUATRO
-// secciones, cuando solo "## Acceptance criteria" tiene un sufijo legítimo
-// ("(EARS, 1:1 con tests)"); las otras tres SIEMPRE son la cabecera pelada,
-// sin nada detrás. Con `startsWith` genérico, un humano escribiendo
-// `## Dependencias externas (notas del equipo)` — una sección propia, sobre
-// OTRA cosa — se reclamaba como SI FUERA la sección de dependencias real:
-// --reconcile sustituía esa prosa humana por `- merge-after #N` y dejaba la
-// sección real (si la había, en otro punto del body) obsoleta e invisible,
-// exit 0 estable para siempre. Por defecto `exact: true` (igualdad exacta,
-// módulo espacios finales — `trimEnd()`, que también absorbe un `\r` de
-// CRLF ya que `trim`/`trimEnd` lo tratan como whitespace): el ÚNICO caso
-// que necesita `exact: false` (prefijo) es la cabecera de AC, el único
-// hueco legítimo de sufijo variable.
+// `headingText` acepta un string o un array de strings (ver headingMatcher)
+// — review round 5, Importante 4: hasta ahora "## Acceptance criteria" era
+// el ÚNICO caso con `{ exact: false }` (prefijo abierto), porque es la única
+// de las cuatro cabeceras con un sufijo legítimo ("(EARS, 1:1 con tests)").
+// Pero buildIssueBody (groom.js) SOLO emite dos cadenas fijas para esa
+// cabecera (la actual y, en bodies más antiguos, la de antes de que EARS se
+// añadiera) — el hueco legítimo es un CONJUNTO CERRADO de dos elementos, no
+// un prefijo abierto. Con prefijo abierto, un "## Acceptance criteria
+// propuestos por QA (borrador)" escrito por un humano POR ENCIMA de la
+// sección real se reclamaba como si fuera ella: el dispatcher inyectaba
+// CERO criterios reales en el prompt del agente, y --reconcile habría
+// sustituido la prosa de QA. Ver AC_HEADING_FORMS más abajo.
+//
+// Las OTRAS tres cabeceras (Descripción/Dependencias/Out of scope) siguen
+// exigiendo igualdad exacta con un ÚNICO string: con `startsWith` genérico
+// (round 3), un humano escribiendo `## Dependencias externas (notas del
+// equipo)` — una sección propia, sobre OTRA cosa — se reclamaba como SI
+// FUERA la sección de dependencias real: --reconcile sustituía esa prosa
+// humana por `- merge-after #N` y dejaba la sección real (si la había, en
+// otro punto del body) obsoleta e invisible, exit 0 estable para siempre.
 //
 // Se usa tanto para EXTRAER contenido (comparar spec vs. issue — F5) como
 // para REEMPLAZARLO quirúrgicamente (F5 --reconcile, ver
@@ -134,9 +242,9 @@ function scanLines(body, predicate) {
 // SOLO esa sección, dejando intacto cualquier contenido humano antes,
 // después, o en cualquier sección nueva que el humano haya añadido en otro
 // punto del body.
-export function locateSection(body, headingText, { exact = true } = {}) {
+export function locateSection(body, headingText) {
   const src = body || ''
-  const matches = exact ? (line) => line.trimEnd() === headingText : (line) => line.startsWith(headingText)
+  const matches = headingMatcher(headingText)
   const heading = scanLines(src, matches)
   if (!heading) return null
   const headingStart = heading.offset
@@ -145,25 +253,33 @@ export function locateSection(body, headingText, { exact = true } = {}) {
   const headingEnd = Math.min(headingStart + heading.line.length + 1, src.length)
 
   // Terminador: primera línea (a partir de la siguiente a la cabecera),
-  // ignorando vallas (mismo criterio de carácter+longitud que scanLines —
-  // ver stepFence), que sea otra cabecera "## " o el marcador "<!--".
-  // `consumed` acumula, línea a línea, la posición (relativa a headingEnd)
-  // de INICIO de la línea que se está evaluando — al encontrar el
-  // terminador en la línea `i`, `consumed` todavía NO incluye esa línea, así
-  // que apunta al carácter '\n' que la precede inmediatamente (o a
-  // headingEnd si no hay ninguna línea de contenido en medio), para que el
-  // formato de "línea en blanco antes de la siguiente cabecera" que genera
-  // buildIssueBody se preserve al reconstruir el empalme (ver
-  // buildReconcileBody).
+  // ignorando líneas ocultas (dentro de una valla O de un comentario
+  // multilínea — ver stepLine, review round 5, Critical 1), que sea otra
+  // cabecera ATX (review round 5, Critical 2: cualquier nivel "#" a
+  // "######", no solo "## " literal — ver ATX_HEADING_RE) o un comentario
+  // AUTOCONTENIDO (abre Y cierra en la misma línea — el marcador
+  // `<!-- ct-order:N -->` real). La apertura de un comentario MULTILÍNEA
+  // (un "<!--" sin "-->" en esa misma línea) NUNCA termina la sección por sí
+  // sola: en vez de eso, hace que las líneas siguientes queden ocultas
+  // (`wasHidden`) hasta que el propio comentario cierre — el terminador
+  // real sigue siendo lo que venga DESPUÉS de ese cierre. `consumed`
+  // acumula, línea a línea, la posición (relativa a headingEnd) de INICIO
+  // de la línea que se está evaluando — al encontrar el terminador en la
+  // línea `i`, `consumed` todavía NO incluye esa línea, así que apunta al
+  // carácter '\n' que la precede inmediatamente (o a headingEnd si no hay
+  // ninguna línea de contenido en medio), para que el formato de "línea en
+  // blanco antes de la siguiente cabecera" que genera buildIssueBody se
+  // preserve al reconstruir el empalme (ver buildReconcileBody).
   const restLines = src.slice(headingEnd).split('\n')
-  let fence = { inFence: false, char: null, len: 0 }
+  let state = initLineState()
   let consumed = 0
   let contentEnd = src.length
   for (let i = 0; i < restLines.length; i++) {
     const line = restLines[i]
-    const step = stepFence(line, fence)
-    fence = step.state
-    if (!step.isFenceDelim && !fence.inFence && (line.startsWith('## ') || line.startsWith('<!--'))) {
+    const step = stepLine(line, state)
+    state = step.state
+    const isSelfContainedComment = line.startsWith(COMMENT_OPEN_TOKEN) && line.includes(COMMENT_CLOSE_TOKEN)
+    if (!step.wasHidden && (ATX_HEADING_RE.test(line) || isSelfContainedComment)) {
       contentEnd = headingEnd + Math.max(consumed - 1, 0)
       break
     }
@@ -172,8 +288,8 @@ export function locateSection(body, headingText, { exact = true } = {}) {
   return { headingStart, headingEnd, contentEnd, content: src.slice(headingEnd, contentEnd) }
 }
 
-export function extractSectionContent(body, headingText, opts) {
-  const loc = locateSection(body, headingText, opts)
+export function extractSectionContent(body, headingText) {
+  const loc = locateSection(body, headingText)
   return loc ? loc.content.trim() : null
 }
 
@@ -181,7 +297,8 @@ export function extractSectionContent(body, headingText, opts) {
 // UNA SOLA línea (sin cabecera + contenido delimitado) — usado para la
 // línea de enlace al spec que buildIssueBody escribe como primera línea del
 // body (`> Slice #N del epic. Spec: […]`). Mismo criterio de anclaje a
-// columna 0 y de ignorar líneas dentro de una valla de código.
+// columna 0 y de ignorar líneas ocultas dentro de una valla de código o de
+// un comentario HTML multilínea (scanLines/stepLine, review round 5).
 export function locateLine(body, prefix) {
   const found = scanLines(body, (line) => line.startsWith(prefix))
   if (!found) return null
@@ -226,34 +343,47 @@ export function specLinkAnchor(specLinkLine) {
 }
 
 // countHeadingLines: cuántas veces aparece una cabecera (mismo criterio de
-// exact/prefix y de vallas que locateSection) en todo el body — no solo si
-// aparece, sino CUÁNTAS veces. Review round 3 (menor): locateSection
-// siempre encuentra/empalma la PRIMERA aparición; si un humano duplicó una
-// sección a mano (copiar-pegar, un merge conflictivo mal resuelto…), la
-// segunda copia queda invisible tanto para la comparación como para
-// --reconcile. Se usa para avisar de esa situación, no para decidir qué se
-// aplica (eso sigue siendo, a propósito, "la primera").
-export function countHeadingLines(body, headingText, { exact = true } = {}) {
+// igualdad exacta/conjunto y de líneas ocultas — valla o comentario — que
+// locateSection) en todo el body — no solo si aparece, sino CUÁNTAS veces.
+// Review round 3 (menor): locateSection siempre encuentra/empalma la
+// PRIMERA aparición; si un humano duplicó una sección a mano (copiar-pegar,
+// un merge conflictivo mal resuelto…), la segunda copia queda invisible
+// tanto para la comparación como para --reconcile. Se usa para avisar de
+// esa situación, no para decidir qué se aplica (eso sigue siendo, a
+// propósito, "la primera"). `headingText` acepta array (ver headingMatcher)
+// — para AC, las dos formas de AC_HEADING_FORMS cuentan como la MISMA
+// sección conceptual: una de cada forma también es "duplicado".
+export function countHeadingLines(body, headingText) {
   const src = body || ''
-  const matches = exact ? (line) => line.trimEnd() === headingText : (line) => line.startsWith(headingText)
+  const matches = headingMatcher(headingText)
   const lines = src.split('\n')
-  let fence = { inFence: false, char: null, len: 0 }
+  let state = initLineState()
   let count = 0
   for (const line of lines) {
-    const step = stepFence(line, fence)
-    fence = step.state
-    if (!step.isFenceDelim && !fence.inFence && matches(line)) count++
+    const step = stepLine(line, state)
+    state = step.state
+    if (!step.wasHidden && matches(line)) count++
   }
   return count
 }
 
-// extractAc: la ÚNICA de las cuatro secciones cuya cabecera real lleva
-// sufijo variable ("(EARS, 1:1 con tests)") — por eso, y solo por eso, se
-// localiza con `{ exact: false }` (prefijo). Ver el comentario de
-// locateSection (Critical 2, review round 4) para el porqué de que las
-// otras tres NO toleren esto.
+// AC_HEADING_FORMS (review round 5, Importante 4): buildIssueBody
+// (groom.js) emite una ÚNICA cadena fija para la cabecera de AC — pero esa
+// cadena cambió una vez en la historia del proyecto (se le añadió el
+// sufijo "(EARS, 1:1 con tests)"), así que un issue creado con la versión
+// vieja del generador sigue trayendo la forma anterior. El hueco legítimo
+// es, por tanto, un CONJUNTO CERRADO de exactamente dos cadenas — nunca un
+// prefijo abierto (`{ exact: false }`, la versión de antes de esta ronda):
+// con prefijo, un "## Acceptance criteria propuestos por QA (borrador)"
+// escrito por un humano por encima de la sección real se reclamaba como si
+// fuera ella — el dispatcher inyectaba CERO criterios reales en el prompt
+// del agente, y --reconcile habría sustituido la prosa de QA.
+export const AC_HEADING_FORMS = ['## Acceptance criteria', '## Acceptance criteria (EARS, 1:1 con tests)']
+
+// extractAc: localiza la sección de AC contra el conjunto cerrado
+// AC_HEADING_FORMS (ver arriba) — nunca por prefijo.
 export function extractAc(body) {
-  const section = extractSectionContent(body, '## Acceptance criteria', { exact: false })
+  const section = extractSectionContent(body, AC_HEADING_FORMS)
   if (section == null) return []
   return section.split('\n')
     .map((l) => l.trim())
