@@ -7,6 +7,22 @@ import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const script = join(root, 'scripts', 'ct-init.sh')
+const groomScript = join(root, 'scripts', 'ct-groom.mjs')
+
+// extractWorkedExample: saca el bloque de tabla markdown bajo "Ejemplo que
+// parsea tal cual" del AGENTS.md sembrado por ct-init.sh — las mismas
+// líneas que empiezan por "|", contiguas, hasta la primera línea que no
+// empiece por "|" (la prosa "Detalle completo..." que cierra la sección).
+function extractWorkedExample(agentsMd) {
+  const lines = agentsMd.split('\n')
+  const startIdx = lines.findIndex((l) => l.includes('Ejemplo que parsea tal cual'))
+  const tableLines = []
+  for (let i = startIdx + 1; i < lines.length; i++) {
+    if (lines[i].trim().startsWith('|')) tableLines.push(lines[i])
+    else if (tableLines.length) break
+  }
+  return tableLines.join('\n') + '\n'
+}
 
 describe('ct-init.sh', () => {
   it('crea .agent/STATE.md y AGENTS.md en dir vacío', () => {
@@ -49,6 +65,55 @@ describe('ct-init.sh', () => {
     expect(agents).toContain('<!-- ct-init:slices-contract -->')
     expect(agents).toContain('| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |')
     rmSync(dir, { recursive: true, force: true })
+  })
+
+  // F3: el contrato sembrado escondía que "Tipo" decide el addendum del
+  // agente despachado, y que el título del issue sale de "Slice" (no de
+  // "Entrega") — ver el hallazgo del spec real que disparó este cambio.
+  it('AGENTS.md nuevo: la sección §9 dice que "Slice" es obligatoria y alimenta el título, y que "Entrega" es opcional (Descripción)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    expect(agents).toMatch(/\*\*Slice\*\* \*\(obligatoria\)\*/)
+    expect(agents).toMatch(/T.TULO/i)
+    expect(agents).toMatch(/\*\*Entrega\*\* \*\(opcional\)\*/)
+    expect(agents).toContain('Descripción')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('AGENTS.md nuevo: la sección §9 nombra los valores de "Tipo" reconocidos (ui, backend, infra, bugfix) y que deciden el addendum', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    expect(agents).toMatch(/addendum/i)
+    expect(agents).toContain('`ui`')
+    expect(agents).toContain('`backend`')
+    expect(agents).toContain('`infra`')
+    expect(agents).toContain('`bugfix`')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // Requisito explícito: el ejemplo sembrado debe seguir parseando de
+  // verdad — se extrae tal cual del AGENTS.md generado (no una copia
+  // parafraseada en el test) y se pasa por ct-groom.mjs --dry-run.
+  it('el ejemplo sembrado ("Ejemplo que parsea tal cual") parsea de verdad con ct-groom.mjs --dry-run: 3 issues, títulos desde "Slice"', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const table = extractWorkedExample(agents)
+    expect(table).toContain('| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |')
+    const specDir = mkdtempSync(join(tmpdir(), 'ct-example-'))
+    const specPath = join(specDir, 'spec.md')
+    writeFileSync(specPath, `## 9. Desglose en slices\n${table}`)
+    const out = execFileSync('node', [groomScript, specPath, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8' })
+    const plan = JSON.parse(out)
+    expect(plan.issues).toHaveLength(3)
+    expect(plan.issues[0].title).toBe('#1 modelo')
+    expect(plan.issues[1].title).toBe('#2 api')
+    expect(plan.issues[2].title).toBe('#3 pantalla')
+    expect(plan.issues[0].body).toContain('tabla `medicamentos`') // Entrega -> Descripción
+    rmSync(dir, { recursive: true, force: true })
+    rmSync(specDir, { recursive: true, force: true })
   })
 
   it('AGENTS.md existente SIN la sección §9 → se añade sin tocar el resto (caso "muy editado a mano")', () => {

@@ -250,12 +250,16 @@ function parseTokenList(cell, opts = {}) {
 //     "|" (blanco u otro texto) dentro del bloque de la tabla — antes se
 //     truncaba ahí en silencio (review de F1, punto 3).
 //   - skippedRows: filas cuyo "#" no es un entero a secas.
-//   - invalidRows: filas con la celda "Entrega" vacía (o con un marcador de
-//     "sin valor" como "–"), o con un número de celdas distinto al de la
+//   - invalidRows: filas con la celda "Slice" vacía (o con un marcador de
+//     "sin valor" como "–", o que solo trae una referencia "#N" sin ningún
+//     nombre alrededor), o con un número de celdas distinto al de la
 //     cabecera (de menos o de más — un "|" sin escapar desplaza columnas) —
-//     mismo resultado observable que "falta la columna Entrega", pero por
+//     mismo resultado observable que "falta la columna Slice", pero por
 //     fila (review de F1, punto 4; review round 2, puntos a/b). No se
-//     agregan a `slices`.
+//     agregan a `slices`. F3: el contenido obligatorio pasó de "Entrega" a
+//     "Slice" — el título del issue ahora sale de "Slice"
+//     (`groom.js#buildIssueTitle`), y "Entrega" pasó a ser opcional (se
+//     convierte en una descripción dentro del cuerpo del issue).
 //   - malformedDepRows: filas cuya celda "Dep" tiene contenido real (no
 //     "vacío" según isNoValueCell) pero de la que no se extrajo ninguna
 //     referencia "#N" (F2).
@@ -316,16 +320,27 @@ export function analyzeSlicesTable(specMd) {
   // no es substring de slice/tipo/entrega/dep/acepta/protegido/toca, y
   // ninguna de esas es substring de "área"/"area" tampoco.
   const colAny = (...needles) => header.findIndex((c) => needles.some((n) => c.includes(n)))
-  const iN = col('#'), iIssue = col('slice'), iType = col('tipo'), iEntrega = col('entrega'),
+  // iSlice (antes "iIssue"): renombrada en F3 porque esta columna ya no solo
+  // alimenta `slice.issue` (el "#NN" que pueda traer) — ahora también
+  // alimenta `slice.name`, el texto que compone el TÍTULO del issue.
+  const iN = col('#'), iSlice = col('slice'), iType = col('tipo'), iEntrega = col('entrega'),
         iDep = col('dep'), iAc = col('acepta'), iProt = col('protegido'),
         iArea = colAny('área', 'area'), iToca = colAny('toca')
 
   const missingRequiredColumns = []
   if (iN === -1) missingRequiredColumns.push('#')
-  if (iEntrega === -1) missingRequiredColumns.push('Entrega')
+  // F3: "Entrega" deja de ser una columna obligatoria — el título del issue
+  // ahora sale de "Slice", no de "Entrega" (ver el bloque de validación de
+  // fila más abajo). "Slice" en sí no puede faltar como COLUMNA: el
+  // localizador de cabecera de arriba ya exige una celda que contenga
+  // "slice" para reconocer este bloque como la tabla §9 — llegar aquí con
+  // `iSlice === -1` es estructuralmente imposible, así que no hace falta
+  // ningún chequeo de columna nuevo aquí. Lo que sí cambia es la exigencia
+  // a nivel de CELDA (ver `sliceEmpty` más abajo).
 
   const missingOptionalColumns = []
   if (iType === -1) missingOptionalColumns.push('Tipo')
+  if (iEntrega === -1) missingOptionalColumns.push('Entrega')
   if (iAc === -1) missingOptionalColumns.push('Acepta')
   if (iProt === -1) missingOptionalColumns.push('Protegido')
   if (iArea === -1) missingOptionalColumns.push('Área')
@@ -384,11 +399,13 @@ export function analyzeSlicesTable(specMd) {
 
     // Punto 4 de la review de F1: antes solo se validaba la CABECERA, nunca
     // las celdas. Una fila con menos celdas que la cabecera (típicamente
-    // porque le faltan celdas finales), o con "Entrega" vacía, produce
-    // exactamente el mismo resultado observable que "falta la columna
-    // Entrega entera" (un issue titulado "#N" a secas, sin AC ni deps) —
-    // solo que por fila. Se reporta y NO se agrega a `slices`: no hay
-    // título de issue fiable que construir con esta fila.
+    // porque le faltan celdas finales), o con "Slice" vacía, produce
+    // exactamente el mismo resultado observable que "falta la columna Slice
+    // entera" (un issue titulado "#N" a secas, sin nombre) — solo que por
+    // fila. Se reporta y NO se agrega a `slices`: no hay título de issue
+    // fiable que construir con esta fila. (F3: esta exigencia vivía en
+    // "Entrega"; se movió a "Slice" porque el título del issue ahora sale de
+    // ahí — ver `buildIssueTitle` en groom.js.)
     //
     // Punto (a) de la review round 2: una fila con MÁS celdas que la
     // cabecera (típicamente un "|" sin escapar dentro de una celda) desplaza
@@ -398,23 +415,42 @@ export function analyzeSlicesTable(specMd) {
     // `cells.length < header.length`; ahora cualquier discrepancia (`!==`)
     // se trata igual.
     const rowLengthMismatch = cells.length !== header.length
-    const entregaCellRaw = iEntrega === -1 ? undefined : cells[iEntrega]
-    const entregaTrimmed = entregaCellRaw === undefined ? '' : entregaCellRaw.trim()
-    // Punto (b) de la review round 2: "Entrega" con un marcador de "sin
-    // valor" (–, -, —, etc. — ver isNoValueCell, ya usado en Dep/Acepta/
-    // Área/Toca) producía un issue titulado "#1 –", exit 0. Entrega es la
-    // única columna donde el contenido es obligatorio (sin ella no hay
-    // título de issue); tratar "aquí no hay nada" como si fuera un título
-    // válido era la excepción injustificada al propio estándar de este
-    // cambio.
-    const entregaEmpty = iEntrega !== -1 && (entregaCellRaw === undefined || entregaTrimmed === '' || isNoValueCell(entregaTrimmed))
-    if (rowLengthMismatch || entregaEmpty) {
+
+    // F3: "Slice" alimenta DOS cosas a la vez a partir de la misma celda —
+    // `issue` (la referencia "#NN" que ya pudiera traer, p.ej. un issue
+    // creado a mano antes de correr `/ct-groom`) y `name` (el texto que
+    // compone el título del issue, `#N <name>`). Se extraen juntas, aquí,
+    // porque son las dos mitades del mismo regex sobre la misma celda —
+    // separarlas en dos ficheros (slices.js para `issue`, groom.js para
+    // limpiar `name`) duplicaría el patrón `#\d+` y arriesgaría que
+    // divergieran con el tiempo.
+    const sliceCellRaw = iSlice === -1 ? undefined : cells[iSlice]
+    const sliceCellTrimmed = sliceCellRaw === undefined ? '' : sliceCellRaw.trim()
+    const issueMatch = sliceCellTrimmed.match(/#(\d+)/)
+    // name: el texto de "Slice" ya limpio de cualquier referencia "#NN" (la
+    // que acabamos de capturar arriba en `issueMatch`) — así el título
+    // nunca arrastra un hash colgante ("#3 #12 login model") cuando la
+    // propia celda Slice trae, a la vez, un nombre Y una referencia de
+    // issue. Colapsa el hueco que deja el "#NN" quitado para no dejar
+    // espacios dobles.
+    const name = sliceCellTrimmed.replace(/#\d+/g, '').replace(/\s+/g, ' ').trim()
+    // Punto (b) de la review round 2 (adaptado a F3): "Slice" con un
+    // marcador de "sin valor" (–, -, —, etc. — ver isNoValueCell, ya usado
+    // en Dep/Acepta/Área/Toca) produciría un issue titulado "#1 –", exit 0.
+    // "Slice" es ahora la única columna donde el contenido es obligatorio
+    // (sin ella no hay título de issue); tratar "aquí no hay nada" como si
+    // fuera un título válido sería la misma excepción injustificada que ya
+    // se corrigió para "Entrega". Una celda que SOLO trae una referencia
+    // "#NN" (sin ningún nombre alrededor) cae en el mismo caso: `name` queda
+    // vacío tras quitar el hash, y no hay título fiable que construir.
+    const sliceEmpty = sliceCellTrimmed === '' || isNoValueCell(sliceCellTrimmed) || name === ''
+    if (rowLengthMismatch || sliceEmpty) {
       invalidRows.push({
         n,
         reason: rowLengthMismatch
           ? `la fila tiene ${cells.length} celda(s), la cabecera tiene ${header.length}` +
             (cells.length > header.length ? ' (revisa si hay un "|" sin escapar dentro de una celda)' : '')
-          : 'la columna "Entrega" está vacía (o trae un marcador de "sin valor" como "–")',
+          : 'la columna "Slice" está vacía (o trae un marcador de "sin valor" como "–", o solo una referencia "#N" sin ningún nombre)',
       })
       continue
     }
@@ -436,12 +472,15 @@ export function analyzeSlicesTable(specMd) {
     }
     const acCell = (cells[iAc] || '').trim()
     const ac = acCell && !isNoValueCell(acCell) ? acCell.split(',').map((x) => x.trim()).filter(Boolean) : []
-    const issueCell = (cells[iIssue] || '').trim()
-    const issueMatch = issueCell.match(/#(\d+)/)
     slices.push({
       n,
       issue: issueMatch ? `#${issueMatch[1]}` : null,
+      name,
       type: (cells[iType] || '').trim(),
+      // entrega (F3): ya no alimenta el título — es una descripción OPCIONAL
+      // que groom.js#buildIssueBody renderiza en el cuerpo del issue (mismo
+      // criterio de "sin valor" que Protegido: isNoValueCell decide ahí si
+      // hay contenido real que mostrar).
       entrega: (cells[iEntrega] || '').trim(),
       deps,
       ac,

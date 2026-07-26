@@ -127,12 +127,22 @@ copiable tal cual:
 - **`#`** *(obligatoria)*: entero puro (`1`, `2`…) → orden del slice y target
   de `Dep`. Nunca `S1` ni `**1**` (negrita/prefijo): la fila entera se
   descarta.
-- **Slice**: nombre corto de la fila; no alimenta el issue (el título lo pone
-  `Entrega`), solo hace falta para que `/ct-groom` reconozca esta como la
-  tabla de slices.
-- **Tipo** *(opcional)*: label `type:<valor>` del issue.
-- **Entrega** *(obligatoria)*: texto del título del issue (`#N <Entrega>`).
-  Vacía o con marcador de "sin valor" → fila descartada.
+- **Slice** *(obligatoria)*: nombre corto de la fila — alimenta el TÍTULO del
+  issue (`#N <Slice>`). Vacía, con marcador de "sin valor", o que solo trae
+  una referencia `#N` sin ningún nombre alrededor → fila descartada (mismo
+  trato que antes tenía una `Entrega` vacía). Si la celda ya trae una
+  referencia `#N` (p.ej. un issue creado a mano antes de correr
+  `/ct-groom`), esa referencia se extrae aparte y NO aparece en el título.
+- **Tipo** *(opcional)*: label `type:<valor>` del issue. Además decide qué
+  addendum recibe el agente al despachar (`/ct-next` → `kickoff.js`):
+  valores reconocidos hoy son `ui`, `backend`, `infra`, `bugfix` — cada uno
+  con su propio addendum (el de `ui`, por ejemplo, impone el gate de
+  screenshot obligatorio). Un valor que no sea ninguno de esos NO aborta,
+  pero `/ct-groom` avisa por stderr: el agente despachado para ese slice no
+  recibirá ningún addendum de tipo, y sin ese aviso pasaría en silencio.
+- **Entrega** *(opcional)*: texto de qué entrega el slice → sección
+  "Descripción" del cuerpo del issue. Ya NO alimenta el título (eso lo hace
+  `Slice`, ver arriba).
 - **Dep**: `#N` (varias, separadas por coma) apuntando a otro `#` de esta
   misma tabla, o marcador de "sin valor" si no depende de nada. `S1` no
   sirve — usa `#1`. Alimenta el grafo `merge-after` que respeta `/ct-next`.
@@ -157,7 +167,7 @@ Ejemplo que parsea tal cual (verificado con `ct-groom.mjs --dry-run`):
 |---|-------|------|---------|-----|--------|-----------|------|------|
 | 1 | modelo | backend | tabla `medicamentos` | – | AC-1.1 | schema | medicacion | db, migration |
 | 2 | api | backend | endpoint `POST /medicamentos` | #1 | AC-2.1 | – | medicacion | api |
-| 3 | ui | frontend | pantalla de alta | #2 | AC-3.1 | – | medicacion | app |
+| 3 | pantalla | ui | pantalla de alta | #2 | AC-3.1 | – | medicacion | app |
 
 Detalle completo (todas las condiciones de abort, columnas opcionales,
 avisos no fatales): `commands/ct-groom.md` en el plugin `control-tower-loop`.

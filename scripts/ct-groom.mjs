@@ -5,6 +5,9 @@ import { analyzeSlicesTable } from './slices.js'
 import { groomPlan } from './groom.js'
 import { flattenIssuePages, realIssuesOnly, findByMarker } from './gh-issues.js'
 import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
+// ADDENDA (F3): única fuente de verdad de qué valores de "Tipo" tienen un
+// addendum de kickoff — ver el aviso de "Tipo" no reconocido más abajo.
+import { ADDENDA } from './kickoff.js'
 
 // `arg()` solo devuelve un string cuando el flag realmente trae un valor: si
 // el flag es el último token de argv, o el token siguiente es a su vez otro
@@ -106,19 +109,24 @@ if (!report.tableFound) {
     hardErrors.push('no se encontró ninguna tabla markdown (ninguna línea empieza por "|") en el spec — añade la tabla §9 de slices bajo su sección (ver commands/ct-groom.md)')
   }
 } else if (report.missingRequiredColumns.length) {
+  // F3: "Entrega" salió de esta lista — ya no es obligatoria (el título del
+  // issue ahora sale de "Slice"; "Entrega" pasó a ser una descripción
+  // opcional del cuerpo, ver OPTIONAL_COLUMN_CONSEQUENCE más abajo). "Slice"
+  // no puede faltar como columna sin que la tabla entera deje de
+  // reconocerse como la tabla §9 (ver el comentario en
+  // slices.js#analyzeSlicesTable), así que "#" queda como el único caso real
+  // de esta rama.
   for (const missing of report.missingRequiredColumns) {
     if (missing === '#') {
       hardErrors.push('la tabla §9 no tiene columna "#" — sin ella no hay orden de slice ni se pueden resolver las dependencias (merge-after); añade una columna de cabecera "#" con un entero puro por fila (1, 2, 3…)')
-    } else if (missing === 'Entrega') {
-      hardErrors.push('la tabla §9 no tiene columna "Entrega" — sin ella no hay título de issue; añade una columna de cabecera "Entrega" con el texto visible de cada slice')
     }
   }
 } else {
   // Los checks de aquí abajo son a nivel de FILA, y solo tienen sentido si
-  // la cabecera ya es estructuralmente válida (si faltara "#"/"Entrega"
-  // como columna, cada fila heredaría ese problema de forma derivada —
-  // p.ej. todas aparecerían en skippedRows con valor "" — y mostrarlo junto
-  // al mensaje de columna ausente sería ruido, no señal nueva).
+  // la cabecera ya es estructuralmente válida (si faltara "#" como columna,
+  // cada fila heredaría ese problema de forma derivada — p.ej. todas
+  // aparecerían en skippedRows con valor "" — y mostrarlo junto al mensaje
+  // de columna ausente sería ruido, no señal nueva).
 
   // Punto 3 de la review de F1: una línea en blanco (o cualquier otra sin
   // "|") a mitad de la tabla truncaba el escaneo en silencio — las filas
@@ -136,17 +144,18 @@ if (!report.tableFound) {
     hardErrors.push(`${report.skippedRows.length} fila(s) de la tabla §9 tienen "#" que no es un entero a secas (ejemplo: "${first.value}") — "#" debe ser un entero puro como "1", nunca "S1" ni "**1**"; corrige esas filas (quita cualquier letra o negrita) y vuelve a intentarlo`)
   }
   // Punto 4 de la review de F1 (y puntos a/b de la review round 2): solo
-  // se validaba la CABECERA, nunca las celdas — una fila con "Entrega"
-  // vacía (o con un marcador de "sin valor" como "–"), o con un número de
-  // celdas distinto al de la cabecera (de menos, o de más por un "|" sin
-  // escapar), parseaba igual y producía un issue titulado "#N" a secas (o
-  // con columnas desplazadas), sin AC ni deps, exit 0.
+  // se validaba la CABECERA, nunca las celdas — una fila con "Slice" vacía
+  // (o con un marcador de "sin valor" como "–"), o con un número de celdas
+  // distinto al de la cabecera (de menos, o de más por un "|" sin escapar),
+  // parseaba igual y producía un issue titulado "#N" a secas (o con
+  // columnas desplazadas), sin AC ni deps, exit 0. F3: el exigido pasó de
+  // "Entrega" a "Slice" — el título del issue ahora sale de ahí.
   if (report.invalidRows.length) {
     const first = report.invalidRows[0]
-    hardErrors.push(`${report.invalidRows.length} fila(s) de la tabla §9 están incompletas (ejemplo, slice #${first.n}: ${first.reason}) — sin "Entrega" no hay título de issue; completa esas filas con todas las columnas de la cabecera y vuelve a intentarlo`)
+    hardErrors.push(`${report.invalidRows.length} fila(s) de la tabla §9 están incompletas (ejemplo, slice #${first.n}: ${first.reason}) — sin "Slice" no hay título de issue; completa esas filas con todas las columnas de la cabecera y vuelve a intentarlo`)
   }
   if (report.totalDataRows === 0) {
-    hardErrors.push('la tabla §9 no tiene ninguna fila de datos — añade al menos una fila con "#" y "Entrega"')
+    hardErrors.push('la tabla §9 no tiene ninguna fila de datos — añade al menos una fila con "#" y "Slice"')
   }
   // F2 (señalado tras verificar F1 contra el spec real): una celda "Dep"
   // con contenido (que no sea un marcador de "sin dependencias" —
@@ -194,6 +203,10 @@ if (hardErrors.length) {
 // aborta.
 const OPTIONAL_COLUMN_CONSEQUENCE = {
   Tipo: 'los issues se crearán sin label "type:"',
+  // F3: "Entrega" se une a esta lista — ya no es obligatoria (el título
+  // sale de "Slice"), así que su ausencia degrada en vez de abortar, igual
+  // que Tipo/Acepta/Protegido/Área/Toca.
+  Entrega: 'los issues se crearán sin sección "Descripción" en el cuerpo',
   Acepta: 'los issues se crearán sin criterios de aceptación',
   Protegido: 'los issues se crearán sin sección "Protegido" explícita',
   'Área': 'la maquinaria de colisión (claim.js#tokensOf) queda inerte para todos los slices de este epic',
@@ -201,6 +214,27 @@ const OPTIONAL_COLUMN_CONSEQUENCE = {
 }
 for (const col of report.missingOptionalColumns) {
   console.error(`aviso: la tabla §9 no tiene columna "${col}" — ${OPTIONAL_COLUMN_CONSEQUENCE[col] || 'se omite esa información en los issues'}`)
+}
+// F3: "Tipo" decide, además de la label "type:<valor>", qué addendum recibe
+// el agente despachado — kickoff.js#renderKickoff hace
+// `ADDENDA[slice.type] || ''` en silencio, así que un valor que no sea
+// ninguna key de ADDENDA (p.ej. "ios"/"swift" para un slice de UI real, en
+// vez de "ui") deja al agente SIN el addendum correspondiente — grave en
+// concreto para "ui", cuyo addendum impone el gate de screenshot
+// obligatorio — sin que nada lo señale. Se avisa, no se aborta: el valor
+// sigue siendo una label "type:" legítima aunque no tenga addendum (p.ej.
+// un tipo nuevo que aún no se ha añadido a ADDENDA a propósito).
+//
+// KNOWN_TYPES se deriva de `Object.keys(ADDENDA)` (kickoff.js) en vez de
+// mantener una segunda lista hardcodeada aquí: ADDENDA sigue siendo la
+// ÚNICA fuente de verdad de qué tipos tienen addendum — añadir uno nuevo
+// ahí (o corregir el nombre de uno existente) se refleja en este aviso sin
+// tocar este fichero, así las dos listas no pueden divergir.
+const KNOWN_TYPES = Object.keys(ADDENDA)
+for (const s of report.slices) {
+  if (s.type && !KNOWN_TYPES.includes(s.type)) {
+    console.error(`aviso: valor "${s.type}" en columna Tipo (slice #${s.n}) no es ninguno de los tipos reconocidos por el dispatcher (${KNOWN_TYPES.join(', ')}) — el agente despachado para este slice no recibirá ningún addendum de tipo (ver scripts/kickoff.js#ADDENDA); revisa si es un error tipográfico o si falta añadir su addendum`)
+  }
 }
 // Valores de Área/Toca con el prefijo de LA OTRA columna (p.ej. "area:x"
 // dentro de Toca): se toleró el valor (no se descartó), pero probablemente

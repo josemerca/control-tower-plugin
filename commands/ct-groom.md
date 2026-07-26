@@ -13,6 +13,8 @@ Es idempotente: re-ejecutarlo no duplica milestone ni issues (marca cada issue c
 
 Los issues se crean en `status:backlog`, nunca `status:ready` — es una gate humana deliberada: un humano tiene que promoverlos a `status:ready` (a mano, o editando el label) antes de que `/ct-next` los considere despachables. Si `/ct-next` responde "No hay slices despachables" justo después de un groom, es casi seguro que sea esto.
 
+El título del issue sale de `Slice` (`#N <Slice>`), NO de `Entrega`: `Slice` es el nombre corto de la fila, `Entrega` es opcional y se convierte en la sección "Descripción" del cuerpo. `Tipo` decide, además de la label `type:<valor>`, qué addendum recibe el agente al despachar (`ui`/`backend`/`infra`/`bugfix`, ver `scripts/kickoff.js#ADDENDA`) — un valor que no sea ninguno de esos no aborta, pero avisa por stderr (el agente despachado para ese slice no recibirá ningún addendum de tipo).
+
 La tabla §9 del spec admite dos columnas opcionales, `Área` y `Toca` (acepta también `Area` sin tilde), con valores separados por coma. "Sin valor" se puede escribir como `–`, `-`, `—`, `−`, `--` o celda vacía (cualquier variante de guion/dash es válida — un editor de texto o un móvil con autocorrección puede sustituir una por otra sin que lo notes; todas significan "ninguno" en `Dep`/`Acepta`/`Área`/`Toca`):
 ```
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
@@ -27,11 +29,11 @@ La tabla §9 del spec admite dos columnas opcionales, `Área` y `Toca` (acepta t
 `/ct-groom` (también bajo `--dry-run`: un dry-run que valida menos que la corrida real es una trampa) revisa la tabla §9 completa y **aborta con exit distinto de 0**, sin crear nada, si:
 
 - no encuentra ninguna tabla §9, o encuentra tabla(s) pero ninguna cabecera con columnas `Slice` y `Dep`;
-- faltan las columnas de cabecera `#` o `Entrega`;
+- falta la columna de cabecera `#`;
 - hay una interrupción (línea en blanco, o cualquier línea sin `|`) a mitad del bloque de la tabla — debe ser un único bloque markdown contiguo, sin huecos entre filas;
 - el `#` de alguna fila no es un entero a secas: `1`, `2`… — nunca `S1` ni `**1**` (negrita/backticks/prefijos de letra no se toleran aquí, a propósito);
-- alguna fila tiene menos o más celdas que la cabecera (revisa un `|` sin escapar dentro de una celda), o la celda `Entrega` está vacía o trae un marcador de "sin valor";
+- alguna fila tiene menos o más celdas que la cabecera (revisa un `|` sin escapar dentro de una celda), o la celda `Slice` está vacía, trae un marcador de "sin valor", o solo trae una referencia `#N` sin ningún nombre alrededor (de ahí sale el título del issue — ver arriba);
 - `Dep` tiene contenido que no es reconocible como `#N` (p.ej. `S1` en vez de `#1`) — si de verdad no hay dependencias, escribe `–`;
 - una referencia de `Dep` apunta a un `#` que no existe en la tabla, o al propio slice (auto-referencia: un slice nunca depende de sí mismo).
 
-Si fallan varias de estas cosas a la vez, se reportan **todas juntas** en la misma ejecución (no hace falta arreglar una, volver a correr, y descubrir la siguiente). Columnas opcionales ausentes (`Tipo`/`Acepta`/`Protegido`/`Área`/`Toca`) y valores degradados (prefijo en la columna equivocada, token que normaliza a vacío) no abortan — se avisan por stderr y el groom continúa.
+Si fallan varias de estas cosas a la vez, se reportan **todas juntas** en la misma ejecución (no hace falta arreglar una, volver a correr, y descubrir la siguiente). Columnas opcionales ausentes (`Tipo`/`Entrega`/`Acepta`/`Protegido`/`Área`/`Toca`) y valores degradados (`Tipo` que no es ninguna key de `ADDENDA`, prefijo en la columna equivocada de Área/Toca, token que normaliza a vacío) no abortan — se avisan por stderr y el groom continúa.
