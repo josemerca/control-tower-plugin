@@ -156,14 +156,24 @@ describe('analyzeSlicesTable — contrato enriquecido (F1)', () => {
     expect(r.missingRequiredColumns).toContain('#')
   })
 
-  it('columna "Entrega" ausente → missingRequiredColumns incluye "Entrega"', () => {
+  // F3: el título del issue ya no sale de "Entrega" (ahora sale de "Slice",
+  // ver más abajo) — "Entrega" pasa a ser una columna OPCIONAL (se convierte
+  // en la sección "Descripción" del cuerpo, ver groom.js#buildIssueBody).
+  // Este test antes esperaba que la columna ausente abortara (
+  // missingRequiredColumns); ahora debe degradar como Tipo/Acepta/Protegido/
+  // Área/Toca: se avisa (missingOptionalColumns), la tabla se sigue
+  // parseando.
+  it('columna "Entrega" ausente → missingOptionalColumns la incluye (F3: ya no es obligatoria), y la fila se sigue parseando', () => {
     const spec = `## 9. Slices
 | # | Slice | Tipo | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|
 | 1 | x | backend | – | – | – |
 `
     const r = analyzeSlicesTable(spec)
-    expect(r.missingRequiredColumns).toContain('Entrega')
+    expect(r.missingRequiredColumns).toEqual([])
+    expect(r.missingOptionalColumns).toContain('Entrega')
+    expect(r.slices).toHaveLength(1)
+    expect(r.slices[0].entrega).toBe('')
   })
 
   it('columnas Tipo/Acepta/Protegido/Área/Toca ausentes → missingOptionalColumns las nombra, pero slices se siguen parseando', () => {
@@ -463,17 +473,22 @@ Texto normal después de la tabla, sin más filas.
 })
 
 // 4 — solo se validaba la cabecera, nunca las celdas: una fila con la
-// celda "Entrega" vacía, o con menos celdas que la cabecera (típicamente
+// celda obligatoria vacía, o con menos celdas que la cabecera (típicamente
 // porque a esa misma fila le faltan celdas finales), parseaba igual y
 // producía un issue titulado "#N" a secas, sin AC ni deps, exit 0. Mismo
-// resultado observable que "falta la columna Entrega entera" — solo que
-// por fila. Se reporta en `invalidRows` y la fila NO se agrega a `slices`.
-describe('analyzeSlicesTable — celda "Entrega" vacía o fila más corta que la cabecera (4)', () => {
-  it('celda Entrega vacía se reporta en invalidRows y no se cuela en slices', () => {
+// resultado observable que "falta la columna entera" — solo que por fila.
+// Se reporta en `invalidRows` y la fila NO se agrega a `slices`.
+//
+// F3: la celda con contenido obligatorio pasó de "Entrega" a "Slice" (el
+// título del issue ahora sale de ahí) — "Entrega" vacía ya no invalida
+// nada (ver el describe de más arriba sobre F3), así que este test se
+// reescribe sobre "Slice" en vez de "Entrega".
+describe('analyzeSlicesTable — celda "Slice" vacía o fila más corta que la cabecera (4, actualizado por F3)', () => {
+  it('celda Slice vacía se reporta en invalidRows y no se cuela en slices', () => {
     const spec = `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
-| 1 | a | ui |  | – | – | – |
+| 1 |  | ui | y | – | – | – |
 `
     const r = analyzeSlicesTable(spec)
     expect(r.invalidRows).toHaveLength(1)
@@ -782,12 +797,31 @@ describe('analyzeSlicesTable — fila con MÁS celdas que la cabecera (desplazam
 // b) "Entrega" con un marcador de "nada" (–, -, —, etc.) → título de issue
 // "#1 –", exit 0 — la única columna donde el contenido es obligatorio
 // trataba "aquí no hay nada" como si fuera un título válido.
-describe('analyzeSlicesTable — "Entrega" con un marcador de "sin valor" se trata como vacía (review round 2, b)', () => {
-  it('"Entrega" = "–" se reporta en invalidRows, igual que vacía', () => {
+//
+// F3: el título ya no sale de "Entrega" — sale de "Slice" (ver más abajo).
+// "Entrega" pasa a ser opcional (Descripción del cuerpo), así que un
+// marcador de "sin valor" ahí ya NO invalida la fila: significa "sin
+// descripción", exactamente como en Acepta/Protegido/Área/Toca. La misma
+// exigencia de contenido real se traslada a "Slice", que es de donde sale
+// el título ahora.
+describe('analyzeSlicesTable — "Entrega" con un marcador de "sin valor" ya NO invalida la fila (F3: contenido obligatorio se movió a "Slice")', () => {
+  it('"Entrega" = "–" (Slice con contenido real) ya no aborta la fila — "sin descripción", no "sin título"', () => {
     const spec = `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | a | ui | – | – | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.invalidRows).toEqual([])
+    expect(r.slices).toHaveLength(1)
+    expect(r.slices[0].entrega).toBe('–')
+  })
+
+  it('"Slice" = "–" (marcador de "sin valor") SÍ invalida la fila — es de ahí de donde sale el título ahora', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | – | ui | y | – | – | – |
 `
     const r = analyzeSlicesTable(spec)
     expect(r.invalidRows).toHaveLength(1)
@@ -1053,5 +1087,91 @@ describe('analyzeSlicesTable — un token que legítimamente acaba vacío siempr
     expect(r.slices[0].area).toEqual([])
     expect(r.emptyTokenWarnings).toHaveLength(1)
     expect(r.emptyTokenWarnings[0]).toMatchObject({ column: 'Área', n: 1 })
+  })
+})
+
+// ============================================================================
+// F3 — el título del issue viene de la celda equivocada. buildIssueTitle
+// (groom.js) componía "#N <Entrega>" mientras el texto de "Slice" se
+// descartaba (solo se le extraía un "#NN" hacia `slice.issue`) — un autor
+// que escribe lo natural (nombre corto en Slice, descripción en Entrega)
+// recibía un párrafo entero como título del issue. Decisión: el título sale
+// de "Slice" (`#N <Slice>`); "Slice" pasa a ser CONTENIDO OBLIGATORIO (igual
+// de obligatorio que "Entrega" lo era antes); "Entrega" pasa a ser opcional
+// y se convierte en una descripción dentro del cuerpo (ver groom.test.js).
+// `slice.name` es el texto de "Slice" ya limpio de cualquier referencia
+// "#NN" (que sigue extrayéndose, aparte, hacia `slice.issue` como siempre)
+// — así el título nunca arrastra un hash colgante cuando la celda Slice
+// trae AMBAS cosas (un nombre y una referencia de issue) a la vez.
+// ============================================================================
+
+describe('analyzeSlicesTable/parseSlices — "Slice" alimenta slice.name (título del issue) (F3)', () => {
+  it('Slice sin ningún "#NN" → name es el texto tal cual, issue null', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | login model | backend | modelo de sesión | – | – | – |
+`
+    const s = parseSlices(spec)
+    expect(s[0].name).toBe('login model')
+    expect(s[0].issue).toBeNull()
+  })
+
+  it('Slice con nombre y una referencia "#NN" a la vez → issue extrae "#NN", name queda SIN esa referencia (sin hash colgante en el título)', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | #42 notifications | backend | motor de notificaciones | – | – | – |
+`
+    const s = parseSlices(spec)
+    expect(s[0].issue).toBe('#42')
+    expect(s[0].name).toBe('notifications')
+    expect(s[0].name).not.toMatch(/#/)
+  })
+
+  it('Slice con la referencia "#NN" en medio del texto → se quita solo el hash, el resto del nombre sobrevive sin dobles espacios', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | login #7 model | backend | y | – | – | – |
+`
+    const s = parseSlices(spec)
+    expect(s[0].issue).toBe('#7')
+    expect(s[0].name).toBe('login model')
+  })
+
+  it('la celda "Slice" sigue reconociendo el marcador de "sin valor" (–) como vacía (invalida la fila)', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | – | ui | y | – | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.invalidRows).toHaveLength(1)
+    expect(r.slices).toEqual([])
+  })
+
+  it('Slice que SOLO trae "#7" (sin ningún nombre alrededor) → name queda vacío tras quitar el hash → fila inválida (no hay título fiable)', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | #7 | ui | y | – | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.invalidRows).toHaveLength(1)
+    expect(r.invalidRows[0].reason).toMatch(/Slice/)
+    expect(r.slices).toEqual([])
+  })
+
+  it('fila válida (Slice con contenido) no aparece en invalidRows, y "entrega" se sigue poblando desde la columna Entrega, sin cambios', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | login | backend | modelo de sesión | – | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.invalidRows).toEqual([])
+    expect(r.slices[0].name).toBe('login')
+    expect(r.slices[0].entrega).toBe('modelo de sesión')
   })
 })

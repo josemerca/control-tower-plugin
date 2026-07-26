@@ -34,6 +34,11 @@ describe('ct-groom --dry-run', () => {
     expect(plan.issues).toHaveLength(2)
     expect(plan.issues[1].labels).toContain('type:backend')
     expect(plan.issues[1].body).toContain('merge-after #1')
+    // F3: el título sale de "Slice" ("login"/"refresh"), no de "Entrega"
+    // ("modelo"/"flow") — "Entrega" aparece en el cuerpo como descripción.
+    expect(plan.issues[0].title).toBe('#1 login')
+    expect(plan.issues[1].title).toBe('#2 refresh')
+    expect(plan.issues[0].body).toContain('modelo')
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -274,7 +279,13 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('falta la columna "Entrega" → exit != 0, mensaje nombra la columna y la consecuencia (título del issue)', () => {
+  // F3: el título ya no sale de "Entrega" (sale de "Slice") — "Entrega" pasó
+  // a ser una columna OPCIONAL (Descripción del cuerpo), así que su ausencia
+  // ya NO aborta; degrada como Tipo/Acepta/Protegido/Área/Toca (se avisa por
+  // stderr, dry-run sigue funcionando). Este test antes verificaba el abort;
+  // ahora verifica el nuevo contrato explícitamente para dejar constancia
+  // del cambio.
+  it('falta la columna "Entrega" → YA NO aborta (F3: pasó a opcional), avisa por stderr y el dry-run sigue funcionando', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
     const NO_ENTREGA = `## 9. Slices
 | # | Slice | Tipo | Dep | Acepta | Protegido |
@@ -282,17 +293,13 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
 | 1 | x | backend | – | – | – |
 `
     const spec = join(dir, 'spec.md'); writeFileSync(spec, NO_ENTREGA)
-    let threw = false
-    try {
-      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
-    } catch (e) {
-      threw = true
-      expect(e.status).toBe(2)
-      expect(e.stdout).toBe('')
-      expect(e.stderr.toString()).toMatch(/columna\s+"Entrega"/)
-      expect(e.stderr.toString()).toMatch(/t.tulo/i)
-    }
-    expect(threw).toBe(true)
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8' })
+    expect(res.status).toBe(0)
+    const plan = JSON.parse(res.stdout)
+    expect(plan.issues).toHaveLength(1)
+    expect(plan.issues[0].title).toBe('#1 x') // título desde "Slice"
+    expect(res.stderr).toMatch(/columna\s+"Entrega"/)
+    expect(res.stderr).toMatch(/Descripci/i)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -438,6 +445,67 @@ describe('ct-groom — avisa pero continúa ante columnas ausentes o prefijo en 
     expect(plan.issues[0].labels).toContain('touches:pbxproj')
     expect(plan.issues[0].labels).not.toContain('area:areamedicacion')
     expect(plan.issues[0].labels).not.toContain('touches:touchespbxproj')
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// F3 — `Tipo` decide qué addendum recibe el agente despachado
+// (kickoff.js#ADDENDA, vía renderKickoff): `ADDENDA[slice.type] || ''`
+// devuelve cadena vacía en silencio para cualquier valor que no sea una key
+// exacta de ADDENDA. Un autor que escribe "ios"/"swift" para un slice de UI
+// real obtiene una label `type:ios` de aspecto normal, pero el agente
+// despachado NUNCA recibe el addendum de `ui` (el gate de screenshot
+// obligatorio) — sin ningún aviso. /ct-groom debe avisar (no abortar:
+// `type:ios` sigue siendo una label legítima aunque no tenga addendum),
+// nombrando el valor, el slice, la consecuencia y el conjunto reconocido.
+describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avisa, no aborta (F3)', () => {
+  it('"Tipo" = "ios" (no es key de ADDENDA) → dry-run no aborta, la label type:ios se crea igual, y avisa por stderr con el valor, el slice, la consecuencia y el conjunto reconocido', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | pantalla | ios | pantalla de alta | – | – | – |
+`)
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8' })
+    expect(res.status).toBe(0)
+    const plan = JSON.parse(res.stdout)
+    expect(plan.issues[0].labels).toContain('type:ios') // se usa el valor igualmente
+    expect(res.stderr).toMatch(/"ios"/) // el valor ofensor
+    expect(res.stderr).toMatch(/Tipo/) // la columna
+    expect(res.stderr).toMatch(/#1/) // el slice
+    expect(res.stderr).toMatch(/addendum/i) // la consecuencia
+    expect(res.stderr).toMatch(/ui/) // el conjunto reconocido incluye "ui"
+    expect(res.stderr).toMatch(/backend/)
+    expect(res.stderr).toMatch(/infra/)
+    expect(res.stderr).toMatch(/bugfix/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('"Tipo" con un valor reconocido ("ui") no dispara ningún aviso de tipo', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | pantalla | ui | pantalla de alta | – | – | – | – | – |
+`)
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8' })
+    expect(res.status).toBe(0)
+    expect(res.stderr).toBe('')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('"Tipo" vacío (columna presente, celda en blanco) no dispara ningún aviso de tipo (sigue sin label type:)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | pantalla |  | pantalla de alta | – | – | – | – | – |
+`)
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8' })
+    expect(res.status).toBe(0)
+    expect(res.stderr).toBe('')
+    const plan = JSON.parse(res.stdout)
+    expect(plan.issues[0].labels.some((l) => l.startsWith('type:'))).toBe(false)
     rmSync(dir, { recursive: true, force: true })
   })
 })
@@ -605,13 +673,15 @@ describe('ct-groom — un hueco (línea en blanco) dentro de la tabla §9 aborta
   })
 })
 
-describe('ct-groom — celda "Entrega" vacía o fila más corta que la cabecera aborta fuerte (4)', () => {
-  it('celda Entrega vacía → exit != 0 en vez de un issue titulado "#1" a secas', () => {
+// F3: la celda con contenido obligatorio (la que, vacía, deja sin título
+// fiable que construir) pasó de "Entrega" a "Slice".
+describe('ct-groom — celda "Slice" vacía o fila más corta que la cabecera aborta fuerte (4, actualizado por F3)', () => {
+  it('celda Slice vacía → exit != 0 en vez de un issue titulado "#1" a secas', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
-| 1 | a | ui |  | – | – | – |
+| 1 |  | ui | y | – | – | – |
 `)
     let threw = false
     try {
@@ -622,9 +692,23 @@ describe('ct-groom — celda "Entrega" vacía o fila más corta que la cabecera 
       expect(e.stdout).toBe('')
       const err = e.stderr.toString()
       expect(err).toMatch(/^1 fila/)
-      expect(err).toMatch(/t.tulo/i)
+      expect(err).toMatch(/Slice/)
     }
     expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('celda Entrega vacía (Slice con contenido) YA NO aborta (F3: Entrega es opcional)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui |  | – | – | – |
+`)
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    const plan = JSON.parse(out)
+    expect(plan.issues).toHaveLength(1)
+    expect(plan.issues[0].title).toBe('#1 a')
     rmSync(dir, { recursive: true, force: true })
   })
 })
@@ -798,13 +882,16 @@ describe('ct-groom — fila con más celdas que la cabecera aborta fuerte (revie
   })
 })
 
-describe('ct-groom — "Entrega" con un marcador de "sin valor" aborta fuerte (review round 2, b)', () => {
-  it('"Entrega" = "–" → exit != 0 en vez de un issue titulado "#1 –"', () => {
+// F3: la exigencia de contenido real se movió de "Entrega" a "Slice" — un
+// marcador de "sin valor" en "Entrega" ya no aborta (es "sin descripción",
+// legítimo); en "Slice" sí, porque de ahí sale el título.
+describe('ct-groom — "Slice" con un marcador de "sin valor" aborta fuerte (review round 2, b — actualizado por F3)', () => {
+  it('"Slice" = "–" → exit != 0 en vez de un issue titulado "#1 –"', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
-| 1 | a | ui | – | – | – | – |
+| 1 | – | ui | y | – | – | – |
 `)
     let threw = false
     try {
@@ -816,6 +903,18 @@ describe('ct-groom — "Entrega" con un marcador de "sin valor" aborta fuerte (r
       expect(e.stderr.toString()).toMatch(/^1 fila/)
     }
     expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('"Entrega" = "–" (Slice con contenido) YA NO aborta', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | – | – | – | – |
+`)
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    expect(JSON.parse(out).issues).toHaveLength(1)
     rmSync(dir, { recursive: true, force: true })
   })
 })
