@@ -1,4 +1,6 @@
 // Lógica pura de grooming: de Slice[] (T1) a un plan de operaciones GitHub.
+import { isNoValueCell } from './slices.js'
+
 export function buildIssueTitle(slice) {
   return `#${slice.n} ${slice.entrega}`.trim()
 }
@@ -37,7 +39,13 @@ export function buildIssueBody(slice, { specPath, specSection }) {
     lines.push('')
   }
   lines.push('## Out of scope / Protected')
-  lines.push(slice.protected && slice.protected !== '–' ? `- 🚫 ${slice.protected}` : '- (ninguno declarado)')
+  // Fix de review (F2): antes solo trataba el em dash literal ('–', U+2013)
+  // como "sin valor" — las otras variantes que isNoValueCell ya acepta en
+  // TODAS las demás columnas (Dep/Acepta/Área/Toca: '-', '—', '―', '−',
+  // '--') colaban como si fueran contenido real, produciendo un bullet
+  // basura ("- 🚫 -") en el body de CADA issue con esa variante. Mismo
+  // criterio de "sin valor" que las demás columnas, sin excepción.
+  lines.push(slice.protected && !isNoValueCell(slice.protected) ? `- 🚫 ${slice.protected}` : '- (ninguno declarado)')
   lines.push('')
   lines.push(`<!-- ct-order:${slice.n} -->`) // marcador greppable de orden para el dispatcher
   return lines.join('\n')
