@@ -508,6 +508,32 @@ describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avis
     expect(plan.issues[0].labels.some((l) => l.startsWith('type:'))).toBe(false)
     rmSync(dir, { recursive: true, force: true })
   })
+
+  // Review de F3, finding 1: un marcador de "sin valor" en "Tipo" ("–", "-",
+  // "—", etc. — el MISMO criterio que ya usan Dep/Acepta/Protegido/Área/Toca)
+  // significa "ninguno", igual que la celda vacía de arriba — NO un valor
+  // real desconocido. Antes del fix esto disparaba DOS síntomas a la vez:
+  // (a) el aviso de "Tipo no reconocido" acusaba de error tipográfico a
+  // quien escribió exactamente el marcador que el propio contrato enseña a
+  // usar en todas las demás columnas, y (b) `buildLabels` (groom.js) trataba
+  // "–" como truthy y emitía la label literal "type:–" — que `gh label
+  // create --force` crearía de verdad en el repo del usuario, el mismo bug
+  // de "area:areamedicacion" por otra puerta. Las dos formas de decir
+  // "ninguno" (celda vacía, celda con marcador) deben comportarse igual.
+  it.each(['-', '–', '—', '―', '−', '--'])('"Tipo" = marcador de "sin valor" ("%s") → sin aviso, y sin label "type:" (mismo trato que Tipo vacío)', (marker) => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | pantalla | ${marker} | pantalla de alta | – | – | – | – | – |
+`)
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8' })
+    expect(res.status).toBe(0)
+    expect(res.stderr).toBe('')
+    const plan = JSON.parse(res.stdout)
+    expect(plan.issues[0].labels.some((l) => l.startsWith('type:'))).toBe(false)
+    rmSync(dir, { recursive: true, force: true })
+  })
 })
 
 // F2 — señalado por el coordinador tras verificar F1 contra el spec real:

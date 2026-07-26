@@ -67,6 +67,19 @@ describe('groom puro', () => {
     const empty = { n: 1, type: '', entrega: 'x', deps: [], ac: [], protected: '–' }
     expect(buildLabels(empty)).toEqual(['status:backlog'])
   })
+  // Review de F3, finding 1 (bug preexistente a F3, cerrado ahora): `Tipo`
+  // con un marcador de "sin valor" ("–", "-", "—", etc. — el mismo criterio
+  // que ya usan Dep/Acepta/Protegido/Área/Toca) es truthy en JS, así que
+  // `if (slice.type)` lo trataba como un valor real y emitía la label
+  // literal "type:–" — que `gh label create --force` crearía de verdad en
+  // el repo del usuario. Mismo bug que "area:areamedicacion" por otra
+  // puerta: un marcador que el propio contrato enseña a usar en todas las
+  // demás columnas produce basura en esta. Las dos formas de decir "ninguno"
+  // (celda vacía, celda con marcador) deben producir la MISMA salida.
+  it.each(['-', '–', '—', '―', '−', '--'])('buildLabels con type = marcador de "sin valor" ("%s"): sin label "type:", igual que type vacío', (marker) => {
+    const s = { n: 1, type: marker, entrega: 'x', deps: [], ac: [], protected: '–' }
+    expect(buildLabels(s)).toEqual(['status:backlog'])
+  })
   it('buildLabels emite area:/touches: por cada token, en orden tipo→area→touches→status', () => {
     const s = { ...SLICE, area: ['api'], touches: ['db', 'migration'] }
     expect(buildLabels(s)).toEqual(['type:backend', 'area:api', 'touches:db', 'touches:migration', 'status:backlog'])

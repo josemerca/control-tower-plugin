@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { ADDENDA } from '../scripts/kickoff.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const script = join(root, 'scripts', 'ct-init.sh')
@@ -81,15 +82,21 @@ describe('ct-init.sh', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('AGENTS.md nuevo: la sección §9 nombra los valores de "Tipo" reconocidos (ui, backend, infra, bugfix) y que deciden el addendum', () => {
+  // Review de F3, finding 2: esta aserción antes listaba los cuatro tipos
+  // como literales escritos a mano ('ui'/'backend'/'infra'/'bugfix') — si
+  // alguien añade un quinto addendum a ADDENDA (kickoff.js), el aviso en
+  // runtime de ct-groom.mjs lo reflejaría solo (deriva de
+  // Object.keys(ADDENDA)), pero este test seguiría en VERDE con la prosa
+  // sembrada diciendo solo cuatro, sin detectar la deriva. Se deriva de
+  // ADDENDA en vez de hardcodear una tercera copia de la lista: el test se
+  // autovigila, no hace falta tocarlo cuando se añada un tipo nuevo.
+  it('AGENTS.md nuevo: la sección §9 nombra TODOS los valores de "Tipo" reconocidos (derivado de ADDENDA, no una lista hardcodeada) y que deciden el addendum', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     expect(agents).toMatch(/addendum/i)
-    expect(agents).toContain('`ui`')
-    expect(agents).toContain('`backend`')
-    expect(agents).toContain('`infra`')
-    expect(agents).toContain('`bugfix`')
+    expect(Object.keys(ADDENDA).length).toBeGreaterThan(0) // control: si ADDENDA quedara vacío, el .every() de abajo pasaría vacío y no probaría nada
+    expect(Object.keys(ADDENDA).every((t) => agents.includes(`\`${t}\``))).toBe(true)
     rmSync(dir, { recursive: true, force: true })
   })
 
