@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { analyzeSlicesTable } from './slices.js'
+import { analyzeSlicesTable, isNoValueCell } from './slices.js'
 import { groomPlan } from './groom.js'
 import { flattenIssuePages, realIssuesOnly, findByMarker } from './gh-issues.js'
 import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
@@ -232,7 +232,15 @@ for (const col of report.missingOptionalColumns) {
 // tocar este fichero, así las dos listas no pueden divergir.
 const KNOWN_TYPES = Object.keys(ADDENDA)
 for (const s of report.slices) {
-  if (s.type && !KNOWN_TYPES.includes(s.type)) {
+  // Review de F3, finding 1: un marcador de "sin valor" en "Tipo" ("–", "-",
+  // "—", etc. — isNoValueCell, el MISMO criterio que ya usan Dep/Acepta/
+  // Protegido/Área/Toca) significa "sin tipo", no un valor desconocido. Sin
+  // este chequeo, este aviso acusaba de error tipográfico a un autor que
+  // escribió exactamente el marcador que el propio contrato enseña a usar
+  // en todas las demás columnas ("revisa si es un error tipográfico" sobre
+  // un "–" es ruido, no señal). buildLabels (groom.js) ya trata este mismo
+  // marcador como "sin type:" — coherente con eso.
+  if (s.type && !isNoValueCell(s.type) && !KNOWN_TYPES.includes(s.type)) {
     console.error(`aviso: valor "${s.type}" en columna Tipo (slice #${s.n}) no es ninguno de los tipos reconocidos por el dispatcher (${KNOWN_TYPES.join(', ')}) — el agente despachado para este slice no recibirá ningún addendum de tipo (ver scripts/kickoff.js#ADDENDA); revisa si es un error tipográfico o si falta añadir su addendum`)
   }
 }

@@ -15,8 +15,18 @@ export function buildIssueTitle(slice) {
 
 export function buildLabels(slice) {
   const labels = []
-  // Omit empty type to avoid emitting garbage literal "type:" to GitHub
-  if (slice.type) labels.push(`type:${slice.type}`)
+  // Omit empty type to avoid emitting garbage literal "type:" to GitHub.
+  // Review de F3, finding 1: un marcador de "sin valor" ("–", "-", "—",
+  // etc. — el mismo criterio que ya usan Dep/Acepta/Área/Toca, y que
+  // buildIssueBody ya aplica a Protegido) es TRUTHY en JS, así que
+  // `if (slice.type)` a secas lo trataba como un tipo real y emitía la
+  // label literal "type:–" — que `gh label create --force` crearía de
+  // verdad en el repo del usuario. Mismo bug de "area:areamedicacion" por
+  // otra puerta: un marcador que el propio contrato enseña a usar en todas
+  // las demás columnas producía basura en esta. isNoValueCell unifica el
+  // criterio: celda vacía y celda con marcador producen la MISMA salida
+  // (ninguna label "type:").
+  if (slice.type && !isNoValueCell(slice.type)) labels.push(`type:${slice.type}`)
   // area/touches (T14/W-A): alimentan directamente la maquinaria de colisión
   // de claim.js#tokensOf y la serialización de dispatch.js#SERIALIZING_TOUCHES,
   // que hasta ahora quedaba inerte porque /ct-groom nunca emitía estas
