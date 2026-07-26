@@ -62,7 +62,12 @@ export function mapGhIssue(i) {
     deps,
     touches,
     type,
-    entrega: (i.title || '').replace(/^#\d+\s*/, ''),
+    // name: viene del TÍTULO del issue (columna Slice del spec, F3) — no
+    // confundir con `slice.entrega` (columna Entrega) que usa slices.js/
+    // groom.js para la sección "Descripción" del cuerpo. Mismo nombre de
+    // campo que slices.js#name (la columna Slice) a propósito: ambos
+    // structs representan el mismo concepto, así que usan la misma palabra.
+    name: (i.title || '').replace(/^#\d+\s*/, ''),
     ac: extractAc(body),
     issue: `#${i.number}`,
   }

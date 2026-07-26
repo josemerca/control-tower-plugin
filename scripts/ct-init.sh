@@ -133,6 +133,9 @@ copiable tal cual:
   trato que antes tenía una `Entrega` vacía). Si la celda ya trae una
   referencia `#N` (p.ej. un issue creado a mano antes de correr
   `/ct-groom`), esa referencia se extrae aparte y NO aparece en el título.
+  Ese mismo título es lo que `/ct-next` reinyecta al despachar: la primera
+  línea del kickoff del agente y el nombre del workspace cmux salen de aquí
+  — por eso conviene que sea corto y legible, no una frase.
 - **Tipo** *(opcional)*: label `type:<valor>` del issue. Además decide qué
   addendum recibe el agente al despachar (`/ct-next` → `kickoff.js`):
   valores reconocidos hoy son `ui`, `backend`, `infra`, `bugfix` — cada uno

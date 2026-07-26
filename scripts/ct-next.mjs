@@ -329,7 +329,7 @@ if (fx) {
 
 function loadIssues() {
   if (fx) return fx
-  // issues open con labels → {n, order, status, deps, touches, entrega, type, ac, issue}.
+  // issues open con labels → {n, order, status, deps, touches, name, type, ac, issue}.
   // Enumeración vía el endpoint REST `gh api repos/<repo>/issues`, NUNCA el
   // índice de búsqueda (`--search`/`gh search issues`): tiene latencia de
   // indexado y podría no reflejar un label recién escrito por otro runner.
@@ -548,7 +548,7 @@ function cleanupOrphanedWorktree(s, wt, branch, reason) {
 for (const s of selected) {
   const branch = `feat/${s.n}`
   const wt = `${repoRoot}/.worktrees/${s.n}`
-  const name = `${repoName} · #${s.n} ${s.entrega}`
+  const name = `${repoName} · #${s.n} ${s.name}`
   // Normaliza ac/issue por si el slice viene de un fixture de test (como el
   // del brief) que no los trae: renderKickoff/buildStateSeed indexan
   // slice.ac como array y usan slice.issue con `??`/`||` — sin este default
@@ -573,7 +573,7 @@ for (const s of selected) {
   const cmuxArgv = buildCmuxArgv({ name, cwd: wt, command, env: { CLAUDE_CONFIG_DIR: configDir } })
 
   if (dryRun) {
-    console.log(`\n=== slice #${s.n} (${s.entrega}) ===`)
+    console.log(`\n=== slice #${s.n} (${s.name}) ===`)
     // W-C, punto 5: el plan tiene que dejar claro que se INTENTARÍA un claim
     // (dispatch-check.mjs, status:ready → status:in-progress) para este issue
     // concreto ANTES de crear el worktree — sin invocar dispatch-check de
