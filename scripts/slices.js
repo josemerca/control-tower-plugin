@@ -51,7 +51,10 @@ const NO_VALUE_MARKERS = new Set(['-', '–', '—', '―', '−', '--'])
 // exactamente eso, solo que envuelto. También se amplía el propio conjunto:
 // el signo menos matemático (−, U+2212) y el doble-guion ("--") son
 // salidas plausibles de autocorrección, igual que el em dash.
-function isNoValueCell(trimmedCell) {
+// Exportada (además de usarse internamente arriba): groom.js#buildIssueBody
+// la necesita para tratar "Protegido" con el mismo criterio de "sin valor"
+// que ya usan Dep/Acepta/Área/Toca — ver el fix correspondiente en groom.js.
+export function isNoValueCell(trimmedCell) {
   return NO_VALUE_MARKERS.has(cleanEmphasis(trimmedCell))
 }
 

@@ -64,6 +64,21 @@ describe('groom puro', () => {
     const plan = groomPlan([a, b], { milestone: 'Epic', specPath: 'x', specSection: '9' })
     expect(plan.issues).toHaveLength(2)
   })
+  // Bug de review: buildIssueBody solo trataba el em dash literal ('–',
+  // U+2013) como "sin valor" para Protegido — las otras cuatro variantes que
+  // isNoValueCell acepta en TODAS las demás columnas (Dep/Acepta/Área/Toca)
+  // colaban como si fueran contenido real, produciendo un bullet basura
+  // ("- 🚫 -", "- 🚫 —", "- 🚫 −") en el body del issue. Las cinco variantes
+  // deben producir "(ninguno declarado)", igual que las demás columnas.
+  it.each(['-', '–', '—', '―', '−', '--'])('Protegido "%s" (marcador de "sin valor") → "(ninguno declarado)", no un bullet basura', (marker) => {
+    const b = buildIssueBody({ ...SLICE, protected: marker }, { specPath: 'x', specSection: '9' })
+    expect(b).toContain('(ninguno declarado)')
+    expect(b).not.toMatch(/🚫 .*[-–—―−]\s*$/m)
+  })
+  it('Protegido con contenido real sigue emitiendo su bullet 🚫', () => {
+    const b = buildIssueBody({ ...SLICE, protected: 'schema §6' }, { specPath: 'x', specSection: '9' })
+    expect(b).toContain('🚫 schema §6')
+  })
   it('groomPlan nombra todos los órdenes duplicados cuando hay más de uno', () => {
     const s1a = { ...SLICE, n: 1 }
     const s1b = { ...SLICE, n: 1 }

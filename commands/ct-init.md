@@ -7,6 +7,14 @@ bash ${CLAUDE_PLUGIN_ROOT}/scripts/ct-init.sh "$(pwd)"
 ```
 Luego rellena `AGENTS.md` con los comandos reales del repo (build, test, lint, CI): para eso sí explora el repo.
 
+`AGENTS.md` ya trae (el scaffolder la crea o la añade solo) una sección
+**"Formato de la tabla §9 (contrato con /ct-groom)"**, delimitada por
+`<!-- ct-init:slices-contract --> ... <!-- /ct-init:slices-contract -->`.
+Es el contrato que necesita quien escriba specs para este repo — **no la
+dupliques, no la reescribas, no la resumas en otra sección**, aunque al
+explorar el repo te parezca que falta o que la redactarías distinto. Si el
+usuario la ha editado a mano, respétala tal cual está.
+
 En `.agent/STATE.md`, en cambio, **limítate a describir el bootstrap**:
 
 - `task`: `"Bootstrap Control Tower loop (ct-init)"`
