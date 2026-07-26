@@ -46,8 +46,8 @@ const openIssue42 = { number: 42, title: '#42 algo', labels: [{ name: 'status:re
 
 const FIXTURE = JSON.stringify({
   issues: [
-    { n: 1, order: 1, status: 'in-review', deps: [], touches: ['api'], entrega: 'login', type: 'backend' },
-    { n: 2, order: 2, status: 'ready', deps: [1], touches: ['api'], entrega: 'refresh', type: 'backend' },
+    { n: 1, order: 1, status: 'in-review', deps: [], touches: ['api'], name: 'login', type: 'backend' },
+    { n: 2, order: 2, status: 'ready', deps: [1], touches: ['api'], name: 'refresh', type: 'backend' },
   ],
   mergedIssues: [1],
 })

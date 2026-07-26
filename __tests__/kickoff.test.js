@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP, ADDENDA } from '../scripts/kickoff.js'
 import { parseState } from '../scripts/state.js'
 
-const SLICE = { n: 7, entrega: 'refresh token', type: 'backend', ac: ['AC-7.1'], deps: [1], issue: '#7' }
+const SLICE = { n: 7, name: 'refresh token', type: 'backend', ac: ['AC-7.1'], deps: [1], issue: '#7' }
 
 describe('renderKickoff', () => {
   it('backend: has backend markers, not ui/infra/bugfix', () => {

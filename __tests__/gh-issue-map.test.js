@@ -50,9 +50,9 @@ describe('mapGhIssue — defensivo con labels/marcadores ausentes', () => {
     expect(mapped.order).toBe(7)
     expect(mapped.deps).toEqual([3, 4])
   })
-  it('entrega: quita el prefijo "#N " del título', () => {
+  it('name: quita el prefijo "#N " del título', () => {
     const mapped = mapGhIssue({ number: 5, title: '#5 refresh token', labels: [], body: '' })
-    expect(mapped.entrega).toBe('refresh token')
+    expect(mapped.name).toBe('refresh token')
   })
   it('issue: siempre "#<number>", nunca undefined', () => {
     const mapped = mapGhIssue({ number: 5, title: '#5 x', labels: [], body: '' })

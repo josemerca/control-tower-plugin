@@ -29,8 +29,8 @@ function run(args, envOverrides = {}) {
 // El wrapper acepta CT_NEXT_FIXTURE (JSON de {issues, mergedIssues}) para test sin red.
 const FIXTURE = JSON.stringify({
   issues: [
-    { n: 1, order: 1, status: 'in-review', deps: [], touches: ['api'], entrega: 'login', type: 'backend' },
-    { n: 2, order: 2, status: 'ready', deps: [1], touches: ['api'], entrega: 'refresh', type: 'backend' },
+    { n: 1, order: 1, status: 'in-review', deps: [], touches: ['api'], name: 'login', type: 'backend' },
+    { n: 2, order: 2, status: 'ready', deps: [1], touches: ['api'], name: 'refresh', type: 'backend' },
   ],
   mergedIssues: [1],
 })
@@ -84,8 +84,8 @@ describe('ct-next — nada despachable', () => {
   it('imprime el motivo "deps sin mergear" y exit 0 cuando el único ready tiene una dep sin mergear', () => {
     const fixtureNadaReady = JSON.stringify({
       issues: [
-        { n: 1, order: 1, status: 'in-review', deps: [], touches: ['api'], entrega: 'login', type: 'backend' },
-        { n: 2, order: 2, status: 'ready', deps: [1], touches: ['api'], entrega: 'refresh', type: 'backend' },
+        { n: 1, order: 1, status: 'in-review', deps: [], touches: ['api'], name: 'login', type: 'backend' },
+        { n: 2, order: 2, status: 'ready', deps: [1], touches: ['api'], name: 'refresh', type: 'backend' },
       ],
       mergedIssues: [], // #1 no mergeado todavía → #2 bloqueado por deps
     })
@@ -105,7 +105,7 @@ describe('ct-next — nada despachable', () => {
 describe('ct-next — motivo de bloqueo distinguible (W-B, §8)', () => {
   it('nada en status:ready → mensaje "none-ready"', () => {
     const fx = JSON.stringify({
-      issues: [{ n: 1, order: 1, status: 'in-review', deps: [], touches: [], entrega: 'x', type: 'backend' }],
+      issues: [{ n: 1, order: 1, status: 'in-review', deps: [], touches: [], name: 'x', type: 'backend' }],
       mergedIssues: [],
     })
     const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fx })
@@ -116,8 +116,8 @@ describe('ct-next — motivo de bloqueo distinguible (W-B, §8)', () => {
   it('ready + deps mergeadas pero colisiona con touches en vuelo → nombra el issue en vuelo y el token compartido', () => {
     const fx = JSON.stringify({
       issues: [
-        { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['api'], entrega: 'en curso', type: 'backend' },
-        { n: 2, order: 2, status: 'ready', deps: [], touches: ['api'], entrega: 'choca', type: 'backend' },
+        { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['api'], name: 'en curso', type: 'backend' },
+        { n: 2, order: 2, status: 'ready', deps: [], touches: ['api'], name: 'choca', type: 'backend' },
       ],
       mergedIssues: [],
     })
@@ -132,8 +132,8 @@ describe('ct-next — motivo de bloqueo distinguible (W-B, §8)', () => {
   it('ready + deps mergeadas pero colisiona con serialización (migration en vuelo vs. ci ready) → nombra ambos tokens', () => {
     const fx = JSON.stringify({
       issues: [
-        { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['migration'], entrega: 'en curso', type: 'backend' },
-        { n: 2, order: 2, status: 'ready', deps: [], touches: ['ci'], entrega: 'choca', type: 'backend' },
+        { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['migration'], name: 'en curso', type: 'backend' },
+        { n: 2, order: 2, status: 'ready', deps: [], touches: ['ci'], name: 'choca', type: 'backend' },
       ],
       mergedIssues: [],
     })
@@ -148,8 +148,8 @@ describe('ct-next — motivo de bloqueo distinguible (W-B, §8)', () => {
   it('cap ya copado por trabajo en vuelo → dice cuántos hay en vuelo y cuál es el cap, aunque haya ready sin colisión', () => {
     const fx = JSON.stringify({
       issues: [
-        { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['db'], entrega: 'en curso', type: 'backend' },
-        { n: 2, order: 2, status: 'ready', deps: [], touches: ['ui'], entrega: 'sin colisión', type: 'backend' },
+        { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['db'], name: 'en curso', type: 'backend' },
+        { n: 2, order: 2, status: 'ready', deps: [], touches: ['ui'], name: 'sin colisión', type: 'backend' },
       ],
       mergedIssues: [],
     })
@@ -173,8 +173,8 @@ describe('ct-next — motivo de bloqueo distinguible (W-B, §8)', () => {
   it('cap ya copado Y el ready también tiene deps sin mergear → dice que subir --cap no bastaría, y por qué', () => {
     const fx = JSON.stringify({
       issues: [
-        { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['x'], entrega: 'en curso', type: 'backend' },
-        { n: 2, order: 2, status: 'ready', deps: [1], touches: [], entrega: 'con dep pendiente', type: 'backend' },
+        { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['x'], name: 'en curso', type: 'backend' },
+        { n: 2, order: 2, status: 'ready', deps: [1], touches: [], name: 'con dep pendiente', type: 'backend' },
       ],
       mergedIssues: [], // la dep de #2 (orden 1, o sea #1) no está mergeada
     })
@@ -202,8 +202,8 @@ describe('ct-next --dry-run — visibilidad del trabajo en vuelo (W-B, §8)', ()
   it('con algo en vuelo (y aun así se despacha otro) → lista el issue en vuelo y sus tokens retenidos', () => {
     const fx = JSON.stringify({
       issues: [
-        { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['migration'], entrega: 'en curso', type: 'backend' },
-        { n: 2, order: 2, status: 'ready', deps: [], touches: ['ui'], entrega: 'nuevo', type: 'backend' },
+        { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['migration'], name: 'en curso', type: 'backend' },
+        { n: 2, order: 2, status: 'ready', deps: [], touches: ['ui'], name: 'nuevo', type: 'backend' },
       ],
       mergedIssues: [],
     })

@@ -30,7 +30,7 @@ export const ADDENDA = {
 export function renderKickoff(slice, { repo, dispatchCheckPath }) {
   const addendum = ADDENDA[slice.type] || ''
   return [
-    `Estás implementando UN slice (${slice.entrega}) del repo ${repo}, issue ${slice.issue || `orden #${slice.n}`}.`,
+    `Estás implementando UN slice (${slice.name}) del repo ${repo}, issue ${slice.issue || `orden #${slice.n}`}.`,
     `Es human-gated: NO empieces el siguiente slice; al terminar deja el PR listo y PARA.`,
     `Arranque verification-first: confirma pwd/rama, git log, y baseline verde ANTES de tocar nada.`,
     `Hidrátate de .agent/STATE.md y del issue de GitHub; los criterios de aceptación son ${slice.ac.join(', ') || '(ver issue)'}.`,
@@ -59,7 +59,7 @@ export function buildStateSeed(slice, { branch, base }) {
   const issueNum = slice.issue != null ? parseInt(String(slice.issue).replace('#', ''), 10) : null
   return renderState({
     meta: {
-      task: slice.entrega,
+      task: slice.name,
       status: 'not_started',
       branch,
       base,
