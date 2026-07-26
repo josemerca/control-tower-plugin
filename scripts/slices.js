@@ -40,9 +40,19 @@ const SEPARATOR_RE = /^\s*\|[\s:|-]+\|\s*$/
 // automáticamente) ya lo elimina `String#trim()` de forma nativa —
 // verificado (`' — '.trim() === '—'`) — así que no hace falta
 // tratarlo aparte aquí.
-const NO_VALUE_MARKERS = new Set(['-', '–', '—', '―'])
+const NO_VALUE_MARKERS = new Set(['-', '–', '—', '―', '−', '--'])
+// isNoValueCell corre `stripInlineMarkup` ANTES de comparar (review round 2,
+// punto c): envolver el marcador en marcado inline ("`–`", "**–**") es la
+// MISMA forma que el CRITICAL del em dash — un autor que ya demostró
+// envolver valores en negrita/backticks (F1: "**S1**") envuelve igual de
+// fácil el marcador de "nada". Sin este strip, `isNoValueCell` comparaba la
+// celda cruda contra el Set y "`–`"/"**–**" no matcheaban nada, así que el
+// autor recibía "si no hay dependencias, escribe –" por haber escrito
+// exactamente eso, solo que envuelto. También se amplía el propio conjunto:
+// el signo menos matemático (−, U+2212) y el doble-guion ("--") son
+// salidas plausibles de autocorrección, igual que el em dash.
 function isNoValueCell(trimmedCell) {
-  return NO_VALUE_MARKERS.has(trimmedCell)
+  return NO_VALUE_MARKERS.has(stripInlineMarkup(trimmedCell))
 }
 
 function splitRow(line) {
@@ -151,7 +161,20 @@ function parseTokenList(cell, opts = {}) {
   const { ownPrefix, otherPrefix, columnLabel, n, warnings, emptyWarnings } = opts
   const raw = (cell || '').trim()
   if (!raw || isNoValueCell(raw)) return []
-  return raw
+  // CRITICAL (review round 2): el split por comas corría sobre `raw` SIN
+  // limpiar marcado inline primero, así que marcado que envuelve la CELDA
+  // COMPLETA de una lista ("**area:medicacion, area:otro**" — un solo par
+  // de asteriscos envolviendo TODA la lista, no cada token) sobrevivía
+  // intacto: el split partía "**area:medicacion" y "area:otro**", ninguno
+  // de los dos empezaba/terminaba con el mismo wrapper por separado, así
+  // que ni stripColumnPrefix (por-pieza) los reconocía como prefijados —
+  // resultado: "area:areamedicacion" otra vez, el mismo defecto de F1 una
+  // capa por debajo. Las listas por comas son el uso documentado normal
+  // (commands/ct-groom.md: "db, migration"), no un caso raro. Se limpia la
+  // celda COMPLETA aquí, antes del split; el strip por pieza de más abajo
+  // (dentro de stripColumnPrefix) se queda para el caso de un solo token.
+  const unwrapped = stripInlineMarkup(raw)
+  return unwrapped
     .split(',')
     .map((piece) => {
       const trimmed = piece.trim()
@@ -190,10 +213,12 @@ function parseTokenList(cell, opts = {}) {
 //     "|" (blanco u otro texto) dentro del bloque de la tabla — antes se
 //     truncaba ahí en silencio (review de F1, punto 3).
 //   - skippedRows: filas cuyo "#" no es un entero a secas.
-//   - invalidRows: filas con la celda "Entrega" vacía, o con menos celdas
-//     que la cabecera — mismo resultado observable que "falta la columna
-//     Entrega", pero por fila (review de F1, punto 4). No se agregan a
-//     `slices`.
+//   - invalidRows: filas con la celda "Entrega" vacía (o con un marcador de
+//     "sin valor" como "–"), o con un número de celdas distinto al de la
+//     cabecera (de menos o de más — un "|" sin escapar desplaza columnas) —
+//     mismo resultado observable que "falta la columna Entrega", pero por
+//     fila (review de F1, punto 4; review round 2, puntos a/b). No se
+//     agregan a `slices`.
 //   - malformedDepRows: filas cuya celda "Dep" tiene contenido real (no
 //     "vacío" según isNoValueCell) pero de la que no se extrajo ninguna
 //     referencia "#N" (F2).
@@ -291,6 +316,24 @@ export function analyzeSlicesTable(specMd) {
     }
     if (SEPARATOR_RE.test(raw)) continue // fila separadora |---|
 
+    // IMPORTANTE (review round 2): HEADING_RE (solo headings ATX "## ...")
+    // es demasiado estrecho para decidir "fin del bloque de la tabla §9" —
+    // una regla horizontal ("---"), un heading setext ("Riesgos" +
+    // subrayado "-------"), un pseudo-heading en negrita ("**10.
+    // Riesgos**") o un "##10." sin espacio son markdown perfectamente
+    // corriente y ninguno matchea HEADING_RE; sin este check, el escaneo
+    // post-hueco los trataría como más líneas de gap y acabaría arrastrando
+    // la tabla de OTRA sección, abortando con un ejemplo de la fila
+    // equivocada y un consejo ("une las filas en un solo bloque") que no
+    // aplica. Arreglo barato que conserva el true positive: tras un hueco,
+    // si esta fila con "|" está seguida INMEDIATAMENTE de una fila
+    // separadora, es la cabecera de una tabla NUEVA (toda tabla markdown
+    // válida tiene su separador justo después de su cabecera) — se corta el
+    // escaneo aquí sin contar nada de esta fila en adelante. Una fila de
+    // continuación de LA MISMA tabla (el caso real) nunca está seguida de
+    // un separador nuevo.
+    if (hitGap && SEPARATOR_RE.test(lines[i + 1] ?? '')) break
+
     // A partir de aquí: fila de datos real.
     totalDataRows++
     if (hitGap) rowsAfterGap.push({ raw: trimmed })
@@ -309,15 +352,32 @@ export function analyzeSlicesTable(specMd) {
     // Entrega entera" (un issue titulado "#N" a secas, sin AC ni deps) —
     // solo que por fila. Se reporta y NO se agrega a `slices`: no hay
     // título de issue fiable que construir con esta fila.
-    const rowShorterThanHeader = cells.length < header.length
+    //
+    // Punto (a) de la review round 2: una fila con MÁS celdas que la
+    // cabecera (típicamente un "|" sin escapar dentro de una celda) desplaza
+    // las columnas siguientes en silencio — "med | icacion | pbx" sobre una
+    // cabecera de 9 columnas produce area:['med'], touches:['icacion'], y
+    // "pbx" se pierde sin que nadie lo note. Antes solo se comprobaba
+    // `cells.length < header.length`; ahora cualquier discrepancia (`!==`)
+    // se trata igual.
+    const rowLengthMismatch = cells.length !== header.length
     const entregaCellRaw = iEntrega === -1 ? undefined : cells[iEntrega]
-    const entregaEmpty = iEntrega !== -1 && (entregaCellRaw === undefined || entregaCellRaw.trim() === '')
-    if (rowShorterThanHeader || entregaEmpty) {
+    const entregaTrimmed = entregaCellRaw === undefined ? '' : entregaCellRaw.trim()
+    // Punto (b) de la review round 2: "Entrega" con un marcador de "sin
+    // valor" (–, -, —, etc. — ver isNoValueCell, ya usado en Dep/Acepta/
+    // Área/Toca) producía un issue titulado "#1 –", exit 0. Entrega es la
+    // única columna donde el contenido es obligatorio (sin ella no hay
+    // título de issue); tratar "aquí no hay nada" como si fuera un título
+    // válido era la excepción injustificada al propio estándar de este
+    // cambio.
+    const entregaEmpty = iEntrega !== -1 && (entregaCellRaw === undefined || entregaTrimmed === '' || isNoValueCell(entregaTrimmed))
+    if (rowLengthMismatch || entregaEmpty) {
       invalidRows.push({
         n,
-        reason: rowShorterThanHeader
-          ? `la fila tiene ${cells.length} celda(s), la cabecera tiene ${header.length}`
-          : 'la columna "Entrega" está vacía',
+        reason: rowLengthMismatch
+          ? `la fila tiene ${cells.length} celda(s), la cabecera tiene ${header.length}` +
+            (cells.length > header.length ? ' (revisa si hay un "|" sin escapar dentro de una celda)' : '')
+          : 'la columna "Entrega" está vacía (o trae un marcador de "sin valor" como "–")',
       })
       continue
     }

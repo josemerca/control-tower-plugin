@@ -729,3 +729,151 @@ describe('ct-groom — "no se encontró la tabla §9" distingue "no hay tabla" d
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+// ============================================================================
+// Review round 2/5 — CRITICAL (marcado envolviendo la celda completa de una
+// lista), IMPORTANTE (falsos positivos del heurístico de fin de tabla) y 3
+// caminos silenciosos más, verificados a nivel CLI end-to-end.
+// ============================================================================
+
+describe('ct-groom — marcado envolviendo la CELDA COMPLETA de una lista por comas no duplica el prefijo (review round 2, CRITICAL)', () => {
+  it('"**area:medicacion, area:otro**" / "`touches:pbxproj, touches:otro`" → labels correctas, sin duplicar, sin abortar', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Slices\n' +
+      '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
+      '|---|---|---|---|---|---|---|---|---|\n' +
+      '| 1 | login | backend | modelo | – | – | – | **area:medicacion, area:otro** | `touches:pbxproj, touches:otro` |\n')
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    const plan = JSON.parse(out)
+    const labels = plan.issues[0].labels
+    expect(labels).toContain('area:medicacion')
+    expect(labels).toContain('area:otro')
+    expect(labels).toContain('touches:pbxproj')
+    expect(labels).toContain('touches:otro')
+    expect(labels).not.toContain('area:areamedicacion')
+    expect(labels).not.toContain('touches:touchespbxproj')
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom — el escaneo post-hueco no arrastra una tabla ajena (review round 2, IMPORTANTE)', () => {
+  it('regla horizontal ("---") antes de una tabla no relacionada, sin heading markdown → no aborta', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | primero | – | – | – |
+
+---
+
+| Cosa | Valor |
+|---|---|
+| x | y |
+`)
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    expect(JSON.parse(out).issues).toHaveLength(1)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom — fila con más celdas que la cabecera aborta fuerte (review round 2, a)', () => {
+  it('un "|" sin escapar en una celda (más celdas que la cabecera) → exit != 0 en vez de columnas desplazadas en silencio', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – | med | icacion | pbx |
+`)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect(e.stdout).toBe('')
+      expect(e.stderr.toString()).toMatch(/^1 fila/)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom — "Entrega" con un marcador de "sin valor" aborta fuerte (review round 2, b)', () => {
+  it('"Entrega" = "–" → exit != 0 en vez de un issue titulado "#1 –"', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | – | – | – | – |
+`)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect(e.stdout).toBe('')
+      expect(e.stderr.toString()).toMatch(/^1 fila/)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom — marcador de "nada" envuelto en marcado en Dep no aborta (review round 2, c)', () => {
+  it('"`–`" (backtick) en Dep no aborta', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Slices\n' +
+      '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |\n' +
+      '|---|---|---|---|---|---|---|\n' +
+      '| 1 | a | ui | x | `–` | – | – |\n')
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    expect(JSON.parse(out).issues).toHaveLength(1)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('"**–**" (negrita) en Dep no aborta', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | **–** | – | – |
+`)
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    expect(JSON.parse(out).issues).toHaveLength(1)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// Mejora de uso recomendada por el coordinador: con varios defectos a la vez
+// antes solo se imprimía el primero (una noria de hasta ocho ejecuciones
+// para verlos todos). Ahora se agregan todas las clases de error que
+// disparan y se imprimen juntas antes de un único exit(2).
+describe('ct-groom — varios defectos a la vez se reportan TODOS en una sola ejecución (mejora de uso)', () => {
+  it('una fila con "#" malformado y otra con "Dep" malformado en la misma tabla → stderr trae AMBOS mensajes, un solo exit 2', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| **1** | a | ui | x | – | – | – |
+| 2 | b | ui | y | S1 | – | – |
+`)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect(e.stdout).toBe('')
+      const err = e.stderr.toString()
+      // Ambas clases de error deben aparecer en la MISMA ejecución — no hace
+      // falta arreglar una, volver a correr, y descubrir la otra.
+      expect(err).toMatch(/"#"/)
+      expect(err).toMatch(/\*\*1\*\*/)
+      expect(err).toMatch(/"Dep"/)
+      expect(err).toMatch(/"S1"/)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})

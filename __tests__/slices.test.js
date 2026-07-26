@@ -610,3 +610,250 @@ describe('analyzeSlicesTable — distingue "no hay tabla" de "hay tabla sin cabe
     expect(r.pipeRowsFound).toBe(true)
   })
 })
+
+// ============================================================================
+// Review round 2/5 — el defecto de los prefijos seguía vivo una capa por
+// debajo (split por comas antes de limpiar marcado), el heurístico de fin de
+// tabla abortaba specs válidos, y 3 caminos silenciosos más.
+// ============================================================================
+
+// CRITICAL — slices.js hacía el split por comas ANTES de stripInlineMarkup,
+// así que marcado que envuelve la CELDA COMPLETA (en vez de cada token)
+// sobrevivía. Las listas por comas son el uso documentado normal
+// (commands/ct-groom.md: "db, migration"), no un caso raro — y un autor que
+// ya demostró envolver valores en negrita/backticks (F1: "**S1**") envuelve
+// igual de fácil la celda entera de una lista.
+describe('parseSlices — marcado que envuelve la CELDA COMPLETA de una lista por comas (review round 2, CRITICAL)', () => {
+  it('negrita envolviendo "area:medicacion, area:otro" completo → ambos tokens sin duplicar el prefijo', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | x | backend | y | – | – | – | **area:medicacion, area:otro** | – |
+`
+    const s = parseSlices(spec)
+    expect(s[0].area).toEqual(['medicacion', 'otro'])
+  })
+
+  it('backticks envolviendo "touches:pbxproj, touches:otro" completo → ambos tokens sin duplicar el prefijo', () => {
+    const spec = '## 9. Slices\n' +
+      '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
+      '|---|---|---|---|---|---|---|---|---|\n' +
+      '| 1 | x | backend | y | – | – | – | – | `touches:pbxproj, touches:otro` |\n'
+    const s = parseSlices(spec)
+    expect(s[0].touches).toEqual(['pbxproj', 'otro'])
+  })
+
+  it('regresión exacta del ejemplo de la review: ambas columnas envueltas a la vez, ninguna label duplica el prefijo', () => {
+    const spec = '## 9. Slices\n' +
+      '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
+      '|---|---|---|---|---|---|---|---|---|\n' +
+      '| 1 | x | backend | y | – | – | – | **area:medicacion, area:otro** | `touches:pbxproj, touches:otro` |\n'
+    const s = parseSlices(spec)
+    expect(s[0].area).toEqual(['medicacion', 'otro'])
+    expect(s[0].touches).toEqual(['pbxproj', 'otro'])
+    expect(s[0].area).not.toContain('areamedicacion')
+    expect(s[0].touches).not.toContain('touchespbxproj')
+  })
+
+  it('sin marcado envolviendo la celda, listas por comas normales siguen funcionando (no regresión del uso documentado)', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | modelo | backend | tabla users | – | AC-1.1 | schema | api | db, migration |
+`
+    const s = parseSlices(spec)
+    expect(s[0].area).toEqual(['api'])
+    expect(s[0].touches).toEqual(['db', 'migration'])
+  })
+})
+
+// IMPORTANTE — HEADING_RE (solo headings ATX "## ...") es demasiado
+// estrecho: una regla horizontal, un heading setext, un pseudo-heading en
+// negrita, o un "##10." sin espacio, todos markdown corriente, hacían que
+// el escaneo post-hueco arrastrara la tabla de OTRA sección y abortara con
+// un ejemplo de la tabla equivocada. Fix barato: tras un hueco, si la
+// siguiente fila con "|" es inmediatamente seguida de una fila separadora
+// (cabecera + separador de una tabla nueva), se corta el escaneo sin
+// contarla como continuación — los 4 falsos positivos tienen esa forma; el
+// salto de línea a mitad de LA MISMA tabla (caso real) no.
+describe('analyzeSlicesTable — el escaneo post-hueco no arrastra una tabla ajena (review round 2, IMPORTANTE)', () => {
+  it('regla horizontal ("---") antes de una tabla no relacionada, SIN heading markdown entre medias → no aborta', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+
+---
+
+| Cosa | Valor |
+|---|---|
+| x | y |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.rowsAfterGap).toEqual([])
+    expect(r.skippedRows).toEqual([])
+    expect(r.slices).toHaveLength(1)
+  })
+
+  it('heading setext ("Riesgos" + subrayado "-------") antes de una tabla ajena → no aborta', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+
+Riesgos
+-------
+
+| Cosa | Valor |
+|---|---|
+| x | y |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.rowsAfterGap).toEqual([])
+    expect(r.slices).toHaveLength(1)
+  })
+
+  it('pseudo-heading en negrita ("**10. Riesgos**") antes de una tabla ajena → no aborta', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+
+**10. Riesgos**
+
+| Cosa | Valor |
+|---|---|
+| x | y |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.rowsAfterGap).toEqual([])
+    expect(r.slices).toHaveLength(1)
+  })
+
+  it('"##10." sin espacio tras las almohadillas antes de una tabla ajena → no aborta', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+
+##10.Riesgos
+
+| Cosa | Valor |
+|---|---|
+| x | y |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.rowsAfterGap).toEqual([])
+    expect(r.slices).toHaveLength(1)
+  })
+
+  it('el caso REAL (línea en blanco a mitad de LA MISMA tabla) sigue disparando rowsAfterGap — no se ha perdido el true positive', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | primero | – | – | – |
+
+| 2 | b | ui | segundo | – | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.rowsAfterGap).toHaveLength(1)
+    expect(r.rowsAfterGap[0].raw).toContain('segundo')
+    expect(r.slices).toHaveLength(2)
+  })
+})
+
+// a) Fila MÁS LARGA que la cabecera (un "|" sin escapar dentro de una celda
+// desplaza las columnas siguientes en silencio) — antes solo se comprobaba
+// "menos celdas", nunca "más".
+describe('analyzeSlicesTable — fila con MÁS celdas que la cabecera (desplazamiento de columnas) (review round 2, a)', () => {
+  it('una fila con más celdas que la cabecera se reporta en invalidRows, no se cuela en slices con columnas desplazadas', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – | med | icacion | pbx |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.invalidRows).toHaveLength(1)
+    expect(r.invalidRows[0].n).toBe(1)
+    expect(r.slices).toEqual([]) // no se cuela con area:['med']/touches:['icacion'] y "pbx" perdido
+  })
+})
+
+// b) "Entrega" con un marcador de "nada" (–, -, —, etc.) → título de issue
+// "#1 –", exit 0 — la única columna donde el contenido es obligatorio
+// trataba "aquí no hay nada" como si fuera un título válido.
+describe('analyzeSlicesTable — "Entrega" con un marcador de "sin valor" se trata como vacía (review round 2, b)', () => {
+  it('"Entrega" = "–" se reporta en invalidRows, igual que vacía', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | – | – | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.invalidRows).toHaveLength(1)
+    expect(r.slices).toEqual([])
+  })
+})
+
+// c) Marcador de "nada" ENVUELTO en marcado ("`–`", "**–**") en Dep — misma
+// forma que el CRITICAL del em dash: isNoValueCell corría sobre la celda
+// cruda, así que el autor que ya demostró envolver valores en marcado
+// recibía el mensaje "si no hay dependencias, escribe –" por escribir
+// EXACTAMENTE eso, solo que envuelto.
+describe('analyzeSlicesTable — marcador de "nada" envuelto en marcado (review round 2, c)', () => {
+  it('"`–`" (backtick) en Dep no es malformado — deps: []', () => {
+    const spec = '## 9. Slices\n' +
+      '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |\n' +
+      '|---|---|---|---|---|---|---|\n' +
+      '| 1 | a | ui | x | `–` | – | – |\n'
+    const r = analyzeSlicesTable(spec)
+    expect(r.malformedDepRows).toEqual([])
+    expect(r.slices[0].deps).toEqual([])
+  })
+
+  it('"**–**" (negrita) en Dep no es malformado — deps: []', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | **–** | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.malformedDepRows).toEqual([])
+    expect(r.slices[0].deps).toEqual([])
+  })
+
+  it('"**–**" (negrita) en Acepta también cuenta como "sin AC" (mismo isNoValueCell compartido)', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | **–** | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.slices[0].ac).toEqual([])
+  })
+})
+
+// Menor — el signo menos matemático (−, U+2212) y el doble-guion ("--") son
+// salidas plausibles de autocorrección de teclado/editor, igual que el
+// em dash.
+describe('analyzeSlicesTable — signo menos (−, U+2212) y doble-guion ("--") también significan "sin valor" (menor)', () => {
+  it('signo menos U+2212 en Dep no es malformado', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | − | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.malformedDepRows).toEqual([])
+  })
+
+  it('doble-guion "--" en Dep no es malformado', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | -- | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.malformedDepRows).toEqual([])
+  })
+})
