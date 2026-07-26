@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { parseSlices } from './slices.js'
+import { analyzeSlicesTable } from './slices.js'
 import { groomPlan } from './groom.js'
 import { flattenIssuePages, realIssuesOnly, findByMarker } from './gh-issues.js'
 import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
@@ -73,7 +73,66 @@ try {
   console.error(`no se pudo leer el spec: ${specFile} (${e.code || e.message})`)
   process.exit(2)
 }
-const slices = parseSlices(specMd)
+// F1 (informe del incidente): un spec real, escrito por alguien que no había
+// leído commands/ct-groom.md, produjo una tabla §9 que parseSlices() convertía
+// en 0 slices — en total silencio. `/ct-groom --dry-run` imprimía
+// `{"issues": [], ...}` y salía 0; una corrida real habría creado el
+// milestone, cero issues, y reportado éxito. `analyzeSlicesTable` (a
+// diferencia de `parseSlices`, que sigue devolviendo solo `Slice[]` para no
+// romper el contrato del que dependen otros módulos/tests) trae el reporte
+// completo de qué se pudo y qué NO se pudo parsear, y por qué. Todas las
+// comprobaciones de abajo corren ANTES de `--dry-run` y ANTES de cualquier
+// mutación de GitHub — un dry-run que valida menos que la corrida real es una
+// trampa.
+const report = analyzeSlicesTable(specMd)
+
+if (!report.tableFound) {
+  console.error(`no se encontró la tabla §9 de slices en ${specFile} — añade una tabla markdown con una fila de cabecera que incluya "Slice" y "Dep" (p.ej. "| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |") bajo la sección de slices del spec`)
+  process.exit(2)
+}
+if (report.missingRequiredColumns.length) {
+  for (const missing of report.missingRequiredColumns) {
+    if (missing === '#') {
+      console.error('la tabla §9 no tiene columna "#" — sin ella no hay orden de slice ni se pueden resolver las dependencias (merge-after); añade una columna de cabecera "#" con un entero puro por fila (1, 2, 3…)')
+    } else if (missing === 'Entrega') {
+      console.error('la tabla §9 no tiene columna "Entrega" — sin ella no hay título de issue; añade una columna de cabecera "Entrega" con el texto visible de cada slice')
+    }
+  }
+  process.exit(2)
+}
+if (report.skippedRows.length) {
+  const first = report.skippedRows[0]
+  console.error(`${report.skippedRows.length} fila(s) de la tabla §9 tienen "#" que no es un entero a secas (ejemplo: "${first.value}") — "#" debe ser un entero puro como "1", nunca "S1" ni "**1**"; corrige esas filas (quita cualquier letra o negrita) y vuelve a intentarlo`)
+  process.exit(2)
+}
+if (report.slices.length === 0) {
+  console.error('la tabla §9 no tiene ninguna fila de datos — añade al menos una fila con "#" y "Entrega"')
+  process.exit(2)
+}
+
+// Columnas opcionales ausentes (Tipo/Acepta/Protegido/Área/Toca): degradan el
+// issue creado (sin label type:, sin AC, sin Protegido explícito, o con la
+// maquinaria de colisión/serialización inerte para estos slices) pero no
+// impiden crear issues razonables — se avisa por stderr y se continúa, no se
+// aborta.
+const OPTIONAL_COLUMN_CONSEQUENCE = {
+  Tipo: 'los issues se crearán sin label "type:"',
+  Acepta: 'los issues se crearán sin criterios de aceptación',
+  Protegido: 'los issues se crearán sin sección "Protegido" explícita',
+  'Área': 'la maquinaria de colisión (claim.js#tokensOf) queda inerte para todos los slices de este epic',
+  Toca: 'la serialización de touches (dispatch.js#SERIALIZING_TOUCHES) queda inerte para todos los slices de este epic',
+}
+for (const col of report.missingOptionalColumns) {
+  console.error(`aviso: la tabla §9 no tiene columna "${col}" — ${OPTIONAL_COLUMN_CONSEQUENCE[col] || 'se omite esa información en los issues'}`)
+}
+// Valores de Área/Toca con el prefijo de LA OTRA columna (p.ej. "area:x"
+// dentro de Toca): se toleró el valor (no se descartó), pero probablemente
+// sea un despiste de columna — se avisa para que el autor pueda revisar.
+for (const w of report.prefixWarnings) {
+  console.error(`aviso: valor "${w.raw}" en columna ${w.column} (slice #${w.n}) trae el prefijo "${w.otherPrefix}:" de la otra columna — se ha usado el valor igualmente, revisa si está en la columna correcta`)
+}
+
+const slices = report.slices
 // groomPlan lanza si hay órdenes de slice duplicados en la tabla §9 (T14/W-A):
 // se captura aquí y se reporta con la misma convención que el resto de errores
 // de validación de este wrapper (spec inexistente, --milestone/--project/
