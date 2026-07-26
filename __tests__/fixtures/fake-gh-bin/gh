@@ -37,6 +37,17 @@ if (argv[0] === 'issue' && argv[1] === 'edit') {
 }
 
 if (argv[0] === 'issue' && argv[1] === 'view') {
+  // FAKE_GH_VIEW_FAIL (D2, finding 3): simula que `labelsOf()` (la lectura de
+  // labels del propio candidato en dispatch-check.mjs) falla — auth caída,
+  // rate limit, red — ANTES de cualquier escritura. Sin esto no había forma
+  // de distinguir, desde un stub, "no se pudo leer el estado del candidato"
+  // (fallo de infraestructura) de "colisión detectada" (resultado normal del
+  // protocolo): ambos casos, antes de este fix, terminaban en el mismo exit 1
+  // de dispatch-check que ct-next trataba siempre como "salta y sigue".
+  if (process.env.FAKE_GH_VIEW_FAIL) {
+    console.error('fake-gh: issue view failed (simulado)')
+    process.exit(1)
+  }
   process.stdout.write(process.env.FAKE_GH_VIEW_LABELS || '[]')
   process.exit(0)
 }

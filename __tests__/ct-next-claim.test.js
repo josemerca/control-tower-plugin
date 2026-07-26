@@ -236,6 +236,139 @@ describe('ct-next — dispatch-check.mjs ausente (W-C, fix round 1, finding 2)',
   })
 })
 
+// D2 (auditoría del dispatch), finding 2: en el path REAL (sin --dry-run) no
+// se imprimía en ningún sitio la lista completa de slices seleccionados para
+// esta tanda ANTES de intentar reclamarlos — si el proceso abortaba a medio
+// camino, no había forma de saber, a posteriori, qué se había elegido en
+// total (solo lo que se llegó a intentar). --dry-run sí lo deja ver de forma
+// implícita (imprime un bloque por cada slice de `selected`, sin abortar
+// nunca) — el fix imprime la selección completa explícitamente, up front, en
+// AMBos paths.
+describe('ct-next — la selección de la tanda se imprime up front también en el path real (D2, finding 2)', () => {
+  it('antes de intentar ningún claim, ya se ve qué se seleccionó para esta tanda', () => {
+    const repoRoot = makeRepoRoot()
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+    })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/seleccion.*#42/i)
+    // Y aparece ANTES de que se intente el claim de verdad.
+    const selIdx = r.out.search(/seleccion.*#42/i)
+    const claimIdx = r.out.indexOf('claimed #42')
+    expect(selIdx).toBeGreaterThan(-1)
+    expect(claimIdx).toBeGreaterThan(-1)
+    expect(selIdx).toBeLessThan(claimIdx)
+  })
+})
+
+// D2, finding 1: cuando TODOS los slices seleccionados de la tanda se saltan
+// a la hora de reclamar (cada uno choca de verdad, en vivo, contra trabajo
+// que otro proceso reclamó justo después de que ct-next cargara su propia
+// foto de issues — la misma advertencia honesta de "sin compare-and-swap"
+// documentada en dispatch-check.mjs), el proceso terminaba en exit 0 sin
+// ninguna traza de que cero agentes se lanzaron, y la última línea
+// ("sigo con el resto de esta tanda") prometía continuar cuando ya no
+// quedaba ningún candidato. Reproducción: cap=2, #41 y #42 no chocan ENTRE
+// SÍ (así que ct-next los selecciona a los dos con su propia foto, que no ve
+// a #99 en vuelo todavía) pero cada uno, por separado, choca de verdad
+// contra #99 cuando dispatch-check hace su propia lectura en vivo.
+describe('ct-next — TODOS los slices seleccionados se saltan al reclamar → no silencioso (D2, finding 1)', () => {
+  it('cero lanzados de dos seleccionados → línea de conteo, wording sin promesa falsa, y exit distinto de 0', () => {
+    const repoRoot = makeRepoRoot()
+    const openIssue41x = { number: 41, title: '#41 x', labels: [{ name: 'status:ready' }, { name: 'touches:x' }], body: '' }
+    const openIssue42y = { number: 42, title: '#42 y', labels: [{ name: 'status:ready' }, { name: 'touches:y' }], body: '' }
+    const inFlight99 = { number: 99, labels: [{ name: 'status:in-progress' }, { name: 'touches:x' }, { name: 'touches:y' }] }
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const gitLog = join(repoRoot, 'git-log')
+    const r = runReal(['--repo', 'o/r', '--cap', '2'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      // idx0: ct-next open (sin #99 en vuelo todavía — la carrera es
+      // exactamente que otro proceso lo reclama DESPUÉS de esta foto) ;
+      // idx1: ct-next closed ; idx2: dispatch-check(#41) collision-check
+      // (#99 YA en vuelo, comparte 'x') ; idx3: dispatch-check(#42)
+      // collision-check (#99, comparte 'y').
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue41x, openIssue42y], [], [inFlight99], [inFlight99]]),
+      FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:x', 'touches:y']),
+      FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GIT_LOG_FILE: gitLog,
+    })
+    // Ningún worktree debió crearse: los dos candidatos se saltaron.
+    const gitLogTxt = existsSync(gitLog) ? readFileSync(gitLog, 'utf8') : ''
+    expect(gitLogTxt).not.toMatch(/worktree add/)
+    expect(r.out).not.toMatch(/lanzado #/)
+    // Conteo terminal explícito de cuántos de cuántos se lanzaron.
+    expect(r.out).toMatch(/lanzad[oa]s? 0.*2/i)
+    // #41 (no es el último) sigue diciendo que continúa con el resto.
+    expect(r.out).toMatch(/saltando #41:.*sigo con el resto/i)
+    // #42 (el ÚLTIMO candidato) YA NO promete "sigo con el resto" — no
+    // queda nada con lo que seguir.
+    expect(r.out).toMatch(/saltando #42:.*no quedan más candidatos/i)
+    expect(r.out).not.toMatch(/saltando #42:.*sigo con el resto/i)
+    // Exit code distinto de 0 (y de los ya usados para error de uso/aborto):
+    // hubo una tanda seleccionada pero cero progreso real.
+    expect(r.code).not.toBe(0)
+    expect(r.code).not.toBe(2)
+  })
+})
+
+// D2, finding 3: el comentario de dispatch-check.mjs llama a su exit 1
+// "colisión o carrera perdida", pero el MISMO exit 1 también cubre un fallo
+// de lectura de labels del candidato, un fallo al escribir el claim, y un
+// fallo de readback — ct-next trataba los cinco exactamente igual ("saltando
+// ... sigo con el resto"), incluso cuando el issue quedaba HUÉRFANO en
+// status:in-progress (readback Y el revert posterior fallan a la vez, la
+// peor combinación reproducida por el auditor). Estos tests fuerzan esa
+// distinción desde el lado del caller, sin tocar dispatch-check.mjs.
+describe('ct-next — exit 1 de dispatch-check NO siempre es un resultado normal del protocolo (D2, finding 3)', () => {
+  it('readback falla Y el revert también falla (issue huérfano) → ct-next aborta la tanda, no lo trata como salto normal', () => {
+    const repoRoot = makeRepoRoot()
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const gitLog = join(repoRoot, 'git-log')
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      // idx0: ct-next open ; idx1: ct-next closed ; idx2: dispatch-check(#42)
+      // collision-check (limpio) ; idx3: dispatch-check(#42) readback → FALLA.
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], [], []]),
+      FAKE_GH_LIST_FAIL_AT: '3',
+      FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GIT_LOG_FILE: gitLog,
+      // El claim inicial (status:ready→in-progress) SÍ escribe con éxito; es
+      // el revert POSTERIOR (in-progress→ready, tras el fallo de readback) el
+      // que también falla — así el issue queda de verdad bloqueado.
+      FAKE_GH_EDIT_FAIL_SUBSTR: '--add-label status:ready --remove-label status:in-progress',
+    })
+    expect(r.code).not.toBe(0)
+    expect(r.out).toMatch(/ATENCIÓN.*bloqueado en status:in-progress/is)
+    // NUNCA se reporta como si fuera el salto normal de colisión/carrera.
+    expect(r.out).not.toMatch(/sigo con el resto de esta tanda/i)
+    expect(r.out).not.toMatch(/lanzado #42/)
+    const gitLogTxt = existsSync(gitLog) ? readFileSync(gitLog, 'utf8') : ''
+    expect(gitLogTxt).not.toMatch(/worktree add/)
+  })
+
+  it('fallo al leer las labels del candidato (labelsOf) → ct-next lo trata como fallo, no como colisión normal', () => {
+    const repoRoot = makeRepoRoot()
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const gitLog = join(repoRoot, 'git-log')
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GIT_LOG_FILE: gitLog,
+      FAKE_GH_VIEW_FAIL: '1',
+    })
+    expect(r.code).not.toBe(0)
+    expect(r.out).toMatch(/no se pudo leer el estado de #42/i)
+    expect(r.out).not.toMatch(/sigo con el resto de esta tanda/i)
+    expect(r.out).not.toMatch(/lanzado #42/)
+    const gitLogTxt = existsSync(gitLog) ? readFileSync(gitLog, 'utf8') : ''
+    expect(gitLogTxt).not.toMatch(/worktree add/)
+  })
+})
+
 describe('ct-next — dispatch falla tras un claim exitoso → revierte el claim (W-C, punto 3)', () => {
   it('seed de STATE.md falla tras claim exitoso → limpia worktree/rama Y revierte el claim a status:ready', () => {
     const repoRoot = makeRepoRoot()
