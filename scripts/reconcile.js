@@ -7,25 +7,38 @@
 // /ct-groom no ve ninguna señal de que nada cambió: el mismo mensaje de
 // éxito que si todo estuviera perfecto.
 //
-// Review round 3 (coordinador) — tres Critical, atendidos aquí:
-//   1. locateSection (gh-issue-map.js) no estaba anclada a columna 0 ni era
-//      consciente de vallas de código — REESCRITA ahí (ver ese fichero).
-//   2. `--reconcile` podía salir 0 sobre una divergencia real (ac/deps) que
-//      SE REPORTÓ pero no se pudo aplicar (p.ej. cabecera renombrada) — ver
-//      reconcileGaps/hasReconcileGap más abajo, y cómo ct-groom.mjs los usa
-//      para el código de salida y el mensaje.
-//   3. Dominio de detección (extractDeps, todo el body) ≠ dominio de
-//      aplicación (solo la sección) — unificado: AHORA ambos operan sobre
-//      el contenido de la sección reconocida únicamente (ver diffIssue). Es
-//      una divergencia deliberada del extractDeps que usa el DISPATCHER de
-//      verdad (gh-issue-map.js#mapGhIssue, que sigue escaneando todo el
-//      body — ese es su comportamiento real, no se toca aquí): un
-//      "merge-after #N" suelto fuera de "## Dependencias" (en Descripción,
-//      en una sección nueva…) es, técnicamente, obedecido por el
-//      dispatcher real, pero F5 NUNCA podría reescribirlo de forma segura
-//      sin arriesgar exactamente el tipo de corrupción de contenido humano
-//      que el Critical 1 de esta misma review vino a cerrar. Se documenta
-//      como límite conocido, no como descuido.
+// Review round 4 (el reviewer atacó su PROPIO escáner del round 3, no solo
+// los tres casos que se le habían dado) — tres Critical más:
+//   1. El rastreador de vallas (gh-issue-map.js) conmutaba con CUALQUIER
+//      delimitador, sin mirar tipo ni longitud — REESCRITO ahí (stepFence),
+//      ahora exige mismo carácter y longitud >= apertura, como CommonMark.
+//   2. `locateSection` usaba `startsWith` para las CUATRO secciones, pero
+//      solo AC tiene un sufijo legítimo — REESCRITO ahí: igualdad exacta
+//      por defecto, prefijo solo para AC.
+//   3. La rama degenerada de inserción de deps (sin "## Dependencias" NI
+//      "## Out of scope / Protected" localizables) añadía una sección
+//      nueva CIEGAMENTE en cada corrida, sin límite — ahora se RINDE
+//      (unresolvedDeps, antes hardcodeado a `false`) igual que ya hacía AC.
+//
+// Y tres Importantes:
+//   4. El enlace al spec se comparaba por texto completo, incluida la
+//      ruta — dos costumbres de invocación (relativa/absoluta) hacían
+//      ping-pong sobre issues reales para siempre. Ahora se compara SOLO
+//      el ancla `#sección` (specLinkAnchor, gh-issue-map.js).
+//   5. Un `## Dependencias`/`## Acceptance criteria` DUPLICADO cambia lo
+//      que hace el dispatcher (que no sabe de "primera aparición") — esos
+//      dos SÍ cuentan para el exit code; duplicar Descripción/Protegido
+//      sigue siendo solo cosmético (nota, no cuenta).
+//   6. Asimetría con mapGhIssue: la aplicación se queda acotada a la
+//      sección (a propósito, ver el punto 3 de la ronda anterior), pero
+//      ahora TAMBIÉN se escanea el body entero para avisar (nota:, nunca
+//      divergencia:) de cualquier `merge-after` que el dispatcher vería
+//      pero que vive fuera de la sección reconocida — el silencio ya no
+//      afirma más de lo que la herramienta sabe.
+//
+// Y un Menor: CRLF. Todo el procesamiento normaliza a LF internamente
+// (gh-issue-map.js#normalizeToLF) y, si aplica, `buildReconcileBody`
+// reconvierte el resultado al final de línea original antes de devolverlo.
 //
 // Este módulo decide QUÉ cuenta como divergencia (diffIssue/hasDrift), CÓMO
 // se reporta (formatDrift) y CÓMO se aplica: buildReconcileEditArgs para
@@ -35,18 +48,21 @@
 // pegamento delgado: llama a estas funciones con lo que ya trae de `gh` y
 // del plan, e imprime/ejecuta lo que le devuelven — ninguna decisión de
 // negocio vive en el wrapper.
-import { extractAc, extractDeps, extractSectionContent, locateSection, locateLine, extractSpecLink, countHeadingLines } from './gh-issue-map.js'
+import {
+  extractAc, extractDeps, extractSectionContent, locateSection, locateLine,
+  extractSpecLink, specLinkAnchor, countHeadingLines, detectLineEnding, normalizeToLF,
+} from './gh-issue-map.js'
 
 // ownedLabelsOnly: el spec solo es autoridad sobre un prefijo (`type:`,
 // `area:`, `touches:`) SI la tabla §9 trae la columna que lo alimenta
 // (Tipo/Área/Toca respectivamente) — `ownedPrefixes` es ese subconjunto,
 // decidido por el caller (ct-groom.mjs, a partir de qué columnas trae la
 // tabla) y NO tiene un default aquí a propósito: adivinar "todas por
-// defecto" reintroduciría en silencio el falso positivo que esto corrige
-// (review, punto 2): sin columna "Área", el spec no tiene ninguna opinión
-// sobre `area:` y no debe reclamar autoridad sobre un label que un humano
-// puso a mano por su cuenta — reportarlo como "sobra" sería ruido que
-// enseña a ignorar el resto del reporte.
+// defecto" reintroduciría en silencio el falso positivo que esto corrige:
+// sin columna "Área", el spec no tiene ninguna opinión sobre `area:` y no
+// debe reclamar autoridad sobre un label que un humano puso a mano por su
+// cuenta — reportarlo como "sobra" sería ruido que enseña a ignorar el
+// resto del reporte.
 //
 // `status:` NUNCA es un prefijo activo, ni siquiera cuando el spec sí
 // controla su valor inicial (`status:backlog`, al crear el issue) — un
@@ -90,14 +106,14 @@ export function diffAc(currentAc, wantedAc) {
 }
 
 // depsInSection / acInSection: extraen deps/ac SOLO del contenido de su
-// propia sección reconocida (locateSection) — a diferencia de
-// gh-issue-map.js#extractDeps (usada por el DISPATCHER real, que escanea
-// todo el body a propósito), esta es la extracción que F5 usa para
-// comparar Y para decidir si `buildReconcileBody` puede aplicar el arreglo
-// (Critical 3: mismo dominio en detección y en aplicación). `extractAc` ya
-// era, de hecho, section-scoped desde antes (internamente ya usa
-// extractSectionContent) — se reexporta aquí sin más para que diffIssue no
-// tenga que decidir dos criterios distintos para ac/deps.
+// propia sección reconocida — a diferencia de gh-issue-map.js#extractDeps
+// (usada por el DISPATCHER real, que escanea todo el body a propósito),
+// esta es la extracción que F5 usa para comparar Y para decidir si
+// `buildReconcileBody` puede aplicar el arreglo (mismo dominio en
+// detección y en aplicación). `extractAc` ya es, de por sí, section-scoped
+// con tolerancia de sufijo (`{ exact: false }`, ver gh-issue-map.js) — se
+// reexporta aquí sin más para que diffIssue no tenga que decidir dos
+// criterios distintos.
 function depsInSection(body) {
   return extractDeps(extractSectionContent(body, '## Dependencias') || '')
 }
@@ -105,52 +121,81 @@ function acInSection(body) {
   return extractAc(body)
 }
 
+// DUPLICATE_CHECKS: qué cabeceras se comprueban por duplicado, con qué
+// criterio de match (exact salvo AC, igual que locateSection), y si un
+// duplicado es "machine" (cambia lo que el dispatcher hace de verdad, así
+// que CUENTA para el exit code — review round 4, importante 5) o solo
+// cosmético (Descripción/Protegido: una nota, nunca cuenta).
+const DUPLICATE_CHECKS = [
+  { prefix: '## Descripción', label: 'Descripción', exact: true, machine: false },
+  { prefix: '## Acceptance criteria', label: 'Acceptance criteria', exact: false, machine: true },
+  { prefix: '## Dependencias', label: 'Dependencias', exact: true, machine: true },
+  { prefix: '## Out of scope / Protected', label: 'Out of scope / Protected', exact: true, machine: false },
+]
+
 // diffIssue: compara un issue EXISTENTE de verdad (la forma cruda de `gh api
 // repos/<o>/<r>/issues`: number, title, state, milestone, labels, body)
 // contra lo que el plan (groom.js#groomPlan) dice que ESE slice debería
 // tener hoy (wantedIssue: título, milestone, labels, deps, ac, descripcion,
-// protectedLine, specLink — todos campos que groomPlan ya expone, no solo
-// el body ya renderizado).
+// protectedLine, specLink, specSection — todos campos que groomPlan ya
+// expone, no solo el body ya renderizado).
 //
 // El marcador `<!-- ct-order:N -->` es lo ÚNICO del body que queda
-// completamente fuera del diff: es bookkeeping nuestro (el puente
-// orden-de-slice ↔ número-de-issue), nunca "contenido del spec". La línea
-// de enlace al spec (`> Slice #N del epic. Spec: …`) SÍ es contenido del
-// spec (deriva de `--section`/la ruta) — se compara igual que el título
-// (review round 3, importante 5: antes se afirmaba, incorrectamente, que
-// el marcador era "lo único" fuera de la comparación).
+// completamente fuera del diff: es bookkeeping nuestro. El enlace al spec
+// SÍ es contenido del spec, pero se compara SOLO por su ancla `#sección`
+// (specLinkAnchor) — NUNCA por la ruta completa (review round 4, importante
+// 4): `ct-groom.mjs` renderiza la ruta tal cual la escriba quien invoque el
+// comando (`process.argv[2]`), y dos costumbres de invocación (relativa
+// frente a absoluta, un slash command frente a un cron) para el MISMO
+// fichero producirían, comparando la línea entera, una divergencia
+// perpetua — cada corrida "reconciliando" contra la costumbre de la
+// invocación anterior, para siempre. Comparar solo el ancla es inmune a
+// eso, a cambio de un límite conocido: si el spec se MUEVE a otro fichero
+// sin cambiar de número de sección, F5 ya no lo detecta.
 //
 // Descripción/Protegido SÍ se comparan (el spec los posee: derivan de
 // Entrega/Protegido en la tabla §9), pero solo con un flag booleano
 // (descripcionDiffers/protectedDiffers) — nunca se muestra el texto
 // completo, y (ver hasDrift más abajo) NUNCA cuentan para el código de
 // salida: son prosa que un humano edita de forma rutinaria y legítima tras
-// crear el issue; si contaran, cualquier ampliación normal de la
-// descripción dejaría el proceso en exit 3 para siempre, sin ningún
-// `--reconcile` capaz de resolverlo — el mismo argumento del ruido que
-// justifica gatear las labels por columna, aplicado aquí (review round 3,
-// punto 6).
+// crear el issue.
+//
+// `duplicateSections`/`duplicateMachineSections`: cabeceras conocidas que
+// aparecen más de una vez — las de AC/Dependencias SÍ cuentan para el
+// exit code (cambian lo que el dispatcher hace; ver DUPLICATE_CHECKS),
+// Descripción/Protegido no.
+//
+// `strayDeps`: referencias `merge-after #N` que el DISPATCHER real vería
+// (escanea todo el body, gh-issue-map.js#extractDeps sin acotar) pero que
+// viven FUERA de la sección "## Dependencias" reconocida — F5 nunca las
+// toca (harían falta escribir en un sitio del body que no controla, el
+// mismo riesgo de corrupción que el Critical 1 de la ronda anterior cerró),
+// pero las reporta como nota: sin esto, el silencio de F5 solo garantizaba
+// "la sección que sé escribir coincide", no "lo que el dispatcher ve
+// coincide con el spec" — que es lo que este reporte promete.
 //
 // labels acepta tanto la forma cruda de la REST API (`[{name: 'x'}, ...]`)
 // como un array de strings ya planos.
 export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPrefixes) {
+  const body = normalizeToLF(existing.body)
   const currentLabelNames = (existing.labels || []).map((l) => (typeof l === 'string' ? l : l.name))
   const labels = diffLabels(currentLabelNames, wantedIssue.labels, ownedLabelPrefixes)
   const currentMilestoneTitle = existing.milestone ? existing.milestone.title : null
   const titleDiffers = existing.title !== wantedIssue.title
   const milestoneDiffers = currentMilestoneTitle !== wantedMilestone
 
-  const currentSpecLink = extractSpecLink(existing.body)
-  const specLinkDiffers = currentSpecLink !== wantedIssue.specLink
+  const currentSpecLink = extractSpecLink(body)
+  const specLinkDiffers = specLinkAnchor(currentSpecLink) !== specLinkAnchor(wantedIssue.specLink)
 
-  const deps = diffDeps(depsInSection(existing.body), wantedIssue.deps)
-  const ac = diffAc(acInSection(existing.body), wantedIssue.ac)
+  const currentDeps = depsInSection(body)
+  const deps = diffDeps(currentDeps, wantedIssue.deps)
+  const ac = diffAc(acInSection(body), wantedIssue.ac)
 
   // Descripción: `null` en cualquiera de los dos lados significa "no debería
   // existir ninguna sección" — null en AMBOS lados es acuerdo (silencio
   // real), no divergencia. Solo se compara el texto (trim) cuando los dos
   // lados sí tienen sección.
-  const currentDescripcion = extractSectionContent(existing.body, '## Descripción') // string o null (sin sección)
+  const currentDescripcion = extractSectionContent(body, '## Descripción') // string o null (sin sección)
   const wantedDescripcion = wantedIssue.descripcion ?? null // idem
   let descripcionDiffers
   if (currentDescripcion === null && wantedDescripcion === null) {
@@ -164,22 +209,19 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
   // Protegido: SIEMPRE debería existir (buildIssueBody la emite
   // incondicionalmente) — si la cabecera falta del todo en el issue
   // existente (un humano la borró a mano), se trata como divergencia.
-  const currentProtected = extractSectionContent(existing.body, '## Out of scope / Protected')
+  const currentProtected = extractSectionContent(body, '## Out of scope / Protected')
   const protectedDiffers = currentProtected === null || currentProtected.trim() !== (wantedIssue.protectedLine || '').trim()
 
-  // duplicateSections (menor, review round 3): cabeceras conocidas que
-  // aparecen MÁS de una vez en el body — informativo únicamente (ver
-  // formatDrift), no cuenta para hasDrift ni para el código de salida: no
-  // hay "spec vs. issue" que comparar aquí, es un aviso sobre la FORMA del
-  // body en sí (locateSection/buildReconcileBody solo ven/tocan la
-  // primera aparición; la segunda queda huérfana e invisible de otro
-  // modo).
-  const duplicateSections = [
-    ['## Descripción', 'Descripción'],
-    ['## Acceptance criteria', 'Acceptance criteria'],
-    ['## Dependencias', 'Dependencias'],
-    ['## Out of scope / Protected', 'Out of scope / Protected'],
-  ].filter(([prefix]) => countHeadingLines(existing.body, prefix) > 1).map(([, label]) => label)
+  const duplicates = DUPLICATE_CHECKS.filter((c) => countHeadingLines(body, c.prefix, { exact: c.exact }) > 1)
+  const duplicateSections = duplicates.map((c) => c.label)
+  const duplicateMachineSections = duplicates.filter((c) => c.machine).map((c) => c.label)
+
+  // strayDeps: deps que el dispatcher vería (escaneo de TODO el body) que no
+  // están dentro de la sección reconocida — set, sin importar si también
+  // coinciden o no con lo que el spec pide (eso ya lo cubre `deps` arriba).
+  const wholeBodyDeps = new Set(extractDeps(body))
+  const sectionDepsSet = new Set(currentDeps)
+  const strayDeps = [...wholeBodyDeps].filter((d) => !sectionDepsSet.has(d)).sort((a, b) => a - b)
 
   return {
     order: wantedIssue.order,
@@ -194,35 +236,41 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
     descripcionDiffers,
     protectedDiffers,
     duplicateSections,
+    duplicateMachineSections,
+    strayDeps,
   }
 }
 
-// hasDrift: cuenta título/milestone/enlace-al-spec/labels/deps/ac — TODOS
-// campos deterministas, cortos o estructurados, que `--reconcile` puede (al
-// menos en principio) aplicar. `closed`, Descripción/Protegido y
-// duplicateSections NUNCA cuentan (ver arriba y formatDrift): son, o bien
-// algo sobre lo que el spec no tiene autoridad (closed), o bien prosa que
-// se edita de forma rutinaria (Descripción/Protegido) — anclar el exit
-// code a cualquiera de ellos entrenaría a ignorar el resto del reporte,
-// exactamente el problema que esta feature corrige en la otra dirección.
+// hasDrift: cuenta título/milestone/enlace-al-spec (por ancla)/labels/deps/
+// ac, y las secciones DUPLICADAS que cambian lo que el dispatcher hace
+// (AC/Dependencias — review round 4, importante 5). `closed`, Descripción/
+// Protegido (duplicados o divergentes) y `strayDeps` NUNCA cuentan: son, o
+// bien algo sobre lo que el spec no tiene autoridad (closed), o bien prosa
+// rutinaria, o bien algo que --reconcile NUNCA podría aplicar de forma
+// segura (strayDeps vive fuera de la sección que --reconcile puede tocar)
+// — anclar el exit code a cualquiera de ellos entrenaría a ignorar el
+// resto del reporte.
 export function hasDrift(diff) {
   return Boolean(
     diff.title || diff.milestone || diff.specLink ||
     diff.labels.missing.length || diff.labels.extra.length ||
     diff.deps.missing.length || diff.deps.extra.length ||
-    diff.ac.missing.length || diff.ac.extra.length,
+    diff.ac.missing.length || diff.ac.extra.length ||
+    diff.duplicateMachineSections.length,
   )
 }
 
-// reconcileGaps / hasReconcileGap (review round 3, Critical 2): --reconcile
-// puede REPORTAR una divergencia de ac/deps sin poder APLICARLA — la
-// cabecera de la sección puede no existir (un humano la renombró o la
-// borró), y sin ella `buildReconcileBody` no tiene dónde escribir el
-// arreglo. `bodyResult` es el resultado de `buildReconcileBody` (más abajo,
-// trae `unresolvedAc`/`unresolvedDeps`) — un gap real es "el diff dice que
-// diverge Y buildReconcileBody no pudo tocarlo". title/milestone/labels/
-// specLink nunca tienen gap: siempre se resuelven vía flags o un splice de
-// una sola línea, sin depender de localizar una sección con cabecera.
+// reconcileGaps / hasReconcileGap: --reconcile puede REPORTAR una
+// divergencia de ac/deps sin poder APLICARLA — la cabecera de la sección
+// puede no existir (un humano la renombró o la borró), y sin ella
+// `buildReconcileBody` no tiene dónde escribir el arreglo (ni inventa una
+// posición para deps cuando tampoco hay un ancla segura — review round 4,
+// Critical 3). `bodyResult` es el resultado de `buildReconcileBody` (más
+// abajo, trae `unresolvedAc`/`unresolvedDeps`) — un gap real es "el diff
+// dice que diverge Y buildReconcileBody no pudo tocarlo". title/milestone/
+// labels/specLink nunca tienen gap: siempre se resuelven vía flags o un
+// splice de una sola línea, sin depender de localizar una sección con
+// cabecera.
 export function reconcileGaps(diff, bodyResult) {
   return {
     ac: Boolean((diff.ac.missing.length || diff.ac.extra.length) && bodyResult.unresolvedAc),
@@ -234,17 +282,13 @@ export function hasReconcileGap(gaps) {
 }
 
 // formatDrift: una línea humana por campo. Título/milestone/enlace-al-spec/
-// labels/deps/ac son "divergencia:" — cuentan para el exit code (hasDrift)
-// y muestran el valor actual y el que pide el spec (identificadores cortos
-// o códigos, seguros de mostrar enteros). Descripción/Protegido son
-// "nota:" — SIEMPRE se reportan si divergen (silencio total sobre esto
-// sería tan malo como no reportar nada), pero NUNCA cuentan para el exit
-// code (ver hasDrift) — la sección "nota:" vs. "divergencia:" es la forma
-// en que la salida distingue "esto es tuyo, revísalo cuando quieras" de
-// "esto es una divergencia real que --reconcile puede intentar arreglar".
-// `duplicateSections` también es una nota informativa. El cierre del
-// issue se anota al final, y solo si ya hay alguna otra línea que
-// reportar (closed por sí solo, sin más, es silencio real).
+// labels/deps/ac y los duplicados "machine" (AC/Dependencias) son
+// "divergencia:" — cuentan para el exit code (hasDrift) y muestran el valor
+// actual y el que pide el spec cuando aplica. Descripción/Protegido (y sus
+// duplicados) y `strayDeps` son "nota:" — SIEMPRE se reportan si aplican
+// (silencio total sobre esto sería tan malo como no reportar nada), pero
+// NUNCA cuentan para el exit code. El cierre del issue se anota al final, y
+// solo si ya hay alguna otra línea que reportar.
 export function formatDrift(diff) {
   const lines = []
   const head = `slice #${diff.order} (issue #${diff.issueNumber})`
@@ -257,10 +301,17 @@ export function formatDrift(diff) {
   for (const d of diff.deps.extra) lines.push(`divergencia: ${head}: sobra la dependencia "merge-after #${d}" (la tiene el issue, el spec ya no la produce)`)
   for (const a of diff.ac.missing) lines.push(`divergencia: ${head}: falta el criterio de aceptación "${a}" (lo pide el spec, el issue no lo tiene)`)
   for (const a of diff.ac.extra) lines.push(`divergencia: ${head}: sobra el criterio de aceptación "${a}" (lo tiene el issue, el spec ya no lo produce)`)
+  for (const section of diff.duplicateMachineSections || []) {
+    lines.push(`divergencia: ${head}: la sección "## ${section}" aparece más de una vez en el body — el dispatcher no distingue "la primera": une o elimina la copia sobrante a mano`)
+  }
   if (diff.descripcionDiffers) lines.push(`nota: ${head}: la sección "## Descripción" difiere del spec (prosa — no cuenta para el exit code; --reconcile no la reescribe)`)
   if (diff.protectedDiffers) lines.push(`nota: ${head}: la sección "## Out of scope / Protected" difiere del spec (prosa — no cuenta para el exit code; --reconcile no la reescribe)`)
   for (const section of diff.duplicateSections || []) {
+    if ((diff.duplicateMachineSections || []).includes(section)) continue // ya reportada arriba como divergencia:
     lines.push(`nota: ${head}: la sección "## ${section}" aparece más de una vez en el body — solo la primera se compara/reconcilia; revisa la(s) copia(s) sobrante(s) a mano`)
+  }
+  for (const d of diff.strayDeps || []) {
+    lines.push(`nota: ${head}: "merge-after #${d}" aparece fuera de la sección "## Dependencias" — el dispatcher SÍ lo obedece (escanea todo el body), pero --reconcile no lo toca (fuera de la sección que puede tocar con seguridad); revísalo a mano`)
   }
   if (diff.closed && lines.length) lines.push(`nota: ${head}: el issue está cerrado — revisa antes de aplicar --reconcile`)
   return lines
@@ -287,62 +338,57 @@ function renderDepsContent(deps) {
   return (deps || []).map((d) => `- merge-after #${d}`).join('\n')
 }
 
-// withTrailingBlankLine: garantiza que `text` termine en exactamente una
-// línea en blanco ("\n\n") antes de insertar algo justo detrás — fix de
-// review round 3 (menor): la versión anterior insertaba una sección
-// "## Dependencias" nueva en `body.length` (cuando ni la sección de deps ni
-// "## Out of scope / Protected" existían) SIN ningún separador, pegando la
-// cabecera nueva directamente al carácter anterior (típicamente el propio
-// marcador `<!-- ct-order:N -->`, que casi nunca termina en salto de
-// línea).
-function withTrailingBlankLine(text) {
-  if (text.length === 0) return text
-  if (text.endsWith('\n\n')) return text
-  if (text.endsWith('\n')) return text + '\n'
-  return text + '\n\n'
-}
-
 // buildReconcileBody: --reconcile SÍ reescribe el enlace al spec y
 // AC/Dependencias (a diferencia de Descripción/Protegido, ver diffIssue)
 // porque son campos deterministas o estructurados que el dispatcher (o la
-// trazabilidad del spec) obedecen/necesitan de verdad — dejarlos
-// divergentes tras un --reconcile "exitoso" sería peor que las labels que
-// motivaron esta feature. Reemplaza SOLO el rango de cada sección/línea
-// conocida dentro del body EXISTENTE (locateSection/locateLine,
-// scripts/gh-issue-map.js) — nunca reconstruye el body entero — así
-// cualquier contenido humano antes/después de esas secciones (incluida una
-// sección nueva con su propia cabecera "## …" que un humano haya añadido en
-// cualquier punto) se preserva intacto.
+// trazabilidad del spec) obedecen/necesitan de verdad. Reemplaza SOLO el
+// rango de cada sección/línea conocida dentro del body EXISTENTE
+// (locateSection/locateLine, scripts/gh-issue-map.js) — nunca reconstruye
+// el body entero — así cualquier contenido humano antes/después de esas
+// secciones se preserva intacto.
+//
+// Todo el procesamiento interno trabaja sobre el body normalizado a LF
+// (`normalizeToLF`) — si el original usaba CRLF, el resultado se
+// reconvierte a CRLF antes de devolverlo (`detectLineEnding`), para no
+// dejar un body con finales de línea mezclados (review round 4, menor).
 //
 // Devuelve `{ body, unresolvedAc, unresolvedDeps }`: `body` es el body
-// spliceado, o `null` si nada necesitaba cambiar. `unresolvedAc`/
-// `unresolvedDeps` (review round 3, Critical 2) son ciertos cuando el diff
-// SÍ pedía un cambio pero no se pudo aplicar — hoy eso solo le puede pasar
-// a AC (su cabecera SIEMPRE debería existir en un body bien formado; si un
-// humano la renombra o la borra, no hay dónde escribir el reemplazo y NO
-// se inventa una posición). Dependencias, al ser una sección condicional,
-// siempre tiene una acción segura (reemplazar/insertar/retirar), así que
-// `unresolvedDeps` se mantiene por simetría con `unresolvedAc` — el
-// caller (ct-groom.mjs, vía reconcileGaps) es quien decide qué significa
-// cada gap para el mensaje y el código de salida; esta función no lo
-// decide, solo lo informa.
+// spliceado (en el mismo final de línea que el original), o `null` si nada
+// necesitaba cambiar. `unresolvedAc`/`unresolvedDeps` son ciertos cuando el
+// diff SÍ pedía un cambio pero no se pudo aplicar sin adivinar una
+// posición:
+//   - AC: su cabecera SIEMPRE debería existir en un body bien formado; si
+//     un humano la renombra o la borra, no hay dónde escribir el reemplazo.
+//   - Dependencias (review round 4, Critical 3): si la sección no existe Y
+//     TAMPOCO existe "## Out of scope / Protected" (el ancla segura para
+//     insertarla), la versión anterior insertaba una sección nueva a
+//     ciegas al final del body EN CADA CORRIDA — verificado que, con una
+//     valla sin cerrar delante (que hace inhallable cualquier cabecera
+//     posterior), esto crecía sin límite: 2, 3, 4 secciones en pasadas
+//     sucesivas, y el dispatcher (que sí ve las tres) acumulaba
+//     "merge-after #N" repetido. Ahora, sin un ancla segura, se RIÈNDE
+//     igual que AC: no inserta nada, marca `unresolvedDeps`, dejando que
+//     la maquinaria de gaps lo reporte y cuente para el exit code.
 //
-// "¿Necesita cambiar?" se decide con diffSet/depsInSection/acInSection
-// (el MISMO criterio, y el MISMO dominio — section-scoped — que usa
-// diffIssue, ver Critical 3 arriba) — nunca una comparación de texto
-// crudo ni un escaneo de todo el body: si el issue tiene "AC-1.1, AC-1.2"
-// y el spec pide el mismo conjunto en otro orden, diffIssue ya dice "sin
-// divergencia", así que reescribir aquí solo por una diferencia de orden
-// contradiría esa misma decisión.
+// "¿Necesita cambiar?" se decide con diffSet/depsInSection/acInSection (el
+// MISMO criterio, y el MISMO dominio — section-scoped — que usa diffIssue)
+// — nunca una comparación de texto crudo ni un escaneo de todo el body: si
+// el issue tiene "AC-1.1, AC-1.2" y el spec pide el mismo conjunto en otro
+// orden, diffIssue ya dice "sin divergencia", así que reescribir aquí solo
+// por una diferencia de orden contradiría esa misma decisión. El enlace al
+// spec se compara por su ANCLA (specLinkAnchor), no por el texto completo
+// — mismo criterio que diffIssue (review round 4, importante 4): una
+// diferencia de notación de ruta nunca dispara una reescritura.
 export function buildReconcileBody(existingBody, wantedIssue) {
-  let body = existingBody || ''
+  const eol = detectLineEnding(existingBody)
+  let body = normalizeToLF(existingBody)
   let changed = false
   let unresolvedAc = false
-  const unresolvedDeps = false // ver comentario de la función: hoy siempre resoluble (replace/insert/remove)
+  let unresolvedDeps = false
 
   const specLinkLoc = locateLine(body, '> Slice #')
   const currentSpecLink = specLinkLoc ? specLinkLoc.line : null
-  if (currentSpecLink !== wantedIssue.specLink) {
+  if (specLinkAnchor(currentSpecLink) !== specLinkAnchor(wantedIssue.specLink)) {
     if (specLinkLoc) {
       body = body.slice(0, specLinkLoc.start) + wantedIssue.specLink + body.slice(specLinkLoc.end)
     } else {
@@ -356,7 +402,7 @@ export function buildReconcileBody(existingBody, wantedIssue) {
 
   const acDiff = diffAc(acInSection(body), wantedIssue.ac)
   if (acDiff.missing.length || acDiff.extra.length) {
-    const acLoc = locateSection(body, '## Acceptance criteria')
+    const acLoc = locateSection(body, '## Acceptance criteria', { exact: false })
     if (acLoc) {
       body = body.slice(0, acLoc.headingEnd) + renderAcContent(wantedIssue.ac) + '\n' + body.slice(acLoc.contentEnd)
       changed = true
@@ -364,8 +410,7 @@ export function buildReconcileBody(existingBody, wantedIssue) {
       // Cabecera "## Acceptance criteria" ausente por completo: no hay
       // dónde escribir el reemplazo sin adivinar una posición — se rinde
       // limpiamente en vez de inventar una, y lo informa (unresolvedAc)
-      // para que el caller nunca reporte esto como "aplicado" ni, peor,
-      // como "solo prosa" (review round 3, Critical 2).
+      // para que el caller nunca reporte esto como "aplicado".
       unresolvedAc = true
     }
   }
@@ -380,20 +425,21 @@ export function buildReconcileBody(existingBody, wantedIssue) {
       changed = true
     } else if (wantDeps && !depsLoc) {
       // Sección ausente pero el spec ahora sí quiere deps: se inserta ENTERA
-      // (cabecera incluida) en la misma posición que buildIssueBody usaría —
-      // justo antes de "## Out of scope / Protected" (que SIEMPRE existe) —
-      // para que un futuro re-groom la vuelva a encontrar donde la espera.
+      // (cabecera incluida) justo antes de "## Out of scope / Protected" —
+      // SOLO si esa cabecera se puede localizar (es el único ancla segura
+      // de dónde insertar). Sin ella, no se inventa una posición (Critical
+      // 3, review round 4): se rinde, marca `unresolvedDeps`, y no toca el
+      // body — la alternativa (insertar al final a ciegas) creaba una
+      // sección nueva EN CADA CORRIDA sin límite cuando el body tenía una
+      // valla sin cerrar por delante.
       const protectedLoc = locateSection(body, '## Out of scope / Protected')
-      const insertion = `## Dependencias\n${wantedDepsContent}\n\n`
       if (protectedLoc) {
+        const insertion = `## Dependencias\n${wantedDepsContent}\n\n`
         body = body.slice(0, protectedLoc.headingStart) + insertion + body.slice(protectedLoc.headingStart)
+        changed = true
       } else {
-        // Degenerado (ni Dependencias ni Protected existen): se añade al
-        // final, garantizando primero un separador real — nunca pegado al
-        // carácter anterior (típicamente el marcador ct-order).
-        body = withTrailingBlankLine(body) + insertion
+        unresolvedDeps = true
       }
-      changed = true
     } else if (!wantDeps && depsLoc) {
       // El spec ya no declara deps para este slice, pero el issue conserva
       // la sección — se retira ENTERA (cabecera incluida), no solo su
@@ -403,5 +449,7 @@ export function buildReconcileBody(existingBody, wantedIssue) {
     }
   }
 
-  return { body: changed ? body : null, unresolvedAc, unresolvedDeps }
+  if (!changed) return { body: null, unresolvedAc, unresolvedDeps }
+  const finalBody = eol === '\r\n' ? body.replace(/\n/g, '\r\n') : body
+  return { body: finalBody, unresolvedAc, unresolvedDeps }
 }

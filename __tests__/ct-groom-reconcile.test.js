@@ -476,3 +476,113 @@ describe('ct-groom (corrida real) — issues huérfanos: un slice eliminado de l
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+// ============================================================================
+// Review round 4 — el reviewer atacó su PROPIA implementación de la ronda
+// 3, no solo los tres casos que se le habían dado. Estos dos tests cubren,
+// a nivel CLI end-to-end, los dos hallazgos "importante" más visibles para
+// un humano (el resto — el rastreador de vallas, la igualdad exacta de
+// cabecera, la rendición en vez del crecimiento sin límite, y el aviso de
+// merge-after fuera de sección — ya están cubiertos exhaustivamente en la
+// capa pura, reconcile.test.js/gh-issue-map.test.js).
+// ============================================================================
+
+describe('ct-groom (corrida real) — el enlace al spec ignora la notación de ruta, solo compara el ancla (review round 4, importante 4)', () => {
+  it('mismo ancla "#9", ruta distinta (relativa en el issue, absoluta en esta invocación) → NO diverge, exit 0, --reconcile no llama a `gh issue edit`', () => {
+    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
+    const argvLog = join(dir, 'argv.log')
+    // `spec` es una ruta ABSOLUTA (mkdtempSync + join ya lo son) — el issue
+    // existente usa una notación RELATIVA para el MISMO fichero (simula
+    // invocar el comando una vez con ruta relativa y otra con absoluta:
+    // un slash command frente a un cron, p.ej.).
+    const matchingButDifferentPathNotation = {
+      number: 501,
+      title: '#1 login',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
+      body: buildIssueBody(
+        { n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' },
+        { specPath: 'spec.md', specSection: '9' }, // ruta relativa, distinta de `spec` — mismo ancla "#9"
+      ),
+    }
+    const envBase = {
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[matchingButDifferentPathNotation]]),
+    }
+    const resDefault = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], envBase)
+    expect(resDefault.status).toBe(0)
+    expect(resDefault.stderr).not.toMatch(/enlace al spec/)
+
+    const resReconcile = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], { ...envBase, FAKE_GH_ARGV_LOG_FILE: argvLog })
+    expect(resReconcile.status).toBe(0)
+    const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
+    expect(log).not.toMatch(/issue edit/) // nada que reconciliar — jamás se llama a gh por esto
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('ancla DISTINTA ("#10" en vez de "#9") → SÍ diverge, exit 3', () => {
+    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
+    const movedSection = {
+      number: 501,
+      title: '#1 login',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
+      body: buildIssueBody(
+        { n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' },
+        { specPath: spec, specSection: '10' }, // misma ruta, ancla distinta
+      ),
+    }
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[movedSection]]),
+    })
+    expect(res.status).toBe(3)
+    expect(res.stderr).toMatch(/enlace al spec difiere/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom (corrida real) — un "## Dependencias"/"## Acceptance criteria" duplicado cuenta para el exit code (review round 4, importante 5)', () => {
+  const SPEC_2 = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | login | backend | modelo | #2 | AC-1.1 | schema |
+| 2 | signup | backend | registro | – | AC-2.1 | – |
+`
+  it('issue #1 con "## Dependencias" duplicado (misma dependencia en las dos copias) → exit 3, aunque el spec y el issue coincidan en todo lo demás', () => {
+    const { dir, spec } = writeSpec(SPEC_2)
+    const issue1WithDuplicateDeps = {
+      number: 501,
+      title: '#1 login',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }],
+      body: [
+        `> Slice #1 del epic. Spec: [${spec}#9](${spec}#9)`, '',
+        '## Descripción', 'modelo', '',
+        '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-1.1', '',
+        '## Dependencias', '- merge-after #2', '',
+        '## Dependencias', '- merge-after #2', '', // copia duplicada — el dispatcher no distingue "la primera"
+        '## Out of scope / Protected', '- 🚫 schema', '',
+        '<!-- ct-order:1 -->',
+      ].join('\n'),
+    }
+    const issue2Matching = {
+      number: 502,
+      title: '#2 signup',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }],
+      body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, { specPath: spec, specSection: '9' }),
+    }
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[issue1WithDuplicateDeps, issue2Matching]]),
+    })
+    expect(res.status).toBe(3) // antes de esta ronda, esto salía 0 (era solo una nota)
+    expect(res.stderr).toMatch(/divergencia.*Dependencias.*aparece más de una vez/is)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})

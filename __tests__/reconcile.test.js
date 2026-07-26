@@ -12,19 +12,22 @@ import { extractAc, extractDeps, extractSectionContent, extractSpecLink } from '
 // título/labels/milestone/AC/deps del issue siguen coincidiendo con lo que
 // el spec produce HOY.
 //
-// Review round 3 (coordinador), tres Critical atendidos en este fichero:
-//   1. locateSection (gh-issue-map.js) no anclaba a columna 0 ni era
-//      consciente de vallas de código — tests de eso en gh-issue-map.test.js.
-//   2. --reconcile podía salir 0 sobre una divergencia real (ac/deps)
-//      reportada pero no aplicada (cabecera renombrada/ausente) —
-//      reconcileGaps/hasReconcileGap rastrean exactamente esto.
-//   3. El dominio de detección (extractDeps/extractAc) y el de aplicación
-//      (buildReconcileBody) ahora son el MISMO: solo el contenido de la
-//      sección reconocida, nunca todo el body.
-// Y un punto de fondo (6): Descripción/Protegido se reportan (nota:), pero
-// YA NO cuentan para el exit code — anclar el exit a prosa que se edita de
-// forma rutinaria sería el mismo problema de ruido que ya se cerró para las
-// labels, en la otra dirección.
+// Review round 4 (el reviewer atacó su PROPIO escáner del round 3, no solo
+// los tres casos que se le habían dado):
+//   1/2/3 (Critical, fence/exact-match/inserción sin límite): tests de la
+//   capa de parseo puro viven en gh-issue-map.test.js; aquí se cubre el
+//   Critical 3 (rendirse en vez de crecer sin límite) end-to-end vía
+//   buildReconcileBody.
+//   4 (importante): el enlace al spec se compara SOLO por su ancla
+//   #sección — una diferencia de notación de ruta (relativa/absoluta) NUNCA
+//   cuenta como divergencia (evita el ping-pong entre dos costumbres de
+//   invocación).
+//   5 (importante): un "## Dependencias"/"## Acceptance criteria"
+//   DUPLICADO cambia lo que hace el dispatcher — SÍ cuenta para el exit
+//   code. Duplicar Descripción/Protegido sigue siendo solo cosmético.
+//   6 (importante): un "merge-after" fuera de la sección reconocida, que el
+//   dispatcher SÍ obedece, se reporta como nota (nunca divergencia:
+//   --reconcile no puede tocarlo con seguridad).
 
 describe('ownedLabelsOnly — el spec solo es autoridad sobre los prefijos cuya columna trae la tabla §9', () => {
   it('con los tres prefijos activos: conserva type:/area:/touches:, descarta status: y labels ajenas', () => {
@@ -127,7 +130,7 @@ function existingWith(overrides) {
   }
 }
 
-describe('diffIssue — compara título, milestone, enlace-al-spec, labels (prefijos activos), deps, ac y prosa (booleano) contra un issue existente', () => {
+describe('diffIssue — compara título, milestone, enlace-al-spec (ancla), labels (prefijos activos), deps, ac y prosa (booleano) contra un issue existente', () => {
   it('todo coincide → sin ninguna divergencia', () => {
     const d = diffIssue(existingWith({}), WANTED_ISSUE, 'Epic', ALL_PREFIXES)
     expect(d.title).toBeNull()
@@ -140,11 +143,22 @@ describe('diffIssue — compara título, milestone, enlace-al-spec, labels (pref
     expect(d.protectedDiffers).toBe(false)
     expect(d.closed).toBe(false)
     expect(d.duplicateSections).toEqual([])
+    expect(d.duplicateMachineSections).toEqual([])
+    expect(d.strayDeps).toEqual([])
   })
-  it('enlace al spec divergente (el spec se movió de sitio) → { current, wanted }', () => {
-    const movedSpec = { ...WANTED_ISSUE, specLink: '> Slice #2 del epic. Spec: [docs/otra-ruta.md#9](docs/otra-ruta.md#9)' }
-    const d = diffIssue(existingWith({}), movedSpec, 'Epic', ALL_PREFIXES)
-    expect(d.specLink).toEqual({ current: SPEC_LINK, wanted: movedSpec.specLink })
+  // Importante 4 (review round 4): el NÚCLEO del fix — dos notaciones de la
+  // MISMA sección (ruta relativa vs. absoluta) NUNCA deben divergir, o dos
+  // costumbres de invocación harían ping-pong sobre issues reales para
+  // siempre.
+  it('enlace al spec con RUTA DISTINTA pero el MISMO ancla #9 → NO diverge (evita el ping-pong relativo/absoluto)', () => {
+    const absoluteSpecLink = '> Slice #2 del epic. Spec: [/Users/jose/repo/docs/spec.md#9](/Users/jose/repo/docs/spec.md#9)'
+    const d = diffIssue(existingWith({}), { ...WANTED_ISSUE, specLink: absoluteSpecLink }, 'Epic', ALL_PREFIXES)
+    expect(d.specLink).toBeNull()
+  })
+  it('enlace al spec con distinto ANCLA (#10 en vez de #9) → SÍ diverge', () => {
+    const movedSection = '> Slice #2 del epic. Spec: [docs/spec.md#10](docs/spec.md#10)'
+    const d = diffIssue(existingWith({}), { ...WANTED_ISSUE, specLink: movedSection }, 'Epic', ALL_PREFIXES)
+    expect(d.specLink).toEqual({ current: SPEC_LINK, wanted: movedSection })
   })
   it('enlace al spec ausente en el issue (un humano la borró) → current: null', () => {
     const noSpecLink = existingWith({ body: existingWith({}).body.split('\n').slice(2).join('\n') })
@@ -168,14 +182,6 @@ describe('diffIssue — compara título, milestone, enlace-al-spec, labels (pref
     const d = diffIssue(withExtra, WANTED_ISSUE, 'Epic', ALL_PREFIXES)
     expect(d.deps).toEqual({ missing: [], extra: [4] })
   })
-  // Critical 3 (dominio de detección = dominio de aplicación): un
-  // "merge-after" suelto FUERA de "## Dependencias" (aquí, dentro de
-  // Descripción) NUNCA cuenta como dependencia real para F5 — a
-  // diferencia de gh-issue-map.js#extractDeps (que usa el DISPATCHER real
-  // y sí escanea todo el body), diffIssue solo mira dentro de la sección
-  // reconocida. Es la mitad de "detección" de la garantía de Critical 3:
-  // la otra mitad (que --reconcile tampoco reporte éxito sin haber podido
-  // arreglarlo) se prueba en la suite de ct-groom.mjs.
   it('un "merge-after" suelto en Descripción (fuera de "## Dependencias") NO cuenta como dependencia — mismo dominio que la aplicación', () => {
     const stray = existingWith({
       body: [
@@ -188,7 +194,14 @@ describe('diffIssue — compara título, milestone, enlace-al-spec, labels (pref
       ].join('\n'),
     })
     const d = diffIssue(stray, WANTED_ISSUE, 'Epic', ALL_PREFIXES)
-    expect(d.deps).toEqual({ missing: [], extra: [] }) // #9 no se cuela
+    expect(d.deps).toEqual({ missing: [], extra: [] }) // #9 no se cuela en la comparación que decide aplicar/exit code
+    // Importante 6: pero SÍ se avisa (nota, no divergencia) — el dispatcher
+    // real (mapGhIssue/extractDeps sin acotar) lo obedecería igualmente.
+    expect(d.strayDeps).toEqual([9])
+  })
+  it('sin nada fuera de la sección → strayDeps vacío', () => {
+    const d = diffIssue(existingWith({}), WANTED_ISSUE, 'Epic', ALL_PREFIXES)
+    expect(d.strayDeps).toEqual([])
   })
   it('AC divergente (falta un criterio que el spec ahora pide)', () => {
     const d = diffIssue(existingWith({}), { ...WANTED_ISSUE, ac: ['AC-2.1', 'AC-2.2'] }, 'Epic', ALL_PREFIXES)
@@ -240,8 +253,11 @@ describe('diffIssue — compara título, milestone, enlace-al-spec, labels (pref
     expect(d.closed).toBe(true)
     expect(d.title).not.toBeNull()
   })
-  // Menor (headings duplicados): informativo, no cuenta para hasDrift.
-  it('una sección conocida duplicada (## Dependencias dos veces) se detecta en duplicateSections', () => {
+  // Importante 5 (review round 4): un "## Dependencias"/"## Acceptance
+  // criteria" duplicado cambia lo que el dispatcher hace de verdad (no
+  // distingue "la primera") — se reporta en duplicateMachineSections, y
+  // hasDrift lo cuenta.
+  it('"## Dependencias" duplicado → aparece en duplicateSections Y en duplicateMachineSections, hasDrift lo cuenta', () => {
     const dup = existingWith({
       body: [
         SPEC_LINK, '',
@@ -254,15 +270,33 @@ describe('diffIssue — compara título, milestone, enlace-al-spec, labels (pref
     })
     const d = diffIssue(dup, WANTED_ISSUE, 'Epic', ALL_PREFIXES)
     expect(d.duplicateSections).toContain('Dependencias')
-    expect(hasDrift(d)).toBe(false) // no cuenta para el exit code
+    expect(d.duplicateMachineSections).toContain('Dependencias')
+    expect(hasDrift(d)).toBe(true) // SÍ cuenta para el exit code
+  })
+  it('"## Descripción" duplicado → aparece en duplicateSections pero NO en duplicateMachineSections, hasDrift NO lo cuenta', () => {
+    const dup = existingWith({
+      body: [
+        SPEC_LINK, '',
+        '## Descripción', 'flujo de refresco', '',
+        '## Descripción', 'copia pegada por error', '',
+        '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-2.1', '',
+        '## Dependencias', '- merge-after #1', '',
+        '## Out of scope / Protected', '- 🚫 schema §6', '',
+        '<!-- ct-order:2 -->',
+      ].join('\n'),
+    })
+    const d = diffIssue(dup, WANTED_ISSUE, 'Epic', ALL_PREFIXES)
+    expect(d.duplicateSections).toContain('Descripción')
+    expect(d.duplicateMachineSections).toEqual([])
+    expect(hasDrift(d)).toBe(false)
   })
 })
 
-describe('hasDrift — título/milestone/enlace-al-spec/labels/deps/ac cuentan; closed/prosa NUNCA (review round 3, punto 6)', () => {
+describe('hasDrift — título/milestone/enlace-al-spec/labels/deps/ac/duplicados-machine cuentan; closed/prosa/strayDeps NUNCA', () => {
   const CLEAN = {
     order: 1, issueNumber: 1, closed: false, title: null, milestone: null, specLink: null,
     labels: { missing: [], extra: [] }, deps: { missing: [], extra: [] }, ac: { missing: [], extra: [] },
-    descripcionDiffers: false, protectedDiffers: false, duplicateSections: [],
+    descripcionDiffers: false, protectedDiffers: false, duplicateSections: [], duplicateMachineSections: [], strayDeps: [],
   }
   it('sin ninguna divergencia → false, aunque esté cerrado', () => {
     expect(hasDrift({ ...CLEAN, closed: true })).toBe(false)
@@ -276,26 +310,28 @@ describe('hasDrift — título/milestone/enlace-al-spec/labels/deps/ac cuentan; 
   it('specLink divergente → true', () => {
     expect(hasDrift({ ...CLEAN, specLink: { current: 'a', wanted: 'b' } })).toBe(true)
   })
-  // Punto 6 de la review round 3: una divergencia que --reconcile NUNCA
-  // puede resolver (prosa) no debe anclar el exit code para siempre — el
-  // mismo argumento de ruido que ya justificó gatear las labels por
-  // columna, en la dirección opuesta.
+  it('duplicateMachineSections no vacío → true', () => {
+    expect(hasDrift({ ...CLEAN, duplicateMachineSections: ['Dependencias'] })).toBe(true)
+  })
   it('descripcionDiffers → NUNCA cuenta (ya no ancla el exit code)', () => {
     expect(hasDrift({ ...CLEAN, descripcionDiffers: true })).toBe(false)
   })
   it('protectedDiffers → NUNCA cuenta', () => {
     expect(hasDrift({ ...CLEAN, protectedDiffers: true })).toBe(false)
   })
-  it('duplicateSections → NUNCA cuenta (informativo)', () => {
-    expect(hasDrift({ ...CLEAN, duplicateSections: ['Dependencias'] })).toBe(false)
+  it('duplicateSections (solo cosmético, p.ej. Descripción) → NUNCA cuenta', () => {
+    expect(hasDrift({ ...CLEAN, duplicateSections: ['Descripción'] })).toBe(false)
+  })
+  it('strayDeps no vacío → NUNCA cuenta (--reconcile no puede tocarlo con seguridad)', () => {
+    expect(hasDrift({ ...CLEAN, strayDeps: [9] })).toBe(false)
   })
 })
 
-describe('formatDrift — divergencia: (cuenta) vs. nota: (no cuenta); deps/ac/specLink muestran el valor, Descripción/Protegido solo el flag', () => {
+describe('formatDrift — divergencia: (cuenta) vs. nota: (no cuenta); deps/ac/specLink/duplicados-machine muestran el valor, prosa/strayDeps/duplicados-cosméticos solo el flag', () => {
   const BASE = {
     order: 2, issueNumber: 42, closed: false, title: null, milestone: null, specLink: null,
     labels: { missing: [], extra: [] }, deps: { missing: [], extra: [] }, ac: { missing: [], extra: [] },
-    descripcionDiffers: false, protectedDiffers: false, duplicateSections: [],
+    descripcionDiffers: false, protectedDiffers: false, duplicateSections: [], duplicateMachineSections: [], strayDeps: [],
   }
   it('sin nada que reportar → []', () => {
     expect(formatDrift(BASE)).toEqual([])
@@ -316,9 +352,18 @@ describe('formatDrift — divergencia: (cuenta) vs. nota: (no cuenta); deps/ac/s
     expect(lines.find((l) => l.includes('AC-2.2'))).toMatch(/^divergencia:.*falta/i)
     expect(lines.find((l) => l.includes('AC-9.9'))).toMatch(/^divergencia:.*sobra/i)
   })
-  // Punto 6: Descripción/Protegido son "nota:", NUNCA "divergencia:" — y se
-  // reportan aunque sean LO ÚNICO que hay (no hace falta ninguna otra
-  // divergencia real para que aparezcan).
+  it('duplicateMachineSections (p.ej. Dependencias) → línea "divergencia:", no "nota:"', () => {
+    const lines = formatDrift({ ...BASE, duplicateSections: ['Dependencias'], duplicateMachineSections: ['Dependencias'] })
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatch(/^divergencia:/)
+    expect(lines[0]).toMatch(/Dependencias/)
+  })
+  it('duplicateSections cosmético (Descripción, no machine) → línea "nota:"', () => {
+    const lines = formatDrift({ ...BASE, duplicateSections: ['Descripción'], duplicateMachineSections: [] })
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toMatch(/^nota:/)
+    expect(lines[0]).toMatch(/Descripción/)
+  })
   it('Descripción/Protegido divergentes (solos, sin ninguna otra divergencia) → líneas "nota:", mencionan la sección, nunca el texto completo', () => {
     const lines = formatDrift({ ...BASE, descripcionDiffers: true, protectedDiffers: true })
     expect(lines).toHaveLength(2)
@@ -327,11 +372,12 @@ describe('formatDrift — divergencia: (cuenta) vs. nota: (no cuenta); deps/ac/s
     expect(lines.some((l) => l.includes('Out of scope / Protected'))).toBe(true)
     for (const l of lines) expect(l.length).toBeLessThan(220) // nunca vuelca prosa completa
   })
-  it('duplicateSections → una línea "nota:" por sección duplicada', () => {
-    const lines = formatDrift({ ...BASE, duplicateSections: ['Dependencias'] })
+  it('strayDeps → línea "nota:" por cada referencia, nombrando el número y que el dispatcher SÍ lo obedece', () => {
+    const lines = formatDrift({ ...BASE, strayDeps: [9] })
+    expect(lines).toHaveLength(1)
     expect(lines[0]).toMatch(/^nota:/)
-    expect(lines[0]).toMatch(/Dependencias/)
-    expect(lines[0]).toMatch(/más de una vez/)
+    expect(lines[0]).toMatch(/merge-after #9/)
+    expect(lines[0]).toMatch(/dispatcher/i)
   })
   it('issue cerrado CON algo que reportar (incluida prosa-solo) → nota final de "cerrado"', () => {
     const lines = formatDrift({ ...BASE, closed: true, descripcionDiffers: true })
@@ -352,7 +398,7 @@ describe('buildReconcileEditArgs — título/milestone/labels vía flags de `gh 
   })
 })
 
-describe('reconcileGaps / hasReconcileGap — divergencia real que --reconcile no pudo aplicar (review round 3, Critical 2)', () => {
+describe('reconcileGaps / hasReconcileGap — divergencia real que --reconcile no pudo aplicar', () => {
   const DIFF_CLEAN = { ac: { missing: [], extra: [] }, deps: { missing: [], extra: [] } }
   it('sin divergencia de ac/deps → sin gap, aunque bodyResult marque unresolved (no debería pasar, pero no basta por sí solo)', () => {
     const gaps = reconcileGaps(DIFF_CLEAN, { body: null, unresolvedAc: true, unresolvedDeps: true })
@@ -371,9 +417,17 @@ describe('reconcileGaps / hasReconcileGap — divergencia real que --reconcile n
     expect(gaps.ac).toBe(false)
     expect(hasReconcileGap(gaps)).toBe(false)
   })
+  // Critical 3 (review round 4): deps AHORA sí puede quedar unresolved
+  // (antes hardcodeado a false) — cuando no hay ancla segura donde insertar.
+  it('deps diverge Y no se pudo localizar un ancla segura → gap.deps = true', () => {
+    const diff = { ac: { missing: [], extra: [] }, deps: { missing: [2], extra: [] } }
+    const gaps = reconcileGaps(diff, { body: null, unresolvedAc: false, unresolvedDeps: true })
+    expect(gaps.deps).toBe(true)
+    expect(hasReconcileGap(gaps)).toBe(true)
+  })
 })
 
-describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Dependencias, preserva todo lo demás (F5, review crítica)', () => {
+describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Dependencias, preserva todo lo demás', () => {
   const SLICE = { n: 2, name: 'refresh', type: 'backend', entrega: 'flujo de refresco', deps: [1], ac: ['AC-2.1'], protected: 'schema §6' }
   const SPEC_OPTS = { specPath: 'spec.md', specSection: '9' }
   const GENERATED = buildIssueBody(SLICE, SPEC_OPTS)
@@ -402,9 +456,6 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
     expect(newBody).toContain('<!-- ct-order:2 -->') // marcador intacto
   })
 
-  // Critical 2: si la cabecera de AC no existe (renombrada/borrada a mano),
-  // buildReconcileBody NO inventa una posición — se rinde limpiamente y lo
-  // informa vía unresolvedAc, en vez de fingir que aplicó algo.
   it('cabecera "## Acceptance criteria" renombrada/ausente → unresolvedAc: true, NO se inventa una posición, el resto de la sección de deps SÍ se puede seguir aplicando', () => {
     const renamed = GENERATED.replace('## Acceptance criteria (EARS, 1:1 con tests)', '## Criterios')
     const r = buildReconcileBody(renamed, { ...WANTED_BASE, ac: ['AC-2.1', 'AC-2.2'], deps: [1, 3] })
@@ -437,21 +488,50 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
   it('spec empieza a tener deps (issue no tenía sección) → inserta "## Dependencias" antes de "## Out of scope / Protected"', () => {
     const noDeps = buildIssueBody({ ...SLICE, deps: [] }, SPEC_OPTS)
     expect(noDeps).not.toContain('## Dependencias')
-    const { body: newBody } = buildReconcileBody(noDeps, { ...WANTED_BASE, deps: [5] })
+    const { body: newBody, unresolvedDeps } = buildReconcileBody(noDeps, { ...WANTED_BASE, deps: [5] })
+    expect(unresolvedDeps).toBe(false)
     expect(extractDeps(newBody)).toEqual([5])
     expect(newBody.indexOf('## Dependencias')).toBeLessThan(newBody.indexOf('## Out of scope / Protected'))
     expect(extractSectionContent(newBody, '## Descripción')).toBe('flujo de refresco')
     expect(newBody).toContain('<!-- ct-order:2 -->')
   })
 
-  // Menor: separador seguro al insertar en el caso degenerado (ni Deps ni
-  // Protected existen) — antes se pegaba directamente al carácter anterior
-  // (típicamente el marcador ct-order).
-  it('inserción de deps sin "## Out of scope / Protected" (caso degenerado) NUNCA queda pegada al contenido anterior', () => {
+  // Critical 3 (review round 4): sin AC ni "## Out of scope / Protected"
+  // localizables, la versión anterior insertaba una sección nueva CIEGAMENTE
+  // en `body.length` — sin límite, en cada corrida. Ahora se RINDE
+  // (unresolvedDeps: true), igual que ya hacía AC, y NO toca el body.
+  it('sin "## Out of scope / Protected" localizable (sin ancla segura) → se RIÈNDE: unresolvedDeps true, body sin cambios para deps', () => {
     const noProtected = '> Slice #2 del epic. Spec: [x#9](x#9)\n\n## Acceptance criteria (EARS, 1:1 con tests)\n- AC-2.1\n\n<!-- ct-order:2 -->'
-    const { body: newBody } = buildReconcileBody(noProtected, { ...WANTED_BASE, deps: [5] })
-    expect(newBody).not.toMatch(/ct-order:2 -->## Dependencias/)
-    expect(extractDeps(newBody)).toEqual([5])
+    const r = buildReconcileBody(noProtected, { ...WANTED_BASE, deps: [5] })
+    expect(r.unresolvedDeps).toBe(true)
+    expect(r.body).toBeNull() // nada más divergía (AC/specLink ya coincidían) → null entero
+    expect(extractDeps(noProtected)).toEqual([]) // el original, verificado, seguía sin la dependencia
+  })
+
+  // Reproducción exacta del bug del reviewer: una valla sin cerrar hace
+  // inhallable CUALQUIER cabecera posterior (incluida "## Out of scope /
+  // Protected") — antes esto disparaba una inserción ciega en cada
+  // corrida, creciendo sin límite (2, 3, 4 secciones en 3 pasadas). Ahora,
+  // tres llamadas sucesivas (simulando tres corridas de /ct-groom
+  // --reconcile) deben rendirse las TRES veces, sin insertar nada nunca.
+  it('valla sin cerrar (ancla de Protected inhallable) → tres "corridas" sucesivas se rinden las tres, sin crecer sin límite', () => {
+    const withUnclosedFence = [
+      '> Slice #2 del epic. Spec: [x#9](x#9)', '',
+      '## Descripción', '```', 'esta valla nunca se cierra', '',
+      '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-2.1', '',
+      '<!-- ct-order:2 -->',
+    ].join('\n')
+    let current = withUnclosedFence
+    for (let run = 0; run < 3; run++) {
+      const r = buildReconcileBody(current, { ...WANTED_BASE, deps: [5] })
+      expect(r.unresolvedDeps).toBe(true)
+      expect(r.body).toBeNull()
+      // "current" no cambia entre corridas — no hay nada que reconciliar
+      // apliquemos lo que apliquemos, así que el bucle converge en un
+      // no-op estable, no en un crecimiento sin límite.
+      current = current // eslint-disable-line no-self-assign
+    }
+    expect((current.match(/## Dependencias/g) || []).length).toBe(0)
   })
 
   it('contenido humano en una sección nueva ("## Notas") sobrevive intacto a un reconcile de AC', () => {
@@ -462,14 +542,19 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
     expect(extractAc(newBody)).toEqual(['AC-2.1', 'AC-2.2'])
   })
 
-  // Enlace al spec (importante 5): se reescribe con un splice de una sola
-  // línea, igual de quirúrgico que las secciones.
-  it('enlace al spec divergente (el spec se movió) → se reemplaza la línea, preserva todo lo demás', () => {
-    const { body: newBody } = buildReconcileBody(GENERATED, { ...WANTED_BASE, specLink: '> Slice #2 del epic. Spec: [otra-ruta.md#9](otra-ruta.md#9)' })
-    expect(extractSpecLink(newBody)).toBe('> Slice #2 del epic. Spec: [otra-ruta.md#9](otra-ruta.md#9)')
+  // Enlace al spec (importante 4/5 de rondas previas): splice de una sola
+  // línea, PERO solo cuando el ANCLA realmente cambia — nunca por una
+  // diferencia de notación de ruta (el núcleo del fix del ping-pong).
+  it('enlace al spec con ancla distinta (#10) → se reemplaza la línea, preserva todo lo demás', () => {
+    const { body: newBody } = buildReconcileBody(GENERATED, { ...WANTED_BASE, specLink: '> Slice #2 del epic. Spec: [spec.md#10](spec.md#10)' })
+    expect(extractSpecLink(newBody)).toBe('> Slice #2 del epic. Spec: [spec.md#10](spec.md#10)')
     expect(extractAc(newBody)).toEqual(['AC-2.1'])
     expect(extractDeps(newBody)).toEqual([1])
     expect(newBody).toContain('<!-- ct-order:2 -->')
+  })
+  it('enlace al spec con MISMO ancla pero ruta distinta → NO se reescribe (evita el ping-pong): body sin cambios para ese campo', () => {
+    const r = buildReconcileBody(GENERATED, { ...WANTED_BASE, specLink: '> Slice #2 del epic. Spec: [/otra/ruta/absoluta.md#9](/otra/ruta/absoluta.md#9)' })
+    expect(r.body).toBeNull() // nada más divergía tampoco — confirma que el enlace NO disparó una reescritura
   })
 
   it('enlace al spec ausente (un humano lo borró) → se antepone al principio', () => {
@@ -478,10 +563,6 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
     expect(newBody.startsWith(WANTED_BASE.specLink)).toBe(true)
   })
 
-  // Fence-awareness (Critical 1), verificado también end-to-end vía
-  // buildReconcileBody: una mención de "## Dependencias" dentro de una
-  // valla de código en Descripción no debe corromperse ni confundirse con
-  // la sección real al aplicar un reconcile de deps.
   it('reconciliar deps con una mención de "## Dependencias" dentro de una valla en Descripción no corrompe la valla', () => {
     const withFence = [
       '> Slice #2 del epic. Spec: [spec.md#9](spec.md#9)', '',
@@ -497,5 +578,16 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
     expect(extractDeps(extractSectionContent(newBody, '## Descripción'))).toEqual([99]) // la valla no se tocó
     const realDepsSection = extractSectionContent(newBody, '## Dependencias')
     expect(extractDeps(realDepsSection)).toEqual([1, 3]) // la sección REAL sí se actualizó
+  })
+
+  // Menor: CRLF — el resultado final conserva el final de línea del
+  // original, sin mezclar LF nuestro con CRLF humano.
+  it('body en CRLF: el resultado reconciliado también es CRLF de punta a punta (sin finales mezclados)', () => {
+    const crlfBody = GENERATED.replace(/\n/g, '\r\n')
+    const { body: newBody } = buildReconcileBody(crlfBody, { ...WANTED_BASE, ac: ['AC-2.1', 'AC-2.2'] })
+    expect(newBody).not.toBeNull()
+    expect(newBody).toContain('\r\n')
+    expect(newBody).not.toMatch(/[^\r]\n/) // ningún '\n' sin su '\r' delante — nunca mezclado
+    expect(extractAc(newBody)).toEqual(['AC-2.1', 'AC-2.2']) // el contenido sigue siendo correcto tras normalizar/reconvertir
   })
 })

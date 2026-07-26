@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractAc, extractDeps, extractOrder, extractSpecLink, locateSection, countHeadingLines, mapGhIssue, filterMergedIssues, buildOrderIndex, buildDispatchInput } from '../scripts/gh-issue-map.js'
+import { extractAc, extractDeps, extractOrder, extractSpecLink, specLinkAnchor, locateSection, countHeadingLines, detectLineEnding, normalizeToLF, mapGhIssue, filterMergedIssues, buildOrderIndex, buildDispatchInput } from '../scripts/gh-issue-map.js'
 import { selectNext } from '../scripts/dispatch.js'
 import { buildIssueBody } from '../scripts/groom.js'
 
@@ -299,6 +299,172 @@ describe('locateSection — anclado a columna 0 y consciente de vallas de códig
     expect(descripcionLoc.content).toContain('```\n## Dependencias\n- merge-after #99\n```')
     expect(descripcionLoc.content).toContain('fin del ejemplo.')
     expect(descripcionLoc.content).not.toContain('## Acceptance criteria') // no se comió la siguiente cabecera real
+  })
+})
+
+// Review round 4 — el reviewer atacó su propio round 3: "arregló las tres
+// formas que el review nombró y probó exactamente esas tres; no atacó su
+// propio escáner". Estos tests construyen entradas adversarias que nadie
+// pidió explícitamente: valla anidada (delimitador más corto del MISMO
+// carácter dentro), delimitadores de distinta longitud, "~~~" dentro de
+// "```" (carácter DISTINTO), valla sin cerrar, y cabecera con sufijo para
+// las secciones que NO deberían tolerarlo.
+describe('locateSection / stepFence — CommonMark real: cierra solo con MISMO carácter y longitud >= apertura (review round 4, Critical 1)', () => {
+  it('un delimitador MÁS CORTO del mismo carácter (``` dentro de una valla abierta con ````) NO cierra — la sección real más allá se localiza bien', () => {
+    const body = [
+      '## Descripción',
+      'Ejemplo (round 4): una valla de 4 backticks que contiene, como parte',
+      'del propio ejemplo, un bloque de 3 backticks con la cabecera real dentro:',
+      '````',
+      '```',
+      '## Dependencias',
+      '- merge-after #99',
+      '```',
+      '````',
+      'fin del ejemplo real.',
+      '',
+      '## Acceptance criteria (EARS, 1:1 con tests)',
+      '- AC-1.1',
+      '',
+      '## Dependencias',
+      '- merge-after #1',
+      '',
+      '## Out of scope / Protected',
+      '- (ninguno declarado)',
+      '',
+      '<!-- ct-order:1 -->',
+    ].join('\n')
+    const depsLoc = locateSection(body, '## Dependencias')
+    expect(extractDeps(depsLoc.content)).toEqual([1]) // la sección REAL, no la del ejemplo anidado (#99)
+    const descripcionLoc = locateSection(body, '## Descripción')
+    expect(descripcionLoc.content).toContain('````\n```\n## Dependencias\n- merge-after #99\n```\n````')
+    expect(descripcionLoc.content).toContain('fin del ejemplo real.')
+    expect(descripcionLoc.content).not.toContain('## Acceptance criteria')
+  })
+
+  it('un delimitador de OTRO carácter ("~~~~" dentro de una valla abierta con "```") NO cierra la valla', () => {
+    const body = [
+      '## Descripción',
+      '```',
+      'dentro de la valla de backticks, esto NO la cierra:',
+      '~~~~',
+      '## Dependencias',
+      '- merge-after #99',
+      '~~~~',
+      'y esto sí la cierra de verdad:',
+      '```',
+      '',
+      '## Acceptance criteria (EARS, 1:1 con tests)',
+      '- AC-1.1',
+      '',
+      '## Dependencias',
+      '- merge-after #1',
+      '',
+      '## Out of scope / Protected',
+      '- (ninguno declarado)',
+      '',
+      '<!-- ct-order:1 -->',
+    ].join('\n')
+    const depsLoc = locateSection(body, '## Dependencias')
+    expect(extractDeps(depsLoc.content)).toEqual([1])
+    const descripcionLoc = locateSection(body, '## Descripción')
+    expect(descripcionLoc.content).toContain('~~~~\n## Dependencias\n- merge-after #99\n~~~~')
+    expect(descripcionLoc.content).not.toContain('## Acceptance criteria')
+  })
+
+  it('un delimitador MÁS LARGO del mismo carácter SÍ cierra (CommonMark real: longitud >= apertura)', () => {
+    const body = [
+      '## Descripción',
+      '```',
+      'contenido',
+      '````',
+      'esto ya está FUERA de la valla (la cerró la línea de arriba, más larga)',
+      '',
+      '## Acceptance criteria (EARS, 1:1 con tests)',
+      '- AC-1.1',
+      '',
+      '<!-- ct-order:1 -->',
+    ].join('\n')
+    const descripcionLoc = locateSection(body, '## Descripción')
+    expect(descripcionLoc.content).toContain('esto ya está FUERA de la valla')
+    // La cabecera de AC se localiza con normalidad — no quedó "dentro" de nada.
+    const acLoc = locateSection(body, '## Acceptance criteria', { exact: false })
+    expect(acLoc).not.toBeNull()
+  })
+
+  it('valla SIN CERRAR: todo lo que sigue se trata como dentro de ella (CommonMark: una valla abierta llega hasta el fin del documento) — una cabecera real después de la apertura no se localiza', () => {
+    const body = [
+      '## Descripción',
+      '```',
+      'esta valla nunca se cierra',
+      '',
+      '## Dependencias',
+      '- merge-after #1',
+      '',
+      '## Out of scope / Protected',
+      '- (ninguno declarado)',
+      '',
+      '<!-- ct-order:1 -->',
+    ].join('\n')
+    // "## Dependencias" vive, literalmente, dentro de la valla sin cerrar —
+    // no es una cabecera real mientras la valla siga abierta.
+    expect(locateSection(body, '## Dependencias')).toBeNull()
+    expect(locateSection(body, '## Out of scope / Protected')).toBeNull()
+  })
+
+  it('cabecera con sufijo humano ("## Dependencias externas (notas del equipo)") NO se reclama como la sección de dependencias real (exact, no prefijo)', () => {
+    const body = [
+      '## Dependencias externas (notas del equipo)',
+      'El equipo de pagos también depende de este cambio, informalmente.',
+      '',
+      '## Acceptance criteria (EARS, 1:1 con tests)',
+      '- AC-1.1',
+      '',
+      '## Dependencias',
+      '- merge-after #1',
+      '',
+      '<!-- ct-order:1 -->',
+    ].join('\n')
+    const depsLoc = locateSection(body, '## Dependencias')
+    expect(extractDeps(depsLoc.content)).toEqual([1]) // la sección REAL, no la humana con sufijo
+    expect(depsLoc.content).not.toContain('pagos')
+  })
+
+  it('"## Acceptance criteria" SÍ tolera sufijo (el único hueco legítimo) — exact:false', () => {
+    const body = '## Acceptance criteria (EARS, 1:1 con tests)\n- AC-1.1\n\n<!-- ct-order:1 -->'
+    const loc = locateSection(body, '## Acceptance criteria', { exact: false })
+    expect(loc).not.toBeNull()
+    expect(extractAc(body)).toEqual(['AC-1.1'])
+  })
+})
+
+describe('CRLF — normalizeToLF/detectLineEnding (review round 4, menor)', () => {
+  it('detectLineEnding: cuerpo con \\r\\n → "\\r\\n"; cuerpo con \\n puro → "\\n"', () => {
+    expect(detectLineEnding('a\r\nb\r\n')).toBe('\r\n')
+    expect(detectLineEnding('a\nb\n')).toBe('\n')
+    expect(detectLineEnding('')).toBe('\n')
+  })
+  it('normalizeToLF: quita \\r\\n y cualquier \\r suelto, deja \\n puro', () => {
+    expect(normalizeToLF('a\r\nb\r\nc')).toBe('a\nb\nc')
+    expect(normalizeToLF('a\rb')).toBe('ab')
+  })
+  it('una cabecera "exact" con CRLF (arrastra un \\r al final de línea) sigue matcheando — trimEnd absorbe el \\r', () => {
+    const body = normalizeToLF('## Dependencias\r\n- merge-after #1\r\n\r\n<!-- ct-order:1 -->\r\n')
+    const loc = locateSection(body, '## Dependencias')
+    expect(extractDeps(loc.content)).toEqual([1])
+  })
+})
+
+describe('specLinkAnchor — compara solo el ancla #sección, nunca la ruta (review round 4, importante 4)', () => {
+  it('extrae la sección de un enlace con ruta relativa', () => {
+    expect(specLinkAnchor('> Slice #2 del epic. Spec: [docs/spec.md#9](docs/spec.md#9)')).toBe('9')
+  })
+  it('extrae la MISMA sección aunque la ruta sea absoluta — el "#2" de "Slice #2" (antes de cualquier corchete) no se confunde con el ancla', () => {
+    expect(specLinkAnchor('> Slice #2 del epic. Spec: [/Users/jose/repo/docs/spec.md#9](/Users/jose/repo/docs/spec.md#9)')).toBe('9')
+  })
+  it('sin línea → null', () => {
+    expect(specLinkAnchor(null)).toBeNull()
+    expect(specLinkAnchor(undefined)).toBeNull()
   })
 })
 
