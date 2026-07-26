@@ -75,6 +75,36 @@ if (argv[0] === 'api' && /^repos\/[^/]+\/[^/]+\/issues$/.test(argv[1] || '')) {
   process.exit(0)
 }
 
+// `gh api repos/<owner>/<repo>/milestones ...` (ct-groom.mjs, F5): el
+// listado (GET explícito, `--method GET -f state=all --paginate`) y la
+// creación (POST implícito, sin `--method`, solo `-f title=<t>`) comparten
+// el mismo endpoint REST — se distinguen por la presencia de `--method` en
+// argv (el listado SIEMPRE lo pasa explícito; la creación nunca).
+// FAKE_GH_MILESTONES_LIST controla la respuesta del listado (default: "[]",
+// ningún milestone existente); FAKE_GH_MILESTONE_CREATE_NUMBER controla el
+// número devuelto al "crear" uno (default: 1). Los tests de F5 (detección de
+// divergencia / --reconcile) siempre dan por hecho un milestone YA
+// existente que matchea el título del plan, precisamente para no tener que
+// ejercitar la rama de creación — es una feature ortogonal, ya cableada y
+// sin tests de CLI propios antes de F5.
+if (argv[0] === 'api' && /^repos\/[^/]+\/[^/]+\/milestones$/.test(argv[1] || '')) {
+  if (argv.includes('--method')) {
+    process.stdout.write(process.env.FAKE_GH_MILESTONES_LIST || '[]')
+    process.exit(0)
+  }
+  process.stdout.write(JSON.stringify({ number: Number(process.env.FAKE_GH_MILESTONE_CREATE_NUMBER || 1) }))
+  process.exit(0)
+}
+
+// `gh label create <name> --repo <repo> --force` (ct-groom.mjs): una llamada
+// por cada label distinta que el plan produce, antes de crear/actualizar
+// ningún issue. Siempre éxito — ningún test existente necesita simular su
+// fallo (label create con --force no tiene, en la práctica, un caso "ya
+// existe" que tratar como error).
+if (argv[0] === 'label' && argv[1] === 'create') {
+  process.exit(0)
+}
+
 // `gh repo view <repo> --json defaultBranchRef -q .defaultBranchRef.name`
 // (W-D): ct-next.mjs resuelve la rama por defecto real del repo en vez de
 // asumir "main" a ciegas. FAKE_GH_DEFAULT_BRANCH controla el valor devuelto

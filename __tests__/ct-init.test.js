@@ -10,6 +10,15 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const script = join(root, 'scripts', 'ct-init.sh')
 const groomScript = join(root, 'scripts', 'ct-groom.mjs')
 
+// F5: ct-groom.mjs --dry-run ahora también enumera issues existentes de
+// `--repo` (lectura, para detectar divergencia) — sin un `gh` de mentira en
+// el PATH, el único test de este fichero que invoca groomScript llamaría al
+// `gh` real de la máquina contra el repo ficticio "o/r". Mismo stub y mismo
+// criterio que __tests__/ct-groom-dryrun.test.js: sin overrides, responde
+// "ningún issue existente", que es lo correcto para un plan recién creado.
+const fakeGhDir = join(root, '__tests__', 'fixtures', 'fake-gh-bin')
+const fakeGhEnv = { ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}` }
+
 // extractWorkedExample: saca el bloque de tabla markdown bajo "Ejemplo que
 // parsea tal cual" del AGENTS.md sembrado por ct-init.sh — las mismas
 // líneas que empiezan por "|", contiguas, hasta la primera línea que no
@@ -112,7 +121,7 @@ describe('ct-init.sh', () => {
     const specDir = mkdtempSync(join(tmpdir(), 'ct-example-'))
     const specPath = join(specDir, 'spec.md')
     writeFileSync(specPath, `## 9. Desglose en slices\n${table}`)
-    const out = execFileSync('node', [groomScript, specPath, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8' })
+    const out = execFileSync('node', [groomScript, specPath, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', env: fakeGhEnv })
     const plan = JSON.parse(out)
     expect(plan.issues).toHaveLength(3)
     expect(plan.issues[0].title).toBe('#1 modelo')
