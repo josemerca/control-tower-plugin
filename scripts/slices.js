@@ -8,9 +8,9 @@ const DEP_RE = /#(\d+)/g
 // este regex, cualquier "#" que no sea dígitos puros se reporta como fila
 // no-parseable en vez de perderse. A propósito NO se aplica ninguna
 // tolerancia de marcado inline aquí (a diferencia de Área/Toca, ver
-// stripInlineMarkup más abajo): el enunciado original de esta feature pide
-// explícitamente que "**1**" sea rechazado y el autor tenga que escribir
-// "1" a secas, así que "#" no perdona negrita/backticks.
+// EMPHASIS_CHARS_RE/cleanEmphasis más abajo): el enunciado original de esta
+// feature pide explícitamente que "**1**" sea rechazado y el autor tenga
+// que escribir "1" a secas, así que "#" no perdona negrita/backticks.
 const PLAIN_INT_RE = /^\d+$/
 // HEADING_RE: una cabecera markdown ("## 10. Otra sección") marca el fin
 // real del bloque de la tabla §9 (review de F1, punto 3: antes de esto, el
@@ -41,7 +41,7 @@ const SEPARATOR_RE = /^\s*\|[\s:|-]+\|\s*$/
 // verificado (`' — '.trim() === '—'`) — así que no hace falta
 // tratarlo aparte aquí.
 const NO_VALUE_MARKERS = new Set(['-', '–', '—', '―', '−', '--'])
-// isNoValueCell corre `stripInlineMarkup` ANTES de comparar (review round 2,
+// isNoValueCell corre `cleanEmphasis` ANTES de comparar (review round 2,
 // punto c): envolver el marcador en marcado inline ("`–`", "**–**") es la
 // MISMA forma que el CRITICAL del em dash — un autor que ya demostró
 // envolver valores en negrita/backticks (F1: "**S1**") envuelve igual de
@@ -52,7 +52,7 @@ const NO_VALUE_MARKERS = new Set(['-', '–', '—', '―', '−', '--'])
 // el signo menos matemático (−, U+2212) y el doble-guion ("--") son
 // salidas plausibles de autocorrección, igual que el em dash.
 function isNoValueCell(trimmedCell) {
-  return NO_VALUE_MARKERS.has(stripInlineMarkup(trimmedCell))
+  return NO_VALUE_MARKERS.has(cleanEmphasis(trimmedCell))
 }
 
 function splitRow(line) {
@@ -60,32 +60,45 @@ function splitRow(line) {
   return line.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim())
 }
 
-// stripInlineMarkup: quita marcado inline de markdown envolvente —
-// backticks, negrita (**), cursiva (*), y sus equivalentes con guion bajo
-// (__, _) — del principio y el final de un valor, de forma iterativa (para
-// que combinaciones como "`**x**`" se resuelvan capa por capa). CRITICAL 2
-// de la review de F1: el hábito DEMOSTRADO del autor real es envolver
-// valores en negrita ("**S1**" es exactamente lo que produjo el defecto del
-// "#"), y la versión anterior de este helper (entonces llamado
-// `stripBackticks`) solo reconocía backticks — "**area:medicacion**" no se
-// desenvolvía, y el `:` se borraba en el filtro de caracteres de
-// normalizeToken exactamente igual que en el defecto original, produciendo
-// "area:areamedicacion".
-const INLINE_MARKUP_WRAPPERS = ['**', '__', '`', '*', '_']
-function stripInlineMarkup(raw) {
-  let s = raw.trim()
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const w of INLINE_MARKUP_WRAPPERS) {
-      if (s.length > 2 * w.length && s.startsWith(w) && s.endsWith(w)) {
-        s = s.slice(w.length, s.length - w.length).trim()
-        changed = true
-        break
-      }
-    }
-  }
-  return s
+// EMPHASIS_CHARS_RE / stripTokenBoundaryUnderscores / cleanEmphasis (review
+// round 3 — rediseño, no otro parche): las dos rondas anteriores limpiaban
+// marcado "por capas" (bordes de la celda completa en la round 2, que ya
+// había reemplazado un intento aún más simple solo-backticks en F1) — cada
+// capa tapaba una FORMA de marcado (celda entera envuelta, luego backticks
+// anidados) y dejaba otra sin cubrir según en qué posición cayera. El
+// coordinador reprodujo la siguiente a la primera: cada token de una lista
+// envuelto en SU PROPIO backtick — "`area:hoy`, `area:web`". El split por
+// comas partía "`area:hoy" y "area:web`"; ninguna de las dos mitades
+// empezaba Y terminaba con el mismo backtick por separado, así que ningún
+// heurístico "de bordes" (ni a nivel de celda ni a nivel de pieza) los
+// reconocía como envueltos, y el segundo token perdía su "área:" al normalizar
+// exactamente como en el defecto original de F1.
+//
+// Enfoque nuevo: un solo paso de limpieza, sin depender de POSICIÓN.
+// Backtick (`) y asterisco (*) no tienen ningún significado legítimo DENTRO
+// de un token de label — no hace falta detectar si "envuelven" algo; da
+// igual dónde caigan, se quitan TODOS, de la celda completa, antes de
+// partir por comas. Esto resuelve las cuatro formas (celda entera envuelta,
+// cada token envuelto, mezcla, anidada) de una vez, porque ninguna depende
+// ya de que un wrapper "abra" y "cierre" en el sitio correcto.
+//
+// Guion bajo (_) es distinto: SÍ es legítimo DENTRO de un token
+// (normalizeToken lo permite explícitamente, p.ej. "mi_token") — quitarlo
+// globalmente corrompería esos tokens. Como marcado de énfasis (`_foo_`,
+// `__foo__`) solo tiene sentido en el BORDE de un token, así que ese se
+// seguimos quitando por pieza, después del split (nunca globalmente).
+const EMPHASIS_CHARS_RE = /[`*]/g
+function stripTokenBoundaryUnderscores(s) {
+  return s.replace(/^_+/, '').replace(/_+$/, '')
+}
+// cleanEmphasis: limpieza completa (backtick/asterisco fuera globalmente +
+// guion bajo solo en los bordes) para valores de UNA SOLA celda sin
+// estructura de lista (Dep/Acepta/Entrega, vía isNoValueCell) — no hay
+// split por comas de por medio, así que aplicar ambos pasos directamente a
+// la celda entera es correcto y no corrompe nada.
+function cleanEmphasis(raw) {
+  const noEmphasisChars = raw.replace(EMPHASIS_CHARS_RE, '').trim()
+  return stripTokenBoundaryUnderscores(noEmphasisChars).trim()
 }
 
 // stripColumnPrefix (F1, defecto 2): a la columna Área/Toca se le está
@@ -95,7 +108,10 @@ function stripInlineMarkup(raw) {
 // (no es un carácter "label-safe") y el resultado es "areamedicacion", que
 // buildLabels (groom.js) vuelve a prefijar como "area:areamedicacion" —
 // prefijo duplicado, label basura creada de verdad en el repo (`gh label
-// create --force` no rechaza nada).
+// create --force` no rechaza nada). Recibe el token YA limpio (sin
+// backtick/asterisco/guion-bajo-de-borde — ver parseTokenList, que hace esa
+// limpieza antes de llamar aquí), así que no necesita limpiar nada por su
+// cuenta.
 //
 // Si el prefijo encontrado es el de la OTRA columna (p.ej. "area:" dentro de
 // Toca) se decide TOLERAR igual, no rechazar ni abortar: es información real
@@ -105,8 +121,7 @@ function stripInlineMarkup(raw) {
 // eliminar. Se marca con `mismatched: true` para que el llamador lo
 // reporte como aviso (no error) — el valor se usa, pero el autor debe poder
 // verlo señalado para corregir la columna si fue un despiste.
-function stripColumnPrefix(raw, ownPrefix, otherPrefix) {
-  const cleaned = stripInlineMarkup(raw)
+function stripColumnPrefix(cleaned, ownPrefix, otherPrefix) {
   const lower = cleaned.toLowerCase()
   const ownMarker = `${ownPrefix}:`
   if (lower.startsWith(ownMarker)) {
@@ -161,23 +176,25 @@ function parseTokenList(cell, opts = {}) {
   const { ownPrefix, otherPrefix, columnLabel, n, warnings, emptyWarnings } = opts
   const raw = (cell || '').trim()
   if (!raw || isNoValueCell(raw)) return []
-  // CRITICAL (review round 2): el split por comas corría sobre `raw` SIN
-  // limpiar marcado inline primero, así que marcado que envuelve la CELDA
-  // COMPLETA de una lista ("**area:medicacion, area:otro**" — un solo par
-  // de asteriscos envolviendo TODA la lista, no cada token) sobrevivía
-  // intacto: el split partía "**area:medicacion" y "area:otro**", ninguno
-  // de los dos empezaba/terminaba con el mismo wrapper por separado, así
-  // que ni stripColumnPrefix (por-pieza) los reconocía como prefijados —
-  // resultado: "area:areamedicacion" otra vez, el mismo defecto de F1 una
-  // capa por debajo. Las listas por comas son el uso documentado normal
-  // (commands/ct-groom.md: "db, migration"), no un caso raro. Se limpia la
-  // celda COMPLETA aquí, antes del split; el strip por pieza de más abajo
-  // (dentro de stripColumnPrefix) se queda para el caso de un solo token.
-  const unwrapped = stripInlineMarkup(raw)
-  return unwrapped
+  // Review round 3 (rediseño, no otro parche): backtick/asterisco se quitan
+  // GLOBALMENTE de la celda COMPLETA, antes del split — no importa si
+  // envuelven la celda entera, cada token por separado, una mezcla de
+  // ambos, o vienen anidados; da igual la posición, porque no se intenta
+  // detectar un "par que envuelve", simplemente se borran. Esto es lo que
+  // permite que "`area:hoy`, `area:web`" (cada token en SU PROPIO backtick)
+  // funcione: antes, el split partía "`area:hoy" y "area:web`" y ningún
+  // heurístico de bordes por pieza/por celda reconocía el segundo trozo
+  // como prefijado; ahora los backticks ya no existen en absoluto para
+  // cuando se hace el split.
+  const withoutEmphasisChars = raw.replace(EMPHASIS_CHARS_RE, '')
+  return withoutEmphasisChars
     .split(',')
     .map((piece) => {
-      const trimmed = piece.trim()
+      // Guion bajo SÍ es legítimo dentro de un token (normalizeToken lo
+      // permite, p.ej. "mi_token") — no se puede quitar globalmente sin
+      // corromperlo. Como marcado de énfasis solo tiene sentido en el
+      // BORDE del token, así que se quita aquí, por pieza, tras el split.
+      const trimmed = stripTokenBoundaryUnderscores(piece.trim()).trim()
       if (!trimmed) return ''
       let token
       if (!ownPrefix) {
@@ -185,7 +202,7 @@ function parseTokenList(cell, opts = {}) {
       } else {
         const { token: t, mismatched } = stripColumnPrefix(trimmed, ownPrefix, otherPrefix)
         if (mismatched && warnings) {
-          warnings.push({ column: columnLabel, n, raw: stripInlineMarkup(trimmed), otherPrefix })
+          warnings.push({ column: columnLabel, n, raw: trimmed, otherPrefix })
         }
         token = normalizeToken(t)
       }

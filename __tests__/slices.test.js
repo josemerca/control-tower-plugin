@@ -857,3 +857,83 @@ describe('analyzeSlicesTable — signo menos (−, U+2212) y doble-guion ("--") 
     expect(r.malformedDepRows).toEqual([])
   })
 })
+
+// ============================================================================
+// Review round 3/5 — el Critical del prefijo, tercera vez. Las dos rondas
+// anteriores parcheaban por CAPA (bordes de la celda completa, luego bordes
+// de cada pieza), y cada parche tapaba una forma de marcado y dejaba otra
+// sin cubrir según en qué posición cayera. Reproducido por el coordinador a
+// la primera con cada token envuelto en SU PROPIO backtick — el split
+// partía "`area:hoy" y "area:web`" y ninguno de los dos empezaba/terminaba
+// con el mismo backtick por separado, así que el segundo token seguía
+// fallando.
+//
+// Enfoque nuevo: normalizar de un tirón, no por capas. Backtick (`) y
+// asterisco (*) NUNCA son legítimos dentro de un token de label, así que se
+// quitan GLOBALMENTE de la celda completa —en cualquier posición, sin
+// intentar detectar "pares que envuelven"— antes de partir por comas.
+// Guion bajo (_) SÍ es legítimo dentro de un token (normalizeToken ya lo
+// permite, p.ej. "mi_token"), así que ESE se quita solo en los bordes de
+// cada token, después del split, no globalmente.
+describe('parseSlices — normalización de marcado en un solo paso, no por capas (review round 3)', () => {
+  it('REPRODUCCIÓN EXACTA del coordinador: cada token envuelto en su PROPIO backtick — "`area:hoy`, `area:web`"', () => {
+    const spec = '## 9. Slices\n' +
+      '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
+      '|---|---|---|---|---|---|---|---|---|\n' +
+      '| 1 | x | backend | y | – | – | – | `area:hoy`, `area:web` | – |\n'
+    const s = parseSlices(spec)
+    expect(s[0].area).toEqual(['hoy', 'web'])
+    expect(s[0].area).not.toContain('areaweb')
+  })
+
+  it('las cuatro formas de marcado, en la MISMA tabla, todas producen labels limpias (cierra la clase, no un caso)', () => {
+    const spec = '## 9. Slices\n' +
+      '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
+      '|---|---|---|---|---|---|---|---|---|\n' +
+      '| 1 | celda entera envuelta | backend | y | – | – | – | **area:medicacion, area:otro** | – |\n' +
+      '| 2 | cada token envuelto | backend | y | – | – | – | `area:hoy`, `area:web` | – |\n' +
+      '| 3 | mezcla | backend | y | – | – | – | **area:x**, `area:y` | – |\n' +
+      '| 4 | envoltura anidada | backend | y | – | – | – | `**area:z**` | – |\n'
+    const s = parseSlices(spec)
+    expect(s[0].area).toEqual(['medicacion', 'otro']) // celda entera envuelta
+    expect(s[1].area).toEqual(['hoy', 'web']) // cada token envuelto
+    expect(s[2].area).toEqual(['x', 'y']) // mezcla
+    expect(s[3].area).toEqual(['z']) // envoltura anidada
+    for (const slice of s) {
+      for (const token of slice.area) {
+        expect(token).not.toMatch(/^area/) // ninguno debe conservar el prefijo duplicado ("areax", "areahoy", etc.)
+      }
+    }
+  })
+
+  it('control negativo: "areas-comunes" (guion) y un token con guion bajo INTERNO ("mi_token") sobreviven intactos', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | x | backend | y | – | – | – | areas-comunes | mi_token |
+`
+    const s = parseSlices(spec)
+    expect(s[0].area).toEqual(['areas-comunes'])
+    expect(s[0].touches).toEqual(['mi_token'])
+  })
+
+  it('guion bajo de énfasis SÍ se quita en los bordes del token ("_area:medicacion_"), sin tocar el interno de otro token en la misma celda', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | x | backend | y | – | – | – | _area:medicacion_, mi_token | – |
+`
+    const s = parseSlices(spec)
+    expect(s[0].area).toEqual(['medicacion', 'mi_token'])
+  })
+
+  it('marcador de "sin valor" (Dep) envuelto en backtick por token único sigue reconociéndose (isNoValueCell con el mismo enfoque de un paso)', () => {
+    const spec = '## 9. Slices\n' +
+      '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |\n' +
+      '|---|---|---|---|---|---|---|\n' +
+      '| 1 | a | ui | x | `–` | – | – |\n'
+    const r = analyzeSlicesTable(spec)
+    expect(r.malformedDepRows).toEqual([])
+    expect(r.slices[0].deps).toEqual([])
+  })
+})

@@ -877,3 +877,55 @@ describe('ct-groom — varios defectos a la vez se reportan TODOS en una sola ej
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+// Review round 3/5 — el Critical del prefijo, tercera vez: cada token
+// envuelto en SU PROPIO backtick ("`area:hoy`, `area:web`") seguía
+// produciendo "area:areaweb" porque el fix de round 2 solo limpiaba los
+// bordes de la celda COMPLETA o los bordes de cada pieza, por capas — y el
+// split partía justo en el punto donde ninguna de las dos capas alcanzaba.
+// Fix: normalizar de un tirón (backtick/asterisco fuera globalmente, guion
+// bajo solo en bordes de token, split, prefijo, normalizar) en vez de
+// capas. Verificado con las cuatro formas en la misma tabla, más un control
+// negativo de que no se corrompe lo legítimo.
+describe('ct-groom — normalización de marcado en un solo paso cierra la clase entera (review round 3)', () => {
+  it('REPRODUCCIÓN EXACTA del coordinador: "`area:hoy`, `area:web`" → labels limpias, sin abortar, sin aviso', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Slices\n' +
+      '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
+      '|---|---|---|---|---|---|---|---|---|\n' +
+      '| 1 | login | backend | modelo | – | – | – | `area:hoy`, `area:web` | – |\n')
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8' })
+    expect(res.status).toBe(0)
+    const plan = JSON.parse(res.stdout)
+    const labels = plan.issues[0].labels
+    expect(labels).toContain('area:hoy')
+    expect(labels).toContain('area:web')
+    expect(labels).not.toContain('area:areaweb')
+    expect(res.stderr).toBe('') // sin ningún aviso: ambos tokens se reconocen limpios
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('las cuatro formas de marcado en la misma tabla, más un control negativo, todas correctas en una sola ejecución', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Slices\n' +
+      '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
+      '|---|---|---|---|---|---|---|---|---|\n' +
+      '| 1 | celda entera | backend | y | – | – | – | **area:medicacion, area:otro** | – |\n' +
+      '| 2 | cada token | backend | y | – | – | – | `area:hoy`, `area:web` | – |\n' +
+      '| 3 | mezcla | backend | y | – | – | – | **area:x**, `area:y` | – |\n' +
+      '| 4 | anidada | backend | y | – | – | – | `**area:z**` | – |\n' +
+      '| 5 | control negativo | backend | y | – | – | – | areas-comunes | mi_token |\n')
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    const plan = JSON.parse(out)
+    const labelsOf = (order) => plan.issues.find((i) => i.order === order).labels
+    expect(labelsOf(1)).toEqual(expect.arrayContaining(['area:medicacion', 'area:otro']))
+    expect(labelsOf(2)).toEqual(expect.arrayContaining(['area:hoy', 'area:web']))
+    expect(labelsOf(3)).toEqual(expect.arrayContaining(['area:x', 'area:y']))
+    expect(labelsOf(4)).toEqual(expect.arrayContaining(['area:z']))
+    expect(labelsOf(5)).toEqual(expect.arrayContaining(['area:areas-comunes', 'touches:mi_token']))
+    for (const order of [1, 2, 3, 4]) {
+      expect(labelsOf(order).some((l) => /^area:area/.test(l))).toBe(false)
+    }
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
