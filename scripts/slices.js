@@ -6,24 +6,75 @@ const DEP_RE = /#(\d+)/g
 // "1abc" -> 1 y "S1" -> NaN de forma inconsistente, y NaN se descartaba en
 // silencio (F1, defecto 1: la fila entera desaparecía sin dejar rastro). Con
 // este regex, cualquier "#" que no sea dígitos puros se reporta como fila
-// no-parseable en vez de perderse.
+// no-parseable en vez de perderse. A propósito NO se aplica ninguna
+// tolerancia de marcado inline aquí (a diferencia de Área/Toca, ver
+// stripInlineMarkup más abajo): el enunciado original de esta feature pide
+// explícitamente que "**1**" sea rechazado y el autor tenga que escribir
+// "1" a secas, así que "#" no perdona negrita/backticks.
 const PLAIN_INT_RE = /^\d+$/
+// HEADING_RE: una cabecera markdown ("## 10. Otra sección") marca el fin
+// real del bloque de la tabla §9 (review de F1, punto 3: antes de esto, el
+// escaneo de filas se detenía en la primera línea que no empezaba por "|",
+// tratando una línea en blanco en medio de la tabla como "fin de tabla" y
+// truncando en silencio las filas siguientes). Detenerse en una cabecera
+// nueva evita arrastrar una tabla de una sección completamente distinta más
+// abajo en el mismo documento.
+const HEADING_RE = /^#{1,6}\s/
+// SEPARATOR_RE: la fila "|---|---|" de una tabla markdown.
+const SEPARATOR_RE = /^\s*\|[\s:|-]+\|\s*$/
+
+// NO_VALUE_MARKERS: valores de celda que significan "vacío"/"sin valor" —
+// guion (-), en dash (–, U+2013) y em dash (—, U+2014) son variantes
+// tipográficas razonables de la misma intención que un editor de texto
+// (Word, Notion, un móvil con autocorrección…) puede sustituir sin que el
+// autor lo note. CRITICAL de la review de F1: la tabla REAL que originó
+// esta feature usa DELIBERADAMENTE un em dash en la fila S1 para "sin
+// dependencias" — reconocer solo "–"/"-" significa que arreglar la columna
+// "#" (como pide nuestro propio mensaje de error) hace que esa misma celda,
+// que siempre significó "sin dependencias" correctamente, dispare el abort
+// de "Dep malformado" pidiéndole al autor que escriba "#N" para una celda
+// que no necesita ninguna referencia. Un solo criterio de "vacío",
+// compartido entre Dep/Acepta/Área/Toca (antes cada campo repetía su propia
+// comparación `!== '–' && !== '-'`, con el mismo hueco cuatro veces).
+// NBSP alrededor del carácter (p.ej. copiado de un editor que lo inserta
+// automáticamente) ya lo elimina `String#trim()` de forma nativa —
+// verificado (`' — '.trim() === '—'`) — así que no hace falta
+// tratarlo aparte aquí.
+const NO_VALUE_MARKERS = new Set(['-', '–', '—', '―'])
+function isNoValueCell(trimmedCell) {
+  return NO_VALUE_MARKERS.has(trimmedCell)
+}
 
 function splitRow(line) {
   // "| a | b |" -> ["a","b"] (quita bordes y trim)
   return line.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim())
 }
 
-// stripBackticks: `` `area:medicacion` `` -> "area:medicacion". Un autor
-// humano envuelve el valor en backticks porque literalmente se le pide una
-// label de GitHub y así es como se escriben en markdown. Si esto no se
-// resuelve ANTES de buscar el prefijo de columna (stripColumnPrefix), el
-// `:` seguiría ahí en el punto de decisión y el strip de prefijo no
-// dispararía; hacerlo aquí, antes, es lo que permite que el valor
-// backtick-envuelto y el valor pelado terminen en el mismo token.
-function stripBackticks(raw) {
-  const s = raw.trim()
-  if (s.length >= 2 && s.startsWith('`') && s.endsWith('`')) return s.slice(1, -1).trim()
+// stripInlineMarkup: quita marcado inline de markdown envolvente —
+// backticks, negrita (**), cursiva (*), y sus equivalentes con guion bajo
+// (__, _) — del principio y el final de un valor, de forma iterativa (para
+// que combinaciones como "`**x**`" se resuelvan capa por capa). CRITICAL 2
+// de la review de F1: el hábito DEMOSTRADO del autor real es envolver
+// valores en negrita ("**S1**" es exactamente lo que produjo el defecto del
+// "#"), y la versión anterior de este helper (entonces llamado
+// `stripBackticks`) solo reconocía backticks — "**area:medicacion**" no se
+// desenvolvía, y el `:` se borraba en el filtro de caracteres de
+// normalizeToken exactamente igual que en el defecto original, produciendo
+// "area:areamedicacion".
+const INLINE_MARKUP_WRAPPERS = ['**', '__', '`', '*', '_']
+function stripInlineMarkup(raw) {
+  let s = raw.trim()
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const w of INLINE_MARKUP_WRAPPERS) {
+      if (s.length > 2 * w.length && s.startsWith(w) && s.endsWith(w)) {
+        s = s.slice(w.length, s.length - w.length).trim()
+        changed = true
+        break
+      }
+    }
+  }
   return s
 }
 
@@ -45,7 +96,7 @@ function stripBackticks(raw) {
 // reporte como aviso (no error) — el valor se usa, pero el autor debe poder
 // verlo señalado para corregir la columna si fue un despiste.
 function stripColumnPrefix(raw, ownPrefix, otherPrefix) {
-  const cleaned = stripBackticks(raw)
+  const cleaned = stripInlineMarkup(raw)
   const lower = cleaned.toLowerCase()
   const ownMarker = `${ownPrefix}:`
   if (lower.startsWith(ownMarker)) {
@@ -60,12 +111,12 @@ function stripColumnPrefix(raw, ownPrefix, otherPrefix) {
   return { token: cleaned, mismatched: false }
 }
 
-// normalizeToken: token crudo (ya sin backticks/prefijo de columna) -> token
-// "label-safe" para componer `area:<token>`/`touches:<token>` (T14/W-A).
-// Decisión de normalización (documentada en el informe de la tarea): trim +
-// lowercase + se descartan silenciosamente los caracteres que no sean
-// letra/dígito unicode, espacio, guion, guion bajo, `/`, `.` o `+` — en
-// particular `:` (separador de prefijo `area:`/`touches:` que usa
+// normalizeToken: token crudo (ya sin marcado inline/prefijo de columna) ->
+// token "label-safe" para componer `area:<token>`/`touches:<token>`
+// (T14/W-A). Decisión de normalización (documentada en el informe de la
+// tarea): trim + lowercase + se descartan silenciosamente los caracteres que
+// no sean letra/dígito unicode, espacio, guion, guion bajo, `/`, `.` o `+`
+// — en particular `:` (separador de prefijo `area:`/`touches:` que usa
 // buildLabels en groom.js) y `,` (separador de tokens dentro de la propia
 // celda, ver parseTokenList) se eliminan en vez de intentar escaparlos, para
 // que el token resultante nunca pueda reintroducir ambigüedad en ninguno de
@@ -82,74 +133,86 @@ function normalizeToken(raw) {
 }
 
 // parseTokenList: celda Área/Toca -> string[] normalizado. Mismo criterio de
-// "vacío" que la columna Acepta ya usaba (–, -, o celda vacía -> []).
+// "vacío" que usan Dep/Acepta (ver NO_VALUE_MARKERS/isNoValueCell).
 // Column-aware (F1): con `ownPrefix`/`otherPrefix` tolera que la celda traiga
 // el prefijo de label completo en vez del token pelado (ver
 // stripColumnPrefix). Cuando el prefijo encontrado es el de la otra columna,
 // empuja un registro a `warnings` (mutado in-place por el llamador) en vez
 // de lanzar o descartar el valor.
+//
+// Punto 6 de la review de F1: un token con contenido real que, tras quitar
+// prefijo/marcado y normalizar, queda vacío (p.ej. "area:" sin nada detrás,
+// o "???" sin ningún carácter label-safe) se descartaba con
+// `.filter(Boolean)` sin decir nada — la misma inercia de colisión/
+// serialización que ya se reporta cuando falta la COLUMNA entera, pero
+// callada cuando es solo la CELDA la que queda vacía. Se reporta en
+// `emptyWarnings` (mutado in-place, igual que `warnings`).
 function parseTokenList(cell, opts = {}) {
-  const { ownPrefix, otherPrefix, columnLabel, n, warnings } = opts
+  const { ownPrefix, otherPrefix, columnLabel, n, warnings, emptyWarnings } = opts
   const raw = (cell || '').trim()
-  if (!raw || raw === '–' || raw === '-') return []
+  if (!raw || isNoValueCell(raw)) return []
   return raw
     .split(',')
     .map((piece) => {
       const trimmed = piece.trim()
       if (!trimmed) return ''
-      if (!ownPrefix) return normalizeToken(trimmed)
-      const { token, mismatched } = stripColumnPrefix(trimmed, ownPrefix, otherPrefix)
-      if (mismatched && warnings) {
-        warnings.push({ column: columnLabel, n, raw: stripBackticks(trimmed), otherPrefix })
+      let token
+      if (!ownPrefix) {
+        token = normalizeToken(trimmed)
+      } else {
+        const { token: t, mismatched } = stripColumnPrefix(trimmed, ownPrefix, otherPrefix)
+        if (mismatched && warnings) {
+          warnings.push({ column: columnLabel, n, raw: stripInlineMarkup(trimmed), otherPrefix })
+        }
+        token = normalizeToken(t)
       }
-      return normalizeToken(token)
+      if (!token && emptyWarnings) {
+        emptyWarnings.push({ column: columnLabel, n, raw: trimmed })
+      }
+      return token
     })
     .filter(Boolean)
 }
 
 // analyzeSlicesTable: el parseo real, con reporte enriquecido de todo lo que
-// antes se perdía en silencio (F1). `parseSlices` (más abajo) es un wrapper
-// fino sobre esto que preserva el contrato viejo `(md) -> Slice[]` del que
-// dependen otros módulos y la mayoría de los tests — no se toca esa firma,
-// se añade esta como una segunda exportación con el reporte completo:
-//   - tableFound: se localizó una cabecera de tabla §9 (distingue "no hay
-//     tabla" de "hay tabla pero está vacía o mal formada").
-//   - missingRequiredColumns: subconjunto de ['#', 'Entrega'] ausente en la
-//     cabecera. Sin "#" no hay orden de slice ni se pueden resolver
-//     dependencias; sin "Entrega" no hay título de issue. Se reporta para
-//     que el llamador (ct-groom.mjs) pueda abortar fuerte ANTES de tocar
-//     GitHub.
-//   - missingOptionalColumns: subconjunto de ['Tipo','Acepta','Protegido',
-//     'Área','Toca'] ausente — degrada el issue creado (sin label type:, sin
-//     AC, sin sección Protegido explícita, o con la maquinaria de colisión/
-//     serialización inerte) pero no impide crear issues razonables, así que
-//     el llamador debe avisar y continuar, no abortar.
-//   - totalDataRows: cuántas filas de datos (no separador) vio el parser,
-//     independientemente de si se pudieron parsear.
-//   - skippedRows: filas descartadas porque su celda "#" no es un entero a
-//     secas — el defecto original (F1, defecto 1) era que estas filas
-//     desaparecían con un `continue` silencioso.
-//   - prefixWarnings: ocurrencias de un valor en Área/Toca con el prefijo de
-//     LA OTRA columna (ver stripColumnPrefix) — se usó el valor, pero se
-//     señala para revisión.
-//   - malformedDepRows: filas cuya celda "Dep" tiene contenido (no vacía, no
-//     "–"/"-") pero de la que no se extrajo ninguna referencia "#N" (F2:
-//     "S1" en vez de "#1" — un despiste igual de natural que "area:x" en
-//     Área). Este es más grave que un `#` malformado: no rompe el índice de
-//     orden, así que la fila SÍ se parsea y SÍ termina en `slices`, pero con
-//     `deps: []` — el groom saldría con exit 0, crearía milestone e issues,
-//     y solo entonces se notaría (en /ct-next, cuando un slice dependiente
-//     se despacha sin esperar el merge del que dependía) que el grafo de
-//     dependencias se borró en silencio. El llamador (ct-groom.mjs) aborta
-//     fuerte si esta lista no está vacía, con el mismo criterio que
-//     skippedRows.
-//   - slices: el mismo array que devolvía `parseSlices` antes.
+// antes se perdía en silencio (F1/F2 y la review posterior de ambos). Forma
+// del reporte:
+//   - tableFound: se localizó una cabecera de tabla §9.
+//   - pipeRowsFound: había al menos una línea de tabla markdown ("|...")
+//     en el documento, la matcheara o no como cabecera de slices — permite
+//     distinguir "no hay ninguna tabla en el spec" de "hay tabla(s), pero
+//     ninguna con cabecera Slice/Dep" (mensajes de error distintos).
+//   - missingRequiredColumns / missingOptionalColumns: columnas ausentes en
+//     la CABECERA (ver detalle en el código de más abajo).
+//   - totalDataRows: filas de datos vistas (no separador), en todo el bloque
+//     de la tabla (incluyendo las que aparecen después de un hueco).
+//   - rowsAfterGap: filas de datos que aparecen después de una línea sin
+//     "|" (blanco u otro texto) dentro del bloque de la tabla — antes se
+//     truncaba ahí en silencio (review de F1, punto 3).
+//   - skippedRows: filas cuyo "#" no es un entero a secas.
+//   - invalidRows: filas con la celda "Entrega" vacía, o con menos celdas
+//     que la cabecera — mismo resultado observable que "falta la columna
+//     Entrega", pero por fila (review de F1, punto 4). No se agregan a
+//     `slices`.
+//   - malformedDepRows: filas cuya celda "Dep" tiene contenido real (no
+//     "vacío" según isNoValueCell) pero de la que no se extrajo ninguna
+//     referencia "#N" (F2).
+//   - invalidDepRefs: referencias "#N" en Dep que apuntan a un slice que no
+//     existe en la tabla, o al propio slice (auto-referencia, nunca
+//     legítima) — review de F1, punto 5.
+//   - prefixWarnings: valores de Área/Toca con el prefijo de LA OTRA
+//     columna — se usó el valor, pero se señala para revisión.
+//   - emptyTokenWarnings: valores de Área/Toca que, tras normalizar, quedan
+//     vacíos — se descartan, pero se avisa (review de F1, punto 6).
+//   - slices: Slice[] — el mismo array que devolvía `parseSlices` antes.
 export function analyzeSlicesTable(specMd) {
   const lines = (specMd || '').split('\n')
   // localizar el header de la tabla: fila con celdas que incluyen "Slice" y "Dep"
   let headerIdx = -1
+  let pipeRowsFound = false
   for (let i = 0; i < lines.length; i++) {
     if (!lines[i].trim().startsWith('|')) continue
+    pipeRowsFound = true
     const cells = splitRow(lines[i]).map((c) => c.toLowerCase())
     if (cells.some((c) => c.includes('slice')) && cells.some((c) => c === 'dep' || c.includes('dep'))) {
       headerIdx = i
@@ -159,12 +222,17 @@ export function analyzeSlicesTable(specMd) {
   if (headerIdx === -1) {
     return {
       tableFound: false,
+      pipeRowsFound,
       missingRequiredColumns: [],
       missingOptionalColumns: [],
       totalDataRows: 0,
+      rowsAfterGap: [],
       skippedRows: [],
+      invalidRows: [],
       prefixWarnings: [],
       malformedDepRows: [],
+      invalidDepRefs: [],
+      emptyTokenWarnings: [],
       slices: [],
     }
   }
@@ -203,38 +271,74 @@ export function analyzeSlicesTable(specMd) {
 
   const slices = []
   const skippedRows = []
+  const invalidRows = []
   const prefixWarnings = []
   const malformedDepRows = []
+  const emptyTokenWarnings = []
+  const rowsAfterGap = []
   let totalDataRows = 0
+  let hitGap = false
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const raw = lines[i]
-    if (!raw.trim().startsWith('|')) break // fin de tabla
-    if (/^\s*\|[\s:|-]+\|\s*$/.test(raw)) continue // fila separadora |---|
+    const trimmed = raw.trim()
+    if (HEADING_RE.test(trimmed)) break // nueva sección markdown: fin real del bloque de la tabla
+    if (!trimmed.startsWith('|')) {
+      // Línea en blanco (u otro texto) dentro del bloque de la tabla: NO
+      // corta el escaneo (review de F1, punto 3) — solo marca que, si
+      // aparecen más filas de datos después, hay que reportarlo.
+      hitGap = true
+      continue
+    }
+    if (SEPARATOR_RE.test(raw)) continue // fila separadora |---|
+
+    // A partir de aquí: fila de datos real.
     totalDataRows++
+    if (hitGap) rowsAfterGap.push({ raw: trimmed })
     const cells = splitRow(raw)
     const nCellRaw = iN === -1 ? '' : (cells[iN] || '').trim()
     if (!PLAIN_INT_RE.test(nCellRaw)) {
-      skippedRows.push({ raw: raw.trim(), value: nCellRaw })
+      skippedRows.push({ raw: trimmed, value: nCellRaw })
       continue
     }
     const n = parseInt(nCellRaw, 10)
+
+    // Punto 4 de la review de F1: antes solo se validaba la CABECERA, nunca
+    // las celdas. Una fila con menos celdas que la cabecera (típicamente
+    // porque le faltan celdas finales), o con "Entrega" vacía, produce
+    // exactamente el mismo resultado observable que "falta la columna
+    // Entrega entera" (un issue titulado "#N" a secas, sin AC ni deps) —
+    // solo que por fila. Se reporta y NO se agrega a `slices`: no hay
+    // título de issue fiable que construir con esta fila.
+    const rowShorterThanHeader = cells.length < header.length
+    const entregaCellRaw = iEntrega === -1 ? undefined : cells[iEntrega]
+    const entregaEmpty = iEntrega !== -1 && (entregaCellRaw === undefined || entregaCellRaw.trim() === '')
+    if (rowShorterThanHeader || entregaEmpty) {
+      invalidRows.push({
+        n,
+        reason: rowShorterThanHeader
+          ? `la fila tiene ${cells.length} celda(s), la cabecera tiene ${header.length}`
+          : 'la columna "Entrega" está vacía',
+      })
+      continue
+    }
+
     const depCell = (cells[iDep] || '').trim()
     const deps = []
     let m
     DEP_RE.lastIndex = 0
     while ((m = DEP_RE.exec(depCell)) !== null) deps.push(parseInt(m[1], 10))
-    // F2: "Dep" con contenido real (no "–"/"-"/vacío, que son la forma
-    // legítima de "sin dependencias") del que no se extrajo ninguna "#N" —
-    // p.ej. "S1" en vez de "#1" — es una celda malformada, no una fila sin
-    // dependencias. El disparador es "0 deps extraídas de una celda con
-    // contenido": texto legítimo alrededor de una referencia válida (p.ej.
-    // "#1 (tras el merge)") sigue extrayendo su "#1" y NO cuenta como
-    // malformada.
-    if (depCell && depCell !== '–' && depCell !== '-' && deps.length === 0) {
+    // F2: "Dep" con contenido real (no un marcador de "sin valor" — ver
+    // isNoValueCell/NO_VALUE_MARKERS, que ahora incluye el em dash) del que
+    // no se extrajo ninguna "#N" — p.ej. "S1" en vez de "#1" — es una celda
+    // malformada, no una fila sin dependencias. El disparador es "0 deps
+    // extraídas de una celda con contenido": texto legítimo alrededor de
+    // una referencia válida (p.ej. "#1 (tras el merge)") sigue extrayendo
+    // su "#1" y NO cuenta como malformada.
+    if (depCell && !isNoValueCell(depCell) && deps.length === 0) {
       malformedDepRows.push({ n, raw: depCell })
     }
     const acCell = (cells[iAc] || '').trim()
-    const ac = acCell && acCell !== '–' && acCell !== '-' ? acCell.split(',').map((x) => x.trim()).filter(Boolean) : []
+    const ac = acCell && !isNoValueCell(acCell) ? acCell.split(',').map((x) => x.trim()).filter(Boolean) : []
     const issueCell = (cells[iIssue] || '').trim()
     const issueMatch = issueCell.match(/#(\d+)/)
     slices.push({
@@ -245,18 +349,51 @@ export function analyzeSlicesTable(specMd) {
       deps,
       ac,
       protected: (cells[iProt] || '').trim(),
-      area: parseTokenList(cells[iArea], { ownPrefix: 'area', otherPrefix: 'touches', columnLabel: 'Área', n, warnings: prefixWarnings }),
-      touches: parseTokenList(cells[iToca], { ownPrefix: 'touches', otherPrefix: 'area', columnLabel: 'Toca', n, warnings: prefixWarnings }),
+      area: parseTokenList(cells[iArea], { ownPrefix: 'area', otherPrefix: 'touches', columnLabel: 'Área', n, warnings: prefixWarnings, emptyWarnings: emptyTokenWarnings }),
+      touches: parseTokenList(cells[iToca], { ownPrefix: 'touches', otherPrefix: 'area', columnLabel: 'Toca', n, warnings: prefixWarnings, emptyWarnings: emptyTokenWarnings }),
     })
   }
-  return { tableFound: true, missingRequiredColumns, missingOptionalColumns, totalDataRows, skippedRows, prefixWarnings, malformedDepRows, slices }
+
+  // Punto 5 de la review de F1: las deps no se contrastaban contra los
+  // slices que existen de verdad. "#99" en una tabla de 2 slices, o "#3" en
+  // el propio slice 3 (auto-referencia, nunca legítima), parseaban sin
+  // problema y llegarían a GitHub como `merge-after` — un grafo equivocado
+  // escrito en los issues. Se valida aquí, una vez conocido el conjunto
+  // completo de órdenes `n` que sí se parsearon.
+  const knownOrders = new Set(slices.map((s) => s.n))
+  const invalidDepRefs = []
+  for (const s of slices) {
+    for (const d of s.deps) {
+      if (d === s.n) invalidDepRefs.push({ n: s.n, dep: d, reason: 'self' })
+      else if (!knownOrders.has(d)) invalidDepRefs.push({ n: s.n, dep: d, reason: 'unknown' })
+    }
+  }
+
+  return {
+    tableFound: true,
+    pipeRowsFound,
+    missingRequiredColumns,
+    missingOptionalColumns,
+    totalDataRows,
+    rowsAfterGap,
+    skippedRows,
+    invalidRows,
+    prefixWarnings,
+    malformedDepRows,
+    invalidDepRefs,
+    emptyTokenWarnings,
+    slices,
+  }
 }
 
-// parseSlices: contrato viejo preservado (md) -> Slice[]. Otros módulos
-// (ct-groom.mjs, hasta esta tarea) y la mayoría de los tests dependen de
-// esta firma exacta; no se rompe. Quien necesite el reporte de validación
-// (filas descartadas, columnas ausentes, avisos de prefijo) usa
-// `analyzeSlicesTable` en su lugar — ver ct-groom.mjs.
+// parseSlices: contrato viejo preservado (md) -> Slice[]. Se mantiene solo
+// por compatibilidad de contrato (varios tests, y en su momento otros
+// módulos, dependían de esta firma exacta); a día de hoy no tiene ningún
+// llamante en producción — ct-groom.mjs usa `analyzeSlicesTable` para poder
+// validar antes de tocar GitHub. Quien necesite el reporte de validación
+// (filas descartadas, columnas ausentes, avisos de prefijo/token vacío,
+// referencias de Dep inválidas, huecos en la tabla) usa
+// `analyzeSlicesTable` en su lugar.
 export function parseSlices(specMd) {
   return analyzeSlicesTable(specMd).slices
 }

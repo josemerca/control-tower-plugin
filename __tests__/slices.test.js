@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { parseSlices, analyzeSlicesTable } from '../scripts/slices.js'
+import { REAL_FAILING_TABLE, REAL_DEP_TABLE, REAL_TABLE_WITH_HASH_FIXED } from './fixtures/slices-real-tables.js'
 
 const SPEC = `# Spec X
 ## 9. Desglose en slices
@@ -123,29 +124,13 @@ describe('parseSlices — normalización de tokens Área/Toca', () => {
   })
 })
 
-// F1 — la tabla real que disparó el incidente: alguien que no había leído
-// commands/ct-groom.md escribió "#" como "**S1**"/"**S2**" (numeración con
-// prefijo de letra y negrita markdown en vez de un entero a secas), el Dep
-// de S2 como "S1" (sin "#"), y el valor de Área como el nombre completo de
-// la label ("`area:medicacion`", con backticks) en vez del token pelado. Con
-// el parser viejo esto producía `parseSlices() -> []` en absoluto silencio.
-// No se parafrasea: son las filas exactas del informe del incidente.
-const REAL_FAILING_SPEC = [
-  '## 9. Slices',
-  '| # | Slice | Qué entrega (visible) | Área | Toca | Depende de |',
-  '|---|---|---|---|---|---|',
-  '| **S1** | Segmented control + "Plan actual" | La pestaña se parte en dos… | `area:medicacion` | `touches:pbxproj` | — |',
-  '| **S2** | Objetivo semanal y cumplimiento | La barra: % de la semana… | `area:medicacion` | `touches:migration` | S1 |',
-  '',
-].join('\n')
-
 describe('analyzeSlicesTable — contrato enriquecido (F1)', () => {
   it('parseSlices(md) sigue devolviendo Slice[] a secas (contrato sin romper)', () => {
-    expect(Array.isArray(parseSlices(REAL_FAILING_SPEC))).toBe(true)
+    expect(Array.isArray(parseSlices(REAL_FAILING_TABLE))).toBe(true)
   })
 
   it('regresión: la tabla real del incidente — cabecera encontrada, pero ambas filas se reportan como no parseables por "#"', () => {
-    const r = analyzeSlicesTable(REAL_FAILING_SPEC)
+    const r = analyzeSlicesTable(REAL_FAILING_TABLE)
     expect(r.tableFound).toBe(true)
     expect(r.missingRequiredColumns).toEqual([]) // "Qué entrega (visible)" matchea "entrega"
     expect(r.slices).toEqual([]) // ninguna fila parseable: 0 slices, ya no en silencio
@@ -271,16 +256,6 @@ describe('parseSlices/analyzeSlicesTable — tolerancia al prefijo de label en �
 // slices (F1 defecto 1): aquel no hacía nada; este hace daño (rompe el
 // orden merge-after) mientras aparenta funcionar. Mismo criterio que los
 // demás defectos: reportar, no perder en silencio.
-const REAL_DEP_TABLE = [
-  '## 9. Slices',
-  '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |',
-  '|---|---|---|---|---|---|---|',
-  '| 1 | a | ui | primero | – | – | – |',
-  '| 2 | b | ui | segundo | S1 | – | – |',
-  '| 3 | c | ui | tercero | S1, S2 | – | – |',
-  '',
-].join('\n')
-
 describe('analyzeSlicesTable — Dep con contenido pero sin ninguna referencia #N reconocible (F2)', () => {
   it('regresión: la tabla del coordinador — 2 filas con Dep malformado ("S1", "S1, S2"), la fila con "–" no cuenta', () => {
     const r = analyzeSlicesTable(REAL_DEP_TABLE)
@@ -317,5 +292,321 @@ describe('analyzeSlicesTable — Dep con contenido pero sin ninguna referencia #
 
   it('sin tabla / sin filas → malformedDepRows: []', () => {
     expect(analyzeSlicesTable('# sin tabla').malformedDepRows).toEqual([])
+  })
+})
+
+// ============================================================================
+// Review de F1/F2 — 2 Critical + 4 caminos silenciosos encontrados al
+// reproducir el RED contra el código base y al verificar el fix contra el
+// spec real. Cada bloque de abajo corresponde a un punto numerado de esa
+// review.
+// ============================================================================
+
+// CRITICAL 1 — el em dash (—, U+2014) es la forma en que la tabla REAL del
+// incidente escribe "sin dependencias" en la fila S1, y el conjunto de
+// marcadores de "vacío" solo reconocía en dash (–) y guion (-). Arreglar la
+// columna "#" (como pide nuestro propio mensaje de F1) sin tocar nada más
+// haría que esa misma celda, que siempre significó "sin dependencias"
+// correctamente, disparase el abort de "Dep malformado".
+describe('analyzeSlicesTable — em dash (—) y variantes de guion largo en Dep/Acepta/Área/Toca significan "sin valor" (CRITICAL 1)', () => {
+  it('em dash (—) en Dep no es malformado — deps: []', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | — | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.malformedDepRows).toEqual([])
+    expect(r.slices[0].deps).toEqual([])
+  })
+
+  it('em dash envuelto en NBSP (U+00A0) también cuenta como "sin dependencias" (NBSP ya lo quita String#trim, verificado)', () => {
+    const nbsp = ' '
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | ${nbsp}—${nbsp} | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.malformedDepRows).toEqual([])
+  })
+
+  it('regresión EXACTA de la secuencia descrita por el coordinador: REAL_FAILING_TABLE con "#" ya corregido (1, 2) — la fila 1 (Dep "—") no debe abortar; la fila 2 (Dep "S1") sí debe seguir abortando', () => {
+    const r = analyzeSlicesTable(REAL_TABLE_WITH_HASH_FIXED)
+    expect(r.skippedRows).toEqual([]) // el "#" ya está arreglado
+    expect(r.malformedDepRows).toHaveLength(1) // solo la fila 2 (Dep "S1"), no la 1 (Dep "—")
+    expect(r.malformedDepRows[0]).toMatchObject({ n: 2, raw: 'S1' })
+    expect(r.slices[0].deps).toEqual([]) // fila 1: "—" = sin dependencias, correcto
+  })
+
+  it('em dash en Acepta también cuenta como "sin AC" (mismo conjunto de marcadores, coherente entre columnas)', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | — | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.slices[0].ac).toEqual([])
+  })
+
+  it('"ninguna"/"n/a" en Dep siguen abortando (política defendible), pero el mensaje debe decir qué escribir — verificado a nivel CLI', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | ninguna | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.malformedDepRows).toHaveLength(1) // sigue siendo malformado — no es un marcador reconocido
+  })
+})
+
+// CRITICAL 2 — la negrita markdown (**...**) es el hábito demostrado del
+// autor real (es literalmente lo que produjo el defecto del "#": "**S1**").
+// stripColumnPrefix solo desenvolvía backticks; "**area:medicacion**" no se
+// reconocía como prefijado y el `:` se borraba igual que en el defecto
+// original, produciendo "area:areamedicacion".
+describe('parseSlices/analyzeSlicesTable — negrita/cursiva alrededor del valor prefijado en Área/Toca (CRITICAL 2)', () => {
+  it('negrita (**area:medicacion**) no duplica el prefijo, igual que backticks', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | x | backend | y | – | – | – | **area:medicacion** | **touches:pbxproj** |
+`
+    const s = parseSlices(spec)
+    expect(s[0].area).toEqual(['medicacion'])
+    expect(s[0].touches).toEqual(['pbxproj'])
+  })
+
+  it('guion bajo simple (_area:medicacion_) tampoco duplica el prefijo', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | x | backend | y | – | – | – | _area:medicacion_ | – |
+`
+    const s = parseSlices(spec)
+    expect(s[0].area).toEqual(['medicacion'])
+  })
+
+  it('backticks + negrita combinados ("`**area:medicacion**`") tampoco duplican el prefijo', () => {
+    const spec = '## 9. Slices\n' +
+      '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
+      '|---|---|---|---|---|---|---|---|---|\n' +
+      '| 1 | x | backend | y | – | – | – | `**area:medicacion**` | – |\n'
+    const s = parseSlices(spec)
+    expect(s[0].area).toEqual(['medicacion'])
+  })
+})
+
+// 3 — una línea en blanco (o cualquier línea sin "|") a mitad de la tabla
+// hacía `break` en el bucle de filas: las filas después del hueco
+// desaparecían en silencio (medio epic creado, exit 0, reportado como
+// éxito). El fix escanea todo el bloque §9 (hasta la siguiente cabecera
+// markdown "## N", que sí marca el fin real de la sección) y reporta las
+// filas que aparecen después de un hueco en vez de truncar.
+describe('analyzeSlicesTable — un hueco (línea en blanco/sin "|") dentro de la tabla no trunca en silencio (3)', () => {
+  it('línea en blanco entre 2 filas de datos: ambas se parsean, y la fila tras el hueco se reporta en rowsAfterGap', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | primero | – | – | – |
+
+| 2 | b | ui | segundo | – | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.totalDataRows).toBe(2) // ya no se trunca en 1
+    expect(r.slices).toHaveLength(2)
+    expect(r.slices.map((s) => s.n)).toEqual([1, 2])
+    expect(r.rowsAfterGap).toHaveLength(1)
+    expect(r.rowsAfterGap[0].raw).toContain('segundo')
+  })
+
+  it('sin ningún hueco → rowsAfterGap: []', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+| 2 | b | ui | y | – | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.rowsAfterGap).toEqual([])
+  })
+
+  it('una cabecera markdown nueva ("## 10. Otra sección") tras el hueco corta el escaneo — no arrastra la tabla de otra sección', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+
+## 10. Otra sección
+
+| Cosa | Valor |
+|---|---|
+| x | y |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.rowsAfterGap).toEqual([])
+    expect(r.slices).toHaveLength(1)
+  })
+
+  it('prosa (no tabla) después de la tabla, sin más filas → rowsAfterGap: [] (no es falso positivo)', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+
+Texto normal después de la tabla, sin más filas.
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.rowsAfterGap).toEqual([])
+    expect(r.slices).toHaveLength(1)
+  })
+})
+
+// 4 — solo se validaba la cabecera, nunca las celdas: una fila con la
+// celda "Entrega" vacía, o con menos celdas que la cabecera (típicamente
+// porque a esa misma fila le faltan celdas finales), parseaba igual y
+// producía un issue titulado "#N" a secas, sin AC ni deps, exit 0. Mismo
+// resultado observable que "falta la columna Entrega entera" — solo que
+// por fila. Se reporta en `invalidRows` y la fila NO se agrega a `slices`.
+describe('analyzeSlicesTable — celda "Entrega" vacía o fila más corta que la cabecera (4)', () => {
+  it('celda Entrega vacía se reporta en invalidRows y no se cuela en slices', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui |  | – | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.invalidRows).toHaveLength(1)
+    expect(r.invalidRows[0].n).toBe(1)
+    expect(r.slices).toEqual([])
+  })
+
+  it('fila con menos celdas que la cabecera se reporta en invalidRows y no se cuela en slices', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui |
+| 2 | b | ui | y | – | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.invalidRows).toHaveLength(1)
+    expect(r.invalidRows[0].n).toBe(1)
+    expect(r.slices).toHaveLength(1) // la fila 2, completa, sí se parsea
+    expect(r.slices[0].n).toBe(2)
+  })
+
+  it('fila completa y válida no aparece en invalidRows', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.invalidRows).toEqual([])
+  })
+})
+
+// 5 — las deps no se contrastaban contra los slices que existen de verdad
+// en la tabla: "#99" en una tabla de 3 slices, o "#3" en el propio slice 3
+// (auto-referencia, nunca legítima), parseaban y llegarían a GitHub como
+// `merge-after` — un grafo equivocado escrito en los issues, aunque el
+// dispatcher lo acabe reportando como deps-unmet en vez de fallar en
+// silencio del todo.
+describe('analyzeSlicesTable — Dep apunta a un slice inexistente o a sí mismo (5)', () => {
+  it('auto-referencia (slice #3 depende de #3) se reporta en invalidDepRefs', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+| 2 | b | ui | y | #1 | – | – |
+| 3 | c | ui | z | #3 | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.invalidDepRefs).toHaveLength(1)
+    expect(r.invalidDepRefs[0]).toMatchObject({ n: 3, dep: 3, reason: 'self' })
+  })
+
+  it('referencia a un "#" que no existe en la tabla (3 slices, #99) se reporta en invalidDepRefs', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+| 2 | b | ui | y | #99 | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.invalidDepRefs).toHaveLength(1)
+    expect(r.invalidDepRefs[0]).toMatchObject({ n: 2, dep: 99, reason: 'unknown' })
+  })
+
+  it('deps válidas (apuntan a slices existentes, distintos de sí mismas) → invalidDepRefs: []', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+| 2 | b | ui | y | #1 | – | – |
+| 3 | c | ui | z | #1, #2 | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.invalidDepRefs).toEqual([])
+  })
+})
+
+// 6 — una celda Área/Toca que normaliza a cadena vacía (p.ej. "area:" sin
+// nada detrás del prefijo, o "???" sin ningún carácter label-safe) se
+// descartaba con `.filter(Boolean)` sin avisar. El caso de columna AUSENTE
+// sí avisa ("la maquinaria de colisión queda inerte"); el de celda vaciada
+// producía la misma inercia y callaba — incoherente con el propio estándar
+// de este cambio.
+describe('analyzeSlicesTable — token Área/Toca que normaliza a vacío se avisa (6)', () => {
+  it('"area:" solo (nada tras el prefijo) → token vacío, no se cuela en area[], se avisa en emptyTokenWarnings', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | x | backend | y | – | – | – | area: | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.slices[0].area).toEqual([])
+    expect(r.emptyTokenWarnings).toHaveLength(1)
+    expect(r.emptyTokenWarnings[0]).toMatchObject({ column: 'Área', n: 1 })
+  })
+
+  it('"???" en Toca (sin ningún carácter label-safe) → token vacío, se avisa', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | x | backend | y | – | – | – | – | ??? |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.slices[0].touches).toEqual([])
+    expect(r.emptyTokenWarnings).toHaveLength(1)
+    expect(r.emptyTokenWarnings[0]).toMatchObject({ column: 'Toca', n: 1 })
+  })
+
+  it('celda vacía o "–" (forma legítima de "sin valor") NO cuenta como token vacío', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | x | backend | y | – | – | – | – |  |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.emptyTokenWarnings).toEqual([])
+  })
+})
+
+// "no se encontró la tabla §9" debía distinguir "no hay ninguna tabla
+// markdown en absoluto" de "hay filas de tabla, pero ninguna cabecera con
+// Slice/Dep" — el propio detector ya sabe cuál de las dos pasó.
+describe('analyzeSlicesTable — distingue "no hay tabla" de "hay tabla sin cabecera Slice/Dep"', () => {
+  it('sin ninguna línea "|" en el spec → pipeRowsFound: false', () => {
+    const r = analyzeSlicesTable('# spec sin tabla, solo prosa')
+    expect(r.tableFound).toBe(false)
+    expect(r.pipeRowsFound).toBe(false)
+  })
+
+  it('hay filas de tabla markdown, pero ninguna cabecera con "Slice"/"Dep" → pipeRowsFound: true', () => {
+    const spec = `## 9. Algo\n| Foo | Bar |\n|---|---|\n| 1 | 2 |\n`
+    const r = analyzeSlicesTable(spec)
+    expect(r.tableFound).toBe(false)
+    expect(r.pipeRowsFound).toBe(true)
   })
 })

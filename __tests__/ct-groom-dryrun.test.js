@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { REAL_FAILING_TABLE, REAL_DEP_TABLE, REAL_TABLE_WITH_HASH_FIXED } from './fixtures/slices-real-tables.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-groom.mjs')
 
@@ -312,7 +313,10 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
       expect(e.status).toBe(2)
       expect(e.stdout).toBe('') // ni siquiera parcial: aborta antes de imprimir nada
       const err = e.stderr.toString()
-      expect(err).toMatch(/1/) // cuántas filas
+      // Anclado al recuento (test sin dientes de la review: el mensaje trae
+      // el literal "1" en su propio ejemplo, así que un /1/ suelto pasaría
+      // con cualquier recuento). Ancla al principio del mensaje.
+      expect(err).toMatch(/^1 fila/)
       expect(err).toMatch(/\*\*S1\*\*/) // el valor ofensor, tal cual
       expect(err).toMatch(/entero/i)
       expect(err).toMatch(/"1"/) // qué escribir en su lugar
@@ -341,20 +345,12 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  // Regresión mandatoria: la tabla REAL que disparó el incidente. No se
-  // parafrasea — son las filas exactas del informe (numeración "**S1**"/
-  // "**S2**", dep de S2 como "S1" sin "#", valores de Área/Toca con
-  // backticks y prefijo completo de label). Antes de este fix,
-  // `/ct-groom --dry-run` imprimía `{"issues": [], ...}` y salía con 0.
-  const REAL_FAILING_TABLE = [
-    '## 9. Slices',
-    '| # | Slice | Qué entrega (visible) | Área | Toca | Depende de |',
-    '|---|---|---|---|---|---|',
-    '| **S1** | Segmented control + "Plan actual" | La pestaña se parte en dos… | `area:medicacion` | `touches:pbxproj` | — |',
-    '| **S2** | Objetivo semanal y cumplimiento | La barra: % de la semana… | `area:medicacion` | `touches:migration` | S1 |',
-    '',
-  ].join('\n')
-
+  // Regresión mandatoria: la tabla REAL que disparó el incidente (importada
+  // de __tests__/fixtures/slices-real-tables.js — no se parafrasea ni se
+  // duplica: son las filas exactas del informe, numeración "**S1**"/"**S2**",
+  // dep de S2 como "S1" sin "#", valores de Área/Toca con backticks y
+  // prefijo completo de label). Antes de este fix, `/ct-groom --dry-run`
+  // imprimía `{"issues": [], ...}` y salía con 0.
   it('regresión: la tabla real del incidente → exit != 0 en vez de "0 issues, exit 0"', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
     const spec = join(dir, 'spec.md'); writeFileSync(spec, REAL_FAILING_TABLE)
@@ -366,7 +362,7 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
       expect(e.status).toBe(2)
       expect(e.stdout).toBe('') // el bug original: esto imprimía {"issues":[],...} y salía 0
       const err = e.stderr.toString()
-      expect(err).toMatch(/2/) // las dos filas, S1 y S2
+      expect(err).toMatch(/^2 fila/) // anclado al recuento: las dos filas, S1 y S2
       expect(err).toMatch(/\*\*S1\*\*/)
       expect(err).not.toMatch(/at \S+ \(file:/) // convención: nunca un stack trace crudo
     }
@@ -453,19 +449,10 @@ describe('ct-groom — avisa pero continúa ante columnas ausentes o prefijo en 
 // los issues, con exit 0, pero sin ninguna línea `merge-after` — /ct-next
 // despacha slices dependientes sin esperar al merge del que dependían.
 describe('ct-groom — Dep con contenido pero sin ninguna referencia #N reconocible aborta fuerte (F2)', () => {
-  // Tabla tal cual la verificó el coordinador (columnas completadas donde el
-  // mensaje usaba "..."): "#" de las 3 filas es válido — el problema es
-  // solo la columna Dep.
-  const REAL_DEP_TABLE = [
-    '## 9. Slices',
-    '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |',
-    '|---|---|---|---|---|---|---|',
-    '| 1 | a | ui | primero | – | – | – |',
-    '| 2 | b | ui | segundo | S1 | – | – |',
-    '| 3 | c | ui | tercero | S1, S2 | – | – |',
-    '',
-  ].join('\n')
-
+  // Tabla tal cual la verificó el coordinador (importada de
+  // __tests__/fixtures/slices-real-tables.js, columnas completadas donde el
+  // mensaje original usaba "..."): "#" de las 3 filas es válido — el
+  // problema es solo la columna Dep.
   it('regresión: la tabla del coordinador → exit != 0 en vez de "issues creados, exit 0, deps borrados"', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
     const spec = join(dir, 'spec.md'); writeFileSync(spec, REAL_DEP_TABLE)
@@ -477,10 +464,14 @@ describe('ct-groom — Dep con contenido pero sin ninguna referencia #N reconoci
       expect(e.status).toBe(2)
       expect(e.stdout).toBe('') // el bug: esto imprimía el plan completo (deps: []) y salía 0
       const err = e.stderr.toString()
-      expect(err).toMatch(/2/) // 2 filas malformadas (slice #2 y #3; #1 con "–" es legítimo)
+      // Anclado al recuento (test sin dientes de la review: /2/ suelto pasa
+      // con cualquier recuento porque el propio mensaje de ejemplo contiene
+      // dígitos). 2 filas malformadas (slice #2 y #3; #1 con "–" es legítimo).
+      expect(err).toMatch(/^2 fila/)
       expect(err).toMatch(/"S1"/) // el valor ofensor, tal cual
       expect(err).toMatch(/#N/) // qué formato usar
       expect(err).toMatch(/#1/) // ejemplo de formato correcto
+      expect(err).toMatch(/escribe\s+"–"/) // CRITICAL 1: la mitad que faltaba del mensaje
       expect(err).not.toMatch(/at \S+ \(file:/)
     }
     expect(threw).toBe(true)
@@ -507,6 +498,234 @@ describe('ct-groom — Dep con contenido pero sin ninguna referencia #N reconoci
     const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
     const plan = JSON.parse(out)
     expect(plan.issues[1].body).toContain('merge-after #1')
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// ============================================================================
+// Review de F1/F2 — 2 Critical + 4 caminos silenciosos, verificados a nivel
+// CLI end-to-end (dry-run). Los tests unitarios equivalentes viven en
+// __tests__/slices.test.js contra analyzeSlicesTable directamente.
+// ============================================================================
+
+describe('ct-groom — em dash (—) en Dep no aborta; el mensaje de Dep malformado dice qué escribir (CRITICAL 1)', () => {
+  it('em dash (—) en Dep no aborta — el plan se genera con deps: []', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | — | – | – |
+`)
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    expect(JSON.parse(out).issues).toHaveLength(1)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('regresión exacta de la secuencia del coordinador: "#" ya corregido (REAL_TABLE_WITH_HASH_FIXED) — no aborta por la fila 1 (Dep "—"), sí sigue abortando por la fila 2 (Dep "S1")', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, REAL_TABLE_WITH_HASH_FIXED)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      const err = e.stderr.toString()
+      // El mensaje debe ser sobre "S1" (fila 2), NUNCA sobre "—" (fila 1,
+      // que siempre significó "sin dependencias" correctamente).
+      expect(err).toMatch(/^1 fila/)
+      expect(err).toMatch(/"S1"/)
+      expect(err).not.toMatch(/"—"/)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el mensaje de "Dep malformado" dice explícitamente qué escribir si no hay dependencias', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | ninguna | – | – |
+`)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect(e.stderr.toString()).toMatch(/si no hay dependencias, escribe\s+"–"/)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom — negrita/cursiva alrededor del prefijo en Área/Toca no duplica la label (CRITICAL 2)', () => {
+  it('"**area:medicacion**"/"**touches:pbxproj**" (negrita) → labels sin duplicar el prefijo', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | login | backend | modelo | – | – | – | **area:medicacion** | **touches:pbxproj** |
+`)
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    const plan = JSON.parse(out)
+    expect(plan.issues[0].labels).toContain('area:medicacion')
+    expect(plan.issues[0].labels).toContain('touches:pbxproj')
+    expect(plan.issues[0].labels).not.toContain('area:areamedicacion')
+    expect(plan.issues[0].labels).not.toContain('touches:touchespbxproj')
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom — un hueco (línea en blanco) dentro de la tabla §9 aborta fuerte, no trunca en silencio (3)', () => {
+  it('línea en blanco entre 2 filas de datos → exit != 0 en vez de "1 issue creado, exit 0" (medio epic silencioso)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | primero | – | – | – |
+
+| 2 | b | ui | segundo | – | – | – |
+`)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect(e.stdout).toBe('') // el bug: esto imprimía 1 solo issue y salía 0
+      const err = e.stderr.toString()
+      expect(err).toMatch(/^1 fila/)
+      expect(err).toMatch(/segundo/)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom — celda "Entrega" vacía o fila más corta que la cabecera aborta fuerte (4)', () => {
+  it('celda Entrega vacía → exit != 0 en vez de un issue titulado "#1" a secas', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui |  | – | – | – |
+`)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect(e.stdout).toBe('')
+      const err = e.stderr.toString()
+      expect(err).toMatch(/^1 fila/)
+      expect(err).toMatch(/t.tulo/i)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom — Dep apunta a un slice inexistente o a sí mismo aborta fuerte (5)', () => {
+  it('auto-referencia (slice #3 depende de #3) → exit != 0, mensaje nombra la auto-referencia', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+| 2 | b | ui | y | #1 | – | – |
+| 3 | c | ui | z | #3 | – | – |
+`)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect(e.stdout).toBe('')
+      const err = e.stderr.toString()
+      expect(err).toMatch(/^1 referencia/)
+      expect(err).toMatch(/#3.*sí mismo|sí mismo.*#3/)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('referencia a un "#" inexistente (#99 en tabla de 2 slices) → exit != 0', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+| 2 | b | ui | y | #99 | – | – |
+`)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect(e.stdout).toBe('')
+      expect(e.stderr.toString()).toMatch(/#99/)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom — token Área/Toca que normaliza a vacío avisa pero no aborta (6)', () => {
+  it('"area:" vacío tras el prefijo → dry-run no aborta, avisa por stderr que la label queda inerte para ese slice', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | login | backend | modelo | – | – | – | area: | – |
+`)
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8' })
+    expect(res.status).toBe(0)
+    const plan = JSON.parse(res.stdout)
+    expect(plan.issues[0].labels).not.toContain('area:')
+    expect(plan.issues[0].labels.some((l) => l.startsWith('area:'))).toBe(false)
+    expect(res.stderr).toMatch(/Área/)
+    expect(res.stderr).toMatch(/inerte/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom — "no se encontró la tabla §9" distingue "no hay tabla" de "hay tabla sin cabecera Slice/Dep"', () => {
+  it('hay filas de tabla markdown pero ninguna cabecera con "Slice"/"Dep" → mensaje distinto de "no hay tabla en absoluto"', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Algo\n| Foo | Bar |\n|---|---|\n| 1 | 2 |\n')
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      const err = e.stderr.toString()
+      expect(err).toMatch(/cabecera/i)
+      expect(err).toMatch(/Slice/)
+      expect(err).not.toMatch(/ninguna tabla markdown/i)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('sin ninguna tabla markdown en absoluto → mensaje "no se encontró ninguna tabla markdown"', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, '# Spec sin ninguna tabla\n\nSolo prosa.\n')
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect(e.stderr.toString()).toMatch(/no se encontr.*tabla/i)
+    }
+    expect(threw).toBe(true)
     rmSync(dir, { recursive: true, force: true })
   })
 })
