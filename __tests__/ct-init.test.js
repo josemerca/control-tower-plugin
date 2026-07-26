@@ -106,6 +106,53 @@ describe('ct-init.sh', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  // Review de F2, punto 2: si alguien se carga el marcador de APERTURA pero
+  // deja el heading y el cuerpo (y el marcador de cierre), el `grep -qF` del
+  // marcador de apertura no encuentra nada → el script cree que la sección
+  // no está y añade una SEGUNDA copia entera, en silencio, exit 0: dos
+  // headings "## Formato de la tabla §9...", un marcador de cierre huérfano.
+  // Debe, en su lugar, detectar el rastro parcial (heading O cierre sin el
+  // par completo) y avisar sin añadir nada.
+  it('AGENTS.md con el marcador de APERTURA borrado (heading + cuerpo + cierre intactos) → avisa, no duplica', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    const orphan = [
+      '# AGENTS.md',
+      '',
+      '## Formato de la tabla §9 (contrato con /ct-groom)',
+      'cuerpo custom, el usuario borró el marcador de apertura sin querer.',
+      '<!-- /ct-init:slices-contract -->',
+      '',
+    ].join('\n')
+    writeFileSync(join(dir, 'AGENTS.md'), orphan)
+    const output = execFileSync('bash', ['-c', `bash '${script}' '${dir}' 2>&1`], { encoding: 'utf8' })
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    expect(agents).toBe(orphan) // ni una letra tocada
+    const headingOccurrences = agents.split('## Formato de la tabla §9').length - 1
+    expect(headingOccurrences).toBe(1) // no duplicado
+    expect(output.toLowerCase()).toMatch(/aviso|warning/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('AGENTS.md con el marcador de CIERRE borrado (apertura + heading + cuerpo intactos) → avisa, no duplica', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    const orphan = [
+      '# AGENTS.md',
+      '',
+      '<!-- ct-init:slices-contract -->',
+      '## Formato de la tabla §9 (contrato con /ct-groom)',
+      'cuerpo custom, el usuario borró el marcador de cierre sin querer.',
+      '',
+    ].join('\n')
+    writeFileSync(join(dir, 'AGENTS.md'), orphan)
+    const output = execFileSync('bash', ['-c', `bash '${script}' '${dir}' 2>&1`], { encoding: 'utf8' })
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    expect(agents).toBe(orphan) // ni una letra tocada
+    const headingOccurrences = agents.split('## Formato de la tabla §9').length - 1
+    expect(headingOccurrences).toBe(1) // no duplicado
+    expect(output.toLowerCase()).toMatch(/aviso|warning/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('correrlo tres veces seguidas es idempotente: la sección §9 aparece una sola vez', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })

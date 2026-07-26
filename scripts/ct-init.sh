@@ -76,12 +76,36 @@ fi
 # sitios que puedan divergir con el tiempo. Detección: un comentario HTML
 # greppable (`<!-- ct-init:slices-contract -->`), el mismo idiom que
 # `<!-- ct-order:N -->` en groom.js — no se renderiza, no colisiona con
-# encabezados de usuario, y un `grep -qF` de la línea exacta no da falsos
-# positivos. Si el marcador ya está, NO SE TOCA NADA de la sección: puede ser
-# una versión que el usuario editó a mano (mismo principio de "no pisar" que
-# el resto de este script).
-SLICES_MARKER='<!-- ct-init:slices-contract -->'
-if ! grep -qF "$SLICES_MARKER" "$AGENTS_MD"; then
+# encabezados de usuario. `grep -qxF` (línea completa, no substring) en vez
+# de `grep -qF`: reduce (que no elimina del todo — un fence de código con la
+# línea pegada tal cual seguiría dando falso positivo, caso rebuscado que no
+# merece más esfuerzo) el riesgo de que el marcador citado dentro de un
+# bloque de código ajeno (indentado, o parte de una línea más larga) cuente
+# como "ya está".
+#
+# Review de F2, punto 2: comprobar SOLO el marcador de apertura no basta —
+# si alguien borra el de apertura pero deja el heading/cuerpo/cierre (o
+# viceversa), `grep -qF` del que falta no encuentra nada, el script cree que
+# la sección no está, y AÑADE UNA SEGUNDA COPIA ENTERA en silencio: dos
+# headings, un marcador huérfano, exit 0. Se comprueban los TRES rastros
+# (apertura, cierre, heading) por separado:
+#   - apertura Y cierre presentes → sección completa, no se toca (caso normal).
+#   - CUALQUIER rastro parcial (uno o dos de los tres, pero no los tres) →
+#     no es seguro decidir por el usuario qué pasó aquí; se avisa por stderr
+#     y no se añade nada — mejor un AGENTS.md que el usuario entiende y tiene
+#     que arreglar a mano que una sección duplicada en silencio.
+#   - ningún rastro → se añade la sección completa (caso "no existe todavía").
+SLICES_MARKER_OPEN='<!-- ct-init:slices-contract -->'
+SLICES_MARKER_CLOSE='<!-- /ct-init:slices-contract -->'
+SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
+has_open=0; grep -qxF "$SLICES_MARKER_OPEN" "$AGENTS_MD" && has_open=1 || true
+has_close=0; grep -qxF "$SLICES_MARKER_CLOSE" "$AGENTS_MD" && has_close=1 || true
+has_heading=0; grep -qxF "$SLICES_HEADING" "$AGENTS_MD" && has_heading=1 || true
+if [ "$has_open" -eq 1 ] && [ "$has_close" -eq 1 ]; then
+  echo "sección §9 ya está en $AGENTS_MD, no se duplica"
+elif [ "$has_open" -eq 1 ] || [ "$has_close" -eq 1 ] || [ "$has_heading" -eq 1 ]; then
+  echo "aviso: $AGENTS_MD parece tener restos parciales de la sección §9 (contrato /ct-groom) — falta el marcador de apertura, el de cierre, o ambos no acompañan al heading; no se añade nada para no duplicar contenido. Revisa $AGENTS_MD a mano: si la sección sigue siendo válida, complétala con '$SLICES_MARKER_OPEN' antes del heading y '$SLICES_MARKER_CLOSE' al final." >&2
+else
   # Mismo idiom que el bloque de .gitignore de arriba (y el mismo bug que
   # evita: un `.gitignore`/`AGENTS.md` con contenido que NO termina en `\n`
   # haría que un `>>` crudo fusionara nuestra primera línea con la última
@@ -140,6 +164,4 @@ avisos no fatales): `commands/ct-groom.md` en el plugin `control-tower-loop`.
 <!-- /ct-init:slices-contract -->
 EOF
   echo "añadida sección §9 (contrato /ct-groom) a $AGENTS_MD"
-else
-  echo "sección §9 ya está en $AGENTS_MD, no se duplica"
 fi
