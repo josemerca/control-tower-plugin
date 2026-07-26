@@ -42,8 +42,9 @@ else
   echo ".worktrees/ ya está en $GITIGNORE, no se duplica"
 fi
 
-if [ ! -f "$TARGET/AGENTS.md" ]; then
-  cat > "$TARGET/AGENTS.md" <<'EOF'
+AGENTS_MD="$TARGET/AGENTS.md"
+if [ ! -f "$AGENTS_MD" ]; then
+  cat > "$AGENTS_MD" <<'EOF'
 # AGENTS.md
 <!-- Guía durable del repo (≤150 líneas). Procedimientos → Skills. -->
 ## Project overview
@@ -58,7 +59,87 @@ if [ ! -f "$TARGET/AGENTS.md" ]; then
 ## Gotchas
 ## Skills (load on demand)
 EOF
-  echo "creado $TARGET/AGENTS.md"
+  echo "creado $AGENTS_MD"
 else
   echo "AGENTS.md ya existe, no se pisa"
+fi
+
+# Sección "Formato de la tabla §9" (F2 — el contrato con /ct-groom): hasta
+# ahora ese contrato (qué columnas exige, qué marcadores de "sin valor"
+# acepta, qué genera cada una) solo vivía en commands/ct-groom.md — un
+# fichero que lee quien EJECUTA groom, nunca quien ESCRIBE el spec, casi
+# siempre en otra sesión y otro repo. Se siembra aquí, en el AGENTS.md del
+# repo destino, que sí lee quien redacta specs.
+#
+# MISMO bloque para los dos casos (fichero recién creado arriba, o ya
+# existente sin la sección) — un único `if`, sin duplicar la plantilla en dos
+# sitios que puedan divergir con el tiempo. Detección: un comentario HTML
+# greppable (`<!-- ct-init:slices-contract -->`), el mismo idiom que
+# `<!-- ct-order:N -->` en groom.js — no se renderiza, no colisiona con
+# encabezados de usuario, y un `grep -qF` de la línea exacta no da falsos
+# positivos. Si el marcador ya está, NO SE TOCA NADA de la sección: puede ser
+# una versión que el usuario editó a mano (mismo principio de "no pisar" que
+# el resto de este script).
+SLICES_MARKER='<!-- ct-init:slices-contract -->'
+if ! grep -qF "$SLICES_MARKER" "$AGENTS_MD"; then
+  # Mismo idiom que el bloque de .gitignore de arriba (y el mismo bug que
+  # evita: un `.gitignore`/`AGENTS.md` con contenido que NO termina en `\n`
+  # haría que un `>>` crudo fusionara nuestra primera línea con la última
+  # línea del usuario, corrompiéndola).
+  if [ -s "$AGENTS_MD" ] && [ "$(tail -c1 "$AGENTS_MD" | wc -l)" -eq 0 ]; then
+    echo >> "$AGENTS_MD"
+  fi
+  echo >> "$AGENTS_MD"
+  cat >> "$AGENTS_MD" <<'EOF'
+<!-- ct-init:slices-contract -->
+## Formato de la tabla §9 (contrato con /ct-groom)
+`/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
+fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
+copiable tal cual:
+
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|-------|------|---------|-----|--------|-----------|------|------|
+
+- **`#`** *(obligatoria)*: entero puro (`1`, `2`…) → orden del slice y target
+  de `Dep`. Nunca `S1` ni `**1**` (negrita/prefijo): la fila entera se
+  descarta.
+- **Slice**: nombre corto de la fila; no alimenta el issue (el título lo pone
+  `Entrega`), solo hace falta para que `/ct-groom` reconozca esta como la
+  tabla de slices.
+- **Tipo** *(opcional)*: label `type:<valor>` del issue.
+- **Entrega** *(obligatoria)*: texto del título del issue (`#N <Entrega>`).
+  Vacía o con marcador de "sin valor" → fila descartada.
+- **Dep**: `#N` (varias, separadas por coma) apuntando a otro `#` de esta
+  misma tabla, o marcador de "sin valor" si no depende de nada. `S1` no
+  sirve — usa `#1`. Alimenta el grafo `merge-after` que respeta `/ct-next`.
+- **Acepta** *(opcional)*: criterios de aceptación, coma-separados → sección
+  "Acceptance criteria" del issue.
+- **Protegido** *(opcional)*: qué queda fuera de alcance → sección "Out of
+  scope / Protected" del issue.
+- **Área / Toca** *(opcionales, coma-separadas)*: tokens → labels
+  `area:<x>` / `touches:<y>`. Misma clave que usan la detección de colisión
+  (`claim.js#tokensOf`) y la serialización (`dispatch.js#SERIALIZING_TOUCHES`):
+  reutiliza el vocabulario de labels que ya exista en este repo, no inventes
+  uno nuevo por spec. `migration`/`ci`/`pbxproj` en `Toca` son especiales —
+  serializan **globalmente**: como mucho un slice con uno de esos tres en
+  vuelo a la vez, en todo el repo, sin importar `Área`.
+
+Marcadores de "sin valor" (`Dep`/`Acepta`/`Protegido`/`Área`/`Toca`): `–` `-`
+`—` `―` `−` `--` o celda vacía — cualquier variante de guion vale.
+
+Ejemplo que parsea tal cual (verificado con `ct-groom.mjs --dry-run`):
+
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|-------|------|---------|-----|--------|-----------|------|------|
+| 1 | modelo | backend | tabla `medicamentos` | – | AC-1.1 | schema | medicacion | db, migration |
+| 2 | api | backend | endpoint `POST /medicamentos` | #1 | AC-2.1 | – | medicacion | api |
+| 3 | ui | frontend | pantalla de alta | #2 | AC-3.1 | – | medicacion | app |
+
+Detalle completo (todas las condiciones de abort, columnas opcionales,
+avisos no fatales): `commands/ct-groom.md` en el plugin `control-tower-loop`.
+<!-- /ct-init:slices-contract -->
+EOF
+  echo "añadida sección §9 (contrato /ct-groom) a $AGENTS_MD"
+else
+  echo "sección §9 ya está en $AGENTS_MD, no se duplica"
 fi
