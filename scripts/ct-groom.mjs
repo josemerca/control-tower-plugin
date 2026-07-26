@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
-import { parseSlices } from './slices.js'
+import { analyzeSlicesTable } from './slices.js'
 import { groomPlan } from './groom.js'
 import { flattenIssuePages, realIssuesOnly, findByMarker } from './gh-issues.js'
 import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
@@ -73,7 +73,153 @@ try {
   console.error(`no se pudo leer el spec: ${specFile} (${e.code || e.message})`)
   process.exit(2)
 }
-const slices = parseSlices(specMd)
+// F1 (informe del incidente): un spec real, escrito por alguien que no había
+// leído commands/ct-groom.md, produjo una tabla §9 que parseSlices() convertía
+// en 0 slices — en total silencio. `/ct-groom --dry-run` imprimía
+// `{"issues": [], ...}` y salía 0; una corrida real habría creado el
+// milestone, cero issues, y reportado éxito. `analyzeSlicesTable` (a
+// diferencia de `parseSlices`, que sigue devolviendo solo `Slice[]` para no
+// romper el contrato del que dependen otros módulos/tests) trae el reporte
+// completo de qué se pudo y qué NO se pudo parsear, y por qué. Todas las
+// comprobaciones de abajo corren ANTES de `--dry-run` y ANTES de cualquier
+// mutación de GitHub — un dry-run que valida menos que la corrida real es una
+// trampa.
+const report = analyzeSlicesTable(specMd)
+
+// Mejora de uso (review round 2): con varios defectos a la vez, abortar en
+// el PRIMERO que se encuentra fuerza hasta ocho ejecuciones para verlos
+// todos — la misma noria de "arregla uno, vuelve a correr, descubre el
+// siguiente" que convirtió el em dash en una trampa. Cada comprobación de
+// abajo ya agrega TODAS las filas de su propia clase (no solo la primera);
+// aquí se agregan además TODAS las clases que disparan, y se imprimen
+// juntas antes de un único `process.exit(2)`.
+const hardErrors = []
+
+if (!report.tableFound) {
+  // Distingue "no hay ninguna tabla markdown en el spec" de "hay tabla(s),
+  // pero ninguna con cabecera Slice/Dep" (review de F1): son causas y
+  // arreglos distintos, y el propio detector ya sabe cuál de las dos pasó
+  // (report.pipeRowsFound).
+  if (report.pipeRowsFound) {
+    hardErrors.push('se encontraron filas de tabla markdown en el spec, pero ninguna cabecera con columnas "Slice" y "Dep" — añade (o corrige) la fila de cabecera de la tabla §9 con esas columnas (p.ej. "| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |")')
+  } else {
+    hardErrors.push('no se encontró ninguna tabla markdown (ninguna línea empieza por "|") en el spec — añade la tabla §9 de slices bajo su sección (ver commands/ct-groom.md)')
+  }
+} else if (report.missingRequiredColumns.length) {
+  for (const missing of report.missingRequiredColumns) {
+    if (missing === '#') {
+      hardErrors.push('la tabla §9 no tiene columna "#" — sin ella no hay orden de slice ni se pueden resolver las dependencias (merge-after); añade una columna de cabecera "#" con un entero puro por fila (1, 2, 3…)')
+    } else if (missing === 'Entrega') {
+      hardErrors.push('la tabla §9 no tiene columna "Entrega" — sin ella no hay título de issue; añade una columna de cabecera "Entrega" con el texto visible de cada slice')
+    }
+  }
+} else {
+  // Los checks de aquí abajo son a nivel de FILA, y solo tienen sentido si
+  // la cabecera ya es estructuralmente válida (si faltara "#"/"Entrega"
+  // como columna, cada fila heredaría ese problema de forma derivada —
+  // p.ej. todas aparecerían en skippedRows con valor "" — y mostrarlo junto
+  // al mensaje de columna ausente sería ruido, no señal nueva).
+
+  // Punto 3 de la review de F1: una línea en blanco (o cualquier otra sin
+  // "|") a mitad de la tabla truncaba el escaneo en silencio — las filas
+  // posteriores desaparecían, medio epic se creaba igualmente, y el
+  // proceso salía con éxito. analyzeSlicesTable ya no trunca (escanea todo
+  // el bloque hasta la siguiente cabecera markdown, o hasta la cabecera de
+  // una tabla nueva), pero reporta el hueco para que se arregle en vez de
+  // dejarlo pasar.
+  if (report.rowsAfterGap.length) {
+    const first = report.rowsAfterGap[0]
+    hardErrors.push(`${report.rowsAfterGap.length} fila(s) de datos de la tabla §9 aparecen después de una interrupción (línea en blanco, o una línea sin "|") dentro del bloque de la tabla (ejemplo: "${first.raw}") — la tabla debe ser un único bloque markdown contiguo, sin líneas en blanco entre las filas; une las filas en un solo bloque y vuelve a intentarlo`)
+  }
+  if (report.skippedRows.length) {
+    const first = report.skippedRows[0]
+    hardErrors.push(`${report.skippedRows.length} fila(s) de la tabla §9 tienen "#" que no es un entero a secas (ejemplo: "${first.value}") — "#" debe ser un entero puro como "1", nunca "S1" ni "**1**"; corrige esas filas (quita cualquier letra o negrita) y vuelve a intentarlo`)
+  }
+  // Punto 4 de la review de F1 (y puntos a/b de la review round 2): solo
+  // se validaba la CABECERA, nunca las celdas — una fila con "Entrega"
+  // vacía (o con un marcador de "sin valor" como "–"), o con un número de
+  // celdas distinto al de la cabecera (de menos, o de más por un "|" sin
+  // escapar), parseaba igual y producía un issue titulado "#N" a secas (o
+  // con columnas desplazadas), sin AC ni deps, exit 0.
+  if (report.invalidRows.length) {
+    const first = report.invalidRows[0]
+    hardErrors.push(`${report.invalidRows.length} fila(s) de la tabla §9 están incompletas (ejemplo, slice #${first.n}: ${first.reason}) — sin "Entrega" no hay título de issue; completa esas filas con todas las columnas de la cabecera y vuelve a intentarlo`)
+  }
+  if (report.totalDataRows === 0) {
+    hardErrors.push('la tabla §9 no tiene ninguna fila de datos — añade al menos una fila con "#" y "Entrega"')
+  }
+  // F2 (señalado tras verificar F1 contra el spec real): una celda "Dep"
+  // con contenido (que no sea un marcador de "sin dependencias" —
+  // "-"/"–"/"—"/etc., ver isNoValueCell en slices.js) de la que no se
+  // extrajo ninguna "#N" — p.ej. "S1" en vez de "#1" — es MÁS grave que el
+  // caso de 0 filas de arriba: no rompe el índice de orden, así que la
+  // fila se parsea igual, el groom sale con exit 0, crea milestone e
+  // issues... pero sin ninguna línea `merge-after`. El grafo de
+  // dependencias se borra en silencio mientras todo aparenta funcionar —
+  // /ct-next despacharía un slice dependiente sin esperar al merge del que
+  // dependía. Mismo criterio que las filas con "#" malformado: abortar
+  // fuerte, nombrando cuántas filas, un valor ofensor, el formato
+  // correcto, Y (CRITICAL 1 de la review: la mitad que faltaba) qué
+  // escribir si de verdad no hay dependencias.
+  if (report.malformedDepRows.length) {
+    const first = report.malformedDepRows[0]
+    hardErrors.push(`${report.malformedDepRows.length} fila(s) de la tabla §9 tienen "Dep" con contenido pero sin ninguna dependencia reconocible (ejemplo, slice #${first.n}: "${first.raw}") — el formato es #N (p.ej. "#1", "#2, #3"), no "S1"; si no hay dependencias, escribe "–"; corrige esas filas y vuelve a intentarlo`)
+  }
+  // Punto 5 de la review de F1: las deps no se contrastaban contra los
+  // slices que existen de verdad en la tabla. "#99" en una tabla de 2
+  // slices, o "#3" en el propio slice 3 (auto-referencia, nunca
+  // legítima), parseaban sin problema y llegarían a GitHub como
+  // `merge-after` — un grafo equivocado escrito en los issues (el
+  // dispatcher lo acaba reportando como deps-unmet, así que no es del todo
+  // silencioso, pero sigue siendo un grafo equivocado que no hacía falta
+  // escribir).
+  if (report.invalidDepRefs.length) {
+    const first = report.invalidDepRefs[0]
+    const example = first.reason === 'self'
+      ? `slice #${first.n} depende de sí mismo (#${first.dep})`
+      : `slice #${first.n} depende de #${first.dep}, que no existe en la tabla`
+    hardErrors.push(`${report.invalidDepRefs.length} referencia(s) de "Dep" en la tabla §9 apuntan a un slice que no existe o a sí mismas (ejemplo: ${example}) — cada "#N" en Dep debe apuntar a un "#" que exista en la tabla y sea distinto del propio slice; corrige esas filas y vuelve a intentarlo`)
+  }
+}
+
+if (hardErrors.length) {
+  for (const msg of hardErrors) console.error(msg)
+  process.exit(2)
+}
+
+// Columnas opcionales ausentes (Tipo/Acepta/Protegido/Área/Toca): degradan el
+// issue creado (sin label type:, sin AC, sin Protegido explícito, o con la
+// maquinaria de colisión/serialización inerte para estos slices) pero no
+// impiden crear issues razonables — se avisa por stderr y se continúa, no se
+// aborta.
+const OPTIONAL_COLUMN_CONSEQUENCE = {
+  Tipo: 'los issues se crearán sin label "type:"',
+  Acepta: 'los issues se crearán sin criterios de aceptación',
+  Protegido: 'los issues se crearán sin sección "Protegido" explícita',
+  'Área': 'la maquinaria de colisión (claim.js#tokensOf) queda inerte para todos los slices de este epic',
+  Toca: 'la serialización de touches (dispatch.js#SERIALIZING_TOUCHES) queda inerte para todos los slices de este epic',
+}
+for (const col of report.missingOptionalColumns) {
+  console.error(`aviso: la tabla §9 no tiene columna "${col}" — ${OPTIONAL_COLUMN_CONSEQUENCE[col] || 'se omite esa información en los issues'}`)
+}
+// Valores de Área/Toca con el prefijo de LA OTRA columna (p.ej. "area:x"
+// dentro de Toca): se toleró el valor (no se descartó), pero probablemente
+// sea un despiste de columna — se avisa para que el autor pueda revisar.
+for (const w of report.prefixWarnings) {
+  console.error(`aviso: valor "${w.raw}" en columna ${w.column} (slice #${w.n}) trae el prefijo "${w.otherPrefix}:" de la otra columna — se ha usado el valor igualmente, revisa si está en la columna correcta`)
+}
+// Punto 6 de la review de F1: un valor de Área/Toca que, tras quitar
+// prefijo/marcado y normalizar, queda vacío (p.ej. "area:" sin nada detrás,
+// o "???" sin ningún carácter label-safe) se descartaba sin avisar — la
+// misma inercia de colisión/serialización que el aviso de columna ausente
+// de arriba, pero por celda. Coherente con ese mismo estándar: se avisa,
+// no se aborta (el resto del slice sigue siendo válido).
+for (const w of report.emptyTokenWarnings) {
+  const labelPrefix = w.column === 'Área' ? 'area:' : 'touches:'
+  console.error(`aviso: valor "${w.raw}" en columna ${w.column} (slice #${w.n}) queda vacío tras normalizar — no se genera ninguna label "${labelPrefix}" para ese valor, la maquinaria de colisión/serialización queda inerte para ese slice`)
+}
+
+const slices = report.slices
 // groomPlan lanza si hay órdenes de slice duplicados en la tabla §9 (T14/W-A):
 // se captura aquí y se reporta con la misma convención que el resto de errores
 // de validación de este wrapper (spec inexistente, --milestone/--project/
