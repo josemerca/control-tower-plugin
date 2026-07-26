@@ -263,3 +263,59 @@ describe('parseSlices/analyzeSlicesTable — tolerancia al prefijo de label en �
     expect(r.prefixWarnings[0]).toMatchObject({ column: 'Toca', n: 1, raw: 'area:pbxproj' })
   })
 })
+
+// F2 — hueco señalado por el coordinador tras verificar F1: una celda "Dep"
+// con contenido (no "–"/"-"/vacío) que no matchea NINGÚN "#N" produce
+// deps: [] en silencio — el grafo de dependencias desaparece pero groom
+// sale con exit 0 y crea los issues igualmente. Es peor que el caso de 0
+// slices (F1 defecto 1): aquel no hacía nada; este hace daño (rompe el
+// orden merge-after) mientras aparenta funcionar. Mismo criterio que los
+// demás defectos: reportar, no perder en silencio.
+const REAL_DEP_TABLE = [
+  '## 9. Slices',
+  '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |',
+  '|---|---|---|---|---|---|---|',
+  '| 1 | a | ui | primero | – | – | – |',
+  '| 2 | b | ui | segundo | S1 | – | – |',
+  '| 3 | c | ui | tercero | S1, S2 | – | – |',
+  '',
+].join('\n')
+
+describe('analyzeSlicesTable — Dep con contenido pero sin ninguna referencia #N reconocible (F2)', () => {
+  it('regresión: la tabla del coordinador — 2 filas con Dep malformado ("S1", "S1, S2"), la fila con "–" no cuenta', () => {
+    const r = analyzeSlicesTable(REAL_DEP_TABLE)
+    expect(r.tableFound).toBe(true)
+    expect(r.slices).toHaveLength(3) // el "#" de las 3 filas es válido, solo Dep está mal
+    expect(r.malformedDepRows).toHaveLength(2)
+    expect(r.malformedDepRows[0]).toMatchObject({ n: 2, raw: 'S1' })
+    expect(r.malformedDepRows[1]).toMatchObject({ n: 3, raw: 'S1, S2' })
+  })
+
+  it('"–"/"-"/vacío en Dep no es malformado (es la forma legítima de "sin dependencias")', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+| 2 | b | ui | y | - | – | – |
+| 3 | c | ui | z |  | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.malformedDepRows).toEqual([])
+  })
+
+  it('texto legítimo alrededor de una referencia #N válida SÍ pasa (el disparador es "0 deps extraídas", no "caracteres raros")', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+| 2 | b | ui | y | #1 (tras el merge) | – | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.malformedDepRows).toEqual([])
+    expect(r.slices[1].deps).toEqual([1])
+  })
+
+  it('sin tabla / sin filas → malformedDepRows: []', () => {
+    expect(analyzeSlicesTable('# sin tabla').malformedDepRows).toEqual([])
+  })
+})

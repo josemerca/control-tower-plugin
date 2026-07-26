@@ -109,6 +109,21 @@ if (report.slices.length === 0) {
   console.error('la tabla §9 no tiene ninguna fila de datos — añade al menos una fila con "#" y "Entrega"')
   process.exit(2)
 }
+// F2 (señalado tras verificar F1 contra el spec real): una celda "Dep" con
+// contenido (no "–"/"-"/vacío) de la que no se extrajo ninguna "#N" — p.ej.
+// "S1" en vez de "#1" — es MÁS grave que el caso de 0 slices de arriba: no
+// rompe el índice de orden, así que la fila se parsea igual, el groom sale
+// con exit 0, crea milestone e issues... pero sin ninguna línea
+// `merge-after`. El grafo de dependencias se borra en silencio mientras
+// todo aparenta funcionar — /ct-next despacharía un slice dependiente sin
+// esperar al merge del que dependía. Mismo criterio que las filas con "#"
+// malformado: abortar fuerte, nombrando cuántas filas, un valor ofensor y
+// el formato correcto.
+if (report.malformedDepRows.length) {
+  const first = report.malformedDepRows[0]
+  console.error(`${report.malformedDepRows.length} fila(s) de la tabla §9 tienen "Dep" con contenido pero sin ninguna dependencia reconocible (ejemplo, slice #${first.n}: "${first.raw}") — el formato es #N (p.ej. "#1", "#2, #3"), no "S1"; corrige esas filas y vuelve a intentarlo`)
+  process.exit(2)
+}
 
 // Columnas opcionales ausentes (Tipo/Acepta/Protegido/Área/Toca): degradan el
 // issue creado (sin label type:, sin AC, sin Protegido explícito, o con la

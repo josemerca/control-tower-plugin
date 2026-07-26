@@ -445,3 +445,68 @@ describe('ct-groom — avisa pero continúa ante columnas ausentes o prefijo en 
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+// F2 — señalado por el coordinador tras verificar F1 contra el spec real:
+// una celda "Dep" con contenido pero sin ninguna referencia "#N" reconocible
+// (p.ej. "S1" en vez de "#1") produce deps: [] en silencio. A diferencia del
+// caso de 0 slices (que al menos no crea nada), este SÍ crea el milestone y
+// los issues, con exit 0, pero sin ninguna línea `merge-after` — /ct-next
+// despacha slices dependientes sin esperar al merge del que dependían.
+describe('ct-groom — Dep con contenido pero sin ninguna referencia #N reconocible aborta fuerte (F2)', () => {
+  // Tabla tal cual la verificó el coordinador (columnas completadas donde el
+  // mensaje usaba "..."): "#" de las 3 filas es válido — el problema es
+  // solo la columna Dep.
+  const REAL_DEP_TABLE = [
+    '## 9. Slices',
+    '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |',
+    '|---|---|---|---|---|---|---|',
+    '| 1 | a | ui | primero | – | – | – |',
+    '| 2 | b | ui | segundo | S1 | – | – |',
+    '| 3 | c | ui | tercero | S1, S2 | – | – |',
+    '',
+  ].join('\n')
+
+  it('regresión: la tabla del coordinador → exit != 0 en vez de "issues creados, exit 0, deps borrados"', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, REAL_DEP_TABLE)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect(e.stdout).toBe('') // el bug: esto imprimía el plan completo (deps: []) y salía 0
+      const err = e.stderr.toString()
+      expect(err).toMatch(/2/) // 2 filas malformadas (slice #2 y #3; #1 con "–" es legítimo)
+      expect(err).toMatch(/"S1"/) // el valor ofensor, tal cual
+      expect(err).toMatch(/#N/) // qué formato usar
+      expect(err).toMatch(/#1/) // ejemplo de formato correcto
+      expect(err).not.toMatch(/at \S+ \(file:/)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('"–" (sin dependencias, forma legítima) no aborta', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC) // SPEC del top del fichero: Dep "–" y "#1"
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    expect(JSON.parse(out).issues).toHaveLength(2)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('texto legítimo alrededor de una referencia #N válida ("#1 (tras el merge)") no aborta', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const LEGIT = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | ui | x | – | – | – |
+| 2 | b | ui | y | #1 (tras el merge) | – | – |
+`
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, LEGIT)
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    const plan = JSON.parse(out)
+    expect(plan.issues[1].body).toContain('merge-after #1')
+    rmSync(dir, { recursive: true, force: true })
+  })
+})

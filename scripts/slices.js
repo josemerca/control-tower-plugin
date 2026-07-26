@@ -132,6 +132,17 @@ function parseTokenList(cell, opts = {}) {
 //   - prefixWarnings: ocurrencias de un valor en Área/Toca con el prefijo de
 //     LA OTRA columna (ver stripColumnPrefix) — se usó el valor, pero se
 //     señala para revisión.
+//   - malformedDepRows: filas cuya celda "Dep" tiene contenido (no vacía, no
+//     "–"/"-") pero de la que no se extrajo ninguna referencia "#N" (F2:
+//     "S1" en vez de "#1" — un despiste igual de natural que "area:x" en
+//     Área). Este es más grave que un `#` malformado: no rompe el índice de
+//     orden, así que la fila SÍ se parsea y SÍ termina en `slices`, pero con
+//     `deps: []` — el groom saldría con exit 0, crearía milestone e issues,
+//     y solo entonces se notaría (en /ct-next, cuando un slice dependiente
+//     se despacha sin esperar el merge del que dependía) que el grafo de
+//     dependencias se borró en silencio. El llamador (ct-groom.mjs) aborta
+//     fuerte si esta lista no está vacía, con el mismo criterio que
+//     skippedRows.
 //   - slices: el mismo array que devolvía `parseSlices` antes.
 export function analyzeSlicesTable(specMd) {
   const lines = (specMd || '').split('\n')
@@ -153,6 +164,7 @@ export function analyzeSlicesTable(specMd) {
       totalDataRows: 0,
       skippedRows: [],
       prefixWarnings: [],
+      malformedDepRows: [],
       slices: [],
     }
   }
@@ -192,6 +204,7 @@ export function analyzeSlicesTable(specMd) {
   const slices = []
   const skippedRows = []
   const prefixWarnings = []
+  const malformedDepRows = []
   let totalDataRows = 0
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const raw = lines[i]
@@ -210,6 +223,16 @@ export function analyzeSlicesTable(specMd) {
     let m
     DEP_RE.lastIndex = 0
     while ((m = DEP_RE.exec(depCell)) !== null) deps.push(parseInt(m[1], 10))
+    // F2: "Dep" con contenido real (no "–"/"-"/vacío, que son la forma
+    // legítima de "sin dependencias") del que no se extrajo ninguna "#N" —
+    // p.ej. "S1" en vez de "#1" — es una celda malformada, no una fila sin
+    // dependencias. El disparador es "0 deps extraídas de una celda con
+    // contenido": texto legítimo alrededor de una referencia válida (p.ej.
+    // "#1 (tras el merge)") sigue extrayendo su "#1" y NO cuenta como
+    // malformada.
+    if (depCell && depCell !== '–' && depCell !== '-' && deps.length === 0) {
+      malformedDepRows.push({ n, raw: depCell })
+    }
     const acCell = (cells[iAc] || '').trim()
     const ac = acCell && acCell !== '–' && acCell !== '-' ? acCell.split(',').map((x) => x.trim()).filter(Boolean) : []
     const issueCell = (cells[iIssue] || '').trim()
@@ -226,7 +249,7 @@ export function analyzeSlicesTable(specMd) {
       touches: parseTokenList(cells[iToca], { ownPrefix: 'touches', otherPrefix: 'area', columnLabel: 'Toca', n, warnings: prefixWarnings }),
     })
   }
-  return { tableFound: true, missingRequiredColumns, missingOptionalColumns, totalDataRows, skippedRows, prefixWarnings, slices }
+  return { tableFound: true, missingRequiredColumns, missingOptionalColumns, totalDataRows, skippedRows, prefixWarnings, malformedDepRows, slices }
 }
 
 // parseSlices: contrato viejo preservado (md) -> Slice[]. Otros módulos
