@@ -9,7 +9,7 @@ Revisa el JSON. Si está bien, ejecútalo de verdad (añade `--project <n>` para
 ```
 node ${CLAUDE_PLUGIN_ROOT}/scripts/ct-groom.mjs "$1" --repo "<owner/repo>" --milestone "<Epic>" --project <n>
 ```
-Es idempotente: re-ejecutarlo no duplica milestone ni issues (marca cada issue con `<!-- ct-order:N -->`).
+Es idempotente: re-ejecutarlo no duplica milestone ni issues (marca cada issue con `<!-- ct-order:N -->`). **Pero "no duplica" NO significa "converge"**: idempotencia solo por existencia (F5). Si arreglas un título, un label o el milestone en la tabla §9 y vuelves a correr, `/ct-groom` no toca el issue ya creado — reporta la diferencia, no la aplica sola. Ver "Re-ejecutar no converge solo" más abajo.
 
 Los issues se crean en `status:backlog`, nunca `status:ready` — es una gate humana deliberada: un humano tiene que promoverlos a `status:ready` (a mano, o editando el label) antes de que `/ct-next` los considere despachables. Si `/ct-next` responde "No hay slices despachables" justo después de un groom, es casi seguro que sea esto.
 
@@ -37,3 +37,23 @@ La tabla §9 del spec admite dos columnas opcionales, `Área` y `Toca` (acepta t
 - una referencia de `Dep` apunta a un `#` que no existe en la tabla, o al propio slice (auto-referencia: un slice nunca depende de sí mismo).
 
 Si fallan varias de estas cosas a la vez, se reportan **todas juntas** en la misma ejecución (no hace falta arreglar una, volver a correr, y descubrir la siguiente). Columnas opcionales ausentes (`Tipo`/`Entrega`/`Acepta`/`Protegido`/`Área`/`Toca`) y valores degradados (`Tipo` que no es ninguna key de `ADDENDA`, prefijo en la columna equivocada de Área/Toca, token que normaliza a vacío) no abortan — se avisan por stderr y el groom continúa.
+
+### Re-ejecutar no converge solo — detecta divergencia, no la aplica (F5)
+
+Hasta esta versión, "idempotente" quería decir *existence-only*: si el marcador `<!-- ct-order:N -->` ya aparecía en algún issue, `/ct-groom` imprimía "ya existe, no se duplica" y pasaba al siguiente — sin mirar si el título, las labels o el milestone de ese issue seguían coincidiendo con lo que la tabla §9 produce hoy. Un autor que arreglaba un label o un título mal puesto en el spec y volvía a correr `/ct-groom` no veía ninguna señal de que nada había cambiado.
+
+Ahora, para cada slice cuyo issue ya existe, `/ct-groom` compara:
+
+- **título** (`#N <Slice>`);
+- **labels que el spec posee**: `type:`, `area:`, `touches:`. `status:` queda **fuera de la comparación por completo** — el spec solo decide el valor inicial (`status:backlog`, al crear el issue); un humano o `/ct-next` lo mueven después (`backlog` → `ready` → `in-progress` → `in-review`…) como parte normal del flujo, y reportar esos movimientos como "divergencia" sería ruido que entrena a ignorar el resto del reporte. Una label ajena al spec (sin ninguno de esos tres prefijos) tampoco se reporta nunca;
+- **milestone** (`--milestone` del spec contra el milestone actual del issue).
+
+El **cuerpo del issue NO se compara**: es, con diferencia, el campo que más edita un humano después de crear el issue (contexto, discusión, notas de progreso), y carga el propio marcador `<!-- ct-order:N -->` — compararlo entero convertiría cada edición legítima en "divergencia".
+
+Por defecto, `/ct-groom` **detecta y reporta, nunca cambia nada** — cada diferencia sale por stderr nombrando el slice, el issue, el campo, el valor actual y el que pide el spec. Silencio (ninguna línea de "divergencia") significa que spec e issues están de acuerdo. Un **issue cerrado** no se reporta por eso solo (el spec no tiene ni debe tener opinión sobre abierto/cerrado); si además diverge en algún campo, se añade una nota avisando que está cerrado antes de aplicar nada.
+
+**`--reconcile`** (opt-in, nunca por defecto — un issue puede haber sido editado a propósito, llevar discusión, o estar cerrado) aplica lo detectado con un único `gh issue edit` por issue (título + milestone + labels a la vez). Un fallo de `gh` aborta con mensaje claro (misma convención que el resto del fichero: nunca se sigue a ciegas con el resto de slices). Editar un issue cerrado no lo reabre, así que `--reconcile` lo actualiza igual.
+
+Todo esto funciona también bajo **`--dry-run`** (con `--repo`; sin él no hay nada contra qué comparar): el mismo reporte, y con `--reconcile` además anuncia qué aplicaría — pero nunca muta nada.
+
+**Código de salida**: `0` si no hay divergencia (o si `--reconcile` la aplicó con éxito), `2` si la tabla §9 es inválida (como siempre), y **`3`** si queda divergencia sin reconciliar. `3` es deliberadamente distinto de `0` (no sería "silencio real") y de `2` (no es que la tabla esté rota) — un exit no-cero aquí sería tan malo como el silencio que esto corrige, pero en la dirección opuesta: entrenaría a cualquier script que solo mire "¿salió con error?" a tratar una divergencia meramente informativa como si el spec estuviera roto.

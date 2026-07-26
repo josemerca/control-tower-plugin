@@ -172,8 +172,16 @@ Ejemplo que parsea tal cual (verificado con `ct-groom.mjs --dry-run`):
 | 2 | api | backend | endpoint `POST /medicamentos` | #1 | AC-2.1 | – | medicacion | api |
 | 3 | pantalla | ui | pantalla de alta | #2 | AC-3.1 | – | medicacion | app |
 
+Re-ejecutar `/ct-groom` tras arreglar la tabla **no duplica issues, pero
+tampoco los actualiza solo**: si un issue ya existe (por su marcador
+`ct-order`), `/ct-groom` compara su título/labels (`type:`/`area:`/`touches:`,
+`status:` queda fuera adrede)/milestone contra lo que la tabla produce hoy y
+**reporta** cualquier diferencia — nunca la aplica sin que se pida
+`--reconcile` explícitamente. "No duplica" no es "converge".
+
 Detalle completo (todas las condiciones de abort, columnas opcionales,
-avisos no fatales): `commands/ct-groom.md` en el plugin `control-tower-loop`.
+avisos no fatales, el reporte de divergencia y `--reconcile`):
+`commands/ct-groom.md` en el plugin `control-tower-loop`.
 <!-- /ct-init:slices-contract -->
 EOF
   echo "añadida sección §9 (contrato /ct-groom) a $AGENTS_MD"

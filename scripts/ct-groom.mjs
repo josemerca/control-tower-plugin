@@ -5,6 +5,12 @@ import { analyzeSlicesTable, isNoValueCell } from './slices.js'
 import { groomPlan } from './groom.js'
 import { flattenIssuePages, realIssuesOnly, findByMarker } from './gh-issues.js'
 import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
+// F5: capa pura de reconciliación — decide QUÉ cuenta como divergencia entre
+// un issue existente y lo que el plan produce hoy, CÓMO se reporta, y CÓMO
+// se traduce a los flags de `gh issue edit` para aplicarla. Ver
+// scripts/reconcile.js para la justificación completa de cada decisión (qué
+// se compara, qué se excluye a propósito, y por qué).
+import { diffIssue, hasDrift, formatDrift, buildReconcileEditArgs } from './reconcile.js'
 // ADDENDA (F3): única fuente de verdad de qué valores de "Tipo" tienen un
 // addendum de kickoff — ver el aviso de "Tipo" no reconocido más abajo.
 import { ADDENDA } from './kickoff.js'
@@ -39,6 +45,11 @@ const milestone = arg('--milestone', 'Epic')
 const section = arg('--section', '9')
 const project = arg('--project')
 const dryRun = has('--dry-run')
+// F5: opt-in, NUNCA por defecto — un issue existente puede haber sido
+// editado a propósito, llevar discusión, o estar cerrado; el comportamiento
+// por defecto es detectar y reportar divergencia, nunca tocar nada sin que
+// se pida explícitamente (ver el bloque de reconciliación más abajo).
+const reconcileFlag = has('--reconcile')
 
 // Validación explícita: con el `arg()` endurecido de arriba, un `--milestone`
 // colgante (último token, o seguido de otro flag) devuelve `true` en vez de
@@ -275,12 +286,6 @@ try {
   process.exit(2)
 }
 
-if (dryRun) {
-  console.log(JSON.stringify({ ...plan, repo, project: project ? Number(project) : null }, null, 2))
-  process.exit(0)
-}
-
-if (!repo) { console.error('--repo requerido fuera de --dry-run'); process.exit(2) }
 // maxBuffer explícito (finding 7 de la review final): el default de Node para
 // execFileSync es 1 MiB. El `--paginate` de más abajo sobre TODOS los issues y
 // PRs de un repo (con bodies completos) puede superar eso con facilidad en un
@@ -290,6 +295,73 @@ if (!repo) { console.error('--repo requerido fuera de --dry-run'); process.exit(
 // sin ser "sin límite" de verdad (un runaway real seguiría abortando).
 const GH_MAX_BUFFER = 20 * 1024 * 1024
 const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: GH_MAX_BUFFER }).trim()
+
+// F5 — detección de divergencia (existence-only → contenido real). Hasta
+// ahora, todo lo de aquí abajo vivía DESPUÉS de la salida de --dry-run: un
+// dry-run nunca llegaba siquiera a mirar si los issues ya existentes seguían
+// coincidiendo con lo que el plan produce hoy. Eso es exactamente la misma
+// trampa que F1 ya cerró para la validación de la tabla ("un dry-run que
+// valida menos que la corrida real es una trampa") — aquí aplica igual: el
+// fetch de issues (lectura, sin mutar nada) se adelanta a ANTES de la rama de
+// --dry-run, para que el reporte de divergencia sea idéntico se ejecute o no
+// de verdad. Solo se intenta si hay un `--repo` real (string): en dry-run sin
+// --repo no hay contra qué comparar, así que se preserva el comportamiento de
+// siempre (solo imprime el plan, nunca toca `gh`).
+let existingIssues = null
+let reconcileEntries = [] // [{ iss, found, diff }] — found/diff son null si el issue todavía no existe
+let anyUnresolvedDrift = false
+if (typeof repo === 'string') {
+  try {
+    const raw = JSON.parse(gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=all', '--paginate', '--slurp']))
+    existingIssues = realIssuesOnly(flattenIssuePages(raw))
+  } catch (e) {
+    console.error(`no se pudo listar issues de ${repo}: ${e.message}`)
+    process.exit(1)
+  }
+  reconcileEntries = plan.issues.map((iss) => {
+    const marker = `<!-- ct-order:${iss.order} -->`
+    const found = findByMarker(existingIssues, marker)
+    if (!found) return { iss, found: null, diff: null }
+    return { iss, found, diff: diffIssue(found, iss, plan.milestone) }
+  })
+  // El reporte de divergencia se imprime SIEMPRE por stderr (mismo canal que
+  // el resto de "aviso:" de este script) en cuanto se conoce — antes de la
+  // rama de --dry-run, para que sea IDÉNTICO en preview y en corrida real.
+  // Silencio aquí significa "spec e issues están de acuerdo": formatDrift
+  // devuelve [] cuando no hay nada que reportar (ver scripts/reconcile.js).
+  for (const { found, diff } of reconcileEntries) {
+    if (!found) continue
+    for (const line of formatDrift(diff)) console.error(line)
+    if (hasDrift(diff)) anyUnresolvedDrift = true
+  }
+  // --reconcile bajo --dry-run: NUNCA muta (ni aquí ni en la rama real de más
+  // abajo) — solo hace explícito qué aplicaría una corrida real con
+  // --reconcile, para que el preview no calle información que sí actuaría.
+  if (reconcileFlag && dryRun) {
+    for (const { found, diff } of reconcileEntries) {
+      if (!found || !hasDrift(diff)) continue
+      const editArgs = buildReconcileEditArgs(diff)
+      console.error(`--reconcile aplicaría: gh issue edit ${found.number} --repo ${repo} ${editArgs.join(' ')}`)
+    }
+  }
+}
+
+if (dryRun) {
+  console.log(JSON.stringify({ ...plan, repo: typeof repo === 'string' ? repo : null, project: project ? Number(project) : null }, null, 2))
+  // Código de salida (F5): 3 para "divergencia detectada, no reconciliada" —
+  // deliberadamente DISTINTO de 0 (spec e issues de acuerdo: silencio real,
+  // nada que decidir) y de 2 (error de validación: la tabla §9 en sí es
+  // inusable, nada que reportar tiene sentido). Un exit no-cero aquí sería
+  // tan malo como el silencio que esta feature corrige, pero en la dirección
+  // opuesta: entrenaría a cualquier script que solo mire "¿salió 2, aborta
+  // todo?" a tratar una divergencia meramente informativa como si la tabla
+  // §9 estuviera rota. 3 dejar claro, para quien lea el código de salida en
+  // vez del texto, que "no hay error, pero hay algo que revisar" es un
+  // tercer estado, no una variante de "todo bien" ni de "todo roto".
+  process.exit(anyUnresolvedDrift ? 3 : 0)
+}
+
+if (!repo) { console.error('--repo requerido fuera de --dry-run'); process.exit(2) }
 
 // Project v2 + Sprint (T9): introspección en runtime, no se hardcodean IDs.
 // Cada llamada de abajo se probó a mano contra un Project v2 real (sandbox)
@@ -443,15 +515,9 @@ for (const l of wantedLabels) {
 // romperían el `JSON.parse`; ver scripts/gh-issues.js para el detalle y los
 // tests puros de ese filtrado/aplanado. Comparamos el marcador como substring
 // literal del body en JS — mismo patrón que el fix de milestones. Un fallo
-// del fetch aborta.
-let existingIssues
-try {
-  const raw = JSON.parse(gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=all', '--paginate', '--slurp']))
-  existingIssues = realIssuesOnly(flattenIssuePages(raw))
-} catch (e) {
-  console.error(`no se pudo listar issues de ${repo}: ${e.message}`)
-  process.exit(1)
-}
+// del fetch aborta. F5: este fetch (y el cómputo de `reconcileEntries`) ya se
+// hizo MÁS ARRIBA, antes de la rama de --dry-run — no se repite aquí, solo se
+// reutiliza `existingIssues`/`reconcileEntries`.
 
 // Items ya presentes en el Project v2 — se listan una sola vez por corrida
 // (igual que milestones/existingIssues arriba) para poder detectar issues
@@ -471,11 +537,29 @@ if (project) {
   }
 }
 
-for (const iss of plan.issues) {
-  const marker = `<!-- ct-order:${iss.order} -->`
-  const found = findByMarker(existingIssues, marker)
+for (const { iss, found, diff } of reconcileEntries) {
   if (found) {
     console.log(`issue orden #${iss.order} ya existe (#${found.number}), no se duplica`)
+    // F5: la detección de divergencia (y su reporte por stderr) ya ocurrió
+    // ANTES de la rama de --dry-run, así que es idéntica en preview y en
+    // corrida real — aquí solo queda, opcionalmente, APLICARLA.
+    if (reconcileFlag && hasDrift(diff)) {
+      const editArgs = buildReconcileEditArgs(diff)
+      // Mismo criterio que el resto de mutaciones de este fichero (labels,
+      // milestone, project): un fallo de `gh` aquí NUNCA es benigno — auth,
+      // red, rate limit, o el issue cerrado rechazando el edit por alguna
+      // razón que no podemos anticipar. Abortamos con mensaje claro en vez
+      // de seguir a ciegas con el resto de slices, que podría dejar
+      // reconciliados solo ALGUNOS issues sin que quede constancia clara de
+      // cuáles.
+      try {
+        gh(['issue', 'edit', String(found.number), '--repo', repo, ...editArgs])
+      } catch (e) {
+        console.error(`no se pudo reconciliar el issue #${found.number} (orden #${iss.order}): ${e.message}`)
+        process.exit(1)
+      }
+      console.log(`issue #${found.number} reconciliado (orden #${iss.order}): ${editArgs.join(' ')}`)
+    }
     if (project && !hasProjectItem(existingProjectItems, repo, found.number)) {
       console.log(`issue #${found.number} no estaba en el project ${project} (hueco de una corrida anterior interrumpida) — añadiéndolo ahora`)
       addToProjectWithSprint(`https://github.com/${repo}/issues/${found.number}`, iss.order)
@@ -491,3 +575,12 @@ for (const iss of plan.issues) {
   existingIssues.push({ number: null, body: iss.body })
   if (project) addToProjectWithSprint(num, iss.order)
 }
+
+// F5: código de salida de la corrida real — mismo criterio de 3 estados que
+// bajo --dry-run (ver el comentario junto al `process.exit` de esa rama):
+// 0 si no queda ninguna divergencia sin aplicar, 3 si `anyUnresolvedDrift`
+// seguía en pie y NO se pidió --reconcile. Con --reconcile, cualquier fallo
+// de `gh issue edit` ya abortó con exit(1) más arriba (nunca se sigue a
+// ciegas) — así que llegar hasta aquí con --reconcile significa que TODA la
+// divergencia detectada se aplicó con éxito, y el proceso termina en 0.
+process.exit(anyUnresolvedDrift && !reconcileFlag ? 3 : 0)
