@@ -8,15 +8,61 @@
 // encabezado "## Acceptance criteria") podía romperlo en silencio hasta el
 // dispatch real contra un repo de verdad.
 
+// locateSection: encuentra dónde vive una sección del body (buildIssueBody
+// en groom.js genera un puñado de secciones con cabecera fija: "##
+// Acceptance criteria…", "## Dependencias", "## Out of scope / Protected",
+// "## Descripción") — delimitada por su propia cabecera (headingPrefix, el
+// texto fijo; buildIssueBody añade texto libre detrás en algún caso, p.ej.
+// "(EARS, 1:1 con tests)", por eso `headingPrefix` solo ancla el prefijo, no
+// la línea completa) y por el mismo criterio de "fin de sección" que ya usaba
+// extractAc: la siguiente cabecera "## …", el marcador `<!-- ct-order -->`, o
+// el fin del body. Devuelve `null` si la cabecera no aparece en absoluto.
+//
+// Se usa tanto para EXTRAER contenido (comparar spec vs. issue — F5) como
+// para REEMPLAZARLO quirúrgicamente (F5 --reconcile, ver
+// scripts/reconcile.js#buildReconcileBody): las posiciones `headingStart`/
+// `headingEnd`/`contentEnd` permiten hacer un `body.slice(...)` que toca
+// SOLO esa sección, dejando intacto cualquier contenido humano antes,
+// después, o en cualquier sección nueva que el humano haya añadido en otro
+// punto del body (esas secciones tienen su propia cabecera "## …", así que
+// nunca caen dentro del rango de una sección que buildIssueBody sí conoce).
+export function locateSection(body, headingPrefix) {
+  const src = body || ''
+  const headingRe = new RegExp(`${headingPrefix}[^\\n]*\\n?`)
+  const headingMatch = headingRe.exec(src)
+  if (!headingMatch) return null
+  const headingStart = headingMatch.index
+  const headingEnd = headingStart + headingMatch[0].length
+  const rest = src.slice(headingEnd)
+  const endMatch = /\n##\s|\n<!--|$/.exec(rest)
+  const contentEnd = headingEnd + (endMatch ? endMatch.index : rest.length)
+  return { headingStart, headingEnd, contentEnd, content: src.slice(headingEnd, contentEnd) }
+}
+
+export function extractSectionContent(body, headingPrefix) {
+  const loc = locateSection(body, headingPrefix)
+  return loc ? loc.content.trim() : null
+}
+
 export function extractAc(body) {
-  if (!body) return []
-  const m = body.match(/## Acceptance criteria[^\n]*\n([\s\S]*?)(\n##\s|\n<!--|$)/)
-  if (!m) return []
-  return m[1].split('\n')
+  const section = extractSectionContent(body, '## Acceptance criteria')
+  if (section == null) return []
+  return section.split('\n')
     .map((l) => l.trim())
     .filter((l) => l.startsWith('- '))
     .map((l) => l.slice(2).trim())
     .filter((l) => l && l !== '(rellenar desde el spec)')
+}
+
+// extractDeps: lee TODAS las referencias `merge-after #N` del body, sin
+// anclarse a ninguna sección — groom.js#buildIssueBody las agrupa bajo "##
+// Dependencias", pero el dispatcher (mapGhIssue, más abajo) siempre las leyó
+// así, de todo el body, y F5 (scripts/reconcile.js) reutiliza esta MISMA
+// función para comparar — así "lo que compara F5" y "lo que lee el
+// dispatcher" son, por construcción, la misma extracción, no dos
+// implementaciones que puedan divergir.
+export function extractDeps(body) {
+  return [...(body || '').matchAll(/merge-after #(\d+)/g)].map((m) => parseInt(m[1], 10))
 }
 
 // extractOrder: lee el marcador `<!-- ct-order:N -->` que groom.js#buildIssueBody
@@ -53,8 +99,11 @@ export function mapGhIssue(i) {
   // deps aquí quedan en ESPACIO DE ORDEN (groom.js#buildIssueBody escribe
   // `merge-after #<orden>`, no `#<issue>`) — ver buildDispatchInput para la
   // traducción a espacio de número-de-issue antes de comparar con
-  // mergedIssues (que sí son números de issue reales).
-  const deps = [...body.matchAll(/merge-after #(\d+)/g)].map((m) => parseInt(m[1], 10))
+  // mergedIssues (que sí son números de issue reales). extractDeps (arriba)
+  // es la MISMA extracción que usa F5 (scripts/reconcile.js) para comparar
+  // — un solo sitio que sabe leer `merge-after #N`, no dos que puedan
+  // divergir con el tiempo.
+  const deps = extractDeps(body)
   return {
     n: i.number,
     order: order ?? i.number,

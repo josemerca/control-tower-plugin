@@ -41,6 +41,40 @@ export function buildLabels(slice) {
   return labels
 }
 
+// renderDescripcion / renderProtectedLine (F5): extraídas de buildIssueBody
+// para ser la ÚNICA fuente de verdad de "qué debería decir" cada una de
+// estas dos secciones — tanto al CREAR el issue (buildIssueBody, más abajo)
+// como al COMPARARLO después contra un issue ya existente
+// (scripts/reconcile.js#diffIssue). Sin esto, "lo que se escribe" y "lo que
+// se compara" serían dos implementaciones del mismo criterio de "sin
+// valor" que podrían divergir con el tiempo — el mismo motivo por el que
+// ADDENDA (kickoff.js) es la única fuente de verdad de KNOWN_TYPES en
+// ct-groom.mjs.
+//
+// renderDescripcion devuelve `null` (no un string vacío) cuando no hay
+// "Entrega" real: `null` significa "la sección ## Descripción no debería
+// existir en absoluto", distinto de "existe pero está vacía" — un issue
+// existente que SÍ tiene la sección cuando el spec dice `null` es una
+// divergencia real (el spec dejó de pedir descripción), no lo mismo que
+// "coinciden en que no hay nada".
+export function renderDescripcion(slice) {
+  return (slice.entrega && !isNoValueCell(slice.entrega)) ? slice.entrega : null
+}
+
+// renderProtectedLine: a diferencia de Descripción, esta sección SIEMPRE
+// existe en el body (buildIssueBody la emite incondicionalmente) — por eso
+// esta función nunca devuelve `null`, siempre una de las dos líneas
+// posibles.
+export function renderProtectedLine(slice) {
+  // Fix de review (F2): antes solo trataba el em dash literal ('–', U+2013)
+  // como "sin valor" — las otras variantes que isNoValueCell ya acepta en
+  // TODAS las demás columnas (Dep/Acepta/Área/Toca: '-', '—', '―', '−',
+  // '--') colaban como si fueran contenido real, produciendo un bullet
+  // basura ("- 🚫 -") en el body de CADA issue con esa variante. Mismo
+  // criterio de "sin valor" que las demás columnas, sin excepción.
+  return (slice.protected && !isNoValueCell(slice.protected)) ? `- 🚫 ${slice.protected}` : '- (ninguno declarado)'
+}
+
 export function buildIssueBody(slice, { specPath, specSection }) {
   const lines = []
   lines.push(`> Slice #${slice.n} del epic. Spec: [${specPath}#${specSection}](${specPath}#${specSection})`)
@@ -50,12 +84,10 @@ export function buildIssueBody(slice, { specPath, specSection }) {
   // al spec y ANTES de "Acceptance criteria": quien abre el issue lee
   // primero QUÉ entrega el slice, y solo después sus criterios de
   // aceptación — el orden de lectura natural (qué, luego cómo se verifica).
-  // Mismo criterio de "sin valor" que Protegido (isNoValueCell): una celda
-  // vacía, ausente, o con un marcador como "–" no produce ninguna sección
-  // (nada que describir, no un placeholder vacío).
-  if (slice.entrega && !isNoValueCell(slice.entrega)) {
+  const descripcion = renderDescripcion(slice)
+  if (descripcion) {
     lines.push('## Descripción')
-    lines.push(slice.entrega)
+    lines.push(descripcion)
     lines.push('')
   }
   lines.push('## Acceptance criteria (EARS, 1:1 con tests)')
@@ -70,13 +102,7 @@ export function buildIssueBody(slice, { specPath, specSection }) {
     lines.push('')
   }
   lines.push('## Out of scope / Protected')
-  // Fix de review (F2): antes solo trataba el em dash literal ('–', U+2013)
-  // como "sin valor" — las otras variantes que isNoValueCell ya acepta en
-  // TODAS las demás columnas (Dep/Acepta/Área/Toca: '-', '—', '―', '−',
-  // '--') colaban como si fueran contenido real, produciendo un bullet
-  // basura ("- 🚫 -") en el body de CADA issue con esa variante. Mismo
-  // criterio de "sin valor" que las demás columnas, sin excepción.
-  lines.push(slice.protected && !isNoValueCell(slice.protected) ? `- 🚫 ${slice.protected}` : '- (ninguno declarado)')
+  lines.push(renderProtectedLine(slice))
   lines.push('')
   lines.push(`<!-- ct-order:${slice.n} -->`) // marcador greppable de orden para el dispatcher
   return lines.join('\n')
@@ -114,6 +140,14 @@ export function groomPlan(slices, { milestone, specPath, specSection }) {
       body: buildIssueBody(s, { specPath, specSection }),
       labels: buildLabels(s),
       deps: s.deps,
+      // F5: además del body ya renderizado (arriba), el plan lleva los
+      // valores ESTRUCTURADOS que lo alimentan — scripts/reconcile.js los
+      // necesita para comparar contra un issue existente sin tener que
+      // volver a parsear el body que él mismo acaba de generar (evita dos
+      // implementaciones del mismo criterio que puedan divergir).
+      ac: s.ac || [],
+      descripcion: renderDescripcion(s),
+      protectedLine: renderProtectedLine(s),
     })),
   }
 }

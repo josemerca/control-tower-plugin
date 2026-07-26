@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { REAL_FAILING_TABLE, REAL_DEP_TABLE, REAL_TABLE_WITH_HASH_FIXED } from './fixtures/slices-real-tables.js'
+import { buildIssueBody } from '../scripts/groom.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-groom.mjs')
 
@@ -1138,6 +1139,16 @@ const ONE_SLICE_SPEC = `## 9. Slices
 // Plan que ONE_SLICE_SPEC produce con --milestone Epic (verificado contra
 // groom.js): title "#1 login", labels ['type:backend','area:api','touches:db','status:backlog'].
 
+// ONE_SLICE_MATCHING_BODY: el body EXACTO que ONE_SLICE_SPEC produce hoy —
+// generado con el buildIssueBody real (no a mano) para que un "coincide en
+// todo" de verdad coincida en TODO, incluidas las secciones que F5 ahora
+// también compara (AC, Dependencias, Descripción, Protegido) — no solo
+// título/labels/milestone como en la primera versión de estos tests.
+const ONE_SLICE_MATCHING_BODY = buildIssueBody(
+  { n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' },
+  { specPath: 'x', specSection: '9' },
+)
+
 describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F5)', () => {
   it('título/milestone/labels divergentes → se reportan por stderr, exit 3, JSON del plan idéntico al de siempre (nada se muta)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
@@ -1183,7 +1194,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'status:in-progress' }],
-      body: '<!-- ct-order:1 -->',
+      body: ONE_SLICE_MATCHING_BODY,
     }
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
       { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[MATCHING]]) }) })
@@ -1201,7 +1212,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
       state: 'closed',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
-      body: '<!-- ct-order:1 -->',
+      body: ONE_SLICE_MATCHING_BODY,
     }
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
       { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[CLOSED_MATCHING]]) }) })
@@ -1289,6 +1300,134 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
     const plan = JSON.parse(out)
     expect(plan.repo).toBeNull()
     expect(existsSync(argvLog)).toBe(false)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// ============================================================================
+// Review del coordinador tras la primera versión de F5 — cobertura bajo
+// --dry-run de los dos puntos de fondo (el body SÍ se compara para AC/deps;
+// las labels están gateadas por columna) y confirmación explícita de que el
+// exit 3 bajo --dry-run es una decisión, no una consecuencia accidental.
+// ============================================================================
+
+describe('ct-groom --dry-run — AC/Dependencias divergentes se detectan (review crítica: el body SÍ se compara para lo que lee el dispatcher)', () => {
+  const SPEC_2 = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | login | backend | modelo | #2 | AC-1.1, AC-1.2 | schema |
+| 2 | signup | backend | registro | – | AC-2.1 | – |
+`
+  const ISSUE_1_DRIFT = {
+    number: 501,
+    title: '#1 login',
+    state: 'open',
+    milestone: { title: 'Epic' },
+    labels: [{ name: 'type:backend' }],
+    body: buildIssueBody({ n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' }, { specPath: 'x', specSection: '9' }),
+  }
+  const ISSUE_2_MATCHING = {
+    number: 502,
+    title: '#2 signup',
+    state: 'open',
+    milestone: { title: 'Epic' },
+    labels: [{ name: 'type:backend' }],
+    body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, { specPath: 'x', specSection: '9' }),
+  }
+
+  it('reporta el AC y la dependencia faltantes por stderr, exit 3, sin mutar nada', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC_2)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], {
+        encoding: 'utf8', stdio: QUIET_STDIO,
+        env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[ISSUE_1_DRIFT, ISSUE_2_MATCHING]]) }),
+      })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(3)
+      const err = e.stderr.toString()
+      expect(err).toMatch(/falta el criterio de aceptación "AC-1.2"/)
+      expect(err).toMatch(/falta la dependencia "merge-after #2"/)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('--reconcile bajo --dry-run: el preview nombra las categorías (dependencias, criterios de aceptación) SIN volcar el `--body` completo, y no muta nada', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC_2)
+    const argvLog = join(dir, 'argv.log')
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run', '--reconcile'], {
+        encoding: 'utf8', stdio: QUIET_STDIO,
+        env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[ISSUE_1_DRIFT, ISSUE_2_MATCHING]]), FAKE_GH_ARGV_LOG_FILE: argvLog }),
+      })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(3)
+      const err = e.stderr.toString()
+      expect(err).toMatch(/--reconcile aplicaría.*issue edit 501.*--body <actualizado/)
+      // el texto real del AC/dependencia no se vuelca en el mensaje de preview:
+      expect(err).not.toContain('merge-after #2\n')
+    }
+    expect(threw).toBe(true)
+    const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
+    expect(log).not.toMatch(/issue edit/) // --dry-run jamás muta, ni con --reconcile
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom --dry-run — labels: gateadas por columna (review, punto 2)', () => {
+  const NO_AREA_SPEC = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | login | backend | modelo | – | AC-1.1 | schema |
+`
+  it('sin columna "Área" en la tabla: un area: puesto a mano en el issue no se reporta como "sobra", exit 0', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, NO_AREA_SPEC)
+    const ISSUE_WITH_AREA = {
+      number: 501,
+      title: '#1 login',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }, { name: 'area:ops' }],
+      body: ONE_SLICE_MATCHING_BODY,
+    }
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[ISSUE_WITH_AREA]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/area:ops/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom --dry-run — el exit 3 ante divergencia es una decisión explícita, no una consecuencia (review, punto 3)', () => {
+  // El propio comentario junto al `process.exit` de la rama --dry-run en
+  // ct-groom.mjs documenta el porqué: --dry-run y la corrida real SIN
+  // --reconcile comparten el mismo 3 ante la MISMA divergencia — si
+  // difirieran, un `groom --dry-run && groom` encadenado recibiría una
+  // señal distinta en cada paso ante la misma condición. Este test fija esa
+  // igualdad como comportamiento observable, no solo como comentario.
+  it('--dry-run y la corrida real (sin --reconcile) devuelven el MISMO exit code (3) ante la MISMA divergencia', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
+    const EXISTING = {
+      number: 501,
+      title: '#1 otro título',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
+      body: ONE_SLICE_MATCHING_BODY,
+    }
+    const envOverrides = { FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EXISTING]]), FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]) }
+    const dryRunRes = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', env: fakeEnv(envOverrides) })
+    const realRes = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic'], { encoding: 'utf8', env: fakeEnv(envOverrides) })
+    expect(dryRunRes.status).toBe(3)
+    expect(realRes.status).toBe(3)
     rmSync(dir, { recursive: true, force: true })
   })
 })

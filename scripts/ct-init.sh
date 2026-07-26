@@ -174,9 +174,11 @@ Ejemplo que parsea tal cual (verificado con `ct-groom.mjs --dry-run`):
 
 Re-ejecutar `/ct-groom` tras arreglar la tabla **no duplica issues, pero
 tampoco los actualiza solo**: si un issue ya existe (por su marcador
-`ct-order`), `/ct-groom` compara su título/labels (`type:`/`area:`/`touches:`,
-`status:` queda fuera adrede)/milestone contra lo que la tabla produce hoy y
-**reporta** cualquier diferencia — nunca la aplica sin que se pida
+`ct-order`), `/ct-groom` compara título/milestone/labels (`type:`/`area:`/
+`touches:`, cada uno solo si su columna está en la tabla; `status:` queda
+fuera adrede) Y las secciones del body que el dispatcher obedece de verdad
+(`## Dependencias`, `## Acceptance criteria`) contra lo que la tabla produce
+hoy, y **reporta** cualquier diferencia — nunca la aplica sin que se pida
 `--reconcile` explícitamente. "No duplica" no es "converge".
 
 Detalle completo (todas las condiciones de abort, columnas opcionales,

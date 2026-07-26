@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync } from 'no
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { buildIssueBody } from '../scripts/groom.js'
 
 // F5 — el groom detecta divergencia, no solo existencia. Este fichero cubre
 // la CORRIDA REAL (mutadora, sin --dry-run) contra un `gh` de mentira: el
@@ -25,6 +26,16 @@ const ONE_SLICE_SPEC = `## 9. Slices
 // El plan que ONE_SLICE_SPEC produce hoy (verificado contra groom.js):
 // title "#1 login", labels ['type:backend','area:api','touches:db','status:backlog'],
 // milestone "Epic" (--milestone por defecto).
+
+// ONE_SLICE_MATCHING_BODY: el body EXACTO que ONE_SLICE_SPEC produce hoy —
+// generado con el buildIssueBody real (no a mano), para que los fixtures
+// "coincide en todo" de este fichero coincidan de verdad en TODO lo que F5
+// compara (AC, Dependencias, Descripción, Protegido), no solo en
+// título/labels/milestone.
+const ONE_SLICE_MATCHING_BODY = buildIssueBody(
+  { n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' },
+  { specPath: 'x', specSection: '9' },
+)
 
 function writeSpec(content) {
   const dir = mkdtempSync(join(tmpdir(), 'ctg-reconcile-'))
@@ -50,7 +61,10 @@ const EXISTING_ISSUE_DRIFT = {
   state: 'open',
   milestone: { title: 'Sprint 1' },
   labels: [{ name: 'type:backend' }, { name: 'status:in-progress' }],
-  body: 'cuerpo cualquiera del issue\n<!-- ct-order:1 -->',
+  // body correcto (AC/deps/Descripción/Protegido ya coinciden con el spec) —
+  // así este fixture ejercita SOLO la divergencia de título/milestone/labels
+  // que es su propósito, sin arrastrar drift de body sin querer.
+  body: ONE_SLICE_MATCHING_BODY,
 }
 
 const BASE_ENV = {
@@ -86,7 +100,7 @@ describe('ct-groom (corrida real) — detecta divergencia por defecto, no la apl
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'status:in-progress' }],
-      body: '<!-- ct-order:1 -->',
+      body: ONE_SLICE_MATCHING_BODY,
     }
     const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
@@ -105,7 +119,7 @@ describe('ct-groom (corrida real) — detecta divergencia por defecto, no la apl
       state: 'closed',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
-      body: '<!-- ct-order:1 -->',
+      body: ONE_SLICE_MATCHING_BODY,
     }
     const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
@@ -156,7 +170,7 @@ describe('ct-groom (corrida real) --reconcile — aplica lo detectado vía `gh i
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
-      body: '<!-- ct-order:1 -->',
+      body: ONE_SLICE_MATCHING_BODY,
     }
     const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
     const argvLog = join(dir, 'argv.log')
@@ -196,6 +210,154 @@ describe('ct-groom (corrida real) --reconcile — aplica lo detectado vía `gh i
     expect(res.status).toBe(1)
     expect(res.stderr).toMatch(/no se pudo reconciliar el issue #501/)
     expect(res.stdout).not.toMatch(/reconciliado/) // nunca se reporta éxito tras el fallo
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// ============================================================================
+// Review del coordinador tras la primera versión de F5 — tres puntos:
+// 1) CRÍTICO: excluir el body entero tiraba justo lo que el dispatcher SÍ
+//    obedece (deps → dispatch.js, ac → kickoff.js). Ahora se comparan y se
+//    aplican vía --reconcile (splice quirúrgico del body).
+// 2) La regla de labels debe estar gateada por columna: sin "Área" en la
+//    tabla §9, el spec no tiene autoridad sobre `area:` en absoluto.
+// 3) El exit 3 bajo --dry-run debe ser una decisión, no una consecuencia —
+//    cubierto explícitamente en ct-groom-dryrun.test.js.
+// ============================================================================
+
+describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y --reconcile las aplica (review crítica)', () => {
+  // Dos slices para que la dependencia (#2) sea una referencia real: la
+  // tabla §9 exige que "Dep" apunte a un "#" que exista. El slice #1 pide
+  // dos AC (AC-1.1, AC-1.2) y depende de #2; el issue existente de la orden
+  // 1 solo tiene AC-1.1 y ninguna sección "## Dependencias" — exactamente el
+  // escenario que preocupaba al coordinador: un autor corrige la tabla §9
+  // (añade una dependencia, añade un AC) y antes de este fix no pasaba
+  // nada. El slice #2 ya coincide del todo, para aislar la señal.
+  const SPEC_2 = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | login | backend | modelo | #2 | AC-1.1, AC-1.2 | schema |
+| 2 | signup | backend | registro | – | AC-2.1 | – |
+`
+  const ISSUE_1_DRIFT = {
+    number: 501,
+    title: '#1 login',
+    state: 'open',
+    milestone: { title: 'Epic' },
+    labels: [{ name: 'type:backend' }],
+    // AC-1.2 falta, y no hay ninguna sección "## Dependencias" en absoluto.
+    body: buildIssueBody({ n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' }, { specPath: 'x', specSection: '9' }),
+  }
+  const ISSUE_2_MATCHING = {
+    number: 502,
+    title: '#2 signup',
+    state: 'open',
+    milestone: { title: 'Epic' },
+    labels: [{ name: 'type:backend' }],
+    body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, { specPath: 'x', specSection: '9' }),
+  }
+  const ENV_2 = {
+    FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+    FAKE_GH_LIST_SEQUENCE: JSON.stringify([[ISSUE_1_DRIFT, ISSUE_2_MATCHING]]),
+  }
+
+  it('por defecto: reporta el AC y la dependencia faltantes por stderr, NUNCA llama a `gh issue edit`, exit 3', () => {
+    const { dir, spec } = writeSpec(SPEC_2)
+    const argvLog = join(dir, 'argv.log')
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], { ...ENV_2, FAKE_GH_ARGV_LOG_FILE: argvLog })
+    expect(res.status).toBe(3)
+    expect(res.stderr).toMatch(/falta el criterio de aceptación "AC-1.2"/)
+    expect(res.stderr).toMatch(/falta la dependencia "merge-after #2"/)
+    const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
+    expect(log).not.toMatch(/issue edit/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('--reconcile: aplica el AC y la dependencia faltantes vía `--body` (splice), preserva Descripción/Protegido/marcador, NO toca el issue #2 (ya coincidía), exit 0', () => {
+    const { dir, spec } = writeSpec(SPEC_2)
+    const argvLog = join(dir, 'argv.log')
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], { ...ENV_2, FAKE_GH_ARGV_LOG_FILE: argvLog })
+    expect(res.status).toBe(0)
+    const log = readFileSync(argvLog, 'utf8')
+    expect(log).toMatch(/issue edit 501/)
+    expect(log).not.toMatch(/issue edit 502/) // el #2 ya coincidía del todo — ninguna llamada para él
+    // El --body reconciliado trae el AC añadido y la dependencia añadida...
+    expect(log).toContain('AC-1.2')
+    expect(log).toContain('merge-after #2')
+    // ...y preserva Descripción/Protegido/marcador tal cual estaban (splice
+    // quirúrgico, no regeneración del body entero).
+    expect(log).toContain('modelo')
+    expect(log).toContain('schema')
+    expect(log).toContain('<!-- ct-order:1 -->')
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// NO_AREA_SPEC: a diferencia de ONE_SLICE_SPEC (arriba), esta tabla §9 NO
+// trae columnas "Área" ni "Toca" — el body que produce es idéntico al de
+// ONE_SLICE_MATCHING_BODY (esas columnas no alimentan el body, solo
+// labels), así que se reutiliza.
+const NO_AREA_SPEC = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | login | backend | modelo | – | AC-1.1 | schema |
+`
+
+describe('ct-groom (corrida real) — labels: el spec solo es autoridad de un prefijo si la tabla trae su columna (review, punto 2)', () => {
+  // Sin columna "Área" en absoluto: el spec no tiene NINGUNA opinión sobre
+  // `area:`. Un area:ops puesto a mano en el issue (por el motivo que sea)
+  // nunca debe reportarse como "sobra" — sería un falso positivo que enseña
+  // a ignorar el resto del reporte.
+  it('tabla §9 SIN columna "Área": un area: puesto a mano en el issue no se reporta como "sobra", exit 0', () => {
+    const { dir, spec } = writeSpec(NO_AREA_SPEC)
+    const ISSUE_WITH_AREA = {
+      number: 501,
+      title: '#1 login',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }, { name: 'area:ops' }], // puesto a mano, el spec nunca habló de área
+      body: ONE_SLICE_MATCHING_BODY,
+    }
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[ISSUE_WITH_AREA]]),
+    })
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/area:ops/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom (corrida real) — divergencia SOLO de prosa (Descripción/Protegido): --reconcile no la aplica, exit sigue en 3 (review crítica)', () => {
+  it('Descripción divergente, todo lo demás coincide: --reconcile no llama a `gh issue edit`, avisa, y el exit sigue en 3', () => {
+    const PROSE_DRIFT = {
+      number: 501,
+      title: '#1 login',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      // area:api/touches:db incluidas — ONE_SLICE_SPEC de este fichero SÍ
+      // trae esas columnas, así que hacen falta para que labels/AC/deps NO
+      // diverjan y la única divergencia real sea la Descripción.
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
+      // Descripción distinta ("otro texto" en vez de "modelo") — todo lo
+      // demás (AC, deps, Protegido) coincide con el spec.
+      body: buildIssueBody({ n: 1, name: 'login', type: 'backend', entrega: 'otro texto', deps: [], ac: ['AC-1.1'], protected: 'schema' }, { specPath: 'x', specSection: '9' }),
+    }
+    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
+    const argvLog = join(dir, 'argv.log')
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], {
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[PROSE_DRIFT]]),
+      FAKE_GH_ARGV_LOG_FILE: argvLog,
+    })
+    // --reconcile no puede resolver esto (a propósito, ver reconcile.js) —
+    // el exit code lo refleja con honestidad: sigue en 3, NO en 0, aunque se
+    // haya pedido --reconcile.
+    expect(res.status).toBe(3)
+    expect(res.stderr).toMatch(/diverge solo en prosa/)
+    expect(res.stderr).toMatch(/Descripción\/Protegido/)
+    const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
+    expect(log).not.toMatch(/issue edit/) // nada que aplicar de verdad — ninguna llamada
     rmSync(dir, { recursive: true, force: true })
   })
 })

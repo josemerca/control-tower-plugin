@@ -10,7 +10,7 @@ import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
 // se traduce a los flags de `gh issue edit` para aplicarla. Ver
 // scripts/reconcile.js para la justificación completa de cada decisión (qué
 // se compara, qué se excluye a propósito, y por qué).
-import { diffIssue, hasDrift, formatDrift, buildReconcileEditArgs } from './reconcile.js'
+import { diffIssue, hasDrift, formatDrift, buildReconcileEditArgs, buildReconcileBody } from './reconcile.js'
 // ADDENDA (F3): única fuente de verdad de qué valores de "Tipo" tienen un
 // addendum de kickoff — ver el aviso de "Tipo" no reconocido más abajo.
 import { ADDENDA } from './kickoff.js'
@@ -226,6 +226,20 @@ const OPTIONAL_COLUMN_CONSEQUENCE = {
 for (const col of report.missingOptionalColumns) {
   console.error(`aviso: la tabla §9 no tiene columna "${col}" — ${OPTIONAL_COLUMN_CONSEQUENCE[col] || 'se omite esa información en los issues'}`)
 }
+
+// F5 (review, punto 2): el spec es autoridad de un prefijo de label
+// (`type:`/`area:`/`touches:`) SOLO si la tabla §9 trae la columna que lo
+// alimenta (Tipo/Área/Toca) — sin la columna, el spec no tiene NINGUNA
+// opinión sobre ese prefijo, y reclamarla igual reportaría como "sobra" una
+// label que un humano puso a mano por su cuenta (ruido que entrena a
+// ignorar el resto del reporte de divergencia, ver reconcile.js). Se deriva
+// de `report.missingOptionalColumns` (ya calculado arriba para el aviso de
+// columna ausente) en vez de mantener una segunda comprobación — una sola
+// fuente de verdad de "qué columnas trae esta tabla".
+const ownedLabelPrefixes = []
+if (!report.missingOptionalColumns.includes('Tipo')) ownedLabelPrefixes.push('type:')
+if (!report.missingOptionalColumns.includes('Área')) ownedLabelPrefixes.push('area:')
+if (!report.missingOptionalColumns.includes('Toca')) ownedLabelPrefixes.push('touches:')
 // F3: "Tipo" decide, además de la label "type:<valor>", qué addendum recibe
 // el agente despachado — kickoff.js#renderKickoff hace
 // `ADDENDA[slice.type] || ''` en silencio, así que un valor que no sea
@@ -307,9 +321,32 @@ const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignor
 // de verdad. Solo se intenta si hay un `--repo` real (string): en dry-run sin
 // --repo no hay contra qué comparar, así que se preserva el comportamiento de
 // siempre (solo imprime el plan, nunca toca `gh`).
+// driftCategories: lista qué categorías APLICABLES divergen (título/
+// milestone/labels/deps/ac) — Descripción/Protegido a propósito NO
+// aparecen aquí: --reconcile nunca las toca (ver buildReconcileBody en
+// scripts/reconcile.js), así que no pertenecen a "lo que se aplicaría". Se
+// usa solo para mensajes dirigidos a un humano (dry-run preview, log de
+// "reconciliado") — nunca para decidir qué llamar de verdad; eso lo deciden
+// buildReconcileEditArgs/buildReconcileBody directamente.
+function driftCategories(diff) {
+  const cats = []
+  if (diff.title) cats.push('título')
+  if (diff.milestone) cats.push('milestone')
+  if (diff.labels.missing.length || diff.labels.extra.length) cats.push('labels')
+  if (diff.deps.missing.length || diff.deps.extra.length) cats.push('dependencias')
+  if (diff.ac.missing.length || diff.ac.extra.length) cats.push('criterios de aceptación')
+  return cats
+}
+
 let existingIssues = null
 let reconcileEntries = [] // [{ iss, found, diff }] — found/diff son null si el issue todavía no existe
 let anyUnresolvedDrift = false
+// anyProseOnlyDrift: descripcionDiffers/protectedDiffers de CUALQUIER
+// entrada — --reconcile nunca las resuelve (son prosa, ver
+// scripts/reconcile.js#diffIssue), así que son la ÚNICA divergencia que
+// puede seguir en pie después de una corrida con --reconcile con éxito.
+// Se usa para el código de salida de la corrida real (más abajo).
+let anyProseOnlyDrift = false
 if (typeof repo === 'string') {
   try {
     const raw = JSON.parse(gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=all', '--paginate', '--slurp']))
@@ -322,7 +359,7 @@ if (typeof repo === 'string') {
     const marker = `<!-- ct-order:${iss.order} -->`
     const found = findByMarker(existingIssues, marker)
     if (!found) return { iss, found: null, diff: null }
-    return { iss, found, diff: diffIssue(found, iss, plan.milestone) }
+    return { iss, found, diff: diffIssue(found, iss, plan.milestone, ownedLabelPrefixes) }
   })
   // El reporte de divergencia se imprime SIEMPRE por stderr (mismo canal que
   // el resto de "aviso:" de este script) en cuanto se conoce — antes de la
@@ -333,15 +370,26 @@ if (typeof repo === 'string') {
     if (!found) continue
     for (const line of formatDrift(diff)) console.error(line)
     if (hasDrift(diff)) anyUnresolvedDrift = true
+    if (diff.descripcionDiffers || diff.protectedDiffers) anyProseOnlyDrift = true
   }
   // --reconcile bajo --dry-run: NUNCA muta (ni aquí ni en la rama real de más
   // abajo) — solo hace explícito qué aplicaría una corrida real con
   // --reconcile, para que el preview no calle información que sí actuaría.
+  // El --body reconciliado (si deps/ac divergen) NO se imprime entero — sería
+  // un bloque de texto largo — se nombra por categoría, igual que el resto
+  // de mensajes dirigidos a un humano de este bloque.
   if (reconcileFlag && dryRun) {
     for (const { found, diff } of reconcileEntries) {
       if (!found || !hasDrift(diff)) continue
-      const editArgs = buildReconcileEditArgs(diff)
-      console.error(`--reconcile aplicaría: gh issue edit ${found.number} --repo ${repo} ${editArgs.join(' ')}`)
+      const fieldArgs = buildReconcileEditArgs(diff)
+      const bodyChanges = diff.deps.missing.length || diff.deps.extra.length || diff.ac.missing.length || diff.ac.extra.length
+      if (fieldArgs.length || bodyChanges) {
+        const bodyNote = bodyChanges ? ' --body <actualizado: dependencias/criterios de aceptación>' : ''
+        console.error(`--reconcile aplicaría: gh issue edit ${found.number} --repo ${repo} ${fieldArgs.join(' ')}${bodyNote}`.trim())
+      }
+      if (diff.descripcionDiffers || diff.protectedDiffers) {
+        console.error(`--reconcile NO aplicaría la divergencia de prosa del issue #${found.number} (slice #${diff.order}) — Descripción/Protegido se editan a mano, nunca vía --reconcile`)
+      }
     }
   }
 }
@@ -355,9 +403,18 @@ if (dryRun) {
   // tan malo como el silencio que esta feature corrige, pero en la dirección
   // opuesta: entrenaría a cualquier script que solo mire "¿salió 2, aborta
   // todo?" a tratar una divergencia meramente informativa como si la tabla
-  // §9 estuviera rota. 3 dejar claro, para quien lea el código de salida en
+  // §9 estuviera rota. 3 deja claro, para quien lea el código de salida en
   // vez del texto, que "no hay error, pero hay algo que revisar" es un
   // tercer estado, no una variante de "todo bien" ni de "todo roto".
+  //
+  // Bajo --dry-run esto vale SIEMPRE (con o sin --reconcile): dry-run nunca
+  // resuelve nada de verdad, así que cualquier divergencia detectada sigue
+  // sin resolver al terminar — 3 es la lectura honesta, no una consecuencia
+  // accidental. Es DELIBERADO que --dry-run y la corrida real sin
+  // --reconcile compartan el mismo 3 ante la misma divergencia: si
+  // difirieran, un script que encadenara `groom --dry-run && groom` para
+  // "revisar antes de aplicar" recibiría una señal distinta en cada paso
+  // ante la MISMA condición, lo que sería más confuso que útil.
   process.exit(anyUnresolvedDrift ? 3 : 0)
 }
 
@@ -544,21 +601,37 @@ for (const { iss, found, diff } of reconcileEntries) {
     // ANTES de la rama de --dry-run, así que es idéntica en preview y en
     // corrida real — aquí solo queda, opcionalmente, APLICARLA.
     if (reconcileFlag && hasDrift(diff)) {
-      const editArgs = buildReconcileEditArgs(diff)
-      // Mismo criterio que el resto de mutaciones de este fichero (labels,
-      // milestone, project): un fallo de `gh` aquí NUNCA es benigno — auth,
-      // red, rate limit, o el issue cerrado rechazando el edit por alguna
-      // razón que no podemos anticipar. Abortamos con mensaje claro en vez
-      // de seguir a ciegas con el resto de slices, que podría dejar
-      // reconciliados solo ALGUNOS issues sin que quede constancia clara de
-      // cuáles.
-      try {
-        gh(['issue', 'edit', String(found.number), '--repo', repo, ...editArgs])
-      } catch (e) {
-        console.error(`no se pudo reconciliar el issue #${found.number} (orden #${iss.order}): ${e.message}`)
-        process.exit(1)
+      const fieldArgs = buildReconcileEditArgs(diff) // título/milestone/labels, vía flags
+      const newBody = buildReconcileBody(found.body, iss) // AC/Dependencias, vía splice del body — null si no cambia nada
+      const allArgs = newBody !== null ? [...fieldArgs, '--body', newBody] : fieldArgs
+      if (allArgs.length === 0) {
+        // La ÚNICA divergencia de este issue es de prosa (Descripción/
+        // Protegido) — --reconcile deliberadamente no la toca (ver
+        // scripts/reconcile.js#diffIssue): un splice de texto libre no puede
+        // garantizar que no se pierda una elaboración legítima que un humano
+        // haya añadido dentro de esa misma sección. No hay ninguna llamada a
+        // `gh` que hacer aquí; esta divergencia queda sin resolver a
+        // propósito (ver el código de salida al final del fichero).
+        console.error(`aviso: slice #${iss.order} (issue #${found.number}) diverge solo en prosa (Descripción/Protegido) — --reconcile no la aplica, edítala a mano en GitHub`)
+      } else {
+        // Mismo criterio que el resto de mutaciones de este fichero (labels,
+        // milestone, project): un fallo de `gh` aquí NUNCA es benigno — auth,
+        // red, rate limit, o el issue cerrado rechazando el edit por alguna
+        // razón que no podemos anticipar. Abortamos con mensaje claro en vez
+        // de seguir a ciegas con el resto de slices, que podría dejar
+        // reconciliados solo ALGUNOS issues sin que quede constancia clara de
+        // cuáles.
+        try {
+          gh(['issue', 'edit', String(found.number), '--repo', repo, ...allArgs])
+        } catch (e) {
+          console.error(`no se pudo reconciliar el issue #${found.number} (orden #${iss.order}): ${e.message}`)
+          process.exit(1)
+        }
+        // El --body reconciliado no se imprime entero (puede ser un bloque de
+        // texto largo) — se nombra por categoría, igual que el preview de
+        // --dry-run.
+        console.log(`issue #${found.number} reconciliado (orden #${iss.order}): ${driftCategories(diff).join(', ')}`)
       }
-      console.log(`issue #${found.number} reconciliado (orden #${iss.order}): ${editArgs.join(' ')}`)
     }
     if (project && !hasProjectItem(existingProjectItems, repo, found.number)) {
       console.log(`issue #${found.number} no estaba en el project ${project} (hueco de una corrida anterior interrumpida) — añadiéndolo ahora`)
@@ -578,9 +651,14 @@ for (const { iss, found, diff } of reconcileEntries) {
 
 // F5: código de salida de la corrida real — mismo criterio de 3 estados que
 // bajo --dry-run (ver el comentario junto al `process.exit` de esa rama):
-// 0 si no queda ninguna divergencia sin aplicar, 3 si `anyUnresolvedDrift`
-// seguía en pie y NO se pidió --reconcile. Con --reconcile, cualquier fallo
-// de `gh issue edit` ya abortó con exit(1) más arriba (nunca se sigue a
-// ciegas) — así que llegar hasta aquí con --reconcile significa que TODA la
-// divergencia detectada se aplicó con éxito, y el proceso termina en 0.
-process.exit(anyUnresolvedDrift && !reconcileFlag ? 3 : 0)
+// - sin --reconcile: 3 si `anyUnresolvedDrift` (cualquier categoría) seguía
+//   en pie, 0 si no.
+// - con --reconcile: cualquier fallo de `gh issue edit` ya abortó con
+//   exit(1) más arriba (nunca se sigue a ciegas), así que llegar hasta aquí
+//   significa que título/milestone/labels/deps/ac se aplicaron con éxito
+//   donde divergían. Lo ÚNICO que puede seguir sin resolver es la prosa
+//   (Descripción/Protegido) — --reconcile nunca la toca a propósito (ver
+//   scripts/reconcile.js#diffIssue) — así que `anyProseOnlyDrift` decide el
+//   código de salida en este caso: 3 si queda prosa divergente sin aplicar
+//   (el aviso de arriba ya explicó por qué), 0 si no queda nada.
+process.exit((reconcileFlag ? anyProseOnlyDrift : anyUnresolvedDrift) ? 3 : 0)
