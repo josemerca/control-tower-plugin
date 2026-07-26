@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractAc, extractOrder, mapGhIssue, filterMergedIssues, buildOrderIndex, buildDispatchInput } from '../scripts/gh-issue-map.js'
+import { extractAc, extractDeps, extractOrder, extractSpecLink, locateSection, countHeadingLines, mapGhIssue, filterMergedIssues, buildOrderIndex, buildDispatchInput } from '../scripts/gh-issue-map.js'
 import { selectNext } from '../scripts/dispatch.js'
 import { buildIssueBody } from '../scripts/groom.js'
 
@@ -218,5 +218,117 @@ describe('filterMergedIssues', () => {
   it('defensivo: entrada vacía/ausente no revienta', () => {
     expect(filterMergedIssues([])).toEqual([])
     expect(filterMergedIssues(undefined)).toEqual([])
+  })
+})
+
+// F5 review round 3, CRITICAL 1 — locateSection buscaba la cabecera con una
+// regex SIN anclar a inicio de línea y SIN escapar, mientras el terminador
+// SÍ estaba anclado (`\n##\s`) — las dos mitades usaban criterios
+// distintos. Verificado por construcción (informe del reviewer): una
+// mención de "## Dependencias" dentro de una valla de código, a mitad de
+// línea, o citada, se confundía con una cabecera real. Estos tests
+// reproducen las tres formas exactas del informe.
+describe('locateSection — anclado a columna 0 y consciente de vallas de código (review round 3, Critical 1)', () => {
+  it('mención inline ("...## Dependencias..." a mitad de línea, dentro de un AC) NO se confunde con la cabecera real', () => {
+    const body = [
+      '## Acceptance criteria (EARS, 1:1 con tests)',
+      '- AC-2.1 el body debe traer ## Dependencias cuando hay deps',
+      '',
+      '## Dependencias',
+      '- merge-after #1',
+      '',
+      '## Out of scope / Protected',
+      '- (ninguno declarado)',
+      '',
+      '<!-- ct-order:2 -->',
+    ].join('\n')
+    const loc = locateSection(body, '## Dependencias')
+    expect(loc).not.toBeNull()
+    expect(extractDeps(loc.content)).toEqual([1]) // la sección REAL, no la mención inline
+    // el AC en sí no se trunca por la mención — sigue completo
+    expect(extractAc(body)).toEqual(['AC-2.1 el body debe traer ## Dependencias cuando hay deps'])
+  })
+
+  it('cabecera citada ("> ## Dependencias") NO se confunde con la cabecera real', () => {
+    const body = [
+      '## Descripción',
+      '> ## Dependencias (cita de otro issue, no una cabecera real)',
+      '',
+      '## Acceptance criteria (EARS, 1:1 con tests)',
+      '- AC-1.1',
+      '',
+      '## Dependencias',
+      '- merge-after #3',
+      '',
+      '## Out of scope / Protected',
+      '- (ninguno declarado)',
+      '',
+      '<!-- ct-order:1 -->',
+    ].join('\n')
+    const loc = locateSection(body, '## Dependencias')
+    expect(extractDeps(loc.content)).toEqual([3])
+  })
+
+  it('"## Dependencias" dentro de una valla de código cercada (dentro de "## Descripción") NO se confunde con la cabecera real, y la valla sobrevive intacta', () => {
+    const body = [
+      '## Descripción',
+      'Ejemplo de la sección que genera el groom:',
+      '```',
+      '## Dependencias',
+      '- merge-after #99',
+      '```',
+      'fin del ejemplo.',
+      '',
+      '## Acceptance criteria (EARS, 1:1 con tests)',
+      '- AC-1.1',
+      '',
+      '## Dependencias',
+      '- merge-after #1',
+      '',
+      '## Out of scope / Protected',
+      '- (ninguno declarado)',
+      '',
+      '<!-- ct-order:1 -->',
+    ].join('\n')
+    const depsLoc = locateSection(body, '## Dependencias')
+    expect(extractDeps(depsLoc.content)).toEqual([1]) // la sección REAL, no la de dentro de la valla (#99)
+
+    const descripcionLoc = locateSection(body, '## Descripción')
+    // La sección Descripción debe incluir la valla ENTERA (apertura Y cierre) —
+    // si el cierre "```" se pierde, el resto del body se renderiza como código.
+    expect(descripcionLoc.content).toContain('```\n## Dependencias\n- merge-after #99\n```')
+    expect(descripcionLoc.content).toContain('fin del ejemplo.')
+    expect(descripcionLoc.content).not.toContain('## Acceptance criteria') // no se comió la siguiente cabecera real
+  })
+})
+
+describe('countHeadingLines — cuenta cabeceras duplicadas (review round 3, menor)', () => {
+  it('una sola aparición → 1', () => {
+    expect(countHeadingLines('## Dependencias\n- merge-after #1', '## Dependencias')).toBe(1)
+  })
+  it('ausente → 0', () => {
+    expect(countHeadingLines('## Acceptance criteria\n- x', '## Dependencias')).toBe(0)
+  })
+  it('dos apariciones reales → 2', () => {
+    const body = '## Dependencias\n- merge-after #1\n\n## Dependencias\n- merge-after #2'
+    expect(countHeadingLines(body, '## Dependencias')).toBe(2)
+  })
+  it('una aparición dentro de una valla de código NO cuenta como real', () => {
+    const body = '## Descripción\n```\n## Dependencias\n```\n\n## Dependencias\n- merge-after #1'
+    expect(countHeadingLines(body, '## Dependencias')).toBe(1)
+  })
+})
+
+describe('extractSpecLink — la línea "> Slice #N del epic. Spec: …" (review round 3, importante 5)', () => {
+  it('la extrae tal cual', () => {
+    const body = '> Slice #2 del epic. Spec: [docs/spec.md#9](docs/spec.md#9)\n\n## Acceptance criteria (EARS, 1:1 con tests)\n- AC-1.1'
+    expect(extractSpecLink(body)).toBe('> Slice #2 del epic. Spec: [docs/spec.md#9](docs/spec.md#9)')
+  })
+  it('sin esa línea → null', () => {
+    expect(extractSpecLink('## Acceptance criteria\n- x')).toBeNull()
+  })
+  it('una mención citada/indentada no cuenta como la línea real', () => {
+    const body = '> algo más\n  > Slice #9 no es la línea real (indentada)\n> Slice #2 del epic. Spec: [x#9](x#9)'
+    expect(extractSpecLink(body)).toBe('> Slice #2 del epic. Spec: [x#9](x#9)')
   })
 })

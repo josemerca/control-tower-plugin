@@ -1139,15 +1139,22 @@ const ONE_SLICE_SPEC = `## 9. Slices
 // Plan que ONE_SLICE_SPEC produce con --milestone Epic (verificado contra
 // groom.js): title "#1 login", labels ['type:backend','area:api','touches:db','status:backlog'].
 
-// ONE_SLICE_MATCHING_BODY: el body EXACTO que ONE_SLICE_SPEC produce hoy —
+// matchingBody(specPath): el body EXACTO que ONE_SLICE_SPEC produce hoy —
 // generado con el buildIssueBody real (no a mano) para que un "coincide en
 // todo" de verdad coincida en TODO, incluidas las secciones que F5 ahora
-// también compara (AC, Dependencias, Descripción, Protegido) — no solo
-// título/labels/milestone como en la primera versión de estos tests.
-const ONE_SLICE_MATCHING_BODY = buildIssueBody(
-  { n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' },
-  { specPath: 'x', specSection: '9' },
-)
+// también compara (AC, Dependencias, Descripción, Protegido, y — review
+// round 3 — el enlace al spec). Es una FUNCIÓN, no una constante: el enlace
+// al spec incluye la ruta real del fichero de spec, que en estos tests es
+// un directorio temporal distinto en cada `it` — hay que generarlo con la
+// MISMA ruta (`spec`) que se le pasa al script en cada invocación, o la
+// línea de enlace divergiría por construcción y ya no sería un "coincide en
+// todo" de verdad.
+function matchingBody(specPath) {
+  return buildIssueBody(
+    { n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' },
+    { specPath, specSection: '9' },
+  )
+}
 
 describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F5)', () => {
   it('título/milestone/labels divergentes → se reportan por stderr, exit 3, JSON del plan idéntico al de siempre (nada se muta)', () => {
@@ -1194,7 +1201,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'status:in-progress' }],
-      body: ONE_SLICE_MATCHING_BODY,
+      body: matchingBody(spec),
     }
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
       { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[MATCHING]]) }) })
@@ -1212,7 +1219,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
       state: 'closed',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
-      body: ONE_SLICE_MATCHING_BODY,
+      body: matchingBody(spec),
     }
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
       { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[CLOSED_MATCHING]]) }) })
@@ -1395,7 +1402,7 @@ describe('ct-groom --dry-run — labels: gateadas por columna (review, punto 2)'
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:ops' }],
-      body: ONE_SLICE_MATCHING_BODY,
+      body: matchingBody(spec),
     }
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
       { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[ISSUE_WITH_AREA]]) }) })
@@ -1406,12 +1413,16 @@ describe('ct-groom --dry-run — labels: gateadas por columna (review, punto 2)'
 })
 
 describe('ct-groom --dry-run — el exit 3 ante divergencia es una decisión explícita, no una consecuencia (review, punto 3)', () => {
-  // El propio comentario junto al `process.exit` de la rama --dry-run en
-  // ct-groom.mjs documenta el porqué: --dry-run y la corrida real SIN
-  // --reconcile comparten el mismo 3 ante la MISMA divergencia — si
-  // difirieran, un `groom --dry-run && groom` encadenado recibiría una
-  // señal distinta en cada paso ante la misma condición. Este test fija esa
-  // igualdad como comportamiento observable, no solo como comentario.
+  // --dry-run y la corrida real SIN --reconcile comparten el mismo 3 ante
+  // la MISMA divergencia, por PARIDAD (misma condición, misma señal, sin
+  // sorpresas al pasar de "revisar" a "ejecutar de verdad"). Revisión de
+  // round 3 del coordinador: la justificación original de este fichero
+  // ("así `groom --dry-run && groom` recibe la misma señal") estaba
+  // invertida — con `&&`, un exit 3 CORTA la cadena justo cuando hay
+  // divergencia que --reconcile podría aplicar, así que ese encadenamiento
+  // nunca llegaría a ejecutar la corrida real. La paridad se sostiene por
+  // sí sola (ver el comentario junto al `process.exit` en ct-groom.mjs);
+  // este test fija esa igualdad como comportamiento observable.
   it('--dry-run y la corrida real (sin --reconcile) devuelven el MISMO exit code (3) ante la MISMA divergencia', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
     const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
@@ -1421,7 +1432,7 @@ describe('ct-groom --dry-run — el exit 3 ante divergencia es una decisión exp
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
-      body: ONE_SLICE_MATCHING_BODY,
+      body: matchingBody(spec),
     }
     const envOverrides = { FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EXISTING]]), FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]) }
     const dryRunRes = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', env: fakeEnv(envOverrides) })

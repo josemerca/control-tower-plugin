@@ -75,9 +75,20 @@ export function renderProtectedLine(slice) {
   return (slice.protected && !isNoValueCell(slice.protected)) ? `- 🚫 ${slice.protected}` : '- (ninguno declarado)'
 }
 
+// renderSpecLink (F5 review round 3, importante 5): la línea de enlace al
+// spec ES contenido que el spec posee de verdad — deriva de `--section` y de
+// la ruta del propio spec (`specPath`), no es bookkeeping como el marcador
+// `ct-order`. Extraída por el mismo motivo que renderDescripcion/
+// renderProtectedLine: una sola fuente de verdad de "qué debería decir",
+// compartida entre crear el issue (buildIssueBody) y compararlo después
+// (scripts/reconcile.js#diffIssue).
+export function renderSpecLink(slice, { specPath, specSection }) {
+  return `> Slice #${slice.n} del epic. Spec: [${specPath}#${specSection}](${specPath}#${specSection})`
+}
+
 export function buildIssueBody(slice, { specPath, specSection }) {
   const lines = []
-  lines.push(`> Slice #${slice.n} del epic. Spec: [${specPath}#${specSection}](${specPath}#${specSection})`)
+  lines.push(renderSpecLink(slice, { specPath, specSection }))
   lines.push('')
   // F3: "Entrega" ya no alimenta el título (ver buildIssueTitle) — pasa a
   // ser una descripción OPCIONAL del cuerpo. Va aquí, justo debajo del link
@@ -148,6 +159,7 @@ export function groomPlan(slices, { milestone, specPath, specSection }) {
       ac: s.ac || [],
       descripcion: renderDescripcion(s),
       protectedLine: renderProtectedLine(s),
+      specLink: renderSpecLink(s, { specPath, specSection }),
     })),
   }
 }

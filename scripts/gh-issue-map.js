@@ -8,6 +8,42 @@
 // encabezado "## Acceptance criteria") podía romperlo en silencio hasta el
 // dispatch real contra un repo de verdad.
 
+// FENCE_LINE_RE: delimitador de un bloque de código cercado (CommonMark:
+// hasta 3 espacios de indentación, luego 3+ backticks o 3+ tildes). Una
+// línea que abre o cierra una valla de este tipo NUNCA cuenta como
+// cabecera ni como terminador de sección, sea cual sea su contenido — ver
+// scanLines más abajo.
+const FENCE_LINE_RE = /^ {0,3}(`{3,}|~{3,})/
+
+// scanLines: recorre `body` línea a línea, llevando la cuenta de si la
+// línea actual cae DENTRO de un bloque de código cercado (una línea de
+// valla, dentro o fuera de la cuenta, siempre alterna el estado), y
+// devuelve la primera línea (índice + offset absoluto en la cadena) que
+// satisface `predicate`, IGNORANDO por completo las líneas dentro de una
+// valla. Es el mecanismo compartido detrás de locateSection/locateLine —
+// review round 3 (Critical 1): antes, tanto la cabecera como el
+// terminador de sección se buscaban con una regex sobre la cadena
+// COMPLETA, sin distinguir "dentro de una valla de código" de "estructura
+// real del documento" — un `## Dependencias` mencionado dentro de un
+// bloque de código cercado (documentación, ejemplo…) se confundía con una
+// cabecera real, y el empalme posterior se comía el cierre de la valla.
+function scanLines(body, predicate) {
+  const src = body || ''
+  const lines = src.split('\n')
+  let offset = 0
+  let inFence = false
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (FENCE_LINE_RE.test(line)) {
+      inFence = !inFence
+    } else if (!inFence && predicate(line, i)) {
+      return { index: i, offset, line }
+    }
+    offset += line.length + 1
+  }
+  return null
+}
+
 // locateSection: encuentra dónde vive una sección del body (buildIssueBody
 // en groom.js genera un puñado de secciones con cabecera fija: "##
 // Acceptance criteria…", "## Dependencias", "## Out of scope / Protected",
@@ -17,6 +53,24 @@
 // la línea completa) y por el mismo criterio de "fin de sección" que ya usaba
 // extractAc: la siguiente cabecera "## …", el marcador `<!-- ct-order -->`, o
 // el fin del body. Devuelve `null` si la cabecera no aparece en absoluto.
+//
+// Review round 3 (Critical 1) — reescrita por completo, línea a línea en vez
+// de con una regex sobre la cadena entera: la versión anterior buscaba
+// `headingPrefix` con `.exec(src)` SIN anclar a inicio de línea y SIN
+// escapar el prefijo, mientras el terminador SÍ estaba anclado (`\n##\s`) —
+// las dos mitades usaban criterios distintos, y el empalme se fiaba de la
+// que no anclaba. Verificado por construcción (tests explícitos): una
+// mención de `## Dependencias` a mitad de línea (p.ej. un AC que dice
+// "el body debe traer ## Dependencias cuando hay deps") o citada
+// (`> ## Dependencias`) matcheaba igual que una cabecera real, y el empalme
+// escribía dentro de la sección equivocada. Esta versión exige que la
+// cabecera empiece la línea EXACTAMENTE en la columna 0 (`line.startsWith`,
+// sin construir ninguna regex a partir de `headingPrefix` — ni escapar hace
+// falta, ya no es una regex) y, además, IGNORA cualquier línea dentro de un
+// bloque de código cercado (scanLines) — así ni una mención inline, ni una
+// cita, ni un ejemplo dentro de una valla de código se confunden con la
+// cabecera real, y el terminador usa el MISMO criterio (línea a línea,
+// consciente de vallas) en vez de una regex con otro criterio de anclaje.
 //
 // Se usa tanto para EXTRAER contenido (comparar spec vs. issue — F5) como
 // para REEMPLAZARLO quirúrgicamente (F5 --reconcile, ver
@@ -28,20 +82,93 @@
 // nunca caen dentro del rango de una sección que buildIssueBody sí conoce).
 export function locateSection(body, headingPrefix) {
   const src = body || ''
-  const headingRe = new RegExp(`${headingPrefix}[^\\n]*\\n?`)
-  const headingMatch = headingRe.exec(src)
-  if (!headingMatch) return null
-  const headingStart = headingMatch.index
-  const headingEnd = headingStart + headingMatch[0].length
-  const rest = src.slice(headingEnd)
-  const endMatch = /\n##\s|\n<!--|$/.exec(rest)
-  const contentEnd = headingEnd + (endMatch ? endMatch.index : rest.length)
+  const heading = scanLines(src, (line) => line.startsWith(headingPrefix))
+  if (!heading) return null
+  const headingStart = heading.offset
+  // headingEnd: justo después del '\n' que cierra la línea de cabecera (si
+  // el body termina justo ahí, sin más líneas, headingEnd es src.length).
+  const headingEnd = Math.min(headingStart + heading.line.length + 1, src.length)
+
+  // Terminador: primera línea (a partir de la siguiente a la cabecera),
+  // ignorando vallas, que sea otra cabecera "## " o el marcador "<!--".
+  // `consumed` acumula, línea a línea, la posición (relativa a headingEnd)
+  // de INICIO de la línea que se está evaluando — al encontrar el
+  // terminador en la línea `i`, `consumed` todavía NO incluye esa línea, así
+  // que apunta al carácter '\n' que la precede inmediatamente (o a
+  // headingEnd si no hay ninguna línea de contenido en medio) — mismo punto
+  // de corte que usaba la regex original (`\n##…` ancla EN ese '\n', no
+  // después), para que el formato de "línea en blanco antes de la siguiente
+  // cabecera" que genera buildIssueBody se preserve al reconstruir el
+  // empalme (ver buildReconcileBody).
+  const restLines = src.slice(headingEnd).split('\n')
+  let inFence = false
+  let consumed = 0
+  let contentEnd = src.length
+  for (let i = 0; i < restLines.length; i++) {
+    const line = restLines[i]
+    if (FENCE_LINE_RE.test(line)) {
+      inFence = !inFence
+    } else if (!inFence && (line.startsWith('## ') || line.startsWith('<!--'))) {
+      contentEnd = headingEnd + Math.max(consumed - 1, 0)
+      break
+    }
+    consumed += line.length + 1
+  }
   return { headingStart, headingEnd, contentEnd, content: src.slice(headingEnd, contentEnd) }
 }
 
 export function extractSectionContent(body, headingPrefix) {
   const loc = locateSection(body, headingPrefix)
   return loc ? loc.content.trim() : null
+}
+
+// locateLine / extractLine: como locateSection, pero para una entidad de
+// UNA SOLA línea (sin cabecera + contenido delimitado) — usado para la
+// línea de enlace al spec que buildIssueBody escribe como primera línea del
+// body (`> Slice #N del epic. Spec: […]`). Mismo criterio de anclaje a
+// columna 0 y de ignorar líneas dentro de una valla de código.
+export function locateLine(body, prefix) {
+  const found = scanLines(body, (line) => line.startsWith(prefix))
+  if (!found) return null
+  return { start: found.offset, end: found.offset + found.line.length, line: found.line }
+}
+export function extractLine(body, prefix) {
+  const loc = locateLine(body, prefix)
+  return loc ? loc.line : null
+}
+
+// extractSpecLink: la línea `> Slice #N del epic. Spec: […]` que
+// buildIssueBody (groom.js) escribe siempre como primera línea del body —
+// review round 3, importante 5: es contenido que el spec posee de verdad
+// (deriva de `--section`/la ruta del propio spec), no bookkeeping como el
+// marcador `ct-order` — así que F5 la compara igual que el título.
+export function extractSpecLink(body) {
+  return extractLine(body, '> Slice #')
+}
+
+// countHeadingLines: cuántas veces aparece una cabecera (anclada a columna
+// 0, ignorando vallas de código — mismo criterio que locateSection) en todo
+// el body — no solo si aparece, sino CUÁNTAS veces. Review round 3
+// (menor): locateSection siempre encuentra/empalma la PRIMERA aparición;
+// si un humano duplicó una sección a mano (copiar-pegar, un merge
+// conflictivo mal resuelto…), la segunda copia queda invisible tanto para
+// la comparación como para --reconcile — un "reconcile con éxito" no
+// avisa de que dejó una sección vieja huérfana por ahí. Se usa para
+// avisar de esa situación, no para decidir qué se aplica (eso sigue
+// siendo, a propósito, "la primera").
+export function countHeadingLines(body, headingPrefix) {
+  const src = body || ''
+  const lines = src.split('\n')
+  let inFence = false
+  let count = 0
+  for (const line of lines) {
+    if (FENCE_LINE_RE.test(line)) {
+      inFence = !inFence
+    } else if (!inFence && line.startsWith(headingPrefix)) {
+      count++
+    }
+  }
+  return count
 }
 
 export function extractAc(body) {
@@ -54,13 +181,22 @@ export function extractAc(body) {
     .filter((l) => l && l !== '(rellenar desde el spec)')
 }
 
-// extractDeps: lee TODAS las referencias `merge-after #N` del body, sin
-// anclarse a ninguna sección — groom.js#buildIssueBody las agrupa bajo "##
-// Dependencias", pero el dispatcher (mapGhIssue, más abajo) siempre las leyó
-// así, de todo el body, y F5 (scripts/reconcile.js) reutiliza esta MISMA
-// función para comparar — así "lo que compara F5" y "lo que lee el
-// dispatcher" son, por construcción, la misma extracción, no dos
-// implementaciones que puedan divergir.
+// extractDeps: lee TODAS las referencias `merge-after #N` de la cadena que
+// se le pase, sin anclarse a ninguna sección por sí misma — quien decide el
+// ALCANCE (todo el body, o solo el contenido de una sección) es el
+// llamador:
+//   - mapGhIssue (más abajo), el DISPATCHER real, la llama sobre el body
+//     ENTERO a propósito: dispatch.js necesita ver cualquier `merge-after`
+//     que el issue traiga, viva donde viva.
+//   - scripts/reconcile.js, en cambio, la llama SOLO sobre el contenido de
+//     "## Dependencias" (vía locateSection/extractSectionContent) — review
+//     round 3 (Critical 3): el dominio de detección de F5 tiene que
+//     coincidir con su dominio de APLICACIÓN (el splice de --reconcile,
+//     que solo puede tocar esa sección sin arriesgar corromper contenido
+//     humano en otra parte del body) — si F5 comparara todo el body como
+//     hace el dispatcher, un "merge-after" suelto fuera de la sección
+//     reconocida se reportaría como divergencia que --reconcile nunca
+//     podría resolver de verdad, dejando el proceso en 3 para siempre.
 export function extractDeps(body) {
   return [...(body || '').matchAll(/merge-after #(\d+)/g)].map((m) => parseInt(m[1], 10))
 }
@@ -100,9 +236,10 @@ export function mapGhIssue(i) {
   // `merge-after #<orden>`, no `#<issue>`) — ver buildDispatchInput para la
   // traducción a espacio de número-de-issue antes de comparar con
   // mergedIssues (que sí son números de issue reales). extractDeps (arriba)
-  // es la MISMA extracción que usa F5 (scripts/reconcile.js) para comparar
-  // — un solo sitio que sabe leer `merge-after #N`, no dos que puedan
-  // divergir con el tiempo.
+  // es el ÚNICO sitio que sabe leer `merge-after #N` — F5 (scripts/reconcile.js)
+  // reutiliza esta misma función, solo que sobre el contenido de "##
+  // Dependencias" en vez de sobre el body entero (ver el comentario de
+  // extractDeps para el porqué de esa diferencia de alcance).
   const deps = extractDeps(body)
   return {
     n: i.number,

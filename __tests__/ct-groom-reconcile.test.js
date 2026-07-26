@@ -27,15 +27,21 @@ const ONE_SLICE_SPEC = `## 9. Slices
 // title "#1 login", labels ['type:backend','area:api','touches:db','status:backlog'],
 // milestone "Epic" (--milestone por defecto).
 
-// ONE_SLICE_MATCHING_BODY: el body EXACTO que ONE_SLICE_SPEC produce hoy —
+// matchingBody(specPath): el body EXACTO que ONE_SLICE_SPEC produce hoy —
 // generado con el buildIssueBody real (no a mano), para que los fixtures
 // "coincide en todo" de este fichero coincidan de verdad en TODO lo que F5
-// compara (AC, Dependencias, Descripción, Protegido), no solo en
-// título/labels/milestone.
-const ONE_SLICE_MATCHING_BODY = buildIssueBody(
-  { n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' },
-  { specPath: 'x', specSection: '9' },
-)
+// compara (AC, Dependencias, Descripción, Protegido, y — review round 3 —
+// el enlace al spec). Es una FUNCIÓN, no una constante: el enlace al spec
+// incluye la ruta real del fichero de spec, que en cada test es un
+// directorio temporal distinto (`writeSpec` crea uno nuevo cada vez) — hay
+// que generarlo con la MISMA ruta que se le pasa al script en cada
+// invocación, o la línea de enlace divergiría por construcción.
+function matchingBody(specPath) {
+  return buildIssueBody(
+    { n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' },
+    { specPath, specSection: '9' },
+  )
+}
 
 function writeSpec(content) {
   const dir = mkdtempSync(join(tmpdir(), 'ctg-reconcile-'))
@@ -54,29 +60,36 @@ function run(args, envOverrides = {}) {
 // Issue existente que diverge en título, milestone Y labels a la vez (missing
 // area:/touches:, milestone distinto, título distinto) — un solo fixture que
 // ejercita las tres clases de campo en la misma corrida, más status:in-progress
-// (nunca debe reportarse ni tocarse).
-const EXISTING_ISSUE_DRIFT = {
-  number: 501,
-  title: '#1 iniciar sesión',
-  state: 'open',
-  milestone: { title: 'Sprint 1' },
-  labels: [{ name: 'type:backend' }, { name: 'status:in-progress' }],
-  // body correcto (AC/deps/Descripción/Protegido ya coinciden con el spec) —
-  // así este fixture ejercita SOLO la divergencia de título/milestone/labels
-  // que es su propósito, sin arrastrar drift de body sin querer.
-  body: ONE_SLICE_MATCHING_BODY,
+// (nunca debe reportarse ni tocarse). Es una función de `specPath` por el
+// mismo motivo que matchingBody: el body (correcto salvo por lo que cada
+// test quiere probar) incluye el enlace al spec real.
+function existingIssueDrift(specPath) {
+  return {
+    number: 501,
+    title: '#1 iniciar sesión',
+    state: 'open',
+    milestone: { title: 'Sprint 1' },
+    labels: [{ name: 'type:backend' }, { name: 'status:in-progress' }],
+    // body correcto (AC/deps/Descripción/Protegido/enlace-al-spec ya
+    // coinciden con el spec) — así este fixture ejercita SOLO la
+    // divergencia de título/milestone/labels que es su propósito, sin
+    // arrastrar drift de body sin querer.
+    body: matchingBody(specPath),
+  }
 }
 
-const BASE_ENV = {
-  FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
-  FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EXISTING_ISSUE_DRIFT]]),
+function baseEnv(specPath) {
+  return {
+    FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+    FAKE_GH_LIST_SEQUENCE: JSON.stringify([[existingIssueDrift(specPath)]]),
+  }
 }
 
 describe('ct-groom (corrida real) — detecta divergencia por defecto, no la aplica (F5)', () => {
   it('reporta título/milestone/labels divergentes por stderr, NUNCA llama a `gh issue edit`, exit 3', () => {
     const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
     const argvLog = join(dir, 'argv.log')
-    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], { ...BASE_ENV, FAKE_GH_ARGV_LOG_FILE: argvLog })
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], { ...baseEnv(spec), FAKE_GH_ARGV_LOG_FILE: argvLog })
     expect(res.status).toBe(3)
     expect(res.stderr).toMatch(/divergencia.*slice #1.*issue #501/)
     expect(res.stderr).toMatch(/t.tulo difiere/i)
@@ -94,15 +107,15 @@ describe('ct-groom (corrida real) — detecta divergencia por defecto, no la apl
   })
 
   it('sin ninguna divergencia (issue existente ya coincide) → exit 0, sin líneas de "divergencia"', () => {
+    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
     const MATCHING_ISSUE = {
       number: 501,
       title: '#1 login',
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'status:in-progress' }],
-      body: ONE_SLICE_MATCHING_BODY,
+      body: matchingBody(spec),
     }
-    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
       FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[MATCHING_ISSUE]]),
@@ -113,15 +126,15 @@ describe('ct-groom (corrida real) — detecta divergencia por defecto, no la apl
   })
 
   it('issue cerrado sin ninguna otra divergencia → silencio total sobre el cierre, exit 0', () => {
+    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
     const CLOSED_MATCHING = {
       number: 501,
       title: '#1 login',
       state: 'closed',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
-      body: ONE_SLICE_MATCHING_BODY,
+      body: matchingBody(spec),
     }
-    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
       FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[CLOSED_MATCHING]]),
@@ -132,8 +145,8 @@ describe('ct-groom (corrida real) — detecta divergencia por defecto, no la apl
   })
 
   it('issue cerrado CON divergencia → añade la nota de "cerrado" avisando antes de --reconcile, exit 3', () => {
-    const CLOSED_DRIFT = { ...EXISTING_ISSUE_DRIFT, state: 'closed', milestone: { title: 'Epic' }, labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }] }
     const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
+    const CLOSED_DRIFT = { ...existingIssueDrift(spec), state: 'closed', milestone: { title: 'Epic' }, labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }] }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
       FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[CLOSED_DRIFT]]),
@@ -149,7 +162,7 @@ describe('ct-groom (corrida real) --reconcile — aplica lo detectado vía `gh i
   it('aplica título + milestone + labels en una sola llamada a `gh issue edit`, exit 0', () => {
     const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
     const argvLog = join(dir, 'argv.log')
-    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], { ...BASE_ENV, FAKE_GH_ARGV_LOG_FILE: argvLog })
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], { ...baseEnv(spec), FAKE_GH_ARGV_LOG_FILE: argvLog })
     expect(res.status).toBe(0)
     expect(res.stdout).toMatch(/reconciliado/)
     const log = readFileSync(argvLog, 'utf8')
@@ -164,15 +177,15 @@ describe('ct-groom (corrida real) --reconcile — aplica lo detectado vía `gh i
   })
 
   it('--reconcile sobre un slice SIN divergencia no llama a `gh issue edit` para ese slice (nada que aplicar)', () => {
+    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
     const MATCHING_ISSUE = {
       number: 501,
       title: '#1 login',
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
-      body: ONE_SLICE_MATCHING_BODY,
+      body: matchingBody(spec),
     }
-    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
     const argvLog = join(dir, 'argv.log')
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], {
       FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
@@ -186,8 +199,8 @@ describe('ct-groom (corrida real) --reconcile — aplica lo detectado vía `gh i
   })
 
   it('issue cerrado + --reconcile: igual se aplica el edit (gh issue edit no reabre el issue)', () => {
-    const CLOSED_DRIFT = { ...EXISTING_ISSUE_DRIFT, state: 'closed' }
     const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
+    const CLOSED_DRIFT = { ...existingIssueDrift(spec), state: 'closed' }
     const argvLog = join(dir, 'argv.log')
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], {
       FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
@@ -206,7 +219,7 @@ describe('ct-groom (corrida real) --reconcile — aplica lo detectado vía `gh i
   // de este issue concreto falla (auth, red, rate limit...).
   it('--reconcile: si `gh issue edit` falla, aborta con exit 1 y mensaje claro — nunca sigue a ciegas', () => {
     const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
-    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], { ...BASE_ENV, FAKE_GH_EDIT_FAIL_SUBSTR: 'issue edit 501' })
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], { ...baseEnv(spec), FAKE_GH_EDIT_FAIL_SUBSTR: 'issue edit 501' })
     expect(res.status).toBe(1)
     expect(res.stderr).toMatch(/no se pudo reconciliar el issue #501/)
     expect(res.stdout).not.toMatch(/reconciliado/) // nunca se reporta éxito tras el fallo
@@ -215,7 +228,7 @@ describe('ct-groom (corrida real) --reconcile — aplica lo detectado vía `gh i
 })
 
 // ============================================================================
-// Review del coordinador tras la primera versión de F5 — tres puntos:
+// Review round 2 del coordinador — tres puntos:
 // 1) CRÍTICO: excluir el body entero tiraba justo lo que el dispatcher SÍ
 //    obedece (deps → dispatch.js, ac → kickoff.js). Ahora se comparan y se
 //    aplican vía --reconcile (splice quirúrgico del body).
@@ -223,6 +236,13 @@ describe('ct-groom (corrida real) --reconcile — aplica lo detectado vía `gh i
 //    tabla §9, el spec no tiene autoridad sobre `area:` en absoluto.
 // 3) El exit 3 bajo --dry-run debe ser una decisión, no una consecuencia —
 //    cubierto explícitamente en ct-groom-dryrun.test.js.
+//
+// Review round 3 del coordinador — tres Critical más, atendidos aquí donde
+// aplica a nivel CLI (los tests de la capa pura viven en reconcile.test.js
+// y gh-issue-map.test.js):
+//   2. --reconcile podía salir 0 sobre una divergencia real no aplicada.
+//   4. Issues huérfanos nunca se mencionaban.
+//   6. Descripción/Protegido anclaban el exit code para siempre.
 // ============================================================================
 
 describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y --reconcile las aplica (review crítica)', () => {
@@ -239,32 +259,38 @@ describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y
 | 1 | login | backend | modelo | #2 | AC-1.1, AC-1.2 | schema |
 | 2 | signup | backend | registro | – | AC-2.1 | – |
 `
-  const ISSUE_1_DRIFT = {
-    number: 501,
-    title: '#1 login',
-    state: 'open',
-    milestone: { title: 'Epic' },
-    labels: [{ name: 'type:backend' }],
-    // AC-1.2 falta, y no hay ninguna sección "## Dependencias" en absoluto.
-    body: buildIssueBody({ n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' }, { specPath: 'x', specSection: '9' }),
+  function issue1Drift(specPath) {
+    return {
+      number: 501,
+      title: '#1 login',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }],
+      // AC-1.2 falta, y no hay ninguna sección "## Dependencias" en absoluto.
+      body: buildIssueBody({ n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' }, { specPath, specSection: '9' }),
+    }
   }
-  const ISSUE_2_MATCHING = {
-    number: 502,
-    title: '#2 signup',
-    state: 'open',
-    milestone: { title: 'Epic' },
-    labels: [{ name: 'type:backend' }],
-    body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, { specPath: 'x', specSection: '9' }),
+  function issue2Matching(specPath) {
+    return {
+      number: 502,
+      title: '#2 signup',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }],
+      body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, { specPath, specSection: '9' }),
+    }
   }
-  const ENV_2 = {
-    FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
-    FAKE_GH_LIST_SEQUENCE: JSON.stringify([[ISSUE_1_DRIFT, ISSUE_2_MATCHING]]),
+  function env2(specPath) {
+    return {
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[issue1Drift(specPath), issue2Matching(specPath)]]),
+    }
   }
 
   it('por defecto: reporta el AC y la dependencia faltantes por stderr, NUNCA llama a `gh issue edit`, exit 3', () => {
     const { dir, spec } = writeSpec(SPEC_2)
     const argvLog = join(dir, 'argv.log')
-    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], { ...ENV_2, FAKE_GH_ARGV_LOG_FILE: argvLog })
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], { ...env2(spec), FAKE_GH_ARGV_LOG_FILE: argvLog })
     expect(res.status).toBe(3)
     expect(res.stderr).toMatch(/falta el criterio de aceptación "AC-1.2"/)
     expect(res.stderr).toMatch(/falta la dependencia "merge-after #2"/)
@@ -276,7 +302,7 @@ describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y
   it('--reconcile: aplica el AC y la dependencia faltantes vía `--body` (splice), preserva Descripción/Protegido/marcador, NO toca el issue #2 (ya coincidía), exit 0', () => {
     const { dir, spec } = writeSpec(SPEC_2)
     const argvLog = join(dir, 'argv.log')
-    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], { ...ENV_2, FAKE_GH_ARGV_LOG_FILE: argvLog })
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], { ...env2(spec), FAKE_GH_ARGV_LOG_FILE: argvLog })
     expect(res.status).toBe(0)
     const log = readFileSync(argvLog, 'utf8')
     expect(log).toMatch(/issue edit 501/)
@@ -291,12 +317,43 @@ describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y
     expect(log).toContain('<!-- ct-order:1 -->')
     rmSync(dir, { recursive: true, force: true })
   })
+
+  // Critical 2 (review round 3): si la cabecera de AC se renombra a mano,
+  // --reconcile NO puede reescribirla — debe reportarlo con precisión (no
+  // "solo prosa"), NO llamar a `gh` para nada de ese issue (título/
+  // milestone/labels sí coinciden en este fixture; lo único divergente es
+  // el AC inaplicable), y el exit code debe seguir en 3 aunque se haya
+  // pedido --reconcile.
+  it('cabecera "## Acceptance criteria" renombrada a mano → --reconcile NO la aplica, avisa con precisión (nunca "solo prosa"), exit sigue en 3', () => {
+    const { dir, spec } = writeSpec(SPEC_2)
+    const renamedIssue1 = {
+      ...issue1Drift(spec),
+      body: issue1Drift(spec).body.replace('## Acceptance criteria (EARS, 1:1 con tests)', '## Criterios'),
+    }
+    const argvLog = join(dir, 'argv.log')
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], {
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[renamedIssue1, issue2Matching(spec)]]),
+      FAKE_GH_ARGV_LOG_FILE: argvLog,
+    })
+    expect(res.status).toBe(3) // NO 0 — quedó un gap real sin aplicar
+    expect(res.stderr).toMatch(/no puede aplicar del todo esta divergencia/)
+    expect(res.stderr).toMatch(/criterios de aceptación/)
+    expect(res.stderr).not.toMatch(/solo en prosa/i) // NUNCA esta mentira (Critical 2)
+    // deps SÍ se pudo aplicar (dominio independiente del de AC) — el --body
+    // enviado (embebe saltos de línea propios, por eso se comprueba sobre
+    // el log entero en vez de aislar la línea) debe incluir la dependencia:
+    const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
+    expect(log).toMatch(/issue edit 501/)
+    expect(log).toContain('merge-after #2')
+    rmSync(dir, { recursive: true, force: true })
+  })
 })
 
 // NO_AREA_SPEC: a diferencia de ONE_SLICE_SPEC (arriba), esta tabla §9 NO
 // trae columnas "Área" ni "Toca" — el body que produce es idéntico al de
-// ONE_SLICE_MATCHING_BODY (esas columnas no alimentan el body, solo
-// labels), así que se reutiliza.
+// matchingBody (esas columnas no alimentan el body, solo labels), así que
+// se reutiliza.
 const NO_AREA_SPEC = `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -316,7 +373,7 @@ describe('ct-groom (corrida real) — labels: el spec solo es autoridad de un pr
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:ops' }], // puesto a mano, el spec nunca habló de área
-      body: ONE_SLICE_MATCHING_BODY,
+      body: matchingBody(spec),
     }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
       FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
@@ -328,8 +385,14 @@ describe('ct-groom (corrida real) — labels: el spec solo es autoridad de un pr
   })
 })
 
-describe('ct-groom (corrida real) — divergencia SOLO de prosa (Descripción/Protegido): --reconcile no la aplica, exit sigue en 3 (review crítica)', () => {
-  it('Descripción divergente, todo lo demás coincide: --reconcile no llama a `gh issue edit`, avisa, y el exit sigue en 3', () => {
+// Review round 3, punto 6: una divergencia que --reconcile NUNCA puede
+// resolver (Descripción/Protegido, prosa) no debe anclar el exit code para
+// siempre — se reporta (nota:), pero el proceso sale en 0. El
+// comportamiento ANTERIOR (exit 3 perpetuo) era el mismo problema de ruido
+// que ya se cerró para las labels, en la dirección opuesta.
+describe('ct-groom (corrida real) — divergencia SOLO de prosa (Descripción/Protegido): se reporta, pero YA NO ancla el exit code (review round 3, punto 6)', () => {
+  it('Descripción divergente, todo lo demás coincide: se reporta como "nota:", exit 0 (con o sin --reconcile)', () => {
+    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
     const PROSE_DRIFT = {
       number: 501,
       title: '#1 login',
@@ -340,24 +403,76 @@ describe('ct-groom (corrida real) — divergencia SOLO de prosa (Descripción/Pr
       // diverjan y la única divergencia real sea la Descripción.
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
       // Descripción distinta ("otro texto" en vez de "modelo") — todo lo
-      // demás (AC, deps, Protegido) coincide con el spec.
-      body: buildIssueBody({ n: 1, name: 'login', type: 'backend', entrega: 'otro texto', deps: [], ac: ['AC-1.1'], protected: 'schema' }, { specPath: 'x', specSection: '9' }),
+      // demás (AC, deps, Protegido, enlace al spec) coincide con el spec.
+      body: buildIssueBody({ n: 1, name: 'login', type: 'backend', entrega: 'otro texto', deps: [], ac: ['AC-1.1'], protected: 'schema' }, { specPath: spec, specSection: '9' }),
     }
-    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
     const argvLog = join(dir, 'argv.log')
-    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], {
+    const envBase = {
       FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[PROSE_DRIFT]]),
-      FAKE_GH_ARGV_LOG_FILE: argvLog,
-    })
-    // --reconcile no puede resolver esto (a propósito, ver reconcile.js) —
-    // el exit code lo refleja con honestidad: sigue en 3, NO en 0, aunque se
-    // haya pedido --reconcile.
-    expect(res.status).toBe(3)
-    expect(res.stderr).toMatch(/diverge solo en prosa/)
-    expect(res.stderr).toMatch(/Descripción\/Protegido/)
+    }
+    const resDefault = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], envBase)
+    expect(resDefault.status).toBe(0) // punto 6: ya NO se queda anclado en 3
+    expect(resDefault.stderr).toMatch(/^nota:.*Descripción/m)
+    expect(resDefault.stderr).not.toMatch(/^divergencia:/m) // nada cuenta como divergencia real
+
+    const resReconcile = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], { ...envBase, FAKE_GH_ARGV_LOG_FILE: argvLog })
+    expect(resReconcile.status).toBe(0) // tampoco con --reconcile
     const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
     expect(log).not.toMatch(/issue edit/) // nada que aplicar de verdad — ninguna llamada
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// Importante 4 (review round 3): un issue con marcador ct-order:N cuyo
+// slice N ya no está en la tabla §9 actual (se eliminó la fila) no debe
+// desaparecer en silencio.
+describe('ct-groom (corrida real) — issues huérfanos: un slice eliminado de la tabla §9 no deja su issue en silencio (review round 3, importante 4)', () => {
+  it('issue con ct-order:9 cuando la tabla ya no tiene slice #9 → aviso explícito, exit 3', () => {
+    const { dir, spec } = writeSpec(ONE_SLICE_SPEC) // solo tiene slice #1
+    const orphan = {
+      number: 999,
+      title: '#9 algo que ya no existe',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [],
+      body: '<!-- ct-order:9 -->',
+    }
+    const matchingSlice1 = {
+      number: 501,
+      title: '#1 login',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
+      body: matchingBody(spec),
+    }
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[orphan, matchingSlice1]]),
+    })
+    expect(res.status).toBe(3)
+    expect(res.stderr).toMatch(/issue #999/)
+    expect(res.stderr).toMatch(/ct-order:9/)
+    expect(res.stderr).toMatch(/huérfano/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('sin ningún issue huérfano → sin aviso de huérfanos', () => {
+    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
+    const matchingSlice1 = {
+      number: 501,
+      title: '#1 login',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
+      body: matchingBody(spec),
+    }
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[matchingSlice1]]),
+    })
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/huérfano/)
     rmSync(dir, { recursive: true, force: true })
   })
 })

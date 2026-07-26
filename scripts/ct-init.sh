@@ -174,15 +174,18 @@ Ejemplo que parsea tal cual (verificado con `ct-groom.mjs --dry-run`):
 
 Re-ejecutar `/ct-groom` tras arreglar la tabla **no duplica issues, pero
 tampoco los actualiza solo**: si un issue ya existe (por su marcador
-`ct-order`), `/ct-groom` compara título/milestone/labels (`type:`/`area:`/
-`touches:`, cada uno solo si su columna está en la tabla; `status:` queda
-fuera adrede) Y las secciones del body que el dispatcher obedece de verdad
-(`## Dependencias`, `## Acceptance criteria`) contra lo que la tabla produce
-hoy, y **reporta** cualquier diferencia — nunca la aplica sin que se pida
-`--reconcile` explícitamente. "No duplica" no es "converge".
+`ct-order`), `/ct-groom` compara título/enlace-al-spec/milestone/labels
+(`type:`/`area:`/`touches:`, cada uno solo si su columna está en la tabla;
+`status:` queda fuera adrede) Y las secciones del body que el dispatcher
+obedece de verdad (`## Dependencias`, `## Acceptance criteria`) contra lo
+que la tabla produce hoy, y **reporta** cualquier diferencia (exit `3` si
+queda algo real sin resolver) — nunca la aplica sin que se pida
+`--reconcile` explícitamente. "No duplica" no es "converge". Un issue cuyo
+slice ya no está en la tabla (huérfano) se avisa, no se toca solo.
+`--dry-run --repo` ya necesita red/auth de `gh` (antes era 100% offline).
 
 Detalle completo (todas las condiciones de abort, columnas opcionales,
-avisos no fatales, el reporte de divergencia y `--reconcile`):
+avisos no fatales, el reporte de divergencia, sus límites, y `--reconcile`):
 `commands/ct-groom.md` en el plugin `control-tower-loop`.
 <!-- /ct-init:slices-contract -->
 EOF
