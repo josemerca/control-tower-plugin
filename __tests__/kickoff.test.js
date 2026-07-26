@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from '../scripts/kickoff.js'
+import { renderKickoff, buildStateSeed, ACCOUNT_MAP, ADDENDA } from '../scripts/kickoff.js'
 import { parseState } from '../scripts/state.js'
 
 const SLICE = { n: 7, entrega: 'refresh token', type: 'backend', ac: ['AC-7.1'], deps: [1], issue: '#7' }
@@ -93,6 +93,19 @@ describe('buildStateSeed', () => {
     const seed = buildStateSeed(sliceEmptyAc, { branch: 'feat/7', base: 'main' })
     const { meta } = parseState(seed)
     expect(meta.next_action).toContain('ver issue')
+  })
+})
+
+// F3: `Tipo` (columna §9 del spec) decide qué addendum recibe el agente
+// despachado — ct-groom.mjs necesita el conjunto de valores reconocidos
+// para avisar cuando el spec trae un `Tipo` que no matchea ninguna key de
+// `ADDENDA`, SIN mantener una segunda lista hardcodeada que pueda divergir
+// (si mañana se añade `type: 'ios'` aquí, el aviso de ct-groom.mjs lo
+// reconoce automáticamente, sin tocar ct-groom.mjs). Para eso `ADDENDA`
+// tiene que ser exportado — antes era un `const` interno de este módulo.
+describe('ADDENDA', () => {
+  it('se exporta (ct-groom.mjs deriva de aquí el conjunto de Tipo reconocidos, sin duplicarlo)', () => {
+    expect(Object.keys(ADDENDA).sort()).toEqual(['backend', 'bugfix', 'infra', 'ui'])
   })
 })
 

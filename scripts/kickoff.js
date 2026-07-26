@@ -9,7 +9,18 @@ export const ACCOUNT_MAP = {
   workDir: join(homedir(), '.claude-work'),
 }
 
-const ADDENDA = {
+// Exportado (F3): ct-groom.mjs necesita el conjunto de valores de `Tipo`
+// reconocidos para avisar cuando el spec trae un valor que no matchea
+// ninguna key de aquí — `renderKickoff`, más abajo, hace
+// `ADDENDA[slice.type] || ''` en silencio, así que un `Tipo` que no sea
+// ninguna de estas keys deja al agente despachado SIN ningún addendum, sin
+// que nada lo señale. Exportar el objeto (en vez de mantener una lista
+// aparte de "tipos válidos" en ct-groom.mjs) es la única forma de que ese
+// aviso derive el conjunto reconocido de la ÚNICA fuente de verdad: si
+// mañana se añade un addendum nuevo aquí (o se corrige un typo en una key
+// existente), el aviso de ct-groom.mjs lo refleja solo, sin tocar ese
+// fichero ni arriesgarse a que las dos listas diverjan.
+export const ADDENDA = {
   ui: 'Addendum UI: gate de screenshot obligatorio y respeta el design system; no cambies tokens de marca.',
   backend: 'Addendum backend: migración forward+rollback, respeta contratos, reporta el cambio de API.',
   infra: 'Addendum infra: dry-run/plan primero, nunca secretos en claro, apply solo tras review.',

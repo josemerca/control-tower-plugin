@@ -1,14 +1,32 @@
 // Lógica pura de grooming: de Slice[] (T1) a un plan de operaciones GitHub.
 import { isNoValueCell } from './slices.js'
 
+// F3: el título viene de `slice.name` (columna "Slice" del spec §9), no de
+// `slice.entrega` (columna "Entrega") — antes componía "#N <Entrega>"
+// mientras el texto de "Slice" se descartaba salvo por un posible "#NN", así
+// que un autor que escribe lo natural (nombre corto en Slice, descripción
+// de qué entrega en Entrega) recibía un párrafo entero como título del
+// issue. `slice.name` ya llega limpio de cualquier referencia "#NN" (ver
+// slices.js#analyzeSlicesTable) — buildIssueTitle no necesita, y a
+// propósito no repite, esa limpieza aquí.
 export function buildIssueTitle(slice) {
-  return `#${slice.n} ${slice.entrega}`.trim()
+  return `#${slice.n} ${slice.name}`.trim()
 }
 
 export function buildLabels(slice) {
   const labels = []
-  // Omit empty type to avoid emitting garbage literal "type:" to GitHub
-  if (slice.type) labels.push(`type:${slice.type}`)
+  // Omit empty type to avoid emitting garbage literal "type:" to GitHub.
+  // Review de F3, finding 1: un marcador de "sin valor" ("–", "-", "—",
+  // etc. — el mismo criterio que ya usan Dep/Acepta/Área/Toca, y que
+  // buildIssueBody ya aplica a Protegido) es TRUTHY en JS, así que
+  // `if (slice.type)` a secas lo trataba como un tipo real y emitía la
+  // label literal "type:–" — que `gh label create --force` crearía de
+  // verdad en el repo del usuario. Mismo bug de "area:areamedicacion" por
+  // otra puerta: un marcador que el propio contrato enseña a usar en todas
+  // las demás columnas producía basura en esta. isNoValueCell unifica el
+  // criterio: celda vacía y celda con marcador producen la MISMA salida
+  // (ninguna label "type:").
+  if (slice.type && !isNoValueCell(slice.type)) labels.push(`type:${slice.type}`)
   // area/touches (T14/W-A): alimentan directamente la maquinaria de colisión
   // de claim.js#tokensOf y la serialización de dispatch.js#SERIALIZING_TOUCHES,
   // que hasta ahora quedaba inerte porque /ct-groom nunca emitía estas
@@ -27,6 +45,19 @@ export function buildIssueBody(slice, { specPath, specSection }) {
   const lines = []
   lines.push(`> Slice #${slice.n} del epic. Spec: [${specPath}#${specSection}](${specPath}#${specSection})`)
   lines.push('')
+  // F3: "Entrega" ya no alimenta el título (ver buildIssueTitle) — pasa a
+  // ser una descripción OPCIONAL del cuerpo. Va aquí, justo debajo del link
+  // al spec y ANTES de "Acceptance criteria": quien abre el issue lee
+  // primero QUÉ entrega el slice, y solo después sus criterios de
+  // aceptación — el orden de lectura natural (qué, luego cómo se verifica).
+  // Mismo criterio de "sin valor" que Protegido (isNoValueCell): una celda
+  // vacía, ausente, o con un marcador como "–" no produce ninguna sección
+  // (nada que describir, no un placeholder vacío).
+  if (slice.entrega && !isNoValueCell(slice.entrega)) {
+    lines.push('## Descripción')
+    lines.push(slice.entrega)
+    lines.push('')
+  }
   lines.push('## Acceptance criteria (EARS, 1:1 con tests)')
   const ac = slice.ac || []
   if (ac.length) for (const a of ac) lines.push(`- ${a}`)
