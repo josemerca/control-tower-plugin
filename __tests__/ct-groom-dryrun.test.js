@@ -929,3 +929,51 @@ describe('ct-groom — normalización de marcado en un solo paso cierra la clase
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+// Review round 4/5 (última de F1) — verificado a nivel CLI: la regresión
+// del guion bajo asimétrico (issue 1) y la matriz ampliada de envoltorios
+// (issue 2), en una sola ejecución.
+describe('ct-groom — guion bajo simétrico + prefijo invertido (review round 4)', () => {
+  it('control negativo de nombres de fichero (_layout.tsx, __init__.py, trailing_) llega a las labels SIN mutilar — falla si se vuelve a ^_+/_+$ asimétrico', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | a | backend | y | – | – | – | – | _layout.tsx |
+| 2 | b | backend | y | – | – | – | – | __init__.py |
+| 3 | c | backend | y | – | – | – | – | trailing_ |
+| 4 | d | backend | y | – | – | – | – | mi_token_largo |
+| 5 | e | backend | y | – | – | – | areas-comunes | – |
+`)
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    const plan = JSON.parse(out)
+    const labelsOf = (order) => plan.issues.find((i) => i.order === order).labels
+    expect(labelsOf(1)).toContain('touches:_layout.tsx')
+    expect(labelsOf(2)).toContain('touches:__init__.py')
+    expect(labelsOf(3)).toContain('touches:trailing_')
+    expect(labelsOf(4)).toContain('touches:mi_token_largo')
+    expect(labelsOf(5)).toContain('area:areas-comunes')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('matriz de envoltorios (backtick, asterisco, guion bajo, ~~, comillas rectas, paréntesis, anidado) — todas producen "area:med", ninguna duplica el prefijo', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Slices\n' +
+      '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
+      '|---|---|---|---|---|---|---|---|---|\n' +
+      '| 1 | backtick | backend | y | – | – | – | `area:med` | – |\n' +
+      '| 2 | asterisco | backend | y | – | – | – | **area:med** | – |\n' +
+      '| 3 | guion bajo | backend | y | – | – | – | _area:med_ | – |\n' +
+      '| 4 | tachado | backend | y | – | – | – | ~~area:med~~ | – |\n' +
+      '| 5 | comillas | backend | y | – | – | – | "area:med" | – |\n' +
+      '| 6 | parentesis | backend | y | – | – | – | (area:med) | – |\n' +
+      '| 7 | anidado | backend | y | – | – | – | `**area:med**` | – |\n')
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    const plan = JSON.parse(out)
+    for (const issue of plan.issues) {
+      expect(issue.labels).toContain('area:med')
+      expect(issue.labels.some((l) => /^area:area/.test(l))).toBe(false)
+    }
+    rmSync(dir, { recursive: true, force: true })
+  })
+})

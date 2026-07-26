@@ -937,3 +937,121 @@ describe('parseSlices — normalización de marcado en un solo paso, no por capa
     expect(r.slices[0].deps).toEqual([])
   })
 })
+
+// ============================================================================
+// Review round 4/5 (última de F1) — dos cosas que corrompen datos:
+//
+// 1. REGRESIÓN NUEVA de la round 3: la eliminación de guion bajo por bordes
+//    (^_+ / _+$) no distingue un PAR de énfasis (_x_, __x__) de un guion
+//    bajo inicial/final SIN pareja — que es exactamente cómo empiezan
+//    "_layout.tsx"/"_app.tsx" (Expo Router, Next.js) y "__init__.py"
+//    (Python), y cómo puede terminar "trailing_". El token ES la clave de
+//    colisión de claim.js#tokensOf (comparación exacta), así que corromper
+//    "_layout.tsx" en "layout.tsx" produce colisiones falsas.
+//
+// 2. La clase de envoltorios estaba más ancha que backtick/asterisco/guion
+//    bajo: cualquier carácter no alfanumérico ANTES de "area:" (~~, comillas
+//    rectas, paréntesis, enlaces markdown...) reproducía el defecto
+//    original, porque stripColumnPrefix exigía el prefijo en el índice 0.
+//    Fix: invertir el enfoque — stripColumnPrefix salta los caracteres NO
+//    alfanuméricos iniciales SOLO para detectar el prefijo (sin mutar), y
+//    devuelve la cadena ORIGINAL sin tocar si no encuentra ningún prefijo
+//    ahí. Así deja de depender de qué envoltorio use el autor, sin destruir
+//    contenido cuando no hay prefijo.
+// ============================================================================
+
+describe('parseSlices — guion bajo se quita SOLO si está emparejado simétricamente (review round 4, issue 1: regresión)', () => {
+  it('control negativo de nombres de fichero: sobreviven INTACTOS (falla si se vuelve a ^_+/_+$ asimétrico)', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | a | backend | y | – | – | – | – | _layout.tsx |
+| 2 | b | backend | y | – | – | – | – | _app.tsx |
+| 3 | c | backend | y | – | – | – | – | __init__.py |
+| 4 | d | backend | y | – | – | – | – | trailing_ |
+| 5 | e | backend | y | – | – | – | – | mi_token_largo |
+| 6 | f | backend | y | – | – | – | areas-comunes | – |
+`
+    const s = parseSlices(spec)
+    expect(s[0].touches).toEqual(['_layout.tsx'])
+    expect(s[1].touches).toEqual(['_app.tsx'])
+    expect(s[2].touches).toEqual(['__init__.py']) // la señal delatora: NUNCA "init__.py"
+    expect(s[3].touches).toEqual(['trailing_'])
+    expect(s[4].touches).toEqual(['mi_token_largo'])
+    expect(s[5].area).toEqual(['areas-comunes'])
+  })
+
+  it('guion bajo emparejado simétricamente (_x_, __x__) SÍ se quita — énfasis markdown real', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | a | backend | y | – | – | – | _area:medicacion_ | __touches:pbxproj__ |
+`
+    const s = parseSlices(spec)
+    expect(s[0].area).toEqual(['medicacion'])
+    expect(s[0].touches).toEqual(['pbxproj'])
+  })
+
+  it('"___" (solo guiones bajos, número impar) ya no desaparece en silencio: sobrevive como contenido, no se avisa (nada que avisar)', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | a | backend | y | – | – | – | ___ | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.slices[0].area).toEqual(['_'])
+    expect(r.emptyTokenWarnings).toEqual([])
+  })
+})
+
+describe('parseSlices — stripColumnPrefix invertido: detecta el prefijo saltando basura inicial, sin destruir cuando no hay prefijo (review round 4, issue 2)', () => {
+  it('la matriz de envoltorios (backtick, asterisco, guion bajo emparejado, ~~, comillas rectas, paréntesis, anidados) — todos producen labels limpias, sin duplicar el prefijo, en la MISMA tabla', () => {
+    const spec = '## 9. Slices\n' +
+      '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
+      '|---|---|---|---|---|---|---|---|---|\n' +
+      '| 1 | backtick | backend | y | – | – | – | `area:med` | – |\n' +
+      '| 2 | asterisco | backend | y | – | – | – | **area:med** | – |\n' +
+      '| 3 | guion bajo | backend | y | – | – | – | _area:med_ | – |\n' +
+      '| 4 | tachado | backend | y | – | – | – | ~~area:med~~ | – |\n' +
+      '| 5 | comillas rectas | backend | y | – | – | – | "area:med" | – |\n' +
+      '| 6 | parentesis | backend | y | – | – | – | (area:med) | – |\n' +
+      '| 7 | anidado | backend | y | – | – | – | `**area:med**` | – |\n'
+    const s = parseSlices(spec)
+    for (const slice of s) {
+      expect(slice.area).toEqual(['med'])
+    }
+  })
+
+  it('control negativo del propio invertido: "areas-comunes" (empieza como "area" pero no es el marcador "area:") no se mutila', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | a | backend | y | – | – | – | areas-comunes | – |
+`
+    const s = parseSlices(spec)
+    expect(s[0].area).toEqual(['areas-comunes'])
+  })
+
+  it('reproducción del coordinador (round 3, ya cerrada): cada token en su propio backtick sigue funcionando con el nuevo enfoque invertido', () => {
+    const spec = '## 9. Slices\n' +
+      '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
+      '|---|---|---|---|---|---|---|---|---|\n' +
+      '| 1 | x | backend | y | – | – | – | `area:hoy`, `area:web` | – |\n'
+    const s = parseSlices(spec)
+    expect(s[0].area).toEqual(['hoy', 'web'])
+  })
+})
+
+describe('analyzeSlicesTable — un token que legítimamente acaba vacío siempre avisa, incluso pasando por el paso de guion bajo (review round 4, issue 3)', () => {
+  it('"_~~_" (par de guion bajo envolviendo solo un tachado, sin ningún carácter label-safe) acaba vacío y SÍ avisa — la garantía de F1 se mantiene tras el paso de guion bajo', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| 1 | a | backend | y | – | – | – | _~~_ | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.slices[0].area).toEqual([])
+    expect(r.emptyTokenWarnings).toHaveLength(1)
+    expect(r.emptyTokenWarnings[0]).toMatchObject({ column: 'Área', n: 1 })
+  })
+})

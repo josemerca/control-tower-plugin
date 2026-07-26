@@ -60,80 +60,92 @@ function splitRow(line) {
   return line.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim())
 }
 
-// EMPHASIS_CHARS_RE / stripTokenBoundaryUnderscores / cleanEmphasis (review
-// round 3 — rediseño, no otro parche): las dos rondas anteriores limpiaban
-// marcado "por capas" (bordes de la celda completa en la round 2, que ya
-// había reemplazado un intento aún más simple solo-backticks en F1) — cada
-// capa tapaba una FORMA de marcado (celda entera envuelta, luego backticks
-// anidados) y dejaba otra sin cubrir según en qué posición cayera. El
-// coordinador reprodujo la siguiente a la primera: cada token de una lista
-// envuelto en SU PROPIO backtick — "`area:hoy`, `area:web`". El split por
-// comas partía "`area:hoy" y "area:web`"; ninguna de las dos mitades
-// empezaba Y terminaba con el mismo backtick por separado, así que ningún
-// heurístico "de bordes" (ni a nivel de celda ni a nivel de pieza) los
-// reconocía como envueltos, y el segundo token perdía su "área:" al normalizar
-// exactamente como en el defecto original de F1.
+// EMPHASIS_CHARS_RE / PAIRED_UNDERSCORE_RE / cleanEmphasis (review round 4
+// — segunda mitad del rediseño de la round 3, no un parche encima): la
+// round 3 ya invirtió el enfoque de backtick/asterisco (quitarlos siempre,
+// sin intentar detectar "pares que envuelven"), pero para guion bajo
+// conservó `^_+`/`_+$` — una eliminación ASIMÉTRICA que no distingue un PAR
+// de énfasis real (`_x_`, `__x__`, el cierre es la MISMA cadena que la
+// apertura) de un guion bajo inicial o final SIN pareja. Y eso es
+// exactamente cómo empiezan "_layout.tsx"/"_app.tsx" (Expo Router, Next.js)
+// o "__init__.py" (Python), y cómo puede terminar "trailing_" — nombres de
+// fichero de lo más normales en una columna "Toca". El token ES la clave de
+// colisión de claim.js#tokensOf (comparación exacta): corromper
+// "_layout.tsx" en "layout.tsx" produce colisiones falsas entre slices que
+// no colisionan de verdad.
 //
-// Enfoque nuevo: un solo paso de limpieza, sin depender de POSICIÓN.
-// Backtick (`) y asterisco (*) no tienen ningún significado legítimo DENTRO
-// de un token de label — no hace falta detectar si "envuelven" algo; da
-// igual dónde caigan, se quitan TODOS, de la celda completa, antes de
-// partir por comas. Esto resuelve las cuatro formas (celda entera envuelta,
-// cada token envuelto, mezcla, anidada) de una vez, porque ninguna depende
-// ya de que un wrapper "abra" y "cierre" en el sitio correcto.
-//
-// Guion bajo (_) es distinto: SÍ es legítimo DENTRO de un token
-// (normalizeToken lo permite explícitamente, p.ej. "mi_token") — quitarlo
-// globalmente corrompería esos tokens. Como marcado de énfasis (`_foo_`,
-// `__foo__`) solo tiene sentido en el BORDE de un token, así que ese se
-// seguimos quitando por pieza, después del split (nunca globalmente).
-const EMPHASIS_CHARS_RE = /[`*]/g
-function stripTokenBoundaryUnderscores(s) {
-  return s.replace(/^_+/, '').replace(/_+$/, '')
+// PAIRED_UNDERSCORE_RE exige que el cierre sea la MISMA cadena que la
+// apertura (backreference `\1`) — verificado explícitamente carácter por
+// carácter contra la matriz completa antes de escribir el fix:
+// "_layout.tsx"/"_app.tsx"/"__init__.py"/"trailing_" NO matchean (no
+// terminan en guion bajo, o no tienen pareja simétrica) y quedan intactos;
+// "_x_"/"__x__" SÍ matchean y se reducen a "x".
+const PAIRED_UNDERSCORE_RE = /^(_{1,3})(.+?)\1$/
+function stripPairedUnderscore(s) {
+  const m = PAIRED_UNDERSCORE_RE.exec(s)
+  return m ? m[2] : s
 }
-// cleanEmphasis: limpieza completa (backtick/asterisco fuera globalmente +
-// guion bajo solo en los bordes) para valores de UNA SOLA celda sin
-// estructura de lista (Dep/Acepta/Entrega, vía isNoValueCell) — no hay
-// split por comas de por medio, así que aplicar ambos pasos directamente a
-// la celda entera es correcto y no corrompe nada.
+// EMPHASIS_CHARS_RE: backtick/asterisco no tienen ningún significado
+// legítimo dentro de un token de label — se quitan sin condición.
+const EMPHASIS_CHARS_RE = /[`*]/g
+// cleanEmphasis: limpieza para valores de UNA SOLA celda sin estructura de
+// lista (Dep/Acepta/Entrega, vía isNoValueCell) — no hay split por comas de
+// por medio, así que quitar backtick/asterisco de toda la celda y el par
+// de guion bajo (si lo hay) es seguro y no corrompe nada.
 function cleanEmphasis(raw) {
-  const noEmphasisChars = raw.replace(EMPHASIS_CHARS_RE, '').trim()
-  return stripTokenBoundaryUnderscores(noEmphasisChars).trim()
+  const trimmed = raw.trim()
+  const withoutPairedUnderscore = stripPairedUnderscore(trimmed)
+  return withoutPairedUnderscore.replace(EMPHASIS_CHARS_RE, '').trim()
 }
 
-// stripColumnPrefix (F1, defecto 2): a la columna Área/Toca se le está
-// pidiendo un token ("medicacion"), pero el error natural de un autor humano
-// es escribir la label completa ("area:medicacion") porque es lo que ve en
-// la UI de GitHub. Sin este strip, normalizeToken se limita a borrar el `:`
-// (no es un carácter "label-safe") y el resultado es "areamedicacion", que
-// buildLabels (groom.js) vuelve a prefijar como "area:areamedicacion" —
-// prefijo duplicado, label basura creada de verdad en el repo (`gh label
-// create --force` no rechaza nada). Recibe el token YA limpio (sin
-// backtick/asterisco/guion-bajo-de-borde — ver parseTokenList, que hace esa
-// limpieza antes de llamar aquí), así que no necesita limpiar nada por su
-// cuenta.
+// ALNUM_RE: una letra o dígito unicode — el criterio de "esto ya no es
+// basura envolvente, esto es contenido" que usa stripColumnPrefix.
+const ALNUM_RE = /[\p{L}\p{N}]/u
+
+// stripColumnPrefix (F1, defecto 2 — invertido en la review round 4): a la
+// columna Área/Toca se le está pidiendo un token ("medicacion"), pero el
+// error natural de un autor humano es escribir la label completa
+// ("area:medicacion") porque es lo que ve en la UI de GitHub. Sin este
+// strip, normalizeToken se limita a borrar el `:` (no es un carácter
+// "label-safe") y el resultado es "areamedicacion", que buildLabels
+// (groom.js) vuelve a prefijar como "area:areamedicacion" — prefijo
+// duplicado, label basura creada de verdad en el repo (`gh label create
+// --force` no rechaza nada).
 //
-// Si el prefijo encontrado es el de la OTRA columna (p.ej. "area:" dentro de
-// Toca) se decide TOLERAR igual, no rechazar ni abortar: es información real
-// que el autor sí quiso dar (probablemente confundió en qué columna iba, o
-// copió/pegó desde la columna de al lado), y descartarla sería reintroducir
-// exactamente el tipo de pérdida silenciosa que esta tarea existe para
-// eliminar. Se marca con `mismatched: true` para que el llamador lo
-// reporte como aviso (no error) — el valor se usa, pero el autor debe poder
-// verlo señalado para corregir la columna si fue un despiste.
-function stripColumnPrefix(cleaned, ownPrefix, otherPrefix) {
-  const lower = cleaned.toLowerCase()
+// Las rondas F1/2/3 perseguían esto envoltorio por envoltorio (backtick,
+// luego negrita, luego "celda completa vs. cada pieza", luego guion bajo) y
+// cada una dejaba huecos: CUALQUIER carácter no alfanumérico antes de
+// "area:" (`~~`, comillas rectas, paréntesis, un enlace markdown
+// "[area:x](...)"...) reproduce el mismo defecto, porque el chequeo exigía
+// el marcador en el índice 0 exacto. La lista de envoltorios posibles es
+// infinita; perseguirla uno a uno nunca termina.
+//
+// Enfoque invertido: se SALTAN los caracteres NO alfanuméricos iniciales
+// SOLO para comprobar si el marcador "area:"/"touches:" aparece justo
+// después — sin mutar nada todavía. Si aparece, se quita desde el
+// principio (la basura inicial + el marcador) y se devuelve el resto (que
+// normalizeToken, más abajo, limpia de cualquier basura que quede, delante
+// o detrás — backtick/asterisco/tilde/comillas/paréntesis ya están fuera de
+// su alfabeto permitido). Si NO aparece ningún marcador tras saltar la
+// basura inicial, se devuelve el token ORIGINAL sin tocar — así un valor
+// SIN prefijo (el caso normal, con diferencia el más común) nunca se
+// mutila por esta función: es normalizeToken quien decide, como siempre,
+// qué hacer con su propia puntuación.
+function stripColumnPrefix(raw, ownPrefix, otherPrefix) {
+  const lower = raw.toLowerCase()
+  let i = 0
+  while (i < lower.length && !ALNUM_RE.test(lower[i])) i++
   const ownMarker = `${ownPrefix}:`
-  if (lower.startsWith(ownMarker)) {
-    return { token: cleaned.slice(ownMarker.length), mismatched: false }
+  if (lower.startsWith(ownMarker, i)) {
+    return { token: raw.slice(i + ownMarker.length), mismatched: false }
   }
   if (otherPrefix) {
     const otherMarker = `${otherPrefix}:`
-    if (lower.startsWith(otherMarker)) {
-      return { token: cleaned.slice(otherMarker.length), mismatched: true }
+    if (lower.startsWith(otherMarker, i)) {
+      return { token: raw.slice(i + otherMarker.length), mismatched: true }
     }
   }
-  return { token: cleaned, mismatched: false }
+  return { token: raw, mismatched: false }
 }
 
 // normalizeToken: token crudo (ya sin marcado inline/prefijo de columna) ->
@@ -176,38 +188,43 @@ function parseTokenList(cell, opts = {}) {
   const { ownPrefix, otherPrefix, columnLabel, n, warnings, emptyWarnings } = opts
   const raw = (cell || '').trim()
   if (!raw || isNoValueCell(raw)) return []
-  // Review round 3 (rediseño, no otro parche): backtick/asterisco se quitan
-  // GLOBALMENTE de la celda COMPLETA, antes del split — no importa si
-  // envuelven la celda entera, cada token por separado, una mezcla de
-  // ambos, o vienen anidados; da igual la posición, porque no se intenta
-  // detectar un "par que envuelve", simplemente se borran. Esto es lo que
-  // permite que "`area:hoy`, `area:web`" (cada token en SU PROPIO backtick)
-  // funcione: antes, el split partía "`area:hoy" y "area:web`" y ningún
-  // heurístico de bordes por pieza/por celda reconocía el segundo trozo
-  // como prefijado; ahora los backticks ya no existen en absoluto para
-  // cuando se hace el split.
-  const withoutEmphasisChars = raw.replace(EMPHASIS_CHARS_RE, '')
-  return withoutEmphasisChars
+  // Review round 4: ya NO hace falta limpiar backtick/asterisco de la celda
+  // completa antes del split (como hacía la round 3) — el `stripColumnPrefix`
+  // invertido (ver arriba) detecta el prefijo saltando basura inicial PIEZA
+  // A PIEZA, así que da igual dónde caiga el split respecto al marcado: cada
+  // trozo resultante se limpia por su cuenta.
+  return raw
     .split(',')
     .map((piece) => {
-      // Guion bajo SÍ es legítimo dentro de un token (normalizeToken lo
-      // permite, p.ej. "mi_token") — no se puede quitar globalmente sin
-      // corromperlo. Como marcado de énfasis solo tiene sentido en el
-      // BORDE del token, así que se quita aquí, por pieza, tras el split.
-      const trimmed = stripTokenBoundaryUnderscores(piece.trim()).trim()
-      if (!trimmed) return ''
+      const trimmedPiece = piece.trim()
+      // Celda genuinemente vacía entre comas (p.ej. "api,,db", la pieza del
+      // medio): nunca hubo contenido que reportar, no se avisa.
+      if (!trimmedPiece) return ''
+      // Guion bajo SIMÉTRICAMENTE emparejado (`_x_`, `__x__`) es énfasis
+      // markdown y se quita; uno SIN pareja ("_layout.tsx", "__init__.py",
+      // "trailing_") es contenido legítimo — ver PAIRED_UNDERSCORE_RE.
+      // `stripPairedUnderscore` de una entrada no vacía SIEMPRE devuelve algo
+      // no vacío (el grupo capturado exige al menos 1 carácter), así que no
+      // hace falta un segundo check de "¿quedó vacío?" aquí — deliberado: la
+      // review round 3 tenía un `if (!trimmed) return ''` justo después de su
+      // paso de guion bajo que se saltaba el aviso de "token vacío" (una
+      // celda de solo guiones bajos desaparecía sin avisar, a diferencia de
+      // "???", que sí avisaba). Al no haber un segundo punto de retorno
+      // temprano, TODO camino hacia un token vacío pasa por el único chequeo
+      // de más abajo (`if (!token && emptyWarnings)`), sea cual sea el motivo.
+      const afterUnderscore = stripPairedUnderscore(trimmedPiece)
       let token
       if (!ownPrefix) {
-        token = normalizeToken(trimmed)
+        token = normalizeToken(afterUnderscore)
       } else {
-        const { token: t, mismatched } = stripColumnPrefix(trimmed, ownPrefix, otherPrefix)
+        const { token: t, mismatched } = stripColumnPrefix(afterUnderscore, ownPrefix, otherPrefix)
         if (mismatched && warnings) {
-          warnings.push({ column: columnLabel, n, raw: trimmed, otherPrefix })
+          warnings.push({ column: columnLabel, n, raw: afterUnderscore, otherPrefix })
         }
         token = normalizeToken(t)
       }
       if (!token && emptyWarnings) {
-        emptyWarnings.push({ column: columnLabel, n, raw: trimmed })
+        emptyWarnings.push({ column: columnLabel, n, raw: afterUnderscore })
       }
       return token
     })
