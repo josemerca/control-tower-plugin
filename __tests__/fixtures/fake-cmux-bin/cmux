@@ -1,0 +1,18 @@
+#!/usr/bin/env node
+// Stub de `cmux` para los tests de ct-next.mjs: NUNCA lanza un workspace real.
+// FAKE_CMUX_FAIL hace fallar toda invocación; FAKE_CMUX_FAIL_NAME_SUBSTR hace
+// fallar solo la invocación cuyo `--name` contiene ese substring (para el
+// test de "falla a mitad del bucle con varios slices seleccionados").
+const argv = process.argv.slice(2)
+const nameIdx = argv.indexOf('--name')
+const name = nameIdx !== -1 ? argv[nameIdx + 1] : ''
+
+if (process.env.FAKE_CMUX_FAIL) {
+  console.error('fake-cmux: new-workspace failed (simulado)')
+  process.exit(1)
+}
+if (process.env.FAKE_CMUX_FAIL_NAME_SUBSTR && name.includes(process.env.FAKE_CMUX_FAIL_NAME_SUBSTR)) {
+  console.error('fake-cmux: new-workspace failed (simulado, por nombre)')
+  process.exit(1)
+}
+process.exit(0)

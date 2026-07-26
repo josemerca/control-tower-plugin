@@ -1,0 +1,102 @@
+#!/usr/bin/env node
+// Stub de `gh` para tests: NUNCA toca la red ni ningún repo real. Controlado
+// enteramente por variables de entorno para que los tests de
+// dispatch-check-dryrun.test.js puedan simular fallos de `gh` (auth, rate
+// limit, red) en puntos concretos de la secuencia de claim sin llamar al `gh`
+// real. Ver ese fichero de test para el uso de cada variable.
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'node:fs'
+
+const argv = process.argv.slice(2)
+const joined = argv.join(' ')
+
+// FAKE_GH_ARGV_LOG_FILE (review final, finding 2): registra el argv exacto de
+// cada invocación para que los tests puedan comprobar que la enumeración de
+// issues usa `--paginate` (paginación real) y NUNCA `--limit` (el tope fijo
+// que reintroduce el bug de truncado silencioso) — sin esto no hay forma de
+// distinguir, desde un stub que ignora los flags, si el comando real seguiría
+// truncando contra GitHub de verdad.
+if (process.env.FAKE_GH_ARGV_LOG_FILE) {
+  appendFileSync(process.env.FAKE_GH_ARGV_LOG_FILE, joined + '\n')
+}
+
+function nextCallIndex(counterFile) {
+  if (!counterFile) return 0
+  let n = 0
+  if (existsSync(counterFile)) n = parseInt(readFileSync(counterFile, 'utf8'), 10) || 0
+  writeFileSync(counterFile, String(n + 1))
+  return n
+}
+
+if (argv[0] === 'issue' && argv[1] === 'edit') {
+  const failSubstr = process.env.FAKE_GH_EDIT_FAIL_SUBSTR
+  if (failSubstr && joined.includes(failSubstr)) {
+    console.error('fake-gh: issue edit failed (simulado)')
+    process.exit(1)
+  }
+  process.exit(0)
+}
+
+if (argv[0] === 'issue' && argv[1] === 'view') {
+  process.stdout.write(process.env.FAKE_GH_VIEW_LABELS || '[]')
+  process.exit(0)
+}
+
+if (argv[0] === 'issue' && argv[1] === 'list') {
+  const callIndex = nextCallIndex(process.env.FAKE_GH_COUNTER_FILE)
+  const failAt = process.env.FAKE_GH_LIST_FAIL_AT !== undefined ? Number(process.env.FAKE_GH_LIST_FAIL_AT) : null
+  if (failAt !== null && callIndex === failAt) {
+    console.error('fake-gh: issue list failed (simulado)')
+    process.exit(1)
+  }
+  const seq = JSON.parse(process.env.FAKE_GH_LIST_SEQUENCE || '[[]]')
+  const out = seq[Math.min(callIndex, seq.length - 1)]
+  process.stdout.write(JSON.stringify(out))
+  process.exit(0)
+}
+
+// `gh api repos/<owner>/<repo>/issues ... --paginate --slurp` (review final,
+// finding 2): ct-next.mjs y dispatch-check.mjs enumeran issues abiertos/
+// cerrados por este endpoint REST en vez de `gh issue list --limit N`, para
+// no reintroducir el truncado silencioso. Reutiliza EXACTAMENTE la misma
+// secuenciación por contador que el bloque `issue list` de arriba, para que
+// los tests existentes (que ya orquestan una llamada de "abiertos" seguida de
+// una de "cerrados"/readback vía FAKE_GH_LIST_SEQUENCE) seguiran funcionando
+// sin cambios tras el cambio de comando subyacente.
+if (argv[0] === 'api' && /^repos\/[^/]+\/[^/]+\/issues$/.test(argv[1] || '')) {
+  const callIndex = nextCallIndex(process.env.FAKE_GH_COUNTER_FILE)
+  const failAt = process.env.FAKE_GH_LIST_FAIL_AT !== undefined ? Number(process.env.FAKE_GH_LIST_FAIL_AT) : null
+  if (failAt !== null && callIndex === failAt) {
+    console.error('fake-gh: api issues failed (simulado)')
+    process.exit(1)
+  }
+  const seq = JSON.parse(process.env.FAKE_GH_LIST_SEQUENCE || '[[]]')
+  const out = seq[Math.min(callIndex, seq.length - 1)]
+  process.stdout.write(JSON.stringify(out))
+  process.exit(0)
+}
+
+// `gh repo view <repo> --json defaultBranchRef -q .defaultBranchRef.name`
+// (W-D): ct-next.mjs resuelve la rama por defecto real del repo en vez de
+// asumir "main" a ciegas. FAKE_GH_DEFAULT_BRANCH controla el valor devuelto
+// (default: "main", para que los tests existentes que no fijan esta
+// variable — y que no les importa qué rama base se use — sigan pasando sin
+// cambios). FAKE_GH_REPO_VIEW_FAIL simula que gh no puede resolverlo (repo
+// no encontrado, auth caída, sin red, etc.).
+//
+// Fix round 1, Minor 3 (review de W-D): `??` en vez de `||` — con `||`, fijar
+// FAKE_GH_DEFAULT_BRANCH a la cadena vacía ('') seguía cayendo a 'main' (''
+// es falsy), así que la rama de "gh repo view no devolvió nada" de
+// detectDefaultBranch en ct-next.mjs era intestable con este stub. `??` solo
+// cae al default cuando la variable no está definida en absoluto — una
+// cadena vacía explícita se propaga tal cual, alcanzando de verdad esa rama.
+if (argv[0] === 'repo' && argv[1] === 'view') {
+  if (process.env.FAKE_GH_REPO_VIEW_FAIL) {
+    console.error('fake-gh: repo view failed (simulado)')
+    process.exit(1)
+  }
+  process.stdout.write(`${process.env.FAKE_GH_DEFAULT_BRANCH ?? 'main'}\n`)
+  process.exit(0)
+}
+
+console.error(`fake-gh: comando no soportado en el stub: ${joined}`)
+process.exit(1)

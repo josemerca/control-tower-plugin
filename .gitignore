@@ -1,1 +1,6 @@
 node_modules/
+
+# Salidas efímeras de los harness de experimentos en vivo (scripts/experiments/*.sh):
+# nunca se ejecutan en CI/npm test, y sus resultados no deben versionarse.
+scripts/experiments/*-results/
+
