@@ -14,9 +14,16 @@ shift || true
 #     de una versión anterior, y de cómo actualizarla).
 #   - Nunca destructiva a ciegas: solo reemplaza la sección si su contenido
 #     coincide, byte a byte, con alguna versión que este propio script haya
-#     generado (SLICES_PRISTINE_HASHES). Una sección editada a mano se
-#     distingue de una "sin tocar pero desactualizada" y NO se pisa — hace
-#     falta `--force` para eso, y se avisa al hacerlo.
+#     generado (SLICES_PRISTINE_HASHES). Lo que no reconoce NO se pisa: hace
+#     falta `--force`, y se avisa al hacerlo.
+#     F9: "no lo reconozco" NO es lo mismo que "lo has editado a mano", y el
+#     script ya no lo dice como si lo fuera. Un bloque que no está en la lista
+#     puede ser una edición del usuario o una versión del contrato cuyo hash
+#     este ct-init no lleva registrado, y desde aquí no hay forma de
+#     distinguirlas — así que el mensaje ofrece las dos lecturas en vez de
+#     elegir la que culpa al usuario. Y "no se ha podido calcular el hash"
+#     (máquina sin `shasum` ni `sha256sum`) es un tercer estado con su propio
+#     mensaje: ahí no se ha comparado nada.
 UPDATE_SLICES_CONTRACT=0
 FORCE=0
 for opt in "$@"; do
@@ -142,13 +149,45 @@ SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # script. Es lo que permite distinguir "sin tocar pero desactualizada" de
 # "editada a mano" sin guardar el texto histórico entero: si el bloque que hay
 # en el AGENTS.md coincide con alguno de estos, nadie lo ha tocado y se puede
-# reemplazar sin perder nada. Al cambiar el bloque hay que añadir el hash de
-# la versión NUEVA aquí (el test "el hash de la versión actual está
-# registrado" de __tests__/ct-init.test.js falla si se olvida, y sin ese hash
-# la siguiente versión no podría reconocer a esta como intacta).
+# reemplazar sin perder nada.
+#
+# F9: hasta ahora aquí había DOS hashes — el del bloque actual y el de la
+# última variante anterior. Pero el contenido del bloque cambió NUEVE veces
+# distintas siendo nominalmente "v1" (la línea de versión no existía hasta
+# F6), así que ocho de esas nueve variantes eran irreconocibles: un repo
+# bootstrapeado con el plugin 0.5.1, con el bloque intacto byte a byte, recibía
+# un "la has editado a mano" y `--update-slices-contract` se negaba a
+# actualizarlo. Se registran TODAS.
+#
+# Criterio (F9): un hash por cada bloque DISTINTO que haya emitido cualquier
+# commit alcanzable desde `main`, no solo los que coinciden con un bump de
+# versión del plugin. Dos razones, ambas comprobadas en este repo:
+#   - el repo no tiene tags: un plugin de Claude Code se instala clonando un
+#     ref de git, así que cualquier commit de main pudo ser el HEAD que
+#     alguien instaló — "solo las versiones publicadas" no describe nada real
+#     aquí;
+#   - de todas formas no bastaría: CINCO bloques distintos convivieron bajo el
+#     mismo `plugin.json` 0.6.0, y dos commits (9c6c8cf y d4a5ca8) emiten el
+#     MISMO bloque bajo versiones distintas. La correspondencia
+#     versión-publicada ↔ contenido del bloque no existe.
+# La lista se deriva del historial (ver el test "todo bloque que ct-init emitió
+# alguna vez está registrado"), no de memoria.
+#
+# Formato: un hash por línea, seguido de la procedencia (solo el primer campo
+# se compara). Al cambiar el bloque hay que AÑADIR el hash nuevo — nunca
+# sustituir uno viejo: sin él, los repos sembrados con esa variante vuelven a
+# ser irreconocibles. Los dos tests de autovigilancia del final de
+# __tests__/ct-init.test.js fallan si se olvida cualquiera de las dos cosas.
 SLICES_PRISTINE_HASHES='
-7de20667a7c30a869cfcc1e56577de90e3214c4356c48ded040bf4dc0977159e
-5d90ba2f8203469cc1aad5a189b2c25003d5223d13f920e4bbbe9e2320c3e9cb
+fcbc6afa3d90780dd05f9b3c62d8512ad8a0dda98bd2b6087a293088fcdb87b4  v1, 47 líneas — 9c6c8cf/d4a5ca8 (plugin 0.3.0–0.4.0)
+7170dd1d5fedbe5482dd74ebe4ed8fdf989e7fd44eed65e7ffdb6614e7b2662a  v1, 57 líneas — 2faa2a8 (plugin 0.5.0)
+53bd74b26ee8b331ad7d3e224dd81f0b7e51931ac751f5bfe019d19fe45e815c  v1, 60 líneas — 3475033 (plugin 0.5.1)
+8c02c9e458589f1acabd48697d6a207e7308a9af80a5dfa3c7f944504f3e6a57  v1, 68 líneas — 896de17 (plugin 0.6.0)
+f6da7d5dcc4ae0c2a0c71990ac9a71fe8092af0b71440c2ea946f1514377216f  v1, 70 líneas — 1ae5eee (plugin 0.6.0)
+9628a6dc082694506dfb0911d5309308e82078b2bb62a28671ebef344a562932  v1, 73 líneas — 7ef5f4f (plugin 0.6.0)
+c90554b809bc6af4f50613e75f160b0b0859ffce3412aeb44d10bef2d9da3e0a  v1, 77 líneas — 2b633ed (plugin 0.6.0)
+7de20667a7c30a869cfcc1e56577de90e3214c4356c48ded040bf4dc0977159e  v1, 87 líneas — b968286 (plugin 0.6.0–0.8.0)
+5d90ba2f8203469cc1aad5a189b2c25003d5223d13f920e4bbbe9e2320c3e9cb  v2, 134 líneas — 40adf2c (plugin 0.9.0–)
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -301,13 +340,54 @@ sha256_of() {
   else echo ''; fi
 }
 
+# F9, caso que no estaba contemplado: un AGENTS.md con saltos de línea CRLF
+# (repo editado en Windows, fichero pasado por una herramienta que los
+# convierte, `core.autocrlf`…) llevaba un `\r` pegado al final de CADA línea,
+# incluidos los marcadores. `grep -qxF '<!-- ct-init:slices-contract -->'` no
+# encontraba NI el marcador de apertura, NI el de cierre, NI el heading, así
+# que el script concluía "esta sección no existe todavía" y AÑADÍA una segunda
+# copia entera de las 134 líneas al final del fichero — en silencio, exit 0, y
+# saltándose de paso el guardián de rastro parcial de d4a5ca8, que existe
+# justo para que eso no pueda pasar. Todas las comparaciones de línea de aquí
+# en adelante ignoran un `\r` final.
+#
+# has_line: ¿está esa línea EXACTA en el fichero, con o sin `\r` al final?
+# Con awk y no con `grep -qE '…\r?$'` porque el texto buscado es literal y
+# alguno lleva paréntesis (el heading), que en una ERE significarían otra cosa;
+# y no con `tr -d '\r' | grep -qxF` para no meter una dependencia nueva: si
+# faltara `tr`, esto respondería "no está" y volveríamos a duplicar la sección.
+has_line() {
+  awk -v want="$1" '
+    { line = $0; sub(/\r$/, "", line) }
+    line == want { found = 1; exit }
+    END { exit !found }
+  ' "$2"
+}
+
 # extract_slices_block: el bloque tal cual está HOY en el AGENTS.md, del
-# marcador de apertura al de cierre, ambos incluidos.
+# marcador de apertura al de cierre, ambos incluidos. Se imprime NORMALIZADO
+# (sin `\r`): así el hash de un bloque intacto pero con saltos CRLF coincide
+# con el registrado — que es la verdad ("nadie ha tocado este texto") en vez de
+# un "no lo reconozco" motivado por los saltos de línea.
 extract_slices_block() {
   awk -v om="$SLICES_MARKER_OPEN" -v cm="$SLICES_MARKER_CLOSE" '
-    $0 == om { f = 1 }
-    f { print }
-    f && $0 == cm { exit }
+    { line = $0; sub(/\r$/, "", line) }
+    line == om { f = 1 }
+    f { print line }
+    f && line == cm { exit }
+  ' "$1"
+}
+
+# slices_block_is_crlf: ¿el bloque presente usa CRLF? Decide con qué saltos se
+# reescribe, para no dejar un fichero con la mitad de las líneas en un formato
+# y la mitad en otro.
+slices_block_is_crlf() {
+  awk -v om="$SLICES_MARKER_OPEN" -v cm="$SLICES_MARKER_CLOSE" '
+    { line = $0; sub(/\r$/, "", line) }
+    line == om { f = 1 }
+    f && line != $0 { crlf = 1 }
+    f && line == cm { exit }
+    END { exit !crlf }
   ' "$1"
 }
 
@@ -317,10 +397,15 @@ extract_slices_block() {
 replace_slices_block() {
   local newblock outfile
   newblock="$(mktemp)"; outfile="$(mktemp)"
-  emit_slices_contract > "$newblock"
+  if slices_block_is_crlf "$AGENTS_MD"; then
+    emit_slices_contract | awk '{ printf "%s\r\n", $0 }' > "$newblock"
+  else
+    emit_slices_contract > "$newblock"
+  fi
   awk -v nf="$newblock" -v om="$SLICES_MARKER_OPEN" -v cm="$SLICES_MARKER_CLOSE" '
-    $0 == om && !done { inb = 1; while ((getline line < nf) > 0) print line; close(nf); done = 1; next }
-    inb && $0 == cm { inb = 0; next }
+    { line = $0; sub(/\r$/, "", line) }
+    line == om && !done { inb = 1; while ((getline l < nf) > 0) print l; close(nf); done = 1; next }
+    inb && line == cm { inb = 0; next }
     inb { next }
     { print }
   ' "$AGENTS_MD" > "$outfile"
@@ -328,43 +413,116 @@ replace_slices_block() {
   rm -f "$newblock"
 }
 
-slices_block_is_pristine() {
-  local blockfile hash known
+# slices_block_hash: sha256 del bloque presente, o vacío si esta máquina no
+# tiene con qué calcularlo. Se guarda en una global porque los mensajes lo
+# citan: un hash que no reconocemos es justo el dato que hace falta para
+# registrarlo (y para que quien lo reporte no tenga que explicar nada más).
+SLICES_BLOCK_HASH=''
+compute_slices_block_hash() {
+  local blockfile
   blockfile="$(mktemp)"
   extract_slices_block "$AGENTS_MD" > "$blockfile"
-  hash="$(sha256_of "$blockfile")"
+  SLICES_BLOCK_HASH="$(sha256_of "$blockfile")"
   rm -f "$blockfile"
-  [ -z "$hash" ] && return 1
-  for known in $SLICES_PRISTINE_HASHES; do
-    [ "$hash" = "$known" ] && return 0
-  done
-  return 1
 }
 
-has_open=0; grep -qxF "$SLICES_MARKER_OPEN" "$AGENTS_MD" && has_open=1 || true
-has_close=0; grep -qxF "$SLICES_MARKER_CLOSE" "$AGENTS_MD" && has_close=1 || true
-has_heading=0; grep -qxF "$SLICES_HEADING" "$AGENTS_MD" && has_heading=1 || true
+# slices_block_status: `pristine` | `unknown` | `unverifiable`. Tres estados,
+# no dos (F9): "no coincide con ningún hash conocido" y "no se ha podido
+# calcular el hash" son cosas distintas, y colapsarlas en un solo `return 1`
+# era lo que hacía que una máquina sin `shasum` ni `sha256sum` acusara al
+# usuario de haber editado una sección que estaba intacta.
+# Lee SLICES_BLOCK_HASH; hay que llamar antes a compute_slices_block_hash
+# desde el shell padre (esta se usa dentro de `$(...)`, y lo que asignara ahí
+# se quedaría en la subshell).
+slices_block_status() {
+  if [ -z "$SLICES_BLOCK_HASH" ]; then echo unverifiable; return; fi
+  # Un hash por línea, con la procedencia detrás: solo se compara el campo 1.
+  if printf '%s\n' "$SLICES_PRISTINE_HASHES" |
+     awk -v h="$SLICES_BLOCK_HASH" '$1 == h { found = 1 } END { exit !found }'; then
+    echo pristine
+  else
+    echo unknown
+  fi
+}
+
+has_open=0; has_line "$SLICES_MARKER_OPEN" "$AGENTS_MD" && has_open=1 || true
+has_close=0; has_line "$SLICES_MARKER_CLOSE" "$AGENTS_MD" && has_close=1 || true
+has_heading=0; has_line "$SLICES_HEADING" "$AGENTS_MD" && has_heading=1 || true
 if [ "$has_open" -eq 1 ] && [ "$has_close" -eq 1 ]; then
   # F6, menor 6: hasta ahora esto era un "ya está, no se duplica" a secas —
   # que es exactamente lo que hacía invisible que la sección presente pudiera
   # ser de una versión anterior del contrato.
-  found_version="$(grep -o "$SLICES_VERSION_LINE_RE" "$AGENTS_MD" | head -n1 | grep -o '[0-9]\{1,\}' || true)"
+  # F9: la versión se lee del BLOQUE, no del fichero entero. Con `grep` sobre
+  # todo el AGENTS.md, cualquier línea de versión citada más arriba (el propio
+  # marcador copiado en una nota, un ejemplo dentro de un fence) ganaba por
+  # `head -n1` y el script anunciaba "contrato vNN, al día" sobre un bloque que
+  # ni siquiera había mirado — callándose el aviso que le tocaba dar.
+  found_version="$(extract_slices_block "$AGENTS_MD" | grep -o "$SLICES_VERSION_LINE_RE" | head -n1 | grep -o '[0-9]\{1,\}' || true)"
   [ -z "$found_version" ] && found_version=1 # sin línea de versión = el contrato original (pre-F6)
-  if [ "$found_version" -ge "$SLICES_CONTRACT_VERSION" ]; then
-    echo "sección §9 ya está en $AGENTS_MD (contrato v$found_version, al día), no se duplica"
+  compute_slices_block_hash
+  block_status="$(slices_block_status)"
+  # `hash: …` para los mensajes que hablan de un bloque no reconocido: es el
+  # único dato con el que quien lo reporte puede conseguir que se registre.
+  hash_note="hash del bloque presente: ${SLICES_BLOCK_HASH:-no calculable en esta máquina}"
+  if [ "$found_version" -gt "$SLICES_CONTRACT_VERSION" ]; then
+    # F9: esto antes caía en el "al día" de abajo. No es al día: el bloque es
+    # de un plugin MÁS NUEVO que el que lo está mirando, así que describe un
+    # contrato que este ct-init/ct-groom puede no cumplir. Decirlo.
+    echo "aviso: la sección §9 de $AGENTS_MD es del contrato v$found_version, y este plugin solo llega a la v$SLICES_CONTRACT_VERSION — la sembró una versión más nueva del plugin. No se toca (degradarla sería perder lo que ya tienes). Si /ct-groom no se comporta como describe esa sección, el desactualizado es el plugin: actualízalo." >&2
+  elif [ "$found_version" -eq "$SLICES_CONTRACT_VERSION" ]; then
+    if [ "$UPDATE_SLICES_CONTRACT" -eq 1 ] && [ "$block_status" = unknown ]; then
+      # Se pidió sincronizar y el número de versión ya es el actual, pero el
+      # contenido no es el que emite este plugin. No es "al día" a secas: el
+      # número coincide y el texto no. Pasó de verdad — el contenido del
+      # bloque cambió nueve veces bajo el mismo "v1". (Con el hash sin poder
+      # calcular no se entra aquí: no habría nada que actualizar de todos
+      # modos, y afirmar que el contenido difiere sería inventárselo.)
+      if [ "$FORCE" -eq 1 ]; then
+        replace_slices_block
+        echo "aviso: la sección §9 de $AGENTS_MD ya declaraba v$found_version pero su contenido no coincidía con el que trae este plugin ($hash_note); se ha reemplazado por el actual porque lo pediste con --force. Si había ediciones tuyas en esa sección, ya no están." >&2
+      else
+        echo "aviso: la sección §9 de $AGENTS_MD ya declara la v$found_version (la actual), así que no hay actualización de versión que hacer, pero su contenido NO es el que emite este plugin ($hash_note). Puede ser una edición tuya, o una variante distinta que se publicó con el mismo número de versión. No se toca nada; con --force se reemplazaría por el bloque v$SLICES_CONTRACT_VERSION de este plugin." >&2
+      fi
+    else
+      echo "sección §9 ya está en $AGENTS_MD (contrato v$found_version, al día), no se duplica"
+    fi
   elif [ "$UPDATE_SLICES_CONTRACT" -eq 1 ]; then
-    if slices_block_is_pristine; then
+    if [ "$block_status" = pristine ]; then
       replace_slices_block
       echo "sección §9 actualizada en $AGENTS_MD: contrato v$found_version → v$SLICES_CONTRACT_VERSION (estaba sin editar; el resto del fichero no se ha tocado)"
+    elif [ "$block_status" = unverifiable ] && [ "$FORCE" -eq 0 ]; then
+      # F9: antes esto caía en el "la has editado a mano" de abajo — la
+      # acusación más falsa de todas, porque aquí no se ha llegado a comparar
+      # nada. Categoría propia, con su propia salida.
+      echo "aviso: no se ha podido comprobar si la sección §9 de $AGENTS_MD sigue tal cual la dejó ct-init: esta máquina no tiene ni \`shasum\` ni \`sha256sum\`, y esa comprobación es lo único que impide pisar ediciones tuyas. No se toca nada — el bloque puede estar perfectamente intacto, simplemente no se sabe. Instala uno de los dos (coreutils trae \`sha256sum\`; \`shasum\` viene con perl) y repite, o pasa --force si te consta que esa sección no la has editado." >&2
+      exit 3
     elif [ "$FORCE" -eq 1 ]; then
       replace_slices_block
-      echo "aviso: la sección §9 de $AGENTS_MD estaba EDITADA A MANO (no coincide con ninguna versión generada por ct-init) y se ha sobrescrito con el contrato v$SLICES_CONTRACT_VERSION porque lo pediste con --force — tus cambios en esa sección se han perdido; recupéralos del control de versiones si los necesitas." >&2
+      if [ "$block_status" = unverifiable ]; then
+        echo "aviso: la sección §9 de $AGENTS_MD se ha sobrescrito con el contrato v$SLICES_CONTRACT_VERSION porque lo pediste con --force, SIN haber podido comprobar si estaba sin editar (esta máquina no tiene \`shasum\` ni \`sha256sum\`). Si había ediciones tuyas en esa sección, ya no están: recupéralas del control de versiones." >&2
+      else
+        echo "aviso: la sección §9 de $AGENTS_MD no coincidía con ninguna versión que este ct-init sepa reconocer ($hash_note) y se ha sobrescrito con el contrato v$SLICES_CONTRACT_VERSION porque lo pediste con --force. Si había ediciones tuyas en esa sección, ya no están: recupéralas del control de versiones." >&2
+      fi
     else
-      echo "aviso: la sección §9 de $AGENTS_MD es del contrato v$found_version (el actual es v$SLICES_CONTRACT_VERSION), pero su contenido NO coincide con lo que ct-init generó nunca: la has editado a mano. No se toca nada. Compara a mano con el contrato actual, o pasa --force junto a --update-slices-contract para sobrescribirla (perderás tus ediciones de esa sección)." >&2
+      # F9: este mensaje decía "la has editado a mano". No lo sabe. Lo único
+      # que sabe es que el hash no está en su lista, y esa lista solo cubre
+      # los bloques que ESTE ct-init conoce: un bloque sembrado por una
+      # versión del plugin que no tiene registrada (pasó con ocho de las nueve
+      # variantes del contrato v1) es indistinguible de una edición a mano.
+      # No se elige la interpretación que culpa al usuario.
+      echo "aviso: la sección §9 de $AGENTS_MD es del contrato v$found_version (el actual es v$SLICES_CONTRACT_VERSION), pero su contenido no coincide con ninguno de los bloques que este ct-init sabe reconocer ($hash_note). Eso puede ser (a) una edición a mano de esa sección, o (b) un bloque intacto sembrado por una versión del plugin cuyo hash este ct-init no lleva registrado — desde aquí NO hay forma de distinguirlas, así que no se toca nada por si es (a). Para salir de dudas, mira el historial de $AGENTS_MD (\`git log -p -- AGENTS.md\`): si esa sección no se ha tocado desde que se creó, es (b) — repórtalo con ese hash para que quede registrado, y mientras tanto pasa --force junto a --update-slices-contract para adoptar el contrato v$SLICES_CONTRACT_VERSION (si SÍ había ediciones tuyas, se pierden)." >&2
       exit 3
     fi
   else
-    echo "aviso: la sección §9 de $AGENTS_MD es del contrato v$found_version, y este plugin trae la v$SLICES_CONTRACT_VERSION — no se toca nada por defecto (podrías tenerla editada a mano). Para adoptar la nueva: bash $HERE/scripts/ct-init.sh $TARGET --update-slices-contract (solo la reemplaza si está tal cual la dejó ct-init; con --force, también si la editaste)." >&2
+    # Corrida normal (sin el flag): solo se avisa. F9 — el estado del bloque ya
+    # está calculado, así que el aviso puede decir si actualizar es seguro en
+    # vez de dejar al usuario con el "podrías tenerla editada a mano" genérico.
+    case "$block_status" in
+      pristine) update_note="Está exactamente como la dejó ct-init, así que actualizarla no pierde nada:" ;;
+      unverifiable) update_note="No se ha podido comprobar si está sin editar (esta máquina no tiene ni \`shasum\` ni \`sha256sum\`), así que la actualización se negará hasta que lo instales:" ;;
+      *) update_note="Su contenido no coincide con ningún bloque que este ct-init reconozca ($hash_note) — puede ser una edición tuya o una versión que no tiene registrada, así que la actualización se negará sin --force:" ;;
+    esac
+    echo "aviso: la sección §9 de $AGENTS_MD es del contrato v$found_version, y este plugin trae la v$SLICES_CONTRACT_VERSION — no se toca nada por defecto. $update_note bash $HERE/scripts/ct-init.sh $TARGET --update-slices-contract" >&2
   fi
 elif [ "$has_open" -eq 1 ] || [ "$has_close" -eq 1 ] || [ "$has_heading" -eq 1 ]; then
   echo "aviso: $AGENTS_MD parece tener restos parciales de la sección §9 (contrato /ct-groom) — falta el marcador de apertura, el de cierre, o ambos no acompañan al heading; no se añade nada para no duplicar contenido. Revisa $AGENTS_MD a mano: si la sección sigue siendo válida, complétala con '$SLICES_MARKER_OPEN' antes del heading y '$SLICES_MARKER_CLOSE' al final." >&2
