@@ -6,7 +6,8 @@
 // registra cada invocación (comando + argv) en un fichero de log para que el
 // test verifique qué intentó ct-next.mjs y en qué orden — igual que
 // fake-gh-bin/gh hace para los tests de dispatch-check.
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 
 const argv = process.argv.slice(2)
 const joined = argv.join(' ')
@@ -53,6 +54,14 @@ function main() {
   // precisamente "no hay rama" y los tests deben poder partir de ahí sin
   // tener que apagar nada.
   if (argv[0] === 'rev-parse' && argv[1] === '--verify' && argv[2] === '--quiet' && /^refs\/heads\/feat\/\d+$/.test(argv[3] || '')) {
+    // FAKE_GIT_REV_PARSE_BROKEN (D4): simula una CONSULTA rota (repo
+    // corrupto, .git ilegible) — git sale con 128, no con 1. ct-next.mjs
+    // distingue los dos: 1 = "la ref no existe" (respuesta), cualquier otro
+    // = "no pude preguntar" (aviso, nunca "está libre").
+    if (process.env.FAKE_GIT_REV_PARSE_BROKEN) {
+      console.error('fake-git: fatal: not a git repository (simulado)')
+      process.exit(128)
+    }
     const n = (argv[3] || '').replace('refs/heads/feat/', '')
     const existing = (process.env.FAKE_GIT_STALE_BRANCH_EXISTS || '').split(',').map((s) => s.trim()).filter(Boolean)
     if (!existing.includes(n)) process.exit(1)
@@ -81,6 +90,26 @@ function main() {
       process.exit(1)
     }
     process.stdout.write(`${process.env.FAKE_GIT_REMOTE_ORIGIN || 'https://github.com/o/r.git'}\n`)
+    process.exit(0)
+  }
+
+  // `git worktree list --porcelain` (D4): ct-next.mjs lo consulta en el
+  // preflight para detectar un worktree REGISTRADO cuyo directorio ya no
+  // existe (borrado a mano, sin `git worktree remove`) — ese caso hace
+  // fallar a `git worktree add` con "missing but already registered
+  // worktree", y en el run real eso ocurriría con el claim ya escrito.
+  // FAKE_GIT_WORKTREE_REGISTERED: rutas registradas extra, separadas por
+  // coma. Por defecto solo está registrado el propio toplevel, que es lo que
+  // devuelve un repo normal sin worktrees.
+  if (argv[0] === 'worktree' && argv[1] === 'list') {
+    if (process.env.FAKE_GIT_WORKTREE_LIST_FAIL) {
+      console.error('fake-git: worktree list failed (simulado)')
+      process.exit(1)
+    }
+    const top = process.env.FAKE_GIT_TOPLEVEL || '/tmp/fake-repo-root'
+    const extra = (process.env.FAKE_GIT_WORKTREE_REGISTERED || '').split(',').map((s) => s.trim()).filter(Boolean)
+    const out = [top, ...extra].map((p) => `worktree ${p}\n\n`).join('')
+    process.stdout.write(out)
     process.exit(0)
   }
 
@@ -121,6 +150,24 @@ function main() {
     if (process.env.FAKE_GIT_WORKTREE_ADD_FAIL) {
       console.error('fake-git: worktree add failed (simulado)')
       process.exit(1)
+    }
+    // FAKE_GIT_WORKTREE_ADD_AS_FILE (D4): crea la ruta del worktree como un
+    // FICHERO en vez de como un directorio, para que el `mkdirSync(
+    // `${wt}/.agent`)` posterior de ct-next.mjs falle con ENOTDIR de forma
+    // determinista y sin depender de permisos. Sustituye al truco anterior
+    // de los tests (pre-crear `.worktrees/<n>` como fichero ANTES de correr
+    // ct-next.mjs), que dejó de servir cuando ct-next.mjs pasó a comprobar
+    // que el destino esté libre ANTES de reclamar (D4, defecto 3): con esa
+    // comprobación, el pre-creado ya no llega nunca al paso del seed — se
+    // detecta antes, que es justo el arreglo. Crearlo DURANTE el `worktree
+    // add` reproduce el mismo fallo del seed sin desactivar la comprobación
+    // nueva: el destino estaba libre cuando se miró, y algo salió mal
+    // después. `-b <branch> <wt> <base>` → argv[3] es la ruta del worktree.
+    if (process.env.FAKE_GIT_WORKTREE_ADD_AS_FILE) {
+      const wt = argv[argv.indexOf('-b') + 2]
+      mkdirSync(dirname(wt), { recursive: true })
+      writeFileSync(wt, '')
+      process.exit(0)
     }
     process.exit(0)
   }

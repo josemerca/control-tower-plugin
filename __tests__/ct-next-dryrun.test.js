@@ -1,10 +1,12 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { shQuote } from '../scripts/shquote.js'
+// D4: entorno hermético (dirs de cuenta + stubs de cmux/claude) — ver fixtures/hermetic-env.js
+import { ACCOUNT_ENV, hermeticEnv } from './fixtures/hermetic-env.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-next.mjs')
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
@@ -19,7 +21,11 @@ const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
 // stderr disponibles vía `e.stdout`/`e.stderr` sin ecoarlos al padre.
 function run(args, envOverrides = {}) {
   try {
-    const out = execFileSync('node', [script, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...envOverrides } })
+    // hermeticEnv() (D4): además de los dirs de cuenta, mete los stubs de
+    // `cmux`/`claude` por delante del PATH real — el preflight los BUSCA (no
+    // los ejecuta), y sin esto la suite dependería de que la máquina que la
+    // corre los tenga instalados.
+    const out = execFileSync('node', [script, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...hermeticEnv(), ...envOverrides } })
     return { code: 0, out }
   } catch (e) {
     return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }
@@ -379,6 +385,7 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
     join(fixturesDir, 'fake-git-bin'),
     join(fixturesDir, 'fake-gh-bin'),
     join(fixturesDir, 'fake-cmux-bin'),
+    join(fixturesDir, 'fake-claude-bin'),
     process.env.PATH,
   ].join(':')
 
@@ -392,7 +399,7 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
       const out = execFileSync('node', [script, ...args], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'], // finding 11: no ecoar el ruido esperado al padre
-        env: { ...process.env, PATH: fakePath, ...envOverrides },
+        env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
       })
       return { code: 0, out }
     } catch (e) {
@@ -408,19 +415,23 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
 
   const openIssue42 = { number: 42, title: '#42 algo', labels: [{ name: 'status:ready' }], body: '' }
 
-  it('el seed de STATE.md falla (wt ya existe como fichero, no directorio) → limpia y avisa que se puede reintentar', () => {
+  // FAKE_GIT_WORKTREE_ADD_AS_FILE (D4): el stub de `git worktree add` crea la
+  // ruta del worktree COMO FICHERO, así que el `mkdirSync(`${wt}/.agent`)`
+  // posterior de ct-next.mjs revienta con ENOTDIR de forma determinista, sin
+  // depender de permisos. Antes, estos tests pre-creaban ese fichero ANTES de
+  // arrancar ct-next.mjs; desde D4 (defecto 3) eso ya no sirve — ct-next.mjs
+  // comprueba que el destino esté libre ANTES de reclamar, así que un
+  // worktree pre-existente se detecta en el preflight y nunca llega al seed
+  // (que es exactamente el arreglo). Crear el fichero DURANTE el `worktree
+  // add` reproduce el mismo fallo del seed sin desactivar esa comprobación.
+  it('el seed de STATE.md falla (el worktree resultó no ser un directorio) → limpia y avisa que se puede reintentar', () => {
     const repoRoot = makeRepoRoot()
-    mkdirSync(join(repoRoot, '.worktrees'), { recursive: true })
-    // Pre-crea la ruta del worktree COMO FICHERO: `git worktree add` está
-    // stubbeado (no toca disco), así que sigue siendo un fichero cuando
-    // ct-next.mjs intenta mkdirSync(`${wt}/.agent`, {recursive:true}) — eso
-    // revienta con ENOTDIR de forma determinista, sin depender de permisos.
-    writeFileSync(join(repoRoot, '.worktrees', '42'), '')
     const counterFile = join(repoRoot, 'gh-list-count')
     const r = runReal(['--repo', 'o/r', '--cap', '1'], {
       FAKE_GIT_TOPLEVEL: repoRoot,
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
       FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GIT_WORKTREE_ADD_AS_FILE: '1',
     })
     expect(r.code).toBe(1)
     expect(r.out).toMatch(/no se pudo sembrar \.agent\/STATE\.md/)
@@ -436,14 +447,13 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
   // fallar al reintentarlo, y por el `&&` el otro nunca llegaría a correr).
   it('el worktree remove falla pero el branch -D (intentado por separado) sí tiene éxito → ATENCIÓN solo con el comando de worktree, sin && y sin mencionar la rama', () => {
     const repoRoot = makeRepoRoot()
-    mkdirSync(join(repoRoot, '.worktrees'), { recursive: true })
-    writeFileSync(join(repoRoot, '.worktrees', '42'), '')
     const counterFile = join(repoRoot, 'gh-list-count')
     const wtPath = join(repoRoot, '.worktrees', '42')
     const r = runReal(['--repo', 'o/r', '--cap', '1'], {
       FAKE_GIT_TOPLEVEL: repoRoot,
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
       FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GIT_WORKTREE_ADD_AS_FILE: '1',
       FAKE_GIT_WORKTREE_REMOVE_FAIL: '1',
     })
     expect(r.code).toBe(1)
@@ -455,13 +465,12 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
 
   it('el branch -D falla pero el worktree remove (intentado por separado) sí tiene éxito → ATENCIÓN solo con el comando de rama, sin && y sin mencionar el worktree', () => {
     const repoRoot = makeRepoRoot()
-    mkdirSync(join(repoRoot, '.worktrees'), { recursive: true })
-    writeFileSync(join(repoRoot, '.worktrees', '42'), '')
     const counterFile = join(repoRoot, 'gh-list-count')
     const r = runReal(['--repo', 'o/r', '--cap', '1'], {
       FAKE_GIT_TOPLEVEL: repoRoot,
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
       FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GIT_WORKTREE_ADD_AS_FILE: '1',
       FAKE_GIT_BRANCH_DELETE_FAIL: '1',
     })
     expect(r.code).toBe(1)
@@ -473,14 +482,13 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
 
   it('worktree remove Y branch -D fallan los dos → ATENCIÓN con ambos comandos, separados (nunca con &&)', () => {
     const repoRoot = makeRepoRoot()
-    mkdirSync(join(repoRoot, '.worktrees'), { recursive: true })
-    writeFileSync(join(repoRoot, '.worktrees', '42'), '')
     const counterFile = join(repoRoot, 'gh-list-count')
     const wtPath = join(repoRoot, '.worktrees', '42')
     const r = runReal(['--repo', 'o/r', '--cap', '1'], {
       FAKE_GIT_TOPLEVEL: repoRoot,
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
       FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GIT_WORKTREE_ADD_AS_FILE: '1',
       FAKE_GIT_WORKTREE_REMOVE_FAIL: '1',
       FAKE_GIT_BRANCH_DELETE_FAIL: '1',
     })
@@ -552,6 +560,7 @@ describe('ct-next — guarda de identidad de repo (review final, finding 1)', ()
     join(fixturesDir, 'fake-git-bin'),
     join(fixturesDir, 'fake-gh-bin'),
     join(fixturesDir, 'fake-cmux-bin'),
+    join(fixturesDir, 'fake-claude-bin'),
     process.env.PATH,
   ].join(':')
 
@@ -565,7 +574,7 @@ describe('ct-next — guarda de identidad de repo (review final, finding 1)', ()
       const out = execFileSync('node', [script, ...args], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, PATH: fakePath, ...envOverrides },
+        env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
       })
       return { code: 0, out }
     } catch (e) {
@@ -639,6 +648,7 @@ describe('ct-next — enumeración de issues sin --limit fijo (review final, fin
     join(fixturesDir, 'fake-git-bin'),
     join(fixturesDir, 'fake-gh-bin'),
     join(fixturesDir, 'fake-cmux-bin'),
+    join(fixturesDir, 'fake-claude-bin'),
     process.env.PATH,
   ].join(':')
   const dirs = []
@@ -650,7 +660,7 @@ describe('ct-next — enumeración de issues sin --limit fijo (review final, fin
       const out = execFileSync('node', [script, ...args], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, PATH: fakePath, ...envOverrides },
+        env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
       })
       return { code: 0, out }
     } catch (e) {
@@ -723,6 +733,7 @@ describe('ct-next — D1 finding 1: alcance del orden por epic (milestone), cami
     join(fixturesDir, 'fake-git-bin'),
     join(fixturesDir, 'fake-gh-bin'),
     join(fixturesDir, 'fake-cmux-bin'),
+    join(fixturesDir, 'fake-claude-bin'),
     process.env.PATH,
   ].join(':')
   const dirs = []
@@ -734,7 +745,7 @@ describe('ct-next — D1 finding 1: alcance del orden por epic (milestone), cami
       const out = execFileSync('node', [script, ...args], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, PATH: fakePath, ...envOverrides },
+        env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
       })
       return { code: 0, out }
     } catch (e) {

@@ -24,6 +24,7 @@ import { execFileSync } from 'node:child_process'
 import { writeSync } from 'node:fs'
 import { detectCollisions, claimLost } from './claim.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
+import { parseStrictInt } from './argnum.js'
 
 // ============================================================================
 // Finding 4 (auditoría de interrupción/staleness): dos cambios en este
@@ -95,12 +96,23 @@ const arg = (f, d) => {
   return (typeof v === 'string' && !v.startsWith('--')) ? v : true
 }
 const has = (f) => process.argv.includes(f)
-const issue = parseInt(process.argv[2], 10)
+// D4, defecto 2 (mismo patrón que `--cap` en ct-next.mjs, y aquí más caro):
+// `parseInt(process.argv[2], 10)` es un parser TOLERANTE — `parseInt('42x',
+// 10)` es 42, `parseInt('1e3', 10)` es 1. Este número identifica el issue
+// que se va a MUTAR (status:ready → status:in-progress) contra un repo real:
+// un argumento con basura de cola reclamaba, en silencio, un issue que el
+// usuario no había nombrado. parseStrictInt (scripts/argnum.js) solo acepta
+// dígitos decimales; cualquier otra cosa es error de uso, nunca un número
+// "parecido".
+const issue = parseStrictInt(process.argv[2])
 const repo = arg('--repo')
 const release = has('--release')
 const dryRun = has('--dry-run')
 const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release] [--dry-run]'
-if (Number.isNaN(issue) || typeof repo !== 'string' || repo.length === 0) { dieErr(usage, 2) }
+if (issue === null || issue < 1) {
+  dieErr(`<issue#> inválido: ${process.argv[2] === undefined ? '(ausente)' : `"${process.argv[2]}"`} — debe ser un entero >= 1 escrito con dígitos a secas (nada de "42x", "1e3", "4.2" ni espacios: un número aproximado aquí reclamaría un issue que no es el que pediste).\n${usage}`, 2)
+}
+if (typeof repo !== 'string' || repo.length === 0) { dieErr(usage, 2) }
 
 // CT_CLAIM_TEST_SELF_KILL_SIGNAL — exclusivamente para tests (revisión
 // externa, IMPORTANTE: un Ctrl-C real durante attemptClaim en ct-next.mjs

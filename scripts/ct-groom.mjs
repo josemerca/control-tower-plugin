@@ -5,6 +5,7 @@ import { analyzeSlicesTable, isNoValueCell } from './slices.js'
 import { groomPlan } from './groom.js'
 import { flattenIssuePages, realIssuesOnly, findByMarker } from './gh-issues.js'
 import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
+import { parseStrictInt } from './argnum.js'
 // extractOrder (F5, importante 4): para detectar issues huérfanos — un issue
 // con marcador ct-order:N cuyo slice N ya no está en la tabla §9 actual.
 import { extractOrder } from './gh-issue-map.js'
@@ -84,8 +85,21 @@ if (milestone === true || typeof milestone !== 'string' || milestone.length === 
 // Mismo criterio para --project: si se pasó el flag pero sin valor numérico
 // real, abortamos en vez de dejar que `Number(true) === 1` decida en
 // silencio contra qué Project v2 operar.
-if (project !== undefined && (project === true || !Number.isFinite(Number(project)) || Number(project) <= 0)) {
-  console.error(`--project inválido: "${project === true ? '(sin valor)' : project}" — debe ser un entero positivo`)
+// D4 (revisión de los argumentos numéricos de todo el plugin): `Number(...)`
+// es fiel con la basura de cola (`Number('7x')` es NaN, se rechazaba bien),
+// pero aceptaba valores que NO son enteros — `--project 2.9` pasaba
+// `Number.isFinite(...) && > 0` y viajaba tal cual a `gh project view 2.9`,
+// que falla tarde y de forma confusa. parseStrictInt exige dígitos decimales
+// a secas, el mismo criterio que `--cap` en ct-next.mjs y que el `<issue#>`
+// de dispatch-check.mjs.
+// `projectNum` (no `project`) es lo que usa TODO el camino posterior — el
+// dry-run, `gh project view/item-add/item-list`, y las guardas `if (...)`.
+// Validar un valor y usar otro es el mismo defecto que esta tanda arregla en
+// otros sitios: `--project +7` pasaba la validación y luego llamaba a
+// `gh project view +7`.
+const projectNum = typeof project === 'string' ? parseStrictInt(project) : null
+if (project !== undefined && (projectNum === null || projectNum <= 0)) {
+  console.error(`--project inválido: "${project === true ? '(sin valor)' : project}" — debe ser un entero positivo en dígitos decimales a secas`)
   process.exit(2)
 }
 // --repo: un `--repo` colgante (arg() endurecido) da `true`, no un string —
@@ -460,7 +474,7 @@ if (typeof repo === 'string') {
 }
 
 if (dryRun) {
-  console.log(JSON.stringify({ ...plan, repo: typeof repo === 'string' ? repo : null, project: project ? Number(project) : null }, null, 2))
+  console.log(JSON.stringify({ ...plan, repo: typeof repo === 'string' ? repo : null, project: projectNum }, null, 2))
   // Código de salida (F5): 3 para "divergencia detectada, no reconciliada" —
   // deliberadamente DISTINTO de 0 (spec e issues de acuerdo: silencio real,
   // nada que decidir) y de 2 (error de validación: la tabla §9 en sí es
@@ -538,7 +552,7 @@ function ensureProjectMeta() {
   const owner = repo.split('/')[0]
   let view
   try {
-    view = JSON.parse(gh(['project', 'view', String(project), '--owner', owner, '--format', 'json']))
+    view = JSON.parse(gh(['project', 'view', String(projectNum), '--owner', owner, '--format', 'json']))
   } catch (e) {
     console.error(`no se pudo leer el project ${project} (owner ${owner}): ${e.message}`)
     process.exit(1)
@@ -580,7 +594,7 @@ function addToProjectWithSprint(issueUrl, order) {
   const meta = ensureProjectMeta()
   let item
   try {
-    item = JSON.parse(gh(['project', 'item-add', String(project), '--owner', meta.owner, '--url', issueUrl, '--format', 'json']))
+    item = JSON.parse(gh(['project', 'item-add', String(projectNum), '--owner', meta.owner, '--url', issueUrl, '--format', 'json']))
   } catch (e) {
     console.error(`no se pudo añadir el issue orden #${order} al project ${project}: ${e.message}`)
     process.exit(1)
@@ -651,10 +665,10 @@ for (const l of wantedLabels) {
 // default de `gh project item-list` es 30, insuficiente en un sandbox/epic
 // con más slices que eso.
 let existingProjectItems = []
-if (project) {
+if (projectNum) {
   ensureProjectMeta()
   try {
-    const itemsRaw = JSON.parse(gh(['project', 'item-list', String(project), '--owner', projectMeta.owner, '--limit', '200', '--format', 'json']))
+    const itemsRaw = JSON.parse(gh(['project', 'item-list', String(projectNum), '--owner', projectMeta.owner, '--limit', '200', '--format', 'json']))
     existingProjectItems = itemsRaw.items || []
   } catch (e) {
     console.error(`no se pudieron listar los items del project ${project}: ${e.message}`)
@@ -697,7 +711,7 @@ for (const { iss, found, diff, bodyResult } of reconcileEntries) {
         console.log(`issue #${found.number} reconciliado (orden #${iss.order}): ${driftCategories(diff).join(', ')}`)
       }
     }
-    if (project && !hasProjectItem(existingProjectItems, repo, found.number)) {
+    if (projectNum && !hasProjectItem(existingProjectItems, repo, found.number)) {
       console.log(`issue #${found.number} no estaba en el project ${project} (hueco de una corrida anterior interrumpida) — añadiéndolo ahora`)
       addToProjectWithSprint(`https://github.com/${repo}/issues/${found.number}`, iss.order)
     }
@@ -710,7 +724,7 @@ for (const { iss, found, diff, bodyResult } of reconcileEntries) {
   // esta misma ejecución compartieran marcador (no debería pasar, pero así la
   // comprobación de arriba sigue siendo correcta dentro de la misma corrida)
   existingIssues.push({ number: null, body: iss.body })
-  if (project) addToProjectWithSprint(num, iss.order)
+  if (projectNum) addToProjectWithSprint(num, iss.order)
 }
 
 // F5: código de salida de la corrida real — mismo criterio de 3 estados que
