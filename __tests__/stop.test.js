@@ -189,7 +189,7 @@ describe('stop hook — relación entre last_commit y HEAD', () => {
 
     const out = JSON.parse(run(dir))
     expect(out.decision).toBeUndefined()
-    expect(out.systemMessage).toMatch(/DESCENDIENTE de HEAD/)
+    expect(out.systemMessage).toMatch(/descendiente de HEAD/)
     expect(out.systemMessage).toMatch(/hacia atrás/)
     rmSync(dir, { recursive: true, force: true })
   })
@@ -274,6 +274,119 @@ describe('stop hook — relación entre last_commit y HEAD', () => {
     expect(out.reason).toMatch(/desprendido/)
     expect(out.reason).not.toMatch(/rama `/)
     rmSync(dir, { recursive: true, force: true })
+  })
+
+  // El aviso sale en CADA turno mientras dure la anomalía (a propósito: es la
+  // presión visible sobre un problema estructural que alguien tiene que
+  // resolver). Ese precio se paga siendo corto.
+  it('el aviso de divergencia es breve: solo lo que cambia una decisión', () => {
+    const dir = initRepo()
+    git(dir, 'checkout', '-qb', 'polish-v2-geometria')
+    const otro = commit(dir, 'b.txt')
+    git(dir, 'checkout', '-q', 'main')
+    commit(dir, 'c.txt')
+    writeState(dir, otro)
+    const msg = JSON.parse(run(dir)).systemMessage
+    expect(msg.length).toBeLessThan(340)
+    // Lo que tiene que seguir estando: dónde vive, que divergen, y el precio
+    // de la acción obvia.
+    expect(msg).toMatch(/polish-v2-geometria/)
+    expect(msg).toMatch(/divergentes/)
+    expect(msg).toMatch(/sustituyes el de la otra/)
+    // Lo que sobra: explicar por qué el guard no bloquea, en cada turno.
+    expect(msg).not.toMatch(/pisándose por turnos/)
+    expect(msg).not.toMatch(/NO se bloquea el cierre/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el aviso de "va por delante" también es breve', () => {
+    const dir = initRepo()
+    git(dir, 'checkout', '-qb', 'adelantada')
+    const delante = commit(dir, 'b.txt')
+    git(dir, 'checkout', '-q', 'main')
+    writeState(dir, delante)
+    const msg = JSON.parse(run(dir)).systemMessage
+    expect(msg.length).toBeLessThan(280)
+    expect(msg).toMatch(/hacia atrás/)
+    expect(msg).not.toMatch(/No se bloquea el cierre/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // `reset --hard` que se lleva por delante el commit que el STATE.md
+  // describe: el estado apunta a trabajo que ya no existe en ningún ref.
+  it('commit huérfano tras reset --hard: aviso propio, distinto del de "va por delante", y NO bloquea', () => {
+    const dir = initRepo()
+    const huerfano = commit(dir, 'b.txt')
+    git(dir, 'reset', '-q', '--hard', 'HEAD~1')
+    writeState(dir, huerfano)
+    const out = JSON.parse(run(dir))
+    expect(out.decision).toBeUndefined()
+    expect(out.systemMessage).toMatch(/huérfano/)
+    expect(out.systemMessage).toMatch(/ni local ni remota/)
+    expect(out.systemMessage).toMatch(/git gc/)
+    // No es el mensaje de `ahead`: aquí no hay ningún handoff que proteger.
+    expect(out.systemMessage).not.toMatch(/va por delante/)
+    expect(out.systemMessage).not.toMatch(/hacia atrás/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('rama divergente borrada: el commit queda huérfano y cae en ese aviso, no en el de divergencia', () => {
+    const dir = initRepo()
+    git(dir, 'checkout', '-qb', 'efimera')
+    const huerfano = commit(dir, 'b.txt')
+    git(dir, 'checkout', '-q', 'main')
+    commit(dir, 'c.txt')
+    git(dir, 'branch', '-qD', 'efimera')
+    writeState(dir, huerfano)
+    const out = JSON.parse(run(dir))
+    expect(out.decision).toBeUndefined()
+    expect(out.systemMessage).toMatch(/huérfano/)
+    expect(out.systemMessage).not.toMatch(/divergentes/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // «Vive en `origin/polish-v2`» es mucho más útil que «no sé dónde está».
+  it('sin rama local que lo contenga, se mira en las remotas y se nombra origin/…', () => {
+    const origen = initRepo()
+    git(origen, 'checkout', '-qb', 'polish-v2')
+    const otro = commit(origen, 'b.txt')
+    git(origen, 'checkout', '-q', 'main')
+
+    const clon = mkdtempSync(join(tmpdir(), 'ct-clon-'))
+    execFileSync('git', ['clone', '-q', origen, clon], { encoding: 'utf8' })
+    execFileSync('git', ['config', 'user.email', 't@t'], { cwd: clon })
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: clon })
+    commit(clon, 'c.txt')
+    // En el clon no hay ninguna rama LOCAL que contenga ese commit.
+    expect(git(clon, 'branch', '--contains', otro, '--format=%(refname:short)')).toBe('')
+    writeState(clon, otro)
+
+    const out = JSON.parse(run(clon))
+    expect(out.decision).toBeUndefined()
+    expect(out.systemMessage).toMatch(/`origin\/polish-v2`/)
+    expect(out.systemMessage).toMatch(/divergentes/)
+    expect(out.systemMessage).not.toMatch(/huérfano/)
+    rmSync(clon, { recursive: true, force: true })
+    rmSync(origen, { recursive: true, force: true })
+  })
+
+  it('con rama local que lo contenga, no se cuela el ruido de origin/*', () => {
+    const origen = initRepo()
+    const clon = mkdtempSync(join(tmpdir(), 'ct-clon-'))
+    execFileSync('git', ['clone', '-q', origen, clon], { encoding: 'utf8' })
+    execFileSync('git', ['config', 'user.email', 't@t'], { cwd: clon })
+    execFileSync('git', ['config', 'user.name', 't'], { cwd: clon })
+    git(clon, 'checkout', '-qb', 'local-viva')
+    const otro = commit(clon, 'b.txt')
+    git(clon, 'checkout', '-q', 'main')
+    commit(clon, 'c.txt')
+    writeState(clon, otro)
+
+    const msg = JSON.parse(run(clon)).systemMessage
+    expect(msg).toMatch(/`local-viva`/)
+    expect(msg).not.toMatch(/origin\//)
+    rmSync(clon, { recursive: true, force: true })
+    rmSync(origen, { recursive: true, force: true })
   })
 
   it('un tag o una rama como last_commit resuelve a su commit (no se trata como ilegible)', () => {
