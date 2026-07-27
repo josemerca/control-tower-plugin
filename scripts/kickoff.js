@@ -121,6 +121,11 @@ export function renderKickoff(slice, { repo, dispatchCheckPath }) {
     // despacho con éxito. `dispatchCheckPath` llega ya resuelto como ruta
     // absoluta real (ct-next.mjs la calcula relativa a su propia ubicación)
     // y se interpola tal cual — nunca el token sin expandir.
+    // F7: el agente despachado es el principal ESCRITOR de STATE.md, y hasta
+    // ahora no tenía forma de decir "esto no puede continuar" salvo prosa
+    // dentro de `next_action` — que la siguiente sesión lee como una orden
+    // vigente. El campo existe; hay que nombrárselo aquí o no lo usará.
+    `Si el trabajo queda BLOQUEADO (no puedes continuar, y no es solo "no terminado"), márcalo en .agent/STATE.md como \`blocked: {reason: "por qué", unblock: "qué haría falta"}\` — NO en prosa dentro de next_action. El hook de SessionStart lo anuncia y suspende el next_action en la siguiente sesión.`,
     `Al acabar: commit refs al issue, actualiza .agent/STATE.md, abre PR, libera el claim con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --release\`, deja el estado mergeable y PARA.`,
   ].filter(Boolean).join('\n')
 }
@@ -142,6 +147,14 @@ export function buildStateSeed(slice, { branch, base }) {
       // cuál, y solo nombra el orden §9 cuando de verdad se conoce.
       you_are_here: `worktree fresco para el issue ${issueRefOf(slice)} de GitHub${orderSuffixOf(slice)}`,
       next_action: `hidrátate del issue y empieza por el primer AC (${slice.ac[0] || 'ver issue'})`,
+      // F7: `blocked: null` se siembra EXPLÍCITO, no se omite. Un slice recién
+      // despachado no está bloqueado y eso es un hecho que conviene afirmar;
+      // pero sobre todo, el campo tiene que EXISTIR en el fichero que el
+      // agente va a editar — un campo que solo aparece documentado en el
+      // plugin es un campo que nadie escribe cuando le hace falta. Ver
+      // state.js#readBlocked para la forma completa (`{reason, since,
+      // unblock}`) y para por qué el silencio se lee como "no bloqueado".
+      blocked: null,
       verify: '',
       tasks: [],
     },

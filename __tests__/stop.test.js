@@ -63,6 +63,42 @@ describe('stop hook', () => {
     expect(existsSync(join(dir, 'pwned'))).toBe(false)
     rmSync(dir, { recursive: true, force: true })
   })
+  // F7: el hook recuerda qué campos actualizar antes de cerrar; el sitio donde
+  // se registra un bloqueo es ese momento, y `blocked` no estaba en la lista.
+  it('el aviso nombra el campo `blocked` como la forma de decir que el trabajo no puede continuar', () => {
+    const dir = initRepo()
+    writeState(dir, 'sha_viejo')
+    const out = JSON.parse(run(dir))
+    expect(out.reason).toMatch(/`blocked`/)
+    expect(out.reason).toMatch(/no lo escribas en prosa dentro de next_action/i)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // F7: `parseState` LANZA con un frontmatter roto y aquí se llamaba sin red —
+  // el hook reventaba con un stack trace por stderr en CADA cierre de turno de
+  // ese repo, sin decir nunca que el problema era el fichero.
+  it('STATE.md con el frontmatter roto → no crashea ni escupe stack trace; lo dice y pide arreglarlo', () => {
+    const dir = initRepo()
+    mkdirSync(join(dir, '.agent'), { recursive: true })
+    writeFileSync(join(dir, '.agent', 'STATE.md'), '---\ntask: "sin cerrar\n  ]: [\n---\nx')
+    const r = spawnSync('node', [hook], { input: JSON.stringify({ cwd: dir, hook_event_name: 'Stop' }), encoding: 'utf8' })
+    expect(r.status).toBe(0)
+    expect(r.stderr).toBe('')
+    const out = JSON.parse(r.stdout)
+    expect(out.decision).toBe('block')
+    expect(out.reason).toMatch(/frontmatter/i)
+    expect(out.reason).toMatch(/`blocked`/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('frontmatter roto + stop_hook_active → no bloquea (anti-bucle)', () => {
+    const dir = initRepo()
+    mkdirSync(join(dir, '.agent'), { recursive: true })
+    writeFileSync(join(dir, '.agent', 'STATE.md'), '---\ntask: "sin cerrar\n  ]: [\n---\nx')
+    expect(run(dir, true)).toBe('')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('sin fuga de stderr cuando cwd no es un repo git', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     writeState(dir, 'sha_viejo')

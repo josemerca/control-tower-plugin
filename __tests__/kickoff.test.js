@@ -89,6 +89,24 @@ describe('buildStateSeed', () => {
     const { meta } = parseState(seed)
     expect(meta.github_issue).toBe(null)
   })
+  // F7: el campo `blocked` tiene que EXISTIR en el fichero que el agente va a
+  // editar. Un campo que solo está documentado en el plugin es un campo que
+  // nadie escribe el día que hace falta — y ese día, la alternativa es prosa
+  // dentro de `next_action`, que es justo el fallo.
+  it('siembra `blocked: null` explícito (un slice recién despachado no está bloqueado, y el campo queda a la vista)', () => {
+    const seed = buildStateSeed(SLICE, { branch: 'feat/7', base: 'main' })
+    expect(seed).toMatch(/^blocked:/m) // presente en el texto, no solo tras parsear
+    const { meta } = parseState(seed)
+    expect(Object.prototype.hasOwnProperty.call(meta, 'blocked')).toBe(true)
+    expect(meta.blocked).toBe(null)
+  })
+
+  it('el kickoff le dice al agente cómo marcar un bloqueo, y que NO lo escriba en next_action', () => {
+    const k = renderKickoff(SLICE, { repo: 'o/r', dispatchCheckPath: '/x/d.mjs' })
+    expect(k).toMatch(/`blocked: \{reason:/)
+    expect(k).toMatch(/NO en prosa dentro de next_action/)
+  })
+
   it('handles empty ac array → next_action falls back to "ver issue"', () => {
     const sliceEmptyAc = { ...SLICE, ac: [] }
     const seed = buildStateSeed(sliceEmptyAc, { branch: 'feat/7', base: 'main' })
