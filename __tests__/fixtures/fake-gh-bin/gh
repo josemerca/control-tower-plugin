@@ -71,6 +71,18 @@ function loadSequence() {
 // razón para quedar fuera de esta protección solo por venir de la otra rama.)
 function main() {
   if (argv[0] === 'issue' && argv[1] === 'edit') {
+    // FAKE_GH_EDIT_DELAY_MS (finding 1, test de reentrada de señal): ensancha
+    // de forma determinista la ventana en la que ct-next.mjs está bloqueado
+    // DENTRO del propio revert automático (gh() es una llamada síncrona) —
+    // necesaria para poder enviar una SEGUNDA señal mientras la primera
+    // todavía se está gestionando, sin depender de ganar una carrera contra
+    // el scheduler del SO bajo carga variable. Síncrono a propósito (este
+    // es el HIJO simulando latencia real de gh, no el propio ct-next.mjs).
+    const delayMs = Number(process.env.FAKE_GH_EDIT_DELAY_MS || 0)
+    if (delayMs > 0) {
+      const sab = new Int32Array(new SharedArrayBuffer(4))
+      Atomics.wait(sab, 0, 0, delayMs)
+    }
     const failSubstr = process.env.FAKE_GH_EDIT_FAIL_SUBSTR
     if (failSubstr && joined.includes(failSubstr)) {
       console.error('fake-gh: issue edit failed (simulado)')

@@ -21,8 +21,67 @@
 // — hasta que eso aterrice, esta es la garantía real: ninguna bajo
 // concurrencia, sí bajo uso secuencial disciplinado.
 import { execFileSync } from 'node:child_process'
+import { writeSync } from 'node:fs'
 import { detectCollisions, claimLost } from './claim.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
+
+// ============================================================================
+// Finding 4 (auditoría de interrupción/staleness): dos cambios en este
+// fichero, relacionados pero independientes.
+//
+// (a) Truncado a ~64 KiB. `console.error(grande)` seguido INMEDIATAMENTE de
+// `process.exit()` puede perder texto: `process.stdout`/`process.stderr` son
+// ASÍNCRONOS hacia una tubería en POSIX (documentado en los propios docs de
+// Node — el mismo razonamiento que ya motivó el `writeSync` de
+// `attemptClaim` en ct-next.mjs), y `process.exit()` no espera a que un
+// `write()` en vuelo termine de vaciarse. El mensaje `COLLISION: ...` (línea
+// más abajo) es justo el que más crece — un choque contra muchos issues en
+// vuelo a la vez — y los ATENCIÓN de "libéralo a mano" son EXACTAMENTE lo
+// que un humano necesita íntegro cuando algo salió mal. `dieErr`/`dieOut`/
+// `errLine`/`outLine`, más abajo, sustituyen a `console.error`/`console.log`
+// en TODO este fichero (no solo justo antes de salir): dos escrituras
+// separadas al MISMO fd conservan su orden aunque una sea síncrona y la
+// otra no lo fuera, pero si CUALQUIERA de las escrituras previas a un
+// `process.exit()` sigue en vuelo cuando este llega, se pierde igual — así
+// que la única forma de estar seguro es que NINGUNA escritura de este
+// fichero dependa del flush asíncrono por defecto.
+//
+// (b) Contrato de exit code ensanchado. Antes, TODO fallo tras el paso de
+// colisión (fallo de lectura/escritura, fallo de readback, carrera perdida)
+// compartía el mismo exit 1 — el caller (ct-next.mjs#classifyClaimOutcome)
+// tenía que DIFERENCIAR cinco causas muy distintas parseando el TEXTO libre
+// que este fichero imprime, lo cual es frágil ante un cambio futuro de
+// wording. Ahora el exit code por sí solo ya distingue las tres
+// consecuencias que de verdad le importan al caller:
+//   0 = éxito (claim confirmado, o --release con éxito) — sin cambios.
+//   1 = 'skip' — resultado NORMAL del protocolo: colisión detectada ANTES de
+//       escribir nada, o carrera perdida con el revert posterior EXITOSO
+//       (el issue vuelve limpio a status:ready). Ninguna mutación queda
+//       persistida. Saltar este slice y seguir con el resto de la tanda es
+//       correcto — sin cambios de comportamiento respecto a antes.
+//   2 = error de uso/config (argv inválido, flags retirados, fixture sin
+//       --dry-run, hook de prueba malformado) — sin cambios.
+//   3 = NUEVO — fallo de INFRAESTRUCTURA sin mutación persistente: no se
+//       pudo leer el estado del candidato, no se pudo escribir el claim, o
+//       falló el readback pero el revert posterior fue exitoso. El issue
+//       queda intacto (o vuelve a status:ready) — no es una colisión real,
+//       pero tampoco deja nada huérfano. El caller trata esto como
+//       "sigue con el resto de la tanda", igual que antes, solo que ahora
+//       lo sabe por el exit code, no por parsear el mensaje.
+//   4 = NUEVO — HUÉRFANO: el claim quedó en status:in-progress SIN NADIE
+//       trabajándolo (revert fallido tras perder la carrera, o revert
+//       fallido tras un fallo de readback). Esto exige que un humano lo
+//       mire antes de que ct-next.mjs reintente nada más — el caller aborta
+//       la tanda ENTERA con este código, igual que ya hacía antes al ver
+//       este mismo texto de ATENCIÓN.
+// El texto que este fichero imprime NO cambia de contenido (los mismos
+// detalles, incluido el comando manual de `--release`/revert) — solo deja
+// de ser la ÚNICA fuente de verdad para la decisión del caller.
+// ============================================================================
+function errLine(msg) { writeSync(2, msg + '\n') }
+function outLine(msg) { writeSync(1, msg + '\n') }
+function dieErr(msg, code) { errLine(msg); process.exit(code) }
+function dieOut(msg, code) { outLine(msg); process.exit(code) }
 
 // `arg()` solo devuelve un string cuando el flag realmente trae un valor: si
 // el flag es el último token de argv, o el token siguiente es a su vez otro
@@ -41,7 +100,26 @@ const repo = arg('--repo')
 const release = has('--release')
 const dryRun = has('--dry-run')
 const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release] [--dry-run]'
-if (Number.isNaN(issue) || typeof repo !== 'string' || repo.length === 0) { console.error(usage); process.exit(2) }
+if (Number.isNaN(issue) || typeof repo !== 'string' || repo.length === 0) { dieErr(usage, 2) }
+
+// CT_CLAIM_TEST_SELF_KILL_SIGNAL — exclusivamente para tests (revisión
+// externa, IMPORTANTE: un Ctrl-C real durante attemptClaim en ct-next.mjs
+// mata a ESTE proceso por señal, y el caller necesita distinguirlo de un
+// "bug o mala configuración" — ver classifyClaimOutcome/el caller en
+// ct-next.mjs). Reproducir esto de forma determinista con una señal EXTERNA
+// exigiría coordinar el PID de un subproceso lanzado dentro de OTRO
+// subproceso — fràgil y con las mismas carreras de temporización ya vistas
+// en finding 1. Autoenviarse la señal (misma syscall subyacente que una
+// externa, indistinguible para Node) en un punto determinista es la forma
+// fiable de ejercer ese camino. Se comprueba aquí, justo después de la
+// validación de uso — antes de tocar `gh` o mutar nada — para que el efecto
+// sea idéntico a "el usuario interrumpió justo al principio".
+if (process.env.CT_CLAIM_TEST_SELF_KILL_SIGNAL) {
+  process.kill(process.pid, process.env.CT_CLAIM_TEST_SELF_KILL_SIGNAL)
+  // El propio proceso muere aquí por la señal (disposición por defecto: sin
+  // manejador registrado en este fichero) — nada después de esta línea
+  // llega a ejecutarse cuando la variable está fijada.
+}
 
 // --settle-ms/CT_CLAIM_SETTLE_MS ya NO EXISTEN (T11, fix round 2 — ver el
 // comentario de cabecera de este fichero para el porqué). Si el flag
@@ -52,8 +130,7 @@ if (Number.isNaN(issue) || typeof repo !== 'string' || repo.length === 0) { cons
 // exactamente el "invita a confiar en él" que motivó eliminarla. Ignorarlo
 // en silencio habría reintroducido esa falsa confianza por otra vía.
 if (has('--settle-ms') || process.env.CT_CLAIM_SETTLE_MS !== undefined) {
-  console.error('--settle-ms/CT_CLAIM_SETTLE_MS ya no existen: la espera de asentamiento se eliminó a propósito (ver el comentario de cabecera de dispatch-check.mjs y task-11-report.md). Quítalo de la invocación/entorno — no hace nada, y dejarlo puesto invita a creer que sigue activo.')
-  process.exit(2)
+  dieErr('--settle-ms/CT_CLAIM_SETTLE_MS ya no existen: la espera de asentamiento se eliminó a propósito (ver el comentario de cabecera de dispatch-check.mjs y task-11-report.md). Quítalo de la invocación/entorno — no hace nada, y dejarlo puesto invita a creer que sigue activo.', 2)
 }
 
 // NO HAY ESPERA DE ASENTAMIENTO ("settle wait") EN ESTE SCRIPT — se eliminó a
@@ -95,8 +172,7 @@ function sleepSync(ms) {
 // ejecutar mutaciones reales contra gh con ese estado inventado de fondo:
 // se trata como error de uso y abortamos antes de tocar gh.
 if (process.env.CT_CLAIM_FIXTURE && !dryRun) {
-  console.error('CT_CLAIM_FIXTURE está definido pero falta --dry-run: por seguridad no se decide ni se muta gh real con datos de fixture. Añade --dry-run o limpia la variable de entorno.')
-  process.exit(2)
+  dieErr('CT_CLAIM_FIXTURE está definido pero falta --dry-run: por seguridad no se decide ni se muta gh real con datos de fixture. Añade --dry-run o limpia la variable de entorno.', 2)
 }
 // Atado también en la propia lectura (defensa en profundidad): `fx` solo
 // puede ser no-nulo cuando `dryRun` es cierto.
@@ -109,7 +185,25 @@ const fx = (dryRun && process.env.CT_CLAIM_FIXTURE) ? JSON.parse(process.env.CT_
 // trunca en silencio), pero eso haría inusable el comando contra un repo real.
 // 20 MiB es generoso para miles de issues sin ser "sin límite" de verdad.
 const GH_MAX_BUFFER = 20 * 1024 * 1024
-const gh = (a) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: GH_MAX_BUFFER })
+// timeout+killSignal (MENOR, revisión externa: consistencia con el
+// principio de ct-next.mjs de que TODA llamada bloqueante a un subproceso
+// debe estar acotada — este fichero también puede invocarse en solitario,
+// no solo como subproceso de ct-next.mjs, así que le hace falta su propia
+// cota independiente en vez de depender solo del timeout que le impone el
+// caller desde fuera). Mismo default (10 min) y mismo tope (24h) que
+// CT_NEXT_CHILD_TIMEOUT_MS en ct-next.mjs, con su propia variable de
+// entorno — dispatch-check.mjs no importa nada de ct-next.mjs.
+const CHILD_TIMEOUT_CAP_MS = 24 * 60 * 60 * 1000
+let ghTimeoutMs = 10 * 60 * 1000
+const ghTimeoutRaw = process.env.CT_CLAIM_CHILD_TIMEOUT_MS
+if (ghTimeoutRaw !== undefined) {
+  const n = Number(ghTimeoutRaw)
+  if (!Number.isFinite(n) || n <= 0 || n > CHILD_TIMEOUT_CAP_MS) {
+    dieErr(`CT_CLAIM_CHILD_TIMEOUT_MS inválido: "${ghTimeoutRaw}" — debe ser un número > 0 y <= ${CHILD_TIMEOUT_CAP_MS}`, 2)
+  }
+  ghTimeoutMs = n
+}
+const gh = (a) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: GH_MAX_BUFFER, timeout: ghTimeoutMs, killSignal: 'SIGKILL' })
 const labelsOf = (n) => JSON.parse(gh(['issue', 'view', String(n), '--repo', repo, '--json', 'labels', '-q', '[.labels[].name]']))
 // Listado directo de issues abiertos vía el endpoint REST `gh api
 // repos/<repo>/issues` — NUNCA el índice de búsqueda (`--search` / `gh search
@@ -171,15 +265,20 @@ if (release) {
   if (!dryRun && !fx) {
     const result = setStatus(issue, 'status:in-progress', 'status:in-review')
     if (!result.ok) {
-      console.error(`no se pudo liberar #${issue} a in-review: ${result.error.message}. Sigue en status:in-progress; reintenta el --release.`)
-      process.exit(1)
+      // --release nunca pasa por classifyClaimOutcome en ct-next.mjs (es un
+      // paso posterior, invocado por el propio agente al terminar el
+      // slice, no por el bucle de claim) — su exit 1 queda fuera del
+      // contrato ensanchado de arriba, sin cambios.
+      dieErr(`no se pudo liberar #${issue} a in-review: ${result.error.message}. Sigue en status:in-progress; reintenta el --release.`, 1)
     }
   }
-  console.log(`released #${issue} → in-review`); process.exit(0)
+  dieOut(`released #${issue} → in-review`, 0)
 }
 
 // 1) colisión previa. Ningún fallo aquí ha mutado nada todavía: abortar es
-// seguro, no deja lock huérfano.
+// seguro, no deja lock huérfano. Finding 4: exit 3 (fallo de lectura, no
+// mutación, no colisión real) — antes exit 1, indistinguible por código de
+// la COLLISION real de más abajo.
 let candLabels, open
 if (fx) {
   candLabels = fx.candLabels
@@ -189,14 +288,14 @@ if (fx) {
     candLabels = labelsOf(issue)
     open = allOpen().filter((i) => i.n !== issue)
   } catch (e) {
-    console.error(`no se pudo leer el estado de #${issue} en ${repo}: ${e.message}`)
-    process.exit(1)
+    dieErr(`no se pudo leer el estado de #${issue} en ${repo}: ${e.message}`, 3)
   }
 }
 const collisions = detectCollisions(candLabels, open)
 if (collisions.length) {
-  console.error(`COLLISION: #${issue} choca con ${collisions.map((c) => `#${c.n}[${c.tokens.join(',')}]`).join(' ')}`)
-  process.exit(1)
+  // Finding 4: exit 1 — 'skip', resultado NORMAL del protocolo (ninguna
+  // mutación se llegó a escribir). Sin cambios de comportamiento.
+  dieErr(`COLLISION: #${issue} choca con ${collisions.map((c) => `#${c.n}[${c.tokens.join(',')}]`).join(' ')}`, 1)
 }
 
 // HOOK DE PRUEBA — CT_CLAIM_PRECLAIM_DELAY_MS.
@@ -259,19 +358,19 @@ const preclaimRaw = process.env.CT_CLAIM_PRECLAIM_DELAY_MS
 if (preclaimRaw !== undefined) {
   const n = Number(preclaimRaw)
   if (!Number.isFinite(n) || n < 0 || n > PRECLAIM_DELAY_CAP_MS) {
-    console.error(`CT_CLAIM_PRECLAIM_DELAY_MS inválido: "${preclaimRaw}" — debe ser un número entre 0 y ${PRECLAIM_DELAY_CAP_MS}`)
-    process.exit(2)
+    dieErr(`CT_CLAIM_PRECLAIM_DELAY_MS inválido: "${preclaimRaw}" — debe ser un número entre 0 y ${PRECLAIM_DELAY_CAP_MS}`, 2)
   }
   preclaimDelayMs = n
 }
 if (!dryRun && !fx) sleepSync(preclaimDelayMs)
 
-// 2) claim
+// 2) claim. Finding 4: exit 3 — fallo de infraestructura, ninguna mutación
+// llegó a persistir (el intento de escritura falló, el issue sigue en
+// status:ready). Antes exit 1, indistinguible de una COLLISION real.
 if (!dryRun && !fx) {
   const result = setStatus(issue, 'status:ready', 'status:in-progress')
   if (!result.ok) {
-    console.error(`no se pudo escribir el claim de #${issue}: ${result.error.message}`)
-    process.exit(1)
+    dieErr(`no se pudo escribir el claim de #${issue}: ${result.error.message}`, 3)
   }
 }
 
@@ -288,29 +387,37 @@ if (fx) {
     // huérfano silencioso, así que intentamos revertir antes de salir con
     // error — y lo decimos distinto de una carrera perdida normal, porque un
     // humano necesita saber que esto es un fallo de infraestructura, no un
-    // desempate.
-    console.error(`no se pudo re-leer el estado tras el claim de #${issue}: ${e.message} — no se puede confirmar la carrera`)
+    // desempate. Finding 4: el exit code final depende de si ESE revert
+    // tuvo éxito (3 — infra, sin mutación persistente) o falló (4 —
+    // huérfano de verdad, exige intervención humana).
+    errLine(`no se pudo re-leer el estado tras el claim de #${issue}: ${e.message} — no se puede confirmar la carrera`)
+    let revertOk = true
     if (!dryRun) {
       const result = setStatus(issue, 'status:in-progress', 'status:ready')
       if (result.ok) {
-        console.error(`#${issue} revertido a status:ready (carrera no confirmada)`)
+        errLine(`#${issue} revertido a status:ready (carrera no confirmada)`)
       } else {
-        console.error(`ATENCIÓN: #${issue} puede haber quedado bloqueado en status:in-progress (no se pudo revertir: ${result.error.message}). Libéralo a mano con: ${manualReleaseHint()}`)
+        revertOk = false
+        errLine(`ATENCIÓN: #${issue} puede haber quedado bloqueado en status:in-progress (no se pudo revertir: ${result.error.message}). Libéralo a mano con: ${manualReleaseHint()}`)
       }
     }
-    process.exit(1)
+    process.exit(revertOk ? 3 : 4)
   }
 }
 
 if (claimLost(readback, issue)) {
-  console.error(`carrera perdida: #${issue} liberado (otro claim menor con token compartido ganó)`) // lost
+  errLine(`carrera perdida: #${issue} liberado (otro claim menor con token compartido ganó)`) // lost
+  // Finding 4: 'skip' (exit 1) si el revert tuvo éxito — carrera perdida
+  // LIMPIA, resultado normal del protocolo (ninguna mutación persiste).
+  // 'stuck' (exit 4) si el revert TAMBIÉN falló — huérfano de verdad.
+  let revertOk = true
   if (!dryRun && !fx) {
     const result = setStatus(issue, 'status:in-progress', 'status:ready')
     if (!result.ok) {
-      console.error(`ATENCIÓN: no se pudo revertir el claim de #${issue} tras perder la carrera (${result.error.message}). Queda bloqueado en status:in-progress — libéralo a mano con: ${manualReleaseHint()}`)
+      revertOk = false
+      errLine(`ATENCIÓN: no se pudo revertir el claim de #${issue} tras perder la carrera (${result.error.message}). Queda bloqueado en status:in-progress — libéralo a mano con: ${manualReleaseHint()}`)
     }
   }
-  process.exit(1)
+  process.exit(revertOk ? 1 : 4)
 }
-console.log(`claimed #${issue} → in-progress`)
-process.exit(0)
+dieOut(`claimed #${issue} → in-progress`, 0)

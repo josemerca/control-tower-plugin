@@ -176,17 +176,22 @@ describe('dispatch-check — fix review round 1 (Minor 1: validación de flags)'
 })
 
 describe('dispatch-check — fix review round 1 (Critical 2: fallos de gh() no dejan locks huérfanos silenciosos)', () => {
-  it('el claim inicial falla (gh caído) → exit 1, mensaje claro, sin crash sin capturar', () => {
+  it('el claim inicial falla (gh caído) → exit 3 (infra, sin mutación persistente), mensaje claro, sin crash sin capturar', () => {
+    // Finding 4: exit code ensanchado — este caso ya NO comparte el exit 1
+    // de una COLLISION real (ver la cabecera de dispatch-check.mjs). Sin
+    // mutación persistente (el claim ni llegó a escribirse), pero es un
+    // fallo de infraestructura, no una colisión — el caller (ct-next.mjs)
+    // ya no necesita parsear el texto para distinguirlo.
     const r = runReal(['11', '--repo', 'o/r'], {
       FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[]]),
       FAKE_GH_EDIT_FAIL_SUBSTR: '--add-label status:in-progress',
     })
-    expect(r.code).toBe(1)
+    expect(r.code).toBe(3)
     expect(r.out).toMatch(/no se pudo escribir el claim/i)
   })
 
-  it('el readback tras el claim falla → revierte, avisa que la carrera no se pudo confirmar, exit 1', () => {
+  it('el readback tras el claim falla → revierte, avisa que la carrera no se pudo confirmar, exit 3 (infra, revert exitoso)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-fakegh-'))
     const counterFile = join(dir, 'list-count')
     const r = runReal(['13', '--repo', 'o/r'], {
@@ -196,12 +201,12 @@ describe('dispatch-check — fix review round 1 (Critical 2: fallos de gh() no d
       FAKE_GH_COUNTER_FILE: counterFile,
     })
     rmSync(dir, { recursive: true, force: true })
-    expect(r.code).toBe(1)
+    expect(r.code).toBe(3)
     expect(r.out).toMatch(/no se puede confirmar la carrera/i)
     expect(r.out).toMatch(/revertido a status:ready/i)
   })
 
-  it('carrera perdida y el revert también falla → avisa "carrera perdida" Y el lock huérfano con el comando manual', () => {
+  it('carrera perdida y el revert también falla → avisa "carrera perdida" Y el lock huérfano con el comando manual, exit 4 (huérfano)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-fakegh-'))
     const counterFile = join(dir, 'list-count')
     // Formato crudo de `gh issue list --json number,labels` (number/labels[].name),
@@ -218,7 +223,7 @@ describe('dispatch-check — fix review round 1 (Critical 2: fallos de gh() no d
       FAKE_GH_EDIT_FAIL_SUBSTR: '--add-label status:ready', // el revert (no el claim inicial) falla
     })
     rmSync(dir, { recursive: true, force: true })
-    expect(r.code).toBe(1)
+    expect(r.code).toBe(4)
     expect(r.out).toMatch(/carrera perdida/i)
     expect(r.out).toMatch(/ATENCIÓN.*#17.*bloqueado/is)
     expect(r.out).toMatch(/gh issue edit 17 --repo o\/r --add-label status:ready --remove-label status:in-progress/)
