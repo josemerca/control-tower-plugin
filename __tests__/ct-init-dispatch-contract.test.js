@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { SERIALIZING_TOUCHES, selectNext } from '../scripts/dispatch.js'
+import { SERIALIZING_TOUCHES, selectNext, planDispatch } from '../scripts/dispatch.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const script = join(root, 'scripts', 'ct-init.sh')
@@ -29,6 +29,11 @@ function seed() {
 }
 
 const V1 = readFileSync(join(root, '__tests__', 'fixtures', 'slices-contract-v1.md'), 'utf8')
+// V4: el bloque tal cual lo emitía el plugin ANTES de F13 (hash
+// 02247741…, ya registrado en SLICES_PRISTINE_HASHES). Es el control negativo
+// de los tests de F13: sirve para demostrar que las afirmaciones nuevas no
+// estaban ahí antes, igual que V1 lo es para los de F11.
+const historicalBlockV4 = () => readFileSync(join(root, '__tests__', 'fixtures', 'slices-contract-v4.md'), 'utf8')
 
 // flat: el bloque sin negritas markdown y con los saltos de línea del wrapping
 // colapsados. Las afirmaciones que se comprueban aquí son de PROSA — que el
@@ -148,5 +153,114 @@ describe('contrato §9: qué hace /ct-next con lo que groomeas', () => {
   it('sigue siendo una sección, no un manual: remite a commands/ct-next.md para la referencia de invocación', () => {
     const a = seed()
     expect(a).toMatch(/commands\/ct-next\.md/)
+  })
+})
+
+// ============================================================================
+// F13 — el contrato v4 PROMETÍA garantías que el código no da. Esto no es
+// redacción: son cuatro afirmaciones que un lector usaba para tomar decisiones
+// (qué tokens poner, en qué orden mergear, qué hacer con un slice descartado)
+// y que eran falsas o incompletas. Cada test de aquí ata una corrección
+// contra una fuente ejecutable cuando la hay.
+// ============================================================================
+describe('contrato §9 (F13): lo que promete coincide con lo que el código hace', () => {
+  it('control: el contrato v4 no decía NADA de esto (los tests de abajo no pasan por casualidad)', () => {
+    const v4 = historicalBlockV4()
+    // La promesa vieja, tal cual: "serializan globalmente… en todo el repo",
+    // sin decir nunca de qué conjunto sale ese "todo".
+    expect(v4).toMatch(/serializan\s+\*\*globalmente\*\*/)
+    expect(v4).toMatch(/en todo el repo/)
+    expect(flat(v4)).not.toMatch(/solo mira issues de ESTE repo/i)
+    // No había ninguna salida de in-review: era un estado terminal.
+    expect(v4).not.toMatch(/--reopen/)
+    // La trampa de "not planned" SÍ estaba (F11 la escribió); la OPUESTA —
+    // cerrar como completed sin mergear satisface la dep igualmente, y eso no
+    // se detecta — no estaba, y además el texto sugería lo contrario
+    // ("cerrado como completado (lo que ocurre al mergear su PR)").
+    expect(v4).toMatch(/not planned/)
+    expect(v4).not.toMatch(/no se detecta/i)
+    expect(flat(v4)).toMatch(/lo que ocurre al mergear su PR/)
+    // Y la regla de colisión hablaba SOLO de in-progress.
+    expect(flat(v4)).not.toMatch(/in-progress o status:in-review/i)
+    expect(v4).not.toMatch(/compare-and-swap/)
+  })
+
+  it('dice el ALCANCE REAL de la serialización: los issues de este repo, no "todo el repo"', () => {
+    // El código (dispatch.js#collectTokenHolders + ct-next.mjs#loadIssues)
+    // solo mira issues de ESTE repo con status in-progress/in-review. Otra
+    // rama, otro track, o un humano a mano son invisibles — el contrato lo
+    // vendía como una garantía global.
+    const a = flat(seed())
+    expect(a).toMatch(/solo mira issues de ESTE repo/i)
+    expect(a).toMatch(/status:in-progress/)
+    expect(a).toMatch(/INVISIBLE|invisible/)
+    expect(a).toMatch(/global al flujo de issues de este repo/i)
+  })
+
+  it('dice que un token se retiene hasta el MERGE, y que in-review también bloquea', () => {
+    const a = flat(seed())
+    expect(a).toMatch(/status:in-review/)
+    expect(a).toMatch(/hasta que el PR se mergea|retiene.{0,60}hasta el merge/i)
+    // Y la consecuencia práctica que cambia cómo diseñas la tabla.
+    expect(a).toMatch(/un PR sin mergear frena a sus vecinos de área/i)
+    // Control contra el código: un ready que comparte token con un in-review
+    // NO se selecciona. Si esto dejara de ser cierto, el contrato mentiría.
+    const holder = { n: 1, order: 1, status: 'in-review', deps: [], touches: ['api'] }
+    const cand = { n: 2, order: 2, status: 'ready', deps: [], touches: ['api'] }
+    expect(planDispatch([holder, cand], { mergedIssues: [], cap: 5 }).selected).toEqual([])
+  })
+
+  it('dice que in-review NO ocupa cap, que es la otra mitad de la regla', () => {
+    const a = flat(seed())
+    expect(a).toMatch(/`?status:in-review`? \*?\*?no\*?\*? ocupa cap|no.{0,20}ocupa cap/i)
+    // Control contra el código: con cap 1 y un in-review de tokens ajenos, el
+    // ready SÍ sale.
+    const holder = { n: 1, order: 1, status: 'in-review', deps: [], touches: ['api'] }
+    const cand = { n: 2, order: 2, status: 'ready', deps: [], touches: ['ui'] }
+    expect(planDispatch([holder, cand], { mergedIssues: [], cap: 1 }).selected.map((i) => i.n)).toEqual([2])
+  })
+
+  it('enumera las DOS trampas de "cerrado ≠ mergeado", incluida la que no se detecta', () => {
+    const a = flat(seed())
+    expect(a).toMatch(/not planned/)
+    expect(a).toMatch(/para siempre/i)
+    // La dirección opuesta, que es la que el plugin NO puede detectar: hay
+    // que decirlo, no callarlo.
+    expect(a).toMatch(/no se detecta/i)
+    expect(a).toMatch(/completed.{0,120}sin haber mergeado|sin haber mergeado.{0,120}completed/i)
+  })
+
+  it('documenta la salida de in-review para un PR rechazado, con el comando', () => {
+    const a = seed()
+    expect(a).toMatch(/--reopen/)
+    expect(flat(a)).toMatch(/no es un estado terminal|NO\*?\*? es un estado terminal/i)
+    // Los dos caminos con el worktree/rama que ya existen — sin esto, reabrir
+    // "funciona" y el siguiente /ct-next se niega sin explicar por qué.
+    expect(a).toMatch(/\.worktrees\/<n>/)
+    expect(a).toMatch(/feat\/<n>/)
+    expect(flat(a)).toMatch(/corregir encima/i)
+    expect(flat(a)).toMatch(/empezar de cero/i)
+  })
+
+  it('admite que la colisión y el cap solo valen para UN dispatcher a la vez', () => {
+    // El claim es un label sin compare-and-swap: dos /ct-next concurrentes
+    // pueden reclamar el mismo token. Estaba dicho en commands/ct-next.md
+    // pero NO en el contrato, que es el fichero que lee quien escribe la
+    // tabla y decide los tokens.
+    const a = flat(seed())
+    expect(a).toMatch(/compare-and-swap/i)
+    expect(a).toMatch(/no lances dos dispatchers a la vez/i)
+  })
+
+  it('la nota de pie declara la MISMA versión que el marcador del bloque', () => {
+    // El v4 declaraba `<!-- ct-init:slices-contract-version: 4 -->` y su nota
+    // de pie decía "contrato v3": el número que ve un humano y el que lee el
+    // script llevaban desincronizados una versión entera.
+    const a = seed()
+    const marker = a.match(/<!-- ct-init:slices-contract-version: (\d+) -->/)
+    const footer = a.match(/Esta sección la mantiene `\/ct-init` \(contrato v(\d+)\)/)
+    expect(marker).not.toBeNull()
+    expect(footer).not.toBeNull()
+    expect(footer[1]).toBe(marker[1])
   })
 })

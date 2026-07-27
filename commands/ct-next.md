@@ -28,6 +28,27 @@ Los tres avisos anteriores (colisión de orden, ambigüedad de `status:`, depend
 
 Si el claim se obtiene pero el dispatch falla DESPUÉS (el propio `git worktree add`, el seed de `.agent/STATE.md`, o el lanzamiento de `cmux`), `/ct-next` revierte el claim a `status:ready` automáticamente — y si ese revert también falla, lo dice alto y imprime el comando manual exacto para arreglarlo. `--dry-run` muestra qué issue se reclamaría, sin ejecutar `dispatch-check` de verdad (ningún `gh` real se toca). El **release** (`status:in-progress` → `status:in-review`) sigue viviendo en el kickoff — el propio prompt del agente lanzado ya trae el comando literal `dispatch-check <issue> --repo <repo> --release` para cuando termine y el PR esté abierto; el gate de conformidad de PR de la Fase 3 es el respaldo si el agente no lo ejecuta.
 
+**Qué suelta y qué NO suelta el release (F13).** `--release` libera el **cap** (deja de contar como agente vivo) pero **no** los tokens `area:`/`touches:`: un `status:in-review` los retiene hasta que su issue se cierra al mergear. Son dos recursos con dos criterios, no uno:
+
+| | `status:in-progress` | `status:in-review` |
+|---|---|---|
+| Ocupa `--cap` | sí (hay un agente corriendo) | **no** |
+| Retiene `area:`/`touches:` | sí | **sí, hasta el merge** |
+| Satisface un `merge-after` | no | no (hace falta cerrar como *completed*) |
+| Detección de claim rancio | sí (se cruza con worktree/rama/sesión cmux) | **no** — no tener sesión ahí es lo normal |
+
+Antes, `--release` soltaba las dos cosas a la vez: entre la apertura del PR y su merge, el siguiente slice del mismo área veía el terreno libre y ramificaba de una base que todavía no contenía ese trabajo. La ventana del cerrojo era más corta que la ventana del conflicto. Consecuencia práctica: **un PR sin mergear frena a sus vecinos de área**, y `/ct-next` lo dice con ese nombre (`status:in-review`, no "espera a que termine") en vez de mandarte esperar a un agente que no existe.
+
+**Devolver al loop un slice rechazado en revisión (F13):**
+```
+node ${CLAUDE_PLUGIN_ROOT}/scripts/dispatch-check.mjs <issue> --repo "<owner/repo>" --reopen
+```
+`status:in-review` era un estado **terminal**: no había ninguna transición de vuelta a `status:ready` salvo los reverts por fallo del protocolo, así que rechazar un PR en el gate sacaba ese slice del loop para siempre, y con él todo lo que dependiera de él. `--reopen` es esa arista, y es deliberadamente manual: **lee** el estado real del issue y **exige** `status:in-review` (exit 2 si no, sin tocar ninguna label — un `gh issue edit` a mano no comprueba nada y puede dejar dos `status:` a la vez). No borra nada del disco: imprime qué queda de la vuelta anterior (worktree `.worktrees/<n>`, rama `feat/<n>`) y los dos caminos posibles — corregir encima de lo que ya hay (lo normal tras un rechazo; entonces **no** invoques `/ct-next`, que se negaría por worktree/rama ocupados) o borrar y re-despachar desde cero, con los comandos exactos. Nada automático lo invoca jamás: ni `/ct-next`, ni el kickoff.
+
+**Claims muertos que copan el cap (F13).** La detección de claims rancios (worktree / rama `feat/<n>` / sesión de `cmux`, todo local a esta máquina) ya no se consulta solo al explicar una colisión: también cuando el cap está lleno. Un `status:in-progress` abandonado que **no** comparta ningún token con el candidato pero sí ocupe el único hueco de cap producía "sube `--cap`, o espera a que termine alguno" — mandando esperar a un agente que ya no existe. Sigue en pie el límite de siempre: **nada vigila los claims entre invocaciones** (el claim es un label, sin heartbeat), así que solo se entera quien esté corriendo `/ct-next` en ese momento; y la evidencia es local, así que nunca se afirma "abandonado", solo "aquí no hay ni rastro".
+
+**Una dependencia que no se va a satisfacer nunca (F13).** Un `merge-after` cuenta como satisfecho solo si su issue está **cerrado como *completed***. Cerrar un slice descartado como *not planned* — lo semánticamente correcto — deja a todos sus dependientes esperando para siempre, y el mensaje decía "falta mergear #7" igual que si el trabajo siguiera en curso. Ahora se nombra el estado real del cierre y el remedio (quitar la dep, o reabrir y cerrar como *completed* si el trabajo sí se hizo). La trampa opuesta **no** se detecta y se dice claro: cerrar a mano como *completed* sin mergear nada satisface la dep igualmente — distinguirlo exigiría cruzar el grafo de PRs (GraphQL, una llamada por issue cerrado) para blindar un caso que requiere una acción errónea deliberada, mientras que el primero ocurre al hacer lo correcto.
+
 **Exit code de `/ct-next` (path real, sin `--dry-run`):** al terminar de procesar la tanda imprime siempre `lanzados X/Y slice(s) seleccionados de esta tanda` (X puede ser menor que Y, incluso 0, sin que eso sea un error). El código de salida distingue cuatro situaciones — si `/ct-next` corre dentro de un `/loop`, esto es lo que decide si toca seguir, parar, o reintentar más tarde:
 
 | Exit | Significado | Qué hacer |

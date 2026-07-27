@@ -157,7 +157,18 @@ SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
 # recibe el aviso de desactualizado y `--update-slices-contract` lo reemplaza
 # limpiamente, sin `--force` y sin acusar a nadie — que es exactamente el
 # mecanismo que F9 construyó.
-SLICES_CONTRACT_VERSION=4
+#
+# F13 sube de 4 a 5, y el bump es OBLIGATORIO aquí más que en ninguna ronda
+# anterior: lo que cambia no es redacción, es que el texto v4 PROMETÍA
+# garantías que el código no da. Decía que migration/ci/pbxproj serializan "en
+# todo el repo" (el código solo mira issues de este repo con status:
+# in-progress/in-review — todo lo que va por fuera del flujo de issues es
+# invisible), que "merge-after significa MERGEADO" (el código mira cómo se
+# cerró el issue, que no es lo mismo en ninguna de las dos direcciones), y no
+# decía en absoluto que un PR rechazado dejaba su slice fuera del loop para
+# siempre. Un repo bootstrapeado con el v4 se queda con esas tres cosas hasta
+# que este número suba; es la única palanca que existe para llegar hasta él.
+SLICES_CONTRACT_VERSION=5
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -205,6 +216,7 @@ c90554b809bc6af4f50613e75f160b0b0859ffce3412aeb44d10bef2d9da3e0a  v1, 77 líneas
 5d90ba2f8203469cc1aad5a189b2c25003d5223d13f920e4bbbe9e2320c3e9cb  v2, 134 líneas — 40adf2c (plugin 0.9.0–0.10.0)
 8aaa19edfc9b57419972c509f4b558c6084d2a691592561a2b3d180ae59cfcc8  v3, 213 líneas — F11 (sección "Qué hace /ct-next con esto")
 02247741819714164c8f45fbc42dcf26d11c7df58df6b81fae040b038fcf93c4  v4, 221 líneas — F10 (--section obsoleto, enlace al spec verificado)
+cd59702d2c5d3a73b67ad235908b83bdc42c9da41996b14a33fba0749e359961  v5, 289 líneas — F13 (in-review retiene tokens, --reopen, alcance real de la serialización)
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -212,7 +224,7 @@ c90554b809bc6af4f50613e75f160b0b0859ffce3412aeb44d10bef2d9da3e0a  v1, 77 líneas
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 4 -->
+<!-- ct-init:slices-contract-version: 5 -->
 ## Formato de la tabla §9 (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -271,9 +283,11 @@ copiable tal cual:
   NUEVAS y cuáles ha reutilizado — si aparece una nueva que esperabas
   reutilizar, es que has escrito un sinónimo). Un token no puede contener
   comas: se descartan al normalizar, aquí `\,` no sirve de nada.
-  `migration`/`ci`/`pbxproj` en `Toca` son especiales — serializan
-  **globalmente**: como mucho un slice con uno de esos tres en vuelo a la
-  vez, en todo el repo, sin importar `Área`.
+  `migration`/`ci`/`pbxproj` en `Toca` son especiales — serializan entre sí:
+  como mucho un slice con uno de esos tres sin mergear a la vez, sin importar
+  `Área`. El alcance real de ese "global" está más abajo, en "Qué hace
+  `/ct-next` con esto": es global **al flujo de issues de este repo**, que no
+  es lo mismo que global al repo.
 
 Marcadores de "sin valor" (`Dep`/`Acepta`/`Protegido`/`Área`/`Toca`): `–` `-`
 `—` `―` `−` `--` o celda vacía — cualquier variante de guion vale.
@@ -292,8 +306,9 @@ gh issue edit <n> --repo <owner/repo> --add-label status:ready --remove-label st
 
 `/ct-groom` recuerda al terminar cuántos issues del epic siguen en backlog.
 De ahí en adelante el label `status:` lo mueven `/ct-next` y el flujo
-(`ready` → `in-progress` → `in-review`), no el spec — por eso re-groomear
-nunca lo compara ni lo revierte.
+(`ready` → `in-progress` → `in-review`, y de vuelta a `ready` si la revisión
+rechaza el PR — ver "Rechazar un PR" más abajo), no el spec — por eso
+re-groomear nunca lo compara ni lo revierte.
 
 ### Decisiones tuyas que dependen de cómo se invoque `/ct-groom`
 
@@ -355,29 +370,65 @@ el plugin): es lo que cambia cómo escribes la tabla y cómo convives con el
 loop una vez hay slices en vuelo.
 
 - **`Área`/`Toca` no avisan: BLOQUEAN.** Un slice que comparta **un solo
-  token** con un issue en `status:in-progress` no se despacha — `/ct-next` lo
-  salta y prueba el siguiente candidato; si no queda ninguno, no lanza nada y
-  dice contra qué issue chocó. Elegir los tokens **es** elegir qué puede
-  volar en paralelo: dos slices con un token en común quedan serializados
-  aunque toquen ficheros distintos.
-- **`migration`/`ci`/`pbxproj` serializan además GLOBALMENTE.** Son dos reglas
-  distintas actuando a la vez: la de arriba compara tokens, esta no. Un slice
-  con `Toca: migration` y otro con `Toca: ci` **no comparten ningún token** y
-  aun así no pueden estar en vuelo a la vez, en todo el repo, sin importar
-  `Área`.
-- **`merge-after` significa MERGEADO.** Una dependencia solo cuenta como
-  satisfecha cuando su issue está **cerrado como completado** (lo que ocurre
-  al mergear su PR). Un PR aprobado, un PR abierto o un issue en
-  `status:in-review` no desbloquean nada; un issue cerrado como *not planned*
-  tampoco cuenta. Al diseñar la tabla: el slice del que dependen muchos es el
-  **cuello de botella** del epic entero — nada detrás de él avanza hasta que
-  ESE se mergee. Si quieres una ventana de paralelismo, tiene que salir de la
+  token** con un issue en `status:in-progress` **o `status:in-review`**
+  no se despacha — `/ct-next` lo salta y prueba el siguiente candidato; si no
+  queda ninguno, no lanza nada y dice contra qué issue chocó y en qué estado.
+  Elegir los tokens **es** elegir qué puede volar en paralelo: dos slices con
+  un token en común quedan serializados aunque toquen ficheros distintos.
+- **Un token se retiene hasta el MERGE, no hasta que el agente pare.** El
+  agente libera su claim al abrir el PR (`in-progress` → `in-review`), y eso
+  suelta el **cap** — pero no los tokens: hasta que el PR se mergea y el
+  issue se cierra, `main` todavía no contiene ese trabajo, así que un vecino
+  de área ramificaría de una base incompleta. Consecuencia al diseñar la
+  tabla: **un PR sin mergear frena a sus vecinos de área**, no solo a sus
+  dependientes. Dos slices que comparten token no se solapan ni "un poquito".
+  Y si `/ct-next` te dice que choca con un `status:in-review`, esperar no
+  sirve de nada: ahí no hay ningún agente. Mergea el PR — o, si el PR ya se
+  mergeó y el issue sigue abierto (al PR le faltaba `Closes #N`), ciérralo.
+- **`migration`/`ci`/`pbxproj` serializan además GLOBALMENTE, con un alcance
+  concreto.** Son dos reglas distintas actuando a la vez: la de arriba
+  compara tokens, esta no. Un slice con `Toca: migration` y otro con
+  `Toca: ci` **no comparten ningún token** y aun así no pueden estar sin
+  mergear a la vez, sin importar `Área`. **Qué significa "global" de verdad:
+  `/ct-next` solo mira issues de ESTE repo con `status:in-progress` o
+  `status:in-review`.** Todo lo que va por fuera del flujo de issues es
+  INVISIBLE para esta regla: otra rama, otro track de trabajo, un humano
+  editando la misma migración a mano, un repo distinto. La serialización es
+  global **al flujo de issues de este repo**, no al repositorio ni al
+  proyecto. Si tienes trabajo en paralelo fuera del loop, esta garantía no lo
+  cubre y no hay nada en el plugin que pueda cubrirlo.
+- **`merge-after` se comprueba mirando CÓMO se cerró el issue.** Una
+  dependencia cuenta como satisfecha si su issue está **cerrado como
+  *completed*** — que es lo que GitHub hace al mergear un PR con `Closes #N`.
+  Un PR aprobado, un PR abierto o un issue en `status:in-review` no
+  desbloquean nada. Las dos trampas de esa aproximación, dichas sin adornos:
+  - un issue cerrado como ***not planned*** (lo correcto para un slice
+    descartado) **no** satisface la dep y deja a sus dependientes esperando
+    para siempre. `/ct-next` lo nombra al explicar el bloqueo: si ves eso,
+    quita el `merge-after` de la sección `## Dependencias` del dependiente, o
+    reabre el issue y ciérralo como *completed* si su trabajo sí se hizo;
+  - cerrar a mano como ***completed*** sin haber mergeado nada **sí**
+    satisface la dep, y el dependiente saldrá sobre trabajo que no existe.
+    Eso **no se detecta** — haría falta cruzar el grafo de PRs. Cierra los
+    issues del loop mergeando, no a mano.
+  Al diseñar la tabla: el slice del que dependen muchos es el **cuello de
+  botella** del epic entero — nada detrás de él avanza hasta que ESE se
+  mergee. Si quieres una ventana de paralelismo, tiene que salir de la
   columna `Dep`.
 - **Una invocación despacha `--cap` slices; por defecto es 1.** Y el cap es
   **global al repo, no por invocación**: cuenta también lo que ya está en
   vuelo (`status:in-progress`), así que un segundo `/ct-next --cap 1` con algo
-  corriendo no lanza nada — y lo dice. Aprovechar una ventana de paralelismo
-  es un acto explícito: `/ct-next --cap 2` (o más).
+  corriendo no lanza nada — y lo dice. Un `status:in-review` **no** ocupa cap
+  (no hay ningún agente corriendo ahí), aunque sí retenga sus tokens: son dos
+  contabilidades distintas. Aprovechar una ventana de paralelismo es un acto
+  explícito: `/ct-next --cap 2` (o más).
+- **Las dos garantías de arriba valen para UN dispatcher a la vez.** El claim
+  es un label de GitHub, sin compare-and-swap: está reproducido y verificado
+  que dos `/ct-next` lanzados casi a la vez contra el mismo repo pueden
+  reclamar el mismo token compartido y arrancar los dos, saltándose tanto la
+  regla de colisión como el cap. No hay espera ni reintento que cierre ese
+  hueco hoy. **La mitigación es operativa: no lances dos dispatchers a la vez
+  sobre el mismo repo.** (Detalle y evidencia: `commands/ct-next.md`.)
 - **`/ct-next` no acota por epic.** Acepta `--repo`, `--cap`, `--base` y
   `--dry-run`; **no hay `--milestone`**. Barre todos los issues abiertos del
   repo y elige por el `#` más bajo de la tabla, venga del epic que venga (ese
@@ -411,10 +462,39 @@ loop una vez hay slices en vuelo.
   gh issue edit <n> --repo <owner/repo> --add-label status:ready --remove-label status:in-progress
   ```
 
-  `/ct-next` ayuda hasta donde puede: si la colisión es contra un issue del
-  que no hay ni worktree, ni rama, ni sesión de cmux **en esta máquina**, lo
-  dice — pero no puede afirmar que esté abandonado (pudo reclamarse desde
-  otro sitio). Comprueba antes de romper un claim ajeno.
+  `/ct-next` ayuda hasta donde puede: si un `status:in-progress` no tiene ni
+  worktree, ni rama, ni sesión de cmux **en esta máquina**, lo dice — tanto
+  si bloquea por token compartido como si solo está ocupando el `--cap`. Pero
+  no puede afirmar que esté abandonado (pudo reclamarse desde otro sitio), y
+  **solo se entera quien esté corriendo `/ct-next` en ese momento**: no hay
+  ningún demonio vigilando claims entre invocaciones. Comprueba antes de
+  romper un claim ajeno. (Esta comprobación NO se hace sobre un
+  `status:in-review`: ahí no tener sesión abierta es lo normal, no una
+  anomalía — lo que bloquea es el PR sin mergear, no un claim muerto.)
+
+### Rechazar un PR en el gate, sin sacar el slice del loop
+
+`status:in-review` **no** es un estado terminal, pero salir de él es un acto
+deliberado tuyo: no hay ninguna transición automática de vuelta. Si rechazas
+el PR de un slice, devuélvelo al loop con
+
+```
+node <plugin>/scripts/dispatch-check.mjs <n> --repo <owner/repo> --reopen
+```
+
+que lo mueve `in-review` → `ready` **solo si de verdad está en `in-review`**
+(si no, se niega sin tocar ninguna label). No borra nada del disco: te dice
+qué queda de la vuelta anterior (el worktree `.worktrees/<n>` y la rama
+`feat/<n>`) y te deja elegir entre los dos caminos, que son excluyentes:
+
+- **corregir encima** de lo que ya hay — lo normal tras un rechazo: sigues en
+  ese mismo worktree y ese mismo PR, y **no** invocas `/ct-next` para ese
+  slice (se negaría, precisamente porque el worktree y la rama existen);
+- **empezar de cero** — borras worktree y rama (comprueba antes que no
+  pierdes trabajo sin pushear) y dejas que `/ct-next` lo despache de nuevo.
+
+Sin esto, un PR rechazado dejaba su slice fuera del loop **para siempre**, y
+con él todo lo que dependiera de él: `/ct-next` solo despacha `status:ready`.
 - **Cada slice en vuelo tiene SU `.agent/STATE.md`**: el de su worktree
   (`.worktrees/<n>/.agent/STATE.md`), sembrado al despachar. Dos slices a la
   vez no se pisan ese fichero, y ninguno toca el `.agent/STATE.md` del
@@ -427,7 +507,7 @@ loop una vez hay slices en vuelo.
   recibe el spec**: se hidrata del issue. Lo que no llegó al cuerpo del issue
   no llega al agente.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v3). Si el plugin trae una
+<sub>Esta sección la mantiene `/ct-init` (contrato v5). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>

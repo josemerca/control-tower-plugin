@@ -94,7 +94,33 @@ export function selectNext(issues, { mergedIssues = [], runningTouches = [], con
 export function collectInFlight(issues) {
   return (issues || [])
     .filter((i) => i.status === 'in-progress')
-    .map((i) => ({ n: i.n, touches: i.touches || [] }))
+    .map((i) => ({ n: i.n, status: 'in-progress', touches: i.touches || [] }))
+}
+
+// collectTokenHolders (F13/H2): quién retiene tokens de área/touches. NO es
+// lo mismo que collectInFlight, y por eso son dos funciones y no una con un
+// flag: son dos RECURSOS distintos con dos criterios distintos.
+//
+//   - CAP (collectInFlight)        → cuántos AGENTES hay vivos ahora mismo.
+//                                    Solo `in-progress`: un slice en revisión
+//                                    no tiene ningún agente corriendo.
+//   - TOKENS (collectTokenHolders) → sobre qué áreas hay trabajo NO MERGEADO
+//                                    todavía. `in-progress` Y `in-review`: el
+//                                    conflicto de contenido no acaba cuando
+//                                    el agente para, acaba cuando el PR se
+//                                    mergea y `main` contiene ese trabajo.
+//
+// El porqué completo (incluida la alternativa descartada de mantener el claim
+// en `in-progress` hasta el merge) está en scripts/claim.js, junto a
+// CLAIM_HOLDING_STATUSES — ahí vive el mismo criterio para el otro consumidor
+// (dispatch-check.mjs#detectCollisions), y no se duplica aquí para que no
+// puedan divergir: los dos ficheros describen el mismo par de estados, uno
+// sobre labels crudas y otro sobre el struct ya mapeado.
+export const TOKEN_HOLDING_STATUSES = ['in-progress', 'in-review']
+export function collectTokenHolders(issues) {
+  return (issues || [])
+    .filter((i) => TOKEN_HOLDING_STATUSES.includes(i.status))
+    .map((i) => ({ n: i.n, status: i.status, touches: i.touches || [] }))
 }
 
 // collisionAgainstRunning: dado el candidato de menor orden que SÍ está
@@ -115,14 +141,21 @@ function collisionAgainstRunning(cand, inFlight) {
   const conflict = touchesConflict(touches, claimedTouches, hasSerializingInRunning)
   if (!conflict) return null
 
+  // withIssueStatus (F13/H2): la atribución ya no basta con el NÚMERO del
+  // issue que retiene el token — hace falta EN QUÉ ESTADO lo retiene.
+  // "colisiona con #7 (in-progress)" y "colisiona con #7 (in-review, su PR
+  // sigue abierto)" son dos bloqueos con dos remedios distintos, y hasta F13
+  // el segundo ni siquiera existía. `?? null` y no un default optimista: si
+  // quien llama pasó holders sin `status` (los tests unitarios viejos lo
+  // hacen), se dice que no se sabe en vez de afirmar 'in-progress'.
   if (conflict.kind === 'token') {
     const withIssue = inFlight.find((i) => (i.touches || []).includes(conflict.token))
-    return { reason: 'collision', kind: 'token', issue: cand.n, token: conflict.token, withIssue: withIssue ? withIssue.n : null }
+    return { reason: 'collision', kind: 'token', issue: cand.n, token: conflict.token, withIssue: withIssue ? withIssue.n : null, withIssueStatus: withIssue?.status ?? null }
   }
 
   const withIssue = inFlight.find((i) => (i.touches || []).some((t) => SERIALIZING_TOUCHES.includes(t)))
   const runningToken = (withIssue?.touches || []).find((t) => SERIALIZING_TOUCHES.includes(t))
-  return { reason: 'collision', kind: 'serializing', issue: cand.n, token: conflict.token, runningToken, withIssue: withIssue ? withIssue.n : null }
+  return { reason: 'collision', kind: 'serializing', issue: cand.n, token: conflict.token, runningToken, withIssue: withIssue ? withIssue.n : null, withIssueStatus: withIssue?.status ?? null }
 }
 
 // explainSelectionGap: la misma cadena de motivos que explainNoSelection,
@@ -159,9 +192,40 @@ function collisionAgainstRunning(cand, inFlight) {
 // libre, se reporta el motivo del primero (igual que antes) — el escaneo no
 // cambia CUÁL se cita cuando de verdad todos chocan, solo cierra el falso
 // negativo de arriba.
-function explainSelectionGap(issues, { mergedIssues = [], inFlight = [] } = {}) {
+// depStates (F13/H4): `{ <número de issue>: <stateReason> }` SOLO para los
+// issues CERRADOS que NO cuentan como mergeados ('NOT_PLANNED', 'REOPENED',
+// null…). Es la información que faltaba para poder responder "¿por qué este
+// slice no sale nunca?".
+//
+// EL AGUJERO QUE CIERRA. `filterMergedIssues` (gh-issue-map.js) considera
+// satisfecha una dep si su issue está cerrado con `stateReason ===
+// 'COMPLETED'`. Cerrar un slice descartado como **not planned** —que es lo
+// semánticamente correcto— NO satisface la dep, y todos sus dependientes se
+// quedan esperando PARA SIEMPRE. El mensaje que veías era "falta mergear #7",
+// indistinguible de "#7 aún se está trabajando": una instrucción a esperar
+// algo que nunca va a pasar. Verificado contra el código sin arreglar: un
+// cerrado NOT_PLANNED producía exactamente `unmetDeps:[7]`, sin ninguna otra
+// señal.
+//
+// `unmetDeps` conserva su forma (números de issue, o `null` para un orden que
+// no resuelve a ningún issue) — no se cambia a objetos para no reescribir los
+// consumidores existentes ni los tests que fijan esa forma. El estado viaja
+// aparte, en un mapa, y ct-next.mjs#formatReason lo consulta al renderizar.
+export function unresolvableDepsOf(blockedEntry, depStates = {}) {
+  return (blockedEntry.unmetDeps || []).filter((d) => d != null && Object.prototype.hasOwnProperty.call(depStates, d))
+}
+
+function explainSelectionGap(issues, { mergedIssues = [], inFlight = [], depStates = {} } = {}) {
   const { ready, readyDepsMet } = computeReadyCandidates(issues, mergedIssues)
-  if (ready.length === 0) return { reason: 'none-ready' }
+  if (ready.length === 0) {
+    // F13: 'none-ready' decía "no hay nada que despachar todavía" y se
+    // callaba que pudiera haber SEIS PRs abiertos esperando revisión. Con
+    // `in-review` reteniendo tokens (H2) ese silencio es peor todavía: el
+    // estado más común al final de un epic es "todo en revisión, nada ready",
+    // y el mensaje lo pintaba como si no se hubiera empezado. `inReview` es
+    // la lista de issues parados ahí — cero significa de verdad cero.
+    return { reason: 'none-ready', inReview: (issues || []).filter((i) => i.status === 'in-review').map((i) => i.n) }
+  }
   if (readyDepsMet.length === 0) {
     const merged = new Set(mergedIssues)
     // D1 finding 2: para un issue con depsMalformed, `unmetDeps` se reporta
@@ -172,6 +236,7 @@ function explainSelectionGap(issues, { mergedIssues = [], inFlight = [] } = {}) 
     // bloqueo es por datos ilegibles, no por trabajo pendiente.
     return {
       reason: 'deps-unmet',
+      depStates,
       blocked: ready.map((i) => ({
         n: i.n,
         unmetDeps: i.depsMalformed ? [] : (i.deps || []).filter((d) => !merged.has(d)),
@@ -204,15 +269,29 @@ function explainSelectionGap(issues, { mergedIssues = [], inFlight = [] } = {}) 
 //   4. 'collision'   — hay al menos un ready con deps mergeadas, pero choca
 //                       con trabajo en vuelo (token compartido, o conflicto
 //                       de serialización migration/ci/pbxproj).
-export function explainNoSelection(issues, { mergedIssues = [], inFlight = [], cap = 1 } = {}) {
+// `tokenHolders` (F13/H2) es el conjunto que retiene TOKENS (in-progress +
+// in-review); `inFlight` sigue siendo el que consume CAP (solo in-progress).
+// Cuando no se pasa `tokenHolders` (los tests unitarios previos a F13, que
+// solo conocían un conjunto) se usa `inFlight` — así una llamada vieja
+// mantiene exactamente su semántica anterior en vez de perder silenciosamente
+// la mitad de los poseedores.
+export function explainNoSelection(issues, { mergedIssues = [], inFlight = [], tokenHolders, cap = 1, depStates = {} } = {}) {
   const inFlightCount = inFlight.length
+  const holders = tokenHolders ?? inFlight
   // Se calcula SIEMPRE (incluso si el cap ya está lleno): es exactamente lo
   // que hace falta para poblar `wouldDispatchIfCapAllowed`/
   // `blockedEvenWithCap` sin duplicar la lógica de colisión/deps una segunda
   // vez para el caso "cap lleno".
-  const gap = explainSelectionGap(issues, { mergedIssues, inFlight })
+  const gap = explainSelectionGap(issues, { mergedIssues, inFlight: holders, depStates })
   if (inFlightCount >= cap) {
-    return { reason: 'cap-full', inFlightCount, cap, wouldDispatchIfCapAllowed: gap === null, blockedEvenWithCap: gap }
+    // `inFlight` viaja entero (no solo su conteo) porque el mensaje de
+    // "cap lleno" necesita poder cruzar CADA issue que ocupa el cap contra
+    // la evidencia local de que algo lo está trabajando de verdad — ver
+    // F13/H3 en ct-next.mjs#formatBlockReason. Antes solo llegaba el número,
+    // así que un claim MUERTO que copara el cap sin compartir ningún token
+    // con nadie era completamente invisible: "sube --cap, o espera a que
+    // termine alguno", esperando a un agente que ya no existe.
+    return { reason: 'cap-full', inFlightCount, inFlight, cap, wouldDispatchIfCapAllowed: gap === null, blockedEvenWithCap: gap }
   }
   // No debería alcanzarse con datos consistentes (`gap` no-null aquí
   // significaría que selectNext tampoco habría seleccionado nada por otra
@@ -228,13 +307,22 @@ export function explainNoSelection(issues, { mergedIssues = [], inFlight = [], c
 // es el máximo GLOBAL de agentes trabajando este repo a la vez (en vuelo +
 // recién seleccionados), no un tope "por invocación": `remainingCap` es lo
 // que de verdad se le pasa a selectNext como concurrencyCap.
-export function planDispatch(issues, { mergedIssues = [], cap = 1 } = {}) {
+//
+// F13/H2 — DOS CONJUNTOS, NO UNO. `inFlight` (solo `in-progress`) decide el
+// CAP; `tokenHolders` (`in-progress` + `in-review`) decide los TOKENS. Antes
+// `runningTouches` salía de `inFlight`, así que soltar el claim a
+// `in-review` al abrir el PR liberaba también los tokens — la ventana del
+// cerrojo terminaba al abrir el PR, mientras la del conflicto llega hasta el
+// merge. `remainingCap` sigue calculándose con `inFlight.length`: un PR en
+// revisión no ocupa a nadie.
+export function planDispatch(issues, { mergedIssues = [], cap = 1, depStates = {} } = {}) {
   const inFlight = collectInFlight(issues)
-  const runningTouches = inFlight.flatMap((i) => i.touches || [])
+  const tokenHolders = collectTokenHolders(issues)
+  const runningTouches = tokenHolders.flatMap((i) => i.touches || [])
   const remainingCap = Math.max(0, cap - inFlight.length)
   const selected = selectNext(issues, { mergedIssues, runningTouches, concurrencyCap: remainingCap })
-  const blockReason = selected.length === 0 ? explainNoSelection(issues, { mergedIssues, inFlight, cap }) : null
-  return { selected, inFlight, runningTouches, remainingCap, blockReason }
+  const blockReason = selected.length === 0 ? explainNoSelection(issues, { mergedIssues, inFlight, tokenHolders, cap, depStates }) : null
+  return { selected, inFlight, tokenHolders, runningTouches, remainingCap, blockReason }
 }
 
 // ============================================================================

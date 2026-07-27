@@ -20,7 +20,7 @@ describe('detectCollisions', () => {
       { n: 11, labels: ['status:ready', 'touches:db'] },
     ]
     const c = detectCollisions(['touches:db'], open)
-    expect(c).toEqual([{ n: 10, tokens: ['touches:db'] }])
+    expect(c).toEqual([{ n: 10, tokens: ['touches:db'], status: 'status:in-progress' }])
   })
   it('ignora in-progress que no comparten token', () => {
     const open = [
@@ -28,7 +28,7 @@ describe('detectCollisions', () => {
       { n: 11, labels: ['status:in-progress', 'touches:db'] },
     ]
     const c = detectCollisions(['touches:db'], open)
-    expect(c).toEqual([{ n: 11, tokens: ['touches:db'] }])
+    expect(c).toEqual([{ n: 11, tokens: ['touches:db'], status: 'status:in-progress' }])
   })
 })
 

@@ -140,12 +140,12 @@ describe('collectInFlight', () => {
       { n: 3, status: 'in-progress', touches: [] },
     ]
     expect(collectInFlight(issues)).toEqual([
-      { n: 1, touches: ['api', 'ui'] },
-      { n: 3, touches: [] },
+      { n: 1, status: 'in-progress', touches: ['api', 'ui'] },
+      { n: 3, status: 'in-progress', touches: [] },
     ])
   })
   it('issue in-progress sin touches → touches: []', () => {
-    expect(collectInFlight([{ n: 1, status: 'in-progress' }])).toEqual([{ n: 1, touches: [] }])
+    expect(collectInFlight([{ n: 1, status: 'in-progress' }])).toEqual([{ n: 1, status: 'in-progress', touches: [] }])
   })
   it('sin ningún in-progress → []', () => {
     expect(collectInFlight([{ n: 1, status: 'ready', touches: ['x'] }])).toEqual([])
@@ -193,7 +193,7 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
     expect(plan.selected).toEqual([])
     expect(plan.remainingCap).toBe(0)
     expect(plan.blockReason).toEqual({
-      reason: 'cap-full', inFlightCount: 1, cap: 1, wouldDispatchIfCapAllowed: true, blockedEvenWithCap: null,
+      reason: 'cap-full', inFlightCount: 1, inFlight: [{ n: 1, status: 'in-progress', touches: ['api'] }], cap: 1, wouldDispatchIfCapAllowed: true, blockedEvenWithCap: null,
     })
   })
 
@@ -211,14 +211,17 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
     const issues = [{ n: 1, order: 1, status: 'in-review', deps: [], touches: [] }]
     const plan = planDispatch(issues, { mergedIssues: [], cap: 1 })
     expect(plan.selected).toEqual([])
-    expect(plan.blockReason).toEqual({ reason: 'none-ready' })
+    // F13: 'none-ready' ya no se calla los slices parados en in-review — son
+    // la causa habitual de "no hay nada ready" al final de un epic, y desde
+    // F13/H2 además retienen sus tokens.
+    expect(plan.blockReason).toEqual({ reason: 'none-ready', inReview: [1] })
   })
 
   it('ready pero con deps sin mergear → blockReason deps-unmet, lista los issues bloqueados y qué deps faltan', () => {
     const issues = [{ n: 2, order: 2, status: 'ready', deps: [1, 3], touches: [] }]
     const plan = planDispatch(issues, { mergedIssues: [3], cap: 1 }) // falta mergear el 1
     expect(plan.selected).toEqual([])
-    expect(plan.blockReason).toEqual({ reason: 'deps-unmet', blocked: [{ n: 2, unmetDeps: [1], malformed: false }] })
+    expect(plan.blockReason).toEqual({ reason: 'deps-unmet', depStates: {}, blocked: [{ n: 2, unmetDeps: [1], malformed: false }] })
   })
 
   // D1 finding 2: un issue ready cuya sección "## Dependencias" es ilegible
@@ -230,7 +233,7 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
     const issues = [{ n: 9, order: 9, status: 'ready', deps: [], depsMalformed: true, touches: [] }]
     const plan = planDispatch(issues, { mergedIssues: [], cap: 1 })
     expect(plan.selected).toEqual([])
-    expect(plan.blockReason).toEqual({ reason: 'deps-unmet', blocked: [{ n: 9, unmetDeps: [], malformed: true }] })
+    expect(plan.blockReason).toEqual({ reason: 'deps-unmet', depStates: {}, blocked: [{ n: 9, unmetDeps: [], malformed: true }] })
   })
 
   // D1 finding 5: una dependencia de ORDEN no mapeable llega aquí como
@@ -242,7 +245,7 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
   it('deps con un null (orden sin issue correspondiente) → unmetDeps conserva el null tal cual, no revienta', () => {
     const issues = [{ n: 5, order: 5, status: 'ready', deps: [null], touches: [] }]
     const plan = planDispatch(issues, { mergedIssues: [], cap: 1 })
-    expect(plan.blockReason).toEqual({ reason: 'deps-unmet', blocked: [{ n: 5, unmetDeps: [null], malformed: false }] })
+    expect(plan.blockReason).toEqual({ reason: 'deps-unmet', depStates: {}, blocked: [{ n: 5, unmetDeps: [null], malformed: false }] })
   })
 
   it('ready + deps mergeadas pero colisiona con serializante en vuelo (migration/ci/pbxproj, tokens distintos) → collision de tipo serializing', () => {
@@ -252,7 +255,7 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
     ]
     const plan = planDispatch(issues, { mergedIssues: [], cap: 5 })
     expect(plan.selected).toEqual([])
-    expect(plan.blockReason).toEqual({ reason: 'collision', kind: 'serializing', issue: 2, token: 'ci', runningToken: 'migration', withIssue: 1 })
+    expect(plan.blockReason).toEqual({ reason: 'collision', kind: 'serializing', issue: 2, token: 'ci', runningToken: 'migration', withIssue: 1, withIssueStatus: 'in-progress' })
   })
 
   // Fix Minor 1: aquí, aun sin el cap lleno, el único ready seguiría bloqueado
@@ -268,9 +271,10 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
     expect(plan.blockReason).toEqual({
       reason: 'cap-full',
       inFlightCount: 1,
+      inFlight: [{ n: 1, status: 'in-progress', touches: ['x'] }],
       cap: 1,
       wouldDispatchIfCapAllowed: false,
-      blockedEvenWithCap: { reason: 'deps-unmet', blocked: [{ n: 2, unmetDeps: [99], malformed: false }] },
+      blockedEvenWithCap: { reason: 'deps-unmet', depStates: {}, blocked: [{ n: 2, unmetDeps: [99], malformed: false }] },
     })
   })
 
@@ -287,9 +291,10 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
     expect(plan.blockReason).toEqual({
       reason: 'cap-full',
       inFlightCount: 1,
+      inFlight: [{ n: 1, status: 'in-progress', touches: ['api'] }],
       cap: 1,
       wouldDispatchIfCapAllowed: false,
-      blockedEvenWithCap: { reason: 'collision', kind: 'token', issue: 2, token: 'api', withIssue: 1 },
+      blockedEvenWithCap: { reason: 'collision', kind: 'token', issue: 2, token: 'api', withIssue: 1, withIssueStatus: 'in-progress' },
     })
   })
 })
@@ -428,7 +433,7 @@ describe('explainSelectionGap / planDispatch — cap-full debe escanear TODOS lo
     // El motivo reportado debe seguir siendo el del primero (#20, menor
     // orden) — el escaneo no cambia CUÁL se cita cuando de verdad todos
     // chocan, solo evita el falso negativo del caso de arriba.
-    expect(plan.blockReason.blockedEvenWithCap).toEqual({ reason: 'collision', kind: 'token', issue: 20, token: 'api', withIssue: 10 })
+    expect(plan.blockReason.blockedEvenWithCap).toEqual({ reason: 'collision', kind: 'token', issue: 20, token: 'api', withIssue: 10, withIssueStatus: 'in-progress' })
   })
 })
 
