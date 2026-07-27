@@ -19,10 +19,16 @@ La sección lleva su propia versión (`<!-- ct-init:slices-contract-version: N -
 Si el repo ya estaba bootstrapeado con una versión anterior, el scaffolder lo
 **avisa por stderr** y no toca nada: adoptar la nueva es una decisión
 explícita del usuario, no un efecto colateral de correr `/ct-init`. Si te lo
-pide, córrelo con `--update-slices-contract` (solo reemplaza la sección si
-está tal cual la dejó `ct-init`; si la habían editado a mano, se niega con
-exit 3 y hay que añadir `--force` para perder esas ediciones). **Nunca pases
-`--force` por tu cuenta.**
+pide, córrelo con `--update-slices-contract`: solo reemplaza la sección si su
+contenido coincide, byte a byte, con alguno de los bloques que `ct-init` sabe
+que emitió (los tiene todos registrados por hash). Si **no** lo reconoce, sale
+con exit 3 y **no** afirma que el usuario lo editara: puede ser una edición a
+mano o un bloque intacto de una versión del plugin que ese `ct-init` no tenga
+registrada, y desde ahí no se distinguen. Si eso pasa, **transmítele al usuario
+el aviso tal cual, incluido el hash** — no lo traduzcas a "la editaste tú" ni
+supongas cuál de las dos es. `--force` reemplaza igualmente; **nunca lo pases
+por tu cuenta**, y solo después de que el usuario confirme que esa sección no
+lleva trabajo suyo.
 
 En `.agent/STATE.md`, en cambio, **limítate a describir el bootstrap**:
 
