@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path'
 import { planDispatch, resolveAccount, buildCmuxArgv } from './dispatch.js'
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
 import { shQuote } from './shquote.js'
-import { buildDispatchInput } from './gh-issue-map.js'
+import { buildDispatchInput, NO_MILESTONE_KEY } from './gh-issue-map.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 
 // W-C: dispatch-check.mjs implementa el protocolo de claim completo (colisión
@@ -67,10 +67,30 @@ function formatReason(reason) {
     case 'none-ready':
       return 'No hay ningún issue en status:ready — no hay nada que despachar todavía.'
     case 'deps-unmet': {
-      const list = reason.blocked
-        .map((b) => `#${b.n} (falta mergear ${b.unmetDeps.map((d) => `#${d}`).join(', ')})`)
-        .join(', ')
-      return `Hay slice(s) en status:ready pero con dependencias sin mergear: ${list} — espera a que se mergeen esas dependencias.`
+      // D1 finding 2/5: dos causas MUY distintas terminaban antes en el mismo
+      // mensaje genérico ("falta mergear #X"), una de ellas imprimiendo
+      // directamente el string "#null" — instruyendo a esperar algo que no
+      // existe y nunca se va a mergear.
+      //   - `malformed` (finding 2): la sección "## Dependencias" del issue
+      //     existe pero no se reconoció ningún "merge-after #N" — casi
+      //     seguro una reescritura humana. El estado del gate es
+      //     DESCONOCIDO, no "sin dependencias" (unmetDeps llega vacío a
+      //     propósito desde dispatch.js — ver su comentario).
+      //   - una dependencia que tradujo a `null` (finding 5,
+      //     gh-issue-map.js#buildDispatchInput): el orden declarado no
+      //     corresponde a NINGÚN issue existente (ni abierto ni cerrado, ni
+      //     en el propio epic del issue) — nunca se va a resolver solo con
+      //     esperar, hace falta corregir el dato.
+      const list = reason.blocked.map((b) => {
+        if (b.malformed) {
+          return `#${b.n} (la sección "## Dependencias" existe pero no se reconoció ningún "merge-after #N" en su contenido — probablemente reescrita a mano; tratado como NO despachable hasta que se corrija el texto, nunca como "sin dependencias")`
+        }
+        const deps = b.unmetDeps.map((d) => (d == null
+          ? 'una dependencia declarada contra un orden que no corresponde a ningún issue existente (¿"merge-after" a un slice que no existe, o que aún no se groomeó?) — nunca se resolverá sola con esperar; corrige el "merge-after" o el "ct-order" del issue referenciado'
+          : `#${d}`))
+        return `#${b.n} (falta mergear ${deps.join(', ')})`
+      }).join('; ')
+      return `Hay slice(s) en status:ready pero con dependencias sin mergear o sin resolver: ${list} — espera a que se mergeen esas dependencias, o corrige el issue si el bloqueo es por datos, no por trabajo pendiente.`
     }
     case 'collision': {
       if (reason.kind === 'serializing') {
@@ -378,6 +398,14 @@ function loadIssues() {
     closed = rawClosed.map((i) => ({
       number: i.number,
       body: i.body,
+      // milestone (D1 finding 1): buildOrderIndex necesita el milestone de
+      // CUALQUIER issue, abierto o cerrado, para poder escanear el orden POR
+      // EPIC en vez de globalmente al repo — sin esto, todo issue cerrado
+      // caería en el bucket compartido NO_MILESTONE_KEY sin importar su
+      // epic real, arriesgando una colisión FALSA entre dos epics distintos
+      // que de verdad tienen milestones distintos (uno simplemente no viajó
+      // hasta aquí).
+      milestone: i.milestone || null,
       stateReason: i.state_reason ? String(i.state_reason).toUpperCase() : null,
     }))
   } catch (e) {
@@ -387,7 +415,53 @@ function loadIssues() {
   return buildDispatchInput(raw, closed)
 }
 
-const { issues, mergedIssues } = loadIssues()
+// formatOrderCollisions / la guarda de abajo (D1 finding 1, el más grave del
+// hardening del dispatch): `orderCollisions` (gh-issue-map.js#buildOrderIndex,
+// vía buildDispatchInput) es no-vacío cuando dos issues DISTINTOS comparten
+// el mismo `<!-- ct-order:N -->` dentro del MISMO epic (mismo milestone, o
+// ambos sin milestone) — un re-groom accidental, o dos epics que comparten
+// milestone por error (p.ej. ninguno pasó `--milestone` y los dos cayeron en
+// el título por defecto "Epic"). Esto se comprueba ANTES de intentar
+// seleccionar nada: con el índice de orden en este estado, CUALQUIER
+// traducción de `merge-after #N` en ese epic es sospechosa (no solo la del
+// slice que causó la colisión) — abortamos el batch entero en vez de
+// arriesgarnos a despachar contra la dependencia equivocada, que es
+// exactamente el bug que este finding describe (nada se imprimía).
+function formatOrderCollisions(collisions) {
+  return collisions.map((c) => {
+    const epicLabel = c.epicKey === NO_MILESTONE_KEY ? 'issues sin milestone asignado' : `el milestone #${c.epicKey}`
+    return `  - orden ${c.order} en ${epicLabel}: aparece en más de un issue (${c.issues.map((n) => `#${n}`).join(', ')}) — el marcador <!-- ct-order:${c.order} --> está duplicado. ¿Re-groom accidental sobre el mismo milestone, o dos epics compartiendo milestone por no haber pasado --milestone?`
+  }).join('\n')
+}
+
+// formatStatusAmbiguityWarnings (D1 finding 3): un aviso, SIEMPRE impreso
+// (no solo en --dry-run: es una señal de datos rotos, no del plan de
+// despacho) — nunca en silencio — por cada issue con más de una label
+// `status:` a la vez. gh-issue-map.js#mapGhIssue ya resolvió un valor
+// determinista e independiente del orden del array (in-progress > in-review
+// > ready > backlog); este aviso es SOLO para que un humano corrija las
+// labels a mano y la ambigüedad no se repita en la próxima corrida.
+function formatStatusAmbiguityWarnings(issues) {
+  return issues
+    .filter((i) => i.statusAmbiguous)
+    .map((i) => `aviso: #${i.n} tiene más de una label "status:" a la vez (${(i.statusLabels || []).map((s) => `status:${s}`).join(', ')}) — probablemente una edición a medias. Resuelto de forma conservadora a "status:${i.status}" (in-progress > in-review > ready > backlog), sin depender del orden en que gh/GitHub devuelve las labels. Corrige las labels a mano para dejar solo una.`)
+}
+
+const dispatchInput = loadIssues()
+const { issues, mergedIssues } = dispatchInput
+// `orderCollisions` solo existe en la ruta real (buildDispatchInput) — el
+// fixture de test (CT_NEXT_FIXTURE) ya trae issues pre-mapeados y no pasa
+// por ese cálculo; `|| []` lo trata como "sin colisiones" en ese caso.
+const orderCollisions = dispatchInput.orderCollisions || []
+if (orderCollisions.length) {
+  console.error(`no se puede decidir el dispatch: el índice de orden (<!-- ct-order:N -->) tiene colisiones sin resolver — esto NUNCA se resuelve en silencio (ver D1 finding 1):\n${formatOrderCollisions(orderCollisions)}\nRevisa los issues señalados en GitHub (marcador ct-order y milestone) y corrígelos antes de reintentar. No se ha creado ningún worktree ni reclamado ningún issue.`)
+  process.exit(1)
+}
+// console.log (no console.error): este aviso convive con una corrida que
+// sigue exit 0 — mismo criterio que el resto de líneas informativas de este
+// fichero (rama base resuelta, en vuelo, motivo de bloqueo): console.error
+// aquí se reserva para lo que aborta con exit != 0.
+for (const w of formatStatusAmbiguityWarnings(issues)) console.log(w)
 // planDispatch (dispatch.js) es quien decide TODO lo que antes se hacía aquí
 // a medias: antes este wrapper llamaba a selectNext con `runningTouches: []`
 // hardcodeado, así que dos invocaciones sucesivas de /ct-next --cap 1 nunca

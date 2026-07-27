@@ -21,8 +21,16 @@ export const SERIALIZING_TOUCHES = ['migration', 'ci', 'pbxproj']
 export function computeReadyCandidates(issues, mergedIssues) {
   const merged = new Set(mergedIssues)
   const ready = issues.filter((i) => i.status === 'ready')
+  // D1 finding 2: `i.depsMalformed` (gh-issue-map.js#mapGhIssue) marca un
+  // issue cuya sección "## Dependencias" existe pero no produjo NINGÚN
+  // "merge-after #N" reconocible — casi seguro una reescritura humana, no
+  // "sin dependencias". `deps` en ese caso es `[]`, así que el `.every(...)`
+  // de abajo pasaría trivialmente y el issue se trataría como listo para
+  // despachar (el "gate abierto en silencio" que describe el finding) si no
+  // se excluyera aquí explícitamente — nunca se entra a considerarlo "deps
+  // resueltas" mientras el estado real sea desconocido.
   const readyDepsMet = ready
-    .filter((i) => (i.deps || []).every((d) => merged.has(d)))
+    .filter((i) => !i.depsMalformed && (i.deps || []).every((d) => merged.has(d)))
     .sort((a, b) => a.order - b.order)
   return { ready, readyDepsMet }
 }
@@ -133,9 +141,19 @@ function explainSelectionGap(issues, { mergedIssues = [], inFlight = [] } = {}) 
   if (ready.length === 0) return { reason: 'none-ready' }
   if (readyDepsMet.length === 0) {
     const merged = new Set(mergedIssues)
+    // D1 finding 2: para un issue con depsMalformed, `unmetDeps` se reporta
+    // vacío A PROPÓSITO — sus `deps` reales son desconocidas (la sección no
+    // se pudo leer), no "todas mergeadas". `malformed: true` es la señal que
+    // ct-next.mjs#formatReason usa para no imprimir una lista vacía junto a
+    // "bloqueado" (una aparente contradicción) y en su lugar explicar que el
+    // bloqueo es por datos ilegibles, no por trabajo pendiente.
     return {
       reason: 'deps-unmet',
-      blocked: ready.map((i) => ({ n: i.n, unmetDeps: (i.deps || []).filter((d) => !merged.has(d)) })),
+      blocked: ready.map((i) => ({
+        n: i.n,
+        unmetDeps: i.depsMalformed ? [] : (i.deps || []).filter((d) => !merged.has(d)),
+        malformed: !!i.depsMalformed,
+      })),
     }
   }
   return collisionAgainstRunning(readyDepsMet[0], inFlight)

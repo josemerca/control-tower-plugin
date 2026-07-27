@@ -56,6 +56,26 @@ describe('computeReadyCandidates', () => {
     expect(readyDepsMet.map((i) => i.order)).toEqual([10, 20, 30])
     expect(readyDepsMet.map((i) => i.n)).toEqual([200, 300, 100])
   })
+
+  // D1 finding 2: un issue con `depsMalformed: true` (gh-issue-map.js#mapGhIssue
+  // — la sección "## Dependencias" existe pero no se reconoció ningún
+  // "merge-after #N" dentro, una reescritura humana probable) tiene sus
+  // `deps` en `[]`, pero eso NO significa "sin dependencias" — significa
+  // "estado desconocido". Sin este filtro, un issue así pasaría el
+  // `.every(...)` vacío trivialmente y se trataría como listo para
+  // despachar — justo el "gate abierto en silencio" que el finding describe.
+  it('un issue con depsMalformed:true NUNCA entra en readyDepsMet, aunque su `deps` esté vacío', () => {
+    const issues = [{ n: 9, order: 9, status: 'ready', deps: [], depsMalformed: true, touches: [] }]
+    const { ready, readyDepsMet } = computeReadyCandidates(issues, [])
+    expect(ready.map((i) => i.n)).toEqual([9]) // sigue contando como "ready" (status), solo no como "deps resueltas"
+    expect(readyDepsMet).toEqual([])
+  })
+
+  it('depsMalformed:false (o ausente) con deps [] real → readyDepsMet lo incluye con normalidad (caso normal, sin regresión)', () => {
+    const issues = [{ n: 9, order: 9, status: 'ready', deps: [], touches: [] }]
+    const { readyDepsMet } = computeReadyCandidates(issues, [])
+    expect(readyDepsMet.map((i) => i.n)).toEqual([9])
+  })
 })
 
 describe('selectNext', () => {
@@ -198,7 +218,31 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
     const issues = [{ n: 2, order: 2, status: 'ready', deps: [1, 3], touches: [] }]
     const plan = planDispatch(issues, { mergedIssues: [3], cap: 1 }) // falta mergear el 1
     expect(plan.selected).toEqual([])
-    expect(plan.blockReason).toEqual({ reason: 'deps-unmet', blocked: [{ n: 2, unmetDeps: [1] }] })
+    expect(plan.blockReason).toEqual({ reason: 'deps-unmet', blocked: [{ n: 2, unmetDeps: [1], malformed: false }] })
+  })
+
+  // D1 finding 2: un issue ready cuya sección "## Dependencias" es ilegible
+  // (depsMalformed) se reporta con `malformed: true` y `unmetDeps: []` — el
+  // formateador (ct-next.mjs) necesita distinguir este caso de "sin
+  // dependencias pendientes" para no imprimir una lista vacía y una
+  // aparente contradicción ("bloqueado, pero no falta mergear nada").
+  it('ready con depsMalformed:true → blockReason deps-unmet, malformed:true, unmetDeps vacío (el estado del gate es desconocido, no "sin deps")', () => {
+    const issues = [{ n: 9, order: 9, status: 'ready', deps: [], depsMalformed: true, touches: [] }]
+    const plan = planDispatch(issues, { mergedIssues: [], cap: 1 })
+    expect(plan.selected).toEqual([])
+    expect(plan.blockReason).toEqual({ reason: 'deps-unmet', blocked: [{ n: 9, unmetDeps: [], malformed: true }] })
+  })
+
+  // D1 finding 5: una dependencia de ORDEN no mapeable llega aquí como
+  // `null` (gh-issue-map.js#buildDispatchInput) — planDispatch/dispatch.js
+  // no reescribe ese `null` (sigue siendo la representación interna, fail-
+  // closed); es ct-next.mjs quien lo traduce a un mensaje humano (ver
+  // ct-next-dryrun.test.js). Este test fija que el `null` sobrevive intacto
+  // hasta blockReason, sin que planDispatch lo confunda con un issue real.
+  it('deps con un null (orden sin issue correspondiente) → unmetDeps conserva el null tal cual, no revienta', () => {
+    const issues = [{ n: 5, order: 5, status: 'ready', deps: [null], touches: [] }]
+    const plan = planDispatch(issues, { mergedIssues: [], cap: 1 })
+    expect(plan.blockReason).toEqual({ reason: 'deps-unmet', blocked: [{ n: 5, unmetDeps: [null], malformed: false }] })
   })
 
   it('ready + deps mergeadas pero colisiona con serializante en vuelo (migration/ci/pbxproj, tokens distintos) → collision de tipo serializing', () => {
@@ -226,7 +270,7 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
       inFlightCount: 1,
       cap: 1,
       wouldDispatchIfCapAllowed: false,
-      blockedEvenWithCap: { reason: 'deps-unmet', blocked: [{ n: 2, unmetDeps: [99] }] },
+      blockedEvenWithCap: { reason: 'deps-unmet', blocked: [{ n: 2, unmetDeps: [99], malformed: false }] },
     })
   })
 

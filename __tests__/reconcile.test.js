@@ -25,9 +25,12 @@ import { extractAc, extractDeps, extractSectionContent, extractSpecLink } from '
 //   5 (importante): un "## Dependencias"/"## Acceptance criteria"
 //   DUPLICADO cambia lo que hace el dispatcher — SÍ cuenta para el exit
 //   code. Duplicar Descripción/Protegido sigue siendo solo cosmético.
-//   6 (importante): un "merge-after" fuera de la sección reconocida, que el
-//   dispatcher SÍ obedece, se reporta como nota (nunca divergencia:
-//   --reconcile no puede tocarlo con seguridad).
+//   6 (importante): un "merge-after" fuera de la sección reconocida se
+//   reporta como nota (nunca divergencia: --reconcile no puede tocarlo con
+//   seguridad). Hasta el hardening del dispatch (D1), el dispatcher real SÍ
+//   lo obedecía aunque --reconcile no pudiera aplicarlo; D1 finding 2
+//   unificó ambos dominios — hoy es texto inerte para los dos, y la nota
+//   se actualizó para decirlo así (ver reconcile.js#formatDrift).
 
 describe('ownedLabelsOnly — el spec solo es autoridad sobre los prefijos cuya columna trae la tabla §9', () => {
   it('con los tres prefijos activos: conserva type:/area:/touches:, descarta status: y labels ajenas', () => {

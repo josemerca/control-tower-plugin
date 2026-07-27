@@ -95,6 +95,70 @@ describe('ct-next — nada despachable', () => {
     expect(r.out).toMatch(/#2/)
     expect(r.out).toMatch(/#1/)
   })
+
+  // D1 finding 5: una dependencia de ORDEN no mapeable (ningún issue, abierto
+  // o cerrado, lleva ese `<!-- ct-order:N -->`) se traduce a `null` en
+  // gh-issue-map.js#buildDispatchInput — correcto (fail-closed: nunca se
+  // satisface por accidente), pero el mensaje anterior imprimía literalmente
+  // "falta mergear #null", instruyendo a esperar algo que no existe y nunca
+  // se va a mergear. El mensaje nuevo tiene que explicar la causa real (un
+  // orden que no corresponde a ningún issue) y NUNCA mostrar el string "#null".
+  it('dep de orden no mapeable (null) → el mensaje explica la causa real, nunca imprime "#null"', () => {
+    const fx = JSON.stringify({
+      issues: [{ n: 5, order: 5, status: 'ready', deps: [null], touches: [], name: 'x', type: 'backend' }],
+      mergedIssues: [],
+    })
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fx })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/#5/)
+    expect(r.out).not.toMatch(/#null/)
+    expect(r.out).toMatch(/no (corresponde|existe)/i)
+  })
+
+  // D1 finding 2: un issue ready con `depsMalformed: true` (la sección "##
+  // Dependencias" existe pero no se reconoció ningún "merge-after #N" —
+  // probable reescritura humana) se reporta como bloqueado, con un mensaje
+  // que deja claro que el estado es DESCONOCIDO — nunca "sin dependencias"
+  // (que es lo que una lista vacía de unmetDeps sugeriría sin este mensaje).
+  it('issue con depsMalformed:true → mensaje explica que la sección "## Dependencias" es ilegible, no que no tiene deps', () => {
+    const fx = JSON.stringify({
+      issues: [{ n: 9, order: 9, status: 'ready', deps: [], depsMalformed: true, touches: [], name: 'x', type: 'backend' }],
+      mergedIssues: [],
+    })
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fx })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/#9/)
+    expect(r.out).toMatch(/Dependencias/)
+    expect(r.out).not.toMatch(/falta mergear\s*$/im)
+  })
+})
+
+// D1 finding 3: dos labels "status:" en el mismo issue (edición a medias) se
+// resuelven de forma conservadora e independiente del orden del array (ver
+// gh-issue-map.js#resolveStatus), pero eso NUNCA debe pasar en silencio: un
+// aviso explícito, siempre impreso (no solo en --dry-run), es lo que permite
+// a un humano corregir las labels antes de que la ambigüedad se repita.
+describe('ct-next — aviso de status: ambiguo (D1 finding 3)', () => {
+  it('un issue con statusAmbiguous:true produce un aviso explícito, nombrando las labels en conflicto y a qué se resolvió', () => {
+    const fx = JSON.stringify({
+      issues: [
+        { n: 1, order: 1, status: 'in-progress', statusAmbiguous: true, statusLabels: ['in-progress', 'ready'], deps: [], touches: ['api'], name: 'x', type: 'backend' },
+      ],
+      mergedIssues: [],
+    })
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fx })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/#1/)
+    expect(r.out).toMatch(/status:in-progress/)
+    expect(r.out).toMatch(/status:ready/)
+    expect(r.out).toMatch(/avis/i)
+  })
+
+  it('sin ningún statusAmbiguous → sin aviso', () => {
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE })
+    expect(r.code).toBe(0)
+    expect(r.out).not.toMatch(/avis/i)
+  })
 })
 
 // W-B (§8): un mensaje único ("nada ready con deps mergeadas y sin colisión")
@@ -613,5 +677,92 @@ describe('ct-next — enumeración de issues sin --limit fijo (review final, fin
     expect(r.code).toBe(0)
     expect(r.out).toContain('#2')
     expect(r.out).not.toMatch(/no hay slices despachables/i)
+  })
+})
+
+// D1 finding 1 (el más grave del hardening del dispatch): reproducción
+// END-TO-END, contra el CAMINO REAL de ct-next.mjs (gh api repos/.../issues,
+// nunca CT_NEXT_FIXTURE), del escenario exacto que verificó el auditor: epic
+// A groomeado y mergeado por completo (milestone 100), epic B groomeado
+// DESPUÉS en el MISMO repo (milestone 200) — ambos numeran sus slices 1..N
+// desde 1. #8 (slice 2 de epic B) declara "merge-after #1" (orden 1 DE SU
+// PROPIO epic), que es #7. Antes de este fix, el índice de orden era global
+// al repo y `[...open, ...closed]` hacía que el #1 de epic A (ya mergeado)
+// ganara el slot — #8 se habría despachado junto a #7 en la misma tanda, sin
+// haber esperado nunca a #7 de verdad, y sin que nada se imprimiera.
+describe('ct-next — D1 finding 1: alcance del orden por epic (milestone), camino real (gh api)', () => {
+  const fakePath = [
+    join(fixturesDir, 'fake-git-bin'),
+    join(fixturesDir, 'fake-gh-bin'),
+    join(fixturesDir, 'fake-cmux-bin'),
+    process.env.PATH,
+  ].join(':')
+  const dirs = []
+  afterEach(() => {
+    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  })
+  function runReal(args, envOverrides = {}) {
+    try {
+      const out = execFileSync('node', [script, ...args], {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, PATH: fakePath, ...envOverrides },
+      })
+      return { code: 0, out }
+    } catch (e) {
+      return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }
+    }
+  }
+
+  it('reproducción del auditor: epic A mergeado + epic B en curso, mismos números de orden, milestones DISTINTOS → #8 espera a su hermano real (#7), nunca al #1 ya mergeado de epic A', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'ct-next-epics-'))
+    dirs.push(repoRoot)
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const openIssue7 = {
+      number: 7, title: '#7 cimiento epicB', labels: [{ name: 'status:ready' }],
+      milestone: { number: 200 }, body: '<!-- ct-order:1 -->',
+    }
+    const openIssue8 = {
+      number: 8, title: '#8 encima de epicB', labels: [{ name: 'status:ready' }],
+      milestone: { number: 200 },
+      body: 'algo\n## Dependencias\n- merge-after #1\n\n<!-- ct-order:2 -->',
+    }
+    const closedIssue1 = { number: 1, state_reason: 'completed', milestone: { number: 100 }, body: '<!-- ct-order:1 -->' }
+    const closedIssue2 = { number: 2, state_reason: 'completed', milestone: { number: 100 }, body: '<!-- ct-order:2 -->' }
+    const r = runReal(['--repo', 'o/r', '--cap', '5', '--dry-run'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue7, openIssue8], [closedIssue1, closedIssue2]]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+    })
+    expect(r.code).toBe(0)
+    // Solo #7 se despacha. #8 nunca aparece como slice lanzado — el fix hace
+    // que su dep resuelva contra #7 (su propio epic), que sigue sin mergear.
+    expect(r.out).toContain('slice #7')
+    expect(r.out).not.toContain('slice #8')
+  })
+
+  it('si dos epics comparten milestone por error (p.ej. ninguno pasó --milestone) → aborta antes de decidir nada, mensaje explícito, ningún worktree creado', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'ct-next-collision-'))
+    dirs.push(repoRoot)
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const openIssue7 = {
+      number: 7, title: '#7 a', labels: [{ name: 'status:ready' }],
+      milestone: { number: 100 }, body: '<!-- ct-order:1 -->',
+    }
+    const openIssue8 = {
+      number: 8, title: '#8 b', labels: [{ name: 'status:ready' }],
+      milestone: { number: 100 }, body: '<!-- ct-order:1 -->', // MISMO milestone, MISMO orden, issue distinto
+    }
+    const r = runReal(['--repo', 'o/r', '--cap', '5', '--dry-run'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue7, openIssue8], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/colisi[oó]n/i)
+    expect(r.out).toMatch(/#7/)
+    expect(r.out).toMatch(/#8/)
+    expect(r.out).not.toContain('git worktree add')
+    expect(existsSync(join(repoRoot, '.worktrees'))).toBe(false)
   })
 })
