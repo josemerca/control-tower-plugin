@@ -22,6 +22,29 @@ import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 // instalado.
 const dispatchCheckPath = join(dirname(fileURLToPath(import.meta.url)), 'dispatch-check.mjs')
 
+// ============================================================================
+// D5, hallazgo F (segunda mitad) — QUE EL DESTINO DE LA SALIDA SE ROMPA NO
+// PUEDE CAMBIAR NI LO QUE SE DECIDE NI EL EXIT CODE.
+//
+// `process.stdout`/`process.stderr` hacia una tubería emiten un evento
+// 'error' (EPIPE) cuando el lector cierra — `ct-next | head`, un `/loop` que
+// deja de leer, una sesión de cmux que se cierra a media corrida. Sin un
+// manejador, ese evento sube como excepción no capturada y MATA el proceso
+// en el punto exacto en que se intentó imprimir. Verificado por construcción
+// con el extremo de lectura de stdout cerrado: el `console.log` de "lanzado
+// #90" —posterior al claim, al worktree y al lanzamiento de cmux, o sea con
+// TODO el trabajo ya hecho y bien— lanzaba EPIPE y la corrida terminaba con
+// exit 1 y un volcado de pila, como si el despacho hubiera fallado.
+//
+// El exit code de este script describe qué le pasó al TRABAJO (se despachó,
+// no se despachó, quedó algo a medias), nunca si el terminal de quien lo
+// llamó seguía escuchando. Perder líneas de log hacia un destino que ya no
+// las acepta es un límite real y aceptable —no hay adónde entregarlas— y
+// queda escrito aquí; convertirlo en un fallo del despacho, no.
+process.stdout.on('error', () => {})
+process.stderr.on('error', () => {})
+// ============================================================================
+
 // Fix round 1 (review de W-C), finding 2 — IMPORTANT: Node sale con exit 1
 // (MODULE_NOT_FOUND) cuando el fichero que se le pide ejecutar no existe —
 // el MISMO código que dispatch-check.mjs usa para "colisión/carrera
@@ -150,6 +173,39 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+// ============================================================================
+// D5 (hallazgo colateral al C, no estaba en el encargo) — `sleep(0)` NO ES UN
+// PUNTO DE CESIÓN FIABLE PARA UNA SEÑAL, y los dos checkpoints del bucle
+// dependían solo de él.
+//
+// El diseño de arriba da por bueno que un `await sleep(ms)` le da al event
+// loop "la oportunidad de procesar una señal ya pendiente". Es cierto a
+// veces, no siempre: libuv despacha las señales en la fase de POLL (el
+// self-pipe del manejador de señal es un watcher de esa fase), y la fase de
+// TIMERS —donde se resuelve un `setTimeout`— corre ANTES que poll en la
+// misma vuelta del bucle. Si el temporizador ya está vencido cuando el loop
+// entra en timers, la continuación del `await` se ejecuta SIN que la señal
+// pendiente se haya despachado todavía.
+//
+// Medido, no supuesto (mismo experimento, 8 rondas, señal enviada al proceso
+// mientras estaba bloqueado dentro de un `execFileSync` con un hijo que
+// ignora la señal): tras el PRIMER `await sleep(0)` el manejador seguía sin
+// ejecutarse en 2 de 8 rondas — y en esas dos sí se había ejecutado tras el
+// segundo. Con `setImmediate` (fase de CHECK, inmediatamente DESPUÉS de
+// poll) el manejador ya había corrido en 8 de 8. A valor de PRODUCCIÓN
+// (CT_NEXT_TEST_DELAY_AFTER_CLAIM_MS ausente, o sea 0) eso significaba que
+// ~1 de cada 4 Ctrl-C llegados durante `dispatch-check` se colaba por el
+// checkpoint post-claim y el bucle seguía creando el worktree y lanzando el
+// agente — justo el hueco que el checkpoint existe para cerrar.
+//
+// `yieldToSignals()` cruza la fase de poll a propósito. Se usa DESPUÉS del
+// `sleep(...)` de cada checkpoint (no en su lugar: el sleep sigue siendo el
+// que ensancha la ventana de forma determinista para los tests) y una última
+// vez al final del proceso (hallazgo C).
+function yieldToSignals() {
+  return new Promise((resolve) => setImmediate(resolve))
+}
+
 // CT_NEXT_CHILD_TIMEOUT_MS: cota de tiempo para dispatch-check.mjs, `git
 // worktree add/remove`, `git branch -D` y `gh()` (ver el razonamiento arriba,
 // defensa 2). Generosa por defecto (10 minutos): de sobra para un listado de
@@ -193,6 +249,41 @@ if (testDelayRaw !== undefined) {
     process.exit(2)
   }
   testDelayAfterClaimMs = n
+}
+
+// ============================================================================
+// D5, hallazgo G — LOS HOOKS DE AUTOSEÑAL SE VALIDAN AQUÍ, ANTES DE TOCAR
+// NADA.
+//
+// `CT_NEXT_TEST_SELF_SIGINT_AFTER_CLAIM` y
+// `CT_NEXT_TEST_SELF_SIGINT_BEFORE_IDLE_CHECKPOINT` llegan crudos a un
+// `process.kill(process.pid, <valor>)` en mitad del bucle. `process.kill`
+// LANZA `ERR_UNKNOWN_SIGNAL` con un nombre de señal que no reconoce, y el
+// primero de esos dos sitios está DENTRO de la ventana peligrosa: claim ya
+// escrito, worktree todavía no. Verificado por construcción con
+// `CT_NEXT_TEST_SELF_SIGINT_AFTER_CLAIM=pepe`: `claimed #90 → in-progress`
+// en la salida, ni un solo revert en el log de `gh`, una traza de
+// ERR_UNKNOWN_SIGNAL, y el issue huérfano en status:in-progress.
+//
+// Son hooks de test, sí — pero viven en el script de PRODUCCIÓN y se leen
+// del entorno, que es exactamente el sitio del que llega un valor con un
+// typo. Se validan con el mismo criterio que las otras dos variables de
+// arriba (forma conocida → seguir; cualquier otra cosa → exit 2 antes de
+// leer un solo issue), y contra el conjunto EXACTO de señales que este
+// script maneja: instalar un hook para una señal sin manejador no probaría
+// lo que dice probar.
+//
+// Esto NO es, ni pretende ser, la red de seguridad completa: cualquier otro
+// `throw` inesperado en esa misma ventana dejaría el issue igual de
+// huérfano. Esa parte se resuelve de raíz más abajo (ver `bailOutOnCrash`).
+const HANDLED_SIGNALS = ['SIGINT', 'SIGTERM']
+for (const varName of ['CT_NEXT_TEST_SELF_SIGINT_AFTER_CLAIM', 'CT_NEXT_TEST_SELF_SIGINT_BEFORE_IDLE_CHECKPOINT']) {
+  const raw = process.env[varName]
+  if (raw === undefined || raw === '') continue
+  if (!HANDLED_SIGNALS.includes(raw)) {
+    console.error(`${varName} inválido: "${raw}" — debe ser una de las señales que este script maneja (${HANDLED_SIGNALS.join(', ')}). Es un hook exclusivo de tests que se autoenvía la señal en mitad del despacho; con un valor que Node no reconoce, "process.kill" lanza ERR_UNKNOWN_SIGNAL justo entre el claim y el worktree y deja el issue huérfano. Abortando antes de tocar nada.`)
+    process.exit(2)
+  }
 }
 // ============================================================================
 
@@ -308,6 +399,27 @@ function queryAllCmuxWorkspaces() {
     // verdad" — se trata como NO CONCLUYENTE. Si nunca hubo ninguna entrada
     // en ninguna ventana (el caso normal y esperado de "no hay nada
     // abierto"), sigue siendo un `[]` con toda confianza.
+    //
+    // D5, hallazgo B — la guarda de arriba cubría `custom_title` y NADA
+    // MÁS: `current_directory` se leía a pelo (`ws.current_directory ??
+    // null`) y luego se comparaba con igualdad ESTRICTA contra el worktree
+    // esperado. Si cmux renombrara SOLO ese campo (el título seguiría
+    // reconociéndose, así que `sawAnyRecognizedTitle` no salvaría nada),
+    // cada `cwd` sería `null`, `null !== <worktree>` y CADA lanzamiento
+    // correcto se clasificaría como 'wrong-cwd' — es decir, exactamente la
+    // falsa alarma que la guarda de `custom_title` existe para evitar, y
+    // además con consecuencia de exit code: desde que 'wrong-cwd' dejó de
+    // contar como lanzado, un repo entero pasaría de exit 0 a exit 3 sin
+    // que nada estuviera mal.
+    //
+    // Arreglo, aplicado a los DOS campos y no a uno: un campo cuyo esquema
+    // no reconocemos degrada a NO CONCLUYENTE, nunca a "verificado que está
+    // mal". Para el cwd la degradación es POR ENTRADA (`cwdKnown`), no
+    // global como la del título: así también se comporta bien ante una
+    // flota mixta (unas entradas con el campo, otras sin él), y ante una
+    // sesión que legítimamente no expone directorio. `verifyCmuxLaunch`
+    // (más abajo) traduce `cwdKnown: false` a un estado propio
+    // ('cwd-unknown'), jamás a 'wrong-cwd'.
     let sawAnyWorkspaceEntry = false
     let sawAnyRecognizedTitle = false
     for (const w of (Array.isArray(windows) ? windows : [])) {
@@ -322,7 +434,8 @@ function queryAllCmuxWorkspaces() {
           sawAnyWorkspaceEntry = true
           if (ws && typeof ws.custom_title === 'string') {
             sawAnyRecognizedTitle = true
-            out.push({ title: ws.custom_title, cwd: ws.current_directory ?? null })
+            const cwdKnown = typeof ws.current_directory === 'string'
+            out.push({ title: ws.custom_title, cwd: cwdKnown ? ws.current_directory : null, cwdKnown })
           }
         }
       } catch {
@@ -410,11 +523,28 @@ function stalenessCtxFor() {
 // sí distingue con evidencia real "está en el directorio correcto" de "cmux
 // aceptó el comando pero acabó en otro sitio" — que es precisamente la
 // mentira que este hallazgo pide dejar de contar.
+//
+// Cuatro estados, no tres (D5, hallazgo B):
+//   'confirmed'    → la sesión existe con el título pedido Y su directorio
+//                    coincide. Única forma de afirmar "está donde le dijimos".
+//   'wrong-cwd'    → la sesión existe y cmux SÍ nos dio un directorio, y NO
+//                    es el pedido. Evidencia positiva de un problema.
+//   'cwd-unknown'  → la sesión existe con el título pedido, pero cmux no
+//                    expuso ningún directorio legible para ella (campo
+//                    ausente, renombrado, o de otro tipo). Sabemos MÁS que
+//                    con 'unverifiable' (la sesión existe) y MENOS que con
+//                    'confirmed' (no se pudo comprobar el directorio) — y
+//                    desde luego no es 'wrong-cwd': no hay ninguna evidencia
+//                    de que esté en el sitio equivocado.
+//   'not-found'    → cmux respondió, con esquema reconocido, y no hay
+//                    ninguna sesión con ese título.
+//   'unverifiable' → la consulta a cmux no se pudo completar en absoluto.
 function verifyCmuxLaunch(expectedTitle, expectedCwd) {
   const all = queryAllCmuxWorkspaces()
   if (all === null) return { status: 'unverifiable' }
   const match = all.find((w) => w.title === expectedTitle)
   if (!match) return { status: 'not-found' }
+  if (!match.cwdKnown) return { status: 'cwd-unknown' }
   if (match.cwd === expectedCwd) return { status: 'confirmed' }
   return { status: 'wrong-cwd', actualCwd: match.cwd }
 }
@@ -516,7 +646,7 @@ if (!parseRepoSlug(repo)) {
 // son dos errores distintos con dos correcciones distintas.
 const cap = typeof capArg === 'string' ? parseStrictInt(capArg) : null
 if (capArg === true || cap === null) {
-  console.error(`--cap inválido: "${capArg === true ? '(sin valor)' : capArg}" — debe ser un entero en dígitos decimales a secas (nada de "1e3", "2.9", "3perros" ni espacios: antes se aceptaban en silencio con un valor distinto del pedido).`)
+  console.error(`--cap inválido: "${capArg === true ? '(sin valor)' : capArg}" — debe ser un entero en dígitos decimales a secas (nada de "1e3", "2.9", "3perros", espacios, ni signo "+"/"-": antes se aceptaban en silencio con un valor distinto del pedido, y el signo se aceptaba pese a que este mismo mensaje decía lo contrario).`)
   process.exit(2)
 }
 if (cap < 1) {
@@ -1079,6 +1209,17 @@ const repoName = repo.split('/')[1]
 //             convertir una sospecha en un fallo duro sería la misma clase
 //             de afirmación no verificada que esta tanda de trabajo persigue.
 const preflightFailures = []
+// D5, hallazgo H — además de la lista plana (que alimenta el resumen final,
+// idéntico en los dos caminos), se guarda A QUÉ SLICE pertenece cada fallo,
+// indexado por su posición en la tanda. Sirve para dos cosas que antes no se
+// podían decir: anotar cada bloque de plan del --dry-run con SU problema, y
+// nombrar cuál es el PRIMERO que rompería en una corrida real.
+const failuresBySliceIdx = new Map()
+function failSlice(idx, msg) {
+  preflightFailures.push(msg)
+  if (!failuresBySliceIdx.has(idx)) failuresBySliceIdx.set(idx, [])
+  failuresBySliceIdx.get(idx).push(msg)
+}
 
 function sliceNumberError(s) {
   if (typeof s.n === 'number' && Number.isSafeInteger(s.n) && s.n >= 1) return null
@@ -1182,10 +1323,16 @@ if (configDirIsDir) {
 // Una sola consulta al registro de worktrees para toda la tanda (no una por
 // slice): la lista es la misma para todos.
 const registeredWorktrees = registeredWorktreePaths()
+// D5, hallazgo H: cuántos de los fallos acumulados hasta aquí son de TANDA
+// (no de un slice concreto) — `cmux` ausente del PATH y el CLAUDE_CONFIG_DIR
+// inexistente. Se distinguen en el resumen final porque su remedio y su
+// alcance son distintos: no hay "arregla este slice", afectan a todos.
+const batchLevelFailureCount = preflightFailures.length
 const plans = []
-for (const s of selected) {
+for (let idx = 0; idx < selected.length; idx++) {
+  const s = selected[idx]
   const numErr = sliceNumberError(s)
-  if (numErr) { preflightFailures.push(numErr); continue }
+  if (numErr) { failSlice(idx, numErr); continue }
   const branch = `feat/${s.n}`
   const wt = `${repoRoot}/.worktrees/${s.n}`
   const name = `${repoName} · #${s.n} ${s.name}`
@@ -1200,7 +1347,7 @@ for (const s of selected) {
     kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath })
     stateSeed = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase })
   } catch (e) {
-    preflightFailures.push(`no se pudo renderizar el kickoff/STATE.md de #${s.n}: ${e.message}. El agente se lanzaría sin prompt utilizable — antes, esto solo se descubría en el run real.`)
+    failSlice(idx, `no se pudo renderizar el kickoff/STATE.md de #${s.n}: ${e.message}. El agente se lanzaría sin prompt utilizable — antes, esto solo se descubría en el run real.`)
     continue
   }
   // Override 1 (shell quoting): --command es UN argv element (buildCmuxArgv
@@ -1231,27 +1378,90 @@ for (const s of selected) {
   const branchExists = branchExistsLocally(branch)
   if (destinationChecked) {
     if (existsSync(wt)) {
-      preflightFailures.push(`el worktree de #${s.n} ya existe: ${wt}. \`git worktree add\` fallaría — y en el run real eso pasa DESPUÉS de haber reclamado el issue. Limpia con \`git worktree remove --force ${wt}\` (y \`git branch -D ${branch}\` si la rama también sobra) si es basura de una corrida anterior, o revisa si hay trabajo real ahí antes de borrar nada.`)
+      failSlice(idx, `el worktree de #${s.n} ya existe: ${wt}. \`git worktree add\` fallaría — y en el run real eso pasa DESPUÉS de haber reclamado el issue. Limpia con \`git worktree remove --force ${wt}\` (y \`git branch -D ${branch}\` si la rama también sobra) si es basura de una corrida anterior, o revisa si hay trabajo real ahí antes de borrar nada.`)
     } else if (registeredWorktrees && registeredWorktrees.has(wt)) {
       // El directorio NO está, pero git sigue teniéndolo registrado (alguien
       // lo borró a mano sin `git worktree remove`): `git worktree add` falla
       // con "missing but already registered worktree".
-      preflightFailures.push(`el worktree de #${s.n} (${wt}) no existe en disco pero git SIGUE teniéndolo registrado — \`git worktree add\` fallaría con "missing but already registered worktree" (alguien borró el directorio a mano, sin \`git worktree remove\`). Límpialo con \`git worktree prune\` y reintenta.`)
+      failSlice(idx, `el worktree de #${s.n} (${wt}) no existe en disco pero git SIGUE teniéndolo registrado — \`git worktree add\` fallaría con "missing but already registered worktree" (alguien borró el directorio a mano, sin \`git worktree remove\`). Límpialo con \`git worktree prune\` y reintenta.`)
     }
   }
   if (branchExists === 'yes') {
-    preflightFailures.push(`la rama ${branch} ya existe en el checkout local. \`git worktree add -b ${branch}\` fallaría — y en el run real eso pasa DESPUÉS de haber reclamado el issue. Bórrala (\`git branch -D ${branch}\`) si es basura de una corrida anterior, o revisa qué hay en ella antes de tocarla.`)
+    failSlice(idx, `la rama ${branch} ya existe en el checkout local. \`git worktree add -b ${branch}\` fallaría — y en el run real eso pasa DESPUÉS de haber reclamado el issue. Bórrala (\`git branch -D ${branch}\`) si es basura de una corrida anterior, o revisa qué hay en ella antes de tocarla.`)
   } else if (branchExists === 'unknown' && !fx) {
     // No sabemos si está libre: aviso, nunca un "libre" por defecto.
     warn(`no se pudo comprobar si la rama ${branch} ya existe (la consulta a git falló, no es que la rama no esté). Si existe, el run real fallará al crear el worktree DESPUÉS de haber reclamado #${s.n} — compruébalo a mano con \`git branch --list ${branch}\` antes de seguir.`)
   }
-  plans.push({ s, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationChecked: destinationChecked && branchExists !== 'unknown' })
+  // `selIdx` (no `idx` a secas) porque el bucle de despacho de más abajo
+  // itera sobre `plans`, que puede ser MÁS CORTO que `selected` (un slice sin
+  // número utilizable, o cuyo kickoff no renderiza, no llega a tener plan).
+  // Guardar la posición ORIGINAL en la tanda es lo que permite recuperar los
+  // fallos de ese slice sin confundir los dos índices.
+  // `destinationCheck` con TRES valores, no un booleano (D5, revisión propia
+  // — mismo defecto que el resto de esta tanda, encontrado al repasar):
+  // antes era `destinationChecked && branchExists !== 'unknown'`, y el
+  // mensaje del dry-run para el `false` decía, literalmente, "NO COMPROBADOS
+  // (modo fixture: repoRoot sintético, no se toca git). En una corrida real
+  // sí se comprueban antes de reclamar". Cierto para el modo fixture, FALSO
+  // para el otro caso que caía en el mismo `false`: una consulta a git que
+  // se intentó DE VERDAD y falló ('unknown', p.ej. .git ilegible). Ahí el
+  // dry-run era real, git sí se tocó, y la frase "en una corrida real sí se
+  // comprueban" prometía justo lo que acababa de no poder hacerse.
+  // Verificado por construcción con la consulta de rama rota: un --dry-run
+  // sin fixture imprimía "modo fixture" y salía 0.
+  const destinationCheck = fx ? 'fixture' : (branchExists === 'unknown' ? 'unknown' : 'checked')
+  plans.push({ s, selIdx: idx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck })
 }
 
-if (preflightFailures.length) {
-  console.error(`\nprecondiciones NO cumplidas (${preflightFailures.length}) — no se reclama ni se lanza NADA${dryRun ? '' : ' (ni un solo claim escrito: se comprueba antes de tocar GitHub)'}:\n  - ${preflightFailures.join('\n  - ')}`)
-  if (dryRun) console.error('Este --dry-run NO es luz verde: el run real fallaría por lo de arriba. Arréglalo y vuelve a pasar el dry-run.')
+// ============================================================================
+// D5, hallazgo H — UN --DRY-RUN EXISTE PARA ENSEÑAR TODA LA TANDA DE UNA VEZ.
+//
+// D4 dejó esto abierto a propósito y preguntó: con `--cap 3`, si un solo
+// slice tiene el destino ocupado, ¿debe caerse la tanda entera? La respuesta
+// es no. Comprobado antes de tocar nada: las precondiciones de TODOS los
+// slices seleccionados ya se evaluaban (con `--cap 3` y las ramas de dos de
+// ellos ocupadas, el resumen listaba los dos), así que ESA parte no había
+// que arreglarla. Lo que sí faltaba, y es lo que hace que el usuario tenga
+// que arreglar y volver a correr para ver el resto:
+//
+//   1. el --dry-run salía por aquí ANTES de imprimir el plan de NINGÚN
+//      slice — ni siquiera el de los sanos. Un dry-run con un problema en el
+//      segundo de tres no enseñaba ni el kickoff, ni el STATE.md sembrado,
+//      ni la línea de `cmux` de ninguno: exactamente lo que se fue a mirar.
+//   2. el resumen daba el CONTEO de fallos pero no decía cuál rompería
+//      primero, ni cuáles de los slices estaban listos.
+//
+// A partir de aquí, el --dry-run SIGUE adelante e imprime la tanda entera,
+// con el problema de cada slice anotado en su propio bloque, y cierra con el
+// resumen completo y un exit 1 (nunca 0: un dry-run con precondiciones sin
+// cumplir no es luz verde). La corrida REAL no cambia en absoluto: aborta
+// aquí mismo, antes de escribir un solo claim. Esa asimetría no es una
+// divergencia de lo que se VALIDA (que era el bug que D4 cerró): las dos
+// comprueban exactamente lo mismo y las dos fallan. Lo único que cambia es
+// cuánto se IMPRIME después de haber fallado.
+function preflightSummary() {
+  const failedIdxs = [...failuresBySliceIdx.keys()].sort((a, b) => a - b)
+  const label = (i) => sliceRef(selected[i])
+  const parts = [`\nprecondiciones NO cumplidas (${preflightFailures.length}) — no se reclama ni se lanza NADA${dryRun ? '' : ' (ni un solo claim escrito: se comprueba antes de tocar GitHub)'}:\n  - ${preflightFailures.join('\n  - ')}`]
+  if (batchLevelFailureCount > 0) {
+    parts.push(`De esos, ${batchLevelFailureCount} afecta(n) a TODA la tanda (no a un slice concreto): con eso sin arreglar no se lanzaría ninguno de los ${selected.length} seleccionados.`)
+  }
+  if (failedIdxs.length) {
+    const okIdxs = selected.map((_, i) => i).filter((i) => !failuresBySliceIdx.has(i))
+    const okPart = okIdxs.length
+      ? `; ${okIdxs.length} sin problemas propios (${okIdxs.map(label).join(', ')})`
+      : '; ninguno queda sin problemas propios'
+    parts.push(`De los ${selected.length} slice(s) seleccionados, ${failedIdxs.length} tienen precondiciones sin cumplir (${failedIdxs.map(label).join(', ')})${okPart}. En una corrida real, el primero que rompería es ${label(failedIdxs[0])} — pero se listan TODOS a propósito, para que puedas arreglarlos de una vez en vez de descubrirlos de uno en uno.`)
+  }
+  return parts.join('\n')
+}
+
+if (preflightFailures.length && !dryRun) {
+  console.error(preflightSummary())
   process.exit(1)
+}
+if (preflightFailures.length) {
+  console.error(`\nATENCIÓN: ${preflightFailures.length} precondición(es) sin cumplir en esta tanda. Este --dry-run NO es luz verde y terminará con exit 1 — pero el plan de abajo se imprime IGUAL, entero, para que veas de una sola pasada todos los problemas y todos los slices. El detalle va al final.`)
 }
 // ============================================================================
 
@@ -1338,21 +1548,80 @@ if (preflightFailures.length) {
 // los propios docs de Node: "Pipes (and sockets): asynchronous on POSIX"),
 // que es exactamente cómo llega la salida de ESTE script a quien lo invoca
 // (un test, un `/loop`, cmux). `fs.writeSync(fd, texto)` es una syscall
-// SÍNCRONA de verdad, con independencia de si el destino es una tubería — el
-// dato queda escrito en el descriptor antes de que la llamada retorne, así
-// que un `process.exit()` posterior (inmediato o no) ya no puede truncarlo.
+// SÍNCRONA de verdad: cuando RETORNA SIN LANZAR, el dato ya está en el
+// descriptor y ningún `process.exit()` posterior puede truncarlo.
+//
+// D5, hallazgo F — LO QUE ESE PÁRRAFO AFIRMABA DE MÁS. Decía que el dato
+// "queda escrito en el descriptor antes de que la llamada retorne" a secas,
+// como si `writeSync` no pudiera fallar. Sí puede, y de dos formas
+// distintas, ambas medidas:
+//   - Con el destino a una tubería LLENA cuyo lector no consume: si el
+//     descriptor es bloqueante, `writeSync` NO retorna — se queda esperando
+//     sitio (verificado: un hijo con stdout a una tubería sin lector se
+//     quedó dentro del primer `writeSync` de 64 KiB indefinidamente). Si el
+//     descriptor es no bloqueante, lanza EAGAIN al instante y NO escribe
+//     nada (medido por la re-revisión externa: con >= 64 KiB atascados no
+//     llega ni un byte; con 0-32 KiB sí).
+//   - Con el lector CERRADO (`ct-next | head`, un caller que dejó de leer),
+//     lanza EPIPE y tampoco escribe nada.
+// O sea: la garantía real es "si retorna, está escrito", no "siempre
+// escribe". Ese límite es aceptable —no hay forma de entregar un mensaje a
+// un destino que no lo acepta— pero tiene que estar escrito, y tiene que
+// estar CONTENIDO, que es lo que hace `relay()` aquí abajo.
+//
+// D5 (hallazgo colateral, el más grave de los que encontré fuera del
+// encargo): los `writeSync` de reenvío estaban DESNUDOS, y el de la rama de
+// éxito estaba DENTRO del mismo `try` que el `execFileSync`. Consecuencia
+// verificada por construcción, lanzando ct-next.mjs con el extremo de
+// lectura de stdout cerrado: dispatch-check reclamaba #90 CON ÉXITO (el
+// `issue edit ... --add-label status:in-progress` aparece en el log de gh, y
+// su readback también), el `writeSync(1, out)` posterior lanzaba EPIPE, el
+// `catch` lo recogía como si fuera el fallo del SUBPROCESO — `e.status`
+// undefined — y ct-next imprimía "dispatch-check devolvió un fallo
+// inesperado […] probablemente es un bug o una mala configuración", abortaba
+// la tanda entera con exit 1 y NO revertía nada: el issue quedaba huérfano
+// en status:in-progress por no haber podido imprimir una línea. Un claim
+// exitoso reportado como fallo, con el mismo texto que culpa al usuario de
+// una mala configuración: la familia entera de esta tanda de trabajo en un
+// solo defecto.
+//
+// `relay()` aísla cada escritura de reenvío: un destino que no acepta el
+// texto NUNCA puede cambiar lo que ct-next decide ni lo que informa sobre el
+// claim. No hay adónde reportar el fallo del reenvío (si stderr es el roto,
+// tampoco se podría), así que se traga en silencio a propósito — lo que NO
+// se traga es el resultado del claim.
+function relay(fd, text) {
+  if (!text) return
+  try {
+    writeSync(fd, text)
+  } catch {
+    // Tubería llena/cerrada, descriptor no válido: el reenvío se pierde. Es
+    // un límite conocido y documentado arriba, nunca una razón para
+    // clasificar mal el claim ni para tumbar el proceso.
+  }
+}
+
 function attemptClaim(s) {
   try {
     // timeout+killSignal (finding 1, defensa 2): si dispatch-check.mjs se
     // cuelga (su propio `gh` colgado a medias), esto acota la espera en vez
     // de bloquear ct-next.mjs para siempre. Si el kill llega a mitad de su
     // propio claim-then-verify, no podemos saber si el label ya se escribió
-    // antes del SIGKILL — eso cae, a propósito, en la rama de "fallo
-    // inesperado" de más abajo (claim.status no será 1), que ya aborta la
-    // tanda entera en vez de asumir nada: el mismo criterio conservador que
-    // ya rige cualquier otro exit code inesperado de dispatch-check. El
-    // respaldo genérico para un claim que de verdad quedara huérfano por esta
-    // vía es la detección de staleness (finding 2), no esto.
+    // antes del SIGKILL — se aborta la tanda entera en vez de asumir nada,
+    // el mismo criterio conservador que ya rige cualquier otro resultado
+    // inesperado de dispatch-check. El respaldo genérico para un claim que
+    // de verdad quedara huérfano por esta vía es la detección de staleness
+    // (finding 2), no esto.
+    //
+    // D5, hallazgo D — CORRECCIÓN DE ESTE COMENTARIO: decía que este caso
+    // caía "a propósito" en la rama de FALLO INESPERADO de más abajo. Dejó
+    // de ser cierto cuando la ronda anterior añadió la rama de `signal`:
+    // matar al hijo con SIGKILL deja `status` a null y `signal` a
+    // 'SIGKILL', así que desde entonces cae en la rama de SEÑAL, no en la
+    // de fallo inesperado. El comentario describía el código de antes del
+    // cambio que él mismo acompañaba. Ahora la rama de señal distingue
+    // explícitamente nuestro propio timeout (`timedOut`, abajo) de una
+    // señal ajena.
     const out = execFileSync(process.execPath, [dispatchCheckPath, String(s.n), '--repo', repo], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -1360,13 +1629,13 @@ function attemptClaim(s) {
       timeout: childTimeoutMs,
       killSignal: 'SIGKILL',
     })
-    if (out) writeSync(1, out)
+    relay(1, out)
     return { ok: true }
   } catch (e) {
     const stdout = typeof e.stdout === 'string' ? e.stdout : ''
     const stderr = typeof e.stderr === 'string' ? e.stderr : ''
-    if (stdout) writeSync(1, stdout)
-    if (stderr) writeSync(2, stderr)
+    relay(1, stdout)
+    relay(2, stderr)
     // `signal` (revisión externa, finding minor): cuando el subproceso
     // termina por una señal (un Ctrl-C de terminal normal que SÍ llega
     // también al hijo, o el SIGKILL de nuestro propio timeout de arriba),
@@ -1378,7 +1647,13 @@ function attemptClaim(s) {
     // consume desde que el contrato de dispatch-check.mjs se ensanchó a
     // exit codes (finding 4) — el texto de dispatch-check ya se reenvió
     // arriba para que el humano lo vea, no hace falta duplicarlo aquí.
-    return { ok: false, status: e.status, signal: e.signal }
+    // `timedOut` (D5, hallazgo D): MISMA detección que ya usaba el catch de
+    // `git worktree add` — Node mata al hijo con `killSignal` y rellena el
+    // mensaje con ETIMEDOUT cuando el que expiró fue NUESTRO `timeout`.
+    // Sirve para no presentar nuestro propio límite como una interrupción
+    // del usuario.
+    const timedOut = e.signal === 'SIGKILL' && /ETIMEDOUT/.test(e.message || '')
+    return { ok: false, status: e.status, signal: e.signal, timedOut }
   }
 }
 
@@ -1524,13 +1799,35 @@ function cleanupOrphanedWorktree(s, wt, branch, reason) {
 // práctica no puede, ver el bloque de comentarios de más arriba — esto es
 // defensa en profundidad, no algo que se pueda disparar hoy) encuentre el
 // estado ya resuelto en vez de intentar un segundo revert solapado.
-// `activeWorktree` es solo informativo: si `git worktree add` estaba en
-// curso cuando llegó la señal, no podemos saber si alcanzó a crear algo en
-// disco (esa llamada no es interrumpible desde un manejador — ver arriba),
-// así que el manejador solo puede avisar de dónde mirar, nunca limpiarlo con
-// confianza.
+//
+// D5, hallazgo E — SE RETIRÓ `activeWorktree` Y SU MENSAJE EN EL MANEJADOR.
+// Había una variable `activeWorktree` que se ponía a `{wt, branch}` justo
+// antes del `execFileSync` de `git worktree add` y se devolvía a `null`
+// inmediatamente después (tanto en el `try` como en el `catch`), y un
+// `if (activeWorktree)` dentro de `handleInterrupt` que avisaba de que el
+// worktree podía haber quedado a medio crear. Ese guard era INALCANZABLE
+// por construcción: entre la asignación y el `execFileSync` no hay ningún
+// `await`, así que el event loop no puede recuperar el control (y por tanto
+// ningún manejador de señal puede correr); durante el `execFileSync` tampoco
+// (hallazgo (a) de la cabecera); y en cuanto la llamada retorna, la
+// variable vuelve a `null` de forma síncrona antes de cualquier otro yield.
+// Un guard que finge cubrir un caso que no cubre es peor que no tenerlo: le
+// dice al lector que ese escenario está atendido.
+//
+// No se pierde nada al quitarlo, y esto es lo importante: el escenario que
+// ese mensaje describía —un `git worktree add` interrumpido a media
+// creación— SÍ tiene voz, en la rama de timeout del `catch` de `git worktree
+// add` (el único camino por el que ese escenario se alcanza de verdad: la
+// llamada se mata con SIGKILL al agotarse CT_NEXT_CHILD_TIMEOUT_MS), cuyo
+// mensaje ya dice literalmente "puede haber quedado un directorio y/o una
+// rama a MEDIO crear" con los comandos de limpieza.
 let activeClaim = null
-let activeWorktree = null
+// `batchFinished` (D5, hallazgo C): true en cuanto el bucle de despacho
+// terminó del todo. Solo lo usa `handleInterrupt` para decir la verdad
+// sobre QUÉ llega tarde — una señal recibida con la tanda ya procesada no
+// deshace nada, y decir "interrumpiendo de forma segura antes de salir"
+// sugeriría lo contrario.
+let batchFinished = false
 // `interrupting`: cerrojo de reentrada Y bandera de "para en el próximo
 // checkpoint" para el bucle principal (ver el uso de `interrupting` en los
 // dos checkpoints del bucle, más abajo). Una segunda señal mientras ya
@@ -1587,9 +1884,14 @@ function handleInterrupt(sig) {
     process.exit(SIGNAL_EXIT_CODE[sig] || 130)
   }
   interrupting = true
-  console.error(`\n${sig} recibido — interrumpiendo de forma segura antes de salir.`)
-  if (activeWorktree) {
-    console.error(`"git worktree add" para ${activeWorktree.wt} (rama ${activeWorktree.branch}) puede haber quedado a medio crear en disco — esa llamada no es interrumpible desde aquí (ver el comentario de cabecera de este bloque), así que no se puede saber su estado. Revisa \`git worktree list\` / \`git branch\` antes de reintentar este slice, y límpialo a mano (\`git worktree remove --force ${activeWorktree.wt}\` / \`git branch -D ${activeWorktree.branch}\`) si quedó algo huérfano.`)
+  // D5, hallazgo C: una señal que llega con la tanda YA procesada (el caso
+  // que antes se descartaba en silencio) no interrumpe nada — decir
+  // "interrumpiendo de forma segura antes de salir" ahí sería sugerir que
+  // algo se está deteniendo o deshaciendo, y no es cierto.
+  if (batchFinished) {
+    console.error(`\n${sig} recibido, pero la tanda YA había terminado de procesarse cuando llegó: no se interrumpe ni se deshace nada de lo ya hecho (el resumen de arriba es el resultado real de esta corrida). Se sale con el código de la señal para que quien invocó a ct-next sepa que se pulsó.`)
+  } else {
+    console.error(`\n${sig} recibido — interrumpiendo de forma segura antes de salir.`)
   }
   if (activeClaim) {
     const claimant = { n: activeClaim.n }
@@ -1610,16 +1912,90 @@ function handleInterrupt(sig) {
 process.on('SIGINT', () => handleInterrupt('SIGINT'))
 process.on('SIGTERM', () => handleInterrupt('SIGTERM'))
 
+// ============================================================================
+// D5, hallazgo G (la mitad de raíz) — HABÍA RED PARA SEÑALES, PERO NO PARA
+// EXCEPCIONES.
+//
+// `handleInterrupt` revierte el claim de la ventana peligrosa cuando llega
+// una SEÑAL. Un `throw` cualquiera en esa misma ventana —claim escrito,
+// worktree todavía no— no tenía absolutamente nada: el proceso moría con su
+// traza y el issue se quedaba en status:in-progress para siempre. El hook de
+// test sin validar (arriba) era solo UN ejemplo de ese agujero, y arreglar
+// solo el hook habría dejado el agujero intacto: un `mkdirSync` que lanza un
+// error no previsto, un `JSON.parse` de una respuesta rara, un
+// `renderKickoff` que revienta con un slice mal formado, un OOM de V8 en
+// medio del bucle… todos caen igual.
+//
+// `bailOutOnCrash` es el equivalente exacto de `handleInterrupt` para ese
+// caso, con las MISMAS reglas de diseño y por los mismos motivos:
+//   - 100% SÍNCRONA, de la primera línea a `process.exit()`. Ni un `await`.
+//     Ver la cabecera de `handleInterrupt` para la regresión concreta (y
+//     reproducida) que provocó un solo `await sleep(0)` de más ahí dentro.
+//   - Cerrojo de reentrada propio (`crashing`) para no encadenar un segundo
+//     revert solapado si el propio manejo del fallo vuelve a fallar.
+//   - Imprime la traza COMPLETA, siempre. Instalar un manejador de
+//     `uncaughtException` sustituye el comportamiento por defecto de Node
+//     (que la imprime él), así que callarla convertiría esta red en una
+//     forma de esconder bugs — justo lo contrario de lo que se busca.
+//
+// Se registran los DOS manejadores globales, no uno: todo el código de este
+// fichero es síncrono salvo los `await` de los checkpoints, y verificado por
+// construcción (un módulo ES con la misma forma: `await` en el top-level y
+// después un `process.kill` con una señal inválida) el fallo llega como
+// `uncaughtException` — pero apostar por uno solo sería exactamente la clase
+// de suposición sin comprobar que este trabajo persigue, y cubrir ambos no
+// cuesta nada. Se prefirió esto a un `try/catch` alrededor del cuerpo del
+// bucle: cubre estrictamente MÁS (cualquier `throw` en cualquier punto del
+// script, no solo dentro del bucle) y no depende de acertar dónde poner el
+// try.
+let crashing = false
+function bailOutOnCrash(err, kind) {
+  if (crashing) process.exit(1)
+  crashing = true
+  const detail = (err && err.stack) || String(err)
+  console.error(`\n${kind} en ct-next.mjs — esto es un bug, no un resultado esperado del protocolo:\n${detail}`)
+  if (activeClaim) {
+    const claimant = { n: activeClaim.n }
+    activeClaim = null
+    console.error(`#${claimant.n} tenía un claim (status:in-progress) sin worktree completado cuando ocurrió el fallo — revirtiendo a status:ready antes de salir, para no dejarlo huérfano.`)
+    const revertErr = attemptRevertClaim(claimant)
+    if (!revertErr) {
+      console.error(`claim de #${claimant.n} revertido automáticamente a status:ready.`)
+    } else {
+      console.error(`ATENCIÓN: no se pudo revertir automáticamente el claim de #${claimant.n} (${revertErr.message}). Puede haber quedado bloqueado en status:in-progress sin nadie trabajándolo — libéralo a mano con: ${manualRevertClaimHint(claimant)}`)
+    }
+  } else {
+    console.error('no había ningún claim propio pendiente de revertir en ese instante.')
+  }
+  console.error('Los slices de esta tanda ya lanzados con éxito antes de este fallo (si los hubo) siguen corriendo en su propio cmux — no se han tocado.')
+  process.exit(1)
+}
+process.on('uncaughtException', (err) => bailOutOnCrash(err, 'excepción no capturada'))
+process.on('unhandledRejection', (err) => bailOutOnCrash(err, 'promesa rechazada sin manejar'))
+
 // D2, finding 1: conteo de cuántos slices de `selected` se lanzaron de
 // verdad — se usa tanto para la línea de conteo final como para decidir el
 // exit code cuando la tanda entera termina sin lanzar nada.
 let launchedCount = 0
+// D5, hallazgo A — slices que llegaron hasta el final del bucle DEJANDO
+// ESTADO detrás sin poder confirmar que hay un agente trabajándolos:
+// 'wrong-cwd' y 'not-found'. Es la ÚNICA forma de terminar el bucle con
+// residuo (todos los demás caminos, o no mutan nada, o abortan con
+// process.exit tras intentar su limpieza — ver el comentario del verdicto
+// final, más abajo, para la enumeración completa).
+const unverifiedLaunches = []
 
 for (let idx = 0; idx < plans.length; idx++) {
-  const { s, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationChecked } = plans[idx]
+  const { s, selIdx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck } = plans[idx]
 
   if (dryRun) {
     console.log(`\n=== slice #${s.n} (${s.name}) ===`)
+    // D5, hallazgo H: el problema de ESTE slice, en SU bloque — para no
+    // obligar a cruzar el resumen del final con el plan de arriba.
+    const own = failuresBySliceIdx.get(selIdx)
+    if (own) {
+      console.log(`PRECONDICIÓN NO CUMPLIDA (${own.length}) para este slice — con esto sin arreglar, este slice NO se despacharía:\n  - ${own.join('\n  - ')}`)
+    }
     // W-C, punto 5: el plan tiene que dejar claro que se INTENTARÍA un claim
     // (dispatch-check.mjs, status:ready → status:in-progress) para este issue
     // concreto ANTES de crear el worktree — sin invocar dispatch-check de
@@ -1638,9 +2014,22 @@ for (let idx = 0; idx < plans.length; idx++) {
     // de rama exigiría un `git` real, que ese modo promete no tocar — así
     // que se dice, en vez de dejar que la ausencia de queja se lea como
     // "comprobado y libre".
-    console.log(destinationChecked
-      ? `destino libre: ${wt} no existe y la rama ${branch} tampoco (comprobado en este checkout).`
-      : `destino: ${wt} / rama ${branch} — NO COMPROBADOS (modo fixture: repoRoot sintético, no se toca git). En una corrida real sí se comprueban antes de reclamar.`)
+    // D5, hallazgo H: "destino libre" solo se dice cuando de verdad lo está.
+    // Con el bloque de precondiciones ya impreso arriba para este slice,
+    // repetir "destino libre" sería una contradicción dentro del mismo
+    // bloque — el defecto exacto que esta tanda de trabajo persigue.
+    if (own) {
+      console.log(`destino: ${wt} / rama ${branch} — NO LIBRE (ver la precondición de arriba).`)
+    } else if (destinationCheck === 'checked') {
+      console.log(`destino libre: ${wt} no existe y la rama ${branch} tampoco (comprobado en este checkout).`)
+    } else if (destinationCheck === 'fixture') {
+      console.log(`destino: ${wt} / rama ${branch} — NO COMPROBADOS (modo fixture: repoRoot sintético, no se toca git). En una corrida real sí se comprueban antes de reclamar.`)
+    } else {
+      // 'unknown': se intentó de verdad y la consulta falló. Ni "libre" ni
+      // "no se miró" — se miró y no se pudo saber. El aviso con el detalle y
+      // el comando manual ya se imprimió arriba, al hacer la comprobación.
+      console.log(`destino: ${wt} / rama ${branch} — SIN CONFIRMAR: la consulta a git se intentó y FALLÓ (ver el aviso de más arriba), así que no se puede afirmar que estén libres. Esto NO es modo fixture: la corrida real hará exactamente esta misma comprobación, y si vuelve a fallar tampoco lo sabrá.`)
+    }
     console.log(`CLAUDE_CONFIG_DIR=${configDir}`)
     console.log(`git worktree add -b ${branch} ${wt} ${resolvedBase}`)
     console.log(`seed ${wt}/.agent/STATE.md:\n${stateSeed}`)
@@ -1710,6 +2099,12 @@ for (let idx = 0; idx < plans.length; idx++) {
     process.kill(process.pid, process.env.CT_NEXT_TEST_SELF_SIGINT_BEFORE_IDLE_CHECKPOINT)
   }
   await sleep(testDelayAfterClaimMs)
+  // D5: el `sleep` de arriba se resuelve en la fase de TIMERS, que corre
+  // ANTES de la de POLL — donde libuv despacha las señales. Sin este
+  // segundo yield (fase de CHECK, después de poll), una señal ya pendiente
+  // podía no haberse despachado todavía al llegar aquí — medido, 2 de 8
+  // rondas. Ver el comentario de cabecera de `yieldToSignals`.
+  await yieldToSignals()
   // Defensa en profundidad (no la única defensa — ver el comentario de
   // cabecera de handleInterrupt para por qué ya es 100% síncrona): si el
   // manejador ya arrancó y puso `interrupting` a true en el instante en que
@@ -1735,7 +2130,17 @@ for (let idx = 0; idx < plans.length; idx++) {
     // fuente de la DECISIÓN.
     if (claim.status === 1 || claim.status === 3 || claim.status === 4) {
       const outcome = classifyClaimOutcome(claim.status)
-      const isLast = idx === selected.length - 1
+      // `plans.length`, no `selected.length` (D5, revisión propia): este
+      // bucle itera sobre `plans`, y `plans` puede ser MÁS CORTO que
+      // `selected` (un slice sin número utilizable, o cuyo kickoff no
+      // renderiza, no llega a tener plan). Hoy los dos coinciden siempre en
+      // el camino real —cualquier fallo de precondición aborta antes del
+      // bucle— así que no cambia ningún comportamiento; pero comparar `idx`
+      // con la longitud del OTRO array es justo la clase de trampa que un
+      // cambio futuro despierta, y el mensaje que decide ("no quedan más
+      // candidatos" vs "sigo con el resto") tiene que reflejar la realidad
+      // de este bucle.
+      const isLast = idx === plans.length - 1
       // D2, finding 1: en el último candidato de la tanda ya no queda
       // "resto" con el que seguir — decirlo de todas formas es la promesa
       // falsa que reprodujo la auditoría (el propio "si queda algún
@@ -1779,7 +2184,20 @@ for (let idx = 0; idx < plans.length; idx++) {
     // ready → status:in-progress) ANTES de morir por la señal, y no hay
     // forma de saberlo desde aquí.
     if (claim.signal) {
-      console.error(`dispatch-check para #${s.n} terminó por la señal ${claim.signal} mientras intentaba reclamar — no se puede saber si el claim llegó a escribirse antes de morir. Si #${s.n} queda en status:in-progress sin nadie trabajándolo, revisa y revierte a mano: gh issue edit ${s.n} --repo ${repo} --add-label status:ready --remove-label status:in-progress. Abortando toda la tanda: no sigo con el resto de candidatos a ciegas.`)
+      // D5, hallazgo D: el SIGKILL que mandamos NOSOTROS al agotarse
+      // CT_NEXT_CHILD_TIMEOUT_MS entra por esta misma rama y, antes de este
+      // arreglo, se presentaba como una señal ajena ("terminó por la señal
+      // SIGKILL", "antes de esta interrupción") sin nombrar el límite ni la
+      // variable — culpando de una interrupción a un usuario que no
+      // interrumpió nada. Es exactamente la distinción que la ronda
+      // anterior ya había añadido para `git worktree add` (ver `timedOut`
+      // más abajo, misma detección) y que aquí faltaba.
+      if (claim.timedOut) {
+        console.error(`dispatch-check para #${s.n} no terminó dentro del límite de ${childTimeoutMs}ms (CT_NEXT_CHILD_TIMEOUT_MS) y lo matamos NOSOTROS con SIGKILL — no fue una interrupción tuya. Al matarlo a mitad de su propio claim-then-verify, no se puede saber si el claim llegó a escribirse: si #${s.n} queda en status:in-progress sin nadie trabajándolo, revierte a mano con ${manualRevertClaimHint(s)}. Si esto pasa contra un repo legítimamente grande/lento (o un \`gh\` que responde despacio), sube CT_NEXT_CHILD_TIMEOUT_MS. Abortando toda la tanda: no sigo con el resto de candidatos a ciegas.`)
+        console.error('Los slices de esta tanda ya lanzados con éxito antes de este fallo (si los hubo) siguen corriendo en su propio cmux — no se han tocado.')
+        process.exit(1)
+      }
+      console.error(`dispatch-check para #${s.n} terminó por la señal ${claim.signal} mientras intentaba reclamar — no se puede saber si el claim llegó a escribirse antes de morir. Si #${s.n} queda en status:in-progress sin nadie trabajándolo, revisa y revierte a mano: ${manualRevertClaimHint(s)}. Abortando toda la tanda: no sigo con el resto de candidatos a ciegas.`)
       console.error('Los slices de esta tanda ya lanzados con éxito antes de esta interrupción (si los hubo) siguen corriendo en su propio cmux — no se han tocado.')
       process.exit(1)
     }
@@ -1813,7 +2231,26 @@ for (let idx = 0; idx < plans.length; idx++) {
   if (process.env.CT_NEXT_TEST_SELF_SIGINT_AFTER_CLAIM) {
     process.kill(process.pid, process.env.CT_NEXT_TEST_SELF_SIGINT_AFTER_CLAIM)
   }
+  // CT_NEXT_TEST_THROW_AFTER_CLAIM — exclusivamente para tests (D5, hallazgo
+  // G): lanza una excepción cualquiera EXACTAMENTE en la ventana peligrosa
+  // (claim escrito, worktree todavía no) para poder ejercer la red de
+  // `bailOutOnCrash`. Es el mismo mecanismo que el hook de autoseñal de
+  // arriba y existe por el mismo motivo: reproducir un `throw` inesperado en
+  // ese punto exacto desde fuera no es posible de forma determinista, y el
+  // hallazgo que esta red cierra es precisamente que CUALQUIER throw ahí
+  // dejaba el issue huérfano. A diferencia del hook de señal, este no
+  // necesita validación de forma: cualquier cadena es un mensaje de error
+  // válido, y su único efecto es entrar en la red que se está probando.
+  if (process.env.CT_NEXT_TEST_THROW_AFTER_CLAIM) {
+    throw new Error(process.env.CT_NEXT_TEST_THROW_AFTER_CLAIM)
+  }
   await sleep(testDelayAfterClaimMs)
+  // D5: igual que el checkpoint anterior — cruzar la fase de POLL es lo que
+  // de verdad garantiza que una señal ya pendiente se haya despachado antes
+  // de comprobar `interrupting`. Este es EL checkpoint de la ventana
+  // peligrosa (claim escrito, worktree todavía no), así que es justo donde
+  // ese ~25% de señales que se colaban hacía más daño.
+  await yieldToSignals()
   // Defensa en profundidad — mismo razonamiento que el checkpoint anterior:
   // si `interrupting` es cierto aquí, `handleInterrupt` (100% síncrona) ya
   // revirtió este mismo claim y llamó a `process.exit()`, así que este
@@ -1822,16 +2259,17 @@ for (let idx = 0; idx < plans.length; idx++) {
   if (interrupting) break
 
   try {
-    activeWorktree = { wt, branch }
     // timeout+killSignal (finding 1, defensa 2): ver el bloque de
     // comentarios grande más arriba. Si `git worktree add` se cuelga de
     // verdad (repo remoto lento, o algo peor) y la señal solo llega a este
     // proceso, esta es la única forma de que el catch de abajo (que YA
     // revierte el claim) llegue alguna vez a ejecutarse.
+    // (D5, hallazgo E: aquí había un `activeWorktree = {wt, branch}` /
+    // `= null` cuyo único consumidor era un guard inalcanzable dentro de
+    // `handleInterrupt` — ver el comentario de `activeClaim` para el porqué
+    // de retirarlo.)
     execFileSync('git', ['worktree', 'add', '-b', branch, wt, resolvedBase], { cwd: repoRoot, stdio: 'inherit', timeout: childTimeoutMs, killSignal: 'SIGKILL' })
-    activeWorktree = null
   } catch (e) {
-    activeWorktree = null
     // Si el worktree o la rama ya existen, `git worktree add` falla con
     // exit != 0 — lo dejamos fallar ruidoso en vez de reusar en silencio
     // algo que podría no corresponder a este slice. El claim YA se obtuvo
@@ -1901,9 +2339,25 @@ for (let idx = 0; idx < plans.length; idx++) {
     console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — verificado: la sesión cmux está corriendo en ese directorio.`)
     launchedCount++
   } else if (launchCheck.status === 'wrong-cwd') {
+    // D5, hallazgo A: además del ATENCIÓN, se APUNTA el slice en
+    // `unverifiedLaunches` — porque este caso deja estado real detrás
+    // (claim escrito, rama y worktree creados, y un `cmux new-workspace`
+    // que devolvió 0, o sea posiblemente un agente corriendo) y el resumen
+    // final tiene que poder decirlo en vez de afirmar "nada quedó a medias".
     console.error(`ATENCIÓN: cmux aceptó el lanzamiento de #${s.n} (exit 0), pero la sesión NO está en ${wt} — está en "${launchCheck.actualCwd}" en su lugar (cmux tolera un cwd inexistente y arranca en el shell de login por defecto en vez de fallar; ¿el worktree no llegó a existir a tiempo, o se borró justo antes?). El agente puede estar corriendo en el directorio equivocado — revisa la sesión a mano antes de asumir que está trabajando #${s.n}. NO se cuenta como lanzado con éxito.`)
+    unverifiedLaunches.push({ n: s.n, wt, branch, name, why: `la sesión de cmux existe pero está en "${launchCheck.actualCwd}", no en ${wt}` })
   } else if (launchCheck.status === 'not-found') {
     console.error(`ATENCIÓN: cmux devolvió éxito (exit 0) al lanzar #${s.n}, pero no se encontró ninguna sesión con el nombre "${name}" al consultarlo — no se puede confirmar que el agente esté corriendo en absoluto, y mucho menos en ${wt}. Revisa cmux a mano. NO se cuenta como lanzado con éxito.`)
+    unverifiedLaunches.push({ n: s.n, wt, branch, name, why: `cmux respondió y no hay ninguna sesión con el título "${name}"` })
+  } else if (launchCheck.status === 'cwd-unknown') {
+    // D5, hallazgo B: la sesión SÍ existe con el título exacto que pedimos
+    // — eso es evidencia positiva de que el lanzamiento ocurrió. Lo único
+    // que falta es el directorio, y falta porque cmux no nos dio un campo
+    // legible, no porque esté en otro sitio. Cuenta como lanzado (mismo
+    // criterio de "beneficio de la duda ante una consulta incompleta" que
+    // 'unverifiable'), pero el mensaje no afirma "verificado".
+    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — la sesión de cmux con el título esperado EXISTE, pero cmux no expuso un directorio legible para ella (¿esquema/versión distinta de la esperada?), así que NO se pudo comprobar que esté corriendo en ${wt}. No se afirma "verificado"; si te importa, compruébalo a mano.`)
+    launchedCount++
   } else {
     console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — cmux devolvió éxito (exit 0), pero no se pudo verificar la sesión (no se pudo consultar cmux): "lanzado" aquí refleja solo que el comando no falló, no que el agente esté corriendo en ${wt}.`)
     launchedCount++
@@ -1923,6 +2377,22 @@ for (let idx = 0; idx < plans.length; idx++) {
 // "lanzados 0/N" al final de un --dry-run exitoso sería exactamente la misma
 // clase de mensaje engañoso que esta tarea existe para eliminar, solo que al
 // revés (afirmar "cero lanzamientos" de un plan que ni siquiera lo intentó).
+//
+// D5, hallazgo C: el verdicto se CALCULA aquí y se aplica al final del
+// fichero, tras el último punto de cesión — ver el bloque grande de más
+// abajo. Antes cada rama llamaba a `process.exit()` directamente, lo que
+// hacía imposible darle a una señal ya pendiente su oportunidad de ser
+// reconocida sin duplicar el yield en cada salida.
+let finalExitCode = 0
+// D5, hallazgo H: en --dry-run el resumen de precondiciones va AL FINAL,
+// después de haber impreso la tanda entera — es lo último que se lee, y lo
+// que fija el exit 1. En la corrida real este bloque no se alcanza: aborta
+// mucho antes, al detectar las mismas precondiciones.
+if (dryRun && preflightFailures.length) {
+  console.error(preflightSummary())
+  console.error('Este --dry-run NO es luz verde: la corrida real se pararía en las precondiciones de arriba, sin escribir ningún claim. Arréglalas TODAS y vuelve a pasar el dry-run.')
+  finalExitCode = 1
+}
 if (!dryRun) {
   // D2, finding 1: si el bucle llega hasta aquí (no abortó con process.exit
   // en ninguna iteración), la tanda terminó de procesarse por completo —
@@ -1957,20 +2427,122 @@ if (!dryRun) {
   //   2 = error de uso o de CONFIGURACIÓN ESTÁTICA: flags mal puestos, y (D4)
   //       un ACCOUNT_MAP malformado en scripts/kickoff.js — ambos se conocen
   //       sin tocar red ni disco, antes de decidir nada.
-  //   3 = NUEVO: la tanda se seleccionó (selected.length > 0) pero terminó
-  //       de procesarse con CERO lanzamientos, y nada se rompió — cada
-  //       candidato colisionó, perdió una carrera de forma limpia, o tropezó
-  //       con un fallo de infraestructura puntual (D2 review, menor 3),
-  //       contra trabajo que otro proceso reclamó entre la foto de ct-next y
-  //       el claim en vivo de dispatch-check (la advertencia honesta de "sin
-  //       compare-and-swap" ya documentada), o simplemente contra un `gh`
-  //       inestable. No es un bug ni requiere intervención manual, pero
-  //       tampoco es "nada que hacer" (formatBlockReason ya cubre ESE caso
-  //       con exit 0): hubo selección, hubo intento, no hubo progreso. Un
-  //       caller en /loop debe verlo como "reintenta más tarde", distinto
-  //       tanto de 0 (todo bien) como de 1 (para y mira qué pasó).
-  if (selected.length > 0 && launchedCount === 0) {
-    console.error(`ninguno de los ${selected.length} slice(s) seleccionados se lanzó esta vez — todos se saltaron, por colisión, carrera perdida, o un fallo de infraestructura puntual al reclamar (detalle arriba). No es necesariamente un fallo de configuración: puede ser otro dispatcher (u otra invocación concurrente) adelantándose entre la foto de esta tanda y el claim en vivo, o un gh inestable. Nada quedó a medias ni bloqueado — reintenta más tarde, o en la próxima vuelta del /loop.`)
-    process.exit(3)
+  //   3 = la tanda se seleccionó (selected.length > 0) pero terminó
+  //       de procesarse con CERO lanzamientos, y nada se rompió NI QUEDÓ A
+  //       MEDIAS — cada candidato colisionó, perdió una carrera de forma
+  //       limpia, o tropezó con un fallo de infraestructura puntual (D2
+  //       review, menor 3), contra trabajo que otro proceso reclamó entre la
+  //       foto de ct-next y el claim en vivo de dispatch-check (la
+  //       advertencia honesta de "sin compare-and-swap" ya documentada), o
+  //       simplemente contra un `gh` inestable. No es un bug ni requiere
+  //       intervención manual, pero tampoco es "nada que hacer"
+  //       (formatBlockReason ya cubre ESE caso con exit 0): hubo selección,
+  //       hubo intento, no hubo progreso. Un caller en /loop debe verlo como
+  //       "reintenta más tarde", distinto tanto de 0 (todo bien) como de 1
+  //       (para y mira qué pasó).
+  //
+  // ============================================================================
+  // D5, hallazgo A — EL EXIT 3 SIGNIFICABA DOS COSAS Y SU MENSAJE SOLO
+  // DESCRIBÍA UNA.
+  //
+  // El texto del exit 3 ("Nada quedó a medias ni bloqueado — reintenta más
+  // tarde") se escribió cuando `launchedCount === 0` SOLO podía significar
+  // "no llegamos a reclamar nada". La ronda anterior lo cambió sin darse
+  // cuenta: al dejar de contar como lanzado un slice cuya verificación de
+  // lanzamiento NO casa ('wrong-cwd'/'not-found'), abrió un camino nuevo
+  // hasta el mismo exit 3 — uno en el que el claim SÍ está escrito, la rama
+  // y el worktree SÍ existen, y `cmux new-workspace` devolvió 0 (o sea,
+  // puede haber un agente corriendo). Verificado por construcción antes de
+  // este arreglo: con un solo slice y cmux respondiendo con otro cwd, la
+  // salida traía `claimed #90 → in-progress` y un `worktree add -b feat/90`
+  // en el log de git TRES LÍNEAS por encima de un mensaje que afirmaba que
+  // nada había quedado a medias. Y "reintenta más tarde" era además
+  // IMPOSIBLE en ese estado: el issue ya no está en status:ready y tanto la
+  // rama como el directorio existen, así que el siguiente intento ni
+  // seleccionaría el slice ni podría crear su worktree.
+  //
+  // Los dos casos se separan aquí de verdad, no suavizando el texto:
+  // `unverifiedLaunches` (poblado en el bucle) es la lista EXACTA de slices
+  // que dejaron estado detrás. Que esa lista sea la única fuente de residuo
+  // posible al llegar hasta aquí es comprobable enumerando las salidas del
+  // bucle: 'skip'/'infra' hacen `continue` sin mutar nada; 'stuck', el exit
+  // inesperado, la muerte por señal, el fallo de `git worktree add`, el del
+  // seed y el de `cmux` terminan todos en `process.exit()` tras intentar su
+  // propia limpieza (nunca llegan aquí); 'confirmed', 'cwd-unknown' y
+  // 'unverifiable' cuentan como lanzados. Queda 'wrong-cwd'/'not-found'.
+  //
+  // Se AMPLÍA el exit 1 (no se inventa un código nuevo) porque su semántica
+  // ya es exactamente esta: "hay algo que un humano tiene que mirar y
+  // limpiar; reintentar a ciegas no ayuda". Y se aplica AUNQUE la tanda
+  // haya lanzado otros slices con éxito (`launchedCount > 0`): con cap 2,
+  // uno confirmado y otro sin confirmar, el exit 0 de antes anunciaba
+  // "progreso" mientras un issue quedaba en status:in-progress con un
+  // worktree, una rama y ningún agente confirmado — la misma mentira, solo
+  // que más difícil de ver.
+  if (unverifiedLaunches.length > 0) {
+    const detail = unverifiedLaunches
+      .map((u) => `  - #${u.n}: ${u.why}. Quedan en disco/GitHub: el claim (status:in-progress), la rama ${u.branch} y el worktree ${u.wt}. Si NO hay agente trabajándolo, límpialo con: git worktree remove --force ${u.wt} ; git branch -D ${u.branch} ; ${manualRevertClaimHint({ n: u.n })}`)
+      .join('\n')
+    console.error(`\nATENCIÓN: ${unverifiedLaunches.length} de los ${selected.length} slice(s) seleccionados quedaron LANZADOS SIN VERIFICAR — no es "reintenta más tarde": hay estado a medias que solo un humano puede resolver, porque no se puede saber desde aquí si hay un agente corriendo o no (mirar la sesión de cmux a mano es la única forma).\n${detail}\nNO borres nada sin comprobar antes que no hay un agente trabajando ahí: un revert del claim con el agente vivo es peor que dejarlo como está.`)
+    finalExitCode = 1
+  } else if (selected.length > 0 && launchedCount === 0) {
+    // A partir de D5 esta rama ya solo se alcanza cuando NO hay residuo (el
+    // caso de arriba se lo lleva antes), así que "nada quedó a medias" es
+    // por fin una afirmación cierta y no una suposición heredada.
+    console.error(`ninguno de los ${selected.length} slice(s) seleccionados se lanzó esta vez — todos se saltaron AL RECLAMAR, por colisión, carrera perdida, o un fallo de infraestructura puntual (detalle arriba). No es necesariamente un fallo de configuración: puede ser otro dispatcher (u otra invocación concurrente) adelantándose entre la foto de esta tanda y el claim en vivo, o un gh inestable. Ningún claim quedó escrito, ninguna rama ni worktree se creó, y no hay nada que limpiar a mano — reintenta más tarde, o en la próxima vuelta del /loop.`)
+    finalExitCode = 3
   }
 }
+
+// ============================================================================
+// D5, hallazgo C — ÚLTIMO PUNTO DE CESIÓN, PARA QUE UN Ctrl-C NUNCA SE
+// DESCARTE EN SILENCIO.
+//
+// Observado antes de este arreglo, con `--cap 1` (la invocación de portada
+// de la propia documentación): un SIGINT externo que llega mientras el
+// proceso está dentro de una llamada bloqueante POSTERIOR al segundo
+// checkpoint (p.ej. el propio `git worktree add`) daba EXIT=0, "lanzados
+// 1/1", y NI RASTRO de que se hubiera pulsado nada. El manejador solo puede
+// correr cuando el event loop recupera el control, y con cap 1 no queda
+// ningún `await` por delante: el proceso llega a su `process.exit()` sin
+// haber cedido nunca, y el handle de señal está unref'd (no mantiene vivo el
+// loop), así que la señal muere con el proceso.
+//
+// La decisión aquí es RECONOCER la señal, no solo documentarla: el resumen
+// de la tanda ("lanzados X/Y" y el verdicto) ya se imprimió ARRIBA, así que
+// ceder el control en este punto no puede ocultar información — solo puede
+// añadir el acuse de recibo que faltaba. Y no puede deshacer nada: cuando se
+// llega hasta aquí, todo el trabajo mutante del bucle ya terminó y
+// `activeClaim` es null, así que `handleInterrupt` no revierte ningún claim;
+// se limita a decir que la señal llegó tarde y que lo hecho, hecho está.
+//
+// POR QUÉ `setImmediate` Y NO `sleep(0)` (medido, no supuesto): una señal
+// pendiente se despacha en la fase de POLL de libuv, que corre DESPUÉS de la
+// fase de TIMERS. Un `await sleep(0)` (un `setTimeout`) puede resolverse en
+// la fase de timers de la MISMA vuelta en la que la señal todavía no se ha
+// despachado — verificado por construcción con una señal enviada durante un
+// `execFileSync` bloqueante: en 2 de 8 rondas, el manejador seguía SIN
+// ejecutarse tras el primer `await sleep(0)` (y sí tras el segundo). Un
+// `setImmediate` corre en la fase de CHECK, inmediatamente DESPUÉS de poll:
+// 8/8 rondas del mismo experimento con la señal ya despachada. Por eso este
+// yield —y los dos checkpoints del bucle, ver `yieldToSignals`— cruzan la
+// fase de poll en vez de confiar en un temporizador.
+batchFinished = true
+await yieldToSignals()
+// Si `handleInterrupt` corrió durante el yield de arriba, ya llamó a
+// `process.exit()` (es 100% síncrona) y esta línea no se alcanza. Si no
+// corrió, no había ninguna señal pendiente y no hay nada que anunciar.
+//
+// `process.exitCode` y NO `process.exit(code)`: este es el único punto de
+// salida que se alcanza tras haber imprimido mucho texto (el --dry-run
+// vuelca el kickoff en prosa y la línea entera de `cmux` por cada slice), y
+// `process.stdout` es ASÍNCRONO hacia una tubería en POSIX — un
+// `process.exit()` aquí no espera a que esas escrituras se vacíen y podría
+// truncar justo el final del plan. Fijar el código y dejar que el proceso
+// termine solo conserva el mismo exit code y además vacía la salida; nada
+// mantiene vivo el event loop a estas alturas (los handles de señal están
+// unref'd). Los demás puntos de salida del fichero sí usan `process.exit()`
+// a propósito: son abortos, y sus mensajes van por `console.error`/
+// `writeSync` justo antes.
+process.exitCode = finalExitCode
+

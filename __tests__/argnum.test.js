@@ -11,8 +11,20 @@ describe('parseStrictInt', () => {
     expect(parseStrictInt('1')).toBe(1)
     expect(parseStrictInt('1000')).toBe(1000)
     expect(parseStrictInt('0')).toBe(0)
-    expect(parseStrictInt('-3')).toBe(-3)
-    expect(parseStrictInt('+2')).toBe(2)
+    expect(parseStrictInt('007')).toBe(7) // ceros a la izquierda: el valor NO diverge
+  })
+
+  // D5, hallazgo I: D4 aceptaba el signo a propósito ("+2" es fielmente 2, no
+  // diverge del valor escrito). Pero los TRES call-sites prometen, en el
+  // texto de su propio error, "dígitos decimales a secas" / "dígitos a
+  // secas" — y "+2" no lo es. El mensaje afirmaba una regla y el código
+  // aplicaba otra; se rechaza el signo para que coincidan. Verificado contra
+  // el código sin arreglar: estos dos `toBe(null)` daban 2 y -3.
+  it('rechaza el signo explícito, aunque el valor no divergiera (el mensaje de error promete "a secas")', () => {
+    expect(parseStrictInt('+2')).toBe(null)
+    expect(parseStrictInt('-3')).toBe(null)
+    expect(parseStrictInt('+0')).toBe(null)
+    expect(parseStrictInt('-0')).toBe(null)
   })
 
   // El contraste con parseInt es el test: lo que sigue NO es una lista de

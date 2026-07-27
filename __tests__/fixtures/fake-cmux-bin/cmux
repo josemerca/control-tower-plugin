@@ -90,6 +90,22 @@ if (argv[0] === 'workspace' && argv[1] === 'list' && argv.includes('--json')) {
     process.stdout.write(JSON.stringify({ workspaces }))
     process.exit(0)
   }
+  // FAKE_CMUX_CWD_FIELD_RENAMED (D5, hallazgo B): simula una versión de cmux
+  // que renombró SOLO el campo del directorio (`cwd` en vez de
+  // `current_directory`) y mantiene `custom_title`. Es el caso que la guarda
+  // de esquema anterior NO cubría: el título se reconoce (así que
+  // `sawAnyRecognizedTitle` no salva nada), pero cada `current_directory`
+  // sale `undefined` y, con la comparación estricta de antes, CADA
+  // lanzamiento correcto se clasificaba como 'wrong-cwd' — falsa alarma en
+  // cada dispatch, y con consecuencia de exit code (0 → 3).
+  if (process.env.FAKE_CMUX_CWD_FIELD_RENAMED) {
+    const workspaces = [
+      ...staticTitles.map((t) => ({ custom_title: t, cwd: null })),
+      ...launched.map((e) => ({ custom_title: e.title, cwd: e.cwd })),
+    ]
+    process.stdout.write(JSON.stringify({ workspaces }))
+    process.exit(0)
+  }
   const workspaces = [
     ...staticTitles.map((t) => ({ custom_title: t, current_directory: null })),
     ...launched.map((e) => ({ custom_title: e.title, current_directory: e.cwd })),
