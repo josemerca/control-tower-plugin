@@ -7366,7 +7366,7 @@ var require_dist = __commonJS({
 // hooks/stop.js
 import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 // scripts/state.js
 var import_yaml = __toESM(require_dist(), 1);
@@ -7385,10 +7385,86 @@ function parseStateSafe(md) {
     return { meta: {}, body: s.trim(), error: e?.message || String(e) };
   }
 }
-function shouldBlockStop({ headSha: headSha2, stateSha: stateSha2, stopHookActive }) {
-  if (stopHookActive) return false;
-  if (!stateSha2) return false;
-  return headSha2 !== stateSha2;
+function quoteForNotice(s, max = 300) {
+  const one = String(s).replace(/\s+/g, " ").trim();
+  return one.length > max ? `${one.slice(0, max)}\u2026` : one;
+}
+var STOP_TAIL = 'Y si el trabajo NO puede continuar (bloqueado por una decisi\xF3n, un dato falso, una dependencia externa\u2026), no lo escribas en prosa dentro de next_action: ponlo en el campo `blocked` (`blocked: {reason: "\u2026", unblock: "\u2026"}`), que es lo que el hook de SessionStart anuncia y lo que suspende el next_action en la siguiente sesi\xF3n.';
+var shortSha = (s) => typeof s === "string" && /^[0-9a-f]{7,40}$/i.test(s) ? s.slice(0, 12) : String(s ?? "");
+var REV_SHAPE = /^[^\s-][^\s]*$/;
+function describeStopRelation({ headSha: headSha2, lastCommit, git: git2, branch: branch2 = "" }) {
+  const raw = lastCommit == null ? "" : String(lastCommit).trim();
+  const base = { raw, headSha: headSha2, branch: branch2, stateSha: "", count: 0, mergeBase: "", containers: [] };
+  if (!raw) return { ...base, kind: "unset" };
+  if (!REV_SHAPE.test(raw)) return { ...base, kind: "unresolvable" };
+  const rp = git2(["rev-parse", "--verify", "--quiet", `${raw}^{commit}`]);
+  const stateSha = rp.status === 0 ? String(rp.stdout || "").trim() : "";
+  if (!stateSha) return { ...base, kind: "unresolvable" };
+  const out = { ...base, stateSha };
+  if (stateSha === headSha2) return { ...out, kind: "same" };
+  const stateIsAncestor = git2(["merge-base", "--is-ancestor", stateSha, headSha2]).status;
+  if (stateIsAncestor !== 0 && stateIsAncestor !== 1) return { ...out, kind: "unknown" };
+  if (stateIsAncestor === 0) {
+    const c = git2(["rev-list", "--count", `${stateSha}..${headSha2}`]);
+    const n = c.status === 0 ? Number.parseInt(String(c.stdout || "").trim(), 10) : NaN;
+    return { ...out, kind: "behind", count: Number.isFinite(n) ? n : 0 };
+  }
+  const headIsAncestor = git2(["merge-base", "--is-ancestor", headSha2, stateSha]).status;
+  if (headIsAncestor !== 0 && headIsAncestor !== 1) return { ...out, kind: "unknown" };
+  const br = git2(["branch", "--contains", stateSha, "--format=%(refname:short)"]);
+  const containers = br.status === 0 ? String(br.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean).filter((b) => b !== branch2).slice(0, 5) : [];
+  if (headIsAncestor === 0) return { ...out, kind: "ahead", containers };
+  const mb = git2(["merge-base", stateSha, headSha2]);
+  return { ...out, kind: "diverged", containers, mergeBase: mb.status === 0 ? String(mb.stdout || "").trim() : "" };
+}
+var whereAmI = (rel) => rel.branch ? `la rama \`${rel.branch}\`` : `HEAD (desprendido en ${shortSha(rel.headSha)})`;
+var livesIn = (rel) => rel.containers?.length ? ` \u2014 vive en ${rel.containers.map((b) => `\`${b}\``).join(", ")}` : "";
+function classifyStopState({ relation: relation2, stopHookActive }) {
+  const none = { block: false, kind: relation2?.kind || "unset", reason: "", systemMessage: "" };
+  if (!relation2) return none;
+  if (stopHookActive) return none;
+  const rel = relation2;
+  if (rel.kind === "unset" || rel.kind === "same") return none;
+  if (rel.kind === "behind") {
+    const n = rel.count;
+    const cuantos = n === 1 ? "1 commit" : n > 1 ? `${n} commits` : "commits";
+    return {
+      block: true,
+      kind: "behind",
+      reason: `\`.agent/STATE.md\` se ha quedado atr\xE1s: hay ${cuantos} en ${whereAmI(rel)} por encima de su \`last_commit\` (${shortSha(rel.stateSha)}), que s\xED es un ancestro de HEAD (${shortSha(rel.headSha)}). Actualiza STATE.md (you_are_here, next_action, tasks[], last_commit) antes de cerrar el turno, para que la pr\xF3xima sesi\xF3n se hidrate correcta. ` + STOP_TAIL,
+      systemMessage: ""
+    };
+  }
+  if (rel.kind === "unresolvable") {
+    return {
+      block: true,
+      kind: "unresolvable",
+      reason: `El \`last_commit\` de \`.agent/STATE.md\` (\xAB${quoteForNotice(rel.raw || "(vac\xEDo)", 120)}\xBB) no es ning\xFAn commit de este repositorio: \`git rev-parse\` no lo resuelve. Puede ser un valor de relleno, un SHA de otro repo, o un commit que aqu\xED ya no existe. Mientras siga as\xED NADIE puede contrastar el estado con el repo \u2014 ni este guard ni la pr\xF3xima sesi\xF3n. Ponle el SHA real del \xFAltimo commit de este trabajo (\`git rev-parse HEAD\`) y actualiza el resto de STATE.md (you_are_here, next_action, tasks[]) antes de cerrar el turno. ` + STOP_TAIL,
+      systemMessage: ""
+    };
+  }
+  if (rel.kind === "ahead") {
+    return {
+      block: false,
+      kind: "ahead",
+      reason: "",
+      systemMessage: `Guard de cierre: el \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) es un DESCENDIENTE de HEAD (${shortSha(rel.headSha)})${livesIn(rel)}: el estado va por delante de ${whereAmI(rel)}, no por detr\xE1s. No se bloquea el cierre: todo lo que hay en HEAD est\xE1 contenido en ese commit, as\xED que esta sesi\xF3n no ha dejado nada sin registrar. No reapuntes \`last_commit\` a HEAD "para que cuadre": eso mover\xEDa el handoff hacia atr\xE1s y borrar\xEDa trabajo ya anotado.`
+    };
+  }
+  if (rel.kind === "diverged") {
+    return {
+      block: false,
+      kind: "diverged",
+      reason: "",
+      systemMessage: `Guard de cierre: el \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) NO est\xE1 en la historia de ${whereAmI(rel)}${livesIn(rel)}. No es m\xE1s viejo ni m\xE1s nuevo que HEAD (${shortSha(rel.headSha)}): son dos l\xEDneas de trabajo divergentes${rel.mergeBase ? ` desde ${shortSha(rel.mergeBase)}` : ""}. Por eso NO se bloquea el cierre: comparar esos dos SHA no dice si esta sesi\xF3n dej\xF3 algo sin registrar, y la \xFAnica forma de "cumplir" un bloqueo aqu\xED ser\xEDa reapuntar \`last_commit\` a HEAD, borrando el handoff de la otra l\xEDnea de trabajo (que lo reapuntar\xEDa de vuelta: dos sesiones pis\xE1ndose por turnos). Si son dos trabajos distintos no deber\xEDan compartir \`.agent/STATE.md\`: el de la ra\xEDz es el del checkout principal y cada slice despachado por \`/ct-next\` lleva el suyo dentro de su worktree. Si el trabajo vivo es este, actualiza \`last_commit\` a conciencia, sabiendo que sustituyes lo que hab\xEDa.`
+    };
+  }
+  return {
+    block: false,
+    kind: "unknown",
+    reason: "",
+    systemMessage: `Guard de cierre: git no ha podido determinar la relaci\xF3n entre HEAD (${shortSha(rel.headSha)}) y el \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}). No se bloquea el cierre porque no hay nada que se pueda afirmar; comprueba a mano si el estado est\xE1 al d\xEDa antes de fiarte de \xE9l.`
+  };
 }
 
 // hooks/stop.js
@@ -7401,12 +7477,20 @@ try {
 var cwd = input.cwd || process.cwd();
 var statePath = join(cwd, ".agent", "STATE.md");
 if (!existsSync(statePath)) process.exit(0);
+var git = (args) => {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+  if (r.error || r.status == null) return { status: -1, stdout: "" };
+  return { status: r.status, stdout: r.stdout || "" };
+};
 var headSha = "";
 try {
   headSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
 } catch {
   process.exit(0);
 }
+if (!headSha) process.exit(0);
+var branchProbe = git(["symbolic-ref", "--short", "-q", "HEAD"]);
+var branch = branchProbe.status === 0 ? branchProbe.stdout.trim() : "";
 var { meta, error: parseError } = parseStateSafe(readFileSync(statePath, "utf8"));
 if (parseError) {
   if (!input.stop_hook_active) {
@@ -7417,17 +7501,10 @@ if (parseError) {
   }
   process.exit(0);
 }
-var stateSha = "";
-if (meta.last_commit) {
-  try {
-    stateSha = execFileSync("git", ["rev-parse", `${meta.last_commit}^{commit}`], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-  } catch {
-    stateSha = String(meta.last_commit);
-  }
-}
-if (shouldBlockStop({ headSha, stateSha, stopHookActive: input.stop_hook_active })) {
-  process.stdout.write(JSON.stringify({
-    decision: "block",
-    reason: 'Hay commits m\xE1s nuevos que el `last_commit` de .agent/STATE.md. Actualiza STATE.md (you_are_here, next_action, tasks[], last_commit) antes de cerrar el turno, para que la pr\xF3xima sesi\xF3n se hidrate correcta. Y si el trabajo NO puede continuar (bloqueado por una decisi\xF3n, un dato falso, una dependencia externa\u2026), no lo escribas en prosa dentro de next_action: ponlo en el campo `blocked` (`blocked: {reason: "\u2026", unblock: "\u2026"}`), que es lo que el hook de SessionStart anuncia y lo que suspende el next_action en la siguiente sesi\xF3n.'
-  }));
+var relation = describeStopRelation({ headSha, lastCommit: meta.last_commit, git, branch });
+var verdict = classifyStopState({ relation, stopHookActive: input.stop_hook_active });
+if (verdict.block) {
+  process.stdout.write(JSON.stringify({ decision: "block", reason: verdict.reason }));
+} else if (verdict.systemMessage) {
+  process.stdout.write(JSON.stringify({ systemMessage: verdict.systemMessage }));
 }

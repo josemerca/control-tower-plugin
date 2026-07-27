@@ -274,8 +274,199 @@ export function composeHydration(stateText, gitLog) {
   return parts.join('\n\n')
 }
 
-export function shouldBlockStop({ headSha, stateSha, stopHookActive }) {
-  if (stopHookActive) return false
-  if (!stateSha) return false
-  return headSha !== stateSha
+// ===========================================================================
+// El guard de cierre de turno: `last_commit` vs `HEAD`.
+//
+// LO QUE HACÍA (y por qué era mentira): comparaba los dos SHA por igualdad
+// estricta y, si no coincidían, bloqueaba el cierre diciendo «Hay commits más
+// nuevos que el `last_commit` de .agent/STATE.md». "Más nuevos" es una
+// afirmación de ANCESTRÍA, y la igualdad no la comprueba en ningún momento.
+//
+// EL CASO REAL: un repo con dos líneas de trabajo vivas. Una sesión en la rama
+// `polish-v2-geometria` (en otro worktree) escribió en el STATE.md de la raíz
+// un `last_commit` de esa rama. Ese SHA RESUELVE desde el checkout principal
+// —los worktrees comparten el object store— pero nunca va a ser igual al HEAD
+// de `main`. Resultado: el bloqueo saltaba en cada turno acusando de commits
+// más nuevos que no existían, y la única forma de callarlo era reapuntar
+// `last_commit` a `main`, borrando el handoff de la otra sesión — que lo
+// reapuntaba de vuelta al turno siguiente. Un guard que solo se satisface
+// destruyendo información no es un guard, es un muro.
+//
+// LO QUE HACE AHORA: preguntarle a git la relación que el mensaje afirmaba, y
+// decir la verdad de cada caso por separado. Solo se BLOQUEA cuando el guard
+// puede demostrar lo que dice y la acción que pide es constructiva:
+//
+//   behind       `last_commit` es ancestro de HEAD → sí hay commits más nuevos,
+//                y son contables. Es el caso para el que se diseñó. BLOQUEA.
+//   unresolvable el valor no es ningún commit de este repo (relleno, SHA de
+//                otro repo, commit que ya no existe). El estado no se puede
+//                contrastar con nada. BLOQUEA (se arregla poniendo un SHA).
+//   same         nada que decir.
+//   unset        sin `last_commit` no hay nada que comparar (igual que antes).
+//   ahead        HEAD es ancestro de `last_commit` → el estado va POR DELANTE.
+//                NO BLOQUEA: todo lo que hay en HEAD está recogido en ese
+//                commit, así que esta sesión no dejó nada sin registrar, y la
+//                única acción que "cumpliría" el bloqueo (reapuntar a HEAD)
+//                movería el handoff hacia atrás.
+//   diverged     no hay ancestría → dos líneas de trabajo distintas. NO
+//                BLOQUEA: comparar los dos SHA no dice si esta sesión dejó
+//                algo sin registrar, y la salida del bloqueo sería pisar el
+//                handoff ajeno. Es el caso real de arriba.
+//   unknown      git no pudo responder. NO BLOQUEA: no se puede afirmar nada.
+//
+// Los tres casos que dejan de bloquear NO se quedan mudos: salen por
+// `systemMessage` (campo común de la salida JSON de los hooks, no bloqueante,
+// se le muestra al usuario). Dejar de bloquear no es dejar de hablar; lo que
+// se retira es la ORDEN, no el AVISO.
+// ===========================================================================
+
+// Recordatorio de F7, común a todos los bloqueos: el cierre de turno es el
+// momento en que se registra un bloqueo, y `blocked` es el campo donde va.
+const STOP_TAIL =
+  'Y si el trabajo NO puede continuar (bloqueado por una decisión, un dato falso, una dependencia externa…), ' +
+  'no lo escribas en prosa dentro de next_action: ponlo en el campo `blocked` (`blocked: {reason: "…", unblock: "…"}`), ' +
+  'que es lo que el hook de SessionStart anuncia y lo que suspende el next_action en la siguiente sesión.'
+
+const shortSha = (s) => (typeof s === 'string' && /^[0-9a-f]{7,40}$/i.test(s) ? s.slice(0, 12) : String(s ?? ''))
+
+// Un `last_commit` que empieza por `-` sería leído por git como una OPCIÓN, no
+// como una revisión; y uno con espacios/saltos no es un rev en ningún caso. Se
+// rechazan antes de llegar a git en vez de confiar en que git los rechace.
+const REV_SHAPE = /^[^\s-][^\s]*$/
+
+/**
+ * Le pregunta a git qué relación hay entre `HEAD` y el `last_commit` del
+ * STATE.md. No decide nada: solo describe.
+ *
+ * @param headSha    SHA de HEAD (ya resuelto por quien llama).
+ * @param lastCommit valor crudo del frontmatter (puede ser cualquier cosa).
+ * @param git        runner `(args) => { status, stdout }` que NUNCA lanza.
+ * @param branch     rama del checkout ('' si HEAD está desprendido).
+ */
+export function describeStopRelation({ headSha, lastCommit, git, branch = '' }) {
+  const raw = lastCommit == null ? '' : String(lastCommit).trim()
+  const base = { raw, headSha, branch, stateSha: '', count: 0, mergeBase: '', containers: [] }
+  if (!raw) return { ...base, kind: 'unset' }
+  if (!REV_SHAPE.test(raw)) return { ...base, kind: 'unresolvable' }
+
+  const rp = git(['rev-parse', '--verify', '--quiet', `${raw}^{commit}`])
+  const stateSha = rp.status === 0 ? String(rp.stdout || '').trim() : ''
+  if (!stateSha) return { ...base, kind: 'unresolvable' }
+
+  const out = { ...base, stateSha }
+  if (stateSha === headSha) return { ...out, kind: 'same' }
+
+  // `merge-base --is-ancestor` responde por código de salida: 0 sí, 1 no,
+  // cualquier otro es un fallo de git (y entonces no se sabe).
+  const stateIsAncestor = git(['merge-base', '--is-ancestor', stateSha, headSha]).status
+  if (stateIsAncestor !== 0 && stateIsAncestor !== 1) return { ...out, kind: 'unknown' }
+
+  if (stateIsAncestor === 0) {
+    const c = git(['rev-list', '--count', `${stateSha}..${headSha}`])
+    const n = c.status === 0 ? Number.parseInt(String(c.stdout || '').trim(), 10) : NaN
+    return { ...out, kind: 'behind', count: Number.isFinite(n) ? n : 0 }
+  }
+
+  const headIsAncestor = git(['merge-base', '--is-ancestor', headSha, stateSha]).status
+  if (headIsAncestor !== 0 && headIsAncestor !== 1) return { ...out, kind: 'unknown' }
+
+  // Las ramas locales que SÍ contienen ese commit: es la información que
+  // convierte «no está en tu historia» en «está en `polish-v2-geometria`».
+  const br = git(['branch', '--contains', stateSha, '--format=%(refname:short)'])
+  const containers = br.status === 0
+    ? String(br.stdout || '').split('\n').map((s) => s.trim()).filter(Boolean).filter((b) => b !== branch).slice(0, 5)
+    : []
+
+  if (headIsAncestor === 0) return { ...out, kind: 'ahead', containers }
+
+  const mb = git(['merge-base', stateSha, headSha])
+  return { ...out, kind: 'diverged', containers, mergeBase: mb.status === 0 ? String(mb.stdout || '').trim() : '' }
+}
+
+const whereAmI = (rel) => (rel.branch ? `la rama \`${rel.branch}\`` : `HEAD (desprendido en ${shortSha(rel.headSha)})`)
+const livesIn = (rel) => (rel.containers?.length ? ` — vive en ${rel.containers.map((b) => `\`${b}\``).join(', ')}` : '')
+
+/**
+ * Decide, a partir de la relación, si se bloquea el cierre y qué se dice.
+ * @returns { block, kind, reason, systemMessage }
+ */
+export function classifyStopState({ relation, stopHookActive }) {
+  const none = { block: false, kind: relation?.kind || 'unset', reason: '', systemMessage: '' }
+  if (!relation) return none
+  // `stop_hook_active`: ya estamos dentro de una continuación provocada por un
+  // hook de cierre. Ni bloqueo ni aviso — el aviso ya salió en la vuelta previa
+  // y repetirlo solo añade ruido a un turno que ya está en marcha.
+  if (stopHookActive) return none
+  const rel = relation
+
+  if (rel.kind === 'unset' || rel.kind === 'same') return none
+
+  if (rel.kind === 'behind') {
+    const n = rel.count
+    const cuantos = n === 1 ? '1 commit' : n > 1 ? `${n} commits` : 'commits'
+    return {
+      block: true,
+      kind: 'behind',
+      reason:
+        `\`.agent/STATE.md\` se ha quedado atrás: hay ${cuantos} en ${whereAmI(rel)} por encima de su \`last_commit\` ` +
+        `(${shortSha(rel.stateSha)}), que sí es un ancestro de HEAD (${shortSha(rel.headSha)}). ` +
+        'Actualiza STATE.md (you_are_here, next_action, tasks[], last_commit) antes de cerrar el turno, para que la próxima sesión se hidrate correcta. ' +
+        STOP_TAIL,
+      systemMessage: '',
+    }
+  }
+
+  if (rel.kind === 'unresolvable') {
+    return {
+      block: true,
+      kind: 'unresolvable',
+      reason:
+        `El \`last_commit\` de \`.agent/STATE.md\` («${quoteForNotice(rel.raw || '(vacío)', 120)}») no es ningún commit de este repositorio: ` +
+        '`git rev-parse` no lo resuelve. Puede ser un valor de relleno, un SHA de otro repo, o un commit que aquí ya no existe. ' +
+        'Mientras siga así NADIE puede contrastar el estado con el repo — ni este guard ni la próxima sesión. ' +
+        'Ponle el SHA real del último commit de este trabajo (`git rev-parse HEAD`) y actualiza el resto de STATE.md ' +
+        '(you_are_here, next_action, tasks[]) antes de cerrar el turno. ' +
+        STOP_TAIL,
+      systemMessage: '',
+    }
+  }
+
+  if (rel.kind === 'ahead') {
+    return {
+      block: false,
+      kind: 'ahead',
+      reason: '',
+      systemMessage:
+        `Guard de cierre: el \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) es un DESCENDIENTE de HEAD ` +
+        `(${shortSha(rel.headSha)})${livesIn(rel)}: el estado va por delante de ${whereAmI(rel)}, no por detrás. ` +
+        'No se bloquea el cierre: todo lo que hay en HEAD está contenido en ese commit, así que esta sesión no ha dejado nada sin registrar. ' +
+        'No reapuntes `last_commit` a HEAD "para que cuadre": eso movería el handoff hacia atrás y borraría trabajo ya anotado.',
+    }
+  }
+
+  if (rel.kind === 'diverged') {
+    return {
+      block: false,
+      kind: 'diverged',
+      reason: '',
+      systemMessage:
+        `Guard de cierre: el \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) NO está en la historia de ${whereAmI(rel)}${livesIn(rel)}. ` +
+        `No es más viejo ni más nuevo que HEAD (${shortSha(rel.headSha)}): son dos líneas de trabajo divergentes` +
+        `${rel.mergeBase ? ` desde ${shortSha(rel.mergeBase)}` : ''}. ` +
+        'Por eso NO se bloquea el cierre: comparar esos dos SHA no dice si esta sesión dejó algo sin registrar, y la única forma de "cumplir" un bloqueo aquí ' +
+        'sería reapuntar `last_commit` a HEAD, borrando el handoff de la otra línea de trabajo (que lo reapuntaría de vuelta: dos sesiones pisándose por turnos). ' +
+        'Si son dos trabajos distintos no deberían compartir `.agent/STATE.md`: el de la raíz es el del checkout principal y cada slice despachado por `/ct-next` ' +
+        'lleva el suyo dentro de su worktree. Si el trabajo vivo es este, actualiza `last_commit` a conciencia, sabiendo que sustituyes lo que había.',
+    }
+  }
+
+  return {
+    block: false,
+    kind: 'unknown',
+    reason: '',
+    systemMessage:
+      `Guard de cierre: git no ha podido determinar la relación entre HEAD (${shortSha(rel.headSha)}) y el \`last_commit\` de ` +
+      `\`.agent/STATE.md\` (${shortSha(rel.stateSha)}). No se bloquea el cierre porque no hay nada que se pueda afirmar; ` +
+      'comprueba a mano si el estado está al día antes de fiarte de él.',
+  }
 }
