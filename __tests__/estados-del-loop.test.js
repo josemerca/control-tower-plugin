@@ -20,7 +20,7 @@
 //       el mensaje decía "falta mergear #N" igual que si siguiera en curso.
 import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -220,6 +220,22 @@ describe('F13/H1 — un PR rechazado puede volver al loop', () => {
     expect(r.out).toMatch(/ya está en status:ready — no hay nada que reabrir/)
   })
 
+  it('--reopen NO reabre un issue con DOS labels de estado, aunque una de ellas sea in-review', () => {
+    // Hallazgo al atacar la propia implementación de F13: la primera versión
+    // comprobaba `labels.includes('status:in-review')`, así que un issue con
+    // in-progress E in-review a la vez pasaba, y el add ready / remove
+    // in-review lo dejaba en [in-progress, ready] — el mismo estado ambiguo
+    // del que avisa su propio mensaje de error. Observado: exit 0 y
+    // "reopened #9 → ready".
+    const fixture = JSON.stringify({ candLabels: ['status:in-review', 'status:in-progress', 'touches:db'], openIssues: [], readback: [] })
+    const r = runCheck(['9', '--repo', 'o/r', '--reopen', '--dry-run'], { CT_CLAIM_FIXTURE: fixture })
+    expect(r.code).toBe(2)
+    expect(r.out).toMatch(/DOS o más labels de estado a la vez/)
+    expect(r.out).toMatch(/status:in-progress/)
+    expect(r.out).toMatch(/status:in-review/)
+    expect(r.out).not.toMatch(/reopened/)
+  })
+
   it('--release y --reopen juntos → error de uso, sin adivinar cuál quería quien lo escribió', () => {
     const r = runCheck(['9', '--repo', 'o/r', '--release', '--reopen', '--dry-run'])
     expect(r.code).toBe(2)
@@ -296,18 +312,28 @@ describe('F13/H3 — el claim rancio también se cruza cuando lo único que bloq
     expect(r.out).toMatch(/tampoco afirmamos que esté abandonado/)
   })
 
-  it('con evidencia local de vida (worktree presente) NO se dice nada de claim muerto', () => {
+  it('con evidencia local de vida (worktree presente) NO se dice nada de claim muerto — y NI SIQUIERA se consulta a cmux', () => {
+    // La segunda mitad es un hallazgo al atacar la propia implementación:
+    // ampliar la comprobación al caso "cap lleno" (el resultado MÁS COMÚN de
+    // un /ct-next con algo corriendo) hacía que CADA invocación rutinaria
+    // pagara la consulta a cmux —list-windows + un workspace list por
+    // ventana, hasta 5s de timeout— solo para no decir nada. Ahora las dos
+    // señales baratas (worktree, rama) se miran primero y cmux solo se
+    // consulta si las dos fallan. La semántica no cambia: basta UNA señal.
     const repoRoot = tmpRepo()
     mkdirSync(join(repoRoot, '.worktrees', '41'), { recursive: true })
+    const cmuxLog = join(repoRoot, 'cmux-invocations.log')
     const r = runNext(['--repo', 'o/r', '--cap', '1'], {
       FAKE_GIT_TOPLEVEL: repoRoot,
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[issue41Stuck, issue42Ready], []]),
       FAKE_CMUX_WINDOWS_JSON: JSON.stringify([{ id: 'win1' }]),
       FAKE_CMUX_WORKSPACE_TITLES_JSON: JSON.stringify([]),
+      FAKE_CMUX_INVOKED_LOG_FILE: cmuxLog,
     })
     expect(r.code).toBe(0)
     expect(r.out).toMatch(/sube --cap, o espera a que termine alguno\./)
     expect(r.out).not.toMatch(/claim muerto/)
+    expect(existsSync(cmuxLog)).toBe(false) // ni una sola invocación de cmux
   })
 
   it('un in-review que retiene tokens NO se acusa de claim muerto por no tener sesión', () => {
@@ -373,6 +399,12 @@ describe('F13/H4 — "cerrado" no es "mergeado", y ahora se nota', () => {
     // Los dos remedios reales, porque "espera" no es uno de ellos.
     expect(r.out).toMatch(/quita el "merge-after/)
     expect(r.out).toMatch(/reabre #7 y ciérralo como completed/)
+    // Y la coletilla final no puede contradecir al detalle. Observado en una
+    // corrida real contra josemerca/ct-loop-sandbox con la primera versión de
+    // este mensaje: "...ESTA NO SE VA A SATISFACER NUNCA... — espera a que se
+    // mergeen esas dependencias". La última frase es la que se queda.
+    expect(r.out).toMatch(/esperar NO va a desbloquear nada aquí/)
+    expect(r.out).not.toMatch(/espera a que se mergeen esas dependencias/)
   })
 
   it('una dep simplemente sin mergear (issue abierto) sigue diciendo "falta mergear", sin ruido nuevo', () => {
@@ -391,6 +423,10 @@ describe('F13/H4 — "cerrado" no es "mergeado", y ahora se nota', () => {
     expect(r.code).toBe(0)
     expect(r.out).toMatch(/#8 \(falta mergear #7\)/)
     expect(r.out).not.toMatch(/NO SE VA A SATISFACER NUNCA/)
+    // Control de la coletilla en la otra dirección: aquí esperar SÍ es el
+    // consejo correcto, y hay que seguir dándolo.
+    expect(r.out).toMatch(/espera a que se mergeen esas dependencias/)
+    expect(r.out).not.toMatch(/esperar NO va a desbloquear nada/)
   })
 
   it('"no hay nada ready" ya no se calla los slices parados en revisión', () => {

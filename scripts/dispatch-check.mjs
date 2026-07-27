@@ -454,16 +454,32 @@ if (reopen) {
       dieErr(`no se pudo leer el estado de #${issue} en ${repo}: ${e.message} — no se reabre nada sin haber comprobado que está en status:in-review.`, 3)
     }
   }
-  if (labels !== null && !labels.includes('status:in-review')) {
+  // La precondición es que el estado sea EXACTAMENTE `status:in-review`, no
+  // que in-review esté ENTRE sus labels. Hallazgo al atacar esta misma
+  // implementación: con `labels.includes(...)`, un issue que arrastrara
+  // `status:in-progress` Y `status:in-review` a la vez (una edición de label
+  // que se quedó a medias — el caso que resolveStatus existe para sobrevivir)
+  // pasaba la comprobación, y el `--add-label ready --remove-label in-review`
+  // lo dejaba en `[status:in-progress, status:ready]`: exactamente el estado
+  // ambiguo del que avisa el mensaje de abajo, creado por la herramienta que
+  // existe para no crearlo. Verificado contra esa primera versión: exit 0 y
+  // "reopened #9 → ready" sobre un issue con las dos labels.
+  if (labels !== null) {
     const actuales = labels.filter((l) => l.startsWith('status:'))
-    const enQue = actuales.length ? actuales.join(', ') : 'ninguna label status: (o sea, backlog)'
-    const yaReady = actuales.includes('status:ready')
-    dieErr(
-      yaReady
-        ? `#${issue} ya está en status:ready — no hay nada que reabrir, /ct-next puede despacharlo tal cual. (No se ha tocado ninguna label.)`
-        : `--reopen solo devuelve al loop un slice en status:in-review, y #${issue} está en: ${enQue}. No se ha tocado ninguna label — añadir status:ready sin quitar el status: que ya tiene dejaría el issue con DOS estados a la vez, que es exactamente el estado ambiguo que el dispatcher tiene que adivinar después. Si de verdad quieres moverlo desde ${enQue}, hazlo a mano y a conciencia: gh issue edit ${issue} --repo ${repo} --add-label status:ready --remove-label <la que tenga>.`,
-      2
-    )
+    const soloInReview = actuales.length === 1 && actuales[0] === 'status:in-review'
+    if (!soloInReview) {
+      const enQue = actuales.length ? actuales.join(', ') : 'ninguna label status: (o sea, backlog)'
+      const yaReady = actuales.length === 1 && actuales[0] === 'status:ready'
+      const ambiguo = actuales.length > 1
+      dieErr(
+        yaReady
+          ? `#${issue} ya está en status:ready — no hay nada que reabrir, /ct-next puede despacharlo tal cual. (No se ha tocado ninguna label.)`
+          : ambiguo
+            ? `#${issue} tiene DOS o más labels de estado a la vez (${enQue}) — probablemente una edición que se quedó a medias. No se ha tocado ninguna: reabrir desde aquí solo quitaría status:in-review y dejaría el resto puesto junto a status:ready, o sea el mismo lío con una label más. Arréglalo primero dejando UNA sola, y vuelve a intentarlo.`
+            : `--reopen solo devuelve al loop un slice en status:in-review, y #${issue} está en: ${enQue}. No se ha tocado ninguna label — añadir status:ready sin quitar el status: que ya tiene dejaría el issue con DOS estados a la vez, que es exactamente el estado ambiguo que el dispatcher tiene que adivinar después. Si de verdad quieres moverlo desde ${enQue}, hazlo a mano y a conciencia: gh issue edit ${issue} --repo ${repo} --add-label status:ready --remove-label <la que tenga>.`,
+        2
+      )
+    }
   }
   if (!dryRun && !fx) {
     const result = setStatus(issue, 'status:in-review', 'status:ready')

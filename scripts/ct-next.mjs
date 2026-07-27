@@ -507,7 +507,19 @@ function queryCmuxWorkspaceTitles() {
   return all.map((w) => w.title)
 }
 
-function assessLocalLiveness(n, cmuxTitles) {
+// `getCmuxTitles` es un THUNK, no el valor ya calculado (F13): la consulta a
+// cmux (list-windows + un workspace list por ventana, hasta
+// CMUX_QUERY_TIMEOUT_MS) solo se dispara si las DOS señales baratas y locales
+// —worktree en disco, rama en este checkout— han fallado ya. Antes el valor
+// llegaba precalculado, así que preguntar por la vida de un issue costaba
+// siempre la consulta completa aunque su worktree estuviera ahí delante.
+//
+// Importa desde F13/H3, que amplía la comprobación al caso "cap lleno" — el
+// resultado MÁS COMÚN de un /ct-next con algo corriendo. Sin esta inversión,
+// cada invocación rutinaria pagaría la consulta a cmux para no decir nada.
+// La semántica no cambia en absoluto: basta UNA señal de vida para no emitir
+// nota, y el orden en que se comprueban no altera esa conjunción.
+function assessLocalLiveness(n, getCmuxTitles) {
   const wt = `${repoRoot}/.worktrees/${n}`
   const hasWorktree = existsSync(wt)
   let hasBranch = false
@@ -519,6 +531,13 @@ function assessLocalLiveness(n, cmuxTitles) {
   } catch {
     hasBranch = false
   }
+  // Corto aquí: con worktree o rama ya sabemos que NO hay nota que emitir, y
+  // `cmuxChecked` es irrelevante en ese camino (stalenessNote sale por el
+  // primer `return null`). Afirmar `cmuxChecked: false` sin haber preguntado
+  // sería correcto pero engañoso si alguien leyera el struct fuera de aquí,
+  // así que se marca explícitamente como no consultado.
+  if (hasWorktree || hasBranch) return { hasWorktree, hasBranch, hasCmuxWorkspace: false, cmuxChecked: false }
+  const cmuxTitles = getCmuxTitles()
   const cmuxChecked = cmuxTitles !== null
   const hasCmuxWorkspace = cmuxChecked && cmuxTitles.some((t) => new RegExp(`#${n}(\\D|$)`).test(t))
   return { hasWorktree, hasBranch, hasCmuxWorkspace, cmuxChecked }
@@ -542,13 +561,19 @@ function stalenessNote(n, liveness) {
 function stalenessCtxFor() {
   let cmuxTitlesCache
   let queried = false
+  // Memoizado Y perezoso: el thunk se le pasa a assessLocalLiveness, que solo
+  // lo invoca si ni el worktree ni la rama existen (ver su comentario). Una
+  // sola consulta por corrida como mucho, cero si ningún issue la necesita.
+  const getCmuxTitles = () => {
+    if (!queried) {
+      cmuxTitlesCache = queryCmuxWorkspaceTitles()
+      queried = true
+    }
+    return cmuxTitlesCache
+  }
   return {
     stalenessNoteFor(n) {
-      if (!queried) {
-        cmuxTitlesCache = queryCmuxWorkspaceTitles()
-        queried = true
-      }
-      return stalenessNote(n, assessLocalLiveness(n, cmuxTitlesCache))
+      return stalenessNote(n, assessLocalLiveness(n, getCmuxTitles))
     },
   }
 }
@@ -662,7 +687,23 @@ function formatReason(reason, ctx) {
         })
         return `#${b.n} (falta mergear ${deps.join(', ')})`
       }).join('; ')
-      return `Hay slice(s) en status:ready pero con dependencias sin mergear o sin resolver: ${list} — espera a que se mergeen esas dependencias, o corrige el issue si el bloqueo es por datos, no por trabajo pendiente.`
+      // La coletilla final NO puede decir "espera a que se mergeen" cuando
+      // NINGUNA de las deps pendientes puede mergearse ya. Observado en una
+      // corrida real contra el sandbox: el detalle decía "ESTA NO SE VA A
+      // SATISFACER NUNCA" y el cierre, tres palabras después, "espera a que
+      // se mergeen esas dependencias" — el mensaje se contradecía a sí mismo
+      // y la última frase es la que se queda. `waitable` es cierto solo si
+      // queda al menos una dep que de verdad pueda satisfacerse esperando:
+      // un issue todavía abierto (ni traducida a null, ni cerrada sin
+      // completar, ni con la sección de deps ilegible).
+      const depStatesTail = reason.depStates || {}
+      const waitable = reason.blocked.some((b) => !b.malformed && (b.unmetDeps || []).some(
+        (d) => d != null && !Object.prototype.hasOwnProperty.call(depStatesTail, d)
+      ))
+      const tail = waitable
+        ? 'espera a que se mergeen esas dependencias, o corrige el issue si el bloqueo es por datos, no por trabajo pendiente.'
+        : 'esperar NO va a desbloquear nada aquí: ninguna de esas dependencias puede satisfacerse sola. Corrige los issues como se indica arriba.'
+      return `Hay slice(s) en status:ready pero con dependencias sin mergear o sin resolver: ${list} — ${tail}`
     }
     case 'collision': {
       // F13/H2 — DOS BLOQUEOS DISTINTOS BAJO EL MISMO NOMBRE. Desde que
