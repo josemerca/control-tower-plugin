@@ -38,6 +38,13 @@ const MARKER_CLOSE = '<!-- /ct-init:slices-contract -->'
 // puede derivar sin que la suite se entere.
 const V1_BLOCK = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'slices-contract-v1.md'), 'utf8')
 const initScriptSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-init.sh'), 'utf8')
+// CONTRACT_VERSION: la versión del contrato se LEE del propio ct-init.sh, no
+// se repite a mano en cada aserción. F11 la subió de 2 a 3 y hubo que tocar
+// cinco tests que la llevaban hardcodeada — un coste que no aporta ninguna
+// garantía (ninguno de esos tests trata SOBRE el número, solo necesitan "la
+// versión que este script emite hoy").
+const CONTRACT_VERSION = Number(initScriptSrc.match(/^SLICES_CONTRACT_VERSION=(\d+)$/m)[1])
+const versionLineRe = () => new RegExp(`<!-- ct-init:slices-contract-version: ${CONTRACT_VERSION} -->`)
 
 function extractBlock(agentsMd) {
   const lines = agentsMd.split('\n')
@@ -508,7 +515,7 @@ describe('ct-init.sh', () => {
     const res = spawnSync('bash', [script, dir], { encoding: 'utf8' })
     expect(res.status).toBe(0) // avisar no es fallar
     expect(res.stderr).toMatch(/v1/)
-    expect(res.stderr).toMatch(/v2/)
+    expect(res.stderr).toMatch(new RegExp(`v${CONTRACT_VERSION}`))
     expect(res.stderr).toContain('--update-slices-contract')
     expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(before) // ni una letra
     rmSync(dir, { recursive: true, force: true })
@@ -527,7 +534,7 @@ describe('ct-init.sh', () => {
     expect(agents).toContain('status:ready') // contenido nuevo, de verdad
     expect(agents.split(MARKER_OPEN).length - 1).toBe(1) // exactamente un bloque
     expect(agents.split(MARKER_CLOSE).length - 1).toBe(1)
-    expect(agents).toMatch(/<!-- ct-init:slices-contract-version: 2 -->/)
+    expect(agents).toMatch(versionLineRe())
     // Y correrlo otra vez ya no tiene nada que hacer.
     const again = spawnSync('bash', [script, dir, '--update-slices-contract'], { encoding: 'utf8' })
     expect(again.status).toBe(0)
@@ -570,7 +577,7 @@ describe('ct-init.sh', () => {
     expect(res.stderr).not.toMatch(/EDITADA A MANO/)
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     expect(agents).not.toContain('en ESTE repo también usamos')
-    expect(agents).toMatch(/<!-- ct-init:slices-contract-version: 2 -->/)
+    expect(agents).toMatch(versionLineRe())
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -597,7 +604,7 @@ describe('ct-init.sh', () => {
       // Queda el contrato actual, y el resto del fichero sin tocar.
       expect(agents, commit).toContain(`- notas de ${commit}`)
       expect(agents, commit).toContain('- intocable')
-      expect(agents, commit).toMatch(/<!-- ct-init:slices-contract-version: 2 -->/)
+      expect(agents, commit).toMatch(versionLineRe())
       expect(agents.split(MARKER_OPEN).length - 1, commit).toBe(1)
       rmSync(dir, { recursive: true, force: true })
     }
@@ -682,7 +689,7 @@ describe('ct-init.sh', () => {
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     expect(agents.split(MARKER_OPEN).length - 1).toBe(1)
     expect(agents).toContain('- notas')
-    expect(agents).toMatch(/<!-- ct-init:slices-contract-version: 2 -->/)
+    expect(agents).toMatch(versionLineRe())
     // El bloque nuevo mantiene CRLF: nada de dejar el fichero a medias.
     expect(agents).not.toMatch(/[^\r]\n/)
     rmSync(dir, { recursive: true, force: true })
@@ -692,12 +699,12 @@ describe('ct-init.sh', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
     const seeded = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    const fromFuture = seeded.replace('slices-contract-version: 2', 'slices-contract-version: 3')
+    const fromFuture = seeded.replace(`slices-contract-version: ${CONTRACT_VERSION}`, `slices-contract-version: ${CONTRACT_VERSION + 1}`)
     writeFileSync(join(dir, 'AGENTS.md'), fromFuture)
     const res = spawnSync('bash', [script, dir], { encoding: 'utf8' })
     expect(res.status).toBe(0)
     expect(res.stdout).not.toMatch(/al día/)
-    expect(res.stderr).toMatch(/v3/)
+    expect(res.stderr).toMatch(new RegExp(`v${CONTRACT_VERSION + 1}`))
     expect(res.stderr).toMatch(/más nueva del plugin/)
     expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(fromFuture) // no se degrada
     rmSync(dir, { recursive: true, force: true })

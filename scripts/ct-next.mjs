@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync, existsSync, statSync, accessSync, constants as fsConstants, writeSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, accessSync, constants as fsConstants, writeSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, delimiter as pathDelimiter } from 'node:path'
 import { planDispatch, resolveAccount, resolveAccountLegacy, validateAccountMap, parseRepoSlug, buildCmuxArgv } from './dispatch.js'
@@ -9,6 +9,7 @@ import { parseStrictInt } from './argnum.js'
 import { shQuote } from './shquote.js'
 import { buildDispatchInput, NO_MILESTONE_KEY } from './gh-issue-map.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
+import { detectConventions, formatFindings } from './conventions.js'
 
 // W-C: dispatch-check.mjs implementa el protocolo de claim completo (colisión
 // + escritura + claim-then-verify) y ya está testeado en solitario, pero
@@ -1151,6 +1152,55 @@ const orderCollisions = dispatchInput.orderCollisions || []
 for (const w of formatOrderCollisions(orderCollisions)) console.log(w)
 for (const w of formatStatusAmbiguityWarnings(issues)) console.log(w)
 for (const w of formatStrayDepsWarnings(issues)) console.log(w)
+// F11, parte B — el mismo hallazgo que hizo que ct-init deje de bootstrapear
+// encima de convenciones ajenas en silencio, pero en el momento en que de
+// verdad muerde: el DESPACHO. El kickoff que se le da a cada agente le manda
+// liberar el claim con el `dispatch-check.mjs` del plugin y trabajar en el
+// worktree `.worktrees/<n>` sobre `feat/<n>`. Si el AGENTS.md (o el CLAUDE.md)
+// del repo le manda OTRA cosa — su propio `scripts/dispatch-check.sh`, otra
+// ruta de worktrees — el agente recibe dos órdenes contradictorias y va a
+// obedecer la del repo, que es la que lee al hidratarse. Ese es el camino
+// exacto al deadlock que originó esta tanda: /ct-next pone
+// `status:in-progress`, el agente arranca, corre el claim del repo, y el
+// script del repo se encuentra un claim activo sobre su propio issue.
+//
+// Se mira SOLO la documentación del repo (no se escanea el árbol como hace
+// ct-init): lo que contradice al kickoff es la INSTRUCCIÓN, no la existencia
+// de un fichero — y un despacho no puede permitirse un recorrido del disco.
+// Es un aviso más, del mismo tipo que los tres de arriba: nunca bloquea.
+// Un fallo de lectura NO se calla como "no hay nada": ver el `catch`.
+function formatConventionWarnings() {
+  if (fx) return [] // modo fixture: repoRoot sintético, no hay nada real que leer
+  const docs = []
+  let readFailure = null
+  for (const name of ['AGENTS.md', 'CLAUDE.md']) {
+    try {
+      docs.push({ path: name, content: readFileSync(join(repoRoot, name), 'utf8') })
+    } catch (e) {
+      // ENOENT es la respuesta normal (el repo no tiene ese fichero) y no dice
+      // nada. Cualquier OTRO error sí: no se ha podido mirar, y callarlo sería
+      // indistinguible de "no hay conflicto".
+      if (e.code !== 'ENOENT') readFailure = `${name}: ${e.message}`
+    }
+  }
+  const out = []
+  if (readFailure) {
+    out.push(`aviso: no se ha podido leer la documentación del repo para comprobar si contradice al kickoff (${readFailure}). NO lo leas como "no hay conflicto": no se ha mirado.`)
+  }
+  // `files: []` a propósito — sin recorrido de disco, la regla de directorios
+  // de worktrees ajenos y la de ficheros de estado no disparan aquí. Las que sí
+  // importan en el despacho (instrucción de claim, `git worktree add <otra
+  // ruta>`) salen enteras de los documentos.
+  const findings = detectConventions({ docs, files: [] }).filter((f) => f.id === 'claim' || f.id === 'worktrees')
+  const text = formatFindings(findings, { where: `el repo ${repo}` })
+  if (text) {
+    out.push(
+      `${text}\n  En un DESPACHO esto importa ya: el kickoff manda liberar el claim con el dispatch-check del plugin y trabajar en .worktrees/<n> sobre feat/<n>. El agente va a leer las dos órdenes y obedecer la de tu repo.`
+    )
+  }
+  return out
+}
+for (const w of formatConventionWarnings()) console.log(w)
 // planDispatch (dispatch.js) es quien decide TODO lo que antes se hacía aquí
 // a medias: antes este wrapper llamaba a selectNext con `runningTouches: []`
 // hardcodeado, así que dos invocaciones sucesivas de /ct-next --cap 1 nunca

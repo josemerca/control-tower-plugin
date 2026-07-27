@@ -99,6 +99,34 @@ const FIXTURE = JSON.stringify({
 const realDispatchCheckPath = join(dirname(script), 'dispatch-check.mjs')
 const escapeRegExp = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+// ctNextSiblings (F11): los ficheros de `scripts/` que ct-next.mjs necesita
+// para arrancar, DERIVADOS de sus propios imports relativos en vez de escritos
+// a mano. La lista hardcodeada que había aquí era una copia del grafo de
+// dependencias que nadie actualizaba: al añadir un import nuevo a ct-next.mjs
+// (F11 añadió `conventions.js`) estos tests copiaban un árbol INCOMPLETO y
+// medían un ERR_MODULE_NOT_FOUND (exit 1) creyendo que medían el exit code del
+// escenario — verde en la lista de nombres, falso en lo que afirmaban. La
+// resolución es transitiva; un fichero que no exista se ignora, así que
+// `dispatch-check.mjs` (que algunos tests borran a propósito) sigue pudiendo
+// omitirse por separado.
+function ctNextSiblings(scriptsDirPath) {
+  const seen = new Set()
+  const pending = ['ct-next.mjs']
+  while (pending.length) {
+    const f = pending.shift()
+    if (seen.has(f)) continue
+    seen.add(f)
+    let src
+    try {
+      src = readFileSync(join(scriptsDirPath, f), 'utf8')
+    } catch {
+      continue
+    }
+    for (const m of src.matchAll(/from '\.\/([^']+)'/g)) pending.push(m[1])
+  }
+  return [...seen]
+}
+
 describe('ct-next — --dry-run muestra el claim sin ejecutarlo (W-C, punto 5; fix round 1, minor: línea copiable y guarda real)', () => {
   it('imprime el comando REAL y copiable (node <ruta> <issue> --repo <repo>), y deja claro que no se ejecuta', () => {
     const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE })
@@ -228,7 +256,7 @@ describe('ct-next — dispatch-check.mjs ausente (W-C, fix round 1, finding 2)',
   // ct-next.mjs copiado, apunta a un fichero que de verdad no existe.
   const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
   const scriptsDir = join(projectRoot, 'scripts')
-  const SIBLING_FILES = ['ct-next.mjs', 'dispatch.js', 'kickoff.js', 'shquote.js', 'gh-issue-map.js', 'gh-issues.js', 'state.js', 'argnum.js']
+  const SIBLING_FILES = ctNextSiblings(scriptsDir)
 
   it('dispatch-check.mjs no existe en la ruta resuelta → aborta al arrancar con esa ruta, ANTES de tratarlo como colisión', () => {
     const copyDir = mkdtempSync(join(projectRoot, 'tmp-missing-dispatch-check-'))
@@ -293,7 +321,7 @@ describe('ct-next — dispatch-check.mjs ausente (W-C, fix round 1, finding 2)',
 describe('ct-next — maxBuffer explícito al capturar la salida de dispatch-check (D2 review, menor 4)', () => {
   const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
   const scriptsDir = join(projectRoot, 'scripts')
-  const SIBLING_FILES = ['ct-next.mjs', 'dispatch.js', 'kickoff.js', 'shquote.js', 'gh-issue-map.js', 'gh-issues.js', 'state.js', 'argnum.js']
+  const SIBLING_FILES = ctNextSiblings(scriptsDir)
   // ~2 MiB: por encima del default de Node (1 MiB) y por debajo de
   // GH_MAX_BUFFER (20 MiB) — si el fix aplica el mismo límite, esto cabe
   // entero; si no lo aplica (el bug), Node mata al hijo antes de esto.

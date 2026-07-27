@@ -80,6 +80,34 @@ const openIssue42 = { number: 42, title: '#42 algo', labels: [{ name: 'status:re
 // ---------------------------------------------------------------------------
 // Defecto 2 — argumentos numéricos parseados con `parseInt`
 // ---------------------------------------------------------------------------
+// ctNextSiblings (F11): los ficheros de `scripts/` que ct-next.mjs necesita
+// para arrancar, DERIVADOS de sus propios imports relativos en vez de escritos
+// a mano. La lista hardcodeada que había aquí era una copia del grafo de
+// dependencias que nadie actualizaba: al añadir un import nuevo a ct-next.mjs
+// (F11 añadió `conventions.js`) estos tests copiaban un árbol INCOMPLETO y
+// medían un ERR_MODULE_NOT_FOUND (exit 1) creyendo que medían el exit code del
+// escenario — verde en la lista de nombres, falso en lo que afirmaban. La
+// resolución es transitiva; un fichero que no exista se ignora, así que
+// `dispatch-check.mjs` (que algunos tests borran a propósito) sigue pudiendo
+// omitirse por separado.
+function ctNextSiblings(scriptsDirPath) {
+  const seen = new Set()
+  const pending = ['ct-next.mjs']
+  while (pending.length) {
+    const f = pending.shift()
+    if (seen.has(f)) continue
+    seen.add(f)
+    let src
+    try {
+      src = readFileSync(join(scriptsDirPath, f), 'utf8')
+    } catch {
+      continue
+    }
+    for (const m of src.matchAll(/from '\.\/([^']+)'/g)) pending.push(m[1])
+  }
+  return [...seen]
+}
+
 describe('ct-next --cap: parseo estricto (D4, defecto 2)', () => {
   // Verificado contra el código sin arreglar, en el mismo orden que aquí:
   // "1e3" despachaba 1 slice, "3perros" despachaba 3, "2.9" despachaba 2, y
@@ -186,7 +214,7 @@ describe('ct-next — ACCOUNT_MAP malformado se detecta AL ARRANCAR (D4, defecto
   // kickoff.js: el mapa vive en código, así que no hay forma de inyectar uno
   // malo por env sin abrir una puerta de configuración que producción no debe
   // tener. Mismo patrón de copia que ya usa ct-next-claim.test.js.
-  const SIBLINGS = ['ct-next.mjs', 'dispatch.js', 'kickoff.js', 'shquote.js', 'gh-issue-map.js', 'gh-issues.js', 'state.js', 'argnum.js', 'claim.js', 'dispatch-check.mjs']
+  const SIBLINGS = ctNextSiblings(scriptsDir).concat(['dispatch-check.mjs'])
 
   // El temporal va DENTRO del proyecto (no en tmpdir) a propósito, igual que
   // en ct-next-claim.test.js: `state.js` importa el paquete `yaml`, y la

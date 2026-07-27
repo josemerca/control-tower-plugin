@@ -58,4 +58,14 @@ bloqueado, no lo levantes por tu cuenta. Un STATE.md que no trae el campo se
 lee como **no bloqueado** (todos los anteriores a esto lo son); lo que sí se
 anuncia como "no se sabe" es un frontmatter que no se puede parsear.
 
+**Si el scaffolder avisa de convenciones propias del repo** (un bloque
+`ATENCIÓN: este repo ya tenía convenciones propias...` por stderr, con
+apartados `[claim]`, `[worktrees]` y/o `[estado]`), **transmíteselo al usuario
+entero, con la evidencia y la decisión**. No lo resuelvas tú: significa que el
+repo ya traía su propio protocolo de claim, su propia ruta de worktrees o su
+propio fichero de estado en el terreno que el loop va a ocupar, y elegir cuál
+manda es una decisión suya. Si en cambio dice que **no se ha podido comprobar**
+(falta `node`), dilo también: ese caso NO es "no hay ninguna", es "no se ha
+mirado".
+
 Por último, si el repo no está registrado en `control-tower/tower/workspaces.*.yaml`, dilo; no lo registres tú.

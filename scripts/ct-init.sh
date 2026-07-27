@@ -142,7 +142,7 @@ SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
 # marcador de apertura se mantiene idéntico al de siempre para que un repo
 # bootstrapeado antes de F6 (sin línea de versión, "v1") siga reconociéndose
 # con los mismos `grep -qxF` de siempre, sin ninguna migración.
-SLICES_CONTRACT_VERSION=2
+SLICES_CONTRACT_VERSION=3
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -187,7 +187,8 @@ f6da7d5dcc4ae0c2a0c71990ac9a71fe8092af0b71440c2ea946f1514377216f  v1, 70 líneas
 9628a6dc082694506dfb0911d5309308e82078b2bb62a28671ebef344a562932  v1, 73 líneas — 7ef5f4f (plugin 0.6.0)
 c90554b809bc6af4f50613e75f160b0b0859ffce3412aeb44d10bef2d9da3e0a  v1, 77 líneas — 2b633ed (plugin 0.6.0)
 7de20667a7c30a869cfcc1e56577de90e3214c4356c48ded040bf4dc0977159e  v1, 87 líneas — b968286 (plugin 0.6.0–0.8.0)
-5d90ba2f8203469cc1aad5a189b2c25003d5223d13f920e4bbbe9e2320c3e9cb  v2, 134 líneas — 40adf2c (plugin 0.9.0–)
+5d90ba2f8203469cc1aad5a189b2c25003d5223d13f920e4bbbe9e2320c3e9cb  v2, 134 líneas — 40adf2c (plugin 0.9.0–0.10.0)
+8aaa19edfc9b57419972c509f4b558c6084d2a691592561a2b3d180ae59cfcc8  v3, 213 líneas — F11 (sección "Qué hace /ct-next con esto")
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -195,7 +196,7 @@ c90554b809bc6af4f50613e75f160b0b0859ffce3412aeb44d10bef2d9da3e0a  v1, 77 líneas
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 2 -->
+<!-- ct-init:slices-contract-version: 3 -->
 ## Formato de la tabla §9 (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -323,7 +324,86 @@ Detalle completo (todas las condiciones de abort, columnas opcionales,
 avisos no fatales, el reporte de divergencia, sus límites, y `--reconcile`):
 `commands/ct-groom.md` en el plugin `control-tower-loop`.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v2). Si el plugin trae una
+### Qué hace `/ct-next` con esto
+
+Lo de abajo NO es la referencia de invocación (esa es `commands/ct-next.md` en
+el plugin): es lo que cambia cómo escribes la tabla y cómo convives con el
+loop una vez hay slices en vuelo.
+
+- **`Área`/`Toca` no avisan: BLOQUEAN.** Un slice que comparta **un solo
+  token** con un issue en `status:in-progress` no se despacha — `/ct-next` lo
+  salta y prueba el siguiente candidato; si no queda ninguno, no lanza nada y
+  dice contra qué issue chocó. Elegir los tokens **es** elegir qué puede
+  volar en paralelo: dos slices con un token en común quedan serializados
+  aunque toquen ficheros distintos.
+- **`migration`/`ci`/`pbxproj` serializan además GLOBALMENTE.** Son dos reglas
+  distintas actuando a la vez: la de arriba compara tokens, esta no. Un slice
+  con `Toca: migration` y otro con `Toca: ci` **no comparten ningún token** y
+  aun así no pueden estar en vuelo a la vez, en todo el repo, sin importar
+  `Área`.
+- **`merge-after` significa MERGEADO.** Una dependencia solo cuenta como
+  satisfecha cuando su issue está **cerrado como completado** (lo que ocurre
+  al mergear su PR). Un PR aprobado, un PR abierto o un issue en
+  `status:in-review` no desbloquean nada; un issue cerrado como *not planned*
+  tampoco cuenta. Al diseñar la tabla: el slice del que dependen muchos es el
+  **cuello de botella** del epic entero — nada detrás de él avanza hasta que
+  ESE se mergee. Si quieres una ventana de paralelismo, tiene que salir de la
+  columna `Dep`.
+- **Una invocación despacha `--cap` slices; por defecto es 1.** Y el cap es
+  **global al repo, no por invocación**: cuenta también lo que ya está en
+  vuelo (`status:in-progress`), así que un segundo `/ct-next --cap 1` con algo
+  corriendo no lanza nada — y lo dice. Aprovechar una ventana de paralelismo
+  es un acto explícito: `/ct-next --cap 2` (o más).
+- **`/ct-next` no acota por epic.** Acepta `--repo`, `--cap`, `--base` y
+  `--dry-run`; **no hay `--milestone`**. Barre todos los issues abiertos del
+  repo y elige por el `#` más bajo de la tabla, venga del epic que venga (ese
+  `#` sí se resuelve dentro de su propio milestone para traducir `Dep`, pero
+  la SELECCIÓN no se acota). Con dos epics vivos, el `#1` del segundo le gana
+  al `#3` del primero — y si los dos tienen un `#1` despachable, **cuál sale
+  primero no está definido**: depende del orden en que GitHub devuelva los
+  issues. La palanca para decidir qué epic avanza es la que ya tienes:
+  promover a `status:ready` solo los slices que quieras en vuelo.
+- **Hace falta `cmux`.** Es un gestor de workspaces de terminal, externo al
+  plugin: cada slice se lanza como `cmux new-workspace` (un worktree + una
+  sesión de `claude`). Si `cmux` no está en el PATH, **ningún** slice puede
+  lanzarse — `/ct-next` aborta en las precondiciones, antes de reclamar nada.
+  `/ct-groom` y `/ct-init` no lo necesitan: es requisito solo del dispatch.
+- **Interrupción y reanudación.** Un Ctrl-C (SIGINT/SIGTERM) a media corrida
+  revierte a `status:ready` el claim que hubiera quedado a medias antes de
+  salir. Re-invocar `/ct-next` es **idempotente** por construcción: un slice
+  ya despachado está en `status:in-progress`, así que ya no es `status:ready`
+  y no se vuelve a elegir (aunque sigue ocupando cap). Cada slice usa la rama
+  `feat/<n>` y el worktree `.worktrees/<n>` (`<n>` = número de ISSUE, no el
+  `#` de la tabla); si alguno de los dos ya existe de una corrida anterior,
+  `/ct-next` se niega a despachar ese slice **antes** de reclamarlo e imprime
+  el comando de limpieza exacto.
+- **Un claim es un label, sin heartbeat: nada lo caduca.** Si un slice muere
+  (sesión cerrada, máquina apagada, un agente que nunca ejecutó su
+  `--release`), su `status:in-progress` se queda puesto y bloquea
+  indefinidamente a todos los que compartan sus tokens, hasta que alguien lo
+  revierta **a mano**:
+
+  ```
+  gh issue edit <n> --repo <owner/repo> --add-label status:ready --remove-label status:in-progress
+  ```
+
+  `/ct-next` ayuda hasta donde puede: si la colisión es contra un issue del
+  que no hay ni worktree, ni rama, ni sesión de cmux **en esta máquina**, lo
+  dice — pero no puede afirmar que esté abandonado (pudo reclamarse desde
+  otro sitio). Comprueba antes de romper un claim ajeno.
+- **Cada slice en vuelo tiene SU `.agent/STATE.md`**: el de su worktree
+  (`.worktrees/<n>/.agent/STATE.md`), sembrado al despachar. Dos slices a la
+  vez no se pisan ese fichero, y ninguno toca el `.agent/STATE.md` del
+  checkout principal.
+- **Qué recibe el agente despachado**: un prompt de arranque (*kickoff*) con
+  el nombre del slice, el número de issue, los criterios de la sección
+  "Acceptance criteria", el addendum de su `Tipo` y el comando literal para
+  liberar el claim al terminar; más el `.agent/STATE.md` sembrado y lo que el
+  propio repo le dé al arrancar (`AGENTS.md`, `CLAUDE.md`, hooks). **No
+  recibe el spec**: se hidrata del issue. Lo que no llegó al cuerpo del issue
+  no llega al agente.
+
+<sub>Esta sección la mantiene `/ct-init` (contrato v3). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>
@@ -537,4 +617,36 @@ else
   echo >> "$AGENTS_MD"
   emit_slices_contract >> "$AGENTS_MD"
   echo "añadida sección §9 (contrato /ct-groom v$SLICES_CONTRACT_VERSION) a $AGENTS_MD"
+fi
+
+# F11, parte B: hasta ahora ct-init bootstrapeaba ENCIMA de las convenciones
+# que el repo ya tuviera, sin enterarse. El caso real (menoplus): el repo ya
+# traía `scripts/dispatch-check.sh` con su línea en AGENTS.md mandando
+# ejecutarlo, y una convención `git worktree add .claude/worktrees/<slug>` con
+# un hook que la vigila. El plugin trae SU PROPIO dispatch-check.mjs y usa
+# `.worktrees/<n>`/`feat/<n>`, y esta sección se escribió al lado de la que ya
+# había: el AGENTS.md acabó contradiciéndose en dos sitios, y dos protocolos de
+# claim quedaron operando sobre el mismo espacio de labels sin nadie que
+# arbitre. Eso no puede volver a pasar EN SILENCIO.
+#
+# Se AVISA, no se aborta ni se cambia nada: la decisión (cuál de los dos manda)
+# es del usuario y no hay ninguna que ct-init pueda tomar por él sin romper algo.
+# Por eso también sigue saliendo 0 — el bootstrap ha hecho su trabajo.
+#
+# La detección vive en node (scripts/conventions.js, lógica pura + tests) y no
+# aquí, para que ct-next.mjs pueda usar EXACTAMENTE la misma y los dos avisos no
+# puedan divergir. Si node no está, o el escaneo falla, se dice: un silencio
+# aquí sería indistinguible de "repo limpio", y ese es justo el falso negativo
+# que cuesta un deadlock.
+CONV_STATUS=0
+CONV_OUT=''
+if command -v node >/dev/null 2>&1; then
+  CONV_OUT="$(node "$HERE/scripts/detect-conventions.mjs" "$TARGET" 2>/dev/null)" || CONV_STATUS=$?
+else
+  CONV_STATUS=127
+fi
+if [ "$CONV_STATUS" -ne 0 ]; then
+  echo "aviso: no se ha podido comprobar si este repo ya tiene convenciones propias (claim, worktrees, fichero de estado) que choquen con las del loop — la comprobación necesita \`node\` y no se ha podido ejecutar (estado $CONV_STATUS). NO lo leas como \"no hay ninguna\": no se ha mirado. Si este repo ya traía su propio script de claim o su propia ruta de worktrees, revísalo a mano antes de correr /ct-next." >&2
+elif [ -n "$CONV_OUT" ]; then
+  printf '%s\n' "$CONV_OUT" >&2
 fi
