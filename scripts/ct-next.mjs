@@ -228,6 +228,55 @@ if (childTimeoutRaw !== undefined) {
   childTimeoutMs = n
 }
 
+// CT_NEXT_TEST_CHILD_TIMEOUT_SCOPE — exclusivamente para tests: limita a QUÉ
+// hijo se le aplica CT_NEXT_CHILD_TIMEOUT_MS. Todos los demás siguen con el
+// default de producción (DEFAULT_CHILD_TIMEOUT_MS).
+//
+// F8 — por qué hizo falta. Dos tests ejercitan la cota de tiempo con un valor
+// CORTO (800 ms y 1000 ms) porque nadie va a esperar diez minutos a que
+// salte. Con una cota GLOBAL, ese valor tenía que cumplir dos cosas a la vez:
+// ser MÁS LARGO que todos los pasos legítimos de la corrida (leer los issues,
+// resolver la rama base, reclamar) y MÁS CORTO que el cuelgue simulado. Eso
+// no es una propiedad del código: es una propiedad de lo ocupada que esté la
+// máquina.
+//
+// Medido, no supuesto: con otra suite de vitest corriendo a la vez, en 2 de 6
+// corridas contra main sin tocar, el `dispatch-check` LEGÍTIMO del test del
+// "git worktree add colgado" tardó más de 800 ms, así que la cota saltaba
+// sobre el hijo EQUIVOCADO — el test fallaba buscando "no se pudo crear el
+// worktree" en una salida que hablaba de dispatch-check, y de paso dejaba
+// nietos `gh` huérfanos escribiendo en el directorio temporal que el
+// `afterEach` estaba borrando (ENOTEMPTY).
+//
+// Acotar el ALCANCE elimina la carrera por construcción en vez de ensancharla:
+// el único hijo que puede agotar la cota corta es el que el test cuelga a
+// propósito. Cero dependencia del reloj de pared.
+//
+// Se valida con el mismo criterio que los hooks de autoseñal (hallazgo G, más
+// abajo): el conjunto de alcances es CERRADO y cualquier otro valor aborta con
+// exit 2 antes de tocar nada. Un typo aquí no puede dejar en silencio la cota
+// de PRODUCCIÓN (10 min) donde un test creía haber puesto una de 800 ms — el
+// test pasaría a esperar diez minutos por un cuelgue simulado, o peor, a
+// aprobar sin ejercitar nada.
+const CHILD_TIMEOUT_SCOPES = ['dispatch-check', 'worktree-add']
+let childTimeoutScope = null
+const childTimeoutScopeRaw = process.env.CT_NEXT_TEST_CHILD_TIMEOUT_SCOPE
+if (childTimeoutScopeRaw !== undefined && childTimeoutScopeRaw !== '') {
+  if (!CHILD_TIMEOUT_SCOPES.includes(childTimeoutScopeRaw)) {
+    console.error(`CT_NEXT_TEST_CHILD_TIMEOUT_SCOPE inválido: "${childTimeoutScopeRaw}" — debe ser uno de: ${CHILD_TIMEOUT_SCOPES.join(', ')}. Es un hook exclusivo de tests que restringe CT_NEXT_CHILD_TIMEOUT_MS a un solo subproceso; con un valor que no se reconoce, la cota corta no se aplicaría a NINGUNO y el resto usaría el default de ${DEFAULT_CHILD_TIMEOUT_MS}ms sin decirlo. Abortando antes de tocar nada.`)
+    process.exit(2)
+  }
+  childTimeoutScope = childTimeoutScopeRaw
+}
+// childTimeoutFor(step): la cota que le toca a cada llamada bloqueante. Sin
+// alcance fijado (producción y la inmensa mayoría de los tests) devuelve
+// siempre `childTimeoutMs`, exactamente igual que antes de F8. Con alcance
+// fijado, solo el paso nombrado recibe la cota configurada. `step` se omite en
+// las llamadas que no son escopables.
+const childTimeoutFor = (step = null) => (
+  childTimeoutScope === null || childTimeoutScope === step ? childTimeoutMs : DEFAULT_CHILD_TIMEOUT_MS
+)
+
 // CT_NEXT_TEST_DELAY_AFTER_CLAIM_MS — exclusivamente para tests: ensancha de
 // forma determinista (en vez de depender del scheduler del SO) la ventana
 // real entre "claim confirmado" y "worktree creado" — normalmente solo un
@@ -463,7 +512,7 @@ function assessLocalLiveness(n, cmuxTitles) {
   let hasBranch = false
   try {
     execFileSync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/feat/${n}`], {
-      cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutMs, killSignal: 'SIGKILL',
+      cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
     })
     hasBranch = true
   } catch {
@@ -790,7 +839,7 @@ const GH_MAX_BUFFER = 20 * 1024 * 1024
 // arriba, defensa 2 — sin esto, un `gh` colgado (red caída a medias, auth que
 // no responde) bloquearía este script indefinidamente, y ningún manejador de
 // señal podría rescatarlo si la señal solo llega a este proceso.
-const gh = (a) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: GH_MAX_BUFFER, timeout: childTimeoutMs, killSignal: 'SIGKILL' })
+const gh = (a) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: GH_MAX_BUFFER, timeout: childTimeoutFor(), killSignal: 'SIGKILL' })
 
 // detectDefaultBranch (W-D): antes de este cambio, ct-next.mjs asumía "main"
 // a ciegas tanto en `git worktree add ... main` como en `base: 'main'` del
@@ -866,7 +915,7 @@ function verifyBaseExistsLocally(base) {
       // bloqueante" de la cabecera de finding 1 no era del todo cierto —
       // faltaban esta y las otras dos llamadas de git/gh puramente locales
       // de este fichero, sin protección alguna contra un cuelgue real).
-      execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutMs, killSignal: 'SIGKILL' })
+      execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutFor(), killSignal: 'SIGKILL' })
       return true
     } catch {
       return false
@@ -908,7 +957,7 @@ function verifyBaseExistsLocally(base) {
 function ensureRepoIdentity(root, expectedRepo) {
   let originUrl
   try {
-    originUrl = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8', timeout: childTimeoutMs, killSignal: 'SIGKILL' }).trim()
+    originUrl = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL' }).trim()
   } catch (e) {
     console.error(`no se pudo verificar que ${root} es el checkout de ${expectedRepo}: no tiene remote "origin" (${e.message}). Por seguridad, ct-next.mjs NO continúa — podría estar corriendo dentro del repo equivocado (p.ej. una sesión de control-tower en vez de ${expectedRepo}). Añade un remote origin que apunte a ${expectedRepo}, o ejecuta ct-next.mjs desde el checkout correcto.`)
     process.exit(1)
@@ -955,7 +1004,7 @@ if (fx) {
   }
 } else {
   try {
-    repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: childTimeoutMs, killSignal: 'SIGKILL' }).trim()
+    repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL' }).trim()
   } catch (e) {
     console.error(`no se pudo resolver la raíz del repo git local: ${e.message}`)
     process.exit(1)
@@ -1249,7 +1298,7 @@ function branchExistsLocally(branch) {
   if (fx) return 'unknown'
   try {
     execFileSync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
-      cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutMs, killSignal: 'SIGKILL',
+      cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
     })
     return 'yes'
   } catch (e) {
@@ -1272,7 +1321,7 @@ function registeredWorktreePaths() {
   if (fx) return null
   try {
     const out = execFileSync('git', ['worktree', 'list', '--porcelain'], {
-      cwd: repoRoot, encoding: 'utf8', timeout: childTimeoutMs, killSignal: 'SIGKILL',
+      cwd: repoRoot, encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
     })
     const paths = new Set()
     for (const line of out.split('\n')) {
@@ -1626,7 +1675,7 @@ function attemptClaim(s) {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: GH_MAX_BUFFER,
-      timeout: childTimeoutMs,
+      timeout: childTimeoutFor('dispatch-check'),
       killSignal: 'SIGKILL',
     })
     relay(1, out)
@@ -1745,13 +1794,13 @@ function cleanupOrphanedWorktree(s, wt, branch, reason) {
   // trajo hasta aquí — no queremos que la propia limpieza pueda colgarse
   // igual de indefinida que el paso que falló.
   try {
-    execFileSync('git', ['worktree', 'remove', '--force', wt], { cwd: repoRoot, stdio: 'inherit', timeout: childTimeoutMs, killSignal: 'SIGKILL' })
+    execFileSync('git', ['worktree', 'remove', '--force', wt], { cwd: repoRoot, stdio: 'inherit', timeout: childTimeoutFor(), killSignal: 'SIGKILL' })
   } catch (e) {
     attempts[0].err = e
   }
 
   try {
-    execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot, stdio: 'inherit', timeout: childTimeoutMs, killSignal: 'SIGKILL' })
+    execFileSync('git', ['branch', '-D', branch], { cwd: repoRoot, stdio: 'inherit', timeout: childTimeoutFor(), killSignal: 'SIGKILL' })
   } catch (e) {
     attempts[1].err = e
   }
@@ -2193,7 +2242,7 @@ for (let idx = 0; idx < plans.length; idx++) {
       // anterior ya había añadido para `git worktree add` (ver `timedOut`
       // más abajo, misma detección) y que aquí faltaba.
       if (claim.timedOut) {
-        console.error(`dispatch-check para #${s.n} no terminó dentro del límite de ${childTimeoutMs}ms (CT_NEXT_CHILD_TIMEOUT_MS) y lo matamos NOSOTROS con SIGKILL — no fue una interrupción tuya. Al matarlo a mitad de su propio claim-then-verify, no se puede saber si el claim llegó a escribirse: si #${s.n} queda en status:in-progress sin nadie trabajándolo, revierte a mano con ${manualRevertClaimHint(s)}. Si esto pasa contra un repo legítimamente grande/lento (o un \`gh\` que responde despacio), sube CT_NEXT_CHILD_TIMEOUT_MS. Abortando toda la tanda: no sigo con el resto de candidatos a ciegas.`)
+        console.error(`dispatch-check para #${s.n} no terminó dentro del límite de ${childTimeoutFor('dispatch-check')}ms (CT_NEXT_CHILD_TIMEOUT_MS) y lo matamos NOSOTROS con SIGKILL — no fue una interrupción tuya. Al matarlo a mitad de su propio claim-then-verify, no se puede saber si el claim llegó a escribirse: si #${s.n} queda en status:in-progress sin nadie trabajándolo, revierte a mano con ${manualRevertClaimHint(s)}. Si esto pasa contra un repo legítimamente grande/lento (o un \`gh\` que responde despacio), sube CT_NEXT_CHILD_TIMEOUT_MS. Abortando toda la tanda: no sigo con el resto de candidatos a ciegas.`)
         console.error('Los slices de esta tanda ya lanzados con éxito antes de este fallo (si los hubo) siguen corriendo en su propio cmux — no se han tocado.')
         process.exit(1)
       }
@@ -2268,7 +2317,7 @@ for (let idx = 0; idx < plans.length; idx++) {
     // `= null` cuyo único consumidor era un guard inalcanzable dentro de
     // `handleInterrupt` — ver el comentario de `activeClaim` para el porqué
     // de retirarlo.)
-    execFileSync('git', ['worktree', 'add', '-b', branch, wt, resolvedBase], { cwd: repoRoot, stdio: 'inherit', timeout: childTimeoutMs, killSignal: 'SIGKILL' })
+    execFileSync('git', ['worktree', 'add', '-b', branch, wt, resolvedBase], { cwd: repoRoot, stdio: 'inherit', timeout: childTimeoutFor('worktree-add'), killSignal: 'SIGKILL' })
   } catch (e) {
     // Si el worktree o la rama ya existen, `git worktree add` falla con
     // exit != 0 — lo dejamos fallar ruidoso en vez de reusar en silencio
@@ -2287,7 +2336,7 @@ for (let idx = 0; idx < plans.length; idx++) {
     // list` refleja siempre con fiabilidad.
     const timedOut = e.signal === 'SIGKILL' && /ETIMEDOUT/.test(e.message || '')
     if (timedOut) {
-      console.error(`no se pudo crear el worktree para #${s.n} en ${wt}: se agotó el límite de ${childTimeoutMs}ms (CT_NEXT_CHILD_TIMEOUT_MS) esperando a "git worktree add" y se mató el proceso (SIGKILL). Al matarse a mitad de camino (no un fallo limpio), puede haber quedado un directorio y/o una rama a MEDIO crear en ${wt} / ${branch} — revísalo a mano (\`git worktree list\`, \`git branch\`) antes de reintentar este slice; si sigue ahí, límpialo con \`git worktree remove --force ${wt}\` / \`git branch -D ${branch}\`. Si esto pasa contra un repo legítimamente grande/lento, sube CT_NEXT_CHILD_TIMEOUT_MS.`)
+      console.error(`no se pudo crear el worktree para #${s.n} en ${wt}: se agotó el límite de ${childTimeoutFor('worktree-add')}ms (CT_NEXT_CHILD_TIMEOUT_MS) esperando a "git worktree add" y se mató el proceso (SIGKILL). Al matarse a mitad de camino (no un fallo limpio), puede haber quedado un directorio y/o una rama a MEDIO crear en ${wt} / ${branch} — revísalo a mano (\`git worktree list\`, \`git branch\`) antes de reintentar este slice; si sigue ahí, límpialo con \`git worktree remove --force ${wt}\` / \`git branch -D ${branch}\`. Si esto pasa contra un repo legítimamente grande/lento, sube CT_NEXT_CHILD_TIMEOUT_MS.`)
     } else {
       console.error(`no se pudo crear el worktree para #${s.n} en ${wt}: ${e.message}`)
     }
@@ -2307,7 +2356,7 @@ for (let idx = 0; idx < plans.length; idx++) {
     cleanupOrphanedWorktree(s, wt, branch, `no se pudo sembrar .agent/STATE.md: ${e.message}`)
   }
   try {
-    execFileSync('cmux', cmuxArgv, { stdio: 'inherit', timeout: childTimeoutMs, killSignal: 'SIGKILL' })
+    execFileSync('cmux', cmuxArgv, { stdio: 'inherit', timeout: childTimeoutFor(), killSignal: 'SIGKILL' })
   } catch (e) {
     cleanupOrphanedWorktree(s, wt, branch, `no se pudo lanzar cmux: ${e.message}`)
   }

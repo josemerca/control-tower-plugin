@@ -8,6 +8,7 @@
 // fake-gh-bin/gh hace para los tests de dispatch-check.
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { waitForReleaseFile } from '../stub-wait.js'
 
 const argv = process.argv.slice(2)
 const joined = argv.join(' ')
@@ -128,6 +129,17 @@ function main() {
       setInterval(() => {}, 1000)
       return
     }
+    // FAKE_GIT_WORKTREE_ADD_WAIT_FILE (F8): se queda DENTRO del `worktree
+    // add` hasta que el test cree el fichero centinela, y entonces continúa
+    // con éxito. Es el sustituto sin reloj de FAKE_GIT_WORKTREE_ADD_DELAY_MS
+    // para los tests que necesitan mandar una señal "mientras `git worktree
+    // add` está corriendo": el argv ya se registró en FAKE_GIT_LOG_FILE
+    // arriba (síncrono), así que el test detecta por fichero que estamos
+    // aquí dentro y suelta la señal sin ninguna prisa. A diferencia de
+    // FAKE_GIT_WORKTREE_ADD_HANG (que no vuelve NUNCA, para ejercer el
+    // timeout), este SÍ vuelve — y con éxito — en cuanto se le suelta.
+    // Ver __tests__/fixtures/stub-wait.js.
+    waitForReleaseFile('FAKE_GIT_WORKTREE_ADD_WAIT_FILE')
     // FAKE_GIT_WORKTREE_ADD_DELAY_MS: ensancha DETERMINÍSTICAMENTE la
     // ventana de tiempo real entre "claim confirmado" y "worktree add
     // completo" — necesario para probar el checkpoint de finding 1 A VALOR

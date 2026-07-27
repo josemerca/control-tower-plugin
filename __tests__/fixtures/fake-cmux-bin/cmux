@@ -24,6 +24,7 @@
 // sin tener que añadir una variable nueva a los 654 tests preexistentes.
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { waitForReleaseFile } from '../stub-wait.js'
 
 const argv = process.argv.slice(2)
 
@@ -121,6 +122,14 @@ const nameIdx = argv.indexOf('--name')
 const name = nameIdx !== -1 ? argv[nameIdx + 1] : ''
 const cwdIdx = argv.indexOf('--cwd')
 const cwd = cwdIdx !== -1 ? argv[cwdIdx + 1] : null
+
+// FAKE_CMUX_NEW_WORKSPACE_WAIT_FILE (F8): se queda DENTRO del `new-workspace`
+// hasta que el test cree el fichero centinela. La invocación ya quedó
+// registrada arriba en FAKE_CMUX_INVOKED_LOG_FILE (síncrono), así que el test
+// puede detectar por fichero que ct-next está bloqueado dentro de esta llamada
+// y mandarle una señal sin depender de acertar una ventana de tiempo. Ver
+// __tests__/fixtures/stub-wait.js.
+waitForReleaseFile('FAKE_CMUX_NEW_WORKSPACE_WAIT_FILE')
 
 if (process.env.FAKE_CMUX_FAIL) {
   console.error('fake-cmux: new-workspace failed (simulado)')

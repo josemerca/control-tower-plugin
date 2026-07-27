@@ -322,55 +322,84 @@ describe('dispatch-check — T11 hook CT_CLAIM_PRECLAIM_DELAY_MS', () => {
     expect(r.out).toMatch(/claimed #3/)
   })
 
-  // Comparación relativa, no umbrales absolutos: un umbral absoluto bajo
-  // (p.ej. "<500ms") es fràgil frente al coste variable de arrancar un
-  // subproceso node + 3 invocaciones del stub de gh en una máquina bajo
-  // carga (se observó >500ms de solo overhead en una corrida real). En vez
-  // de eso, cada rama se ejecuta dos veces (ausente vs 300ms) y se compara
-  // la DIFERENCIA entre medias: eso aísla el efecto del hook del ruido del
-  // entorno, y es exactamente lo que el harness de T11 necesita confiar que
-  // es cierto.
+  // ==========================================================================
+  // F8 — LOS DOS ÚNICOS TESTS DE LA SUITE QUE DE VERDAD MIDEN TIEMPO.
+  //
+  // `CT_CLAIM_PRECLAIM_DELAY_MS` ES un retraso: no hay forma honesta de
+  // comprobar que duerme lo que dice sin mirar un reloj. Lo que sí se puede
+  // quitar es la dependencia del reloj DE LA MÁQUINA — el ruido — sin quitar
+  // la medición.
+  //
+  // Lo que había antes: cuatro corridas de la rama A seguidas de cuatro de la
+  // rama B, y comparación de MEDIANAS entre bloques. Eso da por hecho que la
+  // carga de la máquina es la misma en los dos bloques, que es justo lo que no
+  // se cumple: los bloques están separados por segundos, y en esos segundos el
+  // resto de la suite (y cualquier otra cosa del portátil) va y viene. Medido
+  // contra main sin tocar, con otra suite de vitest a la vez: 2 de 6 corridas
+  // fallaban aquí, con diferencias de 22ms y 249ms frente al mínimo exigido de
+  // 300 — el retraso de 600ms seguía estando ahí, pero el ruido entre bloques
+  // se lo comía entero.
+  //
+  // Lo que hay ahora: medición PAREADA e INTERCALADA. Cada iteración corre las
+  // dos ramas una detrás de otra y se queda con SU diferencia; el estadístico
+  // es la mediana de las diferencias pareadas, no la diferencia de medianas.
+  // Dos corridas consecutivas ven prácticamente la misma máquina, así que el
+  // ruido común se cancela en la resta en vez de sumarse. El umbral (la mitad
+  // del valor nominal) sigue siendo el mismo, y sigue detectando exactamente
+  // lo que tiene que detectar: un hook que no duerme lo que dice.
+  // ==========================================================================
+  const preclaimEnv = {
+    FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
+    FAKE_GH_LIST_SEQUENCE: JSON.stringify([[], [{ number: 3, labels: [{ name: 'status:in-progress' }, { name: 'touches:db' }] }]]),
+  }
+  const median = (arr) => { const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length / 2)] }
+  function timed(fn) {
+    const t0 = Date.now()
+    const r = fn()
+    return { elapsed: Date.now() - t0, r }
+  }
+
   it('valor positivo retrasa medible la escritura del claim frente a ausente (mismo resultado final, más lento)', () => {
-    const runsOf = (envOverrides) => {
-      const samples = []
-      for (let i = 0; i < 4; i++) {
-        const t0 = Date.now()
-        const r = runReal(['3', '--repo', 'o/r'], {
-          FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
-          FAKE_GH_LIST_SEQUENCE: JSON.stringify([[], [{ number: 3, labels: [{ name: 'status:in-progress' }, { name: 'touches:db' }] }]]),
-          ...envOverrides,
-        })
-        samples.push({ elapsed: Date.now() - t0, r })
+    const NOMINAL_MS = 600
+    const diffs = []
+    for (let i = 0; i < 5; i++) {
+      // Las dos ramas, una inmediatamente después de la otra, en la misma
+      // iteración: ven la misma máquina.
+      const a = timed(() => runReal(['3', '--repo', 'o/r'], { ...preclaimEnv }))
+      const b = timed(() => runReal(['3', '--repo', 'o/r'], { ...preclaimEnv, CT_CLAIM_PRECLAIM_DELAY_MS: String(NOMINAL_MS) }))
+      for (const s of [a, b]) {
+        expect(s.r.code).toBe(0)
+        expect(s.r.out).toMatch(/claimed #3/)
       }
-      return samples
+      diffs.push(b.elapsed - a.elapsed)
     }
-    const baseline = runsOf({})
-    const delayed = runsOf({ CT_CLAIM_PRECLAIM_DELAY_MS: '600' })
-    for (const s of [...baseline, ...delayed]) {
-      expect(s.r.code).toBe(0)
-      expect(s.r.out).toMatch(/claimed #3/)
-    }
-    // Mediana en vez de media: aísla el retraso del hook de un outlier puntual
-    // por contención de CPU en la máquina (ya observado: un pico aislado de
-    // ~150ms en una corrida), sin taparlo con umbrales absolutos frágiles.
-    const median = (arr) => { const s = [...arr].sort((a, b) => a - b); return s[Math.floor(s.length / 2)] }
-    const medBaseline = median(baseline.map((s) => s.elapsed))
-    const medDelayed = median(delayed.map((s) => s.elapsed))
-    // el hook debe añadir ~600ms sobre el baseline; se exige al menos 300ms
-    // (mitad del valor nominal) de margen de holgura para no ser frágil, pero
-    // un valor por debajo de eso significaría que el hook no está durmiendo
-    // lo que dice dormir.
-    expect(medDelayed - medBaseline).toBeGreaterThanOrEqual(300)
-  }, 20000)
+    // La mediana de las diferencias PAREADAS. Se exige la mitad del valor
+    // nominal: por debajo de eso el hook no estaría durmiendo lo que dice.
+    expect(median(diffs)).toBeGreaterThanOrEqual(NOMINAL_MS / 2)
+  })
 
   it('con --dry-run/fixture, CT_CLAIM_PRECLAIM_DELAY_MS alto NO retrasa nada (el hook nunca toca la ruta pura)', () => {
+    // Misma corrección: antes esto era `elapsed < 1000ms`, un umbral ABSOLUTO
+    // de reloj de pared sobre un arranque de node — bajo carga, arrancar node
+    // solo ya puede pasar de 1s, y el test habría fallado sin que el hook
+    // hubiera dormido ni un milisegundo. Lo que de verdad se quiere afirmar es
+    // "el sleep de 5000ms NO ocurrió", y eso se comprueba comparando contra un
+    // control corrido junto al caso, no contra una constante.
+    const NOMINAL_MS = 5000
     const fixture = { candLabels: ['touches:db'], openIssues: [], readback: [{ n: 3, labels: ['status:in-progress', 'touches:db'] }] }
-    const t0 = Date.now()
-    const out = execFileSync('node', [script, '3', '--repo', 'o/r', '--dry-run'],
-      { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_PRECLAIM_DELAY_MS: '5000', CT_CLAIM_FIXTURE: JSON.stringify(fixture) } })
-    const elapsed = Date.now() - t0
-    expect(out).toMatch(/claimed #3/)
-    expect(elapsed).toBeLessThan(1000)
+    const dryRun = (env) => execFileSync('node', [script, '3', '--repo', 'o/r', '--dry-run'],
+      { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify(fixture), ...env } })
+
+    const control = timed(() => dryRun({}))
+    const conHook = timed(() => dryRun({ CT_CLAIM_PRECLAIM_DELAY_MS: String(NOMINAL_MS) }))
+
+    expect(control.r).toMatch(/claimed #3/)
+    expect(conHook.r).toMatch(/claimed #3/)
+    // Si el hook hubiera tocado la ruta pura, la diferencia sería de ~5000ms.
+    // Se exige que esté por debajo de la MITAD: margen de sobra para el ruido
+    // de dos arranques de node consecutivos, y ni de lejos suficiente para
+    // esconder el sleep.
+    expect(conHook.elapsed - control.elapsed).toBeLessThan(NOMINAL_MS / 2)
   })
 
   // Fix round 1 (review de T11), Minor 1: la validación de

@@ -1,12 +1,13 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { mkdtempSync, rmSync, readFileSync, existsSync, openSync, closeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { shQuote } from '../scripts/shquote.js'
 // D4: entorno hermético (dirs de cuenta + stubs de cmux/claude) — ver fixtures/hermetic-env.js
 import { ACCOUNT_ENV, hermeticEnv } from './fixtures/hermetic-env.js'
+import { rmSyncBestEffort } from './fixtures/cleanup.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-next.mjs')
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
@@ -391,7 +392,7 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
 
   const dirs = []
   afterEach(() => {
-    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+    for (const d of dirs.splice(0)) rmSyncBestEffort(d)
   })
 
   function runReal(args, envOverrides = {}) {
@@ -405,6 +406,27 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
     } catch (e) {
       return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }
     }
+  }
+
+  // combinedOutputOf (F8): stdout y stderr del hijo van AL MISMO descriptor de
+  // fichero, así que lo que queda escrito es la transcripción en el orden REAL
+  // de emisión — lo único con lo que se puede afirmar honestamente que una
+  // línea salió antes que otra cuando las dos van por streams distintos.
+  // Concatenar `e.stdout + e.stderr`, que es lo que hace `runReal`, ordena por
+  // stream, no por tiempo.
+  function combinedOutputOf(args, envOverrides = {}) {
+    const logPath = join(mkdtempSync(join(tmpdir(), 'ct-next-combined-')), 'combined.log')
+    dirs.push(dirname(logPath))
+    const fd = openSync(logPath, 'w')
+    try {
+      spawnSync('node', [script, ...args], {
+        stdio: ['ignore', fd, fd],
+        env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
+      })
+    } finally {
+      closeSync(fd)
+    }
+    return readFileSync(logPath, 'utf8')
   }
 
   function makeRepoRoot() {
@@ -533,11 +555,30 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
     // #42 se lanzó con éxito ANTES del fallo de #43 — su línea de éxito debe
     // aparecer, y el mensaje de #43 debe dejar explícito que lo ya lanzado
     // sigue corriendo sin tocarse.
+    //
+    // F8 — ESTA COMPROBACIÓN DE ORDEN ANTES NO COMPROBABA NADA. `runReal`
+    // devuelve `e.stdout + e.stderr`: dos búferes CONCATENADOS, no una
+    // transcripción intercalada. "lanzado #42" sale por console.log (stdout) y
+    // "no se pudo lanzar cmux" por console.error (stderr), así que el primero
+    // aparecía antes que el segundo en esa concatenación SIEMPRE — aunque el
+    // proceso los hubiera emitido en el orden contrario. Una aserción de orden
+    // sobre cosas que la propia captura ya ha ordenado por ti es verde por
+    // construcción. `combinedOutputOf` corre el mismo comando con stdout y
+    // stderr apuntando AL MISMO descriptor de fichero, que es lo único que da
+    // el orden real de emisión.
     const idxLanzado42 = r.out.indexOf('lanzado #42')
     const idxFallo43 = r.out.indexOf('no se pudo lanzar cmux')
     expect(idxLanzado42).toBeGreaterThan(-1)
     expect(idxFallo43).toBeGreaterThan(-1)
-    expect(idxLanzado42).toBeLessThan(idxFallo43)
+    const interleaved = combinedOutputOf(['--repo', 'o/r', '--cap', '2'], {
+      FAKE_GIT_TOPLEVEL: makeRepoRoot(),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42, openIssue43], []]),
+      FAKE_GH_COUNTER_FILE: join(repoRoot, 'gh-list-count-2'),
+      FAKE_CMUX_FAIL_NAME_SUBSTR: '#43',
+    })
+    expect(interleaved.indexOf('lanzado #42')).toBeGreaterThan(-1)
+    expect(interleaved.indexOf('no se pudo lanzar cmux')).toBeGreaterThan(-1)
+    expect(interleaved.indexOf('lanzado #42')).toBeLessThan(interleaved.indexOf('no se pudo lanzar cmux'))
     expect(r.out).toMatch(/ya lanzados con éxito antes de este fallo.*siguen corriendo.*no se han tocado/is)
     // El log de git confirma que SOLO se intentó limpiar el worktree/rama de
     // #43 (el segundo), nunca el de #42 (el primero, que sí tuvo éxito).
@@ -566,7 +607,7 @@ describe('ct-next — guarda de identidad de repo (review final, finding 1)', ()
 
   const dirs = []
   afterEach(() => {
-    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+    for (const d of dirs.splice(0)) rmSyncBestEffort(d)
   })
 
   function runReal(args, envOverrides = {}) {
@@ -653,7 +694,7 @@ describe('ct-next — enumeración de issues sin --limit fijo (review final, fin
   ].join(':')
   const dirs = []
   afterEach(() => {
-    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+    for (const d of dirs.splice(0)) rmSyncBestEffort(d)
   })
   function runReal(args, envOverrides = {}) {
     try {
@@ -738,7 +779,7 @@ describe('ct-next — D1 finding 1: alcance del orden por epic (milestone), cami
   ].join(':')
   const dirs = []
   afterEach(() => {
-    for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+    for (const d of dirs.splice(0)) rmSyncBestEffort(d)
   })
   function runReal(args, envOverrides = {}) {
     try {
