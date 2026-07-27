@@ -27,106 +27,189 @@ function nextCallIndex(counterFile) {
   return n
 }
 
-if (argv[0] === 'issue' && argv[1] === 'edit') {
-  const failSubstr = process.env.FAKE_GH_EDIT_FAIL_SUBSTR
-  if (failSubstr && joined.includes(failSubstr)) {
-    console.error('fake-gh: issue edit failed (simulado)')
-    process.exit(1)
+// FAKE_GH_LIST_SEQUENCE_FILE (D2 review, menor 4/maxBuffer): lee la secuencia
+// desde un FICHERO en vez del contenido inline de FAKE_GH_LIST_SEQUENCE —
+// necesario para reproducir una respuesta de varios MiB (p.ej. una colisión
+// con miles de issues en vuelo) sin pasarla por una variable de entorno: en
+// macOS ARG_MAX (`getconf ARG_MAX`) es ~1 MiB para todo el argv+environ
+// combinado, así que un solo env var de varios MiB directamente revienta el
+// propio `spawnSync` del test (no llega ni a ejecutar el hijo). Un fichero,
+// en cambio, no tiene ese límite — solo la RUTA viaja por env. Si no se
+// define, se sigue leyendo FAKE_GH_LIST_SEQUENCE inline como hasta ahora (sin
+// cambio de comportamiento por defecto).
+function loadSequence() {
+  if (process.env.FAKE_GH_LIST_SEQUENCE_FILE) {
+    return JSON.parse(readFileSync(process.env.FAKE_GH_LIST_SEQUENCE_FILE, 'utf8'))
   }
-  process.exit(0)
+  return JSON.parse(process.env.FAKE_GH_LIST_SEQUENCE || '[[]]')
 }
 
-if (argv[0] === 'issue' && argv[1] === 'view') {
-  process.stdout.write(process.env.FAKE_GH_VIEW_LABELS || '[]')
-  process.exit(0)
-}
-
-if (argv[0] === 'issue' && argv[1] === 'list') {
-  const callIndex = nextCallIndex(process.env.FAKE_GH_COUNTER_FILE)
-  const failAt = process.env.FAKE_GH_LIST_FAIL_AT !== undefined ? Number(process.env.FAKE_GH_LIST_FAIL_AT) : null
-  if (failAt !== null && callIndex === failAt) {
-    console.error('fake-gh: issue list failed (simulado)')
-    process.exit(1)
+// main(): TODA la lógica de despacho vive aquí, con `return` en vez de
+// `process.exit(N)` en cada rama (D2 review, menor 4 — hallazgo colateral al
+// construir el test de maxBuffer): `process.stdout`/`process.stderr` son
+// ASÍNCRONOS hacia una tubería en POSIX (documentado explícitamente en los
+// propios docs de Node: "Pipes (and sockets): asynchronous on POSIX"), que es
+// exactamente cómo execFileSync conecta con este script. `process.exit(N)`
+// termina el proceso YA, sin esperar a que un `write()` grande en vuelo
+// termine de vaciarse — un payload de varios MiB (como el que exige un test
+// real del `maxBuffer` de ct-next.mjs) se trunca en silencio a un múltiplo
+// del tamaño del buffer del pipe del SO (64 KiB en este Mac), con independen
+// cia de cualquier `maxBuffer` que fije el LADO QUE LEE. Verificado por
+// construcción: con la versión vieja (`process.exit()` inmediato tras el
+// `write`), un payload de ~11 MB de JSON llegaba truncado a 64 KiB al otro
+// lado. Fijar `process.exitCode` y dejar que el script termine solo (sin
+// `process.exit()`) permite que Node vacíe la tubería antes de salir de
+// verdad — ver la variante de este mismo experimento en
+// /private/tmp/.../node-repro/parent-nobuf.js vs parent-withbuf.js. Esto es
+// puramente una propiedad del STUB (nunca tocó al `gh` real ni a
+// dispatch-check.mjs/ct-next.mjs), así que no cambia el comportamiento de
+// NINGÚN test existente con payloads pequeños — solo hace correcto (en vez
+// de "funciona por casualidad porque nunca se probó con algo grande") el
+// caso de un payload grande. (D1+D2: el mismo `return`-en-vez-de-`exit`
+// aplica ahora también a los bloques de milestones/label-create que D1
+// (`fix/dispatch-graph-hardening`) añadió para F5/ct-groom.mjs — no tenían
+// razón para quedar fuera de esta protección solo por venir de la otra rama.)
+function main() {
+  if (argv[0] === 'issue' && argv[1] === 'edit') {
+    const failSubstr = process.env.FAKE_GH_EDIT_FAIL_SUBSTR
+    if (failSubstr && joined.includes(failSubstr)) {
+      console.error('fake-gh: issue edit failed (simulado)')
+      process.exitCode = 1
+      return
+    }
+    process.exitCode = 0
+    return
   }
-  const seq = JSON.parse(process.env.FAKE_GH_LIST_SEQUENCE || '[[]]')
-  const out = seq[Math.min(callIndex, seq.length - 1)]
-  process.stdout.write(JSON.stringify(out))
-  process.exit(0)
-}
 
-// `gh api repos/<owner>/<repo>/issues ... --paginate --slurp` (review final,
-// finding 2): ct-next.mjs y dispatch-check.mjs enumeran issues abiertos/
-// cerrados por este endpoint REST en vez de `gh issue list --limit N`, para
-// no reintroducir el truncado silencioso. Reutiliza EXACTAMENTE la misma
-// secuenciación por contador que el bloque `issue list` de arriba, para que
-// los tests existentes (que ya orquestan una llamada de "abiertos" seguida de
-// una de "cerrados"/readback vía FAKE_GH_LIST_SEQUENCE) seguiran funcionando
-// sin cambios tras el cambio de comando subyacente.
-if (argv[0] === 'api' && /^repos\/[^/]+\/[^/]+\/issues$/.test(argv[1] || '')) {
-  const callIndex = nextCallIndex(process.env.FAKE_GH_COUNTER_FILE)
-  const failAt = process.env.FAKE_GH_LIST_FAIL_AT !== undefined ? Number(process.env.FAKE_GH_LIST_FAIL_AT) : null
-  if (failAt !== null && callIndex === failAt) {
-    console.error('fake-gh: api issues failed (simulado)')
-    process.exit(1)
+  if (argv[0] === 'issue' && argv[1] === 'view') {
+    // FAKE_GH_VIEW_FAIL (D2, finding 3): simula que `labelsOf()` (la lectura
+    // de labels del propio candidato en dispatch-check.mjs) falla — auth
+    // caída, rate limit, red — ANTES de cualquier escritura. Sin esto no
+    // había forma de distinguir, desde un stub, "no se pudo leer el estado
+    // del candidato" (fallo de infraestructura) de "colisión detectada"
+    // (resultado normal del protocolo): ambos casos, antes de este fix,
+    // terminaban en el mismo exit 1 de dispatch-check que ct-next trataba
+    // siempre como "salta y sigue".
+    // FAKE_GH_VIEW_FAIL_AT (D2 review, menor 3): variante indexada de
+    // FAKE_GH_VIEW_FAIL — falla solo la N-ésima llamada a `issue view`
+    // (0-based, contador PROPIO vía FAKE_GH_VIEW_COUNTER_FILE, independiente
+    // del contador de FAKE_GH_LIST_SEQUENCE) en vez de TODAS. Necesario para
+    // probar que un fallo de infraestructura en UN candidato de la tanda no
+    // impide intentar el SIGUIENTE — con FAKE_GH_VIEW_FAIL (sin índice)
+    // fallarían los dos por igual y no se podría distinguir "aborta toda la
+    // tanda" de "sigue con el resto".
+    const viewCallIndex = nextCallIndex(process.env.FAKE_GH_VIEW_COUNTER_FILE)
+    const viewFailAt = process.env.FAKE_GH_VIEW_FAIL_AT !== undefined ? Number(process.env.FAKE_GH_VIEW_FAIL_AT) : null
+    if (process.env.FAKE_GH_VIEW_FAIL || (viewFailAt !== null && viewCallIndex === viewFailAt)) {
+      console.error('fake-gh: issue view failed (simulado)')
+      process.exitCode = 1
+      return
+    }
+    process.stdout.write(process.env.FAKE_GH_VIEW_LABELS || '[]')
+    process.exitCode = 0
+    return
   }
-  const seq = JSON.parse(process.env.FAKE_GH_LIST_SEQUENCE || '[[]]')
-  const out = seq[Math.min(callIndex, seq.length - 1)]
-  process.stdout.write(JSON.stringify(out))
-  process.exit(0)
-}
 
-// `gh api repos/<owner>/<repo>/milestones ...` (ct-groom.mjs, F5): el
-// listado (GET explícito, `--method GET -f state=all --paginate`) y la
-// creación (POST implícito, sin `--method`, solo `-f title=<t>`) comparten
-// el mismo endpoint REST — se distinguen por la presencia de `--method` en
-// argv (el listado SIEMPRE lo pasa explícito; la creación nunca).
-// FAKE_GH_MILESTONES_LIST controla la respuesta del listado (default: "[]",
-// ningún milestone existente); FAKE_GH_MILESTONE_CREATE_NUMBER controla el
-// número devuelto al "crear" uno (default: 1). Los tests de F5 (detección de
-// divergencia / --reconcile) siempre dan por hecho un milestone YA
-// existente que matchea el título del plan, precisamente para no tener que
-// ejercitar la rama de creación — es una feature ortogonal, ya cableada y
-// sin tests de CLI propios antes de F5.
-if (argv[0] === 'api' && /^repos\/[^/]+\/[^/]+\/milestones$/.test(argv[1] || '')) {
-  if (argv.includes('--method')) {
-    process.stdout.write(process.env.FAKE_GH_MILESTONES_LIST || '[]')
-    process.exit(0)
+  if (argv[0] === 'issue' && argv[1] === 'list') {
+    const callIndex = nextCallIndex(process.env.FAKE_GH_COUNTER_FILE)
+    const failAt = process.env.FAKE_GH_LIST_FAIL_AT !== undefined ? Number(process.env.FAKE_GH_LIST_FAIL_AT) : null
+    if (failAt !== null && callIndex === failAt) {
+      console.error('fake-gh: issue list failed (simulado)')
+      process.exitCode = 1
+      return
+    }
+    const seq = loadSequence()
+    const out = seq[Math.min(callIndex, seq.length - 1)]
+    process.stdout.write(JSON.stringify(out))
+    process.exitCode = 0
+    return
   }
-  process.stdout.write(JSON.stringify({ number: Number(process.env.FAKE_GH_MILESTONE_CREATE_NUMBER || 1) }))
-  process.exit(0)
-}
 
-// `gh label create <name> --repo <repo> --force` (ct-groom.mjs): una llamada
-// por cada label distinta que el plan produce, antes de crear/actualizar
-// ningún issue. Siempre éxito — ningún test existente necesita simular su
-// fallo (label create con --force no tiene, en la práctica, un caso "ya
-// existe" que tratar como error).
-if (argv[0] === 'label' && argv[1] === 'create') {
-  process.exit(0)
-}
-
-// `gh repo view <repo> --json defaultBranchRef -q .defaultBranchRef.name`
-// (W-D): ct-next.mjs resuelve la rama por defecto real del repo en vez de
-// asumir "main" a ciegas. FAKE_GH_DEFAULT_BRANCH controla el valor devuelto
-// (default: "main", para que los tests existentes que no fijan esta
-// variable — y que no les importa qué rama base se use — sigan pasando sin
-// cambios). FAKE_GH_REPO_VIEW_FAIL simula que gh no puede resolverlo (repo
-// no encontrado, auth caída, sin red, etc.).
-//
-// Fix round 1, Minor 3 (review de W-D): `??` en vez de `||` — con `||`, fijar
-// FAKE_GH_DEFAULT_BRANCH a la cadena vacía ('') seguía cayendo a 'main' (''
-// es falsy), así que la rama de "gh repo view no devolvió nada" de
-// detectDefaultBranch en ct-next.mjs era intestable con este stub. `??` solo
-// cae al default cuando la variable no está definida en absoluto — una
-// cadena vacía explícita se propaga tal cual, alcanzando de verdad esa rama.
-if (argv[0] === 'repo' && argv[1] === 'view') {
-  if (process.env.FAKE_GH_REPO_VIEW_FAIL) {
-    console.error('fake-gh: repo view failed (simulado)')
-    process.exit(1)
+  // `gh api repos/<owner>/<repo>/issues ... --paginate --slurp` (review
+  // final, finding 2): ct-next.mjs y dispatch-check.mjs enumeran issues
+  // abiertos/cerrados por este endpoint REST en vez de `gh issue list --limit
+  // N`, para no reintroducir el truncado silencioso. Reutiliza EXACTAMENTE la
+  // misma secuenciación por contador que el bloque `issue list` de arriba,
+  // para que los tests existentes (que ya orquestan una llamada de
+  // "abiertos" seguida de una de "cerrados"/readback vía
+  // FAKE_GH_LIST_SEQUENCE) sigan funcionando sin cambios tras el cambio de
+  // comando subyacente.
+  if (argv[0] === 'api' && /^repos\/[^/]+\/[^/]+\/issues$/.test(argv[1] || '')) {
+    const callIndex = nextCallIndex(process.env.FAKE_GH_COUNTER_FILE)
+    const failAt = process.env.FAKE_GH_LIST_FAIL_AT !== undefined ? Number(process.env.FAKE_GH_LIST_FAIL_AT) : null
+    if (failAt !== null && callIndex === failAt) {
+      console.error('fake-gh: api issues failed (simulado)')
+      process.exitCode = 1
+      return
+    }
+    const seq = loadSequence()
+    const out = seq[Math.min(callIndex, seq.length - 1)]
+    process.stdout.write(JSON.stringify(out))
+    process.exitCode = 0
+    return
   }
-  process.stdout.write(`${process.env.FAKE_GH_DEFAULT_BRANCH ?? 'main'}\n`)
-  process.exit(0)
+
+  // `gh api repos/<owner>/<repo>/milestones ...` (ct-groom.mjs, F5): el
+  // listado (GET explícito, `--method GET -f state=all --paginate`) y la
+  // creación (POST implícito, sin `--method`, solo `-f title=<t>`) comparten
+  // el mismo endpoint REST — se distinguen por la presencia de `--method` en
+  // argv (el listado SIEMPRE lo pasa explícito; la creación nunca).
+  // FAKE_GH_MILESTONES_LIST controla la respuesta del listado (default: "[]",
+  // ningún milestone existente); FAKE_GH_MILESTONE_CREATE_NUMBER controla el
+  // número devuelto al "crear" uno (default: 1). Los tests de F5 (detección de
+  // divergencia / --reconcile) siempre dan por hecho un milestone YA
+  // existente que matchea el título del plan, precisamente para no tener que
+  // ejercitar la rama de creación — es una feature ortogonal, ya cableada y
+  // sin tests de CLI propios antes de F5.
+  if (argv[0] === 'api' && /^repos\/[^/]+\/[^/]+\/milestones$/.test(argv[1] || '')) {
+    if (argv.includes('--method')) {
+      process.stdout.write(process.env.FAKE_GH_MILESTONES_LIST || '[]')
+      process.exitCode = 0
+      return
+    }
+    process.stdout.write(JSON.stringify({ number: Number(process.env.FAKE_GH_MILESTONE_CREATE_NUMBER || 1) }))
+    process.exitCode = 0
+    return
+  }
+
+  // `gh label create <name> --repo <repo> --force` (ct-groom.mjs): una
+  // llamada por cada label distinta que el plan produce, antes de
+  // crear/actualizar ningún issue. Siempre éxito — ningún test existente
+  // necesita simular su fallo (label create con --force no tiene, en la
+  // práctica, un caso "ya existe" que tratar como error).
+  if (argv[0] === 'label' && argv[1] === 'create') {
+    process.exitCode = 0
+    return
+  }
+
+  // `gh repo view <repo> --json defaultBranchRef -q .defaultBranchRef.name`
+  // (W-D): ct-next.mjs resuelve la rama por defecto real del repo en vez de
+  // asumir "main" a ciegas. FAKE_GH_DEFAULT_BRANCH controla el valor
+  // devuelto (default: "main", para que los tests existentes que no fijan
+  // esta variable — y que no les importa qué rama base se use — sigan
+  // pasando sin cambios). FAKE_GH_REPO_VIEW_FAIL simula que gh no puede
+  // resolverlo (repo no encontrado, auth caída, sin red, etc.).
+  //
+  // Fix round 1, Minor 3 (review de W-D): `??` en vez de `||` — con `||`,
+  // fijar FAKE_GH_DEFAULT_BRANCH a la cadena vacía ('') seguía cayendo a
+  // 'main' ('' es falsy), así que la rama de "gh repo view no devolvió nada"
+  // de detectDefaultBranch en ct-next.mjs era intestable con este stub. `??`
+  // solo cae al default cuando la variable no está definida en absoluto —
+  // una cadena vacía explícita se propaga tal cual, alcanzando de verdad esa
+  // rama.
+  if (argv[0] === 'repo' && argv[1] === 'view') {
+    if (process.env.FAKE_GH_REPO_VIEW_FAIL) {
+      console.error('fake-gh: repo view failed (simulado)')
+      process.exitCode = 1
+      return
+    }
+    process.stdout.write(`${process.env.FAKE_GH_DEFAULT_BRANCH ?? 'main'}\n`)
+    process.exitCode = 0
+    return
+  }
+
+  console.error(`fake-gh: comando no soportado en el stub: ${joined}`)
+  process.exitCode = 1
 }
 
-console.error(`fake-gh: comando no soportado en el stub: ${joined}`)
-process.exit(1)
+main()

@@ -386,6 +386,52 @@ describe('explainNoSelection / selectNext — oráculo de identidad de candidato
   })
 })
 
+// D2, finding 4 (auditoría del dispatch): explainSelectionGap solo miraba
+// readyDepsMet[0] para decidir `wouldDispatchIfCapAllowed` en la rama
+// cap-full. El razonamiento de "el primero explica el bloqueo" (comentario de
+// arriba) es válido para explicar por qué selectNext, con hueco de cap DE
+// VERDAD, no seleccionó nada (si el [0] choca, todos chocan — si no, se
+// habría seleccionado) — pero NO es válido para el contrafactual "¿ayudaría
+// subir --cap?", porque en cap-full `remainingCap` fue 0 y selectNext JAMÁS
+// examinó al candidato 2: que el [0] choque no dice nada sobre si el [1]
+// también lo haría. Reproducción exacta del auditor: cap=2, dos en vuelo
+// (api, db), dos ready-con-deps-mergeadas — #20 (orden 1, touches:api,
+// choca con el `api` en vuelo) y #21 (orden 2, touches:ui, libre). Subir el
+// cap SÍ despacharía #21 — el mensaje actual afirma lo contrario.
+describe('explainSelectionGap / planDispatch — cap-full debe escanear TODOS los candidatos, no solo el primero (D2, finding 4)', () => {
+  it('cap-full con #20 (orden 1) chocando pero #21 (orden 2) libre → wouldDispatchIfCapAllowed debe ser true', () => {
+    const issues = [
+      { n: 10, order: 1, status: 'in-progress', deps: [], touches: ['api'] },
+      { n: 11, order: 2, status: 'in-progress', deps: [], touches: ['db'] },
+      { n: 20, order: 1, status: 'ready', deps: [], touches: ['api'] }, // choca con #10
+      { n: 21, order: 2, status: 'ready', deps: [], touches: ['ui'] },  // libre — subir --cap SÍ ayudaría
+    ]
+    const plan = planDispatch(issues, { mergedIssues: [], cap: 2 }) // 2 en vuelo, cap ya lleno
+    expect(plan.selected).toEqual([])
+    expect(plan.blockReason.reason).toBe('cap-full')
+    // Esta es la aserción que el bug rompe: mirando solo readyDepsMet[0]
+    // (#20, que choca), el código actual concluye `false` — pero #21 SÍ se
+    // despacharía con un hueco de cap más.
+    expect(plan.blockReason.wouldDispatchIfCapAllowed).toBe(true)
+    expect(plan.blockReason.blockedEvenWithCap).toBeNull()
+  })
+
+  it('cap-full con TODOS los candidatos chocando de verdad → wouldDispatchIfCapAllowed sigue false (control negativo)', () => {
+    const issues = [
+      { n: 10, order: 1, status: 'in-progress', deps: [], touches: ['api'] },
+      { n: 20, order: 1, status: 'ready', deps: [], touches: ['api'] }, // choca
+      { n: 21, order: 2, status: 'ready', deps: [], touches: ['api'] }, // también choca con #10
+    ]
+    const plan = planDispatch(issues, { mergedIssues: [], cap: 1 })
+    expect(plan.blockReason.reason).toBe('cap-full')
+    expect(plan.blockReason.wouldDispatchIfCapAllowed).toBe(false)
+    // El motivo reportado debe seguir siendo el del primero (#20, menor
+    // orden) — el escaneo no cambia CUÁL se cita cuando de verdad todos
+    // chocan, solo evita el falso negativo del caso de arriba.
+    expect(plan.blockReason.blockedEvenWithCap).toEqual({ reason: 'collision', kind: 'token', issue: 20, token: 'api', withIssue: 10 })
+  })
+})
+
 describe('resolveAccount', () => {
   const MAP = { personal: ['menoplus', 'control-tower'], work: ['mo.foo'], personalDir: '/p', workDir: '/w' }
   it('repo personal → personalDir', () => expect(resolveAccount('menoplus', MAP)).toBe('/p'))

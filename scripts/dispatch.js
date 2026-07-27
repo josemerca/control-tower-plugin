@@ -130,12 +130,35 @@ function collisionAgainstRunning(cand, inFlight) {
 // mismo el factor limitante (pero el trabajo en vuelo siguiera reteniendo
 // sus tokens), ¿se seleccionaría algo igualmente?". `null` = sí (por tanto
 // subir --cap SÍ ayudaría); un objeto de razón no-null es lo que seguiría
-// bloqueando aunque el cap no limitara. Nunca hace falta recorrer TODOS los
-// candidatos ready-con-deps-mergeadas para el caso de colisión: selectNext
-// los procesa en orden ascendente y solo salta uno por colisión
-// (`continue`, nunca `break`), así que si el primero de la lista (menor
-// orden) no choca, se habría seleccionado — el primero es siempre el que
-// explica el bloqueo cuando lo hay.
+// bloqueando aunque el cap no limitara.
+//
+// D2, finding 4 (auditoría del dispatch) — fix: ANTES esta función miraba
+// solo `readyDepsMet[0]`, con el razonamiento de que "selectNext procesa en
+// orden ascendente y solo salta uno por colisión, así que si el primero no
+// choca se habría seleccionado". Ese razonamiento es válido para explicar por
+// qué el selectNext REAL, con hueco de cap DE VERDAD (remainingCap > 0), no
+// seleccionó nada (si el [0] no chocara, se habría seleccionado, contradicción
+// con "no seleccionó nada" — luego, si no seleccionó nada, el [0] SÍ choca, y
+// de hecho todos chocan). Pero es exactamente el razonamiento EQUIVOCADO para
+// el contrafactual "¿ayudaría subir --cap?" en el caso cap-full: ahí
+// `remainingCap` fue 0, así que el selectNext real NUNCA examinó al
+// candidato 2 en adelante — que el [0] choque no informa en absoluto sobre si
+// el [1] también lo haría. Reproducido por el auditor: cap=2, dos en vuelo
+// (api, db), #20 (orden 1, touches:api) choca con el `api` en vuelo pero #21
+// (orden 2, touches:ui) está libre — subir --cap SÍ despacharía #21, y el
+// código viejo afirmaba lo contrario mirando solo #20.
+//
+// La corrección: escanear TODOS los candidatos ready-con-deps-mergeadas, en
+// el mismo orden que selectNext, hasta encontrar UNO que no choque con el
+// trabajo en vuelo — ese es, por construcción, el mismo que
+// selectNext(..., concurrencyCap: 1) elegiría si el cap diera un hueco más
+// ahora mismo (el trabajo en vuelo sin cambiar): el bucle real de selectNext
+// solo se detiene por colisión (`continue`) o por agotar el cap, así que con
+// un solo hueco disponible acaba seleccionando exactamente al primero de la
+// lista que no choque con `runningTouches`. Si NINGUNO de los candidatos está
+// libre, se reporta el motivo del primero (igual que antes) — el escaneo no
+// cambia CUÁL se cita cuando de verdad todos chocan, solo cierra el falso
+// negativo de arriba.
 function explainSelectionGap(issues, { mergedIssues = [], inFlight = [] } = {}) {
   const { ready, readyDepsMet } = computeReadyCandidates(issues, mergedIssues)
   if (ready.length === 0) return { reason: 'none-ready' }
@@ -155,6 +178,10 @@ function explainSelectionGap(issues, { mergedIssues = [], inFlight = [] } = {}) 
         malformed: !!i.depsMalformed,
       })),
     }
+  }
+  for (const cand of readyDepsMet) {
+    const collision = collisionAgainstRunning(cand, inFlight)
+    if (!collision) return null // este candidato SÍ se despacharía con un hueco de cap más
   }
   return collisionAgainstRunning(readyDepsMet[0], inFlight)
 }
