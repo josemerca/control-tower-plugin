@@ -11,7 +11,7 @@
 // nunca llame a dispatch-check en absoluto.
 import { describe, it, expect, afterEach } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync, cpSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync, cpSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -221,7 +221,7 @@ describe('ct-next — dispatch-check.mjs ausente (W-C, fix round 1, finding 2)',
   // ct-next.mjs copiado, apunta a un fichero que de verdad no existe.
   const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
   const scriptsDir = join(projectRoot, 'scripts')
-  const SIBLING_FILES = ['ct-next.mjs', 'dispatch.js', 'kickoff.js', 'shquote.js', 'gh-issue-map.js', 'gh-issues.js', 'state.js']
+  const SIBLING_FILES = ['ct-next.mjs', 'dispatch.js', 'kickoff.js', 'shquote.js', 'gh-issue-map.js', 'gh-issues.js', 'state.js', 'argnum.js']
 
   it('dispatch-check.mjs no existe en la ruta resuelta → aborta al arrancar con esa ruta, ANTES de tratarlo como colisión', () => {
     const copyDir = mkdtempSync(join(projectRoot, 'tmp-missing-dispatch-check-'))
@@ -285,7 +285,7 @@ describe('ct-next — dispatch-check.mjs ausente (W-C, fix round 1, finding 2)',
 describe('ct-next — maxBuffer explícito al capturar la salida de dispatch-check (D2 review, menor 4)', () => {
   const projectRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
   const scriptsDir = join(projectRoot, 'scripts')
-  const SIBLING_FILES = ['ct-next.mjs', 'dispatch.js', 'kickoff.js', 'shquote.js', 'gh-issue-map.js', 'gh-issues.js', 'state.js']
+  const SIBLING_FILES = ['ct-next.mjs', 'dispatch.js', 'kickoff.js', 'shquote.js', 'gh-issue-map.js', 'gh-issues.js', 'state.js', 'argnum.js']
   // ~2 MiB: por encima del default de Node (1 MiB) y por debajo de
   // GH_MAX_BUFFER (20 MiB) — si el fix aplica el mismo límite, esto cabe
   // entero; si no lo aplica (el bug), Node mata al hijo antes de esto.
@@ -608,8 +608,6 @@ describe('ct-next — exit 1 de dispatch-check NO siempre es un resultado normal
 describe('ct-next — dispatch falla tras un claim exitoso → revierte el claim (W-C, punto 3)', () => {
   it('seed de STATE.md falla tras claim exitoso → limpia worktree/rama Y revierte el claim a status:ready', () => {
     const repoRoot = makeRepoRoot()
-    mkdirSync(join(repoRoot, '.worktrees'), { recursive: true })
-    writeFileSync(join(repoRoot, '.worktrees', '42'), '') // fuerza ENOTDIR en el seed
     const counterFile = join(repoRoot, 'gh-list-count')
     const argvLog = join(repoRoot, 'gh-argv-log')
     const r = runReal(['--repo', 'o/r', '--cap', '1'], {
@@ -617,6 +615,12 @@ describe('ct-next — dispatch falla tras un claim exitoso → revierte el claim
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
       FAKE_GH_COUNTER_FILE: counterFile,
       FAKE_GH_ARGV_LOG_FILE: argvLog,
+      // FAKE_GIT_WORKTREE_ADD_AS_FILE (D4): el worktree se crea como fichero
+      // DURANTE `git worktree add`, así que el seed falla con ENOTDIR. Antes
+      // se pre-creaba ese fichero, pero desde D4 ct-next.mjs comprueba que el
+      // destino esté libre ANTES de reclamar y un worktree pre-existente ya
+      // no llega nunca al seed (ver el preflight en ct-next.mjs).
+      FAKE_GIT_WORKTREE_ADD_AS_FILE: '1',
     })
     expect(r.code).toBe(1)
     expect(r.out).toMatch(/no se pudo sembrar \.agent\/STATE\.md/)
@@ -629,13 +633,12 @@ describe('ct-next — dispatch falla tras un claim exitoso → revierte el claim
 
   it('seed de STATE.md falla Y el revert del claim también falla → ATENCIÓN con el comando manual exacto', () => {
     const repoRoot = makeRepoRoot()
-    mkdirSync(join(repoRoot, '.worktrees'), { recursive: true })
-    writeFileSync(join(repoRoot, '.worktrees', '42'), '')
     const counterFile = join(repoRoot, 'gh-list-count')
     const r = runReal(['--repo', 'o/r', '--cap', '1'], {
       FAKE_GIT_TOPLEVEL: repoRoot,
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
       FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GIT_WORKTREE_ADD_AS_FILE: '1',
       FAKE_GH_EDIT_FAIL_SUBSTR: '--add-label status:ready', // el revert falla; el claim inicial (status:in-progress) no
     })
     expect(r.code).toBe(1)

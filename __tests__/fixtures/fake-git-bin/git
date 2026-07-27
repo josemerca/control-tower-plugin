@@ -6,7 +6,8 @@
 // registra cada invocación (comando + argv) en un fichero de log para que el
 // test verifique qué intentó ct-next.mjs y en qué orden — igual que
 // fake-gh-bin/gh hace para los tests de dispatch-check.
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 
 const argv = process.argv.slice(2)
 const joined = argv.join(' ')
@@ -121,6 +122,24 @@ function main() {
     if (process.env.FAKE_GIT_WORKTREE_ADD_FAIL) {
       console.error('fake-git: worktree add failed (simulado)')
       process.exit(1)
+    }
+    // FAKE_GIT_WORKTREE_ADD_AS_FILE (D4): crea la ruta del worktree como un
+    // FICHERO en vez de como un directorio, para que el `mkdirSync(
+    // `${wt}/.agent`)` posterior de ct-next.mjs falle con ENOTDIR de forma
+    // determinista y sin depender de permisos. Sustituye al truco anterior
+    // de los tests (pre-crear `.worktrees/<n>` como fichero ANTES de correr
+    // ct-next.mjs), que dejó de servir cuando ct-next.mjs pasó a comprobar
+    // que el destino esté libre ANTES de reclamar (D4, defecto 3): con esa
+    // comprobación, el pre-creado ya no llega nunca al paso del seed — se
+    // detecta antes, que es justo el arreglo. Crearlo DURANTE el `worktree
+    // add` reproduce el mismo fallo del seed sin desactivar la comprobación
+    // nueva: el destino estaba libre cuando se miró, y algo salió mal
+    // después. `-b <branch> <wt> <base>` → argv[3] es la ruta del worktree.
+    if (process.env.FAKE_GIT_WORKTREE_ADD_AS_FILE) {
+      const wt = argv[argv.indexOf('-b') + 2]
+      mkdirSync(dirname(wt), { recursive: true })
+      writeFileSync(wt, '')
+      process.exit(0)
     }
     process.exit(0)
   }

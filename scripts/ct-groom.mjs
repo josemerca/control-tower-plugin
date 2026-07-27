@@ -5,6 +5,7 @@ import { analyzeSlicesTable, isNoValueCell } from './slices.js'
 import { groomPlan } from './groom.js'
 import { flattenIssuePages, realIssuesOnly, findByMarker } from './gh-issues.js'
 import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
+import { parseStrictInt } from './argnum.js'
 // extractOrder (F5, importante 4): para detectar issues huérfanos — un issue
 // con marcador ct-order:N cuyo slice N ya no está en la tabla §9 actual.
 import { extractOrder } from './gh-issue-map.js'
@@ -84,8 +85,16 @@ if (milestone === true || typeof milestone !== 'string' || milestone.length === 
 // Mismo criterio para --project: si se pasó el flag pero sin valor numérico
 // real, abortamos en vez de dejar que `Number(true) === 1` decida en
 // silencio contra qué Project v2 operar.
-if (project !== undefined && (project === true || !Number.isFinite(Number(project)) || Number(project) <= 0)) {
-  console.error(`--project inválido: "${project === true ? '(sin valor)' : project}" — debe ser un entero positivo`)
+// D4 (revisión de los argumentos numéricos de todo el plugin): `Number(...)`
+// es fiel con la basura de cola (`Number('7x')` es NaN, se rechazaba bien),
+// pero aceptaba valores que NO son enteros — `--project 2.9` pasaba
+// `Number.isFinite(...) && > 0` y viajaba tal cual a `gh project view 2.9`,
+// que falla tarde y de forma confusa. parseStrictInt exige dígitos decimales
+// a secas, el mismo criterio que `--cap` en ct-next.mjs y que el `<issue#>`
+// de dispatch-check.mjs.
+const projectNum = typeof project === 'string' ? parseStrictInt(project) : null
+if (project !== undefined && (projectNum === null || projectNum <= 0)) {
+  console.error(`--project inválido: "${project === true ? '(sin valor)' : project}" — debe ser un entero positivo en dígitos decimales a secas`)
   process.exit(2)
 }
 // --repo: un `--repo` colgante (arg() endurecido) da `true`, no un string —

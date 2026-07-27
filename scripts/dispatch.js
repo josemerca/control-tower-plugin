@@ -237,11 +237,191 @@ export function planDispatch(issues, { mergedIssues = [], cap = 1 } = {}) {
   return { selected, inFlight, runningTouches, remainingCap, blockReason }
 }
 
-export function resolveAccount(repo, map) {
-  if ((map.work || []).some((r) => repo === r || repo.startsWith(r))) return map.workDir
-  if ((map.personal || []).some((r) => repo === r || repo.startsWith(r))) return map.personalDir
-  return map.personalDir
+// ============================================================================
+// Mapa de cuentas (D4, defecto 1 — el más grave de esa tanda).
+//
+// QUÉ ESTABA ROTO. La versión anterior recibía el repo YA DESPOJADO del owner
+// (`repo.split('/').pop()` en ct-next.mjs) y casaba por prefijo de nombre:
+//
+//   if ((map.work || []).some((r) => repo === r || repo.startsWith(r))) ...
+//
+// Con el mapa real de kickoff.js (`work: ['mo.', 'mercadona']`), verificado
+// por construcción antes de tocar nada:
+//   - `mercadona/mo.boilerplate.fastapi` → 'mo.boilerplate.fastapi' →
+//     startsWith('mo.') → cuenta de TRABAJO. Correcto, por casualidad.
+//   - `mercadona/algun-tool-interno` → 'algun-tool-interno' → no casa con
+//     NADA → cae al default → cuenta PERSONAL. Código de trabajo corriendo
+//     bajo la cuenta personal, en silencio.
+//   - la entrada 'mercadona' de la lista `work` NO PODÍA CASAR JAMÁS: el
+//     owner se tiraba antes de llegar aquí. Configuración que aparenta hacer
+//     algo y no hace nada.
+//   - `startsWith` sin frontera: con `personal: ['control-tower']`, un repo
+//     `control-tower-de-otro` (de cualquier owner) casaba igual; `'mo.'`
+//     casaba `mo.nada-que-ver` de cualquier owner del mundo.
+//
+// FORMA DE PATRÓN NUEVA (documentada también en kickoff.js, donde vive el
+// mapa por defecto): un patrón es `<owner>/<repo>` — SIEMPRE las dos mitades,
+// nunca un nombre suelto, para que el owner cuente de verdad. Cada mitad es:
+//   - un literal exacto      → `mercadona`, `control-tower`
+//   - `*`                    → cualquier cosa
+//   - un prefijo con `*` al final → `mo.*` (casa `mo.foo`, no `momento`)
+// El `*` solo se admite como segmento entero o como ÚLTIMO carácter de un
+// segmento: cualquier otra posición es un patrón malformado (error, nunca
+// una interpretación inventada). La comparación es case-insensitive, igual
+// que ya hace ensureRepoIdentity en ct-next.mjs con el remote.
+//
+// Esto ESTRECHA lo que el sistema acepta, y ese estrechamiento crea dos
+// categorías nuevas que NO pueden pasar calladas (ver ct-next.mjs, que las
+// imprime antes de lanzar nada):
+//   1. repos que ya no casan con ningún patrón y caen al default;
+//   2. repos que casan con una cuenta DISTINTA de la que el mapa viejo les
+//      daba (`resolveAccountLegacy`, más abajo, existe solo para poder
+//      detectar esto y decirlo en voz alta).
+const ACCOUNT_PATTERN_SYNTAX = '<owner>/<repo>, donde cada mitad es un literal exacto, `*` (cualquier cosa), o un prefijo terminado en `*` (p.ej. `mo.*`)'
+
+function segmentPatternError(seg, which) {
+  if (seg.length === 0) return `la mitad de ${which} está vacía (${ACCOUNT_PATTERN_SYNTAX})`
+  const star = seg.indexOf('*')
+  if (star === -1) return null
+  if (seg === '*') return null
+  if (star !== seg.length - 1) {
+    return `la mitad de ${which} ("${seg}") usa "*" en una posición que este matcher NO interpreta — solo se admite "*" como segmento entero o como último carácter (${ACCOUNT_PATTERN_SYNTAX})`
+  }
+  if (seg.indexOf('*') !== seg.lastIndexOf('*')) {
+    return `la mitad de ${which} ("${seg}") tiene más de un "*" (${ACCOUNT_PATTERN_SYNTAX})`
+  }
+  return null
 }
+
+// accountPatternError: `null` si el patrón es válido, o un mensaje que
+// explica exactamente qué tiene mal. Nunca "arregla" un patrón dudoso por su
+// cuenta: un mapa mal escrito tiene que doler al arrancar, no producir un
+// matching a medias que mande trabajo a la cuenta equivocada.
+export function accountPatternError(pattern) {
+  if (typeof pattern !== 'string') return `no es una cadena (es ${pattern === null ? 'null' : typeof pattern})`
+  if (pattern.length === 0) return 'patrón vacío'
+  if (pattern !== pattern.trim()) return `tiene espacios al principio o al final ("${pattern}") — quítalos, no se recortan solos para no casar por accidente algo que el autor no escribió`
+  const parts = pattern.split('/')
+  if (parts.length !== 2) {
+    return parts.length < 2
+      ? `le falta el owner: un patrón es ${ACCOUNT_PATTERN_SYNTAX} — un nombre suelto ("${pattern}") ya no se acepta, porque era justo lo que hacía que el owner no contara`
+      : `tiene más de un "/" (${ACCOUNT_PATTERN_SYNTAX})`
+  }
+  return segmentPatternError(parts[0], 'owner') || segmentPatternError(parts[1], 'repo')
+}
+
+function segmentMatches(value, seg) {
+  if (seg === '*') return true
+  if (seg.endsWith('*')) return value.startsWith(seg.slice(0, -1))
+  return value === seg
+}
+
+// parseRepoSlug: `owner/repo` en minúsculas, o `null` si el slug no tiene
+// exactamente esa forma. Devolver `null` (en vez de adivinar) es lo que
+// permite a ct-next.mjs rechazar un `--repo` malformado con un mensaje claro
+// en vez de resolver una cuenta a partir de algo que no es un repo.
+export function parseRepoSlug(slug) {
+  if (typeof slug !== 'string') return null
+  const parts = slug.trim().split('/')
+  if (parts.length !== 2) return null
+  if (!parts[0] || !parts[1]) return null
+  return { owner: parts[0].toLowerCase(), name: parts[1].toLowerCase() }
+}
+
+export function matchesAccountPattern(slug, pattern) {
+  if (accountPatternError(pattern)) return false
+  const parsed = parseRepoSlug(slug)
+  if (!parsed) return false
+  const [ownerSeg, repoSeg] = pattern.toLowerCase().split('/')
+  return segmentMatches(parsed.owner, ownerSeg) && segmentMatches(parsed.name, repoSeg)
+}
+
+// validateAccountMap: lista de errores (vacía = mapa sano). Se llama al
+// ARRANCAR de ct-next.mjs, antes de tocar gh o el filesystem — el requisito
+// explícito es que un mapa mal formado no pueda descubrirse cuando ya se han
+// lanzado tres agentes. La existencia EN DISCO de los directorios no se
+// comprueba aquí (esta capa es pura, sin IO): eso lo hace ct-next.mjs sobre
+// el directorio que de verdad va a usar, también antes de lanzar nada.
+export function validateAccountMap(map) {
+  if (!map || typeof map !== 'object') return ['ACCOUNT_MAP no es un objeto']
+  const errors = []
+  for (const key of ['personal', 'work']) {
+    const list = map[key]
+    if (list === undefined) {
+      errors.push(`ACCOUNT_MAP.${key} no está definido — pon [] explícitamente si de verdad no hay ningún patrón para esa cuenta`)
+      continue
+    }
+    if (!Array.isArray(list)) {
+      errors.push(`ACCOUNT_MAP.${key} debe ser un array de patrones, no ${typeof list}`)
+      continue
+    }
+    list.forEach((p, i) => {
+      const e = accountPatternError(p)
+      if (e) errors.push(`ACCOUNT_MAP.${key}[${i}] inválido: ${e}`)
+    })
+  }
+  for (const key of ['personalDir', 'workDir']) {
+    const d = map[key]
+    if (typeof d !== 'string' || d.trim().length === 0) {
+      errors.push(`ACCOUNT_MAP.${key} debe ser una ruta absoluta no vacía`)
+    } else if (!d.startsWith('/')) {
+      errors.push(`ACCOUNT_MAP.${key} ("${d}") no es una ruta absoluta — CLAUDE_CONFIG_DIR viaja al daemon de cmux, que la resuelve desde SU propio cwd, no desde el tuyo`)
+    }
+  }
+  return errors
+}
+
+// resolveAccount: recibe el slug COMPLETO (`owner/repo`), nunca el nombre
+// suelto. Devuelve siempre un objeto — el `dir` a secas ya no basta, porque
+// quien llama necesita poder decir en voz alta POR QUÉ cuenta se ha optado y
+// si fue por una regla real o por el default:
+//   { dir, account, pattern, matched, conflictPattern, slugMalformed }
+//   - matched=false  → ninguna regla casó; `dir` es el default (personal) y
+//                      `pattern` es null. ct-next.mjs lo anuncia siempre.
+//   - conflictPattern → el repo casaba TAMBIÉN con un patrón de la otra
+//                      cuenta. Gana `work` (deliberado: código de trabajo
+//                      bajo la cuenta personal es el fallo caro; al revés es
+//                      molesto pero no filtra nada), pero la ambigüedad se
+//                      anuncia en vez de resolverse en silencio.
+export function resolveAccount(slug, map) {
+  const parsed = parseRepoSlug(slug)
+  if (!parsed) {
+    return { dir: map.personalDir, account: 'personal', pattern: null, matched: false, conflictPattern: null, slugMalformed: true }
+  }
+  const workPattern = (map.work || []).find((p) => matchesAccountPattern(slug, p)) ?? null
+  const personalPattern = (map.personal || []).find((p) => matchesAccountPattern(slug, p)) ?? null
+  if (workPattern) {
+    return { dir: map.workDir, account: 'work', pattern: workPattern, matched: true, conflictPattern: personalPattern, slugMalformed: false }
+  }
+  if (personalPattern) {
+    return { dir: map.personalDir, account: 'personal', pattern: personalPattern, matched: true, conflictPattern: null, slugMalformed: false }
+  }
+  return { dir: map.personalDir, account: 'personal', pattern: null, matched: false, conflictPattern: null, slugMalformed: false }
+}
+
+// resolveAccountLegacy: reimplementa, TAL CUAL, el algoritmo viejo (nombre
+// suelto + startsWith, con el owner descartado) sobre las listas viejas que
+// `map.legacy` conserva. NO es código muerto ni nostalgia: es la única forma
+// de responder a "¿este repo, que hoy funciona, cambia de cuenta con el
+// arreglo?" — y ese es un requisito explícito del encargo, porque estrechar
+// el matching reclasifica repos y una reclasificación silenciosa de cuenta
+// es exactamente el tipo de divergencia que esta tanda de trabajo existe
+// para eliminar.
+//
+// Criterio de retirada (para quien lo lea dentro de seis meses): en cuanto
+// el aviso de reclasificación deje de aparecer en las corridas reales de los
+// repos que se usan de verdad, `map.legacy` y esta función se pueden borrar
+// juntas — no tienen ningún otro consumidor.
+export function resolveAccountLegacy(slug, map) {
+  const legacy = map?.legacy
+  if (!legacy) return null
+  const name = String(slug ?? '').split('/').pop()
+  const hits = (list) => (list || []).some((r) => name === r || name.startsWith(r))
+  if (hits(legacy.work)) return { dir: map.workDir, account: 'work', matched: true }
+  if (hits(legacy.personal)) return { dir: map.personalDir, account: 'personal', matched: true }
+  return { dir: map.personalDir, account: 'personal', matched: false }
+}
+// ============================================================================
 
 export function buildCmuxArgv({ name, cwd, command, env }) {
   const argv = ['new-workspace']

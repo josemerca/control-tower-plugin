@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { selectNext, resolveAccount, buildCmuxArgv, collectInFlight, planDispatch, computeReadyCandidates } from '../scripts/dispatch.js'
+import { selectNext, resolveAccount, resolveAccountLegacy, validateAccountMap, matchesAccountPattern, accountPatternError, buildCmuxArgv, collectInFlight, planDispatch, computeReadyCandidates } from '../scripts/dispatch.js'
 
 const ISSUES = [
   { n: 1, order: 1, status: 'in-review', deps: [], touches: ['api'] },
@@ -432,11 +432,150 @@ describe('explainSelectionGap / planDispatch — cap-full debe escanear TODOS lo
   })
 })
 
-describe('resolveAccount', () => {
-  const MAP = { personal: ['menoplus', 'control-tower'], work: ['mo.foo'], personalDir: '/p', workDir: '/w' }
-  it('repo personal → personalDir', () => expect(resolveAccount('menoplus', MAP)).toBe('/p'))
-  it('repo work → workDir', () => expect(resolveAccount('mo.foo', MAP)).toBe('/w'))
-  it('desconocido → personalDir (default)', () => expect(resolveAccount('otro', MAP)).toBe('/p'))
+// D4, defecto 1: la versión anterior de este describe tenía TRES casos, todos
+// con el repo ya despojado del owner ('menoplus', 'mo.foo', 'otro') — es
+// decir, probaba exactamente el modelo roto: el owner no participaba, así que
+// ninguno de los tres podía detectar que `mercadona/algun-tool-interno`
+// acababa en la cuenta personal ni que la entrada 'mercadona' del mapa real
+// no podía casar jamás. Ahora `resolveAccount` recibe el slug COMPLETO y
+// devuelve, además del directorio, POR QUÉ regla se llegó a él.
+describe('resolveAccount (D4: el owner cuenta, y el resultado se explica)', () => {
+  const MAP = {
+    personal: ['josemerca/*', '*/menoplus'],
+    work: ['mercadona/*', '*/mo.*'],
+    personalDir: '/p',
+    workDir: '/w',
+  }
+
+  it('owner de trabajo con repo que no casa ningún patrón de nombre → cuenta de TRABAJO (el bug original: caía a personal)', () => {
+    const r = resolveAccount('mercadona/algun-tool-interno', MAP)
+    expect(r.dir).toBe('/w')
+    expect(r.account).toBe('work')
+    expect(r.pattern).toBe('mercadona/*')
+    expect(r.matched).toBe(true)
+  })
+
+  it('owner personal → cuenta personal, nombrando la regla', () => {
+    const r = resolveAccount('josemerca/lo-que-sea', MAP)
+    expect(r.dir).toBe('/p')
+    expect(r.pattern).toBe('josemerca/*')
+  })
+
+  it('patrón de nombre con cualquier owner (*/menoplus)', () => {
+    expect(resolveAccount('menoplus-app/menoplus', MAP).dir).toBe('/p')
+  })
+
+  it('prefijo explícito con frontera (*/mo.*) casa mo.foo de cualquier owner', () => {
+    const r = resolveAccount('quien-sea/mo.boilerplate', MAP)
+    expect(r.dir).toBe('/w')
+    expect(r.pattern).toBe('*/mo.*')
+  })
+
+  it('un literal ya NO casa por prefijo: */menoplus no casa "menoplus-legacy"', () => {
+    // El bug de `startsWith` sin frontera: con el matcher viejo,
+    // 'control-tower-de-otro' casaba 'control-tower'.
+    const r = resolveAccount('otro/menoplus-legacy', MAP)
+    expect(r.matched).toBe(false)
+    expect(r.pattern).toBe(null)
+  })
+
+  it('sin ninguna regla → default personal, pero MARCADO como default (matched:false)', () => {
+    const r = resolveAccount('desconocido/otro', MAP)
+    expect(r.dir).toBe('/p')
+    expect(r.matched).toBe(false)
+    expect(r.pattern).toBe(null)
+  })
+
+  it('slug sin owner → no se adivina nada: default + slugMalformed', () => {
+    const r = resolveAccount('menoplus', MAP)
+    expect(r.matched).toBe(false)
+    expect(r.slugMalformed).toBe(true)
+  })
+
+  it('casa con las dos cuentas a la vez → gana work, y la ambigüedad se reporta (nunca se resuelve en silencio)', () => {
+    const r = resolveAccount('josemerca/mo.experimento', MAP)
+    expect(r.account).toBe('work')
+    expect(r.pattern).toBe('*/mo.*')
+    expect(r.conflictPattern).toBe('josemerca/*')
+  })
+
+  it('es case-insensitive (GitHub lo es para owner/repo)', () => {
+    expect(resolveAccount('Mercadona/MO.Foo', MAP).dir).toBe('/w')
+  })
+})
+
+describe('matchesAccountPattern / accountPatternError (D4)', () => {
+  it('"*" como segmento entero casa cualquier cosa', () => {
+    expect(matchesAccountPattern('a/b', '*/*')).toBe(true)
+  })
+  it('prefijo con "*" al final respeta la frontera del prefijo', () => {
+    expect(matchesAccountPattern('o/mo.x', '*/mo.*')).toBe(true)
+    expect(matchesAccountPattern('o/momento', '*/mo.*')).toBe(false)
+  })
+  it('literal exacto no casa por prefijo', () => {
+    expect(matchesAccountPattern('o/control-tower', '*/control-tower')).toBe(true)
+    expect(matchesAccountPattern('o/control-tower-de-otro', '*/control-tower')).toBe(false)
+  })
+  it('un nombre suelto ya no es un patrón válido (era la raíz del bug: el owner no contaba)', () => {
+    expect(accountPatternError('menoplus')).toMatch(/owner/i)
+    expect(matchesAccountPattern('o/menoplus', 'menoplus')).toBe(false)
+  })
+  it('"*" en medio de un segmento es un patrón malformado, no una interpretación creativa', () => {
+    expect(accountPatternError('*/mo*x')).toMatch(/posición/i)
+  })
+  it('patrones válidos no dan error', () => {
+    for (const p of ['mercadona/*', '*/menoplus', 'josemerca/control-tower', '*/mo.*', '*/*']) {
+      expect(accountPatternError(p)).toBe(null)
+    }
+  })
+  it('patrón vacío, con espacios, o con dos barras → error explícito', () => {
+    expect(accountPatternError('')).toMatch(/vac/i)
+    expect(accountPatternError(' a/b')).toMatch(/espacios/i)
+    expect(accountPatternError('a/b/c')).toMatch(/"\/"/)
+    expect(accountPatternError('a/')).toMatch(/vac/i)
+  })
+})
+
+describe('validateAccountMap (D4: un mapa roto tiene que doler al arrancar)', () => {
+  const OK = { personal: ['a/b'], work: [], personalDir: '/p', workDir: '/w' }
+  it('mapa sano → sin errores', () => expect(validateAccountMap(OK)).toEqual([]))
+  it('patrón vacío → error que nombra la lista y el índice', () => {
+    const errs = validateAccountMap({ ...OK, work: ['mercadona/*', ''] })
+    expect(errs).toHaveLength(1)
+    expect(errs[0]).toMatch(/work\[1\]/)
+  })
+  it('workDir ausente → error', () => {
+    expect(validateAccountMap({ ...OK, workDir: undefined }).join(' ')).toMatch(/workDir/)
+  })
+  it('workDir relativo → error (CLAUDE_CONFIG_DIR lo resuelve el daemon de cmux, no nuestro cwd)', () => {
+    expect(validateAccountMap({ ...OK, workDir: 'relativo' }).join(' ')).toMatch(/absoluta/)
+  })
+  it('lista ausente → error explícito (nunca se asume [])', () => {
+    expect(validateAccountMap({ personal: ['a/b'], personalDir: '/p', workDir: '/w' }).join(' ')).toMatch(/work no está definido/)
+  })
+})
+
+describe('resolveAccountLegacy (D4: solo para poder anunciar una reclasificación)', () => {
+  const MAP = {
+    personal: ['josemerca/*'],
+    work: ['mercadona/*'],
+    personalDir: '/p',
+    workDir: '/w',
+    legacy: { personal: ['menoplus', 'control-tower'], work: ['mo.', 'mercadona'] },
+  }
+  it('reproduce el algoritmo viejo tal cual: owner descartado + startsWith', () => {
+    // Con el mapa viejo, este repo caía en PERSONAL (el bug) — la comparación
+    // contra el resultado nuevo es lo que permite avisar del cambio.
+    expect(resolveAccountLegacy('mercadona/algun-tool-interno', MAP)).toEqual({ dir: '/p', account: 'personal', matched: false })
+    expect(resolveAccount('mercadona/algun-tool-interno', MAP).dir).toBe('/w')
+  })
+  it('la entrada "mercadona" de la lista work del mapa viejo era inalcanzable (el owner nunca llegaba)', () => {
+    expect(resolveAccountLegacy('mercadona/mercadona', MAP).account).toBe('work') // solo casa si el REPO se llama así
+    expect(resolveAccountLegacy('mercadona/otro-nombre', MAP).account).toBe('personal')
+  })
+  it('sin map.legacy → null (nada que comparar)', () => {
+    expect(resolveAccountLegacy('a/b', { personalDir: '/p', workDir: '/w' })).toBe(null)
+  })
 })
 
 describe('buildCmuxArgv', () => {

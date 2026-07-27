@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -408,19 +408,23 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
 
   const openIssue42 = { number: 42, title: '#42 algo', labels: [{ name: 'status:ready' }], body: '' }
 
-  it('el seed de STATE.md falla (wt ya existe como fichero, no directorio) → limpia y avisa que se puede reintentar', () => {
+  // FAKE_GIT_WORKTREE_ADD_AS_FILE (D4): el stub de `git worktree add` crea la
+  // ruta del worktree COMO FICHERO, así que el `mkdirSync(`${wt}/.agent`)`
+  // posterior de ct-next.mjs revienta con ENOTDIR de forma determinista, sin
+  // depender de permisos. Antes, estos tests pre-creaban ese fichero ANTES de
+  // arrancar ct-next.mjs; desde D4 (defecto 3) eso ya no sirve — ct-next.mjs
+  // comprueba que el destino esté libre ANTES de reclamar, así que un
+  // worktree pre-existente se detecta en el preflight y nunca llega al seed
+  // (que es exactamente el arreglo). Crear el fichero DURANTE el `worktree
+  // add` reproduce el mismo fallo del seed sin desactivar esa comprobación.
+  it('el seed de STATE.md falla (el worktree resultó no ser un directorio) → limpia y avisa que se puede reintentar', () => {
     const repoRoot = makeRepoRoot()
-    mkdirSync(join(repoRoot, '.worktrees'), { recursive: true })
-    // Pre-crea la ruta del worktree COMO FICHERO: `git worktree add` está
-    // stubbeado (no toca disco), así que sigue siendo un fichero cuando
-    // ct-next.mjs intenta mkdirSync(`${wt}/.agent`, {recursive:true}) — eso
-    // revienta con ENOTDIR de forma determinista, sin depender de permisos.
-    writeFileSync(join(repoRoot, '.worktrees', '42'), '')
     const counterFile = join(repoRoot, 'gh-list-count')
     const r = runReal(['--repo', 'o/r', '--cap', '1'], {
       FAKE_GIT_TOPLEVEL: repoRoot,
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
       FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GIT_WORKTREE_ADD_AS_FILE: '1',
     })
     expect(r.code).toBe(1)
     expect(r.out).toMatch(/no se pudo sembrar \.agent\/STATE\.md/)
@@ -436,14 +440,13 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
   // fallar al reintentarlo, y por el `&&` el otro nunca llegaría a correr).
   it('el worktree remove falla pero el branch -D (intentado por separado) sí tiene éxito → ATENCIÓN solo con el comando de worktree, sin && y sin mencionar la rama', () => {
     const repoRoot = makeRepoRoot()
-    mkdirSync(join(repoRoot, '.worktrees'), { recursive: true })
-    writeFileSync(join(repoRoot, '.worktrees', '42'), '')
     const counterFile = join(repoRoot, 'gh-list-count')
     const wtPath = join(repoRoot, '.worktrees', '42')
     const r = runReal(['--repo', 'o/r', '--cap', '1'], {
       FAKE_GIT_TOPLEVEL: repoRoot,
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
       FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GIT_WORKTREE_ADD_AS_FILE: '1',
       FAKE_GIT_WORKTREE_REMOVE_FAIL: '1',
     })
     expect(r.code).toBe(1)
@@ -455,13 +458,12 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
 
   it('el branch -D falla pero el worktree remove (intentado por separado) sí tiene éxito → ATENCIÓN solo con el comando de rama, sin && y sin mencionar el worktree', () => {
     const repoRoot = makeRepoRoot()
-    mkdirSync(join(repoRoot, '.worktrees'), { recursive: true })
-    writeFileSync(join(repoRoot, '.worktrees', '42'), '')
     const counterFile = join(repoRoot, 'gh-list-count')
     const r = runReal(['--repo', 'o/r', '--cap', '1'], {
       FAKE_GIT_TOPLEVEL: repoRoot,
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
       FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GIT_WORKTREE_ADD_AS_FILE: '1',
       FAKE_GIT_BRANCH_DELETE_FAIL: '1',
     })
     expect(r.code).toBe(1)
@@ -473,14 +475,13 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
 
   it('worktree remove Y branch -D fallan los dos → ATENCIÓN con ambos comandos, separados (nunca con &&)', () => {
     const repoRoot = makeRepoRoot()
-    mkdirSync(join(repoRoot, '.worktrees'), { recursive: true })
-    writeFileSync(join(repoRoot, '.worktrees', '42'), '')
     const counterFile = join(repoRoot, 'gh-list-count')
     const wtPath = join(repoRoot, '.worktrees', '42')
     const r = runReal(['--repo', 'o/r', '--cap', '1'], {
       FAKE_GIT_TOPLEVEL: repoRoot,
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
       FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GIT_WORKTREE_ADD_AS_FILE: '1',
       FAKE_GIT_WORKTREE_REMOVE_FAIL: '1',
       FAKE_GIT_BRANCH_DELETE_FAIL: '1',
     })

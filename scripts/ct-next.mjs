@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync, existsSync, writeSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, statSync, accessSync, constants as fsConstants, writeSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
-import { planDispatch, resolveAccount, buildCmuxArgv } from './dispatch.js'
+import { dirname, join, delimiter as pathDelimiter } from 'node:path'
+import { planDispatch, resolveAccount, resolveAccountLegacy, validateAccountMap, parseRepoSlug, buildCmuxArgv } from './dispatch.js'
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
+import { parseStrictInt } from './argnum.js'
 import { shQuote } from './shquote.js'
 import { buildDispatchInput, NO_MILESTONE_KEY } from './gh-issue-map.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
@@ -495,9 +496,31 @@ const baseArg = arg('--base')
 const dryRun = has('--dry-run')
 
 if (typeof repo !== 'string' || repo.length === 0) { console.error(usage); process.exit(2) }
-const cap = typeof capArg === 'string' ? parseInt(capArg, 10) : NaN
-if (!Number.isFinite(cap) || cap < 1) {
-  console.error(`--cap inválido: "${capArg === true ? '(sin valor)' : capArg}" — debe ser un entero >= 1`)
+// Forma de `--repo` (D4, revisión de los argumentos de valor): el resto del
+// script asume `owner/repo` en varios sitios a la vez (la guarda de
+// identidad contra el remote, el mapa de cuentas, la URL de `gh api
+// repos/<repo>/issues`). Antes, cualquier cadena no vacía pasaba: `--repo
+// menoplus` llegaba hasta `gh` y moría con un 404 sin explicar que el
+// problema era la forma del argumento, y `repo.split('/').pop()` producía un
+// "nombre de repo" que era el slug entero.
+if (!parseRepoSlug(repo)) {
+  console.error(`--repo inválido: "${repo}" — debe tener la forma owner/repo (p.ej. josemerca/control-tower), con exactamente una barra y ambas mitades no vacías.`)
+  process.exit(2)
+}
+// D4, defecto 2: `parseInt(capArg, 10)` aceptaba en silencio un valor
+// DISTINTO del que el usuario escribió — `--cap 1e3` despachaba 1,
+// `--cap 3perros` despachaba 3, `--cap 2.9` despachaba 2 (verificado por
+// construcción contra el código sin arreglar, los tres sin una sola línea
+// de aviso). Ver scripts/argnum.js para el porqué de cada forma rechazada.
+// El rango y el "no es un entero" se distinguen en el mensaje a propósito:
+// son dos errores distintos con dos correcciones distintas.
+const cap = typeof capArg === 'string' ? parseStrictInt(capArg) : null
+if (capArg === true || cap === null) {
+  console.error(`--cap inválido: "${capArg === true ? '(sin valor)' : capArg}" — debe ser un entero en dígitos decimales a secas (nada de "1e3", "2.9", "3perros" ni espacios: antes se aceptaban en silencio con un valor distinto del pedido).`)
+  process.exit(2)
+}
+if (cap < 1) {
+  console.error(`--cap inválido: "${capArg}" — debe ser >= 1 (un cap de ${cap} no despacharía nada).`)
   process.exit(2)
 }
 // --base <rama>: mismo patrón de validación que --repo/--cap (`arg()` ya
@@ -527,6 +550,102 @@ if (process.env.CT_NEXT_FIXTURE && !dryRun) {
 // Atado también en la propia lectura (defensa en profundidad): `fx` solo
 // puede ser no-nulo cuando `dryRun` es cierto.
 const fx = (dryRun && process.env.CT_NEXT_FIXTURE) ? JSON.parse(process.env.CT_NEXT_FIXTURE) : null
+
+// ============================================================================
+// D4 — avisos acumulados. Un aviso es algo que NO impide seguir pero que el
+// humano tiene que ver: se imprime en el momento (para que aparezca en el
+// contexto donde ocurre) Y se acumula, para poder cerrar un --dry-run
+// diciendo explícitamente que salió 0 A PESAR de N avisos. Sin ese recap,
+// tres avisos en medio de cuarenta líneas de plan y un exit 0 al final se
+// leen, con toda razón, como "todo bien".
+const warnings = []
+function warn(msg) {
+  warnings.push(msg)
+  console.log(`aviso: ${msg}`)
+}
+// El recap va en un manejador de 'exit' y no al final del fichero a
+// propósito: este script termina en MUCHOS `process.exit()` distintos
+// (bloqueo sin selección, precondiciones, claim atascado, señal…), y un
+// recap colocado "al final" solo se imprimiría en el camino feliz — justo el
+// único en el que menos falta hace. `writeSync` y no console.log porque
+// dentro de un manejador de 'exit' solo las escrituras SÍNCRONAS llegan a
+// salir (mismo motivo, ya documentado en attemptClaim, por el que
+// process.stdout es asíncrono hacia una tubería en POSIX).
+process.on('exit', (code) => {
+  if (!warnings.length) return
+  const lines = warnings.map((w, i) => `  ${i + 1}. ${w}`).join('\n')
+  const what = dryRun ? 'este --dry-run' : 'esta corrida'
+  const nuance = code === 0
+    ? 'un exit 0 aquí significa "no se ha roto nada", NO "todo es como esperas" — lee los avisos antes de darlo por bueno'
+    : 'los avisos siguen siendo relevantes, además del fallo que provocó ese exit code'
+  try {
+    writeSync(2, `\n${what} terminó con exit ${code} A PESAR de ${warnings.length} aviso(s); ${nuance}:\n${lines}\n`)
+  } catch {
+    // stderr cerrado (p.ej. la tubería del caller ya no existe): un recap que
+    // no se puede escribir no debe convertir una salida limpia en un crash.
+  }
+})
+
+// ============================================================================
+// D4, defecto 1 — resolución de cuenta, con voz.
+//
+// Se hace AQUÍ, al arrancar: antes de listar issues, antes de reclamar nada
+// y antes de crear ningún worktree. Un mapa mal formado o un directorio de
+// cuenta inexistente son cosas que se saben sin tocar la red — descubrirlas
+// cuando ya se han lanzado tres agentes (cada uno con su claim escrito en
+// GitHub) es exactamente el modo de fallo que este bloque cierra.
+const accountMapErrors = validateAccountMap(ACCOUNT_MAP)
+if (accountMapErrors.length) {
+  console.error(`ACCOUNT_MAP (scripts/kickoff.js) está mal formado — ct-next.mjs no continúa: con un mapa roto, la cuenta de Claude con la que se lanzaría cada agente es indeterminada.\n  - ${accountMapErrors.join('\n  - ')}\nFormato de patrón: <owner>/<repo>, con cada mitad literal, "*", o un prefijo terminado en "*".`)
+  process.exit(2)
+}
+
+const account = resolveAccount(repo, ACCOUNT_MAP)
+const configDir = account.dir
+const accountLabel = account.account === 'work' ? 'trabajo' : 'personal'
+if (account.matched) {
+  console.log(`cuenta resuelta: ${configDir} (${accountLabel}) — por la regla "${account.pattern}" de ACCOUNT_MAP.`)
+} else {
+  // Requisito explícito: el fallback tiene que TENER VOZ. Antes, un repo que
+  // no casaba con ningún patrón acababa en la cuenta personal sin que nada
+  // lo dijera — el caso de `mercadona/algun-tool-interno`: código de
+  // trabajo, con contexto de trabajo, bajo la cuenta personal, en silencio.
+  warn(`ningún patrón de ACCOUNT_MAP casa con "${repo}" — se usa la cuenta POR DEFECTO: ${configDir} (${accountLabel}). Si este repo es de trabajo, añade un patrón (p.ej. "${parseRepoSlug(repo).owner}/*") a ACCOUNT_MAP.work en scripts/kickoff.js antes de lanzar nada; el agente se despachará con la cuenta personal hasta entonces.`)
+}
+if (account.conflictPattern) {
+  warn(`"${repo}" casa a la vez con "${account.pattern}" (work) y con "${account.conflictPattern}" (personal) en ACCOUNT_MAP — gana la cuenta de TRABAJO (${configDir}) por ser el error más caro al revés, pero el mapa es ambiguo: quita o estrecha uno de los dos patrones.`)
+}
+// Reclasificación respecto del mapa viejo (requisito explícito: "si al
+// arreglarlo un repo que hoy funciona pasa a la otra cuenta, eso no puede
+// pasar callado"). Solo habla cuando el DIRECTORIO cambia — no cuando lo
+// único que cambia es la regla por la que se llegó al mismo sitio.
+const legacyAccount = resolveAccountLegacy(repo, ACCOUNT_MAP)
+if (legacyAccount && legacyAccount.dir !== configDir) {
+  warn(`CAMBIO DE CUENTA respecto del mapa anterior: "${repo}" se despachaba antes con ${legacyAccount.dir} (${legacyAccount.account === 'work' ? 'trabajo' : 'personal'}${legacyAccount.matched ? '' : ', por defecto'}) y ahora se despacha con ${configDir} (${accountLabel})${account.matched ? `, por la regla "${account.pattern}"` : ', por defecto'}. El matching por owner (D4) es el arreglo deliberado — pero si esperabas la cuenta de antes, revísalo AHORA: el agente arrancará con otra sesión de Claude, otro historial y otra autenticación.`)
+}
+
+// findInPath: ¿existe un ejecutable con este nombre en el PATH de ESTE
+// proceso? Se resuelve LEYENDO el filesystem (existsSync + X_OK), nunca
+// ejecutando el binario ni preguntándole su versión: `cmux` en concreto
+// NUNCA debe ejecutarse para comprobar su presencia (lanzar un workspace de
+// verdad es justo lo que un --dry-run promete no hacer). Devuelve la ruta
+// encontrada, o null.
+function findInPath(name) {
+  const raw = process.env.PATH || ''
+  for (const dir of raw.split(pathDelimiter)) {
+    if (!dir) continue
+    const candidate = join(dir, name)
+    try {
+      if (!statSync(candidate).isFile()) continue
+      accessSync(candidate, fsConstants.X_OK)
+      return candidate
+    } catch {
+      // no existe, no es fichero, o no es ejecutable: siguiente directorio.
+    }
+  }
+  return null
+}
+// ============================================================================
 
 // maxBuffer explícito (finding 7 de la review final): el default de Node para
 // execFileSync es 1 MiB, y las enumeraciones de abajo ya no llevan `--limit`
@@ -908,10 +1027,178 @@ if (!selected.length) {
 // ningún claim, en ambos paths (dry-run y real) — es la única fuente de
 // verdad de la selección (`selected`, ya decidido por planDispatch) y no
 // depende de que el resto del script llegue a completarse.
-console.log(`seleccionados para esta tanda (cap ${cap}, ${inFlight.length} en vuelo): ${selected.map((s) => `#${s.n} (${s.name})`).join(', ')}`)
+// sliceRef (D4, defecto 5): un slice cuyo `n` no es un número utilizable no
+// debe imprimirse como si lo fuera. La versión anterior interpolaba `s.n`
+// tal cual — verificado por construcción: un slice sin `n` producía
+// "#undefined" en esta línea, en el título del workspace de cmux
+// ("repo · #undefined nombre"), en la rama, en el worktree y en el comando
+// de claim, y el dry-run salía 0 como si el plan fuera bueno. El
+// identificador ilegible ya no se propaga a ningún sitio (ver
+// sliceNumberError, más abajo, que ahora lo para en seco); esta función solo
+// se ocupa de que, mientras tanto, el texto tampoco mienta.
+const sliceRef = (s) => (typeof s.n === 'number' && Number.isSafeInteger(s.n) && s.n >= 1 ? `#${s.n}` : `(slice SIN número de issue utilizable: ${JSON.stringify(s.n) ?? 'undefined'})`)
+console.log(`seleccionados para esta tanda (cap ${cap}, ${inFlight.length} en vuelo): ${selected.map((s) => `${sliceRef(s)} (${s.name})`).join(', ')}`)
 
-const repoName = repo.split('/').pop()
-const configDir = resolveAccount(repoName, ACCOUNT_MAP)
+// repoName conserva el casing original del argumento (parseRepoSlug
+// normaliza a minúsculas para COMPARAR, no para mostrar): esto solo alimenta
+// el título del workspace de cmux, donde lo que quiere ver el humano es el
+// nombre tal y como lo escribió.
+const repoName = repo.split('/')[1]
+
+// ============================================================================
+// D4, defecto 3 — PRECONDICIONES DEL RUN REAL.
+//
+// Antes, `--dry-run` imprimía el plan y salía: no comprobaba NADA de lo que
+// haría fallar al run real, así que un dry-run limpio no significaba que el
+// run real fuera a funcionar — que es exactamente para lo que la gente usa
+// un dry-run. Y el run real tampoco las comprobaba: descubría, por ejemplo,
+// que `feat/42` ya existía DESPUÉS de haber escrito el claim, y se pasaba el
+// resto del camino revirtiéndolo.
+//
+// Por eso este bloque corre en LOS DOS caminos, con el mismo código y las
+// mismas reglas, antes de tocar nada (ni un claim, ni un worktree): que el
+// dry-run y el run real puedan divergir en lo que validan es el bug, no un
+// detalle de implementación. La única diferencia entre ambos está en qué se
+// puede comprobar de verdad en modo fixture (ver más abajo), y eso se dice
+// en claro en vez de darse por bueno.
+//
+// FALLO DURO (exit 1, nada se intenta) vs AVISO (sigue, pero el recap final
+// deja claro que se salió 0 A PESAR de los avisos):
+//   - duro  → lo que ROMPERÍA el run real con certeza y exige que un humano
+//             arregle algo antes: número de slice no utilizable, worktree o
+//             rama ya ocupados, `cmux` ausente del PATH (lo ejecuta ESTE
+//             proceso, así que su ausencia es un fallo seguro), el
+//             CLAUDE_CONFIG_DIR resuelto no existe en disco, o el kickoff no
+//             se renderiza.
+//   - aviso → lo que NO podemos afirmar con certeza desde aquí. `claude` es
+//             el caso claro: no lo ejecuta este proceso sino el shell de
+//             LOGIN que abre cmux, con su propio PATH (verificado en esta
+//             máquina: `claude` es además una función de zsh definida en el
+//             .zshrc, invisible para cualquier búsqueda en PATH). Su
+//             ausencia aquí es una señal útil, pero no una prueba — y
+//             convertir una sospecha en un fallo duro sería la misma clase
+//             de afirmación no verificada que esta tanda de trabajo persigue.
+const preflightFailures = []
+
+function sliceNumberError(s) {
+  if (typeof s.n === 'number' && Number.isSafeInteger(s.n) && s.n >= 1) return null
+  // D4, defecto 5: sin esta guarda, un slice sin número utilizable no se
+  // quedaba en un título feo — se propagaba a TODO: rama `feat/undefined`,
+  // worktree `.worktrees/undefined`, `dispatch-check.mjs undefined` (que
+  // ahora, con el parseo estricto, moriría con exit 2 a mitad de tanda) y el
+  // título de cmux `repo · #undefined nombre`. Verificado por construcción
+  // contra el código sin arreglar: un fixture sin `n` imprimía exactamente
+  // esas cinco cosas y el dry-run salía 0, como si el plan fuera bueno.
+  return `${sliceRef(s)}: ${JSON.stringify(s.n) ?? 'undefined'} no es un número de issue utilizable (se esperaba un entero >= 1). Todo lo que el dispatcher construye para un slice sale de ese número — la rama feat/<n>, el worktree .worktrees/<n>, el claim contra GitHub y el título de la sesión de cmux — así que no hay forma de despacharlo sin inventarse un identificador. Revisa de dónde salió este slice (${JSON.stringify(s.name ?? null)}): en la ruta real, "n" es siempre el número de issue de GitHub.`
+}
+
+// branchExistsLocally: solo se puede responder de verdad fuera del modo
+// fixture (que promete no tocar ningún subproceso real). Devuelve
+// true/false, o null = "no comprobado".
+function branchExistsLocally(branch) {
+  if (fx) return null
+  try {
+    execFileSync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
+      cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutMs, killSignal: 'SIGKILL',
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Binarios. `cmux` se busca leyendo el PATH, NUNCA ejecutándolo: lanzar un
+// workspace de verdad para comprobar que existe sería justo lo que un
+// --dry-run promete no hacer.
+const cmuxPath = findInPath('cmux')
+if (cmuxPath) {
+  console.log(`cmux: ${cmuxPath} (encontrado en PATH; no se ejecuta para comprobarlo).`)
+} else {
+  preflightFailures.push('`cmux` no está en el PATH de este proceso — ct-next.mjs lo invoca directamente (`cmux new-workspace ...`), así que sin él NINGÚN slice puede lanzarse. Instálalo o añádelo al PATH y reintenta.')
+}
+const claudePath = findInPath('claude')
+if (claudePath) {
+  console.log(`claude: ${claudePath} (encontrado en el PATH de este proceso).`)
+} else {
+  warn('`claude` no aparece en el PATH de ESTE proceso. No es concluyente — quien lo ejecuta de verdad es el shell de login que abre cmux, con su propio PATH (y `claude` puede ser incluso una función de shell, invisible desde aquí) — pero si tampoco está allí, cada sesión lanzada morirá nada más arrancar, con el claim ya puesto y sin agente. Compruébalo a mano antes de fiarte de un "lanzado".')
+}
+
+// CLAUDE_CONFIG_DIR resuelto: tiene que existir EN DISCO. Si no existe, la
+// sesión arranca con una configuración de Claude vacía (sin autenticar,
+// onboarding desde cero) en vez de con la cuenta que el mapa eligió — y eso
+// se descubriría con el claim ya escrito y el worktree ya creado.
+// `isDirectory()`, no solo `existsSync`: una RUTA que existe pero es un
+// fichero (o un enlace a uno) pasaría un existsSync y fallaría igual de tarde
+// que si no existiera — y con un error mucho menos legible.
+const configDirIsDir = (() => {
+  try { return statSync(configDir).isDirectory() } catch { return false }
+})()
+if (configDirIsDir) {
+  console.log(`CLAUDE_CONFIG_DIR: ${configDir} (existe en disco).`)
+} else {
+  preflightFailures.push(`el CLAUDE_CONFIG_DIR resuelto para la cuenta ${accountLabel} NO existe en disco como directorio: ${configDir}. Cada agente se lanzaría con una configuración de Claude vacía (sin autenticar) en vez de con esa cuenta. Crea el directorio, corrige ACCOUNT_MAP (scripts/kickoff.js), o apunta CT_ACCOUNT_${account.account === 'work' ? 'WORK' : 'PERSONAL'}_DIR al directorio correcto.`)
+}
+
+// Plan por slice + comprobación de que su destino está libre. Se construye
+// TODO aquí (rama, worktree, kickoff, seed, argv de cmux) para que un fallo
+// de renderizado del kickoff se vea como una precondición fallida — con su
+// mensaje — en vez de como una excepción sin capturar a mitad de tanda.
+const plans = []
+for (const s of selected) {
+  const numErr = sliceNumberError(s)
+  if (numErr) { preflightFailures.push(numErr); continue }
+  const branch = `feat/${s.n}`
+  const wt = `${repoRoot}/.worktrees/${s.n}`
+  const name = `${repoName} · #${s.n} ${s.name}`
+  // Normaliza ac/issue por si el slice viene de un fixture de test (como el
+  // del brief) que no los trae: renderKickoff/buildStateSeed indexan
+  // slice.ac como array y usan slice.issue con `??`/`||` — sin este default
+  // revientan con un TypeError en vez de imprimir el plan.
+  const sliceForKickoff = { ...s, ac: s.ac || [], issue: s.issue ?? null }
+  let kickoff
+  let stateSeed
+  try {
+    kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath })
+    stateSeed = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase })
+  } catch (e) {
+    preflightFailures.push(`no se pudo renderizar el kickoff/STATE.md de #${s.n}: ${e.message}. El agente se lanzaría sin prompt utilizable — antes, esto solo se descubría en el run real.`)
+    continue
+  }
+  // Override 1 (shell quoting): --command es UN argv element (buildCmuxArgv
+  // ya lo garantiza), pero la STRING dentro de ese argv element es una línea
+  // de comando que cmux ejecuta vía shell. `JSON.stringify` es escapado JSON,
+  // no de shell — un `$`, un backtick o un `\` en el kickoff seguirían
+  // interpretándose dentro de las comillas dobles. shQuote() hace el
+  // escapado POSIX real (comillas simples).
+  const command = `claude --dangerously-skip-permissions ${shQuote(kickoff)}`
+  // CLAUDE_CONFIG_DIR viaja como --env de cmux, NUNCA como env local del
+  // proceso `cmux` cliente (ver dispatch.js#buildCmuxArgv): `cmux` es un
+  // cliente que habla con un daemon ya en marcha por socket Unix, y es el
+  // daemon —no este proceso— quien crea el pty real. Un env var puesto en
+  // el `execFileSync('cmux', ...)` local muere con ese proceso cliente sin
+  // llegar nunca al pty; verificado en vivo contra el sandbox (T10): sin
+  // --env, la sesión se queda colgada en el selector interactivo de cuenta.
+  const cmuxArgv = buildCmuxArgv({ name, cwd: wt, command, env: { CLAUDE_CONFIG_DIR: configDir } })
+
+  // Destino libre. Este es el caso que el encargo nombra explícitamente: si
+  // `feat/<n>` ya existe, el run real moría A MITAD, con el claim YA puesto.
+  const wtExists = existsSync(wt)
+  const branchExists = branchExistsLocally(branch)
+  if (wtExists) {
+    preflightFailures.push(`el worktree de #${s.n} ya existe: ${wt}. \`git worktree add\` fallaría — y en el run real eso pasa DESPUÉS de haber reclamado el issue. Limpia con \`git worktree remove --force ${wt}\` (y \`git branch -D ${branch}\` si la rama también sobra) si es basura de una corrida anterior, o revisa si hay trabajo real ahí antes de borrar nada.`)
+  }
+  if (branchExists === true) {
+    preflightFailures.push(`la rama ${branch} ya existe en el checkout local. \`git worktree add -b ${branch}\` fallaría — y en el run real eso pasa DESPUÉS de haber reclamado el issue. Bórrala (\`git branch -D ${branch}\`) si es basura de una corrida anterior, o revisa qué hay en ella antes de tocarla.`)
+  }
+  plans.push({ s, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationChecked: branchExists !== null })
+}
+
+if (preflightFailures.length) {
+  console.error(`\nprecondiciones NO cumplidas (${preflightFailures.length}) — no se reclama ni se lanza NADA${dryRun ? '' : ' (ni un solo claim escrito: se comprueba antes de tocar GitHub)'}:\n  - ${preflightFailures.join('\n  - ')}`)
+  if (dryRun) console.error('Este --dry-run NO es luz verde: el run real fallaría por lo de arriba. Arréglalo y vuelve a pasar el dry-run.')
+  process.exit(1)
+}
+// ============================================================================
 
 // Si un paso POSTERIOR a `git worktree add` falla (seed de STATE.md, o el
 // lanzamiento de cmux), el worktree y la rama ya existen en disco. Sin
@@ -1273,33 +1560,8 @@ process.on('SIGTERM', () => handleInterrupt('SIGTERM'))
 // exit code cuando la tanda entera termina sin lanzar nada.
 let launchedCount = 0
 
-for (let idx = 0; idx < selected.length; idx++) {
-  const s = selected[idx]
-  const branch = `feat/${s.n}`
-  const wt = `${repoRoot}/.worktrees/${s.n}`
-  const name = `${repoName} · #${s.n} ${s.name}`
-  // Normaliza ac/issue por si el slice viene de un fixture de test (como el
-  // del brief) que no los trae: renderKickoff/buildStateSeed indexan
-  // slice.ac como array y usan slice.issue con `??`/`||` — sin este default
-  // revientan con un TypeError en vez de imprimir el plan.
-  const sliceForKickoff = { ...s, ac: s.ac || [], issue: s.issue ?? null }
-  const kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath })
-  const stateSeed = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase })
-  // Override 1 (shell quoting): --command es UN argv element (buildCmuxArgv
-  // ya lo garantiza), pero la STRING dentro de ese argv element es una línea
-  // de comando que cmux ejecuta vía shell. `JSON.stringify` es escapado JSON,
-  // no de shell — un `$`, un backtick o un `\` en el kickoff seguirían
-  // interpretándose dentro de las comillas dobles. shQuote() hace el
-  // escapado POSIX real (comillas simples).
-  const command = `claude --dangerously-skip-permissions ${shQuote(kickoff)}`
-  // CLAUDE_CONFIG_DIR viaja como --env de cmux, NUNCA como env local del
-  // proceso `cmux` cliente (ver dispatch.js#buildCmuxArgv): `cmux` es un
-  // cliente que habla con un daemon ya en marcha por socket Unix, y es el
-  // daemon —no este proceso— quien crea el pty real. Un env var puesto en
-  // el `execFileSync('cmux', ...)` local muere con ese proceso cliente sin
-  // llegar nunca al pty; verificado en vivo contra el sandbox (T10): sin
-  // --env, la sesión se queda colgada en el selector interactivo de cuenta.
-  const cmuxArgv = buildCmuxArgv({ name, cwd: wt, command, env: { CLAUDE_CONFIG_DIR: configDir } })
+for (let idx = 0; idx < plans.length; idx++) {
+  const { s, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationChecked } = plans[idx]
 
   if (dryRun) {
     console.log(`\n=== slice #${s.n} (${s.name}) ===`)
@@ -1316,9 +1578,26 @@ for (let idx = 0; idx < selected.length; idx++) {
     // ejecutable tal cual, igual que sus vecinas (`git worktree add ...`,
     // `cmux ...`).
     console.log(`node ${dispatchCheckPath} ${s.n} --repo ${repo}   # se reclamaría #${s.n} (status:ready → status:in-progress) antes de crear el worktree; en --dry-run no se ejecuta, ningún gh real se toca`)
+    // D4, defecto 3: qué se pudo comprobar DE VERDAD del destino. En modo
+    // fixture (`CT_NEXT_FIXTURE`) el repoRoot es sintético y la comprobación
+    // de rama exigiría un `git` real, que ese modo promete no tocar — así
+    // que se dice, en vez de dejar que la ausencia de queja se lea como
+    // "comprobado y libre".
+    console.log(destinationChecked
+      ? `destino libre: ${wt} no existe y la rama ${branch} tampoco (comprobado en este checkout).`
+      : `destino: ${wt} / rama ${branch} — NO COMPROBADOS (modo fixture: repoRoot sintético, no se toca git). En una corrida real sí se comprueban antes de reclamar.`)
     console.log(`CLAUDE_CONFIG_DIR=${configDir}`)
     console.log(`git worktree add -b ${branch} ${wt} ${resolvedBase}`)
     console.log(`seed ${wt}/.agent/STATE.md:\n${stateSeed}`)
+    // D4, defecto 3: el kickoff, en PROSA. La línea `cmux ...` de abajo lo
+    // lleva dentro, pero doblemente escapado (comillas POSIX + el
+    // JSON.stringify de la propia línea): un blob de una sola línea con
+    // `\n` literales que nadie puede leer — y juzgar si el prompt que va a
+    // recibir el agente es el correcto es la única razón por la que un
+    // humano mira un dry-run. Se imprime tal cual lo verá el agente, ANTES
+    // del comando literal (que se conserva íntegro, sin recortar: sigue
+    // siendo la fuente de verdad de qué se ejecutaría exactamente).
+    console.log(`--- kickoff que recibiría el agente de #${s.n} (prosa, tal cual) ---\n${kickoff}\n--- fin del kickoff ---`)
     console.log(`cmux ${cmuxArgv.map((a) => (a.includes(' ') ? JSON.stringify(a) : a)).join(' ')}`)
     continue
   }
@@ -1610,8 +1889,19 @@ if (!dryRun) {
   //   1 = algo se ROMPIÓ (bug, mala configuración, o un issue que quedó
   //       huérfano en status:in-progress) — YA estaba así antes de este
   //       cambio para los abortos de mitad de tanda; un caller en /loop debe
-  //       parar y avisar a un humano, no reintentar a ciegas.
-  //   2 = error de uso (flags mal puestos) — sin cambios.
+  //       parar y avisar a un humano, no reintentar a ciegas. D4 AMPLÍA este
+  //       código, deliberadamente y sin inventar uno nuevo, a las
+  //       PRECONDICIONES no cumplidas (worktree/rama ya ocupados, `cmux`
+  //       ausente del PATH, CLAUDE_CONFIG_DIR inexistente, kickoff que no
+  //       renderiza, slice sin número utilizable) — en --dry-run y en la
+  //       corrida real por igual: encajan exactamente en la semántica que ya
+  //       tenía ("algo requiere que un humano lo arregle, reintentar a ciegas
+  //       no ayuda"), y no son "reintenta más tarde" (3) porque no se
+  //       resuelven solas con el tiempo. La diferencia con antes es CUÁNDO se
+  //       detectan: ahora antes de escribir ningún claim, no a mitad de tanda.
+  //   2 = error de uso o de CONFIGURACIÓN ESTÁTICA: flags mal puestos, y (D4)
+  //       un ACCOUNT_MAP malformado en scripts/kickoff.js — ambos se conocen
+  //       sin tocar red ni disco, antes de decidir nada.
   //   3 = NUEVO: la tanda se seleccionó (selected.length > 0) pero terminó
   //       de procesarse con CERO lanzamientos, y nada se rompió — cada
   //       candidato colisionó, perdió una carrera de forma limpia, o tropezó

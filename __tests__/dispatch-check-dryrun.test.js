@@ -94,6 +94,44 @@ describe('dispatch-check --dry-run', () => {
 
 })
 
+// D4, defecto 2 — mismo patrón que `--cap` en ct-next.mjs, pero aquí el
+// número identifica el issue que se va a MUTAR contra un repo real. Con
+// `parseInt(process.argv[2], 10)`, "42x" reclamaba el issue 42 y "1e3"
+// reclamaba el 1: un issue que el usuario no nombró, mutado en silencio.
+// Verificado contra el código sin arreglar: los tres casos de abajo salían 0
+// (dry-run) tras haber DECIDIDO sobre un issue distinto del pedido.
+describe('dispatch-check <issue#> — parseo estricto (D4, defecto 2)', () => {
+  const FIXTURE = { issue: 42, labels: ['status:ready'], others: [] }
+  for (const bad of ['42x', '1e3', '4.2', ' 42', '0x2A', '']) {
+    it(`<issue#> ${JSON.stringify(bad)} → exit 2, nunca un issue distinto del pedido`, () => {
+      let threw = false
+      try {
+        execFileSync('node', [script, bad, '--repo', 'o/r', '--dry-run'],
+          { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify(FIXTURE) } })
+      } catch (e) {
+        threw = true
+        expect(e.status).toBe(2)
+        expect((e.stdout || '') + (e.stderr || '')).toMatch(/<issue#> inválido/)
+      }
+      expect(threw).toBe(true)
+    })
+  }
+
+  it('<issue#> 0 o negativo → exit 2 (no existe el issue 0 en GitHub)', () => {
+    for (const bad of ['0', '-1']) {
+      let threw = false
+      try {
+        execFileSync('node', [script, bad, '--repo', 'o/r', '--dry-run'],
+          { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_FIXTURE: JSON.stringify(FIXTURE) } })
+      } catch (e) {
+        threw = true
+        expect(e.status).toBe(2)
+      }
+      expect(threw).toBe(true)
+    }
+  })
+})
+
 // T11 fix round 3 (re-review): --settle-ms/CT_CLAIM_SETTLE_MS se eliminaron
 // del código (ver el comentario de cabecera de dispatch-check.mjs). Si se
 // ignoraran en silencio, alguien que invoque el script con --settle-ms por

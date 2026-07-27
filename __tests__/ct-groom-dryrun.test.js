@@ -216,6 +216,27 @@ describe('ct-groom — flags colgantes no cuelan valores falsos (review final, f
     rmSync(dir, { recursive: true, force: true })
   })
 
+  // D4 (revisión de argumentos numéricos): `Number('2.9')` es 2.9 — finito y
+  // > 0, así que la validación anterior lo dejaba pasar y el valor viajaba
+  // tal cual hasta `gh project view 2.9`, que falla tarde y de forma confusa.
+  // Un número de project es un entero o no es nada.
+  for (const bad of ['2.9', '1e3', ' 3', '0x10']) {
+    it(`--project ${JSON.stringify(bad)} → exit 2 (no es un entero en dígitos a secas)`, () => {
+      const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+      const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+      let threw = false
+      try {
+        execFileSync('node', [script, spec, '--repo', 'o/r', '--project', bad, '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO, env: fakeEnv() })
+      } catch (e) {
+        threw = true
+        expect(e.status).toBe(2)
+        expect((e.stdout || '') + (e.stderr || '')).toMatch(/--project inválido/)
+      }
+      expect(threw).toBe(true)
+      rmSync(dir, { recursive: true, force: true })
+    })
+  }
+
   // Re-review: --repo tenía el mismo hueco (solo `if (!repo)`, que un
   // `true` colgante pasa sin avisar por ser truthy) — ahora validado igual
   // que ct-next.mjs/dispatch-check.mjs (`typeof !== 'string'`).
