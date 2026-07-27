@@ -94,25 +94,32 @@ describe('ct-next --cap: parseo estricto (D4, defecto 2)', () => {
   }
 
   // Rango vs. forma: dos errores distintos, con dos correcciones distintas.
-  // Un "-1" está BIEN ESCRITO (parseStrictInt lo lee fielmente como -1), así
+  // Un "0" está BIEN ESCRITO (parseStrictInt lo lee fielmente como 0), así
   // que el mensaje correcto es el de rango, no "esto no es un entero".
-  for (const outOfRange of ['0', '-1']) {
-    it(`--cap ${outOfRange} → exit 2 con un mensaje de RANGO, distinto del de "no es un entero"`, () => {
-      const r = run(['--repo', 'menoplus-app/menoplus', '--cap', outOfRange, '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE_ONE_READY })
+  // (D5, hallazgo I: "-1" se movió de aquí a la lista de FORMA inválida — un
+  // signo ya no es "dígitos decimales a secas". La distinción rango/forma se
+  // conserva donde sigue significando algo: el 0.)
+  it('--cap 0 → exit 2 con un mensaje de RANGO, distinto del de "no es un entero"', () => {
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '0', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE_ONE_READY })
+    expect(r.code).toBe(2)
+    expect(r.out).toMatch(/debe ser >= 1/)
+  })
+
+  // D5, hallazgo I — el mensaje de error decía "debe ser un entero en dígitos
+  // decimales a secas" y "+2" se aceptaba igual: el mensaje afirmaba una
+  // regla y el código aplicaba otra, la misma familia que el resto de esta
+  // tanda. Verificado contra el código sin arreglar: `--cap +2` salía con
+  // exit 0 e imprimía "cap 2", y `--cap -1` daba el mensaje de rango.
+  for (const signed of ['+2', '-1']) {
+    it(`--cap ${signed} → exit 2 con el mensaje de FORMA, que ahora sí nombra el signo`, () => {
+      const r = run(['--repo', 'menoplus-app/menoplus', '--cap', signed, '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE_ONE_READY })
       expect(r.code).toBe(2)
-      expect(r.out).toMatch(/debe ser >= 1/)
+      expect(r.out).toMatch(/--cap inválido/)
+      expect(r.out).toMatch(/ni signo "\+"\/"-"/)
+      expect(r.out).not.toMatch(/debe ser >= 1/)
+      expect(r.out).not.toMatch(/seleccionados para esta tanda/)
     })
   }
-
-  // "+2" SÍ se acepta, y eso es deliberado: el signo explícito no esconde
-  // ninguna divergencia (el usuario que escribe "+2" recibe exactamente 2),
-  // que es el único criterio de este endurecimiento. Los espacios sí se
-  // rechazan porque pueden esconder caracteres que no se ven.
-  it('--cap +2 se acepta como 2 (el signo explícito no esconde ninguna divergencia)', () => {
-    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '+2', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE_ONE_READY })
-    expect(r.code).toBe(0)
-    expect(r.out).toMatch(/cap 2/)
-  })
 
   it('--cap 3 (bien escrito) sigue funcionando', () => {
     const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '3', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE_ONE_READY })
@@ -449,7 +456,11 @@ describe('ct-next — slice sin número de issue utilizable (D4, defecto 5)', ()
   // Con cap > 1, un solo slice sin número aborta la tanda ENTERA antes de
   // reclamar nada — la misma decisión que ya regía para cualquier fallo de
   // precondición: se prefiere no empezar a empezar a medias.
-  it('con cap 2, un slice roto impide la tanda entera — pero sin haber reclamado nada', () => {
+  // D5, hallazgo H: la tanda entera sigue sin despacharse (exit 1, ningún
+  // claim), pero el --dry-run YA NO se calla el plan de los slices sanos —
+  // un dry-run existe para enseñar la tanda entera de una vez. Antes, el
+  // bloque `=== slice #7 ===` no se imprimía en absoluto.
+  it('con cap 2, un slice roto impide el despacho de la tanda entera — pero el dry-run SÍ enseña el plan del slice sano', () => {
     const fx = JSON.stringify({
       issues: [
         { n: null, order: 1, status: 'ready', deps: [], touches: ['a'], name: 'roto', type: 'backend' },
@@ -459,7 +470,14 @@ describe('ct-next — slice sin número de issue utilizable (D4, defecto 5)', ()
     })
     const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '2', '--dry-run'], { CT_NEXT_FIXTURE: fx })
     expect(r.code).toBe(1)
-    expect(r.out).not.toMatch(/=== slice #7/)
+    // El plan del slice sano se imprime igual...
+    expect(r.out).toMatch(/=== slice #7/)
+    // ...y el resumen final dice cuántos fallaron, cuál rompería primero, y
+    // cuál queda sin problemas propios.
+    expect(r.out).toMatch(/precondiciones NO cumplidas \(1\)/)
+    expect(r.out).toMatch(/el primero que rompería es \(slice SIN número de issue utilizable/)
+    expect(r.out).toMatch(/1 sin problemas propios \(#7\)/)
+    expect(r.out).toMatch(/NO es luz verde/)
   })
 
   it('la línea de selección tampoco lo imprime como si fuera un número', () => {

@@ -99,7 +99,7 @@ if (milestone === true || typeof milestone !== 'string' || milestone.length === 
 // `gh project view +7`.
 const projectNum = typeof project === 'string' ? parseStrictInt(project) : null
 if (project !== undefined && (projectNum === null || projectNum <= 0)) {
-  console.error(`--project inválido: "${project === true ? '(sin valor)' : project}" — debe ser un entero positivo en dígitos decimales a secas`)
+  console.error(`--project inválido: "${project === true ? '(sin valor)' : project}" — debe ser un entero positivo en dígitos decimales a secas (sin signo "+"/"-", sin espacios, sin punto ni exponente)`)
   process.exit(2)
 }
 // --repo: un `--repo` colgante (arg() endurecido) da `true`, no un string —

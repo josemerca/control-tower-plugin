@@ -79,8 +79,37 @@ import { parseStrictInt } from './argnum.js'
 // detalles, incluido el comando manual de `--release`/revert) — solo deja
 // de ser la ÚNICA fuente de verdad para la decisión del caller.
 // ============================================================================
-function errLine(msg) { writeSync(2, msg + '\n') }
-function outLine(msg) { writeSync(1, msg + '\n') }
+//
+// D5 (hallazgo colateral, hermano del de ct-next.mjs) — UN DESTINO DE SALIDA
+// ROTO NO PUEDE CAMBIAR EL EXIT CODE DE ESTE PROTOCOLO.
+//
+// `writeSync` garantiza que el dato está escrito CUANDO RETORNA, pero puede
+// no retornar nunca (tubería llena y descriptor bloqueante) o lanzar EPIPE
+// (el lector cerró). Sin este try/catch, ese EPIPE subía como excepción no
+// capturada y mataba el proceso con exit 1. Verificado por construcción
+// ejecutando `dispatch-check 90 --repo o/r` con el extremo de LECTURA de
+// stdout cerrado (el caso real de `dispatch-check ... | head`, o de un
+// agente que lo invoca desde el kickoff y no consume la salida): el claim de
+// #90 se escribió CON ÉXITO —`issue edit 90 --add-label status:in-progress`
+// y su readback están en el log de gh— y el proceso murió con EPIPE en el
+// `dieOut('claimed #90 → in-progress', 0)` final, saliendo con 1.
+//
+// Y 1 no es un código cualquiera en este fichero: es 'skip', o sea "colisión
+// detectada a tiempo o carrera perdida con revert limpio — NADA quedó
+// mutado". El caller leería un claim conseguido como un claim que nunca
+// ocurrió, sobre el propio contrato de exit codes del protocolo de claim. Un
+// mensaje que no se puede entregar es un límite aceptable; que decida el
+// resultado del protocolo, no.
+function safeWrite(fd, text) {
+  try {
+    writeSync(fd, text)
+  } catch {
+    // Tubería cerrada o llena: la línea se pierde. Nunca cambia el exit code
+    // ni mata el proceso a mitad del protocolo de claim.
+  }
+}
+function errLine(msg) { safeWrite(2, msg + '\n') }
+function outLine(msg) { safeWrite(1, msg + '\n') }
 function dieErr(msg, code) { errLine(msg); process.exit(code) }
 function dieOut(msg, code) { outLine(msg); process.exit(code) }
 
@@ -110,7 +139,7 @@ const release = has('--release')
 const dryRun = has('--dry-run')
 const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release] [--dry-run]'
 if (issue === null || issue < 1) {
-  dieErr(`<issue#> inválido: ${process.argv[2] === undefined ? '(ausente)' : `"${process.argv[2]}"`} — debe ser un entero >= 1 escrito con dígitos a secas (nada de "42x", "1e3", "4.2" ni espacios: un número aproximado aquí reclamaría un issue que no es el que pediste).\n${usage}`, 2)
+  dieErr(`<issue#> inválido: ${process.argv[2] === undefined ? '(ausente)' : `"${process.argv[2]}"`} — debe ser un entero >= 1 escrito con dígitos a secas (nada de "42x", "1e3", "4.2", espacios, ni signo "+"/"-": un número aproximado aquí reclamaría un issue que no es el que pediste).\n${usage}`, 2)
 }
 if (typeof repo !== 'string' || repo.length === 0) { dieErr(usage, 2) }
 

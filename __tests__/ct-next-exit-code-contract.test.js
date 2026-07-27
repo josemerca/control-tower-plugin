@@ -108,3 +108,60 @@ describe('ct-next — clasifica el claim por el CÓDIGO de dispatch-check, no po
     expect(gitLogTxt).not.toMatch(/worktree add/)
   })
 })
+
+// ===========================================================================
+// D5, hallazgo A — AMPLIACIÓN EXPLÍCITA DEL CONTRATO DE EXIT CODES.
+//
+// El exit 3 significaba dos cosas distintas y su mensaje solo describía una:
+// desde que un lanzamiento sin verificar dejó de contar como lanzado, se
+// podía llegar al exit 3 con el claim escrito, la rama y el worktree creados
+// y `cmux new-workspace` en exit 0 — mientras el texto afirmaba "Nada quedó
+// a medias ni bloqueado — reintenta más tarde".
+//
+// El contrato queda así, y estos tests lo fijan:
+//   3 = hubo tanda, cero lanzamientos, y NADA quedó a medias (todos los
+//       candidatos se saltaron AL RECLAMAR, sin mutar nada). Reintentable.
+//   1 = se AMPLÍA a "al menos un slice quedó lanzado sin verificar" — hay
+//       estado a medias que un humano tiene que resolver. Se aplica aunque
+//       otros slices de la misma tanda sí se lanzaran bien.
+// La tabla de commands/ct-next.md se actualizó en el mismo cambio.
+describe('ct-next — el exit 3 y el exit 1 se distinguen por si QUEDÓ ALGO A MEDIAS (D5, hallazgo A)', () => {
+  const openIssue42 = { number: 42, title: '#42 algo', labels: [{ name: 'status:ready' }], body: '' }
+
+  it('cero lanzamientos SIN residuo → 3, y el mensaje afirma que no hay nada que limpiar', () => {
+    const repoRoot = makeRepoRoot()
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_COUNTER_FILE: join(repoRoot, 'gh-list-count'),
+      FAKE_GH_ARGV_LOG_FILE: join(repoRoot, 'gh-argv'),
+      FAKE_GIT_LOG_FILE: join(repoRoot, 'git-log'),
+      // Colisión detectada por dispatch-check ANTES de escribir nada.
+      FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:zzz']),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([
+        [openIssue42],
+        [],
+        [{ number: 5, labels: [{ name: 'status:in-progress' }, { name: 'touches:zzz' }] }],
+      ]),
+    })
+    expect(r.code).toBe(3)
+    expect(r.out).toMatch(/no hay nada que limpiar a mano/)
+    expect(r.out).not.toMatch(/LANZADOS SIN VERIFICAR/)
+  })
+
+  it('cero lanzamientos CON residuo (lanzamiento sin verificar) → 1, nunca 3', () => {
+    const repoRoot = makeRepoRoot()
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GH_COUNTER_FILE: join(repoRoot, 'gh-list-count'),
+      FAKE_GH_ARGV_LOG_FILE: join(repoRoot, 'gh-argv'),
+      FAKE_GIT_LOG_FILE: join(repoRoot, 'git-log'),
+      FAKE_CMUX_SKIP_STATE_SUBSTR: '#42',
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/1 de los 1 slice\(s\) seleccionados quedaron LANZADOS SIN VERIFICAR/)
+    // El claim y el worktree SÍ existen: por eso no puede ser un 3.
+    expect(readFileSync(join(repoRoot, 'gh-argv'), 'utf8')).toMatch(/issue edit 42 .*--add-label status:in-progress/)
+    expect(readFileSync(join(repoRoot, 'git-log'), 'utf8')).toMatch(/worktree add -b feat\/42/)
+  })
+})

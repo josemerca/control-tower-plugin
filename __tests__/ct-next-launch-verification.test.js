@@ -75,18 +75,36 @@ describe('ct-next — verificación de lanzamiento cmux (finding 3)', () => {
     // con éxito (antes incrementaba launchedCount igual, y la tanda salía
     // con exit 0 — progreso normal para un /loop — aunque el issue quedara
     // in-progress sin agente confirmado, invisible también para la
-    // detección de staleness). Con el único candidato de la tanda sin
-    // confirmar, el exit code cae en el 3 ya existente ("seleccionado pero
-    // cero lanzamientos confirmados, reintenta más tarde") — nunca 0.
-    expect(r.code).toBe(3)
+    // detección de staleness).
+    //
+    // D5, hallazgo A — el exit code de ESTE caso pasa de 3 a 1. Aquel
+    // arreglo lo dejó cayendo en el exit 3, cuyo mensaje afirmaba "Nada
+    // quedó a medias ni bloqueado — reintenta más tarde": mentira en este
+    // camino (claim escrito, rama y worktree creados, `cmux new-workspace`
+    // con exit 0) e imposible de seguir (el issue ya no está en
+    // status:ready y el destino está ocupado). 1 = "para y que lo mire un
+    // humano" es la semántica correcta, y el mensaje ahora enumera qué hay
+    // que limpiar.
+    expect(r.code).toBe(1)
     expect(r.out).toMatch(/ATENCIÓN: cmux aceptó el lanzamiento de #90 \(exit 0\), pero la sesión NO está en/)
     expect(r.out).toMatch(/está en "\/Users\/fake\/\.config\/ghostty-default-shell-dir" en su lugar/)
     expect(r.out).toMatch(/NO se cuenta como lanzado con éxito/)
+    // El resumen final NO puede decir "nada quedó a medias" ni "reintenta
+    // más tarde": es exactamente la afirmación falsa que D5 elimina.
+    expect(r.out).toMatch(/quedaron LANZADOS SIN VERIFICAR/)
+    expect(r.out).toMatch(/la rama feat\/90 y el worktree .*\.worktrees\/90/)
+    expect(r.out).toMatch(/gh issue edit 90 --repo o\/r --add-label status:ready --remove-label status:in-progress/)
+    expect(r.out).not.toMatch(/Nada quedó a medias/)
+    expect(r.out).not.toMatch(/no hay nada que limpiar a mano/)
+    // El texto sí puede NOMBRAR "reintenta más tarde" para negarlo, pero
+    // nunca puede recomendarlo como salida.
+    expect(r.out).toMatch(/no es "reintenta más tarde"/)
+    expect(r.out).not.toMatch(/reintenta más tarde, o en la próxima vuelta del \/loop/)
     // Nunca debe leerse como un lanzamiento confirmado sin matices.
     expect(r.out).not.toMatch(/lanzado #90 en .*verificado/)
   })
 
-  it('cmux acepta el lanzamiento pero la sesión no aparece al consultar en absoluto → ATENCIÓN de "no se encontró", y NO cuenta como progreso (exit 3)', () => {
+  it('cmux acepta el lanzamiento pero la sesión no aparece al consultar en absoluto → ATENCIÓN de "no se encontró", y NO cuenta como progreso (exit 1)', () => {
     const repoRoot = makeRepoRoot()
     const counterFile = join(repoRoot, 'gh-list-count')
     const r = runReal(['--repo', 'o/r', '--cap', '1'], {
@@ -98,9 +116,13 @@ describe('ct-next — verificación de lanzamiento cmux (finding 3)', () => {
     // IMPORTANTE (revisión externa): mismo motivo que 'wrong-cwd' arriba —
     // 'not-found' es evidencia POSITIVA de un problema, no cuenta como
     // lanzado, y el exit code deja de mentir sobre "progreso".
-    expect(r.code).toBe(3)
+    // D5, hallazgo A: y por el mismo motivo que 'wrong-cwd', el código pasa
+    // de 3 a 1 — aquí también quedan claim, rama y worktree detrás.
+    expect(r.code).toBe(1)
     expect(r.out).toMatch(/ATENCIÓN: cmux devolvió éxito \(exit 0\) al lanzar #90, pero no se encontró ninguna sesión/)
     expect(r.out).toMatch(/NO se cuenta como lanzado con éxito/)
+    expect(r.out).toMatch(/quedaron LANZADOS SIN VERIFICAR/)
+    expect(r.out).not.toMatch(/Nada quedó a medias/)
     expect(r.out).not.toMatch(/lanzado #90 en .*verificado/)
   })
 
@@ -132,6 +154,19 @@ describe('ct-next — verificación de lanzamiento cmux (finding 3)', () => {
     })
     expect(r.out).toMatch(/ATENCIÓN: cmux aceptó el lanzamiento de #90 \(exit 0\), pero la sesión NO está en/)
     expect(r.out).toMatch(/lanzado #91 en .*\.worktrees\/91.*verificado: la sesión cmux está corriendo en ese directorio/)
+    // D5, hallazgo A (el caso MIXTO, que el encargo no nombraba y que era el
+    // más difícil de ver): con uno confirmado y otro sin confirmar,
+    // `launchedCount` es 1 — así que el exit 3 nunca se alcanzaba y la tanda
+    // salía con exit 0, o sea "progreso" para un /loop, mientras #90 quedaba
+    // en status:in-progress con rama y worktree y ningún agente confirmado.
+    // Verificado contra el código sin arreglar: exit 0.
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/lanzados 1\/2 slice\(s\) seleccionados de esta tanda/)
+    expect(r.out).toMatch(/1 de los 2 slice\(s\) seleccionados quedaron LANZADOS SIN VERIFICAR/)
+    // Solo #90 debe aparecer en la lista de "hay que mirar esto a mano": el
+    // #91 confirmado no se toca ni se menciona como residuo.
+    expect(r.out).toMatch(/- #90: la sesión de cmux existe pero está en/)
+    expect(r.out).not.toMatch(/- #91: /)
   })
 
   it('IMPORTANTE (revisión externa): un cambio de esquema en la respuesta de cmux (campo renombrado) se trata como no concluyente, NUNCA como "cero sesiones confirmado"', () => {
