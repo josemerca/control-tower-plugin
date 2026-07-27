@@ -1,0 +1,11 @@
+#!/usr/bin/env node
+// Stub DEDICADO para simular "cmux no disponible" (finding 2, ataque
+// adversarial): cmux SÍ está instalado en la máquina de desarrollo real —
+// un test que simplemente omita `fake-cmux-bin` de su PATH pero conserve
+// `process.env.PATH` al final ACABA ENCONTRANDO EL CMUX REAL (verificado por
+// construcción: exactamente el error que cometió un agente anterior de este
+// mismo proyecto, launching un workspace real por asumir "no instalado").
+// Este stub, puesto DELANTE del PATH real en las pruebas que necesitan
+// simular ausencia/fallo, SIEMPRE falla — nunca delega en el cmux real, y
+// nunca ejecuta `new-workspace` de verdad.
+process.exitCode = 127

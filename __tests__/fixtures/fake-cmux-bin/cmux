@@ -1,11 +1,98 @@
 #!/usr/bin/env node
 // Stub de `cmux` para los tests de ct-next.mjs: NUNCA lanza un workspace real.
-// FAKE_CMUX_FAIL hace fallar toda invocación; FAKE_CMUX_FAIL_NAME_SUBSTR hace
-// fallar solo la invocación cuyo `--name` contiene ese substring (para el
-// test de "falla a mitad del bucle con varios slices seleccionados").
+// FAKE_CMUX_FAIL hace fallar toda invocación de `new-workspace`;
+// FAKE_CMUX_FAIL_NAME_SUBSTR hace fallar solo la invocación cuyo `--name`
+// contiene ese substring (para el test de "falla a mitad del bucle con
+// varios slices seleccionados").
+//
+// Finding 2 (staleness) y finding 3 (verificación de lanzamiento) añaden dos
+// consultas de SOLO LECTURA — `list-windows --json` y `workspace list
+// --window <id> --json` — que ct-next.mjs usa para (a) comprobar si hay una
+// sesión viva para un issue en vuelo, y (b) comprobar, DESPUÉS de que
+// `new-workspace` ya devolvió éxito, si la sesión recién creada está de
+// verdad en el cwd pedido. Ninguna de las dos lanza nada.
+//
+// Para que finding 3 sea comprobable de verdad (y para que los tests
+// EXISTENTES de "lanzamiento con éxito" — escritos antes de que esta
+// verificación existiera — sigan viendo "lanzado #N" sin tener que tocar
+// cada uno de ellos), este stub es STATEFUL: cada `new-workspace` que NO
+// falla registra su `--name`/`--cwd` en un fichero de estado, y
+// `workspace list --json` lo lee de vuelta. El fichero de estado, si no se
+// fija explícitamente con FAKE_CMUX_STATE_FILE, se deriva de
+// FAKE_GIT_TOPLEVEL (que CADA test de ct-next.mjs ya fija a un directorio
+// temporal aislado por test) — así el aislamiento entre tests es automático,
+// sin tener que añadir una variable nueva a los 654 tests preexistentes.
+import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'node:fs'
+import { join } from 'node:path'
+
 const argv = process.argv.slice(2)
+
+// FAKE_CMUX_INVOKED_LOG_FILE: registra CUALQUIER invocación de este stub
+// (subcomando + argv), para que un test pueda comprobar que cmux NUNCA se
+// invocó en absoluto — p.ej. CT_NEXT_FIXTURE, que promete no tocar nada
+// real, ni siquiera de solo lectura (ver la guarda `if (fx) return null` en
+// queryAllCmuxWorkspaces, ct-next.mjs).
+if (process.env.FAKE_CMUX_INVOKED_LOG_FILE) {
+  appendFileSync(process.env.FAKE_CMUX_INVOKED_LOG_FILE, argv.join(' ') + '\n')
+}
+
+function stateFilePath() {
+  if (process.env.FAKE_CMUX_STATE_FILE) return process.env.FAKE_CMUX_STATE_FILE
+  if (process.env.FAKE_GIT_TOPLEVEL) return join(process.env.FAKE_GIT_TOPLEVEL, '.fake-cmux-workspaces.json')
+  return null
+}
+
+function readState() {
+  const f = stateFilePath()
+  if (!f || !existsSync(f)) return []
+  try {
+    return JSON.parse(readFileSync(f, 'utf8'))
+  } catch {
+    return []
+  }
+}
+
+function appendState(entry) {
+  const f = stateFilePath()
+  if (!f) return // sin fichero de estado disponible: no-op, mismo comportamiento que antes de finding 3.
+  const cur = readState()
+  cur.push(entry)
+  writeFileSync(f, JSON.stringify(cur))
+}
+
+if (argv[0] === 'list-windows' && argv.includes('--json')) {
+  if (process.env.FAKE_CMUX_LIST_WINDOWS_FAIL) {
+    console.error('fake-cmux: list-windows failed (simulado, daemon no disponible)')
+    process.exit(1)
+  }
+  process.stdout.write(process.env.FAKE_CMUX_WINDOWS_JSON || JSON.stringify([{ id: 'win1' }]))
+  process.exit(0)
+}
+
+if (argv[0] === 'workspace' && argv[1] === 'list' && argv.includes('--json')) {
+  // FAKE_CMUX_WORKSPACE_TITLES_JSON (finding 2): sesiones PRE-EXISTENTES que
+  // un test quiere simular sin haberlas "lanzado" en esta misma corrida
+  // (p.ej. "hay una sesión de otro slice ya abierta"). Se combinan con lo
+  // que el propio proceso bajo prueba haya lanzado de verdad en esta corrida
+  // (el estado stateful de arriba) — ninguna de las dos fuentes pisa a la
+  // otra.
+  const staticTitles = process.env.FAKE_CMUX_WORKSPACE_TITLES_JSON ? JSON.parse(process.env.FAKE_CMUX_WORKSPACE_TITLES_JSON) : []
+  const launched = readState()
+  const workspaces = [
+    ...staticTitles.map((t) => ({ custom_title: t, current_directory: null })),
+    ...launched.map((e) => ({ custom_title: e.title, current_directory: e.cwd })),
+  ]
+  process.stdout.write(JSON.stringify({ workspaces }))
+  process.exit(0)
+}
+
+// `new-workspace` (el único camino que de verdad lanzaría algo real — nunca
+// se invoca desde los tests de staleness/verificación en solitario, solo
+// desde los de dispatch real, y siempre contra este stub).
 const nameIdx = argv.indexOf('--name')
 const name = nameIdx !== -1 ? argv[nameIdx + 1] : ''
+const cwdIdx = argv.indexOf('--cwd')
+const cwd = cwdIdx !== -1 ? argv[cwdIdx + 1] : null
 
 if (process.env.FAKE_CMUX_FAIL) {
   console.error('fake-cmux: new-workspace failed (simulado)')
@@ -15,4 +102,21 @@ if (process.env.FAKE_CMUX_FAIL_NAME_SUBSTR && name.includes(process.env.FAKE_CMU
   console.error('fake-cmux: new-workspace failed (simulado, por nombre)')
   process.exit(1)
 }
+// FAKE_CMUX_WRONG_CWD_SUBSTR (finding 3): simula el escenario exacto del
+// hallazgo — cmux "acepta" el lanzamiento (exit 0) pero la sesión queda en
+// otro directorio (cwd inexistente, shell de login por defecto). Solo
+// afecta al REGISTRO de estado (lo que luego ve `workspace list`), nunca al
+// exit code de `new-workspace` — eso es precisamente lo que hace real el
+// escenario: cmux no avisa de nada.
+if (process.env.FAKE_CMUX_WRONG_CWD_SUBSTR && name.includes(process.env.FAKE_CMUX_WRONG_CWD_SUBSTR)) {
+  appendState({ title: name, cwd: '/Users/fake/.config/ghostty-default-shell-dir' })
+  process.exit(0)
+}
+// FAKE_CMUX_SKIP_STATE_SUBSTR (finding 3): simula "cmux dijo éxito pero la
+// sesión no aparece al consultar" — ninguna escritura de estado para este
+// lanzamiento en concreto, aunque el exit code siga siendo 0.
+if (process.env.FAKE_CMUX_SKIP_STATE_SUBSTR && name.includes(process.env.FAKE_CMUX_SKIP_STATE_SUBSTR)) {
+  process.exit(0)
+}
+appendState({ title: name, cwd })
 process.exit(0)

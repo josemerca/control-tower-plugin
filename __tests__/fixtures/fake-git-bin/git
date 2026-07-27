@@ -15,70 +15,115 @@ if (process.env.FAKE_GIT_LOG_FILE) {
   appendFileSync(process.env.FAKE_GIT_LOG_FILE, joined + '\n')
 }
 
-if (argv[0] === 'rev-parse' && argv[1] === '--show-toplevel') {
-  process.stdout.write(`${process.env.FAKE_GIT_TOPLEVEL || '/tmp/fake-repo-root'}\n`)
-  process.exit(0)
-}
-
-// `git rev-parse --verify --quiet <ref>^{commit}` (W-D, fix round 1,
-// Important): ct-next.mjs comprueba OFFLINE, contra el checkout local, que
-// la rama base resuelta (vía `gh repo view` o `--base`) existe de verdad
-// ANTES de reclamar/despachar nada — ver verifyBaseExistsLocally en
-// ct-next.mjs. Por defecto (ninguna de las dos variables de abajo fijada)
-// CUALQUIER ref "existe", para que los tests existentes (que no fijan
-// ninguna de las dos y asumían implícitamente que "main" resolvía) sigan
-// pasando sin cambios. FAKE_GIT_BASE_NOT_LOCAL hace fallar la comprobación
-// de la rama LOCAL; FAKE_GIT_BASE_NOT_REMOTE hace fallar la de
-// `origin/<rama>` — se distinguen por si el ref empieza por "origin/", para
-// poder simular por separado "no existe en ningún sitio" y "existe en
-// origin pero no en local".
-if (argv[0] === 'rev-parse' && argv[1] === '--verify' && argv[2] === '--quiet') {
-  const ref = argv[3] || ''
-  const isRemoteRef = ref.startsWith('origin/')
-  const shouldFail = isRemoteRef ? process.env.FAKE_GIT_BASE_NOT_REMOTE : process.env.FAKE_GIT_BASE_NOT_LOCAL
-  if (shouldFail) process.exit(1)
-  process.stdout.write('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n')
-  process.exit(0)
-}
-
-// Guarda de identidad de repo de ct-next.mjs (review final, finding 1):
-// FAKE_GIT_REMOTE_FAIL simula un checkout sin remote `origin` (exit != 0,
-// nada en stdout). Por defecto el origin es "https://github.com/o/r.git",
-// para que los tests existentes que usan `--repo o/r` sigan pasando sin
-// tener que fijar esta variable — solo los tests que quieren ejercitar un
-// MISMATCH deliberado fijan FAKE_GIT_REMOTE_ORIGIN a otra cosa.
-if (argv[0] === 'remote' && argv[1] === 'get-url' && argv[2] === 'origin') {
-  if (process.env.FAKE_GIT_REMOTE_FAIL) {
-    console.error('fake-git: remote get-url origin failed (simulado, sin remote origin)')
-    process.exit(1)
+// main(): toda la lógica del stub vive en una función (no en el top-level del
+// módulo) para poder usar `return` en vez de `process.exit()` en la rama de
+// "cuelgue" (finding 1, más abajo) — un `return` en el top-level de un
+// módulo ES es un SyntaxError, y necesitamos poder terminar de decidir sin
+// caer en el fallback de "comando no soportado" del final del fichero.
+function main() {
+  if (argv[0] === 'rev-parse' && argv[1] === '--show-toplevel') {
+    process.stdout.write(`${process.env.FAKE_GIT_TOPLEVEL || '/tmp/fake-repo-root'}\n`)
+    process.exit(0)
   }
-  process.stdout.write(`${process.env.FAKE_GIT_REMOTE_ORIGIN || 'https://github.com/o/r.git'}\n`)
-  process.exit(0)
-}
 
-if (argv[0] === 'worktree' && argv[1] === 'add') {
-  if (process.env.FAKE_GIT_WORKTREE_ADD_FAIL) {
-    console.error('fake-git: worktree add failed (simulado)')
-    process.exit(1)
+  // `git rev-parse --verify --quiet <ref>^{commit}` (W-D, fix round 1,
+  // Important): ct-next.mjs comprueba OFFLINE, contra el checkout local, que
+  // la rama base resuelta (vía `gh repo view` o `--base`) existe de verdad
+  // ANTES de reclamar/despachar nada — ver verifyBaseExistsLocally en
+  // ct-next.mjs. Por defecto (ninguna de las dos variables de abajo fijada)
+  // CUALQUIER ref "existe", para que los tests existentes (que no fijan
+  // ninguna de las dos y asumían implícitamente que "main" resolvía) sigan
+  // pasando sin cambios. FAKE_GIT_BASE_NOT_LOCAL hace fallar la comprobación
+  // de la rama LOCAL; FAKE_GIT_BASE_NOT_REMOTE hace fallar la de
+  // `origin/<rama>` — se distinguen por si el ref empieza por "origin/", para
+  // poder simular por separado "no existe en ningún sitio" y "existe en
+  // origin pero no en local".
+  // `git rev-parse --verify --quiet refs/heads/feat/<n>` (finding 2 —
+  // detección de staleness, assessLocalLiveness en ct-next.mjs): forma de
+  // ref DISTINTA a la del chequeo de rama base de arriba/abajo (esta lleva
+  // el prefijo `refs/heads/` y NUNCA el sufijo `^{commit}`) para que ambos
+  // stubs puedan controlarse de forma INDEPENDIENTE — sin esto, el default
+  // "cualquier ref existe" del bloque de abajo (pensado para la rama base)
+  // haría que TODO issue pareciera siempre tener una rama local viva, sin
+  // forma de que un test simule "sin rama" para un issue concreto.
+  // FAKE_GIT_STALE_BRANCH_EXISTS: lista de números de issue (separados por
+  // coma) para los que la rama SÍ existe — por defecto (variable ausente)
+  // NINGUNA existe, lo contrario del default de la comprobación de rama
+  // base, porque el escenario que motiva esta detección (finding 2) es
+  // precisamente "no hay rama" y los tests deben poder partir de ahí sin
+  // tener que apagar nada.
+  if (argv[0] === 'rev-parse' && argv[1] === '--verify' && argv[2] === '--quiet' && /^refs\/heads\/feat\/\d+$/.test(argv[3] || '')) {
+    const n = (argv[3] || '').replace('refs/heads/feat/', '')
+    const existing = (process.env.FAKE_GIT_STALE_BRANCH_EXISTS || '').split(',').map((s) => s.trim()).filter(Boolean)
+    if (!existing.includes(n)) process.exit(1)
+    process.stdout.write('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n')
+    process.exit(0)
   }
-  process.exit(0)
-}
 
-if (argv[0] === 'worktree' && argv[1] === 'remove') {
-  if (process.env.FAKE_GIT_WORKTREE_REMOVE_FAIL) {
-    console.error('fake-git: worktree remove failed (simulado)')
-    process.exit(1)
+  if (argv[0] === 'rev-parse' && argv[1] === '--verify' && argv[2] === '--quiet') {
+    const ref = argv[3] || ''
+    const isRemoteRef = ref.startsWith('origin/')
+    const shouldFail = isRemoteRef ? process.env.FAKE_GIT_BASE_NOT_REMOTE : process.env.FAKE_GIT_BASE_NOT_LOCAL
+    if (shouldFail) process.exit(1)
+    process.stdout.write('deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n')
+    process.exit(0)
   }
-  process.exit(0)
-}
 
-if (argv[0] === 'branch' && argv[1] === '-D') {
-  if (process.env.FAKE_GIT_BRANCH_DELETE_FAIL) {
-    console.error('fake-git: branch -D failed (simulado)')
-    process.exit(1)
+  // Guarda de identidad de repo de ct-next.mjs (review final, finding 1):
+  // FAKE_GIT_REMOTE_FAIL simula un checkout sin remote `origin` (exit != 0,
+  // nada en stdout). Por defecto el origin es "https://github.com/o/r.git",
+  // para que los tests existentes que usan `--repo o/r` sigan pasando sin
+  // tener que fijar esta variable — solo los tests que quieren ejercitar un
+  // MISMATCH deliberado fijan FAKE_GIT_REMOTE_ORIGIN a otra cosa.
+  if (argv[0] === 'remote' && argv[1] === 'get-url' && argv[2] === 'origin') {
+    if (process.env.FAKE_GIT_REMOTE_FAIL) {
+      console.error('fake-git: remote get-url origin failed (simulado, sin remote origin)')
+      process.exit(1)
+    }
+    process.stdout.write(`${process.env.FAKE_GIT_REMOTE_ORIGIN || 'https://github.com/o/r.git'}\n`)
+    process.exit(0)
   }
-  process.exit(0)
+
+  if (argv[0] === 'worktree' && argv[1] === 'add') {
+    // FAKE_GIT_WORKTREE_ADD_HANG (finding 1 — auditoría de interrupción):
+    // NUNCA termina por su cuenta, e IGNORA SIGINT/SIGTERM — reproduce el
+    // escenario MÁS ADVERSO del auditor (un `git worktree add` colgado que
+    // ni siquiera muere si la señal llegara a alcanzarlo directamente).
+    // Existe para probar que ct-next.mjs acota la espera con su propio
+    // timeout (defensa 2 de finding 1) en vez de quedarse bloqueado para
+    // siempre — sin este stub no hay forma de ejercer ese camino sin colgar
+    // de verdad al runner de tests.
+    if (process.env.FAKE_GIT_WORKTREE_ADD_HANG) {
+      process.on('SIGINT', () => {})
+      process.on('SIGTERM', () => {})
+      setInterval(() => {}, 1000)
+      return
+    }
+    if (process.env.FAKE_GIT_WORKTREE_ADD_FAIL) {
+      console.error('fake-git: worktree add failed (simulado)')
+      process.exit(1)
+    }
+    process.exit(0)
+  }
+
+  if (argv[0] === 'worktree' && argv[1] === 'remove') {
+    if (process.env.FAKE_GIT_WORKTREE_REMOVE_FAIL) {
+      console.error('fake-git: worktree remove failed (simulado)')
+      process.exit(1)
+    }
+    process.exit(0)
+  }
+
+  if (argv[0] === 'branch' && argv[1] === '-D') {
+    if (process.env.FAKE_GIT_BRANCH_DELETE_FAIL) {
+      console.error('fake-git: branch -D failed (simulado)')
+      process.exit(1)
+    }
+    process.exit(0)
+  }
+
+  console.error(`fake-git: comando no soportado en el stub: ${joined}`)
+  process.exit(1)
 }
 
-console.error(`fake-git: comando no soportado en el stub: ${joined}`)
-process.exit(1)
+main()
