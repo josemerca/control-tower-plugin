@@ -34,9 +34,17 @@ function run(args, envOverrides = {}) {
 }
 
 // El wrapper acepta CT_NEXT_FIXTURE (JSON de {issues, mergedIssues}) para test sin red.
+// F13: este fixture describía un estado IMPOSIBLE — #1 aparecía a la vez en
+// `mergedIssues` (o sea, cerrado y mergeado) y dentro de `issues`, que es la
+// lista de issues ABIERTOS (buildDispatchInput solo mapea `rawOpenIssues`).
+// Era inocuo mientras `status:in-review` no hiciera nada; desde F13/H2 un
+// in-review retiene sus tokens, así que ese #1 fantasma bloqueaba a #2 por
+// `touches:api` y el fixture dejaba de despachar nada. Se corrige la
+// contradicción, no el comportamiento: un issue mergeado no está abierto, así
+// que desaparece de `issues` y sigue en `mergedIssues` — que es justo lo que
+// este fixture quería decir (la dep de #2 está mergeada).
 const FIXTURE = JSON.stringify({
   issues: [
-    { n: 1, order: 1, status: 'in-review', deps: [], touches: ['api'], name: 'login', type: 'backend' },
     { n: 2, order: 2, status: 'ready', deps: [1], touches: ['api'], name: 'refresh', type: 'backend' },
   ],
   mergedIssues: [1],

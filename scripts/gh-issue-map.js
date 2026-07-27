@@ -667,6 +667,59 @@ export function filterMergedIssues(closedIssues) {
   return (closedIssues || []).filter((i) => i.stateReason === 'COMPLETED').map((i) => i.number)
 }
 
+// ============================================================================
+// F13/H4 — LA APROXIMACIÓN "CERRADO = MERGEADO" TIENE DOS TRAMPAS OPUESTAS, Y
+// NINGUNA ERA VISIBLE DESDE FUERA.
+//
+// El comentario de `filterMergedIssues` (arriba) ya reconocía que "cerrado no
+// es lo mismo que mergeado, pero es lo único observable sin cruzar con el
+// grafo de PRs". Eso era honesto cuando se escribió; lo que faltaba era
+// enumerar las CONSECUENCIAS, que son dos y van en direcciones contrarias:
+//
+//   (1) FALSO NEGATIVO, silencioso y permanente. Cerrar un slice descartado
+//       como **not planned** —lo semánticamente correcto— deja `stateReason
+//       = 'NOT_PLANNED'`, así que NO entra en `mergedIssues` y TODOS sus
+//       dependientes quedan esperando para siempre. Verificado contra el
+//       código sin arreglar: `/ct-next` respondía "falta mergear #7", con
+//       #7 cerrado — una instrucción a esperar algo que ya no va a ocurrir,
+//       indistinguible de "#7 sigue en curso".
+//
+//   (2) FALSO POSITIVO. Cerrar a mano como **completed** sin haber mergeado
+//       nada satisface la dep igualmente, y el dependiente se despacha sobre
+//       trabajo que no existe.
+//
+// QUÉ SE ARREGLA Y QUÉ NO, Y POR QUÉ. Se arregla (1): es el caso que deja al
+// loop atascado en silencio, y es DETECTABLE con datos que ya se traen (el
+// `state_reason` de cada issue cerrado viaja en la misma llamada REST que ya
+// se hace, coste de red CERO). `closedNotCompleted` lo expone y ct-next.mjs
+// lo nombra en el mensaje de deps sin satisfacer, con el remedio exacto.
+//
+// NO se arregla (2) cruzando el grafo de PRs, y es una decisión, no un
+// olvido: distinguir "cerrado como completed por un merge" de "cerrado como
+// completed a mano" exige el timeline del issue (GraphQL, una llamada por
+// issue cerrado) para blindar un caso que requiere que alguien cierre a mano
+// como completed un slice sin mergear — mientras que (1) ocurre al hacer LO
+// CORRECTO. El coste no se justifica; lo que sí se hace es dejar de PROMETER
+// lo que no se comprueba: el contrato de la §9 (ct-init.sh) decía
+// "`merge-after` significa MERGEADO" y ahora dice qué se mira de verdad y
+// qué no. Una promesa retirada vale más que una comprobación cara a medias.
+//
+// 'REOPENED' aparece aquí por completitud del enum `IssueStateReason`: un
+// issue reabierto normalmente vuelve a estar ABIERTO (y entonces ni siquiera
+// llega a esta lista), pero si apareciera cerrado con ese motivo tampoco
+// cuenta como mergeado, y el mismo mensaje sirve. `null`/ausente (issues
+// cerrados antes de que GitHub tuviera `state_reason`) también entra: no
+// consta que se completara, y afirmar lo contrario sería inventarlo.
+export function closedNotCompleted(closedIssues) {
+  const out = {}
+  for (const i of (closedIssues || [])) {
+    if (i.stateReason === 'COMPLETED') continue
+    out[i.number] = i.stateReason ?? null
+  }
+  return out
+}
+// ============================================================================
+
 // NO_MILESTONE_KEY / epicKeyOf (D1 finding 1): /ct-groom numera slices 1..N
 // POR EPIC (una invocación = un `--milestone` = un epic — ver
 // groom.js#groomPlan) y escribe ESE número en `<!-- ct-order:N -->`. El
@@ -805,5 +858,10 @@ export function buildDispatchInput(rawOpenIssues, rawClosedIssues) {
       }
     })
   const mergedIssues = filterMergedIssues(rawClosedIssues)
-  return { issues, mergedIssues, orderCollisions: collisions }
+  // depStates (F13/H4): el estado de los issues CERRADOS que NO cuentan como
+  // mergeados, para que quien no pueda salir pueda saber POR QUÉ. Viaja junto
+  // a `mergedIssues` (y no se recalcula en ct-next.mjs) porque las dos cosas
+  // se derivan de la MISMA lista de issues cerrados: separarlas invitaría a
+  // que una se filtrara y la otra no.
+  return { issues, mergedIssues, depStates: closedNotCompleted(rawClosedIssues), orderCollisions: collisions }
 }

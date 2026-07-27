@@ -599,10 +599,29 @@ function verifyCmuxLaunch(expectedTitle, expectedCwd) {
   return { status: 'wrong-cwd', actualCwd: match.cwd }
 }
 
+// stateReasonLabel (F13/H4): cómo se llama, en el idioma del usuario, el
+// motivo de cierre que GitHub devuelve. `null` (issue cerrado antes de que
+// GitHub tuviera `state_reason`, o sin él) NO se traduce a "not planned": se
+// dice que no consta.
+function stateReasonLabel(sr) {
+  if (sr === 'NOT_PLANNED') return 'cerrado como "not planned"'
+  if (sr === 'REOPENED') return 'cerrado con motivo "reopened"'
+  if (sr == null) return 'cerrado sin motivo de cierre registrado'
+  return `cerrado con motivo "${sr}"`
+}
+
 function formatReason(reason, ctx) {
   switch (reason?.reason) {
-    case 'none-ready':
-      return 'No hay ningún issue en status:ready — no hay nada que despachar todavía.'
+    case 'none-ready': {
+      // F13: el mensaje callaba los slices parados en `status:in-review`. Al
+      // final de un epic ese es el estado NORMAL —todo entregado, nada
+      // mergeado— y "no hay nada que despachar todavía" lo pinta como si no
+      // se hubiera empezado. Además, desde F13/H2 esos issues RETIENEN sus
+      // tokens: son la causa de que lo siguiente no salga, no un detalle.
+      const inReview = reason.inReview || []
+      if (!inReview.length) return 'No hay ningún issue en status:ready — no hay nada que despachar todavía.'
+      return `No hay ningún issue en status:ready. Sí hay ${inReview.length} en status:in-review (${inReview.map((n) => `#${n}`).join(', ')}): su trabajo está entregado pero SIN MERGEAR, así que ni desbloquea a sus dependientes (merge-after exige el merge) ni suelta sus tokens de área/touches. Mergea sus PRs (o, si un PR ya se mergeó y el issue sigue abierto, ciérralo como completed) — y si alguno se rechazó en revisión, devuélvelo al loop con: node <plugin>/scripts/dispatch-check.mjs <n> --repo <owner/repo> --reopen`
+    }
     case 'deps-unmet': {
       // D1 finding 2/5: dos causas MUY distintas terminaban antes en el mismo
       // mensaje genérico ("falta mergear #X"), una de ellas imprimiendo
@@ -622,22 +641,76 @@ function formatReason(reason, ctx) {
         if (b.malformed) {
           return `#${b.n} (la sección "## Dependencias" existe pero no se reconoció ningún "merge-after #N" en su contenido — probablemente reescrita a mano; tratado como NO despachable hasta que se corrija el texto, nunca como "sin dependencias")`
         }
-        const deps = b.unmetDeps.map((d) => (d == null
-          ? 'una dependencia declarada contra un orden que no corresponde a ningún issue existente (¿"merge-after" a un slice que no existe, o que aún no se groomeó?) — nunca se resolverá sola con esperar; corrige el "merge-after" o el "ct-order" del issue referenciado'
-          : `#${d}`))
+        //   - F13/H4: una dependencia cuyo issue está CERRADO pero NO como
+        //     "completed" (típicamente "not planned", que es lo correcto para
+        //     un slice descartado). `filterMergedIssues` solo cuenta
+        //     'COMPLETED', así que esa dep NUNCA se va a satisfacer sola —
+        //     pero el mensaje decía "falta mergear #7" igual que si el
+        //     trabajo siguiera en curso, y el dependiente esperaba para
+        //     siempre en silencio. Ahora se nombra el estado real y el
+        //     remedio, que aquí NO es esperar sino decidir: quitar la dep, o
+        //     reabrir y cerrar como completed si el trabajo sí se hizo.
+        const depStates = reason.depStates || {}
+        const deps = b.unmetDeps.map((d) => {
+          if (d == null) {
+            return 'una dependencia declarada contra un orden que no corresponde a ningún issue existente (¿"merge-after" a un slice que no existe, o que aún no se groomeó?) — nunca se resolverá sola con esperar; corrige el "merge-after" o el "ct-order" del issue referenciado'
+          }
+          if (Object.prototype.hasOwnProperty.call(depStates, d)) {
+            return `#${d}, que está ${stateReasonLabel(depStates[d])} — una dep solo cuenta como satisfecha si su issue está cerrado como "completed", así que ESTA NO SE VA A SATISFACER NUNCA por sí sola: quita el "merge-after #<orden>" de la sección "## Dependencias" de #${b.n} si el slice se descartó, o reabre #${d} y ciérralo como completed si su trabajo sí se hizo`
+          }
+          return `#${d}`
+        })
         return `#${b.n} (falta mergear ${deps.join(', ')})`
       }).join('; ')
       return `Hay slice(s) en status:ready pero con dependencias sin mergear o sin resolver: ${list} — espera a que se mergeen esas dependencias, o corrige el issue si el bloqueo es por datos, no por trabajo pendiente.`
     }
     case 'collision': {
+      // F13/H2 — DOS BLOQUEOS DISTINTOS BAJO EL MISMO NOMBRE. Desde que
+      // `status:in-review` retiene tokens (dispatch.js#collectTokenHolders),
+      // "colisiona con trabajo en vuelo" puede significar dos cosas con dos
+      // remedios opuestos:
+      //   - contra un `in-progress`: hay (o debería haber) un agente vivo.
+      //     "Espera a que termine" es un consejo correcto, y la nota de
+      //     staleness sirve para decir cuándo NO lo es.
+      //   - contra un `in-review`: NO hay ningún agente. El trabajo está
+      //     entregado y esperando merge. "Espera a que termine" sería
+      //     absurdo — lo que hay que hacer es mergear el PR (o cerrar el
+      //     issue si el PR ya se mergeó y nadie lo cerró, o reabrir el slice
+      //     si la revisión lo rechazó).
+      //
+      // Y la nota de staleness NO se pide para un `in-review` (ver
+      // `holderStatus` abajo): esa comprobación busca worktree/rama/sesión de
+      // cmux, y en un slice ya entregado su ausencia es lo NORMAL, no una
+      // anomalía. Pedirla ahí convertiría cada PR en revisión en una falsa
+      // alarma de "claim huérfano" — exactamente el falso positivo que la
+      // detección de staleness se diseñó para no producir.
+      //
+      // `withIssueStatus` puede ser `null` cuando quien llamó no aportó el
+      // estado (llamadas unitarias antiguas): en ese caso se mantiene el
+      // comportamiento de antes (nota de staleness incluida) en vez de
+      // afirmar un estado que no se conoce.
+      const holderStatus = reason.withIssueStatus ?? null
+      const inReviewHolder = holderStatus === 'in-review'
       // Finding 2: `ctx?.stalenessNoteFor(reason.withIssue)` solo hace algo
       // cuando `ctx` viene informado (siempre, desde el call site real de
       // más abajo) — se deja opcional para que las pruebas unitarias de esta
       // función sigan pudiendo llamarla sin un contexto, sin reventar.
-      const note = ctx ? ctx.stalenessNoteFor(reason.withIssue) : null
+      const note = (ctx && !inReviewHolder) ? ctx.stalenessNoteFor(reason.withIssue) : null
+      // El remedio del caso in-review, en un solo sitio: el mismo texto vale
+      // para la colisión por token y para la serializante.
+      const reviewHint = `#${reason.withIssue} está en status:in-review: su trabajo está entregado pero SIN MERGEAR, así que retiene sus tokens hasta el merge — ramificar ahora de la base te daría un árbol que todavía no lo contiene. NO hay ningún agente trabajándolo: esperar no sirve de nada. Mergea su PR; si su PR YA se mergeó y el issue sigue abierto (el PR no llevaba "Closes #${reason.withIssue}"), ciérralo como completed; si la revisión lo rechazó, devuélvelo al loop con \`node <plugin>/scripts/dispatch-check.mjs ${reason.withIssue} --repo <owner/repo> --reopen\`.`
+      // "en vuelo" solo se dice del caso `in-progress`, donde es literalmente
+      // cierto. Para `in-review` la frase sería falsa (no vuela nada: está
+      // parado esperando merge) — se dice "trabajo entregado sin mergear".
       if (reason.kind === 'serializing') {
+        if (inReviewHolder) {
+          return `#${reason.issue} está ready con deps mergeadas, pero no se puede serializar: su touches:${reason.token} entra en el mismo grupo serializante (migration/ci/pbxproj) que touches:${reason.runningToken}, retenido por #${reason.withIssue} (status:in-review) — ${reviewHint}`
+        }
         const base = `#${reason.issue} está ready con deps mergeadas, pero no se puede serializar: su touches:${reason.token} entra en el mismo grupo serializante (migration/ci/pbxproj) que touches:${reason.runningToken}, ya en vuelo en #${reason.withIssue}`
         return note ? `${base} — ${note}` : `${base} — espera a que termine.`
+      }
+      if (inReviewHolder) {
+        return `#${reason.issue} está ready con deps mergeadas, pero colisiona con trabajo entregado sin mergear: comparte el token '${reason.token}' con #${reason.withIssue} (status:in-review) — ${reviewHint}`
       }
       const base = `#${reason.issue} está ready con deps mergeadas, pero colisiona con trabajo en vuelo: comparte el token '${reason.token}' con #${reason.withIssue} (status:in-progress)`
       return note ? `${base} — ${note}` : `${base} — espera a que termine, o resuelve el token.`
@@ -661,10 +734,39 @@ function formatBlockReason(reason, cap, ctx) {
     // libre seguiría bloqueado por otra causa (deps sin mergear, o colisión
     // con lo ya en vuelo) — subir el cap en ese caso no cambiaría nada, y
     // afirmar que sí es peor que no decir nada.
+    // F13/H3 — UN CLAIM MUERTO QUE COPA EL CAP ERA COMPLETAMENTE INVISIBLE.
+    // La detección de claims rancios (ronda D3) solo se consultaba desde el
+    // caso 'collision': si el issue muerto NO comparte ningún token con el
+    // candidato, pero SÍ ocupa el único hueco de cap, el mensaje era "sube
+    // --cap, o espera a que termine alguno" — mandando esperar a un agente
+    // que ya no existe, sin una sola pista. Verificado contra el código sin
+    // arreglar con un fixture de #5 in-progress (sin worktree, sin rama, sin
+    // cmux) y #6 ready con touches distintos: la salida no contenía ninguna
+    // mención de staleness.
+    //
+    // Ahora se cruza CADA issue que ocupa el cap contra la misma evidencia
+    // local (worktree / rama / sesión de cmux). Mismas cautelas que en el
+    // caso 'collision', porque es literalmente la misma función: basta UNA
+    // señal de vida para no decir nada, y aun sin ninguna nunca se afirma
+    // "abandonado" (la comprobación es solo de esta máquina).
+    //
+    // Lo que esto NO resuelve, y conviene no fingir que sí: solo se entera
+    // quien esté corriendo `/ct-next` en ese momento. No hay demonio, ni
+    // heartbeat, ni nada que vigile los claims entre invocaciones — un claim
+    // muerto a las 3 AM sigue muerto hasta que alguien invoque el
+    // dispatcher. Eso es una limitación del diseño (el claim es un label),
+    // no un hueco de este mensaje, y está dicho como tal en el contrato de la
+    // §9 que siembra ct-init.
+    const notes = ctx
+      ? (reason.inFlight || []).map((i) => ({ n: i.n, note: ctx.stalenessNoteFor(i.n) })).filter((x) => x.note)
+      : []
+    const stale = notes.length
+      ? ` ATENCIÓN, el cap puede estar copado por un claim muerto: ${notes.map((x) => x.note).join(' ')}`
+      : ''
     if (reason.wouldDispatchIfCapAllowed) {
-      return `${base} — sube --cap, o espera a que termine alguno.`
+      return `${base} — sube --cap, o espera a que termine alguno.${stale}`
     }
-    return `${base} — aunque subieras --cap no bastaría todavía: ${formatReason(reason.blockedEvenWithCap, ctx)}`
+    return `${base} — aunque subieras --cap no bastaría todavía: ${formatReason(reason.blockedEvenWithCap, ctx)}${stale}`
   }
   return formatReason(reason, ctx)
 }
@@ -1138,7 +1240,12 @@ function formatStrayDepsWarnings(issues) {
 }
 
 const dispatchInput = loadIssues()
+// depStates (F13/H4): estado de los issues CERRADOS que NO cuentan como
+// mergeados. Solo existe en la ruta real (buildDispatchInput); el fixture de
+// test trae `issues`/`mergedIssues` ya mapeados, así que `|| {}` lo trata
+// como "de ningún cierre consta el motivo" — nunca como "todos completed".
 const { issues, mergedIssues } = dispatchInput
+const depStates = dispatchInput.depStates || {}
 // `orderCollisions` solo existe en la ruta real (buildDispatchInput) — el
 // fixture de test (CT_NEXT_FIXTURE) ya trae issues pre-mapeados y no pasa
 // por ese cálculo; `|| []` lo trata como "sin colisiones" en ese caso. Nunca
@@ -1209,7 +1316,7 @@ for (const w of formatConventionWarnings()) console.log(w)
 // vuelo (status:in-progress) de los mismos `issues` ya cargados, resta ese
 // trabajo del cap antes de seleccionar, y explica el motivo exacto cuando no
 // selecciona nada (W-B, §8) — este wrapper solo formatea lo que ya decidió.
-const { selected, inFlight, blockReason } = planDispatch(issues, { mergedIssues, cap })
+const { selected, inFlight, tokenHolders, blockReason } = planDispatch(issues, { mergedIssues, cap, depStates })
 
 // Visibilidad del trabajo en vuelo en --dry-run (punto 4 del brief de W-B):
 // sin esto, un --dry-run que SÍ selecciona algo podía dar la falsa
@@ -1233,6 +1340,19 @@ if (dryRun) {
     console.log(`En vuelo (${inFlight.length}/${cap} del cap ocupados): ${detail}`)
   } else {
     console.log(`En vuelo: ninguno (0/${cap} del cap ocupados).`)
+  }
+  // F13/H2: los slices en `status:in-review` NO ocupan cap (no hay agente
+  // vivo) pero SÍ retienen sus tokens hasta el merge. Sin esta línea, un
+  // --dry-run que no despacha nada por colisión contra un in-review dejaba al
+  // humano mirando "En vuelo: ninguno" y un mensaje de colisión — una
+  // contradicción aparente. Se lista aparte, no fundido con "En vuelo",
+  // precisamente porque son dos contabilidades distintas.
+  const reviewHolders = (tokenHolders || []).filter((i) => i.status === 'in-review')
+  if (reviewHolders.length) {
+    const detail = reviewHolders
+      .map((i) => `#${i.n} [${(i.touches.length ? i.touches.map((t) => `touches:${t}`).join(', ') : 'sin touches')}]`)
+      .join(', ')
+    console.log(`Sin mergear, reteniendo tokens (status:in-review, NO ocupan cap): ${detail}`)
   }
 }
 

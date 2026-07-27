@@ -21,7 +21,7 @@
 // — hasta que eso aterrice, esta es la garantía real: ninguna bajo
 // concurrencia, sí bajo uso secuencial disciplinado.
 import { execFileSync } from 'node:child_process'
-import { writeSync } from 'node:fs'
+import { writeSync, statSync } from 'node:fs'
 import { detectCollisions, claimLost } from './claim.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 import { parseStrictInt } from './argnum.js'
@@ -136,12 +136,20 @@ const has = (f) => process.argv.includes(f)
 const issue = parseStrictInt(process.argv[2])
 const repo = arg('--repo')
 const release = has('--release')
+const reopen = has('--reopen')
 const dryRun = has('--dry-run')
-const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release] [--dry-run]'
+const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release | --reopen] [--dry-run]'
 if (issue === null || issue < 1) {
   dieErr(`<issue#> inválido: ${process.argv[2] === undefined ? '(ausente)' : `"${process.argv[2]}"`} — debe ser un entero >= 1 escrito con dígitos a secas (nada de "42x", "1e3", "4.2", espacios, ni signo "+"/"-": un número aproximado aquí reclamaría un issue que no es el que pediste).\n${usage}`, 2)
 }
 if (typeof repo !== 'string' || repo.length === 0) { dieErr(usage, 2) }
+// `--release` y `--reopen` mueven el MISMO label en direcciones contrarias
+// (in-progress → in-review, in-review → ready). Pasarlos juntos no tiene una
+// interpretación razonable, y elegir uno en silencio sería adivinar cuál
+// quería quien lo escribió sobre una mutación de estado real.
+if (release && reopen) {
+  dieErr(`--release y --reopen son mutuamente excluyentes: uno cierra el slice hacia revisión (in-progress → in-review) y el otro lo devuelve al loop (in-review → ready). Elige uno.\n${usage}`, 2)
+}
 
 // CT_CLAIM_TEST_SELF_KILL_SIGNAL — exclusivamente para tests (revisión
 // externa, IMPORTANTE: un Ctrl-C real durante attemptClaim en ct-next.mjs
@@ -316,6 +324,158 @@ if (release) {
   dieOut(`released #${issue} → in-review`, 0)
 }
 
+// ============================================================================
+// --reopen (F13/H1) — `status:in-review` ERA UN ESTADO TERMINAL.
+//
+// EL AGUJERO. `--release` movía `in-progress → in-review` y NO EXISTÍA
+// NINGUNA transición de vuelta a `status:ready`. Los únicos caminos que
+// devolvían un issue a `ready` eran los reverts (carrera perdida, fallo de
+// readback, interrupción) — todos por FALLOS DEL PROTOCOLO, ninguno por una
+// revisión rechazada. Y `/ct-next` solo despacha `ready`. Consecuencia: si
+// rechazas un PR en el gate, ese slice sale del loop PARA SIEMPRE, y con él
+// todo lo que dependa de él. El caso no es exótico: en un epic típico, el
+// slice con más papeletas de ser rechazado en el gate visual suele ser
+// justamente uno del que cuelgan varios.
+//
+// POR QUÉ UNA TRANSICIÓN EXPLÍCITA Y NO UN ESTADO NUEVO ('status:rejected').
+// Un estado nuevo obliga a enseñárselo a TODO lo que lee labels
+// (resolveStatus y su precedencia, computeReadyCandidates, la detección de
+// colisión, ct-groom, el contrato de la §9…) y multiplica las combinaciones
+// que hay que razonar, a cambio de información que el propio issue ya
+// conserva mejor que un label: el hilo de la review dice por qué se rechazó.
+// Lo que faltaba no era un estado, era una ARISTA.
+//
+// POR QUÉ AQUÍ Y NO EN /ct-next. `dispatch-check.mjs` ya es el único fichero
+// que muta labels `status:` (ver el comentario de `setStatus`), y reabrir es
+// una decisión HUMANA del gate — igual que promover de backlog a ready. El
+// dispatcher no debe poder deshacer un veredicto de revisión por su cuenta.
+//
+// CÓMO SE EVITA REABRIR ALGO POR ACCIDENTE (el requisito explícito):
+//   1. Flag propio y explícito, nunca invocado por ningún camino automático:
+//      ni /ct-next, ni el kickoff del agente, lo ejecutan jamás.
+//   2. PRECONDICIÓN LEÍDA, no supuesta: se lee el estado real del issue y se
+//      exige `status:in-review`. Un `gh issue edit --add-label ready
+//      --remove-label in-review` a pelo (lo que haría cualquiera a mano)
+//      NO comprueba nada: sobre un issue en `in-progress` añadiría `ready`
+//      dejando DOS labels de status a la vez, que es justo el estado
+//      ambiguo que resolveStatus existe para sobrevivir. Aquí se rechaza.
+//   3. Y se rechaza distinguiendo el caso: reabrir algo que ya está `ready`
+//      no es un error del usuario que haya que castigar, es un no-op que hay
+//      que nombrar.
+// ============================================================================
+
+// localSliceArtifacts: qué queda EN ESTA MÁQUINA de la vuelta anterior del
+// slice — el worktree `.worktrees/<n>` y la rama `feat/<n>`. Se mira desde el
+// checkout PRINCIPAL, no desde el cwd: este script puede invocarse desde
+// dentro del propio worktree del slice (el kickoff lo hace), y ahí
+// `--show-toplevel` devolvería el worktree en vez del checkout donde vive
+// `.worktrees/`. `git worktree list --porcelain` empieza SIEMPRE por el
+// worktree principal, y es portable a git viejos (a diferencia de
+// `--path-format=absolute --git-common-dir`).
+//
+// Devuelve `{ known: false }` si no se ha podido mirar (no hay git, no
+// estamos dentro de un repo, el comando falla). Nunca se traduce "no se pudo
+// comprobar" a "no hay nada": el mensaje de abajo dice explícitamente cuál de
+// las dos cosas sabe.
+function localSliceArtifacts(n) {
+  // `cwd` en vez de `-C <root>` a propósito: el argv queda idéntico al que
+  // usa ct-next.mjs para la misma pregunta (`rev-parse --verify --quiet
+  // refs/heads/feat/<n>`), que es lo que permite razonar sobre los dos sitios
+  // como una sola consulta — y lo que hace que el stub de git de los tests
+  // reconozca esta llamada sin tener que enseñarle una segunda forma.
+  const git = (a, cwd) => execFileSync('git', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30_000, killSignal: 'SIGKILL', ...(cwd ? { cwd } : {}) })
+  let mainRoot
+  try {
+    const line = git(['worktree', 'list', '--porcelain']).split('\n').find((l) => l.startsWith('worktree '))
+    if (!line) return { known: false }
+    mainRoot = line.slice('worktree '.length).trim()
+    if (!mainRoot) return { known: false }
+  } catch {
+    return { known: false }
+  }
+  const worktree = `${mainRoot}/.worktrees/${n}`
+  let hasWorktree = false
+  try {
+    hasWorktree = statSync(worktree).isDirectory()
+  } catch {
+    hasWorktree = false
+  }
+  let hasBranch = false
+  try {
+    // Si `mainRoot` ya no existe en disco (worktree list respondió desde otro
+    // sitio, o el directorio se borró entre las dos llamadas), spawn falla y
+    // caemos a `false` — que es lo correcto: no hay evidencia de rama.
+    git(['rev-parse', '--verify', '--quiet', `refs/heads/feat/${n}`], mainRoot)
+    hasBranch = true
+  } catch {
+    hasBranch = false
+  }
+  return { known: true, mainRoot, worktree, branch: `feat/${n}`, hasWorktree, hasBranch }
+}
+
+// reopenDiskNote: qué hacer con el worktree y la rama que ya existen de la
+// vuelta anterior. Reabrir un slice NO los borra —y no debe: normalmente el
+// trabajo rechazado se corrige ENCIMA de lo que ya hay, no desde cero— pero
+// tampoco puede callarlo, porque `/ct-next` SE NIEGA a despachar un slice
+// cuyo worktree o rama ya existen (precondición, antes de reclamar nada). Sin
+// esta nota, reabrir "funcionaría" y el siguiente `/ct-next` fallaría con un
+// mensaje que no menciona la reapertura.
+function reopenDiskNote(n) {
+  const a = localSliceArtifacts(n)
+  if (!a.known) {
+    return `No se ha podido comprobar qué queda de la vuelta anterior en esta máquina (no se pudo consultar git desde aquí) — NO lo leas como "no hay nada". Si el worktree .worktrees/${n} o la rama feat/${n} siguen existiendo, /ct-next se negará a re-despachar #${n} hasta que decidas qué hacer con ellos.`
+  }
+  if (!a.hasWorktree && !a.hasBranch) {
+    return `De la vuelta anterior no queda nada en ${a.mainRoot} (ni worktree .worktrees/${n} ni rama feat/${n}): /ct-next puede re-despacharlo desde cero. OJO: si la rama solo existe en el remoto, el trabajo anterior sigue ahí — recupéralo antes de rehacerlo.`
+  }
+  const quedan = [a.hasWorktree ? `el worktree ${a.worktree}` : null, a.hasBranch ? `la rama ${a.branch}` : null].filter(Boolean).join(' y ')
+  return [
+    `De la vuelta anterior queda ${quedan} en ${a.mainRoot}. NO se ha tocado nada de eso: reabrir mueve el label, no el disco. Tienes dos caminos, y son excluyentes:`,
+    `  (a) CORREGIR ENCIMA (lo normal tras un rechazo de revisión): sigue trabajando en ese mismo worktree y esa misma rama, sobre el PR que ya existe. NO invoques /ct-next para #${n}: se negaría a despachar precisamente porque el worktree/la rama ya existen. Cuando vuelvas a dejarlo listo, repite el --release.`,
+    `  (b) EMPEZAR DE CERO: borra primero lo anterior (te llevas por delante el trabajo que hubiera, comprueba que está pusheado) y luego deja que /ct-next lo despache:`,
+    a.hasWorktree ? `      git -C ${a.mainRoot} worktree remove ${a.worktree}` : null,
+    a.hasBranch ? `      git -C ${a.mainRoot} branch -D ${a.branch}` : null,
+  ].filter(Boolean).join('\n')
+}
+
+if (reopen) {
+  // Precondición LEÍDA. En dry-run con fixture se usa el fixture; en dry-run
+  // SIN fixture no hay estado que leer y no se muta nada, así que se admite
+  // como ensayo del mensaje. `labelsOf` es la misma lectura que usa el paso
+  // de colisión, y su fallo se clasifica igual: exit 3 (infraestructura, sin
+  // mutación).
+  let labels = null
+  if (fx) {
+    labels = fx.candLabels
+  } else if (!dryRun) {
+    try {
+      labels = labelsOf(issue)
+    } catch (e) {
+      dieErr(`no se pudo leer el estado de #${issue} en ${repo}: ${e.message} — no se reabre nada sin haber comprobado que está en status:in-review.`, 3)
+    }
+  }
+  if (labels !== null && !labels.includes('status:in-review')) {
+    const actuales = labels.filter((l) => l.startsWith('status:'))
+    const enQue = actuales.length ? actuales.join(', ') : 'ninguna label status: (o sea, backlog)'
+    const yaReady = actuales.includes('status:ready')
+    dieErr(
+      yaReady
+        ? `#${issue} ya está en status:ready — no hay nada que reabrir, /ct-next puede despacharlo tal cual. (No se ha tocado ninguna label.)`
+        : `--reopen solo devuelve al loop un slice en status:in-review, y #${issue} está en: ${enQue}. No se ha tocado ninguna label — añadir status:ready sin quitar el status: que ya tiene dejaría el issue con DOS estados a la vez, que es exactamente el estado ambiguo que el dispatcher tiene que adivinar después. Si de verdad quieres moverlo desde ${enQue}, hazlo a mano y a conciencia: gh issue edit ${issue} --repo ${repo} --add-label status:ready --remove-label <la que tenga>.`,
+      2
+    )
+  }
+  if (!dryRun && !fx) {
+    const result = setStatus(issue, 'status:in-review', 'status:ready')
+    if (!result.ok) {
+      dieErr(`no se pudo reabrir #${issue} a status:ready: ${result.error.message}. Sigue en status:in-review; reintenta el --reopen.`, 1)
+    }
+  }
+  outLine(`reopened #${issue} → ready (rechazado en revisión: vuelve a ser despachable por /ct-next)`)
+  outLine(reopenDiskNote(issue))
+  process.exit(0)
+}
+
 // 1) colisión previa. Ningún fallo aquí ha mutado nada todavía: abortar es
 // seguro, no deja lock huérfano. Finding 4: exit 3 (fallo de lectura, no
 // mutación, no colisión real) — antes exit 1, indistinguible por código de
@@ -336,7 +496,16 @@ const collisions = detectCollisions(candLabels, open)
 if (collisions.length) {
   // Finding 4: exit 1 — 'skip', resultado NORMAL del protocolo (ninguna
   // mutación se llegó a escribir). Sin cambios de comportamiento.
-  dieErr(`COLLISION: #${issue} choca con ${collisions.map((c) => `#${c.n}[${c.tokens.join(',')}]`).join(' ')}`, 1)
+  // F13/H2: el estado de cada colisionante viaja en el mensaje. Desde que
+  // `in-review` también retiene tokens, "choca con #7" ya no implica que haya
+  // un agente vivo en #7 — y el remedio es distinto (mergear el PR, no
+  // esperar). Sin el estado, los dos casos son indistinguibles en la salida.
+  const detalle = collisions.map((c) => `#${c.n}[${c.tokens.join(',')}${c.status ? ` ${c.status}` : ''}]`).join(' ')
+  const hayReview = collisions.some((c) => c.status === 'status:in-review')
+  const nota = hayReview
+    ? ' — los marcados status:in-review tienen su trabajo entregado pero SIN MERGEAR: retienen sus tokens hasta el merge (ramificar ahora daría una base sin ese trabajo) y no hay ningún agente en ellos, así que esperar no sirve: mergea su PR, ciérralo como completed si el PR ya se mergeó, o reábrelo con --reopen si la revisión lo rechazó.'
+    : ''
+  dieErr(`COLLISION: #${issue} choca con ${detalle}${nota}`, 1)
 }
 
 // HOOK DE PRUEBA — CT_CLAIM_PRECLAIM_DELAY_MS.

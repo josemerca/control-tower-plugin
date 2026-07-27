@@ -54,6 +54,9 @@ describe('dispatch-check.mjs — el diagnóstico COLLISION no se trunca aunque s
     expect(r.out).toMatch(/^COLLISION: #5 choca con/)
     // El último issue de la lista es el candidato más probable a perderse
     // si algo se trunca — debe seguir estando presente, íntegro.
-    expect(r.out).toMatch(new RegExp(`#${1000 + N}\\[touches:db\\]`))
+    // F13/H2: cada colisionante lleva ahora su status dentro del corchete
+    // (`#N[touches:db status:in-progress]`) — "choca con #N" ya no implica que
+    // haya un agente vivo ahí, y el remedio depende de cuál de los dos sea.
+    expect(r.out).toMatch(new RegExp(`#${1000 + N}\\[touches:db status:in-progress\\]`))
   })
 })
