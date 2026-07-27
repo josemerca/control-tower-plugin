@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseState, parseStateSafe, renderState, composeHydration, readBlocked, blockNotice, fieldReadingGuide, shouldBlockStop } from '../scripts/state.js'
+import { parseState, parseStateSafe, renderState, composeHydration, readBlocked, blockNotice, fieldReadingGuide, describeStopRelation, classifyStopState } from '../scripts/state.js'
 
 const SAMPLE = `---
 task: "OAuth login"
@@ -329,17 +329,140 @@ describe('blockNotice', () => {
   })
 })
 
-describe('shouldBlockStop', () => {
-  it('bloquea si HEAD avanzó más allá del STATE', () => {
-    expect(shouldBlockStop({ headSha: 'def', stateSha: 'abc' })).toBe(true)
+// F12: `shouldBlockStop` comparaba los dos SHA por igualdad y quien lo usaba
+// afirmaba «hay commits más nuevos» — una ancestría que la igualdad no
+// comprueba. Lo sustituyen `describeStopRelation` (le pregunta a git) y
+// `classifyStopState` (decide y redacta).
+const HEAD = 'a'.repeat(40)
+const OTHER = 'b'.repeat(40)
+
+// Runner de mentira: `plan` mapea la primera palabra del subcomando a la
+// respuesta, para poder probar cada rama sin montar un repo. Los tests de
+// integración contra git de verdad están en __tests__/stop.test.js.
+function fakeGit(plan) {
+  return (args) => {
+    const key = args[0] === 'merge-base' && args[1] === '--is-ancestor'
+      ? `is-ancestor:${args[2]}:${args[3]}`
+      : args[0]
+    const v = plan[key]
+    if (v === undefined) return { status: 1, stdout: '' }
+    return typeof v === 'number' ? { status: v, stdout: '' } : { status: 0, stdout: v }
+  }
+}
+
+describe('describeStopRelation', () => {
+  const rel = (lastCommit, plan, branch = 'main') =>
+    describeStopRelation({ headSha: HEAD, lastCommit, git: fakeGit(plan), branch })
+
+  it('sin last_commit → unset', () => {
+    expect(rel(null, {}).kind).toBe('unset')
+    expect(rel('', {}).kind).toBe('unset')
+    expect(rel('   ', {}).kind).toBe('unset')
   })
-  it('no bloquea si están a la par', () => {
-    expect(shouldBlockStop({ headSha: 'abc', stateSha: 'abc' })).toBe(false)
+  it('un valor que git no resuelve → unresolvable (y no se inventa un SHA)', () => {
+    const r = rel('sha_viejo', { 'rev-parse': 1 })
+    expect(r.kind).toBe('unresolvable')
+    expect(r.stateSha).toBe('')
+    expect(r.raw).toBe('sha_viejo')
   })
-  it('no bloquea sin STATE previo', () => {
-    expect(shouldBlockStop({ headSha: 'def', stateSha: '' })).toBe(false)
+  it('un valor con pinta de opción de git ni siquiera llega a git', () => {
+    let llamado = false
+    const r = describeStopRelation({
+      headSha: HEAD, lastCommit: '--output=pwned', branch: 'main',
+      git: () => { llamado = true; return { status: 0, stdout: HEAD } },
+    })
+    expect(r.kind).toBe('unresolvable')
+    expect(llamado).toBe(false)
   })
-  it('anti-bucle: no bloquea si stop_hook_active', () => {
-    expect(shouldBlockStop({ headSha: 'def', stateSha: 'abc', stopHookActive: true })).toBe(false)
+  it('mismo commit → same', () => {
+    expect(rel(HEAD, { 'rev-parse': HEAD }).kind).toBe('same')
+  })
+  it('ancestro de HEAD → behind, con el número de commits contado por git', () => {
+    const r = rel(OTHER, { 'rev-parse': OTHER, [`is-ancestor:${OTHER}:${HEAD}`]: 0, 'rev-list': '3\n' })
+    expect(r.kind).toBe('behind')
+    expect(r.count).toBe(3)
+  })
+  it('HEAD es ancestro del state → ahead', () => {
+    const r = rel(OTHER, {
+      'rev-parse': OTHER,
+      [`is-ancestor:${OTHER}:${HEAD}`]: 1,
+      [`is-ancestor:${HEAD}:${OTHER}`]: 0,
+      branch: 'otra\nmain\n',
+    })
+    expect(r.kind).toBe('ahead')
+    expect(r.containers).toEqual(['otra'])
+  })
+  it('sin ancestría en ninguna dirección → diverged, con merge-base y rama que lo contiene', () => {
+    const r = rel(OTHER, {
+      'rev-parse': OTHER,
+      [`is-ancestor:${OTHER}:${HEAD}`]: 1,
+      [`is-ancestor:${HEAD}:${OTHER}`]: 1,
+      branch: 'polish-v2-geometria\n',
+      'merge-base': 'c'.repeat(40),
+    })
+    expect(r.kind).toBe('diverged')
+    expect(r.containers).toEqual(['polish-v2-geometria'])
+    expect(r.mergeBase).toBe('c'.repeat(40))
+  })
+  it('git falla al responder la ancestría (código != 0/1) → unknown, no se supone nada', () => {
+    const r = rel(OTHER, { 'rev-parse': OTHER, [`is-ancestor:${OTHER}:${HEAD}`]: -1 })
+    expect(r.kind).toBe('unknown')
+  })
+})
+
+describe('classifyStopState', () => {
+  const verdict = (kind, extra = {}) =>
+    classifyStopState({ relation: { kind, headSha: HEAD, stateSha: OTHER, branch: 'main', count: 0, containers: [], raw: '', ...extra }, stopHookActive: false })
+
+  it('behind bloquea y dice cuántos commits hay, porque los ha contado', () => {
+    const v = verdict('behind', { count: 2 })
+    expect(v.block).toBe(true)
+    expect(v.reason).toMatch(/2 commits/)
+    expect(v.reason).toMatch(/`blocked`/)
+  })
+  it('behind con un solo commit no dice "1 commits"', () => {
+    expect(verdict('behind', { count: 1 }).reason).toMatch(/hay 1 commit en/)
+  })
+  it('unresolvable bloquea, cita el valor y NO afirma que sea más viejo', () => {
+    const v = verdict('unresolvable', { raw: 'sha_viejo', stateSha: '' })
+    expect(v.block).toBe(true)
+    expect(v.reason).toMatch(/sha_viejo/)
+    expect(v.reason).not.toMatch(/más nuevos|más viejo/)
+    expect(v.reason).toMatch(/`blocked`/)
+  })
+  it('same y unset no dicen nada', () => {
+    for (const k of ['same', 'unset']) {
+      expect(verdict(k)).toMatchObject({ block: false, reason: '', systemMessage: '' })
+    }
+  })
+  it('ahead no bloquea pero avisa, y desaconseja reapuntar last_commit', () => {
+    const v = verdict('ahead')
+    expect(v.block).toBe(false)
+    expect(v.systemMessage).toMatch(/DESCENDIENTE de HEAD/)
+    expect(v.systemMessage).toMatch(/hacia atrás/)
+  })
+  it('diverged no bloquea, explica por qué, y nombra la salida (un STATE.md por worktree)', () => {
+    const v = verdict('diverged', { containers: ['polish-v2-geometria'], mergeBase: 'c'.repeat(40) })
+    expect(v.block).toBe(false)
+    expect(v.systemMessage).toMatch(/divergentes/)
+    expect(v.systemMessage).toMatch(/polish-v2-geometria/)
+    expect(v.systemMessage).toMatch(/ct-next/)
+    expect(v.systemMessage).not.toMatch(/más nuevos/)
+  })
+  it('unknown no bloquea y admite que no sabe', () => {
+    const v = verdict('unknown')
+    expect(v.block).toBe(false)
+    expect(v.systemMessage).toMatch(/no ha podido determinar/)
+  })
+  it('anti-bucle: con stop_hook_active no bloquea NI avisa, sea cual sea el caso', () => {
+    for (const kind of ['behind', 'unresolvable', 'diverged', 'ahead', 'unknown']) {
+      const v = classifyStopState({ relation: { kind, headSha: HEAD, stateSha: OTHER, count: 9 }, stopHookActive: true })
+      expect(v).toMatchObject({ block: false, reason: '', systemMessage: '' })
+    }
+  })
+  it('HEAD desprendido: no se inventa una rama', () => {
+    const v = verdict('behind', { count: 1, branch: '' })
+    expect(v.reason).toMatch(/desprendido/)
+    expect(v.reason).not.toMatch(/rama `/)
   })
 })
