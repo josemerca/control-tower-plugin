@@ -415,23 +415,26 @@ function loadIssues() {
   return buildDispatchInput(raw, closed)
 }
 
-// formatOrderCollisions / la guarda de abajo (D1 finding 1, el más grave del
-// hardening del dispatch): `orderCollisions` (gh-issue-map.js#buildOrderIndex,
-// vía buildDispatchInput) es no-vacío cuando dos issues DISTINTOS comparten
-// el mismo `<!-- ct-order:N -->` dentro del MISMO epic (mismo milestone, o
-// ambos sin milestone) — un re-groom accidental, o dos epics que comparten
-// milestone por error (p.ej. ninguno pasó `--milestone` y los dos cayeron en
-// el título por defecto "Epic"). Esto se comprueba ANTES de intentar
-// seleccionar nada: con el índice de orden en este estado, CUALQUIER
-// traducción de `merge-after #N` en ese epic es sospechosa (no solo la del
-// slice que causó la colisión) — abortamos el batch entero en vez de
-// arriesgarnos a despachar contra la dependencia equivocada, que es
-// exactamente el bug que este finding describe (nada se imprimía).
+// formatOrderCollisions (D1 finding 1, el más grave del hardening del
+// dispatch — endurecido en la review, finding 4): `orderCollisions`
+// (gh-issue-map.js#buildOrderIndex, vía buildDispatchInput) es no-vacío
+// cuando dos issues DISTINTOS comparten el mismo `<!-- ct-order:N -->`
+// dentro del MISMO epic (mismo milestone, o ambos sin milestone) — un
+// re-groom accidental, o dos epics que comparten milestone por error (p.ej.
+// ninguno pasó `--milestone` y los dos cayeron en el título por defecto
+// "Epic"). Rehusar a resolver esto en silencio sigue siendo la dirección
+// correcta — lo que YA NO hace este wrapper es abortar el batch ENTERO: el
+// epic afectado ya viene EXCLUIDO de `issues` (buildDispatchInput, mismo
+// motivo documentado ahí — con el orden indexado también sobre cerrados,
+// una colisión que viviera solo entre issues mergeados hace tiempo
+// ladrillaba el repo COMPLETO para siempre). Aquí solo queda avisar, SIEMPRE
+// (nunca en silencio), de qué epic quedó fuera y por qué, mientras el resto
+// del repo se despacha con normalidad.
 function formatOrderCollisions(collisions) {
   return collisions.map((c) => {
     const epicLabel = c.epicKey === NO_MILESTONE_KEY ? 'issues sin milestone asignado' : `el milestone #${c.epicKey}`
-    return `  - orden ${c.order} en ${epicLabel}: aparece en más de un issue (${c.issues.map((n) => `#${n}`).join(', ')}) — el marcador <!-- ct-order:${c.order} --> está duplicado. ¿Re-groom accidental sobre el mismo milestone, o dos epics compartiendo milestone por no haber pasado --milestone?`
-  }).join('\n')
+    return `aviso: colisión de orden — el marcador <!-- ct-order:${c.order} --> aparece en más de un issue de ${epicLabel} (${c.issues.map((n) => `#${n}`).join(', ')}). Ese epic queda EXCLUIDO de esta tanda (ni se despacha ni cuenta en vuelo) hasta que se corrija — el resto del repo se despacha con normalidad. ¿Re-groom accidental sobre el mismo milestone, o dos epics compartiendo milestone por no haber pasado --milestone?`
+  })
 }
 
 // formatStatusAmbiguityWarnings (D1 finding 3): un aviso, SIEMPRE impreso
@@ -447,21 +450,38 @@ function formatStatusAmbiguityWarnings(issues) {
     .map((i) => `aviso: #${i.n} tiene más de una label "status:" a la vez (${(i.statusLabels || []).map((s) => `status:${s}`).join(', ')}) — probablemente una edición a medias. Resuelto de forma conservadora a "status:${i.status}" (in-progress > in-review > ready > backlog), sin depender del orden en que gh/GitHub devuelve las labels. Corrige las labels a mano para dejar solo una.`)
 }
 
+// formatStrayDepsWarnings (D1 finding 1, seguimiento de review): estrechar
+// el dominio de deps del dispatcher a "## Dependencias" (D1 finding 2) abrió
+// una puerta que `main` mantenía cerrada — verificado por la review con el
+// mismo fixture en ambos sentidos: un `merge-after #N` fuera de la sección
+// (p.ej. bajo "## Descripción") YA NO gatea el dispatch. Es el estrechamiento
+// correcto y deseado, pero antes de este aviso era invisible — un issue se
+// despachaba en silencio sin que nadie supiera que su dependencia
+// pretendida vive en el sitio equivocado y dejó de contar. gh-issue-map.js#mapGhIssue
+// expone `strayDeps` para esto exactamente; este aviso nunca bloquea el
+// dispatch (la decisión de estrechar el dominio ya está tomada y es
+// correcta) — solo informa.
+function formatStrayDepsWarnings(issues) {
+  return issues
+    .filter((i) => (i.strayDeps || []).length > 0)
+    .map((i) => `aviso: #${i.n} tiene "merge-after ${i.strayDeps.map((d) => `#${d}`).join(', ')}" fuera de la sección "## Dependencias" — desde el hardening del dispatch, esto YA NO cuenta como dependencia real (se despacha igual). Si se pretendía como tal, muévelo dentro de la sección "## Dependencias", o bórralo si ya no aplica.`)
+}
+
 const dispatchInput = loadIssues()
 const { issues, mergedIssues } = dispatchInput
 // `orderCollisions` solo existe en la ruta real (buildDispatchInput) — el
 // fixture de test (CT_NEXT_FIXTURE) ya trae issues pre-mapeados y no pasa
-// por ese cálculo; `|| []` lo trata como "sin colisiones" en ese caso.
+// por ese cálculo; `|| []` lo trata como "sin colisiones" en ese caso. Nunca
+// aborta (ver el comentario de formatOrderCollisions): `issues` ya viene
+// filtrado por buildDispatchInput, así que estos avisos son puramente
+// informativos — console.log, no console.error, mismo criterio que el
+// resto de líneas informativas de este fichero (rama base resuelta, en
+// vuelo, motivo de bloqueo): console.error se reserva para lo que aborta
+// con exit != 0.
 const orderCollisions = dispatchInput.orderCollisions || []
-if (orderCollisions.length) {
-  console.error(`no se puede decidir el dispatch: el índice de orden (<!-- ct-order:N -->) tiene colisiones sin resolver — esto NUNCA se resuelve en silencio (ver D1 finding 1):\n${formatOrderCollisions(orderCollisions)}\nRevisa los issues señalados en GitHub (marcador ct-order y milestone) y corrígelos antes de reintentar. No se ha creado ningún worktree ni reclamado ningún issue.`)
-  process.exit(1)
-}
-// console.log (no console.error): este aviso convive con una corrida que
-// sigue exit 0 — mismo criterio que el resto de líneas informativas de este
-// fichero (rama base resuelta, en vuelo, motivo de bloqueo): console.error
-// aquí se reserva para lo que aborta con exit != 0.
+for (const w of formatOrderCollisions(orderCollisions)) console.log(w)
 for (const w of formatStatusAmbiguityWarnings(issues)) console.log(w)
+for (const w of formatStrayDepsWarnings(issues)) console.log(w)
 // planDispatch (dispatch.js) es quien decide TODO lo que antes se hacía aquí
 // a medias: antes este wrapper llamaba a selectNext con `runningTouches: []`
 // hardcodeado, así que dos invocaciones sucesivas de /ct-next --cap 1 nunca

@@ -161,6 +161,34 @@ describe('ct-next — aviso de status: ambiguo (D1 finding 3)', () => {
   })
 })
 
+// Review de D1, finding 1 (parte "falta el aviso"): estrechar el dominio de
+// deps a "## Dependencias" (D1 finding 2) abrió una puerta que `main`
+// mantenía cerrada — un `merge-after #N` fuera de la sección ya no gatea el
+// dispatch (correcto y deseado), pero antes de este fix nada lo decía. El
+// aviso usa la MISMA forma que el de statusAmbiguous (arriba): siempre
+// impreso (console.log, no console.error — no aborta nada), listando el
+// issue y la referencia ignorada.
+describe('ct-next — aviso de deps fuera de la sección "## Dependencias" (D1 finding 1, seguimiento de review)', () => {
+  it('un issue con strayDeps:[1] produce un aviso explícito nombrando el issue y la referencia ignorada', () => {
+    const fx = JSON.stringify({
+      issues: [{ n: 8, order: 2, status: 'ready', deps: [], strayDeps: [1], touches: [], name: 'x', type: 'backend' }],
+      mergedIssues: [],
+    })
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fx })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/#8/)
+    expect(r.out).toMatch(/#1/)
+    expect(r.out).toMatch(/Dependencias/)
+    expect(r.out).toMatch(/avis/i)
+  })
+
+  it('sin ningún strayDeps → sin aviso', () => {
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE })
+    expect(r.code).toBe(0)
+    expect(r.out).not.toMatch(/avis/i)
+  })
+})
+
 // W-B (§8): un mensaje único ("nada ready con deps mergeadas y sin colisión")
 // obligaba a adivinar entre cuatro causas con remedios distintos. Cada test
 // de abajo fija, contra el wrapper real (vía CT_NEXT_FIXTURE), el mensaje
@@ -741,7 +769,20 @@ describe('ct-next — D1 finding 1: alcance del orden por epic (milestone), cami
     expect(r.out).not.toContain('slice #8')
   })
 
-  it('si dos epics comparten milestone por error (p.ej. ninguno pasó --milestone) → aborta antes de decidir nada, mensaje explícito, ningún worktree creado', () => {
+  // Review de D1, finding 4: el aborto ANTERIOR (exit 1, batch entero) tenía
+  // un radio demasiado ancho — una colisión de orden solo hace sospechoso el
+  // EPIC en el que vive, pero bloqueaba TODO el repo, incluidos epics sanos
+  // y sin ninguna relación. Peor: como buildOrderIndex indexa también los
+  // CERRADOS, una colisión que solo exista entre issues mergeados hace
+  // tiempo (un epic ya terminado, del que a nadie le importa nada hoy)
+  // ladrillaría el repo ENTERO para siempre, sin más remedio que editar
+  // GitHub a mano. Abortar en vez de resolver en silencio sigue siendo la
+  // dirección correcta — lo que cambia es el RADIO: ahora solo el/los
+  // epic(s) cuyo propio orden colisiona quedan excluidos de la selección
+  // (ni se despachan ni cuentan en vuelo) — el resto del repo se despacha
+  // con normalidad, exit 0, con un aviso explícito de qué epic quedó fuera y
+  // por qué.
+  it('si dos epics comparten milestone por error → SOLO ese epic queda excluido de la tanda (aviso explícito), un epic sano y sin relación se despacha con normalidad', () => {
     const repoRoot = mkdtempSync(join(tmpdir(), 'ct-next-collision-'))
     dirs.push(repoRoot)
     const counterFile = join(repoRoot, 'gh-list-count')
@@ -753,16 +794,84 @@ describe('ct-next — D1 finding 1: alcance del orden por epic (milestone), cami
       number: 8, title: '#8 b', labels: [{ name: 'status:ready' }],
       milestone: { number: 100 }, body: '<!-- ct-order:1 -->', // MISMO milestone, MISMO orden, issue distinto
     }
+    // Epic totalmente sano y sin relación (milestone 300): tiene que
+    // despacharse igual, sin que la colisión de otro epic lo bloquee.
+    const openIssue20 = {
+      number: 20, title: '#20 sano', labels: [{ name: 'status:ready' }],
+      milestone: { number: 300 }, body: '<!-- ct-order:1 -->',
+    }
+    const r = runReal(['--repo', 'o/r', '--cap', '5', '--dry-run'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue7, openIssue8, openIssue20], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+    })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/colisi[oó]n/i)
+    expect(r.out).toMatch(/#7/)
+    expect(r.out).toMatch(/#8/)
+    expect(r.out).toMatch(/avis/i)
+    // #7/#8 (el epic colisionado) nunca se despachan...
+    expect(r.out).not.toContain('slice #7')
+    expect(r.out).not.toContain('slice #8')
+    // ...pero #20 (epic sano, sin ninguna relación) SÍ, sin que la colisión
+    // ajena se lo impida.
+    expect(r.out).toContain('slice #20')
+  })
+
+  // Reproducción del escenario que preocupaba a la review: la colisión vive
+  // SOLO entre issues YA CERRADOS de un epic viejo y terminado — nadie tiene
+  // trabajo pendiente ahí. Un epic nuevo, sano, sin relación, tiene que
+  // despacharse con total normalidad; el aviso de la colisión histórica
+  // puede seguir imprimiéndose (información real), pero nunca debe impedir
+  // nada del resto del repo.
+  it('una colisión que vive SOLO entre issues cerrados hace tiempo no bloquea un epic nuevo y sano', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'ct-next-collision-closed-'))
+    dirs.push(repoRoot)
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const closedIssueOld1 = { number: 50, state_reason: 'completed', milestone: { number: 100 }, body: '<!-- ct-order:1 -->' }
+    const closedIssueOld2 = { number: 51, state_reason: 'completed', milestone: { number: 100 }, body: '<!-- ct-order:1 -->' } // mismo (epic,orden) que #50 → colisión histórica
+    const openIssueNew = {
+      number: 60, title: '#60 nuevo y sano', labels: [{ name: 'status:ready' }],
+      milestone: { number: 400 }, body: '<!-- ct-order:1 -->',
+    }
+    const r = runReal(['--repo', 'o/r', '--cap', '5', '--dry-run'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssueNew], [closedIssueOld1, closedIssueOld2]]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+    })
+    expect(r.code).toBe(0)
+    expect(r.out).toContain('slice #60')
+  })
+
+  // Reproducción EXACTA de la review para el finding 1 (parte "falta el
+  // aviso"): #8 depende, por texto, de un `#1` escrito bajo "## Descripción"
+  // en vez de "## Dependencias" — el estrechamiento (D1 finding 2) hace que
+  // ya no cuente como dependencia real, así que #7 Y #8 se despachan los dos
+  // (decisión correcta, sin cambios), pero AHORA se avisa explícitamente de
+  // que la referencia de #8 fuera de sección se ignoró.
+  it('merge-after fuera de "## Dependencias" (bajo "## Descripción") → ambos #7 y #8 se despachan igual (estrechamiento correcto), pero se avisa de la referencia ignorada', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'ct-next-straydeps-'))
+    dirs.push(repoRoot)
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const openIssue7 = {
+      number: 7, title: '#7 cimiento', labels: [{ name: 'status:ready' }],
+      milestone: { number: 200 }, body: '<!-- ct-order:1 -->',
+    }
+    const openIssue8 = {
+      number: 8, title: '#8 encima', labels: [{ name: 'status:ready' }],
+      milestone: { number: 200 },
+      body: '## Descripción\nhace referencia a merge-after #1 pero no en la sección correcta\n\n<!-- ct-order:2 -->',
+    }
     const r = runReal(['--repo', 'o/r', '--cap', '5', '--dry-run'], {
       FAKE_GIT_TOPLEVEL: repoRoot,
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue7, openIssue8], []]),
       FAKE_GH_COUNTER_FILE: counterFile,
     })
-    expect(r.code).toBe(1)
-    expect(r.out).toMatch(/colisi[oó]n/i)
-    expect(r.out).toMatch(/#7/)
+    expect(r.code).toBe(0)
+    expect(r.out).toContain('slice #7')
+    expect(r.out).toContain('slice #8') // el estrechamiento es correcto: NO se bloquea
+    expect(r.out).toMatch(/avis/i)
     expect(r.out).toMatch(/#8/)
-    expect(r.out).not.toContain('git worktree add')
-    expect(existsSync(join(repoRoot, '.worktrees'))).toBe(false)
+    expect(r.out).toMatch(/Dependencias/)
   })
 })

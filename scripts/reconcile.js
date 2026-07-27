@@ -85,7 +85,7 @@
 // del plan, e imprime/ejecuta lo que le devuelven — ninguna decisión de
 // negocio vive en el wrapper.
 import {
-  extractAc, extractDeps, extractDepsInSection, extractSectionContent, locateSection, locateLine,
+  extractAc, extractDepsInSection, extractStrayDeps, extractSectionContent, locateSection, locateLine,
   extractSpecLink, specLinkAnchor, countHeadingLines, detectLineEnding, normalizeToLF,
   AC_HEADING_FORMS,
 } from './gh-issue-map.js'
@@ -287,9 +287,12 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
   // — desde D1, texto inerte para todo el mundo (ni el dispatcher ni
   // --reconcile lo obedecen); se reporta igual, sin importar si también
   // coinciden o no con lo que el spec pide (eso ya lo cubre `deps` arriba).
-  const wholeBodyDeps = new Set(extractDeps(body))
-  const sectionDepsSet = new Set(currentDeps)
-  const strayDeps = [...wholeBodyDeps].filter((d) => !sectionDepsSet.has(d)).sort((a, b) => a - b)
+  // `extractStrayDeps` (gh-issue-map.js) es la MISMA función que
+  // mapGhIssue usa para exponer esto en la ruta del dispatcher (D1, review:
+  // "expón las deps fuera de sección desde mapGhIssue" — ya tienes la
+  // forma hecha aquí, es la misma) — una sola implementación, no dos que
+  // puedan divergir.
+  const strayDeps = extractStrayDeps(body, currentDeps)
 
   return {
     order: wantedIssue.order,
