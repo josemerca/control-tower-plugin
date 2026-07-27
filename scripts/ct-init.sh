@@ -618,3 +618,35 @@ else
   emit_slices_contract >> "$AGENTS_MD"
   echo "añadida sección §9 (contrato /ct-groom v$SLICES_CONTRACT_VERSION) a $AGENTS_MD"
 fi
+
+# F11, parte B: hasta ahora ct-init bootstrapeaba ENCIMA de las convenciones
+# que el repo ya tuviera, sin enterarse. El caso real (menoplus): el repo ya
+# traía `scripts/dispatch-check.sh` con su línea en AGENTS.md mandando
+# ejecutarlo, y una convención `git worktree add .claude/worktrees/<slug>` con
+# un hook que la vigila. El plugin trae SU PROPIO dispatch-check.mjs y usa
+# `.worktrees/<n>`/`feat/<n>`, y esta sección se escribió al lado de la que ya
+# había: el AGENTS.md acabó contradiciéndose en dos sitios, y dos protocolos de
+# claim quedaron operando sobre el mismo espacio de labels sin nadie que
+# arbitre. Eso no puede volver a pasar EN SILENCIO.
+#
+# Se AVISA, no se aborta ni se cambia nada: la decisión (cuál de los dos manda)
+# es del usuario y no hay ninguna que ct-init pueda tomar por él sin romper algo.
+# Por eso también sigue saliendo 0 — el bootstrap ha hecho su trabajo.
+#
+# La detección vive en node (scripts/conventions.js, lógica pura + tests) y no
+# aquí, para que ct-next.mjs pueda usar EXACTAMENTE la misma y los dos avisos no
+# puedan divergir. Si node no está, o el escaneo falla, se dice: un silencio
+# aquí sería indistinguible de "repo limpio", y ese es justo el falso negativo
+# que cuesta un deadlock.
+CONV_STATUS=0
+CONV_OUT=''
+if command -v node >/dev/null 2>&1; then
+  CONV_OUT="$(node "$HERE/scripts/detect-conventions.mjs" "$TARGET" 2>/dev/null)" || CONV_STATUS=$?
+else
+  CONV_STATUS=127
+fi
+if [ "$CONV_STATUS" -ne 0 ]; then
+  echo "aviso: no se ha podido comprobar si este repo ya tiene convenciones propias (claim, worktrees, fichero de estado) que choquen con las del loop — la comprobación necesita \`node\` y no se ha podido ejecutar (estado $CONV_STATUS). NO lo leas como \"no hay ninguna\": no se ha mirado. Si este repo ya traía su propio script de claim o su propia ruta de worktrees, revísalo a mano antes de correr /ct-next." >&2
+elif [ -n "$CONV_OUT" ]; then
+  printf '%s\n' "$CONV_OUT" >&2
+fi
