@@ -107,6 +107,43 @@ describe('mapGhIssue + groom.js#buildIssueBody — ata las dos piezas (detecta d
 // casualidad, orden == número de issue (que es exactamente lo que pasaba en
 // TODOS los fixtures previos de la suite, por eso el bug nunca se detectó
 // aquí). Ver gh-issue-map.js#buildDispatchInput.
+// F6, grave 1: el formato de la referencia de dependencia cambia de "#N"
+// desnudo a código inline ("`#N`") para que GitHub deje de autoenlazarla al
+// issue N (verificado contra la API real, ver groom.test.js). Los issues YA
+// CREADOS con el formato viejo siguen existiendo en repos reales — el lector
+// tiene que entender LOS DOS, para siempre. Decisión explícita: NO se migran
+// (nadie reescribe bodies existentes solo por esto); un body viejo solo
+// adopta el formato nuevo si --reconcile ya iba a reescribir esa sección por
+// una divergencia real.
+describe('extractDeps / extractDepsInSection — formato nuevo (`#N`) y viejo (#N) se leen igual (F6, grave 1)', () => {
+  it('extractDeps lee la referencia entre backticks', () => {
+    expect(extractDeps('- merge-after `#3`')).toEqual([3])
+  })
+  it('extractDeps sigue leyendo el formato viejo, sin backticks (issues ya creados)', () => {
+    expect(extractDeps('- merge-after #3')).toEqual([3])
+  })
+  it('extractDeps lee un body mixto (una sección editada a mano con las dos formas)', () => {
+    expect(extractDeps('- merge-after `#3`\n- merge-after #4')).toEqual([3, 4])
+  })
+  it('la sección generada hoy no es "malformed": la nota de orden no introduce ninguna referencia sin capturar', () => {
+    const body = buildIssueBody({ n: 5, name: 'x', ac: ['AC-5.1'], deps: [1, 2], protected: '–' }, { specPath: 'spec.md', specSection: '9' })
+    expect(extractDepsInSection(body)).toEqual({ deps: [1, 2], malformed: false })
+  })
+  it('un body con el formato VIEJO sigue mapeando igual por el camino de producción (mapGhIssue)', () => {
+    const legacyBody = [
+      '> Slice #5 del epic. Spec: [spec.md#9](spec.md#9)', '',
+      '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-5.1', '',
+      '## Dependencias', '- merge-after #1', '- merge-after #2', '',
+      '## Out of scope / Protected', '- (ninguno declarado)', '',
+      '<!-- ct-order:5 -->',
+    ].join('\n')
+    const mapped = mapGhIssue({ number: 60, title: '#60 x', labels: [{ name: 'status:ready' }], body: legacyBody })
+    expect(mapped.deps).toEqual([1, 2])
+    expect(mapped.depsMalformed).toBe(false)
+    expect(mapped.strayDeps).toEqual([])
+  })
+})
+
 describe('extractOrder', () => {
   it('lee el marcador ct-order:N', () => expect(extractOrder('x\n<!-- ct-order:2 -->')).toBe(2))
   it('sin marcador → null', () => expect(extractOrder('sin marcador')).toBeNull())
@@ -972,6 +1009,19 @@ describe('extractSpecLink — la línea "> Slice #N del epic. Spec: …" (review
   it('una mención citada/indentada no cuenta como la línea real', () => {
     const body = '> algo más\n  > Slice #9 no es la línea real (indentada)\n> Slice #2 del epic. Spec: [x#9](x#9)'
     expect(extractSpecLink(body)).toBe('> Slice #2 del epic. Spec: [x#9](x#9)')
+  })
+  // F6, grave 1: el orden pasa a ir entre backticks también en esta línea (el
+  // `body_html` real del issue #4 del sandbox demuestra que GitHub enlazaba
+  // ese "#3" al issue #3). Los dos formatos tienen que localizarse: los
+  // issues viejos no se reescriben.
+  it('localiza también la línea con el orden entre backticks (formato F6)', () => {
+    const body = '> Slice `#2` del epic. Spec: [docs/spec.md#9](docs/spec.md#9)\n\n## Acceptance criteria\n- AC-1.1'
+    expect(extractSpecLink(body)).toBe('> Slice `#2` del epic. Spec: [docs/spec.md#9](docs/spec.md#9)')
+    expect(specLinkAnchor(extractSpecLink(body))).toBe('9')
+  })
+  it('una línea "> Slice …" que no cita ningún orden no se confunde con el enlace al spec', () => {
+    const body = '> Slice pendiente de negociar con Ana\n> Slice `#2` del epic. Spec: [x#9](x#9)'
+    expect(extractSpecLink(body)).toBe('> Slice `#2` del epic. Spec: [x#9](x#9)')
   })
 })
 

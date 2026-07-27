@@ -1175,3 +1175,71 @@ describe('analyzeSlicesTable/parseSlices — "Slice" alimenta slice.name (títul
     expect(r.slices[0].entrega).toBe('modelo de sesión')
   })
 })
+
+// F6, importante 3: el contrato dice "Acepta: criterios coma-separados" y no
+// avisa de que una coma DENTRO de un criterio lo trocea en silencio. Y la
+// cabecera de la sección que genera es literalmente "Acceptance criteria
+// (EARS, 1:1 con tests)": la sintaxis EARS ("Cuando <trigger>, el sistema
+// debe <respuesta>") lleva coma casi siempre, así que no es un caso raro —
+// es la forma natural de escribir esta columna. Se soporta un escape (`\,`)
+// y se declara en el contrato (ct-init.sh).
+describe('analyzeSlicesTable — "Acepta": coma escapada (\\,) NO trocea el criterio (F6, importante 3)', () => {
+  it('una coma escapada se conserva como parte del criterio, y no cuenta como separador', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | login | backend | x | – | Cuando el token caduca\\, el sistema pide login | – |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.slices[0].ac).toEqual(['Cuando el token caduca, el sistema pide login'])
+  })
+  it('coma SIN escapar sigue separando criterios (comportamiento de siempre)', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | login | backend | x | – | AC-1.1, AC-1.2 | – |
+`
+    expect(analyzeSlicesTable(spec).slices[0].ac).toEqual(['AC-1.1', 'AC-1.2'])
+  })
+  it('mezcla: separadores reales + una coma escapada dentro de un criterio', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | login | backend | x | – | AC-1.1, Cuando A\\, entonces B, AC-1.3 | – |
+`
+    expect(analyzeSlicesTable(spec).slices[0].ac).toEqual(['AC-1.1', 'Cuando A, entonces B', 'AC-1.3'])
+  })
+  it('una barra invertida que no precede a una coma se conserva tal cual (no se come el escape de nadie)', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | login | backend | x | – | ruta C:\\Users existe | – |
+`
+    expect(analyzeSlicesTable(spec).slices[0].ac).toEqual(['ruta C:\\Users existe'])
+  })
+  // Las OTRAS celdas que el contrato llama "coma-separadas" (comprobado
+  // columna por columna, F6): "Protegido" NO se trocea por comas en absoluto
+  // (es texto libre de una sola pieza), "Dep" no se trocea tampoco (se
+  // extraen las referencias "#N" con una regex, así que una coma dentro no
+  // cambia nada), y "Área"/"Toca" SÍ se trocean pero sus valores son tokens
+  // de label donde la coma se descarta igualmente al normalizar — así que un
+  // escape ahí no significaría nada. Solo "Acepta" tenía el problema.
+  it('"Protegido" no se trocea por comas (texto libre de una pieza)', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | login | backend | x | – | AC-1.1 | schema, migraciones y CI |
+`
+    expect(analyzeSlicesTable(spec).slices[0].protected).toBe('schema, migraciones y CI')
+  })
+  it('"Dep" con comas entre referencias no depende del split: las #N se extraen igual', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
+|---|---|---|---|---|---|---|
+| 1 | a | backend | x | – | – | – |
+| 2 | b | backend | x | – | – | – |
+| 3 | c | backend | x | #1 (tras el merge), #2 | – | – |
+`
+    expect(analyzeSlicesTable(spec).slices[2].deps).toEqual([1, 2])
+  })
+})

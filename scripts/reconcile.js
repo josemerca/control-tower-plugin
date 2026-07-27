@@ -87,8 +87,17 @@
 import {
   extractAc, extractDepsInSection, extractStrayDeps, extractSectionContent, locateSection, locateLine,
   extractSpecLink, specLinkAnchor, countHeadingLines, detectLineEnding, normalizeToLF,
-  AC_HEADING_FORMS,
+  AC_HEADING_FORMS, SPEC_LINK_PREFIXES,
 } from './gh-issue-map.js'
+// F6: el CONTENIDO de "## Dependencias"/"## Acceptance criteria" lo renderiza
+// groom.js — la misma función que usa buildIssueBody al CREAR el issue. Hasta
+// F6 este fichero tenía su propia copia del formato: dos implementaciones del
+// mismo criterio que divergían en cuanto una cambiara (y F6 lo cambió: el
+// orden de slice pasa a ir entre backticks para que GitHub no lo autoenlace
+// como número de issue — un --reconcile con la copia vieja habría reescrito
+// el formato nuevo de vuelta al viejo, reintroduciendo el enlace falso en
+// cada corrida).
+import { renderDepsContent, renderAcContent } from './groom.js'
 
 // ownedLabelsOnly: el spec solo es autoridad sobre un prefijo (`type:`,
 // `area:`, `touches:`) SI la tabla §9 trae la columna que lo alimenta
@@ -385,8 +394,11 @@ export function formatDrift(diff) {
   if (diff.specLink) lines.push(`divergencia: ${head}: el enlace al spec difiere — issue: "${diff.specLink.current ?? '(ausente)'}", spec: "${diff.specLink.wanted}"`)
   for (const l of diff.labels.missing) lines.push(`divergencia: ${head}: falta la label "${l}" (la pide el spec, el issue no la tiene)`)
   for (const l of diff.labels.extra) lines.push(`divergencia: ${head}: sobra la label "${l}" (la tiene el issue, el spec ya no la produce)`)
-  for (const d of diff.deps.missing) lines.push(`divergencia: ${head}: falta la dependencia "merge-after #${d}" (la pide el spec, el issue no la tiene)`)
-  for (const d of diff.deps.extra) lines.push(`divergencia: ${head}: sobra la dependencia "merge-after #${d}" (la tiene el issue, el spec ya no la produce)`)
+  // F6: el número que se nombra aquí es el ORDEN del slice en la tabla §9,
+  // nunca un número de issue — decirlo en el propio mensaje evita que quien
+  // lee el reporte salga a buscar "el issue #3" que no tiene nada que ver.
+  for (const d of diff.deps.missing) lines.push(`divergencia: ${head}: falta la dependencia "merge-after \`#${d}\`" (orden de slice de la tabla §9, no un número de issue; la pide el spec, el issue no la tiene)`)
+  for (const d of diff.deps.extra) lines.push(`divergencia: ${head}: sobra la dependencia "merge-after \`#${d}\`" (orden de slice de la tabla §9, no un número de issue; la tiene el issue, el spec ya no la produce)`)
   for (const a of diff.ac.missing) lines.push(`divergencia: ${head}: falta el criterio de aceptación "${a}" (lo pide el spec, el issue no lo tiene)`)
   for (const a of diff.ac.extra) lines.push(`divergencia: ${head}: sobra el criterio de aceptación "${a}" (lo tiene el issue, el spec ya no lo produce)`)
   for (const section of diff.duplicateMachineSections || []) {
@@ -425,13 +437,6 @@ export function buildReconcileEditArgs(diff) {
   for (const l of diff.labels.missing) args.push('--add-label', l)
   for (const l of diff.labels.extra) args.push('--remove-label', l)
   return args
-}
-
-function renderAcContent(ac) {
-  return (ac && ac.length) ? ac.map((a) => `- ${a}`).join('\n') : '- (rellenar desde el spec)'
-}
-function renderDepsContent(deps) {
-  return (deps || []).map((d) => `- merge-after #${d}`).join('\n')
 }
 
 // buildReconcileBody: --reconcile SÍ reescribe el enlace al spec y
@@ -482,7 +487,7 @@ export function buildReconcileBody(existingBody, wantedIssue) {
   let unresolvedAc = false
   let unresolvedDeps = false
 
-  const specLinkLoc = locateLine(body, '> Slice #')
+  const specLinkLoc = locateLine(body, SPEC_LINK_PREFIXES)
   const currentSpecLink = specLinkLoc ? specLinkLoc.line : null
   if (specLinkAnchor(currentSpecLink) !== specLinkAnchor(wantedIssue.specLink)) {
     if (specLinkLoc) {

@@ -345,10 +345,17 @@ describe('formatDrift — divergencia: (cuenta) vs. nota: (no cuenta); deps/ac/s
     expect(lines[0]).toMatch(/"vieja"/)
     expect(lines[0]).toMatch(/"nueva"/)
   })
-  it('deps faltante/sobrante → una línea "divergencia:" por cada una, nombrando merge-after #N', () => {
+  // F6: la línea cita la referencia EXACTAMENTE como aparece en el body que
+  // el spec produce hoy (con backticks) y dice, además, que ese número es un
+  // orden de slice — no un número de issue. Un humano que lee "falta la
+  // dependencia merge-after #3" en el terminal no tiene forma de saber cuál
+  // de los dos espacios de IDs está mirando.
+  it('deps faltante/sobrante → una línea "divergencia:" por cada una, nombrando merge-after `#N` y que es orden de slice', () => {
     const lines = formatDrift({ ...BASE, deps: { missing: [3], extra: [4] } })
-    expect(lines.find((l) => l.includes('merge-after #3'))).toMatch(/^divergencia:.*falta/i)
-    expect(lines.find((l) => l.includes('merge-after #4'))).toMatch(/^divergencia:.*sobra/i)
+    expect(lines.find((l) => l.includes('merge-after `#3`'))).toMatch(/^divergencia:.*falta/i)
+    expect(lines.find((l) => l.includes('merge-after `#4`'))).toMatch(/^divergencia:.*sobra/i)
+    expect(lines.every((l) => /orden de slice/i.test(l))).toBe(true)
+    expect(lines.some((l) => /merge-after #\d/.test(l))).toBe(false) // nunca la forma desnuda, que sugiere un número de issue
   })
   it('ac faltante/sobrante → una línea "divergencia:" por cada una, con el texto del criterio', () => {
     const lines = formatDrift({ ...BASE, ac: { missing: ['AC-2.2'], extra: ['AC-9.9'] } })

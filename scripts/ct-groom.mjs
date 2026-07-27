@@ -3,12 +3,17 @@ import { readFileSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { analyzeSlicesTable, isNoValueCell } from './slices.js'
 import { groomPlan } from './groom.js'
-import { flattenIssuePages, realIssuesOnly, findByMarker } from './gh-issues.js'
+import { flattenIssuePages, flattenPages, realIssuesOnly, findByMarker } from './gh-issues.js'
 import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
 import { parseStrictInt } from './argnum.js'
 // extractOrder (F5, importante 4): para detectar issues huérfanos — un issue
 // con marcador ct-order:N cuyo slice N ya no está en la tabla §9 actual.
-import { extractOrder } from './gh-issue-map.js'
+// resolveStatus (F6, grave 2): el MISMO criterio con el que el dispatcher
+// decide en qué estado está un issue (incluida la precedencia cuando hay más
+// de una label `status:`, y el "sin ninguna label status: = backlog") — es lo
+// que hace verdadero, y no una suposición, el recordatorio de "esto todavía
+// no lo va a despachar nadie" que este script imprime al final.
+import { extractOrder, resolveStatus } from './gh-issue-map.js'
 // F5: capa pura de reconciliación — decide QUÉ cuenta como divergencia entre
 // un issue existente y lo que el plan produce hoy, CÓMO se reporta, y CÓMO
 // se traduce a los flags de `gh issue edit`/`--body` para aplicarla. Ver
@@ -80,6 +85,22 @@ if (reconcileFlag) {
 // título de milestone real.
 if (milestone === true || typeof milestone !== 'string' || milestone.length === 0) {
   console.error(`--milestone requiere un valor: recibido "${milestone === true ? '(sin valor)' : milestone}"`)
+  process.exit(2)
+}
+// F6 — `--section` era el único flag que quedaba sin validación de
+// call-site, y tiene exactamente el mismo agujero que tenían --milestone/
+// --project/--repo: con `--section` colgante (último token, o seguido de otro
+// flag) `arg()` devuelve el booleano `true`, y renderSpecLink escribía
+// "[spec.md#true](spec.md#true)" en el body de TODOS los issues — exit 0, sin
+// un solo aviso. Verificado ejecutándolo antes del fix. El enlace al spec es
+// la única trazabilidad issue → sección que lo originó; que apunte a un ancla
+// inexistente en cada issue creado no es cosmético.
+//
+// No se exige que sea un número: el ancla puede ser legítimamente otra cosa
+// (`--section 9-desglose-en-slices`). Lo que se rechaza es "el flag está pero
+// no trae valor" — y una cadena vacía, que produciría un ancla vacía ("#").
+if (section === true || typeof section !== 'string' || section.length === 0) {
+  console.error(`--section requiere un valor: recibido "${section === true ? '(sin valor)' : section}" — es el ancla del enlace al spec que se escribe en cada issue (p.ej. --section 9 → "spec.md#9")`)
   process.exit(2)
 }
 // Mismo criterio para --project: si se pasó el flag pero sin valor numérico
@@ -411,12 +432,35 @@ let anyReconcileGapRemains = false
 // slice de hoy) y comparando su orden contra los órdenes que la tabla §9
 // todavía declara.
 let anyOrphans = false
+// existingLabelNames (F6, menor 5): las labels que el repo YA tiene. Dos
+// motivos, ninguno cosmético:
+//   1. El contrato pide "reutiliza el vocabulario de labels que ya exista en
+//      este repo, no inventes uno nuevo por spec" — y hasta ahora nadie podía
+//      comprobar cuál era ese vocabulario ni ver, después, qué se había
+//      acabado inventando: `gh label create --force` no distingue crear de
+//      actualizar, y no imprimía nada.
+//   2. `--force` sobre una label que YA existe la REESCRIBE (color y
+//      descripción incluidos, con los que gh asigna por defecto). Creando
+//      solo las que faltan, una label que el repo ya tenía cuidada deja de
+//      cambiar de color en cada groom.
+let existingLabelNames = null
 if (typeof repo === 'string') {
   try {
     const raw = JSON.parse(gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=all', '--paginate', '--slurp']))
     existingIssues = realIssuesOnly(flattenIssuePages(raw))
   } catch (e) {
     console.error(`no se pudo listar issues de ${repo}: ${e.message}`)
+    process.exit(1)
+  }
+  try {
+    const rawLabels = JSON.parse(gh(['api', `repos/${repo}/labels`, '--method', 'GET', '--paginate', '--slurp']))
+    existingLabelNames = new Set(flattenPages(rawLabels).map((l) => l && l.name).filter(Boolean))
+  } catch (e) {
+    // Mismo criterio que el listado de issues/milestones: un fallo de lectura
+    // NO se degrada a "el repo no tiene ninguna label" — eso llevaría a
+    // reescribir con --force labels existentes y a informar de labels
+    // "nuevas" que sí existían. Se aborta con mensaje claro.
+    console.error(`no se pudieron listar las labels de ${repo}: ${e.message}`)
     process.exit(1)
   }
   const knownOrders = new Set(plan.issues.map((i) => i.order))
@@ -473,7 +517,61 @@ if (typeof repo === 'string') {
   }
 }
 
+// F6, menor 5 — labels: qué se reutiliza y qué se inventa. Se calcula ANTES
+// de la rama de --dry-run (misma información en preview y en corrida real,
+// igual que el reporte de divergencia). `newLabels` cae a "todas" cuando no
+// hay --repo con el que consultar: sin repo no se puede afirmar que ninguna
+// exista.
+const wantedLabels = [...new Set(plan.issues.flatMap((i) => i.labels))]
+const reusedLabels = existingLabelNames ? wantedLabels.filter((l) => existingLabelNames.has(l)) : []
+const newLabels = existingLabelNames ? wantedLabels.filter((l) => !existingLabelNames.has(l)) : wantedLabels
+const LABEL_VOCAB_HINT = `revisa si alguna es un sinónimo de una que ya existe (\`gh label list --repo ${typeof repo === 'string' ? repo : '<owner/repo>'}\`): la detección de colisión (area:/touches:) solo funciona si todos los specs del repo usan el MISMO vocabulario`
+// Se habla SOLO cuando hay algo que revisar — inventar vocabulario nuevo. Si
+// el plan no crea ninguna label, no hay nada que distinguir y el silencio
+// sigue significando lo que significaba (mismo criterio que el reporte de
+// divergencia de F5: silencio = nada que decidir). Sin --repo no se puede
+// afirmar nada sobre qué existe, así que tampoco se dice nada.
+function labelReportLine(verb) {
+  if (!existingLabelNames || !newLabels.length) return null
+  const reusedPart = reusedLabels.length ? ` (las demás ya existían y se reutilizan tal cual, sin tocarlas: ${reusedLabels.join(', ')})` : ''
+  return `labels ${verb} nuevas en ${repo}: ${newLabels.join(', ')}${reusedPart} — ${LABEL_VOCAB_HINT}`
+}
+// F6, grave 2 — el groom crea issues en `status:backlog` (groom.js#buildLabels)
+// y el dispatcher solo mira `status:ready`: correr /ct-groom y acto seguido
+// /ct-next producía "no hay slices despachables" sobre issues recién creados,
+// sin que nada explicara por qué. El recordatorio se ancla al ESTADO REAL de
+// los issues (resolveStatus, el mismo criterio del dispatcher), no a "acabo
+// de crear algo": un epic ya promovido entero no genera ningún ruido, y un
+// epic cuyos issues siguen en backlog lo dice aunque esta corrida no haya
+// creado nada.
+function backlogPendingCount() {
+  if (!reconcileEntries.length) return plan.issues.length // sin --repo no hay issues que consultar: todos se crearían en backlog
+  return reconcileEntries.filter(({ found }) => {
+    if (!found) return true // se creará en esta corrida, y buildLabels le pone status:backlog
+    // Un issue CERRADO no está pendiente de promoción: está hecho. Sin este
+    // filtro, un epic terminado (issues cerrados a los que nadie devolvió el
+    // label de estado) arrastraría el recordatorio para siempre en cada
+    // re-groom — un aviso que no se puede satisfacer es un aviso que enseña
+    // a ignorar los demás.
+    if (found.state === 'closed') return false
+    const names = (found.labels || []).map((l) => (typeof l === 'string' ? l : l.name))
+    return resolveStatus(names).status === 'backlog'
+  }).length
+}
+function printBacklogReminder() {
+  const pending = backlogPendingCount()
+  if (!pending) return
+  const repoRef = typeof repo === 'string' ? repo : '<owner/repo>'
+  console.error(`recordatorio: ${pending} issue(s) de este epic ${dryRun ? 'quedarían' : 'quedan'} en status:backlog — /ct-next NO despacha nada que no lleve status:ready. Promoverlos es un paso humano deliberado (es el gate del loop: decides tú qué entra en vuelo): gh issue edit <n> --repo ${repoRef} --add-label status:ready --remove-label status:backlog`)
+}
+
 if (dryRun) {
+  // Los dos mensajes de F6 van por stderr, ANTES del plan: stdout tiene que
+  // seguir siendo JSON puro y parseable (varios tests, y cualquier tubería
+  // real, dependen de eso).
+  const labelLine = labelReportLine('que se crearían')
+  if (labelLine) console.error(labelLine)
+  printBacklogReminder()
   console.log(JSON.stringify({ ...plan, repo: typeof repo === 'string' ? repo : null, project: projectNum }, null, 2))
   // Código de salida (F5): 3 para "divergencia detectada, no reconciliada" —
   // deliberadamente DISTINTO de 0 (spec e issues de acuerdo: silencio real,
@@ -631,13 +729,26 @@ if (!msNumber) {
   console.log(`milestone creado: ${milestone} (#${msNumber})`)
 } else console.log(`milestone ya existe: ${milestone} (#${msNumber})`)
 
-// labels que falten. Con --force, "ya existe" no es un error para gh (lo
-// actualiza), así que no hay caso benigno que capturar aquí: cualquier fallo
-// es real (auth, red, rate limit) y debe abortar el script en vez de dejar
-// issues sin sus labels.
-const wantedLabels = [...new Set(plan.issues.flatMap((i) => i.labels))]
-for (const l of wantedLabels) {
+// labels que falten. Cualquier fallo de gh aquí es real (auth, red, rate
+// limit) y debe abortar el script en vez de dejar issues sin sus labels.
+//
+// F6 (menor 5): solo se crean las que el repo NO tiene ya (`newLabels`,
+// calculado arriba contra el listado real de labels). Antes se llamaba a `gh
+// label create --force` para TODAS en cada corrida — y `--force` sobre una
+// label existente la reescribe con el color/descripción por defecto de gh, así
+// que un groom podía cambiarle el color a labels del repo que nadie le pidió
+// tocar. Se conserva `--force` en la creación por si otra corrida la creó
+// entre el listado y esta llamada (carrera benigna): con --force eso no es un
+// error, sin él abortaría la corrida entera.
+for (const l of newLabels) {
   gh(['label', 'create', l, '--repo', repo, '--force'])
+}
+{
+  // El reporte va DESPUÉS de crearlas: decir "creadas" antes de que `gh` las
+  // haya creado de verdad sería afirmar algo que un fallo posterior
+  // desmentiría.
+  const line = labelReportLine('creadas')
+  if (line) console.error(line)
 }
 
 // issues idempotentes por marcador ct-order. NO usamos `gh issue list --search`:
@@ -726,6 +837,10 @@ for (const { iss, found, diff, bodyResult } of reconcileEntries) {
   existingIssues.push({ number: null, body: iss.body })
   if (projectNum) addToProjectWithSprint(num, iss.order)
 }
+
+// F6, grave 2: lo último que se lee tras una corrida real es qué falta para
+// que esto sea despachable — ver printBacklogReminder más arriba.
+printBacklogReminder()
 
 // F5: código de salida de la corrida real — mismo criterio de 3 estados que
 // bajo --dry-run (ver el comentario junto al `process.exit` de esa rama):

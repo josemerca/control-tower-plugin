@@ -50,7 +50,7 @@ describe('ct-groom --dry-run', () => {
     expect(plan.milestone).toBe('Epic')
     expect(plan.issues).toHaveLength(2)
     expect(plan.issues[1].labels).toContain('type:backend')
-    expect(plan.issues[1].body).toContain('merge-after #1')
+    expect(plan.issues[1].body).toContain('merge-after `#1`') // F6: código inline, GitHub no lo autoenlaza al issue #1
     // F3: el título sale de "Slice" ("login"/"refresh"), no de "Entrega"
     // ("modelo"/"flow") — "Entrega" aparece en el cuerpo como descripción.
     expect(plan.issues[0].title).toBe('#1 login')
@@ -236,6 +236,54 @@ describe('ct-groom — flags colgantes no cuelan valores falsos (review final, f
       rmSync(dir, { recursive: true, force: true })
     })
   }
+
+  // F6 (hallazgo propio, verificado ejecutándolo antes del fix): `--section`
+  // era el ÚNICO flag que quedaba sin validación de call-site. Con
+  // `--section` colgante, `arg()` devuelve el booleano `true` y el enlace al
+  // spec de TODOS los issues salía como "[spec.md#true](spec.md#true)" — con
+  // exit 0 y sin un solo aviso. En una corrida real eso se escribe en el body
+  // de cada issue creado, y el enlace de trazabilidad al spec (lo único que
+  // conecta el issue con la sección que lo originó) apunta a un ancla que no
+  // existe. Mismo trato que --milestone/--project/--repo.
+  it('--section como último token (sin valor) → exit 2, nunca un enlace al spec "#true"', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run', '--section'], { encoding: 'utf8', stdio: QUIET_STDIO, env: fakeEnv() })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect((e.stdout || '') + (e.stderr || '').toString()).toMatch(/--section/i)
+      expect((e.stdout || '')).not.toContain('#true')
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('--section seguido de otro flag (sin valor real) → exit 2', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+    let threw = false
+    try {
+      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--section', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO, env: fakeEnv() })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(2)
+      expect((e.stdout || '') + (e.stderr || '').toString()).toMatch(/--section/i)
+    }
+    expect(threw).toBe(true)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('--section con un valor real sigue funcionando (regresión): alimenta el ancla del enlace al spec', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--section', '12', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO, env: fakeEnv() })
+    const plan = JSON.parse(out)
+    expect(plan.issues[0].body).toContain('#12')
+    rmSync(dir, { recursive: true, force: true })
+  })
 
   // Re-review: --repo tenía el mismo hueco (solo `if (!repo)`, que un
   // `true` colgante pasa sin avisar por ser truthy) — ahora validado igual
@@ -528,7 +576,11 @@ describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avis
 `)
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', env: fakeEnv() })
     expect(res.status).toBe(0)
-    expect(res.stderr).toBe('')
+    // F6: un epic nuevo ya nunca produce stderr vacío — el groom dice qué
+    // labels se inventaría y que lo creado no será despachable hasta que
+    // alguien lo promueva a status:ready. Lo que este test comprueba es la
+    // ausencia del AVISO de tipo, no el silencio global.
+    expect(res.stderr).not.toMatch(/aviso:/)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -541,7 +593,11 @@ describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avis
 `)
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', env: fakeEnv() })
     expect(res.status).toBe(0)
-    expect(res.stderr).toBe('')
+    // F6: un epic nuevo ya nunca produce stderr vacío — el groom dice qué
+    // labels se inventaría y que lo creado no será despachable hasta que
+    // alguien lo promueva a status:ready. Lo que este test comprueba es la
+    // ausencia del AVISO de tipo, no el silencio global.
+    expect(res.stderr).not.toMatch(/aviso:/)
     const plan = JSON.parse(res.stdout)
     expect(plan.issues[0].labels.some((l) => l.startsWith('type:'))).toBe(false)
     rmSync(dir, { recursive: true, force: true })
@@ -567,7 +623,11 @@ describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avis
 `)
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', env: fakeEnv() })
     expect(res.status).toBe(0)
-    expect(res.stderr).toBe('')
+    // F6: un epic nuevo ya nunca produce stderr vacío — el groom dice qué
+    // labels se inventaría y que lo creado no será despachable hasta que
+    // alguien lo promueva a status:ready. Lo que este test comprueba es la
+    // ausencia del AVISO de tipo, no el silencio global.
+    expect(res.stderr).not.toMatch(/aviso:/)
     const plan = JSON.parse(res.stdout)
     expect(plan.issues[0].labels.some((l) => l.startsWith('type:'))).toBe(false)
     rmSync(dir, { recursive: true, force: true })
@@ -629,7 +689,7 @@ describe('ct-groom — Dep con contenido pero sin ninguna referencia #N reconoci
     const spec = join(dir, 'spec.md'); writeFileSync(spec, LEGIT)
     const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO, env: fakeEnv() })
     const plan = JSON.parse(out)
-    expect(plan.issues[1].body).toContain('merge-after #1')
+    expect(plan.issues[1].body).toContain('merge-after `#1`')
     rmSync(dir, { recursive: true, force: true })
   })
 })
@@ -1064,7 +1124,7 @@ describe('ct-groom — normalización de marcado en un solo paso cierra la clase
     expect(labels).toContain('area:hoy')
     expect(labels).toContain('area:web')
     expect(labels).not.toContain('area:areaweb')
-    expect(res.stderr).toBe('') // sin ningún aviso: ambos tokens se reconocen limpios
+    expect(res.stderr).not.toMatch(/aviso:/) // sin ningún aviso: ambos tokens se reconocen limpios (F6: el stderr ya no está vacío — trae labels nuevas y el recordatorio de status:backlog)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1159,6 +1219,13 @@ const ONE_SLICE_SPEC = `## 9. Slices
 `
 // Plan que ONE_SLICE_SPEC produce con --milestone Epic (verificado contra
 // groom.js): title "#1 login", labels ['type:backend','area:api','touches:db','status:backlog'].
+// PLAN_LABELS_EXIST (F6): las cuatro labels del plan, ya presentes en el
+// repo. Los fixtures de "todo coincide" de más abajo necesitan un mundo
+// COHERENTE para poder seguir exigiendo stderr vacío: un issue que ya existe
+// con esas labels implica que esas labels existen en el repo — sin esto, el
+// stub respondería "el repo no tiene ninguna label" y el groom diría, con
+// razón, que se crearían cuatro.
+const PLAN_LABELS_EXIST = JSON.stringify([[{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'status:backlog' }]])
 
 // matchingBody(specPath): el body EXACTO que ONE_SLICE_SPEC produce hoy —
 // generado con el buildIssueBody real (no a mano) para que un "coincide en
@@ -1225,7 +1292,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
       body: matchingBody(spec),
     }
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
-      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[MATCHING]]) }) })
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[MATCHING]]), FAKE_GH_LABELS_LIST: PLAN_LABELS_EXIST }) })
     expect(res.status).toBe(0)
     expect(res.stderr).toBe('')
     rmSync(dir, { recursive: true, force: true })
@@ -1243,8 +1310,11 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
       body: matchingBody(spec),
     }
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
-      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[CLOSED_MATCHING]]) }) })
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[CLOSED_MATCHING]]), FAKE_GH_LABELS_LIST: PLAN_LABELS_EXIST }) })
     expect(res.status).toBe(0)
+    // F6: este fixture (issue CERRADO, sin ninguna label status:) es también
+    // la prueba de que el recordatorio de status:backlog no persigue a un
+    // epic ya terminado: un issue cerrado no está pendiente de promoción.
     expect(res.stderr).toBe('')
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1404,7 +1474,7 @@ describe('ct-groom --dry-run — AC/Dependencias divergentes se detectan (review
       expect(e.status).toBe(3)
       const err = e.stderr.toString()
       expect(err).toMatch(/falta el criterio de aceptación "AC-1.2"/)
-      expect(err).toMatch(/falta la dependencia "merge-after #2"/)
+      expect(err).toMatch(/falta la dependencia "merge-after `#2`"/)
     }
     expect(threw).toBe(true)
     rmSync(dir, { recursive: true, force: true })
@@ -1426,7 +1496,7 @@ describe('ct-groom --dry-run — AC/Dependencias divergentes se detectan (review
       const err = e.stderr.toString()
       expect(err).toMatch(/--reconcile aplicaría.*issue edit 501.*--body <actualizado/)
       // el texto real del AC/dependencia no se vuelca en el mensaje de preview:
-      expect(err).not.toContain('merge-after #2\n')
+      expect(err).not.toContain('merge-after `#2`\n')
     }
     expect(threw).toBe(true)
     const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''

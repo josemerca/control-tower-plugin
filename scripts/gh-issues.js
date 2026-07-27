@@ -12,9 +12,16 @@
 //    gh envuelve todas las páginas en un array externo — el resultado es un
 //    array de arrays (uno por página) que hay que aplanar.
 
-export function flattenIssuePages(parsed) {
+// flattenPages: aplana el array-de-páginas que produce `--paginate --slurp`.
+// No tiene nada de específico de issues (F6 la reutiliza para el listado de
+// labels del repo, que se pagina igual); `flattenIssuePages` se conserva como
+// el nombre con el que ya la llaman ct-groom.mjs/ct-next.mjs y sus tests.
+export function flattenPages(parsed) {
   if (!Array.isArray(parsed)) return []
   return parsed.flat()
+}
+export function flattenIssuePages(parsed) {
+  return flattenPages(parsed)
 }
 
 export function isPullRequest(entry) {

@@ -299,8 +299,16 @@ export function extractSectionContent(body, headingText) {
 // body (`> Slice #N del epic. Spec: […]`). Mismo criterio de anclaje a
 // columna 0 y de ignorar líneas ocultas dentro de una valla de código o de
 // un comentario HTML multilínea (scanLines/stepLine, review round 5).
+// `prefix` acepta un string o un array de strings (F6): la línea de enlace al
+// spec tiene DOS formas válidas — la de siempre ("> Slice #N …") y la que
+// evita el autoenlace falso ("> Slice `#N` …", ver SPEC_LINK_PREFIXES). Un
+// array es un conjunto CERRADO de alternativas, nunca un prefijo más corto
+// que las englobe a las dos ("> Slice ", que también reclamaría una línea
+// citada cualquiera que empiece por esas palabras) — mismo criterio que
+// headingMatcher/AC_HEADING_FORMS.
 export function locateLine(body, prefix) {
-  const found = scanLines(body, (line) => line.startsWith(prefix))
+  const prefixes = Array.isArray(prefix) ? prefix : [prefix]
+  const found = scanLines(body, (line) => prefixes.some((p) => line.startsWith(p)))
   if (!found) return null
   return { start: found.offset, end: found.offset + found.line.length, line: found.line }
 }
@@ -314,8 +322,15 @@ export function extractLine(body, prefix) {
 // review round 3, importante 5: es contenido que el spec posee de verdad
 // (deriva de `--section`/la ruta del propio spec), no bookkeeping como el
 // marcador `ct-order` — así que F5 la compara igual que el título.
+// SPEC_LINK_PREFIXES: las dos formas que buildIssueBody ha emitido para esa
+// línea — con el orden entre backticks (F6, la actual: evita que GitHub
+// enlace el ORDEN de slice al ISSUE con ese número) y sin ellos (los issues
+// ya creados, que no se migran). Conjunto CERRADO, igual que AC_HEADING_FORMS
+// y por el mismo motivo: el prefijo "> Slice " a secas reclamaría como enlace
+// al spec cualquier línea citada que empiece por esas dos palabras.
+export const SPEC_LINK_PREFIXES = ['> Slice `#', '> Slice #']
 export function extractSpecLink(body) {
-  return extractLine(body, '> Slice #')
+  return extractLine(body, SPEC_LINK_PREFIXES)
 }
 
 // specLinkAnchor (review round 4, importante 4): extrae SOLO el ancla
@@ -425,8 +440,17 @@ export function extractAc(body) {
 // lea, y la sección presente-pero-sin-matches deja de ser un `[]` silencioso
 // (ver `malformed` en extractDepsInSection) — dispatch.js ya no la trata
 // como "sin dependencias".
+//
+// F6 (grave 1) — el formato EMITIDO cambia a código inline (``merge-after
+// `#N` ``) para que GitHub deje de autoenlazar el orden de slice al issue con
+// ese número (ver groom.js#DEPS_ORDER_NOTE). El LECTOR acepta las dos formas,
+// para siempre: los issues ya creados en repos reales llevan el formato viejo
+// y NO se migran (nadie reescribe un body existente solo por esto; un body
+// viejo solo adopta el formato nuevo si `--reconcile` ya iba a reescribir esa
+// sección por una divergencia real). El backtick de cierre no se exige: lo
+// que identifica la referencia es el número que sigue a "merge-after".
 export function extractDeps(body) {
-  return [...(body || '').matchAll(/merge-after #(\d+)/g)].map((m) => parseInt(m[1], 10))
+  return [...(body || '').matchAll(/merge-after `?#(\d+)/g)].map((m) => parseInt(m[1], 10))
 }
 
 // DEPS_HEADING / extractDepsInSection: fuente ÚNICA de "qué deps ve
@@ -532,8 +556,12 @@ export function extractOrder(body) {
 // "asumir el estado que menos daño hace si nos equivocamos". `statusLabels`
 // se expone para que quien detecte `statusAmbiguous` pueda avisar con el
 // detalle exacto de qué labels chocaban (ver ct-next.mjs).
+// Exportada (F6): ct-groom.mjs la necesita para decir, al terminar, cuántos
+// issues del epic siguen sin ser despachables — con EXACTAMENTE el mismo
+// criterio que aplica el dispatcher, no con una segunda lectura de labels
+// que pudiera discrepar de él.
 const STATUS_PRECEDENCE = ['in-progress', 'in-review', 'ready', 'backlog']
-function resolveStatus(labels) {
+export function resolveStatus(labels) {
   const statusLabels = labels.filter((l) => l.startsWith('status:')).map((l) => l.slice('status:'.length))
   if (statusLabels.length === 0) return { status: 'backlog', statusAmbiguous: false, statusLabels }
   if (statusLabels.length === 1) return { status: statusLabels[0], statusAmbiguous: false, statusLabels }

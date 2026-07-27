@@ -93,6 +93,27 @@ function main() {
     return
   }
 
+  // `gh issue create --repo <r> --title … --body … --milestone … --label …`
+  // (ct-groom.mjs). Devuelve por stdout la URL del issue creado, que es lo
+  // que gh imprime de verdad y lo que ct-groom.mjs pasa después a `gh project
+  // item-add --url`. F6: hasta ahora NINGÚN test de CLI llegaba a esta rama —
+  // todos los tests de corrida real de ct-groom partían de issues ya
+  // existentes, así que el camino de CREACIÓN (el más común en producción:
+  // groomear un epic nuevo) no se ejecutaba nunca en la suite. Numera desde
+  // el 900 para que ningún número creado se confunda con los fixtures de
+  // issues existentes (501/502…).
+  if (argv[0] === 'issue' && argv[1] === 'create') {
+    if (process.env.FAKE_GH_ISSUE_CREATE_FAIL) {
+      console.error('fake-gh: issue create failed (simulado)')
+      process.exitCode = 1
+      return
+    }
+    const n = nextCallIndex(process.env.FAKE_GH_CREATE_COUNTER_FILE)
+    process.stdout.write(`https://github.com/o/r/issues/${900 + n}\n`)
+    process.exitCode = 0
+    return
+  }
+
   if (argv[0] === 'issue' && argv[1] === 'view') {
     // FAKE_GH_VIEW_FAIL (D2, finding 3): simula que `labelsOf()` (la lectura
     // de labels del propio candidato en dispatch-check.mjs) falla — auth
@@ -184,11 +205,32 @@ function main() {
     return
   }
 
+  // `gh api repos/<owner>/<repo>/labels --method GET --paginate --slurp`
+  // (ct-groom.mjs, F6 menor 5): las labels que YA existen en el repo, para
+  // poder distinguir "reutilicé una" de "me inventé una nueva" y para no
+  // reescribir con --force las que ya estaban. FAKE_GH_LABELS_LIST trae la
+  // respuesta YA en forma de --slurp (array de páginas: [[{name},…]]);
+  // default "[[]]" (repo sin ninguna label), que es lo correcto para los
+  // tests anteriores a F6 — con él, todas las labels del plan salen como
+  // "creadas nuevas", igual que hacía el `--force` incondicional de antes.
+  // FAKE_GH_LABELS_FAIL simula que el listado falla (auth/red/rate limit).
+  if (argv[0] === 'api' && /^repos\/[^/]+\/[^/]+\/labels$/.test(argv[1] || '')) {
+    if (process.env.FAKE_GH_LABELS_FAIL) {
+      console.error('fake-gh: api labels failed (simulado)')
+      process.exitCode = 1
+      return
+    }
+    process.stdout.write(process.env.FAKE_GH_LABELS_LIST || '[[]]')
+    process.exitCode = 0
+    return
+  }
+
   // `gh label create <name> --repo <repo> --force` (ct-groom.mjs): una
-  // llamada por cada label distinta que el plan produce, antes de
-  // crear/actualizar ningún issue. Siempre éxito — ningún test existente
-  // necesita simular su fallo (label create con --force no tiene, en la
-  // práctica, un caso "ya existe" que tratar como error).
+  // llamada por cada label distinta que el plan produce Y que el repo no
+  // tenía ya (F6), antes de crear/actualizar ningún issue. Siempre éxito —
+  // ningún test existente necesita simular su fallo (label create con
+  // --force no tiene, en la práctica, un caso "ya existe" que tratar como
+  // error).
   if (argv[0] === 'label' && argv[1] === 'create') {
     process.exitCode = 0
     return
