@@ -6,6 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { ADDENDA } from '../scripts/kickoff.js'
+import { parseState, readBlocked } from '../scripts/state.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const script = join(root, 'scripts', 'ct-init.sh')
@@ -66,6 +67,49 @@ describe('ct-init.sh', () => {
     expect(existsSync(join(dir, 'AGENTS.md'))).toBe(true)
     rmSync(dir, { recursive: true, force: true })
   })
+  // F7: el STATE.md sembrado tiene que traer el campo `blocked` — y tiene que
+  // seguir siendo un STATE.md parseable con el campo dentro (no solo un
+  // comentario suelto que nadie lee).
+  it('el STATE.md sembrado trae `blocked: null` y explica para qué sirve', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const state = readFileSync(join(dir, '.agent', 'STATE.md'), 'utf8')
+    expect(state).toMatch(/^blocked: null$/m)
+    expect(state).toMatch(/reason:/)
+    expect(state).toMatch(/unblock:/)
+    const { meta } = parseState(state)
+    expect(meta.blocked).toBe(null)
+    expect(readBlocked(meta).state).toBe('none')
+    // Y el otro campo que se lee mal en frío queda con su tiempo verbal escrito.
+    expect(state).toMatch(/PENDIENTE/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // Estrechar el formato crea una categoría nueva: los STATE.md anteriores al
+  // campo. Siguen funcionando (se leen como NO bloqueados) pero su dueño no se
+  // enteraría nunca de que ahora existe otra forma de decirlo.
+  it('STATE.md preexistente SIN el campo `blocked` → no se toca, pero se dice que existe el campo y cómo usarlo', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    mkdirSync(join(dir, '.agent'))
+    writeFileSync(join(dir, '.agent', 'STATE.md'), '---\ntask: "lo mío"\nnext_action: "seguir"\n---\ncuerpo')
+    const out = execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    expect(out).toMatch(/no se pisa/)
+    expect(out).toMatch(/`blocked`/)
+    expect(out).toMatch(/unblock/)
+    expect(readFileSync(join(dir, '.agent', 'STATE.md'), 'utf8')).toContain('task: "lo mío"')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('STATE.md preexistente que YA declara `blocked` → no repite el aviso', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    mkdirSync(join(dir, '.agent'))
+    writeFileSync(join(dir, '.agent', 'STATE.md'), '---\ntask: "lo mío"\nblocked: null\n---\ncuerpo')
+    const out = execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    expect(out).toMatch(/STATE\.md ya existe, no se pisa/)
+    expect(out).not.toMatch(/unblock/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('idempotente: no pisa un STATE.md existente', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     mkdirSync(join(dir, '.agent'))

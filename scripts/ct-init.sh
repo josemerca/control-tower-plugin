@@ -31,8 +31,17 @@ mkdir -p "$TARGET/.agent"
 if [ ! -f "$TARGET/.agent/STATE.md" ]; then
   cp "$HERE/skills/state-template/STATE.template.md" "$TARGET/.agent/STATE.md"
   echo "creado $TARGET/.agent/STATE.md"
-else
+elif grep -qE '^[[:space:]]*blocked[[:space:]]*:' "$TARGET/.agent/STATE.md"; then
   echo "STATE.md ya existe, no se pisa"
+else
+  # F7: un STATE.md anterior al campo `blocked` sigue funcionando (el hook lo
+  # lee como NO bloqueado, que es la lectura correcta por defecto), pero quien
+  # lo tenga no se enterará nunca de que ahora hay una forma de decir "esto no
+  # puede continuar" que no sea escribir prosa en `next_action` — el mismo
+  # error que originó todo esto. Se dice UNA vez, aquí, donde se está mirando
+  # el repo a propósito. No se toca el fichero: reescribir el STATE.md de un
+  # repo vivo desde un scaffolder sería peor que el problema.
+  echo "STATE.md ya existe, no se pisa — pero no declara el campo \`blocked\`, así que se lee como NO bloqueado. Si el trabajo de este repo se queda alguna vez bloqueado, añádelo a mano al frontmatter en vez de explicarlo dentro de \`next_action\`: blocked: {reason: \"por qué no se puede continuar\", unblock: \"qué haría falta\"} — el hook de SessionStart lo anuncia y suspende el next_action en toda sesión nueva."
 fi
 
 GITIGNORE="$TARGET/.gitignore"

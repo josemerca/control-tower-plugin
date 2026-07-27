@@ -7377,6 +7377,14 @@ function parseState(md) {
   if (!m) return { meta: {}, body: s.trim() };
   return { meta: (0, import_yaml.parse)(m[1]) ?? {}, body: m[2].trim() };
 }
+function parseStateSafe(md) {
+  try {
+    return { ...parseState(md), error: null };
+  } catch (e) {
+    const s = (md ?? "").replace(/^﻿/, "").trimStart();
+    return { meta: {}, body: s.trim(), error: e?.message || String(e) };
+  }
+}
 function shouldBlockStop({ headSha: headSha2, stateSha: stateSha2, stopHookActive }) {
   if (stopHookActive) return false;
   if (!stateSha2) return false;
@@ -7399,7 +7407,16 @@ try {
 } catch {
   process.exit(0);
 }
-var { meta } = parseState(readFileSync(statePath, "utf8"));
+var { meta, error: parseError } = parseStateSafe(readFileSync(statePath, "utf8"));
+if (parseError) {
+  if (!input.stop_hook_active) {
+    process.stdout.write(JSON.stringify({
+      decision: "block",
+      reason: `No se ha podido interpretar el frontmatter YAML de .agent/STATE.md (${parseError}). Arr\xE9glalo antes de cerrar el turno: mientras siga as\xED, la pr\xF3xima sesi\xF3n no podr\xE1 hidratarse del estado ni saber si el trabajo est\xE1 BLOQUEADO (campo \`blocked\`), y este mismo aviso volver\xE1 a salir.`
+    }));
+  }
+  process.exit(0);
+}
 var stateSha = "";
 if (meta.last_commit) {
   try {
@@ -7411,6 +7428,6 @@ if (meta.last_commit) {
 if (shouldBlockStop({ headSha, stateSha, stopHookActive: input.stop_hook_active })) {
   process.stdout.write(JSON.stringify({
     decision: "block",
-    reason: "Hay commits m\xE1s nuevos que el `last_commit` de .agent/STATE.md. Actualiza STATE.md (you_are_here, next_action, tasks[], last_commit) antes de cerrar el turno, para que la pr\xF3xima sesi\xF3n se hidrate correcta."
+    reason: 'Hay commits m\xE1s nuevos que el `last_commit` de .agent/STATE.md. Actualiza STATE.md (you_are_here, next_action, tasks[], last_commit) antes de cerrar el turno, para que la pr\xF3xima sesi\xF3n se hidrate correcta. Y si el trabajo NO puede continuar (bloqueado por una decisi\xF3n, un dato falso, una dependencia externa\u2026), no lo escribas en prosa dentro de next_action: ponlo en el campo `blocked` (`blocked: {reason: "\u2026", unblock: "\u2026"}`), que es lo que el hook de SessionStart anuncia y lo que suspende el next_action en la siguiente sesi\xF3n.'
   }));
 }
