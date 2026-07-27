@@ -1092,18 +1092,54 @@ function sliceNumberError(s) {
   return `${sliceRef(s)}: ${JSON.stringify(s.n) ?? 'undefined'} no es un número de issue utilizable (se esperaba un entero >= 1). Todo lo que el dispatcher construye para un slice sale de ese número — la rama feat/<n>, el worktree .worktrees/<n>, el claim contra GitHub y el título de la sesión de cmux — así que no hay forma de despacharlo sin inventarse un identificador. Revisa de dónde salió este slice (${JSON.stringify(s.name ?? null)}): en la ruta real, "n" es siempre el número de issue de GitHub.`
 }
 
-// branchExistsLocally: solo se puede responder de verdad fuera del modo
-// fixture (que promete no tocar ningún subproceso real). Devuelve
-// true/false, o null = "no comprobado".
+// branchExistsLocally: 'yes' | 'no' | 'unknown'.
+//
+// Tres estados, no dos, porque `git rev-parse --verify --quiet <ref>` sale
+// con 1 cuando la ref NO existe (el caso normal) pero también puede salir con
+// 128 (repo corrupto, .git ilegible) o morir por el SIGKILL de nuestro propio
+// timeout. Meterlo todo en un `catch { return false }` convertiría "no pude
+// preguntar" en "está libre" — y "está libre" es justo lo que autoriza a
+// seguir adelante y reclamar. 'unknown' se trata como aviso (no como fallo
+// duro): no sabemos que esté ocupado, pero tampoco podemos afirmar lo
+// contrario, y el mensaje del dry-run deja de decir "comprobado".
+// En modo fixture es 'unknown' por construcción: ese modo promete no tocar
+// ningún subproceso real.
 function branchExistsLocally(branch) {
-  if (fx) return null
+  if (fx) return 'unknown'
   try {
     execFileSync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`], {
       cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutMs, killSignal: 'SIGKILL',
     })
-    return true
+    return 'yes'
+  } catch (e) {
+    // `--quiet` hace que git salga con 1 (y sin mensaje) exactamente para
+    // "la ref no existe". Cualquier otro status, o una muerte por señal, es
+    // un fallo de la CONSULTA, no una respuesta.
+    if (e.status === 1) return 'no'
+    return 'unknown'
+  }
+}
+
+// registeredWorktreePaths: rutas que `git worktree list` ya conoce. Hace
+// falta además de `existsSync(wt)` porque git falla con "missing but already
+// registered worktree" cuando el directorio se borró A MANO sin
+// `git worktree remove` — el registro sigue en .git/worktrees. Ese caso pasa
+// un existsSync sin problema y luego revienta el `git worktree add`… en el
+// run real, con el claim ya escrito, que es justo lo que este bloque existe
+// para evitar. Devuelve un Set, o null si no se pudo consultar.
+function registeredWorktreePaths() {
+  if (fx) return null
+  try {
+    const out = execFileSync('git', ['worktree', 'list', '--porcelain'], {
+      cwd: repoRoot, encoding: 'utf8', timeout: childTimeoutMs, killSignal: 'SIGKILL',
+    })
+    const paths = new Set()
+    for (const line of out.split('\n')) {
+      if (line.startsWith('worktree ')) paths.add(line.slice('worktree '.length).trim())
+    }
+    return paths
   } catch {
-    return false
+    return null
   }
 }
 
@@ -1143,6 +1179,9 @@ if (configDirIsDir) {
 // TODO aquí (rama, worktree, kickoff, seed, argv de cmux) para que un fallo
 // de renderizado del kickoff se vea como una precondición fallida — con su
 // mensaje — en vez de como una excepción sin capturar a mitad de tanda.
+// Una sola consulta al registro de worktrees para toda la tanda (no una por
+// slice): la lista es la misma para todos.
+const registeredWorktrees = registeredWorktreePaths()
 const plans = []
 for (const s of selected) {
   const numErr = sliceNumberError(s)
@@ -1182,15 +1221,31 @@ for (const s of selected) {
 
   // Destino libre. Este es el caso que el encargo nombra explícitamente: si
   // `feat/<n>` ya existe, el run real moría A MITAD, con el claim YA puesto.
-  const wtExists = existsSync(wt)
+  //
+  // En modo fixture NO se mira el disco en absoluto (ni siquiera el
+  // `existsSync`, que sería la única parte "gratis"): el `repoRoot` de ese
+  // modo es sintético (`/tmp/fake-repo`), así que la respuesta no diría nada
+  // sobre ningún checkout real — y comprobar la mitad mientras el mensaje
+  // dice "NO COMPROBADOS" sería, otra vez, informar de una cosa y hacer otra.
+  const destinationChecked = !fx
   const branchExists = branchExistsLocally(branch)
-  if (wtExists) {
-    preflightFailures.push(`el worktree de #${s.n} ya existe: ${wt}. \`git worktree add\` fallaría — y en el run real eso pasa DESPUÉS de haber reclamado el issue. Limpia con \`git worktree remove --force ${wt}\` (y \`git branch -D ${branch}\` si la rama también sobra) si es basura de una corrida anterior, o revisa si hay trabajo real ahí antes de borrar nada.`)
+  if (destinationChecked) {
+    if (existsSync(wt)) {
+      preflightFailures.push(`el worktree de #${s.n} ya existe: ${wt}. \`git worktree add\` fallaría — y en el run real eso pasa DESPUÉS de haber reclamado el issue. Limpia con \`git worktree remove --force ${wt}\` (y \`git branch -D ${branch}\` si la rama también sobra) si es basura de una corrida anterior, o revisa si hay trabajo real ahí antes de borrar nada.`)
+    } else if (registeredWorktrees && registeredWorktrees.has(wt)) {
+      // El directorio NO está, pero git sigue teniéndolo registrado (alguien
+      // lo borró a mano sin `git worktree remove`): `git worktree add` falla
+      // con "missing but already registered worktree".
+      preflightFailures.push(`el worktree de #${s.n} (${wt}) no existe en disco pero git SIGUE teniéndolo registrado — \`git worktree add\` fallaría con "missing but already registered worktree" (alguien borró el directorio a mano, sin \`git worktree remove\`). Límpialo con \`git worktree prune\` y reintenta.`)
+    }
   }
-  if (branchExists === true) {
+  if (branchExists === 'yes') {
     preflightFailures.push(`la rama ${branch} ya existe en el checkout local. \`git worktree add -b ${branch}\` fallaría — y en el run real eso pasa DESPUÉS de haber reclamado el issue. Bórrala (\`git branch -D ${branch}\`) si es basura de una corrida anterior, o revisa qué hay en ella antes de tocarla.`)
+  } else if (branchExists === 'unknown' && !fx) {
+    // No sabemos si está libre: aviso, nunca un "libre" por defecto.
+    warn(`no se pudo comprobar si la rama ${branch} ya existe (la consulta a git falló, no es que la rama no esté). Si existe, el run real fallará al crear el worktree DESPUÉS de haber reclamado #${s.n} — compruébalo a mano con \`git branch --list ${branch}\` antes de seguir.`)
   }
-  plans.push({ s, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationChecked: branchExists !== null })
+  plans.push({ s, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationChecked: destinationChecked && branchExists !== 'unknown' })
 }
 
 if (preflightFailures.length) {

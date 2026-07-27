@@ -15,6 +15,8 @@ import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync, cpSync } 
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+// D4: entorno hermético (dirs de cuenta + stubs de cmux/claude) — ver fixtures/hermetic-env.js
+import { ACCOUNT_ENV, hermeticEnv } from './fixtures/hermetic-env.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-next.mjs')
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
@@ -23,6 +25,7 @@ const fakePath = [
   join(fixturesDir, 'fake-git-bin'),
   join(fixturesDir, 'fake-gh-bin'),
   join(fixturesDir, 'fake-cmux-bin'),
+  join(fixturesDir, 'fake-claude-bin'),
   process.env.PATH,
 ].join(':')
 
@@ -34,12 +37,15 @@ const fakePath = [
 // execFileSync esas aserciones pasarían en falso por falta de ese texto.
 // spawnSync siempre expone stdout/stderr por separado, exista o no excepción.
 function run(args, envOverrides = {}) {
-  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, ...envOverrides } })
+  // hermeticEnv() (D4): dirs de cuenta + stubs de cmux/claude por delante del
+  // PATH real, para que el preflight de ct-next.mjs no dependa del $HOME ni
+  // de qué tenga instalado la máquina que corre los tests.
+  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, ...hermeticEnv(), ...envOverrides } })
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
 }
 
 function runReal(args, envOverrides = {}) {
-  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, PATH: fakePath, ...envOverrides } })
+  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides } })
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
 }
 
@@ -236,6 +242,7 @@ describe('ct-next — dispatch-check.mjs ausente (W-C, fix round 1, finding 2)',
         encoding: 'utf8',
         env: {
           ...process.env,
+          ...ACCOUNT_ENV,
           PATH: fakePath,
           FAKE_GIT_TOPLEVEL: repoRoot,
           FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
@@ -328,6 +335,7 @@ describe('ct-next — maxBuffer explícito al capturar la salida de dispatch-che
         maxBuffer: 20 * 1024 * 1024,
         env: {
           ...process.env,
+          ...ACCOUNT_ENV,
           PATH: fakePath,
           FAKE_GIT_TOPLEVEL: repoRoot,
           FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),

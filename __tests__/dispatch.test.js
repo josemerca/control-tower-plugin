@@ -492,6 +492,15 @@ describe('resolveAccount (D4: el owner cuenta, y el resultado se explica)', () =
     expect(r.slugMalformed).toBe(true)
   })
 
+  // Un slug con espacios NO se recorta en silencio: se rechaza. Recortarlo
+  // aquí validaría una cadena y usaría otra — el resto del dispatcher
+  // (la URL de `gh api repos/<repo>/issues`) sigue viendo la cruda.
+  it('slug con espacios → malformado, nunca recortado por su cuenta', () => {
+    expect(resolveAccount(' josemerca/x', MAP).slugMalformed).toBe(true)
+    expect(resolveAccount('josemerca/x ', MAP).slugMalformed).toBe(true)
+    expect(resolveAccount('jose merca/x', MAP).slugMalformed).toBe(true)
+  })
+
   it('casa con las dos cuentas a la vez → gana work, y la ambigüedad se reporta (nunca se resuelve en silencio)', () => {
     const r = resolveAccount('josemerca/mo.experimento', MAP)
     expect(r.account).toBe('work')
@@ -522,6 +531,8 @@ describe('matchesAccountPattern / accountPatternError (D4)', () => {
   })
   it('"*" en medio de un segmento es un patrón malformado, no una interpretación creativa', () => {
     expect(accountPatternError('*/mo*x')).toMatch(/posición/i)
+    expect(accountPatternError('*/a**')).toMatch(/posición/i)
+    expect(accountPatternError('**/a')).toMatch(/posición/i)
   })
   it('patrones válidos no dan error', () => {
     for (const p of ['mercadona/*', '*/menoplus', 'josemerca/control-tower', '*/mo.*', '*/*']) {

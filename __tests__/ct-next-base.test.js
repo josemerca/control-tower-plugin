@@ -15,6 +15,8 @@ import { mkdtempSync, mkdirSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+// D4: entorno hermético (dirs de cuenta + stubs de cmux/claude) — ver fixtures/hermetic-env.js
+import { ACCOUNT_ENV } from './fixtures/hermetic-env.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-next.mjs')
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
@@ -23,11 +25,12 @@ const fakePath = [
   join(fixturesDir, 'fake-git-bin'),
   join(fixturesDir, 'fake-gh-bin'),
   join(fixturesDir, 'fake-cmux-bin'),
+  join(fixturesDir, 'fake-claude-bin'),
   process.env.PATH,
 ].join(':')
 
 function runReal(args, envOverrides = {}) {
-  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, PATH: fakePath, ...envOverrides } })
+  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides } })
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
 }
 

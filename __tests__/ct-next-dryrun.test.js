@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { shQuote } from '../scripts/shquote.js'
+// D4: entorno hermético (dirs de cuenta + stubs de cmux/claude) — ver fixtures/hermetic-env.js
+import { ACCOUNT_ENV, hermeticEnv } from './fixtures/hermetic-env.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-next.mjs')
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
@@ -19,7 +21,11 @@ const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
 // stderr disponibles vía `e.stdout`/`e.stderr` sin ecoarlos al padre.
 function run(args, envOverrides = {}) {
   try {
-    const out = execFileSync('node', [script, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...envOverrides } })
+    // hermeticEnv() (D4): además de los dirs de cuenta, mete los stubs de
+    // `cmux`/`claude` por delante del PATH real — el preflight los BUSCA (no
+    // los ejecuta), y sin esto la suite dependería de que la máquina que la
+    // corre los tenga instalados.
+    const out = execFileSync('node', [script, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...hermeticEnv(), ...envOverrides } })
     return { code: 0, out }
   } catch (e) {
     return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }
@@ -379,6 +385,7 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
     join(fixturesDir, 'fake-git-bin'),
     join(fixturesDir, 'fake-gh-bin'),
     join(fixturesDir, 'fake-cmux-bin'),
+    join(fixturesDir, 'fake-claude-bin'),
     process.env.PATH,
   ].join(':')
 
@@ -392,7 +399,7 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
       const out = execFileSync('node', [script, ...args], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'], // finding 11: no ecoar el ruido esperado al padre
-        env: { ...process.env, PATH: fakePath, ...envOverrides },
+        env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
       })
       return { code: 0, out }
     } catch (e) {
@@ -553,6 +560,7 @@ describe('ct-next — guarda de identidad de repo (review final, finding 1)', ()
     join(fixturesDir, 'fake-git-bin'),
     join(fixturesDir, 'fake-gh-bin'),
     join(fixturesDir, 'fake-cmux-bin'),
+    join(fixturesDir, 'fake-claude-bin'),
     process.env.PATH,
   ].join(':')
 
@@ -566,7 +574,7 @@ describe('ct-next — guarda de identidad de repo (review final, finding 1)', ()
       const out = execFileSync('node', [script, ...args], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, PATH: fakePath, ...envOverrides },
+        env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
       })
       return { code: 0, out }
     } catch (e) {
@@ -640,6 +648,7 @@ describe('ct-next — enumeración de issues sin --limit fijo (review final, fin
     join(fixturesDir, 'fake-git-bin'),
     join(fixturesDir, 'fake-gh-bin'),
     join(fixturesDir, 'fake-cmux-bin'),
+    join(fixturesDir, 'fake-claude-bin'),
     process.env.PATH,
   ].join(':')
   const dirs = []
@@ -651,7 +660,7 @@ describe('ct-next — enumeración de issues sin --limit fijo (review final, fin
       const out = execFileSync('node', [script, ...args], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, PATH: fakePath, ...envOverrides },
+        env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
       })
       return { code: 0, out }
     } catch (e) {
@@ -724,6 +733,7 @@ describe('ct-next — D1 finding 1: alcance del orden por epic (milestone), cami
     join(fixturesDir, 'fake-git-bin'),
     join(fixturesDir, 'fake-gh-bin'),
     join(fixturesDir, 'fake-cmux-bin'),
+    join(fixturesDir, 'fake-claude-bin'),
     process.env.PATH,
   ].join(':')
   const dirs = []
@@ -735,7 +745,7 @@ describe('ct-next — D1 finding 1: alcance del orden por epic (milestone), cami
       const out = execFileSync('node', [script, ...args], {
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, PATH: fakePath, ...envOverrides },
+        env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
       })
       return { code: 0, out }
     } catch (e) {

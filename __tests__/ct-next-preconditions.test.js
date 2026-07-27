@@ -11,6 +11,11 @@ import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, writeFileSync
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+// D4: entorno hermético (dirs de cuenta reales bajo tmpdir + stubs de
+// cmux/claude en PATH) — ver fixtures/hermetic-env.js. Los tests de este
+// fichero que ejercen la AUSENCIA de un binario fijan su propio PATH, que
+// gana sobre este (los overrides se esparcen después).
+import { ACCOUNT_ENV, hermeticEnv } from './fixtures/hermetic-env.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const projectRoot = join(here, '..')
@@ -22,6 +27,7 @@ const fakePath = [
   join(fixturesDir, 'fake-git-bin'),
   join(fixturesDir, 'fake-gh-bin'),
   join(fixturesDir, 'fake-cmux-bin'),
+  join(fixturesDir, 'fake-claude-bin'),
   process.env.PATH,
 ].join(':')
 
@@ -55,15 +61,15 @@ const FIXTURE_ONE_READY = JSON.stringify({
 function run(args, envOverrides = {}) {
   const r = spawnSync(process.execPath, [script, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, ...envOverrides },
+    env: { ...process.env, ...hermeticEnv(), ...envOverrides },
   })
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
 }
 
 function runReal(args, envOverrides = {}) {
-  const r = spawnSync('node', [script, ...args], {
+  const r = spawnSync(process.execPath, [script, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, PATH: fakePath, ...envOverrides },
+    env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
   })
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
 }
@@ -193,7 +199,7 @@ describe('ct-next — ACCOUNT_MAP malformado se detecta AL ARRANCAR (D4, defecto
   it('un patrón sin owner (el formato viejo) → exit 2 al arrancar, sin listar issues ni tocar nada', () => {
     const copied = copyScriptsWithMap('export const ACCOUNT_MAP = {\n  personal: [\'menoplus\'],\n  work: [],\n  personalDir,\n  workDir,\n}')
     const r = spawnSync('node', [copied, '--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], {
-      encoding: 'utf8', env: { ...process.env, CT_NEXT_FIXTURE: FIXTURE_ONE_READY },
+      encoding: 'utf8', env: { ...process.env, ...ACCOUNT_ENV, CT_NEXT_FIXTURE: FIXTURE_ONE_READY },
     })
     const out = (r.stdout || '') + (r.stderr || '')
     expect(r.status).toBe(2)
@@ -205,7 +211,7 @@ describe('ct-next — ACCOUNT_MAP malformado se detecta AL ARRANCAR (D4, defecto
   it('un patrón vacío → exit 2 (el caso literal del encargo)', () => {
     const copied = copyScriptsWithMap('export const ACCOUNT_MAP = {\n  personal: [\'*/menoplus\', \'\'],\n  work: [],\n  personalDir,\n  workDir,\n}')
     const r = spawnSync('node', [copied, '--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], {
-      encoding: 'utf8', env: { ...process.env, CT_NEXT_FIXTURE: FIXTURE_ONE_READY },
+      encoding: 'utf8', env: { ...process.env, ...ACCOUNT_ENV, CT_NEXT_FIXTURE: FIXTURE_ONE_READY },
     })
     expect(r.status).toBe(2)
     expect(((r.stdout || '') + (r.stderr || ''))).toMatch(/personal\[1\]/)
@@ -339,6 +345,37 @@ describe('ct-next — destino ocupado: se detecta ANTES de reclamar (D4, defecto
     expect(gitLogTxt).not.toMatch(/worktree add/)
   })
 
+  // El directorio ya no está, pero git sigue teniéndolo registrado (alguien
+  // lo borró a mano sin `git worktree remove`). `existsSync` por sí solo dice
+  // "libre" y `git worktree add` revienta después con "missing but already
+  // registered worktree" — en el run real, con el claim ya escrito.
+  it('worktree registrado pero con el directorio borrado a mano → exit 1 y apunta a `git worktree prune`', () => {
+    const repoRoot = makeRepoRoot()
+    const r = runReal(['--repo', 'o/r', '--cap', '1', '--dry-run'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GIT_WORKTREE_REGISTERED: join(repoRoot, '.worktrees', '42'),
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/SIGUE teniéndolo registrado/)
+    expect(r.out).toMatch(/git worktree prune/)
+  })
+
+  // Un fallo de la CONSULTA no es una respuesta: "no pude preguntar si la
+  // rama existe" no puede leerse como "la rama está libre", porque "libre"
+  // es justo lo que autoriza a reclamar.
+  it('si la consulta de la rama falla, se avisa — nunca se da por libre en silencio', () => {
+    const repoRoot = makeRepoRoot()
+    const r = runReal(['--repo', 'o/r', '--cap', '1', '--dry-run'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GIT_REV_PARSE_BROKEN: '1',
+    })
+    expect(r.out).toMatch(/no se pudo comprobar si la rama feat\/42 ya existe/)
+    expect(r.out).not.toMatch(/destino libre/)
+    expect(r.out).toMatch(/A PESAR de \d+ aviso/)
+  })
+
   it('destino libre en una corrida real → el dry-run lo afirma con evidencia, no por omisión', () => {
     const repoRoot = makeRepoRoot()
     const r = runReal(['--repo', 'o/r', '--cap', '1', '--dry-run'], {
@@ -390,6 +427,39 @@ describe('ct-next — slice sin número de issue utilizable (D4, defecto 5)', ()
     // undefined", y el título "repo · #undefined nombre" — con exit 0.
     expect(r.out).not.toMatch(/feat\/undefined|worktrees\/undefined|· #undefined/)
     expect(r.out).not.toMatch(/=== slice/)
+  })
+
+  // El encargo describía este defecto como "el nombre del workspace sale como
+  // `repo · #— nombre`". Lo observado contra el código sin arreglar con un
+  // slice SIN `n` fue peor (`#undefined` propagado a rama/worktree/claim),
+  // pero un `n` que es literalmente un guion largo — la forma que usa
+  // slices.js para "sin valor" — es el mismo defecto por la otra puerta, y
+  // se para en el mismo sitio.
+  it('un `n` que es un guion largo (el caso literal del encargo) tampoco se despacha', () => {
+    const fx = JSON.stringify({
+      issues: [{ n: '—', order: 1, status: 'ready', deps: [], touches: [], name: 'raro', type: 'backend' }],
+      mergedIssues: [],
+    })
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fx })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/no es un número de issue utilizable/)
+    expect(r.out).not.toMatch(/· #—/)
+  })
+
+  // Con cap > 1, un solo slice sin número aborta la tanda ENTERA antes de
+  // reclamar nada — la misma decisión que ya regía para cualquier fallo de
+  // precondición: se prefiere no empezar a empezar a medias.
+  it('con cap 2, un slice roto impide la tanda entera — pero sin haber reclamado nada', () => {
+    const fx = JSON.stringify({
+      issues: [
+        { n: null, order: 1, status: 'ready', deps: [], touches: ['a'], name: 'roto', type: 'backend' },
+        { n: 7, order: 2, status: 'ready', deps: [], touches: ['b'], name: 'bueno', type: 'backend' },
+      ],
+      mergedIssues: [],
+    })
+    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '2', '--dry-run'], { CT_NEXT_FIXTURE: fx })
+    expect(r.code).toBe(1)
+    expect(r.out).not.toMatch(/=== slice #7/)
   })
 
   it('la línea de selección tampoco lo imprime como si fuera un número', () => {

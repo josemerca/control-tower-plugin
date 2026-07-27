@@ -255,9 +255,17 @@ export function planDispatch(issues, { mergedIssues = [], cap = 1 } = {}) {
 //   - la entrada 'mercadona' de la lista `work` NO PODÍA CASAR JAMÁS: el
 //     owner se tiraba antes de llegar aquí. Configuración que aparenta hacer
 //     algo y no hace nada.
-//   - `startsWith` sin frontera: con `personal: ['control-tower']`, un repo
-//     `control-tower-de-otro` (de cualquier owner) casaba igual; `'mo.'`
-//     casaba `mo.nada-que-ver` de cualquier owner del mundo.
+//   - `startsWith` sin frontera y SIN PEDIRLO: con `personal:
+//     ['control-tower']`, un repo `control-tower-de-otro` (de cualquier
+//     owner) casaba igual, aunque el autor solo hubiera escrito un nombre
+//     exacto. Ahora un literal es un literal y el prefijo hay que pedirlo
+//     con un `*` (`mo.*`). OJO, para no vender más de lo que es: el mapa por
+//     defecto SIGUE incluyendo `*/mo.*`, así que
+//     `<cualquier-owner>/mo.nada-que-ver` sigue yendo a la cuenta de
+//     trabajo. Eso es deliberado — conserva el comportamiento actual para
+//     repos `mo.*` que vivan fuera de la org `mercadona`, y hoy no hay
+//     evidencia de cuáles son — pero ahora es una decisión ESCRITA en el
+//     mapa, no un efecto colateral del matcher.
 //
 // FORMA DE PATRÓN NUEVA (documentada también en kickoff.js, donde vive el
 // mapa por defecto): un patrón es `<owner>/<repo>` — SIEMPRE las dos mitades,
@@ -284,11 +292,10 @@ function segmentPatternError(seg, which) {
   const star = seg.indexOf('*')
   if (star === -1) return null
   if (seg === '*') return null
+  // Un segmento con DOS o más `*` cae también aquí, y no en una comprobación
+  // aparte: si hay más de uno, el primero no puede ser el último carácter.
   if (star !== seg.length - 1) {
     return `la mitad de ${which} ("${seg}") usa "*" en una posición que este matcher NO interpreta — solo se admite "*" como segmento entero o como último carácter (${ACCOUNT_PATTERN_SYNTAX})`
-  }
-  if (seg.indexOf('*') !== seg.lastIndexOf('*')) {
-    return `la mitad de ${which} ("${seg}") tiene más de un "*" (${ACCOUNT_PATTERN_SYNTAX})`
   }
   return null
 }
@@ -322,9 +329,17 @@ function segmentMatches(value, seg) {
 // en vez de resolver una cuenta a partir de algo que no es un repo.
 export function parseRepoSlug(slug) {
   if (typeof slug !== 'string') return null
-  const parts = slug.trim().split('/')
+  const parts = slug.split('/')
   if (parts.length !== 2) return null
+  // Sin `trim()` a propósito: recortar aquí haría que `--repo " o/r"` pasara
+  // la validación mientras el RESTO del script (la URL de `gh api
+  // repos/<repo>/issues`, el título del workspace) sigue usando la cadena
+  // cruda, con el espacio dentro — es decir, validaríamos una cosa y
+  // usaríamos otra. Los nombres de owner/repo de GitHub son
+  // [A-Za-z0-9._-]: cualquier espacio es un error del que hay que avisar,
+  // no algo que arreglar en silencio.
   if (!parts[0] || !parts[1]) return null
+  if (/\s/.test(slug)) return null
   return { owner: parts[0].toLowerCase(), name: parts[1].toLowerCase() }
 }
 
