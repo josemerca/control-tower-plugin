@@ -7392,9 +7392,22 @@ function quoteForNotice(s, max = 300) {
 var STOP_TAIL = 'Y si el trabajo NO puede continuar (bloqueado por una decisi\xF3n, un dato falso, una dependencia externa\u2026), no lo escribas en prosa dentro de next_action: ponlo en el campo `blocked` (`blocked: {reason: "\u2026", unblock: "\u2026"}`), que es lo que el hook de SessionStart anuncia y lo que suspende el next_action en la siguiente sesi\xF3n.';
 var shortSha = (s) => typeof s === "string" && /^[0-9a-f]{7,40}$/i.test(s) ? s.slice(0, 12) : String(s ?? "");
 var REV_SHAPE = /^[^\s-][^\s]*$/;
+function branchesContaining(git2, stateSha, currentBranch) {
+  const ask = (args) => {
+    const r = git2(args);
+    if (r.status !== 0) return null;
+    return String(r.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean).filter((b) => b !== currentBranch && !b.endsWith("/HEAD") && !b.includes(" -> "));
+  };
+  const local = ask(["branch", "--contains", stateSha, "--format=%(refname:short)"]);
+  if (local === null) return { containers: [], containersKnown: false };
+  if (local.length) return { containers: local.slice(0, 5), containersKnown: true };
+  const remote = ask(["branch", "-r", "--contains", stateSha, "--format=%(refname:short)"]);
+  if (remote === null) return { containers: [], containersKnown: false };
+  return { containers: remote.slice(0, 5), containersKnown: true };
+}
 function describeStopRelation({ headSha: headSha2, lastCommit, git: git2, branch: branch2 = "" }) {
   const raw = lastCommit == null ? "" : String(lastCommit).trim();
-  const base = { raw, headSha: headSha2, branch: branch2, stateSha: "", count: 0, mergeBase: "", containers: [] };
+  const base = { raw, headSha: headSha2, branch: branch2, stateSha: "", count: 0, mergeBase: "", containers: [], containersKnown: false };
   if (!raw) return { ...base, kind: "unset" };
   if (!REV_SHAPE.test(raw)) return { ...base, kind: "unresolvable" };
   const rp = git2(["rev-parse", "--verify", "--quiet", `${raw}^{commit}`]);
@@ -7411,14 +7424,16 @@ function describeStopRelation({ headSha: headSha2, lastCommit, git: git2, branch
   }
   const headIsAncestor = git2(["merge-base", "--is-ancestor", headSha2, stateSha]).status;
   if (headIsAncestor !== 0 && headIsAncestor !== 1) return { ...out, kind: "unknown" };
-  const br = git2(["branch", "--contains", stateSha, "--format=%(refname:short)"]);
-  const containers = br.status === 0 ? String(br.stdout || "").split("\n").map((s) => s.trim()).filter(Boolean).filter((b) => b !== branch2).slice(0, 5) : [];
-  if (headIsAncestor === 0) return { ...out, kind: "ahead", containers };
+  const { containers, containersKnown } = branchesContaining(git2, stateSha, branch2);
+  if (containersKnown && containers.length === 0) {
+    return { ...out, kind: "orphan", containers, containersKnown, fromKind: headIsAncestor === 0 ? "ahead" : "diverged" };
+  }
+  if (headIsAncestor === 0) return { ...out, kind: "ahead", containers, containersKnown };
   const mb = git2(["merge-base", stateSha, headSha2]);
-  return { ...out, kind: "diverged", containers, mergeBase: mb.status === 0 ? String(mb.stdout || "").trim() : "" };
+  return { ...out, kind: "diverged", containers, containersKnown, mergeBase: mb.status === 0 ? String(mb.stdout || "").trim() : "" };
 }
 var whereAmI = (rel) => rel.branch ? `la rama \`${rel.branch}\`` : `HEAD (desprendido en ${shortSha(rel.headSha)})`;
-var livesIn = (rel) => rel.containers?.length ? ` \u2014 vive en ${rel.containers.map((b) => `\`${b}\``).join(", ")}` : "";
+var livesIn = (rel) => rel.containers?.length ? rel.containers.map((b) => `\`${b}\``).join(", ") : "";
 function classifyStopState({ relation: relation2, stopHookActive }) {
   const none = { block: false, kind: relation2?.kind || "unset", reason: "", systemMessage: "" };
   if (!relation2) return none;
@@ -7448,7 +7463,7 @@ function classifyStopState({ relation: relation2, stopHookActive }) {
       block: false,
       kind: "ahead",
       reason: "",
-      systemMessage: `Guard de cierre: el \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) es un DESCENDIENTE de HEAD (${shortSha(rel.headSha)})${livesIn(rel)}: el estado va por delante de ${whereAmI(rel)}, no por detr\xE1s. No se bloquea el cierre: todo lo que hay en HEAD est\xE1 contenido en ese commit, as\xED que esta sesi\xF3n no ha dejado nada sin registrar. No reapuntes \`last_commit\` a HEAD "para que cuadre": eso mover\xEDa el handoff hacia atr\xE1s y borrar\xEDa trabajo ya anotado.`
+      systemMessage: `Guard de cierre: el \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) es un descendiente de HEAD (${shortSha(rel.headSha)})${livesIn(rel) ? ` y vive en ${livesIn(rel)}` : ""}: el estado va por delante de ${whereAmI(rel)}, no por detr\xE1s. No lo reapuntes a HEAD \u2014 mover\xEDa el handoff hacia atr\xE1s.`
     };
   }
   if (rel.kind === "diverged") {
@@ -7456,7 +7471,15 @@ function classifyStopState({ relation: relation2, stopHookActive }) {
       block: false,
       kind: "diverged",
       reason: "",
-      systemMessage: `Guard de cierre: el \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) NO est\xE1 en la historia de ${whereAmI(rel)}${livesIn(rel)}. No es m\xE1s viejo ni m\xE1s nuevo que HEAD (${shortSha(rel.headSha)}): son dos l\xEDneas de trabajo divergentes${rel.mergeBase ? ` desde ${shortSha(rel.mergeBase)}` : ""}. Por eso NO se bloquea el cierre: comparar esos dos SHA no dice si esta sesi\xF3n dej\xF3 algo sin registrar, y la \xFAnica forma de "cumplir" un bloqueo aqu\xED ser\xEDa reapuntar \`last_commit\` a HEAD, borrando el handoff de la otra l\xEDnea de trabajo (que lo reapuntar\xEDa de vuelta: dos sesiones pis\xE1ndose por turnos). Si son dos trabajos distintos no deber\xEDan compartir \`.agent/STATE.md\`: el de la ra\xEDz es el del checkout principal y cada slice despachado por \`/ct-next\` lleva el suyo dentro de su worktree. Si el trabajo vivo es este, actualiza \`last_commit\` a conciencia, sabiendo que sustituyes lo que hab\xEDa.`
+      systemMessage: `Guard de cierre: el \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) ${livesIn(rel) ? `vive en ${livesIn(rel)}, no en` : "no est\xE1 en"} la historia de ${whereAmI(rel)}: dos l\xEDneas de trabajo divergentes${rel.mergeBase ? ` desde ${shortSha(rel.mergeBase)}` : ""}. Uno solo no puede ser el handoff de las dos (cada worktree de \`/ct-next\` lleva el suyo); si lo reapuntas a HEAD, sustituyes el de la otra.`
+    };
+  }
+  if (rel.kind === "orphan") {
+    return {
+      block: false,
+      kind: "orphan",
+      reason: "",
+      systemMessage: `Guard de cierre: al \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) no llega ninguna rama, ni local ni remota: es un commit hu\xE9rfano (lo t\xEDpico, un \`reset --hard\` que se lo llev\xF3 por delante). El handoff que describe puede haber dejado de existir: compru\xE9balo antes de fiarte, porque \`git gc\` puede borrar el commit para siempre.`
     };
   }
   return {

@@ -312,9 +312,17 @@ export function composeHydration(stateText, gitLog) {
 //                BLOQUEA: comparar los dos SHA no dice si esta sesión dejó
 //                algo sin registrar, y la salida del bloqueo sería pisar el
 //                handoff ajeno. Es el caso real de arriba.
+//   orphan       `ahead` o `diverged` Y no lo contiene NINGUNA rama, ni local
+//                ni remota → el commit no es alcanzable desde ningún ref. No
+//                es "el estado va por delante": es que el estado apunta a
+//                trabajo que dejó de existir (un `reset --hard`, casi
+//                siempre). Mismo defecto de familia que todo esto —el estado
+//                afirma algo que dejó de ser cierto— pero NO BLOQUEA: un
+//                bloqueo no devuelve a la vida un commit huérfano, sería otro
+//                guard insatisfacible. Se dice, y punto.
 //   unknown      git no pudo responder. NO BLOQUEA: no se puede afirmar nada.
 //
-// Los tres casos que dejan de bloquear NO se quedan mudos: salen por
+// Los cuatro casos que dejan de bloquear NO se quedan mudos: salen por
 // `systemMessage` (campo común de la salida JSON de los hooks, no bloqueante,
 // se le muestra al usuario). Dejar de bloquear no es dejar de hablar; lo que
 // se retira es la ORDEN, no el AVISO.
@@ -343,9 +351,33 @@ const REV_SHAPE = /^[^\s-][^\s]*$/
  * @param git        runner `(args) => { status, stdout }` que NUNCA lanza.
  * @param branch     rama del checkout ('' si HEAD está desprendido).
  */
+// Las ramas que contienen un commit, LOCALES primero y remotas solo si ninguna
+// local lo contiene. El orden importa: `origin/*` es ruido cuando ya tienes una
+// rama local que responde a la pregunta, y es la única respuesta posible cuando
+// no la tienes. `containersKnown: false` significa que git no contestó — que no
+// es lo mismo que "ninguna rama lo contiene", y de esa diferencia depende que
+// el commit se declare huérfano o no.
+function branchesContaining(git, stateSha, currentBranch) {
+  const ask = (args) => {
+    const r = git(args)
+    if (r.status !== 0) return null
+    return String(r.stdout || '')
+      .split('\n').map((s) => s.trim()).filter(Boolean)
+      // `git branch -r` lista también el symref `origin/HEAD`, que no es una
+      // rama donde viva nada: es un alias de otra que ya sale en la lista.
+      .filter((b) => b !== currentBranch && !b.endsWith('/HEAD') && !b.includes(' -> '))
+  }
+  const local = ask(['branch', '--contains', stateSha, '--format=%(refname:short)'])
+  if (local === null) return { containers: [], containersKnown: false }
+  if (local.length) return { containers: local.slice(0, 5), containersKnown: true }
+  const remote = ask(['branch', '-r', '--contains', stateSha, '--format=%(refname:short)'])
+  if (remote === null) return { containers: [], containersKnown: false }
+  return { containers: remote.slice(0, 5), containersKnown: true }
+}
+
 export function describeStopRelation({ headSha, lastCommit, git, branch = '' }) {
   const raw = lastCommit == null ? '' : String(lastCommit).trim()
-  const base = { raw, headSha, branch, stateSha: '', count: 0, mergeBase: '', containers: [] }
+  const base = { raw, headSha, branch, stateSha: '', count: 0, mergeBase: '', containers: [], containersKnown: false }
   if (!raw) return { ...base, kind: 'unset' }
   if (!REV_SHAPE.test(raw)) return { ...base, kind: 'unresolvable' }
 
@@ -370,21 +402,28 @@ export function describeStopRelation({ headSha, lastCommit, git, branch = '' }) 
   const headIsAncestor = git(['merge-base', '--is-ancestor', headSha, stateSha]).status
   if (headIsAncestor !== 0 && headIsAncestor !== 1) return { ...out, kind: 'unknown' }
 
-  // Las ramas locales que SÍ contienen ese commit: es la información que
-  // convierte «no está en tu historia» en «está en `polish-v2-geometria`».
-  const br = git(['branch', '--contains', stateSha, '--format=%(refname:short)'])
-  const containers = br.status === 0
-    ? String(br.stdout || '').split('\n').map((s) => s.trim()).filter(Boolean).filter((b) => b !== branch).slice(0, 5)
-    : []
+  // Las ramas que SÍ contienen ese commit: es lo que convierte «no está en tu
+  // historia» en «está en `polish-v2-geometria`».
+  const { containers, containersKnown } = branchesContaining(git, stateSha, branch)
 
-  if (headIsAncestor === 0) return { ...out, kind: 'ahead', containers }
+  // Ni `ahead` ni `diverged` son alcanzables desde HEAD (en los dos casos HEAD
+  // NO es descendiente del commit), así que si además no lo contiene ninguna
+  // rama —ni local ni remota— no hay ningún ref estable que lo alcance: es un
+  // commit HUÉRFANO. Es otra cosa que "el estado va por delante": el estado
+  // apunta a trabajo que dejó de existir. Solo se declara si git contestó a las
+  // dos preguntas; un fallo de git no es una respuesta negativa.
+  if (containersKnown && containers.length === 0) {
+    return { ...out, kind: 'orphan', containers, containersKnown, fromKind: headIsAncestor === 0 ? 'ahead' : 'diverged' }
+  }
+
+  if (headIsAncestor === 0) return { ...out, kind: 'ahead', containers, containersKnown }
 
   const mb = git(['merge-base', stateSha, headSha])
-  return { ...out, kind: 'diverged', containers, mergeBase: mb.status === 0 ? String(mb.stdout || '').trim() : '' }
+  return { ...out, kind: 'diverged', containers, containersKnown, mergeBase: mb.status === 0 ? String(mb.stdout || '').trim() : '' }
 }
 
 const whereAmI = (rel) => (rel.branch ? `la rama \`${rel.branch}\`` : `HEAD (desprendido en ${shortSha(rel.headSha)})`)
-const livesIn = (rel) => (rel.containers?.length ? ` — vive en ${rel.containers.map((b) => `\`${b}\``).join(', ')}` : '')
+const livesIn = (rel) => (rel.containers?.length ? rel.containers.map((b) => `\`${b}\``).join(', ') : '')
 
 /**
  * Decide, a partir de la relación, si se bloquea el cierre y qué se dice.
@@ -431,16 +470,22 @@ export function classifyStopState({ relation, stopHookActive }) {
     }
   }
 
+  // Los avisos no bloqueantes salen en CADA turno mientras dure la anomalía, y
+  // esa insistencia es deliberada: un `STATE.md` para dos líneas de trabajo es
+  // una condición estructural que alguien tiene que resolver, y callarla con un
+  // marcador persistente la volvería invisible en vez de resuelta. Por eso el
+  // precio se paga en la otra moneda: lo más CORTO posible. Solo entra lo que
+  // puede cambiar una decisión de quien lo lee — la explicación de por qué el
+  // guard se comporta así vive en el comentario de arriba, no en el aviso.
   if (rel.kind === 'ahead') {
     return {
       block: false,
       kind: 'ahead',
       reason: '',
       systemMessage:
-        `Guard de cierre: el \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) es un DESCENDIENTE de HEAD ` +
-        `(${shortSha(rel.headSha)})${livesIn(rel)}: el estado va por delante de ${whereAmI(rel)}, no por detrás. ` +
-        'No se bloquea el cierre: todo lo que hay en HEAD está contenido en ese commit, así que esta sesión no ha dejado nada sin registrar. ' +
-        'No reapuntes `last_commit` a HEAD "para que cuadre": eso movería el handoff hacia atrás y borraría trabajo ya anotado.',
+        `Guard de cierre: el \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) es un descendiente de HEAD ` +
+        `(${shortSha(rel.headSha)})${livesIn(rel) ? ` y vive en ${livesIn(rel)}` : ''}: el estado va por delante de ${whereAmI(rel)}, no por detrás. ` +
+        'No lo reapuntes a HEAD — movería el handoff hacia atrás.',
     }
   }
 
@@ -450,13 +495,27 @@ export function classifyStopState({ relation, stopHookActive }) {
       kind: 'diverged',
       reason: '',
       systemMessage:
-        `Guard de cierre: el \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) NO está en la historia de ${whereAmI(rel)}${livesIn(rel)}. ` +
-        `No es más viejo ni más nuevo que HEAD (${shortSha(rel.headSha)}): son dos líneas de trabajo divergentes` +
+        `Guard de cierre: el \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) ` +
+        `${livesIn(rel) ? `vive en ${livesIn(rel)}, no en` : 'no está en'} la historia de ${whereAmI(rel)}: dos líneas de trabajo divergentes` +
         `${rel.mergeBase ? ` desde ${shortSha(rel.mergeBase)}` : ''}. ` +
-        'Por eso NO se bloquea el cierre: comparar esos dos SHA no dice si esta sesión dejó algo sin registrar, y la única forma de "cumplir" un bloqueo aquí ' +
-        'sería reapuntar `last_commit` a HEAD, borrando el handoff de la otra línea de trabajo (que lo reapuntaría de vuelta: dos sesiones pisándose por turnos). ' +
-        'Si son dos trabajos distintos no deberían compartir `.agent/STATE.md`: el de la raíz es el del checkout principal y cada slice despachado por `/ct-next` ' +
-        'lleva el suyo dentro de su worktree. Si el trabajo vivo es este, actualiza `last_commit` a conciencia, sabiendo que sustituyes lo que había.',
+        'Uno solo no puede ser el handoff de las dos (cada worktree de `/ct-next` lleva el suyo); ' +
+        'si lo reapuntas a HEAD, sustituyes el de la otra.',
+    }
+  }
+
+  // El estado apunta a trabajo que ya no existe en ningún ref. Es la misma
+  // familia de siempre —el estado afirma algo que dejó de ser cierto— pero
+  // bloquear el cierre no recupera un commit huérfano: sería otro guard
+  // insatisfacible.
+  if (rel.kind === 'orphan') {
+    return {
+      block: false,
+      kind: 'orphan',
+      reason: '',
+      systemMessage:
+        `Guard de cierre: al \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) no llega ninguna rama, ni local ni remota: ` +
+        'es un commit huérfano (lo típico, un `reset --hard` que se lo llevó por delante). ' +
+        'El handoff que describe puede haber dejado de existir: compruébalo antes de fiarte, porque `git gc` puede borrar el commit para siempre.',
     }
   }
 

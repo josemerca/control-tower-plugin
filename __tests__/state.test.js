@@ -336,14 +336,17 @@ describe('blockNotice', () => {
 const HEAD = 'a'.repeat(40)
 const OTHER = 'b'.repeat(40)
 
-// Runner de mentira: `plan` mapea la primera palabra del subcomando a la
-// respuesta, para poder probar cada rama sin montar un repo. Los tests de
-// integración contra git de verdad están en __tests__/stop.test.js.
-function fakeGit(plan) {
+// Runner de mentira: `plan` mapea cada consulta a su respuesta, para poder
+// probar cada rama sin montar un repo. Claves: `rev-parse`, `rev-list`,
+// `merge-base`, `is-ancestor:<a>:<b>`, `branch` (ramas locales) y `branch-r`
+// (remotas). Los tests de integración contra git de verdad están en
+// __tests__/stop.test.js.
+function fakeGit(plan, log) {
   return (args) => {
+    log?.push(args)
     const key = args[0] === 'merge-base' && args[1] === '--is-ancestor'
       ? `is-ancestor:${args[2]}:${args[3]}`
-      : args[0]
+      : args[0] === 'branch' && args[1] === '-r' ? 'branch-r' : args[0]
     const v = plan[key]
     if (v === undefined) return { status: 1, stdout: '' }
     return typeof v === 'number' ? { status: v, stdout: '' } : { status: 0, stdout: v }
@@ -404,6 +407,38 @@ describe('describeStopRelation', () => {
     expect(r.containers).toEqual(['polish-v2-geometria'])
     expect(r.mergeBase).toBe('c'.repeat(40))
   })
+  // Preferencia local → remota: `origin/*` es ruido cuando ya hay una rama
+  // local que responde, y la única respuesta posible cuando no la hay.
+  const noAncestro = { 'rev-parse': OTHER, [`is-ancestor:${OTHER}:${HEAD}`]: 1, [`is-ancestor:${HEAD}:${OTHER}`]: 1, 'merge-base': 'c'.repeat(40) }
+
+  it('con rama local que lo contiene, ni se pregunta por las remotas', () => {
+    const log = []
+    const r = describeStopRelation({ headSha: HEAD, lastCommit: OTHER, branch: 'main', git: fakeGit({ ...noAncestro, branch: 'local-viva\n', 'branch-r': 'origin/local-viva\n' }, log) })
+    expect(r.containers).toEqual(['local-viva'])
+    expect(log.some((a) => a[0] === 'branch' && a[1] === '-r')).toBe(false)
+  })
+  it('sin rama local, se cae a las remotas y se nombra origin/…', () => {
+    const r = rel(OTHER, { ...noAncestro, branch: '', 'branch-r': 'origin/polish-v2\norigin/HEAD\n' })
+    expect(r.kind).toBe('diverged')
+    expect(r.containers).toEqual(['origin/polish-v2'])
+    expect(r.containersKnown).toBe(true)
+  })
+  it('ni local ni remota lo contienen → orphan (venga de ahead o de diverged)', () => {
+    const desdeDiverged = rel(OTHER, { ...noAncestro, branch: '', 'branch-r': '' })
+    expect(desdeDiverged.kind).toBe('orphan')
+    expect(desdeDiverged.fromKind).toBe('diverged')
+    const desdeAhead = rel(OTHER, { 'rev-parse': OTHER, [`is-ancestor:${OTHER}:${HEAD}`]: 1, [`is-ancestor:${HEAD}:${OTHER}`]: 0, branch: '', 'branch-r': '' })
+    expect(desdeAhead.kind).toBe('orphan')
+    expect(desdeAhead.fromKind).toBe('ahead')
+  })
+  // "git no ha contestado" no es "ninguna rama lo contiene": declarar huérfano
+  // un commit porque `git branch` falló sería inventarse la respuesta.
+  it('si git falla al listar ramas NO se declara huérfano', () => {
+    const r = rel(OTHER, { ...noAncestro, branch: -1 })
+    expect(r.kind).toBe('diverged')
+    expect(r.containersKnown).toBe(false)
+    expect(r.containers).toEqual([])
+  })
   it('git falla al responder la ancestría (código != 0/1) → unknown, no se supone nada', () => {
     const r = rel(OTHER, { 'rev-parse': OTHER, [`is-ancestor:${OTHER}:${HEAD}`]: -1 })
     expect(r.kind).toBe('unknown')
@@ -436,9 +471,9 @@ describe('classifyStopState', () => {
     }
   })
   it('ahead no bloquea pero avisa, y desaconseja reapuntar last_commit', () => {
-    const v = verdict('ahead')
+    const v = verdict('ahead', { containers: ['adelantada'] })
     expect(v.block).toBe(false)
-    expect(v.systemMessage).toMatch(/DESCENDIENTE de HEAD/)
+    expect(v.systemMessage).toMatch(/descendiente de HEAD/)
     expect(v.systemMessage).toMatch(/hacia atrás/)
   })
   it('diverged no bloquea, explica por qué, y nombra la salida (un STATE.md por worktree)', () => {
@@ -449,13 +484,37 @@ describe('classifyStopState', () => {
     expect(v.systemMessage).toMatch(/ct-next/)
     expect(v.systemMessage).not.toMatch(/más nuevos/)
   })
+  // Los avisos salen en CADA turno mientras dure la anomalía. Esa insistencia
+  // es deliberada, y el precio se paga en brevedad: si vuelven a engordar,
+  // esto se pone rojo.
+  it('los avisos que se repiten cada turno se mantienen cortos', () => {
+    expect(verdict('diverged', { containers: ['polish-v2-geometria'], mergeBase: 'c'.repeat(40) }).systemMessage.length).toBeLessThan(340)
+    expect(verdict('ahead', { containers: ['adelantada'] }).systemMessage.length).toBeLessThan(280)
+    expect(verdict('orphan').systemMessage.length).toBeLessThan(340)
+  })
+  it('sin ninguna rama conocida (git calló) la frase no se queda coja', () => {
+    const v = verdict('diverged', { containers: [], containersKnown: false, mergeBase: 'c'.repeat(40) })
+    expect(v.systemMessage).toMatch(/no está en la historia de la rama `main`/)
+    expect(v.systemMessage).not.toMatch(/vive en ,|vive en :/)
+    expect(verdict('ahead', { containers: [] }).systemMessage).not.toMatch(/vive en /)
+  })
+  // Un `last_commit` que no alcanza ningún ref no es "el estado va por
+  // delante": es el estado apuntando a trabajo que dejó de existir.
+  it('orphan no bloquea (un bloqueo no resucita un commit) y no se confunde con ahead', () => {
+    const v = verdict('orphan', { fromKind: 'ahead' })
+    expect(v.block).toBe(false)
+    expect(v.systemMessage).toMatch(/huérfano/)
+    expect(v.systemMessage).toMatch(/ni local ni remota/)
+    expect(v.systemMessage).toMatch(/git gc/)
+    expect(v.systemMessage).not.toMatch(/va por delante|hacia atrás|divergentes/)
+  })
   it('unknown no bloquea y admite que no sabe', () => {
     const v = verdict('unknown')
     expect(v.block).toBe(false)
     expect(v.systemMessage).toMatch(/no ha podido determinar/)
   })
   it('anti-bucle: con stop_hook_active no bloquea NI avisa, sea cual sea el caso', () => {
-    for (const kind of ['behind', 'unresolvable', 'diverged', 'ahead', 'unknown']) {
+    for (const kind of ['behind', 'unresolvable', 'diverged', 'ahead', 'orphan', 'unknown']) {
       const v = classifyStopState({ relation: { kind, headSha: HEAD, stateSha: OTHER, count: 9 }, stopHookActive: true })
       expect(v).toMatchObject({ block: false, reason: '', systemMessage: '' })
     }
