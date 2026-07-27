@@ -9,11 +9,12 @@
 // de éxito, o el mensaje afirma algo que no es cierto.
 import { describe, it, expect, afterEach } from 'vitest'
 import { spawn, spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ACCOUNT_ENV } from './fixtures/hermetic-env.js'
+import { rmSyncBestEffort } from './fixtures/cleanup.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-next.mjs')
 const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
@@ -28,7 +29,7 @@ const fakePath = [
 
 const dirs = []
 afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  for (const d of dirs.splice(0)) rmSyncBestEffort(d)
 })
 function makeRepoRoot() {
   const d = mkdtempSync(join(tmpdir(), 'ct-next-d5-'))
@@ -143,6 +144,16 @@ describe('D5/D — SIGKILL propio por CT_NEXT_CHILD_TIMEOUT_MS sobre dispatch-ch
       ...baseEnv(repoRoot),
       FAKE_GH_EDIT_DELAY_MS: '5000', // dispatch-check se queda dentro de su `gh issue edit`
       CT_NEXT_CHILD_TIMEOUT_MS: '1000',
+      // F8 — misma corrección que en ct-next-signal-interrupt.test.js: la
+      // cota corta se aplica SOLO al hijo que este test bloquea a propósito.
+      // Con la cota global, los 1000ms se aplicaban también a los `gh api
+      // .../issues` y `git rev-parse` legítimos que ct-next hace ANTES de
+      // llegar a dispatch-check, y bajo carga cualquiera de ellos podía
+      // agotarlos primero: el mensaje que este test comprueba nunca llegaría
+      // a imprimirse. Aquí el resultado es determinista por construcción —
+      // dispatch-check se queda 5000ms dentro de su `gh issue edit`, o sea
+      // cinco veces la cota, pase lo que pase con la máquina.
+      CT_NEXT_TEST_CHILD_TIMEOUT_SCOPE: 'dispatch-check',
     })
     expect(r.code).toBe(1)
     expect(r.out).toMatch(/no terminó dentro del límite de 1000ms \(CT_NEXT_CHILD_TIMEOUT_MS\)/)
@@ -260,7 +271,7 @@ describe('D5/F — el reenvío de la salida de dispatch-check no decide el resul
     expect((argv.match(/issue edit 90 --repo o\/r --add-label status:in-progress/g) || []).length).toBe(1)
     expect(argv).not.toMatch(/issue edit 90 --repo o\/r --add-label status:ready/)
     expect(readOrEmpty(join(repoRoot, 'git-log'))).toMatch(/worktree add -b feat\/90/)
-  }, 15000)
+  })
 
   // Hermano del anterior, en dispatch-check.mjs, y peor: ct-next captura la
   // salida de dispatch-check por una tubería que SÍ lee, pero el kickoff que
@@ -297,7 +308,7 @@ describe('D5/F — el reenvío de la salida de dispatch-check no decide el resul
     expect(code).toBe(0)
     expect(err).not.toMatch(/EPIPE/)
     expect((readOrEmpty(argvLog).match(/issue edit 90 --repo o\/r --add-label status:in-progress/g) || []).length).toBe(1)
-  }, 15000)
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -416,10 +427,16 @@ describe('D5/C — SIGINT que llega con el trabajo ya hecho', () => {
         ...ACCOUNT_ENV,
         PATH: fakePath,
         ...baseEnv(repoRoot),
-        // `git worktree add` tarda 2s: una llamada bloqueante REAL posterior
-        // al segundo checkpoint, que es donde el hallazgo dice que la señal
-        // se perdía.
-        FAKE_GIT_WORKTREE_ADD_DELAY_MS: '2000',
+        // F8 — handshake en vez de ventana. Antes esto era
+        // FAKE_GIT_WORKTREE_ADD_DELAY_MS: '2000', o sea "git worktree add
+        // tarda 2s y confiamos en que este proceso reaccione dentro de esos
+        // 2s". Reaccionar a tiempo dependía de que el planificador del SO nos
+        // diera CPU, no del código bajo prueba. Ahora `git worktree add` se
+        // queda PARADO hasta que este test lo suelte: la llamada bloqueante
+        // real posterior al segundo checkpoint (donde el hallazgo dice que la
+        // señal se perdía) sigue siendo exactamente la misma, pero su duración
+        // ya no es una apuesta.
+        FAKE_GIT_WORKTREE_ADD_WAIT_FILE: join(repoRoot, 'release-worktree-add'),
       },
     })
     let out = ''
@@ -432,15 +449,19 @@ describe('D5/C — SIGINT que llega con el trabajo ya hecho', () => {
     const exited = new Promise((resolve) => child.on('exit', (c, s) => resolve({ code: c, sig: s })))
 
     // La señal se envía cuando `git worktree add` YA ARRANCÓ — fake-git
-    // escribe su argv en el log ANTES de dormir, así que el log es el
-    // marcador fiable de "estamos dentro de la llamada bloqueante". Nada de
-    // esperas a ojo: el envío va atado al progreso observable del proceso.
+    // escribe su argv en el log ANTES de pararse, así que el log es el
+    // marcador fiable de "estamos dentro de la llamada bloqueante". Y como el
+    // stub no vuelve hasta que lo soltamos NOSOTROS (línea de abajo), no hay
+    // ninguna ventana que se nos pueda cerrar antes de llegar.
     await new Promise((resolve) => {
       const t = setInterval(() => {
         if (/worktree add/.test(readOrEmpty(gitLog))) { clearInterval(t); resolve() }
-      }, 10)
+      }, 5)
     })
     child.kill('SIGINT') // solo al proceso node, nunca al hijo `git`
+    // Soltar DESPUÉS del kill: `child.kill` es síncrono a nivel de syscall, así
+    // que al volver la señal ya está pendiente para el proceso destino.
+    writeFileSync(join(repoRoot, 'release-worktree-add'), '')
     const { code, sig } = await exited
 
     expect(sig).toBeNull() // salió por su propio process.exit(), no matado por el SO
@@ -455,7 +476,7 @@ describe('D5/C — SIGINT que llega con el trabajo ya hecho', () => {
     // NO se revierte el claim de un slice que se lanzó bien.
     expect(readOrEmpty(join(repoRoot, 'gh-argv'))).not.toMatch(/issue edit 90 --repo o\/r --add-label status:ready/)
     expect(out).toMatch(/no había ningún claim propio pendiente de revertir/)
-  }, 20000)
+  })
 
   // NOTA sobre lo que NO se testea aquí, y por qué: el mismo punto de cesión
   // final cubre también el camino de --dry-run (es literalmente la misma

@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url'
 // fichero que ejercen la AUSENCIA de un binario fijan su propio PATH, que
 // gana sobre este (los overrides se esparcen después).
 import { ACCOUNT_ENV, hermeticEnv } from './fixtures/hermetic-env.js'
+import { rmSyncBestEffort } from './fixtures/cleanup.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const projectRoot = join(here, '..')
@@ -45,7 +46,7 @@ function makeTmp(prefix) {
   return d
 }
 afterEach(() => {
-  for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true })
+  for (const d of dirs.splice(0)) rmSyncBestEffort(d)
 })
 
 const FIXTURE_ONE_READY = JSON.stringify({

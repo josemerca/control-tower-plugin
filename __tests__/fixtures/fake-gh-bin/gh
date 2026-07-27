@@ -5,6 +5,7 @@
 // limit, red) en puntos concretos de la secuencia de claim sin llamar al `gh`
 // real. Ver ese fichero de test para el uso de cada variable.
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'node:fs'
+import { waitForReleaseFile } from '../stub-wait.js'
 
 const argv = process.argv.slice(2)
 const joined = argv.join(' ')
@@ -71,6 +72,20 @@ function loadSequence() {
 // razón para quedar fuera de esta protección solo por venir de la otra rama.)
 function main() {
   if (argv[0] === 'issue' && argv[1] === 'edit') {
+    // FAKE_GH_EDIT_WAIT_FILE (F8): se queda DENTRO de este `issue edit` hasta
+    // que el test cree el fichero centinela. Sustituye a la ventana de tiempo
+    // de FAKE_GH_EDIT_DELAY_MS en los tests que necesitan mandar una señal
+    // "mientras el claim se está escribiendo": el argv ya quedó registrado
+    // arriba (appendFileSync, síncrono), así que el test puede detectar por
+    // fichero que estamos aquí dentro, mandar la señal con toda la calma del
+    // mundo, y solo entonces soltarnos. Ver __tests__/fixtures/stub-wait.js
+    // para el razonamiento completo.
+    //
+    // OJO al alcance: esto bloquea TODO `issue edit`, incluido el revert
+    // automático posterior. Es intencionado y no molesta — cuando ct-next
+    // llega al revert, el centinela ya existe desde hace rato y la espera es
+    // un no-op.
+    waitForReleaseFile('FAKE_GH_EDIT_WAIT_FILE')
     // FAKE_GH_EDIT_DELAY_MS (finding 1, test de reentrada de señal): ensancha
     // de forma determinista la ventana en la que ct-next.mjs está bloqueado
     // DENTRO del propio revert automático (gh() es una llamada síncrona) —
