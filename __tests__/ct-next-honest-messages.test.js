@@ -360,6 +360,45 @@ describe('D5/H — --dry-run con destinos ocupados', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Hallazgo propio (repaso de D5) — "NO COMPROBADOS (modo fixture)" en un
+// dry-run que no es de fixture
+// ---------------------------------------------------------------------------
+describe('D5 (revisión propia) — el dry-run no puede llamar "modo fixture" a una consulta que falló', () => {
+  // Reproducido contra el código sin arreglar: un --dry-run REAL (sin
+  // CT_NEXT_FIXTURE) cuya consulta de rama falla caía en el mismo booleano
+  // `false` que el modo fixture, e imprimía "NO COMPROBADOS (modo fixture:
+  // repoRoot sintético, no se toca git). En una corrida real sí se
+  // comprueban antes de reclamar" — tres afirmaciones falsas seguidas: no
+  // era fixture, el repoRoot era real, git SÍ se tocó, y la corrida real
+  // hará esta misma comprobación fallida.
+  it('distingue "no se miró" (fixture) de "se miró y falló"', () => {
+    const repoRoot = makeRepoRoot()
+    const r = runReal(['--repo', 'o/r', '--cap', '1', '--dry-run'], {
+      ...baseEnv(repoRoot),
+      FAKE_GIT_REV_PARSE_BROKEN: '1', // la consulta de rama sale con 128, no con 1
+    })
+    expect(r.code).toBe(0) // 'unknown' es aviso, nunca fallo duro: no sabemos que esté ocupado
+    expect(r.out).toMatch(/SIN CONFIRMAR: la consulta a git se intentó y FALLÓ/)
+    expect(r.out).toMatch(/Esto NO es modo fixture/)
+    expect(r.out).not.toMatch(/NO COMPROBADOS \(modo fixture/)
+    // Y tampoco puede afirmar que el destino esté libre.
+    expect(r.out).not.toMatch(/destino libre/)
+  })
+
+  it('en modo fixture SÍ dice modo fixture (el mensaje correcto no se pierde por el camino)', () => {
+    const r = runReal(['--repo', 'o/r', '--cap', '1', '--dry-run'], {
+      CT_NEXT_FIXTURE: JSON.stringify({
+        issues: [{ n: 90, order: 1, status: 'ready', deps: [], touches: ['a'], name: 'algo', type: 'backend' }],
+        mergedIssues: [],
+      }),
+    })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/NO COMPROBADOS \(modo fixture/)
+    expect(r.out).not.toMatch(/SIN CONFIRMAR/)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Hallazgo C — un Ctrl-C nunca se descarta en silencio
 // ---------------------------------------------------------------------------
 describe('D5/C — SIGINT que llega con el trabajo ya hecho', () => {

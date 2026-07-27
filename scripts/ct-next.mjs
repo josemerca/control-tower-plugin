@@ -1397,7 +1397,20 @@ for (let idx = 0; idx < selected.length; idx++) {
   // número utilizable, o cuyo kickoff no renderiza, no llega a tener plan).
   // Guardar la posición ORIGINAL en la tanda es lo que permite recuperar los
   // fallos de ese slice sin confundir los dos índices.
-  plans.push({ s, selIdx: idx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationChecked: destinationChecked && branchExists !== 'unknown' })
+  // `destinationCheck` con TRES valores, no un booleano (D5, revisión propia
+  // — mismo defecto que el resto de esta tanda, encontrado al repasar):
+  // antes era `destinationChecked && branchExists !== 'unknown'`, y el
+  // mensaje del dry-run para el `false` decía, literalmente, "NO COMPROBADOS
+  // (modo fixture: repoRoot sintético, no se toca git). En una corrida real
+  // sí se comprueban antes de reclamar". Cierto para el modo fixture, FALSO
+  // para el otro caso que caía en el mismo `false`: una consulta a git que
+  // se intentó DE VERDAD y falló ('unknown', p.ej. .git ilegible). Ahí el
+  // dry-run era real, git sí se tocó, y la frase "en una corrida real sí se
+  // comprueban" prometía justo lo que acababa de no poder hacerse.
+  // Verificado por construcción con la consulta de rama rota: un --dry-run
+  // sin fixture imprimía "modo fixture" y salía 0.
+  const destinationCheck = fx ? 'fixture' : (branchExists === 'unknown' ? 'unknown' : 'checked')
+  plans.push({ s, selIdx: idx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck })
 }
 
 // ============================================================================
@@ -1973,7 +1986,7 @@ let launchedCount = 0
 const unverifiedLaunches = []
 
 for (let idx = 0; idx < plans.length; idx++) {
-  const { s, selIdx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationChecked } = plans[idx]
+  const { s, selIdx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck } = plans[idx]
 
   if (dryRun) {
     console.log(`\n=== slice #${s.n} (${s.name}) ===`)
@@ -2007,10 +2020,15 @@ for (let idx = 0; idx < plans.length; idx++) {
     // bloque — el defecto exacto que esta tanda de trabajo persigue.
     if (own) {
       console.log(`destino: ${wt} / rama ${branch} — NO LIBRE (ver la precondición de arriba).`)
+    } else if (destinationCheck === 'checked') {
+      console.log(`destino libre: ${wt} no existe y la rama ${branch} tampoco (comprobado en este checkout).`)
+    } else if (destinationCheck === 'fixture') {
+      console.log(`destino: ${wt} / rama ${branch} — NO COMPROBADOS (modo fixture: repoRoot sintético, no se toca git). En una corrida real sí se comprueban antes de reclamar.`)
     } else {
-      console.log(destinationChecked
-        ? `destino libre: ${wt} no existe y la rama ${branch} tampoco (comprobado en este checkout).`
-        : `destino: ${wt} / rama ${branch} — NO COMPROBADOS (modo fixture: repoRoot sintético, no se toca git). En una corrida real sí se comprueban antes de reclamar.`)
+      // 'unknown': se intentó de verdad y la consulta falló. Ni "libre" ni
+      // "no se miró" — se miró y no se pudo saber. El aviso con el detalle y
+      // el comando manual ya se imprimió arriba, al hacer la comprobación.
+      console.log(`destino: ${wt} / rama ${branch} — SIN CONFIRMAR: la consulta a git se intentó y FALLÓ (ver el aviso de más arriba), así que no se puede afirmar que estén libres. Esto NO es modo fixture: la corrida real hará exactamente esta misma comprobación, y si vuelve a fallar tampoco lo sabrá.`)
     }
     console.log(`CLAUDE_CONFIG_DIR=${configDir}`)
     console.log(`git worktree add -b ${branch} ${wt} ${resolvedBase}`)
