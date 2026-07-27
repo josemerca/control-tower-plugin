@@ -86,7 +86,7 @@
 // negocio vive en el wrapper.
 import {
   extractAc, extractDepsInSection, extractStrayDeps, extractSectionContent, locateSection, locateLine,
-  extractSpecLink, specLinkAnchor, countHeadingLines, detectLineEnding, normalizeToLF,
+  extractSpecLink, normalizeSpecLink, countHeadingLines, detectLineEnding, normalizeToLF,
   AC_HEADING_FORMS, SPEC_LINK_PREFIXES,
 } from './gh-issue-map.js'
 // F6: el CONTENIDO de "## Dependencias"/"## Acceptance criteria" lo renderiza
@@ -214,16 +214,26 @@ const DUPLICATE_CHECKS = [
 //
 // El marcador `<!-- ct-order:N -->` es lo ÚNICO del body que queda
 // completamente fuera del diff: es bookkeeping nuestro. El enlace al spec
-// SÍ es contenido del spec, pero se compara SOLO por su ancla `#sección`
-// (specLinkAnchor) — NUNCA por la ruta completa (review round 4, importante
-// 4): `ct-groom.mjs` renderiza la ruta tal cual la escriba quien invoque el
-// comando (`process.argv[2]`), y dos costumbres de invocación (relativa
-// frente a absoluta, un slash command frente a un cron) para el MISMO
-// fichero producirían, comparando la línea entera, una divergencia
-// perpetua — cada corrida "reconciliando" contra la costumbre de la
-// invocación anterior, para siempre. Comparar solo el ancla es inmune a
-// eso, a cambio de un límite conocido: si el spec se MUEVE a otro fichero
-// sin cambiar de número de sección, F5 ya no lo detecta.
+// SÍ es contenido del spec, y desde F10 se compara ENTERO.
+//
+// Hasta F10 se comparaba solo el ancla `#sección` (specLinkAnchor), y con
+// razón para su momento: la línea se componía con `process.argv[2]` tal cual
+// lo hubiera escrito quien invocara el comando, así que dos costumbres de
+// invocación del MISMO fichero (relativa desde un slash command, absoluta
+// desde un cron) producían dos líneas distintas — comparar la línea entera
+// habría hecho que cada corrida "reconciliara" contra la costumbre de la
+// anterior, indefinidamente. El precio era un límite conocido: si el spec se
+// MOVÍA a otro fichero sin cambiar de número de sección, no se detectaba.
+//
+// F10 elimina la causa, no el síntoma: la línea ya no se compone de argv sino
+// de la ruta RELATIVA A LA RAÍZ DEL REPO, el remoto del repo y la rama por
+// defecto — tres cosas que son propiedades del repositorio, no de quién
+// invoca (ver scripts/spec-link.js). La misma §9 produce la misma línea desde
+// cualquier clon, cualquier rama y cualquier notación de ruta, así que el
+// ping-pong ya no es posible y comparar la línea entera es estrictamente
+// mejor: detecta también que el spec se ha movido, que el enlace apunta a
+// otro repo, y que el enlace de un issue viejo sigue siendo el relativo roto
+// de antes de F10.
 //
 // Descripción/Protegido SÍ se comparan (el spec los posee: derivan de
 // Entrega/Protegido en la tabla §9), pero solo con un flag booleano
@@ -261,7 +271,7 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
   const milestoneDiffers = currentMilestoneTitle !== wantedMilestone
 
   const currentSpecLink = extractSpecLink(body)
-  const specLinkDiffers = specLinkAnchor(currentSpecLink) !== specLinkAnchor(wantedIssue.specLink)
+  const specLinkDiffers = normalizeSpecLink(currentSpecLink) !== normalizeSpecLink(wantedIssue.specLink)
 
   const currentDeps = depsInSection(body)
   const deps = diffDeps(currentDeps, wantedIssue.deps)
@@ -477,9 +487,8 @@ export function buildReconcileEditArgs(diff) {
 // el issue tiene "AC-1.1, AC-1.2" y el spec pide el mismo conjunto en otro
 // orden, diffIssue ya dice "sin divergencia", así que reescribir aquí solo
 // por una diferencia de orden contradiría esa misma decisión. El enlace al
-// spec se compara por su ANCLA (specLinkAnchor), no por el texto completo
-// — mismo criterio que diffIssue (review round 4, importante 4): una
-// diferencia de notación de ruta nunca dispara una reescritura.
+// spec se compara ENTERO (normalizeSpecLink) — el mismo criterio que
+// diffIssue, ver allí por qué F10 pudo dejar de compararlo solo por el ancla.
 export function buildReconcileBody(existingBody, wantedIssue) {
   const eol = detectLineEnding(existingBody)
   let body = normalizeToLF(existingBody)
@@ -489,7 +498,7 @@ export function buildReconcileBody(existingBody, wantedIssue) {
 
   const specLinkLoc = locateLine(body, SPEC_LINK_PREFIXES)
   const currentSpecLink = specLinkLoc ? specLinkLoc.line : null
-  if (specLinkAnchor(currentSpecLink) !== specLinkAnchor(wantedIssue.specLink)) {
+  if (normalizeSpecLink(currentSpecLink) !== normalizeSpecLink(wantedIssue.specLink)) {
     if (specLinkLoc) {
       body = body.slice(0, specLinkLoc.start) + wantedIssue.specLink + body.slice(specLinkLoc.end)
     } else {

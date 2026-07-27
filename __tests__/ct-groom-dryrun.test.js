@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync, existsSync, readFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { makeSpecDir, specUrl } from './fixtures/spec-repo.js'
 import { REAL_FAILING_TABLE, REAL_DEP_TABLE, REAL_TABLE_WITH_HASH_FIXED } from './fixtures/slices-real-tables.js'
 import { buildIssueBody } from '../scripts/groom.js'
 
@@ -43,7 +44,7 @@ const SPEC = `## 9. Slices
 
 describe('ct-groom --dry-run', () => {
   it('imprime el plan sin tocar gh', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
     const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO, env: fakeEnv() })
     const plan = JSON.parse(out)
@@ -60,7 +61,7 @@ describe('ct-groom --dry-run', () => {
   })
 
   it('--project 7 aparece como número 7 en el JSON del dry-run', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
     const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--project', '7', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO, env: fakeEnv() })
     const plan = JSON.parse(out)
@@ -69,7 +70,7 @@ describe('ct-groom --dry-run', () => {
   })
 
   it('sin --project, el plan lleva project: null', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
     const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO, env: fakeEnv() })
     const plan = JSON.parse(out)
@@ -90,7 +91,7 @@ describe('ct-groom --dry-run', () => {
   })
 
   it('spec con órdenes de slice duplicados sale con código distinto de 0 y mensaje nombrando el duplicado', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const DUP_SPEC = `## 9. Slices
 | # | Slice (issue) | Tipo | Entrega | Dep | Acepta (AC) | Protegido |
 |---|---|---|---|---|---|---|
@@ -118,7 +119,7 @@ describe('ct-groom --dry-run', () => {
   })
 
   it('sin --repo fuera de --dry-run sale con código distinto de 0 y mensaje de uso', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
     let threw = false
     try {
@@ -142,7 +143,7 @@ describe('ct-groom --dry-run', () => {
 // como valor; `--project` sin valor se convertía en `1` (`Number(true)===1`).
 describe('ct-groom — flags colgantes no cuelan valores falsos (review final, finding 3)', () => {
   it('--milestone como último token (sin valor) → exit 2, nunca crea/usa un milestone "true"', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
     let threw = false
     try {
@@ -157,7 +158,7 @@ describe('ct-groom — flags colgantes no cuelan valores falsos (review final, f
   })
 
   it('--milestone seguido de otro flag (--dry-run) sin valor real → exit 2, no se come el flag siguiente', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
     let threw = false
     try {
@@ -172,7 +173,7 @@ describe('ct-groom — flags colgantes no cuelan valores falsos (review final, f
   })
 
   it('--project como último token (sin valor) → exit 2, nunca se convierte en 1', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
     let threw = false
     try {
@@ -187,7 +188,7 @@ describe('ct-groom — flags colgantes no cuelan valores falsos (review final, f
   })
 
   it('--project seguido de otro flag (sin valor real) → exit 2', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
     let threw = false
     try {
@@ -202,7 +203,7 @@ describe('ct-groom — flags colgantes no cuelan valores falsos (review final, f
   })
 
   it('--project no numérico → exit 2', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
     let threw = false
     try {
@@ -222,7 +223,7 @@ describe('ct-groom — flags colgantes no cuelan valores falsos (review final, f
   // Un número de project es un entero o no es nada.
   for (const bad of ['2.9', '1e3', ' 3', '0x10']) {
     it(`--project ${JSON.stringify(bad)} → exit 2 (no es un entero en dígitos a secas)`, () => {
-      const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+      const dir = makeSpecDir('ctg-')
       const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
       let threw = false
       try {
@@ -237,51 +238,59 @@ describe('ct-groom — flags colgantes no cuelan valores falsos (review final, f
     })
   }
 
-  // F6 (hallazgo propio, verificado ejecutándolo antes del fix): `--section`
-  // era el ÚNICO flag que quedaba sin validación de call-site. Con
-  // `--section` colgante, `arg()` devuelve el booleano `true` y el enlace al
-  // spec de TODOS los issues salía como "[spec.md#true](spec.md#true)" — con
-  // exit 0 y sin un solo aviso. En una corrida real eso se escribe en el body
-  // de cada issue creado, y el enlace de trazabilidad al spec (lo único que
-  // conecta el issue con la sección que lo originó) apunta a un ancla que no
-  // existe. Mismo trato que --milestone/--project/--repo.
-  it('--section como último token (sin valor) → exit 2, nunca un enlace al spec "#true"', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+  // F10 — `--section` queda OBSOLETO. Hasta aquí, F6 le había puesto una
+  // validación de call-site (un `--section` colgante devolvía el booleano
+  // `true` y el enlace al spec de TODOS los issues salía como
+  // "[spec.md#true](spec.md#true)"). Esa validación era correcta para lo que
+  // el flag hacía entonces, pero el flag entero era una promesa vacía: la
+  // tabla §9 se localiza por su cabecera de columnas ("Slice" + "Dep"), no por
+  // ningún número de sección, así que --section jamás decidió QUÉ se
+  // groomeaba; solo componía el ancla del enlace... y "#9" no es un ancla que
+  // exista en GitHub (el encabezado "## 9. Slices" tiene el id "9-slices").
+  // Su único efecto observable era producir un enlace roto.
+  //
+  // Contrato nuevo: se acepta en cualquier forma (nadie ve su script romperse
+  // de golpe), se ignora, y se avisa de que se ignora — que es lo que impide
+  // que alguien siga creyendo que decide algo.
+  it('--section con un valor real: se IGNORA (el ancla sale del encabezado real), avisa, y no rompe', () => {
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
-    let threw = false
-    try {
-      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run', '--section'], { encoding: 'utf8', stdio: QUIET_STDIO, env: fakeEnv() })
-    } catch (e) {
-      threw = true
-      expect(e.status).toBe(2)
-      expect((e.stdout || '') + (e.stderr || '').toString()).toMatch(/--section/i)
-      expect((e.stdout || '')).not.toContain('#true')
-    }
-    expect(threw).toBe(true)
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--section', '12', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv() })
+    expect(res.status).toBe(0)
+    expect(res.stderr).toMatch(/--section está obsoleto y se IGNORA/)
+    const plan = JSON.parse(res.stdout)
+    // Ni rastro del "12" que se pidió: el ancla es la del encabezado real.
+    expect(plan.issues[0].body).not.toContain('#12')
+    expect(plan.issues[0].body).toContain(specUrl('spec.md'))
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('--section seguido de otro flag (sin valor real) → exit 2', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
-    let threw = false
-    try {
-      execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--section', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO, env: fakeEnv() })
-    } catch (e) {
-      threw = true
-      expect(e.status).toBe(2)
-      expect((e.stdout || '') + (e.stderr || '').toString()).toMatch(/--section/i)
-    }
-    expect(threw).toBe(true)
-    rmSync(dir, { recursive: true, force: true })
-  })
+  for (const [caso, argv] of [
+    ['como último token (sin valor)', ['--dry-run', '--section']],
+    ['seguido de otro flag (sin valor real)', ['--section', '--dry-run']],
+  ]) {
+    it(`--section ${caso}: ya no es un error — se ignora y se avisa, exit 0`, () => {
+      const dir = makeSpecDir('ctg-')
+      const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+      const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', ...argv],
+        { encoding: 'utf8', env: fakeEnv() })
+      expect(res.status).toBe(0)
+      expect(res.stderr).toMatch(/--section está obsoleto/)
+      // El agujero que F6 cerró NO puede reaparecer por la puerta de atrás:
+      // el booleano `true` de un flag colgante no llega a ningún ancla.
+      expect(res.stdout).not.toContain('#true')
+      rmSync(dir, { recursive: true, force: true })
+    })
+  }
 
-  it('--section con un valor real sigue funcionando (regresión): alimenta el ancla del enlace al spec', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+  it('sin --section no se dice nada de --section (el aviso no es ruido de fondo)', () => {
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
-    const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--section', '12', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO, env: fakeEnv() })
-    const plan = JSON.parse(out)
-    expect(plan.issues[0].body).toContain('#12')
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv() })
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/--section/)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -289,7 +298,7 @@ describe('ct-groom — flags colgantes no cuelan valores falsos (review final, f
   // `true` colgante pasa sin avisar por ser truthy) — ahora validado igual
   // que ct-next.mjs/dispatch-check.mjs (`typeof !== 'string'`).
   it('--repo como último token (sin valor) → exit 2, nunca "true" colándose hacia gh', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
     let threw = false
     try {
@@ -304,7 +313,7 @@ describe('ct-groom — flags colgantes no cuelan valores falsos (review final, f
   })
 
   it('--repo seguido de otro flag (sin valor real) → exit 2', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
     let threw = false
     try {
@@ -327,7 +336,7 @@ describe('ct-groom — flags colgantes no cuelan valores falsos (review final, f
 // reportar (defecto 3).
 describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
   it('sin tabla §9 en el spec → exit != 0, mensaje nombra la ausencia, ANTES de imprimir el plan', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, '# Spec sin sección de slices\n\nSolo prosa, ninguna tabla.\n')
     let threw = false
     try {
@@ -344,7 +353,7 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
   })
 
   it('falta la columna "#" → exit != 0, mensaje nombra la columna y la consecuencia (orden/dependencias)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const NO_HASH = `## 9. Slices
 | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|
@@ -372,7 +381,7 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
   // ahora verifica el nuevo contrato explícitamente para dejar constancia
   // del cambio.
   it('falta la columna "Entrega" → YA NO aborta (F3: pasó a opcional), avisa por stderr y el dry-run sigue funcionando', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const NO_ENTREGA = `## 9. Slices
 | # | Slice | Tipo | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|
@@ -390,7 +399,7 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
   })
 
   it('filas con "#" no entero a secas → exit != 0, mensaje dice cuántas, muestra un valor ofensor y dice qué escribir en su lugar', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const BAD_HASH = `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -419,7 +428,7 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
   })
 
   it('tabla presente pero sin ninguna fila de datos → exit != 0, mensaje dice que no hay filas', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const EMPTY_TABLE = `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -445,7 +454,7 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
   // prefijo completo de label). Antes de este fix, `/ct-groom --dry-run`
   // imprimía `{"issues": [], ...}` y salía con 0.
   it('regresión: la tabla real del incidente → exit != 0 en vez de "0 issues, exit 0"', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, REAL_FAILING_TABLE)
     let threw = false
     try {
@@ -466,7 +475,7 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
 
 describe('ct-groom — avisa pero continúa ante columnas ausentes o prefijo en la columna equivocada (F1)', () => {
   it('sin columnas Tipo/Acepta/Protegido/Área/Toca → dry-run sigue funcionando, stderr avisa de cada ausencia y su consecuencia', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const MINIMAL = `## 9. Slices
 | # | Slice | Entrega | Dep |
 |---|---|---|---|
@@ -480,7 +489,7 @@ describe('ct-groom — avisa pero continúa ante columnas ausentes o prefijo en 
   })
 
   it('el aviso de columnas ausentes se ve en stderr al capturarlo explícitamente (spawnSync)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const MINIMAL = `## 9. Slices
 | # | Slice | Entrega | Dep |
 |---|---|---|---|
@@ -499,7 +508,7 @@ describe('ct-groom — avisa pero continúa ante columnas ausentes o prefijo en 
   })
 
   it('valor con prefijo de la otra columna ("area:x" en Toca) → dry-run no aborta, label se genera bien (touches:pbxproj, no touches:areapbxproj), y avisa', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const MISMATCHED = `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
@@ -516,7 +525,7 @@ describe('ct-groom — avisa pero continúa ante columnas ausentes o prefijo en 
   })
 
   it('valor prefijado correctamente ("area:medicacion" en Área, con backticks) → label sin duplicar el prefijo', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const PREFIXED = [
       '## 9. Slices',
       '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |',
@@ -546,7 +555,7 @@ describe('ct-groom — avisa pero continúa ante columnas ausentes o prefijo en 
 // nombrando el valor, el slice, la consecuencia y el conjunto reconocido.
 describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avisa, no aborta (F3)', () => {
   it('"Tipo" = "ios" (no es key de ADDENDA) → dry-run no aborta, la label type:ios se crea igual, y avisa por stderr con el valor, el slice, la consecuencia y el conjunto reconocido', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -568,7 +577,7 @@ describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avis
   })
 
   it('"Tipo" con un valor reconocido ("ui") no dispara ningún aviso de tipo', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
@@ -585,7 +594,7 @@ describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avis
   })
 
   it('"Tipo" vacío (columna presente, celda en blanco) no dispara ningún aviso de tipo (sigue sin label type:)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
@@ -615,7 +624,7 @@ describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avis
   // de "area:areamedicacion" por otra puerta. Las dos formas de decir
   // "ninguno" (celda vacía, celda con marcador) deben comportarse igual.
   it.each(['-', '–', '—', '―', '−', '--'])('"Tipo" = marcador de "sin valor" ("%s") → sin aviso, y sin label "type:" (mismo trato que Tipo vacío)', (marker) => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
@@ -646,7 +655,7 @@ describe('ct-groom — Dep con contenido pero sin ninguna referencia #N reconoci
   // mensaje original usaba "..."): "#" de las 3 filas es válido — el
   // problema es solo la columna Dep.
   it('regresión: la tabla del coordinador → exit != 0 en vez de "issues creados, exit 0, deps borrados"', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, REAL_DEP_TABLE)
     let threw = false
     try {
@@ -671,7 +680,7 @@ describe('ct-groom — Dep con contenido pero sin ninguna referencia #N reconoci
   })
 
   it('"–" (sin dependencias, forma legítima) no aborta', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC) // SPEC del top del fichero: Dep "–" y "#1"
     const out = execFileSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO, env: fakeEnv() })
     expect(JSON.parse(out).issues).toHaveLength(2)
@@ -679,7 +688,7 @@ describe('ct-groom — Dep con contenido pero sin ninguna referencia #N reconoci
   })
 
   it('texto legítimo alrededor de una referencia #N válida ("#1 (tras el merge)") no aborta', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const LEGIT = `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -702,7 +711,7 @@ describe('ct-groom — Dep con contenido pero sin ninguna referencia #N reconoci
 
 describe('ct-groom — em dash (—) en Dep no aborta; el mensaje de Dep malformado dice qué escribir (CRITICAL 1)', () => {
   it('em dash (—) en Dep no aborta — el plan se genera con deps: []', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -714,7 +723,7 @@ describe('ct-groom — em dash (—) en Dep no aborta; el mensaje de Dep malform
   })
 
   it('regresión exacta de la secuencia del coordinador: "#" ya corregido (REAL_TABLE_WITH_HASH_FIXED) — no aborta por la fila 1 (Dep "—"), sí sigue abortando por la fila 2 (Dep "S1")', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, REAL_TABLE_WITH_HASH_FIXED)
     let threw = false
     try {
@@ -734,7 +743,7 @@ describe('ct-groom — em dash (—) en Dep no aborta; el mensaje de Dep malform
   })
 
   it('el mensaje de "Dep malformado" dice explícitamente qué escribir si no hay dependencias', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -755,7 +764,7 @@ describe('ct-groom — em dash (—) en Dep no aborta; el mensaje de Dep malform
 
 describe('ct-groom — negrita/cursiva alrededor del prefijo en Área/Toca no duplica la label (CRITICAL 2)', () => {
   it('"**area:medicacion**"/"**touches:pbxproj**" (negrita) → labels sin duplicar el prefijo', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
@@ -773,7 +782,7 @@ describe('ct-groom — negrita/cursiva alrededor del prefijo en Área/Toca no du
 
 describe('ct-groom — un hueco (línea en blanco) dentro de la tabla §9 aborta fuerte, no trunca en silencio (3)', () => {
   it('línea en blanco entre 2 filas de datos → exit != 0 en vez de "1 issue creado, exit 0" (medio epic silencioso)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -801,7 +810,7 @@ describe('ct-groom — un hueco (línea en blanco) dentro de la tabla §9 aborta
 // fiable que construir) pasó de "Entrega" a "Slice".
 describe('ct-groom — celda "Slice" vacía o fila más corta que la cabecera aborta fuerte (4, actualizado por F3)', () => {
   it('celda Slice vacía → exit != 0 en vez de un issue titulado "#1" a secas', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -823,7 +832,7 @@ describe('ct-groom — celda "Slice" vacía o fila más corta que la cabecera ab
   })
 
   it('celda Entrega vacía (Slice con contenido) YA NO aborta (F3: Entrega es opcional)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -839,7 +848,7 @@ describe('ct-groom — celda "Slice" vacía o fila más corta que la cabecera ab
 
 describe('ct-groom — Dep apunta a un slice inexistente o a sí mismo aborta fuerte (5)', () => {
   it('auto-referencia (slice #3 depende de #3) → exit != 0, mensaje nombra la auto-referencia', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -863,7 +872,7 @@ describe('ct-groom — Dep apunta a un slice inexistente o a sí mismo aborta fu
   })
 
   it('referencia a un "#" inexistente (#99 en tabla de 2 slices) → exit != 0', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -886,7 +895,7 @@ describe('ct-groom — Dep apunta a un slice inexistente o a sí mismo aborta fu
 
 describe('ct-groom — token Área/Toca que normaliza a vacío avisa pero no aborta (6)', () => {
   it('"area:" vacío tras el prefijo → dry-run no aborta, avisa por stderr que la label queda inerte para ese slice', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
@@ -905,7 +914,7 @@ describe('ct-groom — token Área/Toca que normaliza a vacío avisa pero no abo
 
 describe('ct-groom — "no se encontró la tabla §9" distingue "no hay tabla" de "hay tabla sin cabecera Slice/Dep"', () => {
   it('hay filas de tabla markdown pero ninguna cabecera con "Slice"/"Dep" → mensaje distinto de "no hay tabla en absoluto"', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Algo\n| Foo | Bar |\n|---|---|\n| 1 | 2 |\n')
     let threw = false
     try {
@@ -923,7 +932,7 @@ describe('ct-groom — "no se encontró la tabla §9" distingue "no hay tabla" d
   })
 
   it('sin ninguna tabla markdown en absoluto → mensaje "no se encontró ninguna tabla markdown"', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, '# Spec sin ninguna tabla\n\nSolo prosa.\n')
     let threw = false
     try {
@@ -946,7 +955,7 @@ describe('ct-groom — "no se encontró la tabla §9" distingue "no hay tabla" d
 
 describe('ct-groom — marcado envolviendo la CELDA COMPLETA de una lista por comas no duplica el prefijo (review round 2, CRITICAL)', () => {
   it('"**area:medicacion, area:otro**" / "`touches:pbxproj, touches:otro`" → labels correctas, sin duplicar, sin abortar', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Slices\n' +
       '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
       '|---|---|---|---|---|---|---|---|---|\n' +
@@ -966,7 +975,7 @@ describe('ct-groom — marcado envolviendo la CELDA COMPLETA de una lista por co
 
 describe('ct-groom — el escaneo post-hueco no arrastra una tabla ajena (review round 2, IMPORTANTE)', () => {
   it('regla horizontal ("---") antes de una tabla no relacionada, sin heading markdown → no aborta', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -986,7 +995,7 @@ describe('ct-groom — el escaneo post-hueco no arrastra una tabla ajena (review
 
 describe('ct-groom — fila con más celdas que la cabecera aborta fuerte (review round 2, a)', () => {
   it('un "|" sin escapar en una celda (más celdas que la cabecera) → exit != 0 en vez de columnas desplazadas en silencio', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
@@ -1011,7 +1020,7 @@ describe('ct-groom — fila con más celdas que la cabecera aborta fuerte (revie
 // legítimo); en "Slice" sí, porque de ahí sale el título.
 describe('ct-groom — "Slice" con un marcador de "sin valor" aborta fuerte (review round 2, b — actualizado por F3)', () => {
   it('"Slice" = "–" → exit != 0 en vez de un issue titulado "#1 –"', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -1031,7 +1040,7 @@ describe('ct-groom — "Slice" con un marcador de "sin valor" aborta fuerte (rev
   })
 
   it('"Entrega" = "–" (Slice con contenido) YA NO aborta', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -1045,7 +1054,7 @@ describe('ct-groom — "Slice" con un marcador de "sin valor" aborta fuerte (rev
 
 describe('ct-groom — marcador de "nada" envuelto en marcado en Dep no aborta (review round 2, c)', () => {
   it('"`–`" (backtick) en Dep no aborta', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Slices\n' +
       '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |\n' +
       '|---|---|---|---|---|---|---|\n' +
@@ -1056,7 +1065,7 @@ describe('ct-groom — marcador de "nada" envuelto en marcado en Dep no aborta (
   })
 
   it('"**–**" (negrita) en Dep no aborta', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -1074,7 +1083,7 @@ describe('ct-groom — marcador de "nada" envuelto en marcado en Dep no aborta (
 // disparan y se imprimen juntas antes de un único exit(2).
 describe('ct-groom — varios defectos a la vez se reportan TODOS en una sola ejecución (mejora de uso)', () => {
   it('una fila con "#" malformado y otra con "Dep" malformado en la misma tabla → stderr trae AMBOS mensajes, un solo exit 2', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
@@ -1112,7 +1121,7 @@ describe('ct-groom — varios defectos a la vez se reportan TODOS en una sola ej
 // negativo de que no se corrompe lo legítimo.
 describe('ct-groom — normalización de marcado en un solo paso cierra la clase entera (review round 3)', () => {
   it('REPRODUCCIÓN EXACTA del coordinador: "`area:hoy`, `area:web`" → labels limpias, sin abortar, sin aviso', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Slices\n' +
       '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
       '|---|---|---|---|---|---|---|---|---|\n' +
@@ -1129,7 +1138,7 @@ describe('ct-groom — normalización de marcado en un solo paso cierra la clase
   })
 
   it('las cuatro formas de marcado en la misma tabla, más un control negativo, todas correctas en una sola ejecución', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Slices\n' +
       '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
       '|---|---|---|---|---|---|---|---|---|\n' +
@@ -1158,7 +1167,7 @@ describe('ct-groom — normalización de marcado en un solo paso cierra la clase
 // (issue 2), en una sola ejecución.
 describe('ct-groom — guion bajo simétrico + prefijo invertido (review round 4)', () => {
   it('control negativo de nombres de fichero (_layout.tsx, __init__.py, trailing_) llega a las labels SIN mutilar — falla si se vuelve a ^_+/_+$ asimétrico', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
@@ -1180,7 +1189,7 @@ describe('ct-groom — guion bajo simétrico + prefijo invertido (review round 4
   })
 
   it('matriz de envoltorios (backtick, asterisco, guion bajo, ~~, comillas rectas, paréntesis, anidado) — todas producen "area:med", ninguna duplica el prefijo', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Slices\n' +
       '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
       '|---|---|---|---|---|---|---|---|---|\n' +
@@ -1227,26 +1236,29 @@ const ONE_SLICE_SPEC = `## 9. Slices
 // razón, que se crearían cuatro.
 const PLAN_LABELS_EXIST = JSON.stringify([[{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'status:backlog' }]])
 
-// matchingBody(specPath): el body EXACTO que ONE_SLICE_SPEC produce hoy —
-// generado con el buildIssueBody real (no a mano) para que un "coincide en
-// todo" de verdad coincida en TODO, incluidas las secciones que F5 ahora
-// también compara (AC, Dependencias, Descripción, Protegido, y — review
-// round 3 — el enlace al spec). Es una FUNCIÓN, no una constante: el enlace
-// al spec incluye la ruta real del fichero de spec, que en estos tests es
-// un directorio temporal distinto en cada `it` — hay que generarlo con la
-// MISMA ruta (`spec`) que se le pasa al script en cada invocación, o la
-// línea de enlace divergiría por construcción y ya no sería un "coincide en
-// todo" de verdad.
-function matchingBody(specPath) {
+// SPEC_REF_OK: la referencia al spec que ct-groom.mjs resuelve para un spec
+// llamado "spec.md" dentro de un directorio de makeSpecDir (repo git con
+// origin https://github.com/o/r.git) cuando el stub de `gh` confirma que el
+// fichero está publicado en `main` y que el ancla existe. F10: ya NO depende
+// de la ruta del directorio temporal — la ruta que va al body es la relativa
+// a la raíz del repo, así que es la misma en todos los `it`.
+const SPEC_REF_OK = { path: 'spec.md', heading: '9. Slices', url: specUrl('spec.md'), reason: null }
+
+// matchingBody(): el body EXACTO que ONE_SLICE_SPEC produce hoy — generado
+// con el buildIssueBody real (no a mano) para que un "coincide en todo" de
+// verdad coincida en TODO, incluidas las secciones que F5 ahora también
+// compara (AC, Dependencias, Descripción, Protegido, y — review round 3 — el
+// enlace al spec).
+function matchingBody() {
   return buildIssueBody(
     { n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' },
-    { specPath, specSection: '9' },
+    SPEC_REF_OK,
   )
 }
 
 describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F5)', () => {
   it('título/milestone/labels divergentes → se reportan por stderr, exit 3, JSON del plan idéntico al de siempre (nada se muta)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
     const EXISTING = {
       number: 501,
@@ -1281,7 +1293,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
   })
 
   it('sin ninguna divergencia (issue existente ya coincide) → exit 0, stderr vacío', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
     const MATCHING = {
       number: 501,
@@ -1289,7 +1301,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'status:in-progress' }],
-      body: matchingBody(spec),
+      body: matchingBody(),
     }
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
       { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[MATCHING]]), FAKE_GH_LABELS_LIST: PLAN_LABELS_EXIST }) })
@@ -1299,7 +1311,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
   })
 
   it('issue cerrado sin ninguna otra divergencia → sin nota de cierre (closed por sí solo no es divergencia), exit 0', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
     const CLOSED_MATCHING = {
       number: 501,
@@ -1307,7 +1319,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
       state: 'closed',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
-      body: matchingBody(spec),
+      body: matchingBody(),
     }
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
       { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[CLOSED_MATCHING]]), FAKE_GH_LABELS_LIST: PLAN_LABELS_EXIST }) })
@@ -1320,7 +1332,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
   })
 
   it('issue cerrado CON divergencia → añade nota de "cerrado" avisando antes de --reconcile, exit 3', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
     const CLOSED_DRIFT = {
       number: 501,
@@ -1346,7 +1358,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
   })
 
   it('--reconcile bajo --dry-run: anuncia qué aplicaría, pero NUNCA llama a `gh issue edit` (sigue sin mutar nada), exit 3', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
     const argvLog = join(dir, 'argv.log')
     const EXISTING = {
@@ -1377,7 +1389,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
   // --dry-run — el aviso es sobre el riesgo del flag, no sobre si esta
   // corrida en concreto llega a mutar algo de verdad.
   it('--dry-run --reconcile → el aviso de EXPERIMENTAL también aparece (mismo riesgo, aunque dry-run nunca mute)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run', '--reconcile'],
       { encoding: 'utf8', env: fakeEnv() })
@@ -1386,7 +1398,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
     rmSync(dir, { recursive: true, force: true })
   })
   it('--dry-run SIN --reconcile → el aviso NUNCA aparece', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
     let stderrOut = ''
     try {
@@ -1400,7 +1412,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
   })
 
   it('fallo al listar issues de GitHub bajo --dry-run (con --repo) aborta igual que la corrida real — el plan nunca se imprime', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
     let threw = false
     try {
@@ -1416,15 +1428,31 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('--dry-run SIN --repo: nunca invoca `gh` (comportamiento de siempre, sin nada contra qué comparar)', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+  // F10 cambia esta propiedad, y el cambio se declara en vez de borrarse: el
+  // test decía "--dry-run SIN --repo nunca invoca `gh`". Ya no es cierto, y no
+  // podía seguir siéndolo — el enlace al spec se VERIFICA contra GitHub
+  // (¿está el fichero publicado en la rama por defecto? ¿existe el ancla?), y
+  // esa verificación no depende de `--repo` sino del repositorio donde vive el
+  // SPEC. Saltársela bajo --dry-run devolvería la trampa que F1 y F5 ya
+  // cerraron dos veces: un preview que informa de menos que la corrida real —
+  // aquí, un preview que enseña un enlace que la corrida real degradaría.
+  //
+  // Lo que SÍ sigue siendo cierto, y es lo que de verdad protegía este test,
+  // es que --dry-run no muta nada: las únicas llamadas a `gh` sin --repo son
+  // las dos LECTURAS del enlace al spec.
+  it('--dry-run SIN --repo: las únicas llamadas a `gh` son las lecturas del enlace al spec — ninguna mutación', () => {
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
     const argvLog = join(dir, 'argv.log')
     const out = execFileSync('node', [script, spec, '--milestone', 'Epic', '--dry-run'],
       { encoding: 'utf8', stdio: QUIET_STDIO, env: fakeEnv({ FAKE_GH_ARGV_LOG_FILE: argvLog }) })
     const plan = JSON.parse(out)
     expect(plan.repo).toBeNull()
-    expect(existsSync(argvLog)).toBe(false)
+    const calls = readFileSync(argvLog, 'utf8').trim().split('\n')
+    expect(calls).toEqual([
+      'repo view o/r --json defaultBranchRef -q .defaultBranchRef.name',
+      'api repos/o/r/contents/spec.md?ref=main -H Accept: application/vnd.github.html',
+    ])
     rmSync(dir, { recursive: true, force: true })
   })
 })
@@ -1449,7 +1477,7 @@ describe('ct-groom --dry-run — AC/Dependencias divergentes se detectan (review
     state: 'open',
     milestone: { title: 'Epic' },
     labels: [{ name: 'type:backend' }],
-    body: buildIssueBody({ n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' }, { specPath: 'x', specSection: '9' }),
+    body: buildIssueBody({ n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' }, SPEC_REF_OK),
   }
   const ISSUE_2_MATCHING = {
     number: 502,
@@ -1457,11 +1485,11 @@ describe('ct-groom --dry-run — AC/Dependencias divergentes se detectan (review
     state: 'open',
     milestone: { title: 'Epic' },
     labels: [{ name: 'type:backend' }],
-    body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, { specPath: 'x', specSection: '9' }),
+    body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, SPEC_REF_OK),
   }
 
   it('reporta el AC y la dependencia faltantes por stderr, exit 3, sin mutar nada', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC_2)
     let threw = false
     try {
@@ -1481,7 +1509,7 @@ describe('ct-groom --dry-run — AC/Dependencias divergentes se detectan (review
   })
 
   it('--reconcile bajo --dry-run: el preview nombra las categorías (dependencias, criterios de aceptación) SIN volcar el `--body` completo, y no muta nada', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC_2)
     const argvLog = join(dir, 'argv.log')
     let threw = false
@@ -1512,7 +1540,7 @@ describe('ct-groom --dry-run — labels: gateadas por columna (review, punto 2)'
 | 1 | login | backend | modelo | – | AC-1.1 | schema |
 `
   it('sin columna "Área" en la tabla: un area: puesto a mano en el issue no se reporta como "sobra", exit 0', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, NO_AREA_SPEC)
     const ISSUE_WITH_AREA = {
       number: 501,
@@ -1520,7 +1548,7 @@ describe('ct-groom --dry-run — labels: gateadas por columna (review, punto 2)'
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:ops' }],
-      body: matchingBody(spec),
+      body: matchingBody(),
     }
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
       { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[ISSUE_WITH_AREA]]) }) })
@@ -1542,7 +1570,7 @@ describe('ct-groom --dry-run — el exit 3 ante divergencia es una decisión exp
   // sí sola (ver el comentario junto al `process.exit` en ct-groom.mjs);
   // este test fija esa igualdad como comportamiento observable.
   it('--dry-run y la corrida real (sin --reconcile) devuelven el MISMO exit code (3) ante la MISMA divergencia', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'ctg-'))
+    const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
     const EXISTING = {
       number: 501,
@@ -1550,7 +1578,7 @@ describe('ct-groom --dry-run — el exit 3 ante divergencia es una decisión exp
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
-      body: matchingBody(spec),
+      body: matchingBody(),
     }
     const envOverrides = { FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EXISTING]]), FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]) }
     const dryRunRes = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', env: fakeEnv(envOverrides) })

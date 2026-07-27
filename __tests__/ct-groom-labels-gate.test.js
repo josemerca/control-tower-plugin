@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync } from 'no
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { makeSpecDir, specUrl } from './fixtures/spec-repo.js'
 
 // F6 — dos silencios de /ct-groom que la prueba de campo destapó:
 //
@@ -31,7 +32,7 @@ const SPEC = `## 9. Slices
 // Labels que este spec produce: type:backend, area:api, touches:db, status:backlog
 
 function writeSpec(content = SPEC) {
-  const dir = mkdtempSync(join(tmpdir(), 'ctg-labels-'))
+  const dir = makeSpecDir('ctg-labels-')
   const spec = join(dir, 'spec.md')
   writeFileSync(spec, content)
   return { dir, spec }

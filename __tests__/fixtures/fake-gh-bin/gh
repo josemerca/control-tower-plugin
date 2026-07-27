@@ -240,6 +240,37 @@ function main() {
     return
   }
 
+  // `gh api repos/<o>/<r>/contents/<ruta>?ref=<rama> -H "Accept:
+  // application/vnd.github.html"` (ct-groom.mjs, F10): el spec RENDERIZADO por
+  // GitHub. ct-groom.mjs lo pide por dos cosas a la vez — que el fichero
+  // exista de verdad en esa rama (si no, no hay enlace que escribir) y que el
+  // ancla que ha calculado del encabezado esté de verdad en el HTML.
+  //
+  // FAKE_GH_CONTENTS_FAIL simula el 404 del caso más común de la vida real:
+  // el spec escrito pero todavía sin empujar.
+  // FAKE_GH_CONTENTS_ANCHORS es la lista (separada por espacios) de anclas
+  // que "tiene" el documento publicado. El default cubre los dos encabezados
+  // §9 que usan los specs de esta suite ("## 9. Slices" -> "9-slices" y
+  // "## 9. Algo" -> "9-algo"); un test que quiera ejercer "el ancla no está
+  // en la copia publicada" lo fija a otra cosa (o a vacío).
+  //
+  // El HTML es deliberadamente mínimo y ESCRITO A MANO, no generado con
+  // scripts/anchor.js: si el stub calculara el ancla con el mismo código que
+  // la produce, el test no comprobaría nada. La forma (`<a id="user-content-…"
+  // class="anchor">`) es la real, copiada de una respuesta de GitHub.
+  if (argv[0] === 'api' && /^repos\/[^/]+\/[^/]+\/contents\//.test(argv[1] || '')) {
+    if (process.env.FAKE_GH_CONTENTS_FAIL) {
+      console.error('fake-gh: api contents failed (simulado: 404 Not Found)')
+      process.exitCode = 1
+      return
+    }
+    const anchors = (process.env.FAKE_GH_CONTENTS_ANCHORS ?? '9-slices 9-algo').split(/\s+/).filter(Boolean)
+    const body = anchors.map((a) => `<div class="markdown-heading"><h2 class="heading-element">x</h2><a id="user-content-${a}" class="anchor" href="#${a}"></a></div>`).join('\n')
+    process.stdout.write(`<div id="file" class="md"><article class="markdown-body">\n${body}\n</article></div>`)
+    process.exitCode = 0
+    return
+  }
+
   // `gh label create <name> --repo <repo> --force` (ct-groom.mjs): una
   // llamada por cada label distinta que el plan produce Y que el repo no
   // tenía ya (F6), antes de crear/actualizar ningún issue. Siempre éxito —

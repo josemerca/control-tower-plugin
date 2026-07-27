@@ -320,8 +320,9 @@ export function extractLine(body, prefix) {
 // extractSpecLink: la línea `> Slice #N del epic. Spec: […]` que
 // buildIssueBody (groom.js) escribe siempre como primera línea del body —
 // review round 3, importante 5: es contenido que el spec posee de verdad
-// (deriva de `--section`/la ruta del propio spec), no bookkeeping como el
-// marcador `ct-order` — así que F5 la compara igual que el título.
+// (F10: deriva de la ruta del propio spec dentro de su repo y del encabezado
+// bajo el que vive la tabla §9), no bookkeeping como el marcador `ct-order` —
+// así que F5 la compara igual que el título.
 // SPEC_LINK_PREFIXES: las dos formas que buildIssueBody ha emitido para esa
 // línea — con el orden entre backticks (F6, la actual: evita que GitHub
 // enlace el ORDEN de slice al ISSUE con ese número) y sin ellos (los issues
@@ -333,28 +334,31 @@ export function extractSpecLink(body) {
   return extractLine(body, SPEC_LINK_PREFIXES)
 }
 
-// specLinkAnchor (review round 4, importante 4): extrae SOLO el ancla
-// "#sección" de una línea de enlace al spec — no la ruta. `ct-groom.mjs`
-// renderiza el enlace con `process.argv[2]` tal cual lo haya escrito quien
-// invoque el comando: una vez como "docs/spec.md", otra vez con ruta
-// absoluta (un slash command frente a un cron, p.ej.) — comparar la línea
-// ENTERA haría que --reconcile viera "divergencia" en TODOS los issues cada
-// vez que cambia la notación de la ruta, y la reescribiría de vuelta en la
-// siguiente corrida con la otra costumbre: dos invocaciones haciendo
-// ping-pong sobre issues reales para siempre. F5 compara SOLO el ancla — la
-// ruta puede variar en cómo se escribe sin que eso cuente como divergencia
-// (a cambio, si el spec se MUEVE a otro fichero pero la sección numérica no
-// cambia, F5 ya no lo detecta — límite conocido, documentado en
-// commands/ct-groom.md, preferible al ping-pong).
+// normalizeSpecLink (F10, sustituye a specLinkAnchor): la forma canónica de
+// una línea de enlace al spec, para compararla contra otra.
 //
-// Formato esperado: "> Slice #N del epic. Spec: [ruta#sección](ruta#sección)"
-// — el PRIMER '#' que aparece dentro de un par de corchetes "[...]" (el "#N"
-// del principio de la línea, antes de "Spec:", queda fuera porque no está
-// dentro de ningún corchete).
-export function specLinkAnchor(specLinkLine) {
-  if (!specLinkLine) return null
-  const m = specLinkLine.match(/\[[^\]]*#([^\]]+)\]/)
-  return m ? m[1] : null
+// specLinkAnchor extraía SOLO el ancla "#sección" y descartaba la ruta a
+// propósito (review round 4, importante 4): hasta F10, ct-groom.mjs componía
+// la línea con `process.argv[2]` tal cual, así que la MISMA §9 producía
+// "docs/spec.md#9" desde un slash command y "/Users/.../docs/spec.md#9" desde
+// un cron — comparar la línea entera habría hecho que cada invocación
+// reescribiera la de la otra, para siempre. El precio era no detectar que el
+// spec se hubiera movido de fichero.
+//
+// F10 quita la causa: la línea se compone ahora de la ruta relativa a la raíz
+// del repo + el remoto + la rama por defecto (scripts/spec-link.js), tres
+// propiedades del REPOSITORIO, no de quien invoca. Ya no hay dos notaciones
+// posibles de la misma cosa, así que se compara la línea completa y se gana
+// lo que antes no se detectaba: spec movido de fichero, enlace apuntando a
+// otro repo, y (lo más inmediato) los issues creados antes de F10, cuyo
+// enlace relativo roto ahora sale reportado como divergencia en vez de pasar
+// por bueno porque el "9" coincidía.
+//
+// Lo único que se normaliza es el espacio de los extremos: un editor que
+// añade o quita un espacio al final de la línea no es un cambio de contenido.
+export function normalizeSpecLink(specLinkLine) {
+  if (specLinkLine === null || specLinkLine === undefined) return null
+  return String(specLinkLine).trim()
 }
 
 // countHeadingLines: cuántas veces aparece una cabecera (mismo criterio de

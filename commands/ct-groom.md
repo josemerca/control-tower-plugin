@@ -3,7 +3,7 @@ description: Groom de un epic — spec §9 → GitHub (Milestone + issues + labe
 ---
 Corre el groom sobre el spec del epic. Primero en seco para revisar el plan:
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/ct-groom.mjs "$1" --repo "<owner/repo>" --milestone "<Epic>" --section 9 --dry-run
+node ${CLAUDE_PLUGIN_ROOT}/scripts/ct-groom.mjs "$1" --repo "<owner/repo>" --milestone "<Epic>" --dry-run
 ```
 Revisa el JSON. Si está bien, ejecútalo de verdad (añade `--project <n>` para el Project v2):
 ```
@@ -51,7 +51,7 @@ Hasta esta versión, "idempotente" quería decir *existence-only*: si el marcado
 Ahora, para cada slice cuyo issue ya existe, `/ct-groom` compara:
 
 - **título** (`#N <Slice>`);
-- **el enlace al spec** (la línea `> Slice #N del epic. Spec: […]`) — sí es contenido del spec (deriva de `--section` y de la ruta del propio fichero), a diferencia del marcador `ct-order` (bookkeeping nuestro, fuera de toda comparación). Se compara **solo por su ancla `#sección`, nunca por la ruta**: `ct-groom.mjs` renderiza la ruta tal cual la escribas al invocarlo, y comparar la línea entera haría que dos costumbres de invocación del mismo fichero (relativa desde un slash command, absoluta desde un cron, p.ej.) reportaran divergencia — y con `--reconcile`, cada una "corrigiera" la notación de la otra, indefinidamente. A cambio: si el spec se MUEVE a otro fichero sin cambiar el número de sección, `/ct-groom` ya no lo detecta (límite conocido, ver más abajo);
+- **el enlace al spec** (la línea `> Slice #N del epic. Spec: […]`) — sí es contenido del spec, a diferencia del marcador `ct-order` (bookkeeping nuestro, fuera de toda comparación). Se compara **entero**. Antes se comparaba solo por su ancla, porque la línea se componía con la ruta tal cual la escribieras al invocar el comando y dos costumbres de invocación del mismo fichero se habrían "corregido" mutuamente para siempre bajo `--reconcile`; esa causa ya no existe (ver "El enlace al spec" más abajo), y comparar la línea entera detecta además que el spec se ha movido de fichero o apunta a otro repo. Consecuencia inmediata al actualizar: los issues creados con la versión anterior llevan un enlace relativo roto, así que **saldrán reportados como divergencia** — es correcto, ese enlace nunca funcionó;
 - **milestone** (`--milestone` del spec contra el milestone actual del issue);
 - **labels, pero solo los prefijos cuya columna trae la tabla §9**: `type:` (si hay columna `Tipo`), `area:` (si hay columna `Área`), `touches:` (si hay columna `Toca`). Sin la columna correspondiente, el spec no tiene NINGUNA opinión sobre ese prefijo. `status:` queda **fuera de la comparación por completo, siempre** — un humano o `/ct-next` lo mueven después (`backlog` → `ready` → `in-progress` → `in-review`…) como parte normal del flujo;
 - **dependencias** (`## Dependencias`, las líneas `merge-after #N`) y **criterios de aceptación** (`## Acceptance criteria`) — datos que el dispatcher obedece de verdad (`merge-after` gatea si un slice se puede despachar; los AC se inyectan literalmente en el prompt del agente). Comparación por conjunto, **solo dentro de la sección reconocida** (ver "Límites conocidos"): un `merge-after #N` (o un AC) escrito en OTRA parte del body — Descripción, una sección nueva a mano — no cuenta como divergencia real, pero **sí se avisa como nota** (desde el hardening del dispatch, `/ct-next` tampoco lo obedece — antes de eso el dispatcher SÍ lo hacía aunque `/ct-groom` no pudiera tocarlo con seguridad; ver "Límites conocidos");
@@ -74,7 +74,7 @@ Duplicar `## Descripción`/`## Out of scope / Protected` sigue siendo solo cosm�
 
 **`--reconcile`** (opt-in, nunca por defecto — un issue puede haber sido editado a propósito, llevar discusión, o estar cerrado) aplica:
 
-- **título, milestone y labels** con un único `gh issue edit --title … --milestone … --add-label … --remove-label …`; el **enlace al spec** viaja en la MISMA llamada, dentro de `--body` (splice de una sola línea) — pero **solo si el ancla realmente cambió**; una diferencia de notación de ruta nunca dispara una reescritura;
+- **título, milestone y labels** con un único `gh issue edit --title … --milestone … --add-label … --remove-label …`; el **enlace al spec** viaja en la MISMA llamada, dentro de `--body` (splice de una sola línea), siempre que la línea difiera en algo;
 - **dependencias y criterios de aceptación**, en la MISMA llamada, vía `--body`: se reemplaza (o inserta/retira, si toda la sección `## Dependencias` aparece o desaparece) SOLO el rango exacto de esas dos secciones dentro del body existente — nunca se reconstruye el body entero. Si la cabecera de AC no se encuentra (renombrada o borrada a mano), o si Dependencias necesita crearse pero no hay un ancla segura donde insertarla (típicamente, `## Out of scope / Protected` tampoco se localiza — p.ej. por una valla de código sin cerrar delante), `--reconcile` **no inventa dónde escribir ni añade nada a ciegas** — se rinde limpiamente, avisa con precisión (nunca dice "solo prosa" cuando en realidad es AC/deps sin aplicar) y esa divergencia queda contando para el código de salida. (Antes de esto, la rama sin ancla segura insertaba una sección nueva en cada corrida sin ningún límite — verificado que crecía 2, 3, 4 veces en pasadas sucesivas.)
 - **Descripción, Protegido, secciones duplicadas y referencias fuera de sección NUNCA se aplican**, ni siquiera con `--reconcile` — o son prosa de longitud arbitraria (un splice no puede garantizar que no se pierda una elaboración humana legítima), o viven en un sitio del body que `--reconcile` no puede tocar con seguridad.
 - **Issues huérfanos NUNCA se tocan** — no hay ningún slice en la tabla §9 con el que reconciliarlos.
@@ -87,8 +87,42 @@ Todo esto funciona también bajo **`--dry-run`** (con `--repo`; sin él no hay n
 
 `--dry-run` y la corrida real sin `--reconcile` dan el **mismo `3`** ante la misma divergencia, por paridad (misma condición, misma señal). Ojo si automatizas esto: con `groom --dry-run && groom`, un `3` en el `--dry-run` **corta la cadena** justo cuando hay algo que `--reconcile` podría aplicar — si quieres "revisa, y si hay algo que arreglar, aplícalo", comprueba el código de salida explícitamente en vez de depender de `&&`.
 
+### El enlace al spec
+
+La primera línea del cuerpo de cada issue es su única trazabilidad hacia la sección que lo originó:
+
+```
+> Slice `#1` del epic. Spec: [docs/specs/plan-design.md § 9. Slices](https://github.com/owner/repo/blob/main/docs/specs/plan-design.md#9-slices)
+```
+
+Hasta la versión anterior esa línea era `[docs/specs/plan-design.md#9](docs/specs/plan-design.md#9)`, y estaba rota por partida doble (comprobado contra GitHub, no deducido):
+
+- **la ruta relativa no resuelve desde un issue.** GitHub devuelve el href tal cual; en `github.com/owner/repo/issues/N` eso resuelve contra esa URL y da 404. En un fichero del repo funcionaría; en un issue, que es donde vive la línea, no.
+- **el ancla no existía.** Se emitía el número de sección (`#9`), pero el ancla que GitHub genera para `## 9. Slices` es `#9-slices`. Aunque el enlace hubiera resuelto, habría caído al principio del documento.
+
+Ahora:
+
+- **la URL es absoluta y apunta a la rama por defecto del repo donde vive el spec** (no a un sha). El spec es un documento vivo y `/ct-groom` lo trata como tal — la detección de divergencia compara cada issue contra la §9 de HOY; un permalink a un sha congelaría el enlace en una versión que puede haber dejado de ser la que la herramienta compara. Tampoco se usa la rama desde la que invocas: eso no es una propiedad del repositorio sino de quién invoca (y una rama de feature se borra al mergear).
+- **el ancla sale del texto del encabezado real** bajo el que vive la tabla, con las mismas reglas con las que GitHub genera anclas (minúsculas, espacios a guiones, puntuación fuera, sufijo `-1`/`-2` cuando el mismo texto se repite en el documento). El encabezado no tiene por qué llamarse "9" ni ser el noveno: la tabla se localiza, como siempre, por su cabecera de columnas.
+- **se verifica antes de escribirlo.** `/ct-groom` pide a GitHub el fichero renderizado en esa rama y comprueba que el ancla esté de verdad en él. Un enlace absoluto a algo no publicado es el mismo defecto con otra cara.
+
+Cuando la verificación no pasa, **no se escribe un enlace a medias**: la línea queda como referencia de texto, con el motivo dentro, y se avisa por stderr:
+
+```
+> Slice `#1` del epic. Spec: `docs/specs/plan-design.md` § `9. Slices` — sin enlace: el spec no está publicado en la rama por defecto del repositorio (owner/repo, rama main)
+```
+
+Los motivos posibles: el spec no está en un repo git, queda fuera del árbol del repo, el repo no tiene remoto `origin`, el remoto no es una URL reconocible, no se pudo resolver la rama por defecto, o **el spec todavía no está empujado** (con diferencia el más común: lo escribes, groomeas, y empujas después). Caso intermedio: si el fichero sí está publicado pero el ancla no aparece en la copia publicada (spec editado en local y sin empujar), se enlaza el **fichero** —que sí funciona— sin fragmento, y se avisa.
+
+**Groomea después de empujar el spec.** La idempotencia es solo por existencia: si una corrida real crea los issues con la referencia degradada, la siguiente corrida reporta la divergencia pero no la aplica sin `--reconcile` (EXPERIMENTAL). Un `--dry-run` antes de la corrida real enseña exactamente la misma línea y los mismos avisos.
+
+#### `--section` está obsoleto
+
+`--section N` se acepta todavía (no rompe ninguna invocación existente) pero **se ignora, y se avisa de que se ignora**. Nunca decidió qué se groomeaba —la tabla siempre se ha localizado por su cabecera de columnas `Slice` + `Dep`—; lo único que hacía era componer el ancla `#N` del enlace, que es justo el ancla que no existe. Quítalo de tus invocaciones.
+
 #### Límites conocidos
 
 - Un `merge-after #N` (o un AC) escrito **fuera** de su sección reconocida se avisa como nota, pero `--reconcile` nunca lo toca — el dominio de detección-que-cuenta-para-el-exit-code y el de aplicación son, deliberadamente, el mismo (solo la sección reconocida): escanear todo el body para APLICAR arriesgaría el tipo de corrupción de contenido humano que este diseño evita en otros puntos.
-- El enlace al spec se compara solo por su ancla: si el spec se **mueve a otro fichero** sin cambiar el número de sección, `/ct-groom` no lo detecta.
+- El enlace apunta a la rama por defecto: si el fichero del spec se **mueve o se renombra** después, el enlace de los issues ya creados muere. `/ct-groom` sí lo **detecta** en la siguiente corrida (compara la línea entera), pero no lo corrige sin `--reconcile`.
+- La verificación del enlace añade **dos lecturas** a `gh` (`repo view` y `api …/contents`) en cada corrida, incluidas las de `--dry-run` sin `--repo` — que por eso ya no son 100% offline. Si `gh` no puede responder, el enlace degrada con aviso en vez de abortar el groom.
 - Una sección conocida **duplicada**: solo la primera aparición se compara y se reconcilia; la segunda copia sobrevive intacta pero huérfana (se avisa, no se corrige sola — y para AC/Dependencias, cuenta para el exit code, ver arriba).

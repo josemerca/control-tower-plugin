@@ -76,12 +76,12 @@ export function renderProtectedLine(slice) {
 }
 
 // renderSpecLink (F5 review round 3, importante 5): la línea de enlace al
-// spec ES contenido que el spec posee de verdad — deriva de `--section` y de
-// la ruta del propio spec (`specPath`), no es bookkeeping como el marcador
-// `ct-order`. Extraída por el mismo motivo que renderDescripcion/
+// spec ES contenido que el spec posee de verdad — no es bookkeeping como el
+// marcador `ct-order`. Extraída por el mismo motivo que renderDescripcion/
 // renderProtectedLine: una sola fuente de verdad de "qué debería decir",
 // compartida entre crear el issue (buildIssueBody) y compararlo después
 // (scripts/reconcile.js#diffIssue).
+//
 // F6 (grave 1): el orden del slice va entre backticks (código inline) — un
 // "#N" DESNUDO en el body de un issue lo autoenlaza GitHub al issue N de ese
 // repo. Verificado contra GitHub de verdad, no deducido: el `body_html` real
@@ -91,8 +91,64 @@ export function renderProtectedLine(slice) {
 // #3 de ese repo es, en realidad, el slice 2. Con código inline no se
 // autoenlaza (comprobado en la misma corrida con la API /markdown: ``#2``
 // sale como `<code>#2</code>`, mientras `#2` desnudo sale como `<a …>`).
-export function renderSpecLink(slice, { specPath, specSection }) {
-  return `> Slice \`#${slice.n}\` del epic. Spec: [${specPath}#${specSection}](${specPath}#${specSection})`
+//
+// F10: la línea deja de componerse de `--section` + la ruta tal cual venía en
+// argv (que producía "[docs/x.md#9](docs/x.md#9)": relativo, y por tanto 404
+// desde la página de un issue, contra un ancla que además no existe). Ahora
+// recibe `specRef` — el resultado de scripts/spec-link.js#resolveSpecRef —
+// que ya trae, o una URL absoluta VERIFICADA contra GitHub, o `reason`: por
+// qué no la hay. Esta función solo decide cómo se escriben esos dos casos,
+// nunca inventa un enlace.
+//
+// specRef = { path, heading, url, reason }
+//   path    ruta del spec relativa a la raíz del repo (o tal como llegó, si
+//           no se pudo determinar el repo)
+//   heading texto renderizado del encabezado de la §9 ("9. Slices"), o null
+//   url     enlace absoluto verificado, o null
+//   reason  motivo de que no haya url (cadena fija, ver SPEC_REF_REASONS)
+export function renderSpecLink(slice, specRef) {
+  const head = `> Slice \`#${slice.n}\` del epic. Spec: `
+  const { path, heading, url, reason } = specRef || {}
+  if (url) {
+    // El texto del enlace SÍ puede llevar un "#N" del propio encabezado sin
+    // riesgo: verificado contra GitHub que un "#3" (issue que existe de
+    // verdad en ese repo) DENTRO del texto de un enlace no se autoenlaza,
+    // mientras que el mismo "#3" en texto plano sí. Lo que sí hay que
+    // escapar son los corchetes, que cortarían el enlace en seco.
+    return `${head}[${escapeLinkText(labelOf(path, heading))}](${url})`
+  }
+  // Sin enlace: referencia honesta, sin `[...]( ... )` de ningún tipo. Ruta y
+  // encabezado van en código inline porque AQUÍ sí son texto plano y un
+  // "#N" del encabezado se autoenlazaría al issue N del repo.
+  const headingPart = heading ? ` § ${inlineCode(heading)}` : ''
+  return `${head}${inlineCode(path)}${headingPart} — sin enlace: ${reason}`
+}
+
+function labelOf(path, heading) {
+  return heading ? `${path} § ${heading}` : String(path)
+}
+
+// escapeLinkText: `\` primero (si no, se escaparían los escapes recién
+// puestos), luego los corchetes. Verificado contra GitHub: "[a \[b\] c](url)"
+// sale como un único enlace con texto "a [b] c".
+function escapeLinkText(text) {
+  return String(text).replace(/\\/g, '\\\\').replace(/([[\]])/g, '\\$1')
+}
+
+// inlineCode: envuelve en la valla de backticks MÁS CORTA que el contenido no
+// pueda cerrar — misma regla que CommonMark y que el escáner de vallas de
+// gh-issue-map.js. Un encabezado con backticks dentro ("## Slices `parseo`")
+// llega aquí ya sin ellos (anchor.js#inlineText resuelve el code span), pero
+// una RUTA con un backtick es posible en un sistema de ficheros de verdad, y
+// una valla de un solo backtick la rompería dejando el "#N" del propio texto
+// fuera de todo código inline — o sea, autoenlazado.
+function inlineCode(text) {
+  const s = String(text)
+  let longest = 0
+  for (const run of s.match(/`+/g) || []) longest = Math.max(longest, run.length)
+  const fence = '`'.repeat(longest + 1)
+  const pad = (s.startsWith('`') || s.endsWith('`')) ? ' ' : ''
+  return `${fence}${pad}${s}${pad}${fence}`
 }
 
 // DEPS_ORDER_NOTE / renderDepsContent / renderAcContent (F6): el CONTENIDO de
@@ -120,9 +176,9 @@ export function renderAcContent(ac) {
   return (ac && ac.length) ? ac.map((a) => `- ${a}`).join('\n') : '- (rellenar desde el spec)'
 }
 
-export function buildIssueBody(slice, { specPath, specSection }) {
+export function buildIssueBody(slice, specRef) {
   const lines = []
-  lines.push(renderSpecLink(slice, { specPath, specSection }))
+  lines.push(renderSpecLink(slice, specRef))
   lines.push('')
   // F3: "Entrega" ya no alimenta el título (ver buildIssueTitle) — pasa a
   // ser una descripción OPCIONAL del cuerpo. Va aquí, justo debajo del link
@@ -170,7 +226,7 @@ function findDuplicateOrders(slices) {
   return [...dupes].sort((a, b) => a - b)
 }
 
-export function groomPlan(slices, { milestone, specPath, specSection }) {
+export function groomPlan(slices, { milestone, specRef }) {
   const dupes = findDuplicateOrders(slices)
   if (dupes.length) {
     throw new Error(`groomPlan: orden(es) de slice duplicado(s) en la tabla §9: ${dupes.join(', ')}`)
@@ -180,7 +236,7 @@ export function groomPlan(slices, { milestone, specPath, specSection }) {
     issues: slices.map((s) => ({
       order: s.n,
       title: buildIssueTitle(s),
-      body: buildIssueBody(s, { specPath, specSection }),
+      body: buildIssueBody(s, specRef),
       labels: buildLabels(s),
       deps: s.deps,
       // F5: además del body ya renderizado (arriba), el plan lleva los
@@ -191,7 +247,7 @@ export function groomPlan(slices, { milestone, specPath, specSection }) {
       ac: s.ac || [],
       descripcion: renderDescripcion(s),
       protectedLine: renderProtectedLine(s),
-      specLink: renderSpecLink(s, { specPath, specSection }),
+      specLink: renderSpecLink(s, specRef),
     })),
   }
 }

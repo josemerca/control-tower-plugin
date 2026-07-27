@@ -142,7 +142,22 @@ SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
 # marcador de apertura se mantiene idéntico al de siempre para que un repo
 # bootstrapeado antes de F6 (sin línea de versión, "v1") siga reconociéndose
 # con los mismos `grep -qxF` de siempre, sin ninguna migración.
-SLICES_CONTRACT_VERSION=3
+# F10 sube de 3 a 4. El número NO mide el tamaño del cambio: mide "¿el texto
+# que tiene este repo es el que shippea este plugin?", y es la ÚNICA palanca
+# que hace que un contrato corregido llegue a un repo ya bootstrapeado.
+# Comprobado ejecutándolo antes de decidir: con un repo sembrado por el v3 de
+# F11 (bloque intacto, hash registrado), dejar el número en 3 hace que TANTO la
+# corrida normal COMO `--update-slices-contract` respondan "contrato v3, al
+# día" — `found_version -eq SLICES_CONTRACT_VERSION` y `block_status=pristine`,
+# así que ni siquiera entra en la rama de "el contenido no es el mío". No hay
+# NINGÚN camino por el que ese repo reciba el texto nuevo: se queda para
+# siempre diciendo que `--section` alimenta el ancla del enlace (un flag que
+# ahora se ignora) y sin la línea de "empuja el spec antes de groomear", que es
+# lo que decide si sus issues nacen con enlace o sin él. Con 4, ese mismo repo
+# recibe el aviso de desactualizado y `--update-slices-contract` lo reemplaza
+# limpiamente, sin `--force` y sin acusar a nadie — que es exactamente el
+# mecanismo que F9 construyó.
+SLICES_CONTRACT_VERSION=4
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -189,6 +204,7 @@ c90554b809bc6af4f50613e75f160b0b0859ffce3412aeb44d10bef2d9da3e0a  v1, 77 líneas
 7de20667a7c30a869cfcc1e56577de90e3214c4356c48ded040bf4dc0977159e  v1, 87 líneas — b968286 (plugin 0.6.0–0.8.0)
 5d90ba2f8203469cc1aad5a189b2c25003d5223d13f920e4bbbe9e2320c3e9cb  v2, 134 líneas — 40adf2c (plugin 0.9.0–0.10.0)
 8aaa19edfc9b57419972c509f4b558c6084d2a691592561a2b3d180ae59cfcc8  v3, 213 líneas — F11 (sección "Qué hace /ct-next con esto")
+02247741819714164c8f45fbc42dcf26d11c7df58df6b81fae040b038fcf93c4  v4, 221 líneas — F10 (--section obsoleto, enlace al spec verificado)
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -196,7 +212,7 @@ c90554b809bc6af4f50613e75f160b0b0859ffce3412aeb44d10bef2d9da3e0a  v1, 77 líneas
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 3 -->
+<!-- ct-init:slices-contract-version: 4 -->
 ## Formato de la tabla §9 (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -288,11 +304,19 @@ nunca lo compara ni lo revierte.
   con el título por defecto `Epic`), sus órdenes chocan y `/ct-next` excluye
   ese epic entero de la selección, avisando. Dale a cada epic su propio
   título de milestone.
-- **`--section N`** (por defecto `9`): solo alimenta el enlace al spec que se
-  escribe en cada issue (`ruta/al/spec.md#N`). La tabla se localiza por su
-  **cabecera** (una fila con columnas `Slice` y `Dep`), no por el número de
-  sección — así que si el documento trae ANTES otra tabla con esas dos
-  columnas, se groomeará esa. Una sola tabla de slices por spec.
+- **`--section N`**: OBSOLETO, se acepta y se ignora (avisando). Nunca decidió
+  qué se groomeaba: la tabla se localiza por su **cabecera** (una fila con
+  columnas `Slice` y `Dep`), no por ningún número de sección — así que si el
+  documento trae ANTES otra tabla con esas dos columnas, se groomeará esa. Una
+  sola tabla de slices por spec. Lo único que hacía `--section` era componer el
+  ancla del enlace al spec como `#N`, un ancla que en GitHub no existe.
+- **El enlace al spec** que se escribe en cada issue sale ahora del encabezado
+  real bajo el que pongas la tabla (`## 9. Slices` → `…/blob/<rama por
+  defecto>/ruta/al/spec.md#9-slices`), y se **verifica** contra GitHub antes de
+  escribirlo. Consecuencia para ti: **empuja el spec antes de groomear**. Si el
+  fichero no está publicado en la rama por defecto, los issues nacen con una
+  referencia de texto sin enlace (diciendo por qué), y `/ct-groom` no lo corrige
+  en corridas posteriores sin `--reconcile`.
 - **`--project <n>`** *(opcional)*: mete cada issue en el Project v2 número
   `n` **del mismo owner que `--repo`** (un project de otro owner no está
   soportado) y le fija el campo de iteración llamado exactamente `Sprint` a la

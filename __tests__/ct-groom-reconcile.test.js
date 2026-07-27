@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync } from 'no
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { makeSpecDir, specUrl } from './fixtures/spec-repo.js'
 import { buildIssueBody } from '../scripts/groom.js'
 
 // F5 — el groom detecta divergencia, no solo existencia. Este fichero cubre
@@ -27,33 +28,48 @@ const ONE_SLICE_SPEC = `## 9. Slices
 // title "#1 login", labels ['type:backend','area:api','touches:db','status:backlog'],
 // milestone "Epic" (--milestone por defecto).
 
-// matchingBody(specPath): el body EXACTO que ONE_SLICE_SPEC produce hoy —
-// generado con el buildIssueBody real (no a mano), para que los fixtures
-// "coincide en todo" de este fichero coincidan de verdad en TODO lo que F5
-// compara (AC, Dependencias, Descripción, Protegido, y — review round 3 —
-// el enlace al spec). Es una FUNCIÓN, no una constante: el enlace al spec
-// incluye la ruta real del fichero de spec, que en cada test es un
-// directorio temporal distinto (`writeSpec` crea uno nuevo cada vez) — hay
-// que generarlo con la MISMA ruta que se le pasa al script en cada
-// invocación, o la línea de enlace divergiría por construcción.
-function matchingBody(specPath) {
+// SPEC_REF_OK: la referencia al spec que ct-groom.mjs resuelve para un
+// "spec.md" dentro de un directorio de makeSpecDir (repo git con origin
+// https://github.com/o/r.git) cuando el stub de `gh` confirma que está
+// publicado en `main` y que el ancla existe. F10: ya no depende del
+// directorio temporal — lo que va al body es la ruta relativa a la raíz del
+// repo, idéntica en todos los tests.
+const SPEC_REF_OK = { path: 'spec.md', heading: '9. Slices', url: specUrl('spec.md'), reason: null }
+
+// SPEC_LINK_LINE: la MISMA línea, escrita a mano. Los fixtures que arman un
+// body a mano (los de secciones duplicadas, más abajo) la necesitan para que
+// su única divergencia sea la que quieren probar — y escribirla a mano, en
+// vez de llamar a renderSpecLink, es lo que hace que estos tests fallen si
+// el formato cambia sin querer.
+const SPEC_LINK_LINE = (n) => `> Slice \`#${n}\` del epic. Spec: [spec.md § 9. Slices](${specUrl('spec.md')})`
+
+// matchingBody(): el body EXACTO que ONE_SLICE_SPEC produce hoy — generado
+// con el buildIssueBody real (no a mano), para que los fixtures "coincide en
+// todo" de este fichero coincidan de verdad en TODO lo que F5 compara (AC,
+// Dependencias, Descripción, Protegido, y — review round 3 — el enlace al
+// spec).
+function matchingBody() {
   return buildIssueBody(
     { n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' },
-    { specPath, specSection: '9' },
+    SPEC_REF_OK,
   )
 }
 
 function writeSpec(content) {
-  const dir = mkdtempSync(join(tmpdir(), 'ctg-reconcile-'))
+  const dir = makeSpecDir('ctg-reconcile-')
   const spec = join(dir, 'spec.md')
   writeFileSync(spec, content)
   return { dir, spec }
 }
 
-function run(args, envOverrides = {}) {
+// `opts.cwd` (F10): hace falta para poder invocar con una ruta de spec
+// RELATIVA — la comprobación de que la notación de la ruta ya no cambia
+// nada del enlace resultante.
+function run(args, envOverrides = {}, opts = {}) {
   return spawnSync('node', [script, ...args], {
     encoding: 'utf8',
     env: { ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}`, ...envOverrides },
+    ...opts,
   })
 }
 
@@ -74,7 +90,7 @@ function existingIssueDrift(specPath) {
     // coinciden con el spec) — así este fixture ejercita SOLO la
     // divergencia de título/milestone/labels que es su propósito, sin
     // arrastrar drift de body sin querer.
-    body: matchingBody(specPath),
+    body: matchingBody(),
   }
 }
 
@@ -114,7 +130,7 @@ describe('ct-groom (corrida real) — detecta divergencia por defecto, no la apl
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'status:in-progress' }],
-      body: matchingBody(spec),
+      body: matchingBody(),
     }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
       FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
@@ -133,7 +149,7 @@ describe('ct-groom (corrida real) — detecta divergencia por defecto, no la apl
       state: 'closed',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
-      body: matchingBody(spec),
+      body: matchingBody(),
     }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
       FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
@@ -184,7 +200,7 @@ describe('ct-groom (corrida real) --reconcile — aplica lo detectado vía `gh i
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
-      body: matchingBody(spec),
+      body: matchingBody(),
     }
     const argvLog = join(dir, 'argv.log')
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], {
@@ -267,7 +283,7 @@ describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }],
       // AC-1.2 falta, y no hay ninguna sección "## Dependencias" en absoluto.
-      body: buildIssueBody({ n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' }, { specPath, specSection: '9' }),
+      body: buildIssueBody({ n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' }, SPEC_REF_OK),
     }
   }
   function issue2Matching(specPath) {
@@ -277,7 +293,7 @@ describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }],
-      body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, { specPath, specSection: '9' }),
+      body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, SPEC_REF_OK),
     }
   }
   function env2(specPath) {
@@ -373,7 +389,7 @@ describe('ct-groom (corrida real) — labels: el spec solo es autoridad de un pr
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:ops' }], // puesto a mano, el spec nunca habló de área
-      body: matchingBody(spec),
+      body: matchingBody(),
     }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
       FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
@@ -404,7 +420,7 @@ describe('ct-groom (corrida real) — divergencia SOLO de prosa (Descripción/Pr
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
       // Descripción distinta ("otro texto" en vez de "modelo") — todo lo
       // demás (AC, deps, Protegido, enlace al spec) coincide con el spec.
-      body: buildIssueBody({ n: 1, name: 'login', type: 'backend', entrega: 'otro texto', deps: [], ac: ['AC-1.1'], protected: 'schema' }, { specPath: spec, specSection: '9' }),
+      body: buildIssueBody({ n: 1, name: 'login', type: 'backend', entrega: 'otro texto', deps: [], ac: ['AC-1.1'], protected: 'schema' }, SPEC_REF_OK),
     }
     const argvLog = join(dir, 'argv.log')
     const envBase = {
@@ -444,7 +460,7 @@ describe('ct-groom (corrida real) — issues huérfanos: un slice eliminado de l
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
-      body: matchingBody(spec),
+      body: matchingBody(),
     }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
       FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
@@ -465,7 +481,7 @@ describe('ct-groom (corrida real) — issues huérfanos: un slice eliminado de l
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
-      body: matchingBody(spec),
+      body: matchingBody(),
     }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
       FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
@@ -487,15 +503,50 @@ describe('ct-groom (corrida real) — issues huérfanos: un slice eliminado de l
 // capa pura, reconcile.test.js/gh-issue-map.test.js).
 // ============================================================================
 
-describe('ct-groom (corrida real) — el enlace al spec ignora la notación de ruta, solo compara el ancla (review round 4, importante 4)', () => {
-  it('mismo ancla "#9", ruta distinta (relativa en el issue, absoluta en esta invocación) → NO diverge, exit 0, --reconcile no llama a `gh issue edit`', () => {
+// F10 sustituye entera la sección que había aquí ("el enlace al spec ignora
+// la notación de ruta, solo compara el ancla"). Aquella defensa existía
+// porque la línea se componía con `process.argv[2]` tal cual: la misma §9
+// producía dos líneas distintas según cómo se hubiera escrito la ruta, y
+// comparar la línea entera provocaba un ping-pong perpetuo entre dos
+// costumbres de invocación. Ahora la línea se deriva del REPOSITORIO (ruta
+// relativa a la raíz + remoto + rama por defecto), así que la premisa de
+// aquel test ya no se puede construir: no hay dos líneas posibles para el
+// mismo fichero. Se comprueba eso mismo — y lo que se gana a cambio.
+describe('ct-groom (corrida real) — el enlace al spec es el MISMO se invoque como se invoque, y se compara entero (F10)', () => {
+  it('invocar con ruta relativa y con ruta absoluta produce EXACTAMENTE la misma línea de enlace (ya no hay ping-pong que evitar)', () => {
     const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
-    const argvLog = join(dir, 'argv.log')
-    // `spec` es una ruta ABSOLUTA (mkdtempSync + join ya lo son) — el issue
-    // existente usa una notación RELATIVA para el MISMO fichero (simula
-    // invocar el comando una vez con ruta relativa y otra con absoluta:
-    // un slash command frente a un cron, p.ej.).
-    const matchingButDifferentPathNotation = {
+    const abs = JSON.parse(run([spec, '--milestone', 'Epic', '--dry-run']).stdout)
+    const rel = JSON.parse(run(['spec.md', '--milestone', 'Epic', '--dry-run'], {}, { cwd: dir }).stdout)
+    expect(abs.issues[0].specLink).toBe(rel.issues[0].specLink)
+    // Y es la línea con URL absoluta, no una degradación que por casualidad
+    // coincida en ser igual de inútil las dos veces.
+    expect(abs.issues[0].specLink).toContain(specUrl('spec.md'))
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('un issue creado ANTES de F10 (enlace relativo, ancla numérica) SÍ diverge — el enlace roto ya no pasa por bueno porque el "9" coincidía', () => {
+    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
+    const preF10 = {
+      number: 501,
+      title: '#1 login',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
+      // La línea EXACTA que producía la versión anterior de groom.js.
+      body: matchingBody().replace(/^> Slice .*$/m, '> Slice `#1` del epic. Spec: [spec.md#9](spec.md#9)'),
+    }
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[preF10]]),
+    })
+    expect(res.status).toBe(3)
+    expect(res.stderr).toMatch(/enlace al spec difiere/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el spec MOVIDO a otro fichero (mismo encabezado, misma sección) SÍ diverge — el límite conocido que la comparación por ancla no detectaba', () => {
+    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
+    const otherFile = {
       number: 501,
       title: '#1 login',
       state: 'open',
@@ -503,12 +554,32 @@ describe('ct-groom (corrida real) — el enlace al spec ignora la notación de r
       labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
       body: buildIssueBody(
         { n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' },
-        { specPath: 'spec.md', specSection: '9' }, // ruta relativa, distinta de `spec` — mismo ancla "#9"
+        { path: 'docs/viejo.md', heading: '9. Slices', url: specUrl('docs/viejo.md'), reason: null },
       ),
+    }
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[otherFile]]),
+    })
+    expect(res.status).toBe(3)
+    expect(res.stderr).toMatch(/enlace al spec difiere/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el MISMO enlace (mismo fichero, mismo encabezado) NO diverge, y --reconcile no llama a `gh issue edit` por eso', () => {
+    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
+    const argvLog = join(dir, 'argv.log')
+    const matching = {
+      number: 501,
+      title: '#1 login',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
+      body: matchingBody(),
     }
     const envBase = {
       FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
-      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[matchingButDifferentPathNotation]]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[matching]]),
     }
     const resDefault = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], envBase)
     expect(resDefault.status).toBe(0)
@@ -517,29 +588,7 @@ describe('ct-groom (corrida real) — el enlace al spec ignora la notación de r
     const resReconcile = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], { ...envBase, FAKE_GH_ARGV_LOG_FILE: argvLog })
     expect(resReconcile.status).toBe(0)
     const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
-    expect(log).not.toMatch(/issue edit/) // nada que reconciliar — jamás se llama a gh por esto
-    rmSync(dir, { recursive: true, force: true })
-  })
-
-  it('ancla DISTINTA ("#10" en vez de "#9") → SÍ diverge, exit 3', () => {
-    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
-    const movedSection = {
-      number: 501,
-      title: '#1 login',
-      state: 'open',
-      milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
-      body: buildIssueBody(
-        { n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' },
-        { specPath: spec, specSection: '10' }, // misma ruta, ancla distinta
-      ),
-    }
-    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
-      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
-      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[movedSection]]),
-    })
-    expect(res.status).toBe(3)
-    expect(res.stderr).toMatch(/enlace al spec difiere/)
+    expect(log).not.toMatch(/issue edit/)
     rmSync(dir, { recursive: true, force: true })
   })
 })
@@ -560,7 +609,7 @@ describe('ct-groom (corrida real) — un "## Dependencias"/"## Acceptance criter
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }],
       body: [
-        `> Slice #1 del epic. Spec: [${spec}#9](${spec}#9)`, '',
+        SPEC_LINK_LINE(1), '',
         '## Descripción', 'modelo', '',
         '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-1.1', '',
         '## Dependencias', '- merge-after #2', '',
@@ -575,7 +624,7 @@ describe('ct-groom (corrida real) — un "## Dependencias"/"## Acceptance criter
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }],
-      body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, { specPath: spec, specSection: '9' }),
+      body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, SPEC_REF_OK),
     }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
       FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
@@ -605,7 +654,7 @@ describe('ct-groom (corrida real) — un "## Dependencias"/"## Acceptance criter
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }],
       body: [
-        `> Slice #1 del epic. Spec: [${spec}#9](${spec}#9)`, '',
+        SPEC_LINK_LINE(1), '',
         '## Descripción', 'modelo', '',
         '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-1.1', '',
         '## Dependencias', '- merge-after #2', '',
@@ -620,7 +669,7 @@ describe('ct-groom (corrida real) — un "## Dependencias"/"## Acceptance criter
       state: 'open',
       milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }],
-      body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, { specPath: spec, specSection: '9' }),
+      body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, SPEC_REF_OK),
     }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], {
       FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),

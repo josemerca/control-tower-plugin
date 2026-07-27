@@ -1,4 +1,10 @@
 // Parseo puro de la tabla §9 "Desglose en slices" de un spec markdown.
+// headingAbove (F10): este parser ya localizaba la tabla por su CABECERA DE
+// COLUMNAS ("Slice" + "Dep"), nunca por un número de sección — pero no sabía
+// bajo qué encabezado del documento vivía, así que el enlace al spec de cada
+// issue tenía que inventarse un ancla a partir de `--section` ("#9"), que no
+// existe en GitHub. Ahora el reporte incluye el encabezado real y su ancla.
+import { headingAbove } from './anchor.js'
 const DEP_RE = /#(\d+)/g
 // PLAIN_INT_RE: el `#` de cada fila debe ser un entero a secas ("1", "23"),
 // nunca "S1" (letra de prefijo humano), "**1**" (negrita markdown) ni "1a"
@@ -333,6 +339,7 @@ export function analyzeSlicesTable(specMd) {
     return {
       tableFound: false,
       pipeRowsFound,
+      sectionHeading: null,
       missingRequiredColumns: [],
       missingOptionalColumns: [],
       totalDataRows: 0,
@@ -555,6 +562,14 @@ export function analyzeSlicesTable(specMd) {
   return {
     tableFound: true,
     pipeRowsFound,
+    // sectionHeading (F10): el encabezado bajo el que vive la tabla, con su
+    // ancla de GitHub — `{ line, text, anchor }` o null si la tabla está por
+    // encima de cualquier encabezado del documento. Es lo que hace que el
+    // enlace al spec de los issues pueda apuntar a la sección de verdad en
+    // vez de a un "#9" que no existe. `anchor` puede ser '' (encabezado sin
+    // ancla utilizable, p.ej. "## ..."): el consumidor lo trata como "no hay
+    // ancla", nunca emite "#" a secas — ver scripts/spec-link.js.
+    sectionHeading: headingAbove(specMd, headerIdx),
     missingRequiredColumns,
     missingOptionalColumns,
     totalDataRows,

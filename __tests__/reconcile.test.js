@@ -106,7 +106,10 @@ describe('diffDeps / diffAc — comparación estructurada de las secciones que l
   })
 })
 
-const SPEC_LINK = '> Slice #2 del epic. Spec: [docs/spec.md#9](docs/spec.md#9)'
+// F10: la línea canónica de hoy — URL absoluta (relativa = 404 desde la
+// página de un issue, verificado) y ancla del encabezado real
+// ("## 9. Slices" -> "#9-slices", no "#9").
+const SPEC_LINK = '> Slice #2 del epic. Spec: [docs/spec.md § 9. Slices](https://github.com/o/r/blob/main/docs/spec.md#9-slices)'
 const WANTED_ISSUE = {
   order: 2, title: '#2 refresh token', labels: ['type:backend', 'status:backlog'],
   deps: [1], ac: ['AC-2.1'], descripcion: 'flujo de refresco', protectedLine: '- 🚫 schema §6',
@@ -149,19 +152,34 @@ describe('diffIssue — compara título, milestone, enlace-al-spec (ancla), labe
     expect(d.duplicateMachineSections).toEqual([])
     expect(d.strayDeps).toEqual([])
   })
-  // Importante 4 (review round 4): el NÚCLEO del fix — dos notaciones de la
-  // MISMA sección (ruta relativa vs. absoluta) NUNCA deben divergir, o dos
-  // costumbres de invocación harían ping-pong sobre issues reales para
-  // siempre.
-  it('enlace al spec con RUTA DISTINTA pero el MISMO ancla #9 → NO diverge (evita el ping-pong relativo/absoluto)', () => {
-    const absoluteSpecLink = '> Slice #2 del epic. Spec: [/Users/jose/repo/docs/spec.md#9](/Users/jose/repo/docs/spec.md#9)'
-    const d = diffIssue(existingWith({}), { ...WANTED_ISSUE, specLink: absoluteSpecLink }, 'Epic', ALL_PREFIXES)
+  // F10 invierte el "importante 4" de la review round 4. Aquel test exigía
+  // que dos notaciones de la MISMA ruta no divergieran, porque la línea se
+  // componía con `process.argv[2]` tal cual y comparar la ruta habría hecho
+  // ping-pong entre dos costumbres de invocación. Esa premisa ya no existe:
+  // la ruta que va a la línea es la relativa a la raíz del repo, calculada
+  // con git, así que no hay dos notaciones posibles que reconciliar — y
+  // "dos rutas distintas" ya solo puede significar lo que siempre debió
+  // significar, que el spec está en otro fichero.
+  it('enlace al spec al MISMO fichero y MISMA sección → NO diverge', () => {
+    const d = diffIssue(existingWith({}), { ...WANTED_ISSUE, specLink: SPEC_LINK }, 'Epic', ALL_PREFIXES)
     expect(d.specLink).toBeNull()
   })
-  it('enlace al spec con distinto ANCLA (#10 en vez de #9) → SÍ diverge', () => {
-    const movedSection = '> Slice #2 del epic. Spec: [docs/spec.md#10](docs/spec.md#10)'
+  it('enlace al spec a OTRO FICHERO (spec movido) → SÍ diverge — lo que la comparación por ancla no detectaba', () => {
+    const movedFile = '> Slice #2 del epic. Spec: [docs/viejo.md § 9. Slices](https://github.com/o/r/blob/main/docs/viejo.md#9-slices)'
+    const d = diffIssue(existingWith({}), { ...WANTED_ISSUE, specLink: movedFile }, 'Epic', ALL_PREFIXES)
+    expect(d.specLink).toEqual({ current: SPEC_LINK, wanted: movedFile })
+  })
+  it('enlace al spec con distinta SECCIÓN → SÍ diverge', () => {
+    const movedSection = '> Slice #2 del epic. Spec: [docs/spec.md § 10. Riesgos](https://github.com/o/r/blob/main/docs/spec.md#10-riesgos)'
     const d = diffIssue(existingWith({}), { ...WANTED_ISSUE, specLink: movedSection }, 'Epic', ALL_PREFIXES)
     expect(d.specLink).toEqual({ current: SPEC_LINK, wanted: movedSection })
+  })
+  it('el enlace RELATIVO de antes de F10, todavía en un issue creado entonces → SÍ diverge (era, y sigue siendo, un enlace roto)', () => {
+    const preF10 = existingWith({
+      body: existingWith({}).body.replace(SPEC_LINK, '> Slice #2 del epic. Spec: [docs/spec.md#9](docs/spec.md#9)'),
+    })
+    const d = diffIssue(preF10, WANTED_ISSUE, 'Epic', ALL_PREFIXES)
+    expect(d.specLink).toEqual({ current: '> Slice #2 del epic. Spec: [docs/spec.md#9](docs/spec.md#9)', wanted: SPEC_LINK })
   })
   it('enlace al spec ausente en el issue (un humano la borró) → current: null', () => {
     const noSpecLink = existingWith({ body: existingWith({}).body.split('\n').slice(2).join('\n') })
@@ -462,9 +480,9 @@ describe('reconcileGaps / hasReconcileGap — divergencia real que --reconcile n
 
 describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Dependencias, preserva todo lo demás', () => {
   const SLICE = { n: 2, name: 'refresh', type: 'backend', entrega: 'flujo de refresco', deps: [1], ac: ['AC-2.1'], protected: 'schema §6' }
-  const SPEC_OPTS = { specPath: 'spec.md', specSection: '9' }
+  const SPEC_OPTS = { path: 'spec.md', heading: '9. Slices', url: 'https://github.com/o/r/blob/main/spec.md#9-slices', reason: null }
   const GENERATED = buildIssueBody(SLICE, SPEC_OPTS)
-  const WANTED_BASE = { deps: [1], ac: ['AC-2.1'], specLink: '> Slice #2 del epic. Spec: [spec.md#9](spec.md#9)' }
+  const WANTED_BASE = { deps: [1], ac: ['AC-2.1'], specLink: '> Slice `#2` del epic. Spec: [spec.md § 9. Slices](https://github.com/o/r/blob/main/spec.md#9-slices)' }
 
   it('sin divergencia de nada → body: null, unresolvedAc/unresolvedDeps: false (nada que aplicar)', () => {
     const r = buildReconcileBody(GENERATED, WANTED_BASE)
@@ -534,7 +552,7 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
   // en `body.length` — sin límite, en cada corrida. Ahora se RINDE
   // (unresolvedDeps: true), igual que ya hacía AC, y NO toca el body.
   it('sin "## Out of scope / Protected" localizable (sin ancla segura) → se RIÈNDE: unresolvedDeps true, body sin cambios para deps', () => {
-    const noProtected = '> Slice #2 del epic. Spec: [x#9](x#9)\n\n## Acceptance criteria (EARS, 1:1 con tests)\n- AC-2.1\n\n<!-- ct-order:2 -->'
+    const noProtected = '> Slice `#2` del epic. Spec: [spec.md § 9. Slices](https://github.com/o/r/blob/main/spec.md#9-slices)\n\n## Acceptance criteria (EARS, 1:1 con tests)\n- AC-2.1\n\n<!-- ct-order:2 -->'
     const r = buildReconcileBody(noProtected, { ...WANTED_BASE, deps: [5] })
     expect(r.unresolvedDeps).toBe(true)
     expect(r.body).toBeNull() // nada más divergía (AC/specLink ya coincidían) → null entero
@@ -549,7 +567,7 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
   // --reconcile) deben rendirse las TRES veces, sin insertar nada nunca.
   it('valla sin cerrar (ancla de Protected inhallable) → tres "corridas" sucesivas se rinden las tres, sin crecer sin límite', () => {
     const withUnclosedFence = [
-      '> Slice #2 del epic. Spec: [x#9](x#9)', '',
+      '> Slice `#2` del epic. Spec: [spec.md § 9. Slices](https://github.com/o/r/blob/main/spec.md#9-slices)', '',
       '## Descripción', '```', 'esta valla nunca se cierra', '',
       '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-2.1', '',
       '<!-- ct-order:2 -->',
@@ -575,19 +593,27 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
     expect(extractAc(newBody)).toEqual(['AC-2.1', 'AC-2.2'])
   })
 
-  // Enlace al spec (importante 4/5 de rondas previas): splice de una sola
-  // línea, PERO solo cuando el ANCLA realmente cambia — nunca por una
-  // diferencia de notación de ruta (el núcleo del fix del ping-pong).
-  it('enlace al spec con ancla distinta (#10) → se reemplaza la línea, preserva todo lo demás', () => {
-    const { body: newBody } = buildReconcileBody(GENERATED, { ...WANTED_BASE, specLink: '> Slice #2 del epic. Spec: [spec.md#10](spec.md#10)' })
-    expect(extractSpecLink(newBody)).toBe('> Slice #2 del epic. Spec: [spec.md#10](spec.md#10)')
+  // Enlace al spec: splice de una sola línea. F10 — se dispara ante
+  // CUALQUIER diferencia de la línea, no solo del ancla: la línea es ahora
+  // canónica (deriva del repositorio, no de argv), así que una diferencia ya
+  // solo puede significar un cambio real (otra sección, otro fichero, o el
+  // enlace relativo roto de antes de F10).
+  const OTRA_SECCION = '> Slice `#2` del epic. Spec: [spec.md § 10. Riesgos](https://github.com/o/r/blob/main/spec.md#10-riesgos)'
+  it('enlace al spec con otra sección → se reemplaza la línea, preserva todo lo demás', () => {
+    const { body: newBody } = buildReconcileBody(GENERATED, { ...WANTED_BASE, specLink: OTRA_SECCION })
+    expect(extractSpecLink(newBody)).toBe(OTRA_SECCION)
     expect(extractAc(newBody)).toEqual(['AC-2.1'])
     expect(extractDeps(newBody)).toEqual([1])
     expect(newBody).toContain('<!-- ct-order:2 -->')
   })
-  it('enlace al spec con MISMO ancla pero ruta distinta → NO se reescribe (evita el ping-pong): body sin cambios para ese campo', () => {
-    const r = buildReconcileBody(GENERATED, { ...WANTED_BASE, specLink: '> Slice #2 del epic. Spec: [/otra/ruta/absoluta.md#9](/otra/ruta/absoluta.md#9)' })
-    expect(r.body).toBeNull() // nada más divergía tampoco — confirma que el enlace NO disparó una reescritura
+  const OTRO_FICHERO = '> Slice `#2` del epic. Spec: [docs/viejo.md § 9. Slices](https://github.com/o/r/blob/main/docs/viejo.md#9-slices)'
+  it('enlace al spec a otro fichero (misma sección) → TAMBIÉN se reemplaza — antes de F10 esto no se tocaba nunca', () => {
+    const { body: newBody } = buildReconcileBody(GENERATED, { ...WANTED_BASE, specLink: OTRO_FICHERO })
+    expect(extractSpecLink(newBody)).toBe(OTRO_FICHERO)
+  })
+  it('enlace al spec idéntico → NO se reescribe: body sin cambios para ese campo', () => {
+    const r = buildReconcileBody(GENERATED, WANTED_BASE)
+    expect(r.body).toBeNull()
   })
 
   it('enlace al spec ausente (un humano lo borró) → se antepone al principio', () => {
@@ -598,7 +624,7 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
 
   it('reconciliar deps con una mención de "## Dependencias" dentro de una valla en Descripción no corrompe la valla', () => {
     const withFence = [
-      '> Slice #2 del epic. Spec: [spec.md#9](spec.md#9)', '',
+      '> Slice `#2` del epic. Spec: [spec.md § 9. Slices](https://github.com/o/r/blob/main/spec.md#9-slices)', '',
       '## Descripción', 'Ejemplo:', '```', '## Dependencias', '- merge-after #99', '```', 'fin.', '',
       '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-2.1', '',
       '## Dependencias', '- merge-after #1', '',
@@ -618,7 +644,7 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
   // --reconcile ni perder su "-->" de cierre.
   it('reconciliar deps con una mención de "## Dependencias" dentro de un comentario HTML multilínea no corrompe el comentario ni pierde su cierre', () => {
     const withComment = [
-      '> Slice #2 del epic. Spec: [spec.md#9](spec.md#9)', '',
+      '> Slice `#2` del epic. Spec: [spec.md § 9. Slices](https://github.com/o/r/blob/main/spec.md#9-slices)', '',
       '## Descripción', 'Ejemplo:', '<!--', '## Dependencias', '- merge-after #99 (pospuesto, negociado con pagos)', '-->', 'fin.', '',
       '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-2.1', '',
       '## Dependencias', '- merge-after #1', '',

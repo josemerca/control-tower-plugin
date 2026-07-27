@@ -43,6 +43,8 @@ const initScriptSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)),
 // cinco tests que la llevaban hardcodeada — un coste que no aporta ninguna
 // garantía (ninguno de esos tests trata SOBRE el número, solo necesitan "la
 // versión que este script emite hoy").
+// (F10 llegó a la misma conclusión por su cuenta, con otro nombre; al
+// integrar se conserva esta, que además trae el helper `versionLineRe`.)
 const CONTRACT_VERSION = Number(initScriptSrc.match(/^SLICES_CONTRACT_VERSION=(\d+)$/m)[1])
 const versionLineRe = () => new RegExp(`<!-- ct-init:slices-contract-version: ${CONTRACT_VERSION} -->`)
 

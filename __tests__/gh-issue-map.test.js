@@ -1,7 +1,17 @@
 import { describe, it, expect } from 'vitest'
-import { extractAc, extractDeps, extractOrder, extractSpecLink, specLinkAnchor, locateSection, countHeadingLines, detectLineEnding, normalizeToLF, mapGhIssue, filterMergedIssues, buildOrderIndex, buildDispatchInput, AC_HEADING_FORMS, NO_MILESTONE_KEY, epicKeyOf, extractDepsInSection, extractStrayDeps } from '../scripts/gh-issue-map.js'
+import { extractAc, extractDeps, extractOrder, extractSpecLink, normalizeSpecLink, locateSection, countHeadingLines, detectLineEnding, normalizeToLF, mapGhIssue, filterMergedIssues, buildOrderIndex, buildDispatchInput, AC_HEADING_FORMS, NO_MILESTONE_KEY, epicKeyOf, extractDepsInSection, extractStrayDeps } from '../scripts/gh-issue-map.js'
 import { selectNext } from '../scripts/dispatch.js'
 import { buildIssueBody } from '../scripts/groom.js'
+
+// SPEC_REF (F10): la referencia al spec ya resuelta que recibe buildIssueBody
+// — ruta relativa a la raíz del repo, encabezado real de la §9 y la URL
+// absoluta verificada. Sustituye al viejo `{ specPath, specSection }`.
+const SPEC_REF = {
+  path: 'spec.md',
+  heading: '9. Slices',
+  url: 'https://github.com/o/r/blob/main/spec.md#9-slices',
+  reason: null,
+}
 
 describe('mapGhIssue — defensivo con labels/marcadores ausentes', () => {
   it('sin marcador ct-order en el body → order cae a i.number', () => {
@@ -88,7 +98,7 @@ describe('extractAc', () => {
 describe('mapGhIssue + groom.js#buildIssueBody — ata las dos piezas (detecta deriva de formato)', () => {
   it('un body generado por el buildIssueBody real de ct-groom se mapea correctamente', () => {
     const slice = { n: 7, entrega: 'refresh token', ac: ['AC-7.1 algo', 'AC-7.2 otro'], deps: [1, 2], protected: '–' }
-    const body = buildIssueBody(slice, { specPath: 'spec.md', specSection: '9' })
+    const body = buildIssueBody(slice, SPEC_REF)
     const mapped = mapGhIssue({ number: 55, title: '#55 refresh token', labels: [{ name: 'status:ready' }, { name: 'type:backend' }], body })
     expect(mapped.order).toBe(7) // <!-- ct-order:7 --> generado por buildIssueBody
     expect(mapped.deps).toEqual([1, 2])
@@ -126,7 +136,7 @@ describe('extractDeps / extractDepsInSection — formato nuevo (`#N`) y viejo (#
     expect(extractDeps('- merge-after `#3`\n- merge-after #4')).toEqual([3, 4])
   })
   it('la sección generada hoy no es "malformed": la nota de orden no introduce ninguna referencia sin capturar', () => {
-    const body = buildIssueBody({ n: 5, name: 'x', ac: ['AC-5.1'], deps: [1, 2], protected: '–' }, { specPath: 'spec.md', specSection: '9' })
+    const body = buildIssueBody({ n: 5, name: 'x', ac: ['AC-5.1'], deps: [1, 2], protected: '–' }, SPEC_REF)
     expect(extractDepsInSection(body)).toEqual({ deps: [1, 2], malformed: false })
   })
   it('un body con el formato VIEJO sigue mapeando igual por el camino de producción (mapGhIssue)', () => {
@@ -968,16 +978,32 @@ describe('CRLF — normalizeToLF/detectLineEnding (review round 4, menor)', () =
   })
 })
 
-describe('specLinkAnchor — compara solo el ancla #sección, nunca la ruta (review round 4, importante 4)', () => {
-  it('extrae la sección de un enlace con ruta relativa', () => {
-    expect(specLinkAnchor('> Slice #2 del epic. Spec: [docs/spec.md#9](docs/spec.md#9)')).toBe('9')
+// F10 sustituye a specLinkAnchor, que extraía SOLO el ancla y descartaba la
+// ruta a propósito: mientras la línea se componía con `process.argv[2]` tal
+// cual, comparar la ruta habría hecho que dos notaciones del mismo fichero
+// se reescribieran mutuamente para siempre. El precio era no detectar que el
+// spec se hubiera movido de fichero (un enlace a OTRO fichero con el mismo
+// número de sección pasaba por bueno). Ahora la línea es canónica — deriva
+// del repositorio, no de argv — y se compara entera.
+describe('normalizeSpecLink — compara la línea entera, normalizando solo el espacio de los extremos (F10)', () => {
+  const LINK = '> Slice `#2` del epic. Spec: [docs/spec.md § 9. Slices](https://github.com/o/r/blob/main/docs/spec.md#9-slices)'
+  it('dos líneas idénticas son iguales', () => {
+    expect(normalizeSpecLink(LINK)).toBe(normalizeSpecLink(LINK))
   })
-  it('extrae la MISMA sección aunque la ruta sea absoluta — el "#2" de "Slice #2" (antes de cualquier corchete) no se confunde con el ancla', () => {
-    expect(specLinkAnchor('> Slice #2 del epic. Spec: [/Users/jose/repo/docs/spec.md#9](/Users/jose/repo/docs/spec.md#9)')).toBe('9')
+  it('un espacio de cola (un editor que lo añade) no es un cambio de contenido', () => {
+    expect(normalizeSpecLink(`${LINK}  `)).toBe(normalizeSpecLink(LINK))
   })
-  it('sin línea → null', () => {
-    expect(specLinkAnchor(null)).toBeNull()
-    expect(specLinkAnchor(undefined)).toBeNull()
+  it('el MISMO ancla en OTRO fichero YA NO se considera igual — el agujero que dejaba la comparación por ancla', () => {
+    const otroFichero = '> Slice `#2` del epic. Spec: [docs/viejo.md § 9. Slices](https://github.com/o/r/blob/main/docs/viejo.md#9-slices)'
+    expect(normalizeSpecLink(otroFichero)).not.toBe(normalizeSpecLink(LINK))
+  })
+  it('el enlace RELATIVO de antes de F10 no se considera igual al absoluto de hoy', () => {
+    expect(normalizeSpecLink('> Slice `#2` del epic. Spec: [docs/spec.md#9](docs/spec.md#9)')).not.toBe(normalizeSpecLink(LINK))
+  })
+  it('sin línea → null (y null no es igual a ninguna línea real)', () => {
+    expect(normalizeSpecLink(null)).toBeNull()
+    expect(normalizeSpecLink(undefined)).toBeNull()
+    expect(normalizeSpecLink(null)).not.toBe(normalizeSpecLink(LINK))
   })
 })
 
@@ -1017,7 +1043,6 @@ describe('extractSpecLink — la línea "> Slice #N del epic. Spec: …" (review
   it('localiza también la línea con el orden entre backticks (formato F6)', () => {
     const body = '> Slice `#2` del epic. Spec: [docs/spec.md#9](docs/spec.md#9)\n\n## Acceptance criteria\n- AC-1.1'
     expect(extractSpecLink(body)).toBe('> Slice `#2` del epic. Spec: [docs/spec.md#9](docs/spec.md#9)')
-    expect(specLinkAnchor(extractSpecLink(body))).toBe('9')
   })
   it('una línea "> Slice …" que no cita ningún orden no se confunde con el enlace al spec', () => {
     const body = '> Slice pendiente de negociar con Ana\n> Slice `#2` del epic. Spec: [x#9](x#9)'

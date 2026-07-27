@@ -1,8 +1,14 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs'
+import { readFileSync, realpathSync } from 'node:fs'
+import { resolve as resolvePath, relative as relativePath } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { analyzeSlicesTable, isNoValueCell } from './slices.js'
 import { groomPlan } from './groom.js'
+// F10: de "la ruta que me pasaron en argv + --section" a una URL absoluta
+// verificada contra GitHub (o a una referencia honesta sin enlace, diciendo
+// por qué). Ver scripts/spec-link.js para las tres decisiones que toma y por
+// qué las toma así.
+import { resolveSpecRef } from './spec-link.js'
 import { flattenIssuePages, flattenPages, realIssuesOnly, findByMarker } from './gh-issues.js'
 import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
 import { parseStrictInt } from './argnum.js'
@@ -48,10 +54,9 @@ const arg = (f, d) => {
 const has = (flag) => process.argv.includes(flag)
 
 const specFile = process.argv[2]
-if (!specFile || specFile.startsWith('--')) { console.error('uso: ct-groom.mjs <spec> --repo <o/r> [--milestone t] [--project n] [--section 9] [--dry-run]'); process.exit(2) }
+if (!specFile || specFile.startsWith('--')) { console.error('uso: ct-groom.mjs <spec> --repo <o/r> [--milestone t] [--project n] [--dry-run]'); process.exit(2) }
 const repo = arg('--repo')
 const milestone = arg('--milestone', 'Epic')
-const section = arg('--section', '9')
 const project = arg('--project')
 const dryRun = has('--dry-run')
 // F5: opt-in, NUNCA por defecto — un issue existente puede haber sido
@@ -87,21 +92,26 @@ if (milestone === true || typeof milestone !== 'string' || milestone.length === 
   console.error(`--milestone requiere un valor: recibido "${milestone === true ? '(sin valor)' : milestone}"`)
   process.exit(2)
 }
-// F6 — `--section` era el único flag que quedaba sin validación de
-// call-site, y tiene exactamente el mismo agujero que tenían --milestone/
-// --project/--repo: con `--section` colgante (último token, o seguido de otro
-// flag) `arg()` devuelve el booleano `true`, y renderSpecLink escribía
-// "[spec.md#true](spec.md#true)" en el body de TODOS los issues — exit 0, sin
-// un solo aviso. Verificado ejecutándolo antes del fix. El enlace al spec es
-// la única trazabilidad issue → sección que lo originó; que apunte a un ancla
-// inexistente en cada issue creado no es cosmético.
+// --section: OBSOLETO desde F10, y se dice en voz alta en vez de aceptarlo
+// callando.
 //
-// No se exige que sea un número: el ancla puede ser legítimamente otra cosa
-// (`--section 9-desglose-en-slices`). Lo que se rechaza es "el flag está pero
-// no trae valor" — y una cadena vacía, que produciría un ancla vacía ("#").
-if (section === true || typeof section !== 'string' || section.length === 0) {
-  console.error(`--section requiere un valor: recibido "${section === true ? '(sin valor)' : section}" — es el ancla del enlace al spec que se escribe en cada issue (p.ej. --section 9 → "spec.md#9")`)
-  process.exit(2)
+// Nunca sirvió para localizar nada: la tabla §9 se encuentra por su CABECERA
+// DE COLUMNAS ("Slice" + "Dep"), no por ningún número de sección — así ha
+// sido siempre (ver slices.js#analyzeSlicesTable), y el propio contrato que
+// siembra /ct-init ya lo admitía. Lo único que hacía `--section N` era
+// componer el ancla del enlace al spec como "#N"... un ancla que en GitHub no
+// existe: el encabezado real "## 9. Slices" tiene el id "9-slices". O sea que
+// el único trabajo del flag era producir un enlace roto.
+//
+// F6 le había puesto una validación de call-site (rechazar `--section`
+// colgante, que renderizaba "spec.md#true") — correcta para lo que el flag
+// hacía entonces, pero ahora sería exigir un valor para algo que no se usa.
+// Se acepta el flag en cualquier forma, se ignora, y se avisa: quien tenga el
+// comando escrito en un script, un alias o un slash command (commands/
+// ct-groom.md lo llevaba) no ve su invocación romperse de golpe, pero tampoco
+// se queda creyendo que sigue decidiendo algo.
+if (process.argv.includes('--section')) {
+  console.error('aviso: --section está obsoleto y se IGNORA — el ancla del enlace al spec sale ahora del encabezado real bajo el que vive la tabla (p.ej. "## 9. Slices" → "#9-slices"), y la tabla se localiza, como siempre, por su cabecera de columnas ("Slice" + "Dep"), no por ningún número de sección. Puedes quitarlo de la invocación.')
 }
 // Mismo criterio para --project: si se pasó el flag pero sin valor numérico
 // real, abortamos en vez de dejar que `Number(true) === 1` decida en
@@ -342,6 +352,38 @@ for (const w of report.emptyTokenWarnings) {
   console.error(`aviso: valor "${w.raw}" en columna ${w.column} (slice #${w.n}) queda vacío tras normalizar — no se genera ninguna label "${labelPrefix}" para ese valor, la maquinaria de colisión/serialización queda inerte para ese slice`)
 }
 
+// F10 — el enlace al spec. Se resuelve AQUÍ, una sola vez por corrida (la
+// ruta y la sección son las mismas para todos los slices), y ANTES de la rama
+// de --dry-run: el preview tiene que enseñar el MISMO body que escribiría la
+// corrida real, incluidos sus avisos. Es la misma regla que F1 fijó para la
+// validación de la tabla y F5 para la detección de divergencia — un dry-run
+// que informa de menos que la corrida real es una trampa.
+//
+// `runForSpecLink` mantiene stderr en 'pipe' (no 'inherit', a diferencia de
+// `gh()` más abajo): TODOS los fallos de aquí son casos previstos que este
+// script traduce a un aviso propio y legible (el spec no está en un repo, no
+// tiene remoto, no está empujado…), así que dejar salir además el error crudo
+// de git/gh solo añadiría ruido a algo que ya se está explicando.
+const SPEC_LINK_MAX_BUFFER = 20 * 1024 * 1024
+const runForSpecLink = (cmd, args) =>
+  execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: SPEC_LINK_MAX_BUFFER }).trim()
+// realpathSync: `git -C <dir> rev-parse --show-toplevel` devuelve la raíz ya
+// resuelta de enlaces simbólicos, así que sin resolver también el spec la
+// resta de rutas daría "fuera del repo" para cualquiera que trabaje bajo un
+// symlink (en macOS, /tmp -> /private/tmp lo hace saltar a diario). Si el
+// realpath falla (fichero borrado entre el readFileSync de arriba y esto),
+// se sigue con la ruta absoluta a secas: resolveSpecRef degrada sola.
+let specAbsPath
+try { specAbsPath = realpathSync(resolvePath(specFile)) } catch { specAbsPath = resolvePath(specFile) }
+const { ref: specRef, warnings: specLinkWarnings } = resolveSpecRef({
+  specFile: specAbsPath,
+  displayPath: specFile,
+  heading: report.sectionHeading,
+  run: runForSpecLink,
+  relativize: (root, file) => relativePath(root, file),
+})
+for (const w of specLinkWarnings) console.error(w)
+
 const slices = report.slices
 // groomPlan lanza si hay órdenes de slice duplicados en la tabla §9 (T14/W-A):
 // se captura aquí y se reporta con la misma convención que el resto de errores
@@ -350,7 +392,7 @@ const slices = report.slices
 // stack trace crudo de una excepción sin capturar.
 let plan
 try {
-  plan = groomPlan(slices, { milestone, specPath: specFile, specSection: section })
+  plan = groomPlan(slices, { milestone, specRef })
 } catch (e) {
   console.error(e.message)
   process.exit(2)
