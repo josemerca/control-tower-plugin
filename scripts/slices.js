@@ -101,6 +101,50 @@ function cleanEmphasis(raw) {
   return withoutPairedUnderscore.replace(EMPHASIS_CHARS_RE, '').trim()
 }
 
+// splitEscapedCommas (F6, importante 3): divide una celda por comas que NO
+// vengan escapadas con una barra invertida (`\,`), y devuelve cada trozo con
+// esos escapes ya resueltos a una coma literal.
+//
+// El problema que cierra: "Acepta" se troceaba con un `String#split(',')` a
+// secas, así que una coma DENTRO de un criterio lo partía en dos en silencio
+// — y la cabecera que este mismo pipeline genera para esa sección es
+// literalmente "Acceptance criteria (EARS, 1:1 con tests)": la forma EARS
+// ("Cuando <disparador>, el sistema debe <respuesta>") lleva coma casi
+// siempre. No era un caso raro: era la forma natural de rellenar la columna,
+// y el autor solo lo descubría leyendo el issue ya creado.
+//
+// Se aplica SOLO a "Acepta" (comprobado columna por columna): "Protegido" no
+// se trocea por comas en absoluto, "Dep" extrae sus referencias con una regex
+// `#N` (una coma dentro no cambia nada), y "Área"/"Toca" sí se trocean pero
+// sus valores son tokens de label de los que `normalizeToken` descarta la
+// coma igualmente — un escape ahí prometería algo que la normalización
+// deshace acto seguido.
+//
+// Una barra invertida que NO precede a una coma se conserva tal cual (p.ej.
+// una ruta de Windows en un criterio): solo la secuencia exacta `\,` es un
+// escape.
+export function splitEscapedCommas(cell) {
+  const parts = []
+  let current = ''
+  const src = cell || ''
+  for (let i = 0; i < src.length; i++) {
+    const ch = src[i]
+    if (ch === '\\' && src[i + 1] === ',') {
+      current += ','
+      i++
+      continue
+    }
+    if (ch === ',') {
+      parts.push(current)
+      current = ''
+      continue
+    }
+    current += ch
+  }
+  parts.push(current)
+  return parts
+}
+
 // ALNUM_RE: una letra o dígito unicode — el criterio de "esto ya no es
 // basura envolvente, esto es contenido" que usa stripColumnPrefix.
 const ALNUM_RE = /[\p{L}\p{N}]/u
@@ -471,7 +515,10 @@ export function analyzeSlicesTable(specMd) {
       malformedDepRows.push({ n, raw: depCell })
     }
     const acCell = (cells[iAc] || '').trim()
-    const ac = acCell && !isNoValueCell(acCell) ? acCell.split(',').map((x) => x.trim()).filter(Boolean) : []
+    // F6, importante 3: `split(',')` a secas partía en silencio cualquier
+    // criterio con una coma interna — ver splitEscapedCommas más arriba para
+    // el porqué y para por qué solo esta columna lo necesita.
+    const ac = acCell && !isNoValueCell(acCell) ? splitEscapedCommas(acCell).map((x) => x.trim()).filter(Boolean) : []
     slices.push({
       n,
       issue: issueMatch ? `#${issueMatch[1]}` : null,

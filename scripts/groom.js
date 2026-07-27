@@ -82,8 +82,42 @@ export function renderProtectedLine(slice) {
 // renderProtectedLine: una sola fuente de verdad de "qué debería decir",
 // compartida entre crear el issue (buildIssueBody) y compararlo después
 // (scripts/reconcile.js#diffIssue).
+// F6 (grave 1): el orden del slice va entre backticks (código inline) — un
+// "#N" DESNUDO en el body de un issue lo autoenlaza GitHub al issue N de ese
+// repo. Verificado contra GitHub de verdad, no deducido: el `body_html` real
+// del issue #4 de josemerca/ct-loop-sandbox (`gh api ... -H "Accept:
+// application/vnd.github.html+json"`) trae esta misma línea con el "#3" (que
+// es el ORDEN del slice) convertido en `<a href=".../issues/3">` — el issue
+// #3 de ese repo es, en realidad, el slice 2. Con código inline no se
+// autoenlaza (comprobado en la misma corrida con la API /markdown: ``#2``
+// sale como `<code>#2</code>`, mientras `#2` desnudo sale como `<a …>`).
 export function renderSpecLink(slice, { specPath, specSection }) {
-  return `> Slice #${slice.n} del epic. Spec: [${specPath}#${specSection}](${specPath}#${specSection})`
+  return `> Slice \`#${slice.n}\` del epic. Spec: [${specPath}#${specSection}](${specPath}#${specSection})`
+}
+
+// DEPS_ORDER_NOTE / renderDepsContent / renderAcContent (F6): el CONTENIDO de
+// las dos secciones que el dispatcher obedece de verdad. Igual que
+// renderDescripcion/renderProtectedLine/renderSpecLink, son la ÚNICA fuente
+// de verdad de "qué debería decir" cada sección — hasta F6, scripts/
+// reconcile.js#buildReconcileBody tenía su PROPIA copia del formato
+// (`renderAcContent`/`renderDepsContent` allí), así que un cambio de formato
+// aquí dejaba al reconciliador escribiendo el formato viejo encima de un
+// issue nuevo. Ahora reconcile.js importa estas dos.
+//
+// DEPS_ORDER_NOTE: la mitad "legible y verdadera para un humano" del arreglo
+// del autoenlace. Los backticks impiden el enlace falso, pero por sí solos no
+// explican qué es ese número — un humano que abre el issue sigue sin poder
+// distinguir "orden de slice" de "número de issue". La nota lo dice, y dice
+// también quién lo traduce. NO puede contener ningún "#<dígitos>": sería otro
+// autoenlace falso, y además `gh-issue-map.js#extractDepsInSection` lo leería
+// como una referencia no capturada por `merge-after` y marcaría la sección
+// como `malformed` (fail-closed, el slice dejaría de despacharse).
+export const DEPS_ORDER_NOTE = '*(cada `#N` de esta sección es el ORDEN del slice en la tabla §9 del spec, NO un número de issue de GitHub — `/ct-next` lo traduce por el marcador `ct-order` de cada issue)*'
+export function renderDepsContent(deps) {
+  return [DEPS_ORDER_NOTE, ...(deps || []).map((d) => `- merge-after \`#${d}\``)].join('\n')
+}
+export function renderAcContent(ac) {
+  return (ac && ac.length) ? ac.map((a) => `- ${a}`).join('\n') : '- (rellenar desde el spec)'
 }
 
 export function buildIssueBody(slice, { specPath, specSection }) {
@@ -102,14 +136,12 @@ export function buildIssueBody(slice, { specPath, specSection }) {
     lines.push('')
   }
   lines.push('## Acceptance criteria (EARS, 1:1 con tests)')
-  const ac = slice.ac || []
-  if (ac.length) for (const a of ac) lines.push(`- ${a}`)
-  else lines.push('- (rellenar desde el spec)')
+  lines.push(renderAcContent(slice.ac))
   lines.push('')
   const deps = slice.deps || []
   if (deps.length) {
     lines.push('## Dependencias')
-    for (const d of deps) lines.push(`- merge-after #${d}`)
+    lines.push(renderDepsContent(deps))
     lines.push('')
   }
   lines.push('## Out of scope / Protected')

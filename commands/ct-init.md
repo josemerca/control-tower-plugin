@@ -15,6 +15,15 @@ dupliques, no la reescribas, no la resumas en otra sección**, aunque al
 explorar el repo te parezca que falta o que la redactarías distinto. Si el
 usuario la ha editado a mano, respétala tal cual está.
 
+La sección lleva su propia versión (`<!-- ct-init:slices-contract-version: N -->`).
+Si el repo ya estaba bootstrapeado con una versión anterior, el scaffolder lo
+**avisa por stderr** y no toca nada: adoptar la nueva es una decisión
+explícita del usuario, no un efecto colateral de correr `/ct-init`. Si te lo
+pide, córrelo con `--update-slices-contract` (solo reemplaza la sección si
+está tal cual la dejó `ct-init`; si la habían editado a mano, se niega con
+exit 3 y hay que añadir `--force` para perder esas ediciones). **Nunca pases
+`--force` por tu cuenta.**
+
 En `.agent/STATE.md`, en cambio, **limítate a describir el bootstrap**:
 
 - `task`: `"Bootstrap Control Tower loop (ct-init)"`

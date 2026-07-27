@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildIssueTitle, buildLabels, buildIssueBody, groomPlan } from '../scripts/groom.js'
+import { buildIssueTitle, buildLabels, buildIssueBody, groomPlan, renderDepsContent, renderAcContent, DEPS_ORDER_NOTE } from '../scripts/groom.js'
 
 // F3: el título del issue viene de `slice.name` (columna "Slice" del spec),
 // no de `slice.entrega` (columna "Entrega") — buildIssueTitle componía
@@ -20,7 +20,7 @@ describe('groom puro', () => {
     const b = buildIssueBody(SLICE, { specPath: 'docs/spec.md', specSection: '9' })
     expect(b).toContain('docs/spec.md#9')
     expect(b).toContain('AC-2.1')
-    expect(b).toContain('merge-after #1')
+    expect(b).toContain('merge-after `#1`')
     expect(b).toContain('schema §6')
   })
   // F3: "Entrega" ya no alimenta el título — se convierte en una sección de
@@ -46,6 +46,52 @@ describe('groom puro', () => {
   it('body sin deps → sin merge-after', () => {
     const b = buildIssueBody({ ...SLICE, deps: [] }, { specPath: 'x', specSection: '9' })
     expect(b).not.toContain('merge-after')
+  })
+  // F6, grave 1 — VERIFICADO CONTRA GITHUB DE VERDAD (API /markdown con
+  // `context=josemerca/ct-loop-sandbox`, y el `body_html` real del issue #4 de
+  // ese repo): un `#N` DESNUDO en el body de un issue se renderiza como un
+  // ENLACE al issue N de ese repo en cuanto ese issue existe. El número que
+  // groom escribe aquí es el ORDEN del slice en la tabla §9, no un número de
+  // issue — así que en un repo que va por el #447, "merge-after #1" enlaza a
+  // un issue antiguo sin ninguna relación, y quien abra el issue lee una
+  // dependencia falsa sin forma de saber que lo es. En el sandbox se comprobó
+  // literalmente: el issue #4 (slice 3) tiene "merge-after #2" y GitHub lo
+  // enlazó a `issues/2`, que es el issue del slice 1.
+  //
+  // La misma comprobación mostró que `#N` DENTRO de código inline
+  // (`` `#2` ``) NO se autoenlaza — de ahí el formato.
+  it('body: la dependencia se emite como código inline (`#N`), nunca como "#N" desnudo (GitHub lo autoenlazaría al issue N)', () => {
+    const b = buildIssueBody(SLICE, { specPath: 'docs/spec.md', specSection: '9' })
+    expect(b).toContain('- merge-after `#1`')
+    expect(b).not.toMatch(/merge-after #\d/)
+  })
+  it('body: la sección Dependencias dice explícitamente que el número es orden de slice, no issue', () => {
+    const b = buildIssueBody(SLICE, { specPath: 'docs/spec.md', specSection: '9' })
+    expect(b).toContain(DEPS_ORDER_NOTE)
+    expect(DEPS_ORDER_NOTE.toLowerCase()).toMatch(/orden/)
+    expect(DEPS_ORDER_NOTE.toLowerCase()).toMatch(/issue/)
+    // La propia nota no puede introducir un "#<dígitos>" desnudo: sería otro
+    // autoenlace falso, y además `extractDepsInSection` la leería como una
+    // referencia no cubierta (`malformed`).
+    expect(DEPS_ORDER_NOTE).not.toMatch(/#\d/)
+  })
+  // El mismo autoenlace falso vivía en la PRIMERA línea del body: el
+  // `body_html` real del issue #4 del sandbox muestra "Slice #3 del epic" con
+  // el "#3" convertido en un enlace a `issues/3` — el issue del slice 2.
+  it('body: el enlace al spec cita el orden como código inline, nunca "#N" desnudo', () => {
+    const b = buildIssueBody(SLICE, { specPath: 'docs/spec.md', specSection: '9' })
+    expect(b.split('\n')[0]).toContain('> Slice `#2` del epic')
+    expect(b).not.toMatch(/> Slice #\d/)
+  })
+  // renderDepsContent/renderAcContent son la ÚNICA fuente de verdad de "qué
+  // debería decir" cada sección — compartida entre CREAR el issue (aquí) y
+  // RECONCILIARLO después (scripts/reconcile.js#buildReconcileBody, que hasta
+  // F6 tenía su propia copia del formato: dos implementaciones del mismo
+  // criterio que ya divergían en cuanto una de las dos cambiara).
+  it('el body creado usa exactamente renderDepsContent/renderAcContent (una sola fuente de verdad con --reconcile)', () => {
+    const b = buildIssueBody(SLICE, { specPath: 'x', specSection: '9' })
+    expect(b).toContain(renderDepsContent([1]))
+    expect(b).toContain(renderAcContent(['AC-2.1']))
   })
   it('groomPlan agrega milestone + issues', () => {
     const plan = groomPlan([SLICE], { milestone: 'Epic X', specPath: 'x', specSection: '9' })

@@ -293,7 +293,7 @@ describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], { ...env2(spec), FAKE_GH_ARGV_LOG_FILE: argvLog })
     expect(res.status).toBe(3)
     expect(res.stderr).toMatch(/falta el criterio de aceptación "AC-1.2"/)
-    expect(res.stderr).toMatch(/falta la dependencia "merge-after #2"/)
+    expect(res.stderr).toMatch(/falta la dependencia "merge-after `#2`"/)
     const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
     expect(log).not.toMatch(/issue edit/)
     rmSync(dir, { recursive: true, force: true })
@@ -309,7 +309,7 @@ describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y
     expect(log).not.toMatch(/issue edit 502/) // el #2 ya coincidía del todo — ninguna llamada para él
     // El --body reconciliado trae el AC añadido y la dependencia añadida...
     expect(log).toContain('AC-1.2')
-    expect(log).toContain('merge-after #2')
+    expect(log).toContain('merge-after `#2`') // F6: el body reconciliado usa el MISMO renderer que buildIssueBody
     // ...y preserva Descripción/Protegido/marcador tal cual estaban (splice
     // quirúrgico, no regeneración del body entero).
     expect(log).toContain('modelo')
@@ -345,7 +345,7 @@ describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y
     // el log entero en vez de aislar la línea) debe incluir la dependencia:
     const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
     expect(log).toMatch(/issue edit 501/)
-    expect(log).toContain('merge-after #2')
+    expect(log).toContain('merge-after `#2`')
     rmSync(dir, { recursive: true, force: true })
   })
 })
