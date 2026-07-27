@@ -68,14 +68,22 @@ describe('ct-next — verificación de lanzamiento cmux (finding 3)', () => {
       FAKE_GH_COUNTER_FILE: counterFile,
       FAKE_CMUX_WRONG_CWD_SUBSTR: '#90',
     })
-    expect(r.code).toBe(0) // cmux SIGUE devolviendo exit 0 — el hallazgo es justo que eso no basta
+    // IMPORTANTE (revisión externa): 'wrong-cwd' ya NO cuenta como lanzado
+    // con éxito (antes incrementaba launchedCount igual, y la tanda salía
+    // con exit 0 — progreso normal para un /loop — aunque el issue quedara
+    // in-progress sin agente confirmado, invisible también para la
+    // detección de staleness). Con el único candidato de la tanda sin
+    // confirmar, el exit code cae en el 3 ya existente ("seleccionado pero
+    // cero lanzamientos confirmados, reintenta más tarde") — nunca 0.
+    expect(r.code).toBe(3)
     expect(r.out).toMatch(/ATENCIÓN: cmux aceptó el lanzamiento de #90 \(exit 0\), pero la sesión NO está en/)
     expect(r.out).toMatch(/está en "\/Users\/fake\/\.config\/ghostty-default-shell-dir" en su lugar/)
+    expect(r.out).toMatch(/NO se cuenta como lanzado con éxito/)
     // Nunca debe leerse como un lanzamiento confirmado sin matices.
     expect(r.out).not.toMatch(/lanzado #90 en .*verificado/)
   })
 
-  it('cmux acepta el lanzamiento pero la sesión no aparece al consultar en absoluto → ATENCIÓN de "no se encontró"', () => {
+  it('cmux acepta el lanzamiento pero la sesión no aparece al consultar en absoluto → ATENCIÓN de "no se encontró", y NO cuenta como progreso (exit 3)', () => {
     const repoRoot = makeRepoRoot()
     const counterFile = join(repoRoot, 'gh-list-count')
     const r = runReal(['--repo', 'o/r', '--cap', '1'], {
@@ -84,8 +92,12 @@ describe('ct-next — verificación de lanzamiento cmux (finding 3)', () => {
       FAKE_GH_COUNTER_FILE: counterFile,
       FAKE_CMUX_SKIP_STATE_SUBSTR: '#90',
     })
-    expect(r.code).toBe(0)
+    // IMPORTANTE (revisión externa): mismo motivo que 'wrong-cwd' arriba —
+    // 'not-found' es evidencia POSITIVA de un problema, no cuenta como
+    // lanzado, y el exit code deja de mentir sobre "progreso".
+    expect(r.code).toBe(3)
     expect(r.out).toMatch(/ATENCIÓN: cmux devolvió éxito \(exit 0\) al lanzar #90, pero no se encontró ninguna sesión/)
+    expect(r.out).toMatch(/NO se cuenta como lanzado con éxito/)
     expect(r.out).not.toMatch(/lanzado #90 en .*verificado/)
   })
 
@@ -117,5 +129,27 @@ describe('ct-next — verificación de lanzamiento cmux (finding 3)', () => {
     })
     expect(r.out).toMatch(/ATENCIÓN: cmux aceptó el lanzamiento de #90 \(exit 0\), pero la sesión NO está en/)
     expect(r.out).toMatch(/lanzado #91 en .*\.worktrees\/91.*verificado: la sesión cmux está corriendo en ese directorio/)
+  })
+
+  it('IMPORTANTE (revisión externa): un cambio de esquema en la respuesta de cmux (campo renombrado) se trata como no concluyente, NUNCA como "cero sesiones confirmado"', () => {
+    // Simula una versión de cmux que devuelve `title` en vez de
+    // `custom_title` — HAY entradas de verdad (la que este mismo dispatch
+    // acaba de lanzar), pero ninguna con el campo que ct-next.mjs reconoce.
+    // Sin la guarda de esquema, esto se filtraría en silencio a un array
+    // vacío, indistinguible de "cmux respondió y de verdad no hay
+    // sesiones" — una falsa alarma en TODO dispatch con éxito.
+    const repoRoot = makeRepoRoot()
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue90], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_CMUX_SCHEMA_MISMATCH: '1',
+    })
+    expect(r.code).toBe(0) // se cuenta como lanzado: "no concluyente" usa el mismo beneficio de la duda que "no se pudo consultar"
+    expect(r.out).toMatch(/lanzado #90 en .*\.worktrees\/90/)
+    expect(r.out).toMatch(/no se pudo verificar la sesión/)
+    expect(r.out).not.toMatch(/no se encontró ninguna sesión con el nombre/) // nunca el "not-found" confiado
+    expect(r.out).not.toMatch(/verificado: la sesión cmux está corriendo/)
   })
 })

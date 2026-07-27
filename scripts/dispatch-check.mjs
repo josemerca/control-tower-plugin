@@ -102,6 +102,25 @@ const dryRun = has('--dry-run')
 const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release] [--dry-run]'
 if (Number.isNaN(issue) || typeof repo !== 'string' || repo.length === 0) { dieErr(usage, 2) }
 
+// CT_CLAIM_TEST_SELF_KILL_SIGNAL — exclusivamente para tests (revisión
+// externa, IMPORTANTE: un Ctrl-C real durante attemptClaim en ct-next.mjs
+// mata a ESTE proceso por señal, y el caller necesita distinguirlo de un
+// "bug o mala configuración" — ver classifyClaimOutcome/el caller en
+// ct-next.mjs). Reproducir esto de forma determinista con una señal EXTERNA
+// exigiría coordinar el PID de un subproceso lanzado dentro de OTRO
+// subproceso — fràgil y con las mismas carreras de temporización ya vistas
+// en finding 1. Autoenviarse la señal (misma syscall subyacente que una
+// externa, indistinguible para Node) en un punto determinista es la forma
+// fiable de ejercer ese camino. Se comprueba aquí, justo después de la
+// validación de uso — antes de tocar `gh` o mutar nada — para que el efecto
+// sea idéntico a "el usuario interrumpió justo al principio".
+if (process.env.CT_CLAIM_TEST_SELF_KILL_SIGNAL) {
+  process.kill(process.pid, process.env.CT_CLAIM_TEST_SELF_KILL_SIGNAL)
+  // El propio proceso muere aquí por la señal (disposición por defecto: sin
+  // manejador registrado en este fichero) — nada después de esta línea
+  // llega a ejecutarse cuando la variable está fijada.
+}
+
 // --settle-ms/CT_CLAIM_SETTLE_MS ya NO EXISTEN (T11, fix round 2 — ver el
 // comentario de cabecera de este fichero para el porqué). Si el flag
 // aparece en argv, se RECHAZA explícitamente con exit 2 en vez de
@@ -166,7 +185,25 @@ const fx = (dryRun && process.env.CT_CLAIM_FIXTURE) ? JSON.parse(process.env.CT_
 // trunca en silencio), pero eso haría inusable el comando contra un repo real.
 // 20 MiB es generoso para miles de issues sin ser "sin límite" de verdad.
 const GH_MAX_BUFFER = 20 * 1024 * 1024
-const gh = (a) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: GH_MAX_BUFFER })
+// timeout+killSignal (MENOR, revisión externa: consistencia con el
+// principio de ct-next.mjs de que TODA llamada bloqueante a un subproceso
+// debe estar acotada — este fichero también puede invocarse en solitario,
+// no solo como subproceso de ct-next.mjs, así que le hace falta su propia
+// cota independiente en vez de depender solo del timeout que le impone el
+// caller desde fuera). Mismo default (10 min) y mismo tope (24h) que
+// CT_NEXT_CHILD_TIMEOUT_MS en ct-next.mjs, con su propia variable de
+// entorno — dispatch-check.mjs no importa nada de ct-next.mjs.
+const CHILD_TIMEOUT_CAP_MS = 24 * 60 * 60 * 1000
+let ghTimeoutMs = 10 * 60 * 1000
+const ghTimeoutRaw = process.env.CT_CLAIM_CHILD_TIMEOUT_MS
+if (ghTimeoutRaw !== undefined) {
+  const n = Number(ghTimeoutRaw)
+  if (!Number.isFinite(n) || n <= 0 || n > CHILD_TIMEOUT_CAP_MS) {
+    dieErr(`CT_CLAIM_CHILD_TIMEOUT_MS inválido: "${ghTimeoutRaw}" — debe ser un número > 0 y <= ${CHILD_TIMEOUT_CAP_MS}`, 2)
+  }
+  ghTimeoutMs = n
+}
+const gh = (a) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: GH_MAX_BUFFER, timeout: ghTimeoutMs, killSignal: 'SIGKILL' })
 const labelsOf = (n) => JSON.parse(gh(['issue', 'view', String(n), '--repo', repo, '--json', 'labels', '-q', '[.labels[].name]']))
 // Listado directo de issues abiertos vía el endpoint REST `gh api
 // repos/<repo>/issues` — NUNCA el índice de búsqueda (`--search` / `gh search

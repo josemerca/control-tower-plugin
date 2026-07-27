@@ -118,6 +118,33 @@ if (!existsSync(dispatchCheckPath)) {
 // no cooperar; el objetivo aquí es acotarla (milisegundos, no segundos) y
 // garantizar que, en el peor caso, el cuelgue tiene un techo, nunca "para
 // siempre".
+//
+// REGRESIÓN DE UX EXPLÍCITA (revisión externa, IMPORTANTE — no descubierta
+// por mí, y no "resuelta": solo declarada con honestidad porque el diseño no
+// tiene forma de evitarla del todo sin una reescritura mucho mayor). Antes
+// de instalar CUALQUIER manejador, un Ctrl-C contra un `git worktree add`
+// genuinamente colgado moría al INSTANTE (disposición por defecto del
+// kernel, EXIT=130, sin limpieza pero también sin espera). Con el manejador
+// instalado, ese mismo escenario ahora se comporta así: el usuario pulsa
+// Ctrl-C (una vez, o varias — mientras el proceso sigue bloqueado dentro de
+// la llamada síncrona, CUALQUIER señal es, en la práctica, un no-op: no hay
+// manejador que pueda correr, ver el hallazgo (a) de arriba), no pasa NADA
+// visible — ni mensaje, ni salida — hasta que se cumple `childTimeoutMs`
+// (10 minutos por defecto), momento en el que recién entonces el catch
+// existente revierte el claim y el proceso termina. Es decir: se cambia
+// "muere al instante, sin limpieza" por "tarda hasta 10 minutos en salir,
+// pero limpia bien" — un terminal retenido varios minutos SIN ninguna señal
+// de vida es, en sí mismo, el escenario que finding 1 describe (una
+// divergencia entre lo que el usuario cree — "esto no responde, algo está
+// mal" — y lo que el sistema hace de verdad — "está esperando, y limpiará
+// al final"). No hay mitigación de código para la ausencia total de
+// feedback mientras el hilo principal está genuinamente bloqueado: eso
+// exigiría convertir las llamadas de riesgo (como `git worktree add`) a
+// `spawn` asíncrono con el hijo registrado para poder matarlo DIRECTAMENTE
+// en cuanto la señal se procese (en vez de esperar su propio timeout) — una
+// reestructuración mayor, fuera del alcance acometido en esta ronda. Lo que
+// SÍ cambió para mejor, sin ambigüedad: antes, ese mismo Ctrl-C nunca
+// revertía el claim (quedaba huérfano para siempre); ahora sí, aunque tarde.
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -264,6 +291,24 @@ function queryAllCmuxWorkspaces() {
     })
     const windows = JSON.parse(windowsRaw)
     const out = []
+    // IMPORTANTE (revisión externa): `custom_title`/`current_directory` son
+    // los nombres de campo observados contra la versión de cmux instalada
+    // en la máquina de desarrollo — no hay ninguna garantía de versión ni
+    // de esquema. Si el nombre real cambiara, CADA `ws.custom_title` sería
+    // `undefined`, fallaría el `typeof === 'string'` de más abajo, y el
+    // resultado se filtraría en silencio a un array vacío — indistinguible,
+    // antes de este cambio, de "cmux respondió y de verdad no hay ninguna
+    // sesión". Eso degradaba CADA staleness-check a un falso "abandonado" y
+    // CADA verificación de lanzamiento a un falso "not-found", ambos
+    // ruidosos. `sawAnyWorkspaceEntry`/`sawAnyRecognizedTitle` distinguen
+    // las dos causas de "cero resultados": si hubo entradas de verdad
+    // (`parsed.workspaces` no vacío) pero NINGUNA tenía el campo esperado,
+    // es mucho más probable un cambio de esquema que "cero sesiones de
+    // verdad" — se trata como NO CONCLUYENTE. Si nunca hubo ninguna entrada
+    // en ninguna ventana (el caso normal y esperado de "no hay nada
+    // abierto"), sigue siendo un `[]` con toda confianza.
+    let sawAnyWorkspaceEntry = false
+    let sawAnyRecognizedTitle = false
     for (const w of (Array.isArray(windows) ? windows : [])) {
       if (!w || !w.id) continue
       try {
@@ -271,8 +316,13 @@ function queryAllCmuxWorkspaces() {
           encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: CMUX_QUERY_TIMEOUT_MS, killSignal: 'SIGKILL',
         })
         const parsed = JSON.parse(wsRaw)
-        for (const ws of (parsed.workspaces || [])) {
-          if (ws && typeof ws.custom_title === 'string') out.push({ title: ws.custom_title, cwd: ws.current_directory ?? null })
+        const workspaces = Array.isArray(parsed.workspaces) ? parsed.workspaces : []
+        for (const ws of workspaces) {
+          sawAnyWorkspaceEntry = true
+          if (ws && typeof ws.custom_title === 'string') {
+            sawAnyRecognizedTitle = true
+            out.push({ title: ws.custom_title, cwd: ws.current_directory ?? null })
+          }
         }
       } catch {
         // Una ventana concreta que no se pueda consultar no invalida las
@@ -280,6 +330,7 @@ function queryAllCmuxWorkspaces() {
         // (list-windows) marca el resultado global como no concluyente.
       }
     }
+    if (sawAnyWorkspaceEntry && !sawAnyRecognizedTitle) return null
     return out
   } catch {
     return null // cmux no instalado, daemon caído, o timeout: no concluyente.
@@ -562,7 +613,11 @@ function detectDefaultBranch(repoSlug) {
 function verifyBaseExistsLocally(base) {
   const existsAsCommit = (ref) => {
     try {
-      execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: repoRoot, stdio: 'ignore' })
+      // timeout+killSignal (MENOR, revisión externa: "TODA llamada
+      // bloqueante" de la cabecera de finding 1 no era del todo cierto —
+      // faltaban esta y las otras dos llamadas de git/gh puramente locales
+      // de este fichero, sin protección alguna contra un cuelgue real).
+      execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutMs, killSignal: 'SIGKILL' })
       return true
     } catch {
       return false
@@ -604,7 +659,7 @@ function verifyBaseExistsLocally(base) {
 function ensureRepoIdentity(root, expectedRepo) {
   let originUrl
   try {
-    originUrl = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8' }).trim()
+    originUrl = execFileSync('git', ['remote', 'get-url', 'origin'], { cwd: root, encoding: 'utf8', timeout: childTimeoutMs, killSignal: 'SIGKILL' }).trim()
   } catch (e) {
     console.error(`no se pudo verificar que ${root} es el checkout de ${expectedRepo}: no tiene remote "origin" (${e.message}). Por seguridad, ct-next.mjs NO continúa — podría estar corriendo dentro del repo equivocado (p.ej. una sesión de control-tower en vez de ${expectedRepo}). Añade un remote origin que apunte a ${expectedRepo}, o ejecuta ct-next.mjs desde el checkout correcto.`)
     process.exit(1)
@@ -651,7 +706,7 @@ if (fx) {
   }
 } else {
   try {
-    repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim()
+    repoRoot = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8', timeout: childTimeoutMs, killSignal: 'SIGKILL' }).trim()
   } catch (e) {
     console.error(`no se pudo resolver la raíz del repo git local: ${e.message}`)
     process.exit(1)
@@ -970,7 +1025,18 @@ function attemptClaim(s) {
     const stderr = typeof e.stderr === 'string' ? e.stderr : ''
     if (stdout) writeSync(1, stdout)
     if (stderr) writeSync(2, stderr)
-    return { ok: false, status: e.status, text: `${stdout}\n${stderr}` }
+    // `signal` (revisión externa, finding minor): cuando el subproceso
+    // termina por una señal (un Ctrl-C de terminal normal que SÍ llega
+    // también al hijo, o el SIGKILL de nuestro propio timeout de arriba),
+    // Node deja `status` a `null` y rellena `signal` con el nombre — antes
+    // esto caía sin distinción en el mismo "fallo inesperado, probablemente
+    // mala configuración" que un --repo mal formado, culpando al usuario de
+    // un problema de configuración que nunca existió. `text` (el
+    // stdout+stderr concatenado) se retiró: classifyClaimOutcome ya no lo
+    // consume desde que el contrato de dispatch-check.mjs se ensanchó a
+    // exit codes (finding 4) — el texto de dispatch-check ya se reenvió
+    // arriba para que el humano lo vea, no hace falta duplicarlo aquí.
+    return { ok: false, status: e.status, signal: e.signal }
   }
 }
 
@@ -1123,25 +1189,57 @@ function cleanupOrphanedWorktree(s, wt, branch, reason) {
 // confianza.
 let activeClaim = null
 let activeWorktree = null
-// `interrupting`: cerrojo de reentrada. Una segunda señal mientras ya
-// estamos gestionando la primera (p.ej. el propio revert de la primera
-// señal, si tardara) no debe disparar un segundo revert solapado del MISMO
-// claim — fuerza la salida ya, sin reintentar limpieza.
+// `interrupting`: cerrojo de reentrada Y bandera de "para en el próximo
+// checkpoint" para el bucle principal (ver el uso de `interrupting` en los
+// dos checkpoints del bucle, más abajo). Una segunda señal mientras ya
+// estamos gestionando la primera no debe disparar un segundo revert
+// solapado del MISMO claim — fuerza la salida ya, sin reintentar limpieza.
 let interrupting = false
 const SIGNAL_EXIT_CODE = { SIGINT: 130, SIGTERM: 143 }
-// `async` a propósito (fix tras un ataque adversarial contra el propio
-// diseño, ver el informe de esta tarea): sin el `await sleep(0)` del final,
-// el cerrojo `interrupting` de arriba era código MUERTO en la práctica — una
-// segunda señal que llegara mientras esta función hacía su PROPIO revert
-// (una llamada bloqueante, `attemptRevertClaim` → `gh()`) queda pendiente
-// (ver el bloque de comentarios grande más arriba: ninguna señal se procesa
-// mientras el hilo principal está bloqueado en una llamada síncrona), pero
-// si esta función termina en un `process.exit()` inmediato y SÍNCRONO tras
-// esa llamada, el proceso muere antes de que el event loop tenga ocasión de
-// procesar esa segunda señal pendiente y volver a invocar este mismo
-// manejador — el cerrojo nunca llegaría a comprobarse una segunda vez. El
-// `await sleep(0)` final le da esa oportunidad ANTES de salir.
-async function handleInterrupt(sig) {
+// CRÍTICO — hallazgo de una revisión externa, reproducido 3/3 y 2/2 de
+// forma determinista: la versión anterior de esta función era `async` y
+// terminaba en `await sleep(0)` ANTES de `process.exit()`, con el
+// razonamiento (correcto en aislamiento, pero incompleto) de darle al
+// cerrojo `interrupting` una oportunidad de ser realmente reentrante. Ese
+// `await` adicional REABRÍA exactamente el hueco que finding 1 vino a
+// cerrar: el bucle principal, suspendido en su PROPIO `await
+// sleep(testDelayAfterClaimMs)` (registrado ANTES de que la señal se
+// procesara), tiene un temporizador que YA estaba en la cola de libuv. El
+// `sleep(0)` de este manejador registra un temporizador NUEVO, por detrás
+// del anterior — y Node procesa los temporizadores vencidos en el orden en
+// que se registraron. Resultado, verificado por construcción (a
+// configuración de PRODUCCIÓN, testDelayAfterClaimMs=0, no en el valor que
+// usan los tests): el temporizador del bucle principal vence ANTES que el
+// de este manejador, así que el bucle RETOMA — crea el worktree, lanza cmux
+// e imprime "lanzado" — TODO ESO DESPUÉS de que este manejador ya hubiera
+// impreso "revertido automáticamente a status:ready". El claim queda
+// revertido en GitHub mientras un agente real sigue corriendo sobre él: el
+// finding 1 exacto, causado por el propio arreglo de finding 1.
+//
+// Corolario sobre mi propio hallazgo empírico original (también señalado
+// por la revisión, y confirmado cierto): "ni siquiera después de que la
+// llamada se desbloquee" es válido para UNA llamada síncrona bloqueada,
+// pero NO significa que un `await` cualquiera sea un punto de cesión
+// "seguro y sin efectos secundarios" — cada `await` reintroduce una carrera
+// real contra CUALQUIER otro temporizador/callback ya pendiente. Un
+// `sleep(0)` no es una entrega garantizada de nada; es una vuelta más al
+// event loop, con el mismo riesgo de que otro código avance mientras tanto.
+//
+// Arreglo: esta función ahora es 100% SÍNCRONA — ni un solo `await` — desde
+// que se invoca hasta `process.exit()`. Con eso, en cuanto el event loop la
+// invoca, se ejecuta de un tirón (revert incluido: `attemptRevertClaim` ya
+// era síncrona) hasta terminar el proceso, sin ceder el control ni una sola
+// vez — nada más puede ejecutarse mientras tanto (JS es de un solo hilo, y
+// sin ningún `await` no hay ningún punto en el que el bucle principal
+// pudiera colarse). El cerrojo `interrupting` vuelve a ser, en la práctica,
+// código muerto para el caso de reentrada real (una segunda señal no puede
+// interrumpir una función 100% síncrona) — pero un guard muerto es
+// inofensivo; el `await` que lo hacía "vivo" no lo era. Como defensa en
+// profundidad adicional (no como solución al hueco de arriba, que ya está
+// cerrado por construcción): el bucle principal TAMBIÉN comprueba
+// `interrupting` inmediatamente al retomar de cada uno de sus dos
+// checkpoints, antes de cualquier mutación — ver esos dos sitios.
+function handleInterrupt(sig) {
   if (interrupting) {
     console.error(`\n${sig} recibido de nuevo mientras ya se estaba limpiando de una interrupción anterior — no reintento el revert (podría solaparse con el que ya está en curso); salgo ya.`)
     process.exit(SIGNAL_EXIT_CODE[sig] || 130)
@@ -1165,11 +1263,10 @@ async function handleInterrupt(sig) {
     console.error('no había ningún claim propio pendiente de revertir en este instante.')
   }
   console.error('Los slices de esta tanda ya lanzados con éxito antes de esta interrupción (si los hubo) siguen corriendo en su propio cmux — no se han tocado.')
-  await sleep(0)
   process.exit(SIGNAL_EXIT_CODE[sig] || 130)
 }
-process.on('SIGINT', () => { handleInterrupt('SIGINT') })
-process.on('SIGTERM', () => { handleInterrupt('SIGTERM') })
+process.on('SIGINT', () => handleInterrupt('SIGINT'))
+process.on('SIGTERM', () => handleInterrupt('SIGTERM'))
 
 // D2, finding 1: conteo de cuántos slices de `selected` se lanzaron de
 // verdad — se usa tanto para la línea de conteo final como para decidir el
@@ -1257,7 +1354,41 @@ for (let idx = 0; idx < selected.length; idx++) {
   // ventana de forma determinista en un test — no hace falta una variable
   // nueva por checkpoint, ambos existen exclusivamente para dar tiempo a
   // enviar una señal real durante el hueco.
+  //
+  // CT_NEXT_TEST_SELF_SIGINT_BEFORE_IDLE_CHECKPOINT — exclusivamente para
+  // tests (hallazgo de una revisión externa): enviar una señal EXTERNA de
+  // forma que llegue de forma fiable justo en este checkpoint concreto es
+  // una carrera de temporización real (verificado por construcción: a
+  // CT_NEXT_TEST_DELAY_AFTER_CLAIM_MS=0 — el único valor en el que el fallo
+  // original se manifestaba — entre un 10% y un 20% de los intentos de un
+  // arnés de test externo nunca llegaban a procesarse en absoluto, porque
+  // la tubería entera de subprocesos falsos podía terminar antes de que el
+  // proceso externo reaccionara). Esta variable, en cambio, hace que el
+  // propio proceso se envíe la señal a sí mismo (`process.kill(pid, sig)`)
+  // de forma SÍNCRONA justo aquí — indistinguible para Node de una señal
+  // externa (misma syscall subyacente), pero sin ninguna carrera de
+  // temporización entre procesos: el punto exacto donde queda pendiente es
+  // determinista. Solo se dispara desde la SEGUNDA iteración en adelante
+  // (`idx > 0`), para simular "la señal llegó en algún momento de la vida
+  // de un slice anterior" en vez de interrumpir antes de que exista ningún
+  // slice que revertir.
+  if (process.env.CT_NEXT_TEST_SELF_SIGINT_BEFORE_IDLE_CHECKPOINT && idx > 0) {
+    process.kill(process.pid, process.env.CT_NEXT_TEST_SELF_SIGINT_BEFORE_IDLE_CHECKPOINT)
+  }
   await sleep(testDelayAfterClaimMs)
+  // Defensa en profundidad (no la única defensa — ver el comentario de
+  // cabecera de handleInterrupt para por qué ya es 100% síncrona): si el
+  // manejador ya arrancó y puso `interrupting` a true en el instante en que
+  // este `await` cede el control, process.exit() ya habrá terminado el
+  // proceso antes de que este punto se alcance. Esta comprobación cubre el
+  // caso — mucho más improbable, pero no descartable sin más — de que
+  // alguna vía futura reintroduzca un yield dentro de handleInterrupt.
+  // `break` (no `return`: este bucle vive en el top-level del módulo, no
+  // dentro de una función) — pero en la práctica, si `interrupting` es
+  // cierto aquí, `handleInterrupt` ya llamó a `process.exit()` de forma
+  // síncrona, así que ni siquiera este `break` llega a ejecutarse de
+  // verdad; es cinturón y tirantes, no la defensa principal.
+  if (interrupting) break
   const claim = attemptClaim(s)
   if (!claim.ok) {
     // Finding 4: el contrato de exit codes de dispatch-check.mjs se
@@ -1302,6 +1433,22 @@ for (let idx = 0; idx < selected.length; idx++) {
       console.error('Los slices de esta tanda ya lanzados con éxito antes de este fallo (si los hubo) siguen corriendo en su propio cmux — no se han tocado.')
       process.exit(1)
     }
+    // IMPORTANTE (revisión externa): un Ctrl-C de terminal normal (que SÍ
+    // llega también al hijo, a diferencia del escenario adversarial de
+    // finding 1) durante attemptClaim mata a dispatch-check.mjs por señal
+    // — `status` queda `null` y `signal` lleva el nombre. Antes esto se
+    // culpaba, sin distinción, de "probablemente un bug o una mala
+    // configuración (p.ej. --repo mal formado)" — un mensaje activamente
+    // engañoso justo cuando el usuario sabe perfectamente lo que pasó (él
+    // mismo interrumpió), y que además omitía la información más
+    // importante: dispatch-check.mjs pudo haber escrito el claim (status:
+    // ready → status:in-progress) ANTES de morir por la señal, y no hay
+    // forma de saberlo desde aquí.
+    if (claim.signal) {
+      console.error(`dispatch-check para #${s.n} terminó por la señal ${claim.signal} mientras intentaba reclamar — no se puede saber si el claim llegó a escribirse antes de morir. Si #${s.n} queda en status:in-progress sin nadie trabajándolo, revisa y revierte a mano: gh issue edit ${s.n} --repo ${repo} --add-label status:ready --remove-label status:in-progress. Abortando toda la tanda: no sigo con el resto de candidatos a ciegas.`)
+      console.error('Los slices de esta tanda ya lanzados con éxito antes de esta interrupción (si los hubo) siguen corriendo en su propio cmux — no se han tocado.')
+      process.exit(1)
+    }
     const statusDesc = typeof claim.status === 'number' ? `exit ${claim.status}` : 'sin exit code numérico (fallo inesperado al lanzar el subproceso)'
     console.error(`dispatch-check devolvió un fallo inesperado (${statusDesc}) al intentar reclamar #${s.n} — no es un resultado reconocido del protocolo (1/3/4), así que probablemente es un bug o una mala configuración (p.ej. --repo mal formado, o dispatch-check.mjs no encontrado en ${dispatchCheckPath}). Abortando toda la tanda: no sigo con el resto de candidatos a ciegas.`)
     // Fix round 1, minor: este aborto puede dispararse DESPUÉS de haber
@@ -1323,7 +1470,22 @@ for (let idx = 0; idx < selected.length; idx++) {
   // de arrancar `git worktree add`; en tests, ensancha esa misma ventana de
   // forma determinista (ver el bloque de comentarios grande más arriba).
   activeClaim = { n: s.n }
+  // CT_NEXT_TEST_SELF_SIGINT_AFTER_CLAIM — exclusivamente para tests: mismo
+  // mecanismo y mismo motivo que CT_NEXT_TEST_SELF_SIGINT_BEFORE_IDLE_CHECKPOINT
+  // más arriba (autoenvío determinista de la señal, sin la carrera de
+  // temporización de un proceso externo) — aquí para la ventana peligrosa
+  // exacta que describe finding 1: claim ya confirmado, worktree todavía no
+  // creado.
+  if (process.env.CT_NEXT_TEST_SELF_SIGINT_AFTER_CLAIM) {
+    process.kill(process.pid, process.env.CT_NEXT_TEST_SELF_SIGINT_AFTER_CLAIM)
+  }
   await sleep(testDelayAfterClaimMs)
+  // Defensa en profundidad — mismo razonamiento que el checkpoint anterior:
+  // si `interrupting` es cierto aquí, `handleInterrupt` (100% síncrona) ya
+  // revirtió este mismo claim y llamó a `process.exit()`, así que este
+  // `break` en la práctica nunca se alcanza — pero si algo cambiara eso en
+  // el futuro, esto evita crear el worktree sobre un claim ya revertido.
+  if (interrupting) break
 
   try {
     activeWorktree = { wt, branch }
@@ -1343,7 +1505,20 @@ for (let idx = 0; idx < selected.length; idx++) {
     // status:in-progress con nada corriendo — mismo motivo que
     // cleanupOrphanedWorktree más abajo, pero aquí no hay worktree/rama que
     // limpiar (git worktree add falló antes de crear nada).
-    console.error(`no se pudo crear el worktree para #${s.n} en ${wt}: ${e.message}`)
+    // MENOR (revisión externa): el mensaje antes no distinguía "git
+    // worktree add falló rápido" (rama/ruta ya ocupada, etc.) de "acabamos
+    // de matarlo nosotros mismos porque se agotó el timeout" — en este
+    // segundo caso, el usuario necesita saber el límite exacto, la
+    // variable con la que se ajusta, y que un `git worktree add` matado a
+    // mitad de camino (SIGKILL, no un cierre limpio) puede haber dejado un
+    // directorio/rama a medio crear en disco, algo que ni `git worktree
+    // list` refleja siempre con fiabilidad.
+    const timedOut = e.signal === 'SIGKILL' && /ETIMEDOUT/.test(e.message || '')
+    if (timedOut) {
+      console.error(`no se pudo crear el worktree para #${s.n} en ${wt}: se agotó el límite de ${childTimeoutMs}ms (CT_NEXT_CHILD_TIMEOUT_MS) esperando a "git worktree add" y se mató el proceso (SIGKILL). Al matarse a mitad de camino (no un fallo limpio), puede haber quedado un directorio y/o una rama a MEDIO crear en ${wt} / ${branch} — revísalo a mano (\`git worktree list\`, \`git branch\`) antes de reintentar este slice; si sigue ahí, límpialo con \`git worktree remove --force ${wt}\` / \`git branch -D ${branch}\`. Si esto pasa contra un repo legítimamente grande/lento, sube CT_NEXT_CHILD_TIMEOUT_MS.`)
+    } else {
+      console.error(`no se pudo crear el worktree para #${s.n} en ${wt}: ${e.message}`)
+    }
     const claimErr = attemptRevertClaim(s)
     activeClaim = null
     if (!claimErr) {
@@ -1371,20 +1546,41 @@ for (let idx = 0; idx < selected.length; idx++) {
   // lectura (jamás lanza nada) para distinguir los tres casos posibles antes
   // de decidir qué decir.
   const launchCheck = verifyCmuxLaunch(name, wt)
+  // IMPORTANTE (revisión externa): antes, 'wrong-cwd' y 'not-found'
+  // imprimían su propio ATENCIÓN pero de todas formas incrementaban
+  // `launchedCount` — con lo que la tanda terminaba en "lanzados 1/1" y
+  // exit 0, que un `/loop` lee como progreso normal. Y como el issue queda
+  // en status:in-progress con un worktree presente, la propia detección de
+  // staleness (finding 2) tampoco lo marcaría nunca — un slice sin agente
+  // confirmado se volvía invisible para siempre. Solo cuentan como
+  // "lanzado" los dos casos donde no hay evidencia POSITIVA de un problema:
+  // 'confirmed' (verificado de verdad) y 'unverifiable' (no se pudo
+  // consultar cmux — el mismo criterio de "beneficio de la duda" que ya
+  // usa 'infra' en classifyClaimOutcome, porque una consulta fallida no
+  // dice nada sobre si el lanzamiento fue bueno o malo). 'wrong-cwd' y
+  // 'not-found' SÍ son evidencia positiva de que algo fue mal, así que NO
+  // cuentan — si esta fuera la única selección de la tanda, el exit code
+  // final cae solo, sin más cambios, en el 3 ya existente ("seleccionado
+  // pero cero lanzados confirmados, reintenta más tarde"), en vez de un
+  // exit 0 que afirma más de lo que se sabe.
   if (launchCheck.status === 'confirmed') {
     console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — verificado: la sesión cmux está corriendo en ese directorio.`)
+    launchedCount++
   } else if (launchCheck.status === 'wrong-cwd') {
-    console.error(`ATENCIÓN: cmux aceptó el lanzamiento de #${s.n} (exit 0), pero la sesión NO está en ${wt} — está en "${launchCheck.actualCwd}" en su lugar (cmux tolera un cwd inexistente y arranca en el shell de login por defecto en vez de fallar; ¿el worktree no llegó a existir a tiempo, o se borró justo antes?). El agente puede estar corriendo en el directorio equivocado — revisa la sesión a mano antes de asumir que está trabajando #${s.n}.`)
+    console.error(`ATENCIÓN: cmux aceptó el lanzamiento de #${s.n} (exit 0), pero la sesión NO está en ${wt} — está en "${launchCheck.actualCwd}" en su lugar (cmux tolera un cwd inexistente y arranca en el shell de login por defecto en vez de fallar; ¿el worktree no llegó a existir a tiempo, o se borró justo antes?). El agente puede estar corriendo en el directorio equivocado — revisa la sesión a mano antes de asumir que está trabajando #${s.n}. NO se cuenta como lanzado con éxito.`)
   } else if (launchCheck.status === 'not-found') {
-    console.error(`ATENCIÓN: cmux devolvió éxito (exit 0) al lanzar #${s.n}, pero no se encontró ninguna sesión con el nombre "${name}" al consultarlo — no se puede confirmar que el agente esté corriendo en absoluto, y mucho menos en ${wt}. Revisa cmux a mano.`)
+    console.error(`ATENCIÓN: cmux devolvió éxito (exit 0) al lanzar #${s.n}, pero no se encontró ninguna sesión con el nombre "${name}" al consultarlo — no se puede confirmar que el agente esté corriendo en absoluto, y mucho menos en ${wt}. Revisa cmux a mano. NO se cuenta como lanzado con éxito.`)
   } else {
     console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — cmux devolvió éxito (exit 0), pero no se pudo verificar la sesión (no se pudo consultar cmux): "lanzado" aquí refleja solo que el comando no falló, no que el agente esté corriendo en ${wt}.`)
+    launchedCount++
   }
   // finding 1: el slice se lanzó completo — ya no hay claim "en la ventana
   // peligrosa" que un manejador de señal futuro (para el SIGUIENTE slice de
-  // esta misma tanda) deba tocar.
+  // esta misma tanda) deba tocar. Esto es cierto SIN IMPORTAR el resultado
+  // de verifyCmuxLaunch: el claim en sí ya está resuelto (in-progress,
+  // deliberadamente — no se revierte solo por no poder verificar la
+  // sesión, eso sería sobrerreaccionar a una incertidumbre distinta).
   activeClaim = null
-  launchedCount++
 }
 
 // D2 review, menor 1: TODO este bloque de conteo/exit-code es exclusivo del

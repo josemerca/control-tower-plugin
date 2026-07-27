@@ -78,6 +78,18 @@ if (argv[0] === 'workspace' && argv[1] === 'list' && argv.includes('--json')) {
   // otra.
   const staticTitles = process.env.FAKE_CMUX_WORKSPACE_TITLES_JSON ? JSON.parse(process.env.FAKE_CMUX_WORKSPACE_TITLES_JSON) : []
   const launched = readState()
+  // FAKE_CMUX_SCHEMA_MISMATCH (finding 2/3, ataque adversarial de una
+  // revisión externa): simula una versión de cmux que renombró el campo
+  // (p.ej. `title` en vez de `custom_title`) — hay entradas de verdad, pero
+  // NINGUNA con el nombre de campo que ct-next.mjs espera. Sirve para
+  // probar que esto se trata como NO CONCLUYENTE (queryAllCmuxWorkspaces
+  // devuelve null), nunca como "confirmado: cero sesiones", que sería un
+  // falso positivo ruidoso en cada dispatch.
+  if (process.env.FAKE_CMUX_SCHEMA_MISMATCH) {
+    const workspaces = [...staticTitles, ...launched.map((e) => e.title)].map((t) => ({ title: t, cwd: null }))
+    process.stdout.write(JSON.stringify({ workspaces }))
+    process.exit(0)
+  }
   const workspaces = [
     ...staticTitles.map((t) => ({ custom_title: t, current_directory: null })),
     ...launched.map((e) => ({ custom_title: e.title, current_directory: e.cwd })),

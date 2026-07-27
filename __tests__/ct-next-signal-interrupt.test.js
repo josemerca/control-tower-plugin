@@ -70,6 +70,11 @@ function waitForMarkerThenSignal(child, marker, signal) {
   })
 }
 
+function runRealSync(args, envOverrides) {
+  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, PATH: fakePath, ...envOverrides } })
+  return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
+}
+
 const openIssue77 = { number: 77, title: '#77 algo', labels: [{ name: 'status:ready' }], body: '' }
 
 describe('ct-next — SIGINT tras un claim confirmado pero antes de crear el worktree (finding 1)', () => {
@@ -187,9 +192,12 @@ describe('ct-next — SIGINT tras un claim confirmado pero antes de crear el wor
     expect(signal).toBeNull() // terminó por su propio process.exit(), nunca matado en seco por el SO
     expect(code).toBe(130)
     // Invariante real: por muchas señales de más que lleguen, el revert
-    // automático se completa como MUCHO una vez — nunca doble.
+    // automático se completa EXACTAMENTE una vez — nunca cero (una
+    // regresión que dejara de revertir del todo pasaría con
+    // `toBeLessThanOrEqual`, señalado por una revisión externa) y nunca dos
+    // (doble revert solapado).
     const occurrences = (out.match(/revertido automáticamente a status:ready/g) || []).length
-    expect(occurrences).toBeLessThanOrEqual(1)
+    expect(occurrences).toBe(1)
     // Si la carrera SÍ se ganó esta vez y una segunda señal se procesó de
     // verdad como reentrada, el mensaje debe ser el correcto (no una traza
     // de error ni un segundo revert) — pero no se exige que aparezca.
@@ -197,6 +205,101 @@ describe('ct-next — SIGINT tras un claim confirmado pero antes de crear el wor
       expect(occurrences).toBe(1)
     }
   }, 15000)
+})
+
+// CRÍTICO (revisión externa, reproducido 3/3 y 2/2 de forma determinista
+// contra la primera versión de este fix): el propio manejador de señal, al
+// terminar en `await sleep(0)` antes de `process.exit()`, registraba un
+// temporizador POR DETRÁS del temporizador YA PENDIENTE del bucle principal
+// (su propio `await sleep(testDelayAfterClaimMs)`, registrado ANTES de que
+// la señal se procesara). Node procesa los temporizadores vencidos en el
+// orden en que se registraron — a CT_NEXT_TEST_DELAY_AFTER_CLAIM_MS=0 (el
+// único valor de PRODUCCIÓN; los otros tests de este fichero usan 2000-3000
+// para poder enviar una señal externa con margen, un valor que además
+// enmascaraba este bug por completo: con esa ventana tan grande el
+// temporizador propio del manejador siempre "ganaba" la carrera de todas
+// formas) el temporizador del bucle principal vencía ANTES que el del
+// manejador — el bucle RETOMABA, creaba el worktree, lanzaba cmux, e
+// imprimía "lanzado" DESPUÉS de que el manejador ya hubiera revertido el
+// claim a status:ready. El claim queda revertido en GitHub mientras un
+// agente real sigue corriendo sobre él: el finding 1 exacto, causado por el
+// propio arreglo de finding 1.
+//
+// Estos dos tests reproducen la carrera EXACTA a valor de producción real
+// (CT_NEXT_TEST_DELAY_AFTER_CLAIM_MS sin fijar) — no al valor de 2000-3000
+// que usa el resto de este fichero, que no la habría detectado nunca (así
+// se confirmó: los diez tests de arriba pasaban igual con el bug presente
+// que sin él). Enviar la señal desde un proceso EXTERNO justo en el
+// instante exacto de esta ventana es, en sí mismo, una carrera de
+// temporización de las que estos tests deberían evitar: verificado por
+// construcción que, a este valor de delay, entre un 10 y un 20% de los
+// intentos de un arnés de test externo nunca llegaban a procesar la señal
+// en absoluto (la tubería entera de subprocesos falsos podía terminar antes
+// de que el proceso externo reaccionara al dato de stdout) — un fallo de
+// temporización del PROPIO test, no del código bajo prueba. En su lugar,
+// `CT_NEXT_TEST_SELF_SIGINT_AFTER_CLAIM`/`CT_NEXT_TEST_SELF_SIGINT_BEFORE_IDLE_CHECKPOINT`
+// (hooks exclusivos de test, ver ct-next.mjs) hacen que el propio proceso
+// se envíe la señal a sí mismo (`process.kill(pid, sig)`, la MISMA syscall
+// subyacente que una señal externa — indistinguible para Node) de forma
+// síncrona justo en el punto exacto que se quiere ejercitar, sin ninguna
+// carrera de temporización entre procesos. Verificado 20/20 sin excepción
+// contra el fix, y 0/20 (reproducción total) contra el código sin arreglar.
+describe('ct-next — CRÍTICO: el propio manejador no debe darle al bucle principal una segunda oportunidad de mutar (regresión de una revisión externa)', () => {
+  it('cap 1, autointerrupción justo tras confirmar el claim, a valor de producción (delay sin fijar): NUNCA crea el worktree ni relanza tras el revert', () => {
+    const repoRoot = makeRepoRoot()
+    const gitLog = join(repoRoot, 'git-log')
+    const argvLog = join(repoRoot, 'gh-argv-log')
+    const counterFile = join(repoRoot, 'gh-list-count')
+
+    const r = runRealSync(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue77], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GH_ARGV_LOG_FILE: argvLog,
+      FAKE_GIT_LOG_FILE: gitLog,
+      CT_NEXT_TEST_SELF_SIGINT_AFTER_CLAIM: 'SIGINT',
+      // CT_NEXT_TEST_DELAY_AFTER_CLAIM_MS deliberadamente SIN FIJAR: 0, el
+      // valor real de producción — es el único valor en el que el bug
+      // original se manifestaba.
+    })
+
+    expect(r.code).toBe(130)
+    expect(r.out).toMatch(/revertido automáticamente a status:ready/)
+    const gitLogTxt = existsSync(gitLog) ? readFileSync(gitLog, 'utf8') : ''
+    expect(gitLogTxt).not.toMatch(/worktree add/)
+    const argv = readFileSync(argvLog, 'utf8')
+    // Exactamente un claim (el original) y exactamente un revert — nunca un
+    // segundo `issue edit` que reclamara de nuevo o repitiera nada.
+    expect((argv.match(/issue edit 77 --repo o\/r --add-label status:in-progress/g) || []).length).toBe(1)
+    expect((argv.match(/issue edit 77 --repo o\/r --add-label status:ready/g) || []).length).toBe(1)
+  })
+
+  it('cap 2, autointerrupción justo antes del checkpoint idle previo al segundo candidato: #78 NUNCA recibe un issue edit', () => {
+    const repoRoot = makeRepoRoot()
+    const gitLog = join(repoRoot, 'git-log')
+    const argvLog = join(repoRoot, 'gh-argv-log')
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const openIssue78 = { number: 78, title: '#78 otro', labels: [{ name: 'status:ready' }], body: '' }
+
+    const r = runRealSync(['--repo', 'o/r', '--cap', '2'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue77, openIssue78], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GH_ARGV_LOG_FILE: argvLog,
+      FAKE_GIT_LOG_FILE: gitLog,
+      CT_NEXT_TEST_SELF_SIGINT_BEFORE_IDLE_CHECKPOINT: 'SIGINT',
+    })
+
+    expect(r.code).toBe(130)
+    // #77 (el primer candidato) sí se completó antes de la autointerrupción
+    // (que se dispara solo a partir de la SEGUNDA iteración del bucle).
+    const gitLogTxt = existsSync(gitLog) ? readFileSync(gitLog, 'utf8') : ''
+    expect(gitLogTxt).toMatch(/worktree add -b feat\/77/)
+    // #78 nunca llega a intentar un claim: ni escritura, ni revert, nada.
+    const argv = readFileSync(argvLog, 'utf8')
+    expect(argv).not.toMatch(/issue edit 78/)
+    expect(gitLogTxt).not.toMatch(/worktree add -b feat\/78/)
+  })
 })
 
 describe('ct-next — SIGINT en el hueco idle entre dos slices de la misma tanda (finding 1, checkpoint pre-claim)', () => {
@@ -270,6 +373,11 @@ describe('ct-next — `git worktree add` genuinamente colgado, sin que la señal
     expect(elapsedMs).toBeLessThan(5000)
     const out = (r.stdout || '') + (r.stderr || '')
     expect(out).toMatch(/no se pudo crear el worktree/)
+    // MENOR (revisión externa): el mensaje de timeout debe nombrar el
+    // límite exacto, la variable de entorno con la que se ajusta, y avisar
+    // de que el SIGKILL puede haber dejado un worktree/rama a medio crear.
+    expect(out).toMatch(/se agotó el límite de 800ms \(CT_NEXT_CHILD_TIMEOUT_MS\)/)
+    expect(out).toMatch(/puede haber quedado un directorio y\/o una rama a MEDIO crear/)
     expect(out).toMatch(/revertido automáticamente a status:ready|ATENCIÓN: no se pudo revertir/)
     const argv = readFileSync(argvLog, 'utf8')
     // el claim inicial sí se escribió (dispatch-check llegó a completarse

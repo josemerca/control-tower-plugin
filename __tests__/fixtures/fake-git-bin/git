@@ -99,6 +99,25 @@ function main() {
       setInterval(() => {}, 1000)
       return
     }
+    // FAKE_GIT_WORKTREE_ADD_DELAY_MS: ensancha DETERMINÍSTICAMENTE la
+    // ventana de tiempo real entre "claim confirmado" y "worktree add
+    // completo" — necesario para probar el checkpoint de finding 1 A VALOR
+    // DE PRODUCCIÓN (CT_NEXT_TEST_DELAY_AFTER_CLAIM_MS sin fijar, 0):
+    // verificado por construcción que, sin ningún retraso en absoluto, la
+    // tubería entera (stubs de gh/git/cmux, todos procesos node reales pero
+    // triviales) puede completarse en unos pocos milisegundos — más rápido
+    // de lo que tarda el propio test en reaccionar al evento 'data' de
+    // "claimed #N" y despachar la señal, dando un ~20% de falsos "no
+    // interrumpido a tiempo" que no tienen nada que ver con el propio
+    // checkpoint (el proceso hijo terminaba entero antes de que la señal
+    // llegara a procesarse en absoluto). Retrasar aquí (síncrono, en el
+    // HIJO, simulando la latencia real de un `git worktree add` de verdad)
+    // le da al test margen de sobra sin tocar el valor de
+    // CT_NEXT_TEST_DELAY_AFTER_CLAIM_MS que se está verificando.
+    if (process.env.FAKE_GIT_WORKTREE_ADD_DELAY_MS) {
+      const sab = new Int32Array(new SharedArrayBuffer(4))
+      Atomics.wait(sab, 0, 0, Number(process.env.FAKE_GIT_WORKTREE_ADD_DELAY_MS))
+    }
     if (process.env.FAKE_GIT_WORKTREE_ADD_FAIL) {
       console.error('fake-git: worktree add failed (simulado)')
       process.exit(1)
