@@ -85,7 +85,7 @@
 // del plan, e imprime/ejecuta lo que le devuelven — ninguna decisión de
 // negocio vive en el wrapper.
 import {
-  extractAc, extractDeps, extractSectionContent, locateSection, locateLine,
+  extractAc, extractDepsInSection, extractStrayDeps, extractSectionContent, locateSection, locateLine,
   extractSpecLink, specLinkAnchor, countHeadingLines, detectLineEnding, normalizeToLF,
   AC_HEADING_FORMS,
 } from './gh-issue-map.js'
@@ -143,16 +143,21 @@ export function diffAc(currentAc, wantedAc) {
 }
 
 // depsInSection / acInSection: extraen deps/ac SOLO del contenido de su
-// propia sección reconocida — a diferencia de gh-issue-map.js#extractDeps
-// (usada por el DISPATCHER real, que escanea todo el body a propósito),
-// esta es la extracción que F5 usa para comparar Y para decidir si
-// `buildReconcileBody` puede aplicar el arreglo (mismo dominio en
-// detección y en aplicación). `extractAc` ya es, de por sí, section-scoped
-// contra el conjunto cerrado AC_HEADING_FORMS (ver gh-issue-map.js,
-// Importante 4) — se reexporta aquí sin más para que diffIssue no tenga que
-// decidir dos criterios distintos.
+// propia sección reconocida — mismo dominio en detección (aquí) y en
+// aplicación (`buildReconcileBody`, que solo puede splicear esa sección con
+// seguridad). Hasta el hardening del dispatch (D1), esto era una diferencia
+// DELIBERADA respecto al dispatcher real (gh-issue-map.js#mapGhIssue llamaba
+// a extractDeps sobre el body ENTERO) — D1 finding 2 unificó ambos dominios:
+// mapGhIssue ahora usa exactamente `extractDepsInSection`, la misma función
+// que este archivo. `depsInSection` queda como un wrapper delgado (solo
+// para no tocar las llamadas de más abajo) sobre esa única fuente de
+// verdad — ya no hay dos implementaciones del mismo criterio que puedan
+// divergir. `extractAc` ya es, de por sí, section-scoped contra el conjunto
+// cerrado AC_HEADING_FORMS (ver gh-issue-map.js, Importante 4) — se
+// reexporta aquí sin más para que diffIssue no tenga que decidir dos
+// criterios distintos.
 function depsInSection(body) {
-  return extractDeps(extractSectionContent(body, '## Dependencias') || '')
+  return extractDepsInSection(body).deps
 }
 function acInSection(body) {
   return extractAc(body)
@@ -164,25 +169,26 @@ function acInSection(body) {
 // (cuenta para el exit code — review round 4, importante 5) o solo
 // cosmético (Descripción/Protegido: una nota, nunca cuenta).
 //
-// La justificación de por qué Dependencias/AC SÍ cuentan NO es la misma
-// para las dos, y la ronda 4 la había escrito como si lo fuera — corregido
-// en la ronda 5 (menor: "la justificación de los duplicados de AC es
-// falsa"):
-//   - Dependencias: gh-issue-map.js#extractDeps, la que usa el DISPATCHER
-//     real (mapGhIssue), escanea el body ENTERO con una regex global, sin
-//     ninguna noción de sección — dos "## Dependencias" con `merge-after`
-//     distintos se UNEN de verdad: el dispatcher obedece la suma de ambas
-//     copias, no "la primera".
-//   - Acceptance criteria: extractAc es section-scoped (locateSection
-//     SIEMPRE devuelve la PRIMERA aparición) — el dispatcher NUNCA ve la
-//     segunda copia, no hay unión. Pero eso no la hace inocua: si un
-//     humano edita la copia equivocada (la segunda, tras un merge conflictivo
-//     mal resuelto o un copiar-pegar), esa edición queda invisible para el
-//     agente sin que nada lo avise — silenciosamente se sigue usando la
-//     PRIMERA copia, que puede ser la vieja. Es un mecanismo distinto al de
-//     Dependencias (descartar en vez de unir), pero el resultado — el
-//     dispatcher actuando sobre datos que ya no reflejan lo que un humano
-//     escribió a propósito — es igual de real, así que sigue contando.
+// La justificación de por qué Dependencias/AC SÍ cuentan es AHORA LA MISMA
+// para las dos (antes de D1 no lo era — ver el historial más abajo, la
+// ronda 4 la había escrito como si lo fuera y la ronda 5 lo corrigió):
+// gh-issue-map.js#extractSectionContent/locateSection SIEMPRE devuelve la
+// PRIMERA aparición de una cabecera — tanto Dependencias como AC. Ninguna
+// de las dos "une" dos copias. Eso no las hace inocuas: si un humano edita
+// la copia EQUIVOCADA (la segunda, tras un merge conflictivo mal resuelto o
+// un copiar-pegar), esa edición queda invisible tanto para el dispatcher
+// como para --reconcile sin que nada lo avise — silenciosamente se sigue
+// usando la PRIMERA copia, que puede ser la vieja. Por eso ambas siguen
+// contando para el exit code.
+//
+// Historial (antes de D1, hardening del dispatch): gh-issue-map.js#extractDeps,
+// la que usaba el DISPATCHER real (mapGhIssue), escaneaba el body ENTERO con
+// una regex global, sin ninguna noción de sección — dos "## Dependencias"
+// con `merge-after` distintos se UNÍAN de verdad (el dispatcher obedecía la
+// suma de ambas copias, no "la primera"), a diferencia de AC. D1 finding 2
+// unificó el dominio del dispatcher con el de --reconcile (ambos
+// section-scoped, ambos "primera copia") — la asimetría de justificación
+// desapareció con ella.
 const DUPLICATE_CHECKS = [
   { headings: '## Descripción', label: 'Descripción', machine: false },
   { headings: AC_HEADING_FORMS, label: 'Acceptance criteria', machine: true },
@@ -222,14 +228,18 @@ const DUPLICATE_CHECKS = [
 // exit code (cambian lo que el dispatcher hace; ver DUPLICATE_CHECKS),
 // Descripción/Protegido no.
 //
-// `strayDeps`: referencias `merge-after #N` que el DISPATCHER real vería
-// (escanea todo el body, gh-issue-map.js#extractDeps sin acotar) pero que
-// viven FUERA de la sección "## Dependencias" reconocida — F5 nunca las
-// toca (harían falta escribir en un sitio del body que no controla, el
-// mismo riesgo de corrupción que el Critical 1 de la ronda anterior cerró),
-// pero las reporta como nota: sin esto, el silencio de F5 solo garantizaba
-// "la sección que sé escribir coincide", no "lo que el dispatcher ve
-// coincide con el spec" — que es lo que este reporte promete.
+// `strayDeps`: referencias `merge-after #N` que viven FUERA de la sección
+// "## Dependencias" reconocida. Antes de D1 (hardening del dispatch), el
+// DISPATCHER real SÍ las veía (escaneaba el body entero) mientras --reconcile
+// nunca podía tocarlas (fuera de la sección que puede splicear con
+// seguridad) — el reporte de abajo existía para que ESA asimetría, al menos,
+// no quedara invisible. D1 finding 2 unificó el dominio: mapGhIssue ahora
+// también ignora todo lo que viva fuera de la sección — un `strayDep` ya no
+// lo obedece NADIE (ni el dispatcher ni --reconcile). El campo se conserva
+// porque sigue siendo información real y accionable: un humano que escribió
+// un "merge-after" ahí pensando que contaba merece que se lo digan, aunque
+// ahora la razón sea "esto es texto muerto" y no "el dispatcher lo aplica
+// pero yo no puedo".
 //
 // labels acepta tanto la forma cruda de la REST API (`[{name: 'x'}, ...]`)
 // como un array de strings ya planos.
@@ -273,12 +283,16 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
   const duplicateSections = duplicates.map((c) => c.label)
   const duplicateMachineSections = duplicates.filter((c) => c.machine).map((c) => c.label)
 
-  // strayDeps: deps que el dispatcher vería (escaneo de TODO el body) que no
-  // están dentro de la sección reconocida — set, sin importar si también
+  // strayDeps: deps que viven en el body pero fuera de la sección reconocida
+  // — desde D1, texto inerte para todo el mundo (ni el dispatcher ni
+  // --reconcile lo obedecen); se reporta igual, sin importar si también
   // coinciden o no con lo que el spec pide (eso ya lo cubre `deps` arriba).
-  const wholeBodyDeps = new Set(extractDeps(body))
-  const sectionDepsSet = new Set(currentDeps)
-  const strayDeps = [...wholeBodyDeps].filter((d) => !sectionDepsSet.has(d)).sort((a, b) => a - b)
+  // `extractStrayDeps` (gh-issue-map.js) es la MISMA función que
+  // mapGhIssue usa para exponer esto en la ruta del dispatcher (D1, review:
+  // "expón las deps fuera de sección desde mapGhIssue" — ya tienes la
+  // forma hecha aquí, es la misma) — una sola implementación, no dos que
+  // puedan divergir.
+  const strayDeps = extractStrayDeps(body, currentDeps)
 
   return {
     order: wantedIssue.order,
@@ -393,7 +407,7 @@ export function formatDrift(diff) {
     lines.push(`nota: ${head}: la sección "## ${section}" aparece más de una vez en el body — solo la primera se compara/reconcilia; revisa la(s) copia(s) sobrante(s) a mano`)
   }
   for (const d of diff.strayDeps || []) {
-    lines.push(`nota: ${head}: "merge-after #${d}" aparece fuera de la sección "## Dependencias" — el dispatcher SÍ lo obedece (escanea todo el body), pero --reconcile no lo toca (fuera de la sección que puede tocar con seguridad); revísalo a mano`)
+    lines.push(`nota: ${head}: "merge-after #${d}" aparece fuera de la sección "## Dependencias" — desde el hardening del dispatch (D1), ya NO lo obedece nadie (ni el dispatcher real ni --reconcile); si se pretendía como dependencia real, muévelo dentro de la sección`)
   }
   if (diff.closed && lines.length) lines.push(`nota: ${head}: el issue está cerrado — revisa antes de aplicar --reconcile`)
   return lines

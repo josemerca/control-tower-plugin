@@ -56,6 +56,26 @@ describe('computeReadyCandidates', () => {
     expect(readyDepsMet.map((i) => i.order)).toEqual([10, 20, 30])
     expect(readyDepsMet.map((i) => i.n)).toEqual([200, 300, 100])
   })
+
+  // D1 finding 2: un issue con `depsMalformed: true` (gh-issue-map.js#mapGhIssue
+  // — la sección "## Dependencias" existe pero no se reconoció ningún
+  // "merge-after #N" dentro, una reescritura humana probable) tiene sus
+  // `deps` en `[]`, pero eso NO significa "sin dependencias" — significa
+  // "estado desconocido". Sin este filtro, un issue así pasaría el
+  // `.every(...)` vacío trivialmente y se trataría como listo para
+  // despachar — justo el "gate abierto en silencio" que el finding describe.
+  it('un issue con depsMalformed:true NUNCA entra en readyDepsMet, aunque su `deps` esté vacío', () => {
+    const issues = [{ n: 9, order: 9, status: 'ready', deps: [], depsMalformed: true, touches: [] }]
+    const { ready, readyDepsMet } = computeReadyCandidates(issues, [])
+    expect(ready.map((i) => i.n)).toEqual([9]) // sigue contando como "ready" (status), solo no como "deps resueltas"
+    expect(readyDepsMet).toEqual([])
+  })
+
+  it('depsMalformed:false (o ausente) con deps [] real → readyDepsMet lo incluye con normalidad (caso normal, sin regresión)', () => {
+    const issues = [{ n: 9, order: 9, status: 'ready', deps: [], touches: [] }]
+    const { readyDepsMet } = computeReadyCandidates(issues, [])
+    expect(readyDepsMet.map((i) => i.n)).toEqual([9])
+  })
 })
 
 describe('selectNext', () => {
@@ -198,7 +218,31 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
     const issues = [{ n: 2, order: 2, status: 'ready', deps: [1, 3], touches: [] }]
     const plan = planDispatch(issues, { mergedIssues: [3], cap: 1 }) // falta mergear el 1
     expect(plan.selected).toEqual([])
-    expect(plan.blockReason).toEqual({ reason: 'deps-unmet', blocked: [{ n: 2, unmetDeps: [1] }] })
+    expect(plan.blockReason).toEqual({ reason: 'deps-unmet', blocked: [{ n: 2, unmetDeps: [1], malformed: false }] })
+  })
+
+  // D1 finding 2: un issue ready cuya sección "## Dependencias" es ilegible
+  // (depsMalformed) se reporta con `malformed: true` y `unmetDeps: []` — el
+  // formateador (ct-next.mjs) necesita distinguir este caso de "sin
+  // dependencias pendientes" para no imprimir una lista vacía y una
+  // aparente contradicción ("bloqueado, pero no falta mergear nada").
+  it('ready con depsMalformed:true → blockReason deps-unmet, malformed:true, unmetDeps vacío (el estado del gate es desconocido, no "sin deps")', () => {
+    const issues = [{ n: 9, order: 9, status: 'ready', deps: [], depsMalformed: true, touches: [] }]
+    const plan = planDispatch(issues, { mergedIssues: [], cap: 1 })
+    expect(plan.selected).toEqual([])
+    expect(plan.blockReason).toEqual({ reason: 'deps-unmet', blocked: [{ n: 9, unmetDeps: [], malformed: true }] })
+  })
+
+  // D1 finding 5: una dependencia de ORDEN no mapeable llega aquí como
+  // `null` (gh-issue-map.js#buildDispatchInput) — planDispatch/dispatch.js
+  // no reescribe ese `null` (sigue siendo la representación interna, fail-
+  // closed); es ct-next.mjs quien lo traduce a un mensaje humano (ver
+  // ct-next-dryrun.test.js). Este test fija que el `null` sobrevive intacto
+  // hasta blockReason, sin que planDispatch lo confunda con un issue real.
+  it('deps con un null (orden sin issue correspondiente) → unmetDeps conserva el null tal cual, no revienta', () => {
+    const issues = [{ n: 5, order: 5, status: 'ready', deps: [null], touches: [] }]
+    const plan = planDispatch(issues, { mergedIssues: [], cap: 1 })
+    expect(plan.blockReason).toEqual({ reason: 'deps-unmet', blocked: [{ n: 5, unmetDeps: [null], malformed: false }] })
   })
 
   it('ready + deps mergeadas pero colisiona con serializante en vuelo (migration/ci/pbxproj, tokens distintos) → collision de tipo serializing', () => {
@@ -226,7 +270,7 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
       inFlightCount: 1,
       cap: 1,
       wouldDispatchIfCapAllowed: false,
-      blockedEvenWithCap: { reason: 'deps-unmet', blocked: [{ n: 2, unmetDeps: [99] }] },
+      blockedEvenWithCap: { reason: 'deps-unmet', blocked: [{ n: 2, unmetDeps: [99], malformed: false }] },
     })
   })
 
@@ -339,6 +383,52 @@ describe('explainNoSelection / selectNext — oráculo de identidad de candidato
     // sabotaje pasaría desapercibido.
     expect(clean.map((i) => i.n)).toEqual([10])
     expect(clean[0].n).toBe(plan.blockReason.issue)
+  })
+})
+
+// D2, finding 4 (auditoría del dispatch): explainSelectionGap solo miraba
+// readyDepsMet[0] para decidir `wouldDispatchIfCapAllowed` en la rama
+// cap-full. El razonamiento de "el primero explica el bloqueo" (comentario de
+// arriba) es válido para explicar por qué selectNext, con hueco de cap DE
+// VERDAD, no seleccionó nada (si el [0] choca, todos chocan — si no, se
+// habría seleccionado) — pero NO es válido para el contrafactual "¿ayudaría
+// subir --cap?", porque en cap-full `remainingCap` fue 0 y selectNext JAMÁS
+// examinó al candidato 2: que el [0] choque no dice nada sobre si el [1]
+// también lo haría. Reproducción exacta del auditor: cap=2, dos en vuelo
+// (api, db), dos ready-con-deps-mergeadas — #20 (orden 1, touches:api,
+// choca con el `api` en vuelo) y #21 (orden 2, touches:ui, libre). Subir el
+// cap SÍ despacharía #21 — el mensaje actual afirma lo contrario.
+describe('explainSelectionGap / planDispatch — cap-full debe escanear TODOS los candidatos, no solo el primero (D2, finding 4)', () => {
+  it('cap-full con #20 (orden 1) chocando pero #21 (orden 2) libre → wouldDispatchIfCapAllowed debe ser true', () => {
+    const issues = [
+      { n: 10, order: 1, status: 'in-progress', deps: [], touches: ['api'] },
+      { n: 11, order: 2, status: 'in-progress', deps: [], touches: ['db'] },
+      { n: 20, order: 1, status: 'ready', deps: [], touches: ['api'] }, // choca con #10
+      { n: 21, order: 2, status: 'ready', deps: [], touches: ['ui'] },  // libre — subir --cap SÍ ayudaría
+    ]
+    const plan = planDispatch(issues, { mergedIssues: [], cap: 2 }) // 2 en vuelo, cap ya lleno
+    expect(plan.selected).toEqual([])
+    expect(plan.blockReason.reason).toBe('cap-full')
+    // Esta es la aserción que el bug rompe: mirando solo readyDepsMet[0]
+    // (#20, que choca), el código actual concluye `false` — pero #21 SÍ se
+    // despacharía con un hueco de cap más.
+    expect(plan.blockReason.wouldDispatchIfCapAllowed).toBe(true)
+    expect(plan.blockReason.blockedEvenWithCap).toBeNull()
+  })
+
+  it('cap-full con TODOS los candidatos chocando de verdad → wouldDispatchIfCapAllowed sigue false (control negativo)', () => {
+    const issues = [
+      { n: 10, order: 1, status: 'in-progress', deps: [], touches: ['api'] },
+      { n: 20, order: 1, status: 'ready', deps: [], touches: ['api'] }, // choca
+      { n: 21, order: 2, status: 'ready', deps: [], touches: ['api'] }, // también choca con #10
+    ]
+    const plan = planDispatch(issues, { mergedIssues: [], cap: 1 })
+    expect(plan.blockReason.reason).toBe('cap-full')
+    expect(plan.blockReason.wouldDispatchIfCapAllowed).toBe(false)
+    // El motivo reportado debe seguir siendo el del primero (#20, menor
+    // orden) — el escaneo no cambia CUÁL se cita cuando de verdad todos
+    // chocan, solo evita el falso negativo del caso de arriba.
+    expect(plan.blockReason.blockedEvenWithCap).toEqual({ reason: 'collision', kind: 'token', issue: 20, token: 'api', withIssue: 10 })
   })
 })
 

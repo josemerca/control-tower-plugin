@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync, existsSync } from 'node:fs'
+import { mkdirSync, writeFileSync, existsSync, writeSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { planDispatch, resolveAccount, buildCmuxArgv } from './dispatch.js'
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
 import { shQuote } from './shquote.js'
-import { buildDispatchInput } from './gh-issue-map.js'
+import { buildDispatchInput, NO_MILESTONE_KEY } from './gh-issue-map.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 
 // W-C: dispatch-check.mjs implementa el protocolo de claim completo (colisión
@@ -67,10 +67,30 @@ function formatReason(reason) {
     case 'none-ready':
       return 'No hay ningún issue en status:ready — no hay nada que despachar todavía.'
     case 'deps-unmet': {
-      const list = reason.blocked
-        .map((b) => `#${b.n} (falta mergear ${b.unmetDeps.map((d) => `#${d}`).join(', ')})`)
-        .join(', ')
-      return `Hay slice(s) en status:ready pero con dependencias sin mergear: ${list} — espera a que se mergeen esas dependencias.`
+      // D1 finding 2/5: dos causas MUY distintas terminaban antes en el mismo
+      // mensaje genérico ("falta mergear #X"), una de ellas imprimiendo
+      // directamente el string "#null" — instruyendo a esperar algo que no
+      // existe y nunca se va a mergear.
+      //   - `malformed` (finding 2): la sección "## Dependencias" del issue
+      //     existe pero no se reconoció ningún "merge-after #N" — casi
+      //     seguro una reescritura humana. El estado del gate es
+      //     DESCONOCIDO, no "sin dependencias" (unmetDeps llega vacío a
+      //     propósito desde dispatch.js — ver su comentario).
+      //   - una dependencia que tradujo a `null` (finding 5,
+      //     gh-issue-map.js#buildDispatchInput): el orden declarado no
+      //     corresponde a NINGÚN issue existente (ni abierto ni cerrado, ni
+      //     en el propio epic del issue) — nunca se va a resolver solo con
+      //     esperar, hace falta corregir el dato.
+      const list = reason.blocked.map((b) => {
+        if (b.malformed) {
+          return `#${b.n} (la sección "## Dependencias" existe pero no se reconoció ningún "merge-after #N" en su contenido — probablemente reescrita a mano; tratado como NO despachable hasta que se corrija el texto, nunca como "sin dependencias")`
+        }
+        const deps = b.unmetDeps.map((d) => (d == null
+          ? 'una dependencia declarada contra un orden que no corresponde a ningún issue existente (¿"merge-after" a un slice que no existe, o que aún no se groomeó?) — nunca se resolverá sola con esperar; corrige el "merge-after" o el "ct-order" del issue referenciado'
+          : `#${d}`))
+        return `#${b.n} (falta mergear ${deps.join(', ')})`
+      }).join('; ')
+      return `Hay slice(s) en status:ready pero con dependencias sin mergear o sin resolver: ${list} — espera a que se mergeen esas dependencias, o corrige el issue si el bloqueo es por datos, no por trabajo pendiente.`
     }
     case 'collision': {
       if (reason.kind === 'serializing') {
@@ -378,6 +398,14 @@ function loadIssues() {
     closed = rawClosed.map((i) => ({
       number: i.number,
       body: i.body,
+      // milestone (D1 finding 1): buildOrderIndex necesita el milestone de
+      // CUALQUIER issue, abierto o cerrado, para poder escanear el orden POR
+      // EPIC en vez de globalmente al repo — sin esto, todo issue cerrado
+      // caería en el bucket compartido NO_MILESTONE_KEY sin importar su
+      // epic real, arriesgando una colisión FALSA entre dos epics distintos
+      // que de verdad tienen milestones distintos (uno simplemente no viajó
+      // hasta aquí).
+      milestone: i.milestone || null,
       stateReason: i.state_reason ? String(i.state_reason).toUpperCase() : null,
     }))
   } catch (e) {
@@ -387,7 +415,73 @@ function loadIssues() {
   return buildDispatchInput(raw, closed)
 }
 
-const { issues, mergedIssues } = loadIssues()
+// formatOrderCollisions (D1 finding 1, el más grave del hardening del
+// dispatch — endurecido en la review, finding 4): `orderCollisions`
+// (gh-issue-map.js#buildOrderIndex, vía buildDispatchInput) es no-vacío
+// cuando dos issues DISTINTOS comparten el mismo `<!-- ct-order:N -->`
+// dentro del MISMO epic (mismo milestone, o ambos sin milestone) — un
+// re-groom accidental, o dos epics que comparten milestone por error (p.ej.
+// ninguno pasó `--milestone` y los dos cayeron en el título por defecto
+// "Epic"). Rehusar a resolver esto en silencio sigue siendo la dirección
+// correcta — lo que YA NO hace este wrapper es abortar el batch ENTERO: el
+// epic afectado ya viene EXCLUIDO de `issues` (buildDispatchInput, mismo
+// motivo documentado ahí — con el orden indexado también sobre cerrados,
+// una colisión que viviera solo entre issues mergeados hace tiempo
+// ladrillaba el repo COMPLETO para siempre). Aquí solo queda avisar, SIEMPRE
+// (nunca en silencio), de qué epic quedó fuera y por qué, mientras el resto
+// del repo se despacha con normalidad.
+function formatOrderCollisions(collisions) {
+  return collisions.map((c) => {
+    const epicLabel = c.epicKey === NO_MILESTONE_KEY ? 'issues sin milestone asignado' : `el milestone #${c.epicKey}`
+    return `aviso: colisión de orden — el marcador <!-- ct-order:${c.order} --> aparece en más de un issue de ${epicLabel} (${c.issues.map((n) => `#${n}`).join(', ')}). Ese epic queda EXCLUIDO de esta tanda (ni se despacha ni cuenta en vuelo) hasta que se corrija — el resto del repo se despacha con normalidad. ¿Re-groom accidental sobre el mismo milestone, o dos epics compartiendo milestone por no haber pasado --milestone?`
+  })
+}
+
+// formatStatusAmbiguityWarnings (D1 finding 3): un aviso, SIEMPRE impreso
+// (no solo en --dry-run: es una señal de datos rotos, no del plan de
+// despacho) — nunca en silencio — por cada issue con más de una label
+// `status:` a la vez. gh-issue-map.js#mapGhIssue ya resolvió un valor
+// determinista e independiente del orden del array (in-progress > in-review
+// > ready > backlog); este aviso es SOLO para que un humano corrija las
+// labels a mano y la ambigüedad no se repita en la próxima corrida.
+function formatStatusAmbiguityWarnings(issues) {
+  return issues
+    .filter((i) => i.statusAmbiguous)
+    .map((i) => `aviso: #${i.n} tiene más de una label "status:" a la vez (${(i.statusLabels || []).map((s) => `status:${s}`).join(', ')}) — probablemente una edición a medias. Resuelto de forma conservadora a "status:${i.status}" (in-progress > in-review > ready > backlog), sin depender del orden en que gh/GitHub devuelve las labels. Corrige las labels a mano para dejar solo una.`)
+}
+
+// formatStrayDepsWarnings (D1 finding 1, seguimiento de review): estrechar
+// el dominio de deps del dispatcher a "## Dependencias" (D1 finding 2) abrió
+// una puerta que `main` mantenía cerrada — verificado por la review con el
+// mismo fixture en ambos sentidos: un `merge-after #N` fuera de la sección
+// (p.ej. bajo "## Descripción") YA NO gatea el dispatch. Es el estrechamiento
+// correcto y deseado, pero antes de este aviso era invisible — un issue se
+// despachaba en silencio sin que nadie supiera que su dependencia
+// pretendida vive en el sitio equivocado y dejó de contar. gh-issue-map.js#mapGhIssue
+// expone `strayDeps` para esto exactamente; este aviso nunca bloquea el
+// dispatch (la decisión de estrechar el dominio ya está tomada y es
+// correcta) — solo informa.
+function formatStrayDepsWarnings(issues) {
+  return issues
+    .filter((i) => (i.strayDeps || []).length > 0)
+    .map((i) => `aviso: #${i.n} tiene "merge-after ${i.strayDeps.map((d) => `#${d}`).join(', ')}" fuera de la sección "## Dependencias" — desde el hardening del dispatch, esto YA NO cuenta como dependencia real (se despacha igual). Si se pretendía como tal, muévelo dentro de la sección "## Dependencias", o bórralo si ya no aplica.`)
+}
+
+const dispatchInput = loadIssues()
+const { issues, mergedIssues } = dispatchInput
+// `orderCollisions` solo existe en la ruta real (buildDispatchInput) — el
+// fixture de test (CT_NEXT_FIXTURE) ya trae issues pre-mapeados y no pasa
+// por ese cálculo; `|| []` lo trata como "sin colisiones" en ese caso. Nunca
+// aborta (ver el comentario de formatOrderCollisions): `issues` ya viene
+// filtrado por buildDispatchInput, así que estos avisos son puramente
+// informativos — console.log, no console.error, mismo criterio que el
+// resto de líneas informativas de este fichero (rama base resuelta, en
+// vuelo, motivo de bloqueo): console.error se reserva para lo que aborta
+// con exit != 0.
+const orderCollisions = dispatchInput.orderCollisions || []
+for (const w of formatOrderCollisions(orderCollisions)) console.log(w)
+for (const w of formatStatusAmbiguityWarnings(issues)) console.log(w)
+for (const w of formatStrayDepsWarnings(issues)) console.log(w)
 // planDispatch (dispatch.js) es quien decide TODO lo que antes se hacía aquí
 // a medias: antes este wrapper llamaba a selectNext con `runningTouches: []`
 // hardcodeado, así que dos invocaciones sucesivas de /ct-next --cap 1 nunca
@@ -428,6 +522,19 @@ if (!selected.length) {
   process.exit(0)
 }
 
+// D2 (auditoría del dispatch), finding 2: en --dry-run, la selección
+// completa siempre se ve porque cada slice de `selected` imprime su propio
+// bloque `=== slice #N === ` sin que nada aborte a medio camino (no hay
+// llamadas reales). En el path REAL eso no está garantizado — si el dispatch
+// aborta a mitad de tanda (claim inesperado, worktree, seed, cmux), los
+// slices seleccionados que aún no se habían intentado no dejaban NINGUNA
+// traza: un humano leyendo el log no podía saber qué se había elegido en
+// total, solo lo que llegó a intentarse. Se imprime aquí, ANTES de intentar
+// ningún claim, en ambos paths (dry-run y real) — es la única fuente de
+// verdad de la selección (`selected`, ya decidido por planDispatch) y no
+// depende de que el resto del script llegue a completarse.
+console.log(`seleccionados para esta tanda (cap ${cap}, ${inFlight.length} en vuelo): ${selected.map((s) => `#${s.n} (${s.name})`).join(', ')}`)
+
 const repoName = repo.split('/').pop()
 const configDir = resolveAccount(repoName, ACCOUNT_MAP)
 
@@ -457,17 +564,152 @@ const configDir = resolveAccount(repoName, ACCOUNT_MAP)
 // para no depender de que "node" resuelva en PATH al mismo binario que ya
 // está ejecutando este propio script. Contrato de exit code de
 // dispatch-check.mjs (ver su propia cabecera, T11): 0 = reclamado, 1 = no
-// arrancar (colisión o carrera perdida), 2 = error de uso. stdio heredado a
-// propósito: el mensaje que imprime dispatch-check (colisión, carrera
-// perdida, o "claimed #N → in-progress") ya explica el motivo bien — este
-// wrapper lo deja pasar tal cual en vez de parsearlo y reformatearlo.
+// arrancar, 2 = error de uso. El mensaje que imprime dispatch-check (colisión,
+// carrera perdida, fallo de lectura/escritura/readback, o "claimed #N →
+// in-progress") ya explica el motivo bien — este wrapper lo deja pasar tal
+// cual en vez de reformatearlo.
+//
+// D2 (auditoría del dispatch), finding 3 — YA NO usa `stdio: 'inherit'`: se
+// captura stdout/stderr con un `stdio` EXPLÍCITO — `['ignore', 'pipe',
+// 'pipe']`, ver más abajo el porqué de "explícito" — y se reenvían tal cual a
+// este mismo proceso. La diferencia es que ese texto queda disponible para
+// `classifyClaimOutcome` (más abajo): su propio comentario de cabecera llama
+// a su exit 1 "colisión o carrera perdida", pero el MISMO exit code también
+// cubre un fallo de lectura de labels del candidato, un fallo al escribir el
+// claim, y un fallo de readback — cinco causas muy distintas que, sin
+// distinguir el TEXTO que dispatch-check ya imprime, son indistinguibles
+// desde fuera con solo el exit code. No se modifica dispatch-check.mjs para
+// ensanchar su contrato de exit codes (fuera del alcance de este cambio; ver
+// el comentario de cabecera de classifyClaimOutcome para qué se haría si se
+// pudiera).
+//
+// D2 review (importante 1) — `stdio` EXPLÍCITO, no solo `{ encoding: 'utf8'
+// }`: el default de Node para execFileSync/execSync es 'pipe' para las tres,
+// PERO stderr tiene un caso especial documentado (Node docs, execFileSync):
+// "stderr by default will be output to the parent process' stderr unless
+// stdio is specified" — es decir, sin fijar `stdio`, Node YA reenvía el
+// stderr del hijo al padre por su cuenta, en directo, ADEMÁS de devolverlo en
+// `e.stderr`. La primera versión de este fix no fijaba `stdio` y volvía a
+// escribir `e.stderr` con `process.stderr.write(stderr)` más abajo — el
+// resultado, verificado por construcción (un hijo que escribe una línea a
+// stderr y sale con 1; con `stdio` sin especificar, la línea aparece DOS
+// VECES en la salida del padre): CADA línea de COLLISION, y el bloque entero
+// de 4 líneas del ATENCIÓN de un issue huérfano (incluido el comando manual
+// `gh issue edit ...`), salían duplicados — un huérfano se leía como DOS
+// reverts fallidos distintos. Fijar `stdio: ['ignore', 'pipe', 'pipe']`
+// desactiva ese reenvío automático de Node; el ÚNICO reenvío que queda es el
+// explícito de más abajo (`writeSync`), una sola vez.
+//
+// D2 review (menor 4) — `maxBuffer: GH_MAX_BUFFER` explícito: sin esto, el
+// default de Node (1 MiB POR STREAM) se aplica también aquí — una colisión
+// con muchos issues en vuelo (`COLLISION: #N choca con #A[...] #B[...] ...`,
+// uno por cada uno) puede superarlo con facilidad contra un repo real. Por
+// encima del límite, Node MATA al hijo (SIGTERM) en vez de truncar en
+// silencio — `execFileSync` lanza sin `status` numérico, y el caller (más
+// abajo) ya clasifica eso como "fallo inesperado al lanzar el subproceso":
+// ruidoso, pero ENGAÑOSO (un mensaje grande y legítimo se reporta como si
+// fuera un bug/mala configuración). Mismo valor (20 MiB) que ya usa `gh()`
+// en este mismo fichero para exactamente el mismo motivo.
+//
+// D2 review (menor 4, hallazgo colateral) — el reenvío usa `fs.writeSync`,
+// NO `process.stdout.write`/`process.stderr.write`: verificado por
+// construcción que ESTOS TAMBIÉN truncan un payload grande si un
+// `process.exit()` llega poco después de la escritura (más abajo, en el
+// bucle de despacho, SIEMPRE hay un `process.exit()` o un `continue` seguido
+// de más iteraciones que eventualmente terminan en uno) — `process.stdout`/
+// `process.stderr` son ASÍNCRONOS hacia una tubería en POSIX (documentado en
+// los propios docs de Node: "Pipes (and sockets): asynchronous on POSIX"),
+// que es exactamente cómo llega la salida de ESTE script a quien lo invoca
+// (un test, un `/loop`, cmux). `fs.writeSync(fd, texto)` es una syscall
+// SÍNCRONA de verdad, con independencia de si el destino es una tubería — el
+// dato queda escrito en el descriptor antes de que la llamada retorne, así
+// que un `process.exit()` posterior (inmediato o no) ya no puede truncarlo.
 function attemptClaim(s) {
   try {
-    execFileSync(process.execPath, [dispatchCheckPath, String(s.n), '--repo', repo], { stdio: 'inherit' })
+    const out = execFileSync(process.execPath, [dispatchCheckPath, String(s.n), '--repo', repo], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: GH_MAX_BUFFER,
+    })
+    if (out) writeSync(1, out)
     return { ok: true }
   } catch (e) {
-    return { ok: false, status: e.status }
+    const stdout = typeof e.stdout === 'string' ? e.stdout : ''
+    const stderr = typeof e.stderr === 'string' ? e.stderr : ''
+    if (stdout) writeSync(1, stdout)
+    if (stderr) writeSync(2, stderr)
+    return { ok: false, status: e.status, text: `${stdout}\n${stderr}` }
   }
+}
+
+// classifyClaimOutcome: distingue, a partir del TEXTO que dispatch-check.mjs
+// ya imprimió (nunca se modifica dispatch-check.mjs en este cambio — es la
+// única palanca disponible desde el lado del caller), cuál de las cinco
+// causas distintas produjo su exit 1:
+//   - 'skip'  → resultado NORMAL del protocolo: colisión detectada a tiempo
+//               (nada se escribió), o carrera perdida con el revert
+//               posterior EXITOSO (el issue vuelve limpio a status:ready).
+//               Saltar este slice y seguir con el resto de la tanda es
+//               correcto.
+//   - 'stuck' → carrera perdida O fallo de readback, y el revert posterior
+//               TAMBIÉN falló: el issue queda HUÉRFANO en
+//               status:in-progress, sin nadie trabajándolo. dispatch-check
+//               ya imprime su propio "ATENCIÓN" (con el comando manual), pero
+//               sin esta clasificación ct-next lo trataba como un salto más y
+//               seguía, con exit 0 al final — precisamente el escenario más
+//               grave reproducido por la auditoría (readback Y revert fallan
+//               a la vez).
+//   - 'infra' → fallo de LECTURA de las labels del candidato, o fallo al
+//               ESCRIBIR el claim inicial — en ambos casos no se mutó nada
+//               (issue intacto en status:ready), pero la causa es de
+//               infraestructura (gh caído, auth, red), no una colisión real.
+//
+// Tratamiento en el caller (D2 review, menor 3 — revisado): solo 'stuck'
+// aborta la tanda ENTERA con exit 1, igual que el "fallo inesperado" que ya
+// existía para un exit distinto de 0/1 — un issue de verdad huérfano exige
+// que un humano lo mire antes de que ct-next reintente nada más contra este
+// repo. 'infra', en cambio, NO mutó nada (el issue sigue en status:ready) y
+// la causa (un fallo de lectura/escritura puntual de `gh`) no dice nada sobre
+// si el SIGUIENTE candidato — una llamada independiente — también fallaría:
+// se trata igual que 'skip' (se sigue con el resto de la tanda), y si al
+// final no se lanzó nada, el exit code es 3 (el mismo "reintenta más tarde"
+// de finding 1) — nunca 1. La diferencia con 'skip' es solo el MENSAJE: se
+// deja explícito que esto NO es una colisión normal, para no mentir sobre qué
+// pasó.
+//
+// Si el contrato de exit codes de dispatch-check.mjs se pudiera ensanchar
+// (fuera del alcance de esta tarea): la forma más limpia sería separar el
+// exit 1 actual en dos — p.ej. exit 1 para colisión/carrera-perdida-limpia
+// (protocolo normal) y exit 3 para cualquier fallo de lectura/escritura/
+// readback o carrera-perdida-con-revert-fallido (infraestructura/huérfano) —
+// así el caller no dependería de parsear texto libre, que es más frágil que
+// un exit code ante un cambio futuro de wording en dispatch-check.mjs.
+const STUCK_RE = /ATENCIÓN[\s\S]*bloqueado en status:in-progress/
+function classifyClaimOutcome(text) {
+  const t = text || ''
+  if (/^COLLISION:/m.test(t)) return { kind: 'skip', label: 'colisión detectada a tiempo' }
+  if (/^carrera perdida:/m.test(t)) {
+    return STUCK_RE.test(t)
+      ? { kind: 'stuck', label: 'carrera perdida y el revert posterior también falló' }
+      : { kind: 'skip', label: 'carrera perdida (revertido a status:ready)' }
+  }
+  if (/no se pudo re-leer el estado tras el claim/.test(t)) {
+    return STUCK_RE.test(t)
+      ? { kind: 'stuck', label: 'fallo de readback y el revert posterior también falló' }
+      : { kind: 'infra', label: 'fallo de readback (revertido a status:ready)' }
+  }
+  if (/no se pudo leer el estado de #\d+ en/.test(t)) {
+    return { kind: 'infra', label: 'fallo al leer las labels del candidato' }
+  }
+  if (/no se pudo escribir el claim de #\d+/.test(t)) {
+    return { kind: 'infra', label: 'fallo al escribir el claim' }
+  }
+  // No debería alcanzarse con dispatch-check.mjs tal y como está hoy — pero
+  // ante un exit 1 con un texto que no reconocemos, tratarlo como 'infra'
+  // (abortar, avisar alto) es más seguro que asumir 'skip' (seguir a ciegas):
+  // el mismo criterio que ya rige el resto de este fichero ante una entrada
+  // inesperada.
+  return { kind: 'infra', label: 'motivo de dispatch-check no reconocido' }
 }
 
 // W-C, punto 3: revierte un claim ya obtenido cuando el dispatch falla
@@ -545,7 +787,13 @@ function cleanupOrphanedWorktree(s, wt, branch, reason) {
   process.exit(1)
 }
 
-for (const s of selected) {
+// D2, finding 1: conteo de cuántos slices de `selected` se lanzaron de
+// verdad — se usa tanto para la línea de conteo final como para decidir el
+// exit code cuando la tanda entera termina sin lanzar nada.
+let launchedCount = 0
+
+for (let idx = 0; idx < selected.length; idx++) {
+  const s = selected[idx]
   const branch = `feat/${s.n}`
   const wt = `${repoRoot}/.worktrees/${s.n}`
   const name = `${repoName} · #${s.n} ${s.name}`
@@ -594,19 +842,59 @@ for (const s of selected) {
     continue
   }
 
-  // W-C, punto 1/2: el claim se hace ANTES de crear el worktree. Exit 1
-  // (colisión o carrera perdida) es un resultado ESPERADO del protocolo — se
-  // salta este slice y se sigue con el resto de la tanda, si queda alguno.
-  // Cualquier otro resultado (exit 2, o un fallo al lanzar el subproceso en
-  // absoluto) NO es un resultado esperado del protocolo — sería un bug o una
-  // mala configuración que fallaría igual para todos los slices restantes de
-  // esta misma tanda, así que abortamos la tanda entera en vez de reintentar
-  // a ciegas slice a slice.
+  // W-C, punto 1/2: el claim se hace ANTES de crear el worktree. Exit 1 de
+  // dispatch-check puede significar un resultado ESPERADO del protocolo
+  // (colisión detectada a tiempo, carrera perdida con revert limpio, o un
+  // fallo de infraestructura puntual que no mutó ni dejó nada atascado — D2
+  // review, menor 3) — se salta este slice y se sigue con el resto de la
+  // tanda, si queda alguno — o puede significar que un issue quedó HUÉRFANO
+  // en status:in-progress porque el revert posterior también falló
+  // ('stuck'). `classifyClaimOutcome`, más arriba, es quien distingue estos
+  // casos a partir del texto que dispatch-check ya imprimió, porque su exit 1
+  // por sí solo conflacia las cinco causas (D2, finding 3). Un exit distinto
+  // de 0/1 (exit 2, o un fallo al lanzar el subproceso en absoluto) NUNCA es
+  // un resultado esperado del protocolo — sería un bug o una mala
+  // configuración que fallaría igual para todos los slices restantes de esta
+  // misma tanda.
+  //
+  // Solo 'stuck' (y el exit inesperado de más abajo) abortan la tanda ENTERA
+  // — 'skip' e 'infra' siguen con el resto (ver el comentario de cabecera de
+  // classifyClaimOutcome para el porqué de tratar 'infra' así).
   const claim = attemptClaim(s)
   if (!claim.ok) {
     if (claim.status === 1) {
-      console.error(`saltando #${s.n}: no se pudo reclamar (motivo arriba, de dispatch-check) — sigo con el resto de esta tanda, si queda algún candidato.`)
-      continue
+      const outcome = classifyClaimOutcome(claim.text)
+      const isLast = idx === selected.length - 1
+      // D2, finding 1: en el último candidato de la tanda ya no queda
+      // "resto" con el que seguir — decirlo de todas formas es la promesa
+      // falsa que reprodujo la auditoría (el propio "si queda algún
+      // candidato" no bastaba: el wording debe reflejar la realidad de ESTE
+      // momento, no cubrirse con una condicional).
+      const continuation = isLast ? 'no quedan más candidatos en esta tanda.' : 'sigo con el resto de esta tanda.'
+      if (outcome.kind === 'skip') {
+        console.error(`saltando #${s.n}: no se pudo reclamar (${outcome.label}, motivo arriba de dispatch-check) — ${continuation}`)
+        continue
+      }
+      if (outcome.kind === 'infra') {
+        // D2 review, menor 3: un fallo de infraestructura SIN nada mutado ni
+        // atascado (issue intacto en status:ready) no dice nada sobre si el
+        // SIGUIENTE candidato — una llamada independiente de dispatch-check
+        // — también fallaría. Se sigue con la tanda igual que 'skip', pero
+        // el mensaje deja explícito que NO es una colisión normal — el log
+        // no debe mentir sobre qué pasó, aunque el control de flujo sea el
+        // mismo.
+        console.error(`saltando #${s.n}: no se pudo reclamar — fallo de infraestructura (${outcome.label}), no una colisión normal (motivo arriba de dispatch-check) — ${continuation}`)
+        continue
+      }
+      // 'stuck': el issue quedó HUÉRFANO en status:in-progress, sin nadie
+      // trabajándolo (dispatch-check ya imprimió su propio ATENCIÓN con el
+      // comando manual). Esto SÍ para la tanda entera con exit 1: un humano
+      // tiene que mirarlo antes de que ct-next reintente nada más contra
+      // este repo — seguir a ciegas aquí es el escenario más grave
+      // reproducido por la auditoría.
+      console.error(`dispatch-check devolvió exit 1 para #${s.n}, y el issue puede haber quedado bloqueado en status:in-progress sin nadie trabajándolo (${outcome.label}) — revisa el ATENCIÓN de dispatch-check (arriba) antes de reintentar cualquier cosa. Abortando toda la tanda: no sigo con el resto de candidatos a ciegas.`)
+      console.error('Los slices de esta tanda ya lanzados con éxito antes de este fallo (si los hubo) siguen corriendo en su propio cmux — no se han tocado.')
+      process.exit(1)
     }
     const statusDesc = typeof claim.status === 'number' ? `exit ${claim.status}` : 'sin exit code numérico (fallo inesperado al lanzar el subproceso)'
     console.error(`dispatch-check devolvió un fallo inesperado (${statusDesc}) al intentar reclamar #${s.n} — no es una colisión ni una carrera perdida (eso sale con exit 1), así que probablemente es un bug o una mala configuración (p.ej. --repo mal formado, o dispatch-check.mjs no encontrado en ${dispatchCheckPath}). Abortando toda la tanda: no sigo con el resto de candidatos a ciegas.`)
@@ -650,4 +938,52 @@ for (const s of selected) {
     cleanupOrphanedWorktree(s, wt, branch, `no se pudo lanzar cmux: ${e.message}`)
   }
   console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir})`)
+  launchedCount++
+}
+
+// D2 review, menor 1: TODO este bloque de conteo/exit-code es exclusivo del
+// path REAL — un --dry-run no reclama ni lanza NADA de verdad (es puramente
+// informativo, `launchedCount` es siempre 0 ahí por construcción). Una línea
+// "lanzados 0/N" al final de un --dry-run exitoso sería exactamente la misma
+// clase de mensaje engañoso que esta tarea existe para eliminar, solo que al
+// revés (afirmar "cero lanzamientos" de un plan que ni siquiera lo intentó).
+if (!dryRun) {
+  // D2, finding 1: si el bucle llega hasta aquí (no abortó con process.exit
+  // en ninguna iteración), la tanda terminó de procesarse por completo —
+  // pero eso no significa que se haya lanzado algo. Antes de este fix, una
+  // tanda entera donde CADA slice seleccionado colisionaba (o perdía la
+  // carrera, limpio, o tropezaba con un hiccup de infraestructura — D2
+  // review, menor 3) al reclamar terminaba en silencio: cero agentes, cero
+  // worktrees, exit 0, sin ninguna línea que dijera "de los N
+  // seleccionados, se lanzaron 0".
+  console.log(`lanzados ${launchedCount}/${selected.length} slice(s) seleccionados de esta tanda.`)
+
+  // Exit code deliberado, no 0/1/2 reutilizado: cuando /ct-next corre dentro
+  // de un /loop, quien lo invoca (un humano, u otro agente) necesita
+  // distinguir tres situaciones muy distintas por el exit code, sin tener
+  // que parsear el texto:
+  //   0 = progreso (algo se lanzó — total o parcialmente — o no había nada
+  //       que lanzar y ya se explicó por qué con formatBlockReason). Un
+  //       caller en /loop puede seguir su ritmo normal.
+  //   1 = algo se ROMPIÓ (bug, mala configuración, o un issue que quedó
+  //       huérfano en status:in-progress) — YA estaba así antes de este
+  //       cambio para los abortos de mitad de tanda; un caller en /loop debe
+  //       parar y avisar a un humano, no reintentar a ciegas.
+  //   2 = error de uso (flags mal puestos) — sin cambios.
+  //   3 = NUEVO: la tanda se seleccionó (selected.length > 0) pero terminó
+  //       de procesarse con CERO lanzamientos, y nada se rompió — cada
+  //       candidato colisionó, perdió una carrera de forma limpia, o tropezó
+  //       con un fallo de infraestructura puntual (D2 review, menor 3),
+  //       contra trabajo que otro proceso reclamó entre la foto de ct-next y
+  //       el claim en vivo de dispatch-check (la advertencia honesta de "sin
+  //       compare-and-swap" ya documentada), o simplemente contra un `gh`
+  //       inestable. No es un bug ni requiere intervención manual, pero
+  //       tampoco es "nada que hacer" (formatBlockReason ya cubre ESE caso
+  //       con exit 0): hubo selección, hubo intento, no hubo progreso. Un
+  //       caller en /loop debe verlo como "reintenta más tarde", distinto
+  //       tanto de 0 (todo bien) como de 1 (para y mira qué pasó).
+  if (selected.length > 0 && launchedCount === 0) {
+    console.error(`ninguno de los ${selected.length} slice(s) seleccionados se lanzó esta vez — todos se saltaron, por colisión, carrera perdida, o un fallo de infraestructura puntual al reclamar (detalle arriba). No es necesariamente un fallo de configuración: puede ser otro dispatcher (u otra invocación concurrente) adelantándose entre la foto de esta tanda y el claim en vivo, o un gh inestable. Nada quedó a medias ni bloqueado — reintenta más tarde, o en la próxima vuelta del /loop.`)
+    process.exit(3)
+  }
 }

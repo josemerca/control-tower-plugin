@@ -393,23 +393,111 @@ export function extractAc(body) {
 }
 
 // extractDeps: lee TODAS las referencias `merge-after #N` de la cadena que
-// se le pase, sin anclarse a ninguna sección por sí misma — quien decide el
-// ALCANCE (todo el body, o solo el contenido de una sección) es el
-// llamador:
-//   - mapGhIssue (más abajo), el DISPATCHER real, la llama sobre el body
-//     ENTERO a propósito: dispatch.js necesita ver cualquier `merge-after`
-//     que el issue traiga, viva donde viva.
-//   - scripts/reconcile.js, en cambio, la llama SOLO sobre el contenido de
-//     "## Dependencias" (vía locateSection/extractSectionContent) — review
-//     round 3 (Critical 3): el dominio de detección de F5 tiene que
-//     coincidir con su dominio de APLICACIÓN (el splice de --reconcile,
-//     que solo puede tocar esa sección sin arriesgar corromper contenido
-//     humano en otra parte del body) — si F5 comparara todo el body como
-//     hace el dispatcher, un "merge-after" suelto fuera de la sección
-//     reconocida se reportaría como divergencia que --reconcile nunca
-//     podría resolver de verdad, dejando el proceso en 3 para siempre.
+// se le pase, sin anclarse a ninguna sección por sí misma — el ALCANCE (todo
+// el body, o solo el contenido de una sección) lo decide el llamador. Sigue
+// siendo una regex desnuda a propósito: `extractDepsInSection` (más abajo)
+// es la única fuente de verdad de "qué sección mirar", compartida entre
+// mapGhIssue (el dispatcher real) y reconcile.js.
+//
+// D1 finding 2 (hardening del dispatch — historial de esta decisión): hasta
+// esta ronda, mapGhIssue llamaba a extractDeps sobre el body ENTERO
+// (dispatch.js necesitaba ver cualquier `merge-after`, viviera donde
+// viviera), mientras scripts/reconcile.js (F5, review round 3, Critical 3)
+// ya la llamaba SOLO sobre el contenido de "## Dependencias" — la única
+// sección que --reconcile puede tocar con seguridad vía splice. Esa
+// divergencia deliberada tenía un coste real: un "merge-after #N" citado en
+// la prosa de un Acceptance Criteria (nunca pensado como dependencia) SÍ
+// bloqueaba al dispatcher, pero --reconcile jamás podía "resolverlo" (no
+// hay splice seguro fuera de la sección reconocida) — mismo dato, dos
+// comportamientos irreconciliables entre sí. El auditor además encontró que
+// la ausencia de anclaje a sección escondía una segunda clase de bug: una
+// reescritura humana de la línea de dependencia ("Depende de #1 (merge
+// primero)", o un simple guion perdido en "merge after #1") no matchea la
+// regex — cero deps extraídas, indistinguible de "este slice no tiene
+// dependencias". El gate se abre en silencio.
+//
+// D1 unifica el dominio: mapGhIssue ahora usa `extractDepsInSection`, EXACTAMENTE
+// la misma función (y por tanto el mismo alcance) que reconcile.js. Coste
+// aceptado explícitamente: un issue creado/editado a mano con un
+// "merge-after" en texto libre, fuera de "## Dependencias", deja de ser
+// honrado por el dispatcher — igual que ya dejaba de serlo por --reconcile.
+// Ganancia: el mismo body produce la MISMA lectura para cualquiera que lo
+// lea, y la sección presente-pero-sin-matches deja de ser un `[]` silencioso
+// (ver `malformed` en extractDepsInSection) — dispatch.js ya no la trata
+// como "sin dependencias".
 export function extractDeps(body) {
   return [...(body || '').matchAll(/merge-after #(\d+)/g)].map((m) => parseInt(m[1], 10))
+}
+
+// DEPS_HEADING / extractDepsInSection: fuente ÚNICA de "qué deps ve
+// cualquiera que lea este body" — mapGhIssue (dispatcher real) y
+// reconcile.js#depsInSection la comparten (D1 finding 2). `malformed: true`
+// es la señal que antes se desperdiciaba: la sección existe (algo se
+// intentó declarar) pero ningún "merge-after #N" matcheó dentro de ella —
+// nunca puede pasar con un body que buildIssueBody generó de verdad (solo
+// emite la cabecera cuando `deps.length > 0`, y siempre como
+// "merge-after #N"), así que si pasa es porque un humano reescribió la
+// línea a mano de una forma que la regex ya no reconoce. Quien consuma esto
+// (mapGhIssue) trata `malformed` como "el estado real de este gate es
+// DESCONOCIDO" — nunca como "sin dependencias" (fail-closed, igual que un
+// orden no mapeable se traduce a `null` en vez de a "satisfecho").
+export const DEPS_HEADING = '## Dependencias'
+export function extractDepsInSection(body) {
+  const content = extractSectionContent(body, DEPS_HEADING)
+  if (content == null) return { deps: [], malformed: false }
+  const deps = extractDeps(content)
+  // `malformed` (round 2 de la review de D1 — el primer heurístico, contar
+  // viñetas "- " contra deps extraídas, NO era el eje correcto): lo derrota
+  // cualquier línea BUENA con dos "merge-after" en una sola viñeta (infla
+  // deps sin inflar viñetas → falso negativo) y cualquier línea ROTA que no
+  // use "- " (viñeta "*", una lista numerada, o ninguna viñeta en absoluto →
+  // falso negativo también), y dispara en falso ante una NOTA sin ninguna
+  // relación con dependencias que solo casualmente comparte hueco con una
+  // real ya leída bien (falso positivo).
+  //
+  // La señal que de verdad distingue "esta línea pretendía declarar una
+  // dependencia y está mal escrita" de "esta línea es una nota" es otra:
+  // CUALQUIER referencia "#N" en el contenido de la sección — sea o no parte
+  // de un "merge-after #N" reconocido — que mencione un número que
+  // `merge-after` NUNCA capturó. Una nota real ("ojo: revisar con Ana") no
+  // menciona ningún "#N" en absoluto, así que nunca dispara esto. Comparación
+  // por VALOR (el número), no por posición ni por forma de viñeta: da igual
+  // si la línea rota usa "-", "*", numeración o ninguna viñeta, y una MISMA
+  // referencia repetida en prosa (p.ej. "ver también #1 en el spec", con #1
+  // YA reconocido como dependencia) no cuenta como problema — solo un NÚMERO
+  // que no aparece entre las deps ya extraídas señala una reescritura humana
+  // real.
+  //
+  // `deps.length === 0` se mantiene como caso base aparte: buildIssueBody
+  // NUNCA emite la cabecera sin al menos un "merge-after #N" real, así que
+  // CERO deps extraídas (incluida una sección completamente vacía, sin
+  // ninguna referencia "#N" siquiera) ya es, por sí sola, una divergencia
+  // del invariante — independientemente de si hay o no un "#N" suelto que
+  // lo confirme.
+  const hashRefs = [...content.matchAll(/#(\d+)/g)].map((m) => parseInt(m[1], 10))
+  const depsSet = new Set(deps)
+  const hasUncoveredRef = hashRefs.some((n) => !depsSet.has(n))
+  return { deps, malformed: deps.length === 0 || hasUncoveredRef }
+}
+
+// extractStrayDeps (D1 finding 1, seguimiento de review): estrechar el
+// dominio de deps del dispatcher a "## Dependencias" (D1 finding 2) abrió
+// una puerta que `main` mantenía cerrada — un `merge-after #N` que vive
+// FUERA de la sección reconocida (p.ej. bajo "## Descripción", o en la
+// prosa de un AC) ya NO cuenta como dependencia real para nadie (ni el
+// dispatcher ni --reconcile, ver el historial en reconcile.js). Ese
+// estrechamiento es correcto y deseado — pero es invisible si nada lo dice:
+// un issue cuyo autor escribió su dependencia en el sitio equivocado se
+// despacha en silencio, sin que nadie sepa que su intento de bloqueo dejó
+// de aplicar. `extractStrayDeps` expone esas referencias ignoradas — MISMA
+// función que usan tanto mapGhIssue (para que ct-next.mjs pueda avisar)
+// como reconcile.js#diffIssue (que ya calculaba exactamente esto para su
+// propio reporte de "nota" — una sola implementación compartida, no dos que
+// puedan divergir).
+export function extractStrayDeps(body, sectionDeps) {
+  const wholeBodyDeps = extractDeps(body || '')
+  const sectionDepsSet = new Set(sectionDeps || [])
+  return [...new Set(wholeBodyDeps)].filter((d) => !sectionDepsSet.has(d)).sort((a, b) => a - b)
 }
 
 // extractOrder: lee el marcador `<!-- ct-order:N -->` que groom.js#buildIssueBody
@@ -423,9 +511,49 @@ export function extractOrder(body) {
   return m ? parseInt(m[1], 10) : null
 }
 
+// STATUS_PRECEDENCE / resolveStatus (D1 finding 3): una edición de label a
+// medias (se añade `status:X` nuevo sin quitar el `status:Y` viejo) deja DOS
+// labels `status:` en el mismo issue. El código anterior usaba
+// `Array.prototype.find`, que se queda con la PRIMERA del array que `gh`
+// devuelve — el auditor verificó que el orden de ESE array cambia el
+// resultado (`['status:in-progress','status:ready']` resuelve distinto que
+// el mismo array invertido) y no pudo determinar offline qué orden usa
+// GitHub de verdad. La instrucción explícita es no adivinarlo: el criterio
+// tiene que ser independiente del orden del array.
+//
+// En vez de intentar averiguar CUÁL de las dos labels es "la real" (hay dos
+// consecuencias observadas si se elige mal: en el sentido "ready gana", un
+// issue ya reclamado (in-progress de verdad) se trata como despachable Y no
+// cuenta en el cómputo de in-flight contra el cap — las dos peores
+// consecuencias posibles a la vez), se aplica SIEMPRE la lectura más
+// conservadora: in-progress > in-review > ready > backlog. Es la que menos
+// probabilidad tiene de re-despachar dos veces el mismo trabajo o de
+// dejarlo fuera del cap — no es "adivinar cuál label es correcta", es
+// "asumir el estado que menos daño hace si nos equivocamos". `statusLabels`
+// se expone para que quien detecte `statusAmbiguous` pueda avisar con el
+// detalle exacto de qué labels chocaban (ver ct-next.mjs).
+const STATUS_PRECEDENCE = ['in-progress', 'in-review', 'ready', 'backlog']
+function resolveStatus(labels) {
+  const statusLabels = labels.filter((l) => l.startsWith('status:')).map((l) => l.slice('status:'.length))
+  if (statusLabels.length === 0) return { status: 'backlog', statusAmbiguous: false, statusLabels }
+  if (statusLabels.length === 1) return { status: statusLabels[0], statusAmbiguous: false, statusLabels }
+  // Menor (review de D1): si NINGUNA de las labels en conflicto es una de
+  // las cuatro conocidas (p.ej. dos labels custom como "status:blocked" y
+  // "status:paused" — ninguna gatea nada en dispatch.js, así que la
+  // DECISIÓN de despacho no cambia pase lo que pase aquí), el `?? statusLabels[0]`
+  // de antes seguía devolviendo la PRIMERA del array tal cual llega de
+  // GitHub — el mismo orden no verificable que esta función existe para no
+  // depender. El TEXTO del aviso (ct-next.mjs) sí depende de este valor, y
+  // era justo la garantía que se pidió que fuera independiente del orden:
+  // se ordena alfabéticamente antes de tomar la primera como fallback
+  // determinista.
+  const resolved = STATUS_PRECEDENCE.find((s) => statusLabels.includes(s)) ?? [...statusLabels].sort()[0]
+  return { status: resolved, statusAmbiguous: true, statusLabels }
+}
+
 export function mapGhIssue(i) {
   const labels = (i.labels || []).map((l) => l.name)
-  const status = (labels.find((l) => l.startsWith('status:')) || 'status:backlog').slice('status:'.length)
+  const { status, statusAmbiguous, statusLabels } = resolveStatus(labels)
   // touches: incluye TANTO `touches:` como `area:` (fix de la review final,
   // finding 5): claim.js#tokensOf ya trataba ambos prefijos como
   // igual-de-relevantes para colisión (y el spec §14 define el conflicto como
@@ -437,26 +565,51 @@ export function mapGhIssue(i) {
   // prefijo (el que sea) igual que antes para no romper la convención ya
   // testeada de tokens "pelados" que usan SERIALIZING_TOUCHES/runningTouches
   // en dispatch.js.
+  //
+  // D1 finding 4: una label "area:"/"touches:" SIN VALOR (el colon presente,
+  // nada detrás — p.ej. creada por accidente en el editor de GitHub) pela a
+  // la cadena VACÍA. Sin filtrar, dos issues con esa label rota "colisionan"
+  // sobre '' en dispatch.js#touchesConflict aunque no compartan ningún
+  // área/touch real — un token vacío no representa nada, se descarta antes
+  // de entrar en la maquinaria de colisión. `.trim()` ANTES de filtrar por
+  // longitud (ataque adversarial: "area: ", colon seguido de un espacio en
+  // blanco sin contenido real, pela a ' ' — no la cadena vacía — y un filtro
+  // que solo mirara `.length > 0` dejaría pasar el MISMO bug con un
+  // carácter distinto).
   const touches = labels
     .filter((l) => l.startsWith('touches:') || l.startsWith('area:'))
-    .map((l) => l.slice(l.indexOf(':') + 1))
+    .map((l) => l.slice(l.indexOf(':') + 1).trim())
+    .filter((t) => t.length > 0)
   const type = (labels.find((l) => l.startsWith('type:')) || 'type:').slice('type:'.length)
   const body = i.body || ''
   const order = extractOrder(body)
   // deps aquí quedan en ESPACIO DE ORDEN (groom.js#buildIssueBody escribe
   // `merge-after #<orden>`, no `#<issue>`) — ver buildDispatchInput para la
   // traducción a espacio de número-de-issue antes de comparar con
-  // mergedIssues (que sí son números de issue reales). extractDeps (arriba)
-  // es el ÚNICO sitio que sabe leer `merge-after #N` — F5 (scripts/reconcile.js)
-  // reutiliza esta misma función, solo que sobre el contenido de "##
-  // Dependencias" en vez de sobre el body entero (ver el comentario de
-  // extractDeps para el porqué de esa diferencia de alcance).
-  const deps = extractDeps(body)
+  // mergedIssues (que sí son números de issue reales).
+  //
+  // D1 finding 2: extractDepsInSection (arriba) — no extractDeps sobre el
+  // body entero — es quien decide el alcance ahora: solo "## Dependencias".
+  // `depsMalformed` viaja tal cual hasta dispatch.js#computeReadyCandidates,
+  // que trata un issue así como NO listo para despachar (nunca como "sin
+  // dependencias" — ver el comentario de extractDepsInSection).
+  const { deps, malformed: depsMalformed } = extractDepsInSection(body)
+  // strayDeps (D1 finding 1, seguimiento de review): referencias
+  // "merge-after #N" que existen en el body pero FUERA de la sección
+  // reconocida — el estrechamiento de finding 2 hace que ya NO cuenten como
+  // dependencia real, así que se exponen aparte para que ct-next.mjs pueda
+  // avisar en vez de despachar en silencio un issue cuya dependencia
+  // pretendida vive en el sitio equivocado.
+  const strayDeps = extractStrayDeps(body, deps)
   return {
     n: i.number,
     order: order ?? i.number,
     status,
+    statusAmbiguous,
+    statusLabels,
     deps,
+    depsMalformed,
+    strayDeps,
     touches,
     type,
     // name: viene del TÍTULO del issue (columna Slice del spec, F3) — no
@@ -482,43 +635,143 @@ export function filterMergedIssues(closedIssues) {
   return (closedIssues || []).filter((i) => i.stateReason === 'COMPLETED').map((i) => i.number)
 }
 
-// buildOrderIndex: Map(orden -> número de issue), construido a partir de
-// TODOS los issues (abiertos + cerrados) de la enumeración cruda de gh
-// (forma {number, body}). Tiene que incluir los cerrados: la dependencia
-// típica que queremos reconocer como satisfecha es precisamente la de un
-// issue YA MERGEADO (por tanto cerrado), y su marcador ct-order solo vive en
-// su propio body — si solo indexáramos los abiertos, toda dependencia sobre
-// un issue ya cerrado desaparecería del índice en cuanto se mergeara.
+// NO_MILESTONE_KEY / epicKeyOf (D1 finding 1): /ct-groom numera slices 1..N
+// POR EPIC (una invocación = un `--milestone` = un epic — ver
+// groom.js#groomPlan) y escribe ESE número en `<!-- ct-order:N -->`. El
+// número de orden por tanto NO es único en el repo — solo dentro de su
+// propio epic. `epicKeyOf` deriva el ALCANCE del epic del número de
+// milestone real que GitHub ya asigna a cada issue (abierto o cerrado)
+// desde que ct-groom.mjs existe: coste de compatibilidad CERO para
+// cualquier issue ya groomeado — no hace falta tocar ni un solo marcador
+// `ct-order` existente, el milestone ya viaja en el JSON crudo de `gh api
+// repos/<o>/<r>/issues`. Se descarta codificar el identificador de epic
+// DENTRO del propio marcador (la otra opción que se consideró): sería la
+// MISMA información que el milestone ya provee, pero exigiría reescribir
+// issues ya groomeados o mantener dos formatos de marcador en paralelo
+// indefinidamente para lo que el campo `milestone` resuelve gratis.
+//
+// Un issue sin milestone (creado a mano, o de un repo de antes de que
+// ct-groom empezara a asignarlo) cae en el bucket compartido
+// `NO_MILESTONE_KEY` — mejor que reventar, pero ese bucket puede volver a
+// colisionar si dos epics sin milestone reutilizan números de orden; la
+// detección de colisión de buildOrderIndex (más abajo) cubre justo ese
+// caso, así que el bucket compartido nunca falla en SILENCIO — como mucho,
+// los issues implicados quedan excluidos de la selección con un aviso
+// claro (ver buildDispatchInput/ct-next.mjs), nunca resueltos a ciegas.
+export const NO_MILESTONE_KEY = '(sin milestone)'
+export function epicKeyOf(rawIssue) {
+  const ms = rawIssue?.milestone
+  return (ms && Number.isFinite(ms.number)) ? String(ms.number) : NO_MILESTONE_KEY
+}
+
+// buildOrderIndex: Map(epicKey -> Map(orden -> número de issue)), construido
+// a partir de TODOS los issues (abiertos + cerrados) de la enumeración cruda
+// de gh. Tiene que incluir los cerrados: la dependencia típica que queremos
+// reconocer como satisfecha es precisamente la de un issue YA MERGEADO (por
+// tanto cerrado), y su marcador ct-order (y su milestone) solo viven en su
+// propio body/metadata — si solo indexáramos los abiertos, toda dependencia
+// sobre un issue ya cerrado desaparecería del índice en cuanto se mergeara.
+//
+// D1 finding 1 — DETECCIÓN: antes de este fix, el índice era un único Map
+// GLOBAL AL REPO y `index.set` se quedaba con el ÚLTIMO issue visto para un
+// orden repetido — con `[...open, ...closed]`, un issue YA MERGEADO de OTRO
+// epic ganaba en silencio el slot que un `merge-after` de un epic en curso
+// necesitaba resolver contra su propio hermano. El escaneo por epic (arriba)
+// cierra la INMENSA mayoría de esos casos (epics distintos = milestones
+// distintos = mapas distintos), pero una colisión DENTRO del mismo epic
+// sigue siendo posible (dos epics que comparten milestone por error — p.ej.
+// ambos con el título por defecto "Epic" sin que nadie pasara `--milestone`
+// — o un re-groom accidental que dejó dos issues con el mismo marcador). Esa
+// colisión NUNCA se resuelve en silencio quedándose con "el último" (ni con
+// "el primero"): se acumula en `collisions` para que buildDispatchInput
+// excluya el epic afectado de la selección (ver su propio comentario) en
+// vez de arriesgarse a despachar contra la dependencia equivocada —
+// exactamente el bug que este finding describe.
+//
+// Cada hueco (epicKey, orden) acumula TODOS los números de issue distintos
+// vistos para él (no solo "el primero" y "el que choca") — review de D1:
+// con tres issues en el mismo hueco, comparar solo contra "el primero visto"
+// producía DOS entradas de colisión solapadas ([primero,segundo] y
+// [primero,tercero]), repitiendo el primero y sin dejar ver de un vistazo
+// que son TRES los que compiten por el mismo hueco, no dos pares distintos.
+// Una única entrada por hueco, con la lista completa de issues implicados,
+// es más fácil de leer y de actuar.
 export function buildOrderIndex(rawIssues) {
-  const index = new Map()
+  // seen: epicKey -> Map(orden -> [números de issue, en el orden en que se
+  // vieron, sin duplicados]) — se acumula TODO antes de decidir qué es
+  // colisión, para poder emitir una sola entrada por hueco al final.
+  const seen = new Map()
   for (const i of (rawIssues || [])) {
     const order = extractOrder(i.body)
-    if (order != null) index.set(order, i.number)
+    if (order == null) continue
+    const epicKey = epicKeyOf(i)
+    if (!seen.has(epicKey)) seen.set(epicKey, new Map())
+    const orderMap = seen.get(epicKey)
+    if (!orderMap.has(order)) orderMap.set(order, [])
+    const issuesHere = orderMap.get(order)
+    if (!issuesHere.includes(i.number)) issuesHere.push(i.number)
   }
-  return index
+  const perEpic = new Map()
+  const collisions = []
+  for (const [epicKey, orderMap] of seen) {
+    const outOrderMap = new Map()
+    for (const [order, issuesHere] of orderMap) {
+      outOrderMap.set(order, issuesHere[0]) // el primero visto conserva el slot; ver comentario de arriba sobre por qué el valor exacto ya no importa cuando hay colisión.
+      if (issuesHere.length > 1) {
+        collisions.push({ epicKey, order, issues: [...issuesHere].sort((a, b) => a - b) })
+      }
+    }
+    perEpic.set(epicKey, outOrderMap)
+  }
+  return { perEpic, collisions }
 }
 
 // buildDispatchInput: compone mapGhIssue + filterMergedIssues + la
-// traducción orden→issue de `deps` en un único punto, para que ct-next.mjs
-// nunca tenga que decidir en qué espacio de IDs está comparando. Root cause
-// del bug encontrado en T10: `deps` sale de mapGhIssue en espacio de ORDEN
+// traducción orden→issue de `deps` (ya con alcance por epic, ver
+// buildOrderIndex) en un único punto, para que ct-next.mjs nunca tenga que
+// decidir en qué espacio de IDs está comparando. Root cause del bug
+// encontrado en T10: `deps` sale de mapGhIssue en espacio de ORDEN
 // (groom.js escribe `merge-after #<orden>`), pero `mergedIssues` son números
 // de ISSUE reales (filterMergedIssues lee `i.number`) — comparar uno contra
 // otro sin traducir deja bloqueado para siempre cualquier slice con
-// dependencias, salvo que orden e issue coincidan por casualidad (que es
-// justo lo que ocurre en TODA la suite existente, porque sus fixtures usan
-// `n`/`deps` con los mismos valores en ambos roles y por eso el bug nunca se
-// vio en tests). Una dependencia cuyo orden no aparece en ningún issue
-// (abierto o cerrado) se traduce a `null`: `mergedIssues` (números de issue)
-// nunca contiene `null`, así que esa dependencia queda permanentemente sin
+// dependencias, salvo que orden e issue coincidan por casualidad. Una
+// dependencia cuyo orden no aparece en el epic del propio issue (ni abierto
+// ni cerrado) se traduce a `null`: `mergedIssues` (números de issue) nunca
+// contiene `null`, así que esa dependencia queda permanentemente sin
 // satisfacer en vez de lanzar o, peor, colapsar por casualidad con un número
 // de issue real.
+//
+// `orderCollisions` (D1 finding 1) viaja tal cual desde buildOrderIndex —
+// ct-next.mjs lo usa SOLO para avisar (nunca para abortar nada, ver más
+// abajo). `issues` YA EXCLUYE, aquí mismo, cualquier issue abierto cuyo
+// PROPIO epicKey esté implicado en una colisión (review de D1, finding 4):
+// el "refuse" original abortaba el BATCH ENTERO — con el orden indexado
+// también sobre issues cerrados, una colisión que viviera solo entre
+// issues mergeados hace tiempo (un epic ya terminado, sin relación con
+// nada de lo que hay abierto hoy) ladrillaba el repo COMPLETO para
+// siempre, sin más remedio que editar GitHub a mano. Seguir rehusando a
+// resolver en silencio sigue siendo la dirección correcta — lo que cambia
+// es el RADIO: solo el/los epic(s) cuyo propio orden colisiona quedan
+// fuera de `issues` (ni se seleccionan ni cuentan en vuelo, porque su
+// propia traducción orden→issue no es de fiar), un epic sin relación
+// (epicKey distinto, sin colisión) se ve con total normalidad. Excluir
+// tanto de la selección COMO del cómputo de en-vuelo es deliberado: no hay
+// forma segura de confiar en NINGÚN dato de un epic cuyo propio índice de
+// orden está corrompido, ni siquiera "está en progreso".
 export function buildDispatchInput(rawOpenIssues, rawClosedIssues) {
-  const orderIndex = buildOrderIndex([...(rawOpenIssues || []), ...(rawClosedIssues || [])])
-  const issues = (rawOpenIssues || []).map(mapGhIssue).map((issue) => ({
-    ...issue,
-    deps: (issue.deps || []).map((d) => (orderIndex.has(d) ? orderIndex.get(d) : null)),
-  }))
+  const allRaw = [...(rawOpenIssues || []), ...(rawClosedIssues || [])]
+  const { perEpic, collisions } = buildOrderIndex(allRaw)
+  const collidingEpics = new Set(collisions.map((c) => c.epicKey))
+  const issues = (rawOpenIssues || [])
+    .filter((raw) => !collidingEpics.has(epicKeyOf(raw)))
+    .map((raw) => {
+      const issue = mapGhIssue(raw)
+      const orderMap = perEpic.get(epicKeyOf(raw))
+      return {
+        ...issue,
+        deps: (issue.deps || []).map((d) => (orderMap && orderMap.has(d) ? orderMap.get(d) : null)),
+      }
+    })
   const mergedIssues = filterMergedIssues(rawClosedIssues)
-  return { issues, mergedIssues }
+  return { issues, mergedIssues, orderCollisions: collisions }
 }

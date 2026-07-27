@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractAc, extractDeps, extractOrder, extractSpecLink, specLinkAnchor, locateSection, countHeadingLines, detectLineEnding, normalizeToLF, mapGhIssue, filterMergedIssues, buildOrderIndex, buildDispatchInput, AC_HEADING_FORMS } from '../scripts/gh-issue-map.js'
+import { extractAc, extractDeps, extractOrder, extractSpecLink, specLinkAnchor, locateSection, countHeadingLines, detectLineEnding, normalizeToLF, mapGhIssue, filterMergedIssues, buildOrderIndex, buildDispatchInput, AC_HEADING_FORMS, NO_MILESTONE_KEY, epicKeyOf, extractDepsInSection, extractStrayDeps } from '../scripts/gh-issue-map.js'
 import { selectNext } from '../scripts/dispatch.js'
 import { buildIssueBody } from '../scripts/groom.js'
 
@@ -44,11 +44,16 @@ describe('mapGhIssue — defensivo con labels/marcadores ausentes', () => {
     expect(mapped2.deps).toEqual([])
     expect(mapped2.ac).toEqual([])
   })
-  it('con marcador ct-order y merge-after → order/deps correctos', () => {
-    const body = 'algo\n<!-- ct-order:7 -->\nmerge-after #3, merge-after #4'
+  it('con marcador ct-order y merge-after DENTRO de "## Dependencias" → order/deps correctos', () => {
+    // D1 finding 2: mapGhIssue ya no escanea el body ENTERO en busca de
+    // "merge-after #N" — solo el contenido de la sección "## Dependencias"
+    // reconocida (unificado con el alcance de --reconcile). Un "merge-after"
+    // fuera de esa sección (ver el describe dedicado más abajo) se ignora.
+    const body = 'algo\n## Dependencias\n- merge-after #3\n- merge-after #4\n\n<!-- ct-order:7 -->'
     const mapped = mapGhIssue({ number: 99, title: '#99 x', labels: [], body })
     expect(mapped.order).toBe(7)
     expect(mapped.deps).toEqual([3, 4])
+    expect(mapped.depsMalformed).toBe(false)
   })
   it('name: quita el prefijo "#N " del título', () => {
     const mapped = mapGhIssue({ number: 5, title: '#5 refresh token', labels: [], body: '' })
@@ -111,24 +116,131 @@ describe('extractOrder', () => {
   })
 })
 
-describe('buildOrderIndex', () => {
-  it('mapea orden → número de issue a partir de bodies crudos', () => {
+// buildOrderIndex — hardening del dispatch, D1 finding 1 (el más grave de la
+// revisión): el índice orden→issue era GLOBAL AL REPO (un único Map), pero
+// /ct-groom numera slices 1..N POR EPIC. Dos epics groomeados en el mismo
+// repo reutilizan los mismos números de orden, y `index.set` se quedaba con
+// el ÚLTIMO issue visto para cada orden — con `[...open, ...closed]`, un
+// issue YA MERGEADO (cerrado) de un epic A ganaba silenciosamente el slot
+// que un `merge-after` de un epic B en curso necesitaba resolver contra su
+// propio slice hermano. Reproducción verificada por el auditor: epic A
+// (slices 1,2 → #1,#2, ambos mergeados), epic B en el mismo repo (slices
+// 1,2 → #7,#8) — el `merge-after #1` de #8 (orden 1 DE EPIC B) resolvía
+// contra el #1 de epic A (ya mergeado), así que #7 y #8 se despachaban en la
+// MISMA tanda sin que #8 esperara de verdad a #7. Nada se imprimía.
+//
+// Decisión de ALCANCE: cada issue lleva un milestone real desde que
+// groom.js#groomPlan existe (una invocación de /ct-groom = un `--milestone`
+// = un epic) — el número de milestone de GitHub es único POR REPO y ya
+// viaja en CADA issue (abierto o cerrado) sin que este fix tenga que escribir
+// nada nuevo en ningún body: coste de compatibilidad CERO para cualquier
+// issue ya groomeado con el marcador actual (`<!-- ct-order:N -->` no
+// cambia). La alternativa (codificar un identificador de epic DENTRO del
+// propio marcador) se descarta: obligaría a reescribir issues ya existentes
+// o a mantener dos formatos de marcador en paralelo indefinidamente, para
+// llevar la MISMA información que el campo `milestone` de GitHub ya provee
+// gratis. Un issue sin milestone (creado a mano, o un repo de antes de que
+// ct-groom asignara milestone) cae en el bucket `NO_MILESTONE_KEY`
+// compartido — sigue siendo mejor que reventar, pero el bucket compartido
+// puede volver a colisionar si dos epics sin milestone reutilizan órdenes;
+// ver el test de colisión más abajo, que cubre justo ese caso.
+//
+// Decisión de DETECCIÓN: una colisión dentro del MISMO epic (dos issues
+// DISTINTOS con el mismo orden bajo el mismo milestone — p.ej. dos epics que
+// comparten milestone por error, o un re-groom accidental) NUNCA se resuelve
+// en silencio quedándose con "el último" o "el primero" — se reporta en
+// `collisions` para que buildDispatchInput/ct-next.mjs aborten el batch
+// entero (ver su propio describe más abajo) en vez de arriesgarse a
+// despachar contra la dependencia equivocada, que es precisamente el bug
+// que este finding describe.
+describe('buildOrderIndex — alcance por epic (milestone) y detección de colisión (D1 finding 1)', () => {
+  it('mapea orden → número de issue, con el índice separado POR MILESTONE (epic)', () => {
     const raw = [
-      { number: 2, body: '<!-- ct-order:1 -->' },
-      { number: 3, body: '<!-- ct-order:2 -->' },
+      { number: 2, milestone: { number: 5 }, body: '<!-- ct-order:1 -->' },
+      { number: 3, milestone: { number: 5 }, body: '<!-- ct-order:2 -->' },
     ]
-    const idx = buildOrderIndex(raw)
-    expect(idx.get(1)).toBe(2)
-    expect(idx.get(2)).toBe(3)
+    const { perEpic, collisions } = buildOrderIndex(raw)
+    expect(perEpic.get('5').get(1)).toBe(2)
+    expect(perEpic.get('5').get(2)).toBe(3)
+    expect(collisions).toEqual([])
   })
-  it('issues sin marcador no entran en el índice (no hay orden que indexar)', () => {
-    const idx = buildOrderIndex([{ number: 9, body: 'sin marcador' }])
-    expect(idx.has(9)).toBe(false)
-    expect(idx.size).toBe(0)
+
+  it('el MISMO número de orden en milestones DISTINTOS no es colisión — son epics distintos, cada uno con su propio espacio de orden', () => {
+    const raw = [
+      { number: 1, milestone: { number: 10 }, body: '<!-- ct-order:1 -->' }, // epic A, slice 1
+      { number: 7, milestone: { number: 20 }, body: '<!-- ct-order:1 -->' }, // epic B, slice 1
+    ]
+    const { perEpic, collisions } = buildOrderIndex(raw)
+    expect(collisions).toEqual([])
+    expect(perEpic.get('10').get(1)).toBe(1)
+    expect(perEpic.get('20').get(1)).toBe(7)
   })
+
+  it('el MISMO orden bajo el MISMO milestone, en issues DISTINTOS → colisión real, reportada (nunca "el último gana" en silencio)', () => {
+    const raw = [
+      { number: 7, milestone: { number: 100 }, body: '<!-- ct-order:2 -->' },
+      { number: 8, milestone: { number: 100 }, body: '<!-- ct-order:2 -->' },
+    ]
+    const { perEpic, collisions } = buildOrderIndex(raw)
+    expect(collisions).toEqual([{ epicKey: '100', order: 2, issues: [7, 8] }])
+    // el slot no se resuelve arbitrariamente a "el último" — sigue apuntando
+    // al primero visto, pero quien consuma el índice tiene que mirar
+    // `collisions` antes de confiar en ese valor (buildDispatchInput lo hace).
+    expect(perEpic.get('100').get(2)).toBe(7)
+  })
+
+  it('issues SIN milestone caen en un bucket compartido (NO_MILESTONE_KEY), no en el de ningún epic real', () => {
+    const raw = [{ number: 9, milestone: null, body: '<!-- ct-order:1 -->' }]
+    const { perEpic } = buildOrderIndex(raw)
+    expect(perEpic.get(NO_MILESTONE_KEY).get(1)).toBe(9)
+  })
+
+  it('dos issues sin milestone con el mismo orden → también cuenta como colisión (el bucket compartido no es inmune)', () => {
+    const raw = [
+      { number: 1, body: '<!-- ct-order:1 -->' },
+      { number: 2, body: '<!-- ct-order:1 -->' },
+    ]
+    const { collisions } = buildOrderIndex(raw)
+    expect(collisions).toEqual([{ epicKey: NO_MILESTONE_KEY, order: 1, issues: [1, 2] }])
+  })
+
+  it('issues sin marcador no entran en ningún índice', () => {
+    const { perEpic, collisions } = buildOrderIndex([{ number: 9, milestone: { number: 1 }, body: 'sin marcador' }])
+    expect(perEpic.get('1')).toBeUndefined()
+    // Aserción reforzada (no solo "el bucket del milestone 1 no existe" —
+    // eso por sí solo no descarta que se haya creado ALGÚN otro bucket
+    // vacío por error): sin ningún marcador `ct-order`, `perEpic` entero
+    // queda vacío, igual que el `idx.size === 0` que comprobaba la versión
+    // pre-D1 (Map plano) de este mismo test.
+    expect(perEpic.size).toBe(0)
+    expect(collisions).toEqual([])
+  })
+
+  it('tres issues DISTINTOS en el mismo hueco (epic, orden) → UNA sola colisión con los tres números, nunca entradas solapadas por pares', () => {
+    const raw = [
+      { number: 7, milestone: { number: 100 }, body: '<!-- ct-order:2 -->' },
+      { number: 8, milestone: { number: 100 }, body: '<!-- ct-order:2 -->' },
+      { number: 9, milestone: { number: 100 }, body: '<!-- ct-order:2 -->' },
+    ]
+    const { collisions } = buildOrderIndex(raw)
+    // Una única entrada para el hueco (epic 100, orden 2), con los TRES
+    // números — no dos entradas solapadas ([7,8] y [7,9]) que repitan al
+    // primero y hagan más difícil ver de un vistazo cuántos issues distintos
+    // compiten de verdad por el mismo hueco.
+    expect(collisions).toEqual([{ epicKey: '100', order: 2, issues: [7, 8, 9] }])
+  })
+
   it('defensivo: entrada vacía/ausente no revienta', () => {
-    expect(buildOrderIndex([]).size).toBe(0)
-    expect(buildOrderIndex(undefined).size).toBe(0)
+    expect(buildOrderIndex([]).perEpic.size).toBe(0)
+    expect(buildOrderIndex([]).collisions).toEqual([])
+    expect(buildOrderIndex(undefined).perEpic.size).toBe(0)
+  })
+
+  it('epicKeyOf: milestone con número → String(number); sin milestone (o milestone.number no finito) → NO_MILESTONE_KEY', () => {
+    expect(epicKeyOf({ milestone: { number: 42 } })).toBe('42')
+    expect(epicKeyOf({ milestone: null })).toBe(NO_MILESTONE_KEY)
+    expect(epicKeyOf({})).toBe(NO_MILESTONE_KEY)
+    expect(epicKeyOf({ milestone: {} })).toBe(NO_MILESTONE_KEY)
   })
 })
 
@@ -167,9 +279,10 @@ describe('buildDispatchInput — reproduce y fija el mismatch orden/issue del sa
   it('dependencia cuyo orden no existe en ningún issue (abierto o cerrado) → null, nunca satisfecha, no revienta', () => {
     const open = [{
       number: 5, title: '#5 algo', labels: [{ name: 'status:ready' }],
-      body: 'merge-after #99\n<!-- ct-order:1 -->', // orden 99 no existe en ningún lado
+      body: '## Dependencias\n- merge-after #99\n\n<!-- ct-order:1 -->', // orden 99 no existe en ningún lado
     }]
-    const { issues, mergedIssues } = buildDispatchInput(open, [])
+    const { issues, mergedIssues, orderCollisions } = buildDispatchInput(open, [])
+    expect(orderCollisions).toEqual([])
     const mapped = issues.find((i) => i.n === 5)
     expect(mapped.deps).toEqual([null])
     expect(() => selectNext(issues, { mergedIssues, runningTouches: [], concurrencyCap: 1 })).not.toThrow()
@@ -183,11 +296,95 @@ describe('buildDispatchInput — reproduce y fija el mismatch orden/issue del sa
     const closed = [{ number: 10, stateReason: 'COMPLETED', body: '<!-- ct-order:1 -->' }]
     const open = [{
       number: 11, title: '#11 x', labels: [{ name: 'status:ready' }],
-      body: 'merge-after #1\n<!-- ct-order:2 -->',
+      body: '## Dependencias\n- merge-after #1\n\n<!-- ct-order:2 -->',
     }]
     const { issues, mergedIssues } = buildDispatchInput(open, closed)
     const selected = selectNext(issues, { mergedIssues, runningTouches: [], concurrencyCap: 1 })
     expect(selected.map((i) => i.n)).toEqual([11])
+  })
+
+  // D1 finding 1 (el más grave): reproducción END-TO-END exacta del auditor
+  // — epic A groomeado y mergeado por completo (#1, #2, milestone 100), epic
+  // B groomeado DESPUÉS en el mismo repo (#7, #8, milestone 200 — un
+  // milestone DISTINTO, porque son epics distintos de verdad). #8 declara
+  // "merge-after #1" — orden 1 DE SU PROPIO epic (B), que es #7. Antes de
+  // este fix, el índice global de orden resolvía "orden 1" contra el ÚLTIMO
+  // issue visto con ese marcador en TODO el repo — el #1 de epic A, ya
+  // mergeado — así que #8 se despachaba junto a #7 en la misma tanda, sin
+  // haber esperado nunca a #7 de verdad. Con el índice por milestone, #8
+  // resuelve contra #7 (su hermano real) y queda bloqueado hasta que #7 se
+  // mergee.
+  it('D1 finding 1 — reproducción del auditor: epic A mergeado + epic B en curso, mismos números de orden, milestones DISTINTOS → el dep de B resuelve contra B, nunca contra A', () => {
+    const closed = [
+      { number: 1, stateReason: 'COMPLETED', milestone: { number: 100 }, body: '<!-- ct-order:1 -->' }, // epic A, slice 1
+      { number: 2, stateReason: 'COMPLETED', milestone: { number: 100 }, body: '<!-- ct-order:2 -->' }, // epic A, slice 2
+    ]
+    const open = [
+      {
+        number: 7, title: '#7 cimiento epicB', labels: [{ name: 'status:ready' }],
+        milestone: { number: 200 }, body: '<!-- ct-order:1 -->', // epic B, slice 1 (sin deps)
+      },
+      {
+        number: 8, title: '#8 encima de epicB', labels: [{ name: 'status:ready' }],
+        milestone: { number: 200 },
+        body: 'algo\n## Dependencias\n- merge-after #1\n\n<!-- ct-order:2 -->', // epic B, slice 2: depende del orden 1 DE SU PROPIO epic
+      },
+    ]
+    const { issues, mergedIssues, orderCollisions } = buildDispatchInput(open, closed)
+    expect(orderCollisions).toEqual([]) // milestones distintos: nunca es una colisión real
+    expect(mergedIssues).toEqual([1, 2])
+    const slice8 = issues.find((i) => i.n === 8)
+    expect(slice8.deps).toEqual([7]) // EL FIX: nunca [1] (el orden 1 de epic A)
+    // end-to-end: con cap de sobra, solo #7 se despacha — #8 sigue esperando
+    // a su hermano real, no al #1 de epic A que ya estaba mergeado.
+    const selected = selectNext(issues, { mergedIssues, runningTouches: [], concurrencyCap: 5 })
+    expect(selected.map((i) => i.n)).toEqual([7])
+  })
+
+  it('D1 finding 1 — si dos epics comparten milestone por error (p.ej. ambos con el título por defecto "Epic"), la colisión de orden se reporta, nunca se resuelve en silencio', () => {
+    const open = [
+      { number: 7, title: '#7 a', labels: [{ name: 'status:ready' }], milestone: { number: 100 }, body: '<!-- ct-order:1 -->' },
+      { number: 8, title: '#8 b', labels: [{ name: 'status:ready' }], milestone: { number: 100 }, body: '<!-- ct-order:1 -->' },
+    ]
+    const { orderCollisions } = buildDispatchInput(open, [])
+    expect(orderCollisions).toEqual([{ epicKey: '100', order: 1, issues: [7, 8] }])
+  })
+
+  // Review de D1, finding 4: el radio del "refuse" era demasiado ancho — el
+  // batch entero abortaba (ver ct-next.mjs, versión anterior), incluso para
+  // epics sanos y sin ninguna relación con la colisión. `issues` ahora
+  // EXCLUYE, en el propio buildDispatchInput (para que ningún consumidor
+  // tenga que acordarse de filtrar por su cuenta), cualquier issue cuyo
+  // PROPIO epicKey esté en `orderCollisions` — ni se selecciona ni cuenta en
+  // vuelo, porque su propia resolución de deps ya no es de fiar. Un epic sin
+  // relación (milestone distinto, sin colisión) sigue viéndose con
+  // normalidad.
+  it('D1 finding 4 — un epic con colisión de orden queda EXCLUIDO de `issues` (ni se selecciona ni cuenta en vuelo), pero un epic sano y sin relación permanece intacto', () => {
+    const open = [
+      { number: 7, title: '#7 a', labels: [{ name: 'status:ready' }], milestone: { number: 100 }, body: '<!-- ct-order:1 -->' },
+      { number: 8, title: '#8 b', labels: [{ name: 'status:ready' }], milestone: { number: 100 }, body: '<!-- ct-order:1 -->' },
+      { number: 20, title: '#20 sano', labels: [{ name: 'status:ready' }], milestone: { number: 300 }, body: '<!-- ct-order:1 -->' },
+    ]
+    const { issues, orderCollisions } = buildDispatchInput(open, [])
+    expect(orderCollisions.length).toBe(1) // la colisión se sigue reportando (informativo)
+    expect(issues.map((i) => i.n)).toEqual([20]) // #7/#8 (epic colisionado) fuera; #20 (sano) presente
+  })
+
+  // Reproducción del escenario que más preocupaba a la review: la colisión
+  // vive SOLO entre issues YA CERRADOS de un epic viejo — nadie tiene
+  // trabajo pendiente ahí hoy. Un epic nuevo, abierto, sin relación (milestone
+  // distinto), no debe verse afectado en absoluto — ni excluido ni bloqueado.
+  it('D1 finding 4 — una colisión que vive SOLO entre issues cerrados de un epic viejo no excluye ni afecta a un epic nuevo y abierto', () => {
+    const closed = [
+      { number: 50, stateReason: 'COMPLETED', milestone: { number: 100 }, body: '<!-- ct-order:1 -->' },
+      { number: 51, stateReason: 'COMPLETED', milestone: { number: 100 }, body: '<!-- ct-order:1 -->' }, // mismo (epic,orden) → colisión histórica
+    ]
+    const open = [
+      { number: 60, title: '#60 nuevo', labels: [{ name: 'status:ready' }], milestone: { number: 400 }, body: '<!-- ct-order:1 -->' },
+    ]
+    const { issues, orderCollisions } = buildDispatchInput(open, closed)
+    expect(orderCollisions.length).toBe(1)
+    expect(issues.map((i) => i.n)).toEqual([60]) // el epic nuevo, sin relación, no se toca
   })
 })
 
@@ -775,5 +972,395 @@ describe('extractSpecLink — la línea "> Slice #N del epic. Spec: …" (review
   it('una mención citada/indentada no cuenta como la línea real', () => {
     const body = '> algo más\n  > Slice #9 no es la línea real (indentada)\n> Slice #2 del epic. Spec: [x#9](x#9)'
     expect(extractSpecLink(body)).toBe('> Slice #2 del epic. Spec: [x#9](x#9)')
+  })
+})
+
+// D1 finding 2: extractDeps matcheaba SOLO el literal "merge-after #N", SIN
+// anclarse a ninguna sección — y sin ninguna señal cuando el intento de
+// declarar una dependencia no producía ningún match. Verificado por el
+// auditor sobre bodies editados como un humano los edita de verdad en el
+// editor web de GitHub:
+//   "- merge-after #1"                  -> deps [1]      (caso normal)
+//   "- Depende de #1 (merge primero)"   -> deps []       gate abierto, SILENCIO
+//   "- merge after #1" (guion perdido)  -> deps []       gate abierto, SILENCIO
+//   "- ~~merge-after #1~~ ya no aplica" -> deps [1]       (falla cerrado, no es el caso que este fix ataca)
+//   "merge-after #9" en la prosa de un AC -> antes contaba (escaneo de TODO
+//     el body); unificado con --reconcile (que YA leía solo la sección
+//     "## Dependencias" — es la única que puede tocar con seguridad vía
+//     splice), el dispatcher deja de verlo.
+//
+// La sección "## Dependencias" PRESENTE con CERO matches de "merge-after
+// #N" es la señal que se estaba desperdiciando: antes se traducía en
+// silencio a `deps: []` (mismo resultado que "este slice no declara
+// ninguna dependencia"), indistinguible de un slice que de verdad no tiene
+// deps. `mapGhIssue` ahora expone `depsMalformed: true` en ese caso —
+// dispatch.js#computeReadyCandidates lo trata como NO listo para despachar
+// (fail-closed) en vez de "sin deps" (ver dispatch.test.js).
+//
+// Coste de unificar el dominio: un `merge-after` escrito a mano FUERA de la
+// sección reconocida (p.ej. en la prosa de un AC) deja de ser honrado por el
+// dispatcher — exactamente lo que ya le pasaba a --reconcile desde F5. Antes
+// de este fix, el dispatcher SÍ lo obedecía pero --reconcile jamás podía
+// reconciliarlo (splice inseguro fuera de sección): un mismo dato con dos
+// comportamientos distintos según quién lo leyera. Ahora ambos coinciden.
+describe('mapGhIssue — deps con alcance de sección "## Dependencias" y detección de reescritura humana (D1 finding 2)', () => {
+  it('"- merge-after #1" dentro de la sección → deps correctos, depsMalformed false', () => {
+    const body = '## Dependencias\n- merge-after #1\n\n<!-- ct-order:2 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([1])
+    expect(mapped.depsMalformed).toBe(false)
+  })
+
+  it('reescritura humana ("Depende de #1 (merge primero)") dentro de la sección → deps [], depsMalformed true — nunca "gate abierto" en silencio', () => {
+    const body = '## Dependencias\n- Depende de #1 (merge primero)\n\n<!-- ct-order:2 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([])
+    expect(mapped.depsMalformed).toBe(true)
+  })
+
+  it('guion perdido ("merge after #1", sin el guion) dentro de la sección → deps [], depsMalformed true', () => {
+    const body = '## Dependencias\n- merge after #1\n\n<!-- ct-order:2 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([])
+    expect(mapped.depsMalformed).toBe(true)
+  })
+
+  it('tachado ("~~merge-after #1~~ ya no aplica") → el regex SIGUE matcheando (falla cerrado; no es el caso que este fix ataca) → deps [1], NO malformed', () => {
+    const body = '## Dependencias\n- ~~merge-after #1~~ ya no aplica\n\n<!-- ct-order:2 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([1])
+    expect(mapped.depsMalformed).toBe(false)
+  })
+
+  it('un "merge-after #9" suelto en la prosa de un AC, FUERA de "## Dependencias" → se IGNORA (unificado con --reconcile); solo cuenta lo que hay DENTRO de la sección real', () => {
+    const body = [
+      '## Acceptance criteria (EARS, 1:1 con tests)',
+      '- algo que menciona merge-after #9 de pasada, sin ser una dependencia real',
+      '',
+      '## Dependencias',
+      '- merge-after #1',
+      '',
+      '<!-- ct-order:2 -->',
+    ].join('\n')
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([1]) // nunca [9, 1] ni [1, 9]
+    expect(mapped.depsMalformed).toBe(false)
+    // Review de D1, finding 1 (parte "falta el aviso"): estrechar el
+    // dominio del dispatcher a la sección abrió una puerta que `main`
+    // mantenía cerrada (el "#9" de la prosa antes SÍ bloqueaba, ahora ya
+    // no) — correcto y deseado, pero invisible sin esto. `strayDeps` expone
+    // exactamente esa referencia ignorada para que ct-next.mjs pueda
+    // avisar; ver el describe dedicado más abajo.
+    expect(mapped.strayDeps).toEqual([9])
+  })
+
+  it('sin sección "## Dependencias" en absoluto → deps [], depsMalformed false (caso normal: el slice no declara deps)', () => {
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body: 'sin nada de deps aquí' })
+    expect(mapped.deps).toEqual([])
+    expect(mapped.depsMalformed).toBe(false)
+  })
+
+  it('sección "## Dependencias" presente pero completamente vacía (sin ninguna línea de contenido) → depsMalformed true (buildIssueBody NUNCA emite la cabecera sin al menos un "merge-after"; si aparece así, alguien la vació a mano)', () => {
+    const body = '## Dependencias\n\n<!-- ct-order:1 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([])
+    expect(mapped.depsMalformed).toBe(true)
+  })
+
+  it('extractDepsInSection — misma función que reconcile.js reutiliza; alcance idéntico', () => {
+    expect(extractDepsInSection('## Dependencias\n- merge-after #1\n\n<!-- ct-order:1 -->')).toEqual({ deps: [1], malformed: false })
+    expect(extractDepsInSection('sin sección')).toEqual({ deps: [], malformed: false })
+    expect(extractDepsInSection('## Dependencias\n- nada reconocible\n\n<!-- ct-order:1 -->')).toEqual({ deps: [], malformed: true })
+  })
+
+  // Ataque adversarial (no un ejemplo del auditor): una sección con DOS
+  // líneas — una real ("merge-after #1") y una reescrita a mano ("Depende
+  // de #2") — no produce CERO matches (así que la comprobación simple
+  // "deps.length === 0" no la atraparía), pero SÍ pierde una dependencia
+  // real en silencio. `malformed` compara el número de líneas de bullet
+  // ("- ...") contra el número de deps extraídas: si hay menos deps que
+  // bullets, alguna línea no se pudo leer — sigue siendo `malformed: true`,
+  // aunque `deps` no esté vacío (fail-closed: el `#1` que SÍ se reconoció
+  // sigue aplicando como dependencia real).
+  it('sección con una línea real y otra reescrita a mano (mezcla) → deps parcial, PERO depsMalformed:true (no solo "cero matches")', () => {
+    const body = '## Dependencias\n- merge-after #1\n- Depende de #2 (mal escrito)\n\n<!-- ct-order:3 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([1]) // el #2 se pierde, pero #1 se conserva (fail-closed)
+    expect(mapped.depsMalformed).toBe(true) // nunca se trata como "solo depende de #1"
+  })
+
+  it('dos "merge-after" reales en la MISMA línea de bullet → no es una mezcla, no malformed', () => {
+    const body = '## Dependencias\n- merge-after #1, merge-after #2\n\n<!-- ct-order:3 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([1, 2])
+    expect(mapped.depsMalformed).toBe(false)
+  })
+
+  // Ataque adversarial contra mi PROPIA heurística de "bulletLines" (mismo
+  // espíritu que las rondas de review de F5 sobre locateSection): una
+  // sub-lista humana de elaboración, indentada BAJO una dependencia real
+  // ("- merge-after #1\n  - nota: esto es importante") es una edición
+  // legítima y frecuente — buildIssueBody nunca anida bullets, así que
+  // contar CUALQUIER línea que empiece por "-" (incluso indentada) como
+  // "bullet de dependencia" marcaría esto como `malformed` en falso, aunque
+  // la única dependencia real (#1) se leyó perfectamente. `bulletLines`
+  // cuenta solo bullets de NIVEL SUPERIOR ("- " sin indentar, igual que
+  // buildIssueBody los emite) — una sub-lista indentada no cuenta.
+  it('una sub-lista humana indentada bajo una dependencia real NO cuenta como bullet de dependencia — no dispara malformed en falso', () => {
+    const body = '## Dependencias\n- merge-after #1\n  - nota: esto lo negociamos con pagos, no tocar\n\n<!-- ct-order:2 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([1])
+    expect(mapped.depsMalformed).toBe(false)
+  })
+
+  // Otro ataque contra la propia heurística: un separador markdown "---"
+  // (regla horizontal) empieza por "-" pero NO es un bullet — sin el
+  // requisito de "- " (guion Y espacio, el formato exacto que buildIssueBody
+  // emite), este separador inflaría bulletLines sin ninguna dependencia
+  // correspondiente, marcando malformed en falso.
+  it('una línea "---" (separador markdown) dentro de la sección no cuenta como bullet de dependencia', () => {
+    const body = '## Dependencias\n- merge-after #1\n---\n\n<!-- ct-order:2 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([1])
+    expect(mapped.depsMalformed).toBe(false)
+  })
+})
+
+// Review de D1, finding 1 (parte "falta el aviso"): estrechar el dominio de
+// deps del dispatcher a "## Dependencias" (D1 finding 2) abrió una puerta
+// que `main` mantenía cerrada — verificado por la review con el MISMO
+// fixture en ambos sentidos: un `#8` cuyo body lleva `merge-after #1` bajo
+// "## Descripción" (nunca dentro de "## Dependencias"). `main` (escaneo de
+// TODO el body) lo veía y bloqueaba `#8` hasta que `#1`/su hermano real
+// mergeara; esta rama, tras D1 finding 2, lo ignora del todo — correcto y
+// deseado (es justo el estrechamiento pedido), pero antes de este fix no se
+// imprimía NADA al respecto: `#8` se despachaba en silencio sin que nadie
+// supiera que su intento de dependencia dejó de contar.
+//
+// `extractStrayDeps`/`mapGhIssue#strayDeps` exponen exactamente esas
+// referencias "merge-after #N" que existen en el body pero FUERA de la
+// sección reconocida — la misma señal que reconcile.js ya calculaba para su
+// propio reporte (`diffIssue#strayDeps`), ahora compartida (una sola
+// implementación, no dos que puedan divergir) para que ct-next.mjs también
+// pueda avisar (ver ct-next-dryrun.test.js).
+describe('extractStrayDeps / mapGhIssue#strayDeps — deps fuera de la sección reconocida, expuestas para poder avisar (D1 finding 1, seguimiento de review)', () => {
+  it('reproducción EXACTA de la review: "merge-after #1" bajo "## Descripción" (nunca "## Dependencias") → deps:[], strayDeps:[1]', () => {
+    const body = [
+      '## Descripción',
+      'hace referencia a merge-after #1 pero no en la sección correcta',
+      '',
+      '## Acceptance criteria (EARS, 1:1 con tests)',
+      '- AC-1.1',
+      '',
+      '<!-- ct-order:2 -->',
+    ].join('\n')
+    const mapped = mapGhIssue({ number: 8, title: '#8 x', labels: [], body })
+    expect(mapped.deps).toEqual([]) // el estrechamiento (D1 finding 2) es correcto: no cuenta como dependencia real
+    expect(mapped.strayDeps).toEqual([1]) // pero la referencia ignorada queda expuesta para poder avisar
+  })
+
+  it('un "merge-after #N" DENTRO de la sección reconocida no es "stray" — solo lo que vive fuera cuenta', () => {
+    const body = '## Dependencias\n- merge-after #1\n\n<!-- ct-order:2 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.strayDeps).toEqual([])
+  })
+
+  it('sin ninguna referencia fuera de sección → strayDeps: [] (caso normal, sin ruido)', () => {
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body: 'body normal sin nada de esto' })
+    expect(mapped.strayDeps).toEqual([])
+  })
+
+  it('extractStrayDeps — función compartida: dedup y orden ascendente, y una dep repetida DENTRO y fuera de la sección no cuenta como stray', () => {
+    expect(extractStrayDeps('merge-after #9\nmerge-after #9', [])).toEqual([9]) // dedup
+    expect(extractStrayDeps('merge-after #3\nmerge-after #1', [3])).toEqual([1]) // #3 ya está en sectionDeps, no es stray; #1 sí
+    expect(extractStrayDeps('sin nada', [])).toEqual([])
+  })
+})
+
+// Review de D1 (round 2): contar viñetas "- " no es el eje correcto — lo
+// derrota cualquier línea buena con DOS "merge-after" (infla el conteo de
+// deps sin inflar el de viñetas) y cualquier línea rota que no use "- "
+// (viñeta "*", numerada, o sin viñeta en absoluto). La señal correcta es
+// otra: CUALQUIER referencia "#N" (por VALOR, no por posición — así una
+// misma referencia repetida en prosa, p.ej. "ver también #1", no cuenta
+// como problema si #1 YA es una dependencia reconocida) que "merge-after"
+// nunca capturó es lo que de verdad distingue "esta línea pretendía
+// declarar una dependencia y está mal escrita" de "esta línea es una nota
+// sin ningún número". Estos tests reproducen EXACTAMENTE los tres falsos
+// negativos y el falso positivo que encontró la review contra mi primer
+// heurístico (bulletLines), y atacan la heurística NUEVA con formas que
+// nadie me dio: viñeta "*", numerada, sin viñeta, indentada, varias deps en
+// una línea, deps tachadas.
+describe('mapGhIssue — extractDepsInSection: la señal correcta es la referencia "#N" sin capturar, no el conteo de viñetas (review de D1, round 2)', () => {
+  it('falso negativo 1 (review): dos merge-after reales en una línea + una tercera dependencia rota en OTRA línea → malformed:true (antes: false, la "mezcla" se perdía)', () => {
+    const body = '## Dependencias\n- merge-after #1, merge-after #2\n- Depende de #3\n\n<!-- ct-order:4 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([1, 2]) // lo que sí se leyó bien se conserva (fail-closed)
+    expect(mapped.depsMalformed).toBe(true) // pero #3 no puede perderse en silencio
+  })
+
+  it('falso negativo 2 (review): dependencia rota con viñeta "*" en vez de "-" → malformed:true (antes: false, "*" no contaba como viñeta)', () => {
+    const body = '## Dependencias\n- merge-after #1\n* Depende de #2\n\n<!-- ct-order:3 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([1])
+    expect(mapped.depsMalformed).toBe(true)
+  })
+
+  it('falso negativo 3 (review): dependencia rota SIN viñeta en absoluto → malformed:true (antes: false, la línea no empezaba por "-")', () => {
+    const body = '## Dependencias\n- merge-after #1\nDepende de #2 tambien\n\n<!-- ct-order:3 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([1])
+    expect(mapped.depsMalformed).toBe(true)
+  })
+
+  it('falso positivo (review): una dependencia real + una NOTA sin ningún número → malformed:false (antes: true, 2 viñetas contra 1 dep bloqueaban un slice sano)', () => {
+    const body = '## Dependencias\n- merge-after #1\n- ojo: revisar con Ana\n\n<!-- ct-order:2 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([1])
+    expect(mapped.depsMalformed).toBe(false)
+  })
+
+  // Ataques adicionales contra la heurística NUEVA (no dados por la review):
+  it('dependencia rota en formato de lista NUMERADA ("1. Depende de #2") → malformed:true', () => {
+    const body = '## Dependencias\n- merge-after #1\n1. Depende de #2\n\n<!-- ct-order:3 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([1])
+    expect(mapped.depsMalformed).toBe(true)
+  })
+
+  it('dependencia rota INDENTADA bajo la real ("  Depende de #2", sub-nivel) → malformed:true — indentarla no la vuelve inofensiva', () => {
+    const body = '## Dependencias\n- merge-after #1\n  - Depende de #2\n\n<!-- ct-order:3 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([1])
+    expect(mapped.depsMalformed).toBe(true)
+  })
+
+  it('una MISMA referencia repetida en prosa ("ver también #1 en el spec", #1 YA es una dependencia reconocida) → NO cuenta como problema (comparación por valor, no por posición)', () => {
+    const body = '## Dependencias\n- merge-after #1\n- ver también #1 en el spec para más contexto\n\n<!-- ct-order:2 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([1])
+    expect(mapped.depsMalformed).toBe(false)
+  })
+
+  it('deps tachadas ("~~merge-after #1~~ ya no aplica") + una nota sin número → sigue sin malformed (regresión: no reintroducir el falso positivo)', () => {
+    const body = '## Dependencias\n- ~~merge-after #1~~ ya no aplica\n- nota: pendiente de decidir con pagos\n\n<!-- ct-order:2 -->'
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [], body })
+    expect(mapped.deps).toEqual([1])
+    expect(mapped.depsMalformed).toBe(false)
+  })
+})
+
+// D1 finding 3: dos labels "status:" a la vez (una edición a medias — se
+// añadió la nueva sin quitar la vieja) hacía que `Array.prototype.find`
+// eligiera la PRIMERA del array que devuelve `gh`, sin ningún aviso ni
+// comprobación de que hubiera exactamente una. El auditor verificó que
+// `['status:in-progress','status:ready']` resuelve a "in-progress" y el
+// mismo array invertido resuelve a "ready" — pero no pudo determinar offline
+// el orden real que GitHub usa, y pidió explícitamente NO adivinarlo: el
+// código tiene que ser independiente de ese orden. La resolución aquí NO
+// intenta adivinar cuál de las dos labels es "la real": aplica, siempre,
+// la interpretación MÁS CONSERVADORA posible (in-progress > in-review >
+// ready > backlog) — la que menos probabilidad tiene de re-despachar dos
+// veces el mismo trabajo o de dejarlo fuera del cómputo del cap. El mismo
+// resultado para las DOS órdenes del array es la prueba de independencia.
+describe('mapGhIssue — status: ambiguo con más de una label a la vez, resuelto sin depender del orden del array (D1 finding 3)', () => {
+  it('["status:in-progress","status:ready"] → resuelve a "in-progress", marcado ambiguo', () => {
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [{ name: 'status:in-progress' }, { name: 'status:ready' }], body: '' })
+    expect(mapped.status).toBe('in-progress')
+    expect(mapped.statusAmbiguous).toBe(true)
+  })
+
+  it('el MISMO array pero INVERTIDO → resuelve al MISMO status ("in-progress") — independiente del orden', () => {
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [{ name: 'status:ready' }, { name: 'status:in-progress' }], body: '' })
+    expect(mapped.status).toBe('in-progress')
+    expect(mapped.statusAmbiguous).toBe(true)
+  })
+
+  it('status:ready + status:in-review (ambos órdenes) → siempre "in-review", nunca "ready"', () => {
+    const a = mapGhIssue({ number: 1, title: '#1 x', labels: [{ name: 'status:ready' }, { name: 'status:in-review' }], body: '' })
+    const b = mapGhIssue({ number: 1, title: '#1 x', labels: [{ name: 'status:in-review' }, { name: 'status:ready' }], body: '' })
+    expect(a.status).toBe('in-review')
+    expect(b.status).toBe('in-review')
+  })
+
+  it('una sola label status: → sin ambigüedad, comportamiento normal sin cambios', () => {
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [{ name: 'status:ready' }], body: '' })
+    expect(mapped.status).toBe('ready')
+    expect(mapped.statusAmbiguous).toBe(false)
+  })
+
+  it('sin ninguna label status: → "backlog", sin ambigüedad', () => {
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [{ name: 'type:x' }], body: '' })
+    expect(mapped.status).toBe('backlog')
+    expect(mapped.statusAmbiguous).toBe(false)
+  })
+
+  it('tres labels status: a la vez (edición doblemente a medias) → sigue resolviendo por precedencia, sin reventar', () => {
+    const mapped = mapGhIssue({
+      number: 1, title: '#1 x',
+      labels: [{ name: 'status:backlog' }, { name: 'status:ready' }, { name: 'status:in-progress' }],
+      body: '',
+    })
+    expect(mapped.status).toBe('in-progress')
+    expect(mapped.statusAmbiguous).toBe(true)
+  })
+
+  // Menor (review de D1): dos labels custom que NO son ninguna de las cuatro
+  // conocidas (no gatean nada en dispatch.js — no cuenta como "ready" ni
+  // "in-progress" en ningún sitio, así que la DECISIÓN de despacho es
+  // idéntica pase lo que pase aquí) seguían resolviendo por el orden del
+  // array vía `?? statusLabels[0]` — el mismo defecto que esta función existe
+  // para no tener. El TEXTO del aviso sí depende de este valor: tiene que
+  // ser independiente del orden igual que el resto de la función.
+  it('dos labels status: custom (ninguna de las cuatro conocidas) → el fallback es independiente del orden del array (alfabético, no "el primero del array")', () => {
+    const a = mapGhIssue({ number: 1, title: '#1 x', labels: [{ name: 'status:paused' }, { name: 'status:blocked' }], body: '' })
+    const b = mapGhIssue({ number: 1, title: '#1 x', labels: [{ name: 'status:blocked' }, { name: 'status:paused' }], body: '' })
+    expect(a.status).toBe(b.status) // el mismo resultado sin importar el orden de entrada
+    expect(a.status).toBe('blocked') // determinista: "blocked" < "paused" alfabéticamente
+  })
+})
+
+// D1 finding 4: una label "area:" o "touches:" SIN VALOR (el colon presente,
+// nada detrás — p.ej. creada por accidente en el editor de GitHub) pela a
+// una cadena VACÍA tras quitarle el prefijo. Dos issues así "colisionan"
+// sobre el token '' aunque no compartan ningún área/touch real — y el
+// mensaje de colisión en ct-next.mjs lo mostraría como `comparte el token
+// ''`. Un token vacío no representa nada: se descarta antes de entrar en la
+// maquinaria de colisión (dispatch.js#touchesConflict), igual que un dep de
+// orden no mapeable se descarta a `null` en vez de colar un valor basura.
+describe('mapGhIssue — una label "area:"/"touches:" sin valor no produce un token vacío colisionable (D1 finding 4)', () => {
+  it('label "area:" sin nada detrás del colon → touches no incluye la cadena vacía', () => {
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [{ name: 'area:' }, { name: 'status:ready' }], body: '' })
+    expect(mapped.touches).toEqual([])
+  })
+
+  it('label "touches:" sin valor + un area: real → solo el token real sobrevive, nunca la cadena vacía', () => {
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [{ name: 'touches:' }, { name: 'area:api' }], body: '' })
+    expect(mapped.touches).toEqual(['api'])
+  })
+
+  it('dos issues que SOLO comparten la label rota "area:" (sin valor) → selectNext NO los trata como colisión (el token vacío no cuenta)', () => {
+    const a = mapGhIssue({ number: 1, title: '#1 a', labels: [{ name: 'status:ready' }, { name: 'area:' }], body: '<!-- ct-order:1 -->' })
+    const b = mapGhIssue({ number: 2, title: '#2 b', labels: [{ name: 'status:ready' }, { name: 'area:' }], body: '<!-- ct-order:2 -->' })
+    const selected = selectNext([a, b], { mergedIssues: [], runningTouches: [], concurrencyCap: 2 })
+    expect(selected.map((i) => i.n)).toEqual([1, 2]) // ambos, sin colisión espuria
+  })
+
+  // Ataque adversarial (no un ejemplo del auditor): "area: " — colon seguido
+  // de un espacio en blanco, sin contenido real detrás — pela a ' ' (un
+  // espacio, NO la cadena vacía). Un filtro que solo comprueba
+  // `t.length > 0` deja pasar este token igual de vacío-de-contenido, y dos
+  // issues con esta variante volverían a "colisionar" sobre ' ' — el MISMO
+  // bug del finding, con un carácter distinto.
+  it('label "area: " (colon + espacio en blanco, sin contenido real) → tampoco produce un token colisionable', () => {
+    const mapped = mapGhIssue({ number: 1, title: '#1 x', labels: [{ name: 'area: ' }], body: '' })
+    expect(mapped.touches).toEqual([])
+  })
+
+  it('dos issues que comparten SOLO "area: " (espacio en blanco) → tampoco colisionan', () => {
+    const a = mapGhIssue({ number: 1, title: '#1 a', labels: [{ name: 'status:ready' }, { name: 'area: ' }], body: '<!-- ct-order:1 -->' })
+    const b = mapGhIssue({ number: 2, title: '#2 b', labels: [{ name: 'status:ready' }, { name: 'area: ' }], body: '<!-- ct-order:2 -->' })
+    const selected = selectNext([a, b], { mergedIssues: [], runningTouches: [], concurrencyCap: 2 })
+    expect(selected.map((i) => i.n)).toEqual([1, 2])
   })
 })
