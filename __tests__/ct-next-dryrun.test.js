@@ -20,17 +20,19 @@ const fixturesDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
 // etc.), pero un lector no puede distinguir ese ruido esperado de un fallo
 // real sin leer el código. `stdio: ['ignore','pipe','pipe']` mantiene stdout/
 // stderr disponibles vía `e.stdout`/`e.stderr` sin ecoarlos al padre.
+// F16/H2: `spawnSync`, no `execFileSync`. `execFileSync` solo DEVUELVE stdout
+// cuando el hijo sale con 0 — el stderr aparecía únicamente por el `catch`, o
+// sea solo cuando la corrida fallaba. Mientras los avisos iban por stdout eso
+// no se notaba; desde el criterio de canal (ct-next.mjs), una corrida
+// CORRECTA con avisos perdía el stderr entero y estos tests medían media
+// transcripción.
 function run(args, envOverrides = {}) {
-  try {
-    // hermeticEnv() (D4): además de los dirs de cuenta, mete los stubs de
-    // `cmux`/`claude` por delante del PATH real — el preflight los BUSCA (no
-    // los ejecuta), y sin esto la suite dependería de que la máquina que la
-    // corre los tenga instalados.
-    const out = execFileSync('node', [script, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...hermeticEnv(), ...envOverrides } })
-    return { code: 0, out }
-  } catch (e) {
-    return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }
-  }
+  // hermeticEnv() (D4): además de los dirs de cuenta, mete los stubs de
+  // `cmux`/`claude` por delante del PATH real — el preflight los BUSCA (no
+  // los ejecuta), y sin esto la suite dependería de que la máquina que la
+  // corre los tenga instalados.
+  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...hermeticEnv(), ...envOverrides } })
+  return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
 }
 
 // El wrapper acepta CT_NEXT_FIXTURE (JSON de {issues, mergedIssues}) para test sin red.
@@ -403,17 +405,15 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
     for (const d of dirs.splice(0)) rmSyncBestEffort(d)
   })
 
+  // F16/H2: ver el comentario del `runReal` gemelo de más abajo — `spawnSync`
+  // para no perder el stderr de una corrida que sale con 0.
   function runReal(args, envOverrides = {}) {
-    try {
-      const out = execFileSync('node', [script, ...args], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'], // finding 11: no ecoar el ruido esperado al padre
-        env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
-      })
-      return { code: 0, out }
-    } catch (e) {
-      return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }
-    }
+    const r = spawnSync('node', [script, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'], // finding 11: no ecoar el ruido esperado al padre
+      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
+    })
+    return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
   }
 
   // combinedOutputOf (F8): stdout y stderr del hijo van AL MISMO descriptor de
@@ -618,17 +618,19 @@ describe('ct-next — guarda de identidad de repo (review final, finding 1)', ()
     for (const d of dirs.splice(0)) rmSyncBestEffort(d)
   })
 
+  // F16/H2: `spawnSync`, NO `execFileSync`. `execFileSync` solo DEVUELVE
+  // stdout cuando el hijo sale con 0 — el stderr únicamente aparecía por la
+  // rama `catch`, es decir, solo cuando la corrida fallaba. Mientras los
+  // avisos iban por stdout eso no se notaba; desde que van por stderr
+  // (criterio de canal de ct-next.mjs), una corrida CORRECTA con avisos
+  // perdía el stderr entero y estos tests medían media transcripción.
   function runReal(args, envOverrides = {}) {
-    try {
-      const out = execFileSync('node', [script, ...args], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
-      })
-      return { code: 0, out }
-    } catch (e) {
-      return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }
-    }
+    const r = spawnSync('node', [script, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
+    })
+    return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
   }
 
   function makeRepoRoot() {
@@ -704,17 +706,19 @@ describe('ct-next — enumeración de issues sin --limit fijo (review final, fin
   afterEach(() => {
     for (const d of dirs.splice(0)) rmSyncBestEffort(d)
   })
+  // F16/H2: `spawnSync`, NO `execFileSync`. `execFileSync` solo DEVUELVE
+  // stdout cuando el hijo sale con 0 — el stderr únicamente aparecía por la
+  // rama `catch`, es decir, solo cuando la corrida fallaba. Mientras los
+  // avisos iban por stdout eso no se notaba; desde que van por stderr
+  // (criterio de canal de ct-next.mjs), una corrida CORRECTA con avisos
+  // perdía el stderr entero y estos tests medían media transcripción.
   function runReal(args, envOverrides = {}) {
-    try {
-      const out = execFileSync('node', [script, ...args], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
-      })
-      return { code: 0, out }
-    } catch (e) {
-      return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }
-    }
+    const r = spawnSync('node', [script, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
+    })
+    return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
   }
 
   it('la enumeración de issues abiertos y cerrados usa --paginate y nunca --limit', () => {
@@ -789,17 +793,19 @@ describe('ct-next — D1 finding 1: alcance del orden por epic (milestone), cami
   afterEach(() => {
     for (const d of dirs.splice(0)) rmSyncBestEffort(d)
   })
+  // F16/H2: `spawnSync`, NO `execFileSync`. `execFileSync` solo DEVUELVE
+  // stdout cuando el hijo sale con 0 — el stderr únicamente aparecía por la
+  // rama `catch`, es decir, solo cuando la corrida fallaba. Mientras los
+  // avisos iban por stdout eso no se notaba; desde que van por stderr
+  // (criterio de canal de ct-next.mjs), una corrida CORRECTA con avisos
+  // perdía el stderr entero y estos tests medían media transcripción.
   function runReal(args, envOverrides = {}) {
-    try {
-      const out = execFileSync('node', [script, ...args], {
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
-      })
-      return { code: 0, out }
-    } catch (e) {
-      return { code: e.status, out: (e.stdout || '') + (e.stderr || '') }
-    }
+    const r = spawnSync('node', [script, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
+    })
+    return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
   }
 
   it('reproducción del auditor: epic A mergeado + epic B en curso, mismos números de orden, milestones DISTINTOS → #8 espera a su hermano real (#7), nunca al #1 ya mergeado de epic A', () => {

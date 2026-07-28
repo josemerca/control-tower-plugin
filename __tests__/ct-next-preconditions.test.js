@@ -7,7 +7,7 @@
 // no falla ahí, no prueba nada. Ver el informe de la tarea para el detalle.
 import { describe, it, expect, afterEach } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, writeFileSync, cpSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, existsSync, writeFileSync, cpSync, openSync, closeSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -196,10 +196,29 @@ describe('ct-next — cuenta resuelta, siempre dicha en voz alta (D4, defecto 1)
     expect(r.out).toMatch(/desconocido\/\*/) // la sugerencia concreta de arreglo
   })
 
+  // F16/H2: desde que los avisos salen por STDERR y el plan por STDOUT, este
+  // test NO puede seguir usando `run()` — concatenar `stdout + stderr` ordena
+  // por STREAM, no por tiempo, así que el aviso caería siempre después del
+  // plan y el test fallaría contra un código perfectamente correcto (y, peor,
+  // pasaría si algún día se emitiera al revés). La única forma honesta de
+  // afirmar "esta línea salió antes que aquella" con dos streams distintos es
+  // mandarlos AL MISMO descriptor y leer la transcripción — el mismo patrón
+  // que ya usaba `combinedOutputOf` en ct-next-dryrun.test.js.
   it('el aviso se imprime ANTES del plan del slice, no después (requisito: "antes de lanzar nada")', () => {
-    const r = run(['--repo', 'desconocido/lo-que-sea', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE_ONE_READY })
-    const avisoAt = r.out.indexOf('cuenta POR DEFECTO')
-    const planAt = r.out.indexOf('=== slice #42')
+    const logDir = makeTmp('ct-next-orden-')
+    const logPath = join(logDir, 'combined.log')
+    const fd = openSync(logPath, 'w')
+    try {
+      spawnSync(process.execPath, [script, '--repo', 'desconocido/lo-que-sea', '--cap', '1', '--dry-run'], {
+        stdio: ['ignore', fd, fd],
+        env: { ...process.env, ...hermeticEnv(), CT_NEXT_FIXTURE: FIXTURE_ONE_READY },
+      })
+    } finally {
+      closeSync(fd)
+    }
+    const out = readFileSync(logPath, 'utf8')
+    const avisoAt = out.indexOf('cuenta POR DEFECTO')
+    const planAt = out.indexOf('=== slice #42')
     // Ambos índices tienen que existir de verdad: sin esto, un -1 (aviso
     // ausente) "pasaría" el toBeLessThan por casualidad — el test sería
     // verde contra el código sin arreglar, que es justo el que no lo imprime.

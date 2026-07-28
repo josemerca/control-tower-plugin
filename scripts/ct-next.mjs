@@ -636,6 +636,123 @@ function stateReasonLabel(sr) {
   return `cerrado con motivo "${sr}"`
 }
 
+// ============================================================================
+// F16/H1 — LA MEDIDA DE UN MENSAJE DE BLOQUEO NO ES SI ES CIERTO, ES SI LLEVA
+// A HACER ALGO QUE SIRVA.
+//
+// El hallazgo de campo: cinco issues ocupaban el carril serializante global y
+// el dispatcher nombró uno. Cada frase era literalmente cierta, y aun así el
+// mensaje entero era una instrucción equivocada — un lector razonable deduce
+// "quito ese y sale", resuelve, vuelve a correr, y se encuentra igual de
+// bloqueado. Cuatro veces seguidas.
+//
+// La regla que sale de ahí, y que se aplica a TODAS las explicaciones de este
+// fichero: si para descubrir los N bloqueantes hubiera que repetir el ciclo N
+// veces, hay que decirlos de una vez. Con el cuidado opuesto: cuarenta issues
+// listados tampoco son accionables. Cuando la lista crece, lo que hace falta
+// para DECIDIR es el recuento (¿es una pared o un guijarro?), no los cuarenta
+// nombres — así que se lista una muestra y NUNCA se calla el total.
+const MAX_BLOQUEANTES_LISTADOS = 8
+
+// refsAcotadas: "#1, #2, #3" o "#1, …, #8 y 22 más". El total siempre sale.
+function refsAcotadas(ns) {
+  const shown = ns.slice(0, MAX_BLOQUEANTES_LISTADOS).map((n) => `#${n}`)
+  const rest = ns.length - shown.length
+  return rest > 0 ? `${shown.join(', ')} y ${rest} más` : shown.join(', ')
+}
+
+// detalleDeHolders: el mismo acotado, para los inventarios de --dry-run ("En
+// vuelo", "Sin mergear, reteniendo tokens"). Antes se volcaban ENTEROS: con
+// treinta slices en revisión al final de un epic, esas dos líneas eran un
+// muro que empujaba fuera de pantalla justo el mensaje que explica el
+// bloqueo. El recuento va en la propia etiqueta de la línea, así que
+// recortar la enumeración no esconde el tamaño del problema.
+function detalleDeHolders(holders) {
+  const shown = holders
+    .slice(0, MAX_BLOQUEANTES_LISTADOS)
+    .map((i) => `#${i.n} [${((i.touches || []).length ? i.touches.map((t) => `touches:${t}`).join(', ') : 'sin touches')}]`)
+  const rest = holders.length - shown.length
+  return rest > 0 ? `${shown.join(', ')} … y ${rest} más` : shown.join(', ')
+}
+
+// motivoDeBloqueante: por qué ESTE issue impide despachar al candidato. Los
+// dos motivos no son excluyentes (un holder puede compartir token Y ocupar el
+// carril con otro token distinto), así que se dicen los dos cuando los dos
+// aplican — es exactamente el caso en el que resolver "el token" deja al
+// usuario chocando con el carril en la vuelta siguiente.
+// La explicación de QUÉ es el carril serializante se dice UNA vez, en la
+// nota de cabecera — no pegada a cada línea. Repetida cinco veces (el caso
+// real que originó esto) empuja fuera de pantalla lo único que hay que leer:
+// los números y el recuento.
+function motivoDeBloqueante(b, candN) {
+  const partes = []
+  if (b.sharedTokens.length) {
+    partes.push(`retiene ${b.sharedTokens.map((t) => `'${t}'`).join(', ')}, que #${candN} también toca`)
+  }
+  if (b.laneTokens.length) {
+    partes.push(`ocupa el carril serializante con ${b.laneTokens.map((t) => `touches:${t}`).join(', ')}`)
+  }
+  const estado = b.status ? `status:${b.status}` : 'estado desconocido'
+  return `  - #${b.n} (${estado}) — ${partes.join('; y además ')}`
+}
+
+// formatColisionMultiple: el mensaje cuando bloquean DOS O MÁS. No es el
+// mensaje de uno repetido N veces: la lista de bloqueantes de un candidato es
+// una CONJUNCIÓN (hay que despejarlos todos), y eso hay que decirlo en la
+// primera línea, antes que ningún detalle — es la parte que cambia lo que
+// alguien va a hacer a continuación.
+//
+// El remedio se agrupa por ESTADO y no por bloqueante, porque el remedio
+// depende del estado y no del issue: los `in-review` se sacan mergeando (no
+// hay agente a quien esperar), los `in-progress` se sacan esperando (y ahí sí
+// tiene sentido la nota de claim rancio). Un carril con cuatro in-review y un
+// in-progress necesita las DOS instrucciones, y el mensaje viejo solo podía
+// dar una.
+function formatColisionMultiple(reason, ctx) {
+  const blockers = reason.blockers
+  const candN = reason.issue
+  const lineas = blockers.slice(0, MAX_BLOQUEANTES_LISTADOS).map((b) => motivoDeBloqueante(b, candN))
+  const ocultos = blockers.length - lineas.length
+  if (ocultos > 0) {
+    lineas.push(`  … y ${ocultos} más (no se listan todos: para decidir aquí lo que cuenta es que son ${blockers.length}, no cuáles)`)
+  }
+
+  const enReview = blockers.filter((b) => b.status === 'in-review').map((b) => b.n)
+  const enCurso = blockers.filter((b) => b.status === 'in-progress').map((b) => b.n)
+  const sinEstado = blockers.filter((b) => b.status !== 'in-review' && b.status !== 'in-progress').map((b) => b.n)
+
+  const remedios = []
+  if (enReview.length) {
+    remedios.push(`${enReview.length} en status:in-review (${refsAcotadas(enReview)}): trabajo entregado pero SIN MERGEAR, sin ningún agente detrás — esperar no sirve de nada. Lo único que suelta esos tokens es el MERGE de su PR (o cerrar el issue como completed si el PR ya se mergeó y nadie lo cerró porque le faltaba el "Closes #<n>"). \`--reopen\` NO suelta nada: deja el slice en status:in-progress reteniendo estos mismos tokens hasta que su trabajo se mergee.`)
+  }
+  if (enCurso.length) {
+    remedios.push(`${enCurso.length} en status:in-progress (${refsAcotadas(enCurso)}): ahí sí hay (o debería haber) un agente vivo, y esperar es el remedio correcto.`)
+  }
+  if (sinEstado.length) {
+    remedios.push(`${sinEstado.length} sin estado conocido (${refsAcotadas(sinEstado)}): compruébalos a mano.`)
+  }
+
+  // La nota de claim rancio SOLO para los que dicen tener un agente vivo (o
+  // no dicen nada): en un in-review, no tener worktree/rama/sesión es lo
+  // NORMAL y pedirla convertiría cada PR en revisión en una falsa alarma —
+  // el mismo criterio que ya aplicaba el caso de un solo bloqueante. Se
+  // acota al mismo número que la lista para no disparar cuarenta consultas
+  // a git/cmux por un mensaje.
+  const notas = ctx
+    ? [...enCurso, ...sinEstado].slice(0, MAX_BLOQUEANTES_LISTADOS).map((n) => ctx.stalenessNoteFor(n)).filter(Boolean)
+    : []
+  const cola = notas.length ? `\nATENCIÓN, alguno de esos claims puede estar muerto: ${notas.join(' ')}` : ''
+
+  // La nota del carril solo aparece si alguien bloquea POR carril: si todos
+  // los bloqueantes comparten token literal, explicar el carril es ruido.
+  const hayCarril = blockers.some((b) => b.laneTokens.length)
+  const notaCarril = hayCarril
+    ? ` El carril serializante (migration/ci/pbxproj) es GLOBAL: basta con que #${candN} toque uno cualquiera de esos tres para chocar con TODO el que tenga otro, sin compartir token con nadie.`
+    : ''
+
+  return `#${candN} está ready con deps mergeadas, pero NO basta con desbloquear uno: ${blockers.length} issues retienen a la vez lo que necesita, y hasta que salgan TODOS seguirá sin poder despacharse — resolver uno solo te devolvería justo aquí en la vuelta siguiente, con otro nombre distinto.${notaCarril}\n${lineas.join('\n')}\nQué hace falta, por grupos: ${remedios.join(' ')}${cola}`
+}
+
 function formatReason(reason, ctx) {
   switch (reason?.reason) {
     case 'none-ready': {
@@ -644,9 +761,41 @@ function formatReason(reason, ctx) {
       // mergeado— y "no hay nada que despachar todavía" lo pinta como si no
       // se hubiera empezado. Además, desde F13/H2 esos issues RETIENEN sus
       // tokens: son la causa de que lo siguiente no salga, no un detalle.
+      // F16/H1, con la misma lente: "no hay nada que despachar TODAVÍA" es
+      // una instrucción a ESPERAR, y con todo el epic en `status:backlog` no
+      // hay nada que esperar — promover backlog → ready es el gate HUMANO
+      // del loop (ct-groom hasta lo recuerda al terminar un groom). Nadie va
+      // a abrir ese gate si el dispatcher dice que aún no toca. Verificado
+      // sin arreglar: tres issues en backlog y CERO issues abiertos producían
+      // el mismo texto palabra por palabra, y sus remedios son opuestos.
       const inReview = reason.inReview || []
-      if (!inReview.length) return 'No hay ningún issue en status:ready — no hay nada que despachar todavía.'
-      return `No hay ningún issue en status:ready. Sí hay ${inReview.length} en status:in-review (${inReview.map((n) => `#${n}`).join(', ')}): su trabajo está entregado pero SIN MERGEAR, así que ni desbloquea a sus dependientes (merge-after exige el merge) ni suelta sus tokens de área/touches. Mergea sus PRs (o, si un PR ya se mergeó y el issue sigue abierto, ciérralo como completed) — y si alguno se rechazó en revisión y vas a corregir encima, devuélvelo al banco de trabajo con \`node <plugin>/scripts/dispatch-check.mjs <n> --repo <owner/repo> --reopen\` (queda en status:in-progress: SIGUE reteniendo sus tokens, porque su trabajo sigue sin mergear — reabrir no desbloquea a sus vecinos, solo dice quién lo está rehaciendo).`
+      const backlog = reason.backlog || []
+      const inProgress = reason.inProgress || []
+      const total = reason.total
+      // El prefijo se conserva literal en todas las ramas: es lo que hace
+      // que la causa siga siendo reconocible de un vistazo (y lo que fijan
+      // los tests preexistentes de W-B).
+      const cabeza = 'No hay ningún issue en status:ready'
+      if (total === 0) {
+        return `${cabeza} — de hecho no hay NINGÚN issue abierto en este repo. Eso no es "el loop está al día", es "no hay nada que mirar": o el epic todavía no se ha groomeado (\`/ct-groom <spec> --repo <owner/repo>\`), o --repo apunta a un repo distinto del que crees. Comprueba las dos cosas antes de darlo por terminado.`
+      }
+      const partes = []
+      if (backlog.length) {
+        partes.push(`Hay ${backlog.length} en status:backlog (${refsAcotadas(backlog)}): eso NO se desbloquea esperando. Promover backlog → ready es el gate humano del loop —decides tú qué entra en vuelo— y hasta que lo abras no habrá nada que despachar: \`gh issue edit <n> --repo <owner/repo> --add-label status:ready --remove-label status:backlog\`.`)
+      }
+      if (inReview.length) {
+        partes.push(`Hay ${inReview.length} en status:in-review (${refsAcotadas(inReview)}): su trabajo está entregado pero SIN MERGEAR, así que ni desbloquea a sus dependientes (merge-after exige el merge) ni suelta sus tokens de área/touches. Mergea sus PRs (o, si un PR ya se mergeó y el issue sigue abierto, ciérralo como completed) — y si alguno se rechazó en revisión y vas a corregir encima, devuélvelo al banco de trabajo con \`node <plugin>/scripts/dispatch-check.mjs <n> --repo <owner/repo> --reopen\` (queda en status:in-progress: SIGUE reteniendo sus tokens, porque su trabajo sigue sin mergear — reabrir no desbloquea a sus vecinos, solo dice quién lo está rehaciendo).`)
+      }
+      if (inProgress.length) {
+        partes.push(`Hay ${inProgress.length} en status:in-progress (${refsAcotadas(inProgress)}): con agente vivo, ahí sí toca esperar.`)
+      }
+      if (!partes.length) {
+        // Ni backlog, ni in-review, ni in-progress, y sin embargo hay issues
+        // abiertos: están fuera del loop. Decirlo, en vez de dejar que la
+        // frase corta se lea como "ya no queda trabajo".
+        return `${cabeza}, y ninguno de los ${total} issue(s) abiertos está en ningún otro estado del loop (backlog/in-progress/in-review): están FUERA del loop, probablemente sin ninguna label \`status:\` — /ct-next no los ve. Si alguno debería despacharse, etiquétalo; si no, no hay nada que hacer aquí.`
+      }
+      return `${cabeza}. ${partes.join(' ')}`
     }
     case 'deps-unmet': {
       // D1 finding 2/5: dos causas MUY distintas terminaban antes en el mismo
@@ -731,6 +880,15 @@ function formatReason(reason, ctx) {
       // estado (llamadas unitarias antiguas): en ese caso se mantiene el
       // comportamiento de antes (nota de staleness incluida) en vez de
       // afirmar un estado que no se conoce.
+      // F16/H1: si bloquean DOS O MÁS, ningún mensaje que nombre a uno solo
+      // puede ser honesto — se va por la rama que los dice todos. Con UNO,
+      // el mensaje de siempre se conserva palabra por palabra: añadir "hay
+      // que despejarlos todos" cuando "todos" es uno sería ruido, y los
+      // tests de F13/staleness fijan ese texto literal.
+      // `blockers` puede faltar en llamadas unitarias antiguas a esta
+      // función (que solo conocían la atribución de un issue): en ese caso
+      // se mantiene exactamente el comportamiento anterior.
+      if ((reason.blockers || []).length > 1) return formatColisionMultiple(reason, ctx)
       const holderStatus = reason.withIssueStatus ?? null
       const inReviewHolder = holderStatus === 'in-review'
       // Finding 2: `ctx?.stalenessNoteFor(reason.withIssue)` solo hace algo
@@ -876,6 +1034,41 @@ if (process.env.CT_NEXT_FIXTURE && !dryRun) {
 const fx = (dryRun && process.env.CT_NEXT_FIXTURE) ? JSON.parse(process.env.CT_NEXT_FIXTURE) : null
 
 // ============================================================================
+// F16/H2 — CRITERIO DE CANAL, ÚNICO PARA LOS TRES EJECUTABLES DEL PLUGIN
+// (ct-next.mjs, ct-groom.mjs, dispatch-check.mjs).
+//
+//   STDOUT = el PRODUCTO. Lo que el comando produjo o decidió, y que alguien
+//            podría querer capturar, redirigir o parsear: el plan de despacho
+//            (`git worktree add …`, el kickoff, la línea de `cmux`), la
+//            selección, el motivo de bloqueo, el registro de lo lanzado. En
+//            ct-groom, el JSON del plan y el acta de lo creado; en
+//            dispatch-check, el resultado del protocolo de claim
+//            (`claimed #N → in-progress`).
+//   STDERR = el DIAGNÓSTICO. Todo lo dirigido al humano SOBRE la corrida, no
+//            el resultado de la corrida: `aviso:`, `recordatorio:`,
+//            `ATENCIÓN:`, y cualquier mensaje de aborto.
+//
+// QUÉ ESTABA ROTO, verificado en campo: `warn()` emitía
+// `console.log(\`aviso: …\`)` — a stdout —, mientras los avisos equivalentes de
+// ct-groom.mjs van por `console.error`. Una corrida de /ct-next con avisos en
+// pantalla dejaba 0 BYTES en stderr. Dos consecuencias reales, no teóricas:
+// el diagnóstico se mezclaba con la salida que alguien podría capturar
+// (`/ct-next --dry-run > plan.txt` se llevaba los avisos dentro del plan), y
+// quien capturara stderr esperando los avisos —porque así funciona /ct-groom—
+// no recibía nada.
+//
+// LO QUE ESTE CAMBIO NO PUEDE ROMPER, y no rompe:
+//   - D5: un destino de salida roto (`ct-next | head` → EPIPE) NUNCA decide el
+//     resultado del protocolo. `console.error` va al mismo `process.stderr`
+//     que ya tiene su manejador `on('error')` instalado al principio de este
+//     fichero (junto al de stdout), así que un EPIPE en un aviso se traga
+//     igual que antes. El exit code sigue describiendo qué le pasó al
+//     TRABAJO. Hay tests que lo fijan (ct-next-exit-code-contract.test.js).
+//   - La truncación a 64 KiB: el recap del manejador de 'exit' sigue usando
+//     `writeSync(2, …)` — sigue siendo la única escritura que ocurre DENTRO
+//     de un 'exit', donde lo asíncrono no llega a salir. Este cambio no la
+//     toca; de hecho ahora aviso y recap comparten fd, que es lo coherente.
+//
 // D4 — avisos acumulados. Un aviso es algo que NO impide seguir pero que el
 // humano tiene que ver: se imprime en el momento (para que aparezca en el
 // contexto donde ocurre) Y se acumula, para poder cerrar un --dry-run
@@ -885,7 +1078,7 @@ const fx = (dryRun && process.env.CT_NEXT_FIXTURE) ? JSON.parse(process.env.CT_N
 const warnings = []
 function warn(msg) {
   warnings.push(msg)
-  console.log(`aviso: ${msg}`)
+  console.error(`aviso: ${msg}`)
 }
 // El recap va en un manejador de 'exit' y no al final del fichero a
 // propósito: este script termina en MUCHOS `process.exit()` distintos
@@ -1292,15 +1485,18 @@ const depStates = dispatchInput.depStates || {}
 // fixture de test (CT_NEXT_FIXTURE) ya trae issues pre-mapeados y no pasa
 // por ese cálculo; `|| []` lo trata como "sin colisiones" en ese caso. Nunca
 // aborta (ver el comentario de formatOrderCollisions): `issues` ya viene
-// filtrado por buildDispatchInput, así que estos avisos son puramente
-// informativos — console.log, no console.error, mismo criterio que el
-// resto de líneas informativas de este fichero (rama base resuelta, en
-// vuelo, motivo de bloqueo): console.error se reserva para lo que aborta
-// con exit != 0.
+// filtrado por buildDispatchInput.
+//
+// F16/H2 — estos cuatro bloques iban por `console.log` con el criterio
+// "console.error se reserva para lo que aborta". Ese criterio es el que
+// partía el plugin en dos: son `aviso:`, exactamente la misma categoría que
+// ct-groom.mjs y ct-init.sh emiten por stderr. El criterio vigente (ver el
+// bloque de `warn()`, arriba) es producto/diagnóstico, no aborta/no-aborta —
+// y un aviso es diagnóstico aunque no aborte nada.
 const orderCollisions = dispatchInput.orderCollisions || []
-for (const w of formatOrderCollisions(orderCollisions)) console.log(w)
-for (const w of formatStatusAmbiguityWarnings(issues)) console.log(w)
-for (const w of formatStrayDepsWarnings(issues)) console.log(w)
+for (const w of formatOrderCollisions(orderCollisions)) console.error(w)
+for (const w of formatStatusAmbiguityWarnings(issues)) console.error(w)
+for (const w of formatStrayDepsWarnings(issues)) console.error(w)
 // F11, parte B — el mismo hallazgo que hizo que ct-init deje de bootstrapear
 // encima de convenciones ajenas en silencio, pero en el momento en que de
 // verdad muerde: el DESPACHO. El kickoff que se le da a cada agente le manda
@@ -1357,7 +1553,10 @@ function formatConventionWarnings() {
   }
   return out
 }
-for (const w of formatConventionWarnings()) console.log(w)
+// F16/H2: por stderr, igual que los avisos de convenciones de ct-init.sh —
+// que es literalmente el mismo hallazgo dicho por otro ejecutable del mismo
+// plugin (ver __tests__/conventions.test.js, que los busca en `res.stderr`).
+for (const w of formatConventionWarnings()) console.error(w)
 // planDispatch (dispatch.js) es quien decide TODO lo que antes se hacía aquí
 // a medias: antes este wrapper llamaba a selectNext con `runningTouches: []`
 // hardcodeado, así que dos invocaciones sucesivas de /ct-next --cap 1 nunca
@@ -1384,10 +1583,7 @@ if (dryRun) {
   // resolvió (ni contra GitHub ni contra el checkout local).
   console.log(`rama base resuelta: ${resolvedBase}${baseIsFixtureDefault ? ' (fixture)' : ''}`)
   if (inFlight.length) {
-    const detail = inFlight
-      .map((i) => `#${i.n} [${(i.touches.length ? i.touches.map((t) => `touches:${t}`).join(', ') : 'sin touches')}]`)
-      .join(', ')
-    console.log(`En vuelo (${inFlight.length}/${cap} del cap ocupados): ${detail}`)
+    console.log(`En vuelo (${inFlight.length}/${cap} del cap ocupados): ${detalleDeHolders(inFlight)}`)
   } else {
     console.log(`En vuelo: ninguno (0/${cap} del cap ocupados).`)
   }
@@ -1399,10 +1595,7 @@ if (dryRun) {
   // precisamente porque son dos contabilidades distintas.
   const reviewHolders = (tokenHolders || []).filter((i) => i.status === 'in-review')
   if (reviewHolders.length) {
-    const detail = reviewHolders
-      .map((i) => `#${i.n} [${(i.touches.length ? i.touches.map((t) => `touches:${t}`).join(', ') : 'sin touches')}]`)
-      .join(', ')
-    console.log(`Sin mergear, reteniendo tokens (status:in-review, NO ocupan cap): ${detail}`)
+    console.log(`Sin mergear, reteniendo tokens (${reviewHolders.length}, status:in-review, NO ocupan cap): ${detalleDeHolders(reviewHolders)}`)
   }
 }
 
@@ -2296,8 +2489,11 @@ for (let idx = 0; idx < plans.length; idx++) {
     } else {
       // 'unknown': se intentó de verdad y la consulta falló. Ni "libre" ni
       // "no se miró" — se miró y no se pudo saber. El aviso con el detalle y
-      // el comando manual ya se imprimió arriba, al hacer la comprobación.
-      console.log(`destino: ${wt} / rama ${branch} — SIN CONFIRMAR: la consulta a git se intentó y FALLÓ (ver el aviso de más arriba), así que no se puede afirmar que estén libres. Esto NO es modo fixture: la corrida real hará exactamente esta misma comprobación, y si vuelve a fallar tampoco lo sabrá.`)
+      // el comando manual ya se imprimió al hacer la comprobación.
+      // F16/H2: ese aviso sale por STDERR (criterio de canal), así que la
+      // referencia dice DÓNDE está y no solo "más arriba" — quien haya
+      // redirigido stdout a un fichero no lo tiene "arriba" en ningún sitio.
+      console.log(`destino: ${wt} / rama ${branch} — SIN CONFIRMAR: la consulta a git se intentó y FALLÓ (el detalle y el comando manual están en el aviso correspondiente, por stderr), así que no se puede afirmar que estén libres. Esto NO es modo fixture: la corrida real hará exactamente esta misma comprobación, y si vuelve a fallar tampoco lo sabrá.`)
     }
     console.log(`CLAUDE_CONFIG_DIR=${configDir}`)
     console.log(`git worktree add -b ${branch} ${wt} ${resolvedBase}`)

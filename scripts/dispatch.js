@@ -123,6 +123,63 @@ export function collectTokenHolders(issues) {
     .map((i) => ({ n: i.n, status: i.status, touches: i.touches || [] }))
 }
 
+// collisionBlockers (F16/H1): TODOS los issues que retienen algo que impide
+// despachar a `cand`, no solo el primero que encuentra `touchesConflict`.
+//
+// EL DEFECTO QUE CIERRA, observado en la primera corrida real de /ct-next:
+// cinco issues ocupaban el carril serializante global (cuatro `touches:ci`,
+// uno `touches:migration`) y el dispatcher nombró UNO. El problema no es la
+// incompletitud en abstracto: es que nombrar uno IMPLICA un remedio
+// ("resuelve ese y sale") que no desbloquea nada. Quien lo leyera resolvería
+// ese issue, volvería a correr, y se encontraría igual de bloqueado — cuatro
+// veces seguidas. La lista de bloqueantes de un candidato es una CONJUNCIÓN
+// (hay que despejarlos todos), así que una muestra de tamaño 1 no es
+// "información parcial": es una instrucción equivocada.
+//
+// Y hay un segundo caso, más traicionero, que la atribución vieja tampoco
+// podía ver: el orden de `touchesConflict` devuelve 'token' antes que
+// 'serializing', así que una colisión por token compartido TAPA una colisión
+// de carril que hay detrás. Verificado sin arreglar con #1 (in-review,
+// touches:ci), #2 (in-review, touches:migration) y #3 (ready, touches:ci):
+// el mensaje citaba a #1 por token; tras mergear #1 aparecía uno NUEVO
+// citando a #2 por carril. Dos vueltas para descubrir dos paredes.
+//
+// Forma de cada bloqueante: `{ n, status, sharedTokens, laneTokens }`.
+//   - sharedTokens → tokens que este holder retiene Y `cand` también toca
+//                    (colisión literal de área).
+//   - laneTokens   → tokens serializantes que este holder retiene y que
+//                    bloquean a `cand` por CARRIL GLOBAL (`cand` toca algún
+//                    migration/ci/pbxproj, aunque sea otro distinto). Se
+//                    excluyen los que ya salen en `sharedTokens` para no
+//                    contar dos veces el mismo motivo.
+// Un holder aparece si tiene al menos uno de los dos no vacío.
+//
+// INVARIANTE con `touchesConflict` (el ÚNICO predicate de colisión, que
+// sigue siendo quien decide el `continue` de selectNext): esta función
+// devuelve una lista no vacía exactamente cuando aquel devuelve no-null —
+// mismos dos criterios, misma unión de tokens reclamados. No se usa como
+// gate (el gate sigue siendo `touchesConflict`, para que no puedan
+// divergir): solo ATRIBUYE.
+export function collisionBlockers(cand, holders) {
+  const touches = cand.touches || []
+  const candHasSerializing = touches.some((t) => SERIALIZING_TOUCHES.includes(t))
+  const normalized = (holders || []).map((h) => ({ n: h.n, status: h.status ?? null, touches: h.touches || [] }))
+  const anySerializingHeld = normalized.some((h) => h.touches.some((t) => SERIALIZING_TOUCHES.includes(t)))
+  // El carril solo está "activo" si el candidato entra en él Y hay alguien
+  // dentro: si no, un holder con touches:ci no bloquea a un candidato que no
+  // toca nada serializante.
+  const laneActive = candHasSerializing && anySerializingHeld
+  const out = []
+  for (const h of normalized) {
+    const sharedTokens = h.touches.filter((t) => touches.includes(t))
+    const laneTokens = laneActive
+      ? h.touches.filter((t) => SERIALIZING_TOUCHES.includes(t) && !sharedTokens.includes(t))
+      : []
+    if (sharedTokens.length || laneTokens.length) out.push({ n: h.n, status: h.status, sharedTokens, laneTokens })
+  }
+  return out
+}
+
 // collisionAgainstRunning: dado el candidato de menor orden que SÍ está
 // ready con deps mergeadas, decide si colisiona con el trabajo en vuelo —
 // token compartido literal, o conflicto de serialización cruzada
@@ -141,6 +198,13 @@ function collisionAgainstRunning(cand, inFlight) {
   const conflict = touchesConflict(touches, claimedTouches, hasSerializingInRunning)
   if (!conflict) return null
 
+  // F16/H1: la atribución COMPLETA viaja siempre, junto a la vieja de un solo
+  // issue. Los campos `token`/`withIssue`/`withIssueStatus`/`runningToken` se
+  // conservan tal cual (los consumen tests y el mensaje de un único
+  // bloqueante, que no cambia); `blockers` es lo que permite decir la verdad
+  // cuando son varios.
+  const blockers = collisionBlockers(cand, inFlight)
+
   // withIssueStatus (F13/H2): la atribución ya no basta con el NÚMERO del
   // issue que retiene el token — hace falta EN QUÉ ESTADO lo retiene.
   // "colisiona con #7 (in-progress)" y "colisiona con #7 (in-review, su PR
@@ -150,12 +214,12 @@ function collisionAgainstRunning(cand, inFlight) {
   // hacen), se dice que no se sabe en vez de afirmar 'in-progress'.
   if (conflict.kind === 'token') {
     const withIssue = inFlight.find((i) => (i.touches || []).includes(conflict.token))
-    return { reason: 'collision', kind: 'token', issue: cand.n, token: conflict.token, withIssue: withIssue ? withIssue.n : null, withIssueStatus: withIssue?.status ?? null }
+    return { reason: 'collision', kind: 'token', issue: cand.n, token: conflict.token, withIssue: withIssue ? withIssue.n : null, withIssueStatus: withIssue?.status ?? null, blockers }
   }
 
   const withIssue = inFlight.find((i) => (i.touches || []).some((t) => SERIALIZING_TOUCHES.includes(t)))
   const runningToken = (withIssue?.touches || []).find((t) => SERIALIZING_TOUCHES.includes(t))
-  return { reason: 'collision', kind: 'serializing', issue: cand.n, token: conflict.token, runningToken, withIssue: withIssue ? withIssue.n : null, withIssueStatus: withIssue?.status ?? null }
+  return { reason: 'collision', kind: 'serializing', issue: cand.n, token: conflict.token, runningToken, withIssue: withIssue ? withIssue.n : null, withIssueStatus: withIssue?.status ?? null, blockers }
 }
 
 // explainSelectionGap: la misma cadena de motivos que explainNoSelection,
@@ -224,7 +288,23 @@ function explainSelectionGap(issues, { mergedIssues = [], inFlight = [], depStat
     // estado más común al final de un epic es "todo en revisión, nada ready",
     // y el mensaje lo pintaba como si no se hubiera empezado. `inReview` es
     // la lista de issues parados ahí — cero significa de verdad cero.
-    return { reason: 'none-ready', inReview: (issues || []).filter((i) => i.status === 'in-review').map((i) => i.n) }
+    // F16/H1, misma lente: "no hay nada que despachar TODAVÍA" manda esperar
+    // algo que, con todo en `status:backlog`, no va a llegar nunca solo.
+    // Promover backlog → ready es un gate HUMANO deliberado (ct-groom hasta
+    // imprime un recordatorio sobre ello al terminar un groom). Verificado
+    // sin arreglar: con tres issues en backlog el mensaje era exactamente el
+    // mismo que con CERO issues abiertos — dos situaciones con remedios
+    // opuestos (promover vs. groomear / revisar --repo), indistinguibles.
+    // `total` es el número de issues ABIERTOS que llegaron hasta aquí: cero
+    // significa que no hay nada que mirar, no que todo esté hecho.
+    const all = issues || []
+    return {
+      reason: 'none-ready',
+      inReview: all.filter((i) => i.status === 'in-review').map((i) => i.n),
+      backlog: all.filter((i) => i.status === 'backlog').map((i) => i.n),
+      inProgress: all.filter((i) => i.status === 'in-progress').map((i) => i.n),
+      total: all.length,
+    }
   }
   if (readyDepsMet.length === 0) {
     const merged = new Set(mergedIssues)

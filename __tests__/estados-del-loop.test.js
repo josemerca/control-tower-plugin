@@ -167,7 +167,11 @@ describe('F13/H2 — la ventana del cerrojo llega hasta el merge, no hasta el PR
     })
     const r = runNext(['--repo', 'o/r', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fx })
     expect(r.out).toMatch(/En vuelo: ninguno/)
-    expect(r.out).toMatch(/Sin mergear, reteniendo tokens \(status:in-review, NO ocupan cap\): #5 \[touches:db\]/)
+    // F16/H1: la etiqueta de la línea lleva ahora el RECUENTO, porque la
+    // enumeración pasó a estar acotada (treinta slices en revisión hacían de
+    // esta línea un muro que empujaba el motivo del bloqueo fuera de
+    // pantalla). El recuento nunca se recorta; los nombres, sí.
+    expect(r.out).toMatch(/Sin mergear, reteniendo tokens \(1, status:in-review, NO ocupan cap\): #5 \[touches:db\]/)
   })
 
   it('dispatch-check aborta el claim contra un in-review, y lo dice con su estado', () => {
@@ -457,16 +461,29 @@ describe('F13/H4 — "cerrado" no es "mergeado", y ahora se nota', () => {
     })
     const r = runNext(['--repo', 'o/r', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fx })
     expect(r.code).toBe(0)
-    expect(r.out).toMatch(/Sí hay 2 en status:in-review \(#5, #6\)/)
+    // F16/H1: "Sí hay N" pasó a "Hay N" al unificarse con las otras dos
+    // voces del mismo mensaje (backlog e in-progress) — el "sí" era un
+    // contraste con la frase corta que ya no existe. El contenido que este
+    // test defiende (el recuento y los números concretos) no cambia.
+    expect(r.out).toMatch(/Hay 2 en status:in-review \(#5, #6\)/)
     expect(r.out).toMatch(/entregado pero SIN MERGEAR/)
     expect(r.out).toMatch(/--reopen/)
     expect(r.out).not.toMatch(/no hay nada que despachar todavía/)
   })
 
-  it('sin ningún in-review, "no hay nada ready" sigue siendo la frase corta de siempre', () => {
+  // F16/H1 cambió la frase de esta rama: "no hay nada que despachar TODAVÍA"
+  // era una instrucción a ESPERAR, y con todo en status:backlog no hay nada
+  // que esperar — promover backlog → ready es el gate humano del loop, no un
+  // evento que llegue solo. Lo que este test defendía (que la voz de
+  // in-review NO aparezca cuando no hay ningún in-review) se conserva
+  // intacto; lo que se retira es la afirmación equivocada.
+  it('sin ningún in-review, no se cuela la voz de in-review — y el backlog deja de leerse como "espera"', () => {
     const fx = JSON.stringify({ issues: [{ n: 5, order: 1, status: 'backlog', deps: [], touches: [], name: 'a' }], mergedIssues: [] })
     const r = runNext(['--repo', 'o/r', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fx })
     expect(r.code).toBe(0)
-    expect(r.out).toMatch(/No hay ningún issue en status:ready — no hay nada que despachar todavía\./)
+    expect(r.out).toMatch(/No hay ningún issue en status:ready\./)
+    expect(r.out).not.toMatch(/in-review/)
+    expect(r.out).toMatch(/1 en status:backlog \(#5\)/)
+    expect(r.out).not.toMatch(/no hay nada que despachar todavía/)
   })
 })
