@@ -391,6 +391,39 @@ describe('F15/H3 — el acuse admite explicación humana sin dejar de avisar', (
     expect(parseAcks('# Acuses\n\n').prosaSinAcuses).toBe(false)
   })
 
+  // Hallazgo al atacar esta misma implementación: un acuse dentro de un fence
+  // (o detrás de un fence que se abrió y nadie cerró, que se traga el resto
+  // del fichero) no se parsea Y TAMPOCO era "prosa", así que el fichero salía
+  // en silencio absoluto. Es exactamente el modo de fallo que este aviso
+  // existe para cubrir.
+  it('un acuse tragado por un bloque de código tampoco pasa en silencio', () => {
+    const r = parseAcks('```\nclaim: 2026-07-28 — motivo\n```\n')
+    expect(r.acks.size).toBe(0)
+    expect(r.problems).toEqual([])
+    expect(r.prosaSinAcuses).toBe(true)
+  })
+
+  it('un fence abierto y nunca cerrado se traga el resto — y se dice', () => {
+    const r = parseAcks('```\nclaim: 2026-07-28 — motivo\n')
+    expect(r.acks.size).toBe(0)
+    expect(r.prosaSinAcuses).toBe(true)
+  })
+
+  it('sin ninguna señal viva que silenciar, el aviso NO sale: sería ruido puro', () => {
+    // La condición que importa no es "tu fichero no silencia nada", es
+    // "podrías creer que has callado ESTO y no lo has hecho". Sin un ESTO, no
+    // hay a quién engañar.
+    const limpios = [{ path: 'AGENTS.md', content: '# Repo\nNada que choque con el loop.\n' }]
+    const text = formatFindings(detectConventions({ docs: limpios, files: [] }), { ackProsaSinAcuses: true })
+    expect(text).not.toMatch(/NO silencia ninguna señal/)
+  })
+
+  it('un fichero que solo tiene el razonamiento comentado tampoco silencia nada, y se dice', () => {
+    const r = parseAcks('<!--\nlo decidimos en julio\n-->\n')
+    expect(r.acks.size).toBe(0)
+    expect(r.prosaSinAcuses).toBe(true)
+  })
+
   it('el aviso vivo invita a escribir prosa (si no, nadie sabe que ahora se puede)', () => {
     const docs = [{ path: 'AGENTS.md', content: '## Claim\nPrimer paso del agente: `./scripts/dispatch-check.sh <issue#>`\n' }]
     const text = formatFindings(detectConventions({ docs, files: [] }))

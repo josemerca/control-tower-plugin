@@ -589,12 +589,21 @@ export function parseAcks(content) {
     const line = rawLine.replace(/\r$/, '')
     const t = line.trim()
     if (inComment) {
+      if (t) sawProse = true
       if (t.includes('-->')) inComment = false
       return
     }
     if (/^(```|~~~)/.test(t)) { fenced = !fenced; return }
-    if (fenced || !t || t.startsWith('#')) return
+    // Atacando esta misma implementación: un acuse DENTRO de un bloque de
+    // código (o de un fence que alguien abrió y no cerró, que se traga todo
+    // lo que venga detrás) se ignoraba, y como no era "prosa" tampoco
+    // disparaba el aviso de `prosaSinAcuses` — silencio total sobre un
+    // fichero que el humano cree que silencia algo. Cuenta como contenido: no
+    // se parsea (un fence es un fence), pero deja de ser invisible.
+    if (fenced) { if (t) sawProse = true; return }
+    if (!t || t.startsWith('#')) return
     if (t.startsWith('<!--')) {
+      sawProse = true
       if (!t.includes('-->')) inComment = true
       return
     }
@@ -703,7 +712,12 @@ export function formatFindings(findings, { where = 'este repo', ackProblems = []
   // fichero ENTERO de prosa no produce ni acuses ni avisos: exactamente el
   // estado en que alguien cree haber silenciado algo y no lo ha hecho, que es
   // el fallo que este parser no se puede permitir. Se dice.
-  if (ackProsaSinAcuses) {
+  //
+  // Solo cuando hay avisos VIVOS: si no hay ninguna señal que silenciar, que
+  // el fichero no silencie nada da igual, y decirlo en cada despacho sería
+  // ruido en un repo que no tiene ningún problema. La condición que importa
+  // es "podrías creer que has callado ESTO, y no lo has hecho".
+  if (ackProsaSinAcuses && live.length) {
     out.push(
       `  aviso: \`${ACK_PATH}\` existe y tiene contenido, pero NO silencia ninguna señal — todo lo que hay ` +
         'dentro se ha leído como prosa. Un acuse es una línea que empieza por el nombre de la señal: ' +

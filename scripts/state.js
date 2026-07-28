@@ -423,8 +423,16 @@ const STATE_REL_PATH = '.agent/STATE.md'
 // countWorkCommits: de los commits de `stateSha..headSha`, cuántos tocan algo
 // que no sea el propio STATE.md. `known: false` = git no contestó, y quien
 // llama vuelve al conteo total (bloquear).
+// Tope del análisis detallado. El runner de git de hooks/stop.js usa
+// `spawnSync` sin `maxBuffer`, o sea el default de Node (1 MiB): un rango con
+// cientos de commits y muchos ficheros lo desborda, y entonces el runner
+// devuelve status -1 y caemos al conteo total igualmente. El tope solo hace
+// DETERMINISTA ese límite en vez de dejarlo al tamaño del output — y por
+// encima de él "te has quedado muy atrás" es cierto de todas formas.
+const WORK_SCAN_MAX = 200
+
 function countWorkCommits(git, stateSha, headSha, total) {
-  if (!(total > 0)) return { work: total, bookkeeping: 0, known: false }
+  if (!(total > 0) || total > WORK_SCAN_MAX) return { work: total, bookkeeping: 0, known: false }
   // Sentinela propio (`commit:<sha>`) en vez de fiarse del formato por
   // defecto: `--name-only` sin `--format` intercala el mensaje del commit, y
   // un mensaje que contuviera una línea con pinta de ruta rompería el parseo.

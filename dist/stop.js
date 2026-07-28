@@ -7406,8 +7406,9 @@ function branchesContaining(git2, stateSha, currentBranch) {
   return { containers: remote.slice(0, 5), containersKnown: true };
 }
 var STATE_REL_PATH = ".agent/STATE.md";
+var WORK_SCAN_MAX = 200;
 function countWorkCommits(git2, stateSha, headSha2, total) {
-  if (!(total > 0)) return { work: total, bookkeeping: 0, known: false };
+  if (!(total > 0) || total > WORK_SCAN_MAX) return { work: total, bookkeeping: 0, known: false };
   const r = git2(["log", "--format=commit:%H", "--name-only", "--no-renames", `${stateSha}..${headSha2}`]);
   if (r.status !== 0) return { work: total, bookkeeping: 0, known: false };
   let work = 0;
