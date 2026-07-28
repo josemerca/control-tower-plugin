@@ -10,9 +10,10 @@
 //   exit 1  → NO se ha podido escanear (uso incorrecto, directorio ilegible).
 //             stderr explica por qué. El caller NUNCA debe leer esto como
 //             "repo limpio": ese es justo el falso negativo caro.
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { readdirSync, statSync } from 'node:fs'
 import { join, relative, sep } from 'node:path'
-import { detectConventions, formatFindings } from './conventions.js'
+import { detectConventions, formatFindings, ACK_PATH } from './conventions.js'
+import { readRepoDocs, readAck, MAX_LINKED_DOCS } from './conventions-io.js'
 
 const target = process.argv[2]
 if (!target) {
@@ -91,20 +92,37 @@ try {
   process.exit(1)
 }
 
-// Los documentos donde vive la instrucción que el agente despachado va a leer.
-const DOC_NAMES = ['AGENTS.md', 'CLAUDE.md']
-const docs = []
-for (const name of DOC_NAMES) {
-  try {
-    docs.push({ path: name, content: readFileSync(join(target, name), 'utf8') })
-  } catch {
-    // No existe (o no se puede leer): no es una señal de nada.
-  }
-}
+// Los documentos donde vive la instrucción que el agente despachado va a leer:
+// AGENTS.md, CLAUDE.md y —a UN salto— los `.md` del repo que ellos citan. F14:
+// escanear solo los dos raíz dejaba viva la orden vieja en el documento que las
+// dos guías llamaban "referencia completa", o sea a un clic del agente.
+const { docs, failures, truncated: linksTruncated } = readRepoDocs(target)
+const { acks, problems: ackProblems, unreadable: ackUnreadable } = readAck(target)
 
-const findings = detectConventions({ docs, files })
-const text = formatFindings(findings, { where: 'este repo' })
+const findings = detectConventions({ docs, files, acks })
+const text = formatFindings(findings, { where: 'este repo', ackProblems, ackUnreadable })
 if (text) console.log(text)
+for (const f of failures) {
+  console.log(`  aviso: no se ha podido leer la documentación del repo (${f}). NO lo leas como "ahí no hay nada": no se ha mirado.`)
+}
+// Higiene del acuse, y solo aquí: /ct-init hace el escaneo COMPLETO (las tres
+// señales), así que es el único momento en que "esta línea ya no silencia nada"
+// es una afirmación honesta. Sin esto el fichero de acuse se convierte en un
+// agujero permanente: alguien acusa `estado` en julio, en septiembre resuelve el
+// fichero de estado, y la línea sigue ahí tapando cualquier estado ajeno futuro.
+for (const [id, ack] of acks) {
+  if (findings.some((f) => f.id === id)) continue
+  console.log(
+    `  nota: ${ACK_PATH}:${ack.line} acusa \`${id}\` pero ya no hay ninguna señal de ese tipo en este repo. ` +
+      'Bórrala: mientras esté, silencia por adelantado cualquier convención de ese tipo que aparezca mañana.'
+  )
+}
+if (linksTruncated) {
+  console.log(
+    `  nota: AGENTS.md/CLAUDE.md citan más de ${MAX_LINKED_DOCS} documentos \`.md\` del repo y solo se han ` +
+      'mirado los primeros. Puede quedar una instrucción vieja en los que no se han leído.'
+  )
+}
 if (truncated) {
   console.log(
     `  nota: el escaneo se cortó a los ${MAX_ENTRIES} ficheros (o ${MAX_DEPTH} niveles de profundidad), ` +

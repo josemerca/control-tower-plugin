@@ -84,8 +84,13 @@ describe('detectConventions — el bloque que siembra ct-init no cuenta como con
     expect(detectConventions({ docs: [doc(`# A\n${own}\n`)], files: [] })).toEqual([])
   })
 
+  // F14: la instrucción de estos dos fixtures es una INVOCACIÓN
+  // (`./scripts/dispatch-check.sh <issue#>`), no la simple mención del nombre
+  // del script. Lo que estos tests prueban es la PODA del bloque propio, no la
+  // gramática de la regla de claim; con una mención suelta probarían las dos
+  // cosas a la vez y el fallo de una sería indistinguible del de la otra.
   it('lo que hay FUERA del bloque sigue contando, y su número de línea es el del fichero real', () => {
-    const content = `# A\n${own}\n- claim propio: \`scripts/dispatch-check.sh\`\n`
+    const content = `# A\n${own}\n- claim propio: \`./scripts/dispatch-check.sh <issue#>\`\n`
     const r = detectConventions({ docs: [doc(content)], files: [] })
     expect(ids(r)).toEqual(['claim'])
     // El bloque ocupa las líneas 2..5; la instrucción está en la 6 del fichero
@@ -99,7 +104,7 @@ describe('detectConventions — el bloque que siembra ct-init no cuenta como con
     // Caso real: ct-init tiene un guardián dedicado a los rastros parciales.
     // Podar "desde la apertura hasta el final" escondería todas las
     // convenciones que vinieran después — un falso negativo, el error caro.
-    const content = `# A\n${CONTRACT_MARKER_OPEN}\n- bla\n- claim propio: \`scripts/dispatch-check.sh\`\n`
+    const content = `# A\n${CONTRACT_MARKER_OPEN}\n- bla\n- claim propio: \`./scripts/dispatch-check.sh <issue#>\`\n`
     expect(ids(detectConventions({ docs: [doc(content)], files: [] }))).toEqual(['claim'])
   })
 
