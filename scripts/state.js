@@ -375,6 +375,83 @@ function branchesContaining(git, stateSha, currentBranch) {
   return { containers: remote.slice(0, 5), containersKnown: true }
 }
 
+// ===========================================================================
+// F15/H4 — EL GUARD DE FRESCURA ERA INSATISFACIBLE POR CONSTRUCCIÓN.
+//
+// `behind` bloqueaba el cierre de turno cuando `last_commit` se había quedado
+// por debajo de HEAD. Pero el commit que actualiza `STATE.md` INCLUYE a
+// `STATE.md`: escribes `last_commit: <HEAD>`, lo commiteas, y el acto de
+// commitearlo crea un SHA nuevo — así que el fichero vuelve a estar "1 commit
+// por detrás" en el instante exacto en que lo arreglas. Volver a commitear
+// genera el commit que lo vuelve a invalidar. Regresión infinita.
+//
+// Reproducido contra el `dist/stop.js` de dac5326, dos vueltas seguidas:
+//   HEAD=2926a17 last_commit=192baa2 → block "hay 1 commit … por encima"
+//   HEAD=3346b8e last_commit=2926a17 → block "hay 1 commit … por encima"
+// Es el hermano del caso que F12 arregló (`diverged`): allí el bloqueo era
+// insatisfacible porque la única salida era pisar el handoff de otra sesión;
+// aquí lo es porque el propio acto de obedecerlo lo reintroduce. F12 cubrió
+// `diverged`, `ahead`, `orphan` y `unresolvable`, y dejó `behind` bloqueando
+// siempre — correcto para trabajo de verdad, y justo lo que falla aquí.
+//
+// EL ARREGLO: `last_commit` se entiende como el último commit DE TRABAJO del
+// slice, no el del apunte. Un commit que toca EXCLUSIVAMENTE
+// `.agent/STATE.md` no cuenta para el conteo de "te has quedado atrás".
+//
+// POR QUÉ ASÍ Y NO "no bloquear si el desfase es 1": el desfase de 1 es un
+// síntoma, no la condición. Un slice puede acumular dos apuntes seguidos (se
+// corrige el `next_action` y se vuelve a commitear) y seguir sin nada de
+// trabajo pendiente de registrar; y al revés, UN solo commit de código sin
+// registrar tiene que bloquear igual. Lo que distingue los dos casos es QUÉ
+// tocan los commits, no cuántos son.
+//
+// FAIL CLOSED, TRES VECES. Cada duda se resuelve BLOQUEANDO, porque el fallo
+// caro aquí es dejar pasar trabajo real sin registrar:
+//   1. un commit que toca `.agent/STATE.md` Y ADEMÁS cualquier otra cosa
+//      cuenta como trabajo — si no, bastaría con colar el código dentro del
+//      commit del apunte para saltarse el guard entero;
+//   2. un commit del que git no lista NINGÚN fichero (un merge, un commit
+//      vacío) cuenta como trabajo. `git log --name-only` no lista ficheros
+//      para un merge, y un merge sí puede traer trabajo de verdad;
+//   3. si la consulta a git falla, se usa el conteo total de siempre y se
+//      bloquea igual que antes de este cambio.
+// Solo `.agent/STATE.md`, no `.agent/` entero: `conventions-ack.md` es un
+// registro de decisiones, no bookkeeping, y merece bloquear si no se registra.
+// ===========================================================================
+const STATE_REL_PATH = '.agent/STATE.md'
+
+// countWorkCommits: de los commits de `stateSha..headSha`, cuántos tocan algo
+// que no sea el propio STATE.md. `known: false` = git no contestó, y quien
+// llama vuelve al conteo total (bloquear).
+function countWorkCommits(git, stateSha, headSha, total) {
+  if (!(total > 0)) return { work: total, bookkeeping: 0, known: false }
+  // Sentinela propio (`commit:<sha>`) en vez de fiarse del formato por
+  // defecto: `--name-only` sin `--format` intercala el mensaje del commit, y
+  // un mensaje que contuviera una línea con pinta de ruta rompería el parseo.
+  // Con `--format=commit:%H` lo único que se imprime es el sha y los ficheros.
+  const r = git(['log', '--format=commit:%H', '--name-only', '--no-renames', `${stateSha}..${headSha}`])
+  if (r.status !== 0) return { work: total, bookkeeping: 0, known: false }
+  let work = 0
+  let bookkeeping = 0
+  let files = null // null = todavía no hemos visto ningún commit
+  const cerrar = () => {
+    if (files === null) return
+    // Sin ficheros listados (merge, commit vacío) → cuenta como trabajo.
+    if (files.length > 0 && files.every((f) => f === STATE_REL_PATH)) bookkeeping++
+    else work++
+  }
+  for (const line of String(r.stdout || '').split('\n')) {
+    if (line.startsWith('commit:')) { cerrar(); files = []; continue }
+    const f = line.trim()
+    if (f && files !== null) files.push(f)
+  }
+  cerrar()
+  // Control de sanidad: si el parseo no vio los mismos commits que
+  // `rev-list --count`, no nos fiamos de él.
+  if (work + bookkeeping !== total) return { work: total, bookkeeping: 0, known: false }
+  return { work, bookkeeping, known: true }
+}
+
 export function describeStopRelation({ headSha, lastCommit, git, branch = '' }) {
   const raw = lastCommit == null ? '' : String(lastCommit).trim()
   const base = { raw, headSha, branch, stateSha: '', count: 0, mergeBase: '', containers: [], containersKnown: false }
@@ -396,7 +473,14 @@ export function describeStopRelation({ headSha, lastCommit, git, branch = '' }) 
   if (stateIsAncestor === 0) {
     const c = git(['rev-list', '--count', `${stateSha}..${headSha}`])
     const n = c.status === 0 ? Number.parseInt(String(c.stdout || '').trim(), 10) : NaN
-    return { ...out, kind: 'behind', count: Number.isFinite(n) ? n : 0 }
+    const total = Number.isFinite(n) ? n : 0
+    // F15/H4: de esos commits, cuántos son TRABAJO y cuántos son el propio
+    // apunte del estado. Ver countWorkCommits para el porqué.
+    const { work, bookkeeping, known } = countWorkCommits(git, stateSha, headSha, total)
+    if (known && work === 0 && bookkeeping > 0) {
+      return { ...out, kind: 'behind-bookkeeping', count: 0, bookkeeping, total }
+    }
+    return { ...out, kind: 'behind', count: known ? work : total, bookkeeping: known ? bookkeeping : 0, total }
   }
 
   const headIsAncestor = git(['merge-base', '--is-ancestor', headSha, stateSha]).status
@@ -440,16 +524,32 @@ export function classifyStopState({ relation, stopHookActive }) {
 
   if (rel.kind === 'unset' || rel.kind === 'same') return none
 
+  // F15/H4: el estado solo va por detrás de commits de APUNTE (los que tocan
+  // exclusivamente `.agent/STATE.md`). No hay nada de trabajo sin registrar, y
+  // es el estado NORMAL en que queda cualquier turno que actualice y commitee
+  // su STATE.md: el commit que lo arregla lo deja, por construcción, un commit
+  // por detrás. Ni bloquea ni avisa — un aviso en cada cierre de turno sería
+  // ruido puro, y `last_commit` apuntando al último commit de TRABAJO es
+  // además la lectura más útil de ese campo, no una degradación.
+  if (rel.kind === 'behind-bookkeeping') return { ...none, kind: 'behind-bookkeeping' }
+
   if (rel.kind === 'behind') {
     const n = rel.count
     const cuantos = n === 1 ? '1 commit' : n > 1 ? `${n} commits` : 'commits'
+    // Si además hay apuntes por medio, se dice: si no, el conteo no cuadra con
+    // lo que `git log` enseña y parece un error del guard.
+    const b = rel.bookkeeping || 0
+    const nota = b > 0
+      ? ` (más ${b === 1 ? '1 commit que solo toca' : `${b} commits que solo tocan`} \`.agent/STATE.md\`, que no cuenta${b === 1 ? '' : 'n'}: un apunte no es trabajo sin registrar)`
+      : ''
     return {
       block: true,
       kind: 'behind',
       reason:
-        `\`.agent/STATE.md\` se ha quedado atrás: hay ${cuantos} en ${whereAmI(rel)} por encima de su \`last_commit\` ` +
+        `\`.agent/STATE.md\` se ha quedado atrás: hay ${cuantos} de trabajo${nota} en ${whereAmI(rel)} por encima de su \`last_commit\` ` +
         `(${shortSha(rel.stateSha)}), que sí es un ancestro de HEAD (${shortSha(rel.headSha)}). ` +
         'Actualiza STATE.md (you_are_here, next_action, tasks[], last_commit) antes de cerrar el turno, para que la próxima sesión se hidrate correcta. ' +
+        'Commitear ese cambio NO te vuelve a dejar atrás: un commit que solo toca `.agent/STATE.md` no cuenta. ' +
         STOP_TAIL,
       systemMessage: '',
     }

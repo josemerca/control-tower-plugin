@@ -3,6 +3,10 @@ task: ""
 status: not_started
 branch: ""
 base: main
+# last_commit: el último commit DE TRABAJO de este slice. El hook de Stop
+# bloquea el cierre de turno si hay trabajo por encima de él sin registrar —
+# pero un commit que solo toca este fichero NO cuenta, así que commitear la
+# actualización de STATE.md no te vuelve a dejar atrás.
 last_commit: ""
 github_issue: null
 you_are_here: ""
