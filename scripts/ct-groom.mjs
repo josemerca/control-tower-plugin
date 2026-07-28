@@ -664,6 +664,7 @@ query($id: ID!) {
   node(id: $id) {
     ... on ProjectV2 {
       fields(first: 50) {
+        totalCount
         nodes {
           ... on ProjectV2IterationField {
             id
@@ -722,6 +723,16 @@ function ensureProjectMeta() {
   const nodes = fieldsRaw?.data?.node?.fields?.nodes || []
   const sprintField = nodes.find((n) => n && n.name === 'Sprint')
   if (!sprintField) {
+    // F18/H6 — "no vino en la respuesta" NO es "no existe". `fields(first: 50)`
+    // es una lectura ACOTADA: un project con más de 50 campos puede tener su
+    // campo Sprint fuera de la primera página, y el mensaje de siempre
+    // afirmaría, con total aplomo, que el project no lo tiene. `totalCount`
+    // (pedido en la misma query, coste cero) distingue las dos cosas.
+    const totalFields = fieldsRaw?.data?.node?.fields?.totalCount
+    if (Number.isInteger(totalFields) && totalFields > nodes.length) {
+      console.error(`no se ha podido comprobar si el project ${project} tiene un campo de iteración "Sprint": la consulta solo trajo ${nodes.length} de sus ${totalFields} campos (lectura acotada a 50 por página). NO se afirma que no exista — no se ha visto entero. Reduce el número de campos del project, o repórtalo para que la consulta pagine.`)
+      process.exit(1)
+    }
     console.error(`el project ${project} no tiene un campo de iteración llamado "Sprint" — créalo antes de usar --project`)
     process.exit(1)
   }
@@ -797,14 +808,48 @@ function addToProjectWithSprint(issueUrl, order) {
 // Items ya presentes en el Project v2 — se listan una sola vez por corrida
 // (igual que milestones/existingIssues abajo) para poder detectar issues
 // preexistentes a los que, por una interrupción previa, les falte el item
-// de project (ver hasProjectItem en project-fields.js). --limit alto: el
-// default de `gh project item-list` es 30, insuficiente en un sandbox/epic
-// con más slices que eso.
+// de project (ver hasProjectItem en project-fields.js).
+//
+// F18/H6 — ESTE ERA EL ÚLTIMO TOPE FIJO SIN DETECCIÓN DE TRUNCADO DEL PLUGIN,
+// Y LA LECCIÓN YA ESTABA ESCRITA AL LADO. `ct-next.mjs#loadIssues` explica que
+// no se usa `gh issue list --limit N` porque "un `--limit` fijo deja fuera
+// justo los issues VIEJOS", y unas líneas más abajo, en este mismo fichero, la
+// enumeración de issues dice que un tope fijo "reintroduciría el mismo fallo
+// por truncado". Aquí, en cambio, el tope se había SUBIDO de 30 a 200 —
+// alejando la trampa en vez de quitarla— y `existingProjectItems` se trataba
+// como completo pasara lo que pasara.
+//
+// La consecuencia no es un mensaje pobre: `hasProjectItem` (project-fields.js)
+// devuelve `false` para items que SÍ existen, así que /ct-groom vuelve a
+// añadirlos y el Project acaba con DUPLICADOS, en silencio.
+//
+// Se arregla sin paginar y sin llamadas de más en el caso normal: `gh project
+// item-list --format json` devuelve `{items, totalCount}` (verificado contra
+// gh 2.86 sobre un project real: `--limit 2` sobre 3 items devolvió
+// `items.length = 2, totalCount = 3`). Si el tope recortó, se repite la
+// consulta pidiendo exactamente lo que el propio GitHub dice que hay. Si aun
+// así viene corta, se ABORTA: seguir significaría duplicar items, y ése es
+// justo el daño que este bloque existe para evitar. Y si `totalCount` no
+// viene (una versión de gh que no lo exponga), se avisa de que el truncado no
+// se ha podido descartar — nunca se da por bueno en silencio.
+const PROJECT_ITEMS_PAGE = 200
 let existingProjectItems = []
 if (projectNum) {
   ensureProjectMeta()
+  const listItems = (limit) => JSON.parse(gh(['project', 'item-list', String(projectNum), '--owner', projectMeta.owner, '--limit', String(limit), '--format', 'json']))
   try {
-    const itemsRaw = JSON.parse(gh(['project', 'item-list', String(projectNum), '--owner', projectMeta.owner, '--limit', '200', '--format', 'json']))
+    let itemsRaw = listItems(PROJECT_ITEMS_PAGE)
+    let total = itemsRaw.totalCount
+    if (Number.isInteger(total) && (itemsRaw.items || []).length < total) {
+      itemsRaw = listItems(total)
+      total = Number.isInteger(itemsRaw.totalCount) ? itemsRaw.totalCount : total
+      if ((itemsRaw.items || []).length < total) {
+        console.error(`el project ${project} tiene ${total} items y solo se han podido leer ${(itemsRaw.items || []).length}: /ct-groom NO continúa. Con una lista incompleta, los items que no vinieron se tratarían como inexistentes y se volverían a añadir — duplicados en el Project, en silencio.`)
+        process.exit(1)
+      }
+    } else if (!Number.isInteger(total)) {
+      console.error(`aviso: esta versión de \`gh project item-list\` no devuelve \`totalCount\`, así que NO se ha podido descartar que la lista de items del project ${project} venga truncada en ${PROJECT_ITEMS_PAGE}. Si el project tiene más items que eso, los que falten se tratarán como inexistentes y se añadirán otra vez (duplicados).`)
+    }
     existingProjectItems = itemsRaw.items || []
   } catch (e) {
     console.error(`no se pudieron listar los items del project ${project}: ${e.message}`)

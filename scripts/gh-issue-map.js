@@ -718,6 +718,57 @@ export function closedNotCompleted(closedIssues) {
   }
   return out
 }
+
+// ============================================================================
+// F18/H2 — UN ISSUE CERRADO QUE CONSERVA SU LABEL `status:` DESAPARECE DEL
+// DISPATCHER SIN UNA PALABRA.
+//
+// `/ct-next` solo enumera issues ABIERTOS (state=open). Un issue cerrado con
+// `status:ready` todavía puesta deja de existir para el dispatcher: no se
+// selecciona, no cuenta en vuelo, y —lo grave— no se NOMBRA en ninguna parte.
+//
+// Lo que pasó en campo: el único slice despachable se cerró por accidente, y
+// la corrida siguiente cayó al siguiente `status:ready` del repo (otro epic,
+// sin milestone) y explicó con detalle por qué ÉSE no era despachable. El
+// operador leyó una explicación cuidadosa de algo irrelevante, sin una sola
+// pista de que su trabajo se había caído de la cola.
+//
+// LA TASA, medida (28-jul-2026, repo de producción, consulta paginada
+// COMPLETA — no una lista escrita a mano): 10 de 99 issues cerrados conservan
+// una label `status:` viva. Uno de cada diez. No es un accidente puntual:
+// cerrar el issue y quitarle su label son dos actos separados y NADA comprueba
+// el segundo, así que el residuo se acumula solo.
+//
+//   53, 54, 58, 63   COMPLETED  status:in-review
+//   155, 245         COMPLETED  status:in-progress
+//   156, 157, 161    COMPLETED  status:ready
+//   158              COMPLETED  status:blocked
+//
+// Esta función devuelve TODOS (incluidos los `in-review`) y no clasifica: la
+// separación entre "contradicción" y "final normal de un slice" es una
+// decisión de PRESENTACIÓN y vive en ct-next.mjs, donde está el mensaje. Aquí
+// solo se mira el dato, que además viaja YA en la misma llamada REST de
+// issues cerrados que `filterMergedIssues`/`closedNotCompleted` ya consumen:
+// coste de red CERO.
+//
+// Una label `status:` SIN valor (`status:` a secas, o `status: ` con espacio)
+// se descarta, con el mismo criterio y por el mismo motivo que `area:`/
+// `touches:` vacías en mapGhIssue: un token vacío no representa ningún estado.
+export function closedWithLiveStatus(closedIssues) {
+  const out = []
+  for (const i of (closedIssues || [])) {
+    const labels = (i.labels || [])
+      .map((l) => (typeof l === 'string' ? l : l?.name))
+      .filter((s) => typeof s === 'string')
+    const statusLabels = labels
+      .filter((l) => l.startsWith('status:'))
+      .map((l) => l.slice('status:'.length).trim())
+      .filter((s) => s.length > 0)
+    if (!statusLabels.length) continue
+    out.push({ n: i.number, statusLabels: [...new Set(statusLabels)].sort(), stateReason: i.stateReason ?? null })
+  }
+  return out
+}
 // ============================================================================
 
 // NO_MILESTONE_KEY / epicKeyOf (D1 finding 1): /ct-groom numera slices 1..N
@@ -863,5 +914,14 @@ export function buildDispatchInput(rawOpenIssues, rawClosedIssues) {
   // a `mergedIssues` (y no se recalcula en ct-next.mjs) porque las dos cosas
   // se derivan de la MISMA lista de issues cerrados: separarlas invitaría a
   // que una se filtrara y la otra no.
-  return { issues, mergedIssues, depStates: closedNotCompleted(rawClosedIssues), orderCollisions: collisions }
+  // closedStatusResidue (F18/H2): viaja aquí por el mismo motivo que
+  // `depStates` — se deriva de la MISMA lista de issues cerrados, y separarlo
+  // invitaría a que una de las dos derivaciones se filtrara y la otra no.
+  return {
+    issues,
+    mergedIssues,
+    depStates: closedNotCompleted(rawClosedIssues),
+    closedStatusResidue: closedWithLiveStatus(rawClosedIssues),
+    orderCollisions: collisions,
+  }
 }

@@ -8,6 +8,11 @@ import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
 import { parseStrictInt } from './argnum.js'
 import { shQuote } from './shquote.js'
 import { buildDispatchInput, NO_MILESTONE_KEY } from './gh-issue-map.js'
+import { parseStateSafe, readBlocked } from './state.js'
+import {
+  planClosureProbe, buildClosureQuery, parseClosureProbe,
+  formatSuspectClosureWarnings, formatMergedButOpenWarnings, formatClosureCoverageNote,
+} from './gh-closure.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 import { detectConventions, formatFindings } from './conventions.js'
 import { readRepoDocs, readAck } from './conventions-io.js'
@@ -1446,6 +1451,12 @@ function loadIssues() {
       // que de verdad tienen milestones distintos (uno simplemente no viajó
       // hasta aquí).
       milestone: i.milestone || null,
+      // labels (F18/H2): las labels de un issue CERRADO no se usaban para
+      // nada y se tiraban aquí. Son las que revelan el estado contradictorio
+      // "cerrado + `status:` viva" — el issue que se cayó de la cola de
+      // despacho sin que nadie lo dijera. Viajan en esta MISMA respuesta REST:
+      // conservarlas no cuesta ni una llamada más.
+      labels: i.labels || [],
       stateReason: i.state_reason ? String(i.state_reason).toUpperCase() : null,
     }))
   } catch (e) {
@@ -1507,6 +1518,113 @@ function formatStrayDepsWarnings(issues) {
     .map((i) => `aviso: #${i.n} tiene "merge-after ${i.strayDeps.map((d) => `#${d}`).join(', ')}" fuera de la sección "## Dependencias" — desde el hardening del dispatch, esto YA NO cuenta como dependencia real (se despacha igual). Si se pretendía como tal, muévelo dentro de la sección "## Dependencias", o bórralo si ya no aplica.`)
 }
 
+// ============================================================================
+// F18/H2 — el residuo de labels `status:` sobre issues CERRADOS.
+//
+// UN SOLO AVISO AGREGADO, y ésa es la decisión de diseño que importa. La tasa
+// medida en un repo de producción es 10 de 99 cerrados (ver el comentario de
+// gh-issue-map.js#closedWithLiveStatus): un aviso por issue serían diez líneas
+// en CADA corrida, para siempre, porque nadie limpia labels de issues
+// cerrados. Un aviso que sale diez veces no lo lee nadie, y eso es lo mismo
+// que no avisar. Una línea, con los números agrupados por estado y el remedio.
+//
+// `status:in-review` NO se cuenta como anomalía, y no es un olvido: cerrar un
+// slice desde `in-review` es el final NORMAL del flujo (`backlog → ready →
+// in-progress → in-review → cerrado`) y NADA en el loop quita esa label al
+// cerrar — ni `dispatch-check.mjs`, ni el hook, ni GitHub. Reportarlo como
+// contradicción convertiría cada slice bien terminado en una falsa alarma.
+// Pero su recuento SÍ sale: la primera medición de campo contó 6 de 10
+// precisamente por dejarse los cuatro `in-review` fuera, y un total que
+// esconde parte de lo que ha visto es la clase de dato que se vuelve a
+// descubrir dentro de dos rondas.
+//
+// El orden de los grupos es el de la CONSECUENCIA, no el del flujo: primero
+// `ready` (el que se cayó de la cola de despacho: el caso vivido en campo),
+// después `in-progress` (claims que nunca se soltaron), y al final el resto.
+const RESIDUO_ESTADO_TERMINAL = 'in-review'
+function formatClosedStatusResidueWarning(residue) {
+  const anomalos = (residue || []).filter((r) => !(r.statusLabels.length === 1 && r.statusLabels[0] === RESIDUO_ESTADO_TERMINAL))
+  const terminales = (residue || []).length - anomalos.length
+  if (!anomalos.length) {
+    return terminales
+      ? `${terminales} issue(s) cerrados conservan su label status:${RESIDUO_ESTADO_TERMINAL}: ése es el final NORMAL de un slice (nada le quita la label al cerrar), así que no se cuenta como anomalía — se dice para que el número no aparezca por sorpresa en una auditoría de labels.`
+      : null
+  }
+  const conEstado = (s) => anomalos.filter((r) => r.statusLabels.includes(s)).map((r) => r.n)
+  const listos = conEstado('ready')
+  const enCurso = conEstado('in-progress')
+  const yaContados = new Set([...listos, ...enCurso])
+  const resto = anomalos.filter((r) => !yaContados.has(r.n))
+  const partes = []
+  if (listos.length) {
+    partes.push(`${refsAcotadas(listos)} siguen en status:ready: estaban en la cola de despacho y se cayeron de ella sin una palabra — si esperabas que /ct-next despachara alguno de ésos, ésta es la explicación que ninguna otra línea te va a dar.`)
+  }
+  if (enCurso.length) {
+    partes.push(`${refsAcotadas(enCurso)} siguen en status:in-progress: son claims que nunca se soltaron (su worktree y su rama pueden seguir en disco).`)
+  }
+  if (resto.length) {
+    partes.push(`${refsAcotadas(resto.map((r) => r.n))} conservan ${[...new Set(resto.flatMap((r) => r.statusLabels))].map((s) => `status:${s}`).join(', ')}.`)
+  }
+  const notaTerminal = terminales
+    ? ` (Otros ${terminales} cerrados conservan status:${RESIDUO_ESTADO_TERMINAL}: ése es el final NORMAL de un slice —nada le quita la label al cerrar— y no cuentan como anomalía.)`
+    : ''
+  return `${anomalos.length} issue(s) CERRADOS conservan una label \`status:\` viva, y para /ct-next NO EXISTEN: este dispatcher solo barre issues ABIERTOS. ${partes.join(' ')} Cerrar el issue y quitarle su label son dos actos distintos y NADA comprueba el segundo, así que el residuo se acumula solo (medido en un repo real: 10 de 99 cerrados). Límpialos con \`gh issue edit <n> --repo ${repo} --remove-label status:<la que tenga>\`.${notaTerminal}`
+}
+
+// ============================================================================
+// F18/H3 — UN AGENTE QUE SE DECLARA BLOQUEADO DEJA SU CLAIM PUESTO PARA
+// SIEMPRE, y el dispatcher le dice al humano que hay alguien trabajándolo.
+//
+// El kickoff manda al agente marcar `blocked: {reason, unblock}` en su
+// `.agent/STATE.md` y PARAR. El issue se queda en `status:in-progress`:
+// retiene tokens de área/touches Y una plaza de `--cap`, indefinidamente. Y
+// no hay ninguna transición que el agente pueda ejecutar correctamente:
+//   - `stalenessNote` no lo señala: devuelve null en cuanto existen el
+//     worktree o la rama, y en un bloqueo existen los dos;
+//   - `--requeue` se NIEGA por diseño (exige que no queden ni worktree ni
+//     rama: F15, no suelta tokens de trabajo vivo sin mergear);
+//   - `--release` mentiría — diría que hay un PR listo para revisión;
+//   - y el campo `blocked` vive en un STATE.md que el dispatcher escribía al
+//     sembrar y NUNCA volvía a leer.
+//
+// El arreglo es de DISCO y sin red: el dispatcher sabe exactamente dónde está
+// ese fichero (`.worktrees/<n>/.agent/STATE.md`, la misma ruta que
+// `assessLocalLiveness` ya recorre) y `readBlocked` (state.js) ya sabe leerlo,
+// incluida la variante `status: blocked` que el propio state.js documenta como
+// el error de escritura más probable.
+//
+// Sale como aviso de primer nivel y no colgando de un mensaje de colisión: un
+// claim bloqueado retiene cap y tokens AUNQUE hoy no choque con nadie, así que
+// atarlo a que además haya una colisión sería esconderlo justo cuando todavía
+// se puede arreglar barato. Un fallo de lectura NO se calla como "no hay
+// bloqueo": mismo criterio que formatConventionWarnings.
+function formatBlockedClaimWarnings(issues) {
+  const out = []
+  for (const i of (issues || [])) {
+    if (i.status !== 'in-progress') continue
+    const path = `${repoRoot}/.worktrees/${i.n}/.agent/STATE.md`
+    if (!existsSync(path)) continue // sin STATE.md no hay nada que leer; el claim rancio ya lo cubre stalenessNote
+    let md
+    try {
+      md = readFileSync(path, 'utf8')
+    } catch (e) {
+      out.push(`#${i.n} está en status:in-progress y su worktree existe, pero no se ha podido leer ${path} (${e.message}): NO se ha comprobado si ese agente se declaró BLOQUEADO. No lo leas como "no lo está".`)
+      continue
+    }
+    const b = readBlocked(parseStateSafe(md).meta)
+    if (b.state === 'unreadable') {
+      out.push(`#${i.n} está en status:in-progress, pero el frontmatter de ${path} no se puede interpretar (${b.why}): NO se ha comprobado si ese agente se declaró BLOQUEADO.`)
+      continue
+    }
+    if (b.state !== 'blocked') continue
+    const motivo = b.reason ? `: «${b.reason}»` : ' (sin motivo declarado)'
+    const salida = b.unblock ? ` Para levantarlo, lo que el propio agente dejó escrito: «${b.unblock}».` : ''
+    const extras = (b.notes || []).length ? ` ${b.notes.join(' ')}` : ''
+    out.push(`#${i.n} está en status:in-progress —el dispatcher lo cuenta como trabajo en curso, ocupando una plaza de --cap y reteniendo sus tokens de área/touches— pero su propio .worktrees/${i.n}/.agent/STATE.md se declara BLOQUEADO${motivo}. No hay ningún agente avanzándolo, y NINGUNA transición del loop lo saca de ahí sola: la detección de claims rancios no lo ve (el worktree y la rama SÍ existen), \`--requeue\` se niega mientras existan, y \`--release\` mentiría (no hay PR). Esto lo decides tú: desbloquéalo, o abandónalo (borra .worktrees/${i.n} y la rama feat/${i.n} —comprueba antes que no pierdes trabajo sin pushear— y solo entonces \`node <plugin>/scripts/dispatch-check.mjs ${i.n} --repo ${repo} --requeue\`).${salida}${extras}`)
+  }
+  return out
+}
+
 const dispatchInput = loadIssues()
 // depStates (F13/H4): estado de los issues CERRADOS que NO cuentan como
 // mergeados. Solo existe en la ruta real (buildDispatchInput); el fixture de
@@ -1530,6 +1648,54 @@ const orderCollisions = dispatchInput.orderCollisions || []
 for (const w of formatOrderCollisions(orderCollisions)) console.error(w)
 for (const w of formatStatusAmbiguityWarnings(issues)) console.error(w)
 for (const w of formatStrayDepsWarnings(issues)) console.error(w)
+// F18/H2 — el residuo `cerrado + status: viva`. `|| []` por el mismo motivo
+// que `depStates`: solo existe en la ruta real (buildDispatchInput); un
+// fixture sin el campo significa "no se ha mirado", nunca "está limpio".
+{
+  const w = formatClosedStatusResidueWarning(dispatchInput.closedStatusResidue || [])
+  if (w) warn(w)
+}
+// F18/H3 — claims cuyo propio STATE.md se declara BLOQUEADO. Va por `warn()`
+// (y no por `console.error` a pelo como los tres de arriba) a propósito: es
+// exactamente el tipo de cosa que se pierde en medio de cuarenta líneas de
+// plan y necesita salir también en el recap del final.
+for (const w of formatBlockedClaimWarnings(issues)) warn(w)
+
+// ============================================================================
+// F18/H1 + H4 — CÓMO SE CERRÓ CADA DEPENDENCIA, Y QUÉ RAMA SE MERGEÓ DE
+// VERDAD. Una sola llamada GraphQL, con alias, y solo si hay algo que
+// preguntar. Ver scripts/gh-closure.js para la medición completa (97 issues,
+// 18,8 KB de query, 2,8 s) y para por qué esto es un DETECTOR y nunca un gate.
+//
+// En modo fixture no se hace: el fixture trae `issues`/`mergedIssues` ya
+// mapeados y sin ninguna correspondencia con un repo real, así que preguntar
+// por ellos consultaría issues ajenos. Lo mismo que hace formatConventionWarnings.
+if (!fx) {
+  const plan = planClosureProbe({ issues, mergedIssues })
+  const query = buildClosureQuery(repo, plan)
+  if (query) {
+    let raw = null
+    try {
+      raw = JSON.parse(gh(['api', 'graphql', '-f', `query=${query}`]))
+    } catch (e) {
+      // Nunca aborta: un detector que puede fallar no puede tener veto sobre
+      // el trabajo. Pero tampoco se calla — el silencio se leería como
+      // "comprobado y limpio", que es la mentira exacta que esta ronda
+      // persigue.
+      warn(`no se ha podido comprobar cómo se cerraron las dependencias ya satisfechas (ni si la rama de un slice en revisión está mergeada): ${e.message}. El despacho sigue con el criterio de siempre (una dep cuenta si su issue está cerrado como *completed*); NO lo leas como "comprobado y correcto".`)
+    }
+    if (raw) {
+      if (Array.isArray(raw.errors) && raw.errors.length) {
+        warn(`la comprobación de cierres devolvió errores de GraphQL (${raw.errors.map((x) => x?.message || 'sin mensaje').join('; ')}); lo que no vino en la respuesta queda SIN comprobar.`)
+      }
+      const { closers, mergedPr } = parseClosureProbe(raw, plan)
+      for (const w of formatSuspectClosureWarnings(closers, plan.dependents)) warn(w)
+      for (const w of formatMergedButOpenWarnings(mergedPr, repo)) warn(w)
+    }
+    const cobertura = formatClosureCoverageNote(plan)
+    if (cobertura) warn(cobertura)
+  }
+}
 // F11, parte B — el mismo hallazgo que hizo que ct-init deje de bootstrapear
 // encima de convenciones ajenas en silencio, pero en el momento en que de
 // verdad muerde: el DESPACHO. El kickoff que se le da a cada agente le manda

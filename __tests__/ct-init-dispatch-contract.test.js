@@ -225,14 +225,20 @@ describe('contrato §9 (F13): lo que promete coincide con lo que el código hace
     expect(planDispatch([holder, cand], { mergedIssues: [], cap: 1 }).selected.map((i) => i.n)).toEqual([2])
   })
 
-  it('enumera las DOS trampas de "cerrado ≠ mergeado", incluida la que no se detecta', () => {
+  it('enumera las DOS trampas de "cerrado ≠ mergeado" — y la segunda ya no se despacha como "no se detecta" (F18)', () => {
     const a = flat(seed())
     expect(a).toMatch(/not planned/)
     expect(a).toMatch(/para siempre/i)
-    // La dirección opuesta, que es la que el plugin NO puede detectar: hay
-    // que decirlo, no callarlo.
-    expect(a).toMatch(/no se detecta/i)
-    expect(a).toMatch(/completed.{0,120}sin haber mergeado|sin haber mergeado.{0,120}completed/i)
+    // La dirección opuesta sigue enumerada…
+    expect(a).toMatch(/completed.{0,200}sin que se haya mergeado|sin que se haya mergeado.{0,200}completed/i)
+    // …pero F18 falsificó las DOS mitades de la excusa con la que el v7 la
+    // dejaba fuera ("no se detecta" + "haría falta cruzar el grafo de PRs"):
+    // ocurre por accidente (una closing keyword en CUALQUIER commit, comillas
+    // incluidas) y una sola query resuelve 97 issues. El contrato ya no puede
+    // decir ninguna de las dos.
+    expect(a).not.toMatch(/haría falta cruzar el grafo de PRs/i)
+    expect(a).toMatch(/cualquier mensaje de commit/i)
+    expect(a).toMatch(/las comillas no protegen/i)
   })
 
   it('documenta la salida de in-review para un PR rechazado, con el comando', () => {

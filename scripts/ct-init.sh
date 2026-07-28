@@ -158,6 +158,35 @@ SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
 # limpiamente, sin `--force` y sin acusar a nadie — que es exactamente el
 # mecanismo que F9 construyó.
 #
+# F18 sube de 7 a 8. Lo que cambia no es redacción: el v7 DABA POR IMPOSIBLE
+# algo que ocurre solo, y CALLABA dos estados en los que el loop se atasca sin
+# decir nada. Un repo bootstrapeado con el v7 no puede deducir ninguna:
+#   - el v7 decía que cerrar un issue como *completed* sin haber mergeado nada
+#     "no se detecta — haría falta cruzar el grafo de PRs" y que era "un caso
+#     que requiere una acción errónea deliberada". Las dos mitades eran falsas
+#     y las dos están medidas, no supuestas: GitHub aplica las closing keywords
+#     de CUALQUIER mensaje de commit que llegue a la rama por defecto (un
+#     commit de DOCUMENTACIÓN que solo MENCIONABA `Closes #451`, entrecomillado,
+#     cerró ese issue en un repo de producción), y una sola query GraphQL con
+#     alias resuelve 97 issues en 2,8 s. Un repo con el v7 sigue creyendo que
+#     hace falta mala intención, que es justo lo que impide sospechar del
+#     accidente cuando ocurre;
+#   - el v7 no decía en ninguna parte que un issue CERRADO que conserva su
+#     label `status:` desaparece del dispatcher (solo barre abiertos). La tasa
+#     medida es 10 de 99 cerrados. Sin esto, la reacción natural a "mi slice ya
+#     no sale" es buscar el fallo en el dispatcher;
+#   - ni que un agente que se declara BLOQUEADO deja su claim puesto para
+#     siempre, sin ninguna transición del loop que lo suelte. Es un deadlock
+#     con nombre propio y el v7 lo dejaba sin nombrar;
+#   - y una cuarta, encontrada aplicando al resto del texto la misma lente que
+#     falsificó la primera: el v7 decía que la causa "al PR le faltaba el
+#     `Closes #N`" "solo aparece con PRs abiertos a mano, o si alguien edita
+#     el cuerpo después", porque el kickoff lo pide. El kickoff es un PROMPT,
+#     no un gate — el propio v7 lo admite dos párrafos más abajo ("lo que el
+#     kickoff no puede garantizar es que el agente obedezca"). La causa más
+#     probable faltaba de la lista, y era justo la que un diagnóstico honesto
+#     tiene que mirar primero.
+#
 # F17 sube de 6 a 7. Las dos cosas que cambian son hechos nuevos sobre el
 # CIERRE del issue, y un repo bootstrapeado con el v6 no puede deducir ninguna:
 #   - el kickoff ahora exige `Closes #N` en el cuerpo del PR (antes no pedía
@@ -195,7 +224,7 @@ SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
 # decía en absoluto que un PR rechazado dejaba su slice fuera del loop para
 # siempre. Un repo bootstrapeado con el v4 se queda con esas tres cosas hasta
 # que este número suba; es la única palanca que existe para llegar hasta él.
-SLICES_CONTRACT_VERSION=7
+SLICES_CONTRACT_VERSION=8
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -246,6 +275,7 @@ c90554b809bc6af4f50613e75f160b0b0859ffce3412aeb44d10bef2d9da3e0a  v1, 77 líneas
 cd59702d2c5d3a73b67ad235908b83bdc42c9da41996b14a33fba0749e359961  v5, 289 líneas — F13 (in-review retiene tokens, --reopen, alcance real de la serialización)
 8de58db92770e9b8737280e024f0a7dae199b4a0dca2b7a535e631637c824fea  v6, 364 líneas — F15 (--reopen va a in-progress, --requeue, garantías de orden de /ct-groom)
 8730d7be044a7ba8009d263947c57c56eb6558639cc506d22c460fcc6f9bacb9  v7, 385 líneas — F17 (el kickoff pide Closes #N; las DOS causas de "PR mergeado, issue abierto")
+cef9a97a07edc8c403a37ffc846df74422c4d7d1d5aad02d90001a477b2ef811  v8, 419 líneas — F18 (el cierre accidental por commit; el residuo de labels sobre cerrados; el claim bloqueado; la causa que el kickoff no garantiza)
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -253,7 +283,7 @@ cd59702d2c5d3a73b67ad235908b83bdc42c9da41996b14a33fba0749e359961  v5, 289 línea
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 7 -->
+<!-- ct-init:slices-contract-version: 8 -->
 ## Formato de la tabla §9 (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -445,8 +475,10 @@ loop una vez hay slices en vuelo.
   el estado que tapa un carril para siempre, así que conviene saber
   diagnosticarlo entero:
   - al PR le faltaba el `Closes #N` en el cuerpo. El kickoff que `/ct-next`
-    le da a cada agente lo pide explícitamente, así que este caso solo
-    aparece con PRs abiertos a mano, o si alguien edita el cuerpo después;
+    le da a cada agente lo pide explícitamente, pero el kickoff es un
+    PROMPT, no un gate: **la causa más probable de este caso es simplemente
+    que el agente no lo puso** (además de un PR abierto a mano, o un cuerpo
+    editado después). Nada del loop lo comprueba;
   - el PR SÍ llevaba su `Closes #N`, pero se mergeó en una rama que **no es
     la rama por defecto** del repo. GitHub **solo cierra el issue cuando el
     PR entra en la rama por defecto** — verificado contra un repo real, no
@@ -478,14 +510,46 @@ loop una vez hay slices en vuelo.
     para siempre. `/ct-next` lo nombra al explicar el bloqueo: si ves eso,
     quita el `merge-after` de la sección `## Dependencias` del dependiente, o
     reabre el issue y ciérralo como *completed* si su trabajo sí se hizo;
-  - cerrar a mano como ***completed*** sin haber mergeado nada **sí**
+  - un issue cerrado como ***completed*** sin que se haya mergeado nada **sí**
     satisface la dep, y el dependiente saldrá sobre trabajo que no existe.
-    Eso **no se detecta** — haría falta cruzar el grafo de PRs. Cierra los
-    issues del loop mergeando, no a mano.
+    **Esto no requiere que nadie se equivoque a propósito**: GitHub aplica las
+    *closing keywords* de **cualquier mensaje de commit** que llegue a la rama
+    por defecto, y **las comillas no protegen**. En un repo real, un commit de
+    **documentación** que solo MENCIONABA la cadena `Closes #451` —dentro de
+    una frase que explicaba que el kickoff no la llevaba— cerró ese issue como
+    *completed*. Cuidado con escribir esas keywords en cualquier commit, aunque
+    sea entrecomillándolas.
+    `/ct-next` **avisa** (no bloquea) cuando una dependencia ya satisfecha
+    consta cerrada por un **commit suelto** que no pertenece a ningún PR
+    mergeado. Lo que **no** exige es que el cierre venga de un PR: cerrar el
+    issue a mano es la práctica mayoritaria (medido: 86 de 97 cierres
+    *completed* de un repo real no tienen ningún PR detrás) y además es un paso
+    **prescrito** aquí mismo cuando se despacha con `--base <otra-rama>`.
   Al diseñar la tabla: el slice del que dependen muchos es el **cuello de
   botella** del epic entero — nada detrás de él avanza hasta que ESE se
   mergee. Si quieres una ventana de paralelismo, tiene que salir de la
   columna `Dep`.
+- **Un issue CERRADO que conserva su label `status:` no existe para
+  `/ct-next`.** El dispatcher solo barre issues **abiertos**. Un cerrado con
+  `status:ready` todavía puesta se cae de la cola de despacho, y hasta ahora
+  se caía **sin una palabra**: la corrida siguiente pasaba al siguiente
+  `status:ready` del repo y explicaba con detalle por qué *ése* no era
+  despachable, sin mencionar el que había desaparecido. Ahora sale un aviso
+  agregado —uno solo, con los números agrupados por estado— porque **cerrar el
+  issue y quitarle su label son dos actos distintos y nada comprueba el
+  segundo**: la tasa medida en un repo real es de **10 cerrados con label viva
+  de cada 99**. Un `status:in-review` sobre un issue cerrado NO es anomalía:
+  es el final normal de un slice, y nada le quita esa label al cerrar.
+- **Un slice BLOQUEADO retiene su claim, y no hay transición que lo suelte.**
+  Si el agente marca `blocked: {reason, unblock}` en el `.agent/STATE.md` de su
+  worktree y para —que es lo que el kickoff le pide—, su issue se queda en
+  `status:in-progress` **reteniendo tokens y una plaza de `--cap`**
+  indefinidamente: la detección de claims rancios no lo ve (el worktree y la
+  rama SÍ existen), `--requeue` se niega precisamente por eso, y `--release`
+  mentiría (no hay PR). `/ct-next` **lee** ese `STATE.md` y lo dice con su
+  motivo, pero **no lo arregla**: sacarlo de ahí es una decisión tuya
+  (desbloquearlo, o abandonarlo borrando worktree y rama antes de
+  `--requeue`).
 - **Una invocación despacha `--cap` slices; por defecto es 1.** Y el cap es
   **global al repo, no por invocación**: cuenta también lo que ya está en
   vuelo (`status:in-progress`), así que un segundo `/ct-next --cap 1` con algo
@@ -632,7 +696,7 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   agente obedezca: si un PR aparece sin su `Closes #N`, el loop no lo detecta
   — lo verás como un `status:in-review` que no se despeja.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v7). Si el plugin trae una
+<sub>Esta sección la mantiene `/ct-init` (contrato v8). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>

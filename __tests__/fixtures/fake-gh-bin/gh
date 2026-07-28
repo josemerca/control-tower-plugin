@@ -296,7 +296,20 @@ function main() {
     return
   }
   if (argv[0] === 'project' && argv[1] === 'item-list') {
-    process.stdout.write(JSON.stringify({ items: JSON.parse(process.env.FAKE_GH_PROJECT_ITEMS || '[]') }))
+    // F18/H6: el stub honra `--limit` y devuelve `totalCount`, como el gh
+    // real (verificado contra gh 2.86 sobre un project de verdad: `--limit 2`
+    // sobre 3 items devuelve `items.length = 2, totalCount = 3`). Antes
+    // devolvía SIEMPRE la lista entera y sin `totalCount`, así que el truncado
+    // —el fallo que produce duplicados en el Project— era literalmente
+    // insimulable desde los tests.
+    // FAKE_GH_PROJECT_ITEMS_NO_TOTALCOUNT simula una versión de gh que no lo
+    // expone.
+    const all = JSON.parse(process.env.FAKE_GH_PROJECT_ITEMS || '[]')
+    const li = argv.indexOf('--limit')
+    const limit = li >= 0 ? Number(argv[li + 1]) : 30
+    const payload = { items: all.slice(0, Number.isFinite(limit) ? limit : all.length) }
+    if (!process.env.FAKE_GH_PROJECT_ITEMS_NO_TOTALCOUNT) payload.totalCount = all.length
+    process.stdout.write(JSON.stringify(payload))
     process.exitCode = 0
     return
   }
@@ -306,6 +319,28 @@ function main() {
     return
   }
   if (argv[0] === 'api' && argv[1] === 'graphql') {
+    // F18/H1+H4: la consulta de CIERRES de ct-next.mjs (quién cerró cada dep
+    // ya satisfecha, y si la rama feat/<n> de un in-review está mergeada). Se
+    // reconoce por el tipo de item de timeline que pide, que ninguna otra
+    // query del plugin usa.
+    //
+    // El DEFAULT es deliberado: `{"data":{"repository":{}}}`, o sea "ningún
+    // alias vino" → todo queda como 'unknown' y NO se emite ningún aviso. Sin
+    // ese default, cada test preexistente que llegue aquí (los que enumeran
+    // issues de verdad con FAKE_GH_LIST_SEQUENCE) empezaría a ver avisos
+    // nuevos que no ha pedido.
+    //   FAKE_GH_CLOSURE_JSON → la respuesta completa, tal cual.
+    //   FAKE_GH_CLOSURE_FAIL → la consulta falla (red/auth/rate limit).
+    if (joined.includes('CLOSED_EVENT') || joined.includes('headRefName')) {
+      if (process.env.FAKE_GH_CLOSURE_FAIL) {
+        console.error('fake-gh: api graphql (cierres) failed (simulado)')
+        process.exitCode = 1
+        return
+      }
+      process.stdout.write(process.env.FAKE_GH_CLOSURE_JSON || '{"data":{"repository":{}}}')
+      process.exitCode = 0
+      return
+    }
     // Query de campos vs mutación de iteración: se distinguen por el texto de
     // la propia query, igual que ct-groom.mjs las emite.
     const isFieldsQuery = joined.includes('ProjectV2IterationField')
@@ -321,7 +356,14 @@ function main() {
       const today = new Date().toISOString().slice(0, 10)
       nodes = [{ id: 'PVTIF_fake', name: 'Sprint', configuration: { iterations: [{ id: 'ITER_fake', title: 'Sprint actual', startDate: today, duration: 14 }] } }]
     }
-    process.stdout.write(JSON.stringify({ data: { node: { fields: { nodes } } } }))
+    // F18/H6: `totalCount` también aquí — `fields(first: 50)` es una lectura
+    // acotada, y sin este dato ct-groom no puede distinguir "este project no
+    // tiene campo Sprint" de "no he visto todos sus campos".
+    // FAKE_GH_PROJECT_FIELDS_TOTALCOUNT fuerza un total mayor que lo devuelto.
+    const totalCount = process.env.FAKE_GH_PROJECT_FIELDS_TOTALCOUNT !== undefined
+      ? Number(process.env.FAKE_GH_PROJECT_FIELDS_TOTALCOUNT)
+      : nodes.length
+    process.stdout.write(JSON.stringify({ data: { node: { fields: { totalCount, nodes } } } }))
     process.exitCode = 0
     return
   }
