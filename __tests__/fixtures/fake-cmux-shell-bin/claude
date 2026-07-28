@@ -1,0 +1,12 @@
+#!/bin/sh
+# `claude` tal y como lo vería el shell de login que abre cmux (F19/H1).
+#
+# NO confundir con __tests__/fixtures/fake-claude-bin/claude, que existe para
+# GRITAR si ct-next.mjs ejecutara `claude` por su cuenta (no lo hace, y ese
+# contrato sigue en pie). Este otro lo ejecuta el shell simulado del stub de
+# cmux — que es exactamente quien lo ejecuta en la vida real — así que aquí lo
+# correcto es salir en silencio y con éxito: el agente arrancó.
+#
+# No imprime nada a propósito: su salida iría al mismo stdout/stderr que los
+# tests inspeccionan para juzgar los mensajes de ct-next.mjs.
+exit 0

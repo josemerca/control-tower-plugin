@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, accessSync, constants as fsConstants, writeSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, accessSync, constants as fsConstants, writeSync, realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { tmpdir } from 'node:os'
 import { dirname, join, delimiter as pathDelimiter } from 'node:path'
 import { planDispatch, resolveAccount, resolveAccountLegacy, validateAccountMap, parseRepoSlug, buildCmuxArgv } from './dispatch.js'
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
 import { parseStrictInt } from './argnum.js'
 import { shQuote } from './shquote.js'
+import {
+  buildLauncherScript, buildTypedCommand, parseSentinel, sameDir,
+  LAUNCHER_FILENAME, SENTINEL_FILENAME,
+} from './launch-sentinel.js'
 import { buildDispatchInput, NO_MILESTONE_KEY } from './gh-issue-map.js'
 import { parseStateSafe, readBlocked } from './state.js'
 import {
@@ -15,7 +20,7 @@ import {
 } from './gh-closure.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 import { detectConventions, formatFindings } from './conventions.js'
-import { readRepoDocs, readAck } from './conventions-io.js'
+import { readRepoDocs, readAck, ACK_PATH } from './conventions-io.js'
 
 // W-C: dispatch-check.mjs implementa el protocolo de claim completo (colisión
 // + escritura + claim-then-verify) y ya está testeado en solitario, pero
@@ -305,6 +310,42 @@ if (testDelayRaw !== undefined) {
     process.exit(2)
   }
   testDelayAfterClaimMs = n
+}
+
+// ============================================================================
+// F19/H1 — CUÁNTO SE ESPERA AL CENTINELA DE ARRANQUE.
+//
+// El centinela (ver scripts/launch-sentinel.js) lo escribe el shell de login
+// que cmux abre, así que el retraso que hay que absorber NO es el de arrancar
+// el agente: es el de arrancar EL SHELL (zsh + oh-my-zsh + nvm + lo que el
+// usuario tenga en su rc) más el tiempo que cmux tarde en teclear el texto.
+// En el camino feliz la espera termina en cuanto el fichero aparece —
+// típicamente unos pocos cientos de milisegundos— no cuando se agota la cota:
+// esto NO añade 8 segundos a cada despacho.
+//
+// La cota existe porque un centinela que no aparece TIENE que distinguirse de
+// uno que aún no ha aparecido, y solo el tiempo los separa. Quedarse esperando
+// para siempre convertiría un shell lento en un dispatcher colgado; cortar
+// demasiado pronto convertiría un shell lento en una falsa alarma. 8 s es
+// deliberadamente generoso para un arranque de shell (que en una máquina sana
+// es de décimas) y deliberadamente corto para un humano mirando la salida.
+//
+// Subir esta cota es la respuesta correcta si un repo/máquina legítimamente
+// lento produce falsos «no se pudo confirmar»; bajarla a 0 NO desactiva la
+// comprobación (no hay interruptor para eso, a propósito: sería reintroducir
+// la mentira), solo la hace inútilmente estricta.
+const DEFAULT_LAUNCH_SENTINEL_TIMEOUT_MS = 8000
+const LAUNCH_SENTINEL_TIMEOUT_CAP_MS = 600_000
+const LAUNCH_SENTINEL_POLL_MS = 100
+let launchSentinelTimeoutMs = DEFAULT_LAUNCH_SENTINEL_TIMEOUT_MS
+const launchTimeoutRaw = process.env.CT_NEXT_LAUNCH_TIMEOUT_MS
+if (launchTimeoutRaw !== undefined && launchTimeoutRaw !== '') {
+  const n = Number(launchTimeoutRaw)
+  if (!Number.isFinite(n) || n < 0 || n > LAUNCH_SENTINEL_TIMEOUT_CAP_MS) {
+    console.error(`CT_NEXT_LAUNCH_TIMEOUT_MS inválido: "${launchTimeoutRaw}" — debe ser un número entre 0 y ${LAUNCH_SENTINEL_TIMEOUT_CAP_MS}. Es la cota que se espera al centinela de arranque de cada slice (ver scripts/launch-sentinel.js); con un valor que no se entiende no se puede decidir si un centinela ausente es «no llegó a correr» o «todavía no». Abortando antes de tocar nada.`)
+    process.exit(2)
+  }
+  launchSentinelTimeoutMs = n
 }
 
 // ============================================================================
@@ -628,6 +669,66 @@ function verifyCmuxLaunch(expectedTitle, expectedCwd) {
   if (!match.cwdKnown) return { status: 'cwd-unknown' }
   if (match.cwd === expectedCwd) return { status: 'confirmed' }
   return { status: 'wrong-cwd', actualCwd: match.cwd }
+}
+
+// ============================================================================
+// F19/H1 — LA ESPERA AL CENTINELA, Y LOS CINCO VEREDICTOS QUE SALEN DE ELLA.
+//
+// `verifyCmuxLaunch` (arriba) responde «¿existe la ventana?». Esta pieza
+// responde la pregunta que de verdad importaba y que nadie estaba haciendo:
+// «¿llegó el comando a EJECUTARSE?». Ver la cabecera de
+// scripts/launch-sentinel.js para el hallazgo de campo completo.
+//
+// Estados, y qué evidencia sostiene cada uno:
+//   'ran'          → el centinela existe, parsea, `$PWD` coincide con el
+//                    worktree y `claude` resolvía en ese shell. Es la ÚNICA
+//                    forma de afirmar que el comando corrió.
+//   'wrong-cwd'    → el comando corrió, pero en OTRO directorio. Evidencia
+//                    positiva de un problema: el agente puede estar tocando un
+//                    repo que no es.
+//   'no-claude'    → el comando corrió y `claude` NO resuelve en ese shell.
+//                    Certeza de que no va a haber agente: la línea siguiente
+//                    del script muere con "command not found". Es el único
+//                    veredicto con certeza NEGATIVA, y por eso es el único que
+//                    autoriza a deshacer el claim (ver el bucle de despacho).
+//   'garbled'      → el fichero existe pero no es un centinela de este formato.
+//                    No se adivina: se dice.
+//   'never'        → no apareció dentro de la cota. NO es lo mismo que
+//                    'no-claude': aquí no se sabe si el comando nunca corrió
+//                    (el caso de campo) o si el shell sigue arrancando. Sin
+//                    saberlo NO se puede decir «lanzado», y TAMPOCO se puede
+//                    revertir el claim: un revert con un agente que arranca
+//                    tres segundos tarde es peor que el residuo.
+async function waitForLaunchSentinel(sentinelPath, expectedCwd) {
+  const deadline = Date.now() + launchSentinelTimeoutMs
+  // Bucle ASÍNCRONO (no un `Atomics.wait` síncrono como el de los stubs): cada
+  // vuelta cede el control al event loop, así que un Ctrl-C durante la espera
+  // se despacha en vez de quedarse pendiente hasta el final de la tanda —
+  // mismo criterio que los checkpoints de D5.
+  for (;;) {
+    let raw = null
+    try {
+      raw = readFileSync(sentinelPath, 'utf8')
+    } catch {
+      raw = null // ENOENT es el caso normal mientras el shell arranca.
+    }
+    if (raw !== null) {
+      const parsed = parseSentinel(raw)
+      if (parsed) {
+        const realpathOf = (p) => { try { return realpathSync(p) } catch { return null } }
+        if (!parsed.claudeResolved) return { status: 'no-claude', cwd: parsed.cwd, waitedMs: launchSentinelTimeoutMs - Math.max(0, deadline - Date.now()) }
+        if (!sameDir(parsed.cwd, expectedCwd, realpathOf)) return { status: 'wrong-cwd', cwd: parsed.cwd }
+        return { status: 'ran', cwd: parsed.cwd }
+      }
+      // Un centinela a MEDIO escribir es indistinguible de uno corrupto en una
+      // sola lectura, y el `printf` de una sola llamada lo hace muy improbable
+      // — pero no imposible. Mientras quede presupuesto se reintenta; si se
+      // agota con el fichero ahí y sin parsear, eso es 'garbled' y se dice.
+      if (Date.now() >= deadline) return { status: 'garbled', raw: raw.slice(0, 200) }
+    }
+    if (Date.now() >= deadline) return { status: 'never' }
+    await sleep(LAUNCH_SENTINEL_POLL_MS)
+  }
 }
 
 // stateReasonLabel (F13/H4): cómo se llama, en el idioma del usuario, el
@@ -1541,20 +1642,108 @@ function formatStrayDepsWarnings(issues) {
 // El orden de los grupos es el de la CONSECUENCIA, no el del flujo: primero
 // `ready` (el que se cayó de la cola de despacho: el caso vivido en campo),
 // después `in-progress` (claims que nunca se soltaron), y al final el resto.
+//
+// ============================================================================
+// F19/H2 — LO QUE F18 DEJÓ ABIERTO: EL AVISO ERA CORRECTO PERO ESTÁTICO.
+//
+// El juicio de campo, que se comparte: «me lo voy a saltar a partir de la
+// tercera corrida, y no por cómo está escrito sino porque es estático». Esos
+// diez casos no cambian solos, así que el párrafo se imprime idéntico en cada
+// corrida hasta que alguien limpie — y un aviso que no cambia deja de leerse.
+// Entonces, el día que aparezca uno NUEVO en la lista, no se ve. Es una
+// tercera forma de morir, distinta del muro insatisfacible (F14) y del ruido
+// por volumen (F16): la repetición sin novedad.
+//
+// DOS ARREGLOS, y ninguno de los dos es "escribirlo mejor":
+//
+//  1. EL GRADIENTE DE SEVERIDAD QUE ESTABA APLASTADO. Los tres estados pesaban
+//     igual dentro del agregado, y no lo son:
+//       - `ready`       → se cayó de la cola de despacho EN SILENCIO. Es el
+//                         hallazgo original de F18 y el único que puede
+//                         explicar «¿por qué no se despacha esto?».
+//       - `in-progress` → un claim que nunca se soltó. No bloquea el despacho
+//                         (el dispatcher solo mira abiertos) pero deja
+//                         worktree y rama en disco y ensucia toda auditoría.
+//       - `blocked` y
+//         cualquier otro → INERTE. No retiene nada, no bloquea nada, no le
+//                         importa a nadie. Sale como recuento, igual que los
+//                         `in-review`, y NO infla el titular. Un titular que
+//                         cuenta lo inerte junto a lo grave enseña a
+//                         descontarlo entero.
+//
+//  2. UN ACUSE POR CASO, reusando el mecanismo de F14
+//     (`.agent/conventions-ack.md`, ver scripts/conventions.js#ACK_SET_IDS),
+//     que resuelve exactamente esto: «esto lo he visto y decidido, cállate
+//     sobre estos números concretos y sigue avisando de los nuevos». Sin él, la
+//     única forma de callar el aviso es limpiar labels de issues cerrados que
+//     puede que nadie quiera limpiar — es decir, otra vez un muro.
+//
+// La propiedad que queda: el aviso solo aparece cuando tiene algo que NO se
+// había dicho ya. Si no cambia nada y todo está acusado, no sale.
+//
+// repoAckOnce: el acuse del repo destino, leído UNA sola vez por corrida y
+// compartido por sus dos consumidores (este aviso y el de convenciones). No es
+// solo ahorro de un readFileSync: dos lecturas independientes del MISMO
+// fichero son dos criterios que pueden divergir en silencio, que es
+// exactamente la clase de fallo que este plugin lleva varias rondas cerrando.
+// En modo fixture no se lee nada (repoRoot sintético) y no se silencia nada:
+// "no se ha mirado" nunca se convierte en "no hay acuses".
+let ackCache = null
+function repoAckOnce() {
+  if (ackCache) return ackCache
+  if (fx) {
+    ackCache = { acks: new Map(), problems: [], unreadable: null, prosaSinAcuses: false }
+    return ackCache
+  }
+  try {
+    ackCache = readAck(repoRoot)
+  } catch (e) {
+    // Igual que en formatConventionWarnings: que la lectura reviente no puede
+    // tumbar un despacho, y tampoco puede pasar por "no hay acuses" — el
+    // `unreadable` viaja y quien lo imprime lo dice.
+    ackCache = { acks: new Map(), problems: [], unreadable: e.message, prosaSinAcuses: false }
+  }
+  return ackCache
+}
+// ackedResidueNumbers: el conjunto de números de issue que el humano ya ha
+// mirado y decidido dejar. Vacío (nunca `null`) si no hay acuse: la ausencia
+// de fichero significa "no has acusado nada", que es el estado normal.
+function ackedResidueNumbers() {
+  const entry = repoAckOnce().acks.get('residuo-status')
+  return entry?.cases ?? new Set()
+}
+
 const RESIDUO_ESTADO_TERMINAL = 'in-review'
-function formatClosedStatusResidueWarning(residue) {
-  const anomalos = (residue || []).filter((r) => !(r.statusLabels.length === 1 && r.statusLabels[0] === RESIDUO_ESTADO_TERMINAL))
-  const terminales = (residue || []).length - anomalos.length
+// Los dos estados con consecuencia real. El orden ES el de la severidad, y
+// también el orden en que se imprimen.
+const RESIDUO_ESTADOS_GRAVES = ['ready', 'in-progress']
+function formatClosedStatusResidueWarning(residue, { acked = new Set() } = {}) {
+  const todos = residue || []
+  const acusados = todos.filter((r) => acked.has(r.n))
+  const vivos = todos.filter((r) => !acked.has(r.n))
+  const esTerminal = (r) => r.statusLabels.length === 1 && r.statusLabels[0] === RESIDUO_ESTADO_TERMINAL
+  const esGrave = (r) => r.statusLabels.some((s) => RESIDUO_ESTADOS_GRAVES.includes(s))
+  const anomalos = vivos.filter((r) => !esTerminal(r) && esGrave(r))
+  const inertes = vivos.filter((r) => !esTerminal(r) && !esGrave(r))
+  const terminales = vivos.filter(esTerminal).length
+  const notaInerte = inertes.length
+    ? ` (Otros ${inertes.length} cerrados conservan ${[...new Set(inertes.flatMap((r) => r.statusLabels))].map((s) => `status:${s}`).join(', ')} — ${refsAcotadas(inertes.map((r) => r.n))}: inerte. No retiene tokens, no bloquea ninguna cola y no le pasa nada a nadie por dejarlo; se dice para que el número no sorprenda en una auditoría de labels, no como algo que arreglar.)`
+    : ''
+  const notaTerminal = terminales
+    ? ` (Otros ${terminales} cerrados conservan status:${RESIDUO_ESTADO_TERMINAL}: ése es el final NORMAL de un slice —nada le quita la label al cerrar— y no cuentan como anomalía.)`
+    : ''
   if (!anomalos.length) {
-    return terminales
-      ? `${terminales} issue(s) cerrados conservan su label status:${RESIDUO_ESTADO_TERMINAL}: ése es el final NORMAL de un slice (nada le quita la label al cerrar), así que no se cuenta como anomalía — se dice para que el número no aparezca por sorpresa en una auditoría de labels.`
+    // Sin nada grave, no hay titular. Los recuentos inertes/terminales solo
+    // salen si de verdad hay algo que contar; los acusados NO se mencionan
+    // aquí a propósito — repetir «3 acusados» en cada corrida sería
+    // exactamente el ruido estático que este cambio elimina.
+    return terminales || inertes.length
+      ? `${terminales + inertes.length} issue(s) cerrados conservan una label \`status:\` que no es una anomalía.${notaTerminal}${notaInerte}`.trim()
       : null
   }
   const conEstado = (s) => anomalos.filter((r) => r.statusLabels.includes(s)).map((r) => r.n)
   const listos = conEstado('ready')
-  const enCurso = conEstado('in-progress')
-  const yaContados = new Set([...listos, ...enCurso])
-  const resto = anomalos.filter((r) => !yaContados.has(r.n))
+  const enCurso = conEstado('in-progress').filter((n) => !listos.includes(n))
   const partes = []
   if (listos.length) {
     partes.push(`${refsAcotadas(listos)} siguen en status:ready: estaban en la cola de despacho y se cayeron de ella sin una palabra — si esperabas que /ct-next despachara alguno de ésos, ésta es la explicación que ninguna otra línea te va a dar.`)
@@ -1562,13 +1751,12 @@ function formatClosedStatusResidueWarning(residue) {
   if (enCurso.length) {
     partes.push(`${refsAcotadas(enCurso)} siguen en status:in-progress: son claims que nunca se soltaron (su worktree y su rama pueden seguir en disco).`)
   }
-  if (resto.length) {
-    partes.push(`${refsAcotadas(resto.map((r) => r.n))} conservan ${[...new Set(resto.flatMap((r) => r.statusLabels))].map((s) => `status:${s}`).join(', ')}.`)
-  }
-  const notaTerminal = terminales
-    ? ` (Otros ${terminales} cerrados conservan status:${RESIDUO_ESTADO_TERMINAL}: ése es el final NORMAL de un slice —nada le quita la label al cerrar— y no cuentan como anomalía.)`
+  // El acuse solo se menciona cuando hay algo VIVO que decir: es contexto útil
+  // ("ya has mirado 8, éstos 2 son nuevos"), no un recordatorio periódico.
+  const notaAcuse = acusados.length
+    ? ` (${acusados.length} más ya acusados en \`${ACK_PATH}\`, no se repiten.)`
     : ''
-  return `${anomalos.length} issue(s) CERRADOS conservan una label \`status:\` viva, y para /ct-next NO EXISTEN: este dispatcher solo barre issues ABIERTOS. ${partes.join(' ')} Cerrar el issue y quitarle su label son dos actos distintos y NADA comprueba el segundo, así que el residuo se acumula solo (medido en un repo real: 10 de 99 cerrados). Límpialos con \`gh issue edit <n> --repo ${repo} --remove-label status:<la que tenga>\`.${notaTerminal}`
+  return `${anomalos.length} issue(s) CERRADOS conservan una label \`status:\` viva, y para /ct-next NO EXISTEN: este dispatcher solo barre issues ABIERTOS. ${partes.join(' ')} Cerrar el issue y quitarle su label son dos actos distintos y NADA comprueba el segundo, así que el residuo se acumula solo (medido en un repo real: 10 de 99 cerrados). Límpialos con \`gh issue edit <n> --repo ${repo} --remove-label status:<la que tenga>\` — o, si ya los has mirado y decides DEJARLOS así, escribe una línea en \`${ACK_PATH}\`: \`residuo-status: ${new Date().toISOString().slice(0, 10)} — ${refsAcotadas(anomalos.slice(0, 3).map((r) => r.n))} <por qué se quedan>\`. Esos números dejan de salir y los nuevos siguen apareciendo, que es la única forma de que este aviso siga sirviendo dentro de tres corridas.${notaAcuse}${notaTerminal}${notaInerte}`
 }
 
 // ============================================================================
@@ -1652,7 +1840,11 @@ for (const w of formatStrayDepsWarnings(issues)) console.error(w)
 // que `depStates`: solo existe en la ruta real (buildDispatchInput); un
 // fixture sin el campo significa "no se ha mirado", nunca "está limpio".
 {
-  const w = formatClosedStatusResidueWarning(dispatchInput.closedStatusResidue || [])
+  // F19/H2: los números ya acusados en `.agent/conventions-ack.md` no vuelven
+  // a salir. El acuse se lee UNA vez por corrida (`repoAckOnce`, memoizado) y
+  // lo comparten este aviso y el de convenciones — leer el mismo fichero dos
+  // veces con dos criterios es cómo se llega a que uno silencie y el otro no.
+  const w = formatClosedStatusResidueWarning(dispatchInput.closedStatusResidue || [], { acked: ackedResidueNumbers() })
   if (w) warn(w)
 }
 // F18/H3 — claims cuyo propio STATE.md se declara BLOQUEADO. Va por `warn()`
@@ -1727,7 +1919,9 @@ function formatConventionWarnings() {
   let ackProsaSinAcuses = false
   try {
     ;({ docs, failures } = readRepoDocs(repoRoot))
-    ;({ acks, problems: ackProblems, unreadable: ackUnreadable, prosaSinAcuses: ackProsaSinAcuses } = readAck(repoRoot))
+    // F19/H2: la MISMA lectura que usa el aviso de residuo (memoizada en
+    // repoAckOnce) — un solo fichero, un solo criterio.
+    ;({ acks, problems: ackProblems, unreadable: ackUnreadable, prosaSinAcuses: ackProsaSinAcuses } = repoAckOnce())
   } catch (e) {
     // Que la lectura reviente NO puede tumbar un despacho ni pasar por "no hay
     // conflicto": se dice y se sigue.
@@ -2022,7 +2216,39 @@ for (let idx = 0; idx < selected.length; idx++) {
   // no de shell — un `$`, un backtick o un `\` en el kickoff seguirían
   // interpretándose dentro de las comillas dobles. shQuote() hace el
   // escapado POSIX real (comillas simples).
-  const command = `claude --dangerously-skip-permissions ${shQuote(kickoff)}`
+  const agentCommand = `claude --dangerously-skip-permissions ${shQuote(kickoff)}`
+  // ==========================================================================
+  // F19/H1 — LO QUE SE TECLEA DEJA DE SER EL COMANDO ENTERO.
+  //
+  // `--command` de cmux NO ejecuta: teclea. Su propia ayuda, embebida en el
+  // binario instalado en esta máquina, lo dice literalmente: «Send text+Enter
+  // to the new workspace after creation». Hasta aquí se tecleaban VARIOS KB
+  // (la línea de `claude` con el kickoff dentro) hacia un shell de login
+  // interactivo que podía estar imprimiendo un prompt de oh-my-zsh y
+  // comiéndose caracteres — que es exactamente lo que pasó en el primer
+  // despacho real (ver scripts/launch-sentinel.js).
+  //
+  // Ahora se teclean ~70 caracteres: un `.` sobre un script que este proceso
+  // escribe con `writeFileSync`. El kickoff viaja por disco, donde ningún
+  // prompt puede morderlo. Y el script escribe un centinela ANTES de lanzar al
+  // agente, que es la única evidencia posible de que la orden se ejecutó.
+  //
+  // El directorio es EXCLUSIVO por proceso y por issue, y se crea con
+  // `recursive: false` a propósito (ver el bucle de despacho): en un /tmp
+  // compartido, una ruta predecible que ya existe no se reutiliza en silencio
+  // — sería la puerta para que alguien pusiera ahí un symlink y nos hiciera
+  // escribir el kickoff donde no toca. Que exista es un error, no un atajo.
+  const launchDir = join(tmpdir(), `ct-next-launch-${process.pid}-${s.n}`)
+  const launcherPath = join(launchDir, LAUNCHER_FILENAME)
+  const sentinelPath = join(launchDir, SENTINEL_FILENAME)
+  let launcherScript
+  try {
+    launcherScript = buildLauncherScript({ sentinelPath, agentCommand, issue: s.n, worktree: wt }, shQuote)
+  } catch (e) {
+    failSlice(idx, `no se pudo construir el script de arranque de #${s.n}: ${e.message}. Sin él no hay forma de comprobar que el comando llegó a ejecutarse, y despachar sin esa comprobación es exactamente lo que esta ronda elimina.`)
+    continue
+  }
+  const command = buildTypedCommand(launcherPath, shQuote)
   // CLAUDE_CONFIG_DIR viaja como --env de cmux, NUNCA como env local del
   // proceso `cmux` cliente (ver dispatch.js#buildCmuxArgv): `cmux` es un
   // cliente que habla con un daemon ya en marcha por socket Unix, y es el
@@ -2076,7 +2302,7 @@ for (let idx = 0; idx < selected.length; idx++) {
   // Verificado por construcción con la consulta de rama rota: un --dry-run
   // sin fixture imprimía "modo fixture" y salía 0.
   const destinationCheck = fx ? 'fixture' : (branchExists === 'unknown' ? 'unknown' : 'checked')
-  plans.push({ s, selIdx: idx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck })
+  plans.push({ s, selIdx: idx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck, launchDir, launcherPath, sentinelPath, launcherScript })
 }
 
 // ============================================================================
@@ -2652,7 +2878,7 @@ let launchedCount = 0
 const unverifiedLaunches = []
 
 for (let idx = 0; idx < plans.length; idx++) {
-  const { s, selIdx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck } = plans[idx]
+  const { s, selIdx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck, launchDir, launcherPath, sentinelPath, launcherScript } = plans[idx]
 
   if (dryRun) {
     console.log(`\n=== slice #${s.n} (${s.name}) ===`)
@@ -2711,7 +2937,14 @@ for (let idx = 0; idx < plans.length; idx++) {
     // del comando literal (que se conserva íntegro, sin recortar: sigue
     // siendo la fuente de verdad de qué se ejecutaría exactamente).
     console.log(`--- kickoff que recibiría el agente de #${s.n} (prosa, tal cual) ---\n${kickoff}\n--- fin del kickoff ---`)
+    // F19/H1: la línea de `cmux` ya NO lleva el comando del agente dentro —
+    // lleva un `.` sobre este script, que es lo único que se teclea en el pty.
+    // Si el dry-run solo imprimiera la línea de cmux, escondería exactamente
+    // lo que se va a ejecutar, que es la única razón por la que alguien mira
+    // un dry-run. Se imprime entero, tal cual se escribiría en disco.
+    console.log(`--- ${launcherPath} (script de arranque que cmux sourcearía; el kickoff viaja AQUÍ, no tecleado) ---\n${launcherScript}--- fin del script de arranque ---`)
     console.log(`cmux ${cmuxArgv.map((a) => (a.includes(' ') ? JSON.stringify(a) : a)).join(' ')}`)
+    console.log(`tras lanzar, se espera hasta ${launchSentinelTimeoutMs} ms a que aparezca ${sentinelPath} — el centinela que el propio shell escribe al ejecutar el comando. Sin él NO se dice "lanzado" (ver CT_NEXT_LAUNCH_TIMEOUT_MS).`)
     continue
   }
 
@@ -2975,11 +3208,54 @@ for (let idx = 0; idx < plans.length; idx++) {
   } catch (e) {
     cleanupOrphanedWorktree(s, wt, branch, `no se pudo sembrar .agent/STATE.md: ${e.message}`)
   }
+  // F19/H1: el script de arranque se escribe ANTES de invocar a cmux — cmux
+  // teclea el `.` de inmediato, y un shell rápido podría sourcearlo antes de
+  // que existiera. `recursive: false` a propósito: si el directorio ya está
+  // (otro proceso con el mismo pid es imposible; un symlink puesto a mano en
+  // un /tmp compartido, no), es un error que hay que ver, no algo que
+  // reutilizar en silencio. Modo 0700 por lo mismo: el kickoff puede llevar
+  // contexto del repo dentro.
+  try {
+    mkdirSync(launchDir, { recursive: false, mode: 0o700 })
+    // 0600 y NO 0700, y esto no es higiene: es parte de la detección.
+    // Encontrado escribiendo el test del hallazgo — si el script fuera
+    // EJECUTABLE, comerse el `.` de `. '<ruta>'` dejaría ` '<ruta>'`, que el
+    // shell ejecuta igual como programa: el centinela aparecería, el agente
+    // arrancaría en un subshell sin los alias ni las funciones del usuario, y
+    // la corrupción de la línea sería INDETECTABLE. Sin bit de ejecución, esa
+    // misma corrupción da "Permission denied", no hay centinela, y se dice.
+    // Un script que solo se sourcea no necesita ser ejecutable; que además no
+    // pueda serlo es lo que hace que la comprobación no tenga agujeros.
+    writeFileSync(launcherPath, launcherScript, { mode: 0o600 })
+  } catch (e) {
+    cleanupOrphanedWorktree(s, wt, branch, `no se pudo escribir el script de arranque en ${launchDir} (${e.message}). Sin él, el comando que cmux teclea no existiría y el agente no arrancaría — así que NO se lanza nada y se deshace lo hecho, en vez de despachar a ciegas.`)
+  }
   try {
     execFileSync('cmux', cmuxArgv, { stdio: 'inherit', timeout: childTimeoutFor(), killSignal: 'SIGKILL' })
   } catch (e) {
     cleanupOrphanedWorktree(s, wt, branch, `no se pudo lanzar cmux: ${e.message}`)
   }
+  // finding 1 + F19: la ventana peligrosa se CIERRA AQUÍ, no al final de la
+  // iteración, y el cambio es obligatorio por lo que viene justo debajo.
+  // `activeClaim` no-nulo significa "si llega una señal, revierte este claim":
+  // era correcto mientras el hueco entre el claim y el lanzamiento se medía en
+  // microsegundos. La espera al centinela lo abre hasta
+  // CT_NEXT_LAUNCH_TIMEOUT_MS de `await`s — es decir, tiempo REAL en el que un
+  // Ctrl-C sí llega a despacharse — y para entonces `cmux new-workspace` ya
+  // devolvió 0: puede haber un agente vivo. Revertirle el claim por una señal
+  // sería justo el daño que el resto de esta ronda evita. A partir de aquí una
+  // interrupción no deshace nada; los caminos que SÍ deben deshacer (el
+  // 'no-claude' de abajo) llaman a attemptRevertClaim explícitamente y no
+  // dependen de esta variable.
+  activeClaim = null
+  // ==========================================================================
+  // F19/H1 — PRIMERO EL EFECTO, DESPUÉS LA VENTANA.
+  //
+  // El centinela se consulta ANTES que cmux, y ese orden es el arreglo: la
+  // pregunta «¿corrió el comando?» domina a «¿existe la ventana?». La ventana
+  // la abre el propio dispatcher; el centinela solo puede escribirlo el shell
+  // que ejecutó la orden.
+  const sentinel = await waitForLaunchSentinel(sentinelPath, wt)
   // Finding 3: `new-workspace` ya devolvió éxito (si no, la línea de arriba
   // habría abortado) — pero eso, por sí solo, NUNCA implica que la sesión
   // haya arrancado en `wt` (cmux tolera un cwd inexistente y sigue adelante
@@ -3004,8 +3280,66 @@ for (let idx = 0; idx < plans.length; idx++) {
   // final cae solo, sin más cambios, en el 3 ya existente ("seleccionado
   // pero cero lanzados confirmados, reintenta más tarde"), en vez de un
   // exit 0 que afirma más de lo que se sabe.
+  //
+  // F19/H1 — LA PUERTA NUEVA, Y VA ANTES QUE TODO LO DEMÁS.
+  //
+  // Los cuatro casos de `verifyCmuxLaunch` de abajo solo se evalúan si el
+  // centinela dice que el comando CORRIÓ. Sin eso, da igual lo que cmux
+  // conteste sobre su ventana: la ventana existía también el día que el agente
+  // no arrancó. Los tres veredictos que cortan aquí:
+  //
+  //   'no-claude' → certeza NEGATIVA. El script corrió y `claude` no resuelve
+  //                 en ese shell: la línea siguiente muere con "command not
+  //                 found" y no va a haber agente, ni ahora ni en diez
+  //                 segundos. Es el ÚNICO caso donde se puede deshacer sin
+  //                 riesgo, así que se deshace entero (worktree, rama y claim)
+  //                 con el mismo camino que ya usa cualquier fallo posterior
+  //                 al worktree. Además cierra el aviso "no concluyente" que
+  //                 el preflight solo podía sospechar: el PATH que importa es
+  //                 el del shell de login que abre cmux, no el de este
+  //                 proceso, y ahora se sabe con evidencia.
+  //   'wrong-cwd' → el comando corrió en OTRO directorio (dato tomado del
+  //                 `$PWD` del propio shell, no del campo que cmux reporta).
+  //                 Hay un agente posiblemente vivo tocando otro sitio: NO se
+  //                 borra nada, se cuenta como no lanzado y se enumera.
+  //   'never' /
+  //   'garbled'   → no se puede confirmar. Y aquí está la decisión que esta
+  //                 ronda tenía que tomar y que no es cómoda: NO se revierte el
+  //                 claim. Un centinela ausente es compatible con el caso de
+  //                 campo (el comando nunca corrió) y con un shell que tarda
+  //                 nueve segundos en arrancar, y desde aquí no se distinguen.
+  //                 Revertir el claim y borrar el worktree con un agente que
+  //                 arranca tarde es destruir trabajo vivo; dejar el residuo y
+  //                 GRITARLO —exit 1, con los comandos exactos— es recuperable.
+  //                 Se elige lo recuperable. Lo que NO se hace, y era todo el
+  //                 hallazgo, es llamarlo "lanzado" y salir con 0.
+  if (sentinel.status === 'no-claude') {
+    cleanupOrphanedWorktree(s, wt, branch, `el comando SÍ llegó a ejecutarse en la sesión de cmux (el centinela de arranque está escrito en ${sentinelPath}), pero \`claude\` NO resuelve en ese shell de login — \`command -v claude\` falló DENTRO de la propia sesión. El agente no va a arrancar: la línea siguiente muere con "command not found", igual que si no se hubiera lanzado nada. Esto no lo puede ver el preflight de ct-next.mjs, que solo mira el PATH de ESTE proceso; el que cuenta es el del shell que abre cmux (donde \`claude\` puede ser además un alias o una función). Arregla el PATH de tu shell de login —o instala \`claude\`— y reintenta`)
+  }
+  if (sentinel.status === 'wrong-cwd') {
+    console.error(`ATENCIÓN: el comando de #${s.n} SÍ se ejecutó (el centinela de arranque está escrito), pero el shell que lo ejecutó estaba en "${sentinel.cwd}", NO en ${wt}. El dato sale del \`$PWD\` del propio shell, no de lo que cmux diga de su ventana: hay un agente arrancando sobre un directorio que no es el worktree de este slice, así que puede estar tocando otro repo. NO se cuenta como lanzado con éxito, y NO se borra nada: revisa esa sesión antes.`)
+    unverifiedLaunches.push({ n: s.n, wt, branch, name, why: `el comando se ejecutó, pero en "${sentinel.cwd}" y no en ${wt} (según el $PWD del propio shell)` })
+    continue
+  }
+  if (sentinel.status === 'never' || sentinel.status === 'garbled') {
+    const ventana = launchCheck.status === 'confirmed' || launchCheck.status === 'cwd-unknown'
+      ? ' La ventana de cmux SÍ existe con el título esperado — pero eso ya no cuenta como prueba de nada: la abre este mismo dispatcher, y el día del hallazgo también existía.'
+      : launchCheck.status === 'not-found'
+        ? ' Y cmux tampoco encuentra ninguna sesión con ese título: dos ausencias, no una.'
+        : ''
+    const detalle = sentinel.status === 'garbled'
+      ? `el fichero centinela ${sentinelPath} EXISTE pero no tiene el formato esperado (empieza por «${sentinel.raw}»), así que no dice nada fiable`
+      : `el centinela de arranque ${sentinelPath} NO apareció en ${launchSentinelTimeoutMs} ms`
+    console.error(`ATENCIÓN: cmux aceptó el lanzamiento de #${s.n} (exit 0) y la ventana está abierta, pero ${detalle} — NO se puede confirmar que el comando llegara a ejecutarse. Los dos casos que esto cubre son indistinguibles desde aquí: (a) el comando nunca corrió —el shell de login se comió parte de la línea al arrancar, que es lo que pasó en el primer despacho real de este loop: un prompt de oh-my-zsh convirtió \`claude\` en \`laude\`— o (b) ese shell sigue arrancando y va a ejecutarlo dentro de un momento. Por eso NO se cuenta como lanzado y por eso TAMPOCO se revierte el claim solo: mira la sesión de cmux "${name}". Si el shell está ahí parado en un prompt, el agente no va a arrancar nunca. Si tu shell de login tarda de verdad tanto, sube CT_NEXT_LAUNCH_TIMEOUT_MS (ahora ${launchSentinelTimeoutMs}).${ventana}`)
+    unverifiedLaunches.push({ n: s.n, wt, branch, name, why: sentinel.status === 'garbled' ? `el centinela de arranque existe pero es ilegible: no se puede afirmar que el comando corriera` : `el comando no dejó constancia de haberse ejecutado en ${launchSentinelTimeoutMs} ms (centinela ausente en ${sentinelPath})` })
+    continue
+  }
+  // A partir de aquí el comando CORRIÓ, en el directorio correcto y con
+  // `claude` resoluble. Lo que queda por decidir es solo cuánto sabemos de la
+  // VENTANA, que es una pregunta menos importante y ya no puede producir un
+  // falso "lanzado" por sí sola.
   if (launchCheck.status === 'confirmed') {
-    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — verificado: la sesión cmux está corriendo en ese directorio.`)
+    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — verificado: la sesión cmux está corriendo en ese directorio, y el comando llegó a ejecutarse de verdad (centinela de arranque escrito por el propio shell, con $PWD=${sentinel.cwd} y \`claude\` resoluble).`)
     launchedCount++
   } else if (launchCheck.status === 'wrong-cwd') {
     // D5, hallazgo A: además del ATENCIÓN, se APUNTA el slice en
@@ -3014,10 +3348,10 @@ for (let idx = 0; idx < plans.length; idx++) {
     // que devolvió 0, o sea posiblemente un agente corriendo) y el resumen
     // final tiene que poder decirlo en vez de afirmar "nada quedó a medias".
     console.error(`ATENCIÓN: cmux aceptó el lanzamiento de #${s.n} (exit 0), pero la sesión NO está en ${wt} — está en "${launchCheck.actualCwd}" en su lugar (cmux tolera un cwd inexistente y arranca en el shell de login por defecto en vez de fallar; ¿el worktree no llegó a existir a tiempo, o se borró justo antes?). El agente puede estar corriendo en el directorio equivocado — revisa la sesión a mano antes de asumir que está trabajando #${s.n}. NO se cuenta como lanzado con éxito.`)
-    unverifiedLaunches.push({ n: s.n, wt, branch, name, why: `la sesión de cmux existe pero está en "${launchCheck.actualCwd}", no en ${wt}` })
+    unverifiedLaunches.push({ n: s.n, wt, branch, name, why: `la sesión de cmux existe pero está en "${launchCheck.actualCwd}", no en ${wt} — aunque el comando SÍ se ejecutó (su propio $PWD era ${sentinel.cwd}), así que lo más probable es que haya un agente vivo: no borres nada sin mirarlo` })
   } else if (launchCheck.status === 'not-found') {
-    console.error(`ATENCIÓN: cmux devolvió éxito (exit 0) al lanzar #${s.n}, pero no se encontró ninguna sesión con el nombre "${name}" al consultarlo — no se puede confirmar que el agente esté corriendo en absoluto, y mucho menos en ${wt}. Revisa cmux a mano. NO se cuenta como lanzado con éxito.`)
-    unverifiedLaunches.push({ n: s.n, wt, branch, name, why: `cmux respondió y no hay ninguna sesión con el título "${name}"` })
+    console.error(`ATENCIÓN: cmux devolvió éxito (exit 0) al lanzar #${s.n}, pero no se encontró ninguna sesión con el nombre "${name}" al consultarlo — no se puede confirmar que el agente esté corriendo en absoluto, y mucho menos en ${wt}. El comando SÍ llegó a ejecutarse (centinela de arranque escrito, $PWD=${sentinel.cwd}), o sea que muy probablemente hay un agente vivo en alguna parte y lo que falla es localizar su ventana. Revisa cmux a mano. NO se cuenta como lanzado con éxito.`)
+    unverifiedLaunches.push({ n: s.n, wt, branch, name, why: `cmux respondió y no hay ninguna sesión con el título "${name}" (pero el comando sí se ejecutó: probablemente hay un agente vivo cuya ventana no se localiza)` })
   } else if (launchCheck.status === 'cwd-unknown') {
     // D5, hallazgo B: la sesión SÍ existe con el título exacto que pedimos
     // — eso es evidencia positiva de que el lanzamiento ocurrió. Lo único
@@ -3025,10 +3359,15 @@ for (let idx = 0; idx < plans.length; idx++) {
     // legible, no porque esté en otro sitio. Cuenta como lanzado (mismo
     // criterio de "beneficio de la duda ante una consulta incompleta" que
     // 'unverifiable'), pero el mensaje no afirma "verificado".
-    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — la sesión de cmux con el título esperado EXISTE, pero cmux no expuso un directorio legible para ella (¿esquema/versión distinta de la esperada?), así que NO se pudo comprobar que esté corriendo en ${wt}. No se afirma "verificado"; si te importa, compruébalo a mano.`)
+    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — la sesión de cmux con el título esperado EXISTE, pero cmux no expuso un directorio legible para ella (¿esquema/versión distinta de la esperada?), así que NO se pudo comprobar que esté corriendo en ${wt}. Eso sí: el comando llegó a ejecutarse (centinela de arranque escrito) y su propio $PWD era ${sentinel.cwd}, que es el worktree esperado — así que lo que falta es el dato de cmux, no la evidencia del arranque.`)
     launchedCount++
   } else {
-    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — cmux devolvió éxito (exit 0), pero no se pudo verificar la sesión (no se pudo consultar cmux): "lanzado" aquí refleja solo que el comando no falló, no que el agente esté corriendo en ${wt}.`)
+    // F19/H1: este camino ya no es el "beneficio de la duda" que era. Antes,
+    // no poder consultar cmux dejaba el lanzamiento SIN NINGUNA evidencia y
+    // se contaba igual; ahora el centinela ya ha dicho, por su cuenta y sin
+    // preguntarle nada a cmux, que el comando corrió en el sitio correcto.
+    // Lo único que se ignora es en qué ventana.
+    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — no se pudo verificar la sesión de cmux (la consulta falló: ¿daemon caído?), pero el comando SÍ llegó a ejecutarse: el centinela de arranque está escrito, con $PWD=${sentinel.cwd} y \`claude\` resoluble en ese shell. Lo que no se sabe es en qué ventana de cmux quedó.`)
     launchedCount++
   }
   // finding 1: el slice se lanzó completo — ya no hay claim "en la ventana
@@ -3037,6 +3376,11 @@ for (let idx = 0; idx < plans.length; idx++) {
   // de verifyCmuxLaunch: el claim en sí ya está resuelto (in-progress,
   // deliberadamente — no se revierte solo por no poder verificar la
   // sesión, eso sería sobrerreaccionar a una incertidumbre distinta).
+  // (F19: `activeClaim` ya se puso a null ARRIBA, en cuanto `cmux
+  // new-workspace` devolvió éxito — ver el comentario de allí: desde ese
+  // instante puede haber un agente vivo y una señal no puede revertirle el
+  // claim. Esta línea se conserva como idempotente por si el flujo de arriba
+  // cambiara; no es la que cierra la ventana.)
   activeClaim = null
 }
 

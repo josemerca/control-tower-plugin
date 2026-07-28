@@ -170,10 +170,16 @@ describe('H2 (CLI) — el slice que se cayó de la cola deja de desaparecer en s
     // del final, que por diseño repite todos los avisos acumulados.
     const lineas = r.err.split('\n').filter((l) => /^aviso: \d+ issue\(s\) CERRADOS/.test(l))
     expect(lineas.length).toBe(1)
-    // Los seis anómalos van dentro de esa única línea; los cuatro in-review
-    // se cuentan aparte y no como anomalía.
-    expect(lineas[0]).toMatch(/^aviso: 6 issue\(s\) CERRADOS/)
+    // F19/H2 CAMBIA ESTE NÚMERO A PROPÓSITO: eran 6 cuando `blocked` contaba
+    // como anomalía junto a `ready` e `in-progress`. Un cerrado con
+    // `status:blocked` es INERTE — no retiene tokens, no bloquea ninguna cola,
+    // no le pasa nada a nadie por dejarlo — y meterlo en el mismo titular que
+    // el que se cayó de la cola de despacho es lo que enseña a descontar el
+    // titular entero. Ahora el titular cuenta 5 (3 ready + 2 in-progress) y el
+    // `blocked` sale en su propio recuento, igual que los `in-review`.
+    expect(lineas[0]).toMatch(/^aviso: 5 issue\(s\) CERRADOS/)
     expect(lineas[0]).toMatch(/Otros 4 cerrados conservan status:in-review/)
+    expect(lineas[0]).toMatch(/Otros 1 cerrados conservan status:blocked/)
   })
 })
 

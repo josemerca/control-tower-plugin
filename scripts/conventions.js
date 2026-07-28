@@ -66,7 +66,46 @@ export const LOOP_BRANCH_PREFIX = 'feat/'
 // una señal cuya evidencia es un FICHERO (`scripts/dispatch-check.sh`) no tiene
 // ninguna línea de AGENTS.md al lado de la que ponerla.
 export const ACK_PATH = '.agent/conventions-ack.md'
-export const ACK_IDS = ['claim', 'worktrees', 'estado']
+
+// ============================================================================
+// F19/H2 — UN ACUSE QUE NO SILENCIA UNA SEÑAL, SINO UNOS CASOS CONCRETOS.
+//
+// EL PROBLEMA QUE CIERRA. F18 añadió un aviso agregado de issues CERRADOS que
+// conservan una label `status:` viva. La forma es la correcta —un párrafo, no
+// diez líneas, agrupado por estado— y aun así se lo va a saltar cualquiera a
+// partir de la tercera corrida, y no por cómo está escrito: porque es
+// ESTÁTICO. Esos diez casos no cambian solos, así que el aviso imprime el
+// mismo párrafo en cada corrida hasta que alguien limpie. Un aviso que no
+// cambia deja de leerse — y entonces el día que aparezca uno nuevo en la
+// lista, no se ve. Es una tercera forma de que un aviso deje de servir,
+// distinta del muro insatisfacible (F14) y del ruido por volumen (F16): la
+// REPETICIÓN SIN NOVEDAD.
+//
+// `residuo-status` es la misma herramienta de F14 —un fichero que o está o no
+// está, determinista, con fecha y motivo— aplicada un nivel más fino: en vez
+// de callar una SEÑAL entera, calla unos NÚMEROS concretos y sigue avisando de
+// los que no estén en la lista. Es literalmente la frase "esto lo he visto y
+// decidido, cállate sobre estos números y sigue avisando de los nuevos".
+//
+// DOS DIFERENCIAS de comportamiento con los acuses de señal, y las dos son
+// deliberadas:
+//
+//   1. ACUMULA entre líneas (`ACK_SET_IDS`). Para una señal, dos líneas con el
+//      mismo id son una redundancia y se reportan como tal. Para un acuse por
+//      caso NO: el uso natural es añadir una línea nueva cada vez que se
+//      revisa un lote ("2026-07-01 — #101", "2026-07-28 — #102"), y obligar a
+//      editar la línea vieja convertiría el mecanismo en un incordio que nadie
+//      usaría. Se unen los conjuntos y se conserva la fecha de la ÚLTIMA.
+//   2. Un acuse SIN números no silencia nada y se REPORTA como problema. Es el
+//      mismo criterio que rige todo este parser: el modo de fallo que no nos
+//      podemos permitir es que alguien crea que ha callado algo y no lo haya
+//      hecho. No hay comodín para "todos" a propósito — un comodín devolvería
+//      exactamente el silencio estático que este acuse viene a romper.
+export const ACK_IDS = ['claim', 'worktrees', 'estado', 'residuo-status']
+// Ids cuyo acuse es un CONJUNTO de casos (números de issue) en vez de un
+// interruptor por señal.
+export const ACK_SET_IDS = ['residuo-status']
+// ============================================================================
 
 // El bloque que el PROPIO ct-init siembra se PODA antes de escanear
 // (`docLines`, abajo). Imprescindible desde F11: ese bloque habla de
@@ -630,6 +669,21 @@ export function parseAcks(content) {
     const reason = d[2].trim()
     if (!reason) {
       problems.push({ line: n, text: t, why: 'falta el motivo: qué se decidió y por qué' })
+      return
+    }
+    // F19/H2: los acuses POR CASO (`ACK_SET_IDS`) llevan dentro del motivo los
+    // números que callan, y se ACUMULAN entre líneas en vez de chocar. Ver el
+    // bloque de comentarios de ACK_SET_IDS, arriba, para el porqué de las dos
+    // diferencias.
+    if (ACK_SET_IDS.includes(id)) {
+      const refs = [...reason.matchAll(/#(\d+)\b/g)].map((m) => Number(m[1])).filter((x) => Number.isInteger(x) && x > 0)
+      if (!refs.length) {
+        problems.push({ line: n, text: t, why: `\`${id}\` es un acuse POR CASO: tiene que nombrar los números concretos que calla (p.ej. «${id}: ${d[1]} — #101, #102 revisados: …»). Sin números no silencia nada, y no hay comodín para "todos" a propósito` })
+        return
+      }
+      const prev = acks.get(id)
+      const cases = new Set([...(prev?.cases ?? []), ...refs])
+      acks.set(id, { id, date: d[1], reason, line: n, cases })
       return
     }
     if (acks.has(id)) {
