@@ -100,6 +100,20 @@ import { parseStrictInt } from './argnum.js'
 // ocurrió, sobre el propio contrato de exit codes del protocolo de claim. Un
 // mensaje que no se puede entregar es un límite aceptable; que decida el
 // resultado del protocolo, no.
+// CANAL DE SALIDA (F16/H2) — mismo criterio que ct-next.mjs y ct-groom.mjs,
+// escrito entero en ct-next.mjs junto a su `warn()`:
+//
+//   STDOUT (`outLine`/`dieOut`) = el PRODUCTO. Aquí, el resultado del
+//            protocolo de claim: `claimed #N → in-progress`, `released`,
+//            `reopened`, `requeued`, y las notas que acompañan a un resultado
+//            conseguido.
+//   STDERR (`errLine`/`dieErr`) = el DIAGNÓSTICO. `COLLISION:`, `ATENCIÓN:`,
+//            errores de uso y todo aborto.
+//
+// Este fichero YA cumplía el criterio; queda dicho para que el reparto no
+// haya que inferirlo. OJO al añadir líneas: `writeSync` (más abajo) NO es un
+// detalle de estilo — es lo que impide que un `process.exit()` inmediato se
+// coma el mensaje, y lo que impide que un destino roto cambie el exit code.
 function safeWrite(fd, text) {
   try {
     writeSync(fd, text)
