@@ -158,7 +158,20 @@ SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
 # limpiamente, sin `--force` y sin acusar a nadie — que es exactamente el
 # mecanismo que F9 construyó.
 #
-# F13 sube de 4 a 5, y el bump es OBLIGATORIO aquí más que en ninguna ronda
+# F15 sube de 5 a 6, y por el mismo motivo que F13: el texto v5 DESCRIBE MAL
+# dos cosas que un repo bootstrapeado no puede corregir por su cuenta.
+#   - decía que `--reopen` deja el slice en `status:ready` ("vuelve a ser
+#     despachable"). Ya no: lo deja en `status:in-progress`, porque `ready` no
+#     retiene tokens y ese trabajo sigue sin mergear. Un repo con el v5 seguiría
+#     esperando que /ct-next lo despachara solo, y encima creyendo que su área
+#     quedó libre;
+#   - no decía NADA sobre en qué orden /ct-groom valida y muta. Dos lecturas
+#     independientes del v5 dedujeron —correctamente, entonces— que un abort
+#     podía dejar milestone y labels a medias. Eso YA no es cierto (se arregló
+#     el orden), pero el silencio hacía que la deducción correcta fuera la que
+#     asusta, y ahora la garantía existe y hay que decirla.
+#
+# F13 subió de 4 a 5, y el bump era OBLIGATORIO allí más que en ninguna ronda
 # anterior: lo que cambia no es redacción, es que el texto v4 PROMETÍA
 # garantías que el código no da. Decía que migration/ci/pbxproj serializan "en
 # todo el repo" (el código solo mira issues de este repo con status:
@@ -168,7 +181,7 @@ SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
 # decía en absoluto que un PR rechazado dejaba su slice fuera del loop para
 # siempre. Un repo bootstrapeado con el v4 se queda con esas tres cosas hasta
 # que este número suba; es la única palanca que existe para llegar hasta él.
-SLICES_CONTRACT_VERSION=5
+SLICES_CONTRACT_VERSION=6
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -217,6 +230,7 @@ c90554b809bc6af4f50613e75f160b0b0859ffce3412aeb44d10bef2d9da3e0a  v1, 77 líneas
 8aaa19edfc9b57419972c509f4b558c6084d2a691592561a2b3d180ae59cfcc8  v3, 213 líneas — F11 (sección "Qué hace /ct-next con esto")
 02247741819714164c8f45fbc42dcf26d11c7df58df6b81fae040b038fcf93c4  v4, 221 líneas — F10 (--section obsoleto, enlace al spec verificado)
 cd59702d2c5d3a73b67ad235908b83bdc42c9da41996b14a33fba0749e359961  v5, 289 líneas — F13 (in-review retiene tokens, --reopen, alcance real de la serialización)
+8de58db92770e9b8737280e024f0a7dae199b4a0dca2b7a535e631637c824fea  v6, 364 líneas — F15 (--reopen va a in-progress, --requeue, garantías de orden de /ct-groom)
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -224,7 +238,7 @@ cd59702d2c5d3a73b67ad235908b83bdc42c9da41996b14a33fba0749e359961  v5, 289 línea
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 5 -->
+<!-- ct-init:slices-contract-version: 6 -->
 ## Formato de la tabla §9 (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -336,8 +350,34 @@ re-groomear nunca lo compara ni lo revierte.
   `n` **del mismo owner que `--repo`** (un project de otro owner no está
   soportado) y le fija el campo de iteración llamado exactamente `Sprint` a la
   iteración vigente hoy. Si no existe ese campo, o ninguna iteración cubre la
-  fecha de hoy, `/ct-groom` aborta antes de crear ningún issue (el milestone y
-  las labels sí pueden haberse creado ya).
+  fecha de hoy, `/ct-groom` aborta **sin haber creado nada** — ni milestone, ni
+  labels, ni issues. (Hasta el contrato v5 esto no era cierto: el project se
+  validaba después del milestone y de las labels, y un abort las dejaba
+  creadas.)
+
+#### Qué garantiza `/ct-groom` sobre lo que ya ha tocado cuando falla
+
+Esto importa porque la respuesta natural —"un abort a mitad deja el repo a
+medias"— asusta y lleva a limpiar a mano cosas que no hay que limpiar.
+
+- **Todo lo que `/ct-groom` LEE ocurre antes de todo lo que ESCRIBE.** Las
+  validaciones —argumentos, tabla §9, spec y su enlace, listado de issues, de
+  labels y de milestones, y (con `--project`) el campo `Sprint` con su
+  iteración vigente— van **todas** por delante de la primera mutación. Si
+  aborta por cualquiera de ellas, **no ha creado nada**.
+- **Lo que NO se promete: no hay transacción.** Una vez empieza a escribir, el
+  orden es milestone → labels → issues → alta en el Project. Un fallo *ahí* en
+  medio (red, rate limit, auth caída, un Ctrl-C) deja creado lo anterior. No
+  hay rollback y no se finge que lo haya.
+- **De eso se sale volviendo a correr, no limpiando a mano.** `/ct-groom` es
+  idempotente por construcción: el milestone se reutiliza por título, de las
+  labels solo se crean las que faltan (las que ya existían **no** se tocan,
+  ni su color ni su descripción), los issues se reconocen por su marcador
+  `ct-order` y no se duplican, y un issue que quedó fuera del Project se
+  detecta y se añade en la siguiente corrida.
+- **Sin `--reconcile`, un issue que ya existe NUNCA se edita.** Las
+  divergencias se reportan y se sale `3`; nada se escribe.
+- **`--dry-run` no muta nada, nunca** — ni siquiera crea el milestone.
 
 Ejemplo que parsea tal cual (verificado con `ct-groom.mjs --dry-run`):
 
@@ -420,7 +460,9 @@ loop una vez hay slices en vuelo.
   vuelo (`status:in-progress`), así que un segundo `/ct-next --cap 1` con algo
   corriendo no lanza nada — y lo dice. Un `status:in-review` **no** ocupa cap
   (no hay ningún agente corriendo ahí), aunque sí retenga sus tokens: son dos
-  contabilidades distintas. Aprovechar una ventana de paralelismo es un acto
+  contabilidades distintas. Un slice reabierto con `--reopen` vuelve a
+  `in-progress` y por tanto **sí** ocupa cap: esta vez hay alguien
+  rehaciéndolo. Aprovechar una ventana de paralelismo es un acto
   explícito: `/ct-next --cap 2` (o más).
 - **Las dos garantías de arriba valen para UN dispatcher a la vez.** El claim
   es un label de GitHub, sin compare-and-swap: está reproducido y verificado
@@ -459,6 +501,18 @@ loop una vez hay slices en vuelo.
   revierta **a mano**:
 
   ```
+  node <plugin>/scripts/dispatch-check.mjs <n> --repo <owner/repo> --requeue
+  ```
+
+  `--requeue` es la versión **comprobada** de la edición a mano: se niega si
+  el worktree `.worktrees/<n>` o la rama `feat/<n>` siguen existiendo, porque
+  entonces el trabajo de ese slice sigue vivo sin mergear y soltar sus tokens
+  dejaría salir a un vecino sobre una base que no lo contiene. Si de verdad
+  quieres saltarte esa comprobación (sabes que ese trabajo no importa y
+  prefieres conservar el worktree), la edición cruda sigue estando y no
+  comprueba nada:
+
+  ```
   gh issue edit <n> --repo <owner/repo> --add-label status:ready --remove-label status:in-progress
   ```
 
@@ -475,26 +529,61 @@ loop una vez hay slices en vuelo.
 ### Rechazar un PR en el gate, sin sacar el slice del loop
 
 `status:in-review` **no** es un estado terminal, pero salir de él es un acto
-deliberado tuyo: no hay ninguna transición automática de vuelta. Si rechazas
-el PR de un slice, devuélvelo al loop con
+deliberado tuyo: no hay ninguna transición automática de vuelta. El ciclo
+completo de un slice, con quién mueve cada arista:
+
+```
+backlog --(tú)--> ready --(/ct-next)--> in-progress --(--release)--> in-review
+                    ^                        ^                          |
+                    |                        +-------(--reopen)---------+
+                    +---------(--requeue)----+
+```
+
+Si rechazas el PR de un slice, devuélvelo al banco de trabajo con
 
 ```
 node <plugin>/scripts/dispatch-check.mjs <n> --repo <owner/repo> --reopen
 ```
 
-que lo mueve `in-review` → `ready` **solo si de verdad está en `in-review`**
-(si no, se niega sin tocar ninguna label). No borra nada del disco: te dice
-qué queda de la vuelta anterior (el worktree `.worktrees/<n>` y la rama
-`feat/<n>`) y te deja elegir entre los dos caminos, que son excluyentes:
+que lo mueve `in-review` → **`in-progress`** —el inverso exacto de
+`--release`— **solo si de verdad está en `in-review`** (si no, se niega sin
+tocar ninguna label). Que quede en `in-progress` y no en `ready` **no es un
+detalle**: su trabajo sigue existiendo sin mergear en `feat/<n>`, así que
+**sigue reteniendo sus tokens** de `Área`/`Toca` hasta el merge. Reabrir **no
+desbloquea a sus vecinos** — solo dice quién lo está rehaciendo. Y ocupa una
+plaza de `--cap`, porque esta vez sí hay alguien trabajándolo.
+
+No borra nada del disco: te dice qué queda de la vuelta anterior (el worktree
+`.worktrees/<n>` y la rama `feat/<n>`) y te deja elegir entre dos caminos
+excluyentes:
 
 - **corregir encima** de lo que ya hay — lo normal tras un rechazo: sigues en
   ese mismo worktree y ese mismo PR, y **no** invocas `/ct-next` para ese
-  slice (se negaría, precisamente porque el worktree y la rama existen);
+  slice (se negaría, precisamente porque el worktree y la rama existen).
+  Cuando vuelva a estar listo, repites el `--release`;
 - **empezar de cero** — borras worktree y rama (comprueba antes que no
-  pierdes trabajo sin pushear) y dejas que `/ct-next` lo despache de nuevo.
+  pierdes trabajo sin pushear), cierras su PR, y **solo entonces** lo
+  devuelves a la cola:
 
-Sin esto, un PR rechazado dejaba su slice fuera del loop **para siempre**, y
-con él todo lo que dependiera de él: `/ct-next` solo despacha `status:ready`.
+  ```
+  node <plugin>/scripts/dispatch-check.mjs <n> --repo <owner/repo> --requeue
+  ```
+
+  `--requeue` mueve `in-progress` → `ready`, y es la ÚNICA transición que
+  suelta tokens sin un merge, así que **comprueba antes de declararlo**: exige
+  que en esta máquina no quede ni `.worktrees/<n>` ni `feat/<n>`, y se niega
+  también si no ha podido mirarlo (no se declara ausente lo que no se ha
+  visto). Lo que **no** puede comprobar y te dice cada vez: la rama en el
+  remoto y el PR abierto. Si siguen ahí, ese trabajo sigue sin mergear y ya no
+  hay nadie reteniendo su área.
+
+`--requeue` sirve además para el otro caso de siempre: **romper un claim
+muerto** (un `status:in-progress` cuyo agente ya no existe). Es la versión
+comprobada del `gh issue edit` a mano que aparece más arriba.
+
+Sin estas dos aristas, un PR rechazado dejaba su slice fuera del loop **para
+siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
+`status:ready`.
 - **Cada slice en vuelo tiene SU `.agent/STATE.md`**: el de su worktree
   (`.worktrees/<n>/.agent/STATE.md`), sembrado al despachar. Dos slices a la
   vez no se pisan ese fichero, y ninguno toca el `.agent/STATE.md` del
@@ -507,7 +596,7 @@ con él todo lo que dependiera de él: `/ct-next` solo despacha `status:ready`.
   recibe el spec**: se hidrata del issue. Lo que no llegó al cuerpo del issue
   no llega al agente.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v5). Si el plugin trae una
+<sub>Esta sección la mantiene `/ct-init` (contrato v6). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>

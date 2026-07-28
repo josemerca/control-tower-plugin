@@ -492,21 +492,125 @@ export function linkedDocPaths(docs) {
 // fecha ni motivo es indistinguible de un `# TODO` que alguien dejó y nadie
 // recuerda — y esto silencia un aviso de verdad.
 //
-// Todo lo que no sea un comentario `#` o una línea en blanco TIENE que parsear.
-// Una línea que no se entiende se REPORTA, nunca se ignora: el modo de fallo que
-// no nos podemos permitir es que alguien crea que ha silenciado algo y no lo
-// haya hecho (vuelve a ver el aviso y concluye que el acuse no sirve) o al revés.
+// F15/H3 — EL FICHERO DEL PORQUÉ NO ADMITÍA UN PORQUÉ.
+//
+// La versión de F14 era línea a línea y solo sabía saltar líneas en blanco,
+// encabezados `#`, bloques de código y una línea suelta que empezara por
+// `<!--`. TODO lo demás tenía que parsear como acuse o se reportaba. Medido
+// por construcción contra esa versión, antes de tocar nada: un preámbulo en
+// prosa de tres líneas produce 3 avisos de "no silencia nada"; meter ese mismo
+// preámbulo entre `<!--` y `-->` produce 4 (las tres líneas de dentro MÁS la
+// del `-->`, porque solo la de apertura se saltaba). O sea: un fichero cuya
+// única razón de existir es dejar constancia de POR QUÉ se tomó una decisión
+// no admitía escribir el porqué en ninguna parte, ni siquiera comentado.
+//
+// LA PROPIEDAD QUE NO SE PUEDE PERDER. El fallo inaceptable no es "se me cuela
+// prosa": es que alguien crea que ha silenciado una señal y no lo haya hecho.
+// Así que la pregunta no es "¿esto parsea?" sino "¿esto PRETENDÍA ser un
+// acuse?" — y solo lo que lo pretendía y no parsea se reporta.
+//
+// CÓMO SE DISTINGUE PROSA DE ACUSE MAL ESCRITO (`looksLikeAck`, abajo). Dos
+// huellas, cualquiera de las dos basta:
+//   (a) el primer token de la línea ES una señal conocida, o está a distancia
+//       de edición 1 de una (`clim:`, `worktree:`, `estado`). Cubre el acuse
+//       cuya sintaxis se rompió del todo — sin colon, con guion, sin fecha;
+//   (b) la línea tiene la forma `<palabra>: <YYYY-MM-DD>`. Cubre el acuse con
+//       la sintaxis bien y el NOMBRE de señal mal, que (a) no alcanza.
+// Una frase de prosa normal ("Contexto de la decisión, julio de 2026.") no
+// tiene ninguna de las dos y se ignora sin ruido.
+//
+// EL SESGO ES DELIBERADO: ante la duda, se REPORTA. Una línea de prosa que
+// empiece por la palabra "claim" se llevará un aviso — molesto, y con remedio
+// obvio (comentarla, o reescribirla); un acuse silenciado por error no tiene
+// remedio, porque nadie se entera. Y para el caso en que TODO el fichero se
+// leyó como prosa —el que de verdad engaña— hay una voz propia: ver
+// `formatFindings` y el campo `prosaSinAcuses` que se devuelve aquí.
+const ACK_ID_HEAD_RE = /^(?:[-*+]\s+)?[`"'*_]*([A-Za-zÁ-Úá-ú][\w-]*)/
+
+// editDistanceAtMost1: ¿se llega de `a` a `b` con UNA sola inserción, borrado
+// o sustitución? No es un Levenshtein general a propósito — con umbral 1 basta
+// una pasada lineal, y subir el umbral empezaría a tragarse prosa ("estado" y
+// "estada" son vecinos; "estado" y "estamos" ya no deben serlo).
+function editDistanceAtMost1(a, b) {
+  if (a === b) return true
+  if (Math.abs(a.length - b.length) > 1) return false
+  const [s, l] = a.length <= b.length ? [a, b] : [b, a]
+  let i = 0
+  let j = 0
+  let budget = 1
+  while (i < s.length && j < l.length) {
+    if (s[i] === l[j]) { i++; j++; continue }
+    if (budget-- === 0) return false
+    if (s.length === l.length) { i++; j++ } else { j++ }
+  }
+  return true
+}
+
+// looksLikeAck: ¿esta línea PRETENDÍA silenciar una señal? Exportada porque es
+// exactamente el criterio que hay que poder probar aparte: es la frontera
+// entre "no se dice nada" y "se avisa", y una frontera que solo existe dentro
+// de un bucle no se puede atacar de forma directa.
+export function looksLikeAck(text) {
+  const t = String(text ?? '').trim()
+  if (!t) return false
+  const head = ACK_ID_HEAD_RE.exec(t)
+  if (head) {
+    const id = head[1].toLowerCase()
+    if (ACK_IDS.some((known) => editDistanceAtMost1(id, known))) return true
+  }
+  // Huella (b): fecha ISO pegada a los dos puntos. Es la forma del acuse, no
+  // la de ninguna frase.
+  return /^(?:[-*+]\s+)?[`"'*_]*[A-Za-zÁ-Úá-ú][\w-]*[`"'*_]*\s*:\s*\d{4}-\d{2}-\d{2}\b/.test(t)
+}
+
+// Todo lo que PRETENDA ser un acuse (ver `looksLikeAck`) TIENE que parsear.
+// Una línea así que no se entiende se REPORTA, nunca se ignora: el modo de
+// fallo que no nos podemos permitir es que alguien crea que ha silenciado algo
+// y no lo haya hecho (vuelve a ver el aviso y concluye que el acuse no sirve)
+// o al revés. Lo que no lo pretende es prosa, y la prosa es el motivo por el
+// que este fichero existe.
+//
+// Devuelve `{ acks, problems, prosaSinAcuses }`. El tercer campo es cierto
+// solo cuando el fichero traía contenido de verdad (algo más que blancos,
+// encabezados y comentarios) y NO produjo ni un acuse ni un problema — el
+// único estado en el que el silencio de este parser puede engañar a alguien.
 export function parseAcks(content) {
   const acks = new Map()
   const problems = []
   const raw = String(content ?? '').replace(/^﻿/, '') // BOM: editores de Windows
   let fenced = false
+  // Estado del comentario HTML MULTI-LÍNEA. Antes solo se saltaba la línea que
+  // EMPEZABA por `<!--`, así que el cuerpo del comentario y su `-->` de cierre
+  // se parseaban como si fueran acuses. Un `<!-- ... -->` que abre y cierra en
+  // la misma línea no entra en el estado (de ahí el `&& !t.includes('-->')`).
+  let inComment = false
+  let sawProse = false
   raw.split('\n').forEach((rawLine, i) => {
     const line = rawLine.replace(/\r$/, '')
     const t = line.trim()
+    if (inComment) {
+      if (t) sawProse = true
+      if (t.includes('-->')) inComment = false
+      return
+    }
     if (/^(```|~~~)/.test(t)) { fenced = !fenced; return }
-    if (fenced || !t || t.startsWith('#') || t.startsWith('<!--')) return
+    // Atacando esta misma implementación: un acuse DENTRO de un bloque de
+    // código (o de un fence que alguien abrió y no cerró, que se traga todo
+    // lo que venga detrás) se ignoraba, y como no era "prosa" tampoco
+    // disparaba el aviso de `prosaSinAcuses` — silencio total sobre un
+    // fichero que el humano cree que silencia algo. Cuenta como contenido: no
+    // se parsea (un fence es un fence), pero deja de ser invisible.
+    if (fenced) { if (t) sawProse = true; return }
+    if (!t || t.startsWith('#')) return
+    if (t.startsWith('<!--')) {
+      sawProse = true
+      if (!t.includes('-->')) inComment = true
+      return
+    }
     const n = i + 1
+    // PROSA: no pretendía ser un acuse. Se ignora, que es justo lo que este
+    // fichero necesitaba para poder llevar la explicación humana.
+    if (!looksLikeAck(t)) { sawProse = true; return }
     const m = /^(?:[-*+]\s+)?([A-Za-zÁ-Úá-ú][\w-]*)\s*:\s*(.*)$/.exec(t)
     if (!m) {
       problems.push({ line: n, text: t, why: 'no tiene la forma `señal: YYYY-MM-DD — motivo`' })
@@ -534,7 +638,9 @@ export function parseAcks(content) {
     }
     acks.set(id, { id, date: d[1], reason, line: n })
   })
-  return { acks, problems }
+  // La única forma de que el nuevo silencio engañe: el humano escribió algo,
+  // no era ni un acuse ni algo parecido a uno, y el fichero no silencia nada.
+  return { acks, problems, prosaSinAcuses: sawProse && acks.size === 0 && problems.length === 0 }
 }
 
 // formatFindings: el aviso, ya listo para stderr. Una función y no dos
@@ -546,7 +652,7 @@ export function parseAcks(content) {
 // nada» y «se decidió no mirar esto» no son lo mismo y confundirlos es la
 // mentira que este fichero lleva desde F11 intentando no contar), y los
 // problemas del propio fichero de acuse.
-export function formatFindings(findings, { where = 'este repo', ackProblems = [], ackUnreadable = null } = {}) {
+export function formatFindings(findings, { where = 'este repo', ackProblems = [], ackUnreadable = null, ackProsaSinAcuses = false } = {}) {
   const live = (findings || []).filter((f) => !f.silenced)
   const silenced = (findings || []).filter((f) => f.silenced)
   const out = []
@@ -577,6 +683,14 @@ export function formatFindings(findings, { where = 'este repo', ackProblems = []
       '  Esa señal —y solo esa— deja de avisar; las demás siguen. No hace falta borrar documentación ' +
         'correcta para callar el aviso: si lo que documentas es el uso manual fuera del loop, acúsalo y ya.'
     )
+    // F15/H3: el resto del fichero es tuyo. Se dice AQUÍ, junto al ejemplo,
+    // porque es donde alguien decide qué va a escribir — enterarse después de
+    // haber peleado con el parser llega tarde.
+    out.push(
+      `  El resto de \`${ACK_PATH}\` es prosa libre: escribe el razonamiento largo que haga falta alrededor ` +
+        'de esas líneas. Solo se leen como acuse las líneas que lo parecen, y una que lo parezca y esté mal ' +
+        'escrita se te dice; la prosa no.'
+    )
   }
   for (const f of silenced) {
     const n = f.evidence.length
@@ -593,6 +707,22 @@ export function formatFindings(findings, { where = 'este repo', ackProblems = []
   }
   for (const p of ackProblems || []) {
     out.push(`  aviso: ${ACK_PATH}:${p.line} no silencia nada — ${p.why}: «${p.text}»`)
+  }
+  // F15/H3 — la voz del silencio nuevo. Desde que la prosa se ignora, un
+  // fichero ENTERO de prosa no produce ni acuses ni avisos: exactamente el
+  // estado en que alguien cree haber silenciado algo y no lo ha hecho, que es
+  // el fallo que este parser no se puede permitir. Se dice.
+  //
+  // Solo cuando hay avisos VIVOS: si no hay ninguna señal que silenciar, que
+  // el fichero no silencie nada da igual, y decirlo en cada despacho sería
+  // ruido en un repo que no tiene ningún problema. La condición que importa
+  // es "podrías creer que has callado ESTO, y no lo has hecho".
+  if (ackProsaSinAcuses && live.length) {
+    out.push(
+      `  aviso: \`${ACK_PATH}\` existe y tiene contenido, pero NO silencia ninguna señal — todo lo que hay ` +
+        'dentro se ha leído como prosa. Un acuse es una línea que empieza por el nombre de la señal: ' +
+        `\`${ACK_IDS[0]}: 2026-01-31 — <motivo>\` (señales válidas: ${ACK_IDS.join(', ')}).`
+    )
   }
   return out.join('\n')
 }

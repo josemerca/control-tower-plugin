@@ -189,26 +189,38 @@ describe('F13/H2 — la ventana del cerrojo llega hasta el merge, no hasta el PR
 // H1 — --reopen: la arista que faltaba para salir de in-review.
 // ============================================================================
 describe('F13/H1 — un PR rechazado puede volver al loop', () => {
-  it('--reopen sobre un status:in-review lo devuelve a ready', () => {
+  // F15/H1: el destino de --reopen ya NO es `ready`, es `in-progress`. `ready`
+  // no retiene tokens, así que la arista de vuelta de F13 reabría la ventana
+  // que F13 vino a cerrar. Ver el bloque F15/H1 más abajo para el porqué.
+  it('--reopen sobre un status:in-review lo devuelve a in-progress', () => {
     // Contra el código sin arreglar, `--reopen` era un flag DESCONOCIDO: se
     // ignoraba en silencio y el script seguía hasta el camino de claim
     // (observado: intentaba `gh issue view` y salía 3).
     const fixture = JSON.stringify({ candLabels: ['status:in-review'], openIssues: [], readback: [] })
     const r = runCheck(['9', '--repo', 'o/r', '--reopen', '--dry-run'], { CT_CLAIM_FIXTURE: fixture })
     expect(r.code).toBe(0)
-    expect(r.out).toMatch(/reopened #9 → ready/)
-    expect(r.out).toMatch(/despachable por \/ct-next/)
+    expect(r.out).toMatch(/reopened #9 → in-progress/)
+    expect(r.out).toMatch(/SIN MERGEAR/)
   })
 
-  it('--reopen sobre un status:in-progress se NIEGA sin tocar ninguna label', () => {
-    // El punto entero de que esto viva en dispatch-check y no en un `gh issue
-    // edit` a mano: el comando a mano no comprueba nada y deja dos status: a
-    // la vez.
+  // F15/H1: `in-progress` pasa de "estado desde el que no se puede reabrir" a
+  // "estado en el que --reopen ya te habría dejado", así que el mensaje cambia
+  // de sitio pero la propiedad no: NO se toca ninguna label.
+  it('--reopen sobre un status:in-progress se NIEGA sin tocar ninguna label (ya está donde iría)', () => {
     const fixture = JSON.stringify({ candLabels: ['status:in-progress', 'touches:db'], openIssues: [], readback: [] })
     const r = runCheck(['9', '--repo', 'o/r', '--reopen', '--dry-run'], { CT_CLAIM_FIXTURE: fixture })
     expect(r.code).toBe(2)
-    expect(r.out).toMatch(/solo devuelve al loop un slice en status:in-review/)
-    expect(r.out).toMatch(/status:in-progress/)
+    expect(r.out).toMatch(/ya está en status:in-progress/)
+    expect(r.out).toMatch(/No se ha tocado ninguna label/)
+    // Y nombra la salida real para el otro camino, que ya no es --reopen.
+    expect(r.out).toMatch(/--requeue/)
+  })
+
+  it('--reopen desde backlog (sin ninguna label status:) se NIEGA sin tocar nada', () => {
+    const fixture = JSON.stringify({ candLabels: ['touches:db'], openIssues: [], readback: [] })
+    const r = runCheck(['9', '--repo', 'o/r', '--reopen', '--dry-run'], { CT_CLAIM_FIXTURE: fixture })
+    expect(r.code).toBe(2)
+    expect(r.out).toMatch(/solo devuelve al banco de trabajo un slice en status:in-review/)
     expect(r.out).toMatch(/No se ha tocado ninguna label/)
     expect(r.out).toMatch(/DOS estados a la vez/)
   })
@@ -264,6 +276,10 @@ describe('F13/H1 — un PR rechazado puede volver al loop', () => {
     expect(r.out).toMatch(/\(b\) EMPEZAR DE CERO/)
     expect(r.out).toContain(`git -C ${repoRoot} worktree remove`)
     expect(r.out).toContain(`git -C ${repoRoot} branch -D feat/9`)
+    // F15/H1: el camino (b) ya no termina en "y /ct-next lo despacha": tras
+    // borrar hay que devolverlo a la cola explícitamente, porque --reopen lo
+    // dejó reclamado.
+    expect(r.out).toMatch(/--requeue/)
   })
 
   it('sin poder consultar git, NO afirma que no quede nada', () => {
@@ -280,7 +296,7 @@ describe('F13/H1 — un PR rechazado puede volver al loop', () => {
   it('la línea de uso anuncia --reopen (si no, nadie que lea el error se entera de que existe)', () => {
     const r = runCheck(['9', '--dry-run'])
     expect(r.code).toBe(2)
-    expect(r.out).toMatch(/\[--release \| --reopen\]/)
+    expect(r.out).toMatch(/\[--release \| --reopen \| --requeue\]/)
   })
 })
 

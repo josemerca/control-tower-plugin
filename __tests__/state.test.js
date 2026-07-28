@@ -456,7 +456,20 @@ describe('classifyStopState', () => {
     expect(v.reason).toMatch(/`blocked`/)
   })
   it('behind con un solo commit no dice "1 commits"', () => {
-    expect(verdict('behind', { count: 1 }).reason).toMatch(/hay 1 commit en/)
+    // F15/H4: el conteo es ahora de commits DE TRABAJO (los que solo tocan
+    // .agent/STATE.md no cuentan), y el texto lo dice.
+    expect(verdict('behind', { count: 1 }).reason).toMatch(/hay 1 commit de trabajo en/)
+  })
+  it('behind con apuntes por medio los nombra aparte, para que el conteo cuadre con git log', () => {
+    const v = verdict('behind', { count: 1, bookkeeping: 2 })
+    expect(v.reason).toMatch(/1 commit de trabajo/)
+    expect(v.reason).toMatch(/2 commits que solo tocan/)
+  })
+  it('behind-bookkeeping ni bloquea ni avisa: es el estado normal de un turno registrado', () => {
+    const v = verdict('behind-bookkeeping', { count: 0, bookkeeping: 1 })
+    expect(v.block).toBe(false)
+    expect(v.systemMessage).toBe('')
+    expect(v.kind).toBe('behind-bookkeeping')
   })
   it('unresolvable bloquea, cita el valor y NO afirma que sea más viejo', () => {
     const v = verdict('unresolvable', { raw: 'sha_viejo', stateSha: '' })

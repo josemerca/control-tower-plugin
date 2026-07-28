@@ -7405,6 +7405,33 @@ function branchesContaining(git2, stateSha, currentBranch) {
   if (remote === null) return { containers: [], containersKnown: false };
   return { containers: remote.slice(0, 5), containersKnown: true };
 }
+var STATE_REL_PATH = ".agent/STATE.md";
+var WORK_SCAN_MAX = 200;
+function countWorkCommits(git2, stateSha, headSha2, total) {
+  if (!(total > 0) || total > WORK_SCAN_MAX) return { work: total, bookkeeping: 0, known: false };
+  const r = git2(["log", "--format=commit:%H", "--name-only", "--no-renames", `${stateSha}..${headSha2}`]);
+  if (r.status !== 0) return { work: total, bookkeeping: 0, known: false };
+  let work = 0;
+  let bookkeeping = 0;
+  let files = null;
+  const cerrar = () => {
+    if (files === null) return;
+    if (files.length > 0 && files.every((f) => f === STATE_REL_PATH)) bookkeeping++;
+    else work++;
+  };
+  for (const line of String(r.stdout || "").split("\n")) {
+    if (line.startsWith("commit:")) {
+      cerrar();
+      files = [];
+      continue;
+    }
+    const f = line.trim();
+    if (f && files !== null) files.push(f);
+  }
+  cerrar();
+  if (work + bookkeeping !== total) return { work: total, bookkeeping: 0, known: false };
+  return { work, bookkeeping, known: true };
+}
 function describeStopRelation({ headSha: headSha2, lastCommit, git: git2, branch: branch2 = "" }) {
   const raw = lastCommit == null ? "" : String(lastCommit).trim();
   const base = { raw, headSha: headSha2, branch: branch2, stateSha: "", count: 0, mergeBase: "", containers: [], containersKnown: false };
@@ -7420,7 +7447,12 @@ function describeStopRelation({ headSha: headSha2, lastCommit, git: git2, branch
   if (stateIsAncestor === 0) {
     const c = git2(["rev-list", "--count", `${stateSha}..${headSha2}`]);
     const n = c.status === 0 ? Number.parseInt(String(c.stdout || "").trim(), 10) : NaN;
-    return { ...out, kind: "behind", count: Number.isFinite(n) ? n : 0 };
+    const total = Number.isFinite(n) ? n : 0;
+    const { work, bookkeeping, known } = countWorkCommits(git2, stateSha, headSha2, total);
+    if (known && work === 0 && bookkeeping > 0) {
+      return { ...out, kind: "behind-bookkeeping", count: 0, bookkeeping, total };
+    }
+    return { ...out, kind: "behind", count: known ? work : total, bookkeeping: known ? bookkeeping : 0, total };
   }
   const headIsAncestor = git2(["merge-base", "--is-ancestor", headSha2, stateSha]).status;
   if (headIsAncestor !== 0 && headIsAncestor !== 1) return { ...out, kind: "unknown" };
@@ -7440,13 +7472,16 @@ function classifyStopState({ relation: relation2, stopHookActive }) {
   if (stopHookActive) return none;
   const rel = relation2;
   if (rel.kind === "unset" || rel.kind === "same") return none;
+  if (rel.kind === "behind-bookkeeping") return { ...none, kind: "behind-bookkeeping" };
   if (rel.kind === "behind") {
     const n = rel.count;
     const cuantos = n === 1 ? "1 commit" : n > 1 ? `${n} commits` : "commits";
+    const b = rel.bookkeeping || 0;
+    const nota = b > 0 ? ` (m\xE1s ${b === 1 ? "1 commit que solo toca" : `${b} commits que solo tocan`} \`.agent/STATE.md\`, que no cuenta${b === 1 ? "" : "n"}: un apunte no es trabajo sin registrar)` : "";
     return {
       block: true,
       kind: "behind",
-      reason: `\`.agent/STATE.md\` se ha quedado atr\xE1s: hay ${cuantos} en ${whereAmI(rel)} por encima de su \`last_commit\` (${shortSha(rel.stateSha)}), que s\xED es un ancestro de HEAD (${shortSha(rel.headSha)}). Actualiza STATE.md (you_are_here, next_action, tasks[], last_commit) antes de cerrar el turno, para que la pr\xF3xima sesi\xF3n se hidrate correcta. ` + STOP_TAIL,
+      reason: `\`.agent/STATE.md\` se ha quedado atr\xE1s: hay ${cuantos} de trabajo${nota} en ${whereAmI(rel)} por encima de su \`last_commit\` (${shortSha(rel.stateSha)}), que s\xED es un ancestro de HEAD (${shortSha(rel.headSha)}). Actualiza STATE.md (you_are_here, next_action, tasks[], last_commit) antes de cerrar el turno, para que la pr\xF3xima sesi\xF3n se hidrate correcta. Commitear ese cambio NO te vuelve a dejar atr\xE1s: un commit que solo toca \`.agent/STATE.md\` no cuenta. ` + STOP_TAIL,
       systemMessage: ""
     };
   }

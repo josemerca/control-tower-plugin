@@ -137,18 +137,22 @@ const issue = parseStrictInt(process.argv[2])
 const repo = arg('--repo')
 const release = has('--release')
 const reopen = has('--reopen')
+const requeue = has('--requeue')
 const dryRun = has('--dry-run')
-const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release | --reopen] [--dry-run]'
+const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release | --reopen | --requeue] [--dry-run]'
 if (issue === null || issue < 1) {
   dieErr(`<issue#> inválido: ${process.argv[2] === undefined ? '(ausente)' : `"${process.argv[2]}"`} — debe ser un entero >= 1 escrito con dígitos a secas (nada de "42x", "1e3", "4.2", espacios, ni signo "+"/"-": un número aproximado aquí reclamaría un issue que no es el que pediste).\n${usage}`, 2)
 }
 if (typeof repo !== 'string' || repo.length === 0) { dieErr(usage, 2) }
-// `--release` y `--reopen` mueven el MISMO label en direcciones contrarias
-// (in-progress → in-review, in-review → ready). Pasarlos juntos no tiene una
-// interpretación razonable, y elegir uno en silencio sería adivinar cuál
-// quería quien lo escribió sobre una mutación de estado real.
-if (release && reopen) {
-  dieErr(`--release y --reopen son mutuamente excluyentes: uno cierra el slice hacia revisión (in-progress → in-review) y el otro lo devuelve al loop (in-review → ready). Elige uno.\n${usage}`, 2)
+// Los tres flags mueven el MISMO label por aristas distintas del ciclo
+// (ready → in-progress → in-review → in-progress → … → ready). Pasar dos
+// juntos no tiene una interpretación razonable, y elegir uno en silencio sería
+// adivinar cuál quería quien lo escribió sobre una mutación de estado real.
+{
+  const pedidos = [release && '--release', reopen && '--reopen', requeue && '--requeue'].filter(Boolean)
+  if (pedidos.length > 1) {
+    dieErr(`${pedidos.join(' y ')} son mutuamente excluyentes: --release cierra el slice hacia revisión (in-progress → in-review), --reopen lo devuelve al banco de trabajo tras un rechazo (in-review → in-progress) y --requeue lo abandona y lo devuelve a la cola (in-progress → ready). Elige uno.\n${usage}`, 2)
+  }
 }
 
 // CT_CLAIM_TEST_SELF_KILL_SIGNAL — exclusivamente para tests (revisión
@@ -325,6 +329,64 @@ if (release) {
 }
 
 // ============================================================================
+// F15/H1 — `--reopen` REABRÍA LA VENTANA QUE F13 CERRÓ.
+//
+// F13 separó dos contabilidades que vivían en un solo label: el CAP mide
+// agentes vivos (`in-progress`), los TOKENS miden trabajo SIN MERGEAR
+// (`in-progress` + `in-review`). Y en la misma ronda añadió `--reopen` para
+// que un PR rechazado pudiera volver al loop… mandándolo a `status:ready`.
+//
+// `ready` NO retiene tokens. Pero el trabajo sin mergear del slice rechazado
+// sigue existiendo en su rama y en su PR: mientras alguien corrige encima, un
+// vecino que comparta `area:`/`touches:` podía despacharse ramificando de una
+// `main` que no lo contiene — exactamente la ventana que F13 vino a cerrar,
+// reabierta por su propia arista de vuelta. Reproducido por construcción con
+// `planDispatch` antes de tocar nada: con #7 en `in-review` y `area:plan`, el
+// candidato #8 que comparte esa área se salta y sale #9; con ese mismo #7 en
+// `ready`, `runningTouches` sale VACÍO y la protección desaparece.
+//
+// LA RAÍZ: `ready` significaba dos cosas incompatibles. "Nunca se empezó — no
+// hay nada en ninguna rama" y "se empezó, se rechazó, hay trabajo sin mergear
+// y se está rehaciendo encima". La primera no debe bloquear a nadie; la
+// segunda tiene que bloquear a sus vecinos. Un solo label no puede ser las
+// dos.
+//
+// LA SOLUCIÓN: `--reopen` deja de ir a `ready`. Va a `status:in-progress`, que
+// es el INVERSO EXACTO de `--release`. No es un apaño para retener tokens: es
+// que `in-progress` describe la verdad de ese slice tras un rechazo, en las
+// DOS contabilidades a la vez y sin tocar ni una línea de dispatch.js:
+//   - TOKENS: hay trabajo sin mergear en `feat/<n>`. Debe retenerlos. Lo hace.
+//   - CAP: hay alguien trabajándolo (corregir encima es el camino normal tras
+//     un rechazo, y es lo que el propio mensaje de abajo recomienda). Ocupar
+//     una plaza de concurrencia es correcto, no un efecto colateral.
+//   - CLAIM RANCIO: `stalenessNote` marca un `in-progress` sin worktree, ni
+//     rama, ni sesión. Tras un `--reopen` el worktree y la rama SIGUEN AHÍ
+//     (reabrir no toca el disco), así que no salta ninguna falsa alarma.
+//
+// POR QUÉ NO LAS OTRAS DOS VÍAS:
+//   - "que `ready` retenga tokens": rompe el caso normal — un slice que nunca
+//     se empezó pasaría a bloquear a todos sus vecinos de área para siempre.
+//   - "un estado nuevo, `status:rejected`": el argumento de F13 sigue en pie
+//     (hay que enseñárselo a todo lo que lee labels), y aquí además sobra: el
+//     estado que hacía falta ya existía y se llama `in-progress`.
+// Y NO reintroduce lo que F13 descartó a conciencia (mantener el claim desde
+// el PR hasta el merge): ahí el slice pasaba días en `in-progress` SIN NADIE
+// trabajándolo, congelando una plaza y disparando una falsa alarma de claim
+// huérfano en cada PR en revisión. Aquí el `in-progress` se pone en el momento
+// exacto en que alguien vuelve a ponerse con él, y no antes.
+//
+// LO QUE ESTO ESTRECHA, DICHO EN VOZ ALTA. Antes, `--reopen` dejaba el slice
+// despachable por `/ct-next`. Ya no: sale del comando ya reclamado. Eso es
+// deliberado (era despachable en falso — `/ct-next` se negaba igual, porque el
+// worktree y la rama existían), pero deja huérfano el otro camino, el de
+// "empezar de cero", que sí necesitaba `ready`. Ese camino tiene ahora su
+// propia arista comprobada: `--requeue` (más abajo), que exige que no quede
+// nada del slice en esta máquina antes de declararlo listo para volver a la
+// cola. La alternativa era dejar ese caso en manos de un `gh issue edit` a
+// mano, que es justo lo que `--reopen` existe para no tener que hacer.
+// ============================================================================
+
+// ============================================================================
 // --reopen (F13/H1) — `status:in-review` ERA UN ESTADO TERMINAL.
 //
 // EL AGUJERO. `--release` movía `in-progress → in-review` y NO EXISTÍA
@@ -422,19 +484,26 @@ function localSliceArtifacts(n) {
 // mensaje que no menciona la reapertura.
 function reopenDiskNote(n) {
   const a = localSliceArtifacts(n)
+  const requeueCmd = `node <plugin>/scripts/dispatch-check.mjs ${n} --repo ${repo} --requeue`
   if (!a.known) {
-    return `No se ha podido comprobar qué queda de la vuelta anterior en esta máquina (no se pudo consultar git desde aquí) — NO lo leas como "no hay nada". Si el worktree .worktrees/${n} o la rama feat/${n} siguen existiendo, /ct-next se negará a re-despachar #${n} hasta que decidas qué hacer con ellos.`
+    return `No se ha podido comprobar qué queda de la vuelta anterior en esta máquina (no se pudo consultar git desde aquí) — NO lo leas como "no hay nada". Si el worktree .worktrees/${n} o la rama feat/${n} siguen existiendo, sigue trabajando ahí encima; si de verdad quieres empezar de cero, bórralos y devuélvelo a la cola con: ${requeueCmd}`
   }
   if (!a.hasWorktree && !a.hasBranch) {
-    return `De la vuelta anterior no queda nada en ${a.mainRoot} (ni worktree .worktrees/${n} ni rama feat/${n}): /ct-next puede re-despacharlo desde cero. OJO: si la rama solo existe en el remoto, el trabajo anterior sigue ahí — recupéralo antes de rehacerlo.`
+    return [
+      `De la vuelta anterior no queda nada en ${a.mainRoot} (ni worktree .worktrees/${n} ni rama feat/${n}), pero #${n} ha quedado en status:in-progress: retiene sus tokens de área/touches porque su PR sigue sin mergear, y ocupa una plaza de --cap.`,
+      `  - Si vas a rehacerlo tú, el estado ya es el correcto: crea el worktree y sigue.`,
+      `  - Si lo que quieres es que /ct-next lo despache de cero, devuélvelo a la cola con: ${requeueCmd}`,
+      `  OJO: si la rama solo existe en el remoto, el trabajo anterior sigue ahí — recupéralo (o cierra su PR) antes de rehacerlo.`,
+    ].join('\n')
   }
   const quedan = [a.hasWorktree ? `el worktree ${a.worktree}` : null, a.hasBranch ? `la rama ${a.branch}` : null].filter(Boolean).join(' y ')
   return [
     `De la vuelta anterior queda ${quedan} en ${a.mainRoot}. NO se ha tocado nada de eso: reabrir mueve el label, no el disco. Tienes dos caminos, y son excluyentes:`,
-    `  (a) CORREGIR ENCIMA (lo normal tras un rechazo de revisión): sigue trabajando en ese mismo worktree y esa misma rama, sobre el PR que ya existe. NO invoques /ct-next para #${n}: se negaría a despachar precisamente porque el worktree/la rama ya existen. Cuando vuelvas a dejarlo listo, repite el --release.`,
-    `  (b) EMPEZAR DE CERO: borra primero lo anterior (te llevas por delante el trabajo que hubiera, comprueba que está pusheado) y luego deja que /ct-next lo despache:`,
+    `  (a) CORREGIR ENCIMA (lo normal tras un rechazo de revisión, y para lo que #${n} acaba de quedar en status:in-progress): sigue trabajando en ese mismo worktree y esa misma rama, sobre el PR que ya existe. NO invoques /ct-next para #${n}: se negaría a despachar precisamente porque el worktree/la rama ya existen. Cuando vuelvas a dejarlo listo, repite el --release.`,
+    `  (b) EMPEZAR DE CERO: borra primero lo anterior (te llevas por delante el trabajo que hubiera, comprueba que está pusheado) y DESPUÉS devuélvelo a la cola, que es lo que hace que /ct-next vuelva a considerarlo:`,
     a.hasWorktree ? `      git -C ${a.mainRoot} worktree remove ${a.worktree}` : null,
     a.hasBranch ? `      git -C ${a.mainRoot} branch -D ${a.branch}` : null,
+    `      ${requeueCmd}`,
   ].filter(Boolean).join('\n')
 }
 
@@ -471,24 +540,111 @@ if (reopen) {
       const enQue = actuales.length ? actuales.join(', ') : 'ninguna label status: (o sea, backlog)'
       const yaReady = actuales.length === 1 && actuales[0] === 'status:ready'
       const ambiguo = actuales.length > 1
+      const yaInProgress = actuales.length === 1 && actuales[0] === 'status:in-progress'
       dieErr(
         yaReady
           ? `#${issue} ya está en status:ready — no hay nada que reabrir, /ct-next puede despacharlo tal cual. (No se ha tocado ninguna label.)`
           : ambiguo
-            ? `#${issue} tiene DOS o más labels de estado a la vez (${enQue}) — probablemente una edición que se quedó a medias. No se ha tocado ninguna: reabrir desde aquí solo quitaría status:in-review y dejaría el resto puesto junto a status:ready, o sea el mismo lío con una label más. Arréglalo primero dejando UNA sola, y vuelve a intentarlo.`
-            : `--reopen solo devuelve al loop un slice en status:in-review, y #${issue} está en: ${enQue}. No se ha tocado ninguna label — añadir status:ready sin quitar el status: que ya tiene dejaría el issue con DOS estados a la vez, que es exactamente el estado ambiguo que el dispatcher tiene que adivinar después. Si de verdad quieres moverlo desde ${enQue}, hazlo a mano y a conciencia: gh issue edit ${issue} --repo ${repo} --add-label status:ready --remove-label <la que tenga>.`,
+            ? `#${issue} tiene DOS o más labels de estado a la vez (${enQue}) — probablemente una edición que se quedó a medias. No se ha tocado ninguna: reabrir desde aquí solo quitaría status:in-review y dejaría el resto puesto junto a status:in-progress, o sea el mismo lío con una label más. Arréglalo primero dejando UNA sola, y vuelve a intentarlo.`
+            : yaInProgress
+              ? `#${issue} ya está en status:in-progress — que es justo donde --reopen lo dejaría: en el banco de trabajo, reteniendo sus tokens. No hay nada que reabrir. (No se ha tocado ninguna label.) Si lo que querías era devolverlo a la cola para que /ct-next lo despache de cero, eso es --requeue, y exige que no quede nada del slice en esta máquina.`
+              : `--reopen solo devuelve al banco de trabajo un slice en status:in-review, y #${issue} está en: ${enQue}. No se ha tocado ninguna label — añadir status:in-progress sin quitar el status: que ya tiene dejaría el issue con DOS estados a la vez, que es exactamente el estado ambiguo que el dispatcher tiene que adivinar después. Si de verdad quieres moverlo desde ${enQue}, hazlo a mano y a conciencia: gh issue edit ${issue} --repo ${repo} --add-label status:in-progress --remove-label <la que tenga>.`,
         2
       )
     }
   }
   if (!dryRun && !fx) {
-    const result = setStatus(issue, 'status:in-review', 'status:ready')
+    const result = setStatus(issue, 'status:in-review', 'status:in-progress')
     if (!result.ok) {
-      dieErr(`no se pudo reabrir #${issue} a status:ready: ${result.error.message}. Sigue en status:in-review; reintenta el --reopen.`, 1)
+      dieErr(`no se pudo reabrir #${issue} a status:in-progress: ${result.error.message}. Sigue en status:in-review; reintenta el --reopen.`, 1)
     }
   }
-  outLine(`reopened #${issue} → ready (rechazado en revisión: vuelve a ser despachable por /ct-next)`)
+  outLine(`reopened #${issue} → in-progress (rechazado en revisión: vuelve al banco de trabajo, y sigue reteniendo sus tokens de área/touches porque su trabajo sigue SIN MERGEAR)`)
   outLine(reopenDiskNote(issue))
+  process.exit(0)
+}
+
+// ============================================================================
+// --requeue (F15/H1) — LA OTRA MITAD DE LA ARISTA DE VUELTA.
+//
+// `--reopen` deja el slice en `in-progress` porque su trabajo sigue existiendo
+// sin mergear. El camino contrario —"abandono este intento, que /ct-next lo
+// despache de cero"— necesita `ready`, y `ready` solo es verdad cuando NO
+// queda trabajo sin mergear de ese slice en ninguna parte. Eso no se puede
+// suponer: se comprueba.
+//
+// QUÉ EXIGE, Y QUÉ NO PUEDE EXIGIR (dicho, no escondido):
+//   - estado EXACTAMENTE `status:in-progress` (misma precondición leída que
+//     --reopen, mismo trato para el caso ambiguo de dos labels);
+//   - que en ESTA MÁQUINA no queden ni el worktree `.worktrees/<n>` ni la rama
+//     `feat/<n>`. Si quedan, se niega: devolverlo a la cola soltaría sus
+//     tokens mientras su trabajo sigue vivo, y encima /ct-next se negaría
+//     igual a re-despacharlo por esos mismos artefactos;
+//   - si NO SE PUDO MIRAR, se niega también. Es la diferencia entre `--reopen`
+//     y este: allí la nota de disco es informativa y "no lo sé" se puede
+//     decir; aquí la mutación ES una declaración de ausencia, y no se declara
+//     ausente lo que no se ha podido mirar.
+// Lo que NO puede comprobar, y por eso lo IMPRIME siempre en vez de dejarlo
+// implícito: la rama en el REMOTO y el PR abierto. Un slice cuya rama sigue
+// pusheada y cuyo PR sigue abierto tiene trabajo sin mergear aunque esta
+// máquina esté limpia; ahí `ready` vuelve a mentir. Cerrar el PR es parte del
+// abandono, y el mensaje lo dice con el comando.
+// ============================================================================
+if (requeue) {
+  let labels = null
+  if (fx) {
+    labels = fx.candLabels
+  } else if (!dryRun) {
+    try {
+      labels = labelsOf(issue)
+    } catch (e) {
+      dieErr(`no se pudo leer el estado de #${issue} en ${repo}: ${e.message} — no se devuelve nada a la cola sin haber comprobado que está en status:in-progress.`, 3)
+    }
+  }
+  if (labels !== null) {
+    const actuales = labels.filter((l) => l.startsWith('status:'))
+    const soloInProgress = actuales.length === 1 && actuales[0] === 'status:in-progress'
+    if (!soloInProgress) {
+      const enQue = actuales.length ? actuales.join(', ') : 'ninguna label status: (o sea, backlog)'
+      const yaReady = actuales.length === 1 && actuales[0] === 'status:ready'
+      const ambiguo = actuales.length > 1
+      const enReview = actuales.length === 1 && actuales[0] === 'status:in-review'
+      dieErr(
+        yaReady
+          ? `#${issue} ya está en status:ready — no hay nada que devolver a la cola, /ct-next puede despacharlo tal cual. (No se ha tocado ninguna label.)`
+          : ambiguo
+            ? `#${issue} tiene DOS o más labels de estado a la vez (${enQue}) — probablemente una edición que se quedó a medias. No se ha tocado ninguna: arréglalo primero dejando UNA sola, y vuelve a intentarlo.`
+            : enReview
+              ? `#${issue} está en status:in-review: su PR sigue abierto sin mergear, así que devolverlo a la cola soltaría sus tokens mientras ese trabajo sigue vivo. No se ha tocado ninguna label. Si la revisión lo rechazó y vas a corregir encima, usa --reopen; si de verdad lo abandonas, cierra antes su PR y reabre primero con --reopen.`
+              : `--requeue solo devuelve a la cola un slice en status:in-progress, y #${issue} está en: ${enQue}. No se ha tocado ninguna label — añadir status:ready sin quitar el status: que ya tiene dejaría el issue con DOS estados a la vez, que es exactamente el estado ambiguo que el dispatcher tiene que adivinar después.`,
+        2
+      )
+    }
+  }
+  // La comprobación de disco va ANTES de mutar. Un --requeue que suelta los
+  // tokens y LUEGO descubre que la rama sigue ahí ya ha abierto la ventana.
+  const a = localSliceArtifacts(issue)
+  if (!a.known) {
+    dieErr(`no se ha podido comprobar si queda algo de #${issue} en esta máquina (no se pudo consultar git desde aquí), y --requeue DECLARA que no queda trabajo sin mergear de este slice. No se declara ausente lo que no se ha podido mirar: no se ha tocado ninguna label. Corre esto desde dentro del checkout del repo, o comprueba a mano que ni .worktrees/${issue} ni feat/${issue} existen y haz la edición tú.`, 2)
+  }
+  if (a.hasWorktree || a.hasBranch) {
+    const quedan = [a.hasWorktree ? `el worktree ${a.worktree}` : null, a.hasBranch ? `la rama ${a.branch}` : null].filter(Boolean).join(' y ')
+    dieErr([
+      `#${issue} todavía tiene ${quedan} en ${a.mainRoot}: su trabajo sigue vivo sin mergear, así que devolverlo a status:ready soltaría sus tokens de área/touches y dejaría que un vecino se despachara sobre una base que no lo contiene. No se ha tocado ninguna label.`,
+      `Si de verdad lo abandonas, bórralo primero (comprueba antes que no pierdes nada sin pushear) y repite:`,
+      a.hasWorktree ? `      git -C ${a.mainRoot} worktree remove ${a.worktree}` : null,
+      a.hasBranch ? `      git -C ${a.mainRoot} branch -D ${a.branch}` : null,
+      `Si lo que quieres es seguir trabajándolo, no hace falta nada: status:in-progress ya es el estado correcto.`,
+    ].filter(Boolean).join('\n'), 2)
+  }
+  if (!dryRun && !fx) {
+    const result = setStatus(issue, 'status:in-progress', 'status:ready')
+    if (!result.ok) {
+      dieErr(`no se pudo devolver #${issue} a status:ready: ${result.error.message}. Sigue en status:in-progress; reintenta el --requeue.`, 1)
+    }
+  }
+  outLine(`requeued #${issue} → ready (abandonado: suelta sus tokens y vuelve a ser despachable por /ct-next)`)
+  outLine(`Comprobado que en ${a.mainRoot} no queda ni el worktree .worktrees/${issue} ni la rama feat/${issue}. Lo que NO se ha comprobado —y no se puede desde aquí— es el REMOTO: si feat/${issue} sigue pusheada o su PR sigue abierto, ese trabajo sigue sin mergear y #${issue} ya no lo está reteniendo. Cierra el PR (\`gh pr close --delete-branch\`) si de verdad lo abandonas.`)
   process.exit(0)
 }
 

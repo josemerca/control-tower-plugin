@@ -97,10 +97,10 @@ try {
 // escanear solo los dos raíz dejaba viva la orden vieja en el documento que las
 // dos guías llamaban "referencia completa", o sea a un clic del agente.
 const { docs, failures, truncated: linksTruncated } = readRepoDocs(target)
-const { acks, problems: ackProblems, unreadable: ackUnreadable } = readAck(target)
+const { acks, problems: ackProblems, unreadable: ackUnreadable, prosaSinAcuses: ackProsaSinAcuses } = readAck(target)
 
 const findings = detectConventions({ docs, files, acks })
-const text = formatFindings(findings, { where: 'este repo', ackProblems, ackUnreadable })
+const text = formatFindings(findings, { where: 'este repo', ackProblems, ackUnreadable, ackProsaSinAcuses })
 if (text) console.log(text)
 for (const f of failures) {
   console.log(`  aviso: no se ha podido leer la documentación del repo (${f}). NO lo leas como "ahí no hay nada": no se ha mirado.`)

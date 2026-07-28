@@ -34,6 +34,11 @@ const V1 = readFileSync(join(root, '__tests__', 'fixtures', 'slices-contract-v1.
 // de los tests de F13: sirve para demostrar que las afirmaciones nuevas no
 // estaban ahí antes, igual que V1 lo es para los de F11.
 const historicalBlockV4 = () => readFileSync(join(root, '__tests__', 'fixtures', 'slices-contract-v4.md'), 'utf8')
+// V5: el bloque tal cual lo emitía el plugin ANTES de F15 (hash cd59702d…, ya
+// registrado en SLICES_PRISTINE_HASHES; el fixture se generó ejecutando el
+// ct-init.sh de dac5326 y su hash coincide, así que es el bloque de verdad y
+// no una transcripción). Control negativo de los tests de F15.
+const historicalBlockV5 = () => readFileSync(join(root, '__tests__', 'fixtures', 'slices-contract-v5.md'), 'utf8')
 
 // flat: el bloque sin negritas markdown y con los saltos de línea del wrapping
 // colapsados. Las afirmaciones que se comprueban aquí son de PROSA — que el
@@ -262,5 +267,56 @@ describe('contrato §9 (F13): lo que promete coincide con lo que el código hace
     expect(marker).not.toBeNull()
     expect(footer).not.toBeNull()
     expect(footer[1]).toBe(marker[1])
+  })
+})
+
+// ============================================================================
+// F15 — dos correcciones que un repo ya bootstrapeado no puede deducir solo.
+// El bump v5 → v6 es la única palanca que se las hace llegar.
+// ============================================================================
+describe('contrato §9 (F15): la vuelta de un PR rechazado y el orden de /ct-groom', () => {
+  it('control: el contrato v5 decía justo lo contrario en las dos cosas', () => {
+    const v5 = historicalBlockV5()
+    // (1) --reopen iba a `ready`, y se vendía como "vuelve a ser despachable".
+    expect(flat(v5)).toMatch(/lo mueve `?in-review`? → `?ready`?/i)
+    expect(v5).not.toMatch(/--requeue/)
+    // (2) el orden de /ct-groom SÍ estaba dicho — y decía la verdad de
+    // entonces: que el milestone y las labels podían quedar creados. O sea que
+    // el contrato no callaba una garantía, documentaba con precisión una que
+    // era peor. Lo que cambia en F15 es el CÓDIGO; el texto va detrás.
+    expect(flat(v5)).toMatch(/el milestone y las labels sí pueden haberse creado ya/i)
+    expect(flat(v5)).not.toMatch(/sin haber creado nada/i)
+  })
+
+  it('dice que --reopen deja el slice en in-progress y que SIGUE reteniendo tokens', () => {
+    const a = flat(seed())
+    expect(a).toMatch(/in-review`? → `?in-progress/i)
+    expect(a).toMatch(/sigue reteniendo sus tokens/i)
+    // La consecuencia que cambia lo que haces: reabrir no libera a nadie.
+    expect(a).toMatch(/no desbloquea a sus vecinos/i)
+    // Control contra el código: un ready que comparte token con el reabierto
+    // (ya en in-progress) NO se selecciona, ni con cap de sobra.
+    const reabierto = { n: 1, order: 1, status: 'in-progress', deps: [], touches: ['api'] }
+    const vecino = { n: 2, order: 2, status: 'ready', deps: [], touches: ['api'] }
+    expect(planDispatch([reabierto, vecino], { mergedIssues: [], cap: 5 }).selected).toEqual([])
+  })
+
+  it('documenta --requeue como la única transición que suelta tokens sin merge, y qué comprueba', () => {
+    const a = seed()
+    expect(a).toMatch(/--requeue/)
+    const f = flat(a)
+    expect(f).toMatch(/in-progress`? → `?ready/i)
+    expect(f).toMatch(/no se declara ausente lo que no se ha visto/i)
+    // Y lo que NO puede comprobar, dicho en vez de callado.
+    expect(f).toMatch(/la rama en el remoto y el PR abierto/i)
+  })
+
+  it('dice que /ct-groom valida el Project ANTES de crear nada, y que no hay transacción', () => {
+    const f = flat(seed())
+    expect(f).toMatch(/aborta sin haber creado nada/i)
+    expect(f).toMatch(/Todo lo que .{0,20}ct-groom.{0,20} LEE ocurre antes de todo lo que ESCRIBE/i)
+    // La otra mitad, la que NO se promete: hay que decirla también.
+    expect(f).toMatch(/no hay transacción/i)
+    expect(f).toMatch(/idempotente/i)
   })
 })

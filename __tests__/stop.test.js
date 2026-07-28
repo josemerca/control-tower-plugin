@@ -397,3 +397,112 @@ describe('stop hook — relación entre last_commit y HEAD', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+// ============================================================================
+// F15/H4 — EL CHEQUEO DE FRESCURA ERA INSATISFACIBLE POR CONSTRUCCIÓN.
+//
+// El commit que actualiza STATE.md incluye a STATE.md, así que obedecer el
+// guard crea el commit que lo vuelve a invalidar. Reproducido contra el
+// dist/stop.js de dac5326, dos vueltas seguidas:
+//   HEAD=2926a17 last_commit=192baa2 → block "hay 1 commit … por encima"
+//   HEAD=3346b8e last_commit=2926a17 → block "hay 1 commit … por encima"
+// ============================================================================
+
+// commitState: escribe last_commit y COMMITEA ese cambio — es decir, hace
+// exactamente lo que el guard pide, incluido el commit que lo reintroducía.
+function commitState(dir, sha) {
+  writeState(dir, sha)
+  execFileSync('git', ['add', '-A'], { cwd: dir })
+  execFileSync('git', ['commit', '-qm', 'chore(state): apunte'], { cwd: dir })
+  return head(dir)
+}
+
+describe('F15/H4 — obedecer el guard de frescura tiene que dejarlo verde', () => {
+  it('actualizar y commitear STATE.md deja el guard EN SILENCIO (antes: block, infinitamente)', () => {
+    const dir = initRepo()
+    commit(dir, 'b.txt')
+    commitState(dir, head(dir))
+    expect(run(dir)).toBe('')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('y la segunda vuelta también: no hay regresión que se reintroduzca sola', () => {
+    const dir = initRepo()
+    commit(dir, 'b.txt')
+    commitState(dir, head(dir))
+    commitState(dir, head(dir)) // dos apuntes seguidos, sin trabajo por medio
+    expect(run(dir)).toBe('')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // LO QUE NO SE PUEDE PERDER (1): trabajo real sin registrar sigue bloqueando.
+  it('un commit de CÓDIGO sin actualizar STATE.md sigue bloqueando, con su conteo', () => {
+    const dir = initRepo()
+    commitState(dir, head(dir))
+    commit(dir, 'c.txt')
+    const out = JSON.parse(run(dir))
+    expect(out.decision).toBe('block')
+    expect(out.reason).toMatch(/1 commit de trabajo/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el conteo separa trabajo de apuntes en vez de mezclarlos', () => {
+    const dir = initRepo()
+    const base = head(dir)
+    commitState(dir, base)      // apunte (no cuenta)
+    commit(dir, 'c.txt')        // trabajo
+    commit(dir, 'd.txt')        // trabajo
+    writeState(dir, base)       // el estado se queda en el commit base
+    const out = JSON.parse(run(dir))
+    expect(out.decision).toBe('block')
+    expect(out.reason).toMatch(/2 commits de trabajo/)
+    expect(out.reason).toMatch(/1 commit que solo toca/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // LO QUE NO SE PUEDE PERDER (2): el agujero obvio del arreglo. Si bastara
+  // con que el commit TOQUE STATE.md, se colaría trabajo real sin registrar
+  // metiéndolo en el mismo commit que el apunte.
+  it('un commit que toca STATE.md Y ADEMÁS código SÍ cuenta como trabajo', () => {
+    const dir = initRepo()
+    const base = head(dir)
+    mkdirSync(join(dir, '.agent'), { recursive: true })
+    writeFileSync(join(dir, '.agent', 'STATE.md'), `---\nlast_commit: ${base}\n---\nx`)
+    writeFileSync(join(dir, 'code.txt'), 'trabajo de verdad')
+    execFileSync('git', ['add', '-A'], { cwd: dir })
+    execFileSync('git', ['commit', '-qm', 'apunte + código'], { cwd: dir })
+    const out = JSON.parse(run(dir))
+    expect(out.decision).toBe('block')
+    expect(out.reason).toMatch(/1 commit de trabajo/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // FAIL CLOSED: un merge no lista ficheros en `git log --name-only`, y puede
+  // traer trabajo de verdad. Cuenta como trabajo, no como apunte.
+  it('un merge (sin ficheros listados) cuenta como trabajo, no como apunte', () => {
+    const dir = initRepo()
+    const base = head(dir)
+    git(dir, 'checkout', '-q', '-b', 'side')
+    commit(dir, 'side.txt')
+    git(dir, 'checkout', '-q', 'main')
+    writeState(dir, base)
+    git(dir, 'merge', '-q', '--no-ff', 'side', '-m', 'merge')
+    const out = JSON.parse(run(dir))
+    expect(out.decision).toBe('block')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // El hermano que arrastraba el mismo defecto: `unresolvable` bloquea y su
+  // remedio ("pon el SHA real") terminaba, antes de F15, en el mismo bucle en
+  // cuanto commiteabas el arreglo.
+  it('el remedio de `unresolvable` (poner el SHA real y commitearlo) ahora TERMINA', () => {
+    const dir = initRepo()
+    writeState(dir, 'relleno-que-no-es-un-sha')
+    const bloqueado = JSON.parse(run(dir))
+    expect(bloqueado.decision).toBe('block')
+    expect(bloqueado.reason).toMatch(/no es ningún commit de este repositorio/)
+    commitState(dir, head(dir))
+    expect(run(dir)).toBe('')
+    rmSync(dir, { recursive: true, force: true })
+  })
+})

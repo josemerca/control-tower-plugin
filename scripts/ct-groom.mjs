@@ -750,6 +750,55 @@ function addToProjectWithSprint(issueUrl, order) {
   console.log(`issue orden #${order} añadido al project ${project}, sprint=${meta.iterationTitle}`)
 }
 
+// ============================================================================
+// F15/H2 — TODA LA VALIDACIÓN DEL PROJECT, ANTES DE LA PRIMERA MUTACIÓN.
+//
+// `ensureProjectMeta()` es perezosa: se resolvía en la PRIMERA llamada a
+// `addToProjectWithSprint`, o en el listado de items de más abajo. Con el
+// listado colocado después del milestone y de las labels, un abort por "el
+// project no tiene un campo Sprint" o "ninguna iteración cubre hoy" ocurría
+// con el milestone YA CREADO y las labels YA CREADAS. Verificado por
+// construcción contra el código sin arreglar, con un stub de `gh` que registra
+// el argv de cada llamada: el log salía
+//   api .../milestones --method GET …   (listado)
+//   api .../milestones -f title=Epic    (CREACIÓN)
+//   label create type:backend …         (CREACIÓN ×4)
+//   project view 5 --owner o …          (aquí falla y aborta)
+// y el stdout ya decía "milestone creado: Epic (#1)". O sea: la basura a
+// medias que la documentación ni prometía ni desmentía era REAL.
+//
+// Se adelanta ENTERO el bloque de project (validación + listado de items) por
+// delante del milestone. Los dos son lecturas, y las dos abortan con exit 1:
+// dejarlas donde estaban significaba que cualquier fallo de project —incluido
+// un rate limit al listar items— pagaba el mismo precio.
+//
+// LA GARANTÍA QUE ESTO CREA, y que ahora sí se puede escribir en el contrato:
+// todo lo que /ct-groom LEE ocurre antes de todo lo que /ct-groom ESCRIBE. Si
+// aborta por validación (tabla §9, spec, repo, milestone ilegible, project sin
+// Sprint, iteración vencida), no ha creado nada. Lo que NO se promete: una vez
+// empieza a escribir no hay transacción — un fallo a mitad deja lo ya creado,
+// y de eso se sale volviendo a correr, que es idempotente por construcción
+// (milestone por título, labels solo las que faltan, issues por marcador
+// `ct-order`).
+// ============================================================================
+// Items ya presentes en el Project v2 — se listan una sola vez por corrida
+// (igual que milestones/existingIssues abajo) para poder detectar issues
+// preexistentes a los que, por una interrupción previa, les falte el item
+// de project (ver hasProjectItem en project-fields.js). --limit alto: el
+// default de `gh project item-list` es 30, insuficiente en un sandbox/epic
+// con más slices que eso.
+let existingProjectItems = []
+if (projectNum) {
+  ensureProjectMeta()
+  try {
+    const itemsRaw = JSON.parse(gh(['project', 'item-list', String(projectNum), '--owner', projectMeta.owner, '--limit', '200', '--format', 'json']))
+    existingProjectItems = itemsRaw.items || []
+  } catch (e) {
+    console.error(`no se pudieron listar los items del project ${project}: ${e.message}`)
+    process.exit(1)
+  }
+}
+
 // milestone idempotente — el filtrado por título se hace en JS, no dentro de un
 // filtro jq: un título con `"` o `\` rompería el programa jq si se interpolara
 // ahí. Traemos la lista completa (paginada, todos los estados: el endpoint
@@ -810,24 +859,6 @@ for (const l of newLabels) {
 // del fetch aborta. F5: este fetch (y el cómputo de `reconcileEntries`) ya se
 // hizo MÁS ARRIBA, antes de la rama de --dry-run — no se repite aquí, solo se
 // reutiliza `existingIssues`/`reconcileEntries`.
-
-// Items ya presentes en el Project v2 — se listan una sola vez por corrida
-// (igual que milestones/existingIssues arriba) para poder detectar issues
-// preexistentes a los que, por una interrupción previa, les falte el item
-// de project (ver hasProjectItem en project-fields.js). --limit alto: el
-// default de `gh project item-list` es 30, insuficiente en un sandbox/epic
-// con más slices que eso.
-let existingProjectItems = []
-if (projectNum) {
-  ensureProjectMeta()
-  try {
-    const itemsRaw = JSON.parse(gh(['project', 'item-list', String(projectNum), '--owner', projectMeta.owner, '--limit', '200', '--format', 'json']))
-    existingProjectItems = itemsRaw.items || []
-  } catch (e) {
-    console.error(`no se pudieron listar los items del project ${project}: ${e.message}`)
-    process.exit(1)
-  }
-}
 
 for (const { iss, found, diff, bodyResult } of reconcileEntries) {
   if (found) {
