@@ -214,7 +214,11 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
     // F13: 'none-ready' ya no se calla los slices parados en in-review — son
     // la causa habitual de "no hay nada ready" al final de un epic, y desde
     // F13/H2 además retienen sus tokens.
-    expect(plan.blockReason).toEqual({ reason: 'none-ready', inReview: [1] })
+    // F16/H1: además del inventario de in-review viajan el de backlog, el de
+    // in-progress y el TOTAL de issues abiertos — sin ellos, "no hay nada
+    // ready" no podía distinguir "hay trabajo esperando tu gate humano" de
+    // "este repo está vacío", y las dos salían con el mismo texto.
+    expect(plan.blockReason).toEqual({ reason: 'none-ready', inReview: [1], backlog: [], inProgress: [], total: 1 })
   })
 
   it('ready pero con deps sin mergear → blockReason deps-unmet, lista los issues bloqueados y qué deps faltan', () => {
@@ -255,7 +259,14 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
     ]
     const plan = planDispatch(issues, { mergedIssues: [], cap: 5 })
     expect(plan.selected).toEqual([])
-    expect(plan.blockReason).toEqual({ reason: 'collision', kind: 'serializing', issue: 2, token: 'ci', runningToken: 'migration', withIssue: 1, withIssueStatus: 'in-progress' })
+    // F16/H1: `blockers` lleva TODOS los que retienen el carril, no solo el
+    // primero. Aquí hay uno, así que la lista tiene un elemento — y el
+    // motivo por el que bloquea es de CARRIL (`laneTokens`), no de token
+    // compartido: #2 toca `ci` y #1 `migration`, no comparten nada literal.
+    expect(plan.blockReason).toEqual({
+      reason: 'collision', kind: 'serializing', issue: 2, token: 'ci', runningToken: 'migration', withIssue: 1, withIssueStatus: 'in-progress',
+      blockers: [{ n: 1, status: 'in-progress', sharedTokens: [], laneTokens: ['migration'] }],
+    })
   })
 
   // Fix Minor 1: aquí, aun sin el cap lleno, el único ready seguiría bloqueado
@@ -294,7 +305,10 @@ describe('planDispatch — cap cuenta trabajo en vuelo, y motivo de bloqueo dist
       inFlight: [{ n: 1, status: 'in-progress', touches: ['api'] }],
       cap: 1,
       wouldDispatchIfCapAllowed: false,
-      blockedEvenWithCap: { reason: 'collision', kind: 'token', issue: 2, token: 'api', withIssue: 1, withIssueStatus: 'in-progress' },
+      blockedEvenWithCap: {
+        reason: 'collision', kind: 'token', issue: 2, token: 'api', withIssue: 1, withIssueStatus: 'in-progress',
+        blockers: [{ n: 1, status: 'in-progress', sharedTokens: ['api'], laneTokens: [] }], // F16/H1
+      },
     })
   })
 })
@@ -433,7 +447,10 @@ describe('explainSelectionGap / planDispatch — cap-full debe escanear TODOS lo
     // El motivo reportado debe seguir siendo el del primero (#20, menor
     // orden) — el escaneo no cambia CUÁL se cita cuando de verdad todos
     // chocan, solo evita el falso negativo del caso de arriba.
-    expect(plan.blockReason.blockedEvenWithCap).toEqual({ reason: 'collision', kind: 'token', issue: 20, token: 'api', withIssue: 10, withIssueStatus: 'in-progress' })
+    expect(plan.blockReason.blockedEvenWithCap).toEqual({
+      reason: 'collision', kind: 'token', issue: 20, token: 'api', withIssue: 10, withIssueStatus: 'in-progress',
+      blockers: [{ n: 10, status: 'in-progress', sharedTokens: ['api'], laneTokens: [] }], // F16/H1
+    })
   })
 })
 

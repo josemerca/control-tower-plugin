@@ -1,4 +1,17 @@
 #!/usr/bin/env node
+// CANAL DE SALIDA (F16/H2) — el criterio es común a los TRES ejecutables del
+// plugin (ct-next.mjs, ct-groom.mjs, dispatch-check.mjs) y está escrito entero
+// en ct-next.mjs, junto a su `warn()`:
+//
+//   STDOUT = el PRODUCTO. Aquí: el JSON del plan en --dry-run, y el acta de lo
+//            que se creó/reconcilió de verdad (milestone, issues, project).
+//   STDERR = el DIAGNÓSTICO. `aviso:`, `recordatorio:`, el informe de drift,
+//            y todos los abortos.
+//
+// Este fichero YA cumplía el criterio (es el que sirvió de referencia cuando
+// se descubrió que ct-next.mjs mandaba sus avisos por stdout). Queda dicho
+// aquí para que el siguiente que añada una línea de salida sepa a qué canal
+// va sin tener que inferirlo del vecindario.
 import { readFileSync, realpathSync } from 'node:fs'
 import { resolve as resolvePath, relative as relativePath } from 'node:path'
 import { execFileSync } from 'node:child_process'
