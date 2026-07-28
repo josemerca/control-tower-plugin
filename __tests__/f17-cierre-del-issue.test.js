@@ -307,11 +307,20 @@ describe('contrato §9 (F17): el cierre del issue y la trampa de la rama por def
     expect(f).toMatch(/paso a mano/)
   })
 
-  it('la nota de pie y el marcador declaran la MISMA versión, y es la 7', () => {
+  // F18: este test fijaba el literal '7' y por tanto había que editarlo en
+  // cada bump — es decir, el guardián se tocaba justo cuando debía vigilar.
+  // Lo que de verdad tiene que ser cierto es que las TRES declaraciones (el
+  // marcador del bloque, la nota de pie y SLICES_CONTRACT_VERSION del script)
+  // coinciden entre sí; el número concreto lo aporta el script.
+  it('la nota de pie, el marcador y SLICES_CONTRACT_VERSION declaran la MISMA versión', () => {
     const a = seed()
+    const declared = readFileSync(ctInit, 'utf8').match(/^SLICES_CONTRACT_VERSION=(\d+)$/m)
     const marker = a.match(/<!-- ct-init:slices-contract-version: (\d+) -->/)
     const footer = a.match(/Esta sección la mantiene `\/ct-init` \(contrato v(\d+)\)/)
-    expect(marker[1]).toBe('7')
-    expect(footer[1]).toBe('7')
+    expect(declared).not.toBeNull()
+    expect(marker[1]).toBe(declared[1])
+    expect(footer[1]).toBe(declared[1])
+    // Control: nunca vuelve atrás. El v7 fue la anterior.
+    expect(Number(declared[1])).toBeGreaterThanOrEqual(8)
   })
 })
