@@ -158,6 +158,20 @@ SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
 # limpiamente, sin `--force` y sin acusar a nadie — que es exactamente el
 # mecanismo que F9 construyó.
 #
+# F17 sube de 6 a 7. Las dos cosas que cambian son hechos nuevos sobre el
+# CIERRE del issue, y un repo bootstrapeado con el v6 no puede deducir ninguna:
+#   - el kickoff ahora exige `Closes #N` en el cuerpo del PR (antes no pedía
+#     nada, y por eso el estado "PR mergeado, issue abierto" era el resultado
+#     NORMAL de un slice bien hecho: tokens retenidos para siempre y ningún
+#     dependiente desbloqueado). La enumeración de "qué recibe el agente
+#     despachado" se lo callaba, así que describía un kickoff que ya no existe;
+#   - el v6 atribuía ese estado a UNA sola causa ("al PR le faltaba `Closes
+#     #N`"). Hay una segunda, verificada contra un repo real: un PR que SÍ
+#     lleva su `Closes #N` pero se mergea en una rama que no es la por defecto
+#     tampoco cierra el issue. Es la que engaña — miras el PR, ves el `Closes`,
+#     y descartas el diagnóstico bueno. Con `--base <otra-rama>`, cerrar el
+#     issue al mergear es un paso a mano SIEMPRE.
+#
 # F15 sube de 5 a 6, y por el mismo motivo que F13: el texto v5 DESCRIBE MAL
 # dos cosas que un repo bootstrapeado no puede corregir por su cuenta.
 #   - decía que `--reopen` deja el slice en `status:ready` ("vuelve a ser
@@ -181,7 +195,7 @@ SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
 # decía en absoluto que un PR rechazado dejaba su slice fuera del loop para
 # siempre. Un repo bootstrapeado con el v4 se queda con esas tres cosas hasta
 # que este número suba; es la única palanca que existe para llegar hasta él.
-SLICES_CONTRACT_VERSION=6
+SLICES_CONTRACT_VERSION=7
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -231,6 +245,7 @@ c90554b809bc6af4f50613e75f160b0b0859ffce3412aeb44d10bef2d9da3e0a  v1, 77 líneas
 02247741819714164c8f45fbc42dcf26d11c7df58df6b81fae040b038fcf93c4  v4, 221 líneas — F10 (--section obsoleto, enlace al spec verificado)
 cd59702d2c5d3a73b67ad235908b83bdc42c9da41996b14a33fba0749e359961  v5, 289 líneas — F13 (in-review retiene tokens, --reopen, alcance real de la serialización)
 8de58db92770e9b8737280e024f0a7dae199b4a0dca2b7a535e631637c824fea  v6, 364 líneas — F15 (--reopen va a in-progress, --requeue, garantías de orden de /ct-groom)
+8730d7be044a7ba8009d263947c57c56eb6558639cc506d22c460fcc6f9bacb9  v7, 385 líneas — F17 (el kickoff pide Closes #N; las DOS causas de "PR mergeado, issue abierto")
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -238,7 +253,7 @@ cd59702d2c5d3a73b67ad235908b83bdc42c9da41996b14a33fba0749e359961  v5, 289 línea
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 6 -->
+<!-- ct-init:slices-contract-version: 7 -->
 ## Formato de la tabla §9 (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -424,7 +439,23 @@ loop una vez hay slices en vuelo.
   dependientes. Dos slices que comparten token no se solapan ni "un poquito".
   Y si `/ct-next` te dice que choca con un `status:in-review`, esperar no
   sirve de nada: ahí no hay ningún agente. Mergea el PR — o, si el PR ya se
-  mergeó y el issue sigue abierto (al PR le faltaba `Closes #N`), ciérralo.
+  mergeó y el issue sigue abierto, ciérralo **como *completed***
+  (`gh issue close <n> --reason completed`).
+- **"PR mergeado, issue abierto" tiene DOS causas, y la segunda engaña.** Es
+  el estado que tapa un carril para siempre, así que conviene saber
+  diagnosticarlo entero:
+  - al PR le faltaba el `Closes #N` en el cuerpo. El kickoff que `/ct-next`
+    le da a cada agente lo pide explícitamente, así que este caso solo
+    aparece con PRs abiertos a mano, o si alguien edita el cuerpo después;
+  - el PR SÍ llevaba su `Closes #N`, pero se mergeó en una rama que **no es
+    la rama por defecto** del repo. GitHub **solo cierra el issue cuando el
+    PR entra en la rama por defecto** — verificado contra un repo real, no
+    deducido de la documentación. Es el caso que engaña: miras el PR, ves el
+    `Closes #N` ahí puesto, y descartas el diagnóstico correcto.
+  Consecuencia operativa: si despachas con `/ct-next --base <otra-rama>`,
+  **cerrar cada issue al mergear su PR es un paso a mano, siempre** — el
+  `Closes #N` no lo va a hacer por ti. `/ct-next` lo avisa por stderr cada vez
+  que le pasas `--base`.
 - **`migration`/`ci`/`pbxproj` serializan además GLOBALMENTE, con un alcance
   concreto.** Son dos reglas distintas actuando a la vez: la de arriba
   compara tokens, esta no. Un slice con `Toca: migration` y otro con
@@ -590,13 +621,18 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   checkout principal.
 - **Qué recibe el agente despachado**: un prompt de arranque (*kickoff*) con
   el nombre del slice, el número de issue, los criterios de la sección
-  "Acceptance criteria", el addendum de su `Tipo` y el comando literal para
+  "Acceptance criteria", el addendum de su `Tipo`, la rama base contra la que
+  tiene que abrir el PR, la orden de poner **`Closes #N` en el cuerpo de ese
+  PR** (con el porqué: sin ese cierre, el slice retiene sus tokens para
+  siempre y no desbloquea a sus dependientes) y el comando literal para
   liberar el claim al terminar; más el `.agent/STATE.md` sembrado y lo que el
   propio repo le dé al arrancar (`AGENTS.md`, `CLAUDE.md`, hooks). **No
   recibe el spec**: se hidrata del issue. Lo que no llegó al cuerpo del issue
-  no llega al agente.
+  no llega al agente. Lo que el kickoff **no** puede garantizar es que el
+  agente obedezca: si un PR aparece sin su `Closes #N`, el loop no lo detecta
+  — lo verás como un `status:in-review` que no se despeja.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v6). Si el plugin trae una
+<sub>Esta sección la mantiene `/ct-init` (contrato v7). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>

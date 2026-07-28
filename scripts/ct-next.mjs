@@ -1354,6 +1354,39 @@ if (fx) {
   verifyBaseExistsLocally(resolvedBase)
 }
 
+// F17 — LA TRAMPA QUE CONVIERTE A UN AGENTE OBEDIENTE EN EL MISMO DEADLOCK.
+//
+// El kickoff ya pide `Closes #N` en el cuerpo del PR (kickoff.js), que es lo
+// que cierra el issue al mergear y con ello suelta sus tokens y satisface a
+// sus dependientes. Pero las closing keywords de GitHub SOLO cierran el issue
+// cuando el PR se mergea en la rama POR DEFECTO del repo.
+//
+// VERIFICADO EN CAMPO contra josemerca/ct-loop-sandbox (28-jul-2026), no
+// deducido de la documentación:
+//   - PR #33, `Closes #31` en el cuerpo, mergeado con base `f17-base` (rama
+//     que NO es la por defecto) → issue #31 quedó
+//     {"state":"OPEN","stateReason":""};
+//   - PR #34, `Closes #32` en el cuerpo, mergeado con base `main` (la rama por
+//     defecto) → issue #32 quedó {"state":"CLOSED","stateReason":"COMPLETED"}.
+//
+// O sea: con `--base <otra-rama>`, un agente que obedezca el kickoff al pie de
+// la letra deja IGUALMENTE el issue abierto y el carril tapado. Y es peor que
+// no saberlo: quien lea el remedio que da el dispatcher ("al PR le faltaba el
+// Closes #N") mirará el PR, verá el `Closes #N` ahí, y descartará el
+// diagnóstico correcto.
+//
+// Por qué un aviso condicional y no una comprobación: saber si `resolvedBase`
+// es la rama por defecto exige preguntárselo a GitHub, y `detectDefaultBranch`
+// solo se llama cuando NO hay `--base` (justo el caso en que el aviso sobra,
+// porque entonces la base ES la rama por defecto por construcción). Añadir esa
+// llamada aquí metería una dependencia de red —y un camino de aborto— en la
+// única rama que hoy no la necesita, para decidir el texto de un aviso. El
+// aviso se emite solo cuando alguien pasa `--base` a propósito, que es
+// exactamente cuando hace falta leerlo: ruido bajo, valor alto.
+if (typeof baseArg === 'string') {
+  warn(`--base ${resolvedBase}: si "${resolvedBase}" NO es la rama por defecto de ${repo}, el \`Closes #<n>\` que el kickoff le pide al agente NO cerrará su issue al mergear el PR — GitHub solo aplica las closing keywords cuando el PR entra en la rama por defecto (verificado contra un repo real, no deducido de la documentación). Con esta base, cerrar cada issue como *completed* al mergear su PR es un paso A MANO (\`gh issue close <n> --repo ${repo} --reason completed\`): si no se hace, el slice retiene sus tokens de \`area:\`/\`touches:\` indefinidamente y ningún dependiente con \`merge-after\` sobre él lo ve satisfecho nunca.`)
+}
+
 function loadIssues() {
   if (fx) return fx
   // issues open con labels → {n, order, status, deps, touches, name, type, ac, issue}.
@@ -1806,7 +1839,12 @@ for (let idx = 0; idx < selected.length; idx++) {
   let kickoff
   let stateSeed
   try {
-    kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath })
+    // F17: `base` viaja también al kickoff, no solo al STATE.md sembrado (la
+    // línea de abajo lo recibía desde siempre). El agente abre el PR: si no
+    // sabe contra qué rama salió su worktree, `gh pr create` lo apunta a la
+    // rama por defecto del repo — con `--base <otra-rama>`, un diff que no es
+    // el suyo.
+    kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath, base: resolvedBase })
     stateSeed = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase })
   } catch (e) {
     failSlice(idx, `no se pudo renderizar el kickoff/STATE.md de #${s.n}: ${e.message}. El agente se lanzaría sin prompt utilizable — antes, esto solo se descubría en el run real.`)
