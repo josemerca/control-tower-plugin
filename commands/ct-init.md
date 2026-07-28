@@ -68,4 +68,21 @@ manda es una decisión suya. Si en cambio dice que **no se ha podido comprobar**
 (falta `node`), dilo también: ese caso NO es "no hay ninguna", es "no se ha
 mirado".
 
+**El aviso tiene salida, y transmitirla es parte de transmitirlo (F14).** Si el
+usuario ya tomó la decisión y no la va a cambiar —lo más común: «manda el claim
+del plugin, y el script del repo se queda documentado para trabajo a mano fuera
+del loop»—, la forma de que esa señal deje de avisar **sin borrar documentación
+correcta** es escribirla en `.agent/conventions-ack.md`, una línea por señal:
+
+```
+claim: 2026-07-28 — manda el claim del plugin; scripts/dispatch-check.sh se queda para trabajo a mano fuera del loop
+```
+
+Silencia **esa** señal y solo esa; las demás siguen avisando, y en las siguientes
+corridas queda una nota de una línea diciendo que está silenciada y desde cuándo
+(«decidido no mirar esto» y «aquí no hay nada» no son lo mismo). Hacen falta las
+tres cosas —señal, fecha y motivo—; una línea que no parsee se reporta y **no**
+silencia nada. No escribas tú el acuse: la decisión es del usuario, tú le dices
+que existe la salida.
+
 Por último, si el repo no está registrado en `control-tower/tower/workspaces.*.yaml`, dilo; no lo registres tú.
