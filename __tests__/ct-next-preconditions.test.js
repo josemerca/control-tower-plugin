@@ -459,9 +459,18 @@ describe('ct-next --dry-run — el kickoff se ve como PROSA (D4, defecto 3)', ()
     expect(block).toMatch(/Es human-gated/)
   })
 
-  it('la línea literal de cmux se conserva íntegra (sigue siendo la fuente de verdad de qué se ejecutaría)', () => {
+  it('lo que se ejecutaría se conserva íntegro y literal — F19 lo movió de la línea de cmux al script de arranque, pero NO se puede esconder', () => {
     const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE_ONE_READY })
-    expect(r.out).toMatch(/cmux new-workspace --name .*--command "claude --dangerously-skip-permissions/)
+    // ANTES de F19 esto era `--command "claude --dangerously-skip-permissions
+    // …"`: el comando entero viajaba TECLEADO al pty, que es exactamente lo
+    // que dejó que un prompt de oh-my-zsh se comiera la `c` de `claude` en el
+    // primer despacho real (ver __tests__/f19-verificar-el-arranque.test.js).
+    // Ahora se teclea solo un `. <ruta>` y el comando vive en el script. La
+    // propiedad que este test defiende NO cambia —el dry-run tiene que enseñar
+    // literalmente lo que se ejecutaría, sin recortes— solo cambia dónde está.
+    expect(r.out).toMatch(/cmux new-workspace --name .*--command "\. '.*launch\.sh'"/)
+    expect(r.out).toMatch(/script de arranque que cmux sourcearía/)
+    expect(r.out).toMatch(/^claude --dangerously-skip-permissions '/m)
   })
 })
 

@@ -23,7 +23,9 @@
 // temporal aislado por test) — así el aislamiento entre tests es automático,
 // sin tener que añadir una variable nueva a los 654 tests preexistentes.
 import { readFileSync, writeFileSync, existsSync, appendFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { waitForReleaseFile } from '../stub-wait.js'
 
 const argv = process.argv.slice(2)
@@ -122,6 +124,80 @@ const nameIdx = argv.indexOf('--name')
 const name = nameIdx !== -1 ? argv[nameIdx + 1] : ''
 const cwdIdx = argv.indexOf('--cwd')
 const cwd = cwdIdx !== -1 ? argv[cwdIdx + 1] : null
+const commandIdx = argv.indexOf('--command')
+const command = commandIdx !== -1 ? argv[commandIdx + 1] : null
+
+// ===========================================================================
+// F19/H1 — EL STUB AHORA SIMULA LO QUE `--command` DE VERDAD HACE.
+//
+// La ayuda del cmux instalado en esta máquina (leída con `strings` sobre el
+// binario, sin ejecutarlo nunca) dice, para `new-workspace`:
+//
+//     --command <text>     Send text+Enter to the new workspace after creation
+//
+// No es un exec: son PULSACIONES enviadas a un shell de login interactivo.
+// Hasta F19 este stub ignoraba `--command` por completo, así que TODA la
+// suite comprobaba el despacho sin que el comando se ejecutara jamás — el
+// mismo punto ciego que dejó pasar el hallazgo de campo (una ventana abierta
+// contada como agente lanzado). Ahora el stub ejecuta el texto con `sh -c` en
+// el `--cwd` pedido, que es la parte de la semántica real que importa aquí:
+// el comando corre, en ese directorio, en un shell.
+//
+// Lo que NO se simula (y se dice para no vender más de lo que es): no hay pty,
+// ni rc de usuario, ni asincronía — el comando corre síncronamente dentro de
+// `new-workspace`. Lo que sí se puede simular, y es lo que hacía falta, es que
+// el texto llegue CORROMPIDO o no llegue.
+//
+//   FAKE_CMUX_EAT_FIRST_CHAR_SUBSTR — reproduce el hallazgo exacto: el prompt
+//     de oh-my-zsh se come el primer carácter y `. /tmp/…` entra como
+//     ` /tmp/…`. El shell falla, el centinela no se escribe, y cmux devuelve 0
+//     igualmente porque `new-workspace` ya había terminado su trabajo.
+//   FAKE_CMUX_SKIP_COMMAND_SUBSTR — el texto no llega en absoluto.
+//   FAKE_CMUX_NO_CLAUDE_IN_SHELL — el comando corre, pero en un shell donde
+//     `claude` no está en el PATH (el caso que el preflight de ct-next.mjs
+//     solo podía sospechar, porque mira SU propio PATH y no el del shell de
+//     login que abre cmux).
+//
+// El `claude` que ve ese shell simulado es un stub SILENCIOSO propio
+// (fake-cmux-shell-bin), no el de fake-claude-bin: aquel existe para gritar si
+// ct-next.mjs ejecuta `claude` por su cuenta —cosa que sigue sin hacer, y ese
+// contrato no se toca— mientras que ESTE es el que la sesión de cmux lanzaría
+// de verdad.
+const here = dirname(fileURLToPath(import.meta.url))
+const shellBin = join(here, '..', 'fake-cmux-shell-bin')
+
+//   FAKE_CMUX_COMMAND_CWD — el comando corre en OTRO directorio (el caso en
+//     que cmux tolera un `--cwd` inexistente y arranca en el shell de login
+//     por defecto). Aquí lo que miente no es cmux: es la realidad, y el `$PWD`
+//     del centinela es quien la delata.
+//   FAKE_CMUX_COMMAND_DELAY_MS — el comando corre EN SEGUNDO PLANO tras ese
+//     retraso, para poder separar "el centinela no ha aparecido TODAVÍA" de
+//     "no va a aparecer". Es la única de estas variables que hace el stub
+//     asíncrono, y existe precisamente porque esa distinción es temporal y no
+//     se puede probar de ninguna otra forma.
+function runTypedCommand(text) {
+  if (text === null) return
+  const eat = process.env.FAKE_CMUX_EAT_FIRST_CHAR_SUBSTR
+  const skip = process.env.FAKE_CMUX_SKIP_COMMAND_SUBSTR
+  if (skip && name.includes(skip)) return
+  const typed = eat && name.includes(eat) ? text.slice(1) : text
+  // PATH del shell simulado: el `claude` silencioso delante (salvo que el test
+  // pida que no exista), y nada más del entorno del test que pueda confundir.
+  const path = process.env.FAKE_CMUX_NO_CLAUDE_IN_SHELL
+    ? '/usr/bin:/bin'
+    : `${shellBin}:/usr/bin:/bin`
+  const forced = process.env.FAKE_CMUX_COMMAND_CWD
+  const runDir = forced || (cwd && existsSync(cwd) ? cwd : process.cwd())
+  const delay = Number(process.env.FAKE_CMUX_COMMAND_DELAY_MS || 0)
+  // Con retraso, se lanza en segundo plano y `new-workspace` vuelve YA — igual
+  // que el cmux real, que no espera a que el shell haga nada.
+  const line = delay > 0 ? `( sleep ${delay / 1000} ; ${typed} ) >/dev/null 2>&1 &` : typed
+  spawnSync('/bin/sh', ['-c', line], {
+    cwd: existsSync(runDir) ? runDir : process.cwd(),
+    env: { ...process.env, PATH: path },
+    stdio: 'ignore',
+  })
+}
 
 // FAKE_CMUX_NEW_WORKSPACE_WAIT_FILE (F8): se queda DENTRO del `new-workspace`
 // hasta que el test cree el fichero centinela. La invocación ya quedó
@@ -146,6 +222,11 @@ if (process.env.FAKE_CMUX_FAIL_NAME_SUBSTR && name.includes(process.env.FAKE_CMU
 // exit code de `new-workspace` — eso es precisamente lo que hace real el
 // escenario: cmux no avisa de nada.
 if (process.env.FAKE_CMUX_WRONG_CWD_SUBSTR && name.includes(process.env.FAKE_CMUX_WRONG_CWD_SUBSTR)) {
+  // El comando SÍ se ejecuta, y en el cwd bueno: lo que este escenario simula
+  // es que cmux REPORTA otro directorio para su ventana. Son dos fuentes
+  // distintas (el `$PWD` del shell vs. el `current_directory` de cmux) y la
+  // discrepancia entre ellas es justo lo que este caso ejerce.
+  runTypedCommand(command)
   appendState({ title: name, cwd: '/Users/fake/.config/ghostty-default-shell-dir' })
   process.exit(0)
 }
@@ -153,7 +234,9 @@ if (process.env.FAKE_CMUX_WRONG_CWD_SUBSTR && name.includes(process.env.FAKE_CMU
 // sesión no aparece al consultar" — ninguna escritura de estado para este
 // lanzamiento en concreto, aunque el exit code siga siendo 0.
 if (process.env.FAKE_CMUX_SKIP_STATE_SUBSTR && name.includes(process.env.FAKE_CMUX_SKIP_STATE_SUBSTR)) {
+  runTypedCommand(command)
   process.exit(0)
 }
+runTypedCommand(command)
 appendState({ title: name, cwd })
 process.exit(0)
