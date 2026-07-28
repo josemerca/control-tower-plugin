@@ -10,6 +10,7 @@ import { shQuote } from './shquote.js'
 import { buildDispatchInput, NO_MILESTONE_KEY } from './gh-issue-map.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 import { detectConventions, formatFindings } from './conventions.js'
+import { readRepoDocs, readAck } from './conventions-io.js'
 
 // W-C: dispatch-check.mjs implementa el protocolo de claim completo (colisión
 // + escritura + claim-then-verify) y ya está testeado en solitario, pero
@@ -1315,35 +1316,42 @@ for (const w of formatStrayDepsWarnings(issues)) console.log(w)
 // Se mira SOLO la documentación del repo (no se escanea el árbol como hace
 // ct-init): lo que contradice al kickoff es la INSTRUCCIÓN, no la existencia
 // de un fichero — y un despacho no puede permitirse un recorrido del disco.
+// Sí se sigue UN salto desde AGENTS.md/CLAUDE.md a los `.md` que ellos citan
+// (F14): son unos pocos readFileSync, y ahí es donde el repo real tenía viva la
+// orden vieja después de haberla quitado de las dos guías.
 // Es un aviso más, del mismo tipo que los tres de arriba: nunca bloquea.
-// Un fallo de lectura NO se calla como "no hay nada": ver el `catch`.
+// Un fallo de lectura NO se calla como "no hay nada": ver `failures`.
 function formatConventionWarnings() {
   if (fx) return [] // modo fixture: repoRoot sintético, no hay nada real que leer
-  const docs = []
-  let readFailure = null
-  for (const name of ['AGENTS.md', 'CLAUDE.md']) {
-    try {
-      docs.push({ path: name, content: readFileSync(join(repoRoot, name), 'utf8') })
-    } catch (e) {
-      // ENOENT es la respuesta normal (el repo no tiene ese fichero) y no dice
-      // nada. Cualquier OTRO error sí: no se ha podido mirar, y callarlo sería
-      // indistinguible de "no hay conflicto".
-      if (e.code !== 'ENOENT') readFailure = `${name}: ${e.message}`
-    }
-  }
   const out = []
-  if (readFailure) {
-    out.push(`aviso: no se ha podido leer la documentación del repo para comprobar si contradice al kickoff (${readFailure}). NO lo leas como "no hay conflicto": no se ha mirado.`)
+  let docs = []
+  let failures = []
+  let acks = new Map()
+  let ackProblems = []
+  let ackUnreadable = null
+  try {
+    ;({ docs, failures } = readRepoDocs(repoRoot))
+    ;({ acks, problems: ackProblems, unreadable: ackUnreadable } = readAck(repoRoot))
+  } catch (e) {
+    // Que la lectura reviente NO puede tumbar un despacho ni pasar por "no hay
+    // conflicto": se dice y se sigue.
+    out.push(`aviso: no se ha podido leer la documentación del repo para comprobar si contradice al kickoff (${e.message}). NO lo leas como "no hay conflicto": no se ha mirado.`)
+  }
+  for (const f of failures) {
+    out.push(`aviso: no se ha podido leer la documentación del repo para comprobar si contradice al kickoff (${f}). NO lo leas como "no hay conflicto": no se ha mirado.`)
   }
   // `files: []` a propósito — sin recorrido de disco, la regla de directorios
   // de worktrees ajenos y la de ficheros de estado no disparan aquí. Las que sí
   // importan en el despacho (instrucción de claim, `git worktree add <otra
   // ruta>`) salen enteras de los documentos.
-  const findings = detectConventions({ docs, files: [] }).filter((f) => f.id === 'claim' || f.id === 'worktrees')
-  const text = formatFindings(findings, { where: `el repo ${repo}` })
+  const findings = detectConventions({ docs, files: [], acks }).filter((f) => f.id === 'claim' || f.id === 'worktrees')
+  const text = formatFindings(findings, { where: `el repo ${repo}`, ackProblems, ackUnreadable })
   if (text) {
+    const live = findings.some((f) => !f.silenced)
     out.push(
-      `${text}\n  En un DESPACHO esto importa ya: el kickoff manda liberar el claim con el dispatch-check del plugin y trabajar en .worktrees/<n> sobre feat/<n>. El agente va a leer las dos órdenes y obedecer la de tu repo.`
+      live
+        ? `${text}\n  En un DESPACHO esto importa ya: el kickoff manda liberar el claim con el dispatch-check del plugin y trabajar en .worktrees/<n> sobre feat/<n>. El agente va a leer las dos órdenes y obedecer la de tu repo.`
+        : text
     )
   }
   return out
