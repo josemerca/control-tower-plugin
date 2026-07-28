@@ -205,7 +205,10 @@ describe('F14/B — el acuse explícito da salida a UNA señal, no a todas', () 
     expect(text).toMatch(/No hace falta borrar documentación correcta/)
   })
 
-  it('sin fecha, sin motivo, con señal desconocida o ininteligible: NO silencia y se DICE por qué', () => {
+  // F15/H3: la última línea ('esto es prosa suelta') YA NO es un problema —
+  // no pretendía ser un acuse. Las tres de arriba sí lo pretendían y siguen
+  // reportándose, que es la propiedad que no se puede perder.
+  it('sin fecha, sin motivo, con señal desconocida: NO silencia y se DICE por qué (la prosa, en cambio, se ignora)', () => {
     const { acks, problems } = parseAcks(
       [
         '# comentario, se ignora',
@@ -216,11 +219,10 @@ describe('F14/B — el acuse explícito da salida a UNA señal, no a todas', () 
       ].join('\n')
     )
     expect(acks.size).toBe(0)
-    expect(problems.map((p) => p.line)).toEqual([2, 3, 4, 5])
+    expect(problems.map((p) => p.line)).toEqual([2, 3, 4])
     expect(problems[0].why).toMatch(/fecha/)
     expect(problems[1].why).toMatch(/motivo/)
     expect(problems[2].why).toMatch(/desconocida/)
-    expect(problems[3].why).toMatch(/forma/)
     // Y el aviso lo imprime: un acuse que no silencia y no se queja es la peor
     // combinación — el humano cree que ya lo ha decidido y sigue viendo el aviso.
     const text = formatFindings(detectConventions(noisy), { ackProblems: problems })

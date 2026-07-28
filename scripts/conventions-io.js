@@ -111,11 +111,14 @@ export function readRepoDocs(root, { follow = true } = {}) {
 // el fichero EXISTE y ha fallado la lectura — si no existe simplemente no hay
 // acuses, que es el estado normal. La diferencia importa: "no acusaste nada" y
 // "acusaste y no he podido leerlo" llevan al humano a sitios distintos.
+// `prosaSinAcuses` (F15/H3) viaja igual que `problems`: es el tercer estado
+// del fichero — existe, se leyó, y no silencia nada. Cuando el fichero no
+// existe es `false` (no hay nada que engañe a nadie), no `undefined`.
 export function readAck(root) {
   try {
     return { ...parseAcks(readFileSync(join(root, ACK_PATH), 'utf8')), unreadable: null }
   } catch (e) {
-    if (e.code === 'ENOENT') return { acks: new Map(), problems: [], unreadable: null }
-    return { acks: new Map(), problems: [], unreadable: e.message }
+    if (e.code === 'ENOENT') return { acks: new Map(), problems: [], prosaSinAcuses: false, unreadable: null }
+    return { acks: new Map(), problems: [], prosaSinAcuses: false, unreadable: e.message }
   }
 }

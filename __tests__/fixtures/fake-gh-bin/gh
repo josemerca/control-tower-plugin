@@ -271,6 +271,61 @@ function main() {
     return
   }
 
+  // ---- Project v2 (ct-groom.mjs --project) --------------------------------
+  // F15/H2: hasta ahora el stub NO soportaba ninguna llamada de `project`, así
+  // que todo test con --project moría en "comando no soportado" — es decir, la
+  // única forma de ejercitar --project era que fallara. Sin poder simular un
+  // project SANO no se puede comprobar el ORDEN de las mutaciones (que es lo
+  // que H2 pone en el contrato), solo el camino de error.
+  //
+  //   FAKE_GH_PROJECT_VIEW_FAIL   → `gh project view` falla (project inexistente/auth).
+  //   FAKE_GH_PROJECT_FIELDS      → JSON de `data.node.fields.nodes` para la query de
+  //                                 campos. Default: un campo "Sprint" con una iteración
+  //                                 que empieza HOY y dura 14 días (o sea, vigente).
+  //                                 `[]` simula "no hay campo Sprint"; un Sprint con una
+  //                                 iteración vieja simula "ninguna iteración cubre hoy".
+  //   FAKE_GH_PROJECT_ITEMS       → JSON de `.items` para `project item-list` (default []).
+  if (argv[0] === 'project' && argv[1] === 'view') {
+    if (process.env.FAKE_GH_PROJECT_VIEW_FAIL) {
+      console.error('fake-gh: project view failed (simulado)')
+      process.exitCode = 1
+      return
+    }
+    process.stdout.write(JSON.stringify({ id: 'PVT_fake' }))
+    process.exitCode = 0
+    return
+  }
+  if (argv[0] === 'project' && argv[1] === 'item-list') {
+    process.stdout.write(JSON.stringify({ items: JSON.parse(process.env.FAKE_GH_PROJECT_ITEMS || '[]') }))
+    process.exitCode = 0
+    return
+  }
+  if (argv[0] === 'project' && argv[1] === 'item-add') {
+    process.stdout.write(JSON.stringify({ id: 'PVTI_fake' }))
+    process.exitCode = 0
+    return
+  }
+  if (argv[0] === 'api' && argv[1] === 'graphql') {
+    // Query de campos vs mutación de iteración: se distinguen por el texto de
+    // la propia query, igual que ct-groom.mjs las emite.
+    const isFieldsQuery = joined.includes('ProjectV2IterationField')
+    if (!isFieldsQuery) {
+      process.stdout.write(JSON.stringify({ data: { updateProjectV2ItemFieldValue: { projectV2Item: { id: 'PVTI_fake' } } } }))
+      process.exitCode = 0
+      return
+    }
+    let nodes
+    if (process.env.FAKE_GH_PROJECT_FIELDS) {
+      nodes = JSON.parse(process.env.FAKE_GH_PROJECT_FIELDS)
+    } else {
+      const today = new Date().toISOString().slice(0, 10)
+      nodes = [{ id: 'PVTIF_fake', name: 'Sprint', configuration: { iterations: [{ id: 'ITER_fake', title: 'Sprint actual', startDate: today, duration: 14 }] } }]
+    }
+    process.stdout.write(JSON.stringify({ data: { node: { fields: { nodes } } } }))
+    process.exitCode = 0
+    return
+  }
+
   // `gh label create <name> --repo <repo> --force` (ct-groom.mjs): una
   // llamada por cada label distinta que el plan produce Y que el repo no
   // tenía ya (F6), antes de crear/actualizar ningún issue. Siempre éxito —

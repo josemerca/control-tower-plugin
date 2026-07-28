@@ -646,7 +646,7 @@ function formatReason(reason, ctx) {
       // tokens: son la causa de que lo siguiente no salga, no un detalle.
       const inReview = reason.inReview || []
       if (!inReview.length) return 'No hay ningún issue en status:ready — no hay nada que despachar todavía.'
-      return `No hay ningún issue en status:ready. Sí hay ${inReview.length} en status:in-review (${inReview.map((n) => `#${n}`).join(', ')}): su trabajo está entregado pero SIN MERGEAR, así que ni desbloquea a sus dependientes (merge-after exige el merge) ni suelta sus tokens de área/touches. Mergea sus PRs (o, si un PR ya se mergeó y el issue sigue abierto, ciérralo como completed) — y si alguno se rechazó en revisión, devuélvelo al loop con: node <plugin>/scripts/dispatch-check.mjs <n> --repo <owner/repo> --reopen`
+      return `No hay ningún issue en status:ready. Sí hay ${inReview.length} en status:in-review (${inReview.map((n) => `#${n}`).join(', ')}): su trabajo está entregado pero SIN MERGEAR, así que ni desbloquea a sus dependientes (merge-after exige el merge) ni suelta sus tokens de área/touches. Mergea sus PRs (o, si un PR ya se mergeó y el issue sigue abierto, ciérralo como completed) — y si alguno se rechazó en revisión y vas a corregir encima, devuélvelo al banco de trabajo con \`node <plugin>/scripts/dispatch-check.mjs <n> --repo <owner/repo> --reopen\` (queda en status:in-progress: SIGUE reteniendo sus tokens, porque su trabajo sigue sin mergear — reabrir no desbloquea a sus vecinos, solo dice quién lo está rehaciendo).`
     }
     case 'deps-unmet': {
       // D1 finding 2/5: dos causas MUY distintas terminaban antes en el mismo
@@ -740,7 +740,7 @@ function formatReason(reason, ctx) {
       const note = (ctx && !inReviewHolder) ? ctx.stalenessNoteFor(reason.withIssue) : null
       // El remedio del caso in-review, en un solo sitio: el mismo texto vale
       // para la colisión por token y para la serializante.
-      const reviewHint = `#${reason.withIssue} está en status:in-review: su trabajo está entregado pero SIN MERGEAR, así que retiene sus tokens hasta el merge — ramificar ahora de la base te daría un árbol que todavía no lo contiene. NO hay ningún agente trabajándolo: esperar no sirve de nada. Mergea su PR; si su PR YA se mergeó y el issue sigue abierto (el PR no llevaba "Closes #${reason.withIssue}"), ciérralo como completed; si la revisión lo rechazó, devuélvelo al loop con \`node <plugin>/scripts/dispatch-check.mjs ${reason.withIssue} --repo <owner/repo> --reopen\`.`
+      const reviewHint = `#${reason.withIssue} está en status:in-review: su trabajo está entregado pero SIN MERGEAR, así que retiene sus tokens hasta el merge — ramificar ahora de la base te daría un árbol que todavía no lo contiene. NO hay ningún agente trabajándolo: esperar no sirve de nada. Mergea su PR; si su PR YA se mergeó y el issue sigue abierto (el PR no llevaba "Closes #${reason.withIssue}"), ciérralo como completed; si la revisión lo rechazó, \`node <plugin>/scripts/dispatch-check.mjs ${reason.withIssue} --repo <owner/repo> --reopen\` lo devuelve al banco de trabajo — OJO: eso NO te desbloquea, porque #${reason.withIssue} se queda en status:in-progress reteniendo estos mismos tokens hasta que su trabajo se mergee. Lo único que desbloquea es el merge (o abandonar #${reason.withIssue} del todo: borrar su rama y \`--requeue\`).`
       // "en vuelo" solo se dice del caso `in-progress`, donde es literalmente
       // cierto. Para `in-review` la frase sería falsa (no vuela nada: está
       // parado esperando merge) — se dice "trabajo entregado sin mergear".
@@ -1329,9 +1329,10 @@ function formatConventionWarnings() {
   let acks = new Map()
   let ackProblems = []
   let ackUnreadable = null
+  let ackProsaSinAcuses = false
   try {
     ;({ docs, failures } = readRepoDocs(repoRoot))
-    ;({ acks, problems: ackProblems, unreadable: ackUnreadable } = readAck(repoRoot))
+    ;({ acks, problems: ackProblems, unreadable: ackUnreadable, prosaSinAcuses: ackProsaSinAcuses } = readAck(repoRoot))
   } catch (e) {
     // Que la lectura reviente NO puede tumbar un despacho ni pasar por "no hay
     // conflicto": se dice y se sigue.
@@ -1345,7 +1346,7 @@ function formatConventionWarnings() {
   // importan en el despacho (instrucción de claim, `git worktree add <otra
   // ruta>`) salen enteras de los documentos.
   const findings = detectConventions({ docs, files: [], acks }).filter((f) => f.id === 'claim' || f.id === 'worktrees')
-  const text = formatFindings(findings, { where: `el repo ${repo}`, ackProblems, ackUnreadable })
+  const text = formatFindings(findings, { where: `el repo ${repo}`, ackProblems, ackUnreadable, ackProsaSinAcuses })
   if (text) {
     const live = findings.some((f) => !f.silenced)
     out.push(
