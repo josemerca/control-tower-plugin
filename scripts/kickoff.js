@@ -97,7 +97,28 @@ function orderSuffixOf(slice) {
   return ` (slice #${slice.order} de la tabla §9 del spec — numeración DISTINTA del número de issue)`
 }
 
-export function renderKickoff(slice, { repo, dispatchCheckPath }) {
+// F17 — LA RAMA BASE NO ERA UN DATO QUE EL AGENTE TUVIERA.
+//
+// `buildStateSeed` recibía `base` desde la primera versión; `renderKickoff`
+// no. En el caso normal daba igual, porque `gh pr create` sin `--base` apunta
+// a la rama por defecto del repo y ct-next resuelve esa MISMA rama cuando no
+// se pasa `--base`. Pero ct-next SÍ acepta `--base <otra-rama>` y con ella
+// crea el worktree (`git worktree add -b feat/<n> <wt> <resolvedBase>`): el
+// agente abriría su PR contra la rama por defecto, o sea contra una base que
+// no es de la que salió, con un diff que no es el suyo. El kickoff no le
+// nombraba la base en ningún sitio.
+//
+// Sin base conocida NO se rellena con "main": el bug que W-D arregló en
+// ct-next.mjs fue exactamente ese (asumir "main" en silencio). Se remite a la
+// rama de la que salió el worktree, que es un hecho que el agente puede
+// comprobar (`git log`), en vez de un nombre inventado.
+function baseRefOf(base) {
+  return typeof base === 'string' && base.length > 0
+    ? `\`${base}\``
+    : 'la rama base de la que salió este worktree'
+}
+
+export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
   const addendum = ADDENDA[slice.type] || ''
   return [
     `Estás implementando UN slice (${slice.name}) del repo ${repo}, issue ${issueRefOf(slice)}${orderSuffixOf(slice)}.`,
@@ -126,7 +147,51 @@ export function renderKickoff(slice, { repo, dispatchCheckPath }) {
     // dentro de `next_action` — que la siguiente sesión lee como una orden
     // vigente. El campo existe; hay que nombrárselo aquí o no lo usará.
     `Si el trabajo queda BLOQUEADO (no puedes continuar, y no es solo "no terminado"), márcalo en .agent/STATE.md como \`blocked: {reason: "por qué", unblock: "qué haría falta"}\` — NO en prosa dentro de next_action. El hook de SessionStart lo anuncia y suspende el next_action en la siguiente sesión.`,
-    `Al acabar: commit refs al issue, actualiza .agent/STATE.md, abre PR, libera el claim con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --release\`, deja el estado mergeable y PARA.`,
+    // F17 — EL KICKOFF FABRICABA EL DEADLOCK QUE EL PROPIO LOOP DESCRIBE COMO
+    // AVERÍA. Esta línea decía "abre PR" y nada más: no pedía `Closes #N`. La
+    // cadena, entera y verificable en este repo:
+    //   1. el PR se mergea y el issue se queda ABIERTO (nada lo cierra);
+    //   2. desde F13, un issue abierto en `status:in-review` RETIENE sus
+    //      tokens de `area:`/`touches:` hasta el merge (claim.js:52-57), y el
+    //      dispatcher no puede enterarse de que ya se mergeó porque lo que
+    //      mira es el estado del ISSUE;
+    //   3. esos tokens quedan retenidos INDEFINIDAMENTE, porque no hay nada
+    //      que cierre el issue;
+    //   4. el siguiente slice que comparta cualquier token —o que necesite el
+    //      carril serializante global `migration`/`ci`/`pbxproj`— no sale
+    //      nunca;
+    //   5. y `merge-after` se satisface EXACTAMENTE cuando el issue está
+    //      cerrado con `stateReason === 'COMPLETED'`
+    //      (gh-issue-map.js#filterMergedIssues), que es lo que hace GitHub al
+    //      mergear un PR con `Closes #N`: sin esa línea, ningún dependiente ve
+    //      jamás su dependencia satisfecha.
+    // No es teórico: en el repo donde iba a correr el primer despacho real,
+    // diez issues llevaban meses tapando el carril serializante por esta
+    // causa exacta (trabajo mergeado, issue abierto). Y el propio dispatcher
+    // YA describía ese estado como avería y daba el remedio (ct-next.mjs:726
+    // /787/901: "ciérralo como completed si el PR ya se mergeó y nadie lo
+    // cerró porque le faltaba el Closes #N") — que el remedio existiera y la
+    // causa la produjera este mismo fichero era la contradicción a cerrar.
+    //
+    // "en el CUERPO del PR": GitHub solo interpreta las closing keywords en el
+    // cuerpo del PR y en los mensajes de commit de la rama. Un `Closes #N` en
+    // el TÍTULO no cierra nada, y "ponlo en el PR" es ambiguo justo donde no
+    // puede serlo.
+    //
+    // El número que se interpola es `slice.n` — el de ISSUE, la MISMA fuente
+    // que el comando de `--release` de esta línea. Nunca `slice.order` (ver
+    // el bloque de issueRefOf, arriba): un `Closes #<orden>` cerraría el issue
+    // equivocado, o ninguno.
+    `Al acabar: commit refs al issue, actualiza .agent/STATE.md, abre el PR contra ${baseRefOf(base)} con \`Closes #${slice.n}\` en el CUERPO del PR (no en el título, no en un comentario), libera el claim con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --release\`, deja el estado mergeable y PARA.`,
+    // El porqué va aparte y no dentro de la línea de arriba a propósito: esa
+    // línea es una lista de seis órdenes, y una orden sin motivo dentro de una
+    // lista de seis es la primera que se cae cuando el agente va justo de
+    // contexto. Aquí lo que se le da es la consecuencia, que es lo que hace
+    // que no se caiga. `merge-after` se nombra SIN número: la sección
+    // `## Dependencias` lo escribe en espacio de ORDEN §9, no de issue, y
+    // escribir aquí "merge-after #<número de issue>" sería justo la confusión
+    // entre los dos espacios de identificadores que este fichero ya combate.
+    `Ese \`Closes #${slice.n}\` no es cosmético ni opcional: es lo ÚNICO que cierra el issue al mergear el PR. Un PR mergeado con su issue abierto deja este slice reteniendo sus tokens de \`area:\`/\`touches:\` para siempre — ningún slice vecino se despacha, el carril serializante (\`migration\`/\`ci\`/\`pbxproj\`) se queda tapado, y ningún dependiente con un \`merge-after\` sobre este slice lo ve satisfecho jamás. Si abres el PR a mano, o alguien edita su cuerpo después, comprueba que la línea sigue ahí.`,
   ].filter(Boolean).join('\n')
 }
 
