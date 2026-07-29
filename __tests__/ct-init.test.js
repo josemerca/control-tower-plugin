@@ -283,17 +283,29 @@ describe('ct-init.sh', () => {
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     const table = extractWorkedExample(agents)
-    expect(table).toContain('| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |')
+    expect(table).toContain('| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate |')
     const specDir = mkdtempSync(join(tmpdir(), 'ct-example-'))
     const specPath = join(specDir, 'spec.md')
     writeFileSync(specPath, `## 9. Desglose en slices\n${table}`)
-    const out = execFileSync('node', [groomScript, specPath, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', env: fakeGhEnv })
+    // F21: el ejemplo trae ahora una fila con un gate declarado, así que el
+    // groom avisa por stderr (es su trabajo: un gate que no viene del Tipo se
+    // dice en voz alta). Ese stderr es ESPERADO aquí — se captura en vez de
+    // ecoarlo a la salida de `npm test`, igual que hace ct-groom-dryrun.test.js.
+    const out = execFileSync('node', [groomScript, specPath, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', env: fakeGhEnv, stdio: ['ignore', 'pipe', 'pipe'] })
     const plan = JSON.parse(out)
     expect(plan.issues).toHaveLength(3)
     expect(plan.issues[0].title).toBe('#1 modelo')
-    expect(plan.issues[1].title).toBe('#2 api')
+    expect(plan.issues[1].title).toBe('#2 barra')
     expect(plan.issues[2].title).toBe('#3 pantalla')
     expect(plan.issues[0].body).toContain('tabla `medicamentos`') // Entrega -> Descripción
+    // F21: el ejemplo sembrado no solo parsea — DEMUESTRA la columna Gate. La
+    // fila 2 es `backend` con `Gate: visual` (el caso real que motivó la
+    // columna) y la fila 3 es `ui` sin declarar nada, que recibe su gate
+    // igualmente. Si alguien cambiara el ejemplo por uno que no ejercita
+    // ninguno de los dos caminos, esto se entera.
+    expect(plan.issues[1].labels).toContain('gate:visual') // declarado, contra su Tipo
+    expect(plan.issues[2].labels).toContain('gate:visual') // implícito, por Tipo: ui
+    expect(plan.issues[0].labels).toContain('gate:none')
     rmSync(dir, { recursive: true, force: true })
     rmSync(specDir, { recursive: true, force: true })
   })

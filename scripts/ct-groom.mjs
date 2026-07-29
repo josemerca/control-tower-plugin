@@ -42,6 +42,11 @@ import { diffIssue, hasDrift, formatDrift, buildReconcileEditArgs, buildReconcil
 // ADDENDA (F3): única fuente de verdad de qué valores de "Tipo" tienen un
 // addendum de kickoff — ver el aviso de "Tipo" no reconocido más abajo.
 import { ADDENDA } from './kickoff.js'
+// F21: los gates humanos, separados del `Tipo` técnico. `resolveGates` es la
+// única fuente de verdad de qué gates tiene un slice y de todo lo que hay que
+// decir en voz alta sobre ellos (un gate que el Tipo no implica, una renuncia,
+// una renuncia inerte, un token que no existe).
+import { GATES, TYPE_GATES, resolveGates } from './gates.js'
 
 // `arg()` solo devuelve un string cuando el flag realmente trae un valor: si
 // el flag es el último token de argv, o el token siguiente es a su vez otro
@@ -272,6 +277,45 @@ if (!report.tableFound) {
   // dispatcher lo acaba reportando como deps-unmet, así que no es del todo
   // silencioso, pero sigue siendo un grafo equivocado que no hacía falta
   // escribir).
+  // ==========================================================================
+  // F21 — LA COLUMNA `Gate`. Dos condiciones de abort, y las dos son
+  // deliberadamente DUROS (no avisos) por el mismo motivo, que es distinto del
+  // que aplica a `Tipo`:
+  //
+  //   - un `Tipo` desconocido sigue siendo una label legítima para un humano
+  //     (`type:ios` se entiende), y lo único que se pierde es un addendum. Por
+  //     eso se avisa y se sigue.
+  //   - un `Gate` desconocido no produce NADA: ni label, ni línea en el
+  //     kickoff, ni línea en el cuerpo del issue. Escribir `Gate: seguridad` y
+  //     que el groom siga adelante en silencio dejaría al autor convencido de
+  //     que ha puesto un gate donde no hay ninguno — que es EXACTAMENTE la
+  //     avería que esta ronda cierra, reintroducida por la puerta de al lado.
+  //     Y aceptarlo emitiendo la label igual sería peor: un `gate:seguridad`
+  //     que nadie sabe cómo cerrar, y que el kickoff no puede explicarle al
+  //     agente.
+  //
+  // Esto ESTRECHA lo que el sistema acepta, así que crea una categoría nueva
+  // de rechazo — y esa categoría necesita voz propia: los dos mensajes nombran
+  // el vocabulario ENTERO (derivado de `GATES`, no de una lista repetida aquí)
+  // y la sintaxis de renuncia, para que el remedio esté en el propio mensaje.
+  // Van en `hardErrors`, es decir ANTES de la primera mutación: un spec con un
+  // gate mal escrito no crea milestone, ni labels, ni issues.
+  const unknownGateRows = []
+  const contradictoryGateRows = []
+  for (const s of report.slices) {
+    const g = resolveGates(s.type, s.gate)
+    for (const u of g.unknown) unknownGateRows.push({ n: s.n, token: u })
+    for (const c of g.contradictions) contradictoryGateRows.push({ n: s.n, token: c })
+  }
+  if (unknownGateRows.length) {
+    const first = unknownGateRows[0]
+    hardErrors.push(`${unknownGateRows.length} valor(es) de la columna "Gate" de la tabla §9 no son ningún gate conocido (ejemplo, slice #${first.n}: "${first.token}") — los gates que este plugin sabe explicarle al agente y escribir en el issue son: ${Object.keys(GATES).join(', ')}. Un gate que no está en esa lista no produce label, ni línea de kickoff, ni nada en el cuerpo del issue: sería un gate que solo existe en el spec. Para RENUNCIAR a un gate que implica el "Tipo" del slice, escribe "!<gate>" (p.ej. "!visual"); para no declarar nada, deja la celda vacía o con "–". Si de verdad hace falta un gate nuevo, se añade a scripts/gates.js con su texto para el agente y para el issue`)
+  }
+  if (contradictoryGateRows.length) {
+    const first = contradictoryGateRows[0]
+    hardErrors.push(`${contradictoryGateRows.length} fila(s) de la tabla §9 piden y renuncian al MISMO gate en la columna "Gate" (ejemplo, slice #${first.n}: "${first.token}" y "!${first.token}") — no se elige un ganador en silencio sobre un gate humano: deja solo uno de los dos y vuelve a intentarlo`)
+  }
+
   if (report.invalidDepRefs.length) {
     const first = report.invalidDepRefs[0]
     const example = first.reason === 'self'
@@ -319,6 +363,16 @@ const ownedLabelPrefixes = []
 if (!report.missingOptionalColumns.includes('Tipo')) ownedLabelPrefixes.push('type:')
 if (!report.missingOptionalColumns.includes('Área')) ownedLabelPrefixes.push('area:')
 if (!report.missingOptionalColumns.includes('Toca')) ownedLabelPrefixes.push('touches:')
+// F21 — `gate:` sigue la misma regla, con una fuente doble: el spec tiene una
+// opinión sobre los gates de un slice si trae la columna `Gate` (declaración
+// explícita) O si trae la columna `Tipo` (los gates que el tipo implica —
+// gates.js#TYPE_GATES). Sin ninguna de las dos, el spec no produce ninguna
+// label `gate:` y no debe reclamar autoridad sobre una que un humano haya
+// puesto a mano. Con cualquiera de las dos sí: un issue que conserva un
+// `gate:visual` que el spec ya no produce es una divergencia real, y de las
+// que importan — es un gate humano que alguien va a esperar y nadie va a
+// pedir (o al revés).
+if (report.gateColumnPresent || !report.missingOptionalColumns.includes('Tipo')) ownedLabelPrefixes.push('gate:')
 // F3: "Tipo" decide, además de la label "type:<valor>", qué addendum recibe
 // el agente despachado — kickoff.js#renderKickoff hace
 // `ADDENDA[slice.type] || ''` en silencio, así que un valor que no sea
@@ -345,9 +399,51 @@ for (const s of report.slices) {
   // un "–" es ruido, no señal). buildLabels (groom.js) ya trata este mismo
   // marcador como "sin type:" — coherente con eso.
   if (s.type && !isNoValueCell(s.type) && !KNOWN_TYPES.includes(s.type)) {
-    console.error(`aviso: valor "${s.type}" en columna Tipo (slice #${s.n}) no es ninguno de los tipos reconocidos por el dispatcher (${KNOWN_TYPES.join(', ')}) — el agente despachado para este slice no recibirá ningún addendum de tipo (ver scripts/kickoff.js#ADDENDA); revisa si es un error tipográfico o si falta añadir su addendum`)
+    // F21: este aviso nombra ahora la SEGUNDA consecuencia, que hasta esta
+    // ronda no existía y es más grave que la primera. Un `Tipo` con una errata
+    // (`UI` en vez de `ui`, `ios` en vez de `ui`) no solo se queda sin
+    // addendum: se queda además sin los GATES que ese tipo implicaría — la
+    // comparación es exacta también en gates.js#TYPE_GATES. Callar la mitad
+    // "gate" de la consecuencia sería reintroducir en este aviso el mismo
+    // problema que la columna `Gate` viene a cerrar. Se dice cuál sería el
+    // gate perdido cuando el valor se parece a un tipo que sí implica alguno.
+    const gateNote = Object.keys(TYPE_GATES).length
+      ? ` — y tampoco los gates humanos que un Tipo reconocido implicaría (${Object.entries(TYPE_GATES).map(([t, gs]) => `${t}→${gs.join('/')}`).join(', ')}): si este slice necesita alguno, decláralo en la columna "Gate"`
+      : ''
+    console.error(`aviso: valor "${s.type}" en columna Tipo (slice #${s.n}) no es ninguno de los tipos reconocidos por el dispatcher (${KNOWN_TYPES.join(', ')}) — el agente despachado para este slice no recibirá ningún addendum de tipo (ver scripts/kickoff.js#ADDENDA)${gateNote}; revisa si es un error tipográfico o si falta añadir su addendum`)
   }
 }
+// ============================================================================
+// F21 — LOS GATES, DICHOS EN VOZ ALTA. El encargo no era solo "que se pueda
+// declarar un gate": era que el sistema lo DIGA. Quien groomea tiene que ver,
+// sin ir a buscarlo, que un slice lleva un gate que no viene de su `Tipo` —y
+// sobre todo que a un slice le han QUITADO uno—, porque las dos cosas son
+// decisiones sobre qué se comprueba antes de mergear y ninguna de las dos debe
+// poder colarse en un diff de spec sin que nadie la lea.
+//
+// Los cuatro avisos van por stderr y NO abortan: los cuatro describen
+// configuraciones legítimas (o inocuas), a diferencia de los dos hardErrors de
+// más arriba. Solo se habla cuando hay algo que decir — un slice cuyos gates
+// salen tal cual de su `Tipo` (el caso masivamente mayoritario) no imprime
+// nada, que es lo que mantiene útiles a los que sí salen.
+// ============================================================================
+for (const s of report.slices) {
+  const g = resolveGates(s.type, s.gate)
+  const typeRef = s.type && !isNoValueCell(s.type) ? `"${s.type}"` : '(sin Tipo)'
+  for (const gate of g.added) {
+    console.error(`aviso: el slice #${s.n} declara el gate "${gate}", que su Tipo ${typeRef} no implica — es deliberado (para eso está la columna "Gate"), y se dice en voz alta porque cambia lo que hay que comprobar antes de mergear: el issue llevará la label "gate:${gate}", el agente despachado recibirá la instrucción, y quien revise el PR tiene que cerrarlo`)
+  }
+  for (const gate of g.waived) {
+    console.error(`aviso: el slice #${s.n} RENUNCIA al gate "${gate}" que implica su Tipo ${typeRef} (celda "Gate": "${s.gate}") — ese gate NO se le pedirá al agente, no aparecerá como label del issue y nadie lo comprobará antes de mergear. Si no era eso lo que querías, quita el "!" de esa celda`)
+  }
+  for (const gate of g.inertWaivers) {
+    console.error(`aviso: el slice #${s.n} renuncia al gate "${gate}", pero su Tipo ${typeRef} no implica ese gate: la renuncia no hace nada (no había nada que quitar). Se dice para que no te quedes con la idea de haber retirado un gate que nunca estuvo`)
+  }
+  for (const gate of g.redundant) {
+    console.error(`aviso: el slice #${s.n} declara el gate "${gate}", que su Tipo ${typeRef} ya implica — es redundante, no un error: el resultado es el mismo con la celda "Gate" vacía`)
+  }
+}
+
 // Valores de Área/Toca con el prefijo de LA OTRA columna (p.ej. "area:x"
 // dentro de Toca): se toleró el valor (no se descartó), pero probablemente
 // sea un despiste de columna — se avisa para que el autor pueda revisar.

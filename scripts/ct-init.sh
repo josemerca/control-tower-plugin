@@ -224,7 +224,7 @@ SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
 # decía en absoluto que un PR rechazado dejaba su slice fuera del loop para
 # siempre. Un repo bootstrapeado con el v4 se queda con esas tres cosas hasta
 # que este número suba; es la única palanca que existe para llegar hasta él.
-SLICES_CONTRACT_VERSION=9
+SLICES_CONTRACT_VERSION=10
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -277,6 +277,7 @@ cd59702d2c5d3a73b67ad235908b83bdc42c9da41996b14a33fba0749e359961  v5, 289 línea
 8730d7be044a7ba8009d263947c57c56eb6558639cc506d22c460fcc6f9bacb9  v7, 385 líneas — F17 (el kickoff pide Closes #N; las DOS causas de "PR mergeado, issue abierto")
 cef9a97a07edc8c403a37ffc846df74422c4d7d1d5aad02d90001a477b2ef811  v8, 419 líneas — F18 (el cierre accidental por commit; el residuo de labels sobre cerrados; el claim bloqueado; la causa que el kickoff no garantiza)
 0050a5b1a216063a58beabb1237d08b0753f5390a3c82edcf8ae5c3526491485  v9, 427 líneas — F20 (las DOS sesiones por repo y su campo `role`: coordinadora vs. despachada)
+ca63463cecb38df02011c5d079fd278488aa560bfb4ab5d0c7e95531d51e82e9  v10, 482 líneas — F21 (la columna Gate: el gate humano deja de ser un efecto colateral del Tipo)
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -284,14 +285,23 @@ cef9a97a07edc8c403a37ffc846df74422c4d7d1d5aad02d90001a477b2ef811  v8, 419 línea
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 9 -->
+<!-- ct-init:slices-contract-version: 10 -->
 ## Formato de la tabla §9 (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
 copiable tal cual:
 
-| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
-|---|-------|------|---------|-----|--------|-----------|------|------|
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate |
+|---|-------|------|---------|-----|--------|-----------|------|------|------|
+
+> **Lo que escribas fuera de la tabla §9 no llega al agente.** El agente que
+> implementa un slice no recibe el spec: recibe un prompt de arranque y el
+> CUERPO DEL ISSUE, y el cuerpo del issue se construye con estas columnas y
+> nada más. Una exigencia escrita en otra sección del spec ("§10", "REGLA
+> #-2", un párrafo de introducción) es invisible para él por muy contundente
+> que esté redactada. Si algo tiene que cumplirlo el agente, tiene que caber
+> en una de estas columnas — y si no cabe en ninguna, no cuentes con que se
+> cumpla.
 
 - **`#`** *(obligatoria)*: entero puro (`1`, `2`…) → orden del slice y target
   de `Dep`. Nunca `S1` ni `**1**` (negrita/prefijo): la fila entera se
@@ -306,12 +316,46 @@ copiable tal cual:
   línea del kickoff del agente y el nombre del workspace cmux salen de aquí
   — por eso conviene que sea corto y legible, no una frase.
 - **Tipo** *(opcional)*: label `type:<valor>` del issue. Además decide qué
-  addendum recibe el agente al despachar (`/ct-next` → `kickoff.js`):
-  valores reconocidos hoy son `ui`, `backend`, `infra`, `bugfix` — cada uno
-  con su propio addendum (el de `ui`, por ejemplo, impone el gate de
-  screenshot obligatorio). Un valor que no sea ninguno de esos NO aborta,
-  pero `/ct-groom` avisa por stderr: el agente despachado para ese slice no
+  **recordatorio técnico** (*addendum*) recibe el agente al despachar
+  (`/ct-next` → `kickoff.js`): valores reconocidos hoy son `ui`, `backend`,
+  `infra`, `bugfix`. Un valor que no sea ninguno de esos NO aborta, pero
+  `/ct-groom` avisa por stderr: el agente despachado para ese slice no
   recibirá ningún addendum de tipo, y sin ese aviso pasaría en silencio.
+  `Tipo` decide también los gates **por defecto** (ver `Gate`, justo debajo),
+  pero ya no los decide en exclusiva: hasta el contrato v9 eran la misma
+  columna, y un slice `backend` que necesitaba revisión visual no tenía forma
+  de pedirla.
+- **Gate** *(opcional)*: qué **gates humanos** hay que cerrar antes de mergear
+  este slice — el otro eje, separado del `Tipo`. Vocabulario cerrado:
+  - `visual` — un humano tiene que VER el cambio: captura/vídeo del
+    antes/después en el PR;
+  - `apply` — nada se aplica contra un entorno real hasta que un humano
+    revise el plan/dry-run.
+
+  **No hace falta escribir nada en el caso normal**: `Tipo: ui` implica
+  `visual` e `Tipo: infra` implica `apply`, igual que antes. La columna sirve
+  para las dos desviaciones:
+  - **añadir** un gate que el `Tipo` no implica — `Tipo: backend` +
+    `Gate: visual` (el caso real: una migración con backfill que mueve una
+    barra de progreso muy visible). `/ct-groom` lo **anuncia por stderr**:
+    llevas un gate que no viene de tu tipo;
+  - **renunciar** a uno que sí implica, con un `!` delante: `!visual` sobre un
+    `Tipo: ui` que de verdad no cambia nada visible. También se anuncia, y en
+    voz más alta: quitar un gate nunca es silencioso. (El `!` y no un `-`
+    porque `-` ya significa "sin valor" en todas las demás columnas.)
+
+  Celda vacía o con marcador de "sin valor" (`–`) significa *no he declarado
+  nada*, **no** "renuncio a todo". Un valor que no esté en el vocabulario
+  **aborta** (a diferencia de `Tipo`): un gate desconocido no produciría label,
+  ni instrucción al agente, ni línea en el issue — sería un gate que solo
+  existe en el spec, que es justo lo que esta columna viene a impedir.
+
+  A dónde llega: cada gate resuelto se escribe como label **`gate:<token>`** del
+  issue (y **`gate:none`** cuando no hay ninguno — el silencio no puede
+  significar a la vez "sin gates" y "issue anterior a los gates"), como sección
+  **`## Gates`** del cuerpo del issue, y como instrucción explícita en el
+  prompt del agente. Por eso sobrevive a un redespacho y a un `--reopen`: se
+  lee del issue, no del spec.
 - **Entrega** *(opcional)*: texto de qué entrega el slice → sección
   "Descripción" del cuerpo del issue. Ya NO alimenta el título (eso lo hace
   `Slice`, ver arriba).
@@ -349,8 +393,8 @@ copiable tal cual:
   `/ct-next` con esto": es global **al flujo de issues de este repo**, que no
   es lo mismo que global al repo.
 
-Marcadores de "sin valor" (`Dep`/`Acepta`/`Protegido`/`Área`/`Toca`): `–` `-`
-`—` `―` `−` `--` o celda vacía — cualquier variante de guion vale.
+Marcadores de "sin valor" (`Dep`/`Acepta`/`Protegido`/`Área`/`Toca`/`Gate`):
+`–` `-` `—` `―` `−` `--` o celda vacía — cualquier variante de guion vale.
 
 ### Lo que crea `/ct-groom` NO es despachable todavía
 
@@ -427,17 +471,21 @@ medias"— asusta y lleva a limpiar a mano cosas que no hay que limpiar.
 
 Ejemplo que parsea tal cual (verificado con `ct-groom.mjs --dry-run`):
 
-| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
-|---|-------|------|---------|-----|--------|-----------|------|------|
-| 1 | modelo | backend | tabla `medicamentos` | – | AC-1.1 | schema | medicacion | db, migration |
-| 2 | api | backend | endpoint `POST /medicamentos` | #1 | AC-2.1 | – | medicacion | api |
-| 3 | pantalla | ui | pantalla de alta | #2 | AC-3.1 | – | medicacion | app |
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate |
+|---|-------|------|---------|-----|--------|-----------|------|------|------|
+| 1 | modelo | backend | tabla `medicamentos` | – | AC-1.1 | schema | medicacion | db, migration | – |
+| 2 | barra | backend | backfill con progreso visible | #1 | AC-2.1 | – | medicacion | db, migration | visual |
+| 3 | pantalla | ui | pantalla de alta | #2 | AC-3.1 | – | medicacion | app | – |
+
+(La fila 2 es el caso que la columna `Gate` existe para cubrir: es `backend`
+por dentro y lo más visible del epic por fuera. La fila 3 no declara nada y
+recibe su gate `visual` igualmente, por ser `Tipo: ui`.)
 
 **Arreglar la tabla y volver a groomear NO arregla los issues ya creados.**
 Re-ejecutar `/ct-groom` no los duplica (los reconoce por su marcador
 `ct-order`), pero tampoco los actualiza: compara título, enlace al spec,
-milestone, labels (`type:`/`area:`/`touches:`; `status:` nunca) y las dos
-secciones que el dispatcher obedece
+milestone, labels (`type:`/`area:`/`touches:`/`gate:`; `status:` nunca) y las
+dos secciones que el dispatcher obedece
 (`## Dependencias`, `## Acceptance criteria`) contra lo que la tabla produce
 hoy, **reporta** cada diferencia por stderr y sale `3` — pero no escribe nada
 salvo que se le pase `--reconcile` (EXPERIMENTAL: ha corrompido bodies reales
@@ -694,18 +742,26 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   información para el agente que lo lee.
 - **Qué recibe el agente despachado**: un prompt de arranque (*kickoff*) con
   el nombre del slice, el número de issue, los criterios de la sección
-  "Acceptance criteria", el addendum de su `Tipo`, la rama base contra la que
+  "Acceptance criteria", el aviso de leer la sección "Out of scope /
+  Protected", el addendum técnico de su `Tipo`, **sus gates humanos** (los de
+  la columna `Gate`, o los que implique su `Tipo`), la rama base contra la que
   tiene que abrir el PR, la orden de poner **`Closes #N` en el cuerpo de ese
   PR** (con el porqué: sin ese cierre, el slice retiene sus tokens para
   siempre y no desbloquea a sus dependientes) y el comando literal para
-  liberar el claim al terminar; más el `.agent/STATE.md` sembrado y lo que el
-  propio repo le dé al arrancar (`AGENTS.md`, `CLAUDE.md`, hooks). **No
-  recibe el spec**: se hidrata del issue. Lo que no llegó al cuerpo del issue
-  no llega al agente. Lo que el kickoff **no** puede garantizar es que el
-  agente obedezca: si un PR aparece sin su `Closes #N`, el loop no lo detecta
-  — lo verás como un `status:in-review` que no se despeja.
+  liberar el claim al terminar; más el `.agent/STATE.md` sembrado (que repite
+  su `role` y sus gates, para sobrevivir a un `/clear`) y lo que el propio
+  repo le dé al arrancar (`AGENTS.md`, `CLAUDE.md`, hooks). **No recibe el
+  spec**: se hidrata del issue. **Lo que no llegó al cuerpo del issue no llega
+  al agente.** Ninguna exigencia que le hagas desde otra sección del spec —una
+  §10, una "REGLA #-2", un párrafo de introducción— le va a llegar, por muy
+  contundente que esté redactada. Lo que el kickoff **no** puede garantizar es que el agente
+  obedezca: si un PR aparece sin su `Closes #N`, el loop no lo detecta — lo
+  verás como un `status:in-review` que no se despeja. Lo mismo vale para los
+  gates: el loop los **escribe y los enseña** (kickoff, label `gate:`, sección
+  `## Gates` del issue), pero **no impide mergear** un PR con su gate sin
+  cerrar. El que cierra el gate eres tú.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v9). Si el plugin trae una
+<sub>Esta sección la mantiene `/ct-init` (contrato v10). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>

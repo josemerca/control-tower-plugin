@@ -25,8 +25,12 @@ describe('groom puro', () => {
   it('title lleva orden + name (columna Slice), no Entrega', () => {
     expect(buildIssueTitle(SLICE)).toBe('#2 refresh token')
   })
-  it('labels: type + status:backlog', () => {
-    expect(buildLabels(SLICE)).toEqual(['type:backend', 'status:backlog'])
+  // F21: la label `gate:` se une a la salida de buildLabels. `gate:none` es
+  // la que corresponde a un slice `backend` sin celda `Gate` — ver
+  // gates.js#GATE_LABEL_NONE para por qué "ningún gate" se AFIRMA con una
+  // label en vez de dejarse en silencio.
+  it('labels: type + gate + status:backlog', () => {
+    expect(buildLabels(SLICE)).toEqual(['type:backend', 'gate:none', 'status:backlog'])
   })
   it('body: link al spec, AC, deps como merge-after, protected', () => {
     const b = buildIssueBody(SLICE, SPEC_REF)
@@ -123,7 +127,7 @@ describe('groom puro', () => {
   })
   it('buildLabels con type vacío: solo status:backlog', () => {
     const empty = { n: 1, type: '', entrega: 'x', deps: [], ac: [], protected: '–' }
-    expect(buildLabels(empty)).toEqual(['status:backlog'])
+    expect(buildLabels(empty)).toEqual(['gate:none', 'status:backlog'])
   })
   // Review de F3, finding 1 (bug preexistente a F3, cerrado ahora): `Tipo`
   // con un marcador de "sin valor" ("–", "-", "—", etc. — el mismo criterio
@@ -136,18 +140,18 @@ describe('groom puro', () => {
   // (celda vacía, celda con marcador) deben producir la MISMA salida.
   it.each(['-', '–', '—', '―', '−', '--'])('buildLabels con type = marcador de "sin valor" ("%s"): sin label "type:", igual que type vacío', (marker) => {
     const s = { n: 1, type: marker, entrega: 'x', deps: [], ac: [], protected: '–' }
-    expect(buildLabels(s)).toEqual(['status:backlog'])
+    expect(buildLabels(s)).toEqual(['gate:none', 'status:backlog'])
   })
   it('buildLabels emite area:/touches: por cada token, en orden tipo→area→touches→status', () => {
     const s = { ...SLICE, area: ['api'], touches: ['db', 'migration'] }
-    expect(buildLabels(s)).toEqual(['type:backend', 'area:api', 'touches:db', 'touches:migration', 'status:backlog'])
+    expect(buildLabels(s)).toEqual(['type:backend', 'area:api', 'touches:db', 'touches:migration', 'gate:none', 'status:backlog'])
   })
   it('buildLabels sin area/touches (undefined, spec vieja) produce exactamente la salida de hoy', () => {
-    expect(buildLabels(SLICE)).toEqual(['type:backend', 'status:backlog'])
+    expect(buildLabels(SLICE)).toEqual(['type:backend', 'gate:none', 'status:backlog'])
   })
   it('buildLabels con area/touches vacíos ([]) produce exactamente la salida de hoy', () => {
     const s = { ...SLICE, area: [], touches: [] }
-    expect(buildLabels(s)).toEqual(['type:backend', 'status:backlog'])
+    expect(buildLabels(s)).toEqual(['type:backend', 'gate:none', 'status:backlog'])
   })
   it('groomPlan rechaza órdenes de slice duplicados, nombrando el/los duplicados', () => {
     const dup1 = { ...SLICE, n: 1 }

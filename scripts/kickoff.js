@@ -1,6 +1,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { renderState } from './state.js'
+import { resolveGatesForAgent, renderGateKickoffLines } from './gates.js'
 
 // ACCOUNT_MAP — qué CLAUDE_CONFIG_DIR (qué cuenta de Claude) recibe el agente
 // que se despacha para un repo.
@@ -58,10 +59,26 @@ export const ACCOUNT_MAP = {
 // mañana se añade un addendum nuevo aquí (o se corrige un typo en una key
 // existente), el aviso de ct-groom.mjs lo refleja solo, sin tocar ese
 // fichero ni arriesgarse a que las dos listas diverjan.
+//
+// F21 — ADDENDA YA NO CONTIENE NINGÚN GATE. Hasta esta ronda, el ÚNICO gate
+// humano de todo el plugin era media frase dentro de este objeto ("gate de
+// screenshot obligatorio", en `ui`; "apply solo tras review", en `infra`).
+// Consecuencia: `Tipo` decidía a la vez el recordatorio TÉCNICO y el GATE
+// HUMANO, dos ejes que no siempre coinciden — el caso real fue un slice
+// `Tipo: backend` (migración con backfill) que el spec marcaba como
+// necesitado de gate visual "porque la barra es lo más visible de todo el
+// spec": recibió el addendum de backend y ningún gate, y nada lo señaló.
+//
+// Las dos frases de gate se han MOVIDO a scripts/gates.js, que las resuelve
+// por separado (ver renderKickoff, más abajo). Aquí quedan solo recordatorios
+// técnicos. Que no queden también aquí es parte del arreglo, no una limpieza
+// estética: un `Tipo: ui` que RENUNCIA a su gate en el spec seguiría
+// recibiendo "gate de screenshot obligatorio" desde su addendum, y el kickoff
+// se contradiría a sí mismo.
 export const ADDENDA = {
-  ui: 'Addendum UI: gate de screenshot obligatorio y respeta el design system; no cambies tokens de marca.',
+  ui: 'Addendum UI: respeta el design system; no cambies tokens de marca.',
   backend: 'Addendum backend: migración forward+rollback, respeta contratos, reporta el cambio de API.',
-  infra: 'Addendum infra: dry-run/plan primero, nunca secretos en claro, apply solo tras review.',
+  infra: 'Addendum infra: dry-run/plan primero, nunca secretos en claro.',
   bugfix: 'Addendum bugfix: reproduce-first (test que falla con el síntoma exacto), causa raíz, fix mínimo, test de regresión.',
 }
 
@@ -120,13 +137,31 @@ function baseRefOf(base) {
 
 export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
   const addendum = ADDENDA[slice.type] || ''
+  // F21 — LOS GATES, POR FIN SEPARADOS DEL TIPO. `resolveGatesForAgent` (ver
+  // gates.js) prefiere lo que DECLARA el issue (sus labels `gate:`, que es lo
+  // que sobrevive a un redespacho) y solo cae al `Tipo` para issues anteriores
+  // a esta ronda. Las líneas de gate van justo después del addendum y ANTES
+  // del bloque de cierre del PR, no al final: son la condición para que ese
+  // cierre pueda ocurrir.
+  const gateLines = renderGateKickoffLines(resolveGatesForAgent(slice))
   return [
     `Estás implementando UN slice (${slice.name}) del repo ${repo}, issue ${issueRefOf(slice)}${orderSuffixOf(slice)}.`,
     `Es human-gated: NO empieces el siguiente slice; al terminar deja el PR listo y PARA.`,
     `Arranque verification-first: confirma pwd/rama, git log, y baseline verde ANTES de tocar nada.`,
-    `Hidrátate de .agent/STATE.md y del issue de GitHub; los criterios de aceptación son ${slice.ac.join(', ') || '(ver issue)'}.`,
+    // F21, segundo hallazgo de la misma lente ("ninguna exigencia que el spec
+    // le haga al agente puede depender de que el agente lea el spec"): la
+    // columna `Protegido` SÍ llega al cuerpo del issue, pero este kickoff
+    // enumeraba los criterios de aceptación uno a uno y no nombraba JAMÁS lo
+    // que queda fuera de alcance. "Hidrátate del issue" es estrictamente más
+    // débil que nombrar la sección: lo que se enumera se lee, y lo que se deja
+    // a "ya lo verá" compite con el resto del body. No se interpola el texto
+    // (a diferencia de los AC) porque `Protegido` es prosa de longitud
+    // arbitraria y el kickoff se teclea entero en un pty; se nombra la sección
+    // exacta, que es lo que hace falta para que la busque.
+    `Hidrátate de .agent/STATE.md y del issue de GitHub; los criterios de aceptación son ${slice.ac.join(', ') || '(ver issue)'}. Lee además la sección "## Out of scope / Protected" del issue: lo que hay ahí NO se toca, aunque parezca parte del trabajo.`,
     `Sigue superpowers:subagent-driven-development (impl → spec-review → code-review) con TDD.`,
     addendum,
+    ...gateLines,
     // W-C: el claim (status:ready → status:in-progress) lo hace /ct-next en
     // código, ANTES de crear este worktree — no por el prompt. El release
     // (in-progress → in-review) SÍ se deja aquí a propósito (decisión ya
@@ -195,6 +230,18 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
   ].filter(Boolean).join('\n')
 }
 
+// renderStateGates: el valor del campo `gates` del STATE.md sembrado. Una
+// cadena legible (no una lista YAML de tokens) porque su lector es un agente
+// que se re-hidrata: "visual" a secas no le dice qué tiene que hacer ni que no
+// le toca cerrarlo a él. Cuando no hay ninguno, se afirma explícitamente —
+// mismo criterio que `blocked: null` (state.js): un campo que solo aparece
+// cuando hay algo malo es un campo que nadie escribe cuando le hace falta.
+function renderStateGates(gates) {
+  const list = gates || []
+  if (!list.length) return 'ninguno (este slice no exige ningún gate humano antes de mergear)'
+  return `${list.join(', ')} — GATES HUMANOS pendientes: los cierra quien revisa el PR, NO tú. Detalle en la sección "## Gates" del issue.`
+}
+
 export function buildStateSeed(slice, { branch, base }) {
   const issueNum = slice.issue != null ? parseInt(String(slice.issue).replace('#', ''), 10) : null
   return renderState({
@@ -221,6 +268,22 @@ export function buildStateSeed(slice, { branch, base }) {
       // ningún código del plugin decide nada con él, y decir eso aquí evita
       // que alguien lo convierta en un gate por accidente.
       role: 'slice-agent (sesión DESPACHADA por /ct-next): implementas ESTE slice y PARAS. No groomeas, no mergeas, no despachas el siguiente — de eso se encarga la sesión coordinadora del checkout principal.',
+      // gates (F21) — MISMO ARGUMENTO QUE `role` (F20) Y QUE `blocked` (F7):
+      // lo que tiene que sobrevivir a una re-hidratación es un CAMPO, no una
+      // frase dentro de un prompt. El kickoff se pierde con el contexto de su
+      // sesión; el hook de SessionStart inyecta este fichero en TODA sesión
+      // nueva del worktree. Sin este campo, una sesión que se re-hidrata tras
+      // un /clear no tiene forma de saber que su PR lleva un gate humano
+      // pendiente — y el gate volvería a ser exactamente lo que esta ronda
+      // arregla: una exigencia escrita en un sitio que su destinatario ya no
+      // abre.
+      //
+      // Es texto legible y no un enum por la misma razón que `role`: su lector
+      // es un agente, no un parser. NINGÚN código del plugin decide nada con
+      // este campo — decirlo aquí evita que alguien lo convierta en un gate de
+      // verdad por accidente; el gate ejecutable son las labels `gate:` del
+      // issue.
+      gates: renderStateGates(resolveGatesForAgent(slice)),
       status: 'not_started',
       branch,
       base,

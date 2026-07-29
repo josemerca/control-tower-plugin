@@ -97,7 +97,7 @@ import {
 // como número de issue — un --reconcile con la copia vieja habría reescrito
 // el formato nuevo de vuelta al viejo, reintroduciendo el enlace falso en
 // cada corrida).
-import { renderDepsContent, renderAcContent } from './groom.js'
+import { renderDepsContent, renderAcContent, GATES_HEADING } from './groom.js'
 
 // ownedLabelsOnly: el spec solo es autoridad sobre un prefijo (`type:`,
 // `area:`, `touches:`) SI la tabla §9 trae la columna que lo alimenta
@@ -202,6 +202,15 @@ const DUPLICATE_CHECKS = [
   { headings: '## Descripción', label: 'Descripción', machine: false },
   { headings: AC_HEADING_FORMS, label: 'Acceptance criteria', machine: true },
   { headings: '## Dependencias', label: 'Dependencias', machine: true },
+  // F21: la sección de gates duplicada NO es "machine". El canal que obedece
+  // la máquina (kickoff.js, vía gh-issue-map.js#mapGhIssue) son las LABELS
+  // `gate:`, no esta sección — que existe para el humano que abre el issue o
+  // el PR. Un duplicado aquí es cosmético, exactamente igual que en
+  // Descripción/Protegido, y anclar el exit code a él entrenaría a ignorar el
+  // resto del reporte. Que las labels `gate:` sí cuenten (van en
+  // `ownedLabelPrefixes`, ver ct-groom.mjs) es lo que hace que una divergencia
+  // de gate REAL no pase desapercibida.
+  { headings: GATES_HEADING, label: 'Gates', machine: false },
   { headings: '## Out of scope / Protected', label: 'Out of scope / Protected', machine: false },
 ]
 
@@ -298,6 +307,16 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
   const currentProtected = extractSectionContent(body, '## Out of scope / Protected')
   const protectedDiffers = currentProtected === null || currentProtected.trim() !== (wantedIssue.protectedLine || '').trim()
 
+  // Gates (F21): mismo trato que Protegido — la sección se emite siempre, así
+  // que su ausencia total cuenta como divergencia; y se reporta como NOTA, no
+  // como divergencia que cuente para el exit code (ver hasDrift). El motivo no
+  // es que dé igual: es que el gate que la máquina obedece son las labels
+  // `gate:`, que sí cuentan, y duplicar la señal en dos canales haría que un
+  // issue groomeado ANTES de esta ronda (que no tiene la sección) saliera 3 en
+  // cada re-groom hasta que alguien reescribiera su body a mano.
+  const currentGates = extractSectionContent(body, GATES_HEADING)
+  const gatesDiffers = currentGates === null || currentGates.trim() !== (wantedIssue.gatesContent || '').trim()
+
   const duplicates = DUPLICATE_CHECKS.filter((c) => countHeadingLines(body, c.headings) > 1)
   const duplicateSections = duplicates.map((c) => c.label)
   const duplicateMachineSections = duplicates.filter((c) => c.machine).map((c) => c.label)
@@ -325,6 +344,7 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
     ac,
     descripcionDiffers,
     protectedDiffers,
+    gatesDiffers,
     duplicateSections,
     duplicateMachineSections,
     strayDeps,
@@ -424,6 +444,10 @@ export function formatDrift(diff) {
   }
   if (diff.descripcionDiffers) lines.push(`nota: ${head}: la sección "## Descripción" difiere del spec (prosa — no cuenta para el exit code; --reconcile no la reescribe)`)
   if (diff.protectedDiffers) lines.push(`nota: ${head}: la sección "## Out of scope / Protected" difiere del spec (prosa — no cuenta para el exit code; --reconcile no la reescribe)`)
+  // F21: se nombra la label como el canal que SÍ cuenta, para que quien lea
+  // esta nota sepa dónde mirar si de verdad le preocupa un gate — sin esa
+  // frase, "no cuenta para el exit code" se lee como "los gates no importan".
+  if (diff.gatesDiffers) lines.push(`nota: ${head}: la sección "${GATES_HEADING}" difiere del spec (no cuenta para el exit code; --reconcile no la reescribe). El gate que obedece el dispatcher son las labels "gate:" de este issue, que sí se comparan arriba — si un issue es anterior a los gates, esta sección le falta entera y basta con re-groomear su body a mano`)
   for (const section of diff.duplicateSections || []) {
     if ((diff.duplicateMachineSections || []).includes(section)) continue // ya reportada arriba como divergencia:
     lines.push(`nota: ${head}: la sección "## ${section}" aparece más de una vez en el body — solo la primera se compara/reconcilia; revisa la(s) copia(s) sobrante(s) a mano`)

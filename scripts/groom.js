@@ -1,5 +1,20 @@
 // Lógica pura de grooming: de Slice[] (T1) a un plan de operaciones GitHub.
 import { isNoValueCell } from './slices.js'
+import { resolveGates, gateLabels, renderGatesIssueContent } from './gates.js'
+
+// GATES_HEADING (F21): la sección de gates del cuerpo del issue. Constante
+// exportada porque la nombran TRES sitios (este fichero al escribirla,
+// reconcile.js al compararla, y sus tests) y una cabecera escrita a mano en
+// tres sitios es una cabecera que acaba divergiendo en uno.
+export const GATES_HEADING = '## Gates'
+
+// gatesOf: la resolución de gates de un slice, en un solo sitio. La llaman
+// buildLabels y buildIssueBody por separado (es pura y barata) en vez de
+// pasarse el resultado, para que ninguna de las dos pueda quedarse con una
+// resolución vieja si mañana cambia la forma del slice.
+export function gatesOf(slice) {
+  return resolveGates(slice.type, slice.gate)
+}
 
 // F3: el título viene de `slice.name` (columna "Slice" del spec §9), no de
 // `slice.entrega` (columna "Entrega") — antes componía "#N <Entrega>"
@@ -37,6 +52,19 @@ export function buildLabels(slice) {
   // arrays vacíos) esto produce exactamente la salida de antes.
   for (const a of slice.area || []) labels.push(`area:${a}`)
   for (const t of slice.touches || []) labels.push(`touches:${t}`)
+  // gate: (F21) — el canal por el que el gate humano SOBREVIVE al despacho.
+  // Hasta esta ronda, el único gate del plugin vivía dentro del addendum de
+  // `ui`, es decir dentro de un KICKOFF: un prompt que se pierde con el
+  // contexto de su sesión. Un redespacho, un `--reopen` o un `/clear` lo
+  // borraban, y el humano que abría el PR no tenía dónde ver que quedaba un
+  // gate pendiente. Una label de GitHub sobrevive a las tres cosas y la ve
+  // todo el mundo. `gateLabels` SIEMPRE devuelve al menos una (`gate:none`
+  // cuando no hay ninguno) — ver gates.js#GATE_LABEL_NONE para por qué el
+  // silencio no puede significar dos cosas distintas aquí.
+  //
+  // Va después de area/touches y antes de status por la misma razón que el
+  // resto: orden fijo = salida determinista para tests, dry-run y diffs.
+  for (const g of gateLabels(gatesOf(slice).gates)) labels.push(g)
   labels.push('status:backlog')
   return labels
 }
@@ -73,6 +101,17 @@ export function renderProtectedLine(slice) {
   // basura ("- 🚫 -") en el body de CADA issue con esa variante. Mismo
   // criterio de "sin valor" que las demás columnas, sin excepción.
   return (slice.protected && !isNoValueCell(slice.protected)) ? `- 🚫 ${slice.protected}` : '- (ninguno declarado)'
+}
+
+// renderGatesContent (F21): igual que renderDescripcion/renderProtectedLine/
+// renderSpecLink, la ÚNICA fuente de verdad de "qué debería decir" la sección
+// de gates — compartida entre crear el issue (buildIssueBody) y compararlo
+// después (reconcile.js#diffIssue). NUNCA devuelve null (a diferencia de
+// renderDescripcion): la sección se emite siempre, porque "este slice no exige
+// ningún gate" es una afirmación que un humano necesita poder leer en el
+// issue; su ausencia solo diría "aquí no lo pensó nadie".
+export function renderGatesContent(slice) {
+  return renderGatesIssueContent(gatesOf(slice), slice.type)
 }
 
 // renderSpecLink (F5 review round 3, importante 5): la línea de enlace al
@@ -200,6 +239,14 @@ export function buildIssueBody(slice, specRef) {
     lines.push(renderDepsContent(deps))
     lines.push('')
   }
+  // F21: los gates van justo después de los criterios de aceptación (y de las
+  // dependencias, si las hay) y ANTES de "Out of scope / Protected" — el orden
+  // de lectura de quien abre el issue o el PR es "qué entrega → cómo se
+  // verifica → qué falta para poder mergearlo → qué queda fuera". Se emite
+  // SIEMPRE, también cuando no hay ningún gate: ver renderGatesContent.
+  lines.push(GATES_HEADING)
+  lines.push(renderGatesContent(slice))
+  lines.push('')
   lines.push('## Out of scope / Protected')
   lines.push(renderProtectedLine(slice))
   lines.push('')
@@ -248,6 +295,13 @@ export function groomPlan(slices, { milestone, specRef }) {
       descripcion: renderDescripcion(s),
       protectedLine: renderProtectedLine(s),
       specLink: renderSpecLink(s, specRef),
+      // F21: los gates RESUELTOS (no la celda cruda) viajan en el plan por el
+      // mismo motivo que ac/descripcion/protectedLine — reconcile.js y el
+      // dry-run los necesitan sin volver a resolverlos, y quien lea el JSON
+      // del `--dry-run` tiene que poder ver qué gates saldrán sin reproducir
+      // la resolución de cabeza.
+      gates: gatesOf(s).gates,
+      gatesContent: renderGatesContent(s),
     })),
   }
 }
