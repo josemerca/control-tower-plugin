@@ -200,6 +200,27 @@ export function buildStateSeed(slice, { branch, base }) {
   return renderState({
     meta: {
       task: slice.name,
+      // ====================================================================
+      // F20/H3 — EL REPARTO DE ROLES SOLO VIVÍA DENTRO DE UN KICKOFF.
+      //
+      // Hay DOS sesiones vivas por repo con papeles opuestos: la
+      // COORDINADORA (corre /ct-groom y /ct-next, revisa y mergea) y la
+      // DESPACHADA (implementa un slice y para). Nada en el estado
+      // observable decía quién era quién: el STATE.md de la raíz habla del
+      // epic, el del worktree habla del slice, y el reparto solo estaba
+      // escrito dentro del kickoff — un prompt que recibió UNA de las dos y
+      // que se pierde con el contexto de esa sesión. Una sesión despachada
+      // que se re-hidrata de su STATE.md (un /clear, una reanudación, un
+      // hook de SessionStart) no tenía forma de saber que no le toca
+      // mergear ni despachar el siguiente slice.
+      //
+      // Va en el frontmatter y no en prosa por la misma razón que `blocked`
+      // (ver state.js): lo que tiene que sobrevivir a una re-hidratación es
+      // un CAMPO, no una frase dentro de otro campo. El valor es texto
+      // legible y no un enum porque su lector es un agente, no un parser —
+      // ningún código del plugin decide nada con él, y decir eso aquí evita
+      // que alguien lo convierta en un gate por accidente.
+      role: 'slice-agent (sesión DESPACHADA por /ct-next): implementas ESTE slice y PARAS. No groomeas, no mergeas, no despachas el siguiente — de eso se encarga la sesión coordinadora del checkout principal.',
       status: 'not_started',
       branch,
       base,

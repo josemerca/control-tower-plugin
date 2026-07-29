@@ -625,3 +625,134 @@ export function buildCmuxArgv({ name, cwd, command, env }) {
   if (command) argv.push('--command', command)
   return argv
 }
+
+// ============================================================================
+// F20/H1 — REENVIAR LA LÍNEA, PORQUE NO HAY FORMA DE NO TECLEARLA.
+//
+// Lo que se midió contra el cmux real de esta máquina (y no se dedujo de la
+// ayuda), con siete lanzamientos y sus pantallas leídas:
+//
+//   - `--command` teclea: «Send text+Enter to the new workspace after
+//     creation». Ya lo decía F19.
+//   - `--layout '{"pane":{"surfaces":[{"type":"terminal","command":"…"}]}}'`
+//     TAMBIÉN teclea. Es la vía que F19 dejó apuntada como posible exec y no
+//     pudo probar. Medida: el texto aparece ECOADO detrás del prompt en la
+//     pantalla de la sesión, y el proceso lanzado cuelga de `-/bin/zsh`
+//     (login) → `login -flp … exec -l /bin/zsh` → cmux. Y de propina,
+//     `--cwd` se IGNORA cuando se pasa `--layout` (el `$PWD` medido fue el
+//     directorio por defecto, no el pedido).
+//   - `new-surface` no acepta ningún `--command`; el único tipo que ejecuta
+//     un binario por su cuenta es `agent-session --provider claude`, que es
+//     la sesión de Claude propia de cmux: no admite argumentos de `claude`
+//     ni un prompt, así que no sirve para despachar un slice.
+//   - `--env` SÍ llega al shell (medido: `CLAUDE_CONFIG_DIR` visible dentro),
+//     pero `ZDOTDIR` NO: cmux/Ghostty lo usa para su propia integración de
+//     shell y llega VACÍO. Es decir, tampoco se puede inyectar un rc propio
+//     que arranque el agente sin teclear.
+//
+// Conclusión: en esta versión de cmux no hay ninguna vía de exec. El tecleo
+// se queda, y lo que se endurece es la recuperación: si el centinela no
+// aparece, se REENVÍA la misma línea a la misma sesión (`send` + `send-key
+// Enter`). Que eso sea seguro depende por completo de la guarda de
+// idempotencia del launcher (ver launch-sentinel.js#buildLauncherScript).
+//
+// `send` y `send-key` van SEPARADOS porque `cmux send` no añade Enter — hay
+// que mandarlo aparte (medido: tras un `send` a secas el texto se queda en la
+// línea de edición sin ejecutarse).
+export function buildCmuxSendArgv({ workspace, text }) {
+  return ['send', '--workspace', workspace, text]
+}
+
+export function buildCmuxSendKeyArgv({ workspace, key = 'Enter' }) {
+  return ['send-key', '--workspace', workspace, key]
+}
+
+// ============================================================================
+// F20/H2 — EL CAMINO FELIZ NO RECOGÍA NADA.
+//
+// TODOS los caminos del plugin que borran un worktree son de FALLO: el
+// huérfano de un despacho abortado, el worktree que bloquea un despacho nuevo,
+// las precondiciones de `--requeue`. Ninguno cubre el ÉXITO. Observado en el
+// primer slice que terminó bien (issue #451 de un repo real): PR mergeado,
+// issue cerrado… y `.worktrees/451` + `feat/451` seguían en disco, y el
+// `claude` de esa sesión llevaba TRECE HORAS vivo con su trabajo entregado
+// (leído en `cmux debug-terminals`: la superficie de ese worktree con
+// `created=48111s`). Con seis slices son seis checkouts completos del repo,
+// seis ramas muertas y seis agentes zombis.
+//
+// Y hay un filo añadido: `/ct-next` se NIEGA a despachar si `.worktrees/<n>`
+// ya existe. El residuo de un slice TERMINADO bloquea cualquier reintento
+// futuro de ese mismo slice.
+//
+// POR QUÉ ESTO DETECTA Y NO BORRA. Borrar el worktree de alguien que sigue
+// trabajando es irreversible, y el plugin ya tiene ese criterio tomado dos
+// veces (`--requeue` exige que no queden ni worktree ni rama; F19 decidió no
+// revertir un claim ante un centinela ausente). "Mergeado" no es lo mismo que
+// "nadie está tocando eso": un humano puede tener cambios sin pushear en ese
+// worktree, o el agente puede seguir escribiendo. Lo que NO es aceptable es
+// que nadie lo mencione nunca — que es lo que pasaba. Así que se nombra, con
+// los comandos exactos, y la decisión de ejecutarlos es humana.
+//
+// `mergedIssues` es la lista de issues cerrados como *completed* que ya usa el
+// dispatcher para resolver `merge-after` — es decir, exactamente "los slices
+// cuyo trabajo ya está en la base". No se inventa ninguna fuente nueva.
+//
+// Forma de cada entrada: `{ n, worktree, branch, hasWorktree, hasBranch,
+// cmuxTitle }`. `cmuxTitle` es `null` si no se localizó sesión, y `undefined`
+// no se usa nunca: "no se miró" viaja como `cmuxChecked: false` en el
+// resultado global, no camuflado en una entrada.
+export function collectFinishedResidue(mergedIssues, { worktreeDirs = [], branchNames = [], cmuxTitles = null, worktreePathOf, branchNameOf } = {}) {
+  const dirs = new Set((worktreeDirs || []).map(String))
+  const branches = new Set(branchNames || [])
+  const out = []
+  for (const n of mergedIssues || []) {
+    if (n == null) continue
+    const hasWorktree = dirs.has(String(n))
+    const branch = branchNameOf ? branchNameOf(n) : `feat/${n}`
+    const hasBranch = branches.has(branch)
+    if (!hasWorktree && !hasBranch) continue
+    // El título de la sesión de cmux lo construye este mismo dispatcher como
+    // `<repo> · #<n> <nombre>`; aquí solo se busca el `#<n>` como token
+    // completo para no casar #45 dentro de #451.
+    const cmuxTitle = cmuxTitles === null
+      ? null
+      : (cmuxTitles.find((t) => new RegExp(`(^|\\s)#${n}(\\s|$)`).test(String(t))) ?? null)
+    out.push({
+      n,
+      worktree: worktreePathOf ? worktreePathOf(n) : `.worktrees/${n}`,
+      branch,
+      hasWorktree,
+      hasBranch,
+      cmuxTitle,
+    })
+  }
+  return out.sort((a, b) => a.n - b.n)
+}
+
+// formatFinishedResidueWarning: un solo aviso para toda la cosecha pendiente.
+// Uno por slice serían seis líneas idénticas en un repo con seis slices
+// terminados — el mismo criterio de F16/H1 sobre los bloqueantes: cuando la
+// lista crece, lo accionable es el recuento y el comando, no el desglose.
+// `null` = no hay nada que recoger (o no se pudo mirar, que lo dice quien
+// llama).
+export function formatFinishedResidueWarning(residue, { repo } = {}) {
+  if (!residue || residue.length === 0) return null
+  const conSesion = residue.filter((r) => r.cmuxTitle)
+  const lineas = residue.map((r) => {
+    const partes = []
+    if (r.hasWorktree) partes.push(`worktree ${r.worktree}`)
+    if (r.hasBranch) partes.push(`rama ${r.branch}`)
+    if (r.cmuxTitle) partes.push(`sesión de cmux "${r.cmuxTitle}" todavía abierta`)
+    return `  #${r.n}: ${partes.join(', ')}`
+  })
+  const comandos = residue.map((r) => {
+    const cmds = []
+    if (r.hasWorktree) cmds.push(`git worktree remove --force ${r.worktree}`)
+    if (r.hasBranch) cmds.push(`git branch -D ${r.branch}`)
+    return `  ${cmds.join(' && ')}`
+  })
+  const sesiones = conSesion.length
+    ? `\n${conSesion.length} de ${conSesion.length === 1 ? 'ellos tiene' : 'ellos tienen'} además su sesión de cmux abierta: ese \`claude\` sigue vivo con el trabajo YA entregado (en el caso que originó esto llevaba trece horas). Ciérralas a mano cuando compruebes que no hay nada dentro — el loop crea agentes y hasta ahora no enterraba a ninguno.`
+    : ''
+  return `cosecha pendiente: ${residue.length} slice(s) de ${repo || 'este repo'} con el trabajo YA mergeado siguen dejando residuo en este checkout:\n${lineas.join('\n')}\nNo se borra solo, y es deliberado: un worktree puede tener cambios sin pushear, y borrarlo es irreversible (el mismo criterio por el que \`--requeue\` se niega a actuar mientras existan). Compruébalo y límpialo tú:\n${comandos.join('\n')}\nMientras siga ahí, \`/ct-next\` se NEGARÁ a redespachar cualquiera de esos números: el worktree existente es una precondición que corta el despacho.${sesiones}`
+}

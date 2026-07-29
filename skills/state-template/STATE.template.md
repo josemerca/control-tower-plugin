@@ -1,5 +1,14 @@
 ---
 task: ""
+# role: quién eres en el loop. Hay DOS sesiones vivas por repo con papeles
+# opuestos, y hasta F20 el reparto solo estaba escrito dentro del kickoff que
+# recibía una de ellas — se perdía en cuanto esa sesión se re-hidrataba.
+#   - Este fichero es el del CHECKOUT PRINCIPAL: quien trabaja aquí es la
+#     sesión COORDINADORA (corre /ct-groom y /ct-next, revisa y mergea PRs).
+#   - Cada slice despachado tiene el suyo en .worktrees/<n>/.agent/STATE.md,
+#     con role: slice-agent — implementa ese slice y para.
+# Ningún código decide nada con este campo: es para el agente que lo lee.
+role: "coordinador (checkout principal): groomeas, despachas con /ct-next, revisas y mergeas. NO implementas slices aquí — eso pasa en .worktrees/<n>."
 status: not_started
 branch: ""
 base: main

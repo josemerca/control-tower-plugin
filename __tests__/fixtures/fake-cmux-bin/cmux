@@ -28,6 +28,14 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { waitForReleaseFile } from '../stub-wait.js'
 
+// `shellBin` vive ARRIBA del todo (F20/H1) y no junto a runTypedCommand: el
+// camino de `send-key` lo usa, y ese camino corre ANTES de las declaraciones
+// del bloque de `new-workspace` — un `const` declarado más abajo caería en su
+// zona muerta temporal y el stub moriría con un ReferenceError que parecería
+// un fallo del código bajo prueba.
+const here = dirname(fileURLToPath(import.meta.url))
+const shellBin = join(here, '..', 'fake-cmux-shell-bin')
+
 const argv = process.argv.slice(2)
 
 // FAKE_CMUX_INVOKED_LOG_FILE: registra CUALQUIER invocación de este stub
@@ -109,11 +117,67 @@ if (argv[0] === 'workspace' && argv[1] === 'list' && argv.includes('--json')) {
     process.stdout.write(JSON.stringify({ workspaces }))
     process.exit(0)
   }
+  // F20/H1: `ref` es el handle que `cmux send --workspace` acepta, y el que
+  // ct-next.mjs necesita para poder REENVIAR la línea a una sesión concreta.
+  // El cmux real lo devuelve como "workspace:<n>" (verificado contra
+  // `cmux workspace list --json` de la máquina de desarrollo).
+  // FAKE_CMUX_NO_REF simula una versión que no lo expone: el reenvío no se
+  // puede dirigir, y eso NO puede pasar en silencio.
+  const withRef = (i) => (process.env.FAKE_CMUX_NO_REF ? {} : { ref: `workspace:${i}` })
   const workspaces = [
-    ...staticTitles.map((t) => ({ custom_title: t, current_directory: null })),
-    ...launched.map((e) => ({ custom_title: e.title, current_directory: e.cwd })),
+    ...staticTitles.map((t, i) => ({ custom_title: t, current_directory: null, ...withRef(i) })),
+    ...launched.map((e, i) => ({ custom_title: e.title, current_directory: e.cwd, ...withRef(staticTitles.length + i) })),
   ]
   process.stdout.write(JSON.stringify({ workspaces }))
+  process.exit(0)
+}
+
+// ===========================================================================
+// F20/H1 — `send` / `send-key`: el REENVÍO de la línea.
+//
+// El cmux real no ejecuta nada con `send`: escribe el texto en la línea de
+// edición del shell (medido: tras un `send` a secas el texto se queda ahí sin
+// ejecutarse) y hace falta un `send-key Enter` aparte. Este stub reproduce
+// esa separación: `send` guarda el texto pendiente de la sesión, `send-key
+// Enter` es quien lo ejecuta. Si un cambio futuro dejara de mandar el Enter,
+// este stub NO ejecutaría nada y el test lo vería.
+if (argv[0] === 'send' || argv[0] === 'send-key') {
+  const wsIdx = argv.indexOf('--workspace')
+  const ws = wsIdx !== -1 ? argv[wsIdx + 1] : null
+  // Los `ref` que emite `workspace list` numeran PRIMERO las sesiones
+  // estáticas del test (FAKE_CMUX_WORKSPACE_TITLES_JSON) y después las
+  // lanzadas de verdad, así que aquí hay que descontar ese desplazamiento —
+  // si no, un test con sesiones preexistentes reenviaría a la sesión
+  // equivocada y el fallo parecería del código bajo prueba.
+  const staticCount = process.env.FAKE_CMUX_WORKSPACE_TITLES_JSON ? JSON.parse(process.env.FAKE_CMUX_WORKSPACE_TITLES_JSON).length : 0
+  const refNum = ws && ws.startsWith('workspace:') ? Number(ws.slice('workspace:'.length)) : NaN
+  const idx = Number.isInteger(refNum) ? refNum - staticCount : NaN
+  const state = readState()
+  const entry = Number.isInteger(idx) && idx >= 0 ? state[idx] : null
+  if (!entry || !stateFilePath()) {
+    console.error(`fake-cmux: ${argv[0]}: no hay ninguna sesión ${ws}`)
+    process.exit(1)
+  }
+  if (process.env.FAKE_CMUX_SEND_FAIL) {
+    console.error('fake-cmux: send failed (simulado)')
+    process.exit(1)
+  }
+  if (argv[0] === 'send') {
+    entry.pending = argv[argv.length - 1]
+    writeFileSync(stateFilePath(), JSON.stringify(state))
+    process.exit(0)
+  }
+  const key = argv[argv.length - 1]
+  if (key === 'Enter' && typeof entry.pending === 'string') {
+    const text = entry.pending
+    entry.pending = null
+    writeFileSync(stateFilePath(), JSON.stringify(state))
+    // Un reenvío NO se lo come nadie: el rc del shell ya terminó de arrancar.
+    // FAKE_CMUX_EAT_ALWAYS_SUBSTR es la excepción a propósito (un rc que
+    // devora TODO lo que se teclee), para poder probar que el dispatcher
+    // sigue sin mentir cuando ni los reenvíos bastan.
+    runTypedCommandIn(text, entry, !!(process.env.FAKE_CMUX_EAT_ALWAYS_SUBSTR && entry.title.includes(process.env.FAKE_CMUX_EAT_ALWAYS_SUBSTR)))
+  }
   process.exit(0)
 }
 
@@ -163,8 +227,6 @@ const command = commandIdx !== -1 ? argv[commandIdx + 1] : null
 // ct-next.mjs ejecuta `claude` por su cuenta —cosa que sigue sin hacer, y ese
 // contrato no se toca— mientras que ESTE es el que la sesión de cmux lanzaría
 // de verdad.
-const here = dirname(fileURLToPath(import.meta.url))
-const shellBin = join(here, '..', 'fake-cmux-shell-bin')
 
 //   FAKE_CMUX_COMMAND_CWD — el comando corre en OTRO directorio (el caso en
 //     que cmux tolera un `--cwd` inexistente y arranca en el shell de login
@@ -175,19 +237,31 @@ const shellBin = join(here, '..', 'fake-cmux-shell-bin')
 //     "no va a aparecer". Es la única de estas variables que hace el stub
 //     asíncrono, y existe precisamente porque esa distinción es temporal y no
 //     se puede probar de ninguna otra forma.
-function runTypedCommand(text) {
-  if (text === null) return
-  const eat = process.env.FAKE_CMUX_EAT_FIRST_CHAR_SUBSTR
+//
+// F20/H1 — el reenvío obligó a separar "en qué sesión" del estado global del
+// stub: `send-key Enter` corre ANTES de que se parsee ningún `--name`/`--cwd`
+// (ese parseo es del camino de `new-workspace`), así que la sesión destino
+// viaja como argumento explícito. `runTypedCommand` conserva su firma para
+// no tocar el camino de `new-workspace`.
+//
+// Y el `eat` pasa a aplicarse SOLO al primer tecleo, que es lo que hace el
+// prompt de oh-my-zsh de verdad: se come un carácter una vez, y para cuando
+// llega el reenvío el rc ya ha terminado de arrancar. Medido contra el cmux
+// real: con reenvío, 5 de 5 lanzamientos arrancaron al segundo intento.
+function runTypedCommandIn(text, session, eatFirstChar = false) {
+  if (text === null || text === undefined) return
+  const sessionName = (session && session.title) || ''
+  const sessionCwd = (session && session.cwd) || null
   const skip = process.env.FAKE_CMUX_SKIP_COMMAND_SUBSTR
-  if (skip && name.includes(skip)) return
-  const typed = eat && name.includes(eat) ? text.slice(1) : text
+  if (skip && sessionName.includes(skip)) return
+  const typed = eatFirstChar ? text.slice(1) : text
   // PATH del shell simulado: el `claude` silencioso delante (salvo que el test
   // pida que no exista), y nada más del entorno del test que pueda confundir.
   const path = process.env.FAKE_CMUX_NO_CLAUDE_IN_SHELL
     ? '/usr/bin:/bin'
     : `${shellBin}:/usr/bin:/bin`
   const forced = process.env.FAKE_CMUX_COMMAND_CWD
-  const runDir = forced || (cwd && existsSync(cwd) ? cwd : process.cwd())
+  const runDir = forced || (sessionCwd && existsSync(sessionCwd) ? sessionCwd : process.cwd())
   const delay = Number(process.env.FAKE_CMUX_COMMAND_DELAY_MS || 0)
   // Con retraso, se lanza en segundo plano y `new-workspace` vuelve YA — igual
   // que el cmux real, que no espera a que el shell haga nada.
@@ -197,6 +271,17 @@ function runTypedCommand(text) {
     env: { ...process.env, PATH: path },
     stdio: 'ignore',
   })
+}
+
+// El primer tecleo —el de `--command`— es el ÚNICO al que se le aplica
+// FAKE_CMUX_EAT_FIRST_CHAR_SUBSTR, y eso es la simulación FIEL: el prompt de
+// oh-my-zsh se come un carácter UNA vez, durante el arranque del rc; para
+// cuando llega un reenvío, el rc ya terminó. Aplicarlo también al reenvío
+// haría que el stub probara un shell que no existe — y escondería justo la
+// propiedad que F20 midió en vivo (5 de 5 arrancan al segundo intento).
+function runTypedCommand(text) {
+  const eat = process.env.FAKE_CMUX_EAT_FIRST_CHAR_SUBSTR
+  runTypedCommandIn(text, { title: name, cwd }, !!(eat && name.includes(eat)))
 }
 
 // FAKE_CMUX_NEW_WORKSPACE_WAIT_FILE (F8): se queda DENTRO del `new-workspace`
