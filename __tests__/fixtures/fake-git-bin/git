@@ -192,6 +192,21 @@ function main() {
     process.exit(0)
   }
 
+  // F20/H2: `git branch --list --format=%(refname:short) 'feat/*'` — la
+  // consulta con la que /ct-next descubre ramas de slices YA mergeados que
+  // siguen en el checkout. FAKE_GIT_BRANCH_LIST son los nombres (separados por
+  // comas); FAKE_GIT_BRANCH_LIST_FAIL simula la consulta rota, que NO se puede
+  // leer como "no hay ninguna rama".
+  if (argv[0] === 'branch' && argv.includes('--list')) {
+    if (process.env.FAKE_GIT_BRANCH_LIST_FAIL) {
+      console.error('fake-git: branch --list failed (simulado)')
+      process.exit(1)
+    }
+    const names = (process.env.FAKE_GIT_BRANCH_LIST || '').split(',').map((s) => s.trim()).filter(Boolean)
+    process.stdout.write(names.length ? `${names.join('\n')}\n` : '')
+    process.exit(0)
+  }
+
   if (argv[0] === 'branch' && argv[1] === '-D') {
     if (process.env.FAKE_GIT_BRANCH_DELETE_FAIL) {
       console.error('fake-git: branch -D failed (simulado)')

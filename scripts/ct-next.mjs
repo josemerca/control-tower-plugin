@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, accessSync, constants as fsConstants, writeSync, realpathSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, statSync, accessSync, constants as fsConstants, writeSync, realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
+import { randomBytes } from 'node:crypto'
 import { dirname, join, delimiter as pathDelimiter } from 'node:path'
-import { planDispatch, resolveAccount, resolveAccountLegacy, validateAccountMap, parseRepoSlug, buildCmuxArgv } from './dispatch.js'
+import { planDispatch, resolveAccount, resolveAccountLegacy, validateAccountMap, parseRepoSlug, buildCmuxArgv, buildCmuxSendArgv, buildCmuxSendKeyArgv, collectFinishedResidue, formatFinishedResidueWarning } from './dispatch.js'
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
 import { parseStrictInt } from './argnum.js'
 import { shQuote } from './shquote.js'
@@ -334,9 +335,61 @@ if (testDelayRaw !== undefined) {
 // lento produce falsos «no se pudo confirmar»; bajarla a 0 NO desactiva la
 // comprobación (no hay interruptor para eso, a propósito: sería reintroducir
 // la mentira), solo la hace inútilmente estricta.
-const DEFAULT_LAUNCH_SENTINEL_TIMEOUT_MS = 8000
+//
+// ============================================================================
+// F20/H1 — LOS 8000 ms, YA MEDIDOS. Y LO QUE LA MEDIDA DESMONTÓ.
+//
+// F19 eligió 8000 ms sin medir nada, y su propio mensaje de fallo sugería
+// subirlos «si tu shell de login tarda de verdad tanto». F20 los midió contra
+// el cmux y el zsh REALES de esta máquina, lanzando y cerrando workspaces de
+// prueba (nunca contra un repo de trabajo):
+//
+//   - Un shell de login que arranca limpio ejecuta la línea tecleada a los
+//     ~723 ms desde que `cmux new-workspace` devuelve.
+//   - Un reenvío posterior se ejecuta ~250–400 ms después de mandarlo.
+//   - Y el dato que lo cambia todo: en 6 lanzamientos consecutivos con el
+//     mecanismo de F19 tal cual, el centinela apareció 0 VECES. La causa,
+//     leída en la pantalla de la sesión, es la misma de siempre:
+//
+//         [oh-my-zsh] Would you like to update? [Y/n]
+//         … >  '/…/launch.sh'
+//         zsh: permission denied: /…/launch.sh
+//
+//     El `read` de un carácter del prompt de oh-my-zsh se comió el `.` de
+//     `. '/…/launch.sh'`, y lo que quedó fue un intento de EJECUTAR el
+//     launcher (que no es ejecutable, a propósito — ver el `mode: 0o600` del
+//     bucle de despacho — así que muere ahí en vez de arrancar un agente sin
+//     alias).
+//
+// La conclusión operativa: esperar más NUNCA iba a arreglarlo. 8000 ms son
+// diez veces el arranque real del shell; el problema no es lentitud, es un
+// carácter perdido. Por eso la cota deja de ser «lo único que se hace» y pasa
+// a ser el PRESUPUESTO TOTAL, repartido en intentos: se espera un rato, y si
+// el centinela no está, se REENVÍA la línea a la misma sesión.
+//
+// Los tres números, y por qué:
+//   - `LAUNCH_ATTEMPT_MS` = 2500 → 3,5x el arranque medido (723 ms). Corto
+//     para que el reenvío llegue pronto; largo para no reenviar encima de un
+//     shell que simplemente va lento.
+//   - el presupuesto total, `CT_NEXT_LAUNCH_TIMEOUT_MS`, SÍ sube: de 8000 a
+//     15000. Y el motivo es exactamente el contrario del que F19 rechazaba.
+//     Con una sola espera, más tiempo no compraba nada (el carácter perdido
+//     no vuelve); con reenvíos, cada 2500 ms más son UN INTENTO más. La
+//     medida que lo pide: el camino validado end-to-end contra el cmux real
+//     con este mismo código (launcher con guarda, `send` + `send-key`)
+//     arrancó 5 de 5 con UN reenvío, a los ~2,9 s — pero repitiendo la
+//     medición con la máquina cargada (la suite entera del plugin corriendo
+//     en paralelo) hicieron falta DOS reenvíos, ~6,8–7,0 s, y 1 de 3 se pasó
+//     de los 8000. 15000 da seis intentos y ~2x de margen sobre el peor caso
+//     medido; el coste es que un lanzamiento de verdad muerto tarda 15 s en
+//     declararse, UNA vez. En el camino feliz no cuesta nada: la espera
+//     termina en cuanto aparece el centinela.
+//   - un presupuesto MENOR que un intento (los tests que fijan 400 ms) hace
+//     simplemente que no haya reenvíos, y el comportamiento es el de F19.
+const DEFAULT_LAUNCH_SENTINEL_TIMEOUT_MS = 15000
 const LAUNCH_SENTINEL_TIMEOUT_CAP_MS = 600_000
 const LAUNCH_SENTINEL_POLL_MS = 100
+const LAUNCH_ATTEMPT_MS = 2500
 let launchSentinelTimeoutMs = DEFAULT_LAUNCH_SENTINEL_TIMEOUT_MS
 const launchTimeoutRaw = process.env.CT_NEXT_LAUNCH_TIMEOUT_MS
 if (launchTimeoutRaw !== undefined && launchTimeoutRaw !== '') {
@@ -532,7 +585,15 @@ function queryAllCmuxWorkspaces() {
           if (ws && typeof ws.custom_title === 'string') {
             sawAnyRecognizedTitle = true
             const cwdKnown = typeof ws.current_directory === 'string'
-            out.push({ title: ws.custom_title, cwd: cwdKnown ? ws.current_directory : null, cwdKnown })
+            // F20/H1: `ref` (p.ej. "workspace:97") es el handle que acepta
+            // `cmux send --workspace`. Se degrada a `null` con el MISMO
+            // criterio que el cwd —por entrada, nunca global— porque su
+            // ausencia no invalida nada de lo que ya se sabía: solo significa
+            // que a ESA sesión no se le puede reenviar la línea, y quien lo
+            // necesite tiene que poder decirlo en vez de mandar un `send` a
+            // `undefined`.
+            const ref = typeof ws.ref === 'string' && ws.ref.length > 0 ? ws.ref : null
+            out.push({ title: ws.custom_title, cwd: cwdKnown ? ws.current_directory : null, cwdKnown, ref })
           }
         }
       } catch {
@@ -699,8 +760,8 @@ function verifyCmuxLaunch(expectedTitle, expectedCwd) {
 //                    saberlo NO se puede decir «lanzado», y TAMPOCO se puede
 //                    revertir el claim: un revert con un agente que arranca
 //                    tres segundos tarde es peor que el residuo.
-async function waitForLaunchSentinel(sentinelPath, expectedCwd) {
-  const deadline = Date.now() + launchSentinelTimeoutMs
+async function waitForLaunchSentinel(sentinelPath, expectedCwd, budgetMs = launchSentinelTimeoutMs) {
+  const deadline = Date.now() + budgetMs
   // Bucle ASÍNCRONO (no un `Atomics.wait` síncrono como el de los stubs): cada
   // vuelta cede el control al event loop, así que un Ctrl-C durante la espera
   // se despacha en vez de quedarse pendiente hasta el final de la tanda —
@@ -716,7 +777,7 @@ async function waitForLaunchSentinel(sentinelPath, expectedCwd) {
       const parsed = parseSentinel(raw)
       if (parsed) {
         const realpathOf = (p) => { try { return realpathSync(p) } catch { return null } }
-        if (!parsed.claudeResolved) return { status: 'no-claude', cwd: parsed.cwd, waitedMs: launchSentinelTimeoutMs - Math.max(0, deadline - Date.now()) }
+        if (!parsed.claudeResolved) return { status: 'no-claude', cwd: parsed.cwd, waitedMs: budgetMs - Math.max(0, deadline - Date.now()) }
         if (!sameDir(parsed.cwd, expectedCwd, realpathOf)) return { status: 'wrong-cwd', cwd: parsed.cwd }
         return { status: 'ran', cwd: parsed.cwd }
       }
@@ -729,6 +790,90 @@ async function waitForLaunchSentinel(sentinelPath, expectedCwd) {
     if (Date.now() >= deadline) return { status: 'never' }
     await sleep(LAUNCH_SENTINEL_POLL_MS)
   }
+}
+
+// ============================================================================
+// F20/H1 — EL REENVÍO: LO ÚNICO QUE, MEDIDO, CONVIERTE 0/6 EN 5/5.
+//
+// Medición completa en el bloque de constantes de arriba. El resumen: con el
+// mecanismo de F19 tal cual, seis lanzamientos consecutivos contra el cmux
+// real dieron CERO centinelas (el prompt de oh-my-zsh se comía el `.`). Con
+// este reenvío —misma línea, misma sesión, tras esperar un intento— cinco de
+// cinco arrancaron, todos en el segundo intento, y el agente se lanzó UNA sola
+// vez en cada uno (contado en disco por el propio launcher).
+//
+// Qué se manda y qué NO:
+//   - Se manda EXACTAMENTE la misma línea (`. '<launcher>'`) más un Enter.
+//     No se manda Ctrl-C, ni Escape, ni ninguna otra tecla de "limpieza":
+//     cmux ya envió Enter con el primer tecleo, así que la línea corrupta ya
+//     se ejecutó (y muere en "permission denied", porque el launcher no es
+//     ejecutable). Mandar señales a ciegas a una sesión que PODRÍA tener un
+//     agente vivo es justo el daño irreversible que esta ronda evita.
+//   - Antes de cada reenvío se vuelve a mirar el centinela. Y si aun así las
+//     dos líneas llegaran, la guarda de idempotencia del launcher hace que
+//     solo la primera lance al agente.
+//
+// Cuándo NO se reenvía, y se dice por qué:
+//   - si no queda presupuesto (`CT_NEXT_LAUNCH_TIMEOUT_MS` corto);
+//   - si el veredicto ya es CONCLUYENTE ('ran', 'no-claude', 'wrong-cwd'):
+//     reenviar ahí no aclararía nada y sí podría duplicar;
+//   - si no se puede localizar la sesión por su título, o cmux no da un
+//     `ref` para ella. Eso NO se traga: viaja en `retypeProblem` y sale en el
+//     mensaje, porque «no se pudo reenviar» y «se reenvió y no sirvió» llevan
+//     a mirar sitios distintos.
+//
+// Devuelve `{ ...veredicto, retypes, retypeProblem }`.
+async function awaitLaunchSentinelWithRetypes({ sentinelPath, expectedCwd, title, typedCommand }) {
+  const totalDeadline = Date.now() + launchSentinelTimeoutMs
+  let retypes = 0
+  let retypeProblem = null
+  for (;;) {
+    const remaining = Math.max(0, totalDeadline - Date.now())
+    const verdict = await waitForLaunchSentinel(sentinelPath, expectedCwd, Math.min(LAUNCH_ATTEMPT_MS, remaining))
+    if (verdict.status !== 'never') return { ...verdict, retypes, retypeProblem }
+    if (Date.now() >= totalDeadline) return { ...verdict, retypes, retypeProblem }
+    // Localizar la sesión por su título es la única forma de dirigir el
+    // reenvío: `cmux send` necesita un handle, y el que tenemos es el nombre
+    // que nosotros mismos le pusimos.
+    const all = queryAllCmuxWorkspaces()
+    const match = all === null ? null : all.find((w) => w.title === title)
+    if (all === null) {
+      retypeProblem = 'no se pudo consultar cmux para localizar la sesión y reenviarle la línea (¿daemon caído?)'
+      return { ...(await waitForLaunchSentinel(sentinelPath, expectedCwd, Math.max(0, totalDeadline - Date.now()))), retypes, retypeProblem }
+    }
+    if (!match || !match.ref) {
+      retypeProblem = match
+        ? `la sesión "${title}" existe pero cmux no expuso un handle (\`ref\`) para ella, así que no se le pudo reenviar la línea`
+        : `no se encontró ninguna sesión de cmux titulada "${title}" a la que reenviar la línea`
+      return { ...(await waitForLaunchSentinel(sentinelPath, expectedCwd, Math.max(0, totalDeadline - Date.now()))), retypes, retypeProblem }
+    }
+    try {
+      execFileSync('cmux', buildCmuxSendArgv({ workspace: match.ref, text: typedCommand }), {
+        stdio: ['ignore', 'ignore', 'ignore'], timeout: CMUX_QUERY_TIMEOUT_MS, killSignal: 'SIGKILL',
+      })
+      execFileSync('cmux', buildCmuxSendKeyArgv({ workspace: match.ref }), {
+        stdio: ['ignore', 'ignore', 'ignore'], timeout: CMUX_QUERY_TIMEOUT_MS, killSignal: 'SIGKILL',
+      })
+      retypes++
+    } catch (e) {
+      retypeProblem = `el reenvío de la línea a la sesión "${title}" (${match.ref}) falló: ${e.message}`
+      return { ...(await waitForLaunchSentinel(sentinelPath, expectedCwd, Math.max(0, totalDeadline - Date.now()))), retypes, retypeProblem }
+    }
+  }
+}
+
+// retypeNote: la frase que acompaña a un lanzamiento que necesitó reenvíos.
+// Se dice SIEMPRE que haya habido alguno, también en el camino feliz: un
+// despacho que arrancó al tercer intento arrancó bien, pero el shell de login
+// de esa máquina se está comiendo lo que se le teclea, y eso es exactamente el
+// dato que dejó de existir cuando el problema se volvió recuperable.
+function retypeNote(retypes, retypeProblem) {
+  const partes = []
+  if (retypes > 0) {
+    partes.push(`hizo falta REENVIAR la línea ${retypes} ${retypes === 1 ? 'vez' : 'veces'} a esa sesión: el primer tecleo de cmux no llegó a ejecutarse (el arranque del shell de login se come caracteres — un prompt de oh-my-zsh, un \`read\` en el rc). El agente se lanzó una sola vez: el script de arranque no relanza nada si su centinela ya existe.`)
+  }
+  if (retypeProblem) partes.push(`Además, ${retypeProblem}.`)
+  return partes.length ? ` ${partes.join(' ')}` : ''
 }
 
 // stateReasonLabel (F13/H4): cómo se llama, en el idioma del usuario, el
@@ -1854,6 +1999,62 @@ for (const w of formatStrayDepsWarnings(issues)) console.error(w)
 for (const w of formatBlockedClaimWarnings(issues)) warn(w)
 
 // ============================================================================
+// F20/H2 — LA COSECHA. El detector del residuo que deja un slice TERMINADO.
+//
+// Ver dispatch.js#collectFinishedResidue para el hallazgo completo y para por
+// qué esto detecta y no borra. Aquí solo vive el IO: leer `.worktrees/`, leer
+// las ramas `feat/*`, y —solo si algo de eso ha aparecido— preguntarle a cmux
+// si además queda una sesión abierta.
+//
+// Coste en el caso limpio: dos llamadas locales baratas (un readdir y un `git
+// branch --list`) y CERO llamadas a cmux. La consulta a cmux (que puede tardar
+// hasta CMUX_QUERY_TIMEOUT_MS por ventana) se hace solo cuando ya se sabe que
+// hay algo que contar — mismo criterio de "señales baratas primero" que la
+// detección de claims rancios.
+//
+// En modo fixture no se hace nada: `repoRoot` es sintético (`/tmp/fake-repo`)
+// y `mergedIssues` viene de un fixture sin correspondencia con ningún
+// checkout real, así que la respuesta no diría nada sobre nada.
+if (!fx && (mergedIssues || []).length) {
+  let worktreeDirs = []
+  let dirsLeidos = true
+  try {
+    worktreeDirs = readdirSync(join(repoRoot, '.worktrees'), { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name)
+  } catch (e) {
+    // ENOENT es el caso normal y sano: no hay ningún worktree. Cualquier otra
+    // cosa (permisos, un fichero donde debería haber un directorio) es una
+    // consulta FALLIDA y no se puede leer como "está limpio".
+    if (e.code !== 'ENOENT') dirsLeidos = false
+  }
+  let branchNames = []
+  let ramasLeidas = true
+  try {
+    branchNames = execFileSync('git', ['branch', '--list', '--format=%(refname:short)', 'feat/*'], {
+      cwd: repoRoot, encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
+    }).split('\n').map((l) => l.trim()).filter(Boolean)
+  } catch {
+    ramasLeidas = false
+  }
+  if (!dirsLeidos || !ramasLeidas) {
+    warn(`no se ha podido comprobar si algún slice ya mergeado deja worktree o rama sin recoger en este checkout (${!dirsLeidos ? `no se pudo listar ${join(repoRoot, '.worktrees')}` : `falló \`git branch --list 'feat/*'\``}). NO lo leas como "está limpio": el residuo de un slice terminado bloquea cualquier redespacho futuro de ese mismo número.`)
+  } else {
+    const preliminar = collectFinishedResidue(mergedIssues, {
+      worktreeDirs, branchNames, cmuxTitles: null, worktreePathOf: (n) => `${repoRoot}/.worktrees/${n}`,
+    })
+    if (preliminar.length) {
+      const titles = queryCmuxWorkspaceTitles() // null = no concluyente, nunca "no hay sesiones"
+      const residuo = collectFinishedResidue(mergedIssues, {
+        worktreeDirs, branchNames, cmuxTitles: titles, worktreePathOf: (n) => `${repoRoot}/.worktrees/${n}`,
+      })
+      const w = formatFinishedResidueWarning(residuo, { repo })
+      if (w) warn(titles === null ? `${w}\n(no se pudo consultar cmux, así que de las sesiones abiertas no se afirma nada: puede haber agentes vivos que no salen en esta lista.)` : w)
+    }
+  }
+}
+
+// ============================================================================
 // F18/H1 + H4 — CÓMO SE CERRÓ CADA DEPENDENCIA, Y QUÉ RAMA SE MERGEÓ DE
 // VERDAD. Una sola llamada GraphQL, con alias, y solo si hay algo que
 // preguntar. Ver scripts/gh-closure.js para la medición completa (97 issues,
@@ -2238,7 +2439,24 @@ for (let idx = 0; idx < selected.length; idx++) {
   // compartido, una ruta predecible que ya existe no se reutiliza en silencio
   // — sería la puerta para que alguien pusiera ahí un symlink y nos hiciera
   // escribir el kickoff donde no toca. Que exista es un error, no un atajo.
-  const launchDir = join(tmpdir(), `ct-next-launch-${process.pid}-${s.n}`)
+  // F20 — EL PID NO ES ÚNICO, Y SE NOTÓ. El nombre era
+  // `ct-next-launch-<pid>-<n>` a secas, con `recursive: false` para que un
+  // directorio ya existente fuera un ERROR (ver más abajo: en un /tmp
+  // compartido, una ruta predecible que se reutiliza es la puerta para que
+  // alguien deje ahí un symlink). Pero estos directorios NO se borran nunca
+  // —el shell tiene que poder sourcear el launcher— y los PID se reciclan:
+  // medido en la máquina de desarrollo, 592 directorios `ct-next-launch-*`
+  // acumulados en $TMPDIR. Con esa densidad, un despacho contra el mismo
+  // número de issue desde un proceso que hereda un PID ya usado se encuentra
+  // el directorio puesto, el `mkdirSync` revienta con EEXIST, y el dispatch
+  // se aborta DESPUÉS del claim (se revierte, sí, pero es un fallo que no
+  // tenía por qué pasar). Se vio primero como una corrida de la suite en
+  // rojo bajo carga y sin ninguna aserción rota.
+  //
+  // El sufijo aleatorio quita la colisión SIN tocar la propiedad de
+  // seguridad: la ruta deja de ser predecible (que era el punto), y
+  // `recursive: false` sigue haciendo que "ya existe" sea un error.
+  const launchDir = join(tmpdir(), `ct-next-launch-${process.pid}-${s.n}-${randomBytes(6).toString('hex')}`)
   const launcherPath = join(launchDir, LAUNCHER_FILENAME)
   const sentinelPath = join(launchDir, SENTINEL_FILENAME)
   let launcherScript
@@ -2302,7 +2520,7 @@ for (let idx = 0; idx < selected.length; idx++) {
   // Verificado por construcción con la consulta de rama rota: un --dry-run
   // sin fixture imprimía "modo fixture" y salía 0.
   const destinationCheck = fx ? 'fixture' : (branchExists === 'unknown' ? 'unknown' : 'checked')
-  plans.push({ s, selIdx: idx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck, launchDir, launcherPath, sentinelPath, launcherScript })
+  plans.push({ s, selIdx: idx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck, launchDir, launcherPath, sentinelPath, launcherScript, typedCommand: command })
 }
 
 // ============================================================================
@@ -2878,7 +3096,7 @@ let launchedCount = 0
 const unverifiedLaunches = []
 
 for (let idx = 0; idx < plans.length; idx++) {
-  const { s, selIdx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck, launchDir, launcherPath, sentinelPath, launcherScript } = plans[idx]
+  const { s, selIdx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck, launchDir, launcherPath, sentinelPath, launcherScript, typedCommand } = plans[idx]
 
   if (dryRun) {
     console.log(`\n=== slice #${s.n} (${s.name}) ===`)
@@ -2945,6 +3163,7 @@ for (let idx = 0; idx < plans.length; idx++) {
     console.log(`--- ${launcherPath} (script de arranque que cmux sourcearía; el kickoff viaja AQUÍ, no tecleado) ---\n${launcherScript}--- fin del script de arranque ---`)
     console.log(`cmux ${cmuxArgv.map((a) => (a.includes(' ') ? JSON.stringify(a) : a)).join(' ')}`)
     console.log(`tras lanzar, se espera hasta ${launchSentinelTimeoutMs} ms a que aparezca ${sentinelPath} — el centinela que el propio shell escribe al ejecutar el comando. Sin él NO se dice "lanzado" (ver CT_NEXT_LAUNCH_TIMEOUT_MS).`)
+    console.log(`ese presupuesto se reparte en intentos de ${LAUNCH_ATTEMPT_MS} ms: si el centinela no está al acabar uno, se REENVÍA la misma línea (\`cmux send\` + Enter) a esa sesión y se vuelve a esperar. Medido contra el cmux de esta máquina: sin reenvío, 0 de 6 lanzamientos arrancaron (el prompt de oh-my-zsh se come el primer carácter); con reenvío, 5 de 5, todos al segundo intento y con un solo \`claude\` lanzado.`)
     continue
   }
 
@@ -3255,7 +3474,12 @@ for (let idx = 0; idx < plans.length; idx++) {
   // pregunta «¿corrió el comando?» domina a «¿existe la ventana?». La ventana
   // la abre el propio dispatcher; el centinela solo puede escribirlo el shell
   // que ejecutó la orden.
-  const sentinel = await waitForLaunchSentinel(sentinelPath, wt)
+  // F20/H1: la espera ya no es una sola espera — es un presupuesto repartido
+  // en intentos, con un REENVÍO de la misma línea entre uno y otro. Ver
+  // awaitLaunchSentinelWithRetypes y el bloque de constantes para la medida
+  // que lo justifica (0/6 sin reenvío, 5/5 con él, contra el cmux real).
+  const sentinel = await awaitLaunchSentinelWithRetypes({ sentinelPath, expectedCwd: wt, title: name, typedCommand })
+  const reenvio = retypeNote(sentinel.retypes, sentinel.retypeProblem)
   // Finding 3: `new-workspace` ya devolvió éxito (si no, la línea de arriba
   // habría abortado) — pero eso, por sí solo, NUNCA implica que la sesión
   // haya arrancado en `wt` (cmux tolera un cwd inexistente y sigue adelante
@@ -3330,7 +3554,14 @@ for (let idx = 0; idx < plans.length; idx++) {
     const detalle = sentinel.status === 'garbled'
       ? `el fichero centinela ${sentinelPath} EXISTE pero no tiene el formato esperado (empieza por «${sentinel.raw}»), así que no dice nada fiable`
       : `el centinela de arranque ${sentinelPath} NO apareció en ${launchSentinelTimeoutMs} ms`
-    console.error(`ATENCIÓN: cmux aceptó el lanzamiento de #${s.n} (exit 0) y la ventana está abierta, pero ${detalle} — NO se puede confirmar que el comando llegara a ejecutarse. Los dos casos que esto cubre son indistinguibles desde aquí: (a) el comando nunca corrió —el shell de login se comió parte de la línea al arrancar, que es lo que pasó en el primer despacho real de este loop: un prompt de oh-my-zsh convirtió \`claude\` en \`laude\`— o (b) ese shell sigue arrancando y va a ejecutarlo dentro de un momento. Por eso NO se cuenta como lanzado y por eso TAMPOCO se revierte el claim solo: mira la sesión de cmux "${name}". Si el shell está ahí parado en un prompt, el agente no va a arrancar nunca. Si tu shell de login tarda de verdad tanto, sube CT_NEXT_LAUNCH_TIMEOUT_MS (ahora ${launchSentinelTimeoutMs}).${ventana}`)
+    // F20/H1: qué se INTENTÓ, no solo cuánto se esperó. Las tres situaciones
+    // llevan a mirar sitios distintos y hasta ahora las tres decían lo mismo.
+    const reintentoFallido = sentinel.retypeProblem
+      ? ` Y el reenvío automático de la línea tampoco se pudo hacer: ${sentinel.retypeProblem}.`
+      : sentinel.retypes > 0
+        ? ` Y esto YA no se arregla esperando más: la línea se reenvió ${sentinel.retypes} ${sentinel.retypes === 1 ? 'vez' : 'veces'} a esa sesión dentro del presupuesto y siguió sin ejecutarse — mira qué hay en esa pantalla.`
+        : ` No hubo ningún reenvío automático: el presupuesto (${launchSentinelTimeoutMs} ms) no dio para un intento más allá del primero.`
+    console.error(`ATENCIÓN: cmux aceptó el lanzamiento de #${s.n} (exit 0) y la ventana está abierta, pero ${detalle} — NO se puede confirmar que el comando llegara a ejecutarse. Los dos casos que esto cubre son indistinguibles desde aquí: (a) el comando nunca corrió —el shell de login se comió parte de la línea al arrancar, que es lo que pasó en el primer despacho real de este loop: un prompt de oh-my-zsh convirtió \`claude\` en \`laude\`— o (b) ese shell sigue arrancando y va a ejecutarlo dentro de un momento. Por eso NO se cuenta como lanzado y por eso TAMPOCO se revierte el claim solo: mira la sesión de cmux "${name}". Si el shell está ahí parado en un prompt, el agente no va a arrancar nunca. Si tu shell de login tarda de verdad tanto, sube CT_NEXT_LAUNCH_TIMEOUT_MS (ahora ${launchSentinelTimeoutMs}).${ventana}${reintentoFallido}`)
     unverifiedLaunches.push({ n: s.n, wt, branch, name, why: sentinel.status === 'garbled' ? `el centinela de arranque existe pero es ilegible: no se puede afirmar que el comando corriera` : `el comando no dejó constancia de haberse ejecutado en ${launchSentinelTimeoutMs} ms (centinela ausente en ${sentinelPath})` })
     continue
   }
@@ -3339,7 +3570,7 @@ for (let idx = 0; idx < plans.length; idx++) {
   // VENTANA, que es una pregunta menos importante y ya no puede producir un
   // falso "lanzado" por sí sola.
   if (launchCheck.status === 'confirmed') {
-    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — verificado: la sesión cmux está corriendo en ese directorio, y el comando llegó a ejecutarse de verdad (centinela de arranque escrito por el propio shell, con $PWD=${sentinel.cwd} y \`claude\` resoluble).`)
+    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — verificado: la sesión cmux está corriendo en ese directorio, y el comando llegó a ejecutarse de verdad (centinela de arranque escrito por el propio shell, con $PWD=${sentinel.cwd} y \`claude\` resoluble).${reenvio}`)
     launchedCount++
   } else if (launchCheck.status === 'wrong-cwd') {
     // D5, hallazgo A: además del ATENCIÓN, se APUNTA el slice en
@@ -3347,7 +3578,7 @@ for (let idx = 0; idx < plans.length; idx++) {
     // (claim escrito, rama y worktree creados, y un `cmux new-workspace`
     // que devolvió 0, o sea posiblemente un agente corriendo) y el resumen
     // final tiene que poder decirlo en vez de afirmar "nada quedó a medias".
-    console.error(`ATENCIÓN: cmux aceptó el lanzamiento de #${s.n} (exit 0), pero la sesión NO está en ${wt} — está en "${launchCheck.actualCwd}" en su lugar (cmux tolera un cwd inexistente y arranca en el shell de login por defecto en vez de fallar; ¿el worktree no llegó a existir a tiempo, o se borró justo antes?). El agente puede estar corriendo en el directorio equivocado — revisa la sesión a mano antes de asumir que está trabajando #${s.n}. NO se cuenta como lanzado con éxito.`)
+    console.error(`ATENCIÓN: cmux aceptó el lanzamiento de #${s.n} (exit 0), pero la sesión NO está en ${wt} — está en "${launchCheck.actualCwd}" en su lugar (cmux tolera un cwd inexistente y arranca en el shell de login por defecto en vez de fallar; ¿el worktree no llegó a existir a tiempo, o se borró justo antes?). El agente puede estar corriendo en el directorio equivocado — revisa la sesión a mano antes de asumir que está trabajando #${s.n}. NO se cuenta como lanzado con éxito.${reenvio}`)
     unverifiedLaunches.push({ n: s.n, wt, branch, name, why: `la sesión de cmux existe pero está en "${launchCheck.actualCwd}", no en ${wt} — aunque el comando SÍ se ejecutó (su propio $PWD era ${sentinel.cwd}), así que lo más probable es que haya un agente vivo: no borres nada sin mirarlo` })
   } else if (launchCheck.status === 'not-found') {
     console.error(`ATENCIÓN: cmux devolvió éxito (exit 0) al lanzar #${s.n}, pero no se encontró ninguna sesión con el nombre "${name}" al consultarlo — no se puede confirmar que el agente esté corriendo en absoluto, y mucho menos en ${wt}. El comando SÍ llegó a ejecutarse (centinela de arranque escrito, $PWD=${sentinel.cwd}), o sea que muy probablemente hay un agente vivo en alguna parte y lo que falla es localizar su ventana. Revisa cmux a mano. NO se cuenta como lanzado con éxito.`)
@@ -3359,7 +3590,7 @@ for (let idx = 0; idx < plans.length; idx++) {
     // legible, no porque esté en otro sitio. Cuenta como lanzado (mismo
     // criterio de "beneficio de la duda ante una consulta incompleta" que
     // 'unverifiable'), pero el mensaje no afirma "verificado".
-    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — la sesión de cmux con el título esperado EXISTE, pero cmux no expuso un directorio legible para ella (¿esquema/versión distinta de la esperada?), así que NO se pudo comprobar que esté corriendo en ${wt}. Eso sí: el comando llegó a ejecutarse (centinela de arranque escrito) y su propio $PWD era ${sentinel.cwd}, que es el worktree esperado — así que lo que falta es el dato de cmux, no la evidencia del arranque.`)
+    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — la sesión de cmux con el título esperado EXISTE, pero cmux no expuso un directorio legible para ella (¿esquema/versión distinta de la esperada?), así que NO se pudo comprobar que esté corriendo en ${wt}. Eso sí: el comando llegó a ejecutarse (centinela de arranque escrito) y su propio $PWD era ${sentinel.cwd}, que es el worktree esperado — así que lo que falta es el dato de cmux, no la evidencia del arranque.${reenvio}`)
     launchedCount++
   } else {
     // F19/H1: este camino ya no es el "beneficio de la duda" que era. Antes,
@@ -3367,7 +3598,7 @@ for (let idx = 0; idx < plans.length; idx++) {
     // se contaba igual; ahora el centinela ya ha dicho, por su cuenta y sin
     // preguntarle nada a cmux, que el comando corrió en el sitio correcto.
     // Lo único que se ignora es en qué ventana.
-    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — no se pudo verificar la sesión de cmux (la consulta falló: ¿daemon caído?), pero el comando SÍ llegó a ejecutarse: el centinela de arranque está escrito, con $PWD=${sentinel.cwd} y \`claude\` resoluble en ese shell. Lo que no se sabe es en qué ventana de cmux quedó.`)
+    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — no se pudo verificar la sesión de cmux (la consulta falló: ¿daemon caído?), pero el comando SÍ llegó a ejecutarse: el centinela de arranque está escrito, con $PWD=${sentinel.cwd} y \`claude\` resoluble en ese shell. Lo que no se sabe es en qué ventana de cmux quedó.${reenvio}`)
     launchedCount++
   }
   // finding 1: el slice se lanzó completo — ya no hay claim "en la ventana

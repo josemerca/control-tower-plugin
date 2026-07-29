@@ -27,7 +27,7 @@
 // ===========================================================================
 import { describe, it, expect, afterEach } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -272,10 +272,15 @@ describe('F19/H1 — formato del centinela (unitario)', () => {
     const repoRoot = makeRepoRoot()
     const r = dispatchOne(repoRoot)
     expect(r.code).toBe(0)
-    // El directorio de arranque es determinista: <tmpdir>/ct-next-launch-<pid del
-    // ct-next.mjs>-<issue>. `spawnSync` nos da ese pid, así que se puede mirar
-    // el fichero que ct-next.mjs escribió de verdad, no una reconstrucción.
-    const f = join(tmpdir(), `ct-next-launch-${r.pid}-90`, LAUNCHER_FILENAME)
+    // El directorio de arranque lleva el pid de ct-next.mjs y el número de
+    // issue, más un sufijo aleatorio (F20: los PID se reciclan y estos
+    // directorios no se borran nunca — un nombre determinista colisionaba).
+    // `spawnSync` nos da el pid, así que se localiza por prefijo y se mira el
+    // fichero que ct-next.mjs escribió de verdad, no una reconstrucción.
+    const prefix = `ct-next-launch-${r.pid}-90-`
+    const dirName = readdirSync(tmpdir()).find((n) => n.startsWith(prefix))
+    expect(dirName, `no se encontró ningún directorio de arranque ${prefix}*`).toBeDefined()
+    const f = join(tmpdir(), dirName, LAUNCHER_FILENAME)
     dirs.push(dirname(f))
     const mode = statSync(f).mode & 0o777
     expect(mode & 0o111).toBe(0) // ni user, ni group, ni other

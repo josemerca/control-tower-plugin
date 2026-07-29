@@ -414,10 +414,18 @@ describe('contrato §9 (F18): la premisa falsificada y los dos estados que no se
     expect(v8).toMatch(/no lo arregla/)
   })
 
-  it('la versión declarada del bloque es la 8, en el marcador y en la nota de pie', () => {
+  // F20: este test fija que el marcador y la nota de pie declaran la MISMA
+  // versión que `SLICES_CONTRACT_VERSION` — que las tres no puedan divergir es
+  // la propiedad, no el número concreto. El número se actualiza en cada ronda
+  // que toque el texto del contrato (F18 → v8; F20 → v9, por el reparto de
+  // roles); lo que no puede pasar nunca es que uno de los tres se quede atrás.
+  it('la versión declarada del bloque coincide, en el marcador y en la nota de pie, con SLICES_CONTRACT_VERSION', () => {
+    const src = readFileSync(join(here, '..', 'scripts', 'ct-init.sh'), 'utf8')
+    const declared = src.match(/^SLICES_CONTRACT_VERSION=(\d+)$/m)?.[1]
+    expect(declared).toBeDefined()
     const seeded = seedContract()
-    expect(seeded).toMatch(/<!-- ct-init:slices-contract-version: 8 -->/)
-    expect(seeded).toMatch(/contrato v8/)
+    expect(seeded).toMatch(new RegExp(`<!-- ct-init:slices-contract-version: ${declared} -->`))
+    expect(seeded).toMatch(new RegExp(`contrato v${declared}`))
   })
 })
 

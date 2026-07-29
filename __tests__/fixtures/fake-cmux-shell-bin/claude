@@ -9,4 +9,13 @@
 #
 # No imprime nada a propósito: su salida iría al mismo stdout/stderr que los
 # tests inspeccionan para juzgar los mensajes de ct-next.mjs.
+#
+# F20/H1 — FAKE_CMUX_CLAUDE_RUNS_FILE: una `X` por invocación. Desde que
+# /ct-next REENVÍA la línea cuando el centinela no aparece, "arrancó" ya no
+# basta: hay que poder demostrar que arrancó UNA VEZ. Sin este contador, un
+# doble lanzamiento sobre el mismo worktree —dos agentes pisándose— pasaría
+# por un despacho perfecto en todos los tests.
+if [ -n "$FAKE_CMUX_CLAUDE_RUNS_FILE" ]; then
+  printf 'X' >> "$FAKE_CMUX_CLAUDE_RUNS_FILE"
+fi
 exit 0

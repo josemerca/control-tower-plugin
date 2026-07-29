@@ -121,6 +121,32 @@ export function buildTypedCommand(launcherPath, shQuote) {
 // `$PWD` va el ÚLTIMO campo porque es el único que puede contener un tabulador
 // (una ruta patológica, pero posible): así el parser puede reunir todo lo que
 // venga detrás del tercer tabulador sin partirlo.
+//
+// ===========================================================================
+// F20/H1 — LA GUARDA DE IDEMPOTENCIA, Y POR QUÉ ES LA PIEZA QUE SOSTIENE TODO
+// LO DEMÁS.
+//
+// F20 midió, contra el cmux instalado en esta máquina, lo que F19 solo pudo
+// razonar: `--command` teclea, `--layout` con una superficie `command`
+// TAMBIÉN teclea (medido: el texto sale ECOADO en el prompt de la propia
+// sesión, y el proceso cuelga de un `-/bin/zsh` de login; y además `--cwd` se
+// ignora en ese modo), y no existe ninguna vía de exec en esa versión. O sea:
+// el tecleo no se puede quitar, así que hay que poder REPETIRLO.
+//
+// Repetir el tecleo sin una guarda sería peor que el problema: dos líneas que
+// SÍ lleguen arrancan DOS agentes sobre el mismo worktree. La guarda hace que
+// el segundo sourceo sea un no-op observable — y puede hacerlo porque el
+// centinela se escribe ANTES de lanzar al agente: si existe, el agente ya
+// arrancó (o está arrancando) y no hay nada que repetir.
+//
+// El caso que esto cubre de verdad, y que se reprodujo en el laboratorio: el
+// primer tecleo llega tarde (shell lento) y el dispatcher ya ha reenviado la
+// línea. Las dos llegan. Sin guarda: dos `claude`. Con guarda: uno.
+//
+// `[ -e ]` y no `[ -f ]`: lo que importa es que la ruta esté ocupada, no de
+// qué tipo es. Un `-f` dejaría pasar el relanzamiento si alguien pusiera ahí
+// un directorio o un symlink roto.
+// ===========================================================================
 export function buildLauncherScript({ sentinelPath, agentCommand, issue, worktree }, shQuote) {
   const q = shQuote
   return `#!/bin/sh
@@ -131,11 +157,19 @@ export function buildLauncherScript({ sentinelPath, agentCommand, issue, worktre
 # como subproceso), para que los alias, funciones y PATH del usuario —de donde
 # puede salir el propio \`claude\`— sigan valiendo.
 #
+# Se puede sourcear MÁS DE UNA VEZ: /ct-next reenvía la línea si el centinela
+# no aparece (el pty se la puede comer). La guarda de abajo hace que solo el
+# primer sourceo que llegue lance al agente.
+#
 # Worktree esperado: ${worktree}
-if command -v claude >/dev/null 2>&1; then ct_next_claude=ok; else ct_next_claude=missing; fi
-printf '%s\\t%s\\t%s\\t%s\\n' ${q(SENTINEL_MAGIC)} ${q(SENTINEL_FORMAT_VERSION)} "$ct_next_claude" "$PWD" > ${q(sentinelPath)}
-unset ct_next_claude
+if [ -e ${q(sentinelPath)} ]; then
+  printf '%s\\n' 'ct-next: el agente de #${issue} ya arrancó (centinela presente); este sourceo NO relanza nada.'
+else
+  if command -v claude >/dev/null 2>&1; then ct_next_claude=ok; else ct_next_claude=missing; fi
+  printf '%s\\t%s\\t%s\\t%s\\n' ${q(SENTINEL_MAGIC)} ${q(SENTINEL_FORMAT_VERSION)} "$ct_next_claude" "$PWD" > ${q(sentinelPath)}
+  unset ct_next_claude
 ${agentCommand}
+fi
 `
 }
 

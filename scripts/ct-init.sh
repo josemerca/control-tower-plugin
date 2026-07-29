@@ -224,7 +224,7 @@ SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
 # decía en absoluto que un PR rechazado dejaba su slice fuera del loop para
 # siempre. Un repo bootstrapeado con el v4 se queda con esas tres cosas hasta
 # que este número suba; es la única palanca que existe para llegar hasta él.
-SLICES_CONTRACT_VERSION=8
+SLICES_CONTRACT_VERSION=9
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -276,6 +276,7 @@ cd59702d2c5d3a73b67ad235908b83bdc42c9da41996b14a33fba0749e359961  v5, 289 línea
 8de58db92770e9b8737280e024f0a7dae199b4a0dca2b7a535e631637c824fea  v6, 364 líneas — F15 (--reopen va a in-progress, --requeue, garantías de orden de /ct-groom)
 8730d7be044a7ba8009d263947c57c56eb6558639cc506d22c460fcc6f9bacb9  v7, 385 líneas — F17 (el kickoff pide Closes #N; las DOS causas de "PR mergeado, issue abierto")
 cef9a97a07edc8c403a37ffc846df74422c4d7d1d5aad02d90001a477b2ef811  v8, 419 líneas — F18 (el cierre accidental por commit; el residuo de labels sobre cerrados; el claim bloqueado; la causa que el kickoff no garantiza)
+0050a5b1a216063a58beabb1237d08b0753f5390a3c82edcf8ae5c3526491485  v9, 427 líneas — F20 (las DOS sesiones por repo y su campo `role`: coordinadora vs. despachada)
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -283,7 +284,7 @@ cef9a97a07edc8c403a37ffc846df74422c4d7d1d5aad02d90001a477b2ef811  v8, 419 línea
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 8 -->
+<!-- ct-init:slices-contract-version: 9 -->
 ## Formato de la tabla §9 (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -683,6 +684,14 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   (`.worktrees/<n>/.agent/STATE.md`), sembrado al despachar. Dos slices a la
   vez no se pisan ese fichero, y ninguno toca el `.agent/STATE.md` del
   checkout principal.
+- **Dos sesiones por repo, con papeles OPUESTOS, y cada una lo lleva escrito
+  en su `.agent/STATE.md` (campo `role`).** La del **checkout principal** es
+  la *coordinadora*: groomea, despacha con `/ct-next`, revisa y mergea. La de
+  cada `.worktrees/<n>` es la *despachada*: implementa ese slice y **para** —
+  no mergea, no despacha el siguiente. Antes ese reparto solo existía dentro
+  del kickoff que recibía una de las dos, así que se perdía en cuanto esa
+  sesión se re-hidrataba de su STATE.md. Ningún código lo comprueba: es
+  información para el agente que lo lee.
 - **Qué recibe el agente despachado**: un prompt de arranque (*kickoff*) con
   el nombre del slice, el número de issue, los criterios de la sección
   "Acceptance criteria", el addendum de su `Tipo`, la rama base contra la que
@@ -696,7 +705,7 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   agente obedezca: si un PR aparece sin su `Closes #N`, el loop no lo detecta
   — lo verás como un `status:in-review` que no se despeja.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v8). Si el plugin trae una
+<sub>Esta sección la mantiene `/ct-init` (contrato v9). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>
