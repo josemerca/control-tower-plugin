@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, statSync, accessSync, constants as fsConstants, writeSync, realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
+import { randomBytes } from 'node:crypto'
 import { dirname, join, delimiter as pathDelimiter } from 'node:path'
 import { planDispatch, resolveAccount, resolveAccountLegacy, validateAccountMap, parseRepoSlug, buildCmuxArgv, buildCmuxSendArgv, buildCmuxSendKeyArgv, collectFinishedResidue, formatFinishedResidueWarning } from './dispatch.js'
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
@@ -370,12 +371,22 @@ if (testDelayRaw !== undefined) {
 //   - `LAUNCH_ATTEMPT_MS` = 2500 → 3,5x el arranque medido (723 ms). Corto
 //     para que el reenvío llegue pronto; largo para no reenviar encima de un
 //     shell que simplemente va lento.
-//   - el presupuesto total sigue siendo `CT_NEXT_LAUNCH_TIMEOUT_MS` (8000 por
-//     defecto): con 2500 por intento, caben tres tecleos. No se sube el
-//     default: 8000 ms ya sobran de largo, y lo que faltaba no era tiempo.
+//   - el presupuesto total, `CT_NEXT_LAUNCH_TIMEOUT_MS`, SÍ sube: de 8000 a
+//     15000. Y el motivo es exactamente el contrario del que F19 rechazaba.
+//     Con una sola espera, más tiempo no compraba nada (el carácter perdido
+//     no vuelve); con reenvíos, cada 2500 ms más son UN INTENTO más. La
+//     medida que lo pide: el camino validado end-to-end contra el cmux real
+//     con este mismo código (launcher con guarda, `send` + `send-key`)
+//     arrancó 5 de 5 con UN reenvío, a los ~2,9 s — pero repitiendo la
+//     medición con la máquina cargada (la suite entera del plugin corriendo
+//     en paralelo) hicieron falta DOS reenvíos, ~6,8–7,0 s, y 1 de 3 se pasó
+//     de los 8000. 15000 da seis intentos y ~2x de margen sobre el peor caso
+//     medido; el coste es que un lanzamiento de verdad muerto tarda 15 s en
+//     declararse, UNA vez. En el camino feliz no cuesta nada: la espera
+//     termina en cuanto aparece el centinela.
 //   - un presupuesto MENOR que un intento (los tests que fijan 400 ms) hace
 //     simplemente que no haya reenvíos, y el comportamiento es el de F19.
-const DEFAULT_LAUNCH_SENTINEL_TIMEOUT_MS = 8000
+const DEFAULT_LAUNCH_SENTINEL_TIMEOUT_MS = 15000
 const LAUNCH_SENTINEL_TIMEOUT_CAP_MS = 600_000
 const LAUNCH_SENTINEL_POLL_MS = 100
 const LAUNCH_ATTEMPT_MS = 2500
@@ -2428,7 +2439,24 @@ for (let idx = 0; idx < selected.length; idx++) {
   // compartido, una ruta predecible que ya existe no se reutiliza en silencio
   // — sería la puerta para que alguien pusiera ahí un symlink y nos hiciera
   // escribir el kickoff donde no toca. Que exista es un error, no un atajo.
-  const launchDir = join(tmpdir(), `ct-next-launch-${process.pid}-${s.n}`)
+  // F20 — EL PID NO ES ÚNICO, Y SE NOTÓ. El nombre era
+  // `ct-next-launch-<pid>-<n>` a secas, con `recursive: false` para que un
+  // directorio ya existente fuera un ERROR (ver más abajo: en un /tmp
+  // compartido, una ruta predecible que se reutiliza es la puerta para que
+  // alguien deje ahí un symlink). Pero estos directorios NO se borran nunca
+  // —el shell tiene que poder sourcear el launcher— y los PID se reciclan:
+  // medido en la máquina de desarrollo, 592 directorios `ct-next-launch-*`
+  // acumulados en $TMPDIR. Con esa densidad, un despacho contra el mismo
+  // número de issue desde un proceso que hereda un PID ya usado se encuentra
+  // el directorio puesto, el `mkdirSync` revienta con EEXIST, y el dispatch
+  // se aborta DESPUÉS del claim (se revierte, sí, pero es un fallo que no
+  // tenía por qué pasar). Se vio primero como una corrida de la suite en
+  // rojo bajo carga y sin ninguna aserción rota.
+  //
+  // El sufijo aleatorio quita la colisión SIN tocar la propiedad de
+  // seguridad: la ruta deja de ser predecible (que era el punto), y
+  // `recursive: false` sigue haciendo que "ya existe" sea un error.
+  const launchDir = join(tmpdir(), `ct-next-launch-${process.pid}-${s.n}-${randomBytes(6).toString('hex')}`)
   const launcherPath = join(launchDir, LAUNCHER_FILENAME)
   const sentinelPath = join(launchDir, SENTINEL_FILENAME)
   let launcherScript

@@ -187,6 +187,20 @@ describe('F20/H1 — si el pty se come la línea, se reenvía', () => {
     expect(claudeRuns(repoRoot)).toBe(1)
   })
 
+  it('el presupuesto por defecto da para varios reenvíos, no para uno justo', () => {
+    // La medida que lo fija: idle, 1 reenvío a los ~2,9 s; con la máquina
+    // cargada, 2 reenvíos y ~7 s (1 de 3 se pasaba de los 8000 de F19). Un
+    // presupuesto que solo diera para dos intentos volvería a fallar bajo
+    // carga — y ahora, a diferencia de F19, más presupuesto SÍ compra algo:
+    // cada ventana de más es un tecleo más, no una espera más.
+    const src = readFileSync(join(here, '..', 'scripts', 'ct-next.mjs'), 'utf8')
+    const total = Number(src.match(/^const DEFAULT_LAUNCH_SENTINEL_TIMEOUT_MS = (\d+)$/m)?.[1])
+    const attempt = Number(src.match(/^const LAUNCH_ATTEMPT_MS = (\d+)$/m)?.[1])
+    expect(total).toBeGreaterThan(0)
+    expect(attempt).toBeGreaterThan(0)
+    expect(Math.floor(total / attempt)).toBeGreaterThanOrEqual(5)
+  })
+
   it('el --dry-run enseña el reparto en intentos y la medida que lo justifica', () => {
     const repoRoot = makeRepoRoot()
     const r = runReal(['--repo', 'o/r', '--cap', '1', '--dry-run'], {
