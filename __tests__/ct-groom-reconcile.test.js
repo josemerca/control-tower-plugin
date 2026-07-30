@@ -129,7 +129,7 @@ describe('ct-groom (corrida real) — detecta divergencia por defecto, no la apl
       title: '#1 login',
       state: 'open',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'status:in-progress' }],
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:none' }, { name: 'status:in-progress' }],
       body: matchingBody(),
     }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
@@ -148,7 +148,7 @@ describe('ct-groom (corrida real) — detecta divergencia por defecto, no la apl
       title: '#1 login',
       state: 'closed',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:none' }],
       body: matchingBody(),
     }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
@@ -199,7 +199,7 @@ describe('ct-groom (corrida real) --reconcile — aplica lo detectado vía `gh i
       title: '#1 login',
       state: 'open',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:none' }],
       body: matchingBody(),
     }
     const argvLog = join(dir, 'argv.log')
@@ -281,7 +281,7 @@ describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y
       title: '#1 login',
       state: 'open',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }],
+      labels: [{ name: 'type:backend' }, { name: 'gate:none' }], // F21: el plan produce siempre una label de gate (aquí, "ninguno")
       // AC-1.2 falta, y no hay ninguna sección "## Dependencias" en absoluto.
       body: buildIssueBody({ n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' }, SPEC_REF_OK),
     }
@@ -292,7 +292,7 @@ describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y
       title: '#2 signup',
       state: 'open',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }],
+      labels: [{ name: 'type:backend' }, { name: 'gate:none' }],
       body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, SPEC_REF_OK),
     }
   }
@@ -388,7 +388,7 @@ describe('ct-groom (corrida real) — labels: el spec solo es autoridad de un pr
       title: '#1 login',
       state: 'open',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }, { name: 'area:ops' }], // puesto a mano, el spec nunca habló de área
+      labels: [{ name: 'type:backend' }, { name: 'area:ops' }, { name: 'gate:none' }], // area:ops puesto a mano, el spec nunca habló de área
       body: matchingBody(),
     }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
@@ -417,7 +417,7 @@ describe('ct-groom (corrida real) — divergencia SOLO de prosa (Descripción/Pr
       // area:api/touches:db incluidas — ONE_SLICE_SPEC de este fichero SÍ
       // trae esas columnas, así que hacen falta para que labels/AC/deps NO
       // diverjan y la única divergencia real sea la Descripción.
-      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:none' }],
       // Descripción distinta ("otro texto" en vez de "modelo") — todo lo
       // demás (AC, deps, Protegido, enlace al spec) coincide con el spec.
       body: buildIssueBody({ n: 1, name: 'login', type: 'backend', entrega: 'otro texto', deps: [], ac: ['AC-1.1'], protected: 'schema' }, SPEC_REF_OK),
@@ -459,7 +459,7 @@ describe('ct-groom (corrida real) — issues huérfanos: un slice eliminado de l
       title: '#1 login',
       state: 'open',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:none' }],
       body: matchingBody(),
     }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
@@ -480,7 +480,7 @@ describe('ct-groom (corrida real) — issues huérfanos: un slice eliminado de l
       title: '#1 login',
       state: 'open',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:none' }],
       body: matchingBody(),
     }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
@@ -574,7 +574,7 @@ describe('ct-groom (corrida real) — el enlace al spec es el MISMO se invoque c
       title: '#1 login',
       state: 'open',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }],
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:none' }],
       body: matchingBody(),
     }
     const envBase = {
@@ -607,7 +607,7 @@ describe('ct-groom (corrida real) — un "## Dependencias"/"## Acceptance criter
       title: '#1 login',
       state: 'open',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }],
+      labels: [{ name: 'type:backend' }, { name: 'gate:none' }], // F21: el plan produce siempre una label de gate (aquí, "ninguno")
       body: [
         SPEC_LINK_LINE(1), '',
         '## Descripción', 'modelo', '',
@@ -623,7 +623,7 @@ describe('ct-groom (corrida real) — un "## Dependencias"/"## Acceptance criter
       title: '#2 signup',
       state: 'open',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }],
+      labels: [{ name: 'type:backend' }, { name: 'gate:none' }],
       body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, SPEC_REF_OK),
     }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
@@ -652,7 +652,7 @@ describe('ct-groom (corrida real) — un "## Dependencias"/"## Acceptance criter
       title: '#1 login',
       state: 'open',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }],
+      labels: [{ name: 'type:backend' }, { name: 'gate:none' }], // F21: el plan produce siempre una label de gate (aquí, "ninguno")
       body: [
         SPEC_LINK_LINE(1), '',
         '## Descripción', 'modelo', '',
@@ -668,7 +668,7 @@ describe('ct-groom (corrida real) — un "## Dependencias"/"## Acceptance criter
       title: '#2 signup',
       state: 'open',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }],
+      labels: [{ name: 'type:backend' }, { name: 'gate:none' }],
       body: buildIssueBody({ n: 2, name: 'signup', type: 'backend', entrega: 'registro', deps: [], ac: ['AC-2.1'], protected: '–' }, SPEC_REF_OK),
     }
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], {

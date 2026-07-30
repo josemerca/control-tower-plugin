@@ -17,17 +17,35 @@ Las **labels** que el plan necesita se crean solo si no existen ya en el repo �
 
 Las **dependencias** se escriben en el cuerpo del issue como ``- merge-after `#N` ``, entre backticks: `#N` es el **orden del slice en la tabla §9**, no un número de issue, y sin los backticks GitHub lo convierte en un enlace al issue número N del repo — una dependencia falsa que un humano no tiene forma de detectar (verificado contra la API de GitHub: en el sandbox, `merge-after #2` del slice 3 enlazaba al issue #2, que es el del slice 1). La sección lleva además una línea que lo dice explícitamente. Los issues creados **antes** de este cambio conservan el formato viejo (`merge-after #N`, sin backticks) y se siguen leyendo igual — no se migran solos; solo adoptan el formato nuevo si `--reconcile` ya iba a reescribir esa sección por una divergencia real.
 
-El título del issue sale de `Slice` (`#N <Slice>`), NO de `Entrega`: `Slice` es el nombre corto de la fila, `Entrega` es opcional y se convierte en la sección "Descripción" del cuerpo. Ese mismo título es lo que `/ct-next` reinyecta al despachar (primera línea del kickoff del agente, nombre del workspace cmux) — por eso `Slice` debe ser corto y legible, no una frase. `Tipo` decide, además de la label `type:<valor>`, qué addendum recibe el agente al despachar (`ui`/`backend`/`infra`/`bugfix`, ver `scripts/kickoff.js#ADDENDA`) — un valor que no sea ninguno de esos no aborta, pero avisa por stderr (el agente despachado para ese slice no recibirá ningún addendum de tipo).
+El título del issue sale de `Slice` (`#N <Slice>`), NO de `Entrega`: `Slice` es el nombre corto de la fila, `Entrega` es opcional y se convierte en la sección "Descripción" del cuerpo. Ese mismo título es lo que `/ct-next` reinyecta al despachar (primera línea del kickoff del agente, nombre del workspace cmux) — por eso `Slice` debe ser corto y legible, no una frase. `Tipo` decide, además de la label `type:<valor>`, qué **recordatorio técnico** (*addendum*) recibe el agente al despachar (`ui`/`backend`/`infra`/`bugfix`, ver `scripts/kickoff.js#ADDENDA`) — un valor que no sea ninguno de esos no aborta, pero avisa por stderr (el agente despachado para ese slice no recibirá ningún addendum de tipo). Hasta F21, `Tipo` decidía TAMBIÉN los **gates humanos**, porque el único que existía era media frase dentro del addendum de `ui` ("gate de screenshot obligatorio"); eso ya no es así — ver la columna `Gate`, más abajo.
 
 En la columna `Acepta`, **la coma separa criterios siempre**: un criterio EARS ("Cuando caduca el token, el sistema pide login") se partiría en dos. Se escapa con `\,` (solo esa secuencia exacta; una barra invertida suelta se conserva). `Protegido` no se trocea por comas (texto libre de una pieza), `Dep` extrae sus `#N` con una regex (una coma dentro da igual), y en `Área`/`Toca` la coma separa tokens pero un token nunca puede contenerla (se descarta al normalizar, así que ahí `\,` no sirve de nada).
 
-La tabla §9 del spec admite dos columnas opcionales, `Área` y `Toca` (acepta también `Area` sin tilde), con valores separados por coma. "Sin valor" se puede escribir como `–`, `-`, `—`, `−`, `--` o celda vacía (cualquier variante de guion/dash es válida — un editor de texto o un móvil con autocorrección puede sustituir una por otra sin que lo notes; todas significan "ninguno" en `Dep`/`Acepta`/`Área`/`Toca`):
+La tabla §9 del spec admite dos columnas opcionales, `Área` y `Toca` (acepta también `Area` sin tilde), con valores separados por coma. "Sin valor" se puede escribir como `–`, `-`, `—`, `−`, `--` o celda vacía (cualquier variante de guion/dash es válida — un editor de texto o un móvil con autocorrección puede sustituir una por otra sin que lo notes; todas significan "ninguno" en `Dep`/`Acepta`/`Área`/`Toca`/`Gate`):
 ```
-| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
-|---|-------|------|---------|-----|--------|-----------|------|------|
-| 1 | modelo | backend | tabla users | – | AC-1.1 | schema | api | db, migration |
-| 2 | api | backend | endpoint | #1 | AC-2.1 | – | api | – |
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate |
+|---|-------|------|---------|-----|--------|-----------|------|------|------|
+| 1 | modelo | backend | tabla users | – | AC-1.1 | schema | api | db, migration | – |
+| 2 | api | backend | endpoint | #1 | AC-2.1 | – | api | – | – |
 ```
+### `Gate` — los gates humanos, separados del `Tipo` (F21)
+
+`Gate` *(opcional)* declara qué **gates humanos** hay que cerrar antes de mergear ese slice. Vocabulario **cerrado** (`scripts/gates.js`):
+
+- `visual` — un humano tiene que VER el cambio: captura/vídeo del antes/después en el PR;
+- `apply` — nada se aplica contra un entorno real hasta que un humano revise el plan/dry-run.
+
+**El caso por defecto no exige escribir nada**: `Tipo: ui` implica `visual`, `Tipo: infra` implica `apply`. La columna existe para las dos desviaciones, y `/ct-groom` **avisa por stderr en las dos**:
+
+- **añadir** un gate que el `Tipo` no implica (`Tipo: backend` + `Gate: visual`) — el caso real que motivó la columna: una migración con backfill que movía la barra de progreso más visible del epic. Recibía el addendum de backend y ningún gate, y nada lo señalaba;
+- **renunciar** a uno que sí implica, con `!` delante (`Gate: !visual` sobre un `Tipo: ui` que de verdad no cambia nada visible). Quitar un gate nunca es silencioso.
+
+Celda vacía o con marcador de "sin valor" significa *no he declarado nada*, **no** "renuncio a todo". Un token fuera del vocabulario, o pedir y renunciar al mismo gate en la misma celda, **abortan** (a diferencia de un `Tipo` desconocido, que solo avisa): un gate que no se puede explicar ni al agente ni a quien revisa sería un gate que solo existe en el spec.
+
+A dónde llega cada gate resuelto: label **`gate:<token>`** del issue (o **`gate:none`** si no hay ninguno — el silencio no puede significar a la vez "sin gates" y "issue anterior a los gates"), sección **`## Gates`** del cuerpo, línea explícita en el kickoff del agente, y campo `gates` de su `.agent/STATE.md`. Por eso sobrevive a un redespacho, a un `--reopen` y a un `/clear`: `/ct-next` lo lee del **issue**, no del spec. Un issue groomeado antes de F21 (sin ninguna label `gate:`) cae al `Tipo`, así que no pierde el gate que ya tenía.
+
+**El loop escribe y enseña los gates; no impide mergear con uno sin cerrar.** El que los cierra eres tú.
+
 `/ct-groom` traduce cada valor en labels `area:<x>`/`touches:<y>` sobre el issue — son las mismas que `claim.js#tokensOf` y `dispatch.js#SERIALIZING_TOUCHES` usan para detectar colisión y forzar serialización. Si un slice no declara `Área`/`Toca` (o el spec ni siquiera trae esas columnas), no se emite ninguna label de ese tipo y la maquinaria de colisión/serialización queda inerte para ese slice, igual que antes.
 
 ### La tabla se valida entera antes de tocar GitHub
@@ -41,8 +59,10 @@ La tabla §9 del spec admite dos columnas opcionales, `Área` y `Toca` (acepta t
 - alguna fila tiene menos o más celdas que la cabecera (revisa un `|` sin escapar dentro de una celda), o la celda `Slice` está vacía, trae un marcador de "sin valor", o solo trae una referencia `#N` sin ningún nombre alrededor (de ahí sale el título del issue — ver arriba);
 - `Dep` tiene contenido que no es reconocible como `#N` (p.ej. `S1` en vez de `#1`) — si de verdad no hay dependencias, escribe `–`;
 - una referencia de `Dep` apunta a un `#` que no existe en la tabla, o al propio slice (auto-referencia: un slice nunca depende de sí mismo).
+- un valor de `Gate` no es ningún gate conocido (el mensaje nombra el vocabulario entero y la sintaxis `!` de renuncia);
+- una fila pide y renuncia al MISMO gate (`visual, !visual`) — no se elige un ganador en silencio sobre un gate humano.
 
-Si fallan varias de estas cosas a la vez, se reportan **todas juntas** en la misma ejecución (no hace falta arreglar una, volver a correr, y descubrir la siguiente). Columnas opcionales ausentes (`Tipo`/`Entrega`/`Acepta`/`Protegido`/`Área`/`Toca`) y valores degradados (`Tipo` que no es ninguna key de `ADDENDA`, prefijo en la columna equivocada de Área/Toca, token que normaliza a vacío) no abortan — se avisan por stderr y el groom continúa.
+Si fallan varias de estas cosas a la vez, se reportan **todas juntas** en la misma ejecución (no hace falta arreglar una, volver a correr, y descubrir la siguiente). Columnas opcionales ausentes (`Tipo`/`Entrega`/`Acepta`/`Protegido`/`Área`/`Toca`) y valores degradados (`Tipo` que no es ninguna key de `ADDENDA`, prefijo en la columna equivocada de Área/Toca, token que normaliza a vacío) no abortan — se avisan por stderr y el groom continúa. `Gate` ausente **no avisa siquiera**: su ausencia no degrada nada (los gates se derivan del `Tipo`, como siempre), y un aviso que sale en cada corrida de cada spec sin describir ninguna pérdida es ruido que entrena a ignorar los demás.
 
 ### Qué ha tocado `/ct-groom` cuando aborta (F15)
 
@@ -65,7 +85,7 @@ Ahora, para cada slice cuyo issue ya existe, `/ct-groom` compara:
 - **título** (`#N <Slice>`);
 - **el enlace al spec** (la línea `> Slice #N del epic. Spec: […]`) — sí es contenido del spec, a diferencia del marcador `ct-order` (bookkeeping nuestro, fuera de toda comparación). Se compara **entero**. Antes se comparaba solo por su ancla, porque la línea se componía con la ruta tal cual la escribieras al invocar el comando y dos costumbres de invocación del mismo fichero se habrían "corregido" mutuamente para siempre bajo `--reconcile`; esa causa ya no existe (ver "El enlace al spec" más abajo), y comparar la línea entera detecta además que el spec se ha movido de fichero o apunta a otro repo. Consecuencia inmediata al actualizar: los issues creados con la versión anterior llevan un enlace relativo roto, así que **saldrán reportados como divergencia** — es correcto, ese enlace nunca funcionó;
 - **milestone** (`--milestone` del spec contra el milestone actual del issue);
-- **labels, pero solo los prefijos cuya columna trae la tabla §9**: `type:` (si hay columna `Tipo`), `area:` (si hay columna `Área`), `touches:` (si hay columna `Toca`). Sin la columna correspondiente, el spec no tiene NINGUNA opinión sobre ese prefijo. `status:` queda **fuera de la comparación por completo, siempre** — un humano o `/ct-next` lo mueven después (`backlog` → `ready` → `in-progress` → `in-review`…) como parte normal del flujo;
+- **labels, pero solo los prefijos cuya columna trae la tabla §9**: `type:` (si hay columna `Tipo`), `area:` (si hay columna `Área`), `touches:` (si hay columna `Toca`), `gate:` (si hay columna `Gate` **o** columna `Tipo` — los gates pueden venir de cualquiera de las dos). Sin la columna correspondiente, el spec no tiene NINGUNA opinión sobre ese prefijo. `status:` queda **fuera de la comparación por completo, siempre** — un humano o `/ct-next` lo mueven después (`backlog` → `ready` → `in-progress` → `in-review`…) como parte normal del flujo;
 - **dependencias** (`## Dependencias`, las líneas `merge-after #N`) y **criterios de aceptación** (`## Acceptance criteria`) — datos que el dispatcher obedece de verdad (`merge-after` gatea si un slice se puede despachar; los AC se inyectan literalmente en el prompt del agente). Comparación por conjunto, **solo dentro de la sección reconocida** (ver "Límites conocidos"): un `merge-after #N` (o un AC) escrito en OTRA parte del body — Descripción, una sección nueva a mano — no cuenta como divergencia real, pero **sí se avisa como nota** (desde el hardening del dispatch, `/ct-next` tampoco lo obedece — antes de eso el dispatcher SÍ lo hacía aunque `/ct-groom` no pudiera tocarlo con seguridad; ver "Límites conocidos");
 - **Descripción y Protegido** también se comparan, pero solo con un **sí/no**, como **nota, no como divergencia** — no cuentan para el código de salida: son prosa que se edita de forma rutinaria, y anclar el exit code a eso lo dejaría en "hay algo que revisar" para siempre.
 

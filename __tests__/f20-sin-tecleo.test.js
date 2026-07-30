@@ -336,6 +336,13 @@ describe('F20/H3 — el reparto de roles vive en el estado, no solo en un kickof
   it('el contrato §9 que siembra /ct-init nombra las dos sesiones y dónde vive cada rol', () => {
     const src = readFileSync(join(here, '..', 'scripts', 'ct-init.sh'), 'utf8')
     expect(src).toMatch(/Dos sesiones por repo, con papeles OPUESTOS/)
-    expect(src).toMatch(/SLICES_CONTRACT_VERSION=9/)
+    // F21: esto pinaba la versión EXACTA (`=9`), y eso convertía cada ronda
+    // posterior que tocara el contrato en una edición de este test, que no
+    // trata sobre el número. Lo que sí importa es que el contenido de F20 viaje
+    // en una versión igual o posterior a aquella — si alguien lo quitara y
+    // bajara la versión, este test lo vería igual. Mismo criterio que
+    // ct-init.test.js#CONTRACT_VERSION, que ya dejó de hardcodearla por esta
+    // misma razón.
+    expect(Number(src.match(/^SLICES_CONTRACT_VERSION=(\d+)$/m)[1])).toBeGreaterThanOrEqual(9)
   })
 })

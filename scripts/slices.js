@@ -342,6 +342,7 @@ export function analyzeSlicesTable(specMd) {
       sectionHeading: null,
       missingRequiredColumns: [],
       missingOptionalColumns: [],
+      gateColumnPresent: false,
       totalDataRows: 0,
       rowsAfterGap: [],
       skippedRows: [],
@@ -376,7 +377,13 @@ export function analyzeSlicesTable(specMd) {
   // alimenta `slice.name`, el texto que compone el TÍTULO del issue.
   const iN = col('#'), iSlice = col('slice'), iType = col('tipo'), iEntrega = col('entrega'),
         iDep = col('dep'), iAc = col('acepta'), iProt = col('protegido'),
-        iArea = colAny('área', 'area'), iToca = colAny('toca')
+        iArea = colAny('área', 'area'), iToca = colAny('toca'),
+        // iGate (F21): la columna que separa "qué es técnicamente este slice"
+        // de "qué gates humanos exige antes de mergear". No colisiona con
+        // ninguna cabecera existente: "gate" no es substring de
+        // #/slice/tipo/entrega/dep/acepta/protegido/área/toca, ni ninguna de
+        // esas lo es de "gate".
+        iGate = col('gate')
 
   const missingRequiredColumns = []
   if (iN === -1) missingRequiredColumns.push('#')
@@ -396,6 +403,19 @@ export function analyzeSlicesTable(specMd) {
   if (iProt === -1) missingOptionalColumns.push('Protegido')
   if (iArea === -1) missingOptionalColumns.push('Área')
   if (iToca === -1) missingOptionalColumns.push('Toca')
+  // "Gate" NO entra en missingOptionalColumns, y no es un olvido (F21). Cada
+  // entrada de esa lista produce, en ct-groom.mjs, un aviso por stderr con la
+  // CONSECUENCIA de que falte la columna ("los issues se crearán sin label
+  // type:", "la maquinaria de colisión queda inerte"…). La consecuencia de que
+  // falte `Gate` es: ninguna. Los gates se derivan del `Tipo` exactamente como
+  // antes de que esta columna existiera (gates.js#TYPE_GATES), así que TODAS
+  // las tablas §9 que existen hoy siguen produciendo los mismos gates sin
+  // tocar una letra. Un aviso que sale en cada corrida de cada spec y no
+  // describe ninguna degradación es ruido que entrena a ignorar los demás
+  // avisos — el mismo criterio con el que F14/F19 atacaron los avisos
+  // insatisfacibles y los repetidos sin novedad. Lo que sí se expone es el
+  // hecho crudo (`gateColumnPresent`), porque ct-groom.mjs lo necesita para
+  // decidir si el spec tiene alguna opinión sobre las labels `gate:`.
 
   const slices = []
   const skippedRows = []
@@ -536,6 +556,12 @@ export function analyzeSlicesTable(specMd) {
       // criterio de "sin valor" que Protegido: isNoValueCell decide ahí si
       // hay contenido real que mostrar).
       entrega: (cells[iEntrega] || '').trim(),
+      // gate (F21): la celda CRUDA, sin resolver. La resolución (qué gates
+      // implica el `Tipo`, qué añade o retira esta celda, qué hay que decir en
+      // voz alta) vive entera en gates.js#resolveGates — este parser no sabe
+      // de gates, igual que no sabe de labels ni de addenda: su trabajo es
+      // convertir una tabla markdown en celdas fiables.
+      gate: (cells[iGate] || '').trim(),
       deps,
       ac,
       protected: (cells[iProt] || '').trim(),
@@ -572,6 +598,10 @@ export function analyzeSlicesTable(specMd) {
     sectionHeading: headingAbove(specMd, headerIdx),
     missingRequiredColumns,
     missingOptionalColumns,
+    // gateColumnPresent (F21): se expone aparte de missingOptionalColumns (ver
+    // por qué, arriba). ct-groom.mjs lo usa para decidir si el spec es
+    // autoridad sobre las labels `gate:` de un issue ya existente.
+    gateColumnPresent: iGate !== -1,
     totalDataRows,
     rowsAfterGap,
     skippedRows,

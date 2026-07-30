@@ -7,6 +7,7 @@
 // deriva en el formato de groom.js#buildIssueBody (p.ej. renombrar el
 // encabezado "## Acceptance criteria") podía romperlo en silencio hasta el
 // dispatch real contra un repo de verdad.
+import { gatesFromLabels } from './gates.js'
 
 // detectLineEnding / normalizeToLF (review round 4, menor: CRLF): un issue
 // editado en Windows (o pegado desde un editor que usa CRLF) deja un '\r'
@@ -613,6 +614,16 @@ export function mapGhIssue(i) {
     .map((l) => l.slice(l.indexOf(':') + 1).trim())
     .filter((t) => t.length > 0)
   const type = (labels.find((l) => l.startsWith('type:')) || 'type:').slice('type:'.length)
+  // gates (F21): el gate humano vuelve del ISSUE, no del spec — que es lo que
+  // hace que sobreviva a un redespacho, a un `--reopen` y a cualquier sesión
+  // que se re-hidrate. `gatesDeclared` distingue "este slice no tiene gates"
+  // (label `gate:none`) de "este issue es anterior a los gates" (ninguna label
+  // `gate:`), y esa distinción no es cosmética: en el segundo caso
+  // kickoff.js cae al `Tipo`, de modo que los issues `type:ui` ya groomeados
+  // no pierden su gate de screenshot el día que esto se despliega. Los
+  // `gate:` que no estén en el vocabulario se descartan (gates.js) — nunca se
+  // le anuncia al agente un gate cuyo texto nadie sabe escribir.
+  const { gates, declared: gatesDeclared } = gatesFromLabels(labels)
   const body = i.body || ''
   const order = extractOrder(body)
   // deps aquí quedan en ESPACIO DE ORDEN (groom.js#buildIssueBody escribe
@@ -644,6 +655,8 @@ export function mapGhIssue(i) {
     strayDeps,
     touches,
     type,
+    gates,
+    gatesDeclared,
     // name: viene del TÍTULO del issue (columna Slice del spec, F3) — no
     // confundir con `slice.entrega` (columna Entrega) que usa slices.js/
     // groom.js para la sección "Descripción" del cuerpo. Mismo nombre de
