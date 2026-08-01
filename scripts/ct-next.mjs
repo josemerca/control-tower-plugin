@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, statSy
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
-import { dirname, join, delimiter as pathDelimiter } from 'node:path'
+import { dirname, join, isAbsolute, delimiter as pathDelimiter } from 'node:path'
 import { planDispatch, resolveAccount, resolveAccountLegacy, validateAccountMap, parseRepoSlug, buildCmuxArgv, buildCmuxSendArgv, buildCmuxSendKeyArgv, collectFinishedResidue, formatFinishedResidueWarning } from './dispatch.js'
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
 import { parseStrictInt } from './argnum.js'
@@ -15,6 +15,7 @@ import {
 } from './launch-sentinel.js'
 import { buildDispatchInput, NO_MILESTONE_KEY } from './gh-issue-map.js'
 import { parseStateSafe, readBlocked } from './state.js'
+import { SLICE_REL_PATH, excludeContentWith } from './state-paths.js'
 import {
   planClosureProbe, buildClosureQuery, parseClosureProbe,
   formatSuspectClosureWarnings, formatMergedButOpenWarnings, formatClosureCoverageNote,
@@ -2839,6 +2840,55 @@ const manualRevertClaimHint = (s) => `gh issue edit ${s.n} --repo ${repo} --add-
 function formatSpanishList(items) {
   if (items.length <= 1) return items[0] || ''
   return `${items.slice(0, -1).join(', ')} y ${items[items.length - 1]}`
+}
+
+// ============================================================================
+// F22 — LA REGLA QUE HACE INVISIBLE EL ESTADO DEL SLICE.
+//
+// Va al directorio COMÚN de git, no al `.git` del worktree — que ni siquiera
+// es un directorio: en un worktree enlazado `.git` es un FICHERO que apunta a
+// `<principal>/.git/worktrees/<n>`. `git rev-parse --git-common-dir` devuelve
+// el `.git` del checkout principal, así que UNA escritura cubre a la
+// coordinadora y a todos los worktrees, presentes y futuros. Y como
+// `info/exclude` no se commitea jamás, esta regla no puede acabar dentro de un
+// PR — que es exactamente el fallo que esta ronda arregla.
+//
+// POR QUÉ NO BASTA EL .gitignore. `ct-init` sí añade la línea al `.gitignore`
+// del repo (la vía larga, commiteada y compartida), pero eso sólo protege a
+// los repos que lo re-corran Y sólo desde que ese commit llegue a la base
+// desde la que se corta el worktree. Esta escritura es la red que hace que lo
+// otro no sea un requisito previo.
+//
+// POR QUÉ NO SIRVE PARA `.agent/STATE.md`, y conviene que quede escrito: NINGUNA
+// regla de ignore afecta a un fichero ya TRACKEADO. Funciona aquí, y sólo
+// aquí, porque `.agent/SLICE.md` nace sin trackear y nunca se trackea.
+//
+// Idempotente por línea exacta, mismo criterio que el bloque de `.worktrees/`
+// de ct-init.sh: se añade sólo si no está ya.
+// ============================================================================
+function ensureSliceIgnored() {
+  let commonDir
+  try {
+    commonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: repoRoot, encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
+    }).trim()
+  } catch (e) {
+    return { ok: false, why: `no se pudo localizar el directorio común de git (\`git rev-parse --git-common-dir\`): ${e.message}` }
+  }
+  if (!commonDir) return { ok: false, why: '`git rev-parse --git-common-dir` no devolvió ninguna ruta' }
+  const base = isAbsolute(commonDir) ? commonDir : join(repoRoot, commonDir)
+  const excludePath = join(base, 'info', 'exclude')
+  try {
+    mkdirSync(join(base, 'info'), { recursive: true })
+    let current = ''
+    try { current = readFileSync(excludePath, 'utf8') } catch { current = '' }
+    const next = excludeContentWith(current, SLICE_REL_PATH)
+    if (!next.added) return { ok: true, added: false, path: excludePath }
+    writeFileSync(excludePath, next.content)
+    return { ok: true, added: true, path: excludePath }
+  } catch (e) {
+    return { ok: false, why: `no se pudo escribir ${excludePath}: ${e.message}` }
+  }
 }
 
 function cleanupOrphanedWorktree(s, wt, branch, reason) {

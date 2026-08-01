@@ -26,7 +26,7 @@ import { join } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { STATE_REL_PATH, SLICE_REL_PATH, NEVER_IN_A_SLICE_PR, resolveStatePath } from '../scripts/state-paths.js'
+import { STATE_REL_PATH, SLICE_REL_PATH, NEVER_IN_A_SLICE_PR, resolveStatePath, excludeContentWith } from '../scripts/state-paths.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const stopHook = join(here, '..', 'dist', 'stop.js')
@@ -132,6 +132,63 @@ describe('F22 — los hooks leen por precedencia', () => {
     const out = runHook(stopHook, dir)
     expect(out.decision).toBe('block')
     expect(out.reason).toContain('se ha quedado atrás')
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('F22 — la regla de exclude es idempotente y no corrompe lo que ya hay', () => {
+  it('la añade cuando no está', () => {
+    const r = excludeContentWith('# comentario\n', '.agent/SLICE.md')
+    expect(r.added).toBe(true)
+    expect(r.content).toBe('# comentario\n.agent/SLICE.md\n')
+  })
+
+  it('NO la duplica en la segunda pasada — dos dispatches dejan una sola línea', () => {
+    const once = excludeContentWith('', '.agent/SLICE.md')
+    const twice = excludeContentWith(once.content, '.agent/SLICE.md')
+    expect(twice.added).toBe(false)
+    expect(twice.content).toBe(once.content)
+    expect(twice.content.split('\n').filter((l) => l === '.agent/SLICE.md')).toHaveLength(1)
+  })
+
+  it('normaliza el salto final: sin él, el append pegaría la regla a la última línea del usuario y corrompería LAS DOS', () => {
+    const r = excludeContentWith('*.tmp', '.agent/SLICE.md')
+    expect(r.content).toBe('*.tmp\n.agent/SLICE.md\n')
+    expect(r.content).not.toContain('*.tmp.agent')
+  })
+
+  it('reconoce la regla aunque venga con espacios alrededor', () => {
+    expect(excludeContentWith('  .agent/SLICE.md  \n', '.agent/SLICE.md').added).toBe(false)
+  })
+})
+
+describe('F22 — la regla de ignore va al directorio COMÚN de git', () => {
+  it('el info/exclude que ve un worktree es el del checkout principal, no uno propio', () => {
+    const dir = mkGitRepo()
+    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+    git('worktree', 'add', '-q', '-b', 'feat/1', '.worktrees/1', 'HEAD')
+    const common = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: join(dir, '.worktrees', '1'), encoding: 'utf8',
+    }).trim()
+    // Devuelve el .git del checkout principal: UNA escritura cubre a la
+    // coordinadora y a todos los worktrees, presentes y futuros.
+    expect(common).toContain(dir)
+    expect(common).not.toContain('.worktrees')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('una regla en info/exclude SÍ oculta el fichero nuevo, y sobrevive a git add -A', () => {
+    const dir = mkGitRepo()
+    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+    git('worktree', 'add', '-q', '-b', 'feat/1', '.worktrees/1', 'HEAD')
+    const wt = join(dir, '.worktrees', '1')
+    const common = execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: wt, encoding: 'utf8' }).trim()
+    writeFileSync(join(common, 'info', 'exclude'), `${SLICE_REL_PATH}\n`, { flag: 'a' })
+    mkdirSync(join(wt, '.agent'), { recursive: true })
+    writeFileSync(join(wt, SLICE_REL_PATH), 'estado del slice')
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: wt, encoding: 'utf8' }).trim()).toBe('')
+    execFileSync('git', ['add', '-A'], { cwd: wt })
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: wt, encoding: 'utf8' }).trim()).toBe('')
     rmSync(dir, { recursive: true, force: true })
   })
 })

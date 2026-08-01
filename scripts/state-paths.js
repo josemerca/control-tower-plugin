@@ -48,3 +48,24 @@ export function resolveStatePath(cwd) {
   if (existsSync(state)) return { path: state, kind: 'coordinator' }
   return { path: null, kind: 'none' }
 }
+
+/**
+ * Añade `rule` al contenido de un fichero de exclusión, una sola vez.
+ *
+ * Idempotente por línea exacta (comparando sin espacios alrededor), mismo
+ * criterio que el bloque de `.worktrees/` de ct-init.sh. Y normaliza el salto
+ * de línea final ANTES de concatenar: si el fichero existe y no termina en
+ * `\n`, un append pegaría la regla nueva a la última línea del usuario y
+ * corrompería las dos —la regla previa dejaría de aplicarse y la nuestra
+ * tampoco existiría—. Es el mismo bug que ct-init.sh evita en el `.gitignore`.
+ *
+ * @param {string} current
+ * @param {string} rule
+ * @returns {{ content: string, added: boolean }}
+ */
+export function excludeContentWith(current, rule) {
+  const text = current || ''
+  if (text.split('\n').some((l) => l.trim() === rule)) return { content: text, added: false }
+  const sep = text === '' || text.endsWith('\n') ? '' : '\n'
+  return { content: `${text}${sep}${rule}\n`, added: true }
+}
