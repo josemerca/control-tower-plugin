@@ -27,6 +27,8 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { STATE_REL_PATH, SLICE_REL_PATH, NEVER_IN_A_SLICE_PR, resolveStatePath, excludeContentWith } from '../scripts/state-paths.js'
+import { buildStateSeed } from '../scripts/kickoff.js'
+import { parseState } from '../scripts/state.js'
 // F22, Step 4: montaje reusado de __tests__/ct-next-launch-verification.test.js
 // — dirs de cuenta + stubs de cmux/claude, e higiene de limpieza de directorios
 // temporales que puede colgar de un SIGKILL a un nieto huérfano.
@@ -365,5 +367,49 @@ describe('F22 — la verificación de efecto ABORTA una corrida real y revierte 
   // no exige en ningún sitio que `.agent/` tenga algo trackeado.
   it('.gitignore con negación gana a info/exclude, con NADA trackeado bajo .agent/ → sigue abortando (protege contra el colapso de directorio sin trackear)', () => {
     runGateTest(mkRealDispatchRepo({ trackAgentState: false }))
+  })
+})
+
+describe('F22 — la semilla deja de desarmar el hook de frescura', () => {
+  it('siembra last_commit con el sha de la base, no vacío', () => {
+    const slice = { n: 7, name: 'un slice', ac: ['AC1'], issue: 42 }
+    const seed = buildStateSeed(slice, { branch: 'feat/42', base: 'main', baseSha: 'a'.repeat(40) })
+    expect(parseState(seed).meta.last_commit).toBe('a'.repeat(40))
+  })
+
+  it('sin baseSha cae a vacío — un sha inventado sería peor que ninguno', () => {
+    const slice = { n: 7, name: 'un slice', ac: ['AC1'], issue: 42 }
+    const seed = buildStateSeed(slice, { branch: 'feat/42', base: 'main' })
+    expect(parseState(seed).meta.last_commit).toBe('')
+  })
+
+  it('con la semilla nueva, el hook Stop BLOQUEA el cierre tras un commit de trabajo', () => {
+    const dir = mkGitRepo()
+    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+    const baseSha = git('rev-parse', 'HEAD').trim()
+    const seed = buildStateSeed(
+      { n: 1, name: 'slice', ac: ['AC1'], issue: 1 },
+      { branch: 'feat/1', base: 'main', baseSha },
+    )
+    writeFileSync(join(dir, SLICE_REL_PATH), seed)
+    writeFileSync(join(dir, 'f.txt'), 'trabajo\n')
+    git('add', 'f.txt')
+    git('commit', '-qm', 'work 1')
+    const out = runHook(stopHook, dir)
+    expect(out.decision).toBe('block')
+    expect(out.reason).toContain('1 commit')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('y con la semilla de HOY (last_commit vacío) NO bloquea — el defecto que esto arregla', () => {
+    const dir = mkGitRepo()
+    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+    const seed = buildStateSeed({ n: 1, name: 'slice', ac: ['AC1'], issue: 1 }, { branch: 'feat/1', base: 'main' })
+    writeFileSync(join(dir, SLICE_REL_PATH), seed)
+    writeFileSync(join(dir, 'f.txt'), 'trabajo\n')
+    git('add', 'f.txt')
+    git('commit', '-qm', 'work 1')
+    expect(runHook(stopHook, dir)).toBeNull()
+    rmSync(dir, { recursive: true, force: true })
   })
 })

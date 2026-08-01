@@ -1566,6 +1566,7 @@ function ensureRepoIdentity(root, expectedRepo) {
 
 let repoRoot
 let resolvedBase
+let resolvedBaseSha = ''
 // Fix round 1, Minor 2 (review de W-D): distingue "el valor de resolvedBase
 // viene del relleno sintético de fixture" (nunca resuelto de verdad, ni
 // contra GitHub ni contra el checkout local) de "viene de una resolución
@@ -1604,6 +1605,18 @@ if (fx) {
   // Fix round 1, Important: verificación local ANTES del bucle de despacho,
   // offline (ni gh ni red) — ver el comentario de verifyBaseExistsLocally.
   verifyBaseExistsLocally(resolvedBase)
+  // F22: se resuelve UNA vez, aquí, donde `verifyBaseExistsLocally` acaba de
+  // demostrar que la referencia existe. Si aun así fallara, se sigue con
+  // cadena vacía: la semilla lo trata como "sin last_commit" y el hook calla,
+  // que es el comportamiento de antes de este cambio — degradar es
+  // aceptable, mentir no.
+  try {
+    resolvedBaseSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${resolvedBase}^{commit}`], {
+      cwd: repoRoot, encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
+    }).trim()
+  } catch {
+    console.error(`aviso: no se pudo resolver "${resolvedBase}" a un sha concreto, así que la semilla del slice irá sin \`last_commit\`. El hook de cierre de turno no podrá avisar al agente de que su estado se ha quedado atrás.`)
+  }
 }
 
 // F17 — LA TRAMPA QUE CONVIERTE A UN AGENTE OBEDIENTE EN EL MISMO DEADLOCK.
@@ -2407,7 +2420,7 @@ for (let idx = 0; idx < selected.length; idx++) {
     // rama por defecto del repo — con `--base <otra-rama>`, un diff que no es
     // el suyo.
     kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath, base: resolvedBase })
-    stateSeed = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase })
+    stateSeed = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase, baseSha: resolvedBaseSha })
   } catch (e) {
     failSlice(idx, `no se pudo renderizar el kickoff/SLICE.md de #${s.n}: ${e.message}. El agente se lanzaría sin prompt utilizable — antes, esto solo se descubría en el run real.`)
     continue

@@ -242,7 +242,7 @@ function renderStateGates(gates) {
   return `${list.join(', ')} — GATES HUMANOS pendientes: los cierra quien revisa el PR, NO tú. Detalle en la sección "## Gates" del issue.`
 }
 
-export function buildStateSeed(slice, { branch, base }) {
+export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
   const issueNum = slice.issue != null ? parseInt(String(slice.issue).replace('#', ''), 10) : null
   return renderState({
     meta: {
@@ -287,7 +287,18 @@ export function buildStateSeed(slice, { branch, base }) {
       status: 'not_started',
       branch,
       base,
-      last_commit: '',
+      // F22: el sha de la base, NO el nombre de la rama. Con el campo vacío
+      // —lo que se sembraba hasta ahora— `describeStopRelation` devuelve
+      // `unset` y `classifyStopState` sale en silencio: el hook `Stop` que
+      // obliga a refrescar el estado en cada turno quedaba DESARMADO durante
+      // toda la vida del slice. Medido en campo: 21 horas y 7 commits con la
+      // semilla intacta.
+      //
+      // Y tiene que ser un SHA, no `main`: un nombre de rama es un blanco
+      // móvil, y en cuanto la base avanzara el conteo de "commits por encima
+      // de tu last_commit" dejaría de significar nada. Si no se pudo resolver,
+      // se siembra vacío a propósito — un sha inventado sería peor que ninguno.
+      last_commit: baseSha,
       github_issue: issueNum,
       // D4, defecto 4: este campo imprimía el número de ISSUE llamándolo
       // "slice #N" — dos espacios de identificadores distintos (ver el
