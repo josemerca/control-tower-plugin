@@ -538,4 +538,46 @@ describe('F22 — el dispatcher no confunde el blocked de la coordinadora con el
 
     rmSyncBestEffort(repoRoot)
   })
+
+  // Task 6b, fix round 1 — EL LLAMANTE QUE SE ESCAPÓ DEL BARRIDO.
+  //
+  // `formatBlockedClaimWarnings` lee `.worktrees/<n>/.agent/SLICE.md` y se lo
+  // pasa a `readBlocked`, que compone sus notas con el fichero que le digan —
+  // y sin `stateRel` le dice `.agent/STATE.md` por defecto. La nota de
+  // contradicción salta con `status: blocked` + campo `blocked` vacío (el
+  // error de escritura que el propio state.js documenta como el más probable)
+  // y se concatena TAL CUAL al aviso del dispatcher: la coordinadora leería
+  // «su propio .worktrees/7/.agent/SLICE.md se declara BLOQUEADO …
+  // contradicción en .agent/STATE.md», que la manda a editar el fichero
+  // TRACKEADO que tiene en su propio cwd. Es la contaminación que F22 existe
+  // para impedir, servida por el propio dispatcher.
+  //
+  // Un default es un fallo silencioso por construcción: no revienta, produce
+  // una respuesta PLAUSIBLE y equivocada. Por eso el guard es un test y no una
+  // convención.
+  it('la nota de contradicción de un SLICE.md nombra SLICE.md, no el STATE.md que la coordinadora tiene en su cwd', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'f22-blocked-nota-'))
+    mkdirSync(join(repoRoot, '.worktrees', '7', '.agent'), { recursive: true })
+    // `status: blocked` con el campo `blocked` vacío: dispara la nota.
+    writeFileSync(
+      join(repoRoot, '.worktrees', '7', SLICE_REL_PATH),
+      '---\ntask: el slice\nstatus: blocked\nblocked:\n---\n# s\n',
+    )
+    const issue7 = { number: 7, title: '#7 un slice', labels: [{ name: 'status:in-progress' }], body: '<!-- ct-order:1 -->\n' }
+    const r = runBlockedCheck(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[issue7], []]),
+      FAKE_GH_COUNTER_FILE: join(repoRoot, 'gh-list-count'),
+    })
+
+    // La nota sale (si no, el test no estaría probando nada)…
+    expect(r.stderr).toContain('contradicción en')
+    // …y nombra el fichero que el dispatcher leyó de verdad.
+    expect(r.stderr).toContain(`contradicción en ${SLICE_REL_PATH}`)
+    // Ni una sola mención al fichero de la coordinadora en TODO el aviso.
+    expect(r.stderr).not.toContain(STATE_REL_PATH)
+    expect(r.stdout).not.toContain(STATE_REL_PATH)
+
+    rmSyncBestEffort(repoRoot)
+  })
 })

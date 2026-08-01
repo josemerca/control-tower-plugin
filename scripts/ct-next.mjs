@@ -1978,7 +1978,15 @@ function formatBlockedClaimWarnings(issues) {
       out.push(`#${i.n} está en status:in-progress y su worktree existe, pero no se ha podido leer ${path} (${e.message}): NO se ha comprobado si ese agente se declaró BLOQUEADO. No lo leas como "no lo está".`)
       continue
     }
-    const b = readBlocked(parseStateSafe(md).meta)
+    // `stateRel` (F22/Task 6b): `readBlocked` compone sus notas nombrando un
+    // fichero, y sin esto nombra `.agent/STATE.md` por defecto — el fichero
+    // TRACKEADO que la coordinadora tiene en su propio cwd. La nota de
+    // contradicción (`status: blocked` + campo `blocked` vacío) se concatena
+    // TAL CUAL al aviso de abajo, así que el dispatcher acabaría mandando a la
+    // coordinadora a editar justo el fichero cuya contaminación motivó F22.
+    // Aquí no hay ambigüedad que resolver: `md` se acaba de leer de `path`,
+    // que es `SLICE_REL_PATH` por construcción (línea de arriba).
+    const b = readBlocked(parseStateSafe(md).meta, { stateRel: SLICE_REL_PATH })
     if (b.state === 'unreadable') {
       out.push(`#${i.n} está en status:in-progress, pero el frontmatter de ${path} no se puede interpretar (${b.why}): NO se ha comprobado si ese agente se declaró BLOQUEADO.`)
       continue
