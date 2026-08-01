@@ -63,15 +63,15 @@ En el worktree de un slice conviven:
 | Fichero | Qué es | Estado en git |
 |---|---|---|
 | `.agent/STATE.md` | el de la coordinadora, tal como venía en la base | trackeado, **a cero diff — el seed deja de tocarlo** |
-| `.agent/slice.md` | el estado del slice | ignorado, nunca commiteable |
+| `.agent/SLICE.md` | el estado del slice | ignorado, nunca commiteable |
 
 Que el `STATE.md` del worktree quede a cero diff es lo que hace que el merge del `#480` entre limpio y lo que deja a la puerta del `--release` sin nada que cazar en el caso normal.
 
 Tres escrituras garantizan el «ignorado», con papeles distintos. **El orden importa**: la regla del `info/exclude` se escribe *antes* de sembrar, y la verificación de efecto va *después* de sembrar.
 
-1. **`ct-init` añade `.agent/slice.md` al `.gitignore`** del repo. Commiteado, compartido con quien clone, auto-documentado. La vía correcta a largo plazo. Idempotente, con el mismo idiom de salto de línea final que el bloque de `.worktrees/` (`ct-init.sh:54-80`).
+1. **`ct-init` añade `.agent/SLICE.md` al `.gitignore`** del repo. Commiteado, compartido con quien clone, auto-documentado. La vía correcta a largo plazo. Idempotente, con el mismo idiom de salto de línea final que el bloque de `.worktrees/` (`ct-init.sh:54-80`).
 2. **`ct-next` escribe la misma regla en `$(git rev-parse --git-common-dir)/info/exclude`**, idempotente, en cada dispatch. Cubre los repos ya inicializados sin re-correr `ct-init` ni exigir un commit, y no depende de que la línea del `.gitignore` haya llegado a la base desde la que se corta el worktree.
-3. **`ct-next` verifica el EFECTO, no el exit code.** Tras sembrar: `git status --porcelain` en el worktree. Si `.agent/slice.md` asoma, se aborta el dispatch por `cleanupOrphanedWorktree` (revierte el claim, limpia rama y directorio).
+3. **`ct-next` verifica el EFECTO, no el exit code.** Tras sembrar: `git status --porcelain` en el worktree. Si `.agent/SLICE.md` asoma, se aborta el dispatch por `cleanupOrphanedWorktree` (revierte el claim, limpia rama y directorio).
 
 El punto 3 es la regla del §7.1 del feedback aplicada al propio plugin: *una comprobación que sólo imprime no es una comprobación*. Sin él, 1 y 2 son dos escrituras que **creemos** que funcionan. Con él, el plugin no despacha jamás un slice que no pueda garantizar que no contamina.
 
@@ -79,19 +79,19 @@ El punto 3 es la regla del §7.1 del feedback aplicada al propio plugin: *una co
 
 ### 4.3 Precedencia de lectura
 
-> **Si existe `.agent/slice.md`, ése es el estado. Si no, `.agent/STATE.md`.**
+> **Si existe `.agent/SLICE.md`, ése es el estado. Si no, `.agent/STATE.md`.**
 
-La presencia del fichero **es** la señal de «estoy en un worktree de slice». No hace falta variable de entorno, ni detectar si el `cwd` cuelga de `.worktrees/`, ni preguntarle a git si esto es un worktree enlazado. Un worktree de slice siempre tiene `slice.md` porque lo siembra el dispatcher; el checkout de la coordinadora no lo tiene nunca.
+La presencia del fichero **es** la señal de «estoy en un worktree de slice». No hace falta variable de entorno, ni detectar si el `cwd` cuelga de `.worktrees/`, ni preguntarle a git si esto es un worktree enlazado. Un worktree de slice siempre tiene `SLICE.md` porque lo siembra el dispatcher; el checkout de la coordinadora no lo tiene nunca.
 
 | Lector | Hoy | Después |
 |---|---|---|
 | `hooks/session-start.js:10` | `join(cwd,'.agent','STATE.md')` | precedencia |
 | `hooks/stop.js` | ídem | precedencia |
-| `ct-next.mjs:1938` (lectura de `blocked`) | `.worktrees/<n>/.agent/STATE.md` | `.worktrees/<n>/.agent/slice.md`, **sin fallback** |
+| `ct-next.mjs:1938` (lectura de `blocked`) | `.worktrees/<n>/.agent/STATE.md` | `.worktrees/<n>/.agent/SLICE.md`, **sin fallback** |
 
 **La precedencia es carga estructural, no comodidad.** Sin ella, un agente que se re-hidrata tras un `/clear` leería el `STATE.md` trackeado del worktree — que ya no es su semilla sino **el estado de la coordinadora congelado en la base**: el epic, no el slice. Se hidrataría creyendo que es la coordinadora. Es el §1.1 con el vector invertido.
 
-En `ct-next.mjs:1938` **no hay fallback**, a propósito: si un worktree no tiene `slice.md`, fue sembrado por una versión anterior, y leerle el `STATE.md` sería leer el `blocked:` de la coordinadora y reportar como bloqueado un slice que no lo está. Se avisa en vez de adivinar, con el mismo criterio que ese bloque ya aplica cuando no puede leer el fichero (*«NO se ha comprobado si ese agente se declaró BLOQUEADO. No lo leas como "no lo está"»*).
+En `ct-next.mjs:1938` **no hay fallback**, a propósito: si un worktree no tiene `SLICE.md`, fue sembrado por una versión anterior, y leerle el `STATE.md` sería leer el `blocked:` de la coordinadora y reportar como bloqueado un slice que no lo está. Se avisa en vez de adivinar, con el mismo criterio que ese bloque ya aplica cuando no puede leer el fichero (*«NO se ha comprobado si ese agente se declaró BLOQUEADO. No lo leas como "no lo está"»*).
 
 ### 4.4 `last_commit` sembrado
 
@@ -107,15 +107,15 @@ La resolución ocurre en `ct-next`, donde ya verifica que la base existe localme
 
 **Efecto:** el primer commit de trabajo deja el estado *behind* y el hook `Stop` bloquea el cierre del turno hasta que el agente lo actualice. La foto falsa desaparece porque el fichero se refresca en cada turno.
 
-**La exención de bookkeeping se vuelve inerte, y está bien.** Existe (`state.js:418`) porque el commit que actualizaba `STATE.md` te dejaba otra vez atrás. En el worktree del slice ya no hay tal commit — `slice.md` no se commitea nunca —, así que todos los commits cuentan como trabajo y el agente cierra el ciclo escribiendo el sha en un fichero que no mueve `HEAD`: la relación queda en `same` y el hook calla.
+**La exención de bookkeeping se vuelve inerte, y está bien.** Existe (`state.js:418`) porque el commit que actualizaba `STATE.md` te dejaba otra vez atrás. En el worktree del slice ya no hay tal commit — `SLICE.md` no se commitea nunca —, así que todos los commits cuentan como trabajo y el agente cierra el ciclo escribiendo el sha en un fichero que no mueve `HEAD`: la relación queda en `same` y el hook calla.
 
 ### 4.5 La puerta del `--release`
 
 En `dispatch-check.mjs`, dentro del `if (release)` (línea 331) y **antes** de mover la label:
 
 - `git diff --name-only <base>...HEAD` en el `cwd` — forma de tres puntos: lo que la rama **introduce** respecto a su base común.
-- Si aparece `.agent/STATE.md` o `.agent/slice.md` → **se niega**: exit 5, la label **no** se mueve (el slice sigue en `in-progress`), y el mensaje da el remedio exacto: restaurar el fichero desde la base y commitear. Es lo que se hizo a mano en el `#452` y el `#485`.
-- La base sale del campo `base` de `.agent/slice.md`; si falta, `merge-base` contra la rama por defecto.
+- Si aparece `.agent/STATE.md` o `.agent/SLICE.md` → **se niega**: exit 5, la label **no** se mueve (el slice sigue en `in-progress`), y el mensaje da el remedio exacto: restaurar el fichero desde la base y commitear. Es lo que se hizo a mano en el `#452` y el `#485`.
+- La base sale del campo `base` de `.agent/SLICE.md`; si falta, `merge-base` contra la rama por defecto.
 - **Solo esos dos paths**, no `.agent/` entero: `conventions-ack.md` vive ahí y puede cambiar legítimamente.
 
 **Código de salida propio: 5.** `ct-next` desambigua por código, nunca parseando texto (`dispatch-check.mjs:50-75`). Verificado que del 0 al 4 están asignados y que el 5 está libre. El 5 sólo lo ve el agente: `classifyClaimOutcome` (`ct-next.mjs:2805-2807`) interpreta 1/3/4 y nunca recibe este código, porque `ct-next` no invoca `--release` — lo invoca el agente al entregar.
@@ -126,7 +126,7 @@ En `dispatch-check.mjs`, dentro del `if (release)` (línea 331) y **antes** de m
 
 **No se migra nada y no se toca ningún worktree ajeno** — mutar el árbol de un agente vivo por la espalda es peor que el problema, mismo criterio que «avisa, nunca revierte el claim solo». Cada lector se comporta bien por separado:
 
-| | Worktree del esquema viejo (sin `slice.md`) |
+| | Worktree del esquema viejo (sin `SLICE.md`) |
 |---|---|
 | Hooks | caen a `STATE.md` por la precedencia → leen la semilla vieja, que es lo correcto ahí |
 | `ct-next:1938` | avisa de que no ha comprobado el bloqueo; no adivina |
@@ -137,11 +137,11 @@ En `dispatch-check.mjs`, dentro del `if (release)` (línea 331) y **antes** de m
 Nuevo `__tests__/f22-*.test.js` siguiendo la convención f15…f21, más extensiones a `stop.test.js`, `session-start.test.js`, `kickoff.test.js` y los de `dispatch-check`.
 
 1. El seed **no toca** `.agent/STATE.md` del worktree: diff a cero contra la base.
-2. `.agent/slice.md` no aparece en `git status --porcelain`, ni antes ni después de `git add -A`.
+2. `.agent/SLICE.md` no aparece en `git status --porcelain`, ni antes ni después de `git add -A`.
 3. La escritura en `info/exclude` es idempotente entre dispatches (no duplica la línea).
 4. Si la verificación de efecto falla, se aborta **y se revierte el claim**.
-5. Precedencia en los dos hooks, en los dos sentidos (con y sin `slice.md`).
-6. `ct-next:1938` sin `slice.md`: avisa y **no** lee `STATE.md`.
+5. Precedencia en los dos hooks, en los dos sentidos (con y sin `SLICE.md`).
+6. `ct-next:1938` sin `SLICE.md`: avisa y **no** lee `STATE.md`.
 7. `last_commit` sembrado → tras un commit de trabajo, el `Stop` bloquea. Es el repro del §2.1 convertido en test.
 8. Puerta del `--release`: con contaminación → exit 5 y label sin mover; sin ella → exit 0.
 
