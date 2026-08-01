@@ -20,13 +20,18 @@
 // de commitearlo.
 // ============================================================================
 import { describe, it, expect } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { STATE_REL_PATH, SLICE_REL_PATH, NEVER_IN_A_SLICE_PR, resolveStatePath, excludeContentWith } from '../scripts/state-paths.js'
+// F22, Step 4: montaje reusado de __tests__/ct-next-launch-verification.test.js
+// — dirs de cuenta + stubs de cmux/claude, e higiene de limpieza de directorios
+// temporales que puede colgar de un SIGKILL a un nieto huérfano.
+import { ACCOUNT_ENV } from './fixtures/hermetic-env.js'
+import { rmSyncBestEffort } from './fixtures/cleanup.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const stopHook = join(here, '..', 'dist', 'stop.js')
@@ -190,5 +195,140 @@ describe('F22 — la regla de ignore va al directorio COMÚN de git', () => {
     execFileSync('git', ['add', '-A'], { cwd: wt })
     expect(execFileSync('git', ['status', '--porcelain'], { cwd: wt, encoding: 'utf8' }).trim()).toBe('')
     rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('F22 — el seed no toca el fichero de la coordinadora', () => {
+  it('tras sembrar, el STATE.md del worktree queda a CERO DIFF contra la base', () => {
+    const dir = mkGitRepo()
+    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+    writeFileSync(join(dir, STATE_REL_PATH), '---\ntask: el epic\n---\n# coordinadora\n')
+    git('add', '-A')
+    git('commit', '-qm', 'estado de la coordinadora')
+    git('worktree', 'add', '-q', '-b', 'feat/1', '.worktrees/1', 'HEAD')
+    const wt = join(dir, '.worktrees', '1')
+
+    // Lo que hace el dispatcher tras este cambio: regla de ignore, y siembra
+    // en SLICE.md sin tocar STATE.md.
+    const common = execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: wt, encoding: 'utf8' }).trim()
+    writeFileSync(join(common, 'info', 'exclude'), `${SLICE_REL_PATH}\n`, { flag: 'a' })
+    writeFileSync(join(wt, SLICE_REL_PATH), '---\ntask: el slice\n---\n# slice\n')
+
+    expect(execFileSync('git', ['status', '--porcelain'], { cwd: wt, encoding: 'utf8' }).trim()).toBe('')
+    expect(execFileSync('git', ['diff', '--name-only', 'HEAD'], { cwd: wt, encoding: 'utf8' }).trim()).toBe('')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el merge de main que conflictuaba en STATE.md ahora entra limpio', () => {
+    const dir = mkGitRepo()
+    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+    writeFileSync(join(dir, STATE_REL_PATH), '---\ntask: el epic\n---\n# v1\n')
+    git('add', '-A')
+    git('commit', '-qm', 'estado v1')
+    git('worktree', 'add', '-q', '-b', 'feat/1', '.worktrees/1', 'HEAD')
+    const wt = join(dir, '.worktrees', '1')
+    const common = execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: wt, encoding: 'utf8' }).trim()
+    writeFileSync(join(common, 'info', 'exclude'), `${SLICE_REL_PATH}\n`, { flag: 'a' })
+    writeFileSync(join(wt, SLICE_REL_PATH), '---\ntask: el slice\n---\n# slice\n')
+
+    // La coordinadora avanza su estado en main — 44 de cada 1074 commits de
+    // main lo hacían en el repo real.
+    writeFileSync(join(dir, STATE_REL_PATH), '---\ntask: el epic\n---\n# v2\n')
+    git('add', '-A')
+    git('commit', '-qm', 'estado v2')
+
+    const merge = spawnSync('git', ['merge', 'main', '-m', 'merge main'], { cwd: wt, encoding: 'utf8' })
+    expect(merge.status).toBe(0)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// ============================================================================
+// F22, Step 4 — LA PUERTA DEL EFECTO ABORTA UNA CORRIDA REAL, Y REVIERTE EL
+// CLAIM.
+//
+// Este es el test que impide que la verificación de efecto se degrade a
+// decoración: hace falta una corrida REAL de ct-next.mjs (--dry-run no crea
+// worktree ni siembra nada), montada sobre __tests__/ct-next-launch-
+// verification.test.js — mismos stubs de gh/cmux/claude, mismo ACCOUNT_ENV,
+// misma limpieza best-effort.
+//
+// La diferencia con ese montaje es deliberada: aquí NO se usa fake-git-bin.
+// El escenario depende de una propiedad real de git (una negación en
+// `.gitignore` gana a una regla en `info/exclude`), y un git enteramente
+// simulado no tiene esa precedencia que reproducir — hace falta el binario
+// de verdad, contra un repo de verdad en disco.
+// ============================================================================
+const ctNextScript = join(here, '..', 'scripts', 'ct-next.mjs')
+const fixturesDir = join(here, 'fixtures')
+
+// PATH sin fake-git-bin (a propósito, ver el comentario de arriba): git real,
+// delante de gh/cmux/claude simulados.
+const realGitFakeRestPath = [
+  join(fixturesDir, 'fake-gh-bin'),
+  join(fixturesDir, 'fake-cmux-bin'),
+  join(fixturesDir, 'fake-claude-bin'),
+  process.env.PATH,
+].join(':')
+
+// Repo git DE VERDAD con la trampa puesta: `.gitignore` con la regla y su
+// propia negación justo debajo — verificado a mano (ver Step 4 del brief)
+// que con estas dos líneas `git status --porcelain` SIGUE viendo el fichero
+// pese a la regla que ensureSliceIgnored() escribe en info/exclude, porque
+// una negación en el .gitignore del repo tiene precedencia sobre
+// info/exclude. `.agent/STATE.md` va COMMITEADO (como en cualquier checkout
+// real) porque es lo que hace que `.agent/` no colapse en una sola línea `??
+// .agent/` en el porcelain — con el directorio entero sin trackear, git no
+// lista el fichero individual y el propio `includes(SLICE_REL_PATH)` no
+// tendría nada que encontrar.
+function mkRealDispatchRepo() {
+  const dir = mkdtempSync(join(tmpdir(), 'f22-real-dispatch-'))
+  const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' })
+  git('init', '-q', '-b', 'main')
+  git('config', 'user.email', 'test@test')
+  git('config', 'user.name', 'test')
+  git('remote', 'add', 'origin', 'https://github.com/o/r.git')
+  mkdirSync(join(dir, '.agent'), { recursive: true })
+  writeFileSync(join(dir, '.agent', 'STATE.md'), '---\ntask: el epic\n---\n# coordinadora\n')
+  writeFileSync(join(dir, '.gitignore'), `${SLICE_REL_PATH}\n!${SLICE_REL_PATH}\n`)
+  git('add', '-A')
+  git('commit', '-qm', 'base')
+  return dir
+}
+
+const openIssue1 = { number: 1, title: '#1 algo', labels: [{ name: 'status:ready' }], body: '' }
+
+describe('F22 — la verificación de efecto ABORTA una corrida real y revierte el claim', () => {
+  it('.gitignore con negación gana a info/exclude → no se despacha, worktree limpiado, claim devuelto a status:ready', () => {
+    const repoRoot = mkRealDispatchRepo()
+    const argvLog = join(repoRoot, 'gh-argv-log')
+    const counterFile = join(repoRoot, 'gh-list-count')
+    const r = spawnSync('node', [ctNextScript, '--repo', 'o/r', '--cap', '1'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        ...ACCOUNT_ENV,
+        PATH: realGitFakeRestPath,
+        FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue1], []]),
+        FAKE_GH_COUNTER_FILE: counterFile,
+        FAKE_GH_ARGV_LOG_FILE: argvLog,
+      },
+    })
+    const out = (r.stdout || '') + (r.stderr || '')
+
+    // 1. No se despacha.
+    expect(r.status).not.toBe(0)
+    // 2. El motivo es el que la puerta de efecto imprime — no un fallo genérico.
+    expect(out).toContain('SIGUE siendo visible para git')
+    // 3. El worktree quedó limpiado, no huérfano.
+    expect(existsSync(join(repoRoot, '.worktrees', '1'))).toBe(false)
+    // 4. Y el claim revertido: el fake-gh registró la llamada real de vuelta
+    // a status:ready (mismo patrón de aserción que ct-next-claim.test.js usa
+    // para el mismo tipo de revert automático tras un fallo post-claim).
+    const argv = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
+    expect(argv).toMatch(/issue edit 1 --repo o\/r --add-label status:ready --remove-label status:in-progress/)
+
+    rmSyncBestEffort(repoRoot)
   })
 })

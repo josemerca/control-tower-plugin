@@ -454,7 +454,7 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
   // worktree pre-existente se detecta en el preflight y nunca llega al seed
   // (que es exactamente el arreglo). Crear el fichero DURANTE el `worktree
   // add` reproduce el mismo fallo del seed sin desactivar esa comprobación.
-  it('el seed de STATE.md falla (el worktree resultó no ser un directorio) → limpia y avisa que se puede reintentar', () => {
+  it('el seed de SLICE.md falla (el worktree resultó no ser un directorio) → limpia y avisa que se puede reintentar', () => {
     const repoRoot = makeRepoRoot()
     const counterFile = join(repoRoot, 'gh-list-count')
     const r = runReal(['--repo', 'o/r', '--cap', '1'], {
@@ -464,7 +464,7 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
       FAKE_GIT_WORKTREE_ADD_AS_FILE: '1',
     })
     expect(r.code).toBe(1)
-    expect(r.out).toMatch(/no se pudo sembrar \.agent\/STATE\.md/)
+    expect(r.out).toMatch(/no se pudo sembrar \.agent\/SLICE\.md/)
     expect(r.out).toMatch(/limpiados automáticamente/)
     expect(r.out).toMatch(/puedes reintentar/)
     expect(r.out).not.toMatch(/ATENCIÓN/)

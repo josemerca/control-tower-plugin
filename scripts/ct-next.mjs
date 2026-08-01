@@ -3195,7 +3195,7 @@ for (let idx = 0; idx < plans.length; idx++) {
     }
     console.log(`CLAUDE_CONFIG_DIR=${configDir}`)
     console.log(`git worktree add -b ${branch} ${wt} ${resolvedBase}`)
-    console.log(`seed ${wt}/.agent/STATE.md:\n${stateSeed}`)
+    console.log(`seed ${wt}/${SLICE_REL_PATH}:\n${stateSeed}`)
     // D4, defecto 3: el kickoff, en PROSA. La línea `cmux ...` de abajo lo
     // lleva dentro, pero doblemente escapado (comillas POSIX + el
     // JSON.stringify de la propia línea): un blob de una sola línea con
@@ -3471,11 +3471,43 @@ for (let idx = 0; idx < plans.length; idx++) {
     }
     process.exit(1)
   }
+  // F22: la regla de ignore ANTES de sembrar. Si el fichero llegara a existir
+  // sin la regla puesta, un `git add -A` del agente ya podría llevárselo.
+  const ignored = ensureSliceIgnored()
+  if (!ignored.ok) {
+    cleanupOrphanedWorktree(s, wt, branch, `no se pudo garantizar que ${SLICE_REL_PATH} quede fuera de git (${ignored.why}). NO se siembra: un estado de slice que git puede ver acaba dentro del PR y de ahí a main.`)
+  }
   try {
     mkdirSync(`${wt}/.agent`, { recursive: true })
-    writeFileSync(`${wt}/.agent/STATE.md`, stateSeed)
+    writeFileSync(`${wt}/${SLICE_REL_PATH}`, stateSeed)
   } catch (e) {
-    cleanupOrphanedWorktree(s, wt, branch, `no se pudo sembrar .agent/STATE.md: ${e.message}`)
+    cleanupOrphanedWorktree(s, wt, branch, `no se pudo sembrar ${SLICE_REL_PATH}: ${e.message}`)
+  }
+  // ==========================================================================
+  // F22 — SE VERIFICA EL EFECTO, NO EL EXIT CODE.
+  //
+  // Las dos escrituras de arriba pueden salir 0 y aun así dejar el fichero
+  // VISIBLE para git: un core.excludesFile del usuario con precedencia rara, un
+  // `.gitignore` con una negación (`!.agent/*`) que gane a nuestra regla, un
+  // repo donde alguien trackeó el path a mano en el pasado. Ninguna de esas se
+  // detecta mirando si `writeFileSync` lanzó.
+  //
+  // La única pregunta que importa es la que git contesta: ¿ve el fichero? Si lo
+  // ve, el dispatch NO sigue. Se aborta por la misma vía que cualquier fallo
+  // posterior a crear el worktree (revierte el claim, borra rama y directorio),
+  // porque despachar un agente que va a contaminar main es peor que no
+  // despacharlo.
+  // ==========================================================================
+  let porcelain = null
+  try {
+    porcelain = execFileSync('git', ['status', '--porcelain'], {
+      cwd: wt, encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
+    })
+  } catch (e) {
+    cleanupOrphanedWorktree(s, wt, branch, `no se pudo COMPROBAR que ${SLICE_REL_PATH} queda fuera de git (\`git status --porcelain\` falló: ${e.message}). No se afirma que esté bien: sin esa comprobación, un estado de slice visible para git acaba en el PR y de ahí a main.`)
+  }
+  if (porcelain.split('\n').some((l) => l.includes(SLICE_REL_PATH))) {
+    cleanupOrphanedWorktree(s, wt, branch, `${SLICE_REL_PATH} SIGUE siendo visible para git en ${wt} después de escribir la regla de ignore en ${ignored.path}. Causas típicas: una negación en el .gitignore del repo que gana a la regla (p. ej. \`!.agent/*\`), un core.excludesFile con precedencia, o que alguien trackeara ese path a mano en el pasado (y ninguna regla de ignore afecta a un fichero ya trackeado: haría falta \`git rm --cached ${SLICE_REL_PATH}\`). No se despacha este slice: su estado acabaría dentro del PR.`)
   }
   // F19/H1: el script de arranque se escribe ANTES de invocar a cmux — cmux
   // teclea el `.` de inmediato, y un shell rápido podría sourcearlo antes de

@@ -651,7 +651,7 @@ describe('ct-next — exit 1 de dispatch-check NO siempre es un resultado normal
 })
 
 describe('ct-next — dispatch falla tras un claim exitoso → revierte el claim (W-C, punto 3)', () => {
-  it('seed de STATE.md falla tras claim exitoso → limpia worktree/rama Y revierte el claim a status:ready', () => {
+  it('seed de SLICE.md falla tras claim exitoso → limpia worktree/rama Y revierte el claim a status:ready', () => {
     const repoRoot = makeRepoRoot()
     const counterFile = join(repoRoot, 'gh-list-count')
     const argvLog = join(repoRoot, 'gh-argv-log')
@@ -668,7 +668,7 @@ describe('ct-next — dispatch falla tras un claim exitoso → revierte el claim
       FAKE_GIT_WORKTREE_ADD_AS_FILE: '1',
     })
     expect(r.code).toBe(1)
-    expect(r.out).toMatch(/no se pudo sembrar \.agent\/STATE\.md/)
+    expect(r.out).toMatch(/no se pudo sembrar \.agent\/SLICE\.md/)
     expect(r.out).toMatch(/limpiados automáticamente/)
     expect(r.out).not.toMatch(/ATENCIÓN/)
     const argv = readFileSync(argvLog, 'utf8')
@@ -676,7 +676,7 @@ describe('ct-next — dispatch falla tras un claim exitoso → revierte el claim
     expect(argv).toMatch(/issue edit 42 --repo o\/r --add-label status:ready --remove-label status:in-progress/)
   })
 
-  it('seed de STATE.md falla Y el revert del claim también falla → ATENCIÓN con el comando manual exacto', () => {
+  it('seed de SLICE.md falla Y el revert del claim también falla → ATENCIÓN con el comando manual exacto', () => {
     const repoRoot = makeRepoRoot()
     const counterFile = join(repoRoot, 'gh-list-count')
     const r = runReal(['--repo', 'o/r', '--cap', '1'], {
