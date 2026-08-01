@@ -1260,7 +1260,7 @@ if (cap < 1) {
 // --base <rama>: mismo patrón de validación que --repo/--cap (`arg()` ya
 // devuelve `true`, no un string, cuando el flag es el último token o va
 // seguido de otro flag) — un `--base` colgante nunca debe colarse hacia
-// `git worktree add`/el STATE.md sembrado como el string literal "true".
+// `git worktree add`/el SLICE.md sembrado como el string literal "true".
 // Fix round 1, Minor 1 (review de W-D): igual que --repo (`repo.length ===
 // 0`), una cadena VACÍA también se rechaza aquí — sin esto, `--base ''` pasa
 // la comprobación de `typeof` y se cuela hasta `git worktree add … ''`,
@@ -1275,7 +1275,7 @@ if (baseArg !== undefined && (typeof baseArg !== 'string' || baseArg.length === 
 // __tests__/ct-next-dryrun.test.js). Mismo patrón que T7 (dispatch-check.mjs)
 // para el mismo peligro: si queda colgada en el entorno SIN --dry-run, el
 // script NO debe decidir con datos fabricados ni, sobre todo, crear un
-// worktree real / sembrar STATE.md / lanzar cmux con ese estado inventado.
+// worktree real / sembrar SLICE.md / lanzar cmux con ese estado inventado.
 // Se trata como error de uso y abortamos ANTES de tocar gh o el filesystem.
 if (process.env.CT_NEXT_FIXTURE && !dryRun) {
   console.error('CT_NEXT_FIXTURE está definido pero falta --dry-run: por seguridad no se decide ni se lanza nada real con datos de fixture. Añade --dry-run o limpia la variable de entorno.')
@@ -1433,10 +1433,10 @@ const gh = (a) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'p
 
 // detectDefaultBranch (W-D): antes de este cambio, ct-next.mjs asumía "main"
 // a ciegas tanto en `git worktree add ... main` como en `base: 'main'` del
-// STATE.md sembrado. En un repo cuya rama por defecto real sea distinta
+// SLICE.md sembrado. En un repo cuya rama por defecto real sea distinta
 // (p.ej. "master", o cualquier otra convención) eso fallaba de forma
 // confusa (worktree add contra una rama que no existe), o peor, sembraba un
-// STATE.md con un `base` que miente sobre la rama real.
+// SLICE.md con un `base` que miente sobre la rama real.
 //
 // Se resuelve vía `gh repo view --json defaultBranchRef`: es la fuente
 // autoritativa (la rama por defecto tal y como está configurada AHORA en
@@ -1525,7 +1525,7 @@ function verifyBaseExistsLocally(base) {
 // --show-toplevel` en el cwd en el que arrancó la sesión — que puede no
 // tener NADA que ver con `--repo`. Sin esta guarda, correr `/ct-next --repo
 // otro-org/otro-repo` desde una sesión de control-tower crea `feat/<n>` +
-// `.worktrees/<n>` DENTRO de control-tower, siembra un STATE.md ahí y lanza
+// `.worktrees/<n>` DENTRO de control-tower, siembra un SLICE.md ahí y lanza
 // un agente con un kickoff que dice estar implementando un slice de
 // otro-org/otro-repo. Resolvemos la identidad real del checkout vía `git
 // remote get-url origin` — no `gh repo view --json nameWithOwner`: eso
@@ -2401,7 +2401,7 @@ for (let idx = 0; idx < selected.length; idx++) {
   let kickoff
   let stateSeed
   try {
-    // F17: `base` viaja también al kickoff, no solo al STATE.md sembrado (la
+    // F17: `base` viaja también al kickoff, no solo al SLICE.md sembrado (la
     // línea de abajo lo recibía desde siempre). El agente abre el PR: si no
     // sabe contra qué rama salió su worktree, `gh pr create` lo apunta a la
     // rama por defecto del repo — con `--base <otra-rama>`, un diff que no es
@@ -2409,7 +2409,7 @@ for (let idx = 0; idx < selected.length; idx++) {
     kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath, base: resolvedBase })
     stateSeed = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase })
   } catch (e) {
-    failSlice(idx, `no se pudo renderizar el kickoff/STATE.md de #${s.n}: ${e.message}. El agente se lanzaría sin prompt utilizable — antes, esto solo se descubría en el run real.`)
+    failSlice(idx, `no se pudo renderizar el kickoff/SLICE.md de #${s.n}: ${e.message}. El agente se lanzaría sin prompt utilizable — antes, esto solo se descubría en el run real.`)
     continue
   }
   // Override 1 (shell quoting): --command es UN argv element (buildCmuxArgv
@@ -2537,7 +2537,7 @@ for (let idx = 0; idx < selected.length; idx++) {
 //
 //   1. el --dry-run salía por aquí ANTES de imprimir el plan de NINGÚN
 //      slice — ni siquiera el de los sanos. Un dry-run con un problema en el
-//      segundo de tres no enseñaba ni el kickoff, ni el STATE.md sembrado,
+//      segundo de tres no enseñaba ni el kickoff, ni el SLICE.md sembrado,
 //      ni la línea de `cmux` de ninguno: exactamente lo que se fue a mirar.
 //   2. el resumen daba el CONTEO de fallos pero no decía cuál rompería
 //      primero, ni cuáles de los slices estaban listos.
@@ -2576,7 +2576,7 @@ if (preflightFailures.length) {
 }
 // ============================================================================
 
-// Si un paso POSTERIOR a `git worktree add` falla (seed de STATE.md, o el
+// Si un paso POSTERIOR a `git worktree add` falla (seed de SLICE.md, o el
 // lanzamiento de cmux), el worktree y la rama ya existen en disco. Sin
 // limpieza, reintentar el mismo slice vuelve a fallar en `git worktree add`
 // (ruta y rama ya ocupadas) hasta que un humano limpie a mano — y T10 es
@@ -2815,7 +2815,7 @@ function classifyClaimOutcome(status) {
 }
 
 // W-C, punto 3: revierte un claim ya obtenido cuando el dispatch falla
-// DESPUÉS de reclamar (git worktree add, el seed de STATE.md, o cmux) — sin
+// DESPUÉS de reclamar (git worktree add, el seed de SLICE.md, o cmux) — sin
 // esto el issue queda huérfano en status:in-progress sin nadie trabajándolo,
 // justo el modo de fallo que dispatch-check.mjs se esfuerza en evitar puertas
 // adentro (su propio claim-then-verify). dispatch-check.mjs no tiene un flag
@@ -3498,9 +3498,20 @@ for (let idx = 0; idx < plans.length; idx++) {
   // porque despachar un agente que va a contaminar main es peor que no
   // despacharlo.
   // ==========================================================================
+  // Fix round 1, finding Important 1: `--untracked-files=all`, NUNCA el modo
+  // por defecto. Con el default, git COLAPSA un directorio enteramente sin
+  // trackear en una sola línea (`?? .agent/`) en vez de listar cada fichero
+  // (`?? .agent/SLICE.md`) — y `.agent/` está enteramente sin trackear en
+  // cualquier repo cuyo checkout no tenga ya un `.agent/STATE.md` (u otro
+  // fichero bajo `.agent/`) trackeado. El `.some(includes(SLICE_REL_PATH))`
+  // de abajo no encuentra nada en esa línea colapsada, la puerta deja pasar
+  // el dispatch, y el `git add -A` del agente se lleva el fichero de todas
+  // formas: exactamente el contagio que esta comprobación existe para
+  // cerrar. `--untracked-files=all` fuerza a git a listar cada fichero
+  // individual sin importar el estado de tracking de su directorio.
   let porcelain = null
   try {
-    porcelain = execFileSync('git', ['status', '--porcelain'], {
+    porcelain = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], {
       cwd: wt, encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
     })
   } catch (e) {

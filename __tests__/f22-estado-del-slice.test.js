@@ -42,7 +42,10 @@ const sessionStartHook = join(here, '..', 'dist', 'session-start.js')
 const mkGitRepo = () => {
   const dir = mkdtempSync(join(tmpdir(), 'f22-git-'))
   const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' })
-  git('init', '-q', '.')
+  // Fix round 1, finding 2: `-b main` explícito — sin él, `git init` usa
+  // `init.defaultBranch` de la máquina que corre el test (git de fábrica:
+  // "master"), y el test de merge de más abajo asume "main" a secas.
+  git('init', '-q', '-b', 'main', '.')
   git('config', 'user.email', 'test@test')
   git('config', 'user.name', 'test')
   mkdirSync(join(dir, '.agent'), { recursive: true })
@@ -273,23 +276,36 @@ const realGitFakeRestPath = [
 
 // Repo git DE VERDAD con la trampa puesta: `.gitignore` con la regla y su
 // propia negación justo debajo — verificado a mano (ver Step 4 del brief)
-// que con estas dos líneas `git status --porcelain` SIGUE viendo el fichero
-// pese a la regla que ensureSliceIgnored() escribe en info/exclude, porque
-// una negación en el .gitignore del repo tiene precedencia sobre
-// info/exclude. `.agent/STATE.md` va COMMITEADO (como en cualquier checkout
-// real) porque es lo que hace que `.agent/` no colapse en una sola línea `??
-// .agent/` en el porcelain — con el directorio entero sin trackear, git no
-// lista el fichero individual y el propio `includes(SLICE_REL_PATH)` no
-// tendría nada que encontrar.
-function mkRealDispatchRepo() {
+// que con estas dos líneas `git status --porcelain --untracked-files=all`
+// SIGUE viendo el fichero pese a la regla que ensureSliceIgnored() escribe
+// en info/exclude, porque una negación en el .gitignore del repo tiene
+// precedencia sobre info/exclude.
+//
+// `trackAgentState` (fix round 1, finding Important 1): controla si
+// `.agent/STATE.md` va COMMITEADO en la base, para poder cubrir los DOS
+// casos por los que puede pasar `.agent/` en un checkout real:
+//   - true  (el caso por defecto, el checkout normal): `.agent/` YA tiene
+//     algo trackeado, así que git lista SLICE.md individualmente en el
+//     porcelain sin ayuda de ninguna bandera.
+//   - false: NADA bajo `.agent/` está trackeado — ni siquiera el
+//     directorio existe en la base. Es el caso que `--untracked-files=all`
+//     existe para cubrir: con el modo por defecto de `git status
+//     --porcelain`, un directorio ENTERAMENTE sin trackear colapsa en una
+//     sola línea (`?? .agent/`) que el `includes(SLICE_REL_PATH)` de
+//     ct-next.mjs no reconoce — la puerta se queda ciega justo en el caso
+//     que existe para cerrar. Verificado a mano contra git de verdad antes
+//     de escribir el test de abajo.
+function mkRealDispatchRepo({ trackAgentState = true } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'f22-real-dispatch-'))
   const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' })
   git('init', '-q', '-b', 'main')
   git('config', 'user.email', 'test@test')
   git('config', 'user.name', 'test')
   git('remote', 'add', 'origin', 'https://github.com/o/r.git')
-  mkdirSync(join(dir, '.agent'), { recursive: true })
-  writeFileSync(join(dir, '.agent', 'STATE.md'), '---\ntask: el epic\n---\n# coordinadora\n')
+  if (trackAgentState) {
+    mkdirSync(join(dir, '.agent'), { recursive: true })
+    writeFileSync(join(dir, '.agent', 'STATE.md'), '---\ntask: el epic\n---\n# coordinadora\n')
+  }
   writeFileSync(join(dir, '.gitignore'), `${SLICE_REL_PATH}\n!${SLICE_REL_PATH}\n`)
   git('add', '-A')
   git('commit', '-qm', 'base')
@@ -298,37 +314,56 @@ function mkRealDispatchRepo() {
 
 const openIssue1 = { number: 1, title: '#1 algo', labels: [{ name: 'status:ready' }], body: '' }
 
+// runGateTest: el montaje de despacho real (idéntico entre los dos casos de
+// abajo), parametrizado solo por el repo de entrada — para que los dos casos
+// (`.agent/` con algo trackeado / `.agent/` enteramente sin trackear) corran
+// exactamente la misma secuencia de aserciones y no puedan divergir en algo
+// que no sea la causa que cada uno quiere probar.
+function runGateTest(repoRoot) {
+  const argvLog = join(repoRoot, 'gh-argv-log')
+  const counterFile = join(repoRoot, 'gh-list-count')
+  const r = spawnSync('node', [ctNextScript, '--repo', 'o/r', '--cap', '1'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      ...ACCOUNT_ENV,
+      PATH: realGitFakeRestPath,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue1], []]),
+      FAKE_GH_COUNTER_FILE: counterFile,
+      FAKE_GH_ARGV_LOG_FILE: argvLog,
+    },
+  })
+  const out = (r.stdout || '') + (r.stderr || '')
+
+  // 1. No se despacha.
+  expect(r.status).not.toBe(0)
+  // 2. El motivo es el que la puerta de efecto imprime — no un fallo genérico.
+  expect(out).toContain('SIGUE siendo visible para git')
+  // 3. El worktree quedó limpiado, no huérfano.
+  expect(existsSync(join(repoRoot, '.worktrees', '1'))).toBe(false)
+  // 4. Y el claim revertido: el fake-gh registró la llamada real de vuelta
+  // a status:ready (mismo patrón de aserción que ct-next-claim.test.js usa
+  // para el mismo tipo de revert automático tras un fallo post-claim).
+  const argv = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
+  expect(argv).toMatch(/issue edit 1 --repo o\/r --add-label status:ready --remove-label status:in-progress/)
+
+  rmSyncBestEffort(repoRoot)
+}
+
 describe('F22 — la verificación de efecto ABORTA una corrida real y revierte el claim', () => {
-  it('.gitignore con negación gana a info/exclude → no se despacha, worktree limpiado, claim devuelto a status:ready', () => {
-    const repoRoot = mkRealDispatchRepo()
-    const argvLog = join(repoRoot, 'gh-argv-log')
-    const counterFile = join(repoRoot, 'gh-list-count')
-    const r = spawnSync('node', [ctNextScript, '--repo', 'o/r', '--cap', '1'], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        ...ACCOUNT_ENV,
-        PATH: realGitFakeRestPath,
-        FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue1], []]),
-        FAKE_GH_COUNTER_FILE: counterFile,
-        FAKE_GH_ARGV_LOG_FILE: argvLog,
-      },
-    })
-    const out = (r.stdout || '') + (r.stderr || '')
+  it('.gitignore con negación gana a info/exclude, con .agent/STATE.md ya trackeado → no se despacha, worktree limpiado, claim devuelto a status:ready', () => {
+    runGateTest(mkRealDispatchRepo({ trackAgentState: true }))
+  })
 
-    // 1. No se despacha.
-    expect(r.status).not.toBe(0)
-    // 2. El motivo es el que la puerta de efecto imprime — no un fallo genérico.
-    expect(out).toContain('SIGUE siendo visible para git')
-    // 3. El worktree quedó limpiado, no huérfano.
-    expect(existsSync(join(repoRoot, '.worktrees', '1'))).toBe(false)
-    // 4. Y el claim revertido: el fake-gh registró la llamada real de vuelta
-    // a status:ready (mismo patrón de aserción que ct-next-claim.test.js usa
-    // para el mismo tipo de revert automático tras un fallo post-claim).
-    const argv = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
-    expect(argv).toMatch(/issue edit 1 --repo o\/r --add-label status:ready --remove-label status:in-progress/)
-
-    rmSyncBestEffort(repoRoot)
+  // Fix round 1, finding Important 1: caso separado con NADA trackeado bajo
+  // `.agent/` — el que `git status --porcelain` sin `--untracked-files=all`
+  // dejaba pasar (colapsaba a `?? .agent/`, invisible para el
+  // `includes(SLICE_REL_PATH)` de la puerta). Sin este caso, el que
+  // `.agent/STATE.md` vaya commiteado en el otro test es una propiedad del
+  // FIXTURE que por accidente hace pasar la comprobación real — ct-next.mjs
+  // no exige en ningún sitio que `.agent/` tenga algo trackeado.
+  it('.gitignore con negación gana a info/exclude, con NADA trackeado bajo .agent/ → sigue abortando (protege contra el colapso de directorio sin trackear)', () => {
+    runGateTest(mkRealDispatchRepo({ trackAgentState: false }))
   })
 })
