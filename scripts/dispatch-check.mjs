@@ -21,10 +21,12 @@
 // — hasta que eso aterrice, esta es la garantía real: ninguna bajo
 // concurrencia, sí bajo uso secuencial disciplinado.
 import { execFileSync } from 'node:child_process'
-import { writeSync, statSync } from 'node:fs'
+import { writeSync, statSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { detectCollisions, claimLost } from './claim.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 import { parseStrictInt } from './argnum.js'
+import { NEVER_IN_A_SLICE_PR, SLICE_REL_PATH } from './state-paths.js'
 
 // ============================================================================
 // Finding 4 (auditoría de interrupción/staleness): dos cambios en este
@@ -75,6 +77,11 @@ import { parseStrictInt } from './argnum.js'
 //       mire antes de que ct-next.mjs reintente nada más — el caller aborta
 //       la tanda ENTERA con este código, igual que ya hacía antes al ver
 //       este mismo texto de ATENCIÓN.
+//   5 = NUEVO (F22) — la rama del slice INTRODUCE un fichero de estado
+//       (`.agent/STATE.md` o `.agent/SLICE.md`). No se libera nada: el issue
+//       se queda en status:in-progress. Este código NO lo ve nunca
+//       ct-next.mjs — `--release` lo invoca el agente al entregar, no el
+//       bucle de claim, así que no pasa por classifyClaimOutcome.
 // El texto que este fichero imprime NO cambia de contenido (los mismos
 // detalles, incluido el comando manual de `--release`/revert) — solo deja
 // de ser la ÚNICA fuente de verdad para la decisión del caller.
@@ -328,7 +335,70 @@ function setStatus(issue, from, to) {
   }
 }
 
+// ============================================================================
+// F22 — LA PUERTA: UN SLICE NO ENTREGA CON UN FICHERO DE ESTADO DENTRO.
+//
+// `.agent/STATE.md` es de la sesión COORDINADORA. Si la rama del slice lo
+// introduce, el squash del PR deja main con el estado de un slice: `task:` con
+// el nombre del slice, `role: slice-agent` y un gate pendiente de un PR ya
+// mergeado. Cualquier sesión nueva del repo se hidrata creyendo que ES ese
+// agente. Pasó tres veces en un periodo de 9 slices, y una llegó a main.
+//
+// SE NIEGA, no avisa. Una comprobación que sólo imprime no es una
+// comprobación: si su resultado no puede detener la acción siguiente, es
+// decoración — y fue exactamente así como se coló la que llegó a main (imprimió
+// `1` y el merge siguió adelante).
+//
+// LÍMITE, dicho: `--release` lo invoca el agente porque el kickoff se lo pide,
+// y el kickoff es un prompt, no un gate. Un agente que no lo llame se salta
+// esta puerta — pero entonces su issue se queda en status:in-progress, que sí
+// se ve. Esto mueve el caso normal de la retina del humano al loop; no lo
+// vuelve hermético.
+// ============================================================================
+function sliceBaseRef() {
+  // El `base` de la semilla es la respuesta correcta: es la referencia real
+  // desde la que se cortó este worktree, `--base` incluido. La cadena de
+  // fallback cubre los worktrees del esquema anterior (sin SLICE.md).
+  try {
+    const m = readFileSync(join(process.cwd(), SLICE_REL_PATH), 'utf8').match(/^base:[ \t]*(.+)$/m)
+    if (m) {
+      const v = m[1].trim().replace(/^['"]|['"]$/g, '')
+      if (v) return v
+    }
+  } catch { /* sin SLICE.md: worktree del esquema anterior, o cwd que no es el worktree */ }
+  for (const ref of ['origin/HEAD', 'origin/main', 'main', 'master']) {
+    try {
+      execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { stdio: 'ignore' })
+      return ref
+    } catch { /* siguiente */ }
+  }
+  return ''
+}
+
+function stateFilesIntroducedByBranch() {
+  const base = sliceBaseRef()
+  if (!base) {
+    return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
+  }
+  let out = ''
+  try {
+    out = execFileSync('git', ['diff', '--name-only', `${base}...HEAD`], { encoding: 'utf8' })
+  } catch (e) {
+    return { known: false, why: `\`git diff ${base}...HEAD\` falló: ${e.message}` }
+  }
+  const touched = out.split('\n').map((l) => l.trim()).filter(Boolean)
+  return { known: true, base, hits: NEVER_IN_A_SLICE_PR.filter((p) => touched.includes(p)) }
+}
+
 if (release) {
+  const check = stateFilesIntroducedByBranch()
+  if (!check.known) {
+    dieErr(`no se puede liberar #${issue}: ${check.why}, así que NO se ha podido comprobar si esta rama introduce un fichero de estado (${NEVER_IN_A_SLICE_PR.join(' o ')}). No se afirma que esté limpia — un fichero de estado en el PR deja main con el estado de un slice tras el squash. Comprueba a mano con \`git diff --name-only <base>...HEAD\` y, si está limpio, vuelve a intentarlo desde un cwd donde la base se resuelva.`, 5)
+  }
+  if (check.hits.length) {
+    const lista = check.hits.join(', ')
+    dieErr(`no se libera #${issue}: esta rama INTRODUCE ${lista} respecto a ${check.base}. Ese fichero es el estado de la sesión coordinadora, no producto de este slice: al mergear con squash, main se quedaría con el estado de este slice y cualquier sesión nueva del repo se hidrataría creyendo que es este agente. Restáuralo y vuelve a intentarlo: \`git checkout ${check.base} -- ${lista}\` y commitea (o \`git rm --cached\` si lo añadiste nuevo). El issue sigue en status:in-progress: no se ha movido nada.`, 5)
+  }
   if (!dryRun && !fx) {
     const result = setStatus(issue, 'status:in-progress', 'status:in-review')
     if (!result.ok) {

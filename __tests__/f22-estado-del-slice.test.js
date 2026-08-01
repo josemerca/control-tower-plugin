@@ -595,3 +595,55 @@ describe('F22 — ct-init deja la regla commiteada en el .gitignore', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+describe('F22 — --release se niega si la rama lleva un fichero de estado', () => {
+  const dispatchCheck = join(here, '..', 'scripts', 'dispatch-check.mjs')
+
+  const mkSliceWorktree = () => {
+    const dir = mkGitRepo()
+    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+    writeFileSync(join(dir, STATE_REL_PATH), '---\ntask: el epic\n---\n# c\n')
+    git('add', '-A')
+    git('commit', '-qm', 'estado coordinadora')
+    git('worktree', 'add', '-q', '-b', 'feat/1', '.worktrees/1', 'HEAD')
+    const wt = join(dir, '.worktrees', '1')
+    const baseSha = git('rev-parse', 'HEAD').trim()
+    // Mismo patrón que "F22 — el seed no toca el fichero de la
+    // coordinadora": sin esta regla en info/exclude, `.agent/SLICE.md` no
+    // está ignorado en este repo de prueba y un `git add -A` posterior lo
+    // arrastraría al commit de "work" — contaminando precisamente el caso
+    // que el segundo test de abajo quiere dejar limpio. En el dispatcher
+    // real esta regla la escribe ensureSliceIgnored() (Task 3) antes de
+    // sembrar SLICE.md; aquí hay que replicarla a mano.
+    const common = execFileSync('git', ['rev-parse', '--git-common-dir'], { cwd: wt, encoding: 'utf8' }).trim()
+    writeFileSync(join(common, 'info', 'exclude'), `${SLICE_REL_PATH}\n`, { flag: 'a' })
+    writeFileSync(join(wt, SLICE_REL_PATH), `---\ntask: slice\nbase: ${baseSha}\n---\n# s\n`)
+    return { dir, wt, git: (...a) => execFileSync('git', a, { cwd: wt, encoding: 'utf8' }) }
+  }
+
+  it('exit 5 cuando la rama introduce .agent/STATE.md, y el mensaje da el remedio', () => {
+    const { dir, wt, git } = mkSliceWorktree()
+    writeFileSync(join(wt, STATE_REL_PATH), '---\ntask: el slice\n---\n# contaminado\n')
+    git('add', '-A')
+    git('commit', '-qm', 'work + estado')
+    const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
+      cwd: wt, encoding: 'utf8',
+    })
+    expect(r.status).toBe(5)
+    expect(r.stderr).toContain('.agent/STATE.md')
+    expect(r.stderr).toContain('git checkout')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('exit 0 con una rama limpia — el caso normal no paga nada', () => {
+    const { dir, wt, git } = mkSliceWorktree()
+    writeFileSync(join(wt, 'f.txt'), 'trabajo\n')
+    git('add', '-A')
+    git('commit', '-qm', 'work')
+    const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
+      cwd: wt, encoding: 'utf8',
+    })
+    expect(r.status).toBe(0)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
