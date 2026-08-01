@@ -375,14 +375,49 @@ function sliceBaseRef() {
   return ''
 }
 
+// F22, fix round 1 (Important + Minor elevado) — TRES formas de que esta
+// función informe "limpia" sin haber comprobado nada de verdad:
+//
+//   (a) `diff.relative=true` en la config de git de quien invoca, combinado
+//       con un cwd en un subdirectorio: `git diff --name-only` sin más omite
+//       los paths FUERA del subárbol del cwd, así que el `includes(p)` de
+//       abajo nunca encontraría `.agent/STATE.md` aunque esté en el diff
+//       real. `--no-relative` lo desactiva explícitamente sin importar la
+//       config de quien invoque.
+//   (b) detección de renombres activada (el default de `git diff` con
+//       heurística de similitud): una rama que RENOMBRA `.agent/STATE.md` a
+//       otra cosa imprime solo el destino — el borrado del origen queda
+//       oculto dentro del par de rename, y `includes('.agent/STATE.md')`
+//       no lo ve. `--no-renames` fuerza que el borrado y la creación salgan
+//       como dos líneas independientes, una de ellas el path exacto que se
+//       busca.
+//   (c) un `base:` en la semilla IGUAL a HEAD. `SLICE.md` no está trackeado
+//       y lo escribe el propio agente del slice — es agent-reachable. Con
+//       `base === HEAD`, `git diff base...HEAD` es SIEMPRE vacío por
+//       construcción: no es que la rama esté limpia, es que no se comparó
+//       nada. Tratarlo como "limpia" dejaría que un agente (a propósito o
+//       por un bug) neutralizara la puerta reescribiendo su propio `base:`
+//       al commit en el que ya cometió la contaminación. Se trata igual que
+//       "no se pudo determinar la base": known:false, nunca known:true con
+//       hits vacíos.
 function stateFilesIntroducedByBranch() {
   const base = sliceBaseRef()
   if (!base) {
     return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
   }
+  let baseSha, headSha
+  try {
+    baseSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${base}^{commit}`], { encoding: 'utf8' }).trim()
+    headSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], { encoding: 'utf8' }).trim()
+  } catch (e) {
+    return { known: false, why: `no se pudo resolver \`${base}\` o HEAD a un commit: ${e.message}` }
+  }
+  if (baseSha === headSha) {
+    return { known: false, why: `la base resuelta (\`${base}\`) es EL MISMO commit que HEAD (${headSha.slice(0, 12)}) — un diff contra sí mismo sale vacío por construcción, así que eso no es "limpia", es "no comparada"` }
+  }
   let out = ''
   try {
-    out = execFileSync('git', ['diff', '--name-only', `${base}...HEAD`], { encoding: 'utf8' })
+    out = execFileSync('git', ['diff', '--no-relative', '--no-renames', '--name-only', `${base}...HEAD`], { encoding: 'utf8' })
   } catch (e) {
     return { known: false, why: `\`git diff ${base}...HEAD\` falló: ${e.message}` }
   }

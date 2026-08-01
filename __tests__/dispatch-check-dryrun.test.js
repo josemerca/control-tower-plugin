@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -41,6 +41,37 @@ function run(issue, fixture) {
   } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') } }
 }
 
+// F22, fix round 1, item 1 — `--release --dry-run` corre la puerta de F22
+// (Task 8) INCLUSO en dry-run: la puerta lee git real desde el cwd, nunca el
+// fixture. Los tres tests de abajo que aseveran `--release --dry-run` → exit
+// 0 corrían, antes de este fixture, sin `cwd` — es decir, contra el propio
+// checkout de este plugin, y pasaban solo porque dos hechos AMBIENTALES
+// resultan ciertos hoy: este repo no tiene `.agent/` trackeado, y
+// `main`/`origin/HEAD` resuelven. Ninguna de las dos es una propiedad del
+// test — el día en que este mismo repo se ct-init'ee (que es literalmente lo
+// que este plugin hace a otros repos), `.agent/STATE.md` pasa a estar
+// trackeado, y estos tres tests de semántica de dry-run empezarían a fallar
+// con un mensaje de contaminación de slice que no tiene nada que ver con lo
+// que están probando. Un repo de propósito específico, con una base real
+// (`main`) y una rama (`feat/9`) que diverge de ella sin tocar ningún
+// fichero de estado, hace que el exit 0 dependa del fixture, no del checkout
+// en el que corra la suite.
+function mkReleaseDryRunRepo() {
+  const dir = mkdtempSync(join(tmpdir(), 'ct-release-dryrun-'))
+  const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' })
+  git('init', '-q', '-b', 'main')
+  git('config', 'user.email', 'test@test')
+  git('config', 'user.name', 'test')
+  writeFileSync(join(dir, 'f.txt'), 'base\n')
+  git('add', '-A')
+  git('commit', '-qm', 'base')
+  git('checkout', '-qb', 'feat/9')
+  writeFileSync(join(dir, 'work.txt'), 'trabajo\n')
+  git('add', '-A')
+  git('commit', '-qm', 'work')
+  return dir
+}
+
 describe('dispatch-check --dry-run', () => {
   it('colisión → exit 1', () => {
     const r = run(7, { candLabels: ['touches:db'], openIssues: [{ n: 5, labels: ['status:in-progress', 'touches:db'] }], readback: [] })
@@ -61,11 +92,14 @@ describe('dispatch-check --dry-run', () => {
   })
 
   it('--release → exit 0 e imprime la transición in-progress → in-review', () => {
+    const dir = mkReleaseDryRunRepo()
     try {
-      const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+      const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO })
       expect(out).toMatch(/released #9.*in-review/)
     } catch (e) {
       throw new Error(`no debería fallar: ${e.status} ${(e.stdout || '') + (e.stderr || '')}`)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
     }
   })
 
@@ -165,8 +199,10 @@ describe('dispatch-check — T11 fix round 3 (--settle-ms/CT_CLAIM_SETTLE_MS rec
   })
 
   it('sin --settle-ms ni CT_CLAIM_SETTLE_MS → no le afecta (camino normal)', () => {
-    const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { encoding: 'utf8', stdio: QUIET_STDIO })
+    const dir = mkReleaseDryRunRepo()
+    const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO })
     expect(out).toMatch(/released #9.*in-review/)
+    rmSync(dir, { recursive: true, force: true })
   })
 })
 
@@ -410,9 +446,11 @@ describe('dispatch-check — T11 hook CT_CLAIM_PRECLAIM_DELAY_MS', () => {
   // status:in-progress. Este test demuestra que --release ahora es inmune:
   // ni siquiera un valor claramente inválido lo afecta.
   it('--release con CT_CLAIM_PRECLAIM_DELAY_MS malformado en el entorno → --release procede igual, no le afecta', () => {
+    const dir = mkReleaseDryRunRepo()
     const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'],
-      { encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_PRECLAIM_DELAY_MS: 'not-a-number' } })
+      { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_PRECLAIM_DELAY_MS: 'not-a-number' } })
     expect(out).toMatch(/released #9.*in-review/)
+    rmSync(dir, { recursive: true, force: true })
   })
 
   // Fix round 1, Minor 2: tope superior de 60000ms. Sin tope, "1e12" (~31

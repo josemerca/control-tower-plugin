@@ -646,4 +646,126 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     expect(r.status).toBe(0)
     rmSync(dir, { recursive: true, force: true })
   })
+
+  // ==========================================================================
+  // F22, fix round 1 — tres formas más de que la puerta pase en silencio una
+  // rama contaminada. El reviewer las elevó de Minor a bloqueantes: una
+  // puerta que se puede desactivar por config, por un rename, o por un
+  // `base:` auto-referencial no es una puerta, es una comprobación que a
+  // veces comprueba.
+  // ==========================================================================
+
+  it('con diff.relative=true en la config de git e invocado desde un subdirectorio, SIGUE viendo .agent/STATE.md fuera del subárbol', () => {
+    // Sin `--no-relative`, `git diff --name-only` desde un subdirectorio con
+    // `diff.relative=true` en la config OMITE por completo los paths fuera
+    // de ese subárbol — ni siquiera los oculta bajo un path relativo raro,
+    // los hace desaparecer de la salida. Verificado a mano antes de este
+    // test: sin el flag, la única línea que imprime `git diff` desde `sub/`
+    // es `work.txt`; `.agent/STATE.md` no aparece en ningún sitio.
+    const { dir, wt, git } = mkSliceWorktree()
+    mkdirSync(join(wt, 'sub'), { recursive: true })
+    // `.agent/STATE.md` ya está trackeado desde la base (mkSliceWorktree lo
+    // commitea en `dir` antes de crear el worktree) — hace falta CAMBIAR su
+    // contenido para que aparezca en el diff, no solo tenerlo presente.
+    writeFileSync(join(wt, STATE_REL_PATH), '---\ntask: el slice\n---\n# contaminado\n')
+    writeFileSync(join(wt, 'sub', 'work.txt'), 'trabajo\n')
+    git('add', '-A')
+    git('commit', '-qm', 'work + estado')
+    // La config es del repo (afecta a cualquier invocación de git en él,
+    // como haría la config real de quien esté ejecutando el gate) — no algo
+    // que el script controle.
+    git('config', 'diff.relative', 'true')
+    const subDir = join(wt, 'sub')
+    // Sin SLICE.md en `sub/` (el `.agent/SLICE.md` real vive en la raíz del
+    // worktree, no en el subdirectorio), sliceBaseRef() cae al fallback:
+    // aquí SÍ hay SLICE.md en la raíz del worktree, pero `readFileSync` lo
+    // busca en `process.cwd()` (=`sub/`), así que tampoco lo encuentra desde
+    // ahí y cae igual al fallback, que resuelve `main`.
+    const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
+      cwd: subDir, encoding: 'utf8',
+    })
+    expect(r.status).toBe(5)
+    expect(r.stderr).toContain('.agent/STATE.md')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('un renombrado de .agent/STATE.md no esconde el borrado del path original', () => {
+    // Con detección de renombres activada (el default de `git diff`), una
+    // rama que hace `git mv .agent/STATE.md otro-nombre.md` imprime SOLO el
+    // destino en `--name-only` — el borrado del origen queda oculto dentro
+    // del par de rename. Verificado a mano: sin `--no-renames`, la única
+    // línea es `otro-nombre.md`; con `--no-renames`, salen las dos, borrado
+    // y creación, como paths independientes.
+    // `.agent/STATE.md` ya está trackeado desde la base (mkSliceWorktree lo
+    // commitea en `dir` antes de crear el worktree): basta con renombrarlo.
+    const { dir, wt, git } = mkSliceWorktree()
+    git('mv', STATE_REL_PATH, 'otro-nombre.md')
+    git('commit', '-qm', 'renombra STATE.md')
+    const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
+      cwd: wt, encoding: 'utf8',
+    })
+    expect(r.status).toBe(5)
+    expect(r.stderr).toContain('.agent/STATE.md')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('un `base:` en la semilla igual a HEAD no se lee como "limpia" — se niega igual que "no se pudo determinar la base"', () => {
+    // `SLICE.md` no está trackeado y lo escribe el propio agente del slice:
+    // es agent-reachable. Un `base:` que apunte a HEAD (por accidente, o
+    // porque algo lo reescribió tras cometer la contaminación) haría que
+    // `git diff base...HEAD` saliera SIEMPRE vacío por construcción — no
+    // porque la rama esté limpia, sino porque no se comparó nada. La puerta
+    // tiene que tratarlo como "no se pudo comprobar", nunca como "limpia".
+    const dir = mkGitRepo()
+    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+    writeFileSync(join(dir, STATE_REL_PATH), '---\ntask: el epic\n---\n# c\n')
+    git('add', '-A')
+    git('commit', '-qm', 'estado coordinadora')
+    git('worktree', 'add', '-q', '-b', 'feat/3', '.worktrees/3', 'HEAD')
+    const wt = join(dir, '.worktrees', '3')
+    const wtGit = (...a) => execFileSync('git', a, { cwd: wt, encoding: 'utf8' })
+    // Contamina primero...
+    writeFileSync(join(wt, STATE_REL_PATH), '---\ntask: el slice\n---\n# contaminado\n')
+    wtGit('add', '-A')
+    wtGit('commit', '-qm', 'work + estado')
+    // ...y LUEGO escribe la semilla con `base:` apuntando al HEAD actual (el
+    // commit que YA incluye la contaminación) en vez de al commit real del
+    // que se cortó el worktree.
+    const selfSha = wtGit('rev-parse', 'HEAD').trim()
+    writeFileSync(join(wt, SLICE_REL_PATH), `---\ntask: slice\nbase: ${selfSha}\n---\n# s\n`)
+    const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
+      cwd: wt, encoding: 'utf8',
+    })
+    expect(r.status).toBe(5)
+    expect(r.stderr).toContain('EL MISMO commit que HEAD')
+    expect(r.stderr).toContain('NO se ha podido comprobar')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('sin base resoluble (sin main/master/remoto, sin SLICE.md) → exit 5, y dice explícitamente que NO se pudo comprobar', () => {
+    // El invariante central del plan: nunca afirmar que algo se comprobó
+    // cuando no se comprobó. Este es el test que atraparía una regresión
+    // como añadir 'HEAD' a la cadena de fallback de sliceBaseRef() — con
+    // ese cambio, esta misma rama (sin main/master/remoto) resolvería su
+    // propio HEAD como base, el diff saldría vacío, y el gate reportaría
+    // "limpia" sin haber comparado nada. A propósito, NADA de mkGitRepo()
+    // (que crea la rama `main`): la rama de este repo se llama `feat/1`, no
+    // hay remoto, y no hay `.agent/SLICE.md`, así que las cuatro vías de
+    // sliceBaseRef() están cerradas.
+    const dir = mkdtempSync(join(tmpdir(), 'f22-nobase-'))
+    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+    git('init', '-q', '-b', 'feat/1', '.')
+    git('config', 'user.email', 'test@test')
+    git('config', 'user.name', 'test')
+    writeFileSync(join(dir, 'f.txt'), 'base\n')
+    git('add', '-A')
+    git('commit', '-qm', 'base')
+    const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
+      cwd: dir, encoding: 'utf8',
+    })
+    expect(r.status).toBe(5)
+    expect(r.stderr).toContain('no se pudo determinar la base')
+    expect(r.stderr).toContain('NO se ha podido comprobar')
+    rmSync(dir, { recursive: true, force: true })
+  })
 })
