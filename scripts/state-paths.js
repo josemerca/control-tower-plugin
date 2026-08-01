@@ -38,15 +38,23 @@ export const SLICE_REL_PATH = '.agent/SLICE.md'
 export const NEVER_IN_A_SLICE_PR = [STATE_REL_PATH, SLICE_REL_PATH]
 
 /**
+ * `rel` es la MISMA ruta que `path`, pero relativa — y no es un adorno: es lo
+ * que los mensajes tienen que nombrar. Quien los lee (un agente, o una persona)
+ * está DENTRO de ese directorio, así que un absoluto de 90 caracteres con el
+ * tmpdir de la máquina no le dice qué fichero abrir mejor que `.agent/SLICE.md`.
+ * Se devuelve desde aquí en vez de dejar que cada hook lo derive de `kind`:
+ * dos derivaciones son dos sitios donde pueden divergir, y son exactamente los
+ * dos hooks que tienen que decir lo mismo.
+ *
  * @param {string} cwd
- * @returns {{ path: string|null, kind: 'slice'|'coordinator'|'none' }}
+ * @returns {{ path: string|null, kind: 'slice'|'coordinator'|'none', rel: string|null }}
  */
 export function resolveStatePath(cwd) {
   const slice = join(cwd, SLICE_REL_PATH)
-  if (existsSync(slice)) return { path: slice, kind: 'slice' }
+  if (existsSync(slice)) return { path: slice, kind: 'slice', rel: SLICE_REL_PATH }
   const state = join(cwd, STATE_REL_PATH)
-  if (existsSync(state)) return { path: state, kind: 'coordinator' }
-  return { path: null, kind: 'none' }
+  if (existsSync(state)) return { path: state, kind: 'coordinator', rel: STATE_REL_PATH }
+  return { path: null, kind: 'none', rel: null }
 }
 
 /**

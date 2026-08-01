@@ -9,7 +9,11 @@ describe('renderKickoff', () => {
   it('backend: has backend markers, not ui/infra/bugfix', () => {
     const k = renderKickoff(SLICE, { repo: 'o/r' })
     expect(k).toContain('subagent-driven-development')
-    expect(k).toContain('.agent/STATE.md')
+    // F22: el fichero de estado de un agente de slice es `.agent/SLICE.md`.
+    // El kickoff SOLO lo recibe un agente de slice, así que nombrar aquí el
+    // `.agent/STATE.md` de la coordinadora era mandarlo al fichero trackeado
+    // cuya contaminación motivó toda esta ronda.
+    expect(k).toContain('.agent/SLICE.md')
     expect(k.toLowerCase()).toMatch(/migraci|rollback|contrato/) // backend present
     // Verify other addenda are NOT present
     expect(k.toLowerCase()).not.toMatch(/screenshot|design system/) // not ui

@@ -9,7 +9,13 @@ try { input = JSON.parse(readFileSync(0, 'utf8')) } catch { process.exit(0) }
 const cwd = input.cwd || process.cwd()
 // F22: misma precedencia que en session-start.js. En un worktree de slice esto
 // resuelve a .agent/SLICE.md, que es el fichero cuya frescura importa.
-const { path: statePath } = resolveStatePath(cwd)
+//
+// `rel` (la misma ruta, relativa) viaja hasta los mensajes. Aquí NO es un
+// detalle: desde que la semilla trae el sha de la base, el motivo de bloqueo
+// de este hook sale en CADA turno de CADA slice, y decía «Actualiza STATE.md»
+// — el fichero TRACKEADO de la coordinadora, cuya contaminación es justo lo
+// que F22 elimina.
+const { path: statePath, rel: stateRel } = resolveStatePath(cwd)
 
 if (!statePath) process.exit(0)
 
@@ -46,7 +52,7 @@ if (parseError) {
   if (!input.stop_hook_active) {
     process.stdout.write(JSON.stringify({
       decision: 'block',
-      reason: `No se ha podido interpretar el frontmatter YAML de .agent/STATE.md (${parseError}). Arréglalo antes de cerrar el turno: mientras siga así, la próxima sesión no podrá hidratarse del estado ni saber si el trabajo está BLOQUEADO (campo \`blocked\`), y este mismo aviso volverá a salir.`,
+      reason: `No se ha podido interpretar el frontmatter YAML de ${stateRel} (${parseError}). Arréglalo antes de cerrar el turno: mientras siga así, la próxima sesión no podrá hidratarse del estado ni saber si el trabajo está BLOQUEADO (campo \`blocked\`), y este mismo aviso volverá a salir.`,
     }))
   }
   process.exit(0)
@@ -56,7 +62,7 @@ if (parseError) {
 // en ningún momento. Ahora se le pregunta a git y cada caso dice lo suyo (ver
 // la cabecera de la sección en scripts/state.js).
 const relation = describeStopRelation({ headSha, lastCommit: meta.last_commit, git, branch })
-const verdict = classifyStopState({ relation, stopHookActive: input.stop_hook_active })
+const verdict = classifyStopState({ relation, stopHookActive: input.stop_hook_active, stateRel })
 
 if (verdict.block) {
   process.stdout.write(JSON.stringify({ decision: 'block', reason: verdict.reason }))

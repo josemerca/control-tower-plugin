@@ -27,7 +27,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { STATE_REL_PATH, SLICE_REL_PATH, NEVER_IN_A_SLICE_PR, resolveStatePath, excludeContentWith } from '../scripts/state-paths.js'
-import { buildStateSeed } from '../scripts/kickoff.js'
+import { buildStateSeed, renderKickoff } from '../scripts/kickoff.js'
 import { parseState } from '../scripts/state.js'
 // F22, Step 4: montaje reusado de __tests__/ct-next-launch-verification.test.js
 // — dirs de cuenta + stubs de cmux/claude, e higiene de limpieza de directorios
@@ -411,6 +411,71 @@ describe('F22 — la semilla deja de desarmar el hook de frescura', () => {
     git('commit', '-qm', 'work 1')
     expect(runHook(stopHook, dir)).toBeNull()
     rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// ============================================================================
+// F22, Task 6b — LOS MENSAJES NOMBRAN EL FICHERO QUE SE LEYÓ DE VERDAD.
+//
+// Los lectores ya aplican la precedencia, pero los mensajes que hablan del
+// fichero seguían nombrando `.agent/STATE.md` a pelo. En el worktree de un
+// slice eso le dice al agente que edite el fichero TRACKEADO de la
+// coordinadora — justo la contaminación que F22 elimina. Y desde la Task 5
+// (que rearmó el hook `Stop` sembrando `last_commit` con el sha de la base)
+// ese motivo de bloqueo sale en CADA turno de CADA slice, así que la
+// instrucción equivocada pasó de inofensiva a ser lo que el agente lee
+// turno tras turno.
+//
+// Los dos primeros tests corren el hook REAL de `dist/` contra un repo de
+// verdad: es la única forma de comprobar que la ruta resuelta llega desde
+// `resolveStatePath` hasta el texto, atravesando el hook y `state.js`.
+// ============================================================================
+describe('F22 — los mensajes nombran el fichero que se leyó', () => {
+  it('en un worktree de slice, el bloqueo del hook Stop nombra SLICE.md y NO STATE.md', () => {
+    const dir = mkGitRepo()
+    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+    const base = git('rev-parse', 'HEAD').trim()
+    writeFileSync(join(dir, SLICE_REL_PATH), `---\ntask: slice\nlast_commit: ${base}\n---\n# s\n`)
+    writeFileSync(join(dir, 'f.txt'), 'trabajo\n')
+    git('add', 'f.txt')
+    git('commit', '-qm', 'work 1')
+
+    const out = runHook(stopHook, dir)
+    expect(out.decision).toBe('block')
+    expect(out.reason).toContain(SLICE_REL_PATH)
+    // Lo que de verdad importa: ni una sola mención al fichero de la
+    // coordinadora. Un `Actualiza STATE.md` aquí es una orden de contaminar.
+    expect(out.reason).not.toContain(STATE_REL_PATH)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('en el checkout de la coordinadora, el mismo bloqueo sigue nombrando STATE.md', () => {
+    const dir = mkGitRepo()
+    const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+    const base = git('rev-parse', 'HEAD').trim()
+    writeFileSync(join(dir, STATE_REL_PATH), `---\ntask: el epic\nlast_commit: ${base}\n---\n# c\n`)
+    writeFileSync(join(dir, 'f.txt'), 'trabajo\n')
+    git('add', 'f.txt')
+    git('commit', '-qm', 'work 1')
+
+    const out = runHook(stopHook, dir)
+    expect(out.decision).toBe('block')
+    expect(out.reason).toContain(STATE_REL_PATH)
+    expect(out.reason).not.toContain(SLICE_REL_PATH)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el kickoff le dice al agente que use SLICE.md, en TODAS sus líneas', () => {
+    const k = renderKickoff(
+      { n: 7, name: 'un slice', type: 'backend', ac: ['AC-7.1'], issue: '#7' },
+      { repo: 'o/r', dispatchCheckPath: '/p/dispatch-check.mjs', base: 'main' },
+    )
+    // Ninguna línea nombra el fichero de la coordinadora: el kickoff SOLO lo
+    // recibe un agente de slice, así que ahí no hay ambigüedad posible.
+    expect(k).not.toContain(STATE_REL_PATH)
+    const linea = (aguja) => k.split('\n').find((l) => l.includes(aguja))
+    expect(linea('blocked:')).toContain(SLICE_REL_PATH)
+    expect(linea('Al acabar:')).toContain(SLICE_REL_PATH)
   })
 })
 
