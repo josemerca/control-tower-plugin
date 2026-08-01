@@ -119,13 +119,16 @@ describe('F22 — los hooks leen por precedencia', () => {
     const dir = mkGitRepo()
     const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
     const base = git('rev-parse', 'HEAD').trim()
-    // El STATE.md de la coordinadora apunta a HEAD: si el hook lo leyera a él,
-    // la relación sería `same` y no bloquearía nunca.
-    writeFileSync(join(dir, STATE_REL_PATH), `---\ntask: coordinadora\nlast_commit: ${base}\n---\n# c\n`)
     writeFileSync(join(dir, SLICE_REL_PATH), `---\ntask: slice\nlast_commit: ${base}\n---\n# s\n`)
+    // Hacer trabajo y capturar el nuevo HEAD
     writeFileSync(join(dir, 'f.txt'), 'trabajo\n')
     git('add', 'f.txt')
     git('commit', '-qm', 'work 1')
+    const newHead = git('rev-parse', 'HEAD').trim()
+    // El STATE.md de la coordinadora apunta al nuevo HEAD: si el hook lo leyera,
+    // la relación sería `same` y no bloquearía. Pero SLICE.md apunta a base, así
+    // que si el hook lee SLICE.md, ve `behind` y bloquea.
+    writeFileSync(join(dir, STATE_REL_PATH), `---\ntask: coordinadora\nlast_commit: ${newHead}\n---\n# c\n`)
     const out = runHook(stopHook, dir)
     expect(out.decision).toBe('block')
     expect(out.reason).toContain('se ha quedado atrás')
