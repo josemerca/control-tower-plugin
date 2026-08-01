@@ -413,3 +413,64 @@ describe('F22 — la semilla deja de desarmar el hook de frescura', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+// ============================================================================
+// F22, Task 6 — el `blocked` que formatBlockedClaimWarnings (ct-next.mjs)
+// reporta se lee de `.agent/SLICE.md`, SIN fallback a `.agent/STATE.md`. En
+// un worktree sembrado por esta versión, `.agent/STATE.md` es el fichero de
+// la COORDINADORA, congelado en la base: su `blocked` habla del epic, no del
+// slice, y leerlo reportaría como bloqueado un slice que no lo está. Un
+// worktree sin SLICE.md es uno del esquema anterior a F22 — se avisa, no se
+// adivina.
+//
+// Montaje calcado de __tests__/ct-next-staleness.test.js (runReal vía
+// spawnSync, fakePath con fake-git-bin/fake-gh-bin/fake-cmux-bin,
+// ACCOUNT_ENV, rmSyncBestEffort) — con una diferencia deliberada: aquí se
+// capturan stdout y stderr POR SEPARADO, porque la aserción central es que el
+// motivo de la coordinadora no se filtre a NINGUNO de los dos canales, no
+// solo a la mezcla de ambos.
+// ============================================================================
+const blockedFakePath = [
+  join(fixturesDir, 'fake-git-bin'),
+  join(fixturesDir, 'fake-gh-bin'),
+  join(fixturesDir, 'fake-cmux-bin'),
+  process.env.PATH,
+].join(':')
+
+function runBlockedCheck(args, envOverrides = {}) {
+  const r = spawnSync('node', [ctNextScript, ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, ...ACCOUNT_ENV, PATH: blockedFakePath, ...envOverrides },
+  })
+  return { code: r.status, stdout: r.stdout || '', stderr: r.stderr || '' }
+}
+
+describe('F22 — el dispatcher no confunde el blocked de la coordinadora con el del slice', () => {
+  it('un worktree del esquema anterior AVISA en vez de leer el STATE.md de la coordinadora', () => {
+    const repoRoot = mkdtempSync(join(tmpdir(), 'f22-blocked-'))
+    mkdirSync(join(repoRoot, '.worktrees', '5', '.agent'), { recursive: true })
+    writeFileSync(
+      join(repoRoot, '.worktrees', '5', STATE_REL_PATH),
+      '---\ntask: el epic de la coordinadora\nblocked:\n  reason: esperando una decisión de producto\n---\n# c\n',
+    )
+    const issue5 = { number: 5, title: '#5 slice viejo', labels: [{ name: 'status:in-progress' }], body: '<!-- ct-order:1 -->\n' }
+    const r = runBlockedCheck(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      // Dos llamadas secuenciadas (abiertos, luego cerrados): sin
+      // FAKE_GH_COUNTER_FILE las dos devolverían seq[0] por igual y el
+      // fixture de "cerrados" (vacío, a propósito) se ignoraría.
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[issue5], []]),
+      FAKE_GH_COUNTER_FILE: join(repoRoot, 'gh-list-count'),
+    })
+
+    // Dice que NO lo ha comprobado, y nombra el fichero que falta…
+    expect(r.stderr).toContain('.agent/SLICE.md')
+    expect(r.stderr).toContain('NO se ha comprobado')
+    // …y NUNCA afirma que el slice esté bloqueado citando el motivo del epic,
+    // en NINGUNO de los dos canales.
+    expect(r.stderr).not.toContain('esperando una decisión de producto')
+    expect(r.stdout).not.toContain('esperando una decisión de producto')
+
+    rmSyncBestEffort(repoRoot)
+  })
+})

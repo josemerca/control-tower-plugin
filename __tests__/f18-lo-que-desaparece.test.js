@@ -187,12 +187,16 @@ describe('H2 (CLI) — el slice que se cayó de la cola deja de desaparecer en s
 // H3 — el agente BLOQUEADO que deja el claim puesto
 // ===========================================================================
 
-describe('H3 (CLI) — un claim cuyo STATE.md se declara BLOQUEADO', () => {
-  function repoConWorktree(n, stateMd) {
+// F22, Task 6: el `blocked` se lee de `.agent/SLICE.md`, no de `.agent/
+// STATE.md` (ese pasó a ser el fichero de la coordinadora, congelado en la
+// base — ver __tests__/f22-estado-del-slice.test.js). Este bloque siembra
+// SLICE.md, que es el fichero que un worktree de ESTA versión trae.
+describe('H3 (CLI) — un claim cuyo SLICE.md se declara BLOQUEADO', () => {
+  function repoConWorktree(n, sliceMd) {
     const repoRoot = makeRepoRoot()
     const wt = join(repoRoot, '.worktrees', String(n), '.agent')
     mkdirSync(wt, { recursive: true })
-    if (stateMd !== null) writeFileSync(join(wt, 'STATE.md'), stateMd)
+    if (sliceMd !== null) writeFileSync(join(wt, 'SLICE.md'), sliceMd)
     return repoRoot
   }
 
@@ -215,7 +219,7 @@ describe('H3 (CLI) — un claim cuyo STATE.md se declara BLOQUEADO', () => {
     expect(r.err).toMatch(/ningún agente avanzándolo/)
   })
 
-  it('sin `blocked` en el STATE.md no dice nada (control negativo: el caso normal)', () => {
+  it('sin `blocked` en el SLICE.md no dice nada (control negativo: el caso normal)', () => {
     const repoRoot = repoConWorktree(41, '---\nstatus: wip\nnext_action: seguir\n---\n\nnotas\n')
     const enCurso = rawIssue({ number: 41, order: 1, status: 'status:in-progress', touches: ['api'] })
     const listo = rawIssue({ number: 42, order: 2, status: 'status:ready', touches: ['api'] })

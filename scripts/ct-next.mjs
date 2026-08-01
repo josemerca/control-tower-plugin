@@ -1949,8 +1949,19 @@ function formatBlockedClaimWarnings(issues) {
   const out = []
   for (const i of (issues || [])) {
     if (i.status !== 'in-progress') continue
-    const path = `${repoRoot}/.worktrees/${i.n}/.agent/STATE.md`
-    if (!existsSync(path)) continue // sin STATE.md no hay nada que leer; el claim rancio ya lo cubre stalenessNote
+    const path = `${repoRoot}/.worktrees/${i.n}/${SLICE_REL_PATH}`
+    if (!existsSync(path)) {
+      // F22: SIN FALLBACK a `.agent/STATE.md`, y es deliberado. En un worktree
+      // sembrado por esta versión, ese fichero es el de la COORDINADORA
+      // congelado en la base: su campo `blocked` habla del epic, no de este
+      // slice, y leerlo reportaría como bloqueado un slice que no lo está.
+      // Un worktree sin SLICE.md es uno del esquema anterior — se dice, no se
+      // adivina, mismo criterio que el fallo de lectura de más abajo.
+      if (existsSync(`${repoRoot}/.worktrees/${i.n}`)) {
+        out.push(`#${i.n} está en status:in-progress y su worktree existe, pero no tiene ${SLICE_REL_PATH}: lo sembró una versión del plugin anterior a F22, cuando el estado del slice vivía en .agent/STATE.md. NO se ha comprobado si ese agente se declaró BLOQUEADO —y su .agent/STATE.md NO se lee a propósito: en un worktree nuevo ese fichero es el de la coordinadora, y su campo \`blocked\` no habla de este slice—. Míralo a mano: \`cat .worktrees/${i.n}/.agent/STATE.md\`.`)
+      }
+      continue // sin worktree no hay nada que leer; el claim rancio ya lo cubre stalenessNote
+    }
     let md
     try {
       md = readFileSync(path, 'utf8')
@@ -1967,7 +1978,7 @@ function formatBlockedClaimWarnings(issues) {
     const motivo = b.reason ? `: «${b.reason}»` : ' (sin motivo declarado)'
     const salida = b.unblock ? ` Para levantarlo, lo que el propio agente dejó escrito: «${b.unblock}».` : ''
     const extras = (b.notes || []).length ? ` ${b.notes.join(' ')}` : ''
-    out.push(`#${i.n} está en status:in-progress —el dispatcher lo cuenta como trabajo en curso, ocupando una plaza de --cap y reteniendo sus tokens de área/touches— pero su propio .worktrees/${i.n}/.agent/STATE.md se declara BLOQUEADO${motivo}. No hay ningún agente avanzándolo, y NINGUNA transición del loop lo saca de ahí sola: la detección de claims rancios no lo ve (el worktree y la rama SÍ existen), \`--requeue\` se niega mientras existan, y \`--release\` mentiría (no hay PR). Esto lo decides tú: desbloquéalo, o abandónalo (borra .worktrees/${i.n} y la rama feat/${i.n} —comprueba antes que no pierdes trabajo sin pushear— y solo entonces \`node <plugin>/scripts/dispatch-check.mjs ${i.n} --repo ${repo} --requeue\`).${salida}${extras}`)
+    out.push(`#${i.n} está en status:in-progress —el dispatcher lo cuenta como trabajo en curso, ocupando una plaza de --cap y reteniendo sus tokens de área/touches— pero su propio .worktrees/${i.n}/${SLICE_REL_PATH} se declara BLOQUEADO${motivo}. No hay ningún agente avanzándolo, y NINGUNA transición del loop lo saca de ahí sola: la detección de claims rancios no lo ve (el worktree y la rama SÍ existen), \`--requeue\` se niega mientras existan, y \`--release\` mentiría (no hay PR). Esto lo decides tú: desbloquéalo, o abandónalo (borra .worktrees/${i.n} y la rama feat/${i.n} —comprueba antes que no pierdes trabajo sin pushear— y solo entonces \`node <plugin>/scripts/dispatch-check.mjs ${i.n} --repo ${repo} --requeue\`).${salida}${extras}`)
   }
   return out
 }
