@@ -1,15 +1,17 @@
 #!/usr/bin/env node
-import { readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { parseStateSafe, describeStopRelation, classifyStopState } from '../scripts/state.js'
+import { resolveStatePath } from '../scripts/state-paths.js'
 
 let input
 try { input = JSON.parse(readFileSync(0, 'utf8')) } catch { process.exit(0) }
 const cwd = input.cwd || process.cwd()
-const statePath = join(cwd, '.agent', 'STATE.md')
+// F22: misma precedencia que en session-start.js. En un worktree de slice esto
+// resuelve a .agent/SLICE.md, que es el fichero cuya frescura importa.
+const { path: statePath } = resolveStatePath(cwd)
 
-if (!existsSync(statePath)) process.exit(0)
+if (!statePath) process.exit(0)
 
 // Runner que NUNCA lanza y devuelve el código de salida: `merge-base
 // --is-ancestor` contesta por código (0 sí / 1 no), así que un runner que
