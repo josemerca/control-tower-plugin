@@ -1923,7 +1923,8 @@ function formatClosedStatusResidueWarning(residue, { acked = new Set() } = {}) {
 // SIEMPRE, y el dispatcher le dice al humano que hay alguien trabajándolo.
 //
 // El kickoff manda al agente marcar `blocked: {reason, unblock}` en su
-// `.agent/STATE.md` y PARAR. El issue se queda en `status:in-progress`:
+// `.agent/SLICE.md` (antes de F22, `.agent/STATE.md`) y PARAR. El issue se
+// queda en `status:in-progress`:
 // retiene tokens de área/touches Y una plaza de `--cap`, indefinidamente. Y
 // no hay ninguna transición que el agente pueda ejecutar correctamente:
 //   - `stalenessNote` no lo señala: devuelve null en cuanto existen el
@@ -1946,8 +1947,9 @@ function formatClosedStatusResidueWarning(residue, { acked = new Set() } = {}) {
 // congelado en la base commit (F22/Task 4 dejó de escribir el estado del
 // slice ahí): su `blocked` describe el epic, no este slice, y leerlo
 // reportaría como bloqueado un slice que no lo está. Un worktree que no
-// tiene SLICE.md es uno sembrado por una versión anterior a F22 — se avisa
-// explícitamente, no se adivina (ver el bloque de abajo).
+// tiene SLICE.md o lo sembró una versión anterior a F22, o lo perdió después
+// (está ignorado: un `git clean -x` se lo lleva) — se avisa de las dos
+// causas, no se elige una (ver el bloque de abajo).
 //
 // Sale como aviso de primer nivel y no colgando de un mensaje de colisión: un
 // claim bloqueado retiene cap y tokens AUNQUE hoy no choque con nadie, así que
@@ -1964,10 +1966,15 @@ function formatBlockedClaimWarnings(issues) {
       // sembrado por esta versión, ese fichero es el de la COORDINADORA
       // congelado en la base: su campo `blocked` habla del epic, no de este
       // slice, y leerlo reportaría como bloqueado un slice que no lo está.
-      // Un worktree sin SLICE.md es uno del esquema anterior — se dice, no se
-      // adivina, mismo criterio que el fallo de lectura de más abajo.
+      // Un worktree sin SLICE.md se avisa, no se adivina — mismo criterio que
+      // el fallo de lectura de más abajo. Y el aviso NO elige causa: hay dos,
+      // y desde aquí no se distinguen. La segunda es nueva de F22 y no podía
+      // pasarle al STATE.md trackeado: `.agent/SLICE.md` está IGNORADO, así
+      // que un `git clean -xdf` en el worktree se lo lleva. Mismo síntoma,
+      // remedio distinto; afirmar "esto es del esquema viejo" sería declarar
+      // comprobado lo que no se ha mirado.
       if (existsSync(`${repoRoot}/.worktrees/${i.n}`)) {
-        out.push(`#${i.n} está en status:in-progress y su worktree existe, pero no tiene ${SLICE_REL_PATH}: lo sembró una versión del plugin anterior a F22, cuando el estado del slice vivía en .agent/STATE.md. NO se ha comprobado si ese agente se declaró BLOQUEADO —y su .agent/STATE.md NO se lee a propósito: en un worktree nuevo ese fichero es el de la coordinadora, y su campo \`blocked\` no habla de este slice—. Míralo a mano: \`cat .worktrees/${i.n}/.agent/STATE.md\`.`)
+        out.push(`#${i.n} está en status:in-progress y su worktree existe, pero no tiene ${SLICE_REL_PATH}: o lo sembró una versión del plugin anterior a F22 (cuando el estado del slice vivía en .agent/STATE.md), o se sembró bien y se borró después —p. ej. un \`git clean -x\`, que sí se lo lleva ahora que está ignorado—. Desde aquí no se distinguen. En cualquiera de los dos casos, NO se ha comprobado si ese agente se declaró BLOQUEADO —y su .agent/STATE.md NO se lee a propósito: en un worktree nuevo ese fichero es el de la coordinadora, y su campo \`blocked\` no habla de este slice—. Míralo a mano: \`cat .worktrees/${i.n}/.agent/STATE.md\` si resulta ser del esquema viejo; si no, pregúntale al agente de ese worktree.`)
       }
       continue // sin worktree no hay nada que leer; el claim rancio ya lo cubre stalenessNote
     }
@@ -2034,7 +2041,7 @@ for (const w of formatStrayDepsWarnings(issues)) console.error(w)
   const w = formatClosedStatusResidueWarning(dispatchInput.closedStatusResidue || [], { acked: ackedResidueNumbers() })
   if (w) warn(w)
 }
-// F18/H3 — claims cuyo propio STATE.md se declara BLOQUEADO. Va por `warn()`
+// F18/H3 — claims cuyo propio SLICE.md se declara BLOQUEADO. Va por `warn()`
 // (y no por `console.error` a pelo como los tres de arriba) a propósito: es
 // exactamente el tipo de cosa que se pierde en medio de cuarenta líneas de
 // plan y necesita salir también en el recap del final.

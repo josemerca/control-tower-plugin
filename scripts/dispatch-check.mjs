@@ -432,7 +432,13 @@ if (release) {
   }
   if (check.hits.length) {
     const lista = check.hits.join(', ')
-    dieErr(`no se libera #${issue}: esta rama INTRODUCE ${lista} respecto a ${check.base}. Ese fichero es el estado de la sesión coordinadora, no producto de este slice: al mergear con squash, main se quedaría con el estado de este slice y cualquier sesión nueva del repo se hidrataría creyendo que es este agente. Restáuralo y vuelve a intentarlo: \`git checkout ${check.base} -- ${lista}\` y commitea (o \`git rm --cached\` si lo añadiste nuevo). El issue sigue en status:in-progress: no se ha movido nada.`, 5)
+    // `pathspec` va SEPARADO de `lista` a propósito: la prosa enumera con
+    // comas, pero un `git checkout <base> -- a.md, b.md` mete la coma DENTRO
+    // del pathspec y falla ("did not match any file"). El comando que se
+    // emite tiene que poder pegarse tal cual, y con los dos ficheros a la vez
+    // es justo cuando más falta hace.
+    const pathspec = check.hits.join(' ')
+    dieErr(`no se libera #${issue}: esta rama INTRODUCE ${lista} respecto a ${check.base}. Ese fichero es el estado de la sesión coordinadora, no producto de este slice: al mergear con squash, main se quedaría con el estado de este slice y cualquier sesión nueva del repo se hidrataría creyendo que es este agente. Restáuralo y vuelve a intentarlo: \`git checkout ${check.base} -- ${pathspec}\` y commitea (o \`git rm --cached\` si lo añadiste nuevo). El issue sigue en status:in-progress: no se ha movido nada.`, 5)
   }
   if (!dryRun && !fx) {
     const result = setStatus(issue, 'status:in-progress', 'status:in-review')

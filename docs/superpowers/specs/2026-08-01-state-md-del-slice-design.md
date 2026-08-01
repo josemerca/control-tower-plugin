@@ -130,7 +130,7 @@ En `dispatch-check.mjs`, dentro del `if (release)` (línea 331) y **antes** de m
 |---|---|
 | Hooks | caen a `STATE.md` por la precedencia → leen la semilla vieja, que es lo correcto ahí |
 | `ct-next:1938` | avisa de que no ha comprobado el bloqueo; no adivina |
-| Puerta `--release` | ve el `STATE.md` modificado y se niega — exactamente lo que queremos con esos |
+| Puerta `--release` | se niega **si la rama ha commiteado** `.agent/STATE.md` — que es lo que queremos con esos. Lo que **no** hace: ver una modificación sin commitear. La puerta mira `git diff <base>...HEAD`, o sea historia commiteada, y comprobado en una corrida real un worktree del esquema viejo con el `STATE.md` modificado y sin commitear se libera igual (`released #2 → in-review`, exit 0). Es deliberado: la puerta juzga lo que el PR introduce, no el árbol de trabajo |
 
 ## 5. Tests
 

@@ -1,5 +1,5 @@
 import { parse, stringify } from 'yaml'
-import { STATE_REL_PATH as COORD_REL_PATH } from './state-paths.js'
+import { STATE_REL_PATH as COORD_REL_PATH, SLICE_REL_PATH } from './state-paths.js'
 
 // ===========================================================================
 // F22 — `stateRel`: QUÉ FICHERO NOMBRAN LOS MENSAJES DE ESTE MÓDULO.
@@ -289,7 +289,13 @@ export function composeHydration(stateText, gitLog, { stateRel = COORD_REL_PATH 
   if (blocked.state === 'unreadable') parts.push(unreadableNotice(error || blocked.why, { stateRel }))
   else if (blocked.state === 'blocked') parts.push(blockNotice(blocked, { nextAction: meta?.next_action, stateRel }))
 
-  parts.push(`# Estado del slice (hidratación automática)\n\n${stateText.trim()}`)
+  // F22: la cabecera se deriva de `stateRel`, que es el fichero que quien
+  // llama acaba de resolver. Decía "Estado del slice" SIEMPRE, así que la
+  // sesión coordinadora —cuyo `.agent/STATE.md` habla del epic, no de ningún
+  // slice— abría cada hidratación con una etiqueta falsa: exactamente la
+  // confusión de fichero que esta ronda arregla, en el otro sentido.
+  const titulo = stateRel === SLICE_REL_PATH ? 'Estado del slice' : 'Estado del repo'
+  parts.push(`# ${titulo} (hidratación automática)\n\n${stateText.trim()}`)
 
   const guide = fieldReadingGuide(meta, { blocked: blocked.state === 'blocked' })
   if (guide) parts.push(guide)
