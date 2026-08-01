@@ -81,6 +81,25 @@ else
   echo ".worktrees/ ya está en $GITIGNORE, no se duplica"
 fi
 
+# .agent/SLICE.md (F22): /ct-next siembra el estado del slice ahí, dentro del
+# worktree. Ese fichero es estado VIVO Y LOCAL de una sesión despachada, nunca
+# producto: si git lo ve, un `git add -A` del agente lo mete en su PR y el
+# squash deja main con el estado de un slice —y cualquier sesión nueva del repo
+# se hidrata creyendo que ES ese agente—. Pasó tres veces en un periodo de 9
+# slices antes de existir esta línea.
+#
+# /ct-next escribe además la misma regla en .git/info/exclude en cada dispatch,
+# para cubrir los repos que no re-corran ct-init. Esta es la vía larga: se
+# commitea, la ve quien clone, y explica por qué está.
+#
+# Idempotente por línea exacta, igual que el bloque de .worktrees/ de arriba.
+if ! grep -qxF '.agent/SLICE.md' "$GITIGNORE"; then
+  echo '.agent/SLICE.md' >> "$GITIGNORE"
+  echo "añadido .agent/SLICE.md a $GITIGNORE"
+else
+  echo ".agent/SLICE.md ya está en $GITIGNORE, no se duplica"
+fi
+
 AGENTS_MD="$TARGET/AGENTS.md"
 if [ ! -f "$AGENTS_MD" ]; then
   cat > "$AGENTS_MD" <<'EOF'

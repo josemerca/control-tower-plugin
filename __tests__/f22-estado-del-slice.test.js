@@ -581,3 +581,17 @@ describe('F22 — el dispatcher no confunde el blocked de la coordinadora con el
     rmSyncBestEffort(repoRoot)
   })
 })
+
+describe('F22 — ct-init deja la regla commiteada en el .gitignore', () => {
+  it('añade .agent/SLICE.md, y no la duplica al re-correrlo', () => {
+    const dir = mkGitRepo()
+    const initScript = join(here, '..', 'scripts', 'ct-init.sh')
+    execFileSync('bash', [initScript, dir], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    const first = readFileSync(join(dir, '.gitignore'), 'utf8')
+    expect(first.split('\n').filter((l) => l.trim() === SLICE_REL_PATH)).toHaveLength(1)
+    execFileSync('bash', [initScript, dir], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    const second = readFileSync(join(dir, '.gitignore'), 'utf8')
+    expect(second.split('\n').filter((l) => l.trim() === SLICE_REL_PATH)).toHaveLength(1)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
