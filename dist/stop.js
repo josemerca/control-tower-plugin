@@ -7364,8 +7364,7 @@ var require_dist = __commonJS({
 });
 
 // hooks/stop.js
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 
 // scripts/state.js
@@ -7525,6 +7524,19 @@ function classifyStopState({ relation: relation2, stopHookActive }) {
   };
 }
 
+// scripts/state-paths.js
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+var STATE_REL_PATH2 = ".agent/STATE.md";
+var SLICE_REL_PATH = ".agent/SLICE.md";
+function resolveStatePath(cwd2) {
+  const slice = join(cwd2, SLICE_REL_PATH);
+  if (existsSync(slice)) return { path: slice, kind: "slice" };
+  const state = join(cwd2, STATE_REL_PATH2);
+  if (existsSync(state)) return { path: state, kind: "coordinator" };
+  return { path: null, kind: "none" };
+}
+
 // hooks/stop.js
 var input;
 try {
@@ -7533,8 +7545,8 @@ try {
   process.exit(0);
 }
 var cwd = input.cwd || process.cwd();
-var statePath = join(cwd, ".agent", "STATE.md");
-if (!existsSync(statePath)) process.exit(0);
+var { path: statePath } = resolveStatePath(cwd);
+if (!statePath) process.exit(0);
 var git = (args) => {
   const r = spawnSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
   if (r.error || r.status == null) return { status: -1, stdout: "" };

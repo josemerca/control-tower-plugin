@@ -7364,8 +7364,7 @@ var require_dist = __commonJS({
 });
 
 // hooks/session-start.js
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
 // scripts/state.js
@@ -7522,6 +7521,19 @@ ${log}`);
   return parts.join("\n\n");
 }
 
+// scripts/state-paths.js
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+var STATE_REL_PATH = ".agent/STATE.md";
+var SLICE_REL_PATH = ".agent/SLICE.md";
+function resolveStatePath(cwd2) {
+  const slice = join(cwd2, SLICE_REL_PATH);
+  if (existsSync(slice)) return { path: slice, kind: "slice" };
+  const state = join(cwd2, STATE_REL_PATH);
+  if (existsSync(state)) return { path: state, kind: "coordinator" };
+  return { path: null, kind: "none" };
+}
+
 // hooks/session-start.js
 var input;
 try {
@@ -7530,8 +7542,8 @@ try {
   process.exit(0);
 }
 var cwd = input.cwd || process.cwd();
-var statePath = join(cwd, ".agent", "STATE.md");
-if (existsSync(statePath)) {
+var { path: statePath } = resolveStatePath(cwd);
+if (statePath) {
   const stateText = readFileSync(statePath, "utf8");
   let gitLog = "";
   try {
