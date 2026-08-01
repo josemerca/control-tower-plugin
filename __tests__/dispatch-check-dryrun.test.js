@@ -21,12 +21,19 @@ const fakeGhDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fak
 // disponibles vía `e.stdout`/`e.stderr` sin ecoarlos al padre.
 const QUIET_STDIO = ['ignore', 'pipe', 'pipe']
 
-function runReal(args, envOverrides = {}) {
+// `cwd` es opcional (fix round 2, F22 — ver mkReleaseDryRunRepo más abajo):
+// la inmensa mayoría de los llamantes de runReal() no tocan git en absoluto
+// (solo `gh`, interceptado por fake-gh-bin vía PATH), así que el cwd por
+// defecto (el del proceso de test) nunca importó para ellos. El único que sí
+// importa es cualquiera que invoque `--release`, porque la puerta de F22 lee
+// git real desde el cwd SIEMPRE, dry-run o no.
+function runReal(args, envOverrides = {}, cwd) {
   try {
     const out = execFileSync('node', [script, ...args], {
       encoding: 'utf8',
       stdio: QUIET_STDIO,
       env: { ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}`, ...envOverrides },
+      ...(cwd ? { cwd } : {}),
     })
     return { code: 0, out }
   } catch (e) {
@@ -41,21 +48,22 @@ function run(issue, fixture) {
   } catch (e) { return { code: e.status, out: (e.stdout || '') + (e.stderr || '') } }
 }
 
-// F22, fix round 1, item 1 — `--release --dry-run` corre la puerta de F22
-// (Task 8) INCLUSO en dry-run: la puerta lee git real desde el cwd, nunca el
-// fixture. Los tres tests de abajo que aseveran `--release --dry-run` → exit
-// 0 corrían, antes de este fixture, sin `cwd` — es decir, contra el propio
-// checkout de este plugin, y pasaban solo porque dos hechos AMBIENTALES
-// resultan ciertos hoy: este repo no tiene `.agent/` trackeado, y
-// `main`/`origin/HEAD` resuelven. Ninguna de las dos es una propiedad del
-// test — el día en que este mismo repo se ct-init'ee (que es literalmente lo
-// que este plugin hace a otros repos), `.agent/STATE.md` pasa a estar
-// trackeado, y estos tres tests de semántica de dry-run empezarían a fallar
-// con un mensaje de contaminación de slice que no tiene nada que ver con lo
-// que están probando. Un repo de propósito específico, con una base real
-// (`main`) y una rama (`feat/9`) que diverge de ella sin tocar ningún
-// fichero de estado, hace que el exit 0 dependa del fixture, no del checkout
-// en el que corra la suite.
+// F22, fix round 1, item 1 (y fix round 2: el mismo defecto encontrado en un
+// CUARTO call-site que no estaba en el barrido original — ver el comentario
+// junto a "--release cuyo gh edit falla" más abajo) — `--release` corre la
+// puerta de F22 (Task 8) tanto en dry-run como en real: la puerta lee git
+// real desde el cwd SIEMPRE. Los tests que invocan `--release` sin `cwd`
+// corrían, antes de este fixture, contra el propio checkout de este plugin,
+// y pasaban solo porque dos hechos AMBIENTALES resultan ciertos hoy: este
+// repo no tiene `.agent/` trackeado, y `main`/`origin/HEAD` resuelven.
+// Ninguna de las dos es una propiedad del test — el día en que este mismo
+// repo se ct-init'ee (que es literalmente lo que este plugin hace a otros
+// repos), `.agent/STATE.md` pasa a estar trackeado, y estos tests
+// empezarían a fallar con un mensaje de contaminación de slice que no tiene
+// nada que ver con lo que están probando. Un repo de propósito específico,
+// con una base real (`main`) y una rama (`feat/9`) que diverge de ella sin
+// tocar ningún fichero de estado, hace que el resultado dependa del fixture,
+// no del checkout en el que corra la suite.
 function mkReleaseDryRunRepo() {
   const dir = mkdtempSync(join(tmpdir(), 'ct-release-dryrun-'))
   const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' })
@@ -303,10 +311,17 @@ describe('dispatch-check — fix review round 1 (Critical 2: fallos de gh() no d
     expect(r.out).toMatch(/gh issue edit 17 --repo o\/r --add-label status:ready --remove-label status:in-progress/)
   })
 
+  // F22, fix round 2 — mismo defecto que los tres de mkReleaseDryRunRepo más
+  // arriba, encontrado por el mismo barrido: SIN `--dry-run`, así que no es
+  // uno de esos tres por texto literal, pero la puerta de F22 corre igual
+  // (lee git real desde el cwd en TODO `--release`, dry-run o no) — pasaba
+  // solo porque este checkout no tiene `.agent/` trackeado y `main` resuelve.
   it('--release cuyo gh edit falla → exit 1, mensaje claro (no crash sin capturar)', () => {
+    const dir = mkReleaseDryRunRepo()
     const r = runReal(['19', '--repo', 'o/r', '--release'], {
       FAKE_GH_EDIT_FAIL_SUBSTR: '--add-label status:in-review',
-    })
+    }, dir)
+    rmSync(dir, { recursive: true, force: true })
     expect(r.code).toBe(1)
     expect(r.out).toMatch(/no se pudo liberar #19/i)
   })
