@@ -1931,14 +1931,23 @@ function formatClosedStatusResidueWarning(residue, { acked = new Set() } = {}) {
 //   - `--requeue` se NIEGA por diseño (exige que no queden ni worktree ni
 //     rama: F15, no suelta tokens de trabajo vivo sin mergear);
 //   - `--release` mentiría — diría que hay un PR listo para revisión;
-//   - y el campo `blocked` vive en un STATE.md que el dispatcher escribía al
+//   - y el campo `blocked` vivía en un STATE.md que el dispatcher escribía al
 //     sembrar y NUNCA volvía a leer.
 //
 // El arreglo es de DISCO y sin red: el dispatcher sabe exactamente dónde está
-// ese fichero (`.worktrees/<n>/.agent/STATE.md`, la misma ruta que
-// `assessLocalLiveness` ya recorre) y `readBlocked` (state.js) ya sabe leerlo,
-// incluida la variante `status: blocked` que el propio state.js documenta como
-// el error de escritura más probable.
+// el estado del slice (dentro del mismo directorio de worktree que
+// `assessLocalLiveness` ya recorre) y `readBlocked` (state.js) ya sabe
+// leerlo, incluida la variante `status: blocked` que el propio state.js
+// documenta como el error de escritura más probable.
+//
+// F22: ese fichero es `.worktrees/<n>/.agent/SLICE.md` (`SLICE_REL_PATH`),
+// SIN FALLBACK a `.agent/STATE.md`. En un worktree sembrado por el
+// dispatcher actual, `.agent/STATE.md` es el fichero de la COORDINADORA,
+// congelado en la base commit (F22/Task 4 dejó de escribir el estado del
+// slice ahí): su `blocked` describe el epic, no este slice, y leerlo
+// reportaría como bloqueado un slice que no lo está. Un worktree que no
+// tiene SLICE.md es uno sembrado por una versión anterior a F22 — se avisa
+// explícitamente, no se adivina (ver el bloque de abajo).
 //
 // Sale como aviso de primer nivel y no colgando de un mensaje de colisión: un
 // claim bloqueado retiene cap y tokens AUNQUE hoy no choque con nadie, así que
