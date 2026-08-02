@@ -30,6 +30,8 @@ supongas cuál de las dos es. `--force` reemplaza igualmente; **nunca lo pases
 por tu cuenta**, y solo después de que el usuario confirme que esa sección no
 lleva trabajo suyo.
 
+Al `.gitignore` se le añaden **dos** líneas, las dos idempotentes: `.worktrees/` (los worktrees de slice viven dentro del checkout, y sin esa línea un `git add -A` se traga un árbol de trabajo entero) y `.agent/SLICE.md` (el estado de una sesión despachada, que es estado vivo y local, nunca producto — ver F22 en `commands/ct-next.md`).
+
 En `.agent/STATE.md`, en cambio, **limítate a describir el bootstrap**:
 
 - `task`: `"Bootstrap Control Tower loop (ct-init)"`
@@ -38,7 +40,7 @@ En `.agent/STATE.md`, en cambio, **limítate a describir el bootstrap**:
 - `blocked`: **déjalo en `null`**. Un bootstrap no bloquea nada.
 - `verify`: déjalo vacío. Cuando se rellene, es siempre la comprobación **pendiente** que valida el trabajo al terminar — nunca la afirmación de algo ya comprobado.
 
-**NO salgas a buscar trabajo pendiente para rellenar `next_action`.** Es un scaffolder, no un planificador. El `next_action` real lo siembra `/ct-next` en el STATE.md del worktree cuando despacha un slice, o lo escribe quien arranque uno a mano. Si aquí apuntas a un pendiente que encuentres por el repo, el hook de SessionStart hidratará **todas** las sesiones futuras de ese repo creyendo que eso es lo siguiente — aunque no tenga nada que ver con lo que se vaya a hacer.
+**NO salgas a buscar trabajo pendiente para rellenar `next_action`.** Es un scaffolder, no un planificador. El `next_action` real lo siembra `/ct-next` en el `.agent/SLICE.md` del worktree cuando despacha un slice (F22 — antes era el `STATE.md` del worktree, que es el de la coordinadora y no del slice), o lo escribe quien arranque uno a mano. Si aquí apuntas a un pendiente que encuentres por el repo, el hook de SessionStart hidratará **todas** las sesiones futuras de ese repo creyendo que eso es lo siguiente — aunque no tenga nada que ver con lo que se vaya a hacer.
 
 Cuando ese `next_action` **caduque** (el trabajo ya no se puede hacer: se paró
 por una decisión, el plan resultó falso, falta algo de fuera), la forma de

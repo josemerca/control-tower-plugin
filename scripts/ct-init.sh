@@ -81,6 +81,25 @@ else
   echo ".worktrees/ ya está en $GITIGNORE, no se duplica"
 fi
 
+# .agent/SLICE.md (F22): /ct-next siembra el estado del slice ahí, dentro del
+# worktree. Ese fichero es estado VIVO Y LOCAL de una sesión despachada, nunca
+# producto: si git lo ve, un `git add -A` del agente lo mete en su PR y el
+# squash deja main con el estado de un slice —y cualquier sesión nueva del repo
+# se hidrata creyendo que ES ese agente—. Pasó tres veces en un periodo de 9
+# slices antes de existir esta línea.
+#
+# /ct-next escribe además la misma regla en .git/info/exclude en cada dispatch,
+# para cubrir los repos que no re-corran ct-init. Esta es la vía larga: se
+# commitea, la ve quien clone, y explica por qué está.
+#
+# Idempotente por línea exacta, igual que el bloque de .worktrees/ de arriba.
+if ! grep -qxF '.agent/SLICE.md' "$GITIGNORE"; then
+  echo '.agent/SLICE.md' >> "$GITIGNORE"
+  echo "añadido .agent/SLICE.md a $GITIGNORE"
+else
+  echo ".agent/SLICE.md ya está en $GITIGNORE, no se duplica"
+fi
+
 AGENTS_MD="$TARGET/AGENTS.md"
 if [ ! -f "$AGENTS_MD" ]; then
   cat > "$AGENTS_MD" <<'EOF'
@@ -224,7 +243,21 @@ SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
 # decía en absoluto que un PR rechazado dejaba su slice fuera del loop para
 # siempre. Un repo bootstrapeado con el v4 se queda con esas tres cosas hasta
 # que este número suba; es la única palanca que existe para llegar hasta él.
-SLICES_CONTRACT_VERSION=10
+#
+# F22 sube de 10 a 11 por la MISMA razón que F13, y con el mismo agravante: el
+# v10 no describía mal el flujo, describía mal DÓNDE escribe el agente. Decía
+# que el estado del slice vive en el `.agent/STATE.md` de su worktree y que
+# `/ct-next` lo lee de ahí. Las dos mitades son falsas desde F22: la semilla va
+# a `.agent/SLICE.md` (ignorado) y el dispatcher se NIEGA a leer el STATE.md
+# del worktree, porque ése es el de la coordinadora congelado en la base. Y
+# esto no es un comentario obsoleto: es una INSTRUCCIÓN a un agente. Un slice
+# que siga el AGENTS.md de su repo en vez de su kickoff escribiría su
+# `blocked:` en el fichero que nadie lee —el claim se queda colgado para
+# siempre, que es justo el fallo F18 que este loop ya arregló una vez— y, si
+# llega a commitearlo, la puerta de `--release` lo rechaza con exit 5. Un repo
+# bootstrapeado con el v10 se queda con esa instrucción falsa hasta que este
+# número suba.
+SLICES_CONTRACT_VERSION=11
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -278,6 +311,7 @@ cd59702d2c5d3a73b67ad235908b83bdc42c9da41996b14a33fba0749e359961  v5, 289 línea
 cef9a97a07edc8c403a37ffc846df74422c4d7d1d5aad02d90001a477b2ef811  v8, 419 líneas — F18 (el cierre accidental por commit; el residuo de labels sobre cerrados; el claim bloqueado; la causa que el kickoff no garantiza)
 0050a5b1a216063a58beabb1237d08b0753f5390a3c82edcf8ae5c3526491485  v9, 427 líneas — F20 (las DOS sesiones por repo y su campo `role`: coordinadora vs. despachada)
 ca63463cecb38df02011c5d079fd278488aa560bfb4ab5d0c7e95531d51e82e9  v10, 482 líneas — F21 (la columna Gate: el gate humano deja de ser un efecto colateral del Tipo)
+6b799d34aa589c52cded8801aed641807e3d6591ae372fdd9973d6ebbb1d4d3d  v11, 493 líneas — F22 (el estado del slice vive en .agent/SLICE.md, ignorado; el STATE.md del worktree es el de la coordinadora y no se lee)
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -285,7 +319,7 @@ ca63463cecb38df02011c5d079fd278488aa560bfb4ab5d0c7e95531d51e82e9  v10, 482 líne
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 10 -->
+<!-- ct-init:slices-contract-version: 11 -->
 ## Formato de la tabla §9 (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -590,15 +624,16 @@ loop una vez hay slices en vuelo.
   de cada 99**. Un `status:in-review` sobre un issue cerrado NO es anomalía:
   es el final normal de un slice, y nada le quita esa label al cerrar.
 - **Un slice BLOQUEADO retiene su claim, y no hay transición que lo suelte.**
-  Si el agente marca `blocked: {reason, unblock}` en el `.agent/STATE.md` de su
+  Si el agente marca `blocked: {reason, unblock}` en el `.agent/SLICE.md` de su
   worktree y para —que es lo que el kickoff le pide—, su issue se queda en
   `status:in-progress` **reteniendo tokens y una plaza de `--cap`**
   indefinidamente: la detección de claims rancios no lo ve (el worktree y la
   rama SÍ existen), `--requeue` se niega precisamente por eso, y `--release`
-  mentiría (no hay PR). `/ct-next` **lee** ese `STATE.md` y lo dice con su
-  motivo, pero **no lo arregla**: sacarlo de ahí es una decisión tuya
-  (desbloquearlo, o abandonarlo borrando worktree y rama antes de
-  `--requeue`).
+  mentiría (no hay PR). `/ct-next` **lee** ese `SLICE.md` (antes de F22 era el
+  `.agent/STATE.md` del worktree; hoy ése es el de la coordinadora y **no** se
+  lee) y lo dice con su motivo, pero **no lo arregla**: sacarlo de ahí es una
+  decisión tuya (desbloquearlo, o abandonarlo borrando worktree y rama antes
+  de `--requeue`).
 - **Una invocación despacha `--cap` slices; por defecto es 1.** Y el cap es
   **global al repo, no por invocación**: cuenta también lo que ya está en
   vuelo (`status:in-progress`), así que un segundo `/ct-next --cap 1` con algo
@@ -728,18 +763,26 @@ comprobada del `gh issue edit` a mano que aparece más arriba.
 Sin estas dos aristas, un PR rechazado dejaba su slice fuera del loop **para
 siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
 `status:ready`.
-- **Cada slice en vuelo tiene SU `.agent/STATE.md`**: el de su worktree
-  (`.worktrees/<n>/.agent/STATE.md`), sembrado al despachar. Dos slices a la
-  vez no se pisan ese fichero, y ninguno toca el `.agent/STATE.md` del
-  checkout principal.
+- **Cada slice en vuelo tiene SU `.agent/SLICE.md`**: el de su worktree
+  (`.worktrees/<n>/.agent/SLICE.md`), sembrado al despachar (antes de F22 la
+  semilla iba al `.agent/STATE.md` del worktree — un fichero TRACKEADO, y por
+  eso los PRs de slice acababan llevándose el estado a `main`). Dos slices a
+  la vez no se pisan ese fichero, y ninguno toca ningún `.agent/STATE.md`: ni
+  el del checkout principal ni el que su propio worktree hereda de la base,
+  que se queda a cero diff. `.agent/SLICE.md` está **ignorado** por dos vías:
+  el `.gitignore` del repo (lo añade `/ct-init`) y el `info/exclude` del
+  directorio común de git (lo escribe `/ct-next` en cada despacho, y desde ahí
+  cubre a todos los worktrees). Así no entra en ningún commit — y `--release`
+  se niega si la rama introduce cualquiera de los dos ficheros de estado.
 - **Dos sesiones por repo, con papeles OPUESTOS, y cada una lo lleva escrito
-  en su `.agent/STATE.md` (campo `role`).** La del **checkout principal** es
-  la *coordinadora*: groomea, despacha con `/ct-next`, revisa y mergea. La de
-  cada `.worktrees/<n>` es la *despachada*: implementa ese slice y **para** —
-  no mergea, no despacha el siguiente. Antes ese reparto solo existía dentro
-  del kickoff que recibía una de las dos, así que se perdía en cuanto esa
-  sesión se re-hidrataba de su STATE.md. Ningún código lo comprueba: es
-  información para el agente que lo lee.
+  en su fichero de estado (campo `role`): el `.agent/STATE.md` del checkout
+  principal, el `.agent/SLICE.md` de cada worktree.** La del **checkout
+  principal** es la *coordinadora*: groomea, despacha con `/ct-next`, revisa y
+  mergea. La de cada `.worktrees/<n>` es la *despachada*: implementa ese slice
+  y **para** — no mergea, no despacha el siguiente. Antes ese reparto solo
+  existía dentro del kickoff que recibía una de las dos, así que se perdía en
+  cuanto esa sesión se re-hidrataba de su fichero de estado. Ningún código lo
+  comprueba: es información para el agente que lo lee.
 - **Qué recibe el agente despachado**: un prompt de arranque (*kickoff*) con
   el nombre del slice, el número de issue, los criterios de la sección
   "Acceptance criteria", el aviso de leer la sección "Out of scope /
@@ -748,9 +791,11 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   tiene que abrir el PR, la orden de poner **`Closes #N` en el cuerpo de ese
   PR** (con el porqué: sin ese cierre, el slice retiene sus tokens para
   siempre y no desbloquea a sus dependientes) y el comando literal para
-  liberar el claim al terminar; más el `.agent/STATE.md` sembrado (que repite
-  su `role` y sus gates, para sobrevivir a un `/clear`) y lo que el propio
-  repo le dé al arrancar (`AGENTS.md`, `CLAUDE.md`, hooks). **No recibe el
+  liberar el claim al terminar; más el `.agent/SLICE.md` sembrado en su
+  worktree (que repite su `role` y sus gates, para sobrevivir a un `/clear`;
+  antes de F22 esa semilla iba al `.agent/STATE.md`, que es el de la
+  coordinadora) y lo que el propio repo le dé al arrancar (`AGENTS.md`,
+  `CLAUDE.md`, hooks). **No recibe el
   spec**: se hidrata del issue. **Lo que no llegó al cuerpo del issue no llega
   al agente.** Ninguna exigencia que le hagas desde otra sección del spec —una
   §10, una "REGLA #-2", un párrafo de introducción— le va a llegar, por muy
@@ -761,7 +806,7 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   `## Gates` del issue), pero **no impide mergear** un PR con su gate sin
   cerrar. El que cierra el gate eres tú.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v10). Si el plugin trae una
+<sub>Esta sección la mantiene `/ct-init` (contrato v11). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>

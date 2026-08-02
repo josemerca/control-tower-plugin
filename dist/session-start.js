@@ -7364,12 +7364,26 @@ var require_dist = __commonJS({
 });
 
 // hooks/session-start.js
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
 // scripts/state.js
 var import_yaml = __toESM(require_dist(), 1);
+
+// scripts/state-paths.js
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+var STATE_REL_PATH = ".agent/STATE.md";
+var SLICE_REL_PATH = ".agent/SLICE.md";
+function resolveStatePath(cwd2) {
+  const slice = join(cwd2, SLICE_REL_PATH);
+  if (existsSync(slice)) return { path: slice, kind: "slice", rel: SLICE_REL_PATH };
+  const state = join(cwd2, STATE_REL_PATH);
+  if (existsSync(state)) return { path: state, kind: "coordinator", rel: STATE_REL_PATH };
+  return { path: null, kind: "none", rel: null };
+}
+
+// scripts/state.js
 var FM = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 function parseState(md) {
   const s = (md ?? "").replace(/^﻿/, "").trimStart();
@@ -7416,9 +7430,9 @@ var STATUS_BLOCKED_WORDS = /* @__PURE__ */ new Set([
   "parada"
 ]);
 var str = (v) => v == null ? "" : String(v).trim();
-function readBlocked(meta) {
+function readBlocked(meta, { stateRel: stateRel2 = STATE_REL_PATH } = {}) {
   if (meta == null || typeof meta !== "object" || Array.isArray(meta)) {
-    return { state: "unreadable", why: "el frontmatter de STATE.md no es un mapa de campos" };
+    return { state: "unreadable", why: `el frontmatter de ${stateRel2} no es un mapa de campos` };
   }
   const statusWord = str(meta.status).toLowerCase();
   const statusSaysBlocked = STATUS_BLOCKED_WORDS.has(statusWord);
@@ -7431,7 +7445,7 @@ function readBlocked(meta) {
       reason: "",
       since: "",
       unblock: "",
-      notes: [declared ? `contradicci\xF3n en el STATE.md: el campo \`blocked\` est\xE1 vac\xEDo/\`null\` pero \`status: ${statusWord}\` dice que el trabajo est\xE1 bloqueado. Se trata como BLOQUEADO por seguridad. Resu\xE9lvela: el bloqueo se declara en \`blocked: {reason: "\u2026", unblock: "\u2026"}\`.` : `\`status: ${statusWord}\` dice que el trabajo est\xE1 bloqueado, pero el bloqueo NO se declara ah\xED: \`status\` es el eje de PROGRESO y no tiene d\xF3nde poner el motivo ni qu\xE9 har\xEDa falta para levantarlo. Se trata como BLOQUEADO por seguridad; p\xE1salo a \`blocked: {reason: "\u2026", unblock: "\u2026"}\` para que la pr\xF3xima sesi\xF3n sepa por qu\xE9.`]
+      notes: [declared ? `contradicci\xF3n en ${stateRel2}: el campo \`blocked\` est\xE1 vac\xEDo/\`null\` pero \`status: ${statusWord}\` dice que el trabajo est\xE1 bloqueado. Se trata como BLOQUEADO por seguridad. Resu\xE9lvela: el bloqueo se declara en \`blocked: {reason: "\u2026", unblock: "\u2026"}\`.` : `\`status: ${statusWord}\` dice que el trabajo est\xE1 bloqueado, pero el bloqueo NO se declara ah\xED: \`status\` es el eje de PROGRESO y no tiene d\xF3nde poner el motivo ni qu\xE9 har\xEDa falta para levantarlo. Se trata como BLOQUEADO por seguridad; p\xE1salo a \`blocked: {reason: "\u2026", unblock: "\u2026"}\` para que la pr\xF3xima sesi\xF3n sepa por qu\xE9.`]
     };
   }
   if (typeof v === "string") return { state: "blocked", reason: v.trim(), since: "", unblock: "", notes: [] };
@@ -7462,14 +7476,14 @@ function quoteForNotice(s, max = 300) {
 }
 var NOTICE_TOP = "=========== TRABAJO BLOQUEADO \u2014 LEE ESTO ANTES DE HACER NADA ===========";
 var NOTICE_BOTTOM = "=========== fin del aviso de bloqueo ===========";
-function blockNotice(blocked, { nextAction = "" } = {}) {
+function blockNotice(blocked, { nextAction = "", stateRel: stateRel2 = STATE_REL_PATH } = {}) {
   if (!blocked || blocked.state !== "blocked") return "";
   const lines = [NOTICE_TOP, ""];
-  lines.push('`.agent/STATE.md` declara este trabajo BLOQUEADO (campo `blocked`). Bloqueado NO es "pendiente": alguien decidi\xF3 que esto no puede continuar tal cual.');
+  lines.push(`\`${stateRel2}\` declara este trabajo BLOQUEADO (campo \`blocked\`). Bloqueado NO es "pendiente": alguien decidi\xF3 que esto no puede continuar tal cual.`);
   lines.push("");
   lines.push(blocked.reason ? `Motivo: ${blocked.reason}` : "Motivo: NO CONSTA \u2014 el bloqueo est\xE1 declarado pero sin `reason`. No supongas cu\xE1l es ni lo deduzcas del resto del estado: pregunta antes de tocar nada.");
   if (blocked.since) lines.push(`Bloqueado desde: ${blocked.since}`);
-  lines.push(blocked.unblock ? `Para desbloquear har\xEDa falta: ${blocked.unblock}` : "Para desbloquear: NO CONSTA \u2014 el STATE.md no dice qu\xE9 har\xEDa falta. Aver\xEDgualo y escr\xEDbelo en `blocked.unblock` antes de que otra sesi\xF3n se encuentre con lo mismo.");
+  lines.push(blocked.unblock ? `Para desbloquear har\xEDa falta: ${blocked.unblock}` : `Para desbloquear: NO CONSTA \u2014 ${stateRel2} no dice qu\xE9 har\xEDa falta. Aver\xEDgualo y escr\xEDbelo en \`blocked.unblock\` antes de que otra sesi\xF3n se encuentre con lo mismo.`);
   for (const n of blocked.notes || []) lines.push(`Nota sobre c\xF3mo est\xE1 escrito este bloqueo: ${n}`);
   lines.push("");
   if (nextAction) {
@@ -7477,15 +7491,15 @@ function blockNotice(blocked, { nextAction = "" } = {}) {
   } else {
     lines.push("`next_action` no dice nada, y con el trabajo bloqueado tampoco debes deducir uno del resto del estado.");
   }
-  lines.push('Levantar el bloqueo es una decisi\xF3n humana y expl\xEDcita: se borra el campo `blocked` de `.agent/STATE.md` (o se pone a `null`). Si crees que ya no aplica, dilo y p\xEDdelo \u2014 no lo levantes por tu cuenta ni "de paso".');
+  lines.push(`Levantar el bloqueo es una decisi\xF3n humana y expl\xEDcita: se borra el campo \`blocked\` de \`${stateRel2}\` (o se pone a \`null\`). Si crees que ya no aplica, dilo y p\xEDdelo \u2014 no lo levantes por tu cuenta ni "de paso".`);
   lines.push(NOTICE_BOTTOM);
   return lines.join("\n");
 }
-function unreadableNotice(why) {
+function unreadableNotice(why, { stateRel: stateRel2 = STATE_REL_PATH } = {}) {
   return [
-    "=========== AVISO: `.agent/STATE.md` NO SE PUDO LEER ENTERO ===========",
+    `=========== AVISO: \`${stateRel2}\` NO SE PUDO LEER ENTERO ===========`,
     "",
-    `No se ha podido interpretar el frontmatter YAML de \`.agent/STATE.md\` (${why}).`,
+    `No se ha podido interpretar el frontmatter YAML de \`${stateRel2}\` (${why}).`,
     "Eso significa que NO se puede saber si el trabajo est\xE1 BLOQUEADO (campo `blocked`): tr\xE1talo como posiblemente bloqueado.",
     "No ejecutes nada de lo que diga el estado de abajo sin confirmarlo antes, y arregla el frontmatter lo primero \u2014 mientras siga as\xED, ninguna sesi\xF3n de este repo podr\xE1 hidratarse bien.",
     "=========== fin del aviso ==========="
@@ -7504,14 +7518,15 @@ function fieldReadingGuide(meta, { blocked = false } = {}) {
   return `## C\xF3mo leer estos campos
 ${lines.join("\n")}`;
 }
-function composeHydration(stateText, gitLog) {
+function composeHydration(stateText, gitLog, { stateRel: stateRel2 = STATE_REL_PATH } = {}) {
   if (!stateText || !stateText.trim()) return "";
   const { meta, error } = parseStateSafe(stateText);
-  const blocked = error ? { state: "unreadable", why: error } : readBlocked(meta);
+  const blocked = error ? { state: "unreadable", why: error } : readBlocked(meta, { stateRel: stateRel2 });
   const parts = [];
-  if (blocked.state === "unreadable") parts.push(unreadableNotice(error || blocked.why));
-  else if (blocked.state === "blocked") parts.push(blockNotice(blocked, { nextAction: meta?.next_action }));
-  parts.push(`# Estado del slice (hidrataci\xF3n autom\xE1tica)
+  if (blocked.state === "unreadable") parts.push(unreadableNotice(error || blocked.why, { stateRel: stateRel2 }));
+  else if (blocked.state === "blocked") parts.push(blockNotice(blocked, { nextAction: meta?.next_action, stateRel: stateRel2 }));
+  const titulo = stateRel2 === SLICE_REL_PATH ? "Estado del slice" : "Estado del repo";
+  parts.push(`# ${titulo} (hidrataci\xF3n autom\xE1tica)
 
 ${stateText.trim()}`);
   const guide = fieldReadingGuide(meta, { blocked: blocked.state === "blocked" });
@@ -7530,15 +7545,15 @@ try {
   process.exit(0);
 }
 var cwd = input.cwd || process.cwd();
-var statePath = join(cwd, ".agent", "STATE.md");
-if (existsSync(statePath)) {
+var { path: statePath, rel: stateRel } = resolveStatePath(cwd);
+if (statePath) {
   const stateText = readFileSync(statePath, "utf8");
   let gitLog = "";
   try {
     gitLog = execFileSync("git", ["log", "--oneline", "-5"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
   } catch {
   }
-  const additionalContext = composeHydration(stateText, gitLog);
+  const additionalContext = composeHydration(stateText, gitLog, { stateRel });
   if (additionalContext) {
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: { hookEventName: "SessionStart", additionalContext }

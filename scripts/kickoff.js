@@ -2,6 +2,12 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { renderState } from './state.js'
 import { resolveGatesForAgent, renderGateKickoffLines } from './gates.js'
+// F22: el kickoff SOLO lo recibe un agente de slice, así que aquí no hay
+// ambigüedad que resolver — su fichero de estado es siempre `.agent/SLICE.md`.
+// Se importa la constante en vez de escribir la cadena a mano para que el día
+// que ese path cambie no queden mensajes mandando al agente a un fichero que
+// ya no es el suyo (que es exactamente el defecto que esta ronda arregla).
+import { SLICE_REL_PATH } from './state-paths.js'
 
 // ACCOUNT_MAP — qué CLAUDE_CONFIG_DIR (qué cuenta de Claude) recibe el agente
 // que se despacha para un repo.
@@ -158,7 +164,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
     // (a diferencia de los AC) porque `Protegido` es prosa de longitud
     // arbitraria y el kickoff se teclea entero en un pty; se nombra la sección
     // exacta, que es lo que hace falta para que la busque.
-    `Hidrátate de .agent/STATE.md y del issue de GitHub; los criterios de aceptación son ${slice.ac.join(', ') || '(ver issue)'}. Lee además la sección "## Out of scope / Protected" del issue: lo que hay ahí NO se toca, aunque parezca parte del trabajo.`,
+    `Hidrátate de ${SLICE_REL_PATH} y del issue de GitHub; los criterios de aceptación son ${slice.ac.join(', ') || '(ver issue)'}. Lee además la sección "## Out of scope / Protected" del issue: lo que hay ahí NO se toca, aunque parezca parte del trabajo.`,
     `Sigue superpowers:subagent-driven-development (impl → spec-review → code-review) con TDD.`,
     addendum,
     ...gateLines,
@@ -177,11 +183,11 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
     // despacho con éxito. `dispatchCheckPath` llega ya resuelto como ruta
     // absoluta real (ct-next.mjs la calcula relativa a su propia ubicación)
     // y se interpola tal cual — nunca el token sin expandir.
-    // F7: el agente despachado es el principal ESCRITOR de STATE.md, y hasta
-    // ahora no tenía forma de decir "esto no puede continuar" salvo prosa
-    // dentro de `next_action` — que la siguiente sesión lee como una orden
-    // vigente. El campo existe; hay que nombrárselo aquí o no lo usará.
-    `Si el trabajo queda BLOQUEADO (no puedes continuar, y no es solo "no terminado"), márcalo en .agent/STATE.md como \`blocked: {reason: "por qué", unblock: "qué haría falta"}\` — NO en prosa dentro de next_action. El hook de SessionStart lo anuncia y suspende el next_action en la siguiente sesión.`,
+    // F7: el agente despachado es el principal ESCRITOR de su fichero de
+    // estado, y hasta ahora no tenía forma de decir "esto no puede continuar"
+    // salvo prosa dentro de `next_action` — que la siguiente sesión lee como
+    // una orden vigente. El campo existe; hay que nombrárselo aquí o no lo usará.
+    `Si el trabajo queda BLOQUEADO (no puedes continuar, y no es solo "no terminado"), márcalo en ${SLICE_REL_PATH} como \`blocked: {reason: "por qué", unblock: "qué haría falta"}\` — NO en prosa dentro de next_action. El hook de SessionStart lo anuncia y suspende el next_action en la siguiente sesión.`,
     // F17 — EL KICKOFF FABRICABA EL DEADLOCK QUE EL PROPIO LOOP DESCRIBE COMO
     // AVERÍA. Esta línea decía "abre PR" y nada más: no pedía `Closes #N`. La
     // cadena, entera y verificable en este repo:
@@ -217,7 +223,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
     // que el comando de `--release` de esta línea. Nunca `slice.order` (ver
     // el bloque de issueRefOf, arriba): un `Closes #<orden>` cerraría el issue
     // equivocado, o ninguno.
-    `Al acabar: commit refs al issue, actualiza .agent/STATE.md, abre el PR contra ${baseRefOf(base)} con \`Closes #${slice.n}\` en el CUERPO del PR (no en el título, no en un comentario), libera el claim con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --release\`, deja el estado mergeable y PARA.`,
+    `Al acabar: commit refs al issue, actualiza ${SLICE_REL_PATH}, abre el PR contra ${baseRefOf(base)} con \`Closes #${slice.n}\` en el CUERPO del PR (no en el título, no en un comentario), libera el claim con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --release\`, deja el estado mergeable y PARA.`,
     // El porqué va aparte y no dentro de la línea de arriba a propósito: esa
     // línea es una lista de seis órdenes, y una orden sin motivo dentro de una
     // lista de seis es la primera que se cae cuando el agente va justo de
@@ -230,7 +236,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
   ].filter(Boolean).join('\n')
 }
 
-// renderStateGates: el valor del campo `gates` del STATE.md sembrado. Una
+// renderStateGates: el valor del campo `gates` del SLICE.md sembrado. Una
 // cadena legible (no una lista YAML de tokens) porque su lector es un agente
 // que se re-hidrata: "visual" a secas no le dice qué tiene que hacer ni que no
 // le toca cerrarlo a él. Cuando no hay ninguno, se afirma explícitamente —
@@ -242,7 +248,7 @@ function renderStateGates(gates) {
   return `${list.join(', ')} — GATES HUMANOS pendientes: los cierra quien revisa el PR, NO tú. Detalle en la sección "## Gates" del issue.`
 }
 
-export function buildStateSeed(slice, { branch, base }) {
+export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
   const issueNum = slice.issue != null ? parseInt(String(slice.issue).replace('#', ''), 10) : null
   return renderState({
     meta: {
@@ -253,11 +259,12 @@ export function buildStateSeed(slice, { branch, base }) {
       // Hay DOS sesiones vivas por repo con papeles opuestos: la
       // COORDINADORA (corre /ct-groom y /ct-next, revisa y mergea) y la
       // DESPACHADA (implementa un slice y para). Nada en el estado
-      // observable decía quién era quién: el STATE.md de la raíz habla del
-      // epic, el del worktree habla del slice, y el reparto solo estaba
+      // observable decía quién era quién: el `.agent/STATE.md` de la raíz
+      // habla del epic, el estado del worktree —desde F22, `.agent/SLICE.md`—
+      // habla del slice, y el reparto solo estaba
       // escrito dentro del kickoff — un prompt que recibió UNA de las dos y
       // que se pierde con el contexto de esa sesión. Una sesión despachada
-      // que se re-hidrata de su STATE.md (un /clear, una reanudación, un
+      // que se re-hidrata de su estado (un /clear, una reanudación, un
       // hook de SessionStart) no tenía forma de saber que no le toca
       // mergear ni despachar el siguiente slice.
       //
@@ -287,7 +294,18 @@ export function buildStateSeed(slice, { branch, base }) {
       status: 'not_started',
       branch,
       base,
-      last_commit: '',
+      // F22: el sha de la base, NO el nombre de la rama. Con el campo vacío
+      // —lo que se sembraba hasta ahora— `describeStopRelation` devuelve
+      // `unset` y `classifyStopState` sale en silencio: el hook `Stop` que
+      // obliga a refrescar el estado en cada turno quedaba DESARMADO durante
+      // toda la vida del slice. Medido en campo: 21 horas y 7 commits con la
+      // semilla intacta.
+      //
+      // Y tiene que ser un SHA, no `main`: un nombre de rama es un blanco
+      // móvil, y en cuanto la base avanzara el conteo de "commits por encima
+      // de tu last_commit" dejaría de significar nada. Si no se pudo resolver,
+      // se siembra vacío a propósito — un sha inventado sería peor que ninguno.
+      last_commit: baseSha,
       github_issue: issueNum,
       // D4, defecto 4: este campo imprimía el número de ISSUE llamándolo
       // "slice #N" — dos espacios de identificadores distintos (ver el

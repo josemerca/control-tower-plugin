@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { parseState, parseStateSafe, renderState, composeHydration, readBlocked, blockNotice, fieldReadingGuide, describeStopRelation, classifyStopState } from '../scripts/state.js'
+import { SLICE_REL_PATH } from '../scripts/state-paths.js'
 
 const SAMPLE = `---
 task: "OAuth login"
@@ -53,6 +54,21 @@ describe('composeHydration', () => {
   })
   it('sin estado → cadena vacía (no inyecta ruido)', () => {
     expect(composeHydration('', 'x')).toBe('')
+  })
+})
+
+// F22 — la cabecera decía "Estado del slice" SIEMPRE, también en la sesión
+// coordinadora, cuyo `.agent/STATE.md` no habla de ningún slice. Ahora sale de
+// `stateRel`, que es el fichero que el hook acaba de resolver.
+describe('composeHydration: la cabecera nombra lo que el fichero ES', () => {
+  it('con el STATE.md de la coordinadora (por defecto) NO dice "del slice"', () => {
+    const out = composeHydration('ESTADO', '')
+    expect(out).toContain('# Estado del repo (hidratación automática)')
+    expect(out).not.toContain('Estado del slice')
+  })
+  it('con el SLICE.md de un worktree despachado sí dice "del slice"', () => {
+    const out = composeHydration('ESTADO', '', { stateRel: SLICE_REL_PATH })
+    expect(out).toContain('# Estado del slice (hidratación automática)')
   })
 })
 
@@ -222,7 +238,9 @@ describe('composeHydration con trabajo BLOQUEADO', () => {
 
   it('el aviso de bloqueo va PRIMERO, antes del estado (se lee de arriba abajo)', () => {
     expect(out.split('\n')[0]).toMatch(/TRABAJO BLOQUEADO/) // la PRIMERA línea
-    expect(out.indexOf('TRABAJO BLOQUEADO')).toBeLessThan(out.indexOf('# Estado del slice'))
+    // La cabecera es la del checkout principal (`composeHydration` sin
+    // `stateRel` = `.agent/STATE.md`): "del repo", no "del slice" — F22.
+    expect(out.indexOf('TRABAJO BLOQUEADO')).toBeLessThan(out.indexOf('# Estado del repo'))
   })
 
   it('declara el next_action SUSPENDIDO y lo cita, para que no se lea como orden vigente', () => {
@@ -256,7 +274,7 @@ describe('composeHydration con trabajo BLOQUEADO', () => {
   it('un next_action kilométrico se recorta en el aviso (pero sigue entero en el estado)', () => {
     const largo = 'x'.repeat(900)
     const o = composeHydration(`---\nnext_action: "${largo}"\nblocked: "porque sí"\n---\ncuerpo`, '')
-    const aviso = o.slice(0, o.indexOf('# Estado del slice'))
+    const aviso = o.slice(0, o.indexOf('# Estado del repo'))
     expect(aviso).toContain('…')
     expect(aviso.length).toBeLessThan(2000)
     expect(o).toContain(largo) // el texto íntegro sigue estando, abajo
@@ -268,7 +286,7 @@ describe('composeHydration sin bloqueo (compatibilidad hacia atrás)', () => {
     const out = composeHydration(SAMPLE, 'abc log')
     expect(out).not.toMatch(/TRABAJO BLOQUEADO/)
     expect(out).not.toMatch(/SUSPENDIDO/)
-    expect(out.startsWith('# Estado del slice')).toBe(true)
+    expect(out.startsWith('# Estado del repo')).toBe(true)
   })
   it('`blocked: null` (lo que siembra ct-next) tampoco', () => {
     expect(composeHydration('---\ntask: "x"\nblocked: null\n---\ncuerpo', '')).not.toMatch(/TRABAJO BLOQUEADO/)

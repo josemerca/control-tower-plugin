@@ -4,3 +4,7 @@ node_modules/
 # nunca se ejecutan en CI/npm test, y sus resultados no deben versionarse.
 scripts/experiments/*-results/
 
+
+# Scratch del proceso subagent-driven (ledger, briefs, informes, paquetes de review).
+# Efímero por definición: el registro durable es el historial de git.
+.superpowers/

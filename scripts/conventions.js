@@ -457,10 +457,13 @@ export function detectConventions({ docs = [], files = [], acks = null } = {}) {
       title: 'este repo ya tiene un fichero de estado fuera de `.agent/STATE.md`',
       evidence: foreignState.map((p) => ({ path: p, line: null, text: 'fichero de estado propio del repo' })),
       decision:
-        'El loop entero está atado a `.agent/STATE.md`: el hook de SessionStart hidrata desde ahí, ' +
-        '/ct-next siembra ahí el STATE.md de cada worktree, y el campo `blocked` solo se lee ahí. ' +
-        'Con dos ficheros de estado nadie sabrá cuál es el vigente. Decide cuál es la fuente de ' +
-        'verdad y deja el otro como histórico (o bórralo).',
+        'El loop entero está atado a DOS rutas fijas, con papeles distintos: `.agent/STATE.md` es ' +
+        'el estado de la sesión coordinadora del checkout principal (trackeado), y ' +
+        '`.agent/SLICE.md` el del slice despachado, que /ct-next siembra dentro de cada worktree ' +
+        '(ignorado, nunca commiteado). El hook de SessionStart hidrata del SLICE.md si existe y ' +
+        'del STATE.md si no, y el campo `blocked` solo se lee de esos dos. Un tercer fichero de ' +
+        'estado no lo mira nadie, y con dos a la vez nadie sabrá cuál es el vigente. Decide cuál ' +
+        'es la fuente de verdad y deja el otro como histórico (o bórralo).',
     })
   }
 

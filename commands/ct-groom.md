@@ -42,7 +42,7 @@ La tabla §9 del spec admite dos columnas opcionales, `Área` y `Toca` (acepta t
 
 Celda vacía o con marcador de "sin valor" significa *no he declarado nada*, **no** "renuncio a todo". Un token fuera del vocabulario, o pedir y renunciar al mismo gate en la misma celda, **abortan** (a diferencia de un `Tipo` desconocido, que solo avisa): un gate que no se puede explicar ni al agente ni a quien revisa sería un gate que solo existe en el spec.
 
-A dónde llega cada gate resuelto: label **`gate:<token>`** del issue (o **`gate:none`** si no hay ninguno — el silencio no puede significar a la vez "sin gates" y "issue anterior a los gates"), sección **`## Gates`** del cuerpo, línea explícita en el kickoff del agente, y campo `gates` de su `.agent/STATE.md`. Por eso sobrevive a un redespacho, a un `--reopen` y a un `/clear`: `/ct-next` lo lee del **issue**, no del spec. Un issue groomeado antes de F21 (sin ninguna label `gate:`) cae al `Tipo`, así que no pierde el gate que ya tenía.
+A dónde llega cada gate resuelto: label **`gate:<token>`** del issue (o **`gate:none`** si no hay ninguno — el silencio no puede significar a la vez "sin gates" y "issue anterior a los gates"), sección **`## Gates`** del cuerpo, línea explícita en el kickoff del agente, y campo `gates` de su `.agent/SLICE.md` (F22 — antes era `.agent/STATE.md`, que es el de la coordinadora, no el del slice). Por eso sobrevive a un redespacho, a un `--reopen` y a un `/clear`: `/ct-next` lo lee del **issue**, no del spec. Un issue groomeado antes de F21 (sin ninguna label `gate:`) cae al `Tipo`, así que no pierde el gate que ya tenía.
 
 **El loop escribe y enseña los gates; no impide mergear con uno sin cerrar.** El que los cierra eres tú.
 

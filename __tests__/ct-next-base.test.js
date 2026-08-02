@@ -57,7 +57,7 @@ const FIXTURE = JSON.stringify({
 })
 
 describe('ct-next — resolución de la rama base por defecto (W-D)', () => {
-  it('resuelve vía `gh repo view` (no "main" hardcodeado) y la usa tanto en `git worktree add` como en el STATE.md sembrado', () => {
+  it('resuelve vía `gh repo view` (no "main" hardcodeado) y la usa tanto en `git worktree add` como en el SLICE.md sembrado', () => {
     const repoRoot = makeRepoRoot()
     const counterFile = join(repoRoot, 'gh-list-count')
     const gitLog = join(repoRoot, 'git-log')
@@ -71,7 +71,7 @@ describe('ct-next — resolución de la rama base por defecto (W-D)', () => {
     expect(r.code).toBe(0)
     const gitLogTxt = readFileSync(gitLog, 'utf8')
     expect(gitLogTxt).toMatch(/worktree add -b feat\/42 \S*\/42 develop/)
-    const stateMd = readFileSync(join(repoRoot, '.worktrees', '42', '.agent', 'STATE.md'), 'utf8')
+    const stateMd = readFileSync(join(repoRoot, '.worktrees', '42', '.agent', 'SLICE.md'), 'utf8')
     expect(stateMd).toMatch(/base: develop/)
   })
 
@@ -111,7 +111,7 @@ describe('ct-next — resolución de la rama base por defecto (W-D)', () => {
     expect(r.code).toBe(0)
     const gitLogTxt = readFileSync(gitLog, 'utf8')
     expect(gitLogTxt).toMatch(/worktree add -b feat\/42 \S*\/42 release\/9/)
-    const stateMd = readFileSync(join(repoRoot, '.worktrees', '42', '.agent', 'STATE.md'), 'utf8')
+    const stateMd = readFileSync(join(repoRoot, '.worktrees', '42', '.agent', 'SLICE.md'), 'utf8')
     expect(stateMd).toMatch(/base: release\/9/)
     const argv = readFileSync(argvLog, 'utf8')
     expect(argv).not.toMatch(/repo view/)

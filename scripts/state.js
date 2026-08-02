@@ -1,4 +1,27 @@
 import { parse, stringify } from 'yaml'
+import { STATE_REL_PATH as COORD_REL_PATH, SLICE_REL_PATH } from './state-paths.js'
+
+// ===========================================================================
+// F22 — `stateRel`: QUÉ FICHERO NOMBRAN LOS MENSAJES DE ESTE MÓDULO.
+//
+// Este módulo no lee ficheros: recibe el texto ya leído. Hasta F22 eso no
+// importaba, porque el fichero era siempre `.agent/STATE.md` y la constante
+// escrita a mano dentro de cada frase acertaba siempre. Desde F22 hay DOS
+// (ver scripts/state-paths.js) y quien lee ya aplica la precedencia — así que
+// una constante dentro del mensaje ya no describe nada: AFIRMA. En el worktree
+// de un slice afirmaba `.agent/STATE.md`, que es el fichero TRACKEADO de la
+// coordinadora, y el motivo de bloqueo del hook `Stop` sale en cada turno.
+//
+// El mecanismo es una opción `stateRel` con valor por defecto, no un
+// parámetro obligatorio: los llamantes que no distinguen (y los tests que
+// ejercitan las funciones sueltas) siguen viendo exactamente el texto de
+// antes. La ruta es RELATIVA a propósito — quien lee el mensaje está dentro
+// de ese directorio.
+//
+// El default es el fichero de la COORDINADORA porque es el único caso en que
+// "no me han dicho cuál" tiene una respuesta correcta: un slice SIEMPRE llega
+// por el hook, que sí sabe cuál leyó.
+// ===========================================================================
 
 const FM = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/
 
@@ -14,8 +37,8 @@ export function parseState(md) {
 // derecho a enterarse de que no lo es). Pero los dos hooks corren en el
 // arranque/cierre de CADA sesión de un repo bootstrapeado: ahí una excepción
 // no es un error informativo, es un hook que revienta con un stack trace por
-// stderr en cada turno, del que nadie deduce que el problema es su STATE.md.
-// Esta variante nunca lanza y devuelve el error como DATO, para que quien
+// stderr en cada turno, del que nadie deduce que el problema es su fichero de
+// estado. Esta variante nunca lanza y devuelve el error como DATO, para que quien
 // hidrata pueda DECIRLO en vez de callarlo (ver composeHydration: un
 // frontmatter ilegible es el único caso en que de verdad "no se sabe" si el
 // trabajo está bloqueado, y se anuncia como tal).
@@ -114,9 +137,9 @@ const str = (v) => (v == null ? '' : String(v).trim())
  * En la duda se elige SIEMPRE 'blocked': un falso positivo cuesta una
  * pregunta; un falso negativo es exactamente el incidente que originó esto.
  */
-export function readBlocked(meta) {
+export function readBlocked(meta, { stateRel = COORD_REL_PATH } = {}) {
   if (meta == null || typeof meta !== 'object' || Array.isArray(meta)) {
-    return { state: 'unreadable', why: 'el frontmatter de STATE.md no es un mapa de campos' }
+    return { state: 'unreadable', why: `el frontmatter de ${stateRel} no es un mapa de campos` }
   }
   const statusWord = str(meta.status).toLowerCase()
   const statusSaysBlocked = STATUS_BLOCKED_WORDS.has(statusWord)
@@ -134,7 +157,7 @@ export function readBlocked(meta) {
       since: '',
       unblock: '',
       notes: [declared
-        ? `contradicción en el STATE.md: el campo \`blocked\` está vacío/\`null\` pero \`status: ${statusWord}\` dice que el trabajo está bloqueado. Se trata como BLOQUEADO por seguridad. Resuélvela: el bloqueo se declara en \`blocked: {reason: "…", unblock: "…"}\`.`
+        ? `contradicción en ${stateRel}: el campo \`blocked\` está vacío/\`null\` pero \`status: ${statusWord}\` dice que el trabajo está bloqueado. Se trata como BLOQUEADO por seguridad. Resuélvela: el bloqueo se declara en \`blocked: {reason: "…", unblock: "…"}\`.`
         : `\`status: ${statusWord}\` dice que el trabajo está bloqueado, pero el bloqueo NO se declara ahí: \`status\` es el eje de PROGRESO y no tiene dónde poner el motivo ni qué haría falta para levantarlo. Se trata como BLOQUEADO por seguridad; pásalo a \`blocked: {reason: "…", unblock: "…"}\` para que la próxima sesión sepa por qué.`],
     }
   }
@@ -176,7 +199,7 @@ export function readBlocked(meta) {
 
 // Recorte defensivo del `next_action` que se cita dentro del aviso: ahí se
 // cita para NEUTRALIZARLO (el texto íntegro sigue estando más abajo, en el
-// STATE.md inyectado tal cual). Un next_action kilométrico no debe empujar el
+// estado inyectado tal cual). Un next_action kilométrico no debe empujar el
 // resto del aviso fuera de la vista.
 function quoteForNotice(s, max = 300) {
   const one = String(s).replace(/\s+/g, ' ').trim()
@@ -187,13 +210,15 @@ const NOTICE_TOP = '=========== TRABAJO BLOQUEADO — LEE ESTO ANTES DE HACER NA
 const NOTICE_BOTTOM = '=========== fin del aviso de bloqueo ==========='
 
 /**
- * El aviso que el hook de SessionStart pone ANTES del STATE.md, para que la
- * sesión no pueda leer `next_action` como una orden vigente.
+ * El aviso que el hook de SessionStart pone ANTES del estado, para que la
+ * sesión no pueda leer `next_action` como una orden vigente. `stateRel` es el
+ * fichero que ese hook leyó de verdad (F22): en un worktree de slice, el aviso
+ * que manda a `.agent/STATE.md` manda al fichero de la coordinadora.
  */
-export function blockNotice(blocked, { nextAction = '' } = {}) {
+export function blockNotice(blocked, { nextAction = '', stateRel = COORD_REL_PATH } = {}) {
   if (!blocked || blocked.state !== 'blocked') return ''
   const lines = [NOTICE_TOP, '']
-  lines.push('`.agent/STATE.md` declara este trabajo BLOQUEADO (campo `blocked`). Bloqueado NO es "pendiente": alguien decidió que esto no puede continuar tal cual.')
+  lines.push(`\`${stateRel}\` declara este trabajo BLOQUEADO (campo \`blocked\`). Bloqueado NO es "pendiente": alguien decidió que esto no puede continuar tal cual.`)
   lines.push('')
   lines.push(blocked.reason
     ? `Motivo: ${blocked.reason}`
@@ -204,7 +229,7 @@ export function blockNotice(blocked, { nextAction = '' } = {}) {
   if (blocked.since) lines.push(`Bloqueado desde: ${blocked.since}`)
   lines.push(blocked.unblock
     ? `Para desbloquear haría falta: ${blocked.unblock}`
-    : 'Para desbloquear: NO CONSTA — el STATE.md no dice qué haría falta. Averígualo y escríbelo en `blocked.unblock` antes de que otra sesión se encuentre con lo mismo.')
+    : `Para desbloquear: NO CONSTA — ${stateRel} no dice qué haría falta. Averígualo y escríbelo en \`blocked.unblock\` antes de que otra sesión se encuentre con lo mismo.`)
   for (const n of blocked.notes || []) lines.push(`Nota sobre cómo está escrito este bloqueo: ${n}`)
   lines.push('')
   if (nextAction) {
@@ -212,20 +237,20 @@ export function blockNotice(blocked, { nextAction = '' } = {}) {
   } else {
     lines.push('`next_action` no dice nada, y con el trabajo bloqueado tampoco debes deducir uno del resto del estado.')
   }
-  lines.push('Levantar el bloqueo es una decisión humana y explícita: se borra el campo `blocked` de `.agent/STATE.md` (o se pone a `null`). Si crees que ya no aplica, dilo y pídelo — no lo levantes por tu cuenta ni "de paso".')
+  lines.push(`Levantar el bloqueo es una decisión humana y explícita: se borra el campo \`blocked\` de \`${stateRel}\` (o se pone a \`null\`). Si crees que ya no aplica, dilo y pídelo — no lo levantes por tu cuenta ni "de paso".`)
   lines.push(NOTICE_BOTTOM)
   return lines.join('\n')
 }
 
 /**
  * El aviso para el único caso en que de verdad NO SE SABE si hay bloqueo: el
- * frontmatter no se puede leer. Un STATE.md ilegible no es "no bloqueado".
+ * frontmatter no se puede leer. Un estado ilegible no es "no bloqueado".
  */
-export function unreadableNotice(why) {
+export function unreadableNotice(why, { stateRel = COORD_REL_PATH } = {}) {
   return [
-    '=========== AVISO: `.agent/STATE.md` NO SE PUDO LEER ENTERO ===========',
+    `=========== AVISO: \`${stateRel}\` NO SE PUDO LEER ENTERO ===========`,
     '',
-    `No se ha podido interpretar el frontmatter YAML de \`.agent/STATE.md\` (${why}).`,
+    `No se ha podido interpretar el frontmatter YAML de \`${stateRel}\` (${why}).`,
     'Eso significa que NO se puede saber si el trabajo está BLOQUEADO (campo `blocked`): trátalo como posiblemente bloqueado.',
     'No ejecutes nada de lo que diga el estado de abajo sin confirmarlo antes, y arregla el frontmatter lo primero — mientras siga así, ninguna sesión de este repo podrá hidratarse bien.',
     '=========== fin del aviso ===========',
@@ -255,16 +280,22 @@ export function fieldReadingGuide(meta, { blocked = false } = {}) {
   return `## Cómo leer estos campos\n${lines.join('\n')}`
 }
 
-export function composeHydration(stateText, gitLog) {
+export function composeHydration(stateText, gitLog, { stateRel = COORD_REL_PATH } = {}) {
   if (!stateText || !stateText.trim()) return ''
   const { meta, error } = parseStateSafe(stateText)
-  const blocked = error ? { state: 'unreadable', why: error } : readBlocked(meta)
+  const blocked = error ? { state: 'unreadable', why: error } : readBlocked(meta, { stateRel })
 
   const parts = []
-  if (blocked.state === 'unreadable') parts.push(unreadableNotice(error || blocked.why))
-  else if (blocked.state === 'blocked') parts.push(blockNotice(blocked, { nextAction: meta?.next_action }))
+  if (blocked.state === 'unreadable') parts.push(unreadableNotice(error || blocked.why, { stateRel }))
+  else if (blocked.state === 'blocked') parts.push(blockNotice(blocked, { nextAction: meta?.next_action, stateRel }))
 
-  parts.push(`# Estado del slice (hidratación automática)\n\n${stateText.trim()}`)
+  // F22: la cabecera se deriva de `stateRel`, que es el fichero que quien
+  // llama acaba de resolver. Decía "Estado del slice" SIEMPRE, así que la
+  // sesión coordinadora —cuyo `.agent/STATE.md` habla del epic, no de ningún
+  // slice— abría cada hidratación con una etiqueta falsa: exactamente la
+  // confusión de fichero que esta ronda arregla, en el otro sentido.
+  const titulo = stateRel === SLICE_REL_PATH ? 'Estado del slice' : 'Estado del repo'
+  parts.push(`# ${titulo} (hidratación automática)\n\n${stateText.trim()}`)
 
   const guide = fieldReadingGuide(meta, { blocked: blocked.state === 'blocked' })
   if (guide) parts.push(guide)
@@ -344,7 +375,7 @@ const REV_SHAPE = /^[^\s-][^\s]*$/
 
 /**
  * Le pregunta a git qué relación hay entre `HEAD` y el `last_commit` del
- * STATE.md. No decide nada: solo describe.
+ * estado. No decide nada: solo describe.
  *
  * @param headSha    SHA de HEAD (ya resuelto por quien llama).
  * @param lastCommit valor crudo del frontmatter (puede ser cualquier cosa).
@@ -417,6 +448,16 @@ function branchesContaining(git, stateSha, currentBranch) {
 //      bloquea igual que antes de este cambio.
 // Solo `.agent/STATE.md`, no `.agent/` entero: `conventions-ack.md` es un
 // registro de decisiones, no bookkeeping, y merece bloquear si no se registra.
+//
+// F22 — ESTA CONSTANTE NO SE PARAMETRIZA, Y NO ES UN DESCUIDO. Todo lo demás
+// de este módulo pasó a nombrar el fichero que de verdad se leyó (ver
+// `stateRel`, arriba), y esto NO, porque aquí no se compone un mensaje: se
+// miden COMMITS. El único fichero de estado que llega a commitearse es el de
+// la coordinadora — `.agent/SLICE.md` está fuera de git por construcción (el
+// dispatcher escribe la regla de ignore y aborta el despacho si git sigue
+// viéndolo), así que NINGÚN commit lo toca jamás y no hay nada que eximir.
+// Cambiar esto por la ruta resuelta dejaría a los apuntes de la coordinadora
+// sin su exención, y devolvería justo la regresión infinita de arriba.
 // ===========================================================================
 const STATE_REL_PATH = '.agent/STATE.md'
 
@@ -521,7 +562,7 @@ const livesIn = (rel) => (rel.containers?.length ? rel.containers.map((b) => `\`
  * Decide, a partir de la relación, si se bloquea el cierre y qué se dice.
  * @returns { block, kind, reason, systemMessage }
  */
-export function classifyStopState({ relation, stopHookActive }) {
+export function classifyStopState({ relation, stopHookActive, stateRel = COORD_REL_PATH }) {
   const none = { block: false, kind: relation?.kind || 'unset', reason: '', systemMessage: '' }
   if (!relation) return none
   // `stop_hook_active`: ya estamos dentro de una continuación provocada por un
@@ -534,9 +575,11 @@ export function classifyStopState({ relation, stopHookActive }) {
 
   // F15/H4: el estado solo va por detrás de commits de APUNTE (los que tocan
   // exclusivamente `.agent/STATE.md`). No hay nada de trabajo sin registrar, y
-  // es el estado NORMAL en que queda cualquier turno que actualice y commitee
-  // su STATE.md: el commit que lo arregla lo deja, por construcción, un commit
-  // por detrás. Ni bloquea ni avisa — un aviso en cada cierre de turno sería
+  // es el estado NORMAL en que queda cualquier turno de la COORDINADORA que
+  // actualice y commitee su STATE.md: el commit que lo arregla lo deja, por
+  // construcción, un commit por detrás. (Un slice no pasa nunca por aquí — su
+  // estado está fuera de git y ningún commit lo toca.)
+  // Ni bloquea ni avisa — un aviso en cada cierre de turno sería
   // ruido puro, y `last_commit` apuntando al último commit de TRABAJO es
   // además la lectura más útil de ese campo, no una degradación.
   if (rel.kind === 'behind-bookkeeping') return { ...none, kind: 'behind-bookkeeping' }
@@ -547,17 +590,32 @@ export function classifyStopState({ relation, stopHookActive }) {
     // Si además hay apuntes por medio, se dice: si no, el conteo no cuadra con
     // lo que `git log` enseña y parece un error del guard.
     const b = rel.bookkeeping || 0
+    // Esta nota NO se parametriza, y no es un olvido: habla de COMMITS, y el
+    // path que `countWorkCommits` exime es literalmente `.agent/STATE.md` (ver
+    // la constante de ese bloque). Sustituirlo por la ruta resuelta describiría
+    // una exención que no existe.
     const nota = b > 0
       ? ` (más ${b === 1 ? '1 commit que solo toca' : `${b} commits que solo tocan`} \`.agent/STATE.md\`, que no cuenta${b === 1 ? '' : 'n'}: un apunte no es trabajo sin registrar)`
       : ''
+    // Misma razón, y por eso la frase es CONDICIONAL en vez de interpolada: la
+    // regresión que tranquiliza (commiteas el apunte y vuelves a estar atrás)
+    // solo le puede pasar al fichero que se commitea. El estado de un slice
+    // está fuera de git —el dispatcher lo excluye ANTES de sembrarlo y aborta
+    // el despacho si git sigue viéndolo—, así que ahí no hay commit de apunte
+    // que exista ni, por tanto, que esté exento. Interpolar `stateRel` en la
+    // frase de arriba habría dicho dos mentiras en una: que ese commit existe y
+    // que no cuenta.
+    const apunte = stateRel === COORD_REL_PATH
+      ? 'Commitear ese cambio NO te vuelve a dejar atrás: un commit que solo toca `.agent/STATE.md` no cuenta. '
+      : `No lo commitees: \`${stateRel}\` está fuera de git a propósito y no entra en el PR de este slice; basta con dejarlo al día en disco. `
     return {
       block: true,
       kind: 'behind',
       reason:
-        `\`.agent/STATE.md\` se ha quedado atrás: hay ${cuantos} de trabajo${nota} en ${whereAmI(rel)} por encima de su \`last_commit\` ` +
+        `\`${stateRel}\` se ha quedado atrás: hay ${cuantos} de trabajo${nota} en ${whereAmI(rel)} por encima de su \`last_commit\` ` +
         `(${shortSha(rel.stateSha)}), que sí es un ancestro de HEAD (${shortSha(rel.headSha)}). ` +
-        'Actualiza STATE.md (you_are_here, next_action, tasks[], last_commit) antes de cerrar el turno, para que la próxima sesión se hidrate correcta. ' +
-        'Commitear ese cambio NO te vuelve a dejar atrás: un commit que solo toca `.agent/STATE.md` no cuenta. ' +
+        `Actualiza \`${stateRel}\` (you_are_here, next_action, tasks[], last_commit) antes de cerrar el turno, para que la próxima sesión se hidrate correcta. ` +
+        apunte +
         STOP_TAIL,
       systemMessage: '',
     }
@@ -568,10 +626,10 @@ export function classifyStopState({ relation, stopHookActive }) {
       block: true,
       kind: 'unresolvable',
       reason:
-        `El \`last_commit\` de \`.agent/STATE.md\` («${quoteForNotice(rel.raw || '(vacío)', 120)}») no es ningún commit de este repositorio: ` +
+        `El \`last_commit\` de \`${stateRel}\` («${quoteForNotice(rel.raw || '(vacío)', 120)}») no es ningún commit de este repositorio: ` +
         '`git rev-parse` no lo resuelve. Puede ser un valor de relleno, un SHA de otro repo, o un commit que aquí ya no existe. ' +
         'Mientras siga así NADIE puede contrastar el estado con el repo — ni este guard ni la próxima sesión. ' +
-        'Ponle el SHA real del último commit de este trabajo (`git rev-parse HEAD`) y actualiza el resto de STATE.md ' +
+        `Ponle el SHA real del último commit de este trabajo (\`git rev-parse HEAD\`) y actualiza el resto de \`${stateRel}\` ` +
         '(you_are_here, next_action, tasks[]) antes de cerrar el turno. ' +
         STOP_TAIL,
       systemMessage: '',
@@ -579,7 +637,7 @@ export function classifyStopState({ relation, stopHookActive }) {
   }
 
   // Los avisos no bloqueantes salen en CADA turno mientras dure la anomalía, y
-  // esa insistencia es deliberada: un `STATE.md` para dos líneas de trabajo es
+  // esa insistencia es deliberada: un solo estado para dos líneas de trabajo es
   // una condición estructural que alguien tiene que resolver, y callarla con un
   // marcador persistente la volvería invisible en vez de resuelta. Por eso el
   // precio se paga en la otra moneda: lo más CORTO posible. Solo entra lo que
@@ -591,7 +649,7 @@ export function classifyStopState({ relation, stopHookActive }) {
       kind: 'ahead',
       reason: '',
       systemMessage:
-        `Guard de cierre: el \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) es un descendiente de HEAD ` +
+        `Guard de cierre: el \`last_commit\` de \`${stateRel}\` (${shortSha(rel.stateSha)}) es un descendiente de HEAD ` +
         `(${shortSha(rel.headSha)})${livesIn(rel) ? ` y vive en ${livesIn(rel)}` : ''}: el estado va por delante de ${whereAmI(rel)}, no por detrás. ` +
         'No lo reapuntes a HEAD — movería el handoff hacia atrás.',
     }
@@ -603,7 +661,7 @@ export function classifyStopState({ relation, stopHookActive }) {
       kind: 'diverged',
       reason: '',
       systemMessage:
-        `Guard de cierre: el \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) ` +
+        `Guard de cierre: el \`last_commit\` de \`${stateRel}\` (${shortSha(rel.stateSha)}) ` +
         `${livesIn(rel) ? `vive en ${livesIn(rel)}, no en` : 'no está en'} la historia de ${whereAmI(rel)}: dos líneas de trabajo divergentes` +
         `${rel.mergeBase ? ` desde ${shortSha(rel.mergeBase)}` : ''}. ` +
         'Uno solo no puede ser el handoff de las dos (cada worktree de `/ct-next` lleva el suyo); ' +
@@ -621,7 +679,7 @@ export function classifyStopState({ relation, stopHookActive }) {
       kind: 'orphan',
       reason: '',
       systemMessage:
-        `Guard de cierre: al \`last_commit\` de \`.agent/STATE.md\` (${shortSha(rel.stateSha)}) no llega ninguna rama, ni local ni remota: ` +
+        `Guard de cierre: al \`last_commit\` de \`${stateRel}\` (${shortSha(rel.stateSha)}) no llega ninguna rama, ni local ni remota: ` +
         'es un commit huérfano (lo típico, un `reset --hard` que se lo llevó por delante). ' +
         'El handoff que describe puede haber dejado de existir: compruébalo antes de fiarte, porque `git gc` puede borrar el commit para siempre.',
     }
@@ -633,7 +691,7 @@ export function classifyStopState({ relation, stopHookActive }) {
     reason: '',
     systemMessage:
       `Guard de cierre: git no ha podido determinar la relación entre HEAD (${shortSha(rel.headSha)}) y el \`last_commit\` de ` +
-      `\`.agent/STATE.md\` (${shortSha(rel.stateSha)}). No se bloquea el cierre porque no hay nada que se pueda afirmar; ` +
+      `\`${stateRel}\` (${shortSha(rel.stateSha)}). No se bloquea el cierre porque no hay nada que se pueda afirmar; ` +
       'comprueba a mano si el estado está al día antes de fiarte de él.',
   }
 }

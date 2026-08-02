@@ -28,6 +28,31 @@ function main() {
     process.exit(0)
   }
 
+  // `git rev-parse --git-common-dir` (F22, ensureSliceIgnored en ct-next.mjs):
+  // el directorio común de git donde vive `info/exclude`. El valor concreto
+  // no le importa a casi ningún test — ensureSliceIgnored() lo usa solo para
+  // construir una ruta de FS a la que escribir con Node (mkdirSync +
+  // writeFileSync), sin volver a pasar por git — así que basta una ruta
+  // ABSOLUTA determinista bajo el propio toplevel simulado. Sin FAIL
+  // configurable (a propósito): ningún test necesita simular que ESTA
+  // consulta concreta falle; los que ejercen la precedencia REAL entre
+  // `info/exclude` y una negación en `.gitignore` (F22, Step 4) usan git de
+  // VERDAD, nunca este stub — ver __tests__/f22-estado-del-slice.test.js.
+  if (argv[0] === 'rev-parse' && argv[1] === '--git-common-dir') {
+    process.stdout.write(`${process.env.FAKE_GIT_TOPLEVEL || '/tmp/fake-repo-root'}/.git\n`)
+    process.exit(0)
+  }
+
+  // `git status --porcelain` (F22 — la puerta de efecto tras sembrar
+  // SLICE.md, ver el bloque "SE VERIFICA EL EFECTO" en ct-next.mjs). Siempre
+  // "limpio" (nada visible para git): es el único valor que necesita ningún
+  // test existente, para que los que despachan de verdad pero no ejercitan
+  // esta comprobación sigan pasando sin cambios.
+  if (argv[0] === 'status' && argv.includes('--porcelain')) {
+    process.stdout.write('')
+    process.exit(0)
+  }
+
   // `git rev-parse --verify --quiet <ref>^{commit}` (W-D, fix round 1,
   // Important): ct-next.mjs comprueba OFFLINE, contra el checkout local, que
   // la rama base resuelta (vía `gh repo view` o `--base`) existe de verdad

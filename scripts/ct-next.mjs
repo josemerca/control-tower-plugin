@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, statSy
 import { fileURLToPath } from 'node:url'
 import { tmpdir } from 'node:os'
 import { randomBytes } from 'node:crypto'
-import { dirname, join, delimiter as pathDelimiter } from 'node:path'
+import { dirname, join, isAbsolute, delimiter as pathDelimiter } from 'node:path'
 import { planDispatch, resolveAccount, resolveAccountLegacy, validateAccountMap, parseRepoSlug, buildCmuxArgv, buildCmuxSendArgv, buildCmuxSendKeyArgv, collectFinishedResidue, formatFinishedResidueWarning } from './dispatch.js'
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
 import { parseStrictInt } from './argnum.js'
@@ -15,6 +15,7 @@ import {
 } from './launch-sentinel.js'
 import { buildDispatchInput, NO_MILESTONE_KEY } from './gh-issue-map.js'
 import { parseStateSafe, readBlocked } from './state.js'
+import { SLICE_REL_PATH, excludeContentWith } from './state-paths.js'
 import {
   planClosureProbe, buildClosureQuery, parseClosureProbe,
   formatSuspectClosureWarnings, formatMergedButOpenWarnings, formatClosureCoverageNote,
@@ -1259,7 +1260,7 @@ if (cap < 1) {
 // --base <rama>: mismo patrón de validación que --repo/--cap (`arg()` ya
 // devuelve `true`, no un string, cuando el flag es el último token o va
 // seguido de otro flag) — un `--base` colgante nunca debe colarse hacia
-// `git worktree add`/el STATE.md sembrado como el string literal "true".
+// `git worktree add`/el SLICE.md sembrado como el string literal "true".
 // Fix round 1, Minor 1 (review de W-D): igual que --repo (`repo.length ===
 // 0`), una cadena VACÍA también se rechaza aquí — sin esto, `--base ''` pasa
 // la comprobación de `typeof` y se cuela hasta `git worktree add … ''`,
@@ -1274,7 +1275,7 @@ if (baseArg !== undefined && (typeof baseArg !== 'string' || baseArg.length === 
 // __tests__/ct-next-dryrun.test.js). Mismo patrón que T7 (dispatch-check.mjs)
 // para el mismo peligro: si queda colgada en el entorno SIN --dry-run, el
 // script NO debe decidir con datos fabricados ni, sobre todo, crear un
-// worktree real / sembrar STATE.md / lanzar cmux con ese estado inventado.
+// worktree real / sembrar SLICE.md / lanzar cmux con ese estado inventado.
 // Se trata como error de uso y abortamos ANTES de tocar gh o el filesystem.
 if (process.env.CT_NEXT_FIXTURE && !dryRun) {
   console.error('CT_NEXT_FIXTURE está definido pero falta --dry-run: por seguridad no se decide ni se lanza nada real con datos de fixture. Añade --dry-run o limpia la variable de entorno.')
@@ -1432,10 +1433,10 @@ const gh = (a) => execFileSync('gh', a, { encoding: 'utf8', stdio: ['ignore', 'p
 
 // detectDefaultBranch (W-D): antes de este cambio, ct-next.mjs asumía "main"
 // a ciegas tanto en `git worktree add ... main` como en `base: 'main'` del
-// STATE.md sembrado. En un repo cuya rama por defecto real sea distinta
+// SLICE.md sembrado. En un repo cuya rama por defecto real sea distinta
 // (p.ej. "master", o cualquier otra convención) eso fallaba de forma
 // confusa (worktree add contra una rama que no existe), o peor, sembraba un
-// STATE.md con un `base` que miente sobre la rama real.
+// SLICE.md con un `base` que miente sobre la rama real.
 //
 // Se resuelve vía `gh repo view --json defaultBranchRef`: es la fuente
 // autoritativa (la rama por defecto tal y como está configurada AHORA en
@@ -1524,7 +1525,7 @@ function verifyBaseExistsLocally(base) {
 // --show-toplevel` en el cwd en el que arrancó la sesión — que puede no
 // tener NADA que ver con `--repo`. Sin esta guarda, correr `/ct-next --repo
 // otro-org/otro-repo` desde una sesión de control-tower crea `feat/<n>` +
-// `.worktrees/<n>` DENTRO de control-tower, siembra un STATE.md ahí y lanza
+// `.worktrees/<n>` DENTRO de control-tower, siembra un SLICE.md ahí y lanza
 // un agente con un kickoff que dice estar implementando un slice de
 // otro-org/otro-repo. Resolvemos la identidad real del checkout vía `git
 // remote get-url origin` — no `gh repo view --json nameWithOwner`: eso
@@ -1565,6 +1566,7 @@ function ensureRepoIdentity(root, expectedRepo) {
 
 let repoRoot
 let resolvedBase
+let resolvedBaseSha = ''
 // Fix round 1, Minor 2 (review de W-D): distingue "el valor de resolvedBase
 // viene del relleno sintético de fixture" (nunca resuelto de verdad, ni
 // contra GitHub ni contra el checkout local) de "viene de una resolución
@@ -1603,6 +1605,18 @@ if (fx) {
   // Fix round 1, Important: verificación local ANTES del bucle de despacho,
   // offline (ni gh ni red) — ver el comentario de verifyBaseExistsLocally.
   verifyBaseExistsLocally(resolvedBase)
+  // F22: se resuelve UNA vez, aquí, donde `verifyBaseExistsLocally` acaba de
+  // demostrar que la referencia existe. Si aun así fallara, se sigue con
+  // cadena vacía: la semilla lo trata como "sin last_commit" y el hook calla,
+  // que es el comportamiento de antes de este cambio — degradar es
+  // aceptable, mentir no.
+  try {
+    resolvedBaseSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${resolvedBase}^{commit}`], {
+      cwd: repoRoot, encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
+    }).trim()
+  } catch {
+    console.error(`aviso: no se pudo resolver "${resolvedBase}" a un sha concreto, así que la semilla del slice irá sin \`last_commit\`. El hook de cierre de turno no podrá avisar al agente de que su estado se ha quedado atrás.`)
+  }
 }
 
 // F17 — LA TRAMPA QUE CONVIERTE A UN AGENTE OBEDIENTE EN EL MISMO DEADLOCK.
@@ -1909,7 +1923,8 @@ function formatClosedStatusResidueWarning(residue, { acked = new Set() } = {}) {
 // SIEMPRE, y el dispatcher le dice al humano que hay alguien trabajándolo.
 //
 // El kickoff manda al agente marcar `blocked: {reason, unblock}` en su
-// `.agent/STATE.md` y PARAR. El issue se queda en `status:in-progress`:
+// `.agent/SLICE.md` (antes de F22, `.agent/STATE.md`) y PARAR. El issue se
+// queda en `status:in-progress`:
 // retiene tokens de área/touches Y una plaza de `--cap`, indefinidamente. Y
 // no hay ninguna transición que el agente pueda ejecutar correctamente:
 //   - `stalenessNote` no lo señala: devuelve null en cuanto existen el
@@ -1917,14 +1932,24 @@ function formatClosedStatusResidueWarning(residue, { acked = new Set() } = {}) {
 //   - `--requeue` se NIEGA por diseño (exige que no queden ni worktree ni
 //     rama: F15, no suelta tokens de trabajo vivo sin mergear);
 //   - `--release` mentiría — diría que hay un PR listo para revisión;
-//   - y el campo `blocked` vive en un STATE.md que el dispatcher escribía al
+//   - y el campo `blocked` vivía en un STATE.md que el dispatcher escribía al
 //     sembrar y NUNCA volvía a leer.
 //
 // El arreglo es de DISCO y sin red: el dispatcher sabe exactamente dónde está
-// ese fichero (`.worktrees/<n>/.agent/STATE.md`, la misma ruta que
-// `assessLocalLiveness` ya recorre) y `readBlocked` (state.js) ya sabe leerlo,
-// incluida la variante `status: blocked` que el propio state.js documenta como
-// el error de escritura más probable.
+// el estado del slice (dentro del mismo directorio de worktree que
+// `assessLocalLiveness` ya recorre) y `readBlocked` (state.js) ya sabe
+// leerlo, incluida la variante `status: blocked` que el propio state.js
+// documenta como el error de escritura más probable.
+//
+// F22: ese fichero es `.worktrees/<n>/.agent/SLICE.md` (`SLICE_REL_PATH`),
+// SIN FALLBACK a `.agent/STATE.md`. En un worktree sembrado por el
+// dispatcher actual, `.agent/STATE.md` es el fichero de la COORDINADORA,
+// congelado en la base commit (F22/Task 4 dejó de escribir el estado del
+// slice ahí): su `blocked` describe el epic, no este slice, y leerlo
+// reportaría como bloqueado un slice que no lo está. Un worktree que no
+// tiene SLICE.md o lo sembró una versión anterior a F22, o lo perdió después
+// (está ignorado: un `git clean -x` se lo lleva) — se avisa de las dos
+// causas, no se elige una (ver el bloque de abajo).
 //
 // Sale como aviso de primer nivel y no colgando de un mensaje de colisión: un
 // claim bloqueado retiene cap y tokens AUNQUE hoy no choque con nadie, así que
@@ -1935,8 +1960,24 @@ function formatBlockedClaimWarnings(issues) {
   const out = []
   for (const i of (issues || [])) {
     if (i.status !== 'in-progress') continue
-    const path = `${repoRoot}/.worktrees/${i.n}/.agent/STATE.md`
-    if (!existsSync(path)) continue // sin STATE.md no hay nada que leer; el claim rancio ya lo cubre stalenessNote
+    const path = `${repoRoot}/.worktrees/${i.n}/${SLICE_REL_PATH}`
+    if (!existsSync(path)) {
+      // F22: SIN FALLBACK a `.agent/STATE.md`, y es deliberado. En un worktree
+      // sembrado por esta versión, ese fichero es el de la COORDINADORA
+      // congelado en la base: su campo `blocked` habla del epic, no de este
+      // slice, y leerlo reportaría como bloqueado un slice que no lo está.
+      // Un worktree sin SLICE.md se avisa, no se adivina — mismo criterio que
+      // el fallo de lectura de más abajo. Y el aviso NO elige causa: hay dos,
+      // y desde aquí no se distinguen. La segunda es nueva de F22 y no podía
+      // pasarle al STATE.md trackeado: `.agent/SLICE.md` está IGNORADO, así
+      // que un `git clean -xdf` en el worktree se lo lleva. Mismo síntoma,
+      // remedio distinto; afirmar "esto es del esquema viejo" sería declarar
+      // comprobado lo que no se ha mirado.
+      if (existsSync(`${repoRoot}/.worktrees/${i.n}`)) {
+        out.push(`#${i.n} está en status:in-progress y su worktree existe, pero no tiene ${SLICE_REL_PATH}: o lo sembró una versión del plugin anterior a F22 (cuando el estado del slice vivía en .agent/STATE.md), o se sembró bien y se borró después —p. ej. un \`git clean -x\`, que sí se lo lleva ahora que está ignorado—. Desde aquí no se distinguen. En cualquiera de los dos casos, NO se ha comprobado si ese agente se declaró BLOQUEADO —y su .agent/STATE.md NO se lee a propósito: en un worktree nuevo ese fichero es el de la coordinadora, y su campo \`blocked\` no habla de este slice—. Míralo a mano: \`cat .worktrees/${i.n}/.agent/STATE.md\` si resulta ser del esquema viejo; si no, pregúntale al agente de ese worktree.`)
+      }
+      continue // sin worktree no hay nada que leer; el claim rancio ya lo cubre stalenessNote
+    }
     let md
     try {
       md = readFileSync(path, 'utf8')
@@ -1944,7 +1985,15 @@ function formatBlockedClaimWarnings(issues) {
       out.push(`#${i.n} está en status:in-progress y su worktree existe, pero no se ha podido leer ${path} (${e.message}): NO se ha comprobado si ese agente se declaró BLOQUEADO. No lo leas como "no lo está".`)
       continue
     }
-    const b = readBlocked(parseStateSafe(md).meta)
+    // `stateRel` (F22/Task 6b): `readBlocked` compone sus notas nombrando un
+    // fichero, y sin esto nombra `.agent/STATE.md` por defecto — el fichero
+    // TRACKEADO que la coordinadora tiene en su propio cwd. La nota de
+    // contradicción (`status: blocked` + campo `blocked` vacío) se concatena
+    // TAL CUAL al aviso de abajo, así que el dispatcher acabaría mandando a la
+    // coordinadora a editar justo el fichero cuya contaminación motivó F22.
+    // Aquí no hay ambigüedad que resolver: `md` se acaba de leer de `path`,
+    // que es `SLICE_REL_PATH` por construcción (línea de arriba).
+    const b = readBlocked(parseStateSafe(md).meta, { stateRel: SLICE_REL_PATH })
     if (b.state === 'unreadable') {
       out.push(`#${i.n} está en status:in-progress, pero el frontmatter de ${path} no se puede interpretar (${b.why}): NO se ha comprobado si ese agente se declaró BLOQUEADO.`)
       continue
@@ -1953,7 +2002,7 @@ function formatBlockedClaimWarnings(issues) {
     const motivo = b.reason ? `: «${b.reason}»` : ' (sin motivo declarado)'
     const salida = b.unblock ? ` Para levantarlo, lo que el propio agente dejó escrito: «${b.unblock}».` : ''
     const extras = (b.notes || []).length ? ` ${b.notes.join(' ')}` : ''
-    out.push(`#${i.n} está en status:in-progress —el dispatcher lo cuenta como trabajo en curso, ocupando una plaza de --cap y reteniendo sus tokens de área/touches— pero su propio .worktrees/${i.n}/.agent/STATE.md se declara BLOQUEADO${motivo}. No hay ningún agente avanzándolo, y NINGUNA transición del loop lo saca de ahí sola: la detección de claims rancios no lo ve (el worktree y la rama SÍ existen), \`--requeue\` se niega mientras existan, y \`--release\` mentiría (no hay PR). Esto lo decides tú: desbloquéalo, o abandónalo (borra .worktrees/${i.n} y la rama feat/${i.n} —comprueba antes que no pierdes trabajo sin pushear— y solo entonces \`node <plugin>/scripts/dispatch-check.mjs ${i.n} --repo ${repo} --requeue\`).${salida}${extras}`)
+    out.push(`#${i.n} está en status:in-progress —el dispatcher lo cuenta como trabajo en curso, ocupando una plaza de --cap y reteniendo sus tokens de área/touches— pero su propio .worktrees/${i.n}/${SLICE_REL_PATH} se declara BLOQUEADO${motivo}. No hay ningún agente avanzándolo, y NINGUNA transición del loop lo saca de ahí sola: la detección de claims rancios no lo ve (el worktree y la rama SÍ existen), \`--requeue\` se niega mientras existan, y \`--release\` mentiría (no hay PR). Esto lo decides tú: desbloquéalo, o abandónalo (borra .worktrees/${i.n} y la rama feat/${i.n} —comprueba antes que no pierdes trabajo sin pushear— y solo entonces \`node <plugin>/scripts/dispatch-check.mjs ${i.n} --repo ${repo} --requeue\`).${salida}${extras}`)
   }
   return out
 }
@@ -1992,7 +2041,7 @@ for (const w of formatStrayDepsWarnings(issues)) console.error(w)
   const w = formatClosedStatusResidueWarning(dispatchInput.closedStatusResidue || [], { acked: ackedResidueNumbers() })
   if (w) warn(w)
 }
-// F18/H3 — claims cuyo propio STATE.md se declara BLOQUEADO. Va por `warn()`
+// F18/H3 — claims cuyo propio SLICE.md se declara BLOQUEADO. Va por `warn()`
 // (y no por `console.error` a pelo como los tres de arriba) a propósito: es
 // exactamente el tipo de cosa que se pierde en medio de cuarenta líneas de
 // plan y necesita salir también en el recap del final.
@@ -2400,15 +2449,15 @@ for (let idx = 0; idx < selected.length; idx++) {
   let kickoff
   let stateSeed
   try {
-    // F17: `base` viaja también al kickoff, no solo al STATE.md sembrado (la
+    // F17: `base` viaja también al kickoff, no solo al SLICE.md sembrado (la
     // línea de abajo lo recibía desde siempre). El agente abre el PR: si no
     // sabe contra qué rama salió su worktree, `gh pr create` lo apunta a la
     // rama por defecto del repo — con `--base <otra-rama>`, un diff que no es
     // el suyo.
     kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath, base: resolvedBase })
-    stateSeed = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase })
+    stateSeed = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase, baseSha: resolvedBaseSha })
   } catch (e) {
-    failSlice(idx, `no se pudo renderizar el kickoff/STATE.md de #${s.n}: ${e.message}. El agente se lanzaría sin prompt utilizable — antes, esto solo se descubría en el run real.`)
+    failSlice(idx, `no se pudo renderizar el kickoff/SLICE.md de #${s.n}: ${e.message}. El agente se lanzaría sin prompt utilizable — antes, esto solo se descubría en el run real.`)
     continue
   }
   // Override 1 (shell quoting): --command es UN argv element (buildCmuxArgv
@@ -2536,7 +2585,7 @@ for (let idx = 0; idx < selected.length; idx++) {
 //
 //   1. el --dry-run salía por aquí ANTES de imprimir el plan de NINGÚN
 //      slice — ni siquiera el de los sanos. Un dry-run con un problema en el
-//      segundo de tres no enseñaba ni el kickoff, ni el STATE.md sembrado,
+//      segundo de tres no enseñaba ni el kickoff, ni el SLICE.md sembrado,
 //      ni la línea de `cmux` de ninguno: exactamente lo que se fue a mirar.
 //   2. el resumen daba el CONTEO de fallos pero no decía cuál rompería
 //      primero, ni cuáles de los slices estaban listos.
@@ -2575,7 +2624,7 @@ if (preflightFailures.length) {
 }
 // ============================================================================
 
-// Si un paso POSTERIOR a `git worktree add` falla (seed de STATE.md, o el
+// Si un paso POSTERIOR a `git worktree add` falla (seed de SLICE.md, o el
 // lanzamiento de cmux), el worktree y la rama ya existen en disco. Sin
 // limpieza, reintentar el mismo slice vuelve a fallar en `git worktree add`
 // (ruta y rama ya ocupadas) hasta que un humano limpie a mano — y T10 es
@@ -2814,7 +2863,7 @@ function classifyClaimOutcome(status) {
 }
 
 // W-C, punto 3: revierte un claim ya obtenido cuando el dispatch falla
-// DESPUÉS de reclamar (git worktree add, el seed de STATE.md, o cmux) — sin
+// DESPUÉS de reclamar (git worktree add, el seed de SLICE.md, o cmux) — sin
 // esto el issue queda huérfano en status:in-progress sin nadie trabajándolo,
 // justo el modo de fallo que dispatch-check.mjs se esfuerza en evitar puertas
 // adentro (su propio claim-then-verify). dispatch-check.mjs no tiene un flag
@@ -2839,6 +2888,55 @@ const manualRevertClaimHint = (s) => `gh issue edit ${s.n} --repo ${repo} --add-
 function formatSpanishList(items) {
   if (items.length <= 1) return items[0] || ''
   return `${items.slice(0, -1).join(', ')} y ${items[items.length - 1]}`
+}
+
+// ============================================================================
+// F22 — LA REGLA QUE HACE INVISIBLE EL ESTADO DEL SLICE.
+//
+// Va al directorio COMÚN de git, no al `.git` del worktree — que ni siquiera
+// es un directorio: en un worktree enlazado `.git` es un FICHERO que apunta a
+// `<principal>/.git/worktrees/<n>`. `git rev-parse --git-common-dir` devuelve
+// el `.git` del checkout principal, así que UNA escritura cubre a la
+// coordinadora y a todos los worktrees, presentes y futuros. Y como
+// `info/exclude` no se commitea jamás, esta regla no puede acabar dentro de un
+// PR — que es exactamente el fallo que esta ronda arregla.
+//
+// POR QUÉ NO BASTA EL .gitignore. `ct-init` sí añade la línea al `.gitignore`
+// del repo (la vía larga, commiteada y compartida), pero eso sólo protege a
+// los repos que lo re-corran Y sólo desde que ese commit llegue a la base
+// desde la que se corta el worktree. Esta escritura es la red que hace que lo
+// otro no sea un requisito previo.
+//
+// POR QUÉ NO SIRVE PARA `.agent/STATE.md`, y conviene que quede escrito: NINGUNA
+// regla de ignore afecta a un fichero ya TRACKEADO. Funciona aquí, y sólo
+// aquí, porque `.agent/SLICE.md` nace sin trackear y nunca se trackea.
+//
+// Idempotente por línea exacta, mismo criterio que el bloque de `.worktrees/`
+// de ct-init.sh: se añade sólo si no está ya.
+// ============================================================================
+function ensureSliceIgnored() {
+  let commonDir
+  try {
+    commonDir = execFileSync('git', ['rev-parse', '--git-common-dir'], {
+      cwd: repoRoot, encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
+    }).trim()
+  } catch (e) {
+    return { ok: false, why: `no se pudo localizar el directorio común de git (\`git rev-parse --git-common-dir\`): ${e.message}` }
+  }
+  if (!commonDir) return { ok: false, why: '`git rev-parse --git-common-dir` no devolvió ninguna ruta' }
+  const base = isAbsolute(commonDir) ? commonDir : join(repoRoot, commonDir)
+  const excludePath = join(base, 'info', 'exclude')
+  try {
+    mkdirSync(join(base, 'info'), { recursive: true })
+    let current = ''
+    try { current = readFileSync(excludePath, 'utf8') } catch { current = '' }
+    const next = excludeContentWith(current, SLICE_REL_PATH)
+    if (!next.added) return { ok: true, added: false, path: excludePath }
+    writeFileSync(excludePath, next.content)
+    return { ok: true, added: true, path: excludePath }
+  } catch (e) {
+    return { ok: false, why: `no se pudo escribir ${excludePath}: ${e.message}` }
+  }
 }
 
 function cleanupOrphanedWorktree(s, wt, branch, reason) {
@@ -3145,7 +3243,7 @@ for (let idx = 0; idx < plans.length; idx++) {
     }
     console.log(`CLAUDE_CONFIG_DIR=${configDir}`)
     console.log(`git worktree add -b ${branch} ${wt} ${resolvedBase}`)
-    console.log(`seed ${wt}/.agent/STATE.md:\n${stateSeed}`)
+    console.log(`seed ${wt}/${SLICE_REL_PATH}:\n${stateSeed}`)
     // D4, defecto 3: el kickoff, en PROSA. La línea `cmux ...` de abajo lo
     // lleva dentro, pero doblemente escapado (comillas POSIX + el
     // JSON.stringify de la propia línea): un blob de una sola línea con
@@ -3421,11 +3519,54 @@ for (let idx = 0; idx < plans.length; idx++) {
     }
     process.exit(1)
   }
+  // F22: la regla de ignore ANTES de sembrar. Si el fichero llegara a existir
+  // sin la regla puesta, un `git add -A` del agente ya podría llevárselo.
+  const ignored = ensureSliceIgnored()
+  if (!ignored.ok) {
+    cleanupOrphanedWorktree(s, wt, branch, `no se pudo garantizar que ${SLICE_REL_PATH} quede fuera de git (${ignored.why}). NO se siembra: un estado de slice que git puede ver acaba dentro del PR y de ahí a main.`)
+  }
   try {
     mkdirSync(`${wt}/.agent`, { recursive: true })
-    writeFileSync(`${wt}/.agent/STATE.md`, stateSeed)
+    writeFileSync(`${wt}/${SLICE_REL_PATH}`, stateSeed)
   } catch (e) {
-    cleanupOrphanedWorktree(s, wt, branch, `no se pudo sembrar .agent/STATE.md: ${e.message}`)
+    cleanupOrphanedWorktree(s, wt, branch, `no se pudo sembrar ${SLICE_REL_PATH}: ${e.message}`)
+  }
+  // ==========================================================================
+  // F22 — SE VERIFICA EL EFECTO, NO EL EXIT CODE.
+  //
+  // Las dos escrituras de arriba pueden salir 0 y aun así dejar el fichero
+  // VISIBLE para git: un core.excludesFile del usuario con precedencia rara, un
+  // `.gitignore` con una negación (`!.agent/*`) que gane a nuestra regla, un
+  // repo donde alguien trackeó el path a mano en el pasado. Ninguna de esas se
+  // detecta mirando si `writeFileSync` lanzó.
+  //
+  // La única pregunta que importa es la que git contesta: ¿ve el fichero? Si lo
+  // ve, el dispatch NO sigue. Se aborta por la misma vía que cualquier fallo
+  // posterior a crear el worktree (revierte el claim, borra rama y directorio),
+  // porque despachar un agente que va a contaminar main es peor que no
+  // despacharlo.
+  // ==========================================================================
+  // Fix round 1, finding Important 1: `--untracked-files=all`, NUNCA el modo
+  // por defecto. Con el default, git COLAPSA un directorio enteramente sin
+  // trackear en una sola línea (`?? .agent/`) en vez de listar cada fichero
+  // (`?? .agent/SLICE.md`) — y `.agent/` está enteramente sin trackear en
+  // cualquier repo cuyo checkout no tenga ya un `.agent/STATE.md` (u otro
+  // fichero bajo `.agent/`) trackeado. El `.some(includes(SLICE_REL_PATH))`
+  // de abajo no encuentra nada en esa línea colapsada, la puerta deja pasar
+  // el dispatch, y el `git add -A` del agente se lleva el fichero de todas
+  // formas: exactamente el contagio que esta comprobación existe para
+  // cerrar. `--untracked-files=all` fuerza a git a listar cada fichero
+  // individual sin importar el estado de tracking de su directorio.
+  let porcelain = null
+  try {
+    porcelain = execFileSync('git', ['status', '--porcelain', '--untracked-files=all'], {
+      cwd: wt, encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
+    })
+  } catch (e) {
+    cleanupOrphanedWorktree(s, wt, branch, `no se pudo COMPROBAR que ${SLICE_REL_PATH} queda fuera de git (\`git status --porcelain\` falló: ${e.message}). No se afirma que esté bien: sin esa comprobación, un estado de slice visible para git acaba en el PR y de ahí a main.`)
+  }
+  if (porcelain.split('\n').some((l) => l.includes(SLICE_REL_PATH))) {
+    cleanupOrphanedWorktree(s, wt, branch, `${SLICE_REL_PATH} SIGUE siendo visible para git en ${wt} después de escribir la regla de ignore en ${ignored.path}. Causas típicas: una negación en el .gitignore del repo que gana a la regla (p. ej. \`!.agent/*\`), un core.excludesFile con precedencia, o que alguien trackeara ese path a mano en el pasado (y ninguna regla de ignore afecta a un fichero ya trackeado: haría falta \`git rm --cached ${SLICE_REL_PATH}\`). No se despacha este slice: su estado acabaría dentro del PR.`)
   }
   // F19/H1: el script de arranque se escribe ANTES de invocar a cmux — cmux
   // teclea el `.` de inmediato, y un shell rápido podría sourcearlo antes de
