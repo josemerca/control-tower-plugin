@@ -1,7 +1,7 @@
 {
   "name": "control-tower-loop",
-  "description": "Loop agéntico portable: hidratación por SessionStart, .agent/STATE.md, gates y dispatch. Sistema Control Tower.",
-  "version": "0.22.0",
+  "description": "Loop agéntico portable: hidratación por SessionStart, estado en .agent/ (STATE.md la coordinadora, SLICE.md cada slice), gates y dispatch. Sistema Control Tower.",
+  "version": "0.22.1",
   "author": { "name": "José Agüera" },
   "license": "MIT"
 }
