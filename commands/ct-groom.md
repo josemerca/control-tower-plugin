@@ -76,6 +76,26 @@ Esto se documenta porque la deducción natural —"si aborta a mitad, me habrá 
 - **Sin `--reconcile`, un issue que ya existe no se edita nunca.** Las divergencias se reportan por stderr y se sale `3` — no se escribe nada.
 - **`--dry-run` no muta nada, nunca** — ni siquiera crea el milestone. Sí hace lecturas (incluidas las dos de la verificación del enlace al spec).
 
+### El alcance de un groom es su epic, no el repo
+
+`/ct-groom` numera los slices `1..N` **por epic** (una invocación = un `--milestone` = un epic) y escribe ese número en `<!-- ct-order:N -->`. El contrato §9 lo dice: *«los `#` de esta tabla son únicos dentro de su milestone, no del repo»*. Desde F23 eso es cierto también aquí — hasta entonces lo era sólo en `/ct-next`, y una tabla §9 nueva empezando en `1,2,3` emparejaba con los issues de un epic anterior y cerrado.
+
+En la práctica: **puedes empezar la tabla §9 de cada spec en `1`**. Dos epics del mismo repo no se pisan.
+
+Un groom sólo mira los issues cuyo milestone es el que le has pasado. Los de otros epics no se emparejan, no se reportan como divergencia y no se declaran huérfanos. «Issue huérfano» pasa a significar lo que dice: un issue **de este epic** cuyo orden ya no está en la tabla §9.
+
+### Las dos situaciones en las que `/ct-groom` se para en seco
+
+Ambas caen **antes de tocar nada** (antes incluso de crear el milestone), también bajo `--dry-run`, y salen con **exit 1** diciendo `no se ha creado ni modificado nada`. Si coinciden las dos, se reportan las dos y se sale una sola vez.
+
+**1. Un issue sin milestone cuyo `ct-order` colisiona con tu tabla §9.** No hay forma de saber si es de este epic (alguien le quitó el milestone, o se borró el milestone en GitHub) o de otro, y las dos lecturas posibles hacen daño: emparejarlo reescribiría un issue ajeno, ignorarlo crearía un duplicado. Asígnale su milestone y vuelve a correr.
+
+> Un issue sin milestone cuyo `ct-order` **no** colisiona con tu tabla sólo produce un aviso. No bloquea, pero tampoco se calla.
+
+**2. Un slice tuyo que ya tiene issue en otro milestone, apuntando al mismo spec.** Es la firma de un epic renombrado en GitHub, o de una errata en `--milestone`. Sin esta puerta, esa corrida vería cero issues en su epic y recrearía el epic entero duplicado, con exit 0. Si renombraste el epic, usa su título real; si es un epic nuevo de verdad, su tabla §9 no debería apuntar al spec del anterior.
+
+> Un issue de otro milestone que apunta a **otro** spec no dispara nada: eso son dos epics legítimos compartiendo números de orden, que es justo lo que este alcance permite.
+
 ### Re-ejecutar no converge solo — detecta divergencia, no la aplica (F5)
 
 Hasta esta versión, "idempotente" quería decir *existence-only*: si el marcador `<!-- ct-order:N -->` ya aparecía en algún issue, `/ct-groom` imprimía "ya existe, no se duplica" y pasaba al siguiente — sin mirar si el título, las labels o el milestone de ese issue seguían coincidiendo con lo que la tabla §9 produce hoy. Un autor que arreglaba un label o un título mal puesto en el spec y volvía a correr `/ct-groom` no veía ninguna señal de que nada había cambiado.
