@@ -1267,7 +1267,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
       number: 501,
       title: '#1 iniciar sesión',
       state: 'open',
-      milestone: { title: 'Sprint 1' },
+      milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'status:in-progress' }],
       body: '<!-- ct-order:1 -->',
     }
@@ -1285,8 +1285,6 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
       expect(err).toMatch(/t.tulo difiere/i)
       expect(err).toMatch(/"#1 iniciar sesión"/)
       expect(err).toMatch(/"#1 login"/)
-      expect(err).toMatch(/milestone difiere/)
-      expect(err).toMatch(/"Sprint 1"/)
       expect(err).toMatch(/falta la label "area:api"/)
       expect(err).toMatch(/falta la label "touches:db"/)
       expect(err).not.toMatch(/status:in-progress/) // fuera del namespace que el spec compara
@@ -1591,6 +1589,103 @@ describe('ct-groom --dry-run — el exit 3 ante divergencia es una decisión exp
     const realRes = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic'], { encoding: 'utf8', env: fakeEnv(envOverrides) })
     expect(dryRunRes.status).toBe(3)
     expect(realRes.status).toBe(3)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// F23 — las dos caras del §2 del feedback de campo, medidas en producción
+// sobre menoplus-app/menoplus con los issues #451–#456 de un epic anterior y
+// cerrado. Antes de este arreglo, el emparejado por marcador barría el REPO
+// ENTERO, así que el contrato §9 ("los # son únicos dentro de su milestone,
+// no del repo") era cierto en /ct-next y falso aquí.
+const TRES_SLICES = (a, b, c) => `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| ${a} | uno | backend | a | – | AC-${a}.1 | – | api | db |
+| ${b} | dos | backend | b | – | AC-${b}.1 | – | api | db |
+| ${c} | tres | backend | c | – | AC-${c}.1 | – | api | db |
+`
+
+// Los seis del epic anterior: cerrados, en OTRO milestone, con ct-order 1..6
+// y un enlace a OTRO spec (para no disparar la puerta de la Tarea 5, que es
+// una comprobación distinta — aquí lo que se prueba es el acotado).
+const EPIC_ANTERIOR = [1, 2, 3, 4, 5, 6].map((n) => ({
+  number: 450 + n,
+  title: `#${n} slice viejo`,
+  state: 'closed',
+  milestone: { number: 1, title: 'Epic anterior' },
+  labels: [{ name: 'type:backend' }],
+  body: `> Slice \`#${n}\` del epic. Spec: [otro-spec.md](https://github.com/o/r/blob/main/otro-spec.md)\n\ncuerpo viejo\n\n<!-- ct-order:${n} -->`,
+}))
+
+describe('ct-groom — el marcador ct-order acotado por milestone (F23, §2 del feedback)', () => {
+  it('cara 1: tabla §9 empezando en 1,2,3 sobre un epic anterior con 1..6 → crea los tres, cero divergencias, cero huérfanos, exit 0', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EPIC_ANTERIOR]]) }) })
+    expect(res.status).toBe(0)
+    // Lo que hacía antes: emparejaba con #451/#452/#453 y reportaba el
+    // milestone distinto como divergencia, sin crear nada.
+    expect(res.stderr).not.toMatch(/divergencia/)
+    expect(res.stderr).not.toMatch(/#45[123]/)
+    // Y además declaraba huérfanos a #454/#455/#456 en la MISMA corrida.
+    expect(res.stderr).not.toMatch(/hu.rfano/)
+    const plan = JSON.parse(res.stdout)
+    expect(plan.issues.map((i) => i.order)).toEqual([1, 2, 3])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('cara 2: tabla §9 empezando en 7,8,9 → NO declara huérfanos a los seis del epic anterior', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(7, 8, 9))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EPIC_ANTERIOR]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/hu.rfano/)
+    expect(res.stderr).not.toMatch(/#45[1-6]/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el huérfano legítimo — un issue DEL EPIC ACTUAL cuyo orden ya no está en la tabla — sigue avisando y sigue saliendo 3', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const HUERFANO_REAL = {
+      number: 601,
+      title: '#9 slice retirado',
+      state: 'open',
+      milestone: { number: 2, title: 'Epic nuevo' },
+      labels: [{ name: 'type:backend' }],
+      body: 'cuerpo\n\n<!-- ct-order:9 -->',
+    }
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[...EPIC_ANTERIOR, HUERFANO_REAL]]]) }) })
+    expect(res.status).toBe(3)
+    expect(res.stderr).toMatch(/issue #601.*ct-order:9/)
+    expect(res.stderr).toMatch(/hu.rfano/)
+    // El acotado no ha silenciado la señal, sólo la ha limitado a su epic:
+    // ninguno de los seis del epic anterior aparece.
+    expect(res.stderr).not.toMatch(/#45[1-6]/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el emparejado SÍ ocurre dentro del propio epic: un issue del milestone pedido con el mismo orden no se duplica', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const DEL_EPIC = {
+      number: 700,
+      title: '#1 uno',
+      state: 'open',
+      milestone: { number: 2, title: 'Epic nuevo' },
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'status:backlog' }],
+      body: 'cuerpo\n\n<!-- ct-order:1 -->',
+    }
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[...EPIC_ANTERIOR, DEL_EPIC]]]) }) })
+    // Divergencia real (el body no trae AC ni enlace al spec) → exit 3,
+    // nombrando el issue de SU epic. Lo que importa aquí es que lo encuentra.
+    expect(res.status).toBe(3)
+    expect(res.stderr).toMatch(/slice #1.*issue #700/)
     rmSync(dir, { recursive: true, force: true })
   })
 })

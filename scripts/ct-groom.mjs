@@ -22,7 +22,7 @@ import { groomPlan } from './groom.js'
 // por qué). Ver scripts/spec-link.js para las tres decisiones que toma y por
 // qué las toma así.
 import { resolveSpecRef } from './spec-link.js'
-import { flattenIssuePages, flattenPages, realIssuesOnly, findByMarker } from './gh-issues.js'
+import { flattenIssuePages, flattenPages, realIssuesOnly, findByMarker, partitionByEpic } from './gh-issues.js'
 import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
 import { parseStrictInt } from './argnum.js'
 // extractOrder (F5, importante 4): para detectar issues huérfanos — un issue
@@ -564,6 +564,24 @@ function describeGaps(gaps) {
 }
 
 let existingIssues = null
+// inEpic (F23): los issues del epic de ESTA corrida — los del milestone cuyo
+// título es el argumento `--milestone`. Es la lista contra la que se emparejan
+// los marcadores `ct-order` y se detectan huérfanos, y por eso vive aquí
+// arriba y no dentro del bloque de lectura: el registro en memoria del issue
+// recién creado (mucho más abajo, en el bucle de creación) tiene que empujar
+// a ESTA lista, no a `existingIssues`, o dos slices del mismo orden en la
+// misma corrida dejarían de verse el uno al otro.
+//
+// Por qué el emparejado se acota (§2 del feedback de campo, medido en
+// producción): /ct-groom numera los slices 1..N POR EPIC y escribe ese número
+// en `<!-- ct-order:N -->`, así que el marcador NO es único en el repo — el
+// contrato §9 lo promete explícitamente ("únicos dentro de su milestone, no
+// del repo"). Buscarlo por todo el repo hacía dos cosas, las dos falsas:
+// emparejaba una tabla §9 nueva empezando en 1,2,3 con los issues de un epic
+// anterior y CERRADO (reportando su milestone distinto como "divergencia", y
+// con --reconcile los habría arrastrado al milestone nuevo), y declaraba
+// huérfanos a los issues de cualquier otro epic del repo.
+let inEpic = null
 let reconcileEntries = [] // [{ iss, found, diff, bodyResult, gaps }] — found/diff/bodyResult/gaps son null si el issue todavía no existe
 let anyUnresolvedDrift = false
 // anyReconcileGapRemains (review round 3, Critical 2): true si CUALQUIER
@@ -615,16 +633,18 @@ if (typeof repo === 'string') {
     process.exit(1)
   }
   const knownOrders = new Set(plan.issues.map((i) => i.order))
-  for (const i of existingIssues) {
+  const partition = partitionByEpic(existingIssues, milestone)
+  inEpic = partition.inEpic
+  for (const i of inEpic) {
     const order = extractOrder(i.body)
     if (order != null && !knownOrders.has(order)) {
-      console.error(`aviso: issue #${i.number} lleva el marcador ct-order:${order}, pero el slice #${order} ya no está en la tabla §9 del spec — issue huérfano (¿se eliminó el slice sin cerrar/renumerar su issue?); revísalo a mano`)
+      console.error(`aviso: issue #${i.number} lleva el marcador ct-order:${order}, pero el slice #${order} ya no está en la tabla §9 del spec — issue huérfano del epic "${milestone}" (¿se eliminó el slice sin cerrar/renumerar su issue?); revísalo a mano`)
       anyOrphans = true
     }
   }
   reconcileEntries = plan.issues.map((iss) => {
     const marker = `<!-- ct-order:${iss.order} -->`
-    const found = findByMarker(existingIssues, marker)
+    const found = findByMarker(inEpic, marker)
     if (!found) return { iss, found: null, diff: null, bodyResult: null, gaps: null }
     const diff = diffIssue(found, iss, plan.milestone, ownedLabelPrefixes)
     // bodyResult es puro (no toca `gh`, no muta nada) — seguro de calcular
@@ -1061,7 +1081,10 @@ for (const { iss, found, diff, bodyResult } of reconcileEntries) {
   // registra el issue recién creado en la lista en memoria: si dos slices de
   // esta misma ejecución compartieran marcador (no debería pasar, pero así la
   // comprobación de arriba sigue siendo correcta dentro de la misma corrida)
-  existingIssues.push({ number: null, body: iss.body })
+  // F23: empuja a `inEpic`, que es la lista contra la que emparejan los
+  // marcadores desde que el emparejado está acotado por epic. Empujar a
+  // `existingIssues` dejaría esta guarda sin efecto en silencio.
+  inEpic.push({ number: null, body: iss.body })
   if (projectNum) addToProjectWithSprint(num, iss.order)
 }
 

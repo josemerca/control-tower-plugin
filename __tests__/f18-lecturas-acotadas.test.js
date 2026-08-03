@@ -47,7 +47,7 @@ const MILESTONE_ENV = { FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic'
 
 // Un issue YA existente (orden 1, marcador ct-order:1) para que /ct-groom no
 // cree nada y solo tenga que decidir si le falta el item de project.
-const existente = { number: 501, title: '#1 login', body: '<!-- ct-order:1 -->', labels: [{ name: 'status:backlog' }] }
+const existente = { number: 501, title: '#1 login', milestone: { title: 'Epic' }, body: '<!-- ct-order:1 -->', labels: [{ name: 'status:backlog' }] }
 
 // 200 items de relleno + el del issue 501 en la posición 201: dentro del
 // project, pero FUERA de la primera página de `--limit 200`.

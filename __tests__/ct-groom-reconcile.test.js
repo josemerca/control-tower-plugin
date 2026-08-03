@@ -84,7 +84,7 @@ function existingIssueDrift(specPath) {
     number: 501,
     title: '#1 iniciar sesión',
     state: 'open',
-    milestone: { title: 'Sprint 1' },
+    milestone: { title: 'Epic' },
     labels: [{ name: 'type:backend' }, { name: 'status:in-progress' }],
     // body correcto (AC/deps/Descripción/Protegido/enlace-al-spec ya
     // coinciden con el spec) — así este fixture ejercita SOLO la
@@ -111,8 +111,6 @@ describe('ct-groom (corrida real) — detecta divergencia por defecto, no la apl
     expect(res.stderr).toMatch(/t.tulo difiere/i)
     expect(res.stderr).toMatch(/"#1 iniciar sesión"/)
     expect(res.stderr).toMatch(/"#1 login"/)
-    expect(res.stderr).toMatch(/milestone difiere/)
-    expect(res.stderr).toMatch(/"Sprint 1"/)
     expect(res.stderr).toMatch(/falta la label "area:api"/)
     expect(res.stderr).toMatch(/falta la label "touches:db"/)
     expect(res.stderr).not.toMatch(/status:in-progress/) // label ajena al namespace que el spec compara
@@ -175,7 +173,7 @@ describe('ct-groom (corrida real) — detecta divergencia por defecto, no la apl
 })
 
 describe('ct-groom (corrida real) --reconcile — aplica lo detectado vía `gh issue edit` (F5)', () => {
-  it('aplica título + milestone + labels en una sola llamada a `gh issue edit`, exit 0', () => {
+  it('aplica título + labels en una sola llamada a `gh issue edit` (el milestone ya no puede divergir: F23), exit 0', () => {
     const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
     const argvLog = join(dir, 'argv.log')
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], { ...baseEnv(spec), FAKE_GH_ARGV_LOG_FILE: argvLog })
@@ -186,7 +184,16 @@ describe('ct-groom (corrida real) --reconcile — aplica lo detectado vía `gh i
     expect(editLine).toBeTruthy()
     expect(editLine).toMatch(/--repo o\/r/)
     expect(editLine).toMatch(/--title #1 login/)
-    expect(editLine).toMatch(/--milestone Epic/)
+    // F23: el flag `--milestone` ya NO sale de aquí, y esta aserción invertida
+    // es la que lo prueba. Con el emparejado acotado por epic, un issue
+    // emparejado siempre tiene el milestone pedido, así que diff.milestone es
+    // inalcanzable desde /ct-groom — y con él desaparece POR CONSTRUCCIÓN el
+    // peligro que el §2 del feedback señalaba en mayúsculas: un --reconcile
+    // que arrastrase un issue cerrado de otro epic al milestone nuevo. La
+    // rama sigue viva en reconcile.js (módulo puro, otros callers), pero este
+    // call-site no puede alcanzarla. Se invierte en vez de borrarse porque un
+    // test que desaparece no documenta nada.
+    expect(editLine).not.toMatch(/--milestone/)
     expect(editLine).toMatch(/--add-label area:api/)
     expect(editLine).toMatch(/--add-label touches:db/)
     rmSync(dir, { recursive: true, force: true })
