@@ -11,6 +11,7 @@
 // compilan pero fallan al ejecutarse. Ver __tests__/bundle.test.js, que
 // verifica que el bundle resultante solo importa builtins `node:*`.
 import { build } from 'esbuild'
+import { realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
 // buildOptions se exporta (F24) para que haya UNA sola fuente de verdad de la
@@ -32,7 +33,19 @@ export const buildOptions = {
 // Construye solo al EJECUTARSE (`npm run build`), nunca al importarse — el
 // test importa este módulo y no debe disparar un build como efecto colateral.
 // La guarda de `process.argv[1]` no es defensiva de más: bajo `node -e` ese
-// valor es `undefined` y `pathToFileURL` lanza ERR_INVALID_ARG_TYPE.
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+// valor es `undefined`, y sin ella lanzarían las dos llamadas de abajo
+// —`realpathSync(undefined)` con ENOENT y `pathToFileURL(undefined)` con
+// ERR_INVALID_ARG_TYPE— en vez de limitarse a no construir.
+//
+// `realpathSync` NO es cosmético, y esta comparación falla EN ABIERTO sin él:
+// `process.argv[1]` conserva la ruta TAL COMO SE INVOCÓ, mientras que
+// `import.meta.url` la trae siempre con los symlinks ya resueltos. Si el repo
+// se alcanza por una ruta que atraviesa un symlink, las dos cadenas difieren,
+// la condición sale falsa y `npm run build` NO CONSTRUYE NADA Y SALE 0 — un
+// fallo silencioso que deja al desarrollador en bucle, porque el test de
+// coherencia le pedirá un rebuild que el build se niega a hacer sin decirlo.
+// Medido: argv1 = .../sym/scripts/build.mjs frente a import.meta =
+// file:///.../real/scripts/build.mjs. No lo "simplifiques" quitándolo.
+if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
   await build(buildOptions)
 }
