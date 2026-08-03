@@ -71,10 +71,53 @@ async function comprobarDist(root) {
   }
 }
 
+// explicarIncoherencia: el mensaje que lee un humano. Un fallo tiene dos
+// causas posibles y el arreglo es el mismo, pero saber cuál cambia lo que el
+// lector cree que ha hecho mal — así que se distinguen sin adivinar.
+//
+// La lista de inputs sale del metafile REAL de la corrida, no de `scripts/`
+// entero: los hooks solo importan scripts/state.js y scripts/state-paths.js,
+// así que un cambio en cualquier otro fichero de scripts/ no entra al bundle.
+// Mirar el directorio entero habría dado un falso positivo con cualquier
+// cambio en esos otros ficheros, aunque el bundle no dependa de ellos.
+function explicarIncoherencia(root, { faltan, sobran, difieren, inputs }) {
+  const partes = ['el dist/ commiteado NO corresponde a los fuentes commiteados:']
+  if (faltan.length) partes.push(`  el build produce ficheros que HEAD no tiene commiteados: ${faltan.join(', ')}`)
+  if (sobran.length) partes.push(`  HEAD tiene ficheros en dist/ que el build ya no produce: ${sobran.join(', ')}`)
+  if (difieren.length) partes.push(`  difieren en contenido: ${difieren.join(', ')}`)
+
+  const ultimoDist = execFileSync('git', ['-C', root, 'log', '-1', '--format=%H', '--', 'dist/'], { encoding: 'utf8' }).trim()
+  // `inputs` vacío no puede pasar hoy (el metafile siempre trae al menos los
+  // entry points), pero un `git diff -- ` SIN rutas diffea el repo ENTERO, y
+  // eso convertiría cualquier commit de documentación en un falso "falta un
+  // rebuild". Se corta aquí en vez de confiar en que nunca ocurra.
+  if (ultimoDist && inputs.length) {
+    const cambiados = execFileSync('git', ['-C', root, 'diff', '--name-only', `${ultimoDist}..HEAD`, '--', ...inputs], { encoding: 'utf8' })
+      .split('\n').filter(Boolean)
+    if (cambiados.length) {
+      partes.push(`  falta un rebuild: estos inputs del bundle cambiaron desde el último commit que tocó dist/ (${ultimoDist.slice(0, 7)}): ${cambiados.join(', ')}`)
+    } else {
+      const v = esbuildVersion(root)
+      partes.push(`  ningún input del bundle cambió desde el último commit que tocó dist/ (${ultimoDist.slice(0, 7)}) — lo que se movió es el toolchain (esbuild ${v} instalado), o alguien editó el bundle a mano`)
+    }
+  }
+  partes.push('  arreglo, en los dos casos: npm run build && git add dist/ && git commit')
+  return partes.join('\n')
+}
+
+function esbuildVersion(root) {
+  try {
+    return JSON.parse(readFileSync(join(root, 'node_modules/esbuild/package.json'), 'utf8')).version
+  } catch {
+    return '(versión no legible)'
+  }
+}
+
 describe('el dist/ commiteado corresponde a los fuentes commiteados (F24)', () => {
   it('HEAD es coherente: el bundle commiteado es lo que producen los fuentes commiteados', async () => {
-    const { faltan, sobran, difieren } = await comprobarDist(root)
-    expect({ faltan, sobran, difieren }).toEqual({ faltan: [], sobran: [], difieren: [] })
+    const r = await comprobarDist(root)
+    const incoherente = r.faltan.length || r.sobran.length || r.difieren.length
+    expect(incoherente ? explicarIncoherencia(root, r) : 'coherente').toBe('coherente')
   }, 60_000)
 
   it('los inputs del bundle salen del metafile real, no de una lista escrita a mano', async () => {
@@ -203,6 +246,74 @@ describe('el comprobador falla cuando debe (F24)', () => {
     try {
       const { faltan, sobran, difieren } = await comprobarDist(dir)
       expect({ faltan, sobran, difieren }).toEqual({ faltan: [], sobran: [], difieren: [] })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+})
+
+describe('el diagnóstico distingue las dos causas (F24)', () => {
+  it('si algún input cambió desde el último commit que tocó dist/ → dice que falta un rebuild y nombra los ficheros', async () => {
+    const dir = repoDeMentira()
+    await construirEnRepo(dir)
+    execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' })
+    execFileSync('git', ['-C', dir, 'commit', '-qm', 'coherente'], { stdio: 'ignore' })
+    writeFileSync(join(dir, 'src/a.js'), 'export const x = 999\nconsole.log(x)\n')
+    execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' })
+    execFileSync('git', ['-C', dir, 'commit', '-qm', 'fuente sin rebuild'], { stdio: 'ignore' })
+
+    try {
+      const r = await comprobarDist(dir)
+      const msg = explicarIncoherencia(dir, r)
+      expect(msg).toMatch(/falta un rebuild/i)
+      expect(msg).toMatch(/src\/a\.js/)
+      expect(msg).toMatch(/npm run build/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+
+  it('si ningún input cambió → dice que se movió el toolchain y nombra la versión de esbuild', async () => {
+    const dir = repoDeMentira()
+    await construirEnRepo(dir)
+    execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' })
+    execFileSync('git', ['-C', dir, 'commit', '-qm', 'coherente'], { stdio: 'ignore' })
+    // Se corrompe el bundle commiteado sin tocar ningún fuente: desde el punto
+    // de vista del diagnóstico es indistinguible de "esbuild produce otra cosa".
+    writeFileSync(join(dir, 'dist/a.js'), '// bytes que ningún build produce\n')
+    execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' })
+    execFileSync('git', ['-C', dir, 'commit', '-qm', 'bundle tocado a mano'], { stdio: 'ignore' })
+
+    try {
+      const r = await comprobarDist(dir)
+      expect(r.difieren).toEqual(['a.js'])
+      const msg = explicarIncoherencia(dir, r)
+      expect(msg).toMatch(/toolchain/i)
+      expect(msg).toMatch(/esbuild/)
+      expect(msg).not.toMatch(/falta un rebuild/i)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+})
+
+describe('cuando no puede responder, falla con motivo (F24)', () => {
+  it('un directorio que no es repo git → lanza nombrando el motivo, no devuelve "coherente"', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-nogit-'))
+    try {
+      await expect(comprobarDist(dir)).rejects.toThrow()
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }, 60_000)
+
+  it('un repo cuyo scripts/build.mjs no exporta buildOptions → lanza diciéndolo', async () => {
+    const dir = repoDeMentira()
+    writeFileSync(join(dir, 'scripts/build.mjs'), '// sin export\n')
+    execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' })
+    execFileSync('git', ['-C', dir, 'commit', '-qm', 'build.mjs sin export'], { stdio: 'ignore' })
+    try {
+      await expect(comprobarDist(dir)).rejects.toThrow(/buildOptions/)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
