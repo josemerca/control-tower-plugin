@@ -257,7 +257,19 @@ SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
 # llega a commitearlo, la puerta de `--release` lo rechaza con exit 5. Un repo
 # bootstrapeado con el v10 se queda con esa instrucción falsa hasta que este
 # número suba.
-SLICES_CONTRACT_VERSION=11
+#
+# F23 sube de 11 a 12 por la MISMA razón que F13 y F22: el v11 no describía
+# mal el flujo, PROMETÍA una comparación que el código ya no puede hacer.
+# Decía que re-groomear compara "título, enlace al spec, milestone, labels…"
+# contra la tabla de hoy. Desde que el emparejado por `ct-order` está acotado
+# al milestone de la corrida, un issue emparejado tiene siempre ese milestone
+# por construcción: la divergencia de milestone es inalcanzable desde
+# /ct-groom. Quien leyera el v11 deducía "si muevo un issue de milestone y
+# vuelvo a correr, me lo reporta", y lo que obtiene hoy es o un exit 1 de una
+# de las dos puertas, o un issue nuevo (un epic duplicado, si el enlace al
+# spec tampoco casa). Un repo bootstrapeado con el v11 se queda con esa
+# promesa falsa hasta que este número suba.
+SLICES_CONTRACT_VERSION=12
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -312,6 +324,7 @@ cef9a97a07edc8c403a37ffc846df74422c4d7d1d5aad02d90001a477b2ef811  v8, 419 línea
 0050a5b1a216063a58beabb1237d08b0753f5390a3c82edcf8ae5c3526491485  v9, 427 líneas — F20 (las DOS sesiones por repo y su campo `role`: coordinadora vs. despachada)
 ca63463cecb38df02011c5d079fd278488aa560bfb4ab5d0c7e95531d51e82e9  v10, 482 líneas — F21 (la columna Gate: el gate humano deja de ser un efecto colateral del Tipo)
 6b799d34aa589c52cded8801aed641807e3d6591ae372fdd9973d6ebbb1d4d3d  v11, 493 líneas — F22 (el estado del slice vive en .agent/SLICE.md, ignorado; el STATE.md del worktree es el de la coordinadora y no se lee)
+f1e9f868952d34a80bc7d15b50c0fce99cf375ebd3b1a76a37c6fdfa7b83e035  v12, 505 líneas — F23 (el milestone ya no puede divergir: el emparejado por ct-order está acotado al epic de la corrida)
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -319,7 +332,7 @@ ca63463cecb38df02011c5d079fd278488aa560bfb4ab5d0c7e95531d51e82e9  v10, 482 líne
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 11 -->
+<!-- ct-init:slices-contract-version: 12 -->
 ## Formato de la tabla §9 (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -518,7 +531,7 @@ recibe su gate `visual` igualmente, por ser `Tipo: ui`.)
 **Arreglar la tabla y volver a groomear NO arregla los issues ya creados.**
 Re-ejecutar `/ct-groom` no los duplica (los reconoce por su marcador
 `ct-order`), pero tampoco los actualiza: compara título, enlace al spec,
-milestone, labels (`type:`/`area:`/`touches:`/`gate:`; `status:` nunca) y las
+labels (`type:`/`area:`/`touches:`/`gate:`; `status:` nunca) y las
 dos secciones que el dispatcher obedece
 (`## Dependencias`, `## Acceptance criteria`) contra lo que la tabla produce
 hoy, **reporta** cada diferencia por stderr y sale `3` — pero no escribe nada
@@ -526,6 +539,18 @@ salvo que se le pase `--reconcile` (EXPERIMENTAL: ha corrompido bodies reales
 en pruebas, revisa el diff del issue después de usarlo). Un issue cuyo slice
 ya no está en la tabla se avisa como huérfano y no se toca. Si cambias algo
 en una fila ya groomeada, cuenta con revisar ese issue a mano.
+
+**El milestone NO está en esa lista, y no es un olvido.** Un groom sólo mira
+los issues del milestone que le has pasado, así que un issue emparejado tiene
+siempre, por construcción, ese mismo milestone: la divergencia de milestone es
+inalcanzable desde `/ct-groom` y nunca la vas a ver reportada. Si mueves un
+issue de milestone en GitHub y vuelves a correr, lo que obtienes no es un
+aviso de divergencia: según a dónde lo hayas movido, o se ignora por ser de
+otro epic, o `/ct-groom` se para en seco con **exit 1** sin crear ni modificar
+nada, o crea un issue nuevo para ese slice avisando de que puede estar
+duplicándolo. Consecuencia práctica de ese mismo alcance: **la tabla §9 de
+cada spec puede empezar en `1`** sin pisar los issues de un epic anterior.
+Ver "El alcance de un groom es su epic, no el repo" en `commands/ct-groom.md`.
 
 Detalle completo (todas las condiciones de abort, columnas opcionales,
 avisos no fatales, el reporte de divergencia, sus límites, y `--reconcile`):
@@ -806,7 +831,7 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   `## Gates` del issue), pero **no impide mergear** un PR con su gate sin
   cerrar. El que cierra el gate eres tú.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v11). Si el plugin trae una
+<sub>Esta sección la mantiene `/ct-init` (contrato v12). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>

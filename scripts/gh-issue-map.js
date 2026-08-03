@@ -362,6 +362,62 @@ export function normalizeSpecLink(specLinkLine) {
   return String(specLinkLine).trim()
 }
 
+// specTarget (F23): el DESTINO del enlace al spec — lo que renderSpecLink
+// (scripts/groom.js) escribe después de "Spec: ". Responde a una pregunta
+// distinta de la de diffIssue, y por eso no reutiliza su comparación:
+//
+//   diffIssue pregunta "¿la línea del enlace de ESTE issue ha cambiado
+//   respecto a lo que el spec produce hoy?" — es contenido del spec, su
+//   divergencia es reportable, y desde F10 se compara ENTERA a propósito
+//   (detecta que el spec se ha movido de fichero o de repo).
+//
+//   specTarget pregunta "¿estos dos issues apuntan al MISMO documento?",
+//   para decidir si un issue de otro milestone es en realidad este mismo
+//   epic bajo otro título. Ahí el prefijo estorba: la línea empieza por
+//   "> Slice `#N` del epic. " y ese prefijo (a) lleva el orden del slice y
+//   (b) cambió de formato en F6 (`#N` con backticks, ver
+//   SPEC_LINK_PREFIXES), así que comparar la línea entera daría un falso
+//   negativo sobre cualquier issue creado antes de F6.
+//
+// Falla en ABIERTO por diseño, y el precio de ese fallo hay que decirlo
+// entero, porque NO es el statu quo. La premisa va delante: si el epic está
+// renombrado en GitHub, `inEpic` sale vacío —esa corrida no ve ninguno de sus
+// issues— y va a recrear el epic entero. Lo único que puede pararla es la
+// puerta B del caller (ct-groom.mjs), y para dispararla hace falta reconocer
+// que el issue de ese otro milestone apunta al mismo documento. Lo que se
+// compara aquí, en ese call-site, es el issue EXISTENTE contra lo que el spec
+// produce HOY para ese mismo orden (`specTargetPorOrden`) — no un issue
+// contra otro issue. Si esos dos destinos no coinciden, la puerta no dispara
+// y el epic se duplica entero con exit 0: no lo causa esta función, pero es
+// lo que deja que ocurra. Antes de F23, con el emparejado global, esos mismos
+// issues se encontraban por marcador y salía divergencia con exit 3 sin crear
+// nada. O sea: el falso negativo no restaura ningún comportamiento previo,
+// deja pasar un agujero que antes no existía. Es un riesgo
+// ACEPTADO a cambio de no ladrillar el caso normal — un falso positivo
+// pararía en seco dos epics distintos reusando números de orden, que es justo
+// lo que F23 viene a habilitar. El caller compensa avisando por stderr de
+// cada descarte que pueda acabar en duplicación —el de un slice que todavía
+// no tiene issue en el epic de la corrida—, sin bloquear.
+//
+// Las dos formas reales de que dos destinos difieran para el MISMO documento
+// (la tercera —"dos costumbres de invocación, relativa vs. absoluta"— la
+// eliminó F10: la línea ya no se compone de argv, sino de la ruta dentro del
+// repo, el remoto y la rama por defecto; ver normalizeSpecLink arriba):
+//   (a) issues groomeados ANTES de F10, que llevan el enlace en la forma
+//       relativa vieja ("[docs/x.md#9](docs/x.md#9)");
+//   (b) la forma degradada "— sin enlace: <motivo>" que emite
+//       groom.js#renderSpecLink cuando el spec no estaba publicado al
+//       groomear (scripts/spec-link.js#SPEC_REF_REASONS enumera los motivos).
+const SPEC_TARGET_SEPARATOR = 'Spec: '
+export function specTarget(specLinkLine) {
+  const line = normalizeSpecLink(specLinkLine)
+  if (line === null) return null
+  const at = line.indexOf(SPEC_TARGET_SEPARATOR)
+  if (at === -1) return null
+  const target = line.slice(at + SPEC_TARGET_SEPARATOR.length).trim()
+  return target.length > 0 ? target : null
+}
+
 // countHeadingLines: cuántas veces aparece una cabecera (mismo criterio de
 // igualdad exacta/conjunto y de líneas ocultas — valla o comentario — que
 // locateSection) en todo el body — no solo si aparece, sino CUÁNTAS veces.

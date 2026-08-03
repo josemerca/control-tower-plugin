@@ -1260,14 +1260,14 @@ function matchingBody() {
 }
 
 describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F5)', () => {
-  it('título/milestone/labels divergentes → se reportan por stderr, exit 3, JSON del plan idéntico al de siempre (nada se muta)', () => {
+  it('título/labels divergentes → se reportan por stderr, exit 3, JSON del plan idéntico al de siempre (nada se muta)', () => {
     const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
     const EXISTING = {
       number: 501,
       title: '#1 iniciar sesión',
       state: 'open',
-      milestone: { title: 'Sprint 1' },
+      milestone: { title: 'Epic' },
       labels: [{ name: 'type:backend' }, { name: 'status:in-progress' }],
       body: '<!-- ct-order:1 -->',
     }
@@ -1285,8 +1285,6 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
       expect(err).toMatch(/t.tulo difiere/i)
       expect(err).toMatch(/"#1 iniciar sesión"/)
       expect(err).toMatch(/"#1 login"/)
-      expect(err).toMatch(/milestone difiere/)
-      expect(err).toMatch(/"Sprint 1"/)
       expect(err).toMatch(/falta la label "area:api"/)
       expect(err).toMatch(/falta la label "touches:db"/)
       expect(err).not.toMatch(/status:in-progress/) // fuera del namespace que el spec compara
@@ -1591,6 +1589,396 @@ describe('ct-groom --dry-run — el exit 3 ante divergencia es una decisión exp
     const realRes = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic'], { encoding: 'utf8', env: fakeEnv(envOverrides) })
     expect(dryRunRes.status).toBe(3)
     expect(realRes.status).toBe(3)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// F23 — las dos caras del §2 del feedback de campo, medidas en producción
+// sobre menoplus-app/menoplus con los issues #451–#456 de un epic anterior y
+// cerrado. Antes de este arreglo, el emparejado por marcador barría el REPO
+// ENTERO, así que el contrato §9 ("los # son únicos dentro de su milestone,
+// no del repo") era cierto en /ct-next y falso aquí.
+const TRES_SLICES = (a, b, c) => `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
+|---|---|---|---|---|---|---|---|---|
+| ${a} | uno | backend | a | – | AC-${a}.1 | – | api | db |
+| ${b} | dos | backend | b | – | AC-${b}.1 | – | api | db |
+| ${c} | tres | backend | c | – | AC-${c}.1 | – | api | db |
+`
+
+// Los seis del epic anterior: cerrados, en OTRO milestone, con ct-order 1..6
+// y un enlace a OTRO spec (para no disparar la puerta de la Tarea 5, que es
+// una comprobación distinta — aquí lo que se prueba es el acotado).
+const EPIC_ANTERIOR = [1, 2, 3, 4, 5, 6].map((n) => ({
+  number: 450 + n,
+  title: `#${n} slice viejo`,
+  state: 'closed',
+  milestone: { number: 1, title: 'Epic anterior' },
+  labels: [{ name: 'type:backend' }],
+  body: `> Slice \`#${n}\` del epic. Spec: [otro-spec.md](https://github.com/o/r/blob/main/otro-spec.md)\n\ncuerpo viejo\n\n<!-- ct-order:${n} -->`,
+}))
+
+describe('ct-groom — el marcador ct-order acotado por milestone (F23, §2 del feedback)', () => {
+  it('cara 1: tabla §9 empezando en 1,2,3 sobre un epic anterior con 1..6 → crea los tres, cero divergencias, cero huérfanos, exit 0', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EPIC_ANTERIOR]]) }) })
+    expect(res.status).toBe(0)
+    // Lo que hacía antes: emparejaba con #451/#452/#453 y reportaba el
+    // milestone distinto como divergencia, sin crear nada.
+    expect(res.stderr).not.toMatch(/divergencia/)
+    // Y además declaraba huérfanos a #454/#455/#456 en la MISMA corrida.
+    expect(res.stderr).not.toMatch(/hu.rfano/)
+    // #451/#452/#453 SÍ se nombran ahora, pero sólo como el aviso no
+    // bloqueante del fallo en abierto de la puerta B (su enlace apunta a otro
+    // spec): la aserción de antes era `not.toMatch(/#45[123]/)` y se ha
+    // afinado, no relajado — lo que importa es que ninguna de esas menciones
+    // sea un emparejado, una divergencia o un huérfano.
+    for (const linea of res.stderr.split('\n').filter((l) => /#45[1-6]/.test(l))) {
+      expect(linea.startsWith('aviso: ')).toBe(true)
+    }
+    const plan = JSON.parse(res.stdout)
+    expect(plan.issues.map((i) => i.order)).toEqual([1, 2, 3])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // La MISMA cara 1, sin --dry-run. El test de arriba no puede observar el
+  // arreglo: ct-groom.mjs sale antes del bucle de creación bajo --dry-run, así
+  // que su única aserción sobre creación (`plan.issues.map(i => i.order)`)
+  // sale de la tabla §9 y habría pasado igual ANTES del acotado. Y la
+  // modalidad de fallo de este arreglo es justamente la contraria: emparejar
+  // con los issues del epic anterior en vez de crear los propios. Eso sólo se
+  // ve en una corrida real.
+  it('cara 1, corrida REAL: crea los tres issues del epic nuevo y no empareja con ninguno de #451–#456', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo'],
+      {
+        encoding: 'utf8',
+        env: fakeEnv({
+          FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EPIC_ANTERIOR]]),
+          FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic nuevo', number: 2 }]),
+        }),
+      })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/issue creado orden #1/)
+    expect(res.stdout).toMatch(/issue creado orden #2/)
+    expect(res.stdout).toMatch(/issue creado orden #3/)
+    // En corrida real el verbo del aviso es indicativo: aquí sí se crea.
+    expect(res.stderr).toMatch(/crearé un issue nuevo para el slice #1 en "Epic nuevo"/)
+    // El fallo que este arreglo cierra: "issue orden #1 ya existe (#451), no
+    // se duplica". Ni el mensaje de idempotencia ni ninguno de los seis
+    // números del epic anterior pueden salir por stdout.
+    expect(res.stdout).not.toMatch(/issue orden #\d+ ya existe/)
+    expect(res.stdout).not.toMatch(/#45[1-6]/)
+    expect(res.stderr).not.toMatch(/divergencia/)
+    expect(res.stderr).not.toMatch(/hu.rfano/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('cara 2: tabla §9 empezando en 7,8,9 → NO declara huérfanos a los seis del epic anterior', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(7, 8, 9))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EPIC_ANTERIOR]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/hu.rfano/)
+    expect(res.stderr).not.toMatch(/#45[1-6]/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el huérfano legítimo — un issue DEL EPIC ACTUAL cuyo orden ya no está en la tabla — sigue avisando y sigue saliendo 3', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const HUERFANO_REAL = {
+      number: 601,
+      title: '#9 slice retirado',
+      state: 'open',
+      milestone: { number: 2, title: 'Epic nuevo' },
+      labels: [{ name: 'type:backend' }],
+      body: 'cuerpo\n\n<!-- ct-order:9 -->',
+    }
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[...EPIC_ANTERIOR, HUERFANO_REAL]]]) }) })
+    expect(res.status).toBe(3)
+    expect(res.stderr).toMatch(/issue #601.*ct-order:9/)
+    expect(res.stderr).toMatch(/hu.rfano/)
+    // El acotado no ha silenciado la señal, sólo la ha limitado a su epic:
+    // ninguno de los seis del epic anterior se declara huérfano. (Sí salen
+    // #451–#453 como aviso no bloqueante de la puerta B — el fallo en abierto
+    // de un enlace que no casa —, así que la aserción se afina a la línea de
+    // huérfano en vez de a "no aparece el número".)
+    for (const linea of res.stderr.split('\n').filter((l) => /#45[1-6]/.test(l))) {
+      expect(linea.startsWith('aviso: ')).toBe(true)
+      expect(linea).not.toMatch(/hu.rfano/)
+    }
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el emparejado SÍ ocurre dentro del propio epic: un issue del milestone pedido con el mismo orden no se duplica', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const DEL_EPIC = {
+      number: 700,
+      title: '#1 uno',
+      state: 'open',
+      milestone: { number: 2, title: 'Epic nuevo' },
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'status:backlog' }],
+      body: 'cuerpo\n\n<!-- ct-order:1 -->',
+    }
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[...EPIC_ANTERIOR, DEL_EPIC]]]) }) })
+    // Divergencia real (el body no trae AC ni enlace al spec) → exit 3,
+    // nombrando el issue de SU epic. Lo que importa aquí es que lo encuentra.
+    expect(res.status).toBe(3)
+    expect(res.stderr).toMatch(/slice #1.*issue #700/)
+    // Y como el slice #1 YA tiene issue en este epic, el aviso de la puerta B
+    // no habla de él: no hay creación posible, luego no hay duplicación
+    // posible. Los slices 2 y 3, que sí se crearían, sí se avisan.
+    expect(res.stderr).not.toMatch(/aviso: el slice #1 de este spec/)
+    expect(res.stderr).toMatch(/aviso: el slice #2 de este spec/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom — puerta A: issues sin milestone (F23)', () => {
+  const SIN_MILESTONE = (number, order) => ({
+    number,
+    title: `#${order} suelto`,
+    state: 'open',
+    milestone: null,
+    labels: [],
+    body: `cuerpo\n\n<!-- ct-order:${order} -->`,
+  })
+
+  it('colisiona con la tabla §9 → exit 1, los nombra, y NO muta nada', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[SIN_MILESTONE(487, 2), SIN_MILESTONE(488, 3)]]]) }) })
+    expect(res.status).toBe(1)
+    expect(res.stderr).toMatch(/#487\s+ct-order:2/)
+    expect(res.stderr).toMatch(/#488\s+ct-order:3/)
+    expect(res.stderr).toMatch(/no se ha creado ni modificado nada/)
+    expect(res.stderr).toMatch(/gh issue edit .*--milestone/)
+    // El efecto, no el exit code: la puerta cae ANTES de la primera mutación,
+    // que es la creación del milestone.
+    expect(res.stdout).not.toMatch(/milestone creado/)
+    expect(res.stdout).not.toMatch(/issue creado/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('NO colisiona con la tabla §9 → aviso que lo nombra, la corrida sigue', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[SIN_MILESTONE(487, 9)]]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).toMatch(/issue #487.*ct-order:9.*no tiene milestone/)
+    expect(res.stderr).not.toMatch(/no se ha creado ni modificado nada/)
+    const plan = JSON.parse(res.stdout)
+    expect(plan.issues.map((i) => i.order)).toEqual([1, 2, 3])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('bajo --dry-run la puerta también aborta: un preview que calla que la corrida real se pararía informa menos que la corrida real', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[SIN_MILESTONE(487, 2)]]]) }) })
+    expect(res.status).toBe(1)
+    expect(res.stdout).not.toMatch(/"issues"/) // ni siquiera se imprime el plan
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('un issue sin milestone y SIN marcador ct-order no dice nada de nada', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const SUELTO = { number: 490, title: 'issue a mano', state: 'open', milestone: null, labels: [], body: 'sin marcador' }
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[SUELTO]]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/#490/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+describe('ct-groom — puerta B: el mismo epic bajo otro título (F23)', () => {
+  // MISMO spec que produce el plan de este directorio de test (spec.md), pero
+  // en OTRO milestone: la firma de un epic renombrado, o de una errata en
+  // --milestone.
+  const mismoSpecOtroEpic = (number, order) => ({
+    number,
+    title: `#${order} uno`,
+    state: 'open',
+    milestone: { number: 1, title: 'Epic anterior' },
+    labels: [{ name: 'type:backend' }],
+    body: buildIssueBody(
+      { n: order, name: 'uno', type: 'backend', entrega: 'a', deps: [], ac: [`AC-${order}.1`], protected: '–' },
+      SPEC_REF_OK,
+    ),
+  })
+
+  it('mismo orden + mismo spec en otro milestone → exit 1, nombra el issue y su milestone real, no muta nada', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[mismoSpecOtroEpic(452, 2)]]]) }) })
+    expect(res.status).toBe(1)
+    expect(res.stderr).toMatch(/#452\s+ct-order:2/)
+    expect(res.stderr).toMatch(/Epic anterior/)
+    expect(res.stderr).toMatch(/Epic nuevo/)
+    expect(res.stderr).toMatch(/no se ha creado ni modificado nada/)
+    expect(res.stdout).not.toMatch(/milestone creado/)
+    expect(res.stdout).not.toMatch(/issue creado/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('mismo orden pero OTRO spec → no dispara: es un epic distinto reusando números, que es lo que F23 habilita', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EPIC_ANTERIOR]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/no se ha creado ni modificado nada/)
+    // "No dispara" es no BLOQUEAR, no callarse: los tres órdenes que sí están
+    // en la tabla de hoy salen como aviso (ver los tests del aviso más abajo).
+    expect(res.stderr).toMatch(/aviso: el slice #1 de este spec/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('mismo spec pero un orden que NO está en la tabla de hoy → no dispara', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[mismoSpecOtroEpic(452, 8)]]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/no se ha creado ni modificado nada/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // El aviso del fallo en abierto. La puerta B descarta un issue de otro
+  // milestone cuando su enlace al spec no casa con el nuestro — y ése es
+  // exactamente el cubo del que sale un epic duplicado con exit 0 si el
+  // enlace no casaba sólo porque el issue es viejo o porque su enlace quedó
+  // degradado. Descartarlo en silencio era la asimetría con la puerta A, que
+  // sí nombra los issues sin milestone que NO bloquean.
+  it('aviso (enlace DISTINTO): nombra el issue, su milestone y el riesgo de duplicado — y no cambia el exit code', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[EPIC_ANTERIOR[1]]]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).toMatch(/^aviso: el slice #2 de este spec tiene un issue en otro milestone con el mismo ct-order \(#452, "Epic anterior"\)/m)
+    expect(res.stderr).toMatch(/su enlace al spec no coincide con el de este spec/)
+    // Bajo --dry-run el verbo es condicional: aquí no se crea nada (mismo
+    // criterio que el recordatorio de status:backlog, "quedarían"/"quedan").
+    expect(res.stderr).toMatch(/crearía un issue nuevo para el slice #2 en "Epic nuevo"/)
+    expect(res.stderr).toMatch(/esto va a duplicarlo: compruébalo antes de seguir/)
+    // No bloquea: la corrida sigue y el plan se imprime entero.
+    expect(res.stderr).not.toMatch(/no se ha creado ni modificado nada/)
+    expect(JSON.parse(res.stdout).issues.map((i) => i.order)).toEqual([1, 2, 3])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // La rama `suyo === null` del fallo en abierto: un issue de otro epic con
+  // marcador ct-order pero SIN línea de enlace al spec en el body. Es la más
+  // probable en un repo real (issues creados a mano, o groomeados por una
+  // versión anterior a la línea de enlace) y no tenía ningún test.
+  it('aviso (SIN enlace al spec en el body): también se nombra, con el motivo correcto', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const SIN_ENLACE = {
+      number: 470,
+      title: '#2 a mano',
+      state: 'open',
+      milestone: { number: 1, title: 'Epic anterior' },
+      labels: [],
+      body: 'cuerpo escrito a mano, sin enlace al spec\n\n<!-- ct-order:2 -->',
+    }
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[SIN_ENLACE]]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).toMatch(/aviso:.*#470, "Epic anterior"/)
+    expect(res.stderr).toMatch(/no lleva ninguna línea de enlace al spec/)
+    expect(res.stderr).not.toMatch(/no se ha creado ni modificado nada/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // El acotado del aviso: la duplicación sólo puede ocurrir si el slice se va
+  // a CREAR. Si ya tiene issue en este epic, el emparejado lo encuentra, la
+  // creación se salta, y avisar sería un aviso que nadie puede satisfacer —
+  // saldría en cada corrida, para siempre, sin describir ninguna pérdida
+  // (mismo criterio que el filtro de cerrados de backlogPendingCount).
+  it('el aviso NO sale para un slice que YA tiene issue en este epic: sin creación no hay duplicación', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const YA_EN_ESTE_EPIC = {
+      number: 700,
+      title: '#1 uno',
+      state: 'open',
+      milestone: { number: 2, title: 'Epic nuevo' },
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:none' }, { name: 'status:backlog' }],
+      body: buildIssueBody(
+        { n: 1, name: 'uno', type: 'backend', entrega: 'a', deps: [], ac: ['AC-1.1'], protected: '–' },
+        SPEC_REF_OK,
+      ),
+    }
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[...EPIC_ANTERIOR, YA_EN_ESTE_EPIC]]]) }) })
+    expect(res.status).toBe(0)
+    // #451 lleva ct-order:1, igual que el issue que este epic ya tiene: nada
+    // que duplicar, ningún aviso que lo nombre.
+    expect(res.stderr).not.toMatch(/aviso: el slice #1 de este spec/)
+    expect(res.stderr).not.toMatch(/#451/)
+    // #452/#453 sí: los slices 2 y 3 todavía se crearían.
+    expect(res.stderr).toMatch(/aviso: el slice #2 de este spec.*#452/)
+    expect(res.stderr).toMatch(/aviso: el slice #3 de este spec.*#453/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el aviso NO sale cuando el orden del issue de otro epic no está en la tabla de hoy: ahí no hay nada que duplicar', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(7, 8, 9))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EPIC_ANTERIOR]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/aviso: el slice/)
+    expect(res.stderr).not.toMatch(/#45[1-6]/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // El aviso afirma que este groom va a crear ese slice. En una corrida que
+  // se para en seco no se crea nada, así que los avisos se emiten DESPUÉS del
+  // exit de los bloqueos: un aviso que sale junto a "no se ha creado ni
+  // modificado nada" se contradice con el pie de su propia corrida. Nada se
+  // pierde — la corrida siguiente, ya sin bloqueo, los vuelve a calcular.
+  it('cuando la puerta bloquea, el aviso no se emite: nada se va a crear, así que nada se puede duplicar', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[mismoSpecOtroEpic(452, 2), EPIC_ANTERIOR[0]]]]) }) })
+    expect(res.status).toBe(1)
+    expect(res.stderr).toMatch(/#452\s+ct-order:2/) // el bloqueo sí sale
+    expect(res.stderr).toMatch(/no se ha creado ni modificado nada/)
+    // #451 (ct-order:1, otro spec) habría avisado en una corrida que siguiera.
+    expect(res.stderr).not.toMatch(/aviso: el slice/)
+    expect(res.stderr).not.toMatch(/#451/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('las DOS puertas en la misma corrida: los dos bloques se reportan y se sale UNA sola vez', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const SIN_MS = { number: 487, title: '#3 suelto', state: 'open', milestone: null, labels: [], body: 'x\n\n<!-- ct-order:3 -->' }
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[SIN_MS, mismoSpecOtroEpic(452, 2)]]]) }) })
+    expect(res.status).toBe(1)
+    expect(res.stderr).toMatch(/#487\s+ct-order:3/)   // puerta A
+    expect(res.stderr).toMatch(/#452\s+ct-order:2/)   // puerta B
+    // Un solo cierre: el pie aparece exactamente una vez.
+    expect(res.stderr.match(/no se ha creado ni modificado nada/g)).toHaveLength(1)
     rmSync(dir, { recursive: true, force: true })
   })
 })

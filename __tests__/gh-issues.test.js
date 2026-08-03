@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { flattenIssuePages, isPullRequest, realIssuesOnly, findByMarker } from '../scripts/gh-issues.js'
+import { flattenIssuePages, isPullRequest, realIssuesOnly, findByMarker, epicTitleOf, partitionByEpic } from '../scripts/gh-issues.js'
 
 describe('flattenIssuePages', () => {
   it('aplana el array de páginas que produce --paginate --slurp', () => {
@@ -58,5 +58,61 @@ describe('findByMarker', () => {
     ]
     const onlyIssues = realIssuesOnly(entries)
     expect(findByMarker(onlyIssues, '<!-- ct-order:2 -->')).toBeUndefined()
+  })
+})
+
+// F23 — el alcance por epic. epicTitleOf/partitionByEpic son a /ct-groom lo
+// que epicKeyOf/buildOrderIndex (gh-issue-map.js) son a /ct-next: la misma
+// idea, con la llave que cada uno puede permitirse. /ct-next usa el NÚMERO
+// del milestone; /ct-groom no puede, porque enumera los issues del repo ANTES
+// de haber resuelto (o creado) el milestone de la corrida, así que en ese punto
+// lo único que conoce del epic es su TÍTULO.
+describe('epicTitleOf', () => {
+  it('devuelve el título del milestone', () => {
+    expect(epicTitleOf({ number: 1, milestone: { number: 4, title: 'Epic A' } })).toBe('Epic A')
+  })
+  it('sin milestone → null', () => {
+    expect(epicTitleOf({ number: 1, milestone: null })).toBeNull()
+    expect(epicTitleOf({ number: 1 })).toBeNull()
+  })
+  it('milestone sin título usable → null (no revienta, cae al cubo compartido)', () => {
+    expect(epicTitleOf({ milestone: {} })).toBeNull()
+    expect(epicTitleOf({ milestone: { title: '' } })).toBeNull()
+    expect(epicTitleOf({ milestone: { title: 42 } })).toBeNull()
+  })
+  it('defensivo: entrada vacía no revienta', () => {
+    expect(epicTitleOf(undefined)).toBeNull()
+    expect(epicTitleOf(null)).toBeNull()
+  })
+})
+
+describe('partitionByEpic', () => {
+  const issues = [
+    { number: 1, milestone: { title: 'Epic A' } },
+    { number: 2, milestone: { title: 'Epic B' } },
+    { number: 3, milestone: null },
+    { number: 4, milestone: { title: 'Epic A' } },
+  ]
+  it('reparte en los tres cubos, disjuntos y en el orden de entrada', () => {
+    const { inEpic, sinMilestone, otrosEpics } = partitionByEpic(issues, 'Epic A')
+    expect(inEpic.map((i) => i.number)).toEqual([1, 4])
+    expect(sinMilestone.map((i) => i.number)).toEqual([3])
+    expect(otrosEpics.map((i) => i.number)).toEqual([2])
+  })
+  it('el título se compara EXACTO: no hay normalización de mayúsculas ni de espacios', () => {
+    const { inEpic, otrosEpics } = partitionByEpic(issues, 'epic a')
+    expect(inEpic).toEqual([])
+    expect(otrosEpics.map((i) => i.number)).toEqual([1, 2, 4])
+  })
+  it('un título pedido que no existe deja inEpic vacío sin perder a nadie', () => {
+    const { inEpic, sinMilestone, otrosEpics } = partitionByEpic(issues, 'Epic Z')
+    expect(inEpic).toEqual([])
+    expect(sinMilestone.length + otrosEpics.length).toBe(issues.length)
+  })
+  it('defensivo: lista vacía o ausente devuelve los tres cubos vacíos', () => {
+    for (const entrada of [[], undefined, null]) {
+      const p = partitionByEpic(entrada, 'Epic A')
+      expect(p).toEqual({ inEpic: [], sinMilestone: [], otrosEpics: [] })
+    }
   })
 })

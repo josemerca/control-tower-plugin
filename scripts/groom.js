@@ -256,13 +256,14 @@ export function buildIssueBody(slice, specRef) {
 
 // findDuplicateOrders: los números de slice (`#` de la tabla §9) son la
 // única llave que buildOrderIndex (scripts/gh-issue-map.js) usa para mapear
-// "orden -> número de issue de GitHub", y esa función se queda con el ÚLTIMO
-// issue visto para un orden repetido — así que un duplicado en la fuente
-// (dos filas con el mismo `#`) hace que un `merge-after #N` resuelva contra
-// el issue equivocado, y en ct-groom.mjs el placeholder en memoria de un
-// issue recién creado (aún sin `number` real) provoca que el segundo slice
-// con el mismo orden intente operar contra un issue `null`. Se corta en el
-// productor (aquí) en vez de dejar que el consumidor adivine.
+// "orden -> número de issue de GitHub" dentro de un epic. Desde D1 esa
+// función no resuelve una colisión a ciegas: el primer issue visto conserva
+// el slot y el hueco entero se acumula en `collisions`, lo que hace que
+// buildDispatchInput EXCLUYA de la tanda al epic afectado. Aun así, un
+// duplicado en la FUENTE (dos filas de la tabla §9 con el mismo `#`) sigue
+// siendo un error que hay que cortar aquí y no allí: dejarlo pasar convierte
+// un epic entero en indispachable. Se corta en el productor (aquí) en vez de
+// dejar que el consumidor se defienda.
 function findDuplicateOrders(slices) {
   const seen = new Set()
   const dupes = new Set()

@@ -22,7 +22,7 @@ import { groomPlan } from './groom.js'
 // por qué). Ver scripts/spec-link.js para las tres decisiones que toma y por
 // qué las toma así.
 import { resolveSpecRef } from './spec-link.js'
-import { flattenIssuePages, flattenPages, realIssuesOnly, findByMarker } from './gh-issues.js'
+import { flattenIssuePages, flattenPages, realIssuesOnly, findByMarker, partitionByEpic, epicTitleOf } from './gh-issues.js'
 import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
 import { parseStrictInt } from './argnum.js'
 // extractOrder (F5, importante 4): para detectar issues huérfanos — un issue
@@ -32,7 +32,7 @@ import { parseStrictInt } from './argnum.js'
 // de una label `status:`, y el "sin ninguna label status: = backlog") — es lo
 // que hace verdadero, y no una suposición, el recordatorio de "esto todavía
 // no lo va a despachar nadie" que este script imprime al final.
-import { extractOrder, resolveStatus } from './gh-issue-map.js'
+import { extractOrder, resolveStatus, extractSpecLink, specTarget } from './gh-issue-map.js'
 // F5: capa pura de reconciliación — decide QUÉ cuenta como divergencia entre
 // un issue existente y lo que el plan produce hoy, CÓMO se reporta, y CÓMO
 // se traduce a los flags de `gh issue edit`/`--body` para aplicarla. Ver
@@ -564,6 +564,25 @@ function describeGaps(gaps) {
 }
 
 let existingIssues = null
+// inEpic (F23): los issues del epic de ESTA corrida — los del milestone cuyo
+// título es el argumento `--milestone`. Es la lista contra la que se emparejan
+// los marcadores `ct-order` y se detectan huérfanos. Vive como variable de
+// módulo (y no dentro del bloque de lectura donde se calcula) por UNA sola
+// razón, y conviene decirla con honestidad: el bucle de creación, mucho más
+// abajo y fuera de ese bloque, sigue registrando ahí cada issue recién
+// creado. Ese registro no protege hoy de nada — ver el comentario junto al
+// `push` más abajo, que explica por qué no tiene lectores.
+//
+// Por qué el emparejado se acota (§2 del feedback de campo, medido en
+// producción): /ct-groom numera los slices 1..N POR EPIC y escribe ese número
+// en `<!-- ct-order:N -->`, así que el marcador NO es único en el repo — el
+// contrato §9 lo promete explícitamente ("únicos dentro de su milestone, no
+// del repo"). Buscarlo por todo el repo hacía dos cosas, las dos falsas:
+// emparejaba una tabla §9 nueva empezando en 1,2,3 con los issues de un epic
+// anterior y CERRADO (reportando su milestone distinto como "divergencia", y
+// con --reconcile los habría arrastrado al milestone nuevo), y declaraba
+// huérfanos a los issues de cualquier otro epic del repo.
+let inEpic = null
 let reconcileEntries = [] // [{ iss, found, diff, bodyResult, gaps }] — found/diff/bodyResult/gaps son null si el issue todavía no existe
 let anyUnresolvedDrift = false
 // anyReconcileGapRemains (review round 3, Critical 2): true si CUALQUIER
@@ -615,17 +634,173 @@ if (typeof repo === 'string') {
     process.exit(1)
   }
   const knownOrders = new Set(plan.issues.map((i) => i.order))
-  for (const i of existingIssues) {
+  const partition = partitionByEpic(existingIssues, milestone)
+  inEpic = partition.inEpic
+
+  // F23 — las puertas del alcance por epic. Van AQUÍ, entre el listado de
+  // issues y todo lo demás, porque este punto está por delante de la primera
+  // mutación del script (la creación del milestone, mucho más abajo): una
+  // comprobación que no puede detener la acción siguiente es decoración, y
+  // una que aborta después de crear el milestone deja basura en GitHub — el
+  // mismo motivo por el que el listado se colocó donde está.
+  //
+  // Las dos puertas se calculan ENTERAS y se reportan JUNTAS antes de un
+  // único exit: nombrar sólo el primer bloqueante dice "quita ése y sale", y
+  // es falso cuando hay más de uno.
+  //
+  // Código de salida 1, por precedente de este mismo fichero: 1 es "leí un
+  // estado inconsistente, NO continúo" (ver el abort del listado de items del
+  // project); 2 es error de validación de argv/spec; 3 es "hubo divergencia
+  // pero el trabajo se hizo", y aquí no se hace nada.
+  const bloqueos = []
+  const repoRefBloqueo = typeof repo === 'string' ? repo : '<owner/repo>'
+
+  // Puerta A — issues SIN milestone. No se les puede atribuir un epic, así
+  // que las dos lecturas posibles hacen daño: emparejarlo reescribiría un
+  // issue ajeno; ignorarlo crearía un duplicado del slice que sí es nuestro.
+  // Sólo bloquea si su orden COLISIONA con la tabla §9 de hoy — un marcador
+  // que no compite con nada no impide nada, pero tampoco se calla (mismo
+  // criterio que NO_MILESTONE_KEY en gh-issue-map.js: cubo compartido con
+  // aviso, nunca invisible).
+  const sinMilestoneBloqueantes = []
+  for (const i of partition.sinMilestone) {
+    const order = extractOrder(i.body)
+    if (order == null) continue
+    if (knownOrders.has(order)) {
+      sinMilestoneBloqueantes.push(`  #${i.number}  ct-order:${order}`)
+    } else {
+      console.error(`aviso: issue #${i.number} lleva el marcador ct-order:${order} y no tiene milestone — no puedo decidir a qué epic pertenece, así que queda fuera de este groom. No colisiona con la tabla §9 de este spec, por eso no bloquea; asígnale su milestone para que deje de aparecer: gh issue edit ${i.number} --repo ${repoRefBloqueo} --milestone "<el suyo>"`)
+    }
+  }
+  if (sinMilestoneBloqueantes.length) {
+    bloqueos.push({
+      titular: 'estos issues llevan un marcador ct-order que colisiona con la tabla §9 de este spec, pero NO tienen milestone — no puedo decidir si son de este epic o de otro:',
+      lineas: sinMilestoneBloqueantes,
+      remedio: `asígnales su milestone y vuelve a correr: gh issue edit <n> --repo ${repoRefBloqueo} --milestone "<el suyo>"`,
+    })
+  }
+
+  // Puerta B — el MISMO epic bajo OTRO título. Riesgo que introduce el propio
+  // acotado por epic, no uno que ya existiera: mientras el emparejado era
+  // global, un `--milestone` con una errata (o un epic renombrado en GitHub)
+  // seguía encontrando sus issues por marcador y a lo sumo reportaba
+  // divergencia. Acotado, esa misma corrida ve CERO issues en su epic y
+  // recrea el epic entero duplicado en un milestone nuevo, con exit 0 — un
+  // comando que no da error y no hace lo que parece.
+  //
+  // La señal que lo distingue de un epic distinto reusando números es el
+  // enlace al spec, que todo issue groomeado lleva en el body
+  // (groom.js#renderSpecLink). Mismo orden + MISMO documento = el mismo epic
+  // con otro nombre. Documento distinto = dos epics legítimos compartiendo el
+  // número de orden, que es EXACTAMENTE lo que F23 viene a habilitar: no
+  // dispara.
+  //
+  // Se compara el DESTINO del enlace (specTarget), no la línea entera: la
+  // línea empieza por "> Slice `#N` del epic. " y ese prefijo cambió de
+  // formato en F6, así que comparar entero fallaría contra cualquier issue
+  // anterior.
+  //
+  // Cuando el destino falta en cualquiera de los dos lados, o difiere, la
+  // puerta NO dispara — falla en ABIERTO. El precio hay que decirlo entero,
+  // porque no es el statu quo: si el epic estaba renombrado y sus issues
+  // llevan el enlace en otra forma (groomeados antes de F10, o con la forma
+  // degradada "— sin enlace: <motivo>"), `inEpic` sale vacío y esta corrida
+  // recrea el epic ENTERO duplicado con exit 0. Antes de F23, el emparejado
+  // global los encontraba por marcador y reportaba divergencia con exit 3,
+  // sin crear nada: el falso negativo no devuelve nada, abre un agujero que
+  // antes no existía. Se acepta a cambio de no ladrillar el caso normal —
+  // un falso positivo pararía en seco dos epics distintos reusando números
+  // de orden, que es justo lo que F23 viene a habilitar. Lo que sí se hace
+  // es no callarlo: todo descarte de este cubo que pueda acabar en un epic
+  // duplicado —o sea, el de un slice que todavía no tiene issue en este
+  // epic— emite un aviso por stderr (más abajo, en el propio `continue`),
+  // no bloqueante.
+  const specTargetPorOrden = new Map(plan.issues.map((i) => [i.order, specTarget(i.specLink)]))
+  const otroEpicBloqueantes = []
+  const otroEpicAvisos = []
+  for (const i of partition.otrosEpics) {
+    const order = extractOrder(i.body)
+    if (order == null || !knownOrders.has(order)) continue
+    const suyo = specTarget(extractSpecLink(i.body))
+    const nuestro = specTargetPorOrden.get(order)
+    if (suyo === null || nuestro === null || suyo !== nuestro) {
+      // El aviso del fallo en abierto. Cierra la asimetría con la puerta A,
+      // que sí nombra por stderr los issues sin milestone que NO bloquean:
+      // este cubo es exactamente del que sale un epic duplicado con exit 0
+      // (ver el comentario de arriba), así que descartarlo en silencio es lo
+      // único que no se puede hacer. No bloquea, no cambia el código de
+      // salida, y no altera cuándo dispara la puerta.
+      //
+      // Acotado a los slices que NO tienen ya issue en ESTE epic, con el
+      // mismo predicado que usa el emparejado de más abajo
+      // (`findByMarker(inEpic, marker)`): la duplicación sólo puede ocurrir
+      // si el slice se va a crear, y si ya tiene issue aquí el emparejado lo
+      // encuentra y la creación se salta — no hay nada que duplicar, así que
+      // el aviso saldría en cada corrida sin describir ninguna pérdida y sin
+      // nada que el humano pueda hacer para callarlo. Mismo criterio, en este
+      // mismo fichero, que el filtro de issues cerrados de
+      // `backlogPendingCount`: un aviso que no se puede satisfacer es un
+      // aviso que enseña a ignorar los demás. El acotado no pierde ningún
+      // caso peligroso — cubre exactamente el conjunto en el que la
+      // duplicación es posible.
+      if (findByMarker(inEpic, `<!-- ct-order:${order} -->`)) continue
+      const motivo = suyo === null
+        ? 'pero su body no lleva ninguna línea de enlace al spec con la que compararlo'
+        : (nuestro === null
+          ? 'pero este spec no ha producido ningún enlace con el que compararlo'
+          : 'pero su enlace al spec no coincide con el de este spec')
+      // Se acumula en vez de imprimirse aquí: los avisos se emiten DESPUÉS
+      // del exit de los bloqueos (más abajo), porque cada uno afirma que este
+      // groom va a crear ese slice — y en una corrida que se para en seco no
+      // se crea nada. Nada se pierde: la corrida siguiente, ya sin bloqueo,
+      // los vuelve a calcular igual.
+      otroEpicAvisos.push(`aviso: el slice #${order} de este spec tiene un issue en otro milestone con el mismo ct-order (#${i.number}, "${epicTitleOf(i)}"), ${motivo} — así que lo trato como otro epic y ${dryRun ? 'crearía' : 'crearé'} un issue nuevo para el slice #${order} en "${milestone}". Si en realidad es el mismo epic renombrado, esto va a duplicarlo: compruébalo antes de seguir.`)
+      continue
+    }
+    otroEpicBloqueantes.push(`  #${i.number}  ct-order:${order}  milestone: "${epicTitleOf(i)}"`)
+  }
+  if (otroEpicBloqueantes.length) {
+    bloqueos.push({
+      titular: 'estos slices ya tienen un issue en OTRO milestone que apunta al MISMO spec — parece este mismo epic bajo otro título, no un epic distinto:',
+      lineas: otroEpicBloqueantes,
+      remedio: `este spec pide --milestone "${milestone}". Si renombraste el epic, usa su título real; si es un epic nuevo de verdad, su tabla §9 no debería apuntar al mismo spec que el anterior.`,
+    })
+  }
+
+  if (bloqueos.length) {
+    for (const { titular, lineas, remedio } of bloqueos) {
+      console.error(titular)
+      for (const linea of lineas) console.error(linea)
+      console.error(remedio)
+    }
+    console.error('/ct-groom NO continúa: no se ha creado ni modificado nada.')
+    process.exit(1)
+  }
+  for (const aviso of otroEpicAvisos) console.error(aviso)
+
+  for (const i of inEpic) {
     const order = extractOrder(i.body)
     if (order != null && !knownOrders.has(order)) {
-      console.error(`aviso: issue #${i.number} lleva el marcador ct-order:${order}, pero el slice #${order} ya no está en la tabla §9 del spec — issue huérfano (¿se eliminó el slice sin cerrar/renumerar su issue?); revísalo a mano`)
+      console.error(`aviso: issue #${i.number} lleva el marcador ct-order:${order}, pero el slice #${order} ya no está en la tabla §9 del spec — issue huérfano del epic "${milestone}" (¿se eliminó el slice sin cerrar/renumerar su issue?); revísalo a mano`)
       anyOrphans = true
     }
   }
   reconcileEntries = plan.issues.map((iss) => {
     const marker = `<!-- ct-order:${iss.order} -->`
-    const found = findByMarker(existingIssues, marker)
+    const found = findByMarker(inEpic, marker)
     if (!found) return { iss, found: null, diff: null, bodyResult: null, gaps: null }
+    // F23: `diff.milestone` es INALCANZABLE desde aquí desde que el
+    // emparejado está acotado por epic — `found` sale de `inEpic`, y a
+    // `inEpic` sólo entran issues cuyo milestone es exactamente el que se le
+    // pasa a diffIssue como `wantedMilestone` (`partitionByEpic` los reparte
+    // por título EXACTO contra `milestone`, y `plan.milestone` es ese mismo
+    // valor — ver groomPlan en groom.js). Con ello desaparece POR
+    // CONSTRUCCIÓN el peligro que el §2 del feedback señalaba en mayúsculas:
+    // un --reconcile que, además de reescribir el body, arrastrase un issue
+    // cerrado de otro epic al milestone nuevo. La comparación NO se borra de
+    // reconcile.js: ese módulo es puro, compartido y testeado, y sigue siendo
+    // la reparación correcta para cualquier caller que le pase un issue de
+    // otro alcance. Lo que ya no puede ocurrir es que ESTE call-site lo haga.
     const diff = diffIssue(found, iss, plan.milestone, ownedLabelPrefixes)
     // bodyResult es puro (no toca `gh`, no muta nada) — seguro de calcular
     // siempre, con o sin --reconcile, con o sin --dry-run: es la única forma
@@ -1058,10 +1233,13 @@ for (const { iss, found, diff, bodyResult } of reconcileEntries) {
   const num = gh(['issue', 'create', '--repo', repo, '--title', iss.title, '--body', iss.body,
     '--milestone', milestone, ...iss.labels.flatMap((l) => ['--label', l])])
   console.log(`issue creado orden #${iss.order}: ${num}`)
-  // registra el issue recién creado en la lista en memoria: si dos slices de
-  // esta misma ejecución compartieran marcador (no debería pasar, pero así la
-  // comprobación de arriba sigue siendo correcta dentro de la misma corrida)
-  existingIssues.push({ number: null, body: iss.body })
+  // F23: se empuja a `inEpic` porque es la lista contra la que empareja el
+  // marcador. Hoy este registro NO tiene lectores: `findByMarker` se invoca
+  // una sola vez (arriba), dentro del `plan.issues.map` que construye
+  // `reconcileEntries` de una vez, mucho antes de este bucle. Se conserva por
+  // coherencia con esa lista, no porque proteja de nada: un orden duplicado en
+  // la tabla §9 ya lo corta groom.js#findDuplicateOrders antes de llegar aquí.
+  inEpic.push({ number: null, body: iss.body })
   if (projectNum) addToProjectWithSprint(num, iss.order)
 }
 
