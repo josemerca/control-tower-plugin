@@ -1260,7 +1260,7 @@ function matchingBody() {
 }
 
 describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F5)', () => {
-  it('título/milestone/labels divergentes → se reportan por stderr, exit 3, JSON del plan idéntico al de siempre (nada se muta)', () => {
+  it('título/labels divergentes → se reportan por stderr, exit 3, JSON del plan idéntico al de siempre (nada se muta)', () => {
     const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, ONE_SLICE_SPEC)
     const EXISTING = {

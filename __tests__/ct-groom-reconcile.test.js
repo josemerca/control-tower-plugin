@@ -73,12 +73,18 @@ function run(args, envOverrides = {}, opts = {}) {
   })
 }
 
-// Issue existente que diverge en título, milestone Y labels a la vez (missing
-// area:/touches:, milestone distinto, título distinto) — un solo fixture que
-// ejercita las tres clases de campo en la misma corrida, más status:in-progress
-// (nunca debe reportarse ni tocarse). Es una función de `specPath` por el
-// mismo motivo que matchingBody: el body (correcto salvo por lo que cada
-// test quiere probar) incluye el enlace al spec real.
+// Issue existente que diverge en título Y labels a la vez (missing
+// area:/touches:, título distinto) — un solo fixture que ejercita las dos
+// clases de campo en la misma corrida, más status:in-progress (nunca debe
+// reportarse ni tocarse). Es una función de `specPath` por el mismo motivo
+// que matchingBody: el body (correcto salvo por lo que cada test quiere
+// probar) incluye el enlace al spec real.
+//
+// F23: lleva `milestone: { title: 'Epic' }` (el mismo que pide la corrida) a
+// propósito — con el emparejado acotado por epic, un issue con milestone
+// distinto cae en `otrosEpics` y `findByMarker` no lo encuentra, así que ya
+// no se puede fabricar una divergencia de milestone desde este call-site.
+// Esa rama de diffIssue/formatDrift se prueba ahora en reconcile.test.js.
 function existingIssueDrift(specPath) {
   return {
     number: 501,
@@ -88,8 +94,8 @@ function existingIssueDrift(specPath) {
     labels: [{ name: 'type:backend' }, { name: 'status:in-progress' }],
     // body correcto (AC/deps/Descripción/Protegido/enlace-al-spec ya
     // coinciden con el spec) — así este fixture ejercita SOLO la
-    // divergencia de título/milestone/labels que es su propósito, sin
-    // arrastrar drift de body sin querer.
+    // divergencia de título/labels que es su propósito, sin arrastrar
+    // drift de body sin querer.
     body: matchingBody(),
   }
 }
@@ -102,7 +108,7 @@ function baseEnv(specPath) {
 }
 
 describe('ct-groom (corrida real) — detecta divergencia por defecto, no la aplica (F5)', () => {
-  it('reporta título/milestone/labels divergentes por stderr, NUNCA llama a `gh issue edit`, exit 3', () => {
+  it('reporta título/labels divergentes por stderr, NUNCA llama a `gh issue edit`, exit 3', () => {
     const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
     const argvLog = join(dir, 'argv.log')
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], { ...baseEnv(spec), FAKE_GH_ARGV_LOG_FILE: argvLog })

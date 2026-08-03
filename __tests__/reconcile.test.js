@@ -186,6 +186,16 @@ describe('diffIssue — compara título, milestone, enlace-al-spec (ancla), labe
     const d = diffIssue(noSpecLink, WANTED_ISSUE, 'Epic', ALL_PREFIXES)
     expect(d.specLink).toEqual({ current: null, wanted: SPEC_LINK })
   })
+  // F23: esta rama ya no la ejercita ningún test de /ct-groom — desde que el
+  // emparejado se acota por epic (`partitionByEpic`), un issue que
+  // `findByMarker` encuentra en `ct-groom.mjs` SIEMPRE vino del milestone
+  // pedido, así que `diffIssue` nunca recibe ahí un milestone distinto. La
+  // rama sigue viva (otros callers de `diffIssue` pueden alcanzarla), así
+  // que su cobertura baja aquí, al detector puro, en vez de desaparecer.
+  it('milestone divergente (issue en "Sprint 1", spec pide "Epic") → current/wanted', () => {
+    const d = diffIssue(existingWith({ milestone: { title: 'Sprint 1' } }), WANTED_ISSUE, 'Epic', ALL_PREFIXES)
+    expect(d.milestone).toEqual({ current: 'Sprint 1', wanted: 'Epic' })
+  })
   it('deps divergentes (issue con #1, spec ahora también pide #3)', () => {
     const d = diffIssue(existingWith({}), { ...WANTED_ISSUE, deps: [1, 3] }, 'Epic', ALL_PREFIXES)
     expect(d.deps).toEqual({ missing: [3], extra: [] })
@@ -362,6 +372,18 @@ describe('formatDrift — divergencia: (cuenta) vs. nota: (no cuenta); deps/ac/s
     expect(lines[0]).toMatch(/^divergencia:/)
     expect(lines[0]).toMatch(/"vieja"/)
     expect(lines[0]).toMatch(/"nueva"/)
+  })
+  // F23: mismo motivo que el test de milestone en el describe de diffIssue —
+  // /ct-groom ya no puede producir un diff.milestone no-nulo (el emparejado
+  // acotado por epic lo hace inalcanzable desde ese call-site), así que la
+  // línea de formatDrift para esta rama se prueba aquí, contra el
+  // formateador puro, en vez de contra una corrida de /ct-groom.
+  it('milestone divergente → línea "divergencia:" con ambos valores', () => {
+    const lines = formatDrift({ ...BASE, milestone: { current: 'Sprint 1', wanted: 'Epic' } })
+    expect(lines[0]).toMatch(/^divergencia:/)
+    expect(lines[0]).toMatch(/milestone difiere/)
+    expect(lines[0]).toMatch(/"Sprint 1"/)
+    expect(lines[0]).toMatch(/"Epic"/)
   })
   // F6: la línea cita la referencia EXACTAMENTE como aparece en el body que
   // el spec produce hoy (con backticks) y dice, además, que ese número es un

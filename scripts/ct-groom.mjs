@@ -566,11 +566,13 @@ function describeGaps(gaps) {
 let existingIssues = null
 // inEpic (F23): los issues del epic de ESTA corrida — los del milestone cuyo
 // título es el argumento `--milestone`. Es la lista contra la que se emparejan
-// los marcadores `ct-order` y se detectan huérfanos, y por eso vive aquí
-// arriba y no dentro del bloque de lectura: el registro en memoria del issue
-// recién creado (mucho más abajo, en el bucle de creación) tiene que empujar
-// a ESTA lista, no a `existingIssues`, o dos slices del mismo orden en la
-// misma corrida dejarían de verse el uno al otro.
+// los marcadores `ct-order` y se detectan huérfanos. Vive como variable de
+// módulo (y no dentro del bloque de lectura donde se calcula) porque el
+// bucle de creación, mucho más abajo, necesita seguir registrando ahí cada
+// issue recién creado, y porque las puertas del alcance por epic que añaden
+// las tareas siguientes de F23 necesitan este mismo cubo ya calculado fuera
+// de ese bloque — no por ninguna guarda intra-corrida: ver el comentario
+// junto al `push` más abajo para por qué ese registro no protege de nada hoy.
 //
 // Por qué el emparejado se acota (§2 del feedback de campo, medido en
 // producción): /ct-groom numera los slices 1..N POR EPIC y escribe ese número
@@ -1078,12 +1080,12 @@ for (const { iss, found, diff, bodyResult } of reconcileEntries) {
   const num = gh(['issue', 'create', '--repo', repo, '--title', iss.title, '--body', iss.body,
     '--milestone', milestone, ...iss.labels.flatMap((l) => ['--label', l])])
   console.log(`issue creado orden #${iss.order}: ${num}`)
-  // registra el issue recién creado en la lista en memoria: si dos slices de
-  // esta misma ejecución compartieran marcador (no debería pasar, pero así la
-  // comprobación de arriba sigue siendo correcta dentro de la misma corrida)
-  // F23: empuja a `inEpic`, que es la lista contra la que emparejan los
-  // marcadores desde que el emparejado está acotado por epic. Empujar a
-  // `existingIssues` dejaría esta guarda sin efecto en silencio.
+  // F23: se empuja a `inEpic` porque es la lista contra la que empareja el
+  // marcador. Hoy este registro NO tiene lectores: `findByMarker` se invoca
+  // una sola vez (arriba), dentro del `plan.issues.map` que construye
+  // `reconcileEntries` de una vez, mucho antes de este bucle. Se conserva por
+  // coherencia con esa lista, no porque proteja de nada: un orden duplicado en
+  // la tabla §9 ya lo corta groom.js#findDuplicateOrders antes de llegar aquí.
   inEpic.push({ number: null, body: iss.body })
   if (projectNum) addToProjectWithSprint(num, iss.order)
 }
