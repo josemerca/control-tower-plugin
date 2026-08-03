@@ -379,12 +379,28 @@ export function normalizeSpecLink(specLinkLine) {
 //   SPEC_LINK_PREFIXES), así que comparar la línea entera daría un falso
 //   negativo sobre cualquier issue creado antes de F6.
 //
-// Falla en ABIERTO por diseño: si dos costumbres de invocación producen dos
-// destinos distintos para el mismo fichero (relativa vs. absoluta — el
-// ping-pong que F10 documenta en reconcile.js), esta función los ve como
-// specs distintos, el caller no dispara su puerta, y el comportamiento es el
-// que había antes de F23. Un falso NEGATIVO devuelve el statu quo; un falso
-// positivo pararía una corrida legítima. La dirección segura es ésta.
+// Falla en ABIERTO por diseño, y el precio de ese fallo hay que decirlo
+// entero, porque NO es el statu quo: cuando dos issues del mismo epic acaban
+// con destinos distintos, esta función los ve como specs distintos, el caller
+// (ct-groom.mjs, puerta B) no dispara, `inEpic` sale vacío y esa corrida
+// recrea el epic ENTERO duplicado con exit 0. Antes de F23, con el
+// emparejado global, esos mismos issues se encontraban por marcador y salía
+// divergencia con exit 3 sin crear nada. O sea: el falso negativo no
+// restaura ningún comportamiento previo, abre un agujero nuevo. Es un riesgo
+// ACEPTADO a cambio de no ladrillar el caso normal — un falso positivo
+// pararía en seco dos epics distintos reusando números de orden, que es justo
+// lo que F23 viene a habilitar. El caller compensa avisando por stderr de
+// cada descarte, sin bloquear.
+//
+// Las dos formas reales de que dos destinos difieran para el MISMO documento
+// (la tercera —"dos costumbres de invocación, relativa vs. absoluta"— la
+// eliminó F10: la línea ya no se compone de argv, sino de la ruta dentro del
+// repo, el remoto y la rama por defecto; ver normalizeSpecLink arriba):
+//   (a) issues groomeados ANTES de F10, que llevan el enlace en la forma
+//       relativa vieja ("[docs/x.md#9](docs/x.md#9)");
+//   (b) la forma degradada "— sin enlace: <motivo>" que emite
+//       groom.js#renderSpecLink cuando el spec no estaba publicado al
+//       groomear (scripts/spec-link.js#SPEC_REF_REASONS enumera los motivos).
 const SPEC_TARGET_SEPARATOR = 'Spec: '
 export function specTarget(specLinkLine) {
   const line = normalizeSpecLink(specLinkLine)

@@ -87,7 +87,11 @@ Esta puerta cubre un riesgo que **introduce el propio arreglo** y que no está e
 
 La señal existe y es barata: todo issue groomeado lleva su enlace al spec en el body (`groom.js:148` `renderSpecLink`, leído por `extractSpecLink`). Mismo orden + mismo spec = el mismo epic bajo otro título. Spec distinto = epic distinto reusando números, que es **el caso que este arreglo viene a habilitar** y no dispara nada.
 
-**Cómo se compara el spec.** Sólo el destino, la parte tras `Spec: `, no la línea entera. La línea empieza por `> Slice \`#N\` del epic. Spec: ` y ese prefijo cambió de formato en F6 (`#N` → `` `#N` ``, ver `SPEC_LINK_PREFIXES`), así que comparar entero daría falsos negativos sobre issues viejos. Dos costumbres de invocación (ruta relativa vs. absoluta) **fallan en abierto**: la puerta no dispara y el comportamiento es el de hoy. Es la dirección segura, y no reabre el ping-pong que F10 documenta en `reconcile.js:24-27` — aquí no se reconcilia nada, sólo se decide si parar.
+**Cómo se compara el spec.** Sólo el destino, la parte tras `Spec: `, no la línea entera. La línea empieza por `> Slice \`#N\` del epic. Spec: ` y ese prefijo cambió de formato en F6 (`#N` → `` `#N` ``, ver `SPEC_LINK_PREFIXES`), así que comparar entero daría falsos negativos sobre issues viejos.
+
+**El fallo en abierto, con su precio dicho entero.** Si el destino falta en cualquiera de los dos lados, o difiere, la puerta **no dispara**. Las dos formas reales de que eso pase para el mismo documento son (a) issues groomeados **antes de F10**, con el enlace en la forma relativa vieja, y (b) la forma degradada `— sin enlace: <motivo>`, emitida cuando el spec no estaba publicado al groomear. La causa que se citaba aquí antes —«dos costumbres de invocación, relativa vs. absoluta»— **la eliminó F10**: la línea ya no se compone de `argv`, sino de la ruta dentro del repo, el remoto y la rama por defecto.
+
+Y el falso negativo **no devuelve el comportamiento de hoy**: con `inEpic` vacío, esa corrida recrea el epic entero duplicado con exit 0, mientras que el emparejado global lo encontraba por marcador y salía 3 sin crear nada. Es un riesgo **aceptado** —un falso positivo pararía en seco el caso normal que este arreglo viene a habilitar, dos epics distintos reusando números—, no una degradación benigna. Por eso cada descarte de ese cubo emite un **aviso no bloqueante** por stderr (§3.4).
 
 **Un solo exit.** Las dos puertas se calculan enteras, se reportan **todos** los hallazgos, y se sale una sola vez. Convención ya establecida en este repo (§5 del feedback, «los N bloqueantes nombrados de una vez»): el defecto no era la incompletitud sino la conjunción — nombrar uno decía «quita ése y sale» y era falso.
 
@@ -99,7 +103,8 @@ La señal existe y es barata: todo issue groomeado lleva su enlace al spec en el
 
 - Emparejado: `findByMarker(inEpic, marker)`.
 - Huérfanos: sólo sobre `inEpic`. Un issue de otro epic deja de ser asunto de esta corrida.
-- **Aviso informativo, no bloqueante:** issues sin milestone con `ct-order` que **no** colisiona con la tabla de hoy se nombran por stderr. Replica el criterio de `NO_MILESTONE_KEY`: bucket compartido con aviso, nunca invisible.
+- **Aviso informativo, no bloqueante (puerta A):** issues sin milestone con `ct-order` que **no** colisiona con la tabla de hoy se nombran por stderr. Replica el criterio de `NO_MILESTONE_KEY`: bucket compartido con aviso, nunca invisible.
+- **Aviso informativo, no bloqueante (puerta B):** un issue de otro milestone con `ct-order:N`, N en la tabla de hoy, cuyo destino de spec **no casa** con el nuestro (por diferir o por faltar en cualquiera de los dos lados) se descartaba en silencio — y es exactamente el cubo del que sale un epic duplicado con exit 0 (§3.3). Se nombra por stderr, con su milestone real y la advertencia de que, si es el mismo epic renombrado, el slice acabará duplicado. **No** cambia cuándo dispara la puerta ni el código de salida.
 
 ### 3.5 Lo que queda muerto y se documenta, no se borra
 
