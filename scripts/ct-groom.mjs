@@ -567,12 +567,11 @@ let existingIssues = null
 // inEpic (F23): los issues del epic de ESTA corrida — los del milestone cuyo
 // título es el argumento `--milestone`. Es la lista contra la que se emparejan
 // los marcadores `ct-order` y se detectan huérfanos. Vive como variable de
-// módulo (y no dentro del bloque de lectura donde se calcula) porque el
-// bucle de creación, mucho más abajo, necesita seguir registrando ahí cada
-// issue recién creado, y porque las puertas del alcance por epic que añaden
-// las tareas siguientes de F23 necesitan este mismo cubo ya calculado fuera
-// de ese bloque — no por ninguna guarda intra-corrida: ver el comentario
-// junto al `push` más abajo para por qué ese registro no protege de nada hoy.
+// módulo (y no dentro del bloque de lectura donde se calcula) por UNA sola
+// razón, y conviene decirla con honestidad: el bucle de creación, mucho más
+// abajo y fuera de ese bloque, sigue registrando ahí cada issue recién
+// creado. Ese registro no protege hoy de nada — ver el comentario junto al
+// `push` más abajo, que explica por qué no tiene lectores.
 //
 // Por qué el emparejado se acota (§2 del feedback de campo, medido en
 // producción): /ct-groom numera los slices 1..N POR EPIC y escribe ese número
@@ -690,18 +689,30 @@ if (typeof repo === 'string') {
   // comando que no da error y no hace lo que parece.
   //
   // La señal que lo distingue de un epic distinto reusando números es el
-  // enlace al spec, que todo issue groomeado lleva en el body (groom.js#
-  // renderSpecLink). Mismo orden + MISMO documento = el mismo epic con otro
-  // nombre. Documento distinto = dos epics legítimos compartiendo el número
-  // de orden, que es EXACTAMENTE lo que F23 viene a habilitar: no dispara.
+  // enlace al spec, que todo issue groomeado lleva en el body
+  // (groom.js#renderSpecLink). Mismo orden + MISMO documento = el mismo epic
+  // con otro nombre. Documento distinto = dos epics legítimos compartiendo el
+  // número de orden, que es EXACTAMENTE lo que F23 viene a habilitar: no
+  // dispara.
   //
   // Se compara el DESTINO del enlace (specTarget), no la línea entera: la
   // línea empieza por "> Slice `#N` del epic. " y ese prefijo cambió de
   // formato en F6, así que comparar entero fallaría contra cualquier issue
-  // anterior. Si falta el enlace en cualquiera de los dos lados, o si dos
-  // costumbres de invocación produjeron rutas distintas del mismo fichero, la
-  // puerta NO dispara: un falso negativo devuelve el comportamiento previo a
-  // F23, un falso positivo pararía una corrida legítima.
+  // anterior.
+  //
+  // Cuando el destino falta en cualquiera de los dos lados, o difiere, la
+  // puerta NO dispara — falla en ABIERTO. El precio hay que decirlo entero,
+  // porque no es el statu quo: si el epic estaba renombrado y sus issues
+  // llevan el enlace en otra forma (groomeados antes de F10, o con la forma
+  // degradada "— sin enlace: <motivo>"), `inEpic` sale vacío y esta corrida
+  // recrea el epic ENTERO duplicado con exit 0. Antes de F23, el emparejado
+  // global los encontraba por marcador y reportaba divergencia con exit 3,
+  // sin crear nada: el falso negativo no devuelve nada, abre un agujero que
+  // antes no existía. Se acepta a cambio de no ladrillar el caso normal —
+  // un falso positivo pararía en seco dos epics distintos reusando números
+  // de orden, que es justo lo que F23 viene a habilitar. Lo que sí se hace
+  // es no callarlo: cada descarte de este cubo emite un aviso por stderr
+  // (más abajo, en el propio `continue`), no bloqueante.
   const specTargetPorOrden = new Map(plan.issues.map((i) => [i.order, specTarget(i.specLink)]))
   const otroEpicBloqueantes = []
   for (const i of partition.otrosEpics) {
@@ -709,7 +720,21 @@ if (typeof repo === 'string') {
     if (order == null || !knownOrders.has(order)) continue
     const suyo = specTarget(extractSpecLink(i.body))
     const nuestro = specTargetPorOrden.get(order)
-    if (suyo === null || nuestro === null || suyo !== nuestro) continue
+    if (suyo === null || nuestro === null || suyo !== nuestro) {
+      // El aviso del fallo en abierto. Cierra la asimetría con la puerta A,
+      // que sí nombra por stderr los issues sin milestone que NO bloquean:
+      // este cubo es exactamente del que sale un epic duplicado con exit 0
+      // (ver el comentario de arriba), así que descartarlo en silencio es lo
+      // único que no se puede hacer. No bloquea, no cambia el código de
+      // salida, y no altera cuándo dispara la puerta.
+      const motivo = suyo === null
+        ? 'pero su body no lleva ninguna línea de enlace al spec con la que compararlo'
+        : (nuestro === null
+          ? 'pero este spec no ha producido ningún enlace con el que compararlo'
+          : 'pero su enlace al spec no coincide con el de este spec')
+      console.error(`aviso: el slice #${order} de este spec tiene un issue en otro milestone con el mismo ct-order (#${i.number}, "${epicTitleOf(i)}"), ${motivo} — así que lo trato como otro epic y este groom no lo empareja. Si en realidad es el mismo epic renombrado, el slice #${order} acabará duplicado en "${milestone}": compruébalo antes de seguir.`)
+      continue
+    }
     otroEpicBloqueantes.push(`  #${i.number}  ct-order:${order}  milestone: "${epicTitleOf(i)}"`)
   }
   if (otroEpicBloqueantes.length) {

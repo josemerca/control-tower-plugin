@@ -1628,11 +1628,50 @@ describe('ct-groom — el marcador ct-order acotado por milestone (F23, §2 del 
     // Lo que hacía antes: emparejaba con #451/#452/#453 y reportaba el
     // milestone distinto como divergencia, sin crear nada.
     expect(res.stderr).not.toMatch(/divergencia/)
-    expect(res.stderr).not.toMatch(/#45[123]/)
     // Y además declaraba huérfanos a #454/#455/#456 en la MISMA corrida.
     expect(res.stderr).not.toMatch(/hu.rfano/)
+    // #451/#452/#453 SÍ se nombran ahora, pero sólo como el aviso no
+    // bloqueante del fallo en abierto de la puerta B (su enlace apunta a otro
+    // spec): la aserción de antes era `not.toMatch(/#45[123]/)` y se ha
+    // afinado, no relajado — lo que importa es que ninguna de esas menciones
+    // sea un emparejado, una divergencia o un huérfano.
+    for (const linea of res.stderr.split('\n').filter((l) => /#45[1-6]/.test(l))) {
+      expect(linea.startsWith('aviso: ')).toBe(true)
+    }
     const plan = JSON.parse(res.stdout)
     expect(plan.issues.map((i) => i.order)).toEqual([1, 2, 3])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // La MISMA cara 1, sin --dry-run. El test de arriba no puede observar el
+  // arreglo: ct-groom.mjs sale antes del bucle de creación bajo --dry-run, así
+  // que su única aserción sobre creación (`plan.issues.map(i => i.order)`)
+  // sale de la tabla §9 y habría pasado igual ANTES del acotado. Y la
+  // modalidad de fallo de este arreglo es justamente la contraria: emparejar
+  // con los issues del epic anterior en vez de crear los propios. Eso sólo se
+  // ve en una corrida real.
+  it('cara 1, corrida REAL: crea los tres issues del epic nuevo y no empareja con ninguno de #451–#456', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo'],
+      {
+        encoding: 'utf8',
+        env: fakeEnv({
+          FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EPIC_ANTERIOR]]),
+          FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic nuevo', number: 2 }]),
+        }),
+      })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/issue creado orden #1/)
+    expect(res.stdout).toMatch(/issue creado orden #2/)
+    expect(res.stdout).toMatch(/issue creado orden #3/)
+    // El fallo que este arreglo cierra: "issue orden #1 ya existe (#451), no
+    // se duplica". Ni el mensaje de idempotencia ni ninguno de los seis
+    // números del epic anterior pueden salir por stdout.
+    expect(res.stdout).not.toMatch(/issue orden #\d+ ya existe/)
+    expect(res.stdout).not.toMatch(/#45[1-6]/)
+    expect(res.stderr).not.toMatch(/divergencia/)
+    expect(res.stderr).not.toMatch(/hu.rfano/)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1664,8 +1703,14 @@ describe('ct-groom — el marcador ct-order acotado por milestone (F23, §2 del 
     expect(res.stderr).toMatch(/issue #601.*ct-order:9/)
     expect(res.stderr).toMatch(/hu.rfano/)
     // El acotado no ha silenciado la señal, sólo la ha limitado a su epic:
-    // ninguno de los seis del epic anterior aparece.
-    expect(res.stderr).not.toMatch(/#45[1-6]/)
+    // ninguno de los seis del epic anterior se declara huérfano. (Sí salen
+    // #451–#453 como aviso no bloqueante de la puerta B — el fallo en abierto
+    // de un enlace que no casa —, así que la aserción se afina a la línea de
+    // huérfano en vez de a "no aparece el número".)
+    for (const linea of res.stderr.split('\n').filter((l) => /#45[1-6]/.test(l))) {
+      expect(linea.startsWith('aviso: ')).toBe(true)
+      expect(linea).not.toMatch(/hu.rfano/)
+    }
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1790,6 +1835,9 @@ describe('ct-groom — puerta B: el mismo epic bajo otro título (F23)', () => {
       { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EPIC_ANTERIOR]]) }) })
     expect(res.status).toBe(0)
     expect(res.stderr).not.toMatch(/no se ha creado ni modificado nada/)
+    // "No dispara" es no BLOQUEAR, no callarse: los tres órdenes que sí están
+    // en la tabla de hoy salen como aviso (ver los tests del aviso más abajo).
+    expect(res.stderr).toMatch(/aviso: el slice #1 de este spec/)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1800,6 +1848,62 @@ describe('ct-groom — puerta B: el mismo epic bajo otro título (F23)', () => {
       { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[mismoSpecOtroEpic(452, 8)]]]) }) })
     expect(res.status).toBe(0)
     expect(res.stderr).not.toMatch(/no se ha creado ni modificado nada/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // El aviso del fallo en abierto. La puerta B descarta un issue de otro
+  // milestone cuando su enlace al spec no casa con el nuestro — y ése es
+  // exactamente el cubo del que sale un epic duplicado con exit 0 si el
+  // enlace no casaba sólo porque el issue es viejo o porque su enlace quedó
+  // degradado. Descartarlo en silencio era la asimetría con la puerta A, que
+  // sí nombra los issues sin milestone que NO bloquean.
+  it('aviso (enlace DISTINTO): nombra el issue, su milestone y el riesgo de duplicado — y no cambia el exit code', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[EPIC_ANTERIOR[1]]]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).toMatch(/^aviso: el slice #2 de este spec tiene un issue en otro milestone con el mismo ct-order \(#452, "Epic anterior"\)/m)
+    expect(res.stderr).toMatch(/su enlace al spec no coincide con el de este spec/)
+    expect(res.stderr).toMatch(/acabará duplicado en "Epic nuevo"/)
+    // No bloquea: la corrida sigue y el plan se imprime entero.
+    expect(res.stderr).not.toMatch(/no se ha creado ni modificado nada/)
+    expect(JSON.parse(res.stdout).issues.map((i) => i.order)).toEqual([1, 2, 3])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // La rama `suyo === null` del fallo en abierto: un issue de otro epic con
+  // marcador ct-order pero SIN línea de enlace al spec en el body. Es la más
+  // probable en un repo real (issues creados a mano, o groomeados por una
+  // versión anterior a la línea de enlace) y no tenía ningún test.
+  it('aviso (SIN enlace al spec en el body): también se nombra, con el motivo correcto', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const SIN_ENLACE = {
+      number: 470,
+      title: '#2 a mano',
+      state: 'open',
+      milestone: { number: 1, title: 'Epic anterior' },
+      labels: [],
+      body: 'cuerpo escrito a mano, sin enlace al spec\n\n<!-- ct-order:2 -->',
+    }
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[SIN_ENLACE]]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).toMatch(/aviso:.*#470, "Epic anterior"/)
+    expect(res.stderr).toMatch(/no lleva ninguna línea de enlace al spec/)
+    expect(res.stderr).not.toMatch(/no se ha creado ni modificado nada/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el aviso NO sale cuando el orden del issue de otro epic no está en la tabla de hoy: ahí no hay nada que duplicar', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(7, 8, 9))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EPIC_ANTERIOR]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/aviso: el slice/)
+    expect(res.stderr).not.toMatch(/#45[1-6]/)
     rmSync(dir, { recursive: true, force: true })
   })
 
