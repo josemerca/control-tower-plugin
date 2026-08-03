@@ -11,8 +11,15 @@
 // compilan pero fallan al ejecutarse. Ver __tests__/bundle.test.js, que
 // verifica que el bundle resultante solo importa builtins `node:*`.
 import { build } from 'esbuild'
+import { pathToFileURL } from 'node:url'
 
-await build({
+// buildOptions se exporta (F24) para que haya UNA sola fuente de verdad de la
+// configuración de build. __tests__/dist-coherente-con-fuentes.test.js la
+// importa para reconstruir los fuentes de HEAD y comparar el resultado con el
+// `dist/` commiteado; si el test llevara su propia copia de estas opciones,
+// esa copia se quedaría atrás en silencio y daría verde sobre una
+// configuración que ya no es la del proyecto.
+export const buildOptions = {
   entryPoints: ['hooks/session-start.js', 'hooks/stop.js'],
   bundle: true,
   platform: 'node',
@@ -21,4 +28,12 @@ await build({
   banner: {
     js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
   },
-})
+}
+
+// Construye solo al EJECUTARSE (`npm run build`), nunca al importarse — el
+// test importa este módulo y no debe disparar un build como efecto colateral.
+// La guarda de `process.argv[1]` no es defensiva de más: bajo `node -e` ese
+// valor es `undefined` y `pathToFileURL` lanza ERR_INVALID_ARG_TYPE.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await build(buildOptions)
+}
