@@ -64,8 +64,9 @@ describe('findByMarker', () => {
 // F23 — el alcance por epic. epicTitleOf/partitionByEpic son a /ct-groom lo
 // que epicKeyOf/buildOrderIndex (gh-issue-map.js) son a /ct-next: la misma
 // idea, con la llave que cada uno puede permitirse. /ct-next usa el NÚMERO
-// del milestone; /ct-groom no puede, porque enumera los issues ANTES de
-// resolver el milestone (ver el comentario del call-site en ct-groom.mjs).
+// del milestone; /ct-groom no puede, porque enumera los issues del repo ANTES
+// de haber resuelto (o creado) el milestone de la corrida, así que en ese punto
+// lo único que conoce del epic es su TÍTULO.
 describe('epicTitleOf', () => {
   it('devuelve el título del milestone', () => {
     expect(epicTitleOf({ number: 1, milestone: { number: 4, title: 'Epic A' } })).toBe('Epic A')
