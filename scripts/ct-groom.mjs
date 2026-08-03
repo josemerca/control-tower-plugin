@@ -22,7 +22,7 @@ import { groomPlan } from './groom.js'
 // por qué). Ver scripts/spec-link.js para las tres decisiones que toma y por
 // qué las toma así.
 import { resolveSpecRef } from './spec-link.js'
-import { flattenIssuePages, flattenPages, realIssuesOnly, findByMarker, partitionByEpic } from './gh-issues.js'
+import { flattenIssuePages, flattenPages, realIssuesOnly, findByMarker, partitionByEpic, epicTitleOf } from './gh-issues.js'
 import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
 import { parseStrictInt } from './argnum.js'
 // extractOrder (F5, importante 4): para detectar issues huérfanos — un issue
@@ -32,7 +32,7 @@ import { parseStrictInt } from './argnum.js'
 // de una label `status:`, y el "sin ninguna label status: = backlog") — es lo
 // que hace verdadero, y no una suposición, el recordatorio de "esto todavía
 // no lo va a despachar nadie" que este script imprime al final.
-import { extractOrder, resolveStatus } from './gh-issue-map.js'
+import { extractOrder, resolveStatus, extractSpecLink, specTarget } from './gh-issue-map.js'
 // F5: capa pura de reconciliación — decide QUÉ cuenta como divergencia entre
 // un issue existente y lo que el plan produce hoy, CÓMO se reporta, y CÓMO
 // se traduce a los flags de `gh issue edit`/`--body` para aplicarla. Ver
@@ -678,6 +678,45 @@ if (typeof repo === 'string') {
       titular: 'estos issues llevan un marcador ct-order que colisiona con la tabla §9 de este spec, pero NO tienen milestone — no puedo decidir si son de este epic o de otro:',
       lineas: sinMilestoneBloqueantes,
       remedio: `asígnales su milestone y vuelve a correr: gh issue edit <n> --repo ${repoRefBloqueo} --milestone "<el suyo>"`,
+    })
+  }
+
+  // Puerta B — el MISMO epic bajo OTRO título. Riesgo que introduce el propio
+  // acotado por epic, no uno que ya existiera: mientras el emparejado era
+  // global, un `--milestone` con una errata (o un epic renombrado en GitHub)
+  // seguía encontrando sus issues por marcador y a lo sumo reportaba
+  // divergencia. Acotado, esa misma corrida ve CERO issues en su epic y
+  // recrea el epic entero duplicado en un milestone nuevo, con exit 0 — un
+  // comando que no da error y no hace lo que parece.
+  //
+  // La señal que lo distingue de un epic distinto reusando números es el
+  // enlace al spec, que todo issue groomeado lleva en el body (groom.js#
+  // renderSpecLink). Mismo orden + MISMO documento = el mismo epic con otro
+  // nombre. Documento distinto = dos epics legítimos compartiendo el número
+  // de orden, que es EXACTAMENTE lo que F23 viene a habilitar: no dispara.
+  //
+  // Se compara el DESTINO del enlace (specTarget), no la línea entera: la
+  // línea empieza por "> Slice `#N` del epic. " y ese prefijo cambió de
+  // formato en F6, así que comparar entero fallaría contra cualquier issue
+  // anterior. Si falta el enlace en cualquiera de los dos lados, o si dos
+  // costumbres de invocación produjeron rutas distintas del mismo fichero, la
+  // puerta NO dispara: un falso negativo devuelve el comportamiento previo a
+  // F23, un falso positivo pararía una corrida legítima.
+  const specTargetPorOrden = new Map(plan.issues.map((i) => [i.order, specTarget(i.specLink)]))
+  const otroEpicBloqueantes = []
+  for (const i of partition.otrosEpics) {
+    const order = extractOrder(i.body)
+    if (order == null || !knownOrders.has(order)) continue
+    const suyo = specTarget(extractSpecLink(i.body))
+    const nuestro = specTargetPorOrden.get(order)
+    if (suyo === null || nuestro === null || suyo !== nuestro) continue
+    otroEpicBloqueantes.push(`  #${i.number}  ct-order:${order}  milestone: "${epicTitleOf(i)}"`)
+  }
+  if (otroEpicBloqueantes.length) {
+    bloqueos.push({
+      titular: 'estos slices ya tienen un issue en OTRO milestone que apunta al MISMO spec — parece este mismo epic bajo otro título, no un epic distinto:',
+      lineas: otroEpicBloqueantes,
+      remedio: `este spec pide --milestone "${milestone}". Si renombraste el epic, usa su título real; si es un epic nuevo de verdad, su tabla §9 no debería apuntar al mismo spec que el anterior.`,
     })
   }
 

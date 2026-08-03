@@ -1751,3 +1751,69 @@ describe('ct-groom — puerta A: issues sin milestone (F23)', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+describe('ct-groom — puerta B: el mismo epic bajo otro título (F23)', () => {
+  // MISMO spec que produce el plan de este directorio de test (spec.md), pero
+  // en OTRO milestone: la firma de un epic renombrado, o de una errata en
+  // --milestone.
+  const mismoSpecOtroEpic = (number, order) => ({
+    number,
+    title: `#${order} uno`,
+    state: 'open',
+    milestone: { number: 1, title: 'Epic anterior' },
+    labels: [{ name: 'type:backend' }],
+    body: buildIssueBody(
+      { n: order, name: 'uno', type: 'backend', entrega: 'a', deps: [], ac: [`AC-${order}.1`], protected: '–' },
+      SPEC_REF_OK,
+    ),
+  })
+
+  it('mismo orden + mismo spec en otro milestone → exit 1, nombra el issue y su milestone real, no muta nada', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[mismoSpecOtroEpic(452, 2)]]]) }) })
+    expect(res.status).toBe(1)
+    expect(res.stderr).toMatch(/#452\s+ct-order:2/)
+    expect(res.stderr).toMatch(/Epic anterior/)
+    expect(res.stderr).toMatch(/Epic nuevo/)
+    expect(res.stderr).toMatch(/no se ha creado ni modificado nada/)
+    expect(res.stdout).not.toMatch(/milestone creado/)
+    expect(res.stdout).not.toMatch(/issue creado/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('mismo orden pero OTRO spec → no dispara: es un epic distinto reusando números, que es lo que F23 habilita', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EPIC_ANTERIOR]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/no se ha creado ni modificado nada/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('mismo spec pero un orden que NO está en la tabla de hoy → no dispara', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[mismoSpecOtroEpic(452, 8)]]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/no se ha creado ni modificado nada/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('las DOS puertas en la misma corrida: los dos bloques se reportan y se sale UNA sola vez', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const SIN_MS = { number: 487, title: '#3 suelto', state: 'open', milestone: null, labels: [], body: 'x\n\n<!-- ct-order:3 -->' }
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[SIN_MS, mismoSpecOtroEpic(452, 2)]]]) }) })
+    expect(res.status).toBe(1)
+    expect(res.stderr).toMatch(/#487\s+ct-order:3/)   // puerta A
+    expect(res.stderr).toMatch(/#452\s+ct-order:2/)   // puerta B
+    // Un solo cierre: el pie aparece exactamente una vez.
+    expect(res.stderr.match(/no se ha creado ni modificado nada/g)).toHaveLength(1)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
