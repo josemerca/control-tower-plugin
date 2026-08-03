@@ -137,10 +137,13 @@ describe('el comprobador falla cuando debe (F24)', () => {
     execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' })
     execFileSync('git', ['-C', dir, 'commit', '-qm', 'fuente sin rebuild'], { stdio: 'ignore' })
 
-    const { faltan, sobran, difieren } = await comprobarDist(dir)
-    expect(difieren).toEqual(['a.js'])
-    expect({ faltan, sobran }).toEqual({ faltan: [], sobran: [] })
-    rmSync(dir, { recursive: true, force: true })
+    try {
+      const { faltan, sobran, difieren } = await comprobarDist(dir)
+      expect(difieren).toEqual(['a.js'])
+      expect({ faltan, sobran }).toEqual({ faltan: [], sobran: [] })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   }, 60_000)
 
   it('un fichero que HEAD tiene en dist/ y el build ya no produce → sale como SOBRANTE', async () => {
@@ -150,10 +153,13 @@ describe('el comprobador falla cuando debe (F24)', () => {
     execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' })
     execFileSync('git', ['-C', dir, 'commit', '-qm', 'con un sobrante'], { stdio: 'ignore' })
 
-    const { faltan, sobran, difieren } = await comprobarDist(dir)
-    expect(sobran).toEqual(['huerfano.js'])
-    expect({ faltan, difieren }).toEqual({ faltan: [], difieren: [] })
-    rmSync(dir, { recursive: true, force: true })
+    try {
+      const { faltan, sobran, difieren } = await comprobarDist(dir)
+      expect(sobran).toEqual(['huerfano.js'])
+      expect({ faltan, difieren }).toEqual({ faltan: [], difieren: [] })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   }, 60_000)
 
   it('un fichero que el build produce y HEAD no tiene commiteado → sale como FALTANTE', async () => {
@@ -174,10 +180,13 @@ describe('el comprobador falla cuando debe (F24)', () => {
     execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' })
     execFileSync('git', ['-C', dir, 'commit', '-qm', 'entry point nuevo sin bundle'], { stdio: 'ignore' })
 
-    const { faltan, sobran, difieren } = await comprobarDist(dir)
-    expect(faltan).toEqual(['b.js'])
-    expect({ sobran, difieren }).toEqual({ sobran: [], difieren: [] })
-    rmSync(dir, { recursive: true, force: true })
+    try {
+      const { faltan, sobran, difieren } = await comprobarDist(dir)
+      expect(faltan).toEqual(['b.js'])
+      expect({ sobran, difieren }).toEqual({ sobran: [], difieren: [] })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   }, 60_000)
 
   it('el árbol de trabajo sucio NO pone nada rojo: HEAD sigue siendo coherente consigo mismo', async () => {
@@ -191,8 +200,11 @@ describe('el comprobador falla cuando debe (F24)', () => {
     // sin este caso nadie sabría que se preservó.
     writeFileSync(join(dir, 'src/a.js'), 'export const x = 12345\nconsole.log(x)\n')
 
-    const { faltan, sobran, difieren } = await comprobarDist(dir)
-    expect({ faltan, sobran, difieren }).toEqual({ faltan: [], sobran: [], difieren: [] })
-    rmSync(dir, { recursive: true, force: true })
+    try {
+      const { faltan, sobran, difieren } = await comprobarDist(dir)
+      expect({ faltan, sobran, difieren }).toEqual({ faltan: [], sobran: [], difieren: [] })
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   }, 60_000)
 })
