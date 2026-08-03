@@ -741,6 +741,18 @@ if (typeof repo === 'string') {
     const marker = `<!-- ct-order:${iss.order} -->`
     const found = findByMarker(inEpic, marker)
     if (!found) return { iss, found: null, diff: null, bodyResult: null, gaps: null }
+    // F23: `diff.milestone` es INALCANZABLE desde aquí desde que el
+    // emparejado está acotado por epic — `found` sale de `inEpic`, y a
+    // `inEpic` sólo entran issues cuyo milestone es exactamente el que se le
+    // pasa a diffIssue como `wantedMilestone` (`partitionByEpic` los reparte
+    // por título EXACTO contra `milestone`, y `plan.milestone` es ese mismo
+    // valor — ver groomPlan en groom.js). Con ello desaparece POR
+    // CONSTRUCCIÓN el peligro que el §2 del feedback señalaba en mayúsculas:
+    // un --reconcile que, además de reescribir el body, arrastrase un issue
+    // cerrado de otro epic al milestone nuevo. La comparación NO se borra de
+    // reconcile.js: ese módulo es puro, compartido y testeado, y sigue siendo
+    // la reparación correcta para cualquier caller que le pase un issue de
+    // otro alcance. Lo que ya no puede ocurrir es que ESTE call-site lo haga.
     const diff = diffIssue(found, iss, plan.milestone, ownedLabelPrefixes)
     // bodyResult es puro (no toca `gh`, no muta nada) — seguro de calcular
     // siempre, con o sin --reconcile, con o sin --dry-run: es la única forma

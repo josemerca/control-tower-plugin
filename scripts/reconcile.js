@@ -467,6 +467,13 @@ export function formatDrift(diff) {
 export function buildReconcileEditArgs(diff) {
   const args = []
   if (diff.title) args.push('--title', diff.title.wanted)
+  // F23: desde ct-groom.mjs esta rama ya no se alcanza (allí el emparejado
+  // está acotado por epic, así que un issue emparejado siempre tiene el
+  // milestone pedido). Se conserva porque diffIssue/buildReconcileEditArgs
+  // son puros y no le deben nada a ese call-site: para cualquier caller que
+  // compare un issue contra un milestone distinto, mover el milestone sigue
+  // siendo la reparación correcta. No es código muerto — es código sin
+  // consumidor actual, que no es lo mismo.
   if (diff.milestone) args.push('--milestone', diff.milestone.wanted)
   for (const l of diff.labels.missing) args.push('--add-label', l)
   for (const l of diff.labels.extra) args.push('--remove-label', l)
