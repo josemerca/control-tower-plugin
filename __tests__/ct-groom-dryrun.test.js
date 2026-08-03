@@ -1689,3 +1689,65 @@ describe('ct-groom — el marcador ct-order acotado por milestone (F23, §2 del 
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+describe('ct-groom — puerta A: issues sin milestone (F23)', () => {
+  const SIN_MILESTONE = (number, order) => ({
+    number,
+    title: `#${order} suelto`,
+    state: 'open',
+    milestone: null,
+    labels: [],
+    body: `cuerpo\n\n<!-- ct-order:${order} -->`,
+  })
+
+  it('colisiona con la tabla §9 → exit 1, los nombra, y NO muta nada', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[SIN_MILESTONE(487, 2), SIN_MILESTONE(488, 3)]]]) }) })
+    expect(res.status).toBe(1)
+    expect(res.stderr).toMatch(/#487\s+ct-order:2/)
+    expect(res.stderr).toMatch(/#488\s+ct-order:3/)
+    expect(res.stderr).toMatch(/no se ha creado ni modificado nada/)
+    expect(res.stderr).toMatch(/gh issue edit .*--milestone/)
+    // El efecto, no el exit code: la puerta cae ANTES de la primera mutación,
+    // que es la creación del milestone.
+    expect(res.stdout).not.toMatch(/milestone creado/)
+    expect(res.stdout).not.toMatch(/issue creado/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('NO colisiona con la tabla §9 → aviso que lo nombra, la corrida sigue', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[SIN_MILESTONE(487, 9)]]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).toMatch(/issue #487.*ct-order:9.*no tiene milestone/)
+    expect(res.stderr).not.toMatch(/no se ha creado ni modificado nada/)
+    const plan = JSON.parse(res.stdout)
+    expect(plan.issues.map((i) => i.order)).toEqual([1, 2, 3])
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('bajo --dry-run la puerta también aborta: un preview que calla que la corrida real se pararía informa menos que la corrida real', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[SIN_MILESTONE(487, 2)]]]) }) })
+    expect(res.status).toBe(1)
+    expect(res.stdout).not.toMatch(/"issues"/) // ni siquiera se imprime el plan
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('un issue sin milestone y SIN marcador ct-order no dice nada de nada', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const SUELTO = { number: 490, title: 'issue a mano', state: 'open', milestone: null, labels: [], body: 'sin marcador' }
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[SUELTO]]]) }) })
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/#490/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})

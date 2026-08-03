@@ -637,6 +637,60 @@ if (typeof repo === 'string') {
   const knownOrders = new Set(plan.issues.map((i) => i.order))
   const partition = partitionByEpic(existingIssues, milestone)
   inEpic = partition.inEpic
+
+  // F23 — las puertas del alcance por epic. Van AQUÍ, entre el listado de
+  // issues y todo lo demás, porque este punto está por delante de la primera
+  // mutación del script (la creación del milestone, mucho más abajo): una
+  // comprobación que no puede detener la acción siguiente es decoración, y
+  // una que aborta después de crear el milestone deja basura en GitHub — el
+  // mismo motivo por el que el listado se colocó donde está.
+  //
+  // Las dos puertas se calculan ENTERAS y se reportan JUNTAS antes de un
+  // único exit: nombrar sólo el primer bloqueante dice "quita ése y sale", y
+  // es falso cuando hay más de uno.
+  //
+  // Código de salida 1, por precedente de este mismo fichero: 1 es "leí un
+  // estado inconsistente, NO continúo" (ver el abort del listado de items del
+  // project); 2 es error de validación de argv/spec; 3 es "hubo divergencia
+  // pero el trabajo se hizo", y aquí no se hace nada.
+  const bloqueos = []
+  const repoRefBloqueo = typeof repo === 'string' ? repo : '<owner/repo>'
+
+  // Puerta A — issues SIN milestone. No se les puede atribuir un epic, así
+  // que las dos lecturas posibles hacen daño: emparejarlo reescribiría un
+  // issue ajeno; ignorarlo crearía un duplicado del slice que sí es nuestro.
+  // Sólo bloquea si su orden COLISIONA con la tabla §9 de hoy — un marcador
+  // que no compite con nada no impide nada, pero tampoco se calla (mismo
+  // criterio que NO_MILESTONE_KEY en gh-issue-map.js: cubo compartido con
+  // aviso, nunca invisible).
+  const sinMilestoneBloqueantes = []
+  for (const i of partition.sinMilestone) {
+    const order = extractOrder(i.body)
+    if (order == null) continue
+    if (knownOrders.has(order)) {
+      sinMilestoneBloqueantes.push(`  #${i.number}  ct-order:${order}`)
+    } else {
+      console.error(`aviso: issue #${i.number} lleva el marcador ct-order:${order} y no tiene milestone — no puedo decidir a qué epic pertenece, así que queda fuera de este groom. No colisiona con la tabla §9 de este spec, por eso no bloquea; asígnale su milestone para que deje de aparecer: gh issue edit ${i.number} --repo ${repoRefBloqueo} --milestone "<el suyo>"`)
+    }
+  }
+  if (sinMilestoneBloqueantes.length) {
+    bloqueos.push({
+      titular: 'estos issues llevan un marcador ct-order que colisiona con la tabla §9 de este spec, pero NO tienen milestone — no puedo decidir si son de este epic o de otro:',
+      lineas: sinMilestoneBloqueantes,
+      remedio: `asígnales su milestone y vuelve a correr: gh issue edit <n> --repo ${repoRefBloqueo} --milestone "<el suyo>"`,
+    })
+  }
+
+  if (bloqueos.length) {
+    for (const { titular, lineas, remedio } of bloqueos) {
+      console.error(titular)
+      for (const linea of lineas) console.error(linea)
+      console.error(remedio)
+    }
+    console.error('/ct-groom NO continúa: no se ha creado ni modificado nada.')
+    process.exit(1)
+  }
+
   for (const i of inEpic) {
     const order = extractOrder(i.body)
     if (order != null && !knownOrders.has(order)) {
