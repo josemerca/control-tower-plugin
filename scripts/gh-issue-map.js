@@ -390,7 +390,8 @@ export function normalizeSpecLink(specLinkLine) {
 // ACEPTADO a cambio de no ladrillar el caso normal — un falso positivo
 // pararía en seco dos epics distintos reusando números de orden, que es justo
 // lo que F23 viene a habilitar. El caller compensa avisando por stderr de
-// cada descarte, sin bloquear.
+// cada descarte que pueda acabar en duplicación —el de un slice que todavía
+// no tiene issue en el epic de la corrida—, sin bloquear.
 //
 // Las dos formas reales de que dos destinos difieran para el MISMO documento
 // (la tercera —"dos costumbres de invocación, relativa vs. absoluta"— la

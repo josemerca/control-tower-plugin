@@ -1665,6 +1665,8 @@ describe('ct-groom — el marcador ct-order acotado por milestone (F23, §2 del 
     expect(res.stdout).toMatch(/issue creado orden #1/)
     expect(res.stdout).toMatch(/issue creado orden #2/)
     expect(res.stdout).toMatch(/issue creado orden #3/)
+    // En corrida real el verbo del aviso es indicativo: aquí sí se crea.
+    expect(res.stderr).toMatch(/crearé un issue nuevo para el slice #1 en "Epic nuevo"/)
     // El fallo que este arreglo cierra: "issue orden #1 ya existe (#451), no
     // se duplica". Ni el mensaje de idempotencia ni ninguno de los seis
     // números del epic anterior pueden salir por stdout.
@@ -1731,6 +1733,11 @@ describe('ct-groom — el marcador ct-order acotado por milestone (F23, §2 del 
     // nombrando el issue de SU epic. Lo que importa aquí es que lo encuentra.
     expect(res.status).toBe(3)
     expect(res.stderr).toMatch(/slice #1.*issue #700/)
+    // Y como el slice #1 YA tiene issue en este epic, el aviso de la puerta B
+    // no habla de él: no hay creación posible, luego no hay duplicación
+    // posible. Los slices 2 y 3, que sí se crearían, sí se avisan.
+    expect(res.stderr).not.toMatch(/aviso: el slice #1 de este spec/)
+    expect(res.stderr).toMatch(/aviso: el slice #2 de este spec/)
     rmSync(dir, { recursive: true, force: true })
   })
 })
@@ -1865,7 +1872,10 @@ describe('ct-groom — puerta B: el mismo epic bajo otro título (F23)', () => {
     expect(res.status).toBe(0)
     expect(res.stderr).toMatch(/^aviso: el slice #2 de este spec tiene un issue en otro milestone con el mismo ct-order \(#452, "Epic anterior"\)/m)
     expect(res.stderr).toMatch(/su enlace al spec no coincide con el de este spec/)
-    expect(res.stderr).toMatch(/acabará duplicado en "Epic nuevo"/)
+    // Bajo --dry-run el verbo es condicional: aquí no se crea nada (mismo
+    // criterio que el recordatorio de status:backlog, "quedarían"/"quedan").
+    expect(res.stderr).toMatch(/crearía un issue nuevo para el slice #2 en "Epic nuevo"/)
+    expect(res.stderr).toMatch(/esto va a duplicarlo: compruébalo antes de seguir/)
     // No bloquea: la corrida sigue y el plan se imprime entero.
     expect(res.stderr).not.toMatch(/no se ha creado ni modificado nada/)
     expect(JSON.parse(res.stdout).issues.map((i) => i.order)).toEqual([1, 2, 3])
@@ -1896,6 +1906,38 @@ describe('ct-groom — puerta B: el mismo epic bajo otro título (F23)', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  // El acotado del aviso: la duplicación sólo puede ocurrir si el slice se va
+  // a CREAR. Si ya tiene issue en este epic, el emparejado lo encuentra, la
+  // creación se salta, y avisar sería un aviso que nadie puede satisfacer —
+  // saldría en cada corrida, para siempre, sin describir ninguna pérdida
+  // (mismo criterio que el filtro de cerrados de backlogPendingCount).
+  it('el aviso NO sale para un slice que YA tiene issue en este epic: sin creación no hay duplicación', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const YA_EN_ESTE_EPIC = {
+      number: 700,
+      title: '#1 uno',
+      state: 'open',
+      milestone: { number: 2, title: 'Epic nuevo' },
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:none' }, { name: 'status:backlog' }],
+      body: buildIssueBody(
+        { n: 1, name: 'uno', type: 'backend', entrega: 'a', deps: [], ac: ['AC-1.1'], protected: '–' },
+        SPEC_REF_OK,
+      ),
+    }
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo', '--dry-run'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[...EPIC_ANTERIOR, YA_EN_ESTE_EPIC]]]) }) })
+    expect(res.status).toBe(0)
+    // #451 lleva ct-order:1, igual que el issue que este epic ya tiene: nada
+    // que duplicar, ningún aviso que lo nombre.
+    expect(res.stderr).not.toMatch(/aviso: el slice #1 de este spec/)
+    expect(res.stderr).not.toMatch(/#451/)
+    // #452/#453 sí: los slices 2 y 3 todavía se crearían.
+    expect(res.stderr).toMatch(/aviso: el slice #2 de este spec.*#452/)
+    expect(res.stderr).toMatch(/aviso: el slice #3 de este spec.*#453/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('el aviso NO sale cuando el orden del issue de otro epic no está en la tabla de hoy: ahí no hay nada que duplicar', () => {
     const dir = makeSpecDir('ctg-')
     const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(7, 8, 9))
@@ -1904,6 +1946,25 @@ describe('ct-groom — puerta B: el mismo epic bajo otro título (F23)', () => {
     expect(res.status).toBe(0)
     expect(res.stderr).not.toMatch(/aviso: el slice/)
     expect(res.stderr).not.toMatch(/#45[1-6]/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // El aviso afirma que este groom va a crear ese slice. En una corrida que
+  // se para en seco no se crea nada, así que los avisos se emiten DESPUÉS del
+  // exit de los bloqueos: un aviso que sale junto a "no se ha creado ni
+  // modificado nada" se contradice con el pie de su propia corrida. Nada se
+  // pierde — la corrida siguiente, ya sin bloqueo, los vuelve a calcular.
+  it('cuando la puerta bloquea, el aviso no se emite: nada se va a crear, así que nada se puede duplicar', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, TRES_SLICES(1, 2, 3))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic nuevo'],
+      { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[[mismoSpecOtroEpic(452, 2), EPIC_ANTERIOR[0]]]]) }) })
+    expect(res.status).toBe(1)
+    expect(res.stderr).toMatch(/#452\s+ct-order:2/) // el bloqueo sí sale
+    expect(res.stderr).toMatch(/no se ha creado ni modificado nada/)
+    // #451 (ct-order:1, otro spec) habría avisado en una corrida que siguiera.
+    expect(res.stderr).not.toMatch(/aviso: el slice/)
+    expect(res.stderr).not.toMatch(/#451/)
     rmSync(dir, { recursive: true, force: true })
   })
 

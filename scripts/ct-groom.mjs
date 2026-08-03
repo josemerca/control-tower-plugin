@@ -711,10 +711,13 @@ if (typeof repo === 'string') {
   // antes no existía. Se acepta a cambio de no ladrillar el caso normal —
   // un falso positivo pararía en seco dos epics distintos reusando números
   // de orden, que es justo lo que F23 viene a habilitar. Lo que sí se hace
-  // es no callarlo: cada descarte de este cubo emite un aviso por stderr
-  // (más abajo, en el propio `continue`), no bloqueante.
+  // es no callarlo: todo descarte de este cubo que pueda acabar en un epic
+  // duplicado —o sea, el de un slice que todavía no tiene issue en este
+  // epic— emite un aviso por stderr (más abajo, en el propio `continue`),
+  // no bloqueante.
   const specTargetPorOrden = new Map(plan.issues.map((i) => [i.order, specTarget(i.specLink)]))
   const otroEpicBloqueantes = []
+  const otroEpicAvisos = []
   for (const i of partition.otrosEpics) {
     const order = extractOrder(i.body)
     if (order == null || !knownOrders.has(order)) continue
@@ -727,12 +730,31 @@ if (typeof repo === 'string') {
       // (ver el comentario de arriba), así que descartarlo en silencio es lo
       // único que no se puede hacer. No bloquea, no cambia el código de
       // salida, y no altera cuándo dispara la puerta.
+      //
+      // Acotado a los slices que NO tienen ya issue en ESTE epic, con el
+      // mismo predicado que usa el emparejado de más abajo
+      // (`findByMarker(inEpic, marker)`): la duplicación sólo puede ocurrir
+      // si el slice se va a crear, y si ya tiene issue aquí el emparejado lo
+      // encuentra y la creación se salta — no hay nada que duplicar, así que
+      // el aviso saldría en cada corrida sin describir ninguna pérdida y sin
+      // nada que el humano pueda hacer para callarlo. Mismo criterio, en este
+      // mismo fichero, que el filtro de issues cerrados de
+      // `backlogPendingCount`: un aviso que no se puede satisfacer es un
+      // aviso que enseña a ignorar los demás. El acotado no pierde ningún
+      // caso peligroso — cubre exactamente el conjunto en el que la
+      // duplicación es posible.
+      if (findByMarker(inEpic, `<!-- ct-order:${order} -->`)) continue
       const motivo = suyo === null
         ? 'pero su body no lleva ninguna línea de enlace al spec con la que compararlo'
         : (nuestro === null
           ? 'pero este spec no ha producido ningún enlace con el que compararlo'
           : 'pero su enlace al spec no coincide con el de este spec')
-      console.error(`aviso: el slice #${order} de este spec tiene un issue en otro milestone con el mismo ct-order (#${i.number}, "${epicTitleOf(i)}"), ${motivo} — así que lo trato como otro epic y este groom no lo empareja. Si en realidad es el mismo epic renombrado, el slice #${order} acabará duplicado en "${milestone}": compruébalo antes de seguir.`)
+      // Se acumula en vez de imprimirse aquí: los avisos se emiten DESPUÉS
+      // del exit de los bloqueos (más abajo), porque cada uno afirma que este
+      // groom va a crear ese slice — y en una corrida que se para en seco no
+      // se crea nada. Nada se pierde: la corrida siguiente, ya sin bloqueo,
+      // los vuelve a calcular igual.
+      otroEpicAvisos.push(`aviso: el slice #${order} de este spec tiene un issue en otro milestone con el mismo ct-order (#${i.number}, "${epicTitleOf(i)}"), ${motivo} — así que lo trato como otro epic y ${dryRun ? 'crearía' : 'crearé'} un issue nuevo para el slice #${order} en "${milestone}". Si en realidad es el mismo epic renombrado, esto va a duplicarlo: compruébalo antes de seguir.`)
       continue
     }
     otroEpicBloqueantes.push(`  #${i.number}  ct-order:${order}  milestone: "${epicTitleOf(i)}"`)
@@ -754,6 +776,7 @@ if (typeof repo === 'string') {
     console.error('/ct-groom NO continúa: no se ha creado ni modificado nada.')
     process.exit(1)
   }
+  for (const aviso of otroEpicAvisos) console.error(aviso)
 
   for (const i of inEpic) {
     const order = extractOrder(i.body)
