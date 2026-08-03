@@ -23,7 +23,14 @@ async function comprobarDist(root) {
     // 1. Los fuentes de HEAD: TODO lo trackeado, sin lista de rutas. Una lista
     //    es algo que mantener, y se queda atrás en cuanto el bundle empiece a
     //    importar un fichero que nadie añadió a ella.
-    execFileSync('sh', ['-c', `git -C "${root}" archive HEAD | tar -x -C "${tmp}"`], { stdio: ['ignore', 'ignore', 'pipe'] })
+    //
+    //    `set -o pipefail` NO es decorativo: sin él, el exit code de esta orden
+    //    es el de `tar`, no el de `git`. Si `root` no es un repo git, `git
+    //    archive` falla pero `tar -x` recibe una entrada vacía y también sale
+    //    con 0 — el pipeline entero informa éxito. El temporal queda vacío, y
+    //    quien acaba lanzando más abajo es el `import` de scripts/build.mjs,
+    //    con un "no encuentro el módulo" que apunta a la causa equivocada.
+    execFileSync('sh', ['-c', `set -o pipefail; git -C "${root}" archive HEAD | tar -x -C "${tmp}"`], { stdio: ['ignore', 'ignore', 'pipe'] })
 
     // 2. El `dist/` que vino en el archive estorba: lo que quede aquí después
     //    del build tiene que ser EXACTAMENTE lo que el build produce, o un
@@ -301,7 +308,12 @@ describe('cuando no puede responder, falla con motivo (F24)', () => {
   it('un directorio que no es repo git → lanza nombrando el motivo, no devuelve "coherente"', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-nogit-'))
     try {
-      await expect(comprobarDist(dir)).rejects.toThrow()
+      // No basta con "lanza": sin `pipefail` en el paso 1, este mismo directorio
+      // también lanza, pero por "Cannot find module .../scripts/build.mjs" — un
+      // motivo que apunta a un fichero que falta, no a que `root` no es un repo
+      // git. La aserción tiene que distinguir el motivo correcto del que lo
+      // enmascara.
+      await expect(comprobarDist(dir)).rejects.toThrow(/not a git repository/i)
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
