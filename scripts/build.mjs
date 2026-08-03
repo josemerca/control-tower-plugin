@@ -14,10 +14,9 @@ import { build } from 'esbuild'
 import { pathToFileURL } from 'node:url'
 
 // buildOptions se exporta (F24) para que haya UNA sola fuente de verdad de la
-// configuración de build. __tests__/dist-coherente-con-fuentes.test.js la
-// importa para reconstruir los fuentes de HEAD y comparar el resultado con el
-// `dist/` commiteado; si el test llevara su propia copia de estas opciones,
-// esa copia se quedaría atrás en silencio y daría verde sobre una
+// configuración de build: quien necesite reconstruir los fuentes y comparar el
+// resultado con el `dist/` commiteado la importa de aquí en vez de llevar su
+// propia copia, que se quedaría atrás en silencio y daría por buena una
 // configuración que ya no es la del proyecto.
 export const buildOptions = {
   entryPoints: ['hooks/session-start.js', 'hooks/stop.js'],
