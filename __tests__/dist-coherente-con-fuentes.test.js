@@ -24,13 +24,29 @@ async function comprobarDist(root) {
     //    es algo que mantener, y se queda atrás en cuanto el bundle empiece a
     //    importar un fichero que nadie añadió a ella.
     //
-    //    `set -o pipefail` NO es decorativo: sin él, el exit code de esta orden
-    //    es el de `tar`, no el de `git`. Si `root` no es un repo git, `git
-    //    archive` falla pero `tar -x` recibe una entrada vacía y también sale
-    //    con 0 — el pipeline entero informa éxito. El temporal queda vacío, y
-    //    quien acaba lanzando más abajo es el `import` de scripts/build.mjs,
-    //    con un "no encuentro el módulo" que apunta a la causa equivocada.
-    execFileSync('sh', ['-c', `set -o pipefail; git -C "${root}" archive HEAD | tar -x -C "${tmp}"`], { stdio: ['ignore', 'ignore', 'pipe'] })
+    //    Va por un fichero .tar intermedio y NO por una tubería `git archive |
+    //    tar -x`, a propósito. En una tubería el exit code que ve el shell es
+    //    el de `tar`, no el de `git`: si `root` no es un repo git, `git
+    //    archive` falla pero `tar -x` recibe una entrada vacía y sale con 0, y
+    //    el pipeline entero informa éxito. El temporal queda vacío y quien
+    //    acaba lanzando más abajo es el `import` de scripts/build.mjs, con un
+    //    "no encuentro el módulo" que apunta a la causa equivocada. Eso se
+    //    arreglaba con `set -o pipefail`, pero `pipefail` NO es POSIX y bajo
+    //    dash —que es el `/bin/sh` de Debian y de Ubuntu— aborta con "Illegal
+    //    option -o pipefail" y exit 2, tumbando el fichero de tests ENTERO en
+    //    esas máquinas, incluido el test que afirma que HEAD es coherente. En
+    //    macOS no se notaba: ahí `/bin/sh` es bash en modo sh y sí lo acepta.
+    //    Con dos órdenes separadas cada exit code se comprueba
+    //    por su cuenta, no hace falta shell alguno (ni interpolar `root` en un
+    //    string de shell), y el fallo de `git` llega tal cual al llamante. No
+    //    lo "simplifiques" de vuelta a una tubería.
+    const tar = join(tmp, 'head.tar')
+    execFileSync('git', ['-C', root, 'archive', '--format=tar', '-o', tar, 'HEAD'], { stdio: ['ignore', 'ignore', 'pipe'] })
+    execFileSync('tar', ['-xf', tar, '-C', tmp], { stdio: ['ignore', 'ignore', 'pipe'] })
+    // El .tar se escribió DENTRO de `tmp`, que es donde va a correr el build:
+    // se borra antes de nada para no dejar un intruso en el directorio que
+    // luego se compara.
+    rmSync(tar, { force: true })
 
     // 2. El `dist/` que vino en el archive estorba: lo que quede aquí después
     //    del build tiene que ser EXACTAMENTE lo que el build produce, o un
@@ -308,11 +324,12 @@ describe('cuando no puede responder, falla con motivo (F24)', () => {
   it('un directorio que no es repo git → lanza nombrando el motivo, no devuelve "coherente"', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-nogit-'))
     try {
-      // No basta con "lanza": sin `pipefail` en el paso 1, este mismo directorio
-      // también lanza, pero por "Cannot find module .../scripts/build.mjs" — un
-      // motivo que apunta a un fichero que falta, no a que `root` no es un repo
-      // git. La aserción tiene que distinguir el motivo correcto del que lo
-      // enmascara.
+      // No basta con "lanza": si el paso 1 dejara escapar el fallo de `git`
+      // (como haría una tubería `git archive | tar -x`, cuyo exit code es el de
+      // `tar`), este mismo directorio también lanzaría, pero por "Cannot find
+      // module .../scripts/build.mjs" — un motivo que apunta a un fichero que
+      // falta, no a que `root` no es un repo git. La aserción tiene que
+      // distinguir el motivo correcto del que lo enmascara.
       await expect(comprobarDist(dir)).rejects.toThrow(/not a git repository/i)
     } finally {
       rmSync(dir, { recursive: true, force: true })
