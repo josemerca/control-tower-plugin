@@ -36,10 +36,10 @@ async function comprobarDist(root) {
     //    option -o pipefail" y exit 2, tumbando el fichero de tests ENTERO en
     //    esas máquinas, incluido el test que afirma que HEAD es coherente. En
     //    macOS no se notaba: ahí `/bin/sh` es bash en modo sh y sí lo acepta.
-    //    Con dos órdenes separadas cada exit code se comprueba
-    //    por su cuenta, no hace falta shell alguno (ni interpolar `root` en un
-    //    string de shell), y el fallo de `git` llega tal cual al llamante. No
-    //    lo "simplifiques" de vuelta a una tubería.
+    //    Con dos órdenes separadas cada exit code se comprueba por su cuenta,
+    //    no hace falta shell alguno (ni interpolar `root` en un string de
+    //    shell), y el fallo de `git` llega tal cual al llamante. No lo
+    //    "simplifiques" de vuelta a una tubería.
     const tar = join(tmp, 'head.tar')
     execFileSync('git', ['-C', root, 'archive', '--format=tar', '-o', tar, 'HEAD'], { stdio: ['ignore', 'ignore', 'pipe'] })
     execFileSync('tar', ['-xf', tar, '-C', tmp], { stdio: ['ignore', 'ignore', 'pipe'] })
@@ -128,7 +128,11 @@ function explicarIncoherencia(root, { faltan, sobran, difieren, inputs }) {
     // mensaje DICE que no puede dar la causa y por qué, en vez de limitarse a
     // omitirla. Sin esta línea el lector no distingue "se investigó la causa y
     // no salió nada" de "no se pudo investigar".
-    const motivo = ultimoDist ? 'el build no declaró ningún input' : 'dist/ no tiene historia en este repo'
+    //
+    // "fuera de node_modules" no es un adorno: `inputs` llega ya filtrado por
+    // ese criterio desde comprobarDist, así que la condición que se cumple
+    // aquí no es "el build no declaró inputs" a secas.
+    const motivo = ultimoDist ? 'el build no declaró ningún input fuera de node_modules' : 'dist/ no tiene historia en este repo'
     partes.push(`  no se puede determinar la causa: ${motivo}`)
   }
   partes.push('  arreglo, en los dos casos: npm run build && git add dist/ && git commit')
