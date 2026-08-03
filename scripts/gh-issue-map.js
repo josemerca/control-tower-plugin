@@ -362,6 +362,39 @@ export function normalizeSpecLink(specLinkLine) {
   return String(specLinkLine).trim()
 }
 
+// specTarget (F23): el DESTINO del enlace al spec — lo que renderSpecLink
+// (scripts/groom.js) escribe después de "Spec: ". Responde a una pregunta
+// distinta de la de diffIssue, y por eso no reutiliza su comparación:
+//
+//   diffIssue pregunta "¿la línea del enlace de ESTE issue ha cambiado
+//   respecto a lo que el spec produce hoy?" — es contenido del spec, su
+//   divergencia es reportable, y desde F10 se compara ENTERA a propósito
+//   (detecta que el spec se ha movido de fichero o de repo).
+//
+//   specTarget pregunta "¿estos dos issues apuntan al MISMO documento?",
+//   para decidir si un issue de otro milestone es en realidad este mismo
+//   epic bajo otro título. Ahí el prefijo estorba: la línea empieza por
+//   "> Slice `#N` del epic. " y ese prefijo (a) lleva el orden del slice y
+//   (b) cambió de formato en F6 (`#N` con backticks, ver
+//   SPEC_LINK_PREFIXES), así que comparar la línea entera daría un falso
+//   negativo sobre cualquier issue creado antes de F6.
+//
+// Falla en ABIERTO por diseño: si dos costumbres de invocación producen dos
+// destinos distintos para el mismo fichero (relativa vs. absoluta — el
+// ping-pong que F10 documenta en reconcile.js), esta función los ve como
+// specs distintos, el caller no dispara su puerta, y el comportamiento es el
+// que había antes de F23. Un falso NEGATIVO devuelve el statu quo; un falso
+// positivo pararía una corrida legítima. La dirección segura es ésta.
+const SPEC_TARGET_SEPARATOR = 'Spec: '
+export function specTarget(specLinkLine) {
+  const line = normalizeSpecLink(specLinkLine)
+  if (line === null) return null
+  const at = line.indexOf(SPEC_TARGET_SEPARATOR)
+  if (at === -1) return null
+  const target = line.slice(at + SPEC_TARGET_SEPARATOR.length).trim()
+  return target.length > 0 ? target : null
+}
+
 // countHeadingLines: cuántas veces aparece una cabecera (mismo criterio de
 // igualdad exacta/conjunto y de líneas ocultas — valla o comentario — que
 // locateSection) en todo el body — no solo si aparece, sino CUÁNTAS veces.

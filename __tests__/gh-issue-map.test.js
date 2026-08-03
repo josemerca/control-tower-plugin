@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractAc, extractDeps, extractOrder, extractSpecLink, normalizeSpecLink, locateSection, countHeadingLines, detectLineEnding, normalizeToLF, mapGhIssue, filterMergedIssues, buildOrderIndex, buildDispatchInput, AC_HEADING_FORMS, NO_MILESTONE_KEY, epicKeyOf, extractDepsInSection, extractStrayDeps } from '../scripts/gh-issue-map.js'
+import { extractAc, extractDeps, extractOrder, extractSpecLink, normalizeSpecLink, specTarget, locateSection, countHeadingLines, detectLineEnding, normalizeToLF, mapGhIssue, filterMergedIssues, buildOrderIndex, buildDispatchInput, AC_HEADING_FORMS, NO_MILESTONE_KEY, epicKeyOf, extractDepsInSection, extractStrayDeps } from '../scripts/gh-issue-map.js'
 import { selectNext } from '../scripts/dispatch.js'
 import { buildIssueBody } from '../scripts/groom.js'
 
@@ -1437,5 +1437,40 @@ describe('mapGhIssue — una label "area:"/"touches:" sin valor no produce un to
     const b = mapGhIssue({ number: 2, title: '#2 b', labels: [{ name: 'status:ready' }, { name: 'area: ' }], body: '<!-- ct-order:2 -->' })
     const selected = selectNext([a, b], { mergedIssues: [], runningTouches: [], concurrencyCap: 2 })
     expect(selected.map((i) => i.n)).toEqual([1, 2])
+  })
+})
+
+// F23 — specTarget: "¿estos dos issues apuntan al mismo spec?", que NO es la
+// misma pregunta que "¿la línea del enlace ha cambiado?" (eso lo responde
+// diffIssue comparando la línea entera, y debe seguir haciéndolo).
+describe('specTarget', () => {
+  it('devuelve lo que va tras "Spec: " en la forma actual del enlace', () => {
+    const linea = '> Slice `#2` del epic. Spec: [docs/spec.md § 9. Slices](https://github.com/o/r/blob/main/docs/spec.md#9-slices)'
+    expect(specTarget(linea)).toBe('[docs/spec.md § 9. Slices](https://github.com/o/r/blob/main/docs/spec.md#9-slices)')
+  })
+  it('la forma ANTERIOR a F6 (sin backticks) da el MISMO destino — es el motivo de comparar el destino y no la línea', () => {
+    const destino = '[docs/spec.md § 9. Slices](https://github.com/o/r/blob/main/docs/spec.md#9-slices)'
+    expect(specTarget(`> Slice #2 del epic. Spec: ${destino}`)).toBe(destino)
+    expect(specTarget(`> Slice \`#2\` del epic. Spec: ${destino}`)).toBe(destino)
+  })
+  it('el ORDEN del slice no forma parte del destino: dos slices distintos del mismo spec coinciden', () => {
+    const destino = '`docs/spec.md` § `9. Slices` — sin enlace: el fichero no está publicado'
+    expect(specTarget(`> Slice \`#1\` del epic. Spec: ${destino}`))
+      .toBe(specTarget(`> Slice \`#7\` del epic. Spec: ${destino}`))
+  })
+  it('specs distintos dan destinos distintos', () => {
+    const a = specTarget('> Slice `#1` del epic. Spec: [docs/a.md](https://github.com/o/r/blob/main/docs/a.md)')
+    const b = specTarget('> Slice `#1` del epic. Spec: [docs/b.md](https://github.com/o/r/blob/main/docs/b.md)')
+    expect(a).not.toBe(b)
+  })
+  it('sin separador "Spec: " → null (no se inventa un destino)', () => {
+    expect(specTarget('> Slice `#1` del epic.')).toBeNull()
+    expect(specTarget('una línea cualquiera')).toBeNull()
+  })
+  it('defensivo: null/undefined/vacío → null', () => {
+    expect(specTarget(null)).toBeNull()
+    expect(specTarget(undefined)).toBeNull()
+    expect(specTarget('')).toBeNull()
+    expect(specTarget('> Slice `#1` del epic. Spec: ')).toBeNull()
   })
 })
