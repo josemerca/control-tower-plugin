@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, readdirSync, readFileSync, existsSync, cpSync } from 'node:fs'
+import { mkdtempSync, rmSync, readdirSync, readFileSync, existsSync, cpSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -89,5 +89,110 @@ describe('el dist/ commiteado corresponde a los fuentes commiteados (F24)', () =
       'scripts/state-paths.js',
       'scripts/state.js',
     ])
+  }, 60_000)
+})
+
+// repoDeMentira: un repo git mínimo y COHERENTE, para poder romperlo a
+// propósito. Su scripts/build.mjs no importa esbuild en el tope (a diferencia
+// del real): así el comprobador puede importarlo sin que el temporal necesite
+// node_modules, y estos cuatro tests no pagan la copia de 45 MB. El camino que
+// sí importa un build.mjs con dependencias reales lo cubre el test de HEAD.
+function repoDeMentira() {
+  const dir = mkdtempSync(join(tmpdir(), 'ct-falso-'))
+  const git = (...args) => execFileSync('git', ['-C', dir, ...args], { stdio: 'ignore' })
+  git('init', '-q')
+  git('config', 'user.email', 'test@test')
+  git('config', 'user.name', 'test')
+  mkdirSync(join(dir, 'scripts'), { recursive: true })
+  mkdirSync(join(dir, 'src'), { recursive: true })
+  writeFileSync(join(dir, 'scripts/build.mjs'), [
+    "export const buildOptions = {",
+    "  entryPoints: ['src/a.js'],",
+    "  bundle: true, platform: 'node', format: 'esm', outdir: 'dist',",
+    "}",
+    '',
+  ].join('\n'))
+  writeFileSync(join(dir, 'src/a.js'), 'export const x = 1\nconsole.log(x)\n')
+  return dir
+}
+
+// construirEnRepo: genera el dist del repo de mentira con la MISMA
+// configuración que el comprobador leerá después, para que el punto de partida
+// sea coherente de verdad y no por casualidad.
+async function construirEnRepo(dir) {
+  const mod = await import(pathToFileURL(join(dir, 'scripts/build.mjs')).href + `?v=${Date.now()}`)
+  await build({ ...mod.buildOptions, absWorkingDir: dir })
+}
+
+describe('el comprobador falla cuando debe (F24)', () => {
+  it('un fuente cambiado sin regenerar el bundle → lo detecta y nombra el fichero', async () => {
+    const dir = repoDeMentira()
+    await construirEnRepo(dir)
+    execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' })
+    execFileSync('git', ['-C', dir, 'commit', '-qm', 'coherente'], { stdio: 'ignore' })
+
+    // El defecto de F22, reproducido: se cambia el fuente y se commitea SIN
+    // regenerar el bundle.
+    writeFileSync(join(dir, 'src/a.js'), 'export const x = 999\nconsole.log(x)\n')
+    execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' })
+    execFileSync('git', ['-C', dir, 'commit', '-qm', 'fuente sin rebuild'], { stdio: 'ignore' })
+
+    const { faltan, sobran, difieren } = await comprobarDist(dir)
+    expect(difieren).toEqual(['a.js'])
+    expect({ faltan, sobran }).toEqual({ faltan: [], sobran: [] })
+    rmSync(dir, { recursive: true, force: true })
+  }, 60_000)
+
+  it('un fichero que HEAD tiene en dist/ y el build ya no produce → sale como SOBRANTE', async () => {
+    const dir = repoDeMentira()
+    await construirEnRepo(dir)
+    writeFileSync(join(dir, 'dist/huerfano.js'), '// bundle de un entry point que ya no existe\n')
+    execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' })
+    execFileSync('git', ['-C', dir, 'commit', '-qm', 'con un sobrante'], { stdio: 'ignore' })
+
+    const { faltan, sobran, difieren } = await comprobarDist(dir)
+    expect(sobran).toEqual(['huerfano.js'])
+    expect({ faltan, difieren }).toEqual({ faltan: [], difieren: [] })
+    rmSync(dir, { recursive: true, force: true })
+  }, 60_000)
+
+  it('un fichero que el build produce y HEAD no tiene commiteado → sale como FALTANTE', async () => {
+    const dir = repoDeMentira()
+    await construirEnRepo(dir)
+    execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' })
+    execFileSync('git', ['-C', dir, 'commit', '-qm', 'coherente'], { stdio: 'ignore' })
+
+    // Se añade un segundo entry point al build y se commitea sin generar su bundle.
+    writeFileSync(join(dir, 'src/b.js'), 'console.log("b")\n')
+    writeFileSync(join(dir, 'scripts/build.mjs'), [
+      "export const buildOptions = {",
+      "  entryPoints: ['src/a.js', 'src/b.js'],",
+      "  bundle: true, platform: 'node', format: 'esm', outdir: 'dist',",
+      "}",
+      '',
+    ].join('\n'))
+    execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' })
+    execFileSync('git', ['-C', dir, 'commit', '-qm', 'entry point nuevo sin bundle'], { stdio: 'ignore' })
+
+    const { faltan, sobran, difieren } = await comprobarDist(dir)
+    expect(faltan).toEqual(['b.js'])
+    expect({ sobran, difieren }).toEqual({ sobran: [], difieren: [] })
+    rmSync(dir, { recursive: true, force: true })
+  }, 60_000)
+
+  it('el árbol de trabajo sucio NO pone nada rojo: HEAD sigue siendo coherente consigo mismo', async () => {
+    const dir = repoDeMentira()
+    await construirEnRepo(dir)
+    execFileSync('git', ['-C', dir, 'add', '-A'], { stdio: 'ignore' })
+    execFileSync('git', ['-C', dir, 'commit', '-qm', 'coherente'], { stdio: 'ignore' })
+
+    // Edición SIN commitear — el ciclo rojo-verde normal. El test no debe
+    // interferir con él: es la conducta que hace este test usable a diario, y
+    // sin este caso nadie sabría que se preservó.
+    writeFileSync(join(dir, 'src/a.js'), 'export const x = 12345\nconsole.log(x)\n')
+
+    const { faltan, sobran, difieren } = await comprobarDist(dir)
+    expect({ faltan, sobran, difieren }).toEqual({ faltan: [], sobran: [], difieren: [] })
+    rmSync(dir, { recursive: true, force: true })
   }, 60_000)
 })
