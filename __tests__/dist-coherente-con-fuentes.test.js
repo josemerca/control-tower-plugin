@@ -310,9 +310,27 @@ describe('el diagnóstico distingue las dos causas (F24)', () => {
     try {
       const r = await comprobarDist(dir)
       expect(r.difieren).toEqual(['a.js'])
+
+      // El esbuild de mentira se planta DESPUÉS de comprobarDist y después del
+      // último commit, a propósito: así ni entra en el archive de git ni paga
+      // la copia de node_modules que comprobarDist hace cuando existe. Lo
+      // único que tiene que verlo es esbuildVersion, que corre dentro de
+      // explicarIncoherencia.
+      //
+      // Sin él, la aserción de la versión no valdría nada: la palabra
+      // "esbuild" está en el texto fijo de la plantilla del mensaje, así que
+      // `toMatch(/esbuild/)` casa igual con "(versión no legible)" —que es lo
+      // que salía— y la rama feliz de esbuildVersion se quedaba sin cobertura
+      // en ninguna parte, con un `catch` que se traga cualquier error. Exigir
+      // el número 9.9.9 sólo puede casar leyendo el package.json de abajo, y
+      // de paso demuestra que esbuildVersion lee del repo DIAGNOSTICADO y no
+      // del repo real (que tiene otra versión bien distinta).
+      mkdirSync(join(dir, 'node_modules/esbuild'), { recursive: true })
+      writeFileSync(join(dir, 'node_modules/esbuild/package.json'), JSON.stringify({ version: '9.9.9' }))
+
       const msg = explicarIncoherencia(dir, r)
       expect(msg).toMatch(/toolchain/i)
-      expect(msg).toMatch(/esbuild/)
+      expect(msg).toMatch(/esbuild 9\.9\.9/)
       expect(msg).not.toMatch(/falta un rebuild/i)
     } finally {
       rmSync(dir, { recursive: true, force: true })
