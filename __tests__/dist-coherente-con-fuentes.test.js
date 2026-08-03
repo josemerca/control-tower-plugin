@@ -37,8 +37,9 @@ async function comprobarDist(root) {
     //    sobre 273 KB, medidos. `preserveSymlinks: true` también daría bytes
     //    idénticos hoy, y se descartó: es una opción que el build real no
     //    tiene, así que compararía dos configuraciones distintas afirmando
-    //    identidad. Un repo sin node_modules (los fabricados de los tests de
-    //    más abajo) no necesita la copia.
+    //    identidad. Un repo que no tenga node_modules no necesita la copia: sin
+    //    dependencias npm que resolver, esbuild no empotra ninguna ruta de
+    //    paquete en el bundle.
     const nm = join(root, 'node_modules')
     if (existsSync(nm)) cpSync(nm, join(tmp, 'node_modules'), { recursive: true })
 
@@ -79,8 +80,9 @@ describe('el dist/ commiteado corresponde a los fuentes commiteados (F24)', () =
   it('los inputs del bundle salen del metafile real, no de una lista escrita a mano', async () => {
     const { inputs } = await comprobarDist(root)
     // Los cuatro de hoy. Si este test se pone rojo porque el bundle importa
-    // algo nuevo, la lista de aquí se actualiza — pero el DIAGNÓSTICO de la
-    // Tarea 4 no depende de ella: sale del metafile en cada corrida.
+    // algo nuevo, la lista de aquí se actualiza — pero nada más depende de
+    // ella: la lista de inputs que usa el diagnóstico sale del metafile en
+    // cada corrida, no de este literal.
     expect(inputs).toEqual([
       'hooks/session-start.js',
       'hooks/stop.js',
