@@ -123,6 +123,13 @@ function explicarIncoherencia(root, { faltan, sobran, difieren, inputs }) {
       const v = esbuildVersion(root)
       partes.push(`  ningún input del bundle cambió desde el último commit que tocó dist/ (${ultimoDist.slice(0, 7)}) — lo que se movió es el toolchain (esbuild ${v} instalado), o alguien editó el bundle a mano`)
     }
+  } else {
+    // Nunca un skip silencioso, tampoco aquí: cuando el guard corta, el
+    // mensaje DICE que no puede dar la causa y por qué, en vez de limitarse a
+    // omitirla. Sin esta línea el lector no distingue "se investigó la causa y
+    // no salió nada" de "no se pudo investigar".
+    const motivo = ultimoDist ? 'el build no declaró ningún input' : 'dist/ no tiene historia en este repo'
+    partes.push(`  no se puede determinar la causa: ${motivo}`)
   }
   partes.push('  arreglo, en los dos casos: npm run build && git add dist/ && git commit')
   return partes.join('\n')
