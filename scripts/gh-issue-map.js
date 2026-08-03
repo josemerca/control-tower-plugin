@@ -380,13 +380,19 @@ export function normalizeSpecLink(specLinkLine) {
 //   negativo sobre cualquier issue creado antes de F6.
 //
 // Falla en ABIERTO por diseño, y el precio de ese fallo hay que decirlo
-// entero, porque NO es el statu quo: cuando dos issues del mismo epic acaban
-// con destinos distintos, esta función los ve como specs distintos, el caller
-// (ct-groom.mjs, puerta B) no dispara, `inEpic` sale vacío y esa corrida
-// recrea el epic ENTERO duplicado con exit 0. Antes de F23, con el
-// emparejado global, esos mismos issues se encontraban por marcador y salía
-// divergencia con exit 3 sin crear nada. O sea: el falso negativo no
-// restaura ningún comportamiento previo, abre un agujero nuevo. Es un riesgo
+// entero, porque NO es el statu quo. La premisa va delante: si el epic está
+// renombrado en GitHub, `inEpic` sale vacío —esa corrida no ve ninguno de sus
+// issues— y va a recrear el epic entero. Lo único que puede pararla es la
+// puerta B del caller (ct-groom.mjs), y para dispararla hace falta reconocer
+// que el issue de ese otro milestone apunta al mismo documento. Lo que se
+// compara aquí, en ese call-site, es el issue EXISTENTE contra lo que el spec
+// produce HOY para ese mismo orden (`specTargetPorOrden`) — no un issue
+// contra otro issue. Si esos dos destinos no coinciden, la puerta no dispara
+// y el epic se duplica entero con exit 0: no lo causa esta función, pero es
+// lo que deja que ocurra. Antes de F23, con el emparejado global, esos mismos
+// issues se encontraban por marcador y salía divergencia con exit 3 sin crear
+// nada. O sea: el falso negativo no restaura ningún comportamiento previo,
+// deja pasar un agujero que antes no existía. Es un riesgo
 // ACEPTADO a cambio de no ladrillar el caso normal — un falso positivo
 // pararía en seco dos epics distintos reusando números de orden, que es justo
 // lo que F23 viene a habilitar. El caller compensa avisando por stderr de
