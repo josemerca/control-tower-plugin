@@ -380,12 +380,12 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
 // hasDrift: cuenta título/milestone/enlace-al-spec (por ancla)/labels/deps/
 // ac, y las secciones DUPLICADAS que cambian lo que el dispatcher hace
 // (AC/Dependencias — review round 4, importante 5). `closed`, Descripción/
-// Protegido (duplicados o divergentes) y `strayDeps` NUNCA cuentan: son, o
-// bien algo sobre lo que el spec no tiene autoridad (closed), o bien prosa
-// rutinaria, o bien algo que --reconcile NUNCA podría aplicar de forma
-// segura (strayDeps vive fuera de la sección que --reconcile puede tocar)
-// — anclar el exit code a cualquiera de ellos entrenaría a ignorar el
-// resto del reporte.
+// Protegido (duplicados o divergentes), el contexto del epic y `strayDeps`
+// NUNCA cuentan: son, o bien algo sobre lo que el spec no tiene autoridad
+// (closed), o bien prosa rutinaria, o bien algo que --reconcile NUNCA podría
+// aplicar de forma segura (strayDeps vive fuera de la sección que
+// --reconcile puede tocar) — anclar el exit code a cualquiera de ellos
+// entrenaría a ignorar el resto del reporte.
 export function hasDrift(diff) {
   return Boolean(
     diff.title || diff.milestone || diff.specLink ||
@@ -438,10 +438,10 @@ export function hasReconcileGap(gaps) {
 // labels/deps/ac y los duplicados "machine" (AC/Dependencias) son
 // "divergencia:" — cuentan para el exit code (hasDrift) y muestran el valor
 // actual y el que pide el spec cuando aplica. Descripción/Protegido (y sus
-// duplicados) y `strayDeps` son "nota:" — SIEMPRE se reportan si aplican
-// (silencio total sobre esto sería tan malo como no reportar nada), pero
-// NUNCA cuentan para el exit code. El cierre del issue se anota al final, y
-// solo si ya hay alguna otra línea que reportar.
+// duplicados), el contexto del epic y `strayDeps` son "nota:" — SIEMPRE se
+// reportan si aplican (silencio total sobre esto sería tan malo como no
+// reportar nada), pero NUNCA cuentan para el exit code. El cierre del issue
+// se anota al final, y solo si ya hay alguna otra línea que reportar.
 export function formatDrift(diff) {
   const lines = []
   const head = `slice #${diff.order} (issue #${diff.issueNumber})`
