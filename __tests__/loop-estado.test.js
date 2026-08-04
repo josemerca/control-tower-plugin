@@ -111,6 +111,22 @@ describe('construirEstado — cosecha y residuo', () => {
     expect(e.hayHallazgos).toBe(true)
   })
 
+  it('sin poder atribuir, ningún worktree es huérfano — pero el que está en disco SIGUE estándolo', () => {
+    // Las dos preguntas son distintas: «¿existe .worktrees/N?» es una lectura
+    // de disco, y «¿lo reclama alguien?» necesita los issues. Apagar la
+    // segunda no puede borrar la respuesta de la primera, o el bloque en vuelo
+    // acaba negando un directorio que el aviso de al lado acaba de nombrar.
+    const e = construirEstado({
+      ...base,
+      enProgreso: [{ n: 7, nombre: 'x' }],
+      worktreesEnDisco: ['7', '9'],
+      sePuedeAtribuirWorktree: false,
+      edadClaimMs: new Map([[7, 3 * 3600_000]]),
+    })
+    expect(e.residuo.worktreesHuerfanos).toEqual([])
+    expect(e.enVuelo[0].hasWorktree).toBe(true)
+  })
+
   it('el worktree de un slice EN VUELO no es huérfano', () => {
     const e = construirEstado({
       ...base,

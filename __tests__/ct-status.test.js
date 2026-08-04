@@ -116,6 +116,45 @@ describe('/ct-status', () => {
     limpiar(b)
   })
 
+  it('con los issues a medias, un worktree que SÍ está en disco se afirma: `worktree ✓`, jamás `✗`', () => {
+    // Defecto nacido de la INTERACCIÓN de dos arreglos, y por eso no lo vio
+    // ninguna revisión de tarea: el vaciado de `worktreesEnDisco` que protege
+    // de fabricar huérfanos alimentaba también el `hasWorktree` del bloque en
+    // vuelo. Era inalcanzable mientras `cargarIssues` lanzaba (sin issues no
+    // había bloque en vuelo que imprimir); el informe parcial lo hizo
+    // alcanzable, y el informe se contradecía en dos líneas seguidas: el aviso
+    // nombraba `.worktrees/7` y el bloque decía `worktree ✗` sobre #7.
+    //
+    // La marca correcta aquí es `✓`, no `?`: la lectura de disco SÍ se hizo y
+    // el directorio SÍ está. Lo que no se sabe es a quién pertenece, y eso no
+    // es una señal del bloque en vuelo — es lo que apaga la atribución de
+    // huérfanos. Un `?` sería inventarse una duda que no existe.
+    const b = bancada({ worktrees: [7] })
+    const res = correr(b, { FAKE_GH_LIST_SEQUENCE: enProgreso7(), FAKE_GH_TIMELINE_JSON: hace(3 * 3600_000), FAKE_GH_LIST_FAIL_AT: '1' })
+    expect(res.status).toBe(1)
+    expect(res.stdout).toMatch(/worktree ✓/)
+    expect(res.stdout).not.toMatch(/worktree ✗/)
+    // Y el aviso que nombra el directorio sigue ahí: las dos líneas ya no se
+    // contradicen.
+    expect(res.stderr).toMatch(/\.worktrees\/ \(7\)/)
+    // Sin poder atribuir, tampoco se acusa a nadie de huérfano.
+    expect(res.stdout).not.toMatch(/RESIDUO/)
+    limpiar(b)
+  })
+
+  it('si fallan los ABIERTOS, la cosecha no omite el worktree que sí está en disco', () => {
+    // Colateral del mismo origen: `ENTREGADO, SIN COSECHAR` se construye con
+    // los cerrados, que aquí sí se leyeron, pero el vaciado le borraba el
+    // worktree — y el worktree es justo lo que hay que ir a limpiar.
+    const b = bancada({ worktrees: [5] })
+    const seq = JSON.stringify([[], [{ number: 5, body: '', labels: [], state_reason: 'completed' }]])
+    const res = correr(b, { FAKE_GH_LIST_SEQUENCE: seq, FAKE_GH_LIST_FAIL_AT: '0' })
+    expect(res.status).toBe(1)
+    expect(res.stdout).toMatch(/ENTREGADO, SIN COSECHAR \(1\)/)
+    expect(res.stdout).toMatch(/#5\s+cerrado como completado, y todavía queda en disco: worktree \.worktrees\/5/)
+    limpiar(b)
+  })
+
   it('si la lectura de issues falla, ningún worktree se acusa de huérfano', () => {
     const b = bancada({ worktrees: [7] })
     const res = correr(b, { FAKE_GH_LIST_FAIL_AT: '0' })

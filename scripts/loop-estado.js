@@ -13,6 +13,21 @@ export function construirEstado(entrada) {
   const {
     enProgreso, enRevision = [], mergeados, cerradosConStatus,
     worktreesEnDisco, ramasEnDisco,
+    // sePuedeAtribuirWorktree: si se sabe QUIÉN reclama cada worktree, es
+    // decir, si la lista de issues (abiertos y cerrados) se pudo leer entera.
+    // Separa dos preguntas que antes viajaban en el mismo dato:
+    //
+    //   ¿existe .worktrees/N?   → `worktreesEnDisco`, que es una lectura de
+    //                             DISCO y no depende de GitHub para nada.
+    //   ¿lo reclama alguien?    → sólo contestable con los issues delante.
+    //
+    // El llamante vaciaba `worktreesEnDisco` cuando no tenía los issues, para
+    // no fabricar huérfanos. Protegía lo correcto, pero de más: ese vaciado
+    // también borraba el `hasWorktree` de los slices EN VUELO y de la cosecha,
+    // y el informe acababa diciendo `worktree ✗` sobre un directorio que su
+    // propio aviso acababa de nombrar. Ahora la lista real entra siempre y lo
+    // único que se apaga es la atribución.
+    sePuedeAtribuirWorktree = true,
     procesos, edadClaimMs, ventanaArranqueMs,
   } = entrada
 
@@ -83,7 +98,14 @@ export function construirEstado(entrada) {
     }
   }
 
-  const worktreesHuerfanos = worktreesEnDisco.filter((w) => !worktreesExplicados.has(w))
+  // Huérfano = «está en disco y NINGÚN issue lo explica». La segunda mitad
+  // exige tener los issues: sin ellos, `worktreesExplicados` está vacío por
+  // ignorancia, no por hecho, y TODO worktree saldría acusado. Cuando no se
+  // pueden atribuir no se acusa a ninguno — que es distinto de fingir que el
+  // directorio no está, que es lo que hacía el vaciado del llamante.
+  const worktreesHuerfanos = sePuedeAtribuirWorktree
+    ? worktreesEnDisco.filter((w) => !worktreesExplicados.has(w))
+    : []
 
   const residuo = {
     labels: cerradosConStatus,

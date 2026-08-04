@@ -77,6 +77,19 @@ const nombreInvocado = (ruta) => ruta.slice(ruta.lastIndexOf('/') + 1)
 //
 // SE IDENTIFICA POR LA RUTA INVOCADA, NO POR `pgrep -x`, y no es una cuestión
 // de gusto: `pgrep -x claude` NO ve al Claude Code que te está ejecutando.
+//
+// ANTES DE LOS DOS HECHOS, EL QUE LOS DESAMBIGUA, porque sin él es fácil sacar
+// de aquí una conclusión falsa: en macOS `pgrep -x` NO casa contra el nombre
+// del proceso, casa contra el basename de `argv[0]`. Comprobado en aislado con
+// un symlink `falsoclaude` → `/bin/sleep` ejecutado como `./falsoclaude`:
+//   $ pgrep -x falsoclaude  → lo lista     (basename de argv[0])
+//   $ pgrep -x sleep        → NO lo lista  (y "sleep" es su ucomm)
+// O sea que `pgrep -x claude` sí encuentra procesos de Claude Code — todos
+// menos sus propios ancestros, que es justo la excepción que lo rompía aquí.
+// No es que no encuentre ninguno; es que no encuentra EL que importa. Y el
+// hecho 1 de abajo es lo que hace que la alternativa obvia —matchear por
+// nombre de proceso— tampoco sirva.
+//
 // Dos hechos medidos en esta máquina, los dos hoy:
 //
 //   1. El nombre de proceso no es "claude". El instalador nativo deja
@@ -86,10 +99,11 @@ const nombreInvocado = (ruta) => ruta.slice(ruta.lastIndexOf('/') + 1)
 //        $ ps -u <uid> -o pid=,ucomm=  →  18539  2.1.220
 //      El nombre del proceso ES el número de versión, y cambia con cada
 //      actualización. Cualquier matcheo por NOMBRE persigue un blanco móvil.
-//   2. `pgrep` excluye a sus propios ancestros. `man pgrep`, flag `-a`: «By
-//      default, the current pgrep or pkill process and all of its ancestors
-//      are excluded». Como /ct-status se invoca DESDE una sesión de Claude
-//      Code, el `claude` de esa sesión es ancestro del `pgrep` y queda fuera:
+//   2. LA CAUSA DOMINANTE: `pgrep` excluye a sus propios ancestros. `man
+//      pgrep`, flag `-a`: «By default, the current pgrep or pkill process and
+//      all of its ancestors are excluded». Como /ct-status se invoca DESDE una
+//      sesión de Claude Code, el `claude` de esa sesión es ancestro del
+//      `pgrep` y queda fuera:
 //        $ pgrep -x claude   → no lista el pid 18539, que sí está en `ps`
 //      Con una sola sesión abierta la salida es vacía y rc=1 — que este código
 //      interpretaba como «ninguna coincidencia, respuesta normal» y por tanto

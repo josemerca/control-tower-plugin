@@ -269,9 +269,11 @@ if (checkoutComprobado) {
 
 // ---------------------------------------------------------- señal de vida ---
 // La única señal que responde «¿alguien está trabajando AHORA?» en vez de
-// «¿queda rastro?». Devuelve `comprobado: false` con su motivo cuando pgrep o
-// lsof no están o fallan; el compositor lo convierte en `vivo: null` para todo
-// el mundo, nunca en «muerto».
+// «¿queda rastro?». Devuelve `comprobado: false` con su motivo cuando `ps` o
+// `lsof` no están, fallan o se cuelgan (las dos llamadas llevan tope de
+// tiempo); el compositor lo convierte en `vivo: null` para todo el mundo,
+// nunca en «muerto». Ya no interviene `pgrep`: ver el comentario de
+// `liveSliceProcesses` en scripts/liveness.js para por qué se descartó.
 const procesos = checkoutComprobado
   ? liveSliceProcesses(repoRoot)
   : { porSlice: new Map(), comprobado: false, motivo: motivoCheckout }
@@ -312,11 +314,21 @@ for (const { n } of enProgreso) {
 }
 
 // ------------------------------------------------------------ composición ---
-// `worktreesEnDisco` sólo entra si los issues se leyeron: sin ellos, ni
-// `enProgreso` ni `mergeados` pueden explicar nada, así que TODO worktree en
-// disco saldría como huérfano. Ese hallazgo sería fabricado — exactamente la
-// clase de afirmación confiada sobre datos incompletos que este comando
-// existe para eliminar. Se dice que no se ha mirado y se sigue.
+// Sin los issues, ni `enProgreso` ni `mergeados` pueden explicar un worktree,
+// así que TODO el que hubiera en disco saldría como huérfano. Ese hallazgo
+// sería fabricado — exactamente la clase de afirmación confiada sobre datos
+// incompletos que este comando existe para eliminar. Se dice que no se ha
+// mirado y se sigue.
+//
+// Lo que se apaga es la ATRIBUCIÓN (`sePuedeAtribuirWorktree`), no la lista.
+// Antes se vaciaba `worktreesEnDisco` aquí mismo, y eso protegía de más: el
+// mismo dato alimenta el `hasWorktree` del bloque EN VUELO, que es una lectura
+// de DISCO y no depende de GitHub. El informe se contradecía en dos líneas
+// seguidas —el aviso nombraba `.worktrees/7` y el bloque decía `worktree ✗`
+// sobre #7—, y era la misma clase de afirmación falsa que la marca `?` de más
+// abajo vino a matar, entrando por otra puerta. Era inalcanzable mientras
+// `cargarIssues` lanzaba (sin issues no había bloque en vuelo que imprimir);
+// el informe parcial lo hizo alcanzable.
 if (!issuesLeidos && worktreesEnDisco.length) {
   motivos.push(`hay ${worktreesEnDisco.length} directorio(s) en .worktrees/ (${worktreesEnDisco.join(', ')}) que no se han cruzado con nada: sin la lista de issues no se puede saber quién los reclama`)
 }
@@ -325,7 +337,8 @@ const estado = construirEstado({
   enRevision,
   mergeados,
   cerradosConStatus,
-  worktreesEnDisco: issuesLeidos ? worktreesEnDisco : [],
+  worktreesEnDisco,
+  sePuedeAtribuirWorktree: issuesLeidos,
   ramasEnDisco,
   procesos,
   edadClaimMs,
