@@ -139,6 +139,43 @@ describe('construirEstado — cosecha y residuo', () => {
   })
 })
 
+describe('construirEstado — entregado, esperando merge', () => {
+  it('un in-review sale en su propio cubo y NO cuenta como hallazgo', () => {
+    const e = construirEstado({ ...base, enRevision: [{ n: 11, nombre: 'refresh' }] })
+    expect(e.enRevision).toEqual([{ n: 11, nombre: 'refresh', hasWorktree: false, hasBranch: false }])
+    // Un loop sano con PRs abiertos devolvía 3 de forma permanente: el
+    // coordinador aprende a ignorar el código de salida y un vigilante que
+    // gatee sobre él queda inservible.
+    expect(e.hayHallazgos).toBe(false)
+  })
+
+  it('el worktree de un in-review NO es huérfano: su dueño está vivo y esperando merge', () => {
+    const e = construirEstado({ ...base, enRevision: [{ n: 11, nombre: 'refresh' }], worktreesEnDisco: ['11'], ramasEnDisco: ['feat/11'] })
+    expect(e.residuo.worktreesHuerfanos).toEqual([])
+    expect(e.enRevision[0]).toMatchObject({ hasWorktree: true, hasBranch: true })
+    expect(e.hayHallazgos).toBe(false)
+  })
+
+  it('no se confunde con la cosecha: un in-review y un mergeado con restos salen por cubos distintos, a la vez', () => {
+    const e = construirEstado({
+      ...base,
+      enRevision: [{ n: 11, nombre: 'refresh' }],
+      mergeados: [5],
+      worktreesEnDisco: ['11', '5'],
+    })
+    expect(e.enRevision.map((r) => r.n)).toEqual([11])
+    expect(e.cosecha.map((c) => c.n)).toEqual([5])
+    expect(e.residuo.worktreesHuerfanos).toEqual([])
+    // La cosecha sí es un hallazgo; el in-review no la anula.
+    expect(e.hayHallazgos).toBe(true)
+  })
+
+  it('sin `enRevision` en la entrada, el cubo sale vacío y nada más cambia', () => {
+    const e = construirEstado(base)
+    expect(e.enRevision).toEqual([])
+  })
+})
+
 describe('construirEstado — un loop limpio', () => {
   it('sin nada que revisar: cero hallazgos y cero motivos sin comprobar', () => {
     const e = construirEstado(base)

@@ -11,7 +11,7 @@
 // herramienta que falta en una acusación de abandono.
 export function construirEstado(entrada) {
   const {
-    enProgreso, mergeados, cerradosConStatus,
+    enProgreso, enRevision = [], mergeados, cerradosConStatus,
     worktreesEnDisco, ramasEnDisco,
     procesos, edadClaimMs, ventanaArranqueMs,
   } = entrada
@@ -51,6 +51,28 @@ export function construirEstado(entrada) {
     return { n, nombre, hasWorktree, hasBranch, pid, vivo, arrancando, edadMs }
   })
 
+  // enRevision: los issues abiertos en `status:in-review` — trabajo ENTREGADO
+  // que espera merge. Es su propio cubo, y no es ninguno de los otros tres:
+  //
+  //   - No es residuo. El §2.1 del diseño enumera los tres casos del worktree
+  //     huérfano (abandonado, requeueado, o de un issue cerrado sin mergear) y
+  //     un `in-review` no es ninguno: su worktree suele estar ahí A PROPÓSITO,
+  //     porque el PR todavía no se ha mergeado. Contándolo como hallazgo, un
+  //     loop SANO con tres PRs abiertos devolvía 3 de forma permanente — el
+  //     coordinador aprende a ignorar el código de salida y un vigilante que
+  //     gatee sobre él queda inservible.
+  //   - No es cosecha. La cosecha es lo YA MERGEADO que dejó restos en disco.
+  //     Las dos cosas pueden aparecer a la vez y no se solapan.
+  //
+  // Por eso NO cuenta como hallazgo (ver `hayHallazgos` más abajo): es
+  // informativo. Y por eso sus worktrees quedan EXPLICADOS: un `in-review` es
+  // exactamente el dueño legítimo del suyo.
+  const enRevisionSalida = enRevision.map(({ n, nombre }) => {
+    const hasWorktree = worktreeSet.has(String(n))
+    if (hasWorktree) worktreesExplicados.add(String(n))
+    return { n, nombre, hasWorktree, hasBranch: ramaSet.has(`feat/${n}`) }
+  })
+
   const cosecha = []
   for (const n of mergeados) {
     const hasWorktree = worktreeSet.has(String(n))
@@ -78,5 +100,5 @@ export function construirEstado(entrada) {
     || residuo.worktreesHuerfanos.length > 0
     || hayHallazgoEnVuelo
 
-  return { enVuelo, cosecha, residuo, sinComprobar, hayHallazgos }
+  return { enVuelo, enRevision: enRevisionSalida, cosecha, residuo, sinComprobar, hayHallazgos }
 }
