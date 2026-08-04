@@ -587,7 +587,7 @@ function bodyDriftCategories(diff, bodyResult) {
 // ni rindiéndose. Que se rindiera en SILENCIO era lo único indefendible —
 // AC y Dependencias se rinden en voz alta desde la review round 4.
 const EPIC_CONTEXT_SURRENDERS = {
-  'sin-ancla': 'no existe la sección en el issue y tampoco "## Acceptance criteria", que es el único ancla seguro para insertarla en su sitio; añade a mano la sección (o la de AC) y vuelve a correr',
+  'sin-ancla': 'no existe la sección en el issue, y tampoco ninguna de las dos cabeceras que sirven de ancla para ponerla en su sitio ("## Contexto heredado" o, en su defecto, "## Acceptance criteria"); añade a mano una de ellas y vuelve a correr',
   'ancla-duplicada': 'no existe la sección en el issue y su ancla ("## Acceptance criteria") aparece más de una vez, así que insertarla ahí podría escribir dentro de texto ajeno; deja una sola copia del ancla y vuelve a correr',
   duplicada: 'aparece más de una vez en el body y no hay forma de saber cuál copia es la del plugin — una puede ser texto pegado dentro de "## Contexto heredado", que no se toca nunca; deja una sola copia y vuelve a correr',
   'seccion-sin-cerrar': 'la sección del issue tiene una valla de código (```) o un comentario HTML (<!--) SIN CERRAR, así que no se sabe dónde termina: reescribirla se llevaría por delante todo lo que venga detrás en el cuerpo (contexto heredado, criterios, gates, protegido y el marcador ct-order). Cierra el delimitador en el issue y vuelve a correr',

@@ -385,15 +385,32 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
   }
 }
 
-// hasDrift: cuenta título/milestone/enlace-al-spec (por ancla)/labels/deps/
-// ac, y las secciones DUPLICADAS que cambian lo que el dispatcher hace
-// (AC/Dependencias — review round 4, importante 5). `closed`, Descripción/
-// Protegido (duplicados o divergentes), el contexto del epic y `strayDeps`
-// NUNCA cuentan: son, o bien algo sobre lo que el spec no tiene autoridad
-// (closed), o bien prosa rutinaria, o bien algo que --reconcile NUNCA podría
-// aplicar de forma segura (strayDeps vive fuera de la sección que
-// --reconcile puede tocar) — anclar el exit code a cualquiera de ellos
+// hasDrift: cuenta título/milestone/enlace-al-spec (la línea entera, desde
+// F10)/labels/deps/ac, y las secciones DUPLICADAS que cambian lo que el
+// dispatcher hace (AC/Dependencias — review round 4, importante 5). `closed`,
+// Descripción/Protegido (duplicados o divergentes), el contexto del epic y
+// `strayDeps` NUNCA cuentan, y el motivo NO es el mismo para todos —
+// enumerarlos como si lo fuera es lo que corrige la review final de rama (I3):
+//
+//   - `closed`: el spec no tiene ninguna autoridad sobre el estado del issue.
+//   - Descripción/Protegido: prosa que un humano edita de forma rutinaria y
+//     legítima en SU issue, y que por eso --reconcile tampoco reescribe.
+//   - `strayDeps`: --reconcile no podría aplicarlo de forma segura ni
+//     queriendo — vive fuera de la sección que puede tocar.
+//   - el contexto del epic: NINGUNA de las tres razones anteriores le vale
+//     (el spec sí lo posee, no tiene derecho de edición humana —es justo lo
+//     que lo distingue de Descripción/Protegido, ver buildReconcileBody— y
+//     --reconcile SÍ lo aplica). La razón es la cuarta, y está escrita en el
+//     §4.4 del diseño: contarlo dejaría en `3` a TODO issue groomeado antes de
+//     F26, en cada corrida, hasta que alguien reescribiera su cuerpo a mano.
+//
+// Todas llevan a lo mismo: anclar el exit code a cualquiera de ellas
 // entrenaría a ignorar el resto del reporte.
+//
+// Que el contexto del epic no cuente aquí NO significa que no se escriba: el
+// caller pregunta las dos cosas por separado (ver ct-groom.mjs, el gate
+// `hasDrift(diff) || bodyResult.body !== null`). Confundirlas era el C1 de la
+// review final de rama.
 export function hasDrift(diff) {
   return Boolean(
     diff.title || diff.milestone || diff.specLink ||
@@ -787,14 +804,29 @@ export function buildReconcileBody(existingBody, wantedIssue) {
     } else if (wantedEpic && !epicLoc) {
       // Sección ausente (un issue anterior a esta ronda) y el spec sí trae
       // texto: se inserta entera justo ANTES de "## Acceptance criteria", que
-      // es la posición que le corresponde y a la vez el único ancla seguro.
+      // es la posición que le corresponde (ver más abajo qué cabecera se usa
+      // de ancla y por qué).
       // Sin ese ancla no se inventa una posición — insertar al final a ciegas
       // es lo que, con una valla de código sin cerrar por delante, añadía una
       // sección nueva en cada corrida sin límite.
+      // El ancla preferente es "## Contexto heredado", no "## Acceptance
+      // criteria" (review final de rama, menor): el §3.4 fija el orden
+      // epic → heredado → criterios, y anclar en AC dejaba la sección
+      // insertada DESPUÉS de la heredada, justo al revés. Se ancla ANTES de
+      // su cabecera, así que no se escribe ni un byte dentro de ella. Sin
+      // sección heredada en el cuerpo (un issue anterior a F26 que tampoco la
+      // tiene), se cae a AC, que es donde estaba.
+      //
       // El ancla tiene que ser inequívoca, por el mismo motivo que la de
-      // Dependencias: con dos "## Acceptance criteria" en el body, "la
-      // primera" puede ser la que la coordinadora pegó en su sección.
-      const ancla = seccionSpliceable(AC_HEADING_FORMS)
+      // Dependencias: con dos copias de la cabecera en el body, "la primera"
+      // puede ser la que la coordinadora pegó en su sección. Para la heredada
+      // NO se usa `seccionSpliceable`: esa función descarta cualquier
+      // coincidencia dentro de la zona heredada, y la cabecera de la propia
+      // sección heredada es, por definición, el primer carácter de esa zona.
+      const heredadaUnica = countHeadingLines(body, INHERITED_CONTEXT_HEADING) === 1
+        ? locateSection(body, INHERITED_CONTEXT_HEADING)
+        : null
+      const ancla = heredadaUnica ? { loc: heredadaUnica, ambigua: false } : seccionSpliceable(AC_HEADING_FORMS)
       if (ancla.loc) {
         body = body.slice(0, ancla.loc.headingStart) + `${EPIC_CONTEXT_HEADING}\n${wantedEpic}\n\n` + body.slice(ancla.loc.headingStart)
         changed = true

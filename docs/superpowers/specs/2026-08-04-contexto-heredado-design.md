@@ -134,6 +134,8 @@ La cabecera es **la misma en el spec y en el issue** para la primera: una sola c
 ### 4.3 `/ct-groom --reconcile` sobre un issue existente
 
 - `## Contexto del epic`: se compara y **se reescribe**, con el mismo splice acotado que ya usa para Acceptance criteria. Si la cabecera no existe en el issue (uno anterior a F26), se inserta entera **justo antes de `## Acceptance criteria`** — la posición de §3.4, con la cabecera de AC como único ancla seguro. Sin ese ancla, se rinde sin escribir nada, misma forma que la inserción de `## Dependencias` cuando le falta el suyo.
+
+> **Corrección (review final de rama, menor).** Anclar en AC es lo que pone la sección en el sitio equivocado cuando el issue ya tiene `## Contexto heredado`: aterriza **detrás** de ella e invierte el orden que este mismo §3.4 fija. El ancla preferente pasa a ser `## Contexto heredado` (se inserta justo **antes** de su cabecera, sin tocar un byte de su contenido), con AC como respaldo cuando esa sección no existe. Sin ninguna de las dos, se sigue rindiendo sin escribir nada.
 - `## Contexto heredado`: **no se compara, no se reescribe, no se inserta.** El plugin no tiene ninguna opinión sobre su contenido.
 
 Que esta sección sí se reescriba siendo prosa —cuando Descripción y Protegido no— tiene un motivo que las distingue: Descripción y Protegido son prosa que un humano edita de forma rutinaria y legítima en un issue suelto. `## Contexto del epic` no: es texto del epic, idéntico en los N issues, y editarlo a mano en uno solo es precisamente lo que produce la divergencia que esto viene a matar. Quien quiera contexto propio de un slice tiene la sección de al lado, que es intocable — y el propio placeholder lo dice.

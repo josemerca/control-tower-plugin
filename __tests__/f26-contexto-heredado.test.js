@@ -365,15 +365,33 @@ describe('buildReconcileBody — reescribe el del epic, no toca el heredado', ()
     expect(extractSectionContent(r.body, EPIC_CONTEXT_HEADING)).toBe('- regla NUEVA')
   })
 
-  it('sin Acceptance criteria como ancla, NO inserta nada y no revienta', () => {
+  // Sin NINGÚN ancla (ni "## Contexto heredado" ni "## Acceptance criteria")
+  // se sigue rindiendo, que es la propiedad del §6.4 del diseño: no se
+  // inventa una posición. Lo que cambió en la review final de rama es cuál es
+  // el ancla preferente, no que se escriba a ciegas cuando no hay ninguna.
+  it('sin ningún ancla, NO inserta nada y no revienta', () => {
     const sinAncla = [
+      '> Slice `#2` del epic. Spec: [docs/spec.md § 9. Slices](https://github.com/o/r/blob/main/docs/spec.md#9-slices)',
+      '',
+      '## Descripción',
+      'lo que entrega',
+    ].join('\n')
+    const r = buildReconcileBody(sinAncla, wanted({ ac: [] }))
+    expect(r.body === null || !r.body.includes(EPIC_CONTEXT_HEADING)).toBe(true)
+  })
+
+  // Y con la heredada presente pero sin AC, ya SÍ hay un ancla seguro: se
+  // inserta justo antes de ella (fuera de su texto), en la posición del §3.4.
+  it('con la heredada pero sin Acceptance criteria, ancla en la heredada', () => {
+    const soloHeredada = [
       '> Slice `#2` del epic. Spec: [docs/spec.md § 9. Slices](https://github.com/o/r/blob/main/docs/spec.md#9-slices)',
       '',
       INHERITED_CONTEXT_HEADING,
       'lo de la coordinadora',
     ].join('\n')
-    const r = buildReconcileBody(sinAncla, wanted({ ac: [] }))
-    expect(r.body === null || !r.body.includes(EPIC_CONTEXT_HEADING)).toBe(true)
+    const r = buildReconcileBody(soloHeredada, wanted({ ac: [] }))
+    expect(r.body.indexOf(EPIC_CONTEXT_HEADING)).toBeLessThan(r.body.indexOf(INHERITED_CONTEXT_HEADING))
+    expect(r.body).toContain(`${INHERITED_CONTEXT_HEADING}\nlo de la coordinadora`)
   })
 
   it('si el spec deja de traer contexto, la sección del epic se retira entera', () => {
@@ -538,17 +556,15 @@ describe('la rendición del contexto del epic se dice, y sigue sin mover el exit
     '| 1 | login | backend | modelo | – | – | schema |',
   ].join('\n')
 
-  // Un cuerpo sin "## Acceptance criteria" (un humano la borró) y sin la
-  // sección del epic: no hay dónde insertarla en su sitio. La tabla no pide
-  // ningún criterio, así que AC no diverge y no hay ningún gap que sí cuente.
+  // Un cuerpo sin ningún ancla —ni "## Acceptance criteria" (un humano la
+  // borró) ni "## Contexto heredado" (issue anterior a F26)— y sin la sección
+  // del epic: no hay dónde insertarla en su sitio. La tabla no pide ningún
+  // criterio, así que AC no diverge y no hay ningún gap que sí cuente.
   const SIN_ANCLA_BODY = [
     `> Slice \`#1\` del epic. Spec: [spec.md § 9. Slices](${specUrl('spec.md')})`,
     '',
     '## Descripción',
     'modelo',
-    '',
-    INHERITED_CONTEXT_HEADING,
-    'lo de la coordinadora',
     '',
     '## Out of scope / Protected',
     '- 🚫 schema',
@@ -563,11 +579,11 @@ describe('la rendición del contexto del epic se dice, y sigue sin mover el exit
     const res = invoke(spec, [issue], ['--dry-run', '--reconcile'])
     expect(res.status).toBe(0)
     expect(res.stderr).toMatch(/nota:.*NO ha reescrito la sección "## Contexto del epic"/)
-    expect(res.stderr).toMatch(/Acceptance criteria.*ancla/)
+    expect(res.stderr).toMatch(/ancla.*Contexto heredado.*Acceptance criteria/) // nombra las DOS que servirían
     expect(res.stderr).not.toMatch(/aplicaría/) // no hay body nuevo: no se anuncia ninguna escritura
   })
 
-  it('la sección heredada sigue intacta y sin compararse', () => {
+  it('la sección heredada no se compara ni se inserta', () => {
     const res = invoke(spec, [issue], ['--reconcile'])
     expect(res.status).toBe(0)
     expect(res.stderr).not.toMatch(new RegExp(`divergencia.*${INHERITED_CONTEXT_HEADING}`))
@@ -864,5 +880,37 @@ describe('I2 — un spec en CRLF no mete \\r en el cuerpo de los issues', () => 
     const r = readEpicContext(crlf('# Spec', '', EPIC_CONTEXT_HEADING, '- regla A', '', '##', 'texto de otra sección'))
     expect(r.content).toBe('- regla A')
     expect(r.warnings).toEqual([])
+  })
+})
+
+// ============================================================================
+// REVIEW FINAL DE RAMA (menor) — al INSERTAR la sección del epic que falta (un
+// issue anterior a F26), el único ancla era "## Acceptance criteria", así que
+// la sección aterrizaba DESPUÉS de "## Contexto heredado" e invertía el orden
+// que fija el §3.4 del diseño (epic → heredado → criterios). Reproducido.
+// ============================================================================
+describe('la inserción respeta el orden del §3.4', () => {
+  const sinEpic = [
+    SPEC_LINK_3, '',
+    '## Descripción', 'flow', '',
+    INHERITED_CONTEXT_HEADING, 'lo de la coordinadora', '',
+    '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-1', '',
+    '## Out of scope / Protected', '- 🚫 nada',
+  ].join('\n')
+
+  it('la sección del epic queda ANTES de la heredada, no después', () => {
+    const r = buildReconcileBody(sinEpic, { specLink: SPEC_LINK_3, ac: ['AC-1'], deps: [], epicContext: '- regla' })
+    expect(r.body.indexOf(EPIC_CONTEXT_HEADING)).toBeLessThan(r.body.indexOf(INHERITED_CONTEXT_HEADING))
+    expect(r.body.indexOf(INHERITED_CONTEXT_HEADING)).toBeLessThan(r.body.indexOf('## Acceptance criteria'))
+    expect(extractSectionContent(r.body, EPIC_CONTEXT_HEADING)).toBe('- regla')
+    // Y no se ha tocado una sola letra de lo suyo.
+    expect(r.body).toContain(`${INHERITED_CONTEXT_HEADING}\nlo de la coordinadora`)
+  })
+
+  it('sin sección heredada sigue anclando en Acceptance criteria', () => {
+    const sinNinguna = sinEpic.replace(`${INHERITED_CONTEXT_HEADING}\nlo de la coordinadora\n\n`, '')
+    const r = buildReconcileBody(sinNinguna, { specLink: SPEC_LINK_3, ac: ['AC-1'], deps: [], epicContext: '- regla' })
+    expect(r.body.indexOf(EPIC_CONTEXT_HEADING)).toBeLessThan(r.body.indexOf('## Acceptance criteria'))
+    expect(r.body).not.toContain(INHERITED_CONTEXT_HEADING) // nunca se inserta
   })
 })
