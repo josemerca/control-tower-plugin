@@ -68,7 +68,11 @@ export function construirEstado(entrada) {
     worktreesHuerfanos,
   }
 
-  const hayHallazgoEnVuelo = enVuelo.some((s) => s.vivo === false && !s.arrancando)
+  // Un enVuelo sin vida cuenta como hallazgo sólo si además se conoce su
+  // edad: sin edad, ya viaja en `sinComprobar` con el número del issue, y
+  // presentarlo TAMBIÉN como hallazgo lo dejaría indistinguible de un claim
+  // abandonado de verdad —justo la acusación que la edad desconocida evita.
+  const hayHallazgoEnVuelo = enVuelo.some((s) => s.vivo === false && !s.arrancando && s.edadMs !== null)
   const hayHallazgos = cosecha.length > 0
     || residuo.labels.length > 0
     || residuo.worktreesHuerfanos.length > 0

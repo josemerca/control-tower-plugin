@@ -53,6 +53,9 @@ describe('construirEstado — en vuelo', () => {
     expect(e.enVuelo[0].arrancando).toBe(false)
     expect(e.enVuelo[0].vivo).toBe(false)
     expect(e.sinComprobar.join(' ')).toMatch(/#7/)
+    // Edad desconocida no es lo mismo que claim viejo: si TAMBIÉN contara
+    // como hallazgo, saldría idéntico a un claim abandonado de tres horas.
+    expect(e.hayHallazgos).toBe(false)
   })
 
   it('procesos no comprobados: NADIE sale como muerto, y el motivo viaja', () => {
@@ -65,6 +68,33 @@ describe('construirEstado — en vuelo', () => {
     })
     expect(e.enVuelo[0].vivo).toBeNull()
     expect(e.sinComprobar.join(' ')).toMatch(/lsof no está/)
+    // Con `vivo: null` no hay base para acusar: si un `null` se leyera como
+    // `false` en cualquier punto, esto se dispararía como hallazgo aunque
+    // nadie haya comprobado si el proceso sigue vivo.
+    expect(e.hayHallazgos).toBe(false)
+  })
+
+  it('procesos no comprobados y claim recién puesto: NO sale arrancando (eso también sería afirmar algo no comprobado)', () => {
+    const e = construirEstado({
+      ...base,
+      enProgreso: [{ n: 7, nombre: 'refresh' }],
+      worktreesEnDisco: ['7'],
+      edadClaimMs: new Map([[7, 5_000]]),
+      procesos: { porSlice: new Map(), comprobado: false, motivo: 'lsof no está' },
+    })
+    expect(e.enVuelo[0].vivo).toBeNull()
+    expect(e.enVuelo[0].arrancando).toBe(false)
+  })
+
+  it('procesos no comprobados y edad desconocida: sinComprobar sólo lleva el motivo real, sin mensaje contradictorio de edad', () => {
+    const e = construirEstado({
+      ...base,
+      enProgreso: [{ n: 7, nombre: 'refresh' }],
+      worktreesEnDisco: ['7'],
+      edadClaimMs: new Map([[7, null]]),
+      procesos: { porSlice: new Map(), comprobado: false, motivo: 'lsof no está' },
+    })
+    expect(e.sinComprobar).toEqual(['lsof no está'])
   })
 })
 
@@ -89,6 +119,11 @@ describe('construirEstado — cosecha y residuo', () => {
       edadClaimMs: new Map([[9, 1000]]),
     })
     expect(e.residuo.worktreesHuerfanos).toEqual([])
+  })
+
+  it('un mergeado que dejó SÓLO la rama (worktree ya borrado a mano) también va a cosecha', () => {
+    const e = construirEstado({ ...base, mergeados: [5], ramasEnDisco: ['feat/5'] })
+    expect(e.cosecha).toEqual([{ n: 5, hasWorktree: false, hasBranch: true }])
   })
 
   it('el worktree de un MERGEADO sale por cosecha y NO se duplica en huérfanos', () => {
