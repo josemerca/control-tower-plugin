@@ -1,5 +1,5 @@
-import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, mkdirSync, existsSync, readFileSync, symlinkSync } from 'node:fs'
+import { execFileSync, spawnSync, spawn } from 'node:child_process'
+import { mkdtempSync, rmSync, mkdirSync, existsSync, readFileSync, writeFileSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,26 +9,26 @@ const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'c
 const fakeGhDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-gh-bin')
 const fakeEnv = (o = {}) => ({ ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}`, ...o })
 
-// FAKE_GH_COUNTER_FILE no es opcional para estos tests: sin él, el stub
-// devuelve SIEMPRE el primer elemento de FAKE_GH_LIST_SEQUENCE, así que los
-// issues "abiertos" se devolverían otra vez como "cerrados" y todo issue en
-// vuelo aparecería además como residuo de labels. Cada test se lleva su
-// directorio temporal, con su contador y su registro de argv.
-function bancada({ worktrees = null } = {}) {
+const gitEn = (repo, ...args) => execFileSync('git', ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { stdio: ['ignore', 'ignore', 'pipe'] })
+
+// bancada: cada test se lleva su propio checkout git, con su `origin` y su
+// contenido de `.worktrees/`. El `origin` no es decorado — el comando compara
+// la identidad del checkout contra `--repo` antes de mirar nada local, porque
+// cruzar los issues de un repo con los worktrees de otro fabrica hallazgos
+// (medido: 4, uno de ellos una acusación de abandono).
+//
+// FAKE_GH_COUNTER_FILE tampoco es opcional: sin él el stub devuelve SIEMPRE el
+// primer elemento de FAKE_GH_LIST_SEQUENCE, así que los issues "abiertos"
+// volverían otra vez como "cerrados".
+function bancada({ worktrees = [], origin = 'https://github.com/o/r.git', conCommit = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ct-st-'))
-  const b = { dir, counter: join(dir, 'gh-count'), argvLog: join(dir, 'gh-argv'), cwd: undefined }
-  if (worktrees) {
-    // Un checkout git de verdad, propio del test, para poder controlar qué hay
-    // en `.worktrees/` sin tocar el repo en el que corre la suite. Los tests
-    // que no lo piden corren desde el cwd de vitest (este mismo repo, que no
-    // tiene `.worktrees/` ni ramas `feat/*`) — que es el caso "loop en reposo".
-    const repo = join(dir, 'repo')
-    mkdirSync(repo)
-    execFileSync('git', ['-C', repo, 'init', '-q'], { stdio: ['ignore', 'ignore', 'pipe'] })
-    for (const n of worktrees) mkdirSync(join(repo, '.worktrees', String(n)), { recursive: true })
-    b.cwd = repo
-  }
-  return b
+  const repo = join(dir, 'repo')
+  mkdirSync(repo)
+  execFileSync('git', ['-C', repo, 'init', '-q'], { stdio: ['ignore', 'ignore', 'pipe'] })
+  if (origin) gitEn(repo, 'remote', 'add', 'origin', origin)
+  if (conCommit) gitEn(repo, 'commit', '--allow-empty', '-q', '-m', 'base')
+  for (const n of worktrees) mkdirSync(join(repo, '.worktrees', String(n)), { recursive: true })
+  return { dir, repo, counter: join(dir, 'gh-count'), argvLog: join(dir, 'gh-argv'), cwd: repo }
 }
 
 const correr = (b, env = {}, args = ['--repo', 'o/r']) => spawnSync('node', [script, ...args], {
@@ -40,7 +40,8 @@ const correr = (b, env = {}, args = ['--repo', 'o/r']) => spawnSync('node', [scr
 const limpiar = (b) => rmSync(b.dir, { recursive: true, force: true })
 const argvDe = (b) => (existsSync(b.argvLog) ? readFileSync(b.argvLog, 'utf8') : '')
 const SIN_ISSUES = JSON.stringify([[], []])
-const enProgreso7 = (extra = {}) => JSON.stringify([[{ number: 7, title: '#7 refresh', body: '<!-- ct-order:7 -->', labels: [{ name: 'status:in-progress' }], ...extra }], []])
+const abierto = (n, status, titulo = 'refresh') => ({ number: n, title: `#${n} ${titulo}`, body: '', labels: [{ name: `status:${status}` }] })
+const enProgreso7 = () => JSON.stringify([[abierto(7, 'in-progress')], []])
 const hace = (ms) => JSON.stringify([{ event: 'labeled', label: { name: 'status:in-progress' }, created_at: new Date(Date.now() - ms).toISOString() }])
 
 describe('/ct-status', () => {
@@ -109,12 +110,12 @@ describe('/ct-status', () => {
 
   it('un worktree de un issue ABIERTO que no está en vuelo se nombra sin afirmar que nadie lo reclama', () => {
     const b = bancada({ worktrees: [9] })
-    const res = correr(b, { FAKE_GH_LIST_SEQUENCE: JSON.stringify([[{ number: 9, title: '#9 plan', body: '', labels: [{ name: 'status:in-review' }] }], []]) })
+    const res = correr(b, { FAKE_GH_LIST_SEQUENCE: JSON.stringify([[abierto(9, 'ready', 'plan')], []]) })
     expect(res.status).toBe(3)
     expect(res.stdout).toMatch(/RESIDUO/)
     expect(res.stdout).toMatch(/\.worktrees\/9/)
     expect(res.stdout).toMatch(/#9 sigue abierto/)
-    expect(res.stdout).toMatch(/status:in-review/)
+    expect(res.stdout).toMatch(/status:ready/)
     // La frase que el §6 del spec proponía sería FALSA aquí: el issue #9 está
     // abierto, o sea vivo.
     expect(res.stdout).not.toMatch(/sin issue vivo que lo reclame/)
@@ -153,8 +154,8 @@ describe('/ct-status', () => {
   it('sin pgrep en el PATH nadie sale muerto: exit 1 y «no se pudo comprobar»', () => {
     const b = bancada()
     // Un PATH sin `pgrep` ni `lsof`, pero con `git` (hace falta para resolver
-    // la raíz del repo) y con `node` (el stub de `gh` es un script de node y
-    // sin él fallaría TAMBIÉN la lectura de issues, que no es lo que se está
+    // la raíz del checkout) y con `node` (el stub de `gh` es un script de node
+    // y sin él fallaría TAMBIÉN la lectura de issues, que no es lo que se está
     // probando aquí): así el único fallo es el de la señal de procesos, y se
     // ve qué hace el comando cuando falta la herramienta — acusar de abandono
     // a un slice sano por eso sería su peor fallo posible.
@@ -164,6 +165,7 @@ describe('/ct-status', () => {
     symlinkSync(process.execPath, join(bin, 'node'))
     const res = spawnSync(process.execPath, [script, '--repo', 'o/r'], {
       encoding: 'utf8',
+      cwd: b.cwd,
       env: {
         ...process.env,
         PATH: `${fakeGhDir}:${bin}`,
@@ -185,6 +187,7 @@ describe('/ct-status', () => {
     const log = argvDe(b)
     // La prueba mira el argv REAL con el que se invocó a `gh`, no la ausencia
     // de errores: un comando puede mutar y salir con 0 tan campante.
+    expect(log.length).toBeGreaterThan(0)
     expect(log).not.toMatch(/issue edit/)
     expect(log).not.toMatch(/label/)
     expect(log).not.toMatch(/--method (POST|PATCH|PUT|DELETE)/)
@@ -227,6 +230,146 @@ describe('/ct-status', () => {
     const res = correr(b, {}, [])
     expect(res.status).toBe(2)
     expect(res.stderr).toMatch(/uso: ct-status\.mjs/)
+    limpiar(b)
+  })
+})
+
+describe('/ct-status — la identidad del checkout', () => {
+  it('un --repo que no es el de este checkout no fabrica hallazgos: avisa y sale 1', () => {
+    // El checkout es de o/r, con tres worktrees y un claim; se pregunta por
+    // OTRO repo. Sin esta comprobación salían 4 hallazgos con cero avisos y
+    // exit 3 — uno la acusación de abandono, y tres worktrees marcados como
+    // candidatos a `git worktree remove`. Que el comando no escriba no ayuda:
+    // escribe el humano, por indicación suya.
+    const b = bancada({ worktrees: [7, 8, 9] })
+    const res = correr(b, { FAKE_GH_LIST_SEQUENCE: enProgreso7(), FAKE_GH_TIMELINE_JSON: hace(3 * 3600_000) }, ['--repo', 'otro/repo'])
+    expect(res.status).toBe(1)
+    expect(res.stderr).toMatch(/es el checkout de o\/r, no de otro\/repo/)
+    expect(res.stdout).not.toMatch(/RESIDUO/)
+    expect(res.stdout).not.toMatch(/SIN SE.AL DE VIDA/)
+    expect(res.stdout).not.toMatch(/worktree ✗/)
+    expect(res.stdout).toMatch(/worktree \?/)
+    limpiar(b)
+  })
+
+  it('un checkout sin remote origin no se da por bueno: avisa y sale 1, sin acusar a nadie', () => {
+    const b = bancada({ worktrees: [9], origin: null })
+    const res = correr(b, { FAKE_GH_LIST_SEQUENCE: SIN_ISSUES })
+    expect(res.status).toBe(1)
+    expect(res.stderr).toMatch(/no tiene remote "origin"/)
+    expect(res.stdout).not.toMatch(/RESIDUO/)
+    limpiar(b)
+  })
+
+  it('invocado DESDE DENTRO de un worktree, mira el checkout principal', () => {
+    // `git rev-parse --show-toplevel` devolvería aquí el propio worktree: no
+    // hay ningún `.worktrees/` dentro (todo saldría `worktree ✗`) y el prefijo
+    // con el que se mapea el cwd de cada proceso quedaría mal (todo `proceso
+    // ✗`) — el informe negaría justo el directorio en el que estás parado.
+    const b = bancada({ conCommit: true })
+    gitEn(b.repo, 'worktree', 'add', '-q', '-b', 'feat/7', join(b.repo, '.worktrees', '7'))
+    b.cwd = join(b.repo, '.worktrees', '7')
+    const res = correr(b, { FAKE_GH_LIST_SEQUENCE: enProgreso7(), FAKE_GH_TIMELINE_JSON: hace(1000) })
+    expect(res.stdout).toMatch(/worktree ✓/)
+    expect(res.stdout).toMatch(/rama ✓/)
+    expect(res.status).toBe(0)
+    limpiar(b)
+  })
+})
+
+describe('/ct-status — entregado, esperando merge', () => {
+  it('tres in-review con sus worktrees: bloque propio, sin residuo y exit 0', () => {
+    const b = bancada({ worktrees: [11, 12, 13] })
+    const res = correr(b, {
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[abierto(11, 'in-review', 'refresh de tokens'), abierto(12, 'in-review', 'marca de ritmo'), abierto(13, 'in-review', 'pie de plan')], []]),
+    })
+    // Un loop sano con tres PRs abiertos devolvía 3 de forma permanente: el
+    // coordinador aprende a ignorar el código de salida, y un vigilante que
+    // gatee sobre él queda inservible.
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/ENTREGADO, ESPERANDO MERGE \(3\)/)
+    expect(res.stdout).toMatch(/#11\s+refresh de tokens — status:in-review/)
+    expect(res.stdout).not.toMatch(/RESIDUO/)
+    limpiar(b)
+  })
+
+  it('no se confunde con la cosecha: los dos bloques pueden salir a la vez', () => {
+    const b = bancada({ worktrees: [11, 5] })
+    const res = correr(b, {
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[abierto(11, 'in-review')], [{ number: 5, body: '', labels: [], state_reason: 'completed' }]]),
+    })
+    expect(res.status).toBe(3) // lo mergeado sin cosechar SÍ es hallazgo
+    expect(res.stdout).toMatch(/ENTREGADO, ESPERANDO MERGE \(1\)/)
+    expect(res.stdout).toMatch(/ENTREGADO, SIN COSECHAR \(1\)/)
+    expect(res.stdout).not.toMatch(/RESIDUO/)
+    limpiar(b)
+  })
+})
+
+describe('/ct-status — la señal de vida en el bloque de residuo', () => {
+  it('con un proceso vivo dentro, NO se dice que no hay ninguno', () => {
+    const b = bancada({ worktrees: [9] })
+    // Un proceso de verdad, llamado `claude`, con su cwd dentro del worktree:
+    // es la única forma de ejercitar `liveSliceProcesses` de punta a punta.
+    // Un symlink a /bin/sleep, no una copia: copiar un binario de sistema en
+    // macOS le rompe la firma y el SO lo mata con SIGKILL (comprobado).
+    const bin = join(b.dir, 'bin')
+    mkdirSync(bin)
+    symlinkSync('/bin/sleep', join(bin, 'claude'))
+    const hijo = spawn(join(bin, 'claude'), ['30'], { cwd: join(b.repo, '.worktrees', '9'), stdio: 'ignore' })
+    try {
+      execFileSync('sh', ['-c', 'sleep 0.5'])
+      const res = correr(b, { FAKE_GH_LIST_SEQUENCE: SIN_ISSUES })
+      // LA afirmación que no se puede hacer sin mirar: la primera versión
+      // imprimía «nadie lo está trabajando ahora» sin consultar
+      // `procesos.porSlice`, que ya estaba en memoria.
+      expect(res.stdout).not.toMatch(/no hay ning.n proceso trabajando dentro/)
+      // La rama positiva sólo se exige si la comprobación de procesos se pudo
+      // hacer de verdad en esta máquina: si falta `lsof`, el comando calla, y
+      // eso es justo lo que la aserción de arriba ya protege.
+      if (!/no se pudo (listar procesos|leer el directorio)/.test(res.stderr)) {
+        expect(res.stdout).toMatch(new RegExp(`OJO: hay un proceso trabajando dentro ahora mismo \\(pid ${hijo.pid}\\)`))
+      }
+    } finally {
+      hijo.kill('SIGKILL')
+      limpiar(b)
+    }
+  })
+
+  it('si la comprobación de procesos falló, no se dice NADA sobre procesos', () => {
+    const b = bancada({ worktrees: [9] })
+    const bin = join(b.dir, 'bin')
+    mkdirSync(bin)
+    symlinkSync(execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim(), join(bin, 'git'))
+    symlinkSync(process.execPath, join(bin, 'node'))
+    const res = spawnSync(process.execPath, [script, '--repo', 'o/r'], {
+      encoding: 'utf8',
+      cwd: b.cwd,
+      env: { ...process.env, PATH: `${fakeGhDir}:${bin}`, FAKE_GH_COUNTER_FILE: b.counter, FAKE_GH_LIST_SEQUENCE: SIN_ISSUES },
+    })
+    expect(res.status).toBe(1)
+    expect(res.stdout).toMatch(/\.worktrees\/9/)
+    expect(res.stdout).not.toMatch(/no hay ning.n proceso trabajando dentro/)
+    expect(res.stdout).not.toMatch(/OJO: hay un proceso/)
+    limpiar(b)
+  })
+})
+
+describe('/ct-status — el informe entero llega al otro lado de la tubería', () => {
+  it('un informe largo capturado por un padre no se trunca a 65536 bytes', () => {
+    const b = bancada()
+    // `process.stdout` es asíncrono hacia una tubería en POSIX: con
+    // `process.exit()` el proceso muere sin esperar a vaciarlo, y el informe
+    // llegaba cortado a mitad de línea al tamaño del buffer del pipe del SO —
+    // con el exit code intacto, así que nada delataba el corte.
+    const cerrados = Array.from({ length: 2000 }, (_, i) => ({ number: i + 1, body: '', labels: [{ name: 'status:in-review' }], state_reason: 'completed' }))
+    const seqFile = join(b.dir, 'seq.json')
+    writeFileSync(seqFile, JSON.stringify([[], cerrados]))
+    const res = correr(b, { FAKE_GH_LIST_SEQUENCE_FILE: seqFile })
+    expect(res.status).toBe(3)
+    expect(res.stdout.length).toBeGreaterThan(65536)
+    const ultima = res.stdout.trimEnd().split('\n').pop()
+    expect(ultima).toMatch(/^exit 3 — hay 2000 cosa\(s\) que revisar$/)
     limpiar(b)
   })
 })

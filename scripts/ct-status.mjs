@@ -153,6 +153,12 @@ try {
 
 const mapeados = abiertos.map(mapGhIssue)
 const enProgreso = mapeados.filter((i) => i.status === 'in-progress').map((i) => ({ n: i.n, nombre: i.name }))
+// enRevision: trabajo ENTREGADO que espera merge. Es la segunda de las tres
+// preguntas del §3.2 («qué está en vuelo, qué ha entregado, qué es residuo») y
+// hasta ahora el comando no la respondía: sus worktrees caían en RESIDUO y
+// disparaban exit 3 sobre un loop perfectamente sano. Ver el comentario de
+// `enRevision` en loop-estado.js para por qué no es residuo ni cosecha.
+const enRevision = mapeados.filter((i) => i.status === 'in-review').map((i) => ({ n: i.n, nombre: i.name }))
 const mergeados = filterMergedIssues(cerrados)
 const cerradosConStatus = closedWithLiveStatus(cerrados)
 // statusAbiertoPorNumero: para poder decir la VERDAD sobre un worktree que
@@ -161,18 +167,64 @@ const cerradosConStatus = closedWithLiveStatus(cerrados)
 const statusAbiertoPorNumero = new Map(mapeados.map((i) => [String(i.n), i.status]))
 
 // ------------------------------------------------------------ el checkout ---
-// La raíz del repo local. Ojo con lo que este comando NO comprueba: que el
-// checkout desde el que se invoca sea el de `--repo`. /ct-next sí lo exige,
-// porque va a crear ramas y worktrees dentro; aquí no se escribe nada, así que
-// la única consecuencia de invocarlo desde otro sitio es un informe que cruza
-// los issues de un repo con los worktrees de otro. Queda dicho en
-// commands/ct-status.md, donde lo lee quien usa el comando.
-let repoRoot = null
-try {
-  repoRoot = git(['rev-parse', '--show-toplevel']).trim()
-} catch (e) {
-  motivos.push(`no se pudo resolver la raíz del repo git local (${(e.stderr ? String(e.stderr).trim() : '') || e.message}): no se han podido mirar ni los worktrees, ni las ramas, ni los procesos`)
+// La mitad LOCAL de este informe —worktrees, ramas, procesos— sale de un
+// checkout; la mitad remota sale de `--repo`. Cruzarlas sin comprobar que
+// hablan del MISMO repositorio no produce un informe incompleto: produce
+// hallazgos FABRICADOS. Medido: `--repo` apuntando a otro repo daba 4
+// hallazgos con cero avisos y exit 3 — uno de ellos la acusación de abandono
+// que el §4 del diseño llama «el peor fallo posible de este comando», y tres
+// worktrees marcados como candidatos a `git worktree remove`. Que este comando
+// no escriba nada no protege de nada: escribe el humano, por indicación suya.
+//
+// Y la raíz tiene que ser la del CHECKOUT PRINCIPAL, no la de `git rev-parse
+// --show-toplevel`. Invocado desde dentro de `.worktrees/7`, `--show-toplevel`
+// devuelve ese mismo worktree: ahí no hay ningún `.worktrees/` (todo sale
+// `worktree ✗`) y el prefijo con el que `liveSliceProcesses` mapea cada `cwd`
+// a un slice queda mal (todo sale `proceso ✗`) — el informe niega justo el
+// directorio en el que estás parado. `git worktree list --porcelain` lista
+// SIEMPRE el checkout principal el primero.
+//
+// A diferencia de /ct-next (`ensureRepoIdentity`, que aborta con exit 1 porque
+// va a crear ramas y worktrees), aquí no se aborta: una comprobación que no se
+// puede hacer es exactamente un `sinComprobar` con exit 1. Se dice cuál es la
+// mitad que no es fiable y se sigue informando de la otra.
+const detalleDe = (e) => (e && e.stderr ? String(e.stderr).trim() : '') || (e && e.message) || 'error desconocido'
+
+function motivoDeIdentidad(root, esperado) {
+  let originUrl
+  try {
+    originUrl = git(['-C', root, 'remote', 'get-url', 'origin']).trim()
+  } catch (e) {
+    // Sin remote `origin` no hay NADA que comparar. Se trata como "no
+    // verificable" —nunca como "adelante"—, mismo criterio que ct-next.mjs:
+    // un repo local sin origin es un entorno legítimo, y por eso esto degrada
+    // a exit 1 con su motivo en vez de tumbar el comando.
+    return `no se pudo verificar que ${root} sea el checkout de ${esperado}: no tiene remote "origin" (${detalleDe(e)})`
+  }
+  const m = originUrl.match(/github\.com[:/]+([^/]+)\/(.+?)(?:\.git)?\/?$/)
+  if (!m) return `no se pudo interpretar el remote "origin" de ${root} ("${originUrl}") como un repo de GitHub owner/repo, así que no se pudo verificar que sea el checkout de ${esperado}`
+  const real = `${m[1]}/${m[2]}`
+  if (real.toLowerCase() !== esperado.toLowerCase()) {
+    return `${root} es el checkout de ${real}, no de ${esperado}, y cruzar los issues de un repo con los worktrees de otro produce hallazgos que no existen`
+  }
+  return null
 }
+
+let repoRoot = null
+// motivoCheckout: por qué la mitad local no es utilizable. Viaja como el
+// `motivo` de `procesos` (ver más abajo) en vez de empujarse a `motivos`
+// aparte, para que la misma causa no produzca dos avisos distintos.
+let motivoCheckout = null
+try {
+  const linea = git(['worktree', 'list', '--porcelain']).split('\n').find((l) => l.startsWith('worktree '))
+  if (!linea) throw new Error('`git worktree list --porcelain` no devolvió ninguna entrada')
+  repoRoot = linea.slice('worktree '.length).trim()
+} catch (e) {
+  motivoCheckout = `no se pudo resolver la raíz del checkout principal (${detalleDe(e)})`
+}
+if (repoRoot) motivoCheckout = motivoDeIdentidad(repoRoot, repo)
+const checkoutComprobado = repoRoot !== null && motivoCheckout === null
+if (motivoCheckout) motivoCheckout += ': este informe no dice nada sobre worktrees, ramas ni procesos'
 
 // worktreesEnDisco / ramasEnDisco: un fallo de lectura NUNCA se traduce a «no
 // hay». Que `.worktrees/` no exista sí es una respuesta legítima (ningún
@@ -180,7 +232,7 @@ try {
 // se pudo hacer, y va a `motivos`.
 let worktreesEnDisco = []
 let ramasEnDisco = []
-if (repoRoot) {
+if (checkoutComprobado) {
   try {
     worktreesEnDisco = readdirSync(join(repoRoot, '.worktrees'), { withFileTypes: true })
       .filter((d) => d.isDirectory())
@@ -204,9 +256,9 @@ if (repoRoot) {
 // «¿queda rastro?». Devuelve `comprobado: false` con su motivo cuando pgrep o
 // lsof no están o fallan; el compositor lo convierte en `vivo: null` para todo
 // el mundo, nunca en «muerto».
-const procesos = repoRoot
+const procesos = checkoutComprobado
   ? liveSliceProcesses(repoRoot)
-  : { porSlice: new Map(), comprobado: false, motivo: 'no se pudo comprobar qué procesos trabajan en cada worktree: no se resolvió la raíz del repo local' }
+  : { porSlice: new Map(), comprobado: false, motivo: motivoCheckout }
 
 // ---------------------------------------------------- la edad de cada claim ---
 // Del TIMELINE del issue: el evento `labeled` más reciente para
@@ -254,6 +306,7 @@ if (!issuesLeidos && worktreesEnDisco.length) {
 }
 const estado = construirEstado({
   enProgreso,
+  enRevision,
   mergeados,
   cerradosConStatus,
   worktreesEnDisco: issuesLeidos ? worktreesEnDisco : [],
@@ -290,6 +343,24 @@ function formatearEdad(ms) {
   return `${Math.round(h / 24)} d`
 }
 
+// sufijoDeProceso: si alguien está trabajando AHORA dentro de ese worktree, y
+// sólo si se ha podido comprobar. La primera versión de este bloque decía
+// «nadie lo está trabajando ahora» sin mirar `procesos.porSlice` —que ya está
+// en memoria—, y la frase salía igual con un `claude` vivo dentro del
+// directorio, e igual también cuando la comprobación de procesos había FALLADO
+// (el aviso por stderr y la afirmación por stdout, a la vez). Es exactamente
+// la conflación que el §1.1 del diseño existe para romper —«existen
+// artefactos» frente a «alguien está trabajando ahora»— reintroducida en
+// prosa, y contradice el §4: cuando no se puede comprobar, no se acusa.
+// Cuando no se sabe, esta función no dice NADA.
+function sufijoDeProceso(w) {
+  if (!procesos.comprobado) return ''
+  const pid = procesos.porSlice.get(String(w))
+  return pid
+    ? ` — OJO: hay un proceso trabajando dentro ahora mismo (pid ${pid}), no lo borres`
+    : ' — y ahora mismo no hay ningún proceso trabajando dentro'
+}
+
 const lineas = []
 // Bloques vacíos NO se imprimen: un loop en reposo produce un informe corto,
 // no tres encabezados con «(ninguno)». El fallback que imprimía «(ninguno —
@@ -298,15 +369,34 @@ if (estado.enVuelo.length) {
   lineas.push(`EN VUELO (${estado.enVuelo.length})`)
   for (const s of estado.enVuelo) {
     lineas.push(`  #${s.n}  ${s.nombre}`)
-    const señales = [`worktree ${s.hasWorktree ? '✓' : '✗'}`, `rama ${s.hasBranch ? '✓' : '✗'}`, `proceso ${VIVO[String(s.vivo)]}`]
-    if (s.pid) señales.push(`pid ${s.pid}`)
-    let nota = ''
-    if (s.vivo === null) nota = '  ← no se pudo comprobar si hay alguien trabajando (ver los avisos)'
-    else if (s.arrancando) nota = '  ← arrancando: el claim es más reciente que la ventana de arranque, todavía no hay proceso que esperar'
-    else if (s.vivo === false && s.edadMs !== null) nota = '  ← SIN SEÑAL DE VIDA'
-    else if (s.vivo === false) nota = '  ← sin proceso, y sin saber de cuándo es el claim: no se acusa (ver los avisos)'
-    lineas.push(`        ${señales.join('  ')}${nota}`)
+    if (!checkoutComprobado) {
+      // `hasWorktree`/`hasBranch` son `false` aquí porque no se miró, no
+      // porque no estén: imprimir `worktree ✗` sería afirmar lo que no se ha
+      // comprobado, que es el mismo defecto que este comando persigue.
+      lineas.push('        worktree ?  rama ?  proceso ?  ← no se ha mirado ningún checkout (ver los avisos)')
+    } else {
+      const señales = [`worktree ${s.hasWorktree ? '✓' : '✗'}`, `rama ${s.hasBranch ? '✓' : '✗'}`, `proceso ${VIVO[String(s.vivo)]}`]
+      if (s.pid) señales.push(`pid ${s.pid}`)
+      let nota = ''
+      if (s.vivo === null) nota = '  ← no se pudo comprobar si hay alguien trabajando (ver los avisos)'
+      else if (s.arrancando) nota = '  ← arrancando: el claim es más reciente que la ventana de arranque, todavía no hay proceso que esperar'
+      else if (s.vivo === false && s.edadMs !== null) nota = '  ← SIN SEÑAL DE VIDA'
+      else if (s.vivo === false) nota = '  ← sin proceso, y sin saber de cuándo es el claim: no se acusa (ver los avisos)'
+      lineas.push(`        ${señales.join('  ')}${nota}`)
+    }
     if (s.edadMs !== null) lineas.push(`        claim puesto hace ${formatearEdad(s.edadMs)}`)
+  }
+}
+
+// Bloque informativo: NO cuenta como hallazgo (`hayHallazgos` no lo mira), así
+// que un loop sano con tres PRs abiertos vuelve a salir con 0. Distinto del
+// bloque de cosecha de aquí abajo, que es lo YA MERGEADO que dejó restos en
+// disco — los dos pueden aparecer a la vez.
+if (estado.enRevision.length) {
+  if (lineas.length) lineas.push('')
+  lineas.push(`ENTREGADO, ESPERANDO MERGE (${estado.enRevision.length})`)
+  for (const r of estado.enRevision) {
+    lineas.push(`  #${r.n}  ${r.nombre} — status:in-review`)
   }
 }
 
@@ -332,16 +422,15 @@ if (residuoTotal) {
   }
   for (const w of estado.residuo.worktreesHuerfanos) {
     // LA FRASE. El §6 del spec proponía «sin issue vivo que lo reclame», y esa
-    // frase es FALSA en el caso más común de todos: un issue ABIERTO que no
-    // está en `status:in-progress` (típicamente `status:in-review`, esperando
-    // merge) no lo explica ni `enProgreso` ni `mergeados`, así que cae aquí —
-    // con su issue perfectamente vivo. Son dos situaciones con dos remedios
-    // distintos y el informe las distingue, porque cruzar el nombre del
-    // directorio con los issues abiertos ya leídos no cuesta ninguna llamada.
+    // frase es FALSA cuando el issue está ABIERTO en un estado que no es
+    // `status:in-progress` (p.ej. `ready`, `blocked`): no lo explica ni
+    // `enProgreso` ni `mergeados`, así que cae aquí — con su issue vivo. Son
+    // situaciones distintas con remedios distintos, y distinguirlas no cuesta
+    // ninguna llamada: sale de los issues abiertos que ya se leyeron.
     const status = statusAbiertoPorNumero.get(w)
-    if (status) lineas.push(`  .worktrees/${w}  su issue #${w} sigue abierto (status:${status}) pero no está en vuelo: nadie lo está trabajando ahora`)
-    else if (/^\d+$/.test(w)) lineas.push(`  .worktrees/${w}  ningún issue lo reclama: no hay ninguno abierto con ese número, ni ninguno entregado que lo dejara atrás`)
-    else lineas.push(`  .worktrees/${w}  no corresponde al número de ningún issue`)
+    if (status) lineas.push(`  .worktrees/${w}  su issue #${w} sigue abierto (status:${status}) y no está en vuelo${sufijoDeProceso(w)}`)
+    else if (/^\d+$/.test(w)) lineas.push(`  .worktrees/${w}  ningún issue lo reclama: no hay ninguno abierto con ese número, ni ninguno entregado que lo dejara atrás${sufijoDeProceso(w)}`)
+    else lineas.push(`  .worktrees/${w}  no corresponde al número de ningún issue${sufijoDeProceso(w)}`)
   }
   // La nota es sobre worktrees, así que sólo aparece cuando hay alguno: con
   // residuo de labels a secas hablaría de algo que no está en el informe.
@@ -378,4 +467,18 @@ if (sinComprobar.length) {
 }
 console.log(lineas.join('\n'))
 
-process.exit(sinComprobar.length ? 1 : (estado.hayHallazgos ? 3 : 0))
+// `process.exitCode` y NO `process.exit(code)` — la misma lección que ya está
+// escrita dos veces en este repo (ct-next.mjs, junto a su `finalExitCode`, y
+// la cabecera de __tests__/fixtures/fake-gh-bin/gh). `process.stdout` es
+// ASÍNCRONO hacia una tubería en POSIX, así que `process.exit()` mata el
+// proceso sin esperar a que se vacíe lo ya escrito. Medido con un informe de
+// 4003 hallazgos: 195 223 bytes a un fichero, y 65 536 por tubería —cortado a
+// mitad de línea, sin dejar rastro—. El exit code sobrevivía, así que la señal
+// de máquina no mentía; el PRODUCTO del comando sí, leído por `| less`,
+// `| tee`, una captura de cmux o cualquier padre que capture stdout. Es el bug
+// del §3.2 otra vez con otro mecanismo. Fijar el código y dejar que el proceso
+// termine solo conserva el mismo exit code y además vacía la salida; nada
+// mantiene vivo el event loop a estas alturas. Los abortos de arriba (exit 2
+// por un `--repo` mal puesto) sí usan `process.exit()`, con el mismo criterio
+// que ct-next.mjs: son una línea por console.error y no hay informe que vaciar.
+process.exitCode = sinComprobar.length ? 1 : (estado.hayHallazgos ? 3 : 0)

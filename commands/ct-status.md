@@ -5,7 +5,9 @@ description: Informe de estado del loop — qué está en vuelo, qué ha entrega
 node ${CLAUDE_PLUGIN_ROOT}/scripts/ct-status.mjs --repo "<owner/repo>"
 ```
 
-Responde de una sola vez la pregunta que el coordinador se contestaba a mano cada vez, cruzando `pgrep` + `lsof` + `gh issue view` + `gh pr list` + `git worktree list` + `git rev-list`: **¿en qué estado está el loop ahora mismo?** Se ejecuta desde el checkout del repo que se está mirando — los issues salen de `--repo`, pero los worktrees, las ramas y los procesos salen del checkout en el que lo invocas.
+Responde de una sola vez la pregunta que el coordinador se contestaba a mano cada vez, cruzando `pgrep` + `lsof` + `gh issue view` + `gh pr list` + `git worktree list` + `git rev-list`: **¿en qué estado está el loop ahora mismo?**
+
+**Se ejecuta desde el checkout del repo que se está mirando.** Los issues salen de `--repo`; los worktrees, las ramas y los procesos salen del checkout. El comando **comprueba que las dos mitades hablan del mismo repositorio** (el `origin` del checkout contra `--repo`) antes de mirar nada local: si no coinciden, o si no se puede verificar —un checkout sin `origin`, por ejemplo—, no inventa nada, avisa y sale con `1`. Sin esa comprobación, preguntar por otro repo producía cuatro hallazgos que no existían, incluida una acusación de abandono. Da igual desde qué directorio lo invoques: **desde dentro de un `.worktrees/<n>` también funciona**, porque resuelve el checkout principal, no el worktree en el que estás parado.
 
 **No muta nada.** Ni labels, ni worktrees, ni ramas: no hay una sola escritura en todo el camino, y hay un test que lo comprueba mirando el argv real con el que se llamó a `gh` (no la ausencia de errores — un comando puede mutar y salir con 0 tan campante). Esa es la propiedad que te deja invocarlo sin pensártelo, y la que permite que lo llame en bucle un vigilante externo. Todo lo que encuentra lo **nombra**; borrar el worktree de alguien que sigue trabajando es irreversible, así que eso lo decides tú.
 
@@ -36,13 +38,17 @@ Misma convención de tres estados que `/ct-groom`, así que no hay vocabulario n
 - `← SIN SEÑAL DE VIDA` — hay claim, el claim no es reciente, y no hay ningún proceso trabajando en ese worktree. Es el caso que ninguna otra señal del loop detecta: al morir, un agente deja worktree, rama y ventana de `cmux` en su sitio, así que todo lo demás sigue diciendo «vivo». Mira la ventana de `cmux` de ese slice; si de verdad no hay nadie, el remedio manual es devolver el claim a la cola —`gh issue edit <n> --repo <o/r> --add-label status:ready --remove-label status:in-progress`, el mismo comando que `/ct-next` imprime cuando tiene que revertir un claim a mano— y limpiar worktree y rama si vas a empezar de cero. (`dispatch-check --reopen` **no** sirve aquí: exige `status:in-review`, y esto está en `status:in-progress`.)
 - `proceso ?` — no se pudo comprobar. Lee el aviso: nadie está acusado de nada.
 
+**`ENTREGADO, ESPERANDO MERGE`** — los issues en `status:in-review`: trabajo terminado cuyo PR todavía no se ha mergeado. Es **informativo y no cuenta como hallazgo**: no altera el código de salida, y su worktree no es residuo (está ahí a propósito). Está aquí porque el comando responde tres preguntas —qué está en vuelo, **qué ha entregado**, qué es residuo— y ésta es la segunda. Lo único que hay que hacer con este bloque es mergear los PRs; recuerda que un `in-review` **retiene los tokens `area:`/`touches:` hasta el merge**, así que frena a sus vecinos de área. No confundir con el bloque de abajo: éste es lo que espera merge, aquél es lo ya mergeado que dejó restos. Los dos pueden salir a la vez.
+
 **`ENTREGADO, SIN COSECHAR`** — slices ya cerrados como completados que todavía dejan `.worktrees/<n>` o `feat/<n>` en disco. Ocupan sitio y, sobre todo, el worktree **bloquea el redespacho de ese número**. Cuando confirmes que no queda nada que rescatar: `git worktree remove .worktrees/<n>` y `git branch -d feat/<n>`.
 
 **`RESIDUO`** — dos cosas distintas, y el informe las distingue porque el remedio no es el mismo:
 
 - `#N cerrado, pero conserva status:…` — la label sobrevivió al cierre del issue. Cerrar el issue y quitarle la label son dos actos separados y nada comprueba el segundo, así que esto se acumula solo (medido en un repo real: 10 de 99 issues cerrados). Quítala con `gh issue edit <n> --repo <o/r> --remove-label status:<x>`.
-- `.worktrees/<n> su issue #N sigue abierto (status:…) pero no está en vuelo` — el issue está **vivo**, no abandonado: lo típico es un `status:in-review` esperando a que se mergee su PR, y en ese caso el worktree suele estar ahí a propósito. Sale nombrado igualmente porque mientras exista, `/ct-next` se niega a despachar ese número. No lo borres sin mirar el PR.
-- `.worktrees/<n> ningún issue lo reclama` — ni hay issue abierto con ese número ni consta ninguno entregado que lo dejara atrás: un worktree abandonado, requeueado, o de un issue cerrado sin mergear. Éste sí es el candidato claro a `git worktree remove`.
+- `.worktrees/<n> su issue #N sigue abierto (status:…) y no está en vuelo` — el issue está **vivo**, pero ni lo está trabajando nadie (no es `in-progress`) ni ha entregado (no es `in-review`, ésos van a su propio bloque): típicamente un `ready` o un `blocked` que dejó worktree de una vuelta anterior. Sale nombrado porque mientras exista, `/ct-next` se niega a despachar ese número.
+- `.worktrees/<n> ningún issue lo reclama` — ni hay issue abierto con ese número ni consta ninguno entregado que lo dejara atrás: un worktree abandonado, requeueado, o de un issue cerrado sin mergear. Éste es el candidato claro a `git worktree remove`.
+
+**Antes de borrar, lee la coletilla de la línea.** Cuando la comprobación de procesos se ha podido hacer, cada worktree del bloque dice si hay alguien trabajando dentro **ahora mismo** (`OJO: hay un proceso trabajando dentro ahora mismo (pid N), no lo borres`) o si no lo hay. Si la comprobación falló, la línea **no dice nada** sobre procesos — el silencio ahí significa «no se sabe», nunca «no hay nadie».
 
 ## Qué significa exactamente «sin señal de vida»
 
