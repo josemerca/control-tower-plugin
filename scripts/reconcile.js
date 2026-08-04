@@ -517,9 +517,11 @@ export function buildReconcileEditArgs(diff) {
 // contexto heredado (ver diffIssue). "De quién es el texto" NO es lo que
 // distingue a estas dos listas: el spec posee las CUATRO primeras por
 // igual — el enlace deriva de la ruta del propio spec (F10); AC/Dependencias
-// de la tabla §9; y Descripción/Protegido de las columnas Entrega/Protegido
-// de esa misma tabla (renderDescripcion/renderProtectedLine, groom.js — ver
-// también el comentario de diffIssue más arriba, "el spec los posee").
+// de la tabla §9; el contexto del epic, de la sección homónima que trae el
+// propio spec (groom.js#readEpicContext); y Descripción/Protegido de las
+// columnas Entrega/Protegido de esa misma tabla (renderDescripcion/
+// renderProtectedLine, groom.js — ver también el comentario de diffIssue más
+// arriba, "el spec los posee").
 //
 // Lo que sí distingue es el DERECHO DE EDICIÓN después de crear el issue.
 // Descripción y Protegido son prosa que un humano edita de forma rutinaria y

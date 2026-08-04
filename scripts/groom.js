@@ -34,10 +34,12 @@ export const INHERITED_CONTEXT_PLACEHOLDER =
 
 // truncationLine: la línea que truncó la sección, si resulta que locateSection
 // cortó antes de una cabecera H1/H2 o del final del fichero. `locateSection`
-// termina la sección cuando encuentra una cabecera de CUALQUIER nivel. Eso es
-// legítimo si es H1 o H2 (solo terminan la sección normalmente), pero si es
-// H3+ (subcabecera del epic), un comentario HTML autocontenido u otra cosa,
-// hay un truncamiento que pierde contenido. Esta función devuelve esa línea
+// termina la sección cuando encuentra una cabecera de CUALQUIER nivel, o un
+// comentario HTML autocontenido (uno que abre y cierra en la misma línea —
+// ver gh-issue-map.js#locateSection). Terminar en una cabecera es legítimo si
+// es H1 o H2 (solo terminan la sección normalmente), pero si es H3+
+// (subcabecera del epic), o si es el comentario autocontenido, hay un
+// truncamiento que pierde contenido. Esta función devuelve esa línea
 // ofensora, o null si no la hay.
 //
 // El regex de cabeceras H1/H2 aquí debe ser coherente con ATX_HEADING_RE en
