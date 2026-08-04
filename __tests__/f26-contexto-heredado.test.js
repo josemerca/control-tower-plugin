@@ -8,6 +8,7 @@ import {
   readEpicContext, buildIssueBody, groomPlan,
 } from '../scripts/groom.js'
 import { makeSpecDir } from './fixtures/spec-repo.js'
+import { renderKickoff } from '../scripts/kickoff.js'
 
 // El guardarraíl de truncamientos no es una preferencia de estilo: la sección
 // se reescribe entera desde el spec, y ese reemplazo termina en la primera
@@ -392,5 +393,36 @@ describe('buildReconcileBody — reescribe el del epic, no toca el heredado', ()
   it('un cambio SÓLO en el heredado no produce ninguna escritura', () => {
     const yaAlDia = CON_AMBAS.replace('- regla VIEJA', '- regla NUEVA').replace('- AC-VIEJO', '- AC-NUEVO')
     expect(buildReconcileBody(yaAlDia, wanted()).body).toBeNull()
+  })
+})
+
+// ============================================================================
+// Task 6: renderKickoff nombra las dos secciones de contexto
+// ============================================================================
+
+describe('renderKickoff — nombra las dos secciones', () => {
+  const K = () => renderKickoff({ n: 7, name: 'card', type: 'ui', ac: ['AC-7.1'], deps: [], issue: '#7' }, { repo: 'o/r' })
+
+  it('nombra las dos cabeceras EXACTAS que emite el groom', () => {
+    expect(K()).toContain(EPIC_CONTEXT_HEADING)
+    expect(K()).toContain(INHERITED_CONTEXT_HEADING)
+  })
+
+  it('no interpola el texto de ninguna: sólo las nombra', () => {
+    // El kickoff se teclea entero en un pty y estas secciones son prosa de
+    // longitud arbitraria — mismo criterio ya tomado para Out of scope.
+    const k = renderKickoff(
+      { n: 7, name: 'card', type: 'ui', ac: ['AC-7.1'], deps: [], issue: '#7', epicContext: 'TEXTO QUE NO DEBE APARECER' },
+      { repo: 'o/r' },
+    )
+    expect(k).not.toContain('TEXTO QUE NO DEBE APARECER')
+  })
+
+  it('es honesto con los dos casos sin contenido: vacía y ausente', () => {
+    expect(K()).toMatch(/vacía|no está|no aparece/)
+  })
+
+  it('sigue nombrando Out of scope / Protected — no lo desplaza', () => {
+    expect(K()).toContain('## Out of scope / Protected')
   })
 })
