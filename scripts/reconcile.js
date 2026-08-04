@@ -546,11 +546,11 @@ export function buildReconcileEditArgs(diff) {
 // reconvierte a CRLF antes de devolverlo (`detectLineEnding`), para no
 // dejar un body con finales de línea mezclados (review round 4, menor).
 //
-// Devuelve `{ body, unresolvedAc, unresolvedDeps }`: `body` es el body
-// spliceado (en el mismo final de línea que el original), o `null` si nada
-// necesitaba cambiar. `unresolvedAc`/`unresolvedDeps` son ciertos cuando el
-// diff SÍ pedía un cambio pero no se pudo aplicar sin adivinar una
-// posición:
+// Devuelve `{ body, unresolvedAc, unresolvedDeps, unresolvedEpicContext }`:
+// `body` es el body spliceado (en el mismo final de línea que el original), o
+// `null` si nada necesitaba cambiar. `unresolvedAc`/`unresolvedDeps` son
+// ciertos cuando el diff SÍ pedía un cambio pero no se pudo aplicar sin
+// adivinar una posición:
 //   - AC: su cabecera SIEMPRE debería existir en un body bien formado; si
 //     un humano la renombra o la borra, no hay dónde escribir el reemplazo.
 //   - Dependencias (review round 4, Critical 3): si la sección no existe Y
@@ -563,6 +563,15 @@ export function buildReconcileEditArgs(diff) {
 //     "merge-after #N" repetido. Ahora, sin un ancla segura, se RIÈNDE
 //     igual que AC: no inserta nada, marca `unresolvedDeps`, dejando que
 //     la maquinaria de gaps lo reporte y cuente para el exit code.
+//
+// `unresolvedEpicContext` es distinto de esos dos: es una CADENA con el
+// motivo (o `null` si no hubo ninguno), y NO entra en `reconcileGaps` ni
+// puede mover el exit code — §4.4 del diseño: ni una divergencia ni un
+// duplicado de esta sección sale nunca 3, porque eso dejaría en 3 para
+// siempre a todo issue groomeado antes de F26. Existe para que la rendición
+// no sea SILENCIOSA: AC y Dependencias se rinden en voz alta desde la ronda
+// 4, y esta sección se rendía sin decir nada, con lo que el caller informaba
+// "reconciliado" de una sección que no se había tocado.
 //
 // "¿Necesita cambiar?" se decide con diffSet/depsInSection/acInSection (el
 // MISMO criterio, y el MISMO dominio — section-scoped — que usa diffIssue)
@@ -578,6 +587,7 @@ export function buildReconcileBody(existingBody, wantedIssue) {
   let changed = false
   let unresolvedAc = false
   let unresolvedDeps = false
+  let unresolvedEpicContext = null
 
   const specLinkLoc = locateLine(body, SPEC_LINK_PREFIXES)
   const currentSpecLink = specLinkLoc ? specLinkLoc.line : null
@@ -687,9 +697,13 @@ export function buildReconcileBody(existingBody, wantedIssue) {
       if (acLoc) {
         body = body.slice(0, acLoc.headingStart) + `${EPIC_CONTEXT_HEADING}\n${wantedEpic}\n\n` + body.slice(acLoc.headingStart)
         changed = true
+      } else {
+        // Sin ancla: no se escribe nada y no se marca ningún gap (esta sección
+        // nunca cuenta para el exit code, así que no puede producir uno) —
+        // pero SÍ se dice. Rendirse en silencio dejaba al caller anunciando
+        // "reconciliado" sobre una sección que seguía sin existir.
+        unresolvedEpicContext = 'sin-ancla'
       }
-      // Sin ancla: no se escribe nada y no se marca ningún gap. Esta sección
-      // nunca cuenta para el exit code, así que no puede producir uno.
     } else if (!wantedEpic && epicLoc) {
       // El spec ya no trae contexto del epic: la sección se retira ENTERA,
       // cabecera incluida. Se recorta un '\n' del final del primer trozo para
@@ -701,7 +715,7 @@ export function buildReconcileBody(existingBody, wantedIssue) {
     }
   }
 
-  if (!changed) return { body: null, unresolvedAc, unresolvedDeps }
+  if (!changed) return { body: null, unresolvedAc, unresolvedDeps, unresolvedEpicContext }
   const finalBody = eol === '\r\n' ? body.replace(/\n/g, '\r\n') : body
-  return { body: finalBody, unresolvedAc, unresolvedDeps }
+  return { body: finalBody, unresolvedAc, unresolvedDeps, unresolvedEpicContext }
 }

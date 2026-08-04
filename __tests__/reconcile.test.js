@@ -506,9 +506,9 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
   const GENERATED = buildIssueBody(SLICE, SPEC_OPTS)
   const WANTED_BASE = { deps: [1], ac: ['AC-2.1'], specLink: '> Slice `#2` del epic. Spec: [spec.md § 9. Slices](https://github.com/o/r/blob/main/spec.md#9-slices)' }
 
-  it('sin divergencia de nada → body: null, unresolvedAc/unresolvedDeps: false (nada que aplicar)', () => {
+  it('sin divergencia de nada → body: null, ninguna rendición marcada (nada que aplicar)', () => {
     const r = buildReconcileBody(GENERATED, WANTED_BASE)
-    expect(r).toEqual({ body: null, unresolvedAc: false, unresolvedDeps: false })
+    expect(r).toEqual({ body: null, unresolvedAc: false, unresolvedDeps: false, unresolvedEpicContext: null })
   })
 
   it('mismo conjunto de AC en otro orden → body: null (diffAc no lo considera divergencia, buildReconcileBody tampoco reescribe)', () => {

@@ -439,3 +439,137 @@ describe('renderKickoff — nombra las dos secciones', () => {
     expect(K()).toContain('## Out of scope / Protected')
   })
 })
+
+// ============================================================================
+// REVIEW FINAL DE RAMA — C1: la costura entre las funciones puras de arriba y
+// ct-groom.mjs. Todo lo anterior de este fichero prueba las piezas por
+// separado; el defecto vivía justo en el punto donde el wrapper las une, y por
+// eso ningún test lo veía: --reconcile calculaba el body nuevo y lo tiraba
+// cuando la ÚNICA divergencia era el contexto del epic (el escenario primario
+// de la feature), porque gateaba la escritura en `hasDrift`, que excluye esta
+// sección a propósito (§4.4). Son DOS preguntas distintas: "¿hay algo que
+// escribir?" no es "¿esto cuenta para el exit code?".
+// ============================================================================
+import { specUrl } from './fixtures/spec-repo.js'
+
+const SPEC_REF_E2E = { path: 'spec.md', heading: '9. Slices', url: specUrl('spec.md'), reason: null }
+const SLICE_1 = { n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps: [], ac: ['AC-1.1'], protected: 'schema' }
+// Las labels que el plan produce hoy para SLICE_1 (verificado contra
+// groom.js#buildLabels). `status:` nunca se compara, así que da igual cuál
+// lleve el issue.
+const LABELS_1 = [{ name: 'type:backend' }, { name: 'gate:none' }, { name: 'status:backlog' }]
+
+const ONE_SLICE_TABLE = [
+  '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |',
+  '|---|---|---|---|---|---|---|',
+  '| 1 | login | backend | modelo | – | AC-1.1 | schema |',
+].join('\n')
+
+const specConContexto = (contexto) => [
+  EPIC_CONTEXT_HEADING, contexto, '', '## 9. Slices', ONE_SLICE_TABLE, '',
+].join('\n')
+
+function invoke(specText, issues, extraArgs) {
+  const dir = makeSpecDir('f26-')
+  const spec = join(dir, 'spec.md')
+  writeFileSync(spec, specText)
+  const res = spawnSync('node', [groomScript, spec, '--repo', 'o/r', '--milestone', 'Epic', ...extraArgs], {
+    encoding: 'utf8',
+    stdio: QUIET_STDIO,
+    env: fakeEnv({
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([issues]),
+    }),
+  })
+  rmSync(dir, { recursive: true, force: true })
+  return res
+}
+
+const issueCon = (epicContext) => ({
+  number: 501,
+  title: '#1 login',
+  state: 'open',
+  milestone: { title: 'Epic' },
+  labels: LABELS_1,
+  body: buildIssueBody(SLICE_1, SPEC_REF_E2E, epicContext),
+})
+
+describe('C1 — el contexto del epic como ÚNICA divergencia sí se escribe', () => {
+  it('--dry-run --reconcile lo anuncia con una línea "aplicaría" que nombra la sección', () => {
+    const res = invoke(specConContexto('- regla NUEVA'), [issueCon('- regla VIEJA')], ['--dry-run', '--reconcile'])
+    expect(res.status).toBe(0) // §4.4: esta sección jamás produce un 3
+    expect(res.stderr).toMatch(/--reconcile aplicaría: gh issue edit 501/)
+    // El preview nombra lo que de verdad cambiaría, no una lista fija de
+    // categorías que aquí sería falsa (ni deps ni AC divergen).
+    expect(res.stderr).toMatch(/aplicaría.*contexto del epic/)
+    expect(res.stderr).not.toMatch(/aplicaría.*criterios de aceptación/)
+  })
+
+  it('la corrida real llama a `gh issue edit` con el --body reescrito, y el resumen nombra la categoría', () => {
+    const res = invoke(specConContexto('- regla NUEVA'), [issueCon('- regla VIEJA')], ['--reconcile'])
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/issue #501 reconciliado \(orden #1\): .*contexto del epic/)
+    expect(res.stdout).not.toMatch(/reconciliado \(orden #1\): *$/m) // nunca un dos-puntos pelado
+  })
+
+  it('sin --reconcile no se escribe nada, y el exit sigue siendo 0 (nunca 3 por esta sección)', () => {
+    const res = invoke(specConContexto('- regla NUEVA'), [issueCon('- regla VIEJA')], [])
+    expect(res.status).toBe(0)
+    expect(res.stderr).toMatch(/^nota:.*Contexto del epic/m)
+    expect(res.stderr).not.toMatch(/^divergencia:.*Contexto del epic/m)
+  })
+
+  it('sin ninguna divergencia (el contexto ya coincide) no se llama a `gh issue edit`', () => {
+    const res = invoke(specConContexto('- regla NUEVA'), [issueCon('- regla NUEVA')], ['--dry-run', '--reconcile'])
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/aplicaría/)
+  })
+})
+
+// La rendición sin ancla ya estaba probada en la capa pura (más arriba: "sin
+// Acceptance criteria como ancla, NO inserta nada"). Lo que faltaba es que se
+// DIGA: AC y Dependencias se rinden en voz alta desde la review round 4, y
+// ésta lo hacía en silencio — con el arreglo de C1, el caller pasaba a
+// anunciar una escritura que no existía.
+describe('la rendición del contexto del epic se dice, y sigue sin mover el exit code', () => {
+  const SIN_ANCLA_TABLE = [
+    '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |',
+    '|---|---|---|---|---|---|---|',
+    '| 1 | login | backend | modelo | – | – | schema |',
+  ].join('\n')
+
+  // Un cuerpo sin "## Acceptance criteria" (un humano la borró) y sin la
+  // sección del epic: no hay dónde insertarla en su sitio. La tabla no pide
+  // ningún criterio, así que AC no diverge y no hay ningún gap que sí cuente.
+  const SIN_ANCLA_BODY = [
+    `> Slice \`#1\` del epic. Spec: [spec.md § 9. Slices](${specUrl('spec.md')})`,
+    '',
+    '## Descripción',
+    'modelo',
+    '',
+    INHERITED_CONTEXT_HEADING,
+    'lo de la coordinadora',
+    '',
+    '## Out of scope / Protected',
+    '- 🚫 schema',
+    '',
+    '<!-- ct-order:1 -->',
+  ].join('\n')
+
+  const spec = [EPIC_CONTEXT_HEADING, '- regla', '', '## 9. Slices', SIN_ANCLA_TABLE, ''].join('\n')
+  const issue = { number: 501, title: '#1 login', state: 'open', milestone: { title: 'Epic' }, labels: LABELS_1, body: SIN_ANCLA_BODY }
+
+  it('lo dice como nota:, nombra el ancla que falta, y no escribe nada', () => {
+    const res = invoke(spec, [issue], ['--dry-run', '--reconcile'])
+    expect(res.status).toBe(0)
+    expect(res.stderr).toMatch(/nota:.*NO ha reescrito la sección "## Contexto del epic"/)
+    expect(res.stderr).toMatch(/Acceptance criteria.*ancla/)
+    expect(res.stderr).not.toMatch(/aplicaría/) // no hay body nuevo: no se anuncia ninguna escritura
+  })
+
+  it('la sección heredada sigue intacta y sin compararse', () => {
+    const res = invoke(spec, [issue], ['--reconcile'])
+    expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(new RegExp(`divergencia.*${INHERITED_CONTEXT_HEADING}`))
+  })
+})
