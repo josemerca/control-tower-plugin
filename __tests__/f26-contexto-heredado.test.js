@@ -245,3 +245,64 @@ describe('/ct-groom --dry-run — el contexto del epic llega al plan', () => {
     expect(plan.issues.every((i) => !i.body.includes(EPIC_CONTEXT_HEADING))).toBe(true)
   })
 })
+
+// ============================================================================
+// Task 4: diffIssue compara "## Contexto del epic" contra el spec; la sección
+// heredada nunca se compara ni produce campo alguno.
+// ============================================================================
+import { diffIssue, hasDrift, formatDrift } from '../scripts/reconcile.js'
+
+const bodyCon = (epic, heredado) => [
+  '> Slice `#2` del epic. Spec: [docs/spec.md § 9. Slices](https://github.com/o/r/blob/main/docs/spec.md#9-slices)',
+  '',
+  ...(epic ? [EPIC_CONTEXT_HEADING, epic, ''] : []),
+  ...(heredado ? [INHERITED_CONTEXT_HEADING, heredado, ''] : []),
+  '## Acceptance criteria (EARS, 1:1 con tests)',
+  '- AC-2.1',
+  '',
+  '## Out of scope / Protected',
+  '- 🚫 nada',
+].join('\n')
+
+const WANTED = {
+  order: 2, title: '#2 card', labels: [], deps: [], ac: ['AC-2.1'],
+  descripcion: null, protectedLine: '- 🚫 nada', gatesContent: '',
+  specLink: '> Slice `#2` del epic. Spec: [docs/spec.md § 9. Slices](https://github.com/o/r/blob/main/docs/spec.md#9-slices)',
+  epicContext: '- regla nueva',
+}
+const existingWith = (body) => ({ number: 90, title: '#2 card', state: 'open', milestone: { title: 'E1' }, labels: [], body })
+
+describe('diffIssue — el contexto del epic se compara; el heredado nunca', () => {
+  it('detecta que el texto del epic difiere', () => {
+    const d = diffIssue(existingWith(bodyCon('- regla VIEJA', null)), WANTED, 'E1', [])
+    expect(d.epicContextDiffers).toBe(true)
+  })
+
+  it('null en los dos lados es acuerdo, no divergencia', () => {
+    const d = diffIssue(existingWith(bodyCon(null, null)), { ...WANTED, epicContext: null }, 'E1', [])
+    expect(d.epicContextDiffers).toBe(false)
+  })
+
+  it('NO cuenta para el exit code, ni divergiendo ni duplicada', () => {
+    const d = diffIssue(existingWith(bodyCon('- regla VIEJA', null)), WANTED, 'E1', [])
+    expect(hasDrift(d)).toBe(false)
+    const dup = bodyCon('- a', null) + `\n${EPIC_CONTEXT_HEADING}\n- b\n\n${INHERITED_CONTEXT_HEADING}\nx\n\n${INHERITED_CONTEXT_HEADING}\ny\n`
+    const d2 = diffIssue(existingWith(dup), { ...WANTED, epicContext: '- a' }, 'E1', [])
+    expect(d2.duplicateMachineSections).toEqual([])
+    expect(hasDrift(d2)).toBe(false)
+  })
+
+  it('se reporta como nota:, nunca como divergencia:', () => {
+    const d = diffIssue(existingWith(bodyCon('- regla VIEJA', null)), WANTED, 'E1', [])
+    const linea = formatDrift(d).find((l) => l.includes(EPIC_CONTEXT_HEADING))
+    expect(linea).toMatch(/^nota:/)
+  })
+
+  // La sección heredada es la petición literal del §4: el plugin no opina.
+  it('el contenido de la sección heredada no produce NINGÚN campo ni línea', () => {
+    const a = diffIssue(existingWith(bodyCon('- x', 'lo que escribio la coordinadora')), { ...WANTED, epicContext: '- x' }, 'E1', [])
+    const b = diffIssue(existingWith(bodyCon('- x', 'algo COMPLETAMENTE distinto')), { ...WANTED, epicContext: '- x' }, 'E1', [])
+    expect(formatDrift(a)).toEqual(formatDrift(b))
+    expect(JSON.stringify(a)).toBe(JSON.stringify(b))
+  })
+})

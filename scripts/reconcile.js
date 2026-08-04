@@ -97,7 +97,7 @@ import {
 // como número de issue — un --reconcile con la copia vieja habría reescrito
 // el formato nuevo de vuelta al viejo, reintroduciendo el enlace falso en
 // cada corrida).
-import { renderDepsContent, renderAcContent, GATES_HEADING } from './groom.js'
+import { renderDepsContent, renderAcContent, GATES_HEADING, EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING } from './groom.js'
 
 // ownedLabelsOnly: el spec solo es autoridad sobre un prefijo (`type:`,
 // `area:`, `touches:`) SI la tabla §9 trae la columna que lo alimenta
@@ -212,6 +212,12 @@ const DUPLICATE_CHECKS = [
   // de gate REAL no pase desapercibida.
   { headings: GATES_HEADING, label: 'Gates', machine: false },
   { headings: '## Out of scope / Protected', label: 'Out of scope / Protected', machine: false },
+  // Las dos secciones de contexto duplicadas son cosméticas: ninguna máquina
+  // decide nada con ellas. Se avisa —un duplicado suele ser un merge mal
+  // resuelto, y quien edite la copia equivocada merece saberlo— pero anclar el
+  // exit code a esto entrenaría a ignorar el resto del informe.
+  { headings: EPIC_CONTEXT_HEADING, label: 'Contexto del epic', machine: false },
+  { headings: INHERITED_CONTEXT_HEADING, label: 'Contexto heredado', machine: false },
 ]
 
 // diffIssue: compara un issue EXISTENTE de verdad (la forma cruda de `gh api
@@ -301,6 +307,25 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
     descripcionDiffers = currentDescripcion.trim() !== wantedDescripcion.trim()
   }
 
+  // Contexto del epic: mismo criterio de tres estados que Descripción — null
+  // en ambos lados es acuerdo (silencio real), null en uno solo es
+  // divergencia, y sólo se compara el texto cuando los dos lados tienen
+  // sección.
+  //
+  // La sección heredada NO se compara aquí ni en ningún otro sitio: su dueño
+  // es quien la escribe, y el plugin no tiene ninguna opinión sobre su
+  // contenido. Que no aparezca en este diff es la propiedad, no un olvido.
+  const currentEpicContext = extractSectionContent(body, EPIC_CONTEXT_HEADING)
+  const wantedEpicContext = wantedIssue.epicContext ?? null
+  let epicContextDiffers
+  if (currentEpicContext === null && wantedEpicContext === null) {
+    epicContextDiffers = false
+  } else if (currentEpicContext === null || wantedEpicContext === null) {
+    epicContextDiffers = true
+  } else {
+    epicContextDiffers = currentEpicContext.trim() !== wantedEpicContext.trim()
+  }
+
   // Protegido: SIEMPRE debería existir (buildIssueBody la emite
   // incondicionalmente) — si la cabecera falta del todo en el issue
   // existente (un humano la borró a mano), se trata como divergencia.
@@ -343,6 +368,7 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
     deps,
     ac,
     descripcionDiffers,
+    epicContextDiffers,
     protectedDiffers,
     gatesDiffers,
     duplicateSections,
@@ -443,6 +469,14 @@ export function formatDrift(diff) {
     lines.push(`divergencia: ${head}: la sección "## ${section}" aparece más de una vez en el body — el dispatcher no reconstruye la intención de un humano a partir de "la primera" ni de "la unión": revisa y une o elimina la copia sobrante a mano`)
   }
   if (diff.descripcionDiffers) lines.push(`nota: ${head}: la sección "## Descripción" difiere del spec (prosa — no cuenta para el exit code; --reconcile no la reescribe)`)
+  // Task 4 vs brief: el brief pedía afirmar aquí "Con --reconcile se
+  // reescribe desde el spec" — falso en este commit, buildReconcileBody no
+  // toca esta sección todavía (esa reescritura es la tarea siguiente). Un
+  // mensaje que ve el usuario no puede afirmar un mecanismo que no existe
+  // aún, así que el texto se limita a lo que es cierto hoy: que la sección
+  // difiere, que no cuenta para el exit code, y que la sección de al lado
+  // (heredada) no la toca nadie nunca — sin decir quién reescribe esta.
+  if (diff.epicContextDiffers) lines.push(`nota: ${head}: la sección "${EPIC_CONTEXT_HEADING}" difiere del spec (no cuenta para el exit code). La sección "${INHERITED_CONTEXT_HEADING}" de al lado no se toca nunca`)
   if (diff.protectedDiffers) lines.push(`nota: ${head}: la sección "## Out of scope / Protected" difiere del spec (prosa — no cuenta para el exit code; --reconcile no la reescribe)`)
   // F21: se nombra la label como el canal que SÍ cuenta, para que quien lea
   // esta nota sepa dónde mirar si de verdad le preocupa un gate — sin esa
