@@ -573,3 +573,125 @@ describe('la rendición del contexto del epic se dice, y sigue sin mover el exit
     expect(res.stderr).not.toMatch(new RegExp(`divergencia.*${INHERITED_CONTEXT_HEADING}`))
   })
 })
+
+// ============================================================================
+// REVIEW FINAL DE RAMA — C2: los splices escribían DENTRO de "## Contexto
+// heredado". Todos los localizadores de buildReconcileBody son "primera
+// aparición sobre el body entero", sin ninguna noción de zona intocable. El
+// caso de uso real —la coordinadora pega contexto del issue del slice
+// anterior, que lleva las MISMAS cabeceras que todo issue del epic— convertía
+// su texto en el objetivo del splice. El placeholder promete por escrito lo
+// contrario: «`/ct-groom` no escribe aquí ni reescribe lo que escribas».
+// ============================================================================
+
+const SPEC_LINK_3 = `> Slice \`#3\` del epic. Spec: [spec.md § 9. Slices](${specUrl('spec.md')})`
+const FIN_DEL_PEGADO = 'Hasta aquí lo pegado por la coordinadora.'
+
+// El cuerpo real que reprodujo el defecto: la coordinadora pega el bloque de
+// criterios del slice #2 dentro de SU sección, cabecera incluida.
+const CON_PEGADO = (pegado) => [
+  SPEC_LINK_3,
+  '',
+  '## Descripción',
+  'flow',
+  '',
+  EPIC_CONTEXT_HEADING,
+  '- regla VIEJA',
+  '',
+  INHERITED_CONTEXT_HEADING,
+  'El slice #2 dejó montado el endpoint. Copio lo suyo:',
+  '',
+  ...pegado,
+  '',
+  FIN_DEL_PEGADO,
+  '',
+  '## Acceptance criteria (EARS, 1:1 con tests)',
+  '- AC-3.1 VIEJO',
+  '',
+  '## Dependencias',
+  '- merge-after `#2`',
+  '',
+  '## Out of scope / Protected',
+  '- 🚫 nada',
+  '',
+  '<!-- ct-order:3 -->',
+].join('\n')
+
+const WANTED_3 = { specLink: SPEC_LINK_3, ac: ['AC-3.1 NUEVO'], deps: [2], epicContext: '- regla NUEVA' }
+
+// Se compara con `trozo` (fragmento LITERAL entre dos anclas), nunca con
+// extractSectionContent: ése corta en la primera cabecera de cualquier nivel,
+// así que sobre una sección con cabeceras pegadas dentro compararía sólo su
+// primer trozo y daría por buena una sección destrozada.
+describe('C2 — nada de lo que escriba la coordinadora se toca', () => {
+  it('una cabecera de AC pegada dentro: su texto sobrevive byte a byte', () => {
+    const body = CON_PEGADO(['## Acceptance criteria (EARS, 1:1 con tests)', '- AC-2.1 de la coordinadora', '- AC-2.2 de la coordinadora'])
+    const r = buildReconcileBody(body, WANTED_3)
+    const resultado = r.body ?? body
+    expect(resultado).toContain(FIN_DEL_PEGADO)
+    expect(trozo(resultado, INHERITED_CONTEXT_HEADING, FIN_DEL_PEGADO))
+      .toBe(trozo(body, INHERITED_CONTEXT_HEADING, FIN_DEL_PEGADO))
+    // Y se dice: no se aplica a ciegas sobre la copia equivocada, se reporta.
+    expect(r.unresolvedAc).toBe(true)
+  })
+
+  it('una cabecera de Dependencias pegada dentro: su texto sobrevive byte a byte', () => {
+    const body = CON_PEGADO(['## Dependencias', '- merge-after `#1`'])
+    const r = buildReconcileBody(body, { ...WANTED_3, deps: [2, 5] })
+    const resultado = r.body ?? body
+    expect(trozo(resultado, INHERITED_CONTEXT_HEADING, FIN_DEL_PEGADO))
+      .toBe(trozo(body, INHERITED_CONTEXT_HEADING, FIN_DEL_PEGADO))
+    expect(r.unresolvedDeps).toBe(true)
+  })
+
+  it('la cabecera del contexto del epic pegada dentro: no se escribe en la copia de ella, y se dice', () => {
+    const body = CON_PEGADO([EPIC_CONTEXT_HEADING, '- la regla que le tocaba al slice #2'])
+    const r = buildReconcileBody(body, WANTED_3)
+    const resultado = r.body ?? body
+    expect(trozo(resultado, INHERITED_CONTEXT_HEADING, FIN_DEL_PEGADO))
+      .toBe(trozo(body, INHERITED_CONTEXT_HEADING, FIN_DEL_PEGADO))
+    expect(r.unresolvedEpicContext).toBe('duplicada')
+  })
+
+  it('el ancla de inserción de Dependencias también tiene que ser inequívoca', () => {
+    // Sin "## Dependencias" propia y con la de Protegido pegada dentro de la
+    // sección heredada: la inserción anclaba en la PRIMERA aparición, o sea
+    // dentro del texto de la coordinadora.
+    const body = [
+      SPEC_LINK_3, '',
+      INHERITED_CONTEXT_HEADING,
+      'Copio lo suyo:', '',
+      '## Out of scope / Protected',
+      '- 🚫 lo que protegía el slice #2',
+      '',
+      FIN_DEL_PEGADO, '',
+      '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-3.1 NUEVO', '',
+      '## Out of scope / Protected', '- 🚫 nada',
+    ].join('\n')
+    const r = buildReconcileBody(body, { specLink: SPEC_LINK_3, ac: ['AC-3.1 NUEVO'], deps: [2], epicContext: null })
+    const resultado = r.body ?? body
+    expect(trozo(resultado, INHERITED_CONTEXT_HEADING, FIN_DEL_PEGADO))
+      .toBe(trozo(body, INHERITED_CONTEXT_HEADING, FIN_DEL_PEGADO))
+    expect(r.unresolvedDeps).toBe(true)
+  })
+
+  it('la línea de enlace al spec pegada dentro no es la línea del issue', () => {
+    // Aquí sí muerde el rango prohibido literal: la línea de enlace no es una
+    // cabecera, así que no termina la sección heredada y vive DENTRO de ella.
+    const pegada = '> Slice `#2` del epic. Spec: [spec.md § 9. Slices](https://github.com/o/r/blob/main/OTRO.md#9-slices)'
+    const body = [
+      INHERITED_CONTEXT_HEADING,
+      'El slice #2 apuntaba a:',
+      pegada,
+      '',
+      FIN_DEL_PEGADO, '',
+      '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-3.1 NUEVO', '',
+      '## Out of scope / Protected', '- 🚫 nada',
+    ].join('\n')
+    const r = buildReconcileBody(body, { specLink: SPEC_LINK_3, ac: ['AC-3.1 NUEVO'], deps: [], epicContext: null })
+    expect(r.body).toContain(pegada) // intacta
+    expect(trozo(r.body, INHERITED_CONTEXT_HEADING, FIN_DEL_PEGADO))
+      .toBe(trozo(body, INHERITED_CONTEXT_HEADING, FIN_DEL_PEGADO))
+    expect(r.body).toContain(SPEC_LINK_3) // la del issue se antepone, como cuando falta del todo
+  })
+})

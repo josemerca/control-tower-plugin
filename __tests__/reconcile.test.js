@@ -508,7 +508,13 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
 
   it('sin divergencia de nada → body: null, ninguna rendición marcada (nada que aplicar)', () => {
     const r = buildReconcileBody(GENERATED, WANTED_BASE)
-    expect(r).toEqual({ body: null, unresolvedAc: false, unresolvedDeps: false, unresolvedEpicContext: null })
+    expect(r).toEqual({
+      body: null,
+      unresolvedAc: false,
+      unresolvedDeps: false,
+      unresolvedReasons: { ac: null, deps: null },
+      unresolvedEpicContext: null,
+    })
   })
 
   it('mismo conjunto de AC en otro orden → body: null (diffAc no lo considera divergencia, buildReconcileBody tampoco reescribe)', () => {

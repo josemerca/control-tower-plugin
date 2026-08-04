@@ -399,12 +399,16 @@ export function hasDrift(diff) {
 // reconcileGaps / hasReconcileGap: --reconcile puede REPORTAR una
 // divergencia sin poder APLICARLA. Dos formas distintas de esto:
 //   - ac/deps: la cabecera de la sección puede no existir (un humano la
-//     renombró o la borró), y sin ella `buildReconcileBody` no tiene dónde
-//     escribir el arreglo (ni inventa una posición para deps cuando
-//     tampoco hay un ancla segura — review round 4, Critical 3).
-//     `bodyResult` es el resultado de `buildReconcileBody` (más abajo, trae
-//     `unresolvedAc`/`unresolvedDeps`) — un gap real es "el diff dice que
-//     diverge Y buildReconcileBody no pudo tocarlo".
+//     renombró o la borró) y sin ella `buildReconcileBody` no tiene dónde
+//     escribir el arreglo (ni inventa una posición para deps cuando tampoco
+//     hay un ancla segura — review round 4, Critical 3); o puede aparecer
+//     MÁS DE UNA VEZ, y entonces ninguna de las copias se puede señalar como
+//     la del plugin (review final de rama, C2 — la coordinadora pega el
+//     cuerpo del issue anterior dentro de "## Contexto heredado", con sus
+//     cabeceras). `bodyResult` es el resultado de `buildReconcileBody` (más
+//     abajo, trae `unresolvedAc`/`unresolvedDeps` y el motivo de cada uno en
+//     `unresolvedReasons`) — un gap real es "el diff dice que diverge Y
+//     buildReconcileBody no pudo tocarlo".
 //   - duplicates (review round 5, Importante 3): una sección "machine"
 //     duplicada (diff.duplicateMachineSections) CUENTA para hasDrift, pero
 //     --reconcile no tiene ningún código que decida cuál copia es la
@@ -541,12 +545,24 @@ export function buildReconcileEditArgs(diff) {
 // reconstruye el body entero — así cualquier contenido humano antes/después
 // de esas secciones se preserva intacto.
 //
+// "Cada sección conocida" no es lo mismo que "la primera aparición de su
+// cabecera", y confundirlo era lo que rompía la promesa del placeholder de
+// "## Contexto heredado" (review final de rama, C2): la coordinadora pega ahí
+// el contexto del issue del slice anterior —que lleva las MISMAS cabeceras,
+// porque las escribe este mismo generador— y esa copia suya se convertía en el
+// objetivo del splice. Dos filtros lo impiden, y cubren cosas distintas: la
+// zona prohibida (`zonaHeredada`, para lo que no es cabecera y por tanto sí
+// puede vivir dentro de su sección — hoy la línea de enlace al spec) y la
+// negativa a splicear ninguna sección cuya cabecera aparezca más de una vez
+// (`seccionSpliceable`, que es lo que salva el caso de la cabecera pegada).
+// Ver el comentario de esa función para por qué hacen falta las dos.
+//
 // Todo el procesamiento interno trabaja sobre el body normalizado a LF
 // (`normalizeToLF`) — si el original usaba CRLF, el resultado se
 // reconvierte a CRLF antes de devolverlo (`detectLineEnding`), para no
 // dejar un body con finales de línea mezclados (review round 4, menor).
 //
-// Devuelve `{ body, unresolvedAc, unresolvedDeps, unresolvedEpicContext }`:
+// Devuelve `{ body, unresolvedAc, unresolvedDeps, unresolvedReasons, unresolvedEpicContext }`:
 // `body` es el body spliceado (en el mismo final de línea que el original), o
 // `null` si nada necesitaba cambiar. `unresolvedAc`/`unresolvedDeps` son
 // ciertos cuando el diff SÍ pedía un cambio pero no se pudo aplicar sin
@@ -588,8 +604,40 @@ export function buildReconcileBody(existingBody, wantedIssue) {
   let unresolvedAc = false
   let unresolvedDeps = false
   let unresolvedEpicContext = null
+  const unresolvedReasons = { ac: null, deps: null }
 
-  const specLinkLoc = locateLine(body, SPEC_LINK_PREFIXES)
+  // zonaHeredada: el rango del body que pertenece a la sesión coordinadora.
+  // Se RECALCULA en cada uso, no se cachea al principio: cada splice de aquí
+  // abajo cambia la longitud del body, y un rango calculado antes apuntaría a
+  // caracteres distintos después. Es puro y barato.
+  const zonaHeredada = () => {
+    const loc = locateSection(body, INHERITED_CONTEXT_HEADING)
+    return loc ? { start: loc.headingStart, end: loc.contentEnd } : null
+  }
+
+  // seccionSpliceable: dónde splicear una sección conocida, o por qué no se
+  // puede. Dos filtros, y hacen falta los dos porque cubren cosas distintas:
+  //
+  //   - `copias > 1` → AMBIGUA: no se toca. Es lo que salva el texto de la
+  //     coordinadora cuando lo que pegó en "## Contexto heredado" es una
+  //     cabecera conocida (pega el cuerpo del issue del slice anterior, que
+  //     lleva las mismas cabeceras que todos). La zona prohibida NO puede
+  //     salvarlo: `locateSection` termina la sección heredada en la primera
+  //     cabecera ATX, así que la cabecera pegada queda justo FUERA del rango,
+  //     no dentro — medido, no deducido. Y no hay forma de decidir cuál copia
+  //     es la del plugin sin inventarse un criterio: se rinde y se reporta,
+  //     que es exactamente lo que el informe ya le dice al usuario sobre las
+  //     secciones duplicadas ("--reconcile no decide cuál copia es la
+  //     correcta: une o borra la sobrante a mano").
+  //   - la zona prohibida → para lo que NO es cabecera y por tanto sí puede
+  //     vivir dentro de la sección heredada (hoy, la línea de enlace al spec;
+  //     ver `outsideOf` en gh-issue-map.js).
+  const seccionSpliceable = (headings) => {
+    if (countHeadingLines(body, headings) > 1) return { loc: null, ambigua: true }
+    return { loc: locateSection(body, headings, zonaHeredada()), ambigua: false }
+  }
+
+  const specLinkLoc = locateLine(body, SPEC_LINK_PREFIXES, zonaHeredada())
   const currentSpecLink = specLinkLoc ? specLinkLoc.line : null
   if (normalizeSpecLink(currentSpecLink) !== normalizeSpecLink(wantedIssue.specLink)) {
     if (specLinkLoc) {
@@ -605,25 +653,35 @@ export function buildReconcileBody(existingBody, wantedIssue) {
 
   const acDiff = diffAc(acInSection(body), wantedIssue.ac)
   if (acDiff.missing.length || acDiff.extra.length) {
-    const acLoc = locateSection(body, AC_HEADING_FORMS)
-    if (acLoc) {
-      body = body.slice(0, acLoc.headingEnd) + renderAcContent(wantedIssue.ac) + '\n' + body.slice(acLoc.contentEnd)
+    const ac = seccionSpliceable(AC_HEADING_FORMS)
+    if (ac.loc) {
+      body = body.slice(0, ac.loc.headingEnd) + renderAcContent(wantedIssue.ac) + '\n' + body.slice(ac.loc.contentEnd)
       changed = true
     } else {
-      // Cabecera "## Acceptance criteria" ausente por completo: no hay
-      // dónde escribir el reemplazo sin adivinar una posición — se rinde
-      // limpiamente en vez de inventar una, y lo informa (unresolvedAc)
-      // para que el caller nunca reporte esto como "aplicado".
+      // No hay dónde escribir el reemplazo sin adivinar: o la cabecera "##
+      // Acceptance criteria" no está por ninguna parte (un humano la renombró
+      // o la borró), o hay más de una y ninguna se puede señalar como la del
+      // plugin. Se rinde limpiamente en vez de inventarse una, y lo informa
+      // (unresolvedAc + el motivo) para que el caller nunca reporte esto como
+      // "aplicado".
       unresolvedAc = true
+      unresolvedReasons.ac = ac.ambigua ? 'duplicada' : 'sin-seccion'
     }
   }
 
   const depsDiff = diffDeps(depsInSection(body), wantedIssue.deps)
   const wantDeps = (wantedIssue.deps || []).length > 0
   if (depsDiff.missing.length || depsDiff.extra.length) {
-    const depsLoc = locateSection(body, '## Dependencias') // sobre el body YA actualizado (posiciones frescas tras los splices de arriba, si hubo alguno)
+    const deps = seccionSpliceable('## Dependencias') // sobre el body YA actualizado (posiciones frescas tras los splices de arriba, si hubo alguno)
+    const depsLoc = deps.loc
     const wantedDepsContent = renderDepsContent(wantedIssue.deps)
-    if (wantDeps && depsLoc) {
+    if (deps.ambigua) {
+      // Más de una "## Dependencias" en el body: ni reescribir la primera ni
+      // retirarla es defendible — la otra copia sigue ahí, y una de las dos
+      // puede ser texto pegado por la coordinadora en su sección.
+      unresolvedDeps = true
+      unresolvedReasons.deps = 'duplicada'
+    } else if (wantDeps && depsLoc) {
       body = body.slice(0, depsLoc.headingEnd) + wantedDepsContent + '\n' + body.slice(depsLoc.contentEnd)
       changed = true
     } else if (wantDeps && !depsLoc) {
@@ -635,13 +693,18 @@ export function buildReconcileBody(existingBody, wantedIssue) {
       // body — la alternativa (insertar al final a ciegas) creaba una
       // sección nueva EN CADA CORRIDA sin límite cuando el body tenía una
       // valla sin cerrar por delante.
-      const protectedLoc = locateSection(body, '## Out of scope / Protected')
-      if (protectedLoc) {
+      // El ancla también tiene que ser INEQUÍVOCA: si "## Out of scope /
+      // Protected" aparece dos veces (la coordinadora pegó el cuerpo del
+      // issue anterior, que la lleva), anclar en "la primera" es insertar
+      // dentro de su texto.
+      const ancla = seccionSpliceable('## Out of scope / Protected')
+      if (ancla.loc) {
         const insertion = `## Dependencias\n${wantedDepsContent}\n\n`
-        body = body.slice(0, protectedLoc.headingStart) + insertion + body.slice(protectedLoc.headingStart)
+        body = body.slice(0, ancla.loc.headingStart) + insertion + body.slice(ancla.loc.headingStart)
         changed = true
       } else {
         unresolvedDeps = true
+        unresolvedReasons.deps = ancla.ambigua ? 'ancla-duplicada' : 'sin-ancla'
       }
     } else if (!wantDeps && depsLoc) {
       // El spec ya no declara deps para este slice, pero el issue conserva
@@ -682,8 +745,13 @@ export function buildReconcileBody(existingBody, wantedIssue) {
       ? true
       : currentEpic.trim() !== wantedEpic.trim()
   if (epicDiffers) {
-    const epicLoc = locateSection(body, EPIC_CONTEXT_HEADING)
-    if (wantedEpic && epicLoc) {
+    const epic = seccionSpliceable(EPIC_CONTEXT_HEADING)
+    const epicLoc = epic.loc
+    if (epic.ambigua) {
+      // Dos copias de la sección del epic: una puede ser la que la
+      // coordinadora pegó dentro de la suya. No se escribe en ninguna.
+      unresolvedEpicContext = 'duplicada'
+    } else if (wantedEpic && epicLoc) {
       body = body.slice(0, epicLoc.headingEnd) + wantedEpic + '\n' + body.slice(epicLoc.contentEnd)
       changed = true
     } else if (wantedEpic && !epicLoc) {
@@ -693,16 +761,19 @@ export function buildReconcileBody(existingBody, wantedIssue) {
       // Sin ese ancla no se inventa una posición — insertar al final a ciegas
       // es lo que, con una valla de código sin cerrar por delante, añadía una
       // sección nueva en cada corrida sin límite.
-      const acLoc = locateSection(body, AC_HEADING_FORMS)
-      if (acLoc) {
-        body = body.slice(0, acLoc.headingStart) + `${EPIC_CONTEXT_HEADING}\n${wantedEpic}\n\n` + body.slice(acLoc.headingStart)
+      // El ancla tiene que ser inequívoca, por el mismo motivo que la de
+      // Dependencias: con dos "## Acceptance criteria" en el body, "la
+      // primera" puede ser la que la coordinadora pegó en su sección.
+      const ancla = seccionSpliceable(AC_HEADING_FORMS)
+      if (ancla.loc) {
+        body = body.slice(0, ancla.loc.headingStart) + `${EPIC_CONTEXT_HEADING}\n${wantedEpic}\n\n` + body.slice(ancla.loc.headingStart)
         changed = true
       } else {
         // Sin ancla: no se escribe nada y no se marca ningún gap (esta sección
         // nunca cuenta para el exit code, así que no puede producir uno) —
         // pero SÍ se dice. Rendirse en silencio dejaba al caller anunciando
         // "reconciliado" sobre una sección que seguía sin existir.
-        unresolvedEpicContext = 'sin-ancla'
+        unresolvedEpicContext = ancla.ambigua ? 'ancla-duplicada' : 'sin-ancla'
       }
     } else if (!wantedEpic && epicLoc) {
       // El spec ya no trae contexto del epic: la sección se retira ENTERA,
@@ -715,7 +786,7 @@ export function buildReconcileBody(existingBody, wantedIssue) {
     }
   }
 
-  if (!changed) return { body: null, unresolvedAc, unresolvedDeps, unresolvedEpicContext }
+  if (!changed) return { body: null, unresolvedAc, unresolvedDeps, unresolvedReasons, unresolvedEpicContext }
   const finalBody = eol === '\r\n' ? body.replace(/\n/g, '\r\n') : body
-  return { body: finalBody, unresolvedAc, unresolvedDeps, unresolvedEpicContext }
+  return { body: finalBody, unresolvedAc, unresolvedDeps, unresolvedReasons, unresolvedEpicContext }
 }

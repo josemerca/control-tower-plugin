@@ -188,12 +188,44 @@ function scanLines(body, predicate) {
     const line = lines[i]
     const step = stepLine(line, state)
     state = step.state
-    if (!step.wasHidden && predicate(line, i)) {
+    if (!step.wasHidden && predicate(line, i, offset)) {
       return { index: i, offset, line }
     }
     offset += line.length + 1
   }
   return null
+}
+
+// outsideOf (review final de rama, C2): el predicado "esta coincidencia NO
+// cae dentro de un rango prohibido del propio body". Una sola implementación,
+// compartida por locateSection y locateLine, porque el problema es el mismo
+// en las dos: ambas se quedan con la PRIMERA aparición sobre el body ENTERO,
+// sin ninguna noción de "esto de aquí es de otro dueño y no se toca".
+//
+// El caso real: la sesión coordinadora pega en "## Contexto heredado" el
+// contexto del issue del slice anterior — que lleva las MISMAS cabeceras y la
+// MISMA línea de enlace al spec que todo issue del epic, porque las escribe el
+// mismo generador. Sin este filtro, su texto se convierte en el objetivo del
+// splice, y el placeholder con el que se crea la sección («`/ct-groom` no
+// escribe aquí ni reescribe lo que escribas») pasa a ser mentira.
+//
+// `range` es `{ start, end }` en offsets absolutos del body, o null/undefined
+// (sin zona prohibida — el comportamiento de siempre). Intervalo semiabierto
+// [start, end): el carácter en `end` ya está fuera.
+//
+// LÍMITE MEDIDO, y hay que decirlo porque cambia qué protege esto de verdad:
+// el rango que se le pasa es el de la sección heredada según `locateSection`,
+// y esa función TERMINA la sección en la primera cabecera ATX que encuentre
+// (endurecimiento de F5, ronda 5). O sea: por construcción, NINGUNA cabecera
+// ATX puede caer dentro del rango — la primera que aparezca es justamente la
+// que lo cierra. Este filtro muerde, por tanto, sobre lo que NO es cabecera:
+// hoy, la línea de enlace al spec. Lo que protege el texto de la coordinadora
+// cuando lo que pegó es una CABECERA conocida es otra cosa, y está en
+// reconcile.js: no splicear ninguna sección cuya cabecera aparezca más de una
+// vez en el body, porque entonces no hay forma de saber cuál copia es la suya.
+function outsideOf(range) {
+  if (!range) return () => true
+  return (offset) => offset < range.start || offset >= range.end
 }
 
 // headingMatcher: `headings` es un string (la cabecera exacta) o un array
@@ -243,10 +275,15 @@ function headingMatcher(headings) {
 // SOLO esa sección, dejando intacto cualquier contenido humano antes,
 // después, o en cualquier sección nueva que el humano haya añadido en otro
 // punto del body.
-export function locateSection(body, headingText) {
+// `forbidden` (opcional, review final de rama C2): rango `{start, end}` del
+// body cuyo contenido pertenece a otro dueño. Una cabecera que caiga dentro
+// se DESCARTA y la búsqueda sigue con la siguiente aparición fuera del rango
+// — ver `outsideOf` arriba, incluido su límite medido.
+export function locateSection(body, headingText, forbidden = null) {
   const src = body || ''
   const matches = headingMatcher(headingText)
-  const heading = scanLines(src, matches)
+  const allowed = outsideOf(forbidden)
+  const heading = scanLines(src, (line, _i, offset) => matches(line) && allowed(offset))
   if (!heading) return null
   const headingStart = heading.offset
   // headingEnd: justo después del '\n' que cierra la línea de cabecera (si
@@ -307,9 +344,16 @@ export function extractSectionContent(body, headingText) {
 // que las englobe a las dos ("> Slice ", que también reclamaría una línea
 // citada cualquiera que empiece por esas palabras) — mismo criterio que
 // headingMatcher/AC_HEADING_FORMS.
-export function locateLine(body, prefix) {
+//
+// `forbidden` (opcional, review final de rama C2): mismo rango y mismo
+// criterio que en locateSection — ver `outsideOf`. Aquí es donde de verdad
+// muerde: la línea de enlace al spec NO es una cabecera, así que no cierra la
+// sección heredada y puede vivir dentro de ella (la coordinadora pega el
+// contexto del issue anterior, enlace incluido).
+export function locateLine(body, prefix, forbidden = null) {
   const prefixes = Array.isArray(prefix) ? prefix : [prefix]
-  const found = scanLines(body, (line) => prefixes.some((p) => line.startsWith(p)))
+  const allowed = outsideOf(forbidden)
+  const found = scanLines(body, (line, _i, offset) => prefixes.some((p) => line.startsWith(p)) && allowed(offset))
   if (!found) return null
   return { start: found.offset, end: found.offset + found.line.length, line: found.line }
 }

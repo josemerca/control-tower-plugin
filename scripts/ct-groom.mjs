@@ -588,6 +588,8 @@ function bodyDriftCategories(diff, bodyResult) {
 // AC y Dependencias se rinden en voz alta desde la review round 4.
 const EPIC_CONTEXT_SURRENDERS = {
   'sin-ancla': 'no existe la sección en el issue y tampoco "## Acceptance criteria", que es el único ancla seguro para insertarla en su sitio; añade a mano la sección (o la de AC) y vuelve a correr',
+  'ancla-duplicada': 'no existe la sección en el issue y su ancla ("## Acceptance criteria") aparece más de una vez, así que insertarla ahí podría escribir dentro de texto ajeno; deja una sola copia del ancla y vuelve a correr',
+  duplicada: 'aparece más de una vez en el body y no hay forma de saber cuál copia es la del plugin — una puede ser texto pegado dentro de "## Contexto heredado", que no se toca nunca; deja una sola copia y vuelve a correr',
 }
 
 // describeGaps (review round 3, Critical 2): nombra qué categorías, DE LAS
@@ -598,10 +600,31 @@ const EPIC_CONTEXT_SURRENDERS = {
 // sección "machine" duplicada — --reconcile no decide cuál copia es la
 // correcta, así que tampoco puede aplicar nada ahí; sin nombrarlo aquí,
 // esta misma divergencia salía 0 en silencio bajo --reconcile.
-function describeGaps(gaps) {
+//
+// GAP_REASONS (review final de rama, C2): el motivo exacto lo decide
+// buildReconcileBody (`unresolvedReasons`), no este fichero. Antes había una
+// sola frase por categoría —"no se encontró la sección"— que era cierta para
+// el caso original y dejó de serlo en cuanto aparecieron los otros dos: una
+// sección DUPLICADA sí se encuentra (el problema es que hay dos y ninguna se
+// puede señalar como la del plugin), y una inserción sin ancla no habla de la
+// sección que falta sino de la que tendría que servir de referencia.
+const GAP_REASONS = {
+  ac: {
+    'sin-seccion': 'no se encontró la sección "## Acceptance criteria" en el body',
+    duplicada: 'la sección "## Acceptance criteria" aparece más de una vez y no hay forma de saber cuál copia es la del plugin — puede ser texto pegado dentro de "## Contexto heredado"',
+  },
+  deps: {
+    'sin-seccion': 'no se encontró la sección "## Dependencias" en el body',
+    duplicada: 'la sección "## Dependencias" aparece más de una vez y no hay forma de saber cuál copia es la del plugin — puede ser texto pegado dentro de "## Contexto heredado"',
+    'sin-ancla': 'no existe la sección "## Dependencias" y tampoco "## Out of scope / Protected", que es el único ancla seguro para insertarla',
+    'ancla-duplicada': 'no existe la sección "## Dependencias" y su ancla ("## Out of scope / Protected") aparece más de una vez, así que insertarla ahí podría escribir dentro de texto ajeno',
+  },
+}
+function describeGaps(gaps, bodyResult) {
+  const reasons = bodyResult.unresolvedReasons || {}
   const parts = []
-  if (gaps.ac) parts.push('criterios de aceptación (no se encontró la sección "## Acceptance criteria" en el body)')
-  if (gaps.deps) parts.push('dependencias (no se encontró la sección "## Dependencias" en el body)')
+  if (gaps.ac) parts.push(`criterios de aceptación (${GAP_REASONS.ac[reasons.ac] ?? GAP_REASONS.ac['sin-seccion']})`)
+  if (gaps.deps) parts.push(`dependencias (${GAP_REASONS.deps[reasons.deps] ?? GAP_REASONS.deps['sin-seccion']})`)
   if (gaps.duplicates) parts.push('secciones duplicadas (## Dependencias/## Acceptance criteria — --reconcile no decide cuál copia es la correcta: une o borra la sobrante a mano)')
   return parts.join(' y ')
 }
@@ -862,7 +885,7 @@ if (typeof repo === 'string') {
     if (!found) continue
     for (const line of formatDrift(diff)) console.error(line)
     if (hasReconcileGap(gaps)) {
-      console.error(`aviso: slice #${diff.order} (issue #${found.number}) — --reconcile no puede aplicar del todo esta divergencia: ${describeGaps(gaps)}; revísala a mano en GitHub`)
+      console.error(`aviso: slice #${diff.order} (issue #${found.number}) — --reconcile no puede aplicar del todo esta divergencia: ${describeGaps(gaps, bodyResult)}; revísala a mano en GitHub`)
     }
     // La rendición del contexto del epic va por separado y como `nota:`: no
     // entra en `reconcileGaps` porque esta sección nunca cuenta para el exit
