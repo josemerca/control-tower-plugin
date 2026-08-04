@@ -23,6 +23,7 @@ import {
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 import { detectConventions, formatFindings } from './conventions.js'
 import { readRepoDocs, readAck, ACK_PATH } from './conventions-io.js'
+import { assessLocalLiveness } from './liveness.js'
 
 // W-C: dispatch-check.mjs implementa el protocolo de claim completo (colisión
 // + escritura + claim-then-verify) y ya está testeado en solitario, pero
@@ -616,42 +617,6 @@ function queryCmuxWorkspaceTitles() {
   return all.map((w) => w.title)
 }
 
-// `getCmuxTitles` es un THUNK, no el valor ya calculado (F13): la consulta a
-// cmux (list-windows + un workspace list por ventana, hasta
-// CMUX_QUERY_TIMEOUT_MS) solo se dispara si las DOS señales baratas y locales
-// —worktree en disco, rama en este checkout— han fallado ya. Antes el valor
-// llegaba precalculado, así que preguntar por la vida de un issue costaba
-// siempre la consulta completa aunque su worktree estuviera ahí delante.
-//
-// Importa desde F13/H3, que amplía la comprobación al caso "cap lleno" — el
-// resultado MÁS COMÚN de un /ct-next con algo corriendo. Sin esta inversión,
-// cada invocación rutinaria pagaría la consulta a cmux para no decir nada.
-// La semántica no cambia en absoluto: basta UNA señal de vida para no emitir
-// nota, y el orden en que se comprueban no altera esa conjunción.
-function assessLocalLiveness(n, getCmuxTitles) {
-  const wt = `${repoRoot}/.worktrees/${n}`
-  const hasWorktree = existsSync(wt)
-  let hasBranch = false
-  try {
-    execFileSync('git', ['rev-parse', '--verify', '--quiet', `refs/heads/feat/${n}`], {
-      cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
-    })
-    hasBranch = true
-  } catch {
-    hasBranch = false
-  }
-  // Corto aquí: con worktree o rama ya sabemos que NO hay nota que emitir, y
-  // `cmuxChecked` es irrelevante en ese camino (stalenessNote sale por el
-  // primer `return null`). Afirmar `cmuxChecked: false` sin haber preguntado
-  // sería correcto pero engañoso si alguien leyera el struct fuera de aquí,
-  // así que se marca explícitamente como no consultado.
-  if (hasWorktree || hasBranch) return { hasWorktree, hasBranch, hasCmuxWorkspace: false, cmuxChecked: false }
-  const cmuxTitles = getCmuxTitles()
-  const cmuxChecked = cmuxTitles !== null
-  const hasCmuxWorkspace = cmuxChecked && cmuxTitles.some((t) => new RegExp(`#${n}(\\D|$)`).test(t))
-  return { hasWorktree, hasBranch, hasCmuxWorkspace, cmuxChecked }
-}
-
 function stalenessNote(n, liveness) {
   if (liveness.hasWorktree || liveness.hasBranch || liveness.hasCmuxWorkspace) return null
   if (!liveness.cmuxChecked) {
@@ -682,7 +647,7 @@ function stalenessCtxFor() {
   }
   return {
     stalenessNoteFor(n) {
-      return stalenessNote(n, assessLocalLiveness(n, getCmuxTitles))
+      return stalenessNote(n, assessLocalLiveness(n, getCmuxTitles, { repoRoot, timeoutMs: childTimeoutFor() }))
     },
   }
 }
