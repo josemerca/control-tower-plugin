@@ -314,11 +314,11 @@ for (const { n } of enProgreso) {
 }
 
 // ------------------------------------------------------------ composición ---
-// Sin los issues, ni `enProgreso` ni `mergeados` pueden explicar un worktree,
-// así que TODO el que hubiera en disco saldría como huérfano. Ese hallazgo
-// sería fabricado — exactamente la clase de afirmación confiada sobre datos
-// incompletos que este comando existe para eliminar. Se dice que no se ha
-// mirado y se sigue.
+// Con la lista de issues incompleta no se puede decidir quién reclama un
+// worktree, así que acusar de huérfano a los que no aparezcan sería fabricar
+// el hallazgo — exactamente la clase de afirmación confiada sobre datos
+// incompletos que este comando existe para eliminar. Se dice cuáles quedaron
+// sin explicar y se sigue.
 //
 // Lo que se apaga es la ATRIBUCIÓN (`sePuedeAtribuirWorktree`), no la lista.
 // Antes se vaciaba `worktreesEnDisco` aquí mismo, y eso protegía de más: el
@@ -329,9 +329,19 @@ for (const { n } of enProgreso) {
 // abajo vino a matar, entrando por otra puerta. Era inalcanzable mientras
 // `cargarIssues` lanzaba (sin issues no había bloque en vuelo que imprimir);
 // el informe parcial lo hizo alcanzable.
-if (!issuesLeidos && worktreesEnDisco.length) {
-  motivos.push(`hay ${worktreesEnDisco.length} directorio(s) en .worktrees/ (${worktreesEnDisco.join(', ')}) que no se han cruzado con nada: sin la lista de issues no se puede saber quién los reclama`)
-}
+//
+// Y OJO CON LA REDACCIÓN, que es donde reapareció el mismo defecto una vuelta
+// después: una lectura PARCIAL no deja el informe a ciegas. Si los abiertos se
+// leyeron y los cerrados no, `enProgreso` SÍ explica worktrees, y la cosecha
+// también en el caso simétrico. El aviso decía «no se han cruzado con nada» de
+// TODOS los directorios en disco, y esa frase se volvió falsa en el momento en
+// que la lista real pasó a alimentar los bloques: afirmaba por stderr lo
+// contrario de lo que el propio informe imprimía dos líneas más abajo. Por eso
+// el aviso se emite DESPUÉS de componer, y sólo sobre los que de verdad
+// quedaron sin explicar. Si todos quedaron explicados no hay nada que avisar
+// —y el exit sigue siendo 1 igualmente, porque el motivo de la lectura que
+// falló ya está en `motivos` desde que se leyeron los issues; eso no se pierde
+// nunca.
 const estado = construirEstado({
   enProgreso,
   enRevision,
@@ -344,6 +354,17 @@ const estado = construirEstado({
   edadClaimMs,
   ventanaArranqueMs,
 })
+
+// Los que quedaron SIN EXPLICAR, usando el mismo criterio que el compositor
+// (`worktreesExplicados` sale de él, no se recalcula aquí: dos copias del
+// criterio derivarían, y la primera víctima sería este mismo aviso).
+if (!issuesLeidos) {
+  const explicados = new Set(estado.worktreesExplicados)
+  const sinCruzar = worktreesEnDisco.filter((w) => !explicados.has(w))
+  if (sinCruzar.length) {
+    motivos.push(`hay ${sinCruzar.length} directorio(s) en .worktrees/ (${sinCruzar.join(', ')}) que no explica ninguno de los issues que sí se pudieron leer, y con la lista de issues incompleta no se puede decidir si son residuo: este informe no acusa a ninguno`)
+  }
+}
 
 // El compositor emite un motivo genérico («#N: no se pudo determinar la
 // antigüedad del claim») para cada slice sin vida y sin edad. Cuando el fallo

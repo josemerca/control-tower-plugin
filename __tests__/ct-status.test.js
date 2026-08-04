@@ -134,11 +134,42 @@ describe('/ct-status', () => {
     expect(res.status).toBe(1)
     expect(res.stdout).toMatch(/worktree ✓/)
     expect(res.stdout).not.toMatch(/worktree ✗/)
-    // Y el aviso que nombra el directorio sigue ahí: las dos líneas ya no se
-    // contradicen.
-    expect(res.stderr).toMatch(/\.worktrees\/ \(7\)/)
+    // Y el aviso NO nombra el 7: el informe acaba de explicarlo. Ver el test
+    // de aquí abajo, que es el que ata esa mitad.
+    expect(res.stderr).not.toMatch(/en \.worktrees\//)
     // Sin poder atribuir, tampoco se acusa a nadie de huérfano.
     expect(res.stdout).not.toMatch(/RESIDUO/)
+    limpiar(b)
+  })
+
+  it('el aviso no nombra un directorio que el informe SÍ explica', () => {
+    // Segunda cara del mismo defecto: al pasar la lista real a los bloques, el
+    // aviso —que no se tocó— pasó a afirmar lo contrario de lo que el informe
+    // imprimía dos líneas más abajo. Sus dos mitades eran falsas para el 7: sí
+    // se había cruzado, y sí se sabía quién lo reclamaba, porque la lectura
+    // que SÍ funcionó es justo la que lo explica.
+    const b = bancada({ worktrees: [7, 8] })
+    const res = correr(b, { FAKE_GH_LIST_SEQUENCE: enProgreso7(), FAKE_GH_TIMELINE_JSON: hace(3 * 3600_000), FAKE_GH_LIST_FAIL_AT: '1' })
+    expect(res.status).toBe(1)
+    expect(res.stdout).toMatch(/worktree ✓/) // el 7, explicado por #7 en vuelo
+    const aviso = res.stderr.split('\n').find((l) => /en \.worktrees\//.test(l))
+    expect(aviso).toBeDefined()
+    const nombrados = /en \.worktrees\/ \(([^)]*)\)/.exec(aviso)[1].split(', ')
+    expect(nombrados).toEqual(['8'])
+    limpiar(b)
+  })
+
+  it('si la lectura parcial explica TODOS los worktrees, no hay aviso — pero el exit sigue siendo 1', () => {
+    // El motivo de la lectura que falló no se pierde nunca: viaja aparte,
+    // desde `cargarIssues`. Que no quede ningún directorio del que avisar no
+    // convierte una lectura incompleta en un loop en reposo.
+    const b = bancada({ worktrees: [7] })
+    const res = correr(b, { FAKE_GH_LIST_SEQUENCE: enProgreso7(), FAKE_GH_TIMELINE_JSON: hace(3 * 3600_000), FAKE_GH_LIST_FAIL_AT: '1' })
+    expect(res.status).toBe(1)
+    expect(res.stderr).not.toMatch(/en \.worktrees\//)
+    expect(res.stderr).toMatch(/no se pudieron listar issues cerrados/)
+    expect(res.stdout).toMatch(/exit 1 — 1 lectura\(s\) sin completar/)
+    expect(res.stdout).not.toMatch(/reposo/i)
     limpiar(b)
   })
 

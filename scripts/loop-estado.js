@@ -122,5 +122,11 @@ export function construirEstado(entrada) {
     || residuo.worktreesHuerfanos.length > 0
     || hayHallazgoEnVuelo
 
-  return { enVuelo, enRevision: enRevisionSalida, cosecha, residuo, sinComprobar, hayHallazgos }
+  // `worktreesExplicados` sale afuera porque el llamante necesita la MISMA
+  // respuesta para otra cosa: avisar de los directorios que quedaron sin
+  // explicar cuando la lista de issues está incompleta. Recalcularlo allí
+  // sería duplicar el criterio de "quién reclama un worktree" en dos sitios
+  // que derivarían por separado — y la primera víctima de esa deriva sería
+  // justo un aviso que nombra un directorio que el informe sí explica.
+  return { enVuelo, enRevision: enRevisionSalida, cosecha, residuo, sinComprobar, hayHallazgos, worktreesExplicados: [...worktreesExplicados] }
 }
