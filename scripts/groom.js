@@ -302,7 +302,7 @@ export function renderAcContent(ac) {
   return (ac && ac.length) ? ac.map((a) => `- ${a}`).join('\n') : '- (rellenar desde el spec)'
 }
 
-export function buildIssueBody(slice, specRef) {
+export function buildIssueBody(slice, specRef, epicContext = null) {
   const lines = []
   lines.push(renderSpecLink(slice, specRef))
   lines.push('')
@@ -317,6 +317,25 @@ export function buildIssueBody(slice, specRef) {
     lines.push(descripcion)
     lines.push('')
   }
+  // Las dos secciones de contexto van DESPUÉS de la descripción y ANTES de los
+  // criterios de aceptación: son el contexto con el que esos criterios se
+  // interpretan, y detrás de ellos se leerían tarde.
+  //
+  // El contexto del epic sólo se emite si el spec trae texto real — sin él, el
+  // spec no tiene ninguna opinión, y una sección vacía afirmaría que sí la
+  // tiene y está en blanco. La heredada se emite SIEMPRE, aunque nadie haya
+  // escrito nada todavía: una sección que sólo existe cuando alguien se acordó
+  // de crearla es una sección que nadie crea cuando hace falta, y sin un sitio
+  // fijo cada quien inventa el suyo — con lo que ningún kickoff puede
+  // nombrarla.
+  if (epicContext) {
+    lines.push(EPIC_CONTEXT_HEADING)
+    lines.push(epicContext)
+    lines.push('')
+  }
+  lines.push(INHERITED_CONTEXT_HEADING)
+  lines.push(INHERITED_CONTEXT_PLACEHOLDER)
+  lines.push('')
   lines.push('## Acceptance criteria (EARS, 1:1 con tests)')
   lines.push(renderAcContent(slice.ac))
   lines.push('')
@@ -361,7 +380,7 @@ function findDuplicateOrders(slices) {
   return [...dupes].sort((a, b) => a - b)
 }
 
-export function groomPlan(slices, { milestone, specRef }) {
+export function groomPlan(slices, { milestone, specRef, epicContext = null }) {
   const dupes = findDuplicateOrders(slices)
   if (dupes.length) {
     throw new Error(`groomPlan: orden(es) de slice duplicado(s) en la tabla §9: ${dupes.join(', ')}`)
@@ -371,7 +390,7 @@ export function groomPlan(slices, { milestone, specRef }) {
     issues: slices.map((s) => ({
       order: s.n,
       title: buildIssueTitle(s),
-      body: buildIssueBody(s, specRef),
+      body: buildIssueBody(s, specRef, epicContext),
       labels: buildLabels(s),
       deps: s.deps,
       // F5: además del body ya renderizado (arriba), el plan lleva los
@@ -390,6 +409,12 @@ export function groomPlan(slices, { milestone, specRef }) {
       // la resolución de cabeza.
       gates: gatesOf(s).gates,
       gatesContent: renderGatesContent(s),
+      // El texto del epic viaja en el plan, no sólo dentro del body ya
+      // renderizado, por el mismo motivo que ac/descripcion/protectedLine: la
+      // comparación contra un issue existente lo necesita sin volver a parsear
+      // el cuerpo que acaba de generar, y quien lea el JSON del --dry-run
+      // tiene que poder ver qué va a salir sin reproducir la lectura del spec.
+      epicContext,
     })),
   }
 }

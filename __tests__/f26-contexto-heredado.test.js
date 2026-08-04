@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING, INHERITED_CONTEXT_PLACEHOLDER,
-  readEpicContext,
+  readEpicContext, buildIssueBody, groomPlan,
 } from '../scripts/groom.js'
 
 // El guardarraíl de truncamientos no es una preferencia de estilo: la sección
@@ -127,5 +127,50 @@ describe('readEpicContext — la sección del spec y su guardarraíl', () => {
     const r = readEpicContext(conH2Desnudo)
     expect(r.content).toBe('- una regla')
     expect(r.warnings).toEqual([])
+  })
+})
+
+const SLICE = { n: 2, issue: null, name: 'card del plan', type: 'ui', entrega: 'card contraíble', deps: [1], ac: ['AC-2.1'], protected: 'schema §6' }
+const SPEC_REF = { path: 'docs/spec.md', heading: '9. Slices', url: 'https://github.com/o/r/blob/main/docs/spec.md#9-slices', reason: null }
+
+describe('buildIssueBody — las dos secciones nuevas', () => {
+  it('con contexto del epic: lo emite tal cual, y la heredada va vacía', () => {
+    const body = buildIssueBody(SLICE, SPEC_REF, '- `today_madrid()`, nunca `date.today()`')
+    expect(body).toContain(`${EPIC_CONTEXT_HEADING}\n- \`today_madrid()\`, nunca \`date.today()\``)
+    expect(body).toContain(`${INHERITED_CONTEXT_HEADING}\n${INHERITED_CONTEXT_PLACEHOLDER}`)
+  })
+
+  it('sin contexto del epic: esa sección NO existe, la heredada sí', () => {
+    const body = buildIssueBody(SLICE, SPEC_REF, null)
+    expect(body).not.toContain(EPIC_CONTEXT_HEADING)
+    expect(body).toContain(INHERITED_CONTEXT_HEADING)
+  })
+
+  it('el tercer parámetro es opcional y no rompe a quien llame con dos', () => {
+    expect(buildIssueBody(SLICE, SPEC_REF)).toContain(INHERITED_CONTEXT_HEADING)
+  })
+
+  // El orden importa: es contexto para interpretar los criterios de
+  // aceptación, así que leerlo después de ellos es leerlo tarde.
+  it('van tras Descripción y antes de Acceptance criteria', () => {
+    const body = buildIssueBody(SLICE, SPEC_REF, '- una regla')
+    const pos = (s) => body.indexOf(s)
+    expect(pos('## Descripción')).toBeLessThan(pos(EPIC_CONTEXT_HEADING))
+    expect(pos(EPIC_CONTEXT_HEADING)).toBeLessThan(pos(INHERITED_CONTEXT_HEADING))
+    expect(pos(INHERITED_CONTEXT_HEADING)).toBeLessThan(pos('## Acceptance criteria'))
+  })
+
+  it('groomPlan reparte el MISMO texto a todos los issues del epic', () => {
+    const plan = groomPlan(
+      [SLICE, { ...SLICE, n: 3, name: 'otro slice' }],
+      { milestone: 'E1', specRef: SPEC_REF, epicContext: '- una regla común' },
+    )
+    expect(plan.issues.map((i) => i.epicContext)).toEqual(['- una regla común', '- una regla común'])
+    for (const i of plan.issues) expect(i.body).toContain('- una regla común')
+  })
+
+  it('groomPlan sin epicContext deja el campo a null, no a undefined', () => {
+    const plan = groomPlan([SLICE], { milestone: 'E1', specRef: SPEC_REF })
+    expect(plan.issues[0].epicContext).toBeNull()
   })
 })
