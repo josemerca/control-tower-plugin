@@ -197,6 +197,32 @@ function main() {
     return
   }
 
+  // `gh api repos/<owner>/<repo>/issues/<n>/timeline --paginate`
+  // (ct-status.mjs, F25): el timeline de UN issue, que es de donde sale la
+  // EDAD del claim — el evento `labeled` más reciente para
+  // `status:in-progress`. Sin esa edad no se puede distinguir un slice que
+  // acaba de arrancar (todavía sin proceso `claude`, y perfectamente sano) de
+  // uno abandonado hace tres horas.
+  //
+  // FAKE_GH_TIMELINE_JSON es la respuesta completa, tal cual (`--paginate`
+  // sobre un endpoint de array devuelve UN array ya fusionado, no un array de
+  // páginas: no lleva `--slurp`). El default "[]" —un timeline sin ningún
+  // evento— es deliberado y es el caso "no se pudo determinar la antigüedad":
+  // ningún test preexistente llega aquí, y los que lleguen sin fijar la
+  // variable no deben recibir una edad inventada.
+  // FAKE_GH_TIMELINE_FAIL simula que la lectura falla (auth/red/rate limit),
+  // que es el caso en el que el comando NO puede acusar a nadie de abandono.
+  if (argv[0] === 'api' && /^repos\/[^/]+\/[^/]+\/issues\/\d+\/timeline$/.test(argv[1] || '')) {
+    if (process.env.FAKE_GH_TIMELINE_FAIL) {
+      console.error('fake-gh: api issue timeline failed (simulado)')
+      process.exitCode = 1
+      return
+    }
+    process.stdout.write(process.env.FAKE_GH_TIMELINE_JSON || '[]')
+    process.exitCode = 0
+    return
+  }
+
   // `gh api repos/<owner>/<repo>/milestones ...` (ct-groom.mjs, F5): el
   // listado (GET explícito, `--method GET -f state=all --paginate`) y la
   // creación (POST implícito, sin `--method`, solo `-f title=<t>`) comparten
