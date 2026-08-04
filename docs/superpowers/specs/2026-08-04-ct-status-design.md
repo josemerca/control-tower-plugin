@@ -48,11 +48,14 @@ Eso acota el riesgo: la mayor parte de lo que se mueve está probado en campo. L
 
 Se descartó una bandera `--status` en `/ct-next`: ese fichero tiene **3933 líneas** y ya mezcla bastante; y un coordinador que sólo quiere mirar tendría que fiarse de que la bandera corta antes de cualquier mutación, en vez de invocar un comando que **no puede** mutar.
 
-**Qué se extrae de `ct-next.mjs`, y qué no.** Sólo lo que **los dos** necesitan, a módulos puros con tests propios:
+**Qué se extrae de `ct-next.mjs`, y qué no.** Menos de lo que parecía: al medirlo, **dos de las cuatro piezas ya están extraídas y son puras**.
 
-- la evaluación de vida local,
-- la carga de issues,
-- los dos detectores de residuo.
+| Pieza | Estado real |
+|---|---|
+| `collectFinishedResidue` (cosecha) | **ya es pura** — vive en `dispatch.js`, se importa y ya está |
+| `closedWithLiveStatus` (residuo de labels) | **ya es pura** — vive en `gh-issue-map.js`, se importa y ya está |
+| `assessLocalLiveness` (worktree/rama/cmux) | **hay que extraerla** — cierra sobre dos globales (`repoRoot`, `childTimeoutFor`), que pasan a parámetros |
+| La carga de issues | **hay que extraerla**, y con un cambio: hoy hace `process.exit(1)` dentro. Un módulo compartido no decide por su llamante — pasa a **lanzar**, y cada comando elige qué hacer con el fallo |
 
 Lo que no comparten, no se toca. **No es un refactor de oportunidad**: `ct-next.mjs` adelgaza como efecto de compartir, no como objetivo. Un cambio de conducta de `/ct-next` durante esta extracción es un defecto, no una mejora — la extracción debe ser demostrablemente neutra.
 
