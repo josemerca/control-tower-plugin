@@ -84,7 +84,7 @@ export function readEpicContext(specMd) {
   }
   const truncating = truncationLine(specMd, loc)
   if (truncating) {
-    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec se trunca en ("${truncating}") y por eso NO se emite en ningún issue. Esta sección se reescribe entera desde el spec, y ese reemplazo termina en la primera cabecera que encuentre dentro: lo que sea que esté ahí dejaría el resto del texto huérfano.`)
+    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec contiene ("${truncating}") y por eso NO se emite en ningún issue. La sección se reescribe entera desde el spec: el reemplazo termina en la primera cosa que corta la sección (cabecera de cualquier nivel, comentario HTML, etc.), así que nada que corte puede vivir dentro.`)
     return { content: null, warnings }
   }
   const content = loc.content.trim()
