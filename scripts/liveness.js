@@ -1,13 +1,10 @@
-// Señales de vida de un slice. Dos preguntas distintas que conviene no
-// confundir:
+// Señales de vida de un slice.
 //
-//   assessLocalLiveness  ¿queda RASTRO de este slice en esta máquina?
-//                        (worktree, rama, ventana de cmux)
-//   liveSliceProcesses   ¿hay alguien TRABAJANDO en él ahora mismo?
-//
-// La primera no sirve para lo segundo, y ésa es justamente la razón de que un
-// slice muerto pudiera pasar desapercibido para siempre: al morir deja el
-// worktree y la rama en disco, así que "queda rastro" responde que sí.
+// `assessLocalLiveness` responde si queda RASTRO de un slice en esta máquina
+// —worktree, rama, ventana de cmux—, que no es lo mismo que si alguien está
+// TRABAJANDO en él. La diferencia es justamente la razón de que un slice
+// muerto pudiera pasar desapercibido para siempre: al morir deja el worktree y
+// la rama en su sitio, así que "queda rastro" responde que sí.
 
 import { existsSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'

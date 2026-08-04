@@ -4,10 +4,10 @@ import { join } from 'node:path'
 import { describe, it, expect } from 'vitest'
 import { assessLocalLiveness } from '../scripts/liveness.js'
 
-// assessLocalLiveness responde "¿hay rastro de este slice?", no "¿alguien está
-// trabajando ahora?" — esa segunda pregunta la contesta otra función de este
-// mismo módulo. La distinción importa: un slice que murió a medias deja
-// worktree y rama, así que ESTA función lo ve vivo.
+// assessLocalLiveness responde "¿hay rastro de este slice en esta máquina?",
+// que NO es lo mismo que "¿alguien está trabajando en él ahora?". La distinción
+// importa y no es teórica: un slice que muere a medias deja worktree y rama en
+// disco, así que esta función lo sigue viendo vivo.
 describe('assessLocalLiveness', () => {
   const conRepo = (fn) => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-liveness-'))
