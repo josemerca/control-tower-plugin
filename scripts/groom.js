@@ -1,7 +1,7 @@
 // Lógica pura de grooming: de Slice[] (T1) a un plan de operaciones GitHub.
 import { isNoValueCell } from './slices.js'
 import { resolveGates, gateLabels, renderGatesIssueContent } from './gates.js'
-import { locateSection } from './gh-issue-map.js'
+import { locateSection, unterminatedDelimiter } from './gh-issue-map.js'
 
 // GATES_HEADING (F21): la sección de gates del cuerpo del issue. Constante
 // exportada porque la nombran TRES sitios (este fichero al escribirla,
@@ -72,11 +72,11 @@ function truncationLine(specMd, loc) {
 // slices por sus columnas: los números de sección de un spec se mueven en
 // cuanto alguien inserta algo por delante.
 //
-// Devuelve `content: null` en los tres casos en que no hay nada que emitir
-// (ausente, vacía, o con un truncamiento dentro), cada uno con su propio
-// aviso: los tres se arreglan de forma distinta y un mensaje único obligaría a
-// adivinar cuál pasó. Un spec sin esta sección es un spec VÁLIDO — de ahí que
-// esto avise y nunca lance.
+// Devuelve `content: null` en los cuatro casos en que no hay nada que emitir
+// (ausente, vacía, con un delimitador sin cerrar dentro, o con un
+// truncamiento dentro), cada uno con su propio aviso: los cuatro se arreglan
+// de forma distinta y un mensaje único obligaría a adivinar cuál pasó. Un spec
+// sin esta sección es un spec VÁLIDO — de ahí que esto avise y nunca lance.
 export function readEpicContext(specMd) {
   const warnings = []
   const loc = locateSection(specMd || '', EPIC_CONTEXT_HEADING)
@@ -84,6 +84,21 @@ export function readEpicContext(specMd) {
     warnings.push(`aviso: el spec no trae la sección "${EPIC_CONTEXT_HEADING}" — los issues de este epic se crearán sin contexto común. Si lo quieres, añade esa sección al spec, fuera de la tabla de slices, y vuelve a correr.`)
     return { content: null, warnings }
   }
+  // Delimitador sin cerrar (review final de rama, C3). Va ANTES del
+  // truncamiento porque es el fallo OPUESTO y lo tapa: `truncationLine` sólo
+  // ve terminadores que cortan la sección demasiado pronto, y una valla (o un
+  // comentario) sin cerrar esconde todas las líneas siguientes, así que deja
+  // de haber terminador y `loc.content` se traga el resto del spec —tabla de
+  // slices incluida— sin nada que avisar. Se comprueba con el MISMO escáner
+  // que localiza la sección (gh-issue-map.js#unterminatedDelimiter), no con
+  // uno nuevo.
+  const abierto = unterminatedDelimiter(loc.content)
+  if (abierto) {
+    const que = abierto === 'valla' ? 'una valla de código (```) sin cerrar' : 'un comentario HTML (<!--) sin cerrar'
+    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec contiene ${que} y por eso NO se emite en ningún issue. Sin el cierre, la sección no termina donde parece: se traga todo lo que venga detrás en el spec (la tabla de slices incluida) y ese texto acabaría en el cuerpo de todos los issues. Cierra el delimitador y vuelve a correr.`)
+    return { content: null, warnings }
+  }
+
   const truncating = truncationLine(specMd, loc)
   if (truncating) {
     warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec contiene ("${truncating}") y por eso NO se emite en ningún issue. La sección se reescribe entera desde el spec: el reemplazo termina en la primera cosa que corta la sección (cabecera de cualquier nivel, comentario HTML, etc.), así que nada que corte puede vivir dentro.`)

@@ -87,7 +87,7 @@
 import {
   extractAc, extractDepsInSection, extractStrayDeps, extractSectionContent, locateSection, locateLine,
   extractSpecLink, normalizeSpecLink, countHeadingLines, detectLineEnding, normalizeToLF,
-  AC_HEADING_FORMS, SPEC_LINK_PREFIXES,
+  unterminatedDelimiter, AC_HEADING_FORMS, SPEC_LINK_PREFIXES,
 } from './gh-issue-map.js'
 // F6: el CONTENIDO de "## Dependencias"/"## Acceptance criteria" lo renderiza
 // groom.js — la misma función que usa buildIssueBody al CREAR el issue. Hasta
@@ -747,7 +747,22 @@ export function buildReconcileBody(existingBody, wantedIssue) {
   if (epicDiffers) {
     const epic = seccionSpliceable(EPIC_CONTEXT_HEADING)
     const epicLoc = epic.loc
-    if (epic.ambigua) {
+    // Defensa en el consumidor (review final de rama, C3). El guardarraíl de
+    // groom.js#readEpicContext corta esto en el productor, pero no puede ser
+    // la única línea: un humano edita el cuerpo del issue a mano, y ahí no hay
+    // productor al que cortar. Con una valla (o un comentario) sin cerrar
+    // dentro de la sección, `locateSection` no encuentra terminador y
+    // `contentEnd` cae al final del body — el splice borraría desde la
+    // cabecera del epic hasta el final: "## Contexto heredado", los AC, los
+    // gates, lo protegido y el marcador `ct-order` (y sin marcador el issue
+    // deja de emparejar, así que el groom siguiente crea un duplicado). Se
+    // mira también el texto NUEVO: escribir un delimitador abierto en el body
+    // es fabricar este mismo daño para la corrida siguiente.
+    const seccionAbierta = epicLoc ? unterminatedDelimiter(epicLoc.content) : null
+    const textoAbierto = wantedEpic ? unterminatedDelimiter(wantedEpic) : null
+    if (seccionAbierta || textoAbierto) {
+      unresolvedEpicContext = seccionAbierta ? 'seccion-sin-cerrar' : 'texto-sin-cerrar'
+    } else if (epic.ambigua) {
       // Dos copias de la sección del epic: una puede ser la que la
       // coordinadora pegó dentro de la suya. No se escribe en ninguna.
       unresolvedEpicContext = 'duplicada'

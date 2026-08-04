@@ -695,3 +695,89 @@ describe('C2 — nada de lo que escriba la coordinadora se toca', () => {
     expect(r.body).toContain(SPEC_LINK_3) // la del issue se antepone, como cuando falta del todo
   })
 })
+
+// ============================================================================
+// REVIEW FINAL DE RAMA — C3: `truncationLine` sólo caza terminadores que
+// cortan la sección DEMASIADO PRONTO. Una valla de código sin cerrar (o un
+// `<!--` sin `-->`) hace lo contrario: esconde del escáner todas las líneas
+// siguientes, así que no hay terminador NINGUNO y la sección se traga el resto
+// del spec —tabla de slices incluida— sin un solo aviso. Ese delimitador sin
+// cerrar viaja después al cuerpo de cada issue, y el siguiente --reconcile
+// splicea desde la cabecera del epic hasta el final del body: se lleva por
+// delante "## Contexto heredado", los AC, los gates, lo protegido y el
+// marcador `ct-order` (y perder el marcador desempareja el issue, así que el
+// groom siguiente crea un duplicado).
+// ============================================================================
+describe('C3 — un delimitador sin cerrar dentro de la sección del spec', () => {
+  const specCon = (cuerpo) => [
+    '# Spec', '', EPIC_CONTEXT_HEADING, cuerpo, '', '## 9. Slices',
+    '| # | Slice | Dep |', '|---|---|---|', '| 1 | A | – |',
+  ].join('\n')
+
+  it('valla de código sin cerrar: no se emite, y el aviso lo dice', () => {
+    const r = readEpicContext(specCon('- regla A\n```js\nconst x = 1'))
+    expect(r.content).toBeNull()
+    expect(r.warnings).toHaveLength(1)
+    expect(r.warnings[0]).toMatch(/valla|```/)
+    expect(r.warnings[0]).toContain(EPIC_CONTEXT_HEADING)
+  })
+
+  it('comentario HTML sin cerrar: mismo trato', () => {
+    const r = readEpicContext(specCon('- regla A\n<!-- ojo con esto'))
+    expect(r.content).toBeNull()
+    expect(r.warnings).toHaveLength(1)
+    expect(r.warnings[0]).toMatch(/comentario/)
+  })
+
+  it('la tabla de slices NUNCA acaba dentro del contexto del epic', () => {
+    for (const roto of ['- regla\n```js\nconst x = 1', '- regla\n<!-- ojo']) {
+      expect(readEpicContext(specCon(roto)).content).toBeNull()
+    }
+  })
+
+  // Una valla BIEN cerrada sigue siendo contenido legítimo: el guardarraíl
+  // caza el delimitador abierto, no el bloque de código.
+  it('una valla bien cerrada no dispara nada', () => {
+    const r = readEpicContext(specCon('ejemplo:\n\n```md\n### no es una cabecera\n```'))
+    expect(r.warnings).toEqual([])
+    expect(r.content).toContain('### no es una cabecera')
+  })
+
+  // El guardarraíl no puede ser la única línea de defensa: un humano edita el
+  // cuerpo del issue a mano, y ahí no hay ningún productor al que cortar.
+  it('el splice del epic se defiende de un cuerpo de issue con la valla abierta', () => {
+    const body = [
+      SPEC_LINK_3, '',
+      EPIC_CONTEXT_HEADING,
+      '- regla VIEJA',
+      '```js',
+      'const x = 1',
+      '',
+      INHERITED_CONTEXT_HEADING,
+      'lo de la coordinadora',
+      '',
+      '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-3.1 NUEVO', '',
+      '## Out of scope / Protected', '- 🚫 nada', '',
+      '<!-- ct-order:3 -->',
+    ].join('\n')
+    const r = buildReconcileBody(body, { specLink: SPEC_LINK_3, ac: ['AC-3.1 NUEVO'], deps: [], epicContext: '- regla NUEVA' })
+    const resultado = r.body ?? body
+    expect(resultado).toContain(INHERITED_CONTEXT_HEADING)
+    expect(resultado).toContain('lo de la coordinadora')
+    expect(resultado).toContain('## Out of scope / Protected')
+    expect(resultado).toContain('<!-- ct-order:3 -->')
+    expect(r.unresolvedEpicContext).toBe('seccion-sin-cerrar')
+  })
+
+  it('tampoco se escribe un texto nuevo que traiga la valla abierta', () => {
+    const body = [
+      SPEC_LINK_3, '',
+      EPIC_CONTEXT_HEADING, '- regla VIEJA', '',
+      '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-3.1 NUEVO', '',
+      '## Out of scope / Protected', '- 🚫 nada',
+    ].join('\n')
+    const r = buildReconcileBody(body, { specLink: SPEC_LINK_3, ac: ['AC-3.1 NUEVO'], deps: [], epicContext: '- regla\n```js\nconst x = 1' })
+    expect(r.body === null || !r.body.includes('const x = 1')).toBe(true)
+    expect(r.unresolvedEpicContext).toBe('texto-sin-cerrar')
+  })
+})

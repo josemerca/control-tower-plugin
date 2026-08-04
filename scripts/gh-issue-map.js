@@ -228,6 +228,33 @@ function outsideOf(range) {
   return (offset) => offset < range.start || offset >= range.end
 }
 
+// unterminatedDelimiter (review final de rama, C3): recorre `text` con el
+// MISMO escáner de estado que scanLines/locateSection (stepLine) y dice si al
+// llegar al final quedaba una valla de código o un comentario HTML ABIERTOS.
+// Devuelve `'valla'`, `'comentario'` o `null`.
+//
+// Es la mitad que faltaba del guardarraíl de secciones. `locateSection` y
+// `groom.js#truncationLine` sólo pueden cazar lo que termina una sección
+// ANTES de tiempo; un delimitador sin cerrar hace justo lo contrario: esconde
+// todas las líneas siguientes, así que deja de haber terminador y la sección
+// se traga todo lo que venga detrás. Sin ruido, sin aviso, y con un splice
+// posterior que borra desde la cabecera hasta el final del cuerpo.
+//
+// Vive aquí, y no en groom.js, por la misma razón por la que se reusa
+// `locateSection` sobre el texto del spec en vez de escribir un segundo
+// escáner: el de este fichero lleva encima el endurecimiento de vallas
+// (carácter, longitud, info string) y de comentarios multilínea de las rondas
+// 4 y 5 de F5, y una segunda implementación divergiría de él.
+export function unterminatedDelimiter(text) {
+  let state = initLineState()
+  for (const line of (text || '').split('\n')) {
+    state = stepLine(line, state).state
+  }
+  if (state.inComment) return 'comentario'
+  if (state.inFence) return 'valla'
+  return null
+}
+
 // headingMatcher: `headings` es un string (la cabecera exacta) o un array
 // de strings (un conjunto CERRADO de cabeceras aceptables — ver AC_HEADING_FORMS
 // más abajo, review round 5, Importante 4). Siempre igualdad exacta módulo
