@@ -914,3 +914,43 @@ describe('la inserción respeta el orden del §3.4', () => {
     expect(r.body).not.toContain(INHERITED_CONTEXT_HEADING) // nunca se inserta
   })
 })
+
+// La propiedad no negociable del §4.4, comprobada end-to-end sobre el binario
+// real y en las tres formas en que esta sección puede quedar sin aplicar
+// (diverge, está duplicada, se rinde sin ancla). El código de salida se lee de
+// spawnSync, nunca a través de una tubería.
+describe('§4.4 — el contexto del epic no puede producir un exit 3, pase lo que pase', () => {
+  const casos = {
+    'diverge y se aplica': buildIssueBody(SLICE_1, SPEC_REF_E2E, '- regla VIEJA'),
+    'está duplicada en el cuerpo': buildIssueBody(SLICE_1, SPEC_REF_E2E, '- regla VIEJA')
+      .replace(INHERITED_CONTEXT_HEADING, `${EPIC_CONTEXT_HEADING}\n- una copia pegada\n\n${INHERITED_CONTEXT_HEADING}`),
+  }
+  for (const [nombre, body] of Object.entries(casos)) {
+    it(`${nombre}: exit 0, y ninguna línea de "divergencia:" por esta sección`, () => {
+      const issue = { number: 501, title: '#1 login', state: 'open', milestone: { title: 'Epic' }, labels: LABELS_1, body }
+      for (const args of [[], ['--reconcile'], ['--dry-run', '--reconcile']]) {
+        const res = invoke(specConContexto('- regla NUEVA'), [issue], args)
+        expect(res.status, `${nombre} con ${args.join(' ') || '(sin flags)'}`).toBe(0)
+        expect(res.stderr).not.toMatch(new RegExp(`divergencia:.*${EPIC_CONTEXT_HEADING}`))
+      }
+    })
+  }
+
+  // El tercer caso —una valla sin cerrar DENTRO de la sección del epic en el
+  // cuerpo del issue— sí sale 3, y hay que decir por qué, porque no lo causa
+  // esta sección: la valla abierta esconde del escáner TODO lo que viene
+  // detrás, así que "## Acceptance criteria" deja de existir para quien lee el
+  // cuerpo y los criterios salen como divergencia real. El cuerpo está roto de
+  // verdad; el 3 es correcto y no viene del contexto del epic, que sigue sin
+  // producir ni una línea de "divergencia:".
+  it('con la valla abierta el 3 lo produce AC (que deja de ser legible), nunca esta sección', () => {
+    const body = buildIssueBody(SLICE_1, SPEC_REF_E2E, '- regla VIEJA\n```js')
+    const issue = { number: 501, title: '#1 login', state: 'open', milestone: { title: 'Epic' }, labels: LABELS_1, body }
+    const res = invoke(specConContexto('- regla NUEVA'), [issue], ['--reconcile'])
+    expect(res.status).toBe(3)
+    expect(res.stderr).toMatch(/divergencia:.*criterio de aceptación/)
+    expect(res.stderr).not.toMatch(new RegExp(`divergencia:.*${EPIC_CONTEXT_HEADING}`))
+    // Y no se ha escrito nada en la sección del epic: se ha dicho por qué.
+    expect(res.stderr).toMatch(/nota:.*NO ha reescrito la sección "## Contexto del epic".*SIN CERRAR/s)
+  })
+})
