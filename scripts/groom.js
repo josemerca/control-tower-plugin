@@ -40,6 +40,10 @@ export const INHERITED_CONTEXT_PLACEHOLDER =
 // hay un truncamiento que pierde contenido. Esta función devuelve esa línea
 // ofensora, o null si no la hay.
 //
+// El regex de cabeceras H1/H2 aquí debe ser coherente con ATX_HEADING_RE en
+// gh-issue-map.js — ambos gobiernan qué `locateSection` ve como cabecera. Si
+// divergen, emitiremos falsos avisos de truncamiento sobre secciones sanas.
+//
 // `contentEnd` apunta al '\n' que precede a la línea terminadora (o al final
 // del texto si no hay ninguna), así que la primera línea no vacía a partir de
 // ahí es esa línea terminadora.
@@ -48,8 +52,11 @@ function truncationLine(specMd, loc) {
   const line = rest.split('\n').find((l) => l.trim() !== '')
   if (!line) return null // Final del fichero, no hay truncamiento
 
-  // Cabecera H1 o H2: termina la sección normalmente, no es truncamiento
-  if (/^ {0,3}#{1,2}\s/.test(line)) return null
+  // Cabecera H1 o H2: termina la sección normalmente. El regex es coherente
+  // con ATX_HEADING_RE en gh-issue-map.js: acepta # o ## seguidos de espacio,
+  // tabulador, o fin de línea. Una cabecera desnuda (p.ej. "##" sin texto)
+  // también es válida y termina la sección sin truncamiento.
+  if (/^ {0,3}#{1,2}([ \t]|$)/.test(line)) return null
 
   // Cualquier otra cosa: es un truncamiento
   return line.trim()

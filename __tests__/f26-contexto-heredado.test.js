@@ -4,11 +4,12 @@ import {
   readEpicContext,
 } from '../scripts/groom.js'
 
-// El guardarraíl de truncamientos no es una preferencia de estilo: el
-// reemplazo con el que se mantiene esta sección al día termina en la primera
-// cabecera que encuentra dentro (cualquier nivel), así que una cabecera u otro
-// elemento ahí dejaría el resto del texto huérfano bajo el texto nuevo. Se
-// corta en el productor, donde todavía hay a quién decírselo.
+// El guardarraíl de truncamientos no es una preferencia de estilo: la sección
+// se reescribe entera desde el spec, y ese reemplazo termina en la primera
+// cosa que corta la sección (cabecera de cualquier nivel, comentario HTML,
+// etc.). Cualquier cosa que corte no puede vivir dentro, o dejaría el resto
+// del texto huérfano bajo el reemplazo. Se corta en el productor, donde
+// todavía hay a quién decírselo.
 describe('readEpicContext — la sección del spec y su guardarraíl', () => {
   const conSeccion = (cuerpo) => [
     '# Spec',
@@ -117,5 +118,14 @@ describe('readEpicContext — la sección del spec y su guardarraíl', () => {
     expect(readEpicContext(conSeccion('- una regla')).content).toBe('- una regla')
     const conH1 = ['# Spec', '', EPIC_CONTEXT_HEADING, '- una regla', '', '# Otro título'].join('\n')
     expect(readEpicContext(conH1).content).toBe('- una regla')
+  })
+
+  it('cabecera H1 o H2 desnuda (sin texto) es un fin normal, no truncamiento', () => {
+    // Una línea que sea exactamente "##" sin nada detrás es una cabecera
+    // válida para locateSection y termina la sección normalmente
+    const conH2Desnudo = ['# Spec', '', EPIC_CONTEXT_HEADING, '- una regla', '', '##'].join('\n')
+    const r = readEpicContext(conH2Desnudo)
+    expect(r.content).toBe('- una regla')
+    expect(r.warnings).toEqual([])
   })
 })
