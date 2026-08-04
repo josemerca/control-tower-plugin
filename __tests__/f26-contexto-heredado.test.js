@@ -408,18 +408,31 @@ describe('renderKickoff — nombra las dos secciones', () => {
     expect(K()).toContain(INHERITED_CONTEXT_HEADING)
   })
 
-  it('no interpola el texto de ninguna: sólo las nombra', () => {
-    // El kickoff se teclea entero en un pty y estas secciones son prosa de
-    // longitud arbitraria — mismo criterio ya tomado para Out of scope.
-    const k = renderKickoff(
-      { n: 7, name: 'card', type: 'ui', ac: ['AC-7.1'], deps: [], issue: '#7', epicContext: 'TEXTO QUE NO DEBE APARECER' },
+  it('la salida NO depende de ningún contenido de contexto que traiga el slice', () => {
+    // La propiedad de verdad: se NOMBRAN las secciones y no se interpola su
+    // texto. Se comprueba comparando dos salidas —una sin campos de contexto,
+    // otra con los mismos campos cargados de texto reconocible— y exigiendo que
+    // sean idénticas. Si alguien introduce interpolación mañana, esa igualdad
+    // se rompe y el test lo dice. Un test que no puede fallar no protege la
+    // decisión de diseño.
+    const sinContexto = K()
+    const conContexto = renderKickoff(
+      {
+        n: 7, name: 'card', type: 'ui', ac: ['AC-7.1'], deps: [], issue: '#7',
+        epicContext: 'TEXTO EPICCONTEXT QUE NO DEBE APARECER',
+        inheritedContext: 'TEXTO INHERITEDCONTEXT QUE NO DEBE APARECER',
+      },
       { repo: 'o/r' },
     )
-    expect(k).not.toContain('TEXTO QUE NO DEBE APARECER')
+    expect(sinContexto).toBe(conContexto)
   })
 
-  it('es honesto con los dos casos sin contenido: vacía y ausente', () => {
-    expect(K()).toMatch(/vacía|no está|no aparece/)
+  it('anuncia explícitamente el caso «vacía»: la sección existe pero sin contenido', () => {
+    expect(K()).toMatch(/vacía/)
+  })
+
+  it('anuncia explícitamente el caso «ausente»: issue previo a esta ronda nunca recibe la sección heredada', () => {
+    expect(K()).toMatch(/no está|no aparece/)
   })
 
   it('sigue nombrando Out of scope / Protected — no lo desplaza', () => {
