@@ -498,7 +498,7 @@ for (const w of specLinkWarnings) console.error(w)
 // imprimen aquí, junto a los del enlace al spec, y NUNCA abortan: un spec sin
 // esa sección es un spec válido, y bloquear un groom entero por una sección
 // opcional malformada sería desproporcionado. El remedio va dentro del aviso.
-const { content: epicContext, warnings: epicContextWarnings } = readEpicContext(specMd)
+const { content: epicContext, reason: epicContextReason, warnings: epicContextWarnings } = readEpicContext(specMd)
 for (const w of epicContextWarnings) console.error(w)
 
 const slices = report.slices
@@ -509,7 +509,7 @@ const slices = report.slices
 // stack trace crudo de una excepción sin capturar.
 let plan
 try {
-  plan = groomPlan(slices, { milestone, specRef, epicContext })
+  plan = groomPlan(slices, { milestone, specRef, epicContext, epicContextReason })
 } catch (e) {
   console.error(e.message)
   process.exit(2)

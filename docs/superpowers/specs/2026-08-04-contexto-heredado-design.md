@@ -190,6 +190,8 @@ Lo que convierte esto en soporte de primera clase no es el código nuevo: es que
 
 **El aviso del guardarraíl puede no leerse**, y entonces alguien cree que el contexto se emitió. Se acepta: no emitir nada es fail-safe (no corrompe ningún cuerpo), y el repo ya trata así las columnas opcionales ausentes.
 
+> **Corrección (review final de rama, I1).** «No emitir nada es fail-safe» era cierto al CREAR y falso al reconciliar, y este §7 no lo vio: los modos de fallo del guardarraíl colapsaban todos en «sin texto», que es exactamente la señal con la que el §4.3 pide RETIRAR la sección. Con eso, un `###` de más en el spec borraba el contexto de los N issues del epic en el `--reconcile` siguiente. Se separa el motivo: «el epic no tiene contexto» (sección ausente o vacía) autoriza a retirar; «no he podido leer un texto válido» (truncada, o con un delimitador sin cerrar) no autoriza nada y deja los cuerpos como están.
+
 ## 8. Lo que F26 no hace
 
 **El eje B — dirigir texto del spec a un slice concreto.** Es el caso del `#455` y su §6.2 (§1.3): el spec dice algo que afecta a *un* slice y la tabla §9 no puede llevarlo. Requiere decidir cómo el spec direcciona texto por slice, que es una decisión de contrato mayor que todo lo demás de esta ronda junta. Se deja fuera **explícitamente**, y no se insinúa que el §4 quede cerrado del todo: queda cerrado el transporte y el eje C/D.

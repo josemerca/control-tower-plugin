@@ -32,6 +32,27 @@ export const INHERITED_CONTEXT_HEADING = '## Contexto heredado'
 export const INHERITED_CONTEXT_PLACEHOLDER =
   '_(vacía — la rellena la sesión coordinadora cuando algo ya mergeado condiciona a este slice. `/ct-groom` no escribe aquí ni reescribe lo que escribas.)_'
 
+// EPIC_CONTEXT_REASONS (review final de rama, I1): por qué readEpicContext no
+// devuelve texto. No es decoración del mensaje: decide si `--reconcile` puede
+// RETIRAR la sección del cuerpo de los issues que ya la tengan.
+//
+//   ABSENT / EMPTY  el epic no tiene contexto común, y lo dice el spec. La
+//                   sección no debe existir en ningún cuerpo: retirarla es la
+//                   reconciliación correcta (§3.1 del diseño: una sección
+//                   presente pero vacía cuenta como ausente).
+//   MALFORMED       el spec SÍ tiene una opinión, pero no se ha podido leer un
+//                   texto válido. Eso no autoriza a tocar nada: borrar la
+//                   sección de los N issues porque alguien puso un `###` de
+//                   más sería destruir texto bueno a cambio de un error de
+//                   formato. Se avisa y se deja el cuerpo como está.
+export const EPIC_CONTEXT_REASONS = { ABSENT: 'ausente', EMPTY: 'vacia', MALFORMED: 'malformada' }
+
+// La frase que cierra los avisos de sección MALFORMADA. Está en una constante
+// porque la comparten los dos avisos de esa clase y tiene que decir
+// exactamente lo mismo en los dos: lo que un lector necesita saber es que su
+// error de formato no le ha borrado nada.
+const MALFORMED_KEEPS_WHAT_IS_THERE = 'Mientras esté así, no se toca ni se borra el contexto que ya tengan los issues de este epic: sin texto válido, el spec no tiene ninguna opinión que aplicar.'
+
 // truncationLine: la línea que truncó la sección, si resulta que locateSection
 // cortó antes de una cabecera H1/H2 o del final del fichero. `locateSection`
 // termina la sección cuando encuentra una cabecera de CUALQUIER nivel, o un
@@ -77,12 +98,20 @@ function truncationLine(specMd, loc) {
 // truncamiento dentro), cada uno con su propio aviso: los cuatro se arreglan
 // de forma distinta y un mensaje único obligaría a adivinar cuál pasó. Un spec
 // sin esta sección es un spec VÁLIDO — de ahí que esto avise y nunca lance.
+//
+// `reason` (review final de rama, I1) es lo que impide que esos cuatro casos
+// se confundan aguas abajo. Los cuatro producen el mismo `content: null`, pero
+// NO significan lo mismo, y `buildReconcileBody` lee `null` como RETIRA LA
+// SECCIÓN ENTERA: sin el motivo, añadir un `###` de más al spec borraba el
+// contexto de los N issues del epic en el siguiente --reconcile. "El epic no
+// tiene contexto" (ausente/vacía) autoriza a retirar; "no he podido leer un
+// texto válido" (malformada) no autoriza nada — ver EPIC_CONTEXT_REASONS.
 export function readEpicContext(specMd) {
   const warnings = []
   const loc = locateSection(specMd || '', EPIC_CONTEXT_HEADING)
   if (!loc) {
-    warnings.push(`aviso: el spec no trae la sección "${EPIC_CONTEXT_HEADING}" — los issues de este epic se crearán sin contexto común. Si lo quieres, añade esa sección al spec, fuera de la tabla de slices, y vuelve a correr.`)
-    return { content: null, warnings }
+    warnings.push(`aviso: el spec no trae la sección "${EPIC_CONTEXT_HEADING}" — ningún issue de este epic lleva contexto común (ni el que se cree ahora, ni el que ya exista: con --reconcile la sección se retira del cuerpo). Si lo quieres, añade esa sección al spec, fuera de la tabla de slices, y vuelve a correr.`)
+    return { content: null, reason: EPIC_CONTEXT_REASONS.ABSENT, warnings }
   }
   // Delimitador sin cerrar (review final de rama, C3). Va ANTES del
   // truncamiento porque es el fallo OPUESTO y lo tapa: `truncationLine` sólo
@@ -95,21 +124,21 @@ export function readEpicContext(specMd) {
   const abierto = unterminatedDelimiter(loc.content)
   if (abierto) {
     const que = abierto === 'valla' ? 'una valla de código (```) sin cerrar' : 'un comentario HTML (<!--) sin cerrar'
-    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec contiene ${que} y por eso NO se emite en ningún issue. Sin el cierre, la sección no termina donde parece: se traga todo lo que venga detrás en el spec (la tabla de slices incluida) y ese texto acabaría en el cuerpo de todos los issues. Cierra el delimitador y vuelve a correr.`)
-    return { content: null, warnings }
+    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec contiene ${que} y por eso NO se emite en ningún issue. Sin el cierre, la sección no termina donde parece: se traga todo lo que venga detrás en el spec (la tabla de slices incluida) y ese texto acabaría en el cuerpo de todos los issues. Cierra el delimitador y vuelve a correr. ${MALFORMED_KEEPS_WHAT_IS_THERE}`)
+    return { content: null, reason: EPIC_CONTEXT_REASONS.MALFORMED, warnings }
   }
 
   const truncating = truncationLine(specMd, loc)
   if (truncating) {
-    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec contiene ("${truncating}") y por eso NO se emite en ningún issue. La sección se reescribe entera desde el spec: el reemplazo termina en la primera cosa que corta la sección (cabecera de cualquier nivel, comentario HTML, etc.), así que nada que corte puede vivir dentro.`)
-    return { content: null, warnings }
+    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec contiene ("${truncating}") y por eso NO se emite en ningún issue. La sección se reescribe entera desde el spec: el reemplazo termina en la primera cosa que corta la sección (cabecera de cualquier nivel, comentario HTML, etc.), así que nada que corte puede vivir dentro. ${MALFORMED_KEEPS_WHAT_IS_THERE}`)
+    return { content: null, reason: EPIC_CONTEXT_REASONS.MALFORMED, warnings }
   }
   const content = loc.content.trim()
   if (!content) {
-    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec está presente pero sin contenido — se trata igual que si no estuviera. Escribe algo debajo de la cabecera, o quítala.`)
-    return { content: null, warnings }
+    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec está presente pero sin contenido — se trata igual que si no estuviera, o sea que ningún issue lleva contexto común (y con --reconcile la sección se retira del cuerpo de los que ya la tengan). Escribe algo debajo de la cabecera, o quítala.`)
+    return { content: null, reason: EPIC_CONTEXT_REASONS.EMPTY, warnings }
   }
-  return { content, warnings }
+  return { content, reason: null, warnings }
 }
 
 // gatesOf: la resolución de gates de un slice, en un solo sitio. La llaman
@@ -397,7 +426,13 @@ function findDuplicateOrders(slices) {
   return [...dupes].sort((a, b) => a - b)
 }
 
-export function groomPlan(slices, { milestone, specRef, epicContext = null }) {
+export function groomPlan(slices, { milestone, specRef, epicContext = null, epicContextReason = null }) {
+  // epicContextUnknown (I1): "no he podido leer un texto válido" NO es "el
+  // epic no tiene contexto". Sin esta distinción, `epicContext: null` viajaba
+  // igual en los dos casos y buildReconcileBody lo leía siempre como "retira
+  // la sección". Es lo único que reconcile.js necesita saber del motivo: el
+  // resto del detalle vive en el aviso, que ya lo ha impreso el wrapper.
+  const epicContextUnknown = epicContextReason === EPIC_CONTEXT_REASONS.MALFORMED
   const dupes = findDuplicateOrders(slices)
   if (dupes.length) {
     throw new Error(`groomPlan: orden(es) de slice duplicado(s) en la tabla §9: ${dupes.join(', ')}`)
@@ -433,6 +468,7 @@ export function groomPlan(slices, { milestone, specRef, epicContext = null }) {
       // JSON del --dry-run tiene que poder ver qué va a salir sin reproducir
       // la lectura del spec.
       epicContext,
+      epicContextUnknown,
     })),
   }
 }

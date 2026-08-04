@@ -781,3 +781,48 @@ describe('C3 — un delimitador sin cerrar dentro de la sección del spec', () =
     expect(r.unresolvedEpicContext).toBe('texto-sin-cerrar')
   })
 })
+
+// ============================================================================
+// REVIEW FINAL DE RAMA — I1: los tres (ahora cuatro) modos de fallo del
+// guardarraíl colapsaban en `content: null`, indistinguible aguas abajo de "el
+// spec no tiene ninguna opinión". Y `buildReconcileBody` lee `null` como
+// RETIRA LA SECCIÓN ENTERA. O sea: añadir un `###` de más al spec borraba el
+// contexto de los N issues del epic en el siguiente --reconcile. El aviso
+// decía sólo que la sección no se emitiría, y el diseño §7 lo llamaba
+// "fail-safe": ninguna de las dos cosas es cierta con --reconcile delante.
+// ============================================================================
+describe('I1 — "no tengo texto válido" no es "el epic no tiene contexto"', () => {
+  const conMotivo = (spec) => readEpicContext(spec)
+
+  it('readEpicContext dice POR QUÉ, no sólo que no hay texto', () => {
+    const tabla = '\n\n## 9. Slices\n| # | Slice | Dep |'
+    expect(conMotivo('# Spec' + tabla).reason).toBe('ausente')
+    expect(conMotivo(`# Spec\n\n${EPIC_CONTEXT_HEADING}\n` + tabla).reason).toBe('vacia')
+    expect(conMotivo(`# Spec\n\n${EPIC_CONTEXT_HEADING}\ntexto\n\n### dentro\nmás` + tabla).reason).toBe('malformada')
+    expect(conMotivo(`# Spec\n\n${EPIC_CONTEXT_HEADING}\ntexto\n\`\`\`js\nx` + tabla).reason).toBe('malformada')
+    expect(conMotivo(`# Spec\n\n${EPIC_CONTEXT_HEADING}\n- regla` + tabla).reason).toBeNull()
+  })
+
+  it('el aviso de una sección malformada dice que NO se borra lo que ya hay en los issues', () => {
+    const w = conMotivo(`# Spec\n\n${EPIC_CONTEXT_HEADING}\ntexto\n\n### dentro\nmás\n\n## 9. Slices`).warnings[0]
+    expect(w).toMatch(/no se (borra|toca|retira)/i)
+  })
+
+  it('un spec malformado NO retira la sección del cuerpo de los issues', () => {
+    const spec = [
+      EPIC_CONTEXT_HEADING, 'preámbulo', '', '### 1 · un detalle', 'texto', '',
+      '## 9. Slices', ONE_SLICE_TABLE, '',
+    ].join('\n')
+    const res = invoke(spec, [issueCon('- regla que YA está en el issue')], ['--reconcile'])
+    expect(res.status).toBe(0)
+    expect(res.stderr).toContain('### 1 · un detalle')
+    expect(res.stdout).not.toMatch(/reconciliado/) // no hay nada que aplicar: el spec no tiene opinión válida
+  })
+
+  it('un spec SIN la sección sí la retira: eso sí significa "el epic no tiene contexto"', () => {
+    const spec = ['## 9. Slices', ONE_SLICE_TABLE, ''].join('\n')
+    const res = invoke(spec, [issueCon('- regla que YA está en el issue')], ['--reconcile'])
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/reconciliado \(orden #1\): .*contexto del epic/)
+  })
+})

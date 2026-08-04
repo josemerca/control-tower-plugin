@@ -315,10 +315,18 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
   // La sección heredada NO se compara aquí ni en ningún otro sitio: su dueño
   // es quien la escribe, y el plugin no tiene ninguna opinión sobre su
   // contenido. Que no aparezca en este diff es la propiedad, no un olvido.
+  //
+  // `epicContextUnknown` (review final de rama, I1): el spec trae la sección
+  // pero no se pudo leer un texto válido (una cabecera dentro, un delimitador
+  // sin cerrar…). Eso no es una divergencia: es no tener con qué comparar. Sin
+  // esta rama, un `###` de más en el spec se reportaba como "el issue tiene
+  // sección y el spec no" y --reconcile la borraba de los N issues.
   const currentEpicContext = extractSectionContent(body, EPIC_CONTEXT_HEADING)
   const wantedEpicContext = wantedIssue.epicContext ?? null
   let epicContextDiffers
-  if (currentEpicContext === null && wantedEpicContext === null) {
+  if (wantedIssue.epicContextUnknown) {
+    epicContextDiffers = false
+  } else if (currentEpicContext === null && wantedEpicContext === null) {
     epicContextDiffers = false
   } else if (currentEpicContext === null || wantedEpicContext === null) {
     epicContextDiffers = true
@@ -737,13 +745,20 @@ export function buildReconcileBody(existingBody, wantedIssue) {
   //
   // Las posiciones se localizan sobre el body YA actualizado por los splices
   // de arriba, no sobre el original.
+  // `epicContextUnknown` (I1): mismo criterio que en diffIssue — el spec trae
+  // la sección pero no se pudo leer un texto válido. No hay nada que escribir
+  // ni, sobre todo, nada que retirar: "no tengo texto" no es "el epic no tiene
+  // contexto", y confundirlos borraba la sección de los N issues del epic por
+  // un `###` de más en el spec.
   const currentEpic = extractSectionContent(body, EPIC_CONTEXT_HEADING)
   const wantedEpic = wantedIssue.epicContext ?? null
-  const epicDiffers = (currentEpic === null && wantedEpic === null)
+  const epicDiffers = wantedIssue.epicContextUnknown
     ? false
-    : (currentEpic === null || wantedEpic === null)
-      ? true
-      : currentEpic.trim() !== wantedEpic.trim()
+    : (currentEpic === null && wantedEpic === null)
+      ? false
+      : (currentEpic === null || wantedEpic === null)
+        ? true
+        : currentEpic.trim() !== wantedEpic.trim()
   if (epicDiffers) {
     const epic = seccionSpliceable(EPIC_CONTEXT_HEADING)
     const epicLoc = epic.loc
