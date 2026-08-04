@@ -410,10 +410,11 @@ export function groomPlan(slices, { milestone, specRef, epicContext = null }) {
       gates: gatesOf(s).gates,
       gatesContent: renderGatesContent(s),
       // El texto del epic viaja en el plan, no sólo dentro del body ya
-      // renderizado, por el mismo motivo que ac/descripcion/protectedLine: la
-      // comparación contra un issue existente lo necesita sin volver a parsear
-      // el cuerpo que acaba de generar, y quien lea el JSON del --dry-run
-      // tiene que poder ver qué va a salir sin reproducir la lectura del spec.
+      // renderizado, por el mismo motivo que ac/descripcion/protectedLine:
+      // para que comparar este slice contra un issue existente no obligue a
+      // re-parsear el cuerpo recién generado. Mientras tanto, quien lea el
+      // JSON del --dry-run tiene que poder ver qué va a salir sin reproducir
+      // la lectura del spec.
       epicContext,
     })),
   }
