@@ -100,11 +100,76 @@ describe('liveSliceProcesses', () => {
     expect(r.motivo).toMatch(/lsof/)
   })
 
-  it('nunca llama a lsof con la lista de pids vacía', () => {
-    // Medido: `lsof -a -p "" -d cwd -Fpn` devuelve un proceso AJENO, no vacío.
+  it('pgrep sin coincidencias (rc=1) corta antes de intentar lsof', () => {
     const llamadas = []
     const run = (cmd) => { llamadas.push(cmd); if (cmd === 'pgrep') { const e = new Error(''); e.status = 1; throw e } return '' }
     liveSliceProcesses(raiz, { run })
     expect(llamadas).toEqual(['pgrep'])
+  })
+
+  it('nunca llama a lsof con la lista de pids vacía', () => {
+    // Medido: `lsof -a -p "" -d cwd -Fpn` devuelve un proceso AJENO, no vacío.
+    // Este caso es distinto del de "pgrep sale 1": aquí pgrep TIENE ÉXITO
+    // (rc=0) pero su salida no trae ningún pid, así que la guarda que se
+    // comprueba es la del array vacío tras el parseo, no el atajo del catch.
+    const llamadas = []
+    const run = (cmd) => { llamadas.push(cmd); return cmd === 'pgrep' ? '\n' : '' }
+    liveSliceProcesses(raiz, { run })
+    expect(llamadas).toEqual(['pgrep'])
+  })
+
+  it('pgrep se acota al usuario actual con -U antes de -x claude', () => {
+    const llamadas = []
+    const run = (cmd, args) => {
+      llamadas.push([cmd, args])
+      if (cmd === 'pgrep') { const e = new Error(''); e.status = 1; throw e }
+      return ''
+    }
+    liveSliceProcesses(raiz, { run })
+    expect(llamadas).toEqual([['pgrep', ['-x', '-U', String(process.getuid()), 'claude']]])
+  })
+
+  it('sin process.getuid disponible degrada a "no se pudo comprobar", nunca a un pgrep sin acotar', () => {
+    const original = process.getuid
+    try {
+      process.getuid = undefined
+      const llamadas = []
+      const run = (cmd) => { llamadas.push(cmd); return '' }
+      const r = liveSliceProcesses(raiz, { run })
+      expect(r.comprobado).toBe(false)
+      expect(r.motivo).toMatch(/getuid|usuario/)
+      expect(llamadas).toEqual([])
+    } finally {
+      process.getuid = original
+    }
+  })
+
+  it('un PID que muere entre pgrep y lsof no rompe la señal: se lee el stdout parcial de rc=1', () => {
+    // Medido: `lsof -a -p <vivos,muerto> -d cwd -Fpn` sale con rc=1 pero trae
+    // en stdout los PID que sí siguen vivos.
+    const run = (cmd) => {
+      if (cmd === 'pgrep') return '100\n999999\n'
+      const e = new Error('lsof: no such process (999999)')
+      e.status = 1
+      e.stdout = lsofFalso([['100', '/repo/.worktrees/7']])
+      throw e
+    }
+    const r = liveSliceProcesses(raiz, { run })
+    expect(r.comprobado).toBe(true)
+    expect([...r.porSlice]).toEqual([['7', '100']])
+  })
+
+  it('si TODOS los pids mueren antes de lsof (rc=1, stdout vacío), es "nadie vivo", no un fallo', () => {
+    const run = (cmd) => {
+      if (cmd === 'pgrep') return '999999\n'
+      const e = new Error('lsof: no such process (999999)')
+      e.status = 1
+      e.stdout = ''
+      throw e
+    }
+    const r = liveSliceProcesses(raiz, { run })
+    expect(r.comprobado).toBe(true)
+    expect(r.porSlice.size).toBe(0)
+    expect(r.motivo).toBeNull()
   })
 })

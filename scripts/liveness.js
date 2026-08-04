@@ -58,15 +58,34 @@ const ejecutar = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', stdi
 //
 // `pgrep -x`, nunca `-f`: `-x` casa el nombre exacto del proceso, mientras que
 // `-f` casa cualquier línea de comando que contenga "claude" — incluida la del
-// propio comando que hace esta comprobación.
+// propio comando que hace esta comprobación. Además se acota con `-U <uid>`
+// al usuario actual: sin acotar, `pgrep` listaría procesos `claude` de
+// cualquier usuario de la máquina, y eso es justo lo que hace falta para leer
+// con seguridad el `stdout` parcial de `lsof` más abajo.
 //
-// Una sola llamada a `lsof` para todos los PID (medido: 52 ms). Un PID que
-// muera entre el `pgrep` y el `lsof` no rompe nada: lsof sale con 0 y
-// simplemente lo omite.
+// Una sola llamada a `lsof` para todos los PID (medido: del orden de decenas
+// de ms). Un PID que muera entre el `pgrep` y el `lsof` no rompe nada, pero
+// no porque `lsof` "salga con 0 y lo omita" —eso es falso, medido—: `lsof`
+// sale con **1** en cuanto falta UNO de los PID pedidos, aunque el resto se
+// resuelva bien y venga en `stdout`. Leer ese `stdout` parcial sólo es seguro
+// PORQUE `pgrep` está acotado al usuario actual: todo PID de la lista es
+// propio y legible, así que la única razón de que falte en la salida de
+// `lsof` es que haya muerto —y un proceso muerto no trabaja en ningún
+// worktree. Sin el acotado por usuario, un PID ajeno (no legible por permisos)
+// produciría el mismo rc=1 y aquí se leería como "muerto" pudiendo seguir
+// vivo: sería la única vía de acusar en falso a un slice sano. No lo quites.
 export function liveSliceProcesses(repoRoot, { run = ejecutar } = {}) {
+  // `process.getuid` no existe en Windows. Sin uid no hay acotado posible, y
+  // un `pgrep` sin acotar rompe la premisa que hace segura la lectura parcial
+  // de `lsof` de más abajo, así que se degrada aquí en vez de arriesgarse.
+  if (typeof process.getuid !== 'function') {
+    return { porSlice: new Map(), comprobado: false, motivo: 'no se pudo determinar el usuario actual: process.getuid no está disponible en esta plataforma' }
+  }
+  const uid = process.getuid()
+
   let pids
   try {
-    pids = run('pgrep', ['-x', 'claude']).split('\n').map((s) => s.trim()).filter(Boolean)
+    pids = run('pgrep', ['-x', '-U', String(uid), 'claude']).split('\n').map((s) => s.trim()).filter(Boolean)
   } catch (e) {
     // rc=1 en pgrep significa "ninguna coincidencia", que es una respuesta
     // NORMAL y válida: el loop en reposo no tiene agentes. Tratarla como
@@ -83,7 +102,14 @@ export function liveSliceProcesses(repoRoot, { run = ejecutar } = {}) {
   try {
     salida = run('lsof', ['-a', '-p', pids.join(','), '-d', 'cwd', '-Fpn'])
   } catch (e) {
-    return { porSlice: new Map(), comprobado: false, motivo: `no se pudo leer el directorio de trabajo de los procesos con lsof: ${e && e.message}` }
+    // rc=1 con `stdout` legible es la carrera pgrep→lsof, no un fallo: ver el
+    // comentario de cabecera de esta función sobre por qué acotar por usuario
+    // es lo que hace segura esta lectura parcial.
+    if (e && e.status === 1 && typeof e.stdout === 'string') {
+      salida = e.stdout
+    } else {
+      return { porSlice: new Map(), comprobado: false, motivo: `no se pudo leer el directorio de trabajo de los procesos con lsof: ${e && e.message}` }
+    }
   }
 
   // `-Fpn` emite tripletes: p<pid> / fcwd / n<ruta>.
