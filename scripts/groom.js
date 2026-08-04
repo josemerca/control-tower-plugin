@@ -13,7 +13,7 @@ export const GATES_HEADING = '## Gates'
 // y por eso con reglas distintas:
 //
 //   EPIC_CONTEXT_HEADING      la escribe /ct-groom desde el spec, idéntica en
-//                             todos los issues del epic, y la mantiene al día.
+//                             todos los issues del epic.
 //   INHERITED_CONTEXT_HEADING la escribe la sesión coordinadora. El plugin la
 //                             emite vacía al crear el issue y no vuelve a
 //                             tocarla nunca: ni la compara, ni la reescribe,
@@ -32,25 +32,27 @@ export const INHERITED_CONTEXT_HEADING = '## Contexto heredado'
 export const INHERITED_CONTEXT_PLACEHOLDER =
   '_(vacía — la rellena la sesión coordinadora cuando algo ya mergeado condiciona a este slice. `/ct-groom` no escribe aquí ni reescribe lo que escribas.)_'
 
-// SUBHEADING_RE: cabecera ATX de nivel 3 o más, con la indentación de 0 a 3
-// espacios que CommonMark admite. Los niveles 1 y 2 quedan fuera a propósito:
-// una "## " o una "# " detrás de la sección no está DENTRO de ella, sólo la
-// termina, que es lo normal en cualquier documento.
-const SUBHEADING_RE = /^ {0,3}#{3,}\s/
-
-// subheadingInside: la línea que terminó la sección, si resulta ser una
-// cabecera de nivel 3 o más — es decir, una subcabecera del propio contexto
-// del epic. `locateSection` corta el contenido en la primera cabecera de
-// CUALQUIER nivel, así que basta con mirar qué hay justo detrás del corte: si
-// es una subcabecera, había una dentro.
+// truncationLine: la línea que truncó la sección, si resulta que locateSection
+// cortó antes de una cabecera H1/H2 o del final del fichero. `locateSection`
+// termina la sección cuando encuentra una cabecera de CUALQUIER nivel. Eso es
+// legítimo si es H1 o H2 (solo terminan la sección normalmente), pero si es
+// H3+ (subcabecera del epic), un comentario HTML autocontenido u otra cosa,
+// hay un truncamiento que pierde contenido. Esta función devuelve esa línea
+// ofensora, o null si no la hay.
 //
 // `contentEnd` apunta al '\n' que precede a la línea terminadora (o al final
 // del texto si no hay ninguna), así que la primera línea no vacía a partir de
 // ahí es esa línea terminadora.
-function subheadingInside(specMd, loc) {
+function truncationLine(specMd, loc) {
   const rest = (specMd || '').slice(loc.contentEnd)
   const line = rest.split('\n').find((l) => l.trim() !== '')
-  return line && SUBHEADING_RE.test(line) ? line.trim() : null
+  if (!line) return null // Final del fichero, no hay truncamiento
+
+  // Cabecera H1 o H2: termina la sección normalmente, no es truncamiento
+  if (/^ {0,3}#{1,2}\s/.test(line)) return null
+
+  // Cualquier otra cosa: es un truncamiento
+  return line.trim()
 }
 
 // readEpicContext: lee del fichero de spec el texto que va a viajar, idéntico,
@@ -62,7 +64,7 @@ function subheadingInside(specMd, loc) {
 // cuanto alguien inserta algo por delante.
 //
 // Devuelve `content: null` en los tres casos en que no hay nada que emitir
-// (ausente, vacía, o con una subcabecera dentro), cada uno con su propio
+// (ausente, vacía, o con un truncamiento dentro), cada uno con su propio
 // aviso: los tres se arreglan de forma distinta y un mensaje único obligaría a
 // adivinar cuál pasó. Un spec sin esta sección es un spec VÁLIDO — de ahí que
 // esto avise y nunca lance.
@@ -73,9 +75,9 @@ export function readEpicContext(specMd) {
     warnings.push(`aviso: el spec no trae la sección "${EPIC_CONTEXT_HEADING}" — los issues de este epic se crearán sin contexto común. Si lo quieres, añade esa sección al spec, fuera de la tabla de slices, y vuelve a correr.`)
     return { content: null, warnings }
   }
-  const offending = subheadingInside(specMd, loc)
-  if (offending) {
-    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec contiene una cabecera ("${offending}") y por eso NO se emite en ningún issue. El texto de esta sección se mantiene al día con un reemplazo que termina en la primera cabecera que encuentra dentro, así que esa cabecera dejaría el resto del texto huérfano. Usa negritas o una lista en su lugar.`)
+  const truncating = truncationLine(specMd, loc)
+  if (truncating) {
+    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec se trunca en ("${truncating}") y por eso NO se emite en ningún issue. Esta sección se reescribe entera desde el spec, y ese reemplazo termina en la primera cabecera que encuentre dentro: lo que sea que esté ahí dejaría el resto del texto huérfano.`)
     return { content: null, warnings }
   }
   const content = loc.content.trim()

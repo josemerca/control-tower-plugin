@@ -4,10 +4,10 @@ import {
   readEpicContext,
 } from '../scripts/groom.js'
 
-// El guardarraíl de las subcabeceras no es una preferencia de estilo: el
-// reemplazo con el que --reconcile mantiene esta sección al día termina en la
-// primera cabecera que encuentra dentro (cualquier nivel), así que una
-// cabecera ahí dejaría el resto del texto huérfano bajo el texto nuevo. Se
+// El guardarraíl de truncamientos no es una preferencia de estilo: el
+// reemplazo con el que se mantiene esta sección al día termina en la primera
+// cabecera que encuentra dentro (cualquier nivel), así que una cabecera u otro
+// elemento ahí dejaría el resto del texto huérfano bajo el texto nuevo. Se
 // corta en el productor, donde todavía hay a quién decírselo.
 describe('readEpicContext — la sección del spec y su guardarraíl', () => {
   const conSeccion = (cuerpo) => [
@@ -87,5 +87,35 @@ describe('readEpicContext — la sección del spec y su guardarraíl', () => {
   it('el placeholder de la sección heredada dice quién la rellena y que el plugin no la toca', () => {
     expect(INHERITED_CONTEXT_PLACEHOLDER).toMatch(/coordinadora/)
     expect(INHERITED_CONTEXT_PLACEHOLDER).toMatch(/ct-groom/)
+  })
+
+  it('INHERITED_CONTEXT_HEADING tiene el valor exacto', () => {
+    expect(INHERITED_CONTEXT_HEADING).toBe('## Contexto heredado')
+  })
+
+  it('comentario HTML autocontenido dentro dispara el aviso y nombra la línea', () => {
+    const r = readEpicContext(conSeccion('texto\n\n<!-- TODO: revisar esto -->'))
+    expect(r.content).toBeNull()
+    expect(r.warnings).toHaveLength(1)
+    expect(r.warnings[0]).toContain('<!-- TODO: revisar esto -->')
+  })
+
+  it('validación: cabecera H3 dentro sigue disparando el aviso', () => {
+    const r = readEpicContext(conSeccion('preámbulo\n\n### 1 · Un detalle\ntexto del detalle'))
+    expect(r.content).toBeNull()
+    expect(r.warnings).toHaveLength(1)
+    expect(r.warnings[0]).toContain('### 1 · Un detalle')
+  })
+
+  it('validación: valla de código sigue sin disparar', () => {
+    const r = readEpicContext(conSeccion('ejemplo:\n\n```md\n### esto es un ejemplo\n```'))
+    expect(r.warnings).toEqual([])
+    expect(r.content).toContain('### esto es un ejemplo')
+  })
+
+  it('validación: cabecera H1/H2 detrás sigue siendo un final normal', () => {
+    expect(readEpicContext(conSeccion('- una regla')).content).toBe('- una regla')
+    const conH1 = ['# Spec', '', EPIC_CONTEXT_HEADING, '- una regla', '', '# Otro título'].join('\n')
+    expect(readEpicContext(conH1).content).toBe('- una regla')
   })
 })
