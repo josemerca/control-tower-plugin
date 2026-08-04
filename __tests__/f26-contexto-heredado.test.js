@@ -306,3 +306,91 @@ describe('diffIssue — el contexto del epic se compara; el heredado nunca', () 
     expect(JSON.stringify(a)).toBe(JSON.stringify(b))
   })
 })
+
+// ============================================================================
+// Task 5: buildReconcileBody reescribe "## Contexto del epic" desde el spec;
+// "## Contexto heredado" sobrevive byte a byte, siempre — nadie la splicea.
+// ============================================================================
+import { buildReconcileBody } from '../scripts/reconcile.js'
+import { extractSectionContent, extractAc } from '../scripts/gh-issue-map.js'
+
+// El trozo LITERAL del cuerpo entre dos cabeceras. extractSectionContent no
+// sirve para afirmar "intacto": corta en la primera cabecera de cualquier
+// nivel, así que sobre una sección con subcabeceras dentro compararía sólo su
+// primer trozo y diría que sí a cosas que no.
+const trozo = (body, desde, hasta) => body.slice(body.indexOf(desde), body.indexOf(hasta))
+
+describe('buildReconcileBody — reescribe el del epic, no toca el heredado', () => {
+  const CON_AMBAS = [
+    '> Slice `#2` del epic. Spec: [docs/spec.md § 9. Slices](https://github.com/o/r/blob/main/docs/spec.md#9-slices)',
+    '',
+    EPIC_CONTEXT_HEADING,
+    '- regla VIEJA',
+    '',
+    INHERITED_CONTEXT_HEADING,
+    'Preámbulo de la coordinadora.',
+    '',
+    '### 1 · Una subcabecera suya',
+    'Texto bajo la subcabecera.',
+    '',
+    '| col | col |',
+    '|---|---|',
+    '| a | b |',
+    '',
+    '## Acceptance criteria (EARS, 1:1 con tests)',
+    '- AC-VIEJO',
+    '',
+    '## Out of scope / Protected',
+    '- 🚫 nada',
+  ].join('\n')
+
+  const wanted = (over) => ({
+    specLink: '> Slice `#2` del epic. Spec: [docs/spec.md § 9. Slices](https://github.com/o/r/blob/main/docs/spec.md#9-slices)',
+    ac: ['AC-NUEVO'], deps: [], epicContext: '- regla NUEVA', ...over,
+  })
+
+  it('reescribe el del epic y deja el heredado byte a byte, con sus subcabeceras y su tabla', () => {
+    const r = buildReconcileBody(CON_AMBAS, wanted())
+    expect(extractSectionContent(r.body, EPIC_CONTEXT_HEADING)).toBe('- regla NUEVA')
+    expect(trozo(r.body, INHERITED_CONTEXT_HEADING, '## Acceptance criteria'))
+      .toBe(trozo(CON_AMBAS, INHERITED_CONTEXT_HEADING, '## Acceptance criteria'))
+    expect(extractAc(r.body)).toEqual(['AC-NUEVO'])
+  })
+
+  it('sin la cabecera del epic, la inserta justo ANTES de Acceptance criteria', () => {
+    const sinEpic = CON_AMBAS.replace(`${EPIC_CONTEXT_HEADING}\n- regla VIEJA\n\n`, '')
+    const r = buildReconcileBody(sinEpic, wanted())
+    expect(r.body.indexOf(EPIC_CONTEXT_HEADING)).toBeLessThan(r.body.indexOf('## Acceptance criteria'))
+    expect(extractSectionContent(r.body, EPIC_CONTEXT_HEADING)).toBe('- regla NUEVA')
+  })
+
+  it('sin Acceptance criteria como ancla, NO inserta nada y no revienta', () => {
+    const sinAncla = [
+      '> Slice `#2` del epic. Spec: [docs/spec.md § 9. Slices](https://github.com/o/r/blob/main/docs/spec.md#9-slices)',
+      '',
+      INHERITED_CONTEXT_HEADING,
+      'lo de la coordinadora',
+    ].join('\n')
+    const r = buildReconcileBody(sinAncla, wanted({ ac: [] }))
+    expect(r.body === null || !r.body.includes(EPIC_CONTEXT_HEADING)).toBe(true)
+  })
+
+  it('si el spec deja de traer contexto, la sección del epic se retira entera', () => {
+    const r = buildReconcileBody(CON_AMBAS, wanted({ epicContext: null }))
+    expect(r.body).not.toContain(EPIC_CONTEXT_HEADING)
+    expect(r.body).toContain(INHERITED_CONTEXT_HEADING)
+    expect(r.body).not.toContain('\n\n\n')
+  })
+
+  // La propiedad que hoy se sostiene sola y que nadie protege.
+  it('nunca inserta la sección heredada cuando falta del cuerpo', () => {
+    const sinHeredado = CON_AMBAS.replace(/## Contexto heredado[\s\S]*?(?=## Acceptance)/, '')
+    const r = buildReconcileBody(sinHeredado, wanted())
+    expect(r.body).not.toContain(INHERITED_CONTEXT_HEADING)
+  })
+
+  it('un cambio SÓLO en el heredado no produce ninguna escritura', () => {
+    const yaAlDia = CON_AMBAS.replace('- regla VIEJA', '- regla NUEVA').replace('- AC-VIEJO', '- AC-NUEVO')
+    expect(buildReconcileBody(yaAlDia, wanted()).body).toBeNull()
+  })
+})

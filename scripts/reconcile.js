@@ -79,11 +79,11 @@
 // Este módulo decide QUÉ cuenta como divergencia (diffIssue/hasDrift), CÓMO
 // se reporta (formatDrift) y CÓMO se aplica: buildReconcileEditArgs para
 // título/milestone/labels, vía los flags de `gh issue edit`; buildReconcileBody
-// para el enlace al spec (splice de una sola línea) y AC/Dependencias
-// (splice quirúrgico de sección), ambos vía `--body`. ct-groom.mjs es
-// pegamento delgado: llama a estas funciones con lo que ya trae de `gh` y
-// del plan, e imprime/ejecuta lo que le devuelven — ninguna decisión de
-// negocio vive en el wrapper.
+// para el enlace al spec (splice de una sola línea), AC/Dependencias y el
+// contexto del epic (splice quirúrgico de sección, los tres), todos vía
+// `--body`. ct-groom.mjs es pegamento delgado: llama a estas funciones con lo
+// que ya trae de `gh` y del plan, e imprime/ejecuta lo que le devuelven —
+// ninguna decisión de negocio vive en el wrapper.
 import {
   extractAc, extractDepsInSection, extractStrayDeps, extractSectionContent, locateSection, locateLine,
   extractSpecLink, normalizeSpecLink, countHeadingLines, detectLineEnding, normalizeToLF,
@@ -469,14 +469,12 @@ export function formatDrift(diff) {
     lines.push(`divergencia: ${head}: la sección "## ${section}" aparece más de una vez en el body — el dispatcher no reconstruye la intención de un humano a partir de "la primera" ni de "la unión": revisa y une o elimina la copia sobrante a mano`)
   }
   if (diff.descripcionDiffers) lines.push(`nota: ${head}: la sección "## Descripción" difiere del spec (prosa — no cuenta para el exit code; --reconcile no la reescribe)`)
-  // Task 4 vs brief: el brief pedía afirmar aquí "Con --reconcile se
-  // reescribe desde el spec" — falso en este commit, buildReconcileBody no
-  // toca esta sección todavía (esa reescritura es la tarea siguiente). Un
-  // mensaje que ve el usuario no puede afirmar un mecanismo que no existe
-  // aún, así que el texto se limita a lo que es cierto hoy: que la sección
-  // difiere, que no cuenta para el exit code, y que la sección de al lado
-  // (heredada) no la toca nadie nunca — sin decir quién reescribe esta.
-  if (diff.epicContextDiffers) lines.push(`nota: ${head}: la sección "${EPIC_CONTEXT_HEADING}" difiere del spec (no cuenta para el exit code). La sección "${INHERITED_CONTEXT_HEADING}" de al lado no se toca nunca`)
+  // Task 4 dejó esta nota sin decir quién reescribe la sección, a propósito:
+  // en aquel commit "con --reconcile se reescribe desde el spec" todavía era
+  // falso (buildReconcileBody no la tocaba). Task 5 lo hace cierto
+  // (buildReconcileBody, más abajo, sí la reescribe) — ahora la nota puede
+  // decirlo sin afirmar un mecanismo que no existe.
+  if (diff.epicContextDiffers) lines.push(`nota: ${head}: la sección "${EPIC_CONTEXT_HEADING}" difiere del spec (no cuenta para el exit code; con --reconcile se reescribe desde el spec). La sección "${INHERITED_CONTEXT_HEADING}" de al lado no se toca nunca`)
   if (diff.protectedDiffers) lines.push(`nota: ${head}: la sección "## Out of scope / Protected" difiere del spec (prosa — no cuenta para el exit code; --reconcile no la reescribe)`)
   // F21: se nombra la label como el canal que SÍ cuenta, para que quien lea
   // esta nota sepa dónde mirar si de verdad le preocupa un gate — sin esa
@@ -514,14 +512,23 @@ export function buildReconcileEditArgs(diff) {
   return args
 }
 
-// buildReconcileBody: --reconcile SÍ reescribe el enlace al spec y
-// AC/Dependencias (a diferencia de Descripción/Protegido, ver diffIssue)
-// porque son campos deterministas o estructurados que el dispatcher (o la
-// trazabilidad del spec) obedecen/necesitan de verdad. Reemplaza SOLO el
-// rango de cada sección/línea conocida dentro del body EXISTENTE
-// (locateSection/locateLine, scripts/gh-issue-map.js) — nunca reconstruye
-// el body entero — así cualquier contenido humano antes/después de esas
-// secciones se preserva intacto.
+// buildReconcileBody: --reconcile SÍ reescribe el enlace al spec, AC/
+// Dependencias y el contexto del epic (a diferencia de Descripción/Protegido
+// y del contexto heredado, ver diffIssue). Lo que distingue a las tres
+// primeras no es "estructurado vs. prosa" — el contexto del epic ES prosa —
+// sino DE QUIÉN es el texto: el enlace al spec y AC/Dependencias son campos
+// deterministas o estructurados que el dispatcher (o la trazabilidad del
+// spec) obedecen/necesitan de verdad, y el contexto del epic, aunque es
+// prosa, es prosa del SPEC (idéntica en todos los issues del epic, ver
+// groom.js#readEpicContext) — su autoridad es el spec, igual que la de AC/
+// Dependencias, y no la de quien abre un issue suelto. Descripción/Protegido
+// SÍ son prosa de ese issue, y el contexto heredado es prosa de la sesión
+// coordinadora: ninguna de las dos es texto que el spec posea, así que
+// ninguna se reescribe aquí. Reemplaza SOLO el rango de cada sección/línea
+// conocida dentro del body EXISTENTE (locateSection/locateLine,
+// scripts/gh-issue-map.js) — nunca reconstruye el body entero — así
+// cualquier contenido humano antes/después de esas secciones se preserva
+// intacto.
 //
 // Todo el procesamiento interno trabaja sobre el body normalizado a LF
 // (`normalizeToLF`) — si el original usaba CRLF, el resultado se
@@ -632,6 +639,53 @@ export function buildReconcileBody(existingBody, wantedIssue) {
       // no-op) para dejar exactamente una.
       const before = body.slice(0, depsLoc.headingStart).replace(/\n$/, '')
       body = before + body.slice(depsLoc.contentEnd)
+      changed = true
+    }
+  }
+
+  // Contexto del epic. Es prosa, y aun así se reescribe — al contrario que
+  // Descripción y Protegido, que no. Lo que las distingue: aquéllas son prosa
+  // que un humano edita de forma rutinaria y legítima en un issue suelto; ésta
+  // es texto del epic, idéntico en todos sus issues, y editarla a mano en uno
+  // solo es exactamente la divergencia que mantenerla al día viene a eliminar.
+  // Quien quiera contexto propio de este slice tiene la sección de al lado, que
+  // no se toca nunca — y el placeholder con el que se crea ya se lo dice.
+  //
+  // Las posiciones se localizan sobre el body YA actualizado por los splices
+  // de arriba, no sobre el original.
+  const currentEpic = extractSectionContent(body, EPIC_CONTEXT_HEADING)
+  const wantedEpic = wantedIssue.epicContext ?? null
+  const epicDiffers = (currentEpic === null && wantedEpic === null)
+    ? false
+    : (currentEpic === null || wantedEpic === null)
+      ? true
+      : currentEpic.trim() !== wantedEpic.trim()
+  if (epicDiffers) {
+    const epicLoc = locateSection(body, EPIC_CONTEXT_HEADING)
+    if (wantedEpic && epicLoc) {
+      body = body.slice(0, epicLoc.headingEnd) + wantedEpic + '\n' + body.slice(epicLoc.contentEnd)
+      changed = true
+    } else if (wantedEpic && !epicLoc) {
+      // Sección ausente (un issue anterior a esta ronda) y el spec sí trae
+      // texto: se inserta entera justo ANTES de "## Acceptance criteria", que
+      // es la posición que le corresponde y a la vez el único ancla seguro.
+      // Sin ese ancla no se inventa una posición — insertar al final a ciegas
+      // es lo que, con una valla de código sin cerrar por delante, añadía una
+      // sección nueva en cada corrida sin límite.
+      const acLoc = locateSection(body, AC_HEADING_FORMS)
+      if (acLoc) {
+        body = body.slice(0, acLoc.headingStart) + `${EPIC_CONTEXT_HEADING}\n${wantedEpic}\n\n` + body.slice(acLoc.headingStart)
+        changed = true
+      }
+      // Sin ancla: no se escribe nada y no se marca ningún gap. Esta sección
+      // nunca cuenta para el exit code, así que no puede producir uno.
+    } else if (!wantedEpic && epicLoc) {
+      // El spec ya no trae contexto del epic: la sección se retira ENTERA,
+      // cabecera incluida. Se recorta un '\n' del final del primer trozo para
+      // no dejar dos líneas en blanco en la costura, igual que al retirar
+      // "## Dependencias".
+      const before = body.slice(0, epicLoc.headingStart).replace(/\n$/, '')
+      body = before + body.slice(epicLoc.contentEnd)
       changed = true
     }
   }
