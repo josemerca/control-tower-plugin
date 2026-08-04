@@ -1,12 +1,90 @@
 // Lógica pura de grooming: de Slice[] (T1) a un plan de operaciones GitHub.
 import { isNoValueCell } from './slices.js'
 import { resolveGates, gateLabels, renderGatesIssueContent } from './gates.js'
+import { locateSection } from './gh-issue-map.js'
 
 // GATES_HEADING (F21): la sección de gates del cuerpo del issue. Constante
 // exportada porque la nombran TRES sitios (este fichero al escribirla,
 // reconcile.js al compararla, y sus tests) y una cabecera escrita a mano en
 // tres sitios es una cabecera que acaba divergiendo en uno.
 export const GATES_HEADING = '## Gates'
+
+// Las DOS secciones de contexto del cuerpo de un issue, con dueños distintos
+// y por eso con reglas distintas:
+//
+//   EPIC_CONTEXT_HEADING      la escribe /ct-groom desde el spec, idéntica en
+//                             todos los issues del epic, y la mantiene al día.
+//   INHERITED_CONTEXT_HEADING la escribe la sesión coordinadora. El plugin la
+//                             emite vacía al crear el issue y no vuelve a
+//                             tocarla nunca: ni la compara, ni la reescribe,
+//                             ni la inserta, ni la borra.
+//
+// Son constantes exportadas por el mismo motivo que GATES_HEADING: las nombran
+// el que las escribe, el que las compara y sus tests, y una cabecera tecleada
+// en tres sitios acaba divergiendo en uno. La primera es además la MISMA
+// cadena en el fichero de spec y en el cuerpo del issue: una sola que aprender.
+export const EPIC_CONTEXT_HEADING = '## Contexto del epic'
+export const INHERITED_CONTEXT_HEADING = '## Contexto heredado'
+
+// El placeholder afirma dos cosas que un humano necesita leer ahí mismo: quién
+// rellena la sección, y que lo que escriba no se lo va a pisar nadie. Una
+// sección vacía sin esa segunda frase invita a no usarla.
+export const INHERITED_CONTEXT_PLACEHOLDER =
+  '_(vacía — la rellena la sesión coordinadora cuando algo ya mergeado condiciona a este slice. `/ct-groom` no escribe aquí ni reescribe lo que escribas.)_'
+
+// SUBHEADING_RE: cabecera ATX de nivel 3 o más, con la indentación de 0 a 3
+// espacios que CommonMark admite. Los niveles 1 y 2 quedan fuera a propósito:
+// una "## " o una "# " detrás de la sección no está DENTRO de ella, sólo la
+// termina, que es lo normal en cualquier documento.
+const SUBHEADING_RE = /^ {0,3}#{3,}\s/
+
+// subheadingInside: la línea que terminó la sección, si resulta ser una
+// cabecera de nivel 3 o más — es decir, una subcabecera del propio contexto
+// del epic. `locateSection` corta el contenido en la primera cabecera de
+// CUALQUIER nivel, así que basta con mirar qué hay justo detrás del corte: si
+// es una subcabecera, había una dentro.
+//
+// `contentEnd` apunta al '\n' que precede a la línea terminadora (o al final
+// del texto si no hay ninguna), así que la primera línea no vacía a partir de
+// ahí es esa línea terminadora.
+function subheadingInside(specMd, loc) {
+  const rest = (specMd || '').slice(loc.contentEnd)
+  const line = rest.split('\n').find((l) => l.trim() !== '')
+  return line && SUBHEADING_RE.test(line) ? line.trim() : null
+}
+
+// readEpicContext: lee del fichero de spec el texto que va a viajar, idéntico,
+// al cuerpo de cada issue del epic.
+//
+// La sección se localiza POR EL TEXTO DE SU CABECERA, nunca por un número de
+// sección — mismo criterio con el que analyzeSlicesTable localiza la tabla de
+// slices por sus columnas: los números de sección de un spec se mueven en
+// cuanto alguien inserta algo por delante.
+//
+// Devuelve `content: null` en los tres casos en que no hay nada que emitir
+// (ausente, vacía, o con una subcabecera dentro), cada uno con su propio
+// aviso: los tres se arreglan de forma distinta y un mensaje único obligaría a
+// adivinar cuál pasó. Un spec sin esta sección es un spec VÁLIDO — de ahí que
+// esto avise y nunca lance.
+export function readEpicContext(specMd) {
+  const warnings = []
+  const loc = locateSection(specMd || '', EPIC_CONTEXT_HEADING)
+  if (!loc) {
+    warnings.push(`aviso: el spec no trae la sección "${EPIC_CONTEXT_HEADING}" — los issues de este epic se crearán sin contexto común. Si lo quieres, añade esa sección al spec, fuera de la tabla de slices, y vuelve a correr.`)
+    return { content: null, warnings }
+  }
+  const offending = subheadingInside(specMd, loc)
+  if (offending) {
+    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec contiene una cabecera ("${offending}") y por eso NO se emite en ningún issue. El texto de esta sección se mantiene al día con un reemplazo que termina en la primera cabecera que encuentra dentro, así que esa cabecera dejaría el resto del texto huérfano. Usa negritas o una lista en su lugar.`)
+    return { content: null, warnings }
+  }
+  const content = loc.content.trim()
+  if (!content) {
+    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec está presente pero sin contenido — se trata igual que si no estuviera. Escribe algo debajo de la cabecera, o quítala.`)
+    return { content: null, warnings }
+  }
+  return { content, warnings }
+}
 
 // gatesOf: la resolución de gates de un slice, en un solo sitio. La llaman
 // buildLabels y buildIssueBody por separado (es pura y barata) en vez de
