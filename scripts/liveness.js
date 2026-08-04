@@ -49,62 +49,144 @@ export function assessLocalLiveness(n, getCmuxTitles, { repoRoot, timeoutMs }) {
   return { hasWorktree, hasBranch, hasCmuxWorkspace, cmuxChecked }
 }
 
-const ejecutar = (cmd, args) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+// SEÑAL_TIMEOUT_MS: ni `ps` ni `lsof` pueden dejar este comando colgado para
+// siempre. `lsof` es el caso clásico —un montaje de red muerto lo bloquea
+// indefinidamente al estatear el cwd de un proceso— y /ct-status se vende como
+// invocable en bucle por un vigilante externo: un cuelgue ahí no devuelve ni
+// código de salida. Mismo criterio que sus vecinas (`gh` y `git` en
+// ct-status.mjs, y el `execFileSync` de `assessLocalLiveness` aquí arriba):
+// `timeout` + `killSignal: 'SIGKILL'`, porque un SIGTERM a un proceso atascado
+// en una llamada al sistema no lo mata. El tope es holgado a propósito: medido
+// en esta máquina, `ps` tarda 26 ms y un `lsof` agrupado sobre 400 PID tarda
+// 180 ms, así que 10 s son ~55x el peor caso medido — no se dispara por carga,
+// sólo por un cuelgue de verdad. Un timeout llega aquí con `status: null` (no
+// 1), así que cae por la rama de "no se pudo comprobar" con su motivo, nunca
+// por la de la lista vacía.
+const SEÑAL_TIMEOUT_MS = 10_000
+const ejecutar = (cmd, args, opciones) => execFileSync(cmd, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], ...opciones })
+
+// basename exacto de la RUTA con la que se invocó un proceso. Sin `path.basename`
+// a propósito: aquí no se normaliza nada, se corta por la última barra y se
+// compara tal cual.
+const nombreInvocado = (ruta) => ruta.slice(ruta.lastIndexOf('/') + 1)
 
 // liveSliceProcesses: ¿qué slices tienen AHORA MISMO un proceso `claude`
 // trabajando dentro de su worktree? Es la pregunta que ninguna otra señal del
 // loop responde: al morir, un agente deja worktree, rama y ventana de cmux en
 // su sitio, así que todo lo demás sigue diciendo "vivo".
 //
-// `pgrep -x`, nunca `-f`: `-x` casa el nombre exacto del proceso, mientras que
-// `-f` casa cualquier línea de comando que contenga "claude" — incluida la del
-// propio comando que hace esta comprobación. Además se acota con `-U <uid>`
-// al usuario actual: sin acotar, `pgrep` listaría procesos `claude` de
-// cualquier usuario de la máquina, y eso es justo lo que hace falta para leer
-// con seguridad el `stdout` parcial de `lsof` más abajo.
+// SE IDENTIFICA POR LA RUTA INVOCADA, NO POR `pgrep -x`, y no es una cuestión
+// de gusto: `pgrep -x claude` NO ve al Claude Code que te está ejecutando.
+// Dos hechos medidos en esta máquina, los dos hoy:
 //
-// Una sola llamada a `lsof` para todos los PID (medido: del orden de decenas
-// de ms). Un PID que muera entre el `pgrep` y el `lsof` no rompe nada, pero
-// no porque `lsof` "salga con 0 y lo omita" —eso es falso, medido—: `lsof`
-// sale con **1** en cuanto falta UNO de los PID pedidos, aunque el resto se
-// resuelva bien y venga en `stdout`. Leer ese `stdout` parcial sólo es seguro
-// PORQUE `pgrep` está acotado al usuario actual: todo PID de la lista es
-// propio y legible, así que la única razón de que falte en la salida de
-// `lsof` es que haya muerto —y un proceso muerto no trabaja en ningún
-// worktree. Sin el acotado por usuario, un PID ajeno (no legible por permisos)
-// produciría el mismo rc=1 y aquí se leería como "muerto" pudiendo seguir
-// vivo: sería la única vía de acusar en falso a un slice sano. No lo quites.
+//   1. El nombre de proceso no es "claude". El instalador nativo deja
+//      `~/.local/bin/claude` como symlink a
+//      `~/.local/share/claude/versions/<versión>`, y el kernel toma el nombre
+//      del proceso del ejecutable YA RESUELTO:
+//        $ ps -u <uid> -o pid=,ucomm=  →  18539  2.1.220
+//      El nombre del proceso ES el número de versión, y cambia con cada
+//      actualización. Cualquier matcheo por NOMBRE persigue un blanco móvil.
+//   2. `pgrep` excluye a sus propios ancestros. `man pgrep`, flag `-a`: «By
+//      default, the current pgrep or pkill process and all of its ancestors
+//      are excluded». Como /ct-status se invoca DESDE una sesión de Claude
+//      Code, el `claude` de esa sesión es ancestro del `pgrep` y queda fuera:
+//        $ pgrep -x claude   → no lista el pid 18539, que sí está en `ps`
+//      Con una sola sesión abierta la salida es vacía y rc=1 — que este código
+//      interpretaba como «ninguna coincidencia, respuesta normal» y por tanto
+//      `comprobado: true`. Resultado: TODO slice sano en vuelo salía «← SIN
+//      SEÑAL DE VIDA» con exit 3 y sin un solo `aviso:`, y el bloque de
+//      residuo afirmaba «no hay ningún proceso trabajando dentro» sobre un
+//      worktree con un agente dentro. La degradación segura no se activaba
+//      porque, desde dentro, la lectura «había sido un éxito». Es el peor
+//      fallo posible de esta feature. No vuelvas a `pgrep`.
+//
+// Lo que sí identifica es la RUTA con la que se invocó el proceso, que `ps`
+// da en la columna `comm` y que sobrevive a los cambios de versión:
+//   $ ps -o comm= -p 18539  →  /Users/jpereag/.local/bin/claude
+// Se acepta sólo si su basename es EXACTAMENTE `claude`, comparando string
+// contra string. El matcheo exacto no es celo: deja fuera la app de escritorio
+// sin ninguna regla extra —`/Applications/Claude.app/Contents/MacOS/Claude`
+// tiene basename `Claude` con mayúscula, y sus helpers `Claude Helper`,
+// `Claude Helper (Renderer)`, `Claude Helper (Plugin)`—, y una ventana abierta
+// del escritorio no es un agente trabajando en ningún worktree.
+//
+// `ps -u <uid>` acota al usuario actual, igual que hacía el `-U` de `pgrep` y
+// por el mismo motivo: es lo que hace segura la lectura del `stdout` parcial
+// de `lsof` de más abajo. Y `ps`, a diferencia de `pgrep`, NO excluye
+// ancestros: por eso este camino sí ve la sesión desde la que se le llama.
+// Comprobado en aislado: un proceso invocado como `<dir>/claude` que ejecuta
+// `pgrep -x claude` NO se ve a sí mismo en la salida; el filtro de aquí abajo
+// sí lo lista.
+//
+// LÍMITE CONOCIDO, y se deja escrito porque nadie lo ha podido comprobar: todo
+// lo de arriba está medido en macOS. Que la columna `comm` de `ps` traiga la
+// RUTA invocada es lo que hace funcionar esto, y en otro sistema operativo esa
+// columna puede significar otra cosa. Si alguien lleva el loop a Linux, lo
+// primero que hay que verificar es qué devuelve ahí `ps -o comm=`; hasta
+// entonces, esta señal está comprobada sólo donde se ha medido.
+//
+// Una sola llamada a `lsof` para todos los PID (medido: 180 ms sobre 400 PID).
+// Un PID que muera entre el `ps` y el `lsof` no rompe nada, pero no porque
+// `lsof` "salga con 0 y lo omita" —eso es falso, medido—: `lsof` sale con **1**
+// en cuanto falta UNO de los PID pedidos, aunque el resto se resuelva bien y
+// venga en `stdout`. Leer ese `stdout` parcial sólo es seguro PORQUE la lista
+// está acotada al usuario actual: todo PID de la lista es propio y legible,
+// así que la única razón de que falte en la salida de `lsof` es que haya
+// muerto —y un proceso muerto no trabaja en ningún worktree. Sin el acotado
+// por usuario, un PID ajeno (no legible por permisos) produciría el mismo rc=1
+// y aquí se leería como "muerto" pudiendo seguir vivo: sería la única vía de
+// acusar en falso a un slice sano. No lo quites.
 export function liveSliceProcesses(repoRoot, { run = ejecutar } = {}) {
   // `process.getuid` no existe en Windows. Sin uid no hay acotado posible, y
-  // un `pgrep` sin acotar rompe la premisa que hace segura la lectura parcial
+  // un listado sin acotar rompe la premisa que hace segura la lectura parcial
   // de `lsof` de más abajo, así que se degrada aquí en vez de arriesgarse.
   if (typeof process.getuid !== 'function') {
     return { porSlice: new Map(), comprobado: false, motivo: 'no se pudo determinar el usuario actual: process.getuid no está disponible en esta plataforma' }
   }
   const uid = process.getuid()
 
-  let pids
+  let listado
   try {
-    pids = run('pgrep', ['-x', '-U', String(uid), 'claude']).split('\n').map((s) => s.trim()).filter(Boolean)
+    listado = run('ps', ['-u', String(uid), '-o', 'pid=,comm='], { timeout: SEÑAL_TIMEOUT_MS, killSignal: 'SIGKILL' })
   } catch (e) {
-    // rc=1 en pgrep significa "ninguna coincidencia", que es una respuesta
-    // NORMAL y válida: el loop en reposo no tiene agentes. Tratarla como
-    // fallo daría falsa alarma en cada corrida tranquila.
-    if (e && e.status === 1) return { porSlice: new Map(), comprobado: true, motivo: null }
-    return { porSlice: new Map(), comprobado: false, motivo: `no se pudo listar procesos con pgrep: ${e && e.message}` }
+    // Un `ps` que falla es una lectura que NO se pudo hacer. Nunca una lista
+    // vacía presentada como hecho: ese es exactamente el fallo que este módulo
+    // acaba de arreglar.
+    return { porSlice: new Map(), comprobado: false, motivo: `no se pudo listar procesos con ps: ${e && e.message}` }
   }
-  // Sin PID no se llama a lsof, y no es una optimización: medido, `lsof -a -p ""`
-  // devuelve un proceso AJENO en vez de nada, así que la lista vacía produciría
-  // un falso positivo.
+  const pids = []
+  for (const linea of listado.split('\n')) {
+    // El PID es el primer campo y TODO el resto de la línea es la ruta. No se
+    // parte por espacios: las rutas de la app de escritorio los llevan dentro
+    // (`.../Claude Helper.app/Contents/MacOS/Claude Helper`), y partir por
+    // espacios convertiría esa línea en el token suelto `Helper`.
+    const m = /^\s*(\d+)\s+(.*)$/.exec(linea)
+    if (!m) continue
+    if (nombreInvocado(m[2]) !== 'claude') continue
+    pids.push(m[1])
+  }
+  // Sin PID no se llama a lsof, y no es una optimización: medido, `lsof -a -p ""
+  // -d cwd -Fpn` no devuelve nada vacío — devuelve el cwd de TODOS los procesos
+  // legibles de la máquina con rc=0 (cientos de entradas: 399 en la corrida
+  // medida), porque una lista de PID vacía no restringe nada. La lista vacía
+  // produciría entonces un falso positivo por cada worktree.
   if (!pids.length) return { porSlice: new Map(), comprobado: true, motivo: null }
 
   let salida
   try {
-    salida = run('lsof', ['-a', '-p', pids.join(','), '-d', 'cwd', '-Fpn'])
+    salida = run('lsof', ['-a', '-p', pids.join(','), '-d', 'cwd', '-Fpn'], { timeout: SEÑAL_TIMEOUT_MS, killSignal: 'SIGKILL' })
   } catch (e) {
-    // rc=1 con `stdout` legible es la carrera pgrep→lsof, no un fallo: ver el
+    // rc=1 con `stdout` legible es la carrera ps→lsof, no un fallo: ver el
     // comentario de cabecera de esta función sobre por qué acotar por usuario
     // es lo que hace segura esta lectura parcial.
+    //
+    // `status === 1` es la mitad que NO se puede quitar, y no está ahí de
+    // adorno: rc=1 es el único código que significa "faltaba algún PID". Un
+    // `lsof` que no existe sale con 127, y un `lsof` matado por el `timeout`
+    // de arriba llega con `status: null` — los dos pueden traer un `stdout`
+    // string (vacío, o cortado a la mitad). Sin esta mitad de la condición,
+    // esos dos casos se leerían como una lectura BUENA y parcial: el informe
+    // afirmaría "no hay nadie vivo" sobre un `stdout` que se quedó a medias.
     if (e && e.status === 1 && typeof e.stdout === 'string') {
       salida = e.stdout
     } else {

@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync, spawn } from 'node:child_process'
-import { mkdtempSync, rmSync, mkdirSync, existsSync, readFileSync, writeFileSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, rmSync, mkdirSync, existsSync, readFileSync, writeFileSync, symlinkSync, chmodSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,7 +15,7 @@ const gitEn = (repo, ...args) => execFileSync('git', ['-C', repo, '-c', 'user.em
 // contenido de `.worktrees/`. El `origin` no es decorado — el comando compara
 // la identidad del checkout contra `--repo` antes de mirar nada local, porque
 // cruzar los issues de un repo con los worktrees de otro fabrica hallazgos
-// (medido: 4, uno de ellos una acusación de abandono).
+// (medido: 3, uno de ellos una acusación de abandono).
 //
 // FAKE_GH_COUNTER_FILE tampoco es opcional: sin él el stub devuelve SIEMPRE el
 // primer elemento de FAKE_GH_LIST_SEQUENCE, así que los issues "abiertos"
@@ -99,6 +99,23 @@ describe('/ct-status', () => {
     limpiar(b)
   })
 
+  it('si fallan los CERRADOS, lo de arriba no se queda vacío: el bloque EN VUELO sigue ahí', () => {
+    // El informe decía «exit 1 — 2 lectura(s) sin completar: lo de arriba es
+    // sólo lo que sí se ha podido comprobar»… y arriba no había nada, porque
+    // `cargarIssues` lanzaba y con ello tiraba la lectura de abiertos que ya
+    // estaba entera en memoria. Contradecía el contrato que este comando
+    // publica: «se informa de lo que sí se sabe».
+    const b = bancada()
+    const res = correr(b, { FAKE_GH_LIST_SEQUENCE: enProgreso7(), FAKE_GH_TIMELINE_JSON: hace(3 * 3600_000), FAKE_GH_LIST_FAIL_AT: '1' })
+    expect(res.status).toBe(1)
+    expect(res.stdout).toMatch(/EN VUELO \(1\)/)
+    expect(res.stdout).toMatch(/#7\s+refresh/)
+    expect(res.stderr).toMatch(/no se pudieron listar issues cerrados/)
+    // Y sólo se ha perdido UNA de las dos lecturas, no las dos.
+    expect(res.stdout).toMatch(/exit 1 — 1 lectura\(s\) sin completar/)
+    limpiar(b)
+  })
+
   it('si la lectura de issues falla, ningún worktree se acusa de huérfano', () => {
     const b = bancada({ worktrees: [7] })
     const res = correr(b, { FAKE_GH_LIST_FAIL_AT: '0' })
@@ -106,6 +123,30 @@ describe('/ct-status', () => {
     expect(res.stdout).not.toMatch(/RESIDUO/)
     expect(res.stderr).toMatch(/\.worktrees/)
     limpiar(b)
+  })
+
+  it('no se puede listar .worktrees/ → nunca «no hay huérfanos», y la señal sale `?` en vez de `✗`', () => {
+    // El test que el §9 del diseño exige y que faltaba. Con `.worktrees/`
+    // ilegible salían a la vez el `aviso:` de EACCES y un `worktree ✗` que
+    // afirmaba que no hay lo que no se ha podido mirar.
+    const b = bancada({ worktrees: [7] })
+    chmodSync(join(b.repo, '.worktrees'), 0o000)
+    try {
+      const res = correr(b, { FAKE_GH_LIST_SEQUENCE: enProgreso7(), FAKE_GH_TIMELINE_JSON: hace(3 * 3600_000) })
+      expect(res.status).toBe(1)
+      expect(res.stderr).toMatch(/no se pudo listar .*\.worktrees/)
+      expect(res.stdout).toMatch(/worktree \?/)
+      expect(res.stdout).not.toMatch(/worktree ✗/)
+      // Y jamás la afirmación de limpieza sobre la lectura que no se hizo.
+      expect(res.stdout).not.toMatch(/RESIDUO/)
+      expect(res.stdout).not.toMatch(/reposo/i)
+      // La rama SÍ se pudo leer, así que ésa sí se afirma: la duda no se
+      // contagia a la señal de al lado.
+      expect(res.stdout).toMatch(/rama ✗/)
+    } finally {
+      chmodSync(join(b.repo, '.worktrees'), 0o755)
+      limpiar(b)
+    }
   })
 
   it('un worktree de un issue ABIERTO que no está en vuelo se nombra sin afirmar que nadie lo reclama', () => {
@@ -151,9 +192,9 @@ describe('/ct-status', () => {
     limpiar(b)
   })
 
-  it('sin pgrep en el PATH nadie sale muerto: exit 1 y «no se pudo comprobar»', () => {
+  it('sin `ps` en el PATH nadie sale muerto: exit 1 y «no se pudo comprobar»', () => {
     const b = bancada()
-    // Un PATH sin `pgrep` ni `lsof`, pero con `git` (hace falta para resolver
+    // Un PATH sin `ps` ni `lsof`, pero con `git` (hace falta para resolver
     // la raíz del checkout) y con `node` (el stub de `gh` es un script de node
     // y sin él fallaría TAMBIÉN la lectura de issues, que no es lo que se está
     // probando aquí): así el único fallo es el de la señal de procesos, y se
@@ -177,7 +218,7 @@ describe('/ct-status', () => {
     expect(res.status).toBe(1)
     expect(res.stdout).toMatch(/proceso \?/)
     expect(res.stdout).not.toMatch(/SIN SE.AL DE VIDA/)
-    expect(res.stderr).toMatch(/pgrep/)
+    expect(res.stderr).toMatch(/no se pudo listar procesos con ps/)
     limpiar(b)
   })
 
@@ -237,10 +278,10 @@ describe('/ct-status', () => {
 describe('/ct-status — la identidad del checkout', () => {
   it('un --repo que no es el de este checkout no fabrica hallazgos: avisa y sale 1', () => {
     // El checkout es de o/r, con tres worktrees y un claim; se pregunta por
-    // OTRO repo. Sin esta comprobación salían 4 hallazgos con cero avisos y
-    // exit 3 — uno la acusación de abandono, y tres worktrees marcados como
-    // candidatos a `git worktree remove`. Que el comando no escriba no ayuda:
-    // escribe el humano, por indicación suya.
+    // OTRO repo. Sin esta comprobación salían 3 hallazgos con cero avisos y
+    // exit 3 — uno la acusación de abandono sobre #7, y dos worktrees (8 y 9)
+    // marcados como candidatos a `git worktree remove`. Que el comando no
+    // escriba no ayuda: escribe el humano, por indicación suya.
     const b = bancada({ worktrees: [7, 8, 9] })
     const res = correr(b, { FAKE_GH_LIST_SEQUENCE: enProgreso7(), FAKE_GH_TIMELINE_JSON: hace(3 * 3600_000) }, ['--repo', 'otro/repo'])
     expect(res.status).toBe(1)
@@ -309,16 +350,31 @@ describe('/ct-status — entregado, esperando merge', () => {
 describe('/ct-status — la señal de vida en el bloque de residuo', () => {
   it('con un proceso vivo dentro, NO se dice que no hay ninguno', () => {
     const b = bancada({ worktrees: [9] })
-    // Un proceso de verdad, llamado `claude`, con su cwd dentro del worktree:
-    // es la única forma de ejercitar `liveSliceProcesses` de punta a punta.
-    // Un symlink a /bin/sleep, no una copia: copiar un binario de sistema en
-    // macOS le rompe la firma y el SO lo mata con SIGKILL (comprobado).
+    // Un proceso de verdad con su cwd dentro del worktree: es la única forma
+    // de ejercitar `liveSliceProcesses` de punta a punta.
+    //
+    // Montado COMO LO MONTA EL INSTALADOR NATIVO, que es lo que hace decisiva
+    // esta prueba: `bin/claude` es un SYMLINK a un ejecutable guardado bajo
+    // `versions/<versión>`, igual que `~/.local/bin/claude` apunta a
+    // `~/.local/share/claude/versions/2.1.221`. El nombre de proceso que ve el
+    // kernel es el del ejecutable RESUELTO (medido: `ps -o ucomm=` de un
+    // Claude Code real devuelve "2.1.221", no "claude"), así que lo único que
+    // dice `claude` aquí es la RUTA con la que se invocó — que es justo lo que
+    // este comando mira. Un symlink a /bin/sleep, no una copia: copiar un
+    // binario de sistema en macOS le rompe la firma y el SO lo mata con
+    // SIGKILL (comprobado).
     const bin = join(b.dir, 'bin')
-    mkdirSync(bin)
-    symlinkSync('/bin/sleep', join(bin, 'claude'))
+    mkdirSync(join(bin, 'versions'), { recursive: true })
+    symlinkSync('/bin/sleep', join(bin, 'versions', '2.1.221'))
+    symlinkSync(join(bin, 'versions', '2.1.221'), join(bin, 'claude'))
     const hijo = spawn(join(bin, 'claude'), ['30'], { cwd: join(b.repo, '.worktrees', '9'), stdio: 'ignore' })
     try {
       execFileSync('sh', ['-c', 'sleep 0.5'])
+      // El nombre de proceso NO es "claude": es el del binario resuelto. Si
+      // alguien vuelve a identificar por nombre, esta línea lo delata antes
+      // que la aserción de abajo.
+      const nombreDeProceso = execFileSync('ps', ['-o', 'ucomm=', '-p', String(hijo.pid)], { encoding: 'utf8' }).trim()
+      expect(nombreDeProceso).not.toBe('claude')
       const res = correr(b, { FAKE_GH_LIST_SEQUENCE: SIN_ISSUES })
       // LA afirmación que no se puede hacer sin mirar: la primera versión
       // imprimía «nadie lo está trabajando ahora» sin consultar

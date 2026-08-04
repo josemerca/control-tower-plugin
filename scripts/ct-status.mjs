@@ -137,19 +137,22 @@ const git = (args) => execFileSync('git', args, { encoding: 'utf8', stdio: ['ign
 const motivos = []
 
 // ---------------------------------------------------------------- issues ---
-// La lectura de issues va dentro de un try porque `cargarIssues` LANZA en vez
-// de salir del proceso: un módulo compartido no decide por su llamante, y este
-// llamante quiere informar de lo que sí sabe en vez de abortar. El Error que
-// lanza ya nombra cuál de las dos lecturas falló (abiertos o cerrados).
-let abiertos = []
-let cerrados = []
-let issuesLeidos = true
-try {
-  ;({ abiertos, cerrados } = cargarIssues({ repo, gh }))
-} catch (e) {
-  issuesLeidos = false
-  motivos.push(e.message)
-}
+// `cargarIssues` intenta SIEMPRE las dos lecturas y devuelve lo que salió bien
+// junto con los motivos de lo que no: un módulo compartido no decide por su
+// llamante, y este llamante quiere informar de lo que sí sabe en vez de
+// abortar. Antes lanzaba, y lanzar al fallar la segunda lectura tiraba la
+// primera —que ya estaba entera en memoria—: el informe salía VACÍO bajo un
+// «lo de arriba es sólo lo que sí se ha podido comprobar» que no tenía nada
+// arriba. Cada motivo nombra cuál de las dos lecturas falló.
+//
+// `issuesLeidos` exige las DOS. No es exceso de celo: con sólo los abiertos no
+// se sabe qué worktree dejó atrás un slice ya entregado, y con sólo los
+// cerrados no se sabe cuál está en vuelo — en cualquiera de los dos casos, el
+// cruce que decide "huérfano" fabricaría hallazgos. Lo que sí se pudo leer
+// sigue alimentando su bloque del informe.
+const { abiertos, cerrados, motivos: motivosIssues } = cargarIssues({ repo, gh })
+const issuesLeidos = motivosIssues.length === 0
+motivos.push(...motivosIssues)
 
 const mapeados = abiertos.map(mapGhIssue)
 const enProgreso = mapeados.filter((i) => i.status === 'in-progress').map((i) => ({ n: i.n, nombre: i.name }))
@@ -170,11 +173,13 @@ const statusAbiertoPorNumero = new Map(mapeados.map((i) => [String(i.n), i.statu
 // La mitad LOCAL de este informe —worktrees, ramas, procesos— sale de un
 // checkout; la mitad remota sale de `--repo`. Cruzarlas sin comprobar que
 // hablan del MISMO repositorio no produce un informe incompleto: produce
-// hallazgos FABRICADOS. Medido: `--repo` apuntando a otro repo daba 4
-// hallazgos con cero avisos y exit 3 — uno de ellos la acusación de abandono
-// que el §4 del diseño llama «el peor fallo posible de este comando», y tres
-// worktrees marcados como candidatos a `git worktree remove`. Que este comando
-// no escriba nada no protege de nada: escribe el humano, por indicación suya.
+// hallazgos FABRICADOS. Medido, con esta comprobación desactivada y un
+// checkout de `o/r` con tres worktrees y un claim de 3 h: `--repo otro/repo`
+// daba 3 hallazgos con cero avisos y exit 3 — uno de ellos la acusación de
+// abandono que el §4 del diseño llama «el peor fallo posible de este
+// comando», y dos worktrees marcados como candidatos a `git worktree remove`.
+// Que este comando no escriba nada no protege de nada: escribe el humano, por
+// indicación suya.
 //
 // Y la raíz tiene que ser la del CHECKOUT PRINCIPAL, no la de `git rev-parse
 // --show-toplevel`. Invocado desde dentro de `.worktrees/7`, `--show-toplevel`
@@ -230,15 +235,25 @@ if (motivoCheckout) motivoCheckout += ': este informe no dice nada sobre worktre
 // hay». Que `.worktrees/` no exista sí es una respuesta legítima (ningún
 // dispatch ha creado nada todavía); cualquier otro error es una lectura que no
 // se pudo hacer, y va a `motivos`.
+//
+// `worktreesLeidos`/`ramasLeidas` distinguen las dos cosas para el render: sin
+// ellas, un array vacío por FALLO era indistinguible de un array vacío por «no
+// hay nada», y el bloque en vuelo imprimía `worktree ✗ rama ✗` a la vez que el
+// `aviso:` decía que no se había podido mirar. Reproducido con `.worktrees/`
+// en `chmod 000`. Un `ENOENT` sí es una lectura completada: el directorio no
+// existe, y eso responde la pregunta.
 let worktreesEnDisco = []
 let ramasEnDisco = []
+let worktreesLeidos = false
+let ramasLeidas = false
 if (checkoutComprobado) {
   try {
     worktreesEnDisco = readdirSync(join(repoRoot, '.worktrees'), { withFileTypes: true })
       .filter((d) => d.isDirectory())
       .map((d) => d.name)
+    worktreesLeidos = true
   } catch (e) {
-    if (e && e.code === 'ENOENT') worktreesEnDisco = []
+    if (e && e.code === 'ENOENT') { worktreesEnDisco = []; worktreesLeidos = true }
     else motivos.push(`no se pudo listar ${join(repoRoot, '.worktrees')} (${e.code || e.message}): este informe no dice nada sobre worktrees en disco`)
   }
   try {
@@ -246,6 +261,7 @@ if (checkoutComprobado) {
     // la rama actual llega con un "* " delante y ninguna casaría con `feat/N`.
     ramasEnDisco = git(['-C', repoRoot, 'branch', '--list', 'feat/*', '--format=%(refname:short)'])
       .split('\n').map((s) => s.trim()).filter(Boolean)
+    ramasLeidas = true
   } catch (e) {
     motivos.push(`no se pudieron listar las ramas feat/* (${(e.stderr ? String(e.stderr).trim() : '') || e.message}): este informe no dice nada sobre ramas en disco`)
   }
@@ -333,6 +349,10 @@ const sinComprobar = [
 
 // ---------------------------------------------------------------- informe ---
 const VIVO = { true: '✓', false: '✗', null: '?' }
+// marca: `✓` / `✗` sólo cuando la lectura que responde esa pregunta se pudo
+// completar; `?` cuando no. Mismo alfabeto de tres estados que `VIVO`, y por
+// el mismo motivo: «no lo hay» y «no se ha podido mirar» no son la misma cosa.
+const marca = (leido, hay) => (leido ? (hay ? '✓' : '✗') : '?')
 function formatearEdad(ms) {
   const s = Math.max(0, Math.round(ms / 1000))
   if (s < 90) return `${s} s`
@@ -375,7 +395,13 @@ if (estado.enVuelo.length) {
       // comprobado, que es el mismo defecto que este comando persigue.
       lineas.push('        worktree ?  rama ?  proceso ?  ← no se ha mirado ningún checkout (ver los avisos)')
     } else {
-      const señales = [`worktree ${s.hasWorktree ? '✓' : '✗'}`, `rama ${s.hasBranch ? '✓' : '✗'}`, `proceso ${VIVO[String(s.vivo)]}`]
+      // `?`, no `✗`, cuando la lectura correspondiente no se pudo completar:
+      // afirmar que no hay lo que no se ha podido mirar es el mismo defecto
+      // que este comando persigue, y la incoherencia era interna —el `else`
+      // de arriba ya imprime `worktree ?` por esta misma razón—. Un `✓` sólo
+      // puede venir de una lectura que sí se hizo, así que la marca de duda
+      // nunca degrada una señal positiva.
+      const señales = [`worktree ${marca(worktreesLeidos, s.hasWorktree)}`, `rama ${marca(ramasLeidas, s.hasBranch)}`, `proceso ${VIVO[String(s.vivo)]}`]
       if (s.pid) señales.push(`pid ${s.pid}`)
       let nota = ''
       if (s.vivo === null) nota = '  ← no se pudo comprobar si hay alguien trabajando (ver los avisos)'
@@ -472,7 +498,7 @@ console.log(lineas.join('\n'))
 // la cabecera de __tests__/fixtures/fake-gh-bin/gh). `process.stdout` es
 // ASÍNCRONO hacia una tubería en POSIX, así que `process.exit()` mata el
 // proceso sin esperar a que se vacíe lo ya escrito. Medido con un informe de
-// 4003 hallazgos: 195 223 bytes a un fichero, y 65 536 por tubería —cortado a
+// 4003 hallazgos: 195 095 bytes a un fichero, y 65 536 por tubería —cortado a
 // mitad de línea, sin dejar rastro—. El exit code sobrevivía, así que la señal
 // de máquina no mentía; el PRODUCTO del comando sí, leído por `| less`,
 // `| tee`, una captura de cmux o cualquier padre que capture stdout. Es el bug

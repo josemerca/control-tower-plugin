@@ -1622,13 +1622,15 @@ function loadIssues() {
   // La lectura paginada de abiertos/cerrados vive en scripts/loop-issues.js,
   // compartida con otros comandos: mismos dos bloques `gh api ... --paginate
   // --slurp`, mismos comentarios, misma normalización de state_reason.
-  let abiertos, cerrados
-  try {
-    ({ abiertos, cerrados } = cargarIssues({ repo, gh }))
-  } catch (e) {
-    // Mismo criterio de siempre: una lectura fallida NO se degrada a "no hay
-    // issues". Se aborta con el mensaje que nombra qué lectura falló.
-    console.error(e.message)
+  const { abiertos, cerrados, motivos } = cargarIssues({ repo, gh })
+  // Mismo criterio de siempre, y la conducta de /ct-next no cambia: una
+  // lectura fallida NO se degrada a "no hay issues". Se aborta con el mensaje
+  // que nombra qué lectura falló. Lo único que aporta el contrato nuevo de
+  // `cargarIssues` (que devuelve lo parcial en vez de lanzar) es que si fallan
+  // LAS DOS se dicen las dos, en vez de sólo la primera: este dispatcher va a
+  // mutar cosas, así que cualquier motivo es motivo suficiente para no seguir.
+  if (motivos.length) {
+    console.error(motivos.join('\n'))
     process.exit(1)
   }
   return buildDispatchInput(abiertos, cerrados)

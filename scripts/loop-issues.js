@@ -5,11 +5,31 @@
 //
 // Un módulo compartido no decide por su llamante: /ct-next quiere abortar
 // ante una lectura fallida, y otro comando puede querer informar de lo que sí
-// sabe y seguir. Por eso esta función LANZA en vez de salir del proceso — la
-// decisión de qué hacer con el fallo es de cada llamante.
+// sabe y seguir. Por eso esta función no sale del proceso — la decisión de qué
+// hacer con el fallo es de cada llamante.
+//
+// Y por eso tampoco LANZA, que es como estaba y era peor: lanzar al fallar la
+// lectura de cerrados TIRABA la de abiertos, que ya estaba entera en memoria.
+// Reproducido: el informe de /ct-status salía vacío bajo el epígrafe «exit 1 —
+// 2 lectura(s) sin completar: lo de arriba es sólo lo que sí se ha podido
+// comprobar»… y arriba no había nada. Contradice el contrato que ese comando
+// publica en su cabecera y en commands/ct-status.md: «se informa de lo que sí
+// se sabe». Así que las dos lecturas se INTENTAN siempre y se devuelve lo que
+// haya salido bien junto con los motivos de lo que no:
+//
+//   { abiertos, cerrados, motivos }   motivos: [] ⇔ las dos lecturas fueron bien
+//
+// Cada motivo nombra CUÁL de las dos lecturas falló, igual que hacía el Error.
+// Un llamante que quiera abortar ante cualquier fallo mira `motivos.length`
+// (así lo hace /ct-next, cuya conducta no cambia); uno que quiera informar de
+// lo parcial usa los arrays igualmente.
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 
 export function cargarIssues({ repo, gh }) {
+  // Una lectura fallida deja su array VACÍO y su motivo en la lista. Nunca al
+  // revés: un array vacío sin motivo significaría "no hay issues", que es la
+  // clase de degradación silenciosa que todo este módulo evita.
+  const motivos = []
   // issues open con labels → {n, order, status, deps, touches, name, type, ac, issue}.
   // Enumeración vía el endpoint REST `gh api repos/<repo>/issues`, NUNCA el
   // índice de búsqueda (`--search`/`gh search issues`): tiene latencia de
@@ -28,7 +48,7 @@ export function cargarIssues({ repo, gh }) {
   // (mapGhIssue/filterMergedIssues) es lógica pura extraída a
   // gh-issue-map.js — ver __tests__/gh-issue-map.test.js — para poder
   // testearla sin red y detectar una deriva de formato con groom.js.
-  let abiertos
+  let abiertos = []
   try {
     // per_page=100 (re-review): el default REST es 30/página — con --paginate
     // igual se traen todos, pero a 3x más round-trips de los necesarios. 100
@@ -36,10 +56,10 @@ export function cargarIssues({ repo, gh }) {
     abiertos = realIssuesOnly(flattenIssuePages(JSON.parse(
       gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=open', '-f', 'per_page=100', '--paginate', '--slurp']))))
   } catch (e) {
-    throw new Error(`no se pudieron listar issues abiertos de ${repo}: ${e.message}`)
+    motivos.push(`no se pudieron listar issues abiertos de ${repo}: ${e.message}`)
   }
 
-  let cerrados
+  let cerrados = []
   try {
     // `body` es imprescindible aquí (no solo number,stateReason): es la única
     // forma de recuperar el marcador <!-- ct-order:N --> de un issue YA
@@ -75,8 +95,8 @@ export function cargarIssues({ repo, gh }) {
       stateReason: i.state_reason ? String(i.state_reason).toUpperCase() : null,
     }))
   } catch (e) {
-    throw new Error(`no se pudieron listar issues cerrados de ${repo}: ${e.message}`)
+    motivos.push(`no se pudieron listar issues cerrados de ${repo}: ${e.message}`)
   }
 
-  return { abiertos, cerrados }
+  return { abiertos, cerrados, motivos }
 }
