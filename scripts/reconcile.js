@@ -513,22 +513,31 @@ export function buildReconcileEditArgs(diff) {
 }
 
 // buildReconcileBody: --reconcile SÍ reescribe el enlace al spec, AC/
-// Dependencias y el contexto del epic (a diferencia de Descripción/Protegido
-// y del contexto heredado, ver diffIssue). Lo que distingue a las tres
-// primeras no es "estructurado vs. prosa" — el contexto del epic ES prosa —
-// sino DE QUIÉN es el texto: el enlace al spec y AC/Dependencias son campos
-// deterministas o estructurados que el dispatcher (o la trazabilidad del
-// spec) obedecen/necesitan de verdad, y el contexto del epic, aunque es
-// prosa, es prosa del SPEC (idéntica en todos los issues del epic, ver
-// groom.js#readEpicContext) — su autoridad es el spec, igual que la de AC/
-// Dependencias, y no la de quien abre un issue suelto. Descripción/Protegido
-// SÍ son prosa de ese issue, y el contexto heredado es prosa de la sesión
-// coordinadora: ninguna de las dos es texto que el spec posea, así que
-// ninguna se reescribe aquí. Reemplaza SOLO el rango de cada sección/línea
-// conocida dentro del body EXISTENTE (locateSection/locateLine,
-// scripts/gh-issue-map.js) — nunca reconstruye el body entero — así
-// cualquier contenido humano antes/después de esas secciones se preserva
-// intacto.
+// Dependencias y el contexto del epic — no Descripción, Protegido, ni el
+// contexto heredado (ver diffIssue). "De quién es el texto" NO es lo que
+// distingue a estas dos listas: el spec posee las CUATRO primeras por
+// igual — el enlace deriva de la ruta del propio spec (F10); AC/Dependencias
+// de la tabla §9; y Descripción/Protegido de las columnas Entrega/Protegido
+// de esa misma tabla (renderDescripcion/renderProtectedLine, groom.js — ver
+// también el comentario de diffIssue más arriba, "el spec los posee").
+//
+// Lo que sí distingue es el DERECHO DE EDICIÓN después de crear el issue.
+// Descripción y Protegido son prosa que un humano edita de forma rutinaria y
+// legítima en SU issue, una vez creado — reescribírsela encima le borraría
+// trabajo deliberado, así que --reconcile nunca la toca. El contexto del
+// epic no tiene ese derecho: debe ser idéntico en todos los issues del
+// epic, y editarlo a mano en uno solo es exactamente la divergencia que
+// esta ronda existe para eliminar — quien quiera contexto propio de un
+// slice tiene "## Contexto heredado" al lado. Esa sección, a diferencia de
+// las otras tres, no es texto que el spec posea en absoluto: la escribe la
+// sesión coordinadora, y el plugin no tiene ninguna opinión sobre su
+// contenido — por eso tampoco se toca aquí, pero por un motivo distinto al
+// de Descripción/Protegido.
+//
+// Reemplaza SOLO el rango de cada sección/línea conocida dentro del body
+// EXISTENTE (locateSection/locateLine, scripts/gh-issue-map.js) — nunca
+// reconstruye el body entero — así cualquier contenido humano antes/después
+// de esas secciones se preserva intacto.
 //
 // Todo el procesamiento interno trabaja sobre el body normalizado a LF
 // (`normalizeToLF`) — si el original usaba CRLF, el resultado se
