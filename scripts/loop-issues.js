@@ -1,7 +1,7 @@
-// cargarIssues: la lectura paginada de issues abiertos y cerrados, compartida
-// entre /ct-next y /ct-status. Extraída de loadIssues (ct-next.mjs) para que
-// dos comandos no acaben paginando distinto — esa deriva es la clase de bug
-// que un módulo compartido existe para matar.
+// cargarIssues: la lectura paginada de issues abiertos y cerrados, extraída
+// de loadIssues (ct-next.mjs) para que un módulo compartido no acabe
+// paginando distinto según quién lo llame — esa deriva es la clase de bug
+// que este módulo existe para matar.
 //
 // Un módulo compartido no decide por su llamante: /ct-next quiere abortar
 // ante una lectura fallida, y otro comando puede querer informar de lo que sí

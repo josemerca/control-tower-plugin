@@ -1619,8 +1619,8 @@ if (typeof baseArg === 'string') {
 
 function loadIssues() {
   if (fx) return fx
-  // La lectura paginada de abiertos/cerrados vive en scripts/loop-issues.js
-  // (compartida con /ct-status): mismos dos bloques `gh api ... --paginate
+  // La lectura paginada de abiertos/cerrados vive en scripts/loop-issues.js,
+  // compartida con otros comandos: mismos dos bloques `gh api ... --paginate
   // --slurp`, mismos comentarios, misma normalización de state_reason.
   let abiertos, cerrados
   try {
