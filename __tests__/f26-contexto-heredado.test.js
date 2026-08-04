@@ -826,3 +826,43 @@ describe('I1 — "no tengo texto válido" no es "el epic no tiene contexto"', ()
     expect(res.stdout).toMatch(/reconciliado \(orden #1\): .*contexto del epic/)
   })
 })
+
+// ============================================================================
+// REVIEW FINAL DE RAMA — I2: ct-groom.mjs lee el spec sin normalizar, y
+// `readEpicContext` es el primer valor MULTI-LÍNEA derivado del spec que llega
+// a un cuerpo (las celdas de la tabla van todas por `trim`, así que esta
+// exposición es nueva de esta rama). Un spec en CRLF metía `\r` dentro del
+// body, y como diffIssue/buildReconcileBody comparan texto ya normalizado a LF
+// contra un valor con `\r`, no podían coincidir NUNCA: una `nota:` en cada
+// corrida, para siempre, y una escritura en cada corrida, para siempre.
+// ============================================================================
+describe('I2 — un spec en CRLF no mete \\r en el cuerpo de los issues', () => {
+  const crlf = (...lineas) => lineas.join('\r\n')
+
+  it('el contenido sale en LF puro', () => {
+    const r = readEpicContext(crlf('# Spec', '', EPIC_CONTEXT_HEADING, '- regla A', '- regla B', '', '## 9. Slices'))
+    expect(r.content).toBe('- regla A\n- regla B')
+    expect(r.content).not.toContain('\r')
+  })
+
+  it('el texto leído de un spec CRLF y el del MISMO spec en LF son idénticos', () => {
+    const lineas = ['# Spec', '', EPIC_CONTEXT_HEADING, '- regla A', '- regla B', '', '## 9. Slices']
+    expect(readEpicContext(lineas.join('\r\n')).content).toBe(readEpicContext(lineas.join('\n')).content)
+  })
+
+  it('no converge nunca: el mismo texto no puede quedar en divergencia perpetua', () => {
+    const contexto = readEpicContext(crlf('# Spec', '', EPIC_CONTEXT_HEADING, '- regla A', '- regla B', '', '## 9. Slices')).content
+    const body = [SPEC_LINK_3, '', EPIC_CONTEXT_HEADING, '- regla A', '- regla B', '', '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-1', '', '## Out of scope / Protected', '- 🚫 nada'].join('\n')
+    const wanted = { specLink: SPEC_LINK_3, ac: ['AC-1'], deps: [], epicContext: contexto }
+    expect(buildReconcileBody(body, wanted).body).toBeNull() // segunda corrida: nada que escribir
+  })
+
+  // El guardarraíl tiene que ver el spec CRLF igual que el LF. Sin normalizar,
+  // ATX_HEADING_RE no reconoce "##\r" como cabecera: la sección no termina ahí
+  // y se traga el resto del fichero — el mismo daño que C3, por otra puerta.
+  it('una cabecera desnuda en un spec CRLF termina la sección, no se la traga', () => {
+    const r = readEpicContext(crlf('# Spec', '', EPIC_CONTEXT_HEADING, '- regla A', '', '##', 'texto de otra sección'))
+    expect(r.content).toBe('- regla A')
+    expect(r.warnings).toEqual([])
+  })
+})

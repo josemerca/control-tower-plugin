@@ -1,7 +1,7 @@
 // Lógica pura de grooming: de Slice[] (T1) a un plan de operaciones GitHub.
 import { isNoValueCell } from './slices.js'
 import { resolveGates, gateLabels, renderGatesIssueContent } from './gates.js'
-import { locateSection, unterminatedDelimiter } from './gh-issue-map.js'
+import { locateSection, unterminatedDelimiter, normalizeToLF } from './gh-issue-map.js'
 
 // GATES_HEADING (F21): la sección de gates del cuerpo del issue. Constante
 // exportada porque la nombran TRES sitios (este fichero al escribirla,
@@ -108,7 +108,25 @@ function truncationLine(specMd, loc) {
 // texto válido" (malformada) no autoriza nada — ver EPIC_CONTEXT_REASONS.
 export function readEpicContext(specMd) {
   const warnings = []
-  const loc = locateSection(specMd || '', EPIC_CONTEXT_HEADING)
+  // CRLF (review final de rama, I2). Se normaliza AQUÍ, antes de localizar
+  // nada, y por dos motivos distintos:
+  //
+  //   1. Lo que esta función devuelve viaja al CUERPO de los issues, y es el
+  //      primer valor multi-línea derivado del spec que lo hace (las celdas de
+  //      la tabla §9 pasan todas por `trim`, que se come el `\r`). Un `\r`
+  //      dentro del cuerpo no se ve, pero diffIssue y buildReconcileBody
+  //      comparan siempre texto normalizado a LF: contra un valor con `\r`
+  //      no pueden coincidir NUNCA — `nota:` en cada corrida y, desde el
+  //      arreglo de C1, una escritura en cada corrida, para siempre.
+  //   2. `locateSection` (y con ella el guardarraíl entero) mira las líneas
+  //      con ATX_HEADING_RE, que no reconoce "##\r" como cabecera: en un spec
+  //      CRLF, una cabecera desnuda deja de terminar la sección y ésta se
+  //      traga el resto del fichero. Ese fallo se arregla aquí, en la causa, y
+  //      no tocando el regex de truncationLine — ese regex está bien, y de
+  //      hecho coincide con ATX_HEADING_RE en rechazar "##\r"; lo que estaba
+  //      mal era el texto que se les daba a los dos.
+  const src = normalizeToLF(specMd || '')
+  const loc = locateSection(src, EPIC_CONTEXT_HEADING)
   if (!loc) {
     warnings.push(`aviso: el spec no trae la sección "${EPIC_CONTEXT_HEADING}" — ningún issue de este epic lleva contexto común (ni el que se cree ahora, ni el que ya exista: con --reconcile la sección se retira del cuerpo). Si lo quieres, añade esa sección al spec, fuera de la tabla de slices, y vuelve a correr.`)
     return { content: null, reason: EPIC_CONTEXT_REASONS.ABSENT, warnings }
@@ -128,7 +146,7 @@ export function readEpicContext(specMd) {
     return { content: null, reason: EPIC_CONTEXT_REASONS.MALFORMED, warnings }
   }
 
-  const truncating = truncationLine(specMd, loc)
+  const truncating = truncationLine(src, loc)
   if (truncating) {
     warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec contiene ("${truncating}") y por eso NO se emite en ningún issue. La sección se reescribe entera desde el spec: el reemplazo termina en la primera cosa que corta la sección (cabecera de cualquier nivel, comentario HTML, etc.), así que nada que corte puede vivir dentro. ${MALFORMED_KEEPS_WHAT_IS_THERE}`)
     return { content: null, reason: EPIC_CONTEXT_REASONS.MALFORMED, warnings }
