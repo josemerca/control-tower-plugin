@@ -20,7 +20,7 @@ import {
   planClosureProbe, buildClosureQuery, parseClosureProbe,
   formatSuspectClosureWarnings, formatMergedButOpenWarnings, formatClosureCoverageNote,
 } from './gh-closure.js'
-import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
+import { cargarIssues } from './loop-issues.js'
 import { detectConventions, formatFindings } from './conventions.js'
 import { readRepoDocs, readAck, ACK_PATH } from './conventions-io.js'
 import { assessLocalLiveness } from './liveness.js'
@@ -1619,76 +1619,19 @@ if (typeof baseArg === 'string') {
 
 function loadIssues() {
   if (fx) return fx
-  // issues open con labels → {n, order, status, deps, touches, name, type, ac, issue}.
-  // Enumeración vía el endpoint REST `gh api repos/<repo>/issues`, NUNCA el
-  // índice de búsqueda (`--search`/`gh search issues`): tiene latencia de
-  // indexado y podría no reflejar un label recién escrito por otro runner.
-  // Tampoco `gh issue list --limit N` con un tope fijo (finding 2 de la
-  // review final): ese endpoint devuelve más nuevo primero, así que un
-  // `--limit` fijo deja fuera justo los issues VIEJOS — que son los que
-  // suelen tener dependientes. Dos consecuencias silenciosas observadas: una
-  // dependencia mergeada que cae fuera de `mergedIssues` deja un slice
-  // permanentemente indespachable, y (en dispatch-check.mjs) un
-  // `in-progress` colisionante que cae fuera de `allOpen()` hace que el lock
-  // falle abierto. En su lugar usamos paginación real (`--paginate --slurp`,
-  // sin tope) igual que ct-groom.mjs, y reutilizamos su mismo helper de
-  // aplanado/filtrado de PRs (scripts/gh-issues.js) — ese endpoint también
-  // devuelve pull requests (comparten namespace en la API v3). El mapeo en sí
-  // (mapGhIssue/filterMergedIssues) es lógica pura extraída a
-  // gh-issue-map.js — ver __tests__/gh-issue-map.test.js — para poder
-  // testearla sin red y detectar una deriva de formato con groom.js.
-  let raw
+  // La lectura paginada de abiertos/cerrados vive en scripts/loop-issues.js
+  // (compartida con /ct-status): mismos dos bloques `gh api ... --paginate
+  // --slurp`, mismos comentarios, misma normalización de state_reason.
+  let abiertos, cerrados
   try {
-    // per_page=100 (re-review): el default REST es 30/página — con --paginate
-    // igual se traen todos, pero a 3x más round-trips de los necesarios. 100
-    // es el máximo que admite este endpoint.
-    raw = realIssuesOnly(flattenIssuePages(JSON.parse(
-      gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=open', '-f', 'per_page=100', '--paginate', '--slurp']))))
+    ({ abiertos, cerrados } = cargarIssues({ repo, gh }))
   } catch (e) {
-    console.error(`no se pudieron listar issues abiertos de ${repo}: ${e.message}`)
+    // Mismo criterio de siempre: una lectura fallida NO se degrada a "no hay
+    // issues". Se aborta con el mensaje que nombra qué lectura falló.
+    console.error(e.message)
     process.exit(1)
   }
-
-  let closed
-  try {
-    // `body` es imprescindible aquí (no solo number,stateReason): es la única
-    // forma de recuperar el marcador <!-- ct-order:N --> de un issue YA
-    // CERRADO, y sin ese marcador buildDispatchInput no puede traducir un dep
-    // en espacio de orden hacia el número de issue real de una dependencia
-    // que ya se mergeó (ver gh-issue-map.js#buildOrderIndex).
-    //
-    // El campo de estado del endpoint REST es `state_reason`, en minúsculas
-    // (p.ej. "completed") — DISTINTO del `stateReason` que expone `gh issue
-    // list --json stateReason` vía GraphQL, en mayúsculas ("COMPLETED"), que
-    // es lo que espera filterMergedIssues (ver gh-issue-map.js, verificado
-    // contra gh 2.86). Normalizamos aquí, en el wrapper, para no tener que
-    // enseñarle a la capa pura dos formatos de la misma cosa.
-    const rawClosed = realIssuesOnly(flattenIssuePages(JSON.parse(
-      gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=closed', '-f', 'per_page=100', '--paginate', '--slurp']))))
-    closed = rawClosed.map((i) => ({
-      number: i.number,
-      body: i.body,
-      // milestone (D1 finding 1): buildOrderIndex necesita el milestone de
-      // CUALQUIER issue, abierto o cerrado, para poder escanear el orden POR
-      // EPIC en vez de globalmente al repo — sin esto, todo issue cerrado
-      // caería en el bucket compartido NO_MILESTONE_KEY sin importar su
-      // epic real, arriesgando una colisión FALSA entre dos epics distintos
-      // que de verdad tienen milestones distintos (uno simplemente no viajó
-      // hasta aquí).
-      milestone: i.milestone || null,
-      // labels (F18/H2): las labels de un issue CERRADO no se usaban para
-      // nada y se tiraban aquí. Son las que revelan el estado contradictorio
-      // "cerrado + `status:` viva" — el issue que se cayó de la cola de
-      // despacho sin que nadie lo dijera. Viajan en esta MISMA respuesta REST:
-      // conservarlas no cuesta ni una llamada más.
-      labels: i.labels || [],
-      stateReason: i.state_reason ? String(i.state_reason).toUpperCase() : null,
-    }))
-  } catch (e) {
-    console.error(`no se pudieron listar issues cerrados de ${repo}: ${e.message}`)
-    process.exit(1)
-  }
-  return buildDispatchInput(raw, closed)
+  return buildDispatchInput(abiertos, cerrados)
 }
 
 // formatOrderCollisions (D1 finding 1, el más grave del hardening del
