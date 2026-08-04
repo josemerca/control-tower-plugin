@@ -16,7 +16,7 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { resolve as resolvePath, relative as relativePath } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { analyzeSlicesTable, isNoValueCell } from './slices.js'
-import { groomPlan } from './groom.js'
+import { groomPlan, readEpicContext } from './groom.js'
 // F10: de "la ruta que me pasaron en argv + --section" a una URL absoluta
 // verificada contra GitHub (o a una referencia honesta sin enlace, diciendo
 // por qué). Ver scripts/spec-link.js para las tres decisiones que toma y por
@@ -493,6 +493,14 @@ const { ref: specRef, warnings: specLinkWarnings } = resolveSpecRef({
 })
 for (const w of specLinkWarnings) console.error(w)
 
+// El contexto común del epic: una sección del spec, fuera de la tabla de
+// slices, cuyo texto viaja idéntico al cuerpo de cada issue. Sus avisos se
+// imprimen aquí, junto a los del enlace al spec, y NUNCA abortan: un spec sin
+// esa sección es un spec válido, y bloquear un groom entero por una sección
+// opcional malformada sería desproporcionado. El remedio va dentro del aviso.
+const { content: epicContext, warnings: epicContextWarnings } = readEpicContext(specMd)
+for (const w of epicContextWarnings) console.error(w)
+
 const slices = report.slices
 // groomPlan lanza si hay órdenes de slice duplicados en la tabla §9 (T14/W-A):
 // se captura aquí y se reporta con la misma convención que el resto de errores
@@ -501,7 +509,7 @@ const slices = report.slices
 // stack trace crudo de una excepción sin capturar.
 let plan
 try {
-  plan = groomPlan(slices, { milestone, specRef })
+  plan = groomPlan(slices, { milestone, specRef, epicContext })
 } catch (e) {
   console.error(e.message)
   process.exit(2)

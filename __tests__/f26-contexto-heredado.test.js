@@ -1,8 +1,13 @@
 import { describe, it, expect } from 'vitest'
+import { spawnSync } from 'node:child_process'
+import { writeFileSync, rmSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING, INHERITED_CONTEXT_PLACEHOLDER,
   readEpicContext, buildIssueBody, groomPlan,
 } from '../scripts/groom.js'
+import { makeSpecDir } from './fixtures/spec-repo.js'
 
 // El guardarraíl de truncamientos no es una preferencia de estilo: la sección
 // se reescribe entera desde el spec, y ese reemplazo termina en la primera
@@ -172,5 +177,71 @@ describe('buildIssueBody — las dos secciones nuevas', () => {
   it('groomPlan sin epicContext deja el campo a null, no a undefined', () => {
     const plan = groomPlan([SLICE], { milestone: 'E1', specRef: SPEC_REF })
     expect(plan.issues[0].epicContext).toBeNull()
+  })
+})
+
+// ============================================================================
+// Integración end-to-end: /ct-groom --dry-run de verdad, no las funciones
+// puras de arriba. `readEpicContext`/`groomPlan`/`buildIssueBody` ya están
+// probadas en aislamiento — lo que falta comprobar es que ct-groom.mjs las
+// conecta: lee el spec, imprime los avisos por stderr, y pasa el texto al
+// plan. Mecánica de invocación (spawnSync + PATH con el `gh` de mentira)
+// reusada tal cual de __tests__/ct-groom-dryrun.test.js / f21-gate-y-tipo.test.js
+// — no se inventa una segunda forma de arrancar el binario.
+// ============================================================================
+const groomScript = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-groom.mjs')
+const QUIET_STDIO = ['ignore', 'pipe', 'pipe']
+const fakeGhDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-gh-bin')
+const fakeEnv = (overrides = {}) => ({ ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}`, ...overrides })
+
+function dryRun(specText) {
+  const dir = makeSpecDir('f26-')
+  const spec = join(dir, 'spec.md')
+  writeFileSync(spec, specText)
+  const res = spawnSync('node', [groomScript, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], {
+    encoding: 'utf8', stdio: QUIET_STDIO, env: fakeEnv(),
+  })
+  rmSync(dir, { recursive: true, force: true })
+  return res
+}
+
+const SLICES_TABLE = [
+  '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |',
+  '|---|---|---|---|---|---|---|',
+  '| 1 | login | backend | modelo | – | AC-1.1 | schema |',
+  '| 2 | refresh | backend | flow | #1 | AC-2.1 | – |',
+].join('\n')
+
+// Se invoca el binario real con --dry-run, no una función interna: el aviso y
+// el reparto del texto sólo son ciertos si el wrapper de verdad los conecta.
+describe('/ct-groom --dry-run — el contexto del epic llega al plan', () => {
+  it('con la sección en el spec: el texto sale en cada issue del dry-run', () => {
+    const spec = [EPIC_CONTEXT_HEADING, '- una regla común', '', '## 9. Slices', SLICES_TABLE, ''].join('\n')
+    const res = dryRun(spec)
+    expect(res.status).toBe(0)
+    const plan = JSON.parse(res.stdout)
+    expect(plan.issues).toHaveLength(2)
+    expect(plan.issues.every((i) => i.epicContext === '- una regla común')).toBe(true)
+  })
+
+  it('sin la sección: avisa por stderr y epicContext queda a null', () => {
+    const spec = ['## 9. Slices', SLICES_TABLE, ''].join('\n')
+    const res = dryRun(spec)
+    expect(res.status).toBe(0)
+    expect(res.stderr).toContain(EPIC_CONTEXT_HEADING)
+    const plan = JSON.parse(res.stdout)
+    expect(plan.issues.every((i) => i.epicContext === null)).toBe(true)
+  })
+
+  it('con una cabecera dentro: avisa nombrando la línea y no emite la sección', () => {
+    const spec = [
+      EPIC_CONTEXT_HEADING, 'preámbulo', '', '### 1 · Un detalle', 'texto del detalle', '',
+      '## 9. Slices', SLICES_TABLE, '',
+    ].join('\n')
+    const res = dryRun(spec)
+    expect(res.status).toBe(0)
+    expect(res.stderr).toContain('### 1 · Un detalle')
+    const plan = JSON.parse(res.stdout)
+    expect(plan.issues.every((i) => !i.body.includes(EPIC_CONTEXT_HEADING))).toBe(true)
   })
 })
