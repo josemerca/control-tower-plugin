@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, mkdirSync, existsSync, readFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, mkdirSync, existsSync, readFileSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -147,6 +147,35 @@ describe('/ct-status', () => {
     expect(res.stdout).toMatch(/#3\s+cerrado, pero conserva status:in-review/)
     // Sin worktrees huérfanos, la nota sobre worktrees no pinta nada aquí.
     expect(res.stdout).not.toMatch(/\.worktrees/)
+    limpiar(b)
+  })
+
+  it('sin pgrep en el PATH nadie sale muerto: exit 1 y «no se pudo comprobar»', () => {
+    const b = bancada()
+    // Un PATH sin `pgrep` ni `lsof`, pero con `git` (hace falta para resolver
+    // la raíz del repo) y con `node` (el stub de `gh` es un script de node y
+    // sin él fallaría TAMBIÉN la lectura de issues, que no es lo que se está
+    // probando aquí): así el único fallo es el de la señal de procesos, y se
+    // ve qué hace el comando cuando falta la herramienta — acusar de abandono
+    // a un slice sano por eso sería su peor fallo posible.
+    const bin = join(b.dir, 'bin')
+    mkdirSync(bin)
+    symlinkSync(execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim(), join(bin, 'git'))
+    symlinkSync(process.execPath, join(bin, 'node'))
+    const res = spawnSync(process.execPath, [script, '--repo', 'o/r'], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${fakeGhDir}:${bin}`,
+        FAKE_GH_COUNTER_FILE: b.counter,
+        FAKE_GH_LIST_SEQUENCE: enProgreso7(),
+        FAKE_GH_TIMELINE_JSON: hace(3 * 3600_000),
+      },
+    })
+    expect(res.status).toBe(1)
+    expect(res.stdout).toMatch(/proceso \?/)
+    expect(res.stdout).not.toMatch(/SIN SE.AL DE VIDA/)
+    expect(res.stderr).toMatch(/pgrep/)
     limpiar(b)
   })
 
