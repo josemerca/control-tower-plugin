@@ -873,7 +873,9 @@ if (typeof repo === 'string') {
     // bodyResult es puro (no toca `gh`, no muta nada) — seguro de calcular
     // siempre, con o sin --reconcile, con o sin --dry-run: es la única forma
     // de saber, ANTES de que nadie pida aplicar nada, si una divergencia de
-    // AC/Dependencias sería siquiera aplicable (Critical 2).
+    // AC/Dependencias sería siquiera aplicable (Critical 2) — y, desde la
+    // review final de rama, si hay algo que escribir en el body aunque nada
+    // de lo divergente cuente para el exit code (C1: el contexto del epic).
     const bodyResult = buildReconcileBody(found.body, iss)
     const gaps = reconcileGaps(diff, bodyResult)
     return { iss, found, diff, bodyResult, gaps }

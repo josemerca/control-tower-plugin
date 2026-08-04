@@ -185,10 +185,16 @@ function acInSection(body) {
 // PRIMERA aparición de una cabecera — tanto Dependencias como AC. Ninguna
 // de las dos "une" dos copias. Eso no las hace inocuas: si un humano edita
 // la copia EQUIVOCADA (la segunda, tras un merge conflictivo mal resuelto o
-// un copiar-pegar), esa edición queda invisible tanto para el dispatcher
-// como para --reconcile sin que nada lo avise — silenciosamente se sigue
-// usando la PRIMERA copia, que puede ser la vieja. Por eso ambas siguen
-// contando para el exit code.
+// un copiar-pegar), esa edición queda invisible para el DISPATCHER, que
+// silenciosamente sigue usando la PRIMERA copia, que puede ser la vieja. Por
+// eso ambas siguen contando para el exit code.
+//
+// Lo que sí cambió con la review final de rama (C2): --reconcile ya no
+// escribe en "la primera" cuando hay dos — se rinde y lo dice (ver
+// `seccionSpliceable` en buildReconcileBody), porque una de esas dos copias
+// puede ser texto que la coordinadora pegó en "## Contexto heredado". El
+// duplicado sigue contando para el exit code por lo del dispatcher, que sí
+// resuelve en silencio.
 //
 // Historial (antes de D1, hardening del dispatch): gh-issue-map.js#extractDeps,
 // la que usaba el DISPATCHER real (mapGhIssue), escaneaba el body ENTERO con
@@ -511,7 +517,13 @@ export function formatDrift(diff) {
   if (diff.gatesDiffers) lines.push(`nota: ${head}: la sección "${GATES_HEADING}" difiere del spec (no cuenta para el exit code; --reconcile no la reescribe). El gate que obedece el dispatcher son las labels "gate:" de este issue, que sí se comparan arriba — si un issue es anterior a los gates, esta sección le falta entera y basta con re-groomear su body a mano`)
   for (const section of diff.duplicateSections || []) {
     if ((diff.duplicateMachineSections || []).includes(section)) continue // ya reportada arriba como divergencia:
-    lines.push(`nota: ${head}: la sección "## ${section}" aparece más de una vez en el body — solo la primera se compara/reconcilia; revisa la(s) copia(s) sobrante(s) a mano`)
+    // Sólo la primera se COMPARA (locateSection siempre devuelve esa), y
+    // ninguna se REESCRIBE: desde la review final de rama, --reconcile se
+    // rinde ante una sección duplicada en vez de escribir en "la primera",
+    // porque una de las copias puede ser texto pegado dentro de
+    // "## Contexto heredado". Las secciones de esta lista no se reescriben
+    // nunca de todos modos, salvo la del contexto del epic.
+    lines.push(`nota: ${head}: la sección "## ${section}" aparece más de una vez en el body — solo la primera se compara, y ninguna se reescribe mientras haya dos; revisa la(s) copia(s) sobrante(s) a mano`)
   }
   for (const d of diff.strayDeps || []) {
     lines.push(`nota: ${head}: "merge-after #${d}" aparece fuera de la sección "## Dependencias" — desde el hardening del dispatch (D1), ya NO lo obedece nadie (ni el dispatcher real ni --reconcile); si se pretendía como dependencia real, muévelo dentro de la sección`)
