@@ -70,17 +70,29 @@ Lo que no comparten, no se toca. **No es un refactor de oportunidad**: `ct-next.
 ## 4. La señal de vida
 
 ```
-pgrep -x claude                       → los PID
+ps -u <uid> -o pid=,comm=             → los procesos del usuario, con la ruta invocada
+   └─ se queda con los de basename exactamente `claude`  → los PID
 lsof -a -p <todos> -d cwd -Fpn        → una sola llamada, el cwd de cada uno
 ```
 
-Medido en esta máquina: **52 ms** para la llamada agrupada, con salida parseable en tripletes `p<pid>` / `fcwd` / `n<ruta>`. Un PID que muere entre el `pgrep` y el `lsof` **no la rompe**: sale con 0 y simplemente lo omite.
+Medido en esta máquina: **decenas de ms** el `ps`, y **del orden de cientos de ms** la llamada agrupada de `lsof` sobre unos cientos de PID, con salida parseable en tripletes `p<pid>` / `fcwd` / `n<ruta>`. Las dos llamadas llevan `timeout` + `killSignal`: `lsof` se cuelga indefinidamente con un montaje de red muerto, y un comando pensado para que lo invoque un vigilante en bucle no puede quedarse sin devolver código de salida.
 
-**`pgrep -x`, nunca `-f`.** `-x` casa el nombre exacto del proceso; `-f` casa cualquier línea de comando que contenga «claude», incluida la del propio comando que hace la comprobación.
+Un PID que muere entre el `ps` y el `lsof` **no la rompe**, pero conviene saber por qué: `lsof` **no** «sale con 0 y lo omite» —eso es falso, medido—, sale con **1** en cuanto falta uno de los PID pedidos, aunque el resto se resuelva bien y venga en `stdout`. Leer ese `stdout` parcial sólo es seguro porque la lista está **acotada al usuario actual**: todo PID es propio y legible, así que la única razón de que falte es que haya muerto. Y sólo se hace con `rc=1`: un `lsof` que no existe (127) o que el `timeout` ha matado (`status: null`) puede traer un `stdout` cortado, y darlo por bueno sería afirmar «no hay nadie vivo» sobre datos a medias.
+
+**Se identifica por la RUTA INVOCADA, no por el nombre del proceso — y `pgrep` queda descartado.** Los dos hechos que lo deciden, medidos:
+
+1. **El nombre del proceso no es «claude».** El instalador nativo deja `~/.local/bin/claude` como symlink a `~/.local/share/claude/versions/<versión>`, y el nombre del proceso sale del ejecutable **ya resuelto**: `ps -u <uid> -o pid=,ucomm=` devuelve `18539  2.1.220`. El nombre del proceso **es el número de versión**, y cambia con cada actualización. Cualquier matcheo por nombre persigue un blanco móvil.
+2. **`pgrep` excluye a sus propios ancestros.** `man pgrep`, flag `-a`: «By default, the current pgrep or pkill process and all of its ancestors are excluded». Como `/ct-status` se invoca **desde** una sesión de Claude Code, el `claude` de esa sesión es ancestro del `pgrep` y queda fuera del resultado.
+
+La combinación era el peor fallo posible de esta feature, y se reprodujo de punta a punta: con una sola sesión abierta, `pgrep -x claude` sale vacío con `rc=1`, que este comando interpretaba como «ninguna coincidencia, respuesta normal» → `comprobado: true` → **todo slice sano en vuelo salía `← SIN SEÑAL DE VIDA` con exit 3 y sin un solo `aviso:`**, y el bloque de residuo afirmaba «no hay ningún proceso trabajando dentro» sobre un worktree con un agente dentro. La degradación segura no se activaba porque, desde dentro, la lectura «había sido un éxito».
+
+Lo que sí identifica es la columna `comm` de `ps`, que conserva la ruta con la que se invocó el proceso (`/Users/…/.local/bin/claude`) y no cambia al actualizar. Se acepta sólo si su **basename es exactamente `claude`**, comparando string contra string. El matcheo exacto deja fuera la app de escritorio sin ninguna regla adicional: `/Applications/Claude.app/Contents/MacOS/Claude` tiene basename `Claude` (mayúscula) y sus helpers `Claude Helper`, `Claude Helper (Renderer)`, `Claude Helper (Plugin)`. Un matcheo laxo afirmaría que hay un agente donde sólo hay una ventana abierta. La línea de `ps` **no se trocea por espacios** —esas rutas los llevan dentro—: el PID es el primer campo y todo el resto es la ruta.
+
+`ps` se acota al usuario actual (`-u <uid>`) por el mismo motivo por el que lo hacía el `-U` de `pgrep`: es lo que hace segura la lectura del `stdout` parcial de `lsof`. Y `ps`, a diferencia de `pgrep`, **no excluye ancestros**, así que sí ve la sesión desde la que se le llama.
 
 El `cwd` se mapea a `.worktrees/<n>` para saber **qué slice** está vivo, no sólo que haya algo vivo.
 
-**Cuando no se puede comprobar, no se acusa.** Si `pgrep` o `lsof` no están, fallan, o devuelven algo ilegible: **«no se pudo comprobar»**, nunca «muerto». Acusar de abandono a un slice sano porque falta una herramienta sería el peor fallo posible de este comando, y contradice todo lo que el loop hace en otros sitios ante una lectura fallida.
+**Cuando no se puede comprobar, no se acusa.** Si `ps` o `lsof` no están, fallan, se cuelgan o devuelven algo ilegible: **«no se pudo comprobar»**, nunca «muerto». Acusar de abandono a un slice sano porque falta una herramienta sería el peor fallo posible de este comando, y contradice todo lo que el loop hace en otros sitios ante una lectura fallida.
 
 ## 5. La ventana de arranque
 
@@ -155,7 +167,8 @@ Misma convención de tres estados que ya usa `/ct-groom`, así que no se inventa
 - un worktree con proceso vivo → se reporta vivo;
 - un worktree **sin** proceso, con claim antiguo → sale como sin señal de vida;
 - un worktree sin proceso, con claim **reciente** → sale como «arrancando», no como muerto;
-- `pgrep`/`lsof` ausentes o fallando → «no se pudo comprobar», exit `1`, y **nunca** «muerto»;
+- `ps`/`lsof` ausentes o fallando → «no se pudo comprobar», exit `1`, y **nunca** «muerto»;
+- un proceso de la **app de escritorio** (`…/MacOS/Claude`, `…/Claude Helper`) → **no** cuenta como agente;
 - el timeline ilegible → no se acusa, exit `1`.
 
 **Del worktree huérfano (§2.1):**
