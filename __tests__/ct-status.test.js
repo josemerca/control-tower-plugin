@@ -100,8 +100,8 @@ describe('/ct-status', () => {
   })
 
   it('si fallan los CERRADOS, lo de arriba no se queda vacío: el bloque EN VUELO sigue ahí', () => {
-    // El informe decía «exit 1 — 2 lectura(s) sin completar: lo de arriba es
-    // sólo lo que sí se ha podido comprobar»… y arriba no había nada, porque
+    // El informe salía vacío bajo un pie que decía «lo de arriba es sólo lo
+    // que sí se ha podido comprobar»… y arriba no había nada, porque
     // `cargarIssues` lanzaba y con ello tiraba la lectura de abiertos que ya
     // estaba entera en memoria. Contradecía el contrato que este comando
     // publica: «se informa de lo que sí se sabe».
@@ -112,7 +112,7 @@ describe('/ct-status', () => {
     expect(res.stdout).toMatch(/#7\s+refresh/)
     expect(res.stderr).toMatch(/no se pudieron listar issues cerrados/)
     // Y sólo se ha perdido UNA de las dos lecturas, no las dos.
-    expect(res.stdout).toMatch(/exit 1 — 1 lectura\(s\) sin completar/)
+    expect(res.stdout).toMatch(/exit 1 — 1 aviso\(s\)/)
     limpiar(b)
   })
 
@@ -168,7 +168,7 @@ describe('/ct-status', () => {
     expect(res.status).toBe(1)
     expect(res.stderr).not.toMatch(/en \.worktrees\//)
     expect(res.stderr).toMatch(/no se pudieron listar issues cerrados/)
-    expect(res.stdout).toMatch(/exit 1 — 1 lectura\(s\) sin completar/)
+    expect(res.stdout).toMatch(/exit 1 — 1 aviso\(s\)/)
     expect(res.stdout).not.toMatch(/reposo/i)
     limpiar(b)
   })

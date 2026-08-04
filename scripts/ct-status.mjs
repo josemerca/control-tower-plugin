@@ -32,9 +32,11 @@
 // reciba la señal tiene que poder distinguirlas: el bug que originó todo esto
 // fue exactamente un informe que decía «limpio» sobre datos truncados. De ahí
 // dos conductas concretas de este fichero: la línea de «loop en reposo» sólo
-// se imprime cuando NO hay ninguna lectura pendiente, y un worktree en disco
-// no se acusa de huérfano si la lectura de issues falló (sin issues no se
-// sabe quién lo reclama; decirlo igual sería inventar el hallazgo).
+// se imprime cuando no queda NADA sin comprobar, y un worktree en disco no se
+// acusa de huérfano si la lectura de issues falló — no porque entonces no se
+// sepa nada (con una lectura parcial, los issues que sí llegaron siguen
+// explicando sus worktrees), sino porque un issue que NO llegó podría
+// reclamarlo, y acusarlo sería inventar el hallazgo.
 //
 // Un hallazgo parcial tampoco oculta el resto: si falla la lectura de procesos
 // pero la de issues va bien, se informa de lo que sí se sabe, se avisa de lo
@@ -314,14 +316,18 @@ for (const { n } of enProgreso) {
 }
 
 // ------------------------------------------------------------ composición ---
-// Con la lista de issues incompleta no se puede decidir quién reclama un
-// worktree, así que acusar de huérfano a los que no aparezcan sería fabricar
-// el hallazgo — exactamente la clase de afirmación confiada sobre datos
-// incompletos que este comando existe para eliminar. Se dice cuáles quedaron
-// sin explicar y se sigue.
+// Con la lista de issues incompleta SÍ se puede atribuir un worktree —con los
+// issues que sí llegaron—; lo que NO se puede es concluir que no lo reclama
+// nadie, porque un issue que no llegó podría reclamarlo. Acusar de huérfano a
+// los que no aparezcan sería fabricar el hallazgo — exactamente la clase de
+// afirmación confiada sobre datos incompletos que este comando existe para
+// eliminar. Se dice cuáles quedaron sin explicar y se sigue.
 //
-// Lo que se apaga es la ATRIBUCIÓN (`sePuedeAtribuirWorktree`), no la lista.
-// Antes se vaciaba `worktreesEnDisco` aquí mismo, y eso protegía de más: el
+// Lo que se apaga es la CONCLUSIÓN de residuo (`sePuedeAtribuirWorktree`), no
+// la lista ni la atribución: los worktrees que un issue leído sí reclama se
+// siguen atribuyendo, y por eso el aviso de más abajo puede callarse sobre
+// ellos. Antes se vaciaba `worktreesEnDisco` aquí mismo, y eso protegía de
+// más: el
 // mismo dato alimenta el `hasWorktree` del bloque EN VUELO, que es una lectura
 // de DISCO y no depende de GitHub. El informe se contradecía en dos líneas
 // seguidas —el aviso nombraba `.worktrees/7` y el bloque decía `worktree ✗`
@@ -519,7 +525,13 @@ for (const m of sinComprobar) console.error(`aviso: ${m}`)
 const cuantos = estado.enVuelo.filter((s) => s.vivo === false && !s.arrancando && s.edadMs !== null).length
   + estado.cosecha.length + residuoTotal
 if (sinComprobar.length) {
-  lineas.push(`exit 1 — ${sinComprobar.length} lectura(s) sin completar: lo de arriba es sólo lo que sí se ha podido comprobar`)
+  // «aviso(s)», no «lectura(s) sin completar»: el recuento es el de líneas de
+  // `aviso:` que acaban de salir por stderr, y no todas son lecturas. El aviso
+  // de los worktrees que no explica ningún issue leído no es una lectura
+  // fallida —la lectura de disco fue bien—, así que contarlo como tal hacía
+  // decir «2 lectura(s)» donde había fallado UNA. Contar avisos es exacto y
+  // además lo puede verificar quien lo lee, contando las líneas de arriba.
+  lineas.push(`exit 1 — ${sinComprobar.length} aviso(s): lo de arriba es sólo lo que sí se ha podido comprobar`)
 } else if (estado.hayHallazgos) {
   lineas.push(`exit 3 — hay ${cuantos} cosa(s) que revisar`)
 } else {

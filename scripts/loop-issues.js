@@ -10,9 +10,11 @@
 //
 // Y por eso tampoco LANZA, que es como estaba y era peor: lanzar al fallar la
 // lectura de cerrados TIRABA la de abiertos, que ya estaba entera en memoria.
-// Reproducido: el informe de /ct-status salía vacío bajo el epígrafe «exit 1 —
-// 2 lectura(s) sin completar: lo de arriba es sólo lo que sí se ha podido
-// comprobar»… y arriba no había nada. Contradice el contrato que ese comando
+// Reproducido: el informe de /ct-status salía vacío bajo un pie que remataba
+// con «lo de arriba es sólo lo que sí se ha podido comprobar»… y arriba no
+// había nada. (El pie contaba entonces «2 lectura(s) sin completar»; hoy
+// cuenta avisos, que es lo exacto — ver ct-status.mjs.) Contradice el
+// contrato que ese comando
 // publica en su cabecera y en commands/ct-status.md: «se informa de lo que sí
 // se sabe». Así que las dos lecturas se INTENTAN siempre y se devuelve lo que
 // haya salido bien junto con los motivos de lo que no:

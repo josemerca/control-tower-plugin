@@ -13,20 +13,25 @@ export function construirEstado(entrada) {
   const {
     enProgreso, enRevision = [], mergeados, cerradosConStatus,
     worktreesEnDisco, ramasEnDisco,
-    // sePuedeAtribuirWorktree: si se sabe QUIÉN reclama cada worktree, es
-    // decir, si la lista de issues (abiertos y cerrados) se pudo leer entera.
-    // Separa dos preguntas que antes viajaban en el mismo dato:
+    // sePuedeAtribuirWorktree: si la lista de issues (abiertos y cerrados) se
+    // pudo leer ENTERA, que es lo que hace falta para concluir que a un
+    // worktree no lo reclama nadie. Separa tres preguntas que antes viajaban
+    // en el mismo dato:
     //
     //   ¿existe .worktrees/N?   → `worktreesEnDisco`, que es una lectura de
     //                             DISCO y no depende de GitHub para nada.
-    //   ¿lo reclama alguien?    → sólo contestable con los issues delante.
+    //   ¿lo reclama ALGUNO de   → se contesta con los issues que sí llegaron,
+    //   los issues leídos?        aunque la lectura haya sido parcial.
+    //   ¿no lo reclama NADIE?   → sólo con la lista completa. Es la única que
+    //                             apaga este flag, y la única que acusa.
     //
     // El llamante vaciaba `worktreesEnDisco` cuando no tenía los issues, para
     // no fabricar huérfanos. Protegía lo correcto, pero de más: ese vaciado
     // también borraba el `hasWorktree` de los slices EN VUELO y de la cosecha,
     // y el informe acababa diciendo `worktree ✗` sobre un directorio que su
     // propio aviso acababa de nombrar. Ahora la lista real entra siempre y lo
-    // único que se apaga es la atribución.
+    // único que se apaga es la CONCLUSIÓN de residuo — la atribución se sigue
+    // haciendo con lo que haya llegado.
     sePuedeAtribuirWorktree = true,
     procesos, edadClaimMs, ventanaArranqueMs,
   } = entrada
@@ -36,8 +41,12 @@ export function construirEstado(entrada) {
 
   const worktreeSet = new Set(worktreesEnDisco)
   const ramaSet = new Set(ramasEnDisco)
-  // Un worktree deja de ser huérfano en cuanto ALGÚN issue —en vuelo o ya
-  // mergeado— lo reclama. Se acumula aquí desde los dos sitios.
+  // Un worktree deja de ser huérfano en cuanto ALGÚN issue lo reclama. Se
+  // acumula desde los TRES cubos que pueden reclamarlo: en vuelo, entregado
+  // esperando merge (`enRevision`, que es el dueño legítimo del suyo), y ya
+  // mergeado (cosecha). Eran dos hasta que `enRevision` se convirtió en cubo
+  // propio: dejarlo fuera hacía que un loop sano con PRs abiertos sacara sus
+  // worktrees por residuo.
   const worktreesExplicados = new Set()
 
   const enVuelo = enProgreso.map(({ n, nombre }) => {
@@ -99,10 +108,18 @@ export function construirEstado(entrada) {
   }
 
   // Huérfano = «está en disco y NINGÚN issue lo explica». La segunda mitad
-  // exige tener los issues: sin ellos, `worktreesExplicados` está vacío por
-  // ignorancia, no por hecho, y TODO worktree saldría acusado. Cuando no se
-  // pueden atribuir no se acusa a ninguno — que es distinto de fingir que el
-  // directorio no está, que es lo que hacía el vaciado del llamante.
+  // exige la lista de issues COMPLETA, y ojo con por qué: no es que sin ella
+  // no se pueda atribuir nada. Con una lectura parcial se atribuye
+  // perfectamente con los issues que sí llegaron —medido: con los cerrados
+  // caídos, `enProgreso: [#7]` y `worktreesEnDisco: ['7','8']`,
+  // `worktreesExplicados` sale `["7"]`, no vacío—. Lo que no se puede es
+  // concluir RESIDUO sobre el resto: el `8` no está explicado por lo que se
+  // leyó, pero podría estarlo por un issue que no llegó, y acusarlo sería
+  // fabricar el hallazgo. Por eso lo que se apaga es la conclusión, no la
+  // atribución: `worktreesExplicados` se sigue calculando y sale afuera, y es
+  // lo que el llamante usa para no avisar de lo que el informe sí explica.
+  // Distinto de fingir que el directorio no está, que es lo que hacía el
+  // vaciado del llamante.
   const worktreesHuerfanos = sePuedeAtribuirWorktree
     ? worktreesEnDisco.filter((w) => !worktreesExplicados.has(w))
     : []
