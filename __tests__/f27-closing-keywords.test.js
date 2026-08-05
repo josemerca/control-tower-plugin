@@ -173,3 +173,62 @@ describe('F27 — extractCommitMessages', () => {
     expect(extractCommitMessages('git commit -C HEAD')).toEqual([])
   })
 })
+
+import { findClosingKeywords, CLOSING_KEYWORDS } from '../scripts/closing-keywords.js'
+
+describe('F27 — findClosingKeywords', () => {
+  it('las NUEVE keywords de GitHub, ni una mas ni una menos', () => {
+    expect(CLOSING_KEYWORDS).toEqual([
+      'close', 'closes', 'closed',
+      'fix', 'fixes', 'fixed',
+      'resolve', 'resolves', 'resolved',
+    ])
+  })
+
+  it('cada una de las nueve dispara', () => {
+    for (const k of CLOSING_KEYWORDS) {
+      expect(findClosingKeywords(`${k} #7`)).toHaveLength(1)
+    }
+  })
+
+  it('es insensible a mayusculas y admite dos puntos', () => {
+    expect(findClosingKeywords('CLOSES #10')).toHaveLength(1)
+    expect(findClosingKeywords('Closes: #10')).toHaveLength(1)
+    expect(findClosingKeywords('Fixes:#10')).toHaveLength(1)
+  })
+
+  it('acepta la forma owner/repo#N', () => {
+    const f = findClosingKeywords('Fixes octo-org/octo-repo#100')
+    expect(f).toHaveLength(1)
+    expect(f[0].ref).toBe('octo-org/octo-repo#100')
+  })
+
+  it('devuelve la keyword y la referencia encontradas', () => {
+    expect(findClosingKeywords('Closes #451')).toEqual([{ keyword: 'Closes', ref: '#451' }])
+  })
+
+  it('caza la keyword dentro de una frase entrecomillada — las comillas NO protegen', () => {
+    // Es, palabra por palabra, la forma del commit que cerro el #451 en campo.
+    const f = findClosingKeywords('Dos observaciones sobre el kickoff: no dice "Closes #451", y el agente no recibe el spec.')
+    expect(f).toEqual([{ keyword: 'Closes', ref: '#451' }])
+  })
+
+  // NEGATIVOS
+  it('una referencia sin keyword no dispara', () => {
+    expect(findClosingKeywords('mira el #42 cuando puedas')).toEqual([])
+  })
+
+  it('una keyword sin referencia no dispara', () => {
+    expect(findClosingKeywords('closes the door')).toEqual([])
+    expect(findClosingKeywords('fixed the flaky test')).toEqual([])
+  })
+
+  it('la keyword tiene que ser palabra entera', () => {
+    expect(findClosingKeywords('prefix #42')).toEqual([])
+    expect(findClosingKeywords('foreclosed #42')).toEqual([])
+  })
+
+  it('entrada no-string devuelve lista vacia', () => {
+    expect(findClosingKeywords(undefined)).toEqual([])
+  })
+})

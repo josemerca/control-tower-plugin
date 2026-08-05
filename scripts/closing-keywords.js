@@ -153,3 +153,35 @@ function messagesFromSegment(tokens) {
 export function extractCommitMessages(command) {
   return tokenizeSegments(command).flatMap(messagesFromSegment)
 }
+
+// Las closing keywords que GitHub reconoce, verbatim de su documentación. No se
+// añade ninguna forma que no esté ahí: una keyword de más aquí es un bloqueo de
+// un commit legítimo.
+export const CLOSING_KEYWORDS = [
+  'close', 'closes', 'closed',
+  'fix', 'fixes', 'fixed',
+  'resolve', 'resolves', 'resolved',
+]
+
+// `\b` a los dos lados: sin él, `prefix #42` y `foreclosed #42` dispararían.
+// Los dos puntos son opcionales porque GitHub acepta `Closes: #10` igual que
+// `Closes #10`. La referencia es `#N` o `owner/repo#N`.
+const CLOSING_RE = new RegExp(
+  String.raw`\b(${CLOSING_KEYWORDS.join('|')})\b\s*:?\s*(#\d+|[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+#\d+)`,
+  'gi',
+)
+
+/**
+ * findClosingKeywords: los pares (keyword, referencia) que GitHub interpretaría
+ * como orden de cierre.
+ *
+ * Devuelve la keyword TAL COMO ESTÁ ESCRITA, no normalizada: el mensaje de la
+ * puerta cita el texto del usuario, y «CLOSES» citado como «closes» se lee como
+ * si el aviso hablara de otra cosa.
+ */
+export function findClosingKeywords(text) {
+  const src = typeof text === 'string' ? text : ''
+  const out = []
+  for (const m of src.matchAll(CLOSING_RE)) out.push({ keyword: m[1], ref: m[2] })
+  return out
+}
