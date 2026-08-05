@@ -954,3 +954,47 @@ describe('§4.4 — el contexto del epic no puede producir un exit 3, pase lo qu
     expect(res.stderr).toMatch(/nota:.*NO ha reescrito la sección "## Contexto del epic".*SIN CERRAR/s)
   })
 })
+
+// ============================================================================
+// SEGUNDA OLEADA — Importante: la línea de éxito de la corrida REAL afirmaba
+// lo que el código se había NEGADO a hacer. Usaba `driftCategories` (lo que
+// DIVERGE) donde el preview de --dry-run ya usaba `bodyDriftCategories` (lo
+// que se ESCRIBIÓ), así que preview y corrida real se contradecían y la
+// afirmación falsa caía por stdout, el canal que este script reserva para lo
+// que de verdad ha pasado.
+// ============================================================================
+
+describe('la línea de "reconciliado" nombra lo que se escribió, no lo que diverge', () => {
+  const dosVecesElEpic = (epicContext) =>
+    `${buildIssueBody(SLICE_1, SPEC_REF_E2E, epicContext)}\n\n${EPIC_CONTEXT_HEADING}\n- copia pegada`
+
+  it('con la sección del epic duplicada, stdout no dice que la reconcilió', () => {
+    const issue = {
+      number: 501, title: '#1 login MAL', state: 'open', milestone: { title: 'Epic' },
+      labels: LABELS_1, body: dosVecesElEpic('- regla VIEJA'),
+    }
+    const res = invoke(specConContexto('- regla NUEVA'), [issue], ['--reconcile'])
+    // stderr ya decía la verdad: no se ha reescrito.
+    expect(res.stderr).toMatch(/nota:.*NO ha reescrito la sección "## Contexto del epic"/)
+    // stdout no puede decir lo contrario en la misma corrida.
+    expect(res.stdout).toMatch(/issue #501 reconciliado \(orden #1\): título/)
+    expect(res.stdout).not.toMatch(/reconciliado \(orden #1\):.*contexto del epic/)
+  })
+
+  it('lo mismo para AC: una sección duplicada no se reporta como reconciliada', () => {
+    const conAcDuplicada = [
+      buildIssueBody({ ...SLICE_1, ac: ['AC-1.1 VIEJO'] }, SPEC_REF_E2E, null),
+      '',
+      '## Acceptance criteria (EARS, 1:1 con tests)',
+      '- AC-1.1 copia pegada',
+    ].join('\n')
+    const issue = {
+      number: 501, title: '#1 login MAL', state: 'open', milestone: { title: 'Epic' },
+      labels: LABELS_1, body: conAcDuplicada,
+    }
+    const spec = ['## 9. Slices', ONE_SLICE_TABLE, ''].join('\n')
+    const res = invoke(spec, [issue], ['--reconcile'])
+    expect(res.stdout).toMatch(/issue #501 reconciliado \(orden #1\): título/)
+    expect(res.stdout).not.toMatch(/reconciliado \(orden #1\):.*criterios de aceptación/)
+  })
+})

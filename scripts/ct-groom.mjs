@@ -536,27 +536,40 @@ const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignor
 // de verdad. Solo se intenta si hay un `--repo` real (string): en dry-run sin
 // --repo no hay contra qué comparar, así que se preserva el comportamiento de
 // siempre (solo imprime el plan, nunca toca `gh`).
-// driftCategories: lista qué categorías APLICABLES divergen (título/
-// milestone/enlace-al-spec/labels/deps/ac/contexto del epic) —
-// Descripción/Protegido/Gates a propósito NO aparecen aquí: --reconcile nunca
-// las toca (ver buildReconcileBody en scripts/reconcile.js), así que no
-// pertenecen a "lo que se aplicaría". El contexto del epic SÍ aparece
-// (--reconcile lo reescribe) aunque NO cuente para el exit code: son dos
-// preguntas distintas, y confundirlas es lo que dejaba esta línea terminando
-// en un dos-puntos pelado cuando esa era la única categoría. Se usa solo
-// para mensajes dirigidos a un humano (dry-run preview, log de
-// "reconciliado") — nunca para decidir qué llamar de verdad; eso lo deciden
-// buildReconcileEditArgs/buildReconcileBody directamente.
-function driftCategories(diff) {
+// fieldDriftCategories: las categorías que viajan por FLAGS de `gh issue edit`
+// (buildReconcileEditArgs) — título/milestone/labels. No tienen rama de
+// rendición: si divergen, se aplican. Descripción/Protegido/Gates a propósito
+// NO aparecen aquí ni abajo: --reconcile nunca las toca (ver
+// buildReconcileBody en scripts/reconcile.js), así que no pertenecen a "lo que
+// se ha escrito".
+function fieldDriftCategories(diff) {
   const cats = []
   if (diff.title) cats.push('título')
   if (diff.milestone) cats.push('milestone')
-  if (diff.specLink) cats.push('enlace al spec')
   if (diff.labels.missing.length || diff.labels.extra.length) cats.push('labels')
-  if (diff.deps.missing.length || diff.deps.extra.length) cats.push('dependencias')
-  if (diff.ac.missing.length || diff.ac.extra.length) cats.push('criterios de aceptación')
-  if (diff.epicContextDiffers) cats.push('contexto del epic')
   return cats
+}
+
+// appliedCategories: qué se ha ESCRITO de verdad en este issue — flags +
+// cuerpo. Es la única lista que puede aparecer en la línea de "reconciliado",
+// que va por stdout, el canal que este script reserva para lo que ha pasado.
+//
+// Segunda oleada de la review final de rama: esa línea usaba "lo que DIVERGE"
+// (título/milestone/enlace/labels/deps/ac/contexto del epic, sin mirar ninguna
+// rendición), así que anunciaba por stdout la reescritura de una sección que
+// el código acababa de negarse a tocar y que stderr reportaba como no
+// reescrita en la misma corrida. El preview de --dry-run ya usaba
+// `bodyDriftCategories`; ahora las dos rutas responden la misma pregunta.
+//
+// El contexto del epic SÍ puede aparecer (--reconcile lo reescribe) aunque NO
+// cuente para el exit code: son dos preguntas distintas, y confundirlas es lo
+// que dejaba esta línea terminando en un dos-puntos pelado cuando esa era la
+// única categoría.
+//
+// Sólo para mensajes dirigidos a un humano — nunca para decidir qué llamar de
+// verdad; eso lo deciden buildReconcileEditArgs/buildReconcileBody.
+function appliedCategories(diff, bodyResult) {
+  return [...fieldDriftCategories(diff), ...bodyDriftCategories(diff, bodyResult)]
 }
 
 // bodyDriftCategories: de las categorías que viajan por `--body` (las que
@@ -1310,8 +1323,10 @@ for (const { iss, found, diff, bodyResult } of reconcileEntries) {
         }
         // El --body reconciliado no se imprime entero (puede ser un bloque de
         // texto largo) — se nombra por categoría, igual que el preview de
-        // --dry-run.
-        console.log(`issue #${found.number} reconciliado (orden #${iss.order}): ${driftCategories(diff).join(', ')}`)
+        // --dry-run, y con la MISMA lista: lo que se ha escrito, no lo que
+        // diverge. Una categoría cuya sección no se pudo localizar ya se
+        // reporta como `nota:` por stderr; nombrarla aquí sería contradecirse.
+        console.log(`issue #${found.number} reconciliado (orden #${iss.order}): ${appliedCategories(diff, bodyResult).join(', ')}`)
       }
     }
     if (projectNum && !hasProjectItem(existingProjectItems, repo, found.number)) {
