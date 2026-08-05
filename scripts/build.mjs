@@ -1,5 +1,6 @@
-// Bundlea los hooks (session-start.js, stop.js) en dist/*.js, autocontenidos
-// (sin dependencias npm en runtime; solo imports node:*).
+// Bundlea los hooks del plugin (uno por entry point de buildOptions, abajo)
+// en dist/*.js, autocontenidos (sin dependencias npm en runtime; solo
+// imports node:*).
 //
 // El banner `createRequire` de abajo es IMPRESCINDIBLE, no cosmético:
 // la librería `yaml` usa internamente un `require()` de CommonJS. Al
