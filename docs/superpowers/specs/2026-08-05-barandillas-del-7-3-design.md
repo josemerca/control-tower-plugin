@@ -260,12 +260,25 @@ mergeó igual, y hubo que arreglar `main` a posteriori.
 
 ### 4.2 El mecanismo de versión
 
-`SLICES_CONTRACT_VERSION` sube de **12 a 13**. Y —esto es lo que no se puede
-olvidar— hay que **registrar el hash del bloque v12** en
-`SLICES_PRISTINE_HASHES`. Sin eso, todo repo que hoy tenga el bloque v12
-**intacto** se negaría a actualizarse sin `--force`, acusando al usuario de
-haberlo editado a mano. El hash se calcula del bloque tal como se shippea, no a
-ojo.
+`SLICES_CONTRACT_VERSION` sube de **12 a 13**, y hay que **añadir el hash del
+bloque v13** a `SLICES_PRISTINE_HASHES` — nunca sustituir uno viejo.
+
+**Precisión sobre el mecanismo, leída del código y no supuesta.** La lista
+registra el hash de **todos** los bloques que este script haya emitido alguna
+vez, **incluido el actual**: la v12 ya está ahí (`ct-init.sh:327`,
+`f1e9f868… v12, 505 líneas — F23`). Así que los repos que hoy tengan la v12
+intacta ya son reconocibles y se actualizan sin `--force` sin que haya que hacer
+nada. Lo que falta es registrar la v13, para que los repos sembrados con ella
+sigan siendo reconocibles en la ronda siguiente.
+
+El hash no se escribe a ojo, y no hace falta: `__tests__/ct-init.test.js` tiene
+tres autovigilancias que lo dictan — «el hash del bloque que se siembra HOY está
+registrado» (línea 787), «todo bloque que ct-init emitió alguna vez está
+registrado» (805) y «no se registran hashes de bloques que no existieron nunca»
+(829). Al cambiar el texto del bloque, el primero se pone rojo y **dice el hash
+que falta**. La secuencia correcta es: editar el bloque → correr el test → tomar
+el hash del fallo → añadirlo. Escribirlo antes es imposible, y el tercer test lo
+impide a propósito.
 
 ### 4.3 El segundo sitio: `/ct-status`
 
@@ -307,8 +320,9 @@ no la línea señalada, y se comprueban los comentarios **que no se tocaron**.
 
 | Fichero | Qué |
 |---|---|
-| `scripts/closing-keywords.js` | **Nuevo.** Módulo puro: tokenizado, reconocimiento del `git commit`, extracción de mensajes, detección de keywords |
-| `hooks/commit-keyword-guard.js` | **Nuevo.** El hook: stdin JSON → decisión JSON. Predicado de repo gobernado |
+| `scripts/closing-keywords.js` | **Nuevo.** Módulo **puro**: tokenizado, reconocimiento del `git commit`, extracción de mensajes, detección de keywords |
+| `scripts/governed-repo.js` | **Nuevo.** El predicado del §3.3. Vive aparte porque hace I/O, y `closing-keywords.js` tiene que poder testearse sin tocar disco |
+| `hooks/commit-keyword-guard.js` | **Nuevo.** El hook: stdin JSON → decisión JSON. Sólo cableado y mensajes |
 | `scripts/build.mjs` | Añadir el hook a `buildOptions.entryPoints` |
 | `hooks/hooks.json` | Entrada `PreToolUse` con `matcher: "Bash"` |
 | `dist/commit-keyword-guard.js` | Generado por `npm run build`, commiteado como los otros |
@@ -356,9 +370,10 @@ del §2.2 y fallaría en silencio sin este test.
 keyword y la referencia nombradas; no gobernado → sin decisión; raíz o
 `AGENTS.md` ilegibles → `ask`, jamás silencio.
 
-**Del contrato**: que la v13 lleve la regla; que el hash de la v12 esté
-registrado; y —la que de verdad prueba el mecanismo— que un repo con el bloque
-v12 **intacto** se actualice limpiamente **sin `--force`** y sin acusar a nadie.
+**Del contrato**: que la v13 lleve la regla, y que un repo con el bloque v12
+**intacto** se actualice a la v13 limpiamente **sin `--force`** y sin acusar a
+nadie. Las tres autovigilancias del §4.2 ya existen y no hay que escribirlas:
+basta con no dejarlas rojas.
 
 **Método, lección 5**: cada test de propiedad se valida rompiendo la
 implementación a propósito, confirmando el rojo, deshaciendo y confirmando el
