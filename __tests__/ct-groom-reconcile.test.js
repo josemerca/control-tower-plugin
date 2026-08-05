@@ -353,11 +353,19 @@ describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y
   // milestone/labels sí coinciden en este fixture; lo único divergente es
   // el AC inaplicable), y el exit code debe seguir en 3 aunque se haya
   // pedido --reconcile.
+  // El cuerpo se toma anterior a F26 (sin "## Contexto heredado") para que lo
+  // que se lee aquí sea sólo lo que este test existe para fijar. Con la sección
+  // heredada presente, una cabecera de AC ilocalizable deja además sin límite
+  // conocido la zona de la sesión coordinadora y Dependencias tampoco se
+  // aplica — eso tiene su propio test justo debajo (segunda oleada de la review
+  // final de rama), con su motivo, en vez de diluir éste.
+  const sinHeredada = (body) => body.replace(/## Contexto heredado\n.*\n\n/, '')
+
   it('cabecera "## Acceptance criteria" renombrada a mano → --reconcile NO la aplica, avisa con precisión (nunca "solo prosa"), exit sigue en 3', () => {
     const { dir, spec } = writeSpec(SPEC_2)
     const renamedIssue1 = {
       ...issue1Drift(spec),
-      body: issue1Drift(spec).body.replace('## Acceptance criteria (EARS, 1:1 con tests)', '## Criterios'),
+      body: sinHeredada(issue1Drift(spec).body).replace('## Acceptance criteria (EARS, 1:1 con tests)', '## Criterios'),
     }
     const argvLog = join(dir, 'argv.log')
     const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], {
@@ -375,6 +383,34 @@ describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y
     const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
     expect(log).toMatch(/issue edit 501/)
     expect(log).toContain('merge-after `#2`')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // Segunda oleada de la review final de rama: el MISMO cuerpo, pero como lo
+  // emite F26 (con "## Contexto heredado"). La zona intocable de la sesión
+  // coordinadora termina en "## Acceptance criteria"; sin esa cabecera no se
+  // sabe dónde acaba lo suyo, así que no se escribe nada por detrás de la
+  // cabecera heredada — tampoco la sección de Dependencias que falta. El exit
+  // sigue en 3 y el aviso dice cuál es el remedio, sin afirmar que el bloque
+  // sea de ella (no se puede saber).
+  it('con la sección heredada, la cabecera de AC renombrada también deja Dependencias sin aplicar — y el aviso dice por qué', () => {
+    const { dir, spec } = writeSpec(SPEC_2)
+    const renamedIssue1 = {
+      ...issue1Drift(spec),
+      body: issue1Drift(spec).body.replace('## Acceptance criteria (EARS, 1:1 con tests)', '## Criterios'),
+    }
+    expect(renamedIssue1.body).toContain('## Contexto heredado') // la premisa del caso
+    const argvLog = join(dir, 'argv.log')
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], {
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[renamedIssue1, issue2Matching(spec)]]),
+      FAKE_GH_ARGV_LOG_FILE: argvLog,
+    })
+    expect(res.status).toBe(3)
+    expect(res.stderr).toMatch(/no se puede saber dónde termina "## Contexto heredado"/)
+    expect(res.stderr).not.toMatch(/solo en prosa/i)
+    const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
+    expect(log).not.toMatch(/issue edit 501/) // no se escribe nada: no había nada aplicable
     rmSync(dir, { recursive: true, force: true })
   })
 })

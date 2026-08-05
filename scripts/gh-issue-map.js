@@ -213,16 +213,16 @@ function scanLines(body, predicate) {
 // (sin zona prohibida — el comportamiento de siempre). Intervalo semiabierto
 // [start, end): el carácter en `end` ya está fuera.
 //
-// LÍMITE MEDIDO, y hay que decirlo porque cambia qué protege esto de verdad:
-// el rango que se le pasa es el de la sección heredada según `locateSection`,
-// y esa función TERMINA la sección en la primera cabecera ATX que encuentre
-// (endurecimiento de F5, ronda 5). O sea: por construcción, NINGUNA cabecera
-// ATX puede caer dentro del rango — la primera que aparezca es justamente la
-// que lo cierra. Este filtro muerde, por tanto, sobre lo que NO es cabecera:
-// hoy, la línea de enlace al spec. Lo que protege el texto de la coordinadora
-// cuando lo que pegó es una CABECERA conocida es otra cosa, y está en
-// reconcile.js: no splicear ninguna sección cuya cabecera aparezca más de una
-// vez en el body, porque entonces no hay forma de saber cuál copia es la suya.
+// QUÉ PROTEGE ESTO DEPENDE ENTERAMENTE DEL RANGO QUE SE LE PASE, y conviene
+// decirlo aquí porque la primera versión de este filtro se quedó corta por no
+// verlo. Si el rango es el de la sección heredada tal cual la devuelve
+// `locateSection`, no protege de ninguna cabecera: esa función TERMINA la
+// sección en la primera cabecera ATX (endurecimiento de F5, ronda 5), así que
+// la cabecera que alguien pegue dentro es justamente la que cierra el rango y
+// queda FUERA de él. El caller decide dónde acaba la zona — ver `zonaHeredada`
+// en reconcile.js, que la lleva hasta "## Acceptance criteria" precisamente
+// para que las cabeceras pegadas sí caigan dentro. Este helper no opina sobre
+// eso: sólo aplica el intervalo que recibe.
 function outsideOf(range) {
   if (!range) return () => true
   return (offset) => offset < range.start || offset >= range.end

@@ -506,10 +506,17 @@ export function formatDrift(diff) {
   if (diff.descripcionDiffers) lines.push(`nota: ${head}: la sección "## Descripción" difiere del spec (prosa — no cuenta para el exit code; --reconcile no la reescribe)`)
   // Task 4 dejó esta nota sin decir quién reescribe la sección, a propósito:
   // en aquel commit "con --reconcile se reescribe desde el spec" todavía era
-  // falso (buildReconcileBody no la tocaba). Task 5 lo hace cierto
-  // (buildReconcileBody, más abajo, sí la reescribe) — ahora la nota puede
-  // decirlo sin afirmar un mecanismo que no existe.
-  if (diff.epicContextDiffers) lines.push(`nota: ${head}: la sección "${EPIC_CONTEXT_HEADING}" difiere del spec (no cuenta para el exit code; con --reconcile se reescribe desde el spec). La sección "${INHERITED_CONTEXT_HEADING}" de al lado no se toca nunca`)
+  // falso (buildReconcileBody no la tocaba). Task 5 lo hizo cierto.
+  //
+  // La review final de rama volvió a moverlo: --reconcile ya no reescribe esta
+  // sección SIEMPRE. Se rinde —en voz alta, con una `nota:` propia que dice el
+  // motivo— si la cabecera aparece dos veces, si hay una valla o un comentario
+  // sin cerrar, si no existe y no hay ancla donde ponerla, o si la única copia
+  // cae dentro de la zona de "## Contexto heredado". Esta línea la emite
+  // `diffIssue`, que sólo compara: no sabe cuál de esos casos aplica, así que
+  // no puede prometer la reescritura — dice qué es lo normal y de dónde sale
+  // la excepción, que es exactamente lo que sabe.
+  if (diff.epicContextDiffers) lines.push(`nota: ${head}: la sección "${EPIC_CONTEXT_HEADING}" difiere del spec (no cuenta para el exit code; con --reconcile se reescribe desde el spec salvo que el body no deje hacerlo con seguridad, en cuyo caso se dice aquí mismo con otra nota y el motivo). La sección "${INHERITED_CONTEXT_HEADING}" de al lado no se toca nunca`)
   if (diff.protectedDiffers) lines.push(`nota: ${head}: la sección "## Out of scope / Protected" difiere del spec (prosa — no cuenta para el exit code; --reconcile no la reescribe)`)
   // F21: se nombra la label como el canal que SÍ cuenta, para que quien lea
   // esta nota sepa dónde mirar si de verdad le preocupa un gate — sin esa
@@ -587,12 +594,15 @@ export function buildReconcileEditArgs(diff) {
 // "## Contexto heredado" (review final de rama, C2): la coordinadora pega ahí
 // el contexto del issue del slice anterior —que lleva las MISMAS cabeceras,
 // porque las escribe este mismo generador— y esa copia suya se convertía en el
-// objetivo del splice. Dos filtros lo impiden, y cubren cosas distintas: la
-// zona prohibida (`zonaHeredada`, para lo que no es cabecera y por tanto sí
-// puede vivir dentro de su sección — hoy la línea de enlace al spec) y la
-// negativa a splicear ninguna sección cuya cabecera aparezca más de una vez
-// (`seccionSpliceable`, que es lo que salva el caso de la cabecera pegada).
-// Ver el comentario de esa función para por qué hacen falta las dos.
+// objetivo del splice. Dos filtros lo impiden, y cubren cosas distintas:
+//   - la zona prohibida (`zonaHeredada`), que va de la cabecera heredada a
+//     "## Acceptance criteria" y se salta TODO lo que caiga dentro: la línea de
+//     enlace al spec y también las cabeceras pegadas cuando son la única copia
+//     del body (el issue no tiene esa sección propia);
+//   - la negativa a splicear ninguna sección cuya cabecera aparezca más de una
+//     vez (`seccionSpliceable`), para cuando el issue SÍ tiene la suya y no hay
+//     forma de señalar cuál de las dos copias es.
+// Ver el comentario de cada una para el detalle.
 //
 // Todo el procesamiento interno trabaja sobre el body normalizado a LF
 // (`normalizeToLF`) — si el original usaba CRLF, el resultado se
@@ -647,31 +657,93 @@ export function buildReconcileBody(existingBody, wantedIssue) {
   // Se RECALCULA en cada uso, no se cachea al principio: cada splice de aquí
   // abajo cambia la longitud del body, y un rango calculado antes apuntaría a
   // caracteres distintos después. Es puro y barato.
+  //
+  // DÓNDE TERMINA EL RANGO (segunda oleada de la review final de rama). La
+  // primera oleada lo cerraba en `loc.contentEnd`, y eso lo dejaba casi
+  // inservible: `locateSection` termina una sección en la PRIMERA cabecera ATX,
+  // así que la cabecera que la coordinadora pega dentro de su sección no cae
+  // dentro del rango — es justamente la que lo cierra. Con el issue sin sección
+  // propia de ese nombre (un slice sin dependencias, un issue anterior a F26
+  // sin "## Contexto del epic"), la cuenta de copias era 1, `seccionSpliceable`
+  // no la veía ambigua, y el splice se aplicaba DENTRO de su texto: borraba lo
+  // pegado y, como el borrado corre hasta la cabecera siguiente, toda la prosa
+  // que ella hubiera escrito detrás.
+  //
+  // El final del rango es una ELECCIÓN, no un dato. Se elige la cabecera que
+  // canónicamente sigue a la heredada: "## Acceptance criteria", que
+  // `buildIssueBody` (groom.js) emite SIEMPRE y justo detrás (orden del §3.4
+  // del diseño: enlace → Descripción → Contexto del epic → Contexto heredado →
+  // Acceptance criteria → …). Ninguna sección del plugin vive legítimamente
+  // entre las dos, así que ensanchar hasta ahí no le quita alcance a nada, y no
+  // hace falta ningún marcador dentro del cuerpo — el §3.3 descarta marcadores
+  // EN EL BODY, no exige que el rango acabe en la primera cabecera.
+  //
+  // SI NO SE PUEDE LOCALIZAR "## Acceptance criteria" —ni por ausencia (un
+  // humano la borró o la renombró) ni por ambigüedad (aparece más de una vez,
+  // o sea que una de las dos también puede ser texto pegado)— el rango se
+  // extiende hasta el FINAL del body, y el flag `acotada` queda en false para
+  // que quien se rinda pueda decir POR QUÉ sin afirmar de más. Es el extremo
+  // conservador a propósito: sin esa cabecera no queda ninguna evidencia de
+  // dónde termina lo que escribió la coordinadora —podría llegar hasta el
+  // final—, y de los dos errores posibles el caro es el que borra texto humano
+  // sin vuelta atrás; el otro es una negativa ruidosa que se arregla
+  // restaurando una cabecera. El coste está medido y se paga entero: sobre un
+  // cuerpo así, --reconcile deja de poder aplicar Dependencias (ver el test
+  // "con la sección heredada y sin cabecera de AC…" en reconcile.test.js).
   const zonaHeredada = () => {
     const loc = locateSection(body, INHERITED_CONTEXT_HEADING)
-    return loc ? { start: loc.headingStart, end: loc.contentEnd } : null
+    if (!loc) return null
+    // El ancla de fin se busca a partir de la propia cabecera heredada,
+    // reusando `forbidden` para descartar todo lo que quede por delante (mismo
+    // helper `outsideOf`, no un segundo criterio): una "## Acceptance criteria"
+    // ANTERIOR a la sección heredada no dice nada sobre dónde termina ésta.
+    const ac = countHeadingLines(body, AC_HEADING_FORMS) === 1
+      ? locateSection(body, AC_HEADING_FORMS, { start: 0, end: loc.headingEnd })
+      : null
+    return { start: loc.headingStart, end: ac ? ac.headingStart : body.length, acotada: !!ac }
   }
 
   // seccionSpliceable: dónde splicear una sección conocida, o por qué no se
   // puede. Dos filtros, y hacen falta los dos porque cubren cosas distintas:
   //
-  //   - `copias > 1` → AMBIGUA: no se toca. Es lo que salva el texto de la
-  //     coordinadora cuando lo que pegó en "## Contexto heredado" es una
-  //     cabecera conocida (pega el cuerpo del issue del slice anterior, que
-  //     lleva las mismas cabeceras que todos). La zona prohibida NO puede
-  //     salvarlo: `locateSection` termina la sección heredada en la primera
-  //     cabecera ATX, así que la cabecera pegada queda justo FUERA del rango,
-  //     no dentro — medido, no deducido. Y no hay forma de decidir cuál copia
-  //     es la del plugin sin inventarse un criterio: se rinde y se reporta,
-  //     que es exactamente lo que el informe ya le dice al usuario sobre las
-  //     secciones duplicadas ("--reconcile no decide cuál copia es la
-  //     correcta: une o borra la sobrante a mano").
-  //   - la zona prohibida → para lo que NO es cabecera y por tanto sí puede
-  //     vivir dentro de la sección heredada (hoy, la línea de enlace al spec;
-  //     ver `outsideOf` en gh-issue-map.js).
+  //   - `copias > 1` → AMBIGUA: no se toca. Cubre el caso en que el issue SÍ
+  //     tiene su sección propia y la coordinadora pegó otra copia: no hay forma
+  //     de decidir cuál es la del plugin sin inventarse un criterio, así que se
+  //     rinde y se reporta — exactamente lo que el informe ya le dice al
+  //     usuario sobre las secciones duplicadas ("--reconcile no decide cuál
+  //     copia es la correcta: une o borra la sobrante a mano").
+  //   - la zona prohibida → cubre TODO lo que viva dentro de la sección
+  //     heredada: la línea de enlace al spec (que no es cabecera y por tanto
+  //     nunca cerró la sección) y, desde que el rango llega hasta "##
+  //     Acceptance criteria", también las cabeceras pegadas cuando son la única
+  //     copia del body.
+  //
+  // `motivo` (null cuando sí hay `loc`) separa las cuatro formas de no tenerlo,
+  // porque el remedio que se le ofrece al usuario es distinto en cada una y
+  // decir la equivocada sería afirmar algo falso. Además de 'duplicada' (el
+  // filtro de arriba):
+  //   - 'sin-seccion': la cabecera no aparece en el body. Es la única en la que
+  //     el caller puede seguir adelante SIEMPRE, insertando la sección donde
+  //     toque; con las otras dos, sólo el contexto del epic puede (su ancla va
+  //     por DELANTE de la zona — ver allí).
+  //   - 'en-heredado': aparece UNA vez y cae dentro de la zona acotada de la
+  //     coordinadora — no es la sección del issue, es texto suyo. No es lo
+  //     mismo que "no existe": cualquier lector de "la primera aparición" (el
+  //     dispatcher, vía gh-issue-map.js#mapGhIssue) SÍ la va a leer como si
+  //     fuera la del issue.
+  //   - 'zona-sin-fin': aparece UNA vez y cae por detrás de la cabecera
+  //     heredada, pero la zona no se pudo acotar (sin "## Acceptance criteria"
+  //     localizable). Aquí NO se puede afirmar que sea texto de la
+  //     coordinadora: lo que se afirma es que no hay forma de saberlo.
   const seccionSpliceable = (headings) => {
-    if (countHeadingLines(body, headings) > 1) return { loc: null, ambigua: true }
-    return { loc: locateSection(body, headings, zonaHeredada()), ambigua: false }
+    const copias = countHeadingLines(body, headings)
+    if (copias > 1) return { loc: null, ambigua: true, motivo: 'duplicada' }
+    const zona = zonaHeredada()
+    const loc = locateSection(body, headings, zona)
+    // copias === 1 y aun así no hay `loc` ⟹ esa única copia cayó en la zona
+    // (es lo único que puede esconder una cabecera que sí está en el body).
+    const motivo = loc ? null : copias === 0 ? 'sin-seccion' : zona.acotada ? 'en-heredado' : 'zona-sin-fin'
+    return { loc, ambigua: false, motivo }
   }
 
   const specLinkLoc = locateLine(body, SPEC_LINK_PREFIXES, zonaHeredada())
@@ -701,8 +773,14 @@ export function buildReconcileBody(existingBody, wantedIssue) {
       // plugin. Se rinde limpiamente en vez de inventarse una, y lo informa
       // (unresolvedAc + el motivo) para que el caller nunca reporte esto como
       // "aplicado".
+      //
+      // Aquí `ac.motivo` sólo puede ser 'duplicada' o 'sin-seccion', y no es
+      // casualidad: el rango prohibido TERMINA en la propia "## Acceptance
+      // criteria" cuando aparece exactamente una vez (así que no puede caer
+      // dentro), y cuando aparece más de una `seccionSpliceable` devuelve
+      // 'duplicada' antes de mirar el rango. Ver `zonaHeredada`.
       unresolvedAc = true
-      unresolvedReasons.ac = ac.ambigua ? 'duplicada' : 'sin-seccion'
+      unresolvedReasons.ac = ac.motivo
     }
   }
 
@@ -718,6 +796,23 @@ export function buildReconcileBody(existingBody, wantedIssue) {
       // puede ser texto pegado por la coordinadora en su sección.
       unresolvedDeps = true
       unresolvedReasons.deps = 'duplicada'
+    } else if (deps.motivo === 'en-heredado' || deps.motivo === 'zona-sin-fin') {
+      // La ÚNICA "## Dependencias" del body cae dentro de la zona de la
+      // coordinadora: el issue no tiene sección propia y ese bloque es (o
+      // puede ser) texto pegado por ella (segunda oleada de la review final).
+      //
+      // Aquí no vale tratarlo como "sección ausente" e insertar una nueva más
+      // abajo, aunque el rango prohibido ya protegería su texto: el ancla de
+      // inserción ("## Out of scope / Protected") va DETRÁS de la suya, y todo
+      // el que lee "la primera aparición" —el dispatcher real, vía
+      // gh-issue-map.js#mapGhIssue/extractDepsInSection— seguiría obedeciendo
+      // las dependencias de ELLA, no las del spec. Añadir una segunda copia
+      // sería fabricar en silencio justo la divergencia que este fichero
+      // existe para eliminar. Se rinde y lo dice, con el motivo exacto: los
+      // dos remedios son distintos (sacar el bloque de la sección heredada vs.
+      // restaurar la cabecera de AC que delimita la zona).
+      unresolvedDeps = true
+      unresolvedReasons.deps = deps.motivo
     } else if (wantDeps && depsLoc) {
       body = body.slice(0, depsLoc.headingEnd) + wantedDepsContent + '\n' + body.slice(depsLoc.contentEnd)
       changed = true
@@ -740,8 +835,17 @@ export function buildReconcileBody(existingBody, wantedIssue) {
         body = body.slice(0, ancla.loc.headingStart) + insertion + body.slice(ancla.loc.headingStart)
         changed = true
       } else {
+        // Cada motivo tiene su frase porque "tampoco existe la sección de
+        // Protegido" sería FALSO cuando lo que pasa es que existe pero cae en
+        // la zona de la coordinadora. 'zona-sin-fin' viaja tal cual: no habla
+        // del ancla, habla de que la zona no se pudo delimitar.
         unresolvedDeps = true
-        unresolvedReasons.deps = ancla.ambigua ? 'ancla-duplicada' : 'sin-ancla'
+        unresolvedReasons.deps = {
+          duplicada: 'ancla-duplicada',
+          'sin-seccion': 'sin-ancla',
+          'en-heredado': 'ancla-en-heredado',
+          'zona-sin-fin': 'zona-sin-fin',
+        }[ancla.motivo]
       }
     } else if (!wantDeps && depsLoc) {
       // El spec ya no declara deps para este slice, pero el issue conserva
@@ -818,6 +922,16 @@ export function buildReconcileBody(existingBody, wantedIssue) {
       // texto: se inserta entera justo ANTES de "## Acceptance criteria", que
       // es la posición que le corresponde (ver más abajo qué cabecera se usa
       // de ancla y por qué).
+      //
+      // El caso "la única copia cae en la zona de la coordinadora"
+      // (`epic.motivo === 'en-heredado'`) entra por aquí a propósito, y al
+      // revés que Dependencias, que se rinde en el caso equivalente. La
+      // diferencia no es de criterio, es de POSICIÓN: el ancla de esta sección
+      // es la cabecera heredada, o sea que la copia insertada queda POR DELANTE
+      // de la que pegó la coordinadora, y todo el que lee "la primera
+      // aparición" pasa a leer la del plugin. Insertar aquí converge; en
+      // Dependencias, cuyo ancla va por detrás, insertar dejaría al dispatcher
+      // obedeciendo las suyas para siempre.
       // Sin ese ancla no se inventa una posición — insertar al final a ciegas
       // es lo que, con una valla de código sin cerrar por delante, añadía una
       // sección nueva en cada corrida sin límite.
@@ -857,6 +971,17 @@ export function buildReconcileBody(existingBody, wantedIssue) {
       const before = body.slice(0, epicLoc.headingStart).replace(/\n$/, '')
       body = before + body.slice(epicLoc.contentEnd)
       changed = true
+    } else {
+      // `!wantedEpic && !epicLoc`, y aun así `epicDiffers`: la única copia de
+      // la cabecera del body cae dentro de la zona de la coordinadora
+      // (`epic.motivo` es 'en-heredado' o 'zona-sin-fin') — `currentEpic` la
+      // leyó, porque `extractSectionContent` mira el body entero, y el spec ya
+      // no trae contexto. Retirarla sería borrar texto que no es del plugin,
+      // así que no se toca; y hay que DECIRLO, o el caller reportaría como
+      // retirada una sección que sigue ahí. Esta rama no se alcanza de ninguna
+      // otra forma: con `wantedEpic` y `currentEpic` ambos nulos,
+      // `epicDiffers` ya es false.
+      unresolvedEpicContext = 'en-heredado'
     }
   }
 

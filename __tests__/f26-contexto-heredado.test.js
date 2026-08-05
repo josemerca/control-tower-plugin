@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { writeFileSync, rmSync } from 'node:fs'
+import { writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -996,5 +996,139 @@ describe('la línea de "reconciliado" nombra lo que se escribió, no lo que dive
     const res = invoke(spec, [issue], ['--reconcile'])
     expect(res.stdout).toMatch(/issue #501 reconciliado \(orden #1\): título/)
     expect(res.stdout).not.toMatch(/reconciliado \(orden #1\):.*criterios de aceptación/)
+  })
+})
+
+// ============================================================================
+// SEGUNDA OLEADA — C2, la mitad que quedaba abierta: la cabecera pegada ÚNICA.
+//
+// La primera oleada cerró el caso DUPLICADO (`seccionSpliceable` se rinde si la
+// cabecera aparece dos veces). Queda el caso en el que el issue NO tiene esa
+// sección propia, así que la copia pegada por la coordinadora es la única del
+// body: la cuenta es 1, y el splice se aplicaba dentro de su texto. El borrado
+// corre hasta la SIGUIENTE cabecera ATX, así que se lleva por delante toda la
+// prosa que ella escribiera después de lo pegado, no sólo lo pegado.
+//
+// El arreglo amplía la zona prohibida: termina en "## Acceptance criteria" (la
+// cabecera que buildIssueBody emite SIEMPRE justo detrás de la heredada), no en
+// la primera cabecera ATX que aparezca — que, dentro de la sección heredada,
+// puede ser la que ella pegó.
+// ============================================================================
+
+// Sin sección propia de Dependencias ni de Contexto del epic: lo pegado es la
+// ÚNICA copia de esa cabecera en todo el body.
+const PEGADO_UNICO = (pegado) => [
+  SPEC_LINK_3,
+  '',
+  '## Descripción',
+  'flow',
+  '',
+  INHERITED_CONTEXT_HEADING,
+  'El slice #2 dejó montado el endpoint. Copio lo suyo:',
+  '',
+  ...pegado,
+  '',
+  FIN_DEL_PEGADO,
+  '',
+  '## Acceptance criteria (EARS, 1:1 con tests)',
+  '- AC-3.1 VIEJO',
+  '',
+  '## Out of scope / Protected',
+  '- 🚫 nada',
+  '',
+  '<!-- ct-order:3 -->',
+].join('\n')
+
+describe('C2 (2ª oleada) — la cabecera pegada ÚNICA tampoco es objetivo del splice', () => {
+  it('"## Dependencias" pegada y el spec pasa a pedir una dep: su texto sobrevive byte a byte', () => {
+    const body = PEGADO_UNICO(['## Dependencias', '- merge-after `#1`'])
+    const r = buildReconcileBody(body, { specLink: SPEC_LINK_3, ac: ['AC-3.1 VIEJO'], deps: [2], epicContext: null })
+    const resultado = r.body ?? body
+    expect(resultado).toContain(FIN_DEL_PEGADO) // su prosa POSTERIOR a lo pegado
+    expect(trozo(resultado, INHERITED_CONTEXT_HEADING, '## Acceptance criteria'))
+      .toBe(trozo(body, INHERITED_CONTEXT_HEADING, '## Acceptance criteria'))
+    // Y se dice: nada de rendirse en silencio y dejar que el caller lo reporte
+    // como aplicado.
+    expect(r.unresolvedDeps).toBe(true)
+  })
+
+  it('"## Contexto del epic" pegada en un issue anterior a F26: su texto sobrevive byte a byte', () => {
+    const body = PEGADO_UNICO([EPIC_CONTEXT_HEADING, '- la regla que le tocaba al slice #2'])
+    const r = buildReconcileBody(body, { specLink: SPEC_LINK_3, ac: ['AC-3.1 VIEJO'], deps: [], epicContext: '- regla NUEVA' })
+    const resultado = r.body ?? body
+    expect(resultado).toContain(FIN_DEL_PEGADO)
+    expect(trozo(resultado, INHERITED_CONTEXT_HEADING, '## Acceptance criteria'))
+      .toBe(trozo(body, INHERITED_CONTEXT_HEADING, '## Acceptance criteria'))
+    // La sección que le falta al issue se inserta en SU sitio (§3.4: antes de
+    // la heredada), no encima de la copia de ella.
+    expect(resultado.indexOf(`${EPIC_CONTEXT_HEADING}\n- regla NUEVA`)).toBeLessThan(resultado.indexOf(INHERITED_CONTEXT_HEADING))
+  })
+
+  it('la protección del caso DUPLICADO sigue en pie (no se cambia una por otra)', () => {
+    const body = CON_PEGADO(['## Dependencias', '- merge-after `#1`'])
+    const r = buildReconcileBody(body, { ...WANTED_3, deps: [2, 5] })
+    const resultado = r.body ?? body
+    expect(trozo(resultado, INHERITED_CONTEXT_HEADING, FIN_DEL_PEGADO))
+      .toBe(trozo(body, INHERITED_CONTEXT_HEADING, FIN_DEL_PEGADO))
+    expect(r.unresolvedDeps).toBe(true)
+  })
+})
+
+// El caso del epic converge, y eso hay que fijarlo: la copia insertada queda
+// POR DELANTE de la que pegó la coordinadora, así que la pasada siguiente lee
+// la del plugin como "la primera" y ya no reescribe nada. Sin esta propiedad,
+// el arreglo cambiaría un borrado de texto por una reescritura perpetua.
+describe('C2 (2ª oleada) — insertar la sección del epic delante de la copia pegada CONVERGE', () => {
+  it('la segunda pasada sobre el body ya escrito devuelve body: null', () => {
+    const body = PEGADO_UNICO([EPIC_CONTEXT_HEADING, '- la regla que le tocaba al slice #2'])
+    const wanted = { specLink: SPEC_LINK_3, ac: ['AC-3.1 VIEJO'], deps: [], epicContext: '- regla NUEVA' }
+    const primera = buildReconcileBody(body, wanted)
+    expect(primera.body).not.toBeNull()
+    expect(buildReconcileBody(primera.body, wanted).body).toBeNull()
+  })
+})
+
+// El mismo caso, extremo a extremo sobre el binario real: es como se reprodujo
+// (exit 0, "reconciliado … contexto del epic" y la prosa de la coordinadora
+// desaparecida del `--body` enviado a `gh`). La línea de éxito ahora es cierta
+// —la sección SÍ se escribe, en su sitio— y lo que se comprueba es que el body
+// que sale por el cable conserva su texto.
+describe('C2 (2ª oleada) — extremo a extremo: el --body enviado conserva el texto de la coordinadora', () => {
+  it('el `gh issue edit` lleva la sección del epic nueva Y la prosa pegada intacta', () => {
+    const dir = makeSpecDir('f26-')
+    const spec = join(dir, 'spec.md')
+    const argvLog = join(dir, 'argv.log')
+    writeFileSync(spec, specConContexto('- regla NUEVA'))
+    // Cuerpo de issue anterior a F26 (sin sección del epic propia) con el
+    // bloque del vecino pegado dentro de la heredada, y prosa suya detrás.
+    const body = [
+      `> Slice \`#1\` del epic. Spec: [spec.md § 9. Slices](${specUrl('spec.md')})`, '',
+      '## Descripción', 'modelo', '',
+      INHERITED_CONTEXT_HEADING,
+      'Copio lo del slice anterior:', '',
+      EPIC_CONTEXT_HEADING, '- la regla que le tocaba al vecino', '',
+      FIN_DEL_PEGADO, '',
+      '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-1.1', '',
+      '## Out of scope / Protected', '- 🚫 schema', '',
+      '<!-- ct-order:1 -->',
+    ].join('\n')
+    const issue = { number: 501, title: '#1 login', state: 'open', milestone: { title: 'Epic' }, labels: LABELS_1, body }
+    const res = spawnSync('node', [groomScript, spec, '--repo', 'o/r', '--milestone', 'Epic', '--reconcile'], {
+      encoding: 'utf8',
+      stdio: QUIET_STDIO,
+      env: fakeEnv({
+        FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+        FAKE_GH_LIST_SEQUENCE: JSON.stringify([[issue]]),
+        FAKE_GH_ARGV_LOG_FILE: argvLog,
+      }),
+    })
+    const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
+    rmSync(dir, { recursive: true, force: true })
+    expect(res.status).toBe(0) // §4.4: esta sección nunca produce un 3
+    expect(log).toMatch(/issue edit 501/)
+    expect(log).toContain('- regla NUEVA') // la sección del epic, escrita
+    expect(log).toContain(FIN_DEL_PEGADO) // y su prosa, intacta — esto es lo que se perdía
+    expect(log).toContain('- la regla que le tocaba al vecino') // lo pegado, también
+    expect(res.stdout).toMatch(/issue #501 reconciliado \(orden #1\):.*contexto del epic/)
   })
 })

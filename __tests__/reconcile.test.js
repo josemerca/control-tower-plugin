@@ -535,12 +535,39 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
     expect(newBody).toContain('<!-- ct-order:2 -->') // marcador intacto
   })
 
+  // Un cuerpo anterior a F26 (sin "## Contexto heredado"), que es donde la
+  // propiedad de abajo se lee sin ruido: AC y Dependencias son dominios
+  // independientes y que uno se rinda no bloquea al otro. Con la sección
+  // heredada presente la cosa cambia, y ese caso tiene su propio test justo
+  // debajo — ver ahí por qué.
+  const SIN_HEREDADA = GENERATED.replace(/## Contexto heredado\n.*\n\n/, '')
+
   it('cabecera "## Acceptance criteria" renombrada/ausente → unresolvedAc: true, NO se inventa una posición, el resto de la sección de deps SÍ se puede seguir aplicando', () => {
-    const renamed = GENERATED.replace('## Acceptance criteria (EARS, 1:1 con tests)', '## Criterios')
+    const renamed = SIN_HEREDADA.replace('## Acceptance criteria (EARS, 1:1 con tests)', '## Criterios')
+    expect(renamed).not.toContain('## Contexto heredado') // la premisa del caso, explícita
     const r = buildReconcileBody(renamed, { ...WANTED_BASE, ac: ['AC-2.1', 'AC-2.2'], deps: [1, 3] })
     expect(r.unresolvedAc).toBe(true)
     expect(extractAc(r.body ?? renamed)).not.toEqual(['AC-2.1', 'AC-2.2']) // no se aplicó
     expect(extractDeps(r.body)).toEqual([1, 3]) // pero deps SÍ se pudo aplicar (dominio independiente)
+  })
+
+  // Segunda oleada de la review final de rama. La zona intocable de la sesión
+  // coordinadora ya no termina en la primera cabecera ATX (que puede ser una
+  // que ella pegó) sino en "## Acceptance criteria". Sin esa cabecera no hay
+  // forma de saber dónde acaba lo suyo, y el rango se extiende hasta el final
+  // del body a propósito: de los dos errores posibles, el caro es el que borra
+  // texto humano. El precio, medido y pagado entero, es este: sobre un cuerpo
+  // CON sección heredada y SIN cabecera de AC, Dependencias tampoco se aplica.
+  // Se rinde en voz alta, con un motivo que no habla de la sección heredada
+  // (no se puede afirmar que el bloque sea de ella) sino del límite que falta.
+  it('con la sección heredada y sin cabecera de AC, Dependencias tampoco se aplica: la zona de la coordinadora deja de tener fin conocido', () => {
+    const renamed = GENERATED.replace('## Acceptance criteria (EARS, 1:1 con tests)', '## Criterios')
+    expect(renamed).toContain('## Contexto heredado') // la premisa del caso
+    const r = buildReconcileBody(renamed, { ...WANTED_BASE, ac: ['AC-2.1', 'AC-2.2'], deps: [1, 3] })
+    expect(r.unresolvedAc).toBe(true)
+    expect(r.unresolvedDeps).toBe(true)
+    expect(r.unresolvedReasons.deps).toBe('zona-sin-fin')
+    expect(r.body).toBeNull() // no se escribe NADA por detrás de la cabecera heredada
   })
 
   it('deps divergente (falta una) → añade la referencia, preserva AC/Descripción/Protected', () => {
