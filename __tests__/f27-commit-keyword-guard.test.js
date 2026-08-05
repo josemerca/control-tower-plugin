@@ -1,10 +1,10 @@
 import { describe, it, expect, afterAll } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { CONTRACT_MARKER } from '../scripts/governed-repo.js'
+import { CONTRACT_MARKER, probeGovernedRepo } from '../scripts/governed-repo.js'
 import { decidir } from '../hooks/commit-keyword-guard.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -44,7 +44,7 @@ describe('F27 — decidir (funcion pura, sin proceso)', () => {
   it('ls -la: sin decision Y el probe NO se invoca', () => {
     let llamadas = 0
     const espia = () => { llamadas++; return { governed: true } }
-    const r = decidir({ tool_name: 'Bash', tool_input: { command: 'ls -la' }, cwd: '/x' }, espia)
+    const r = decidir({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls -la' }, cwd: '/x' }, espia)
     expect(r).toBeNull()
     expect(llamadas).toBe(0)
   })
@@ -52,7 +52,7 @@ describe('F27 — decidir (funcion pura, sin proceso)', () => {
   it('commit sin keyword: sin decision Y el probe NO se invoca', () => {
     let llamadas = 0
     const espia = () => { llamadas++; return { governed: true } }
-    const r = decidir({ tool_name: 'Bash', tool_input: { command: 'git commit -m "arregla el parser"' }, cwd: '/x' }, espia)
+    const r = decidir({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git commit -m "arregla el parser"' }, cwd: '/x' }, espia)
     expect(r).toBeNull()
     expect(llamadas).toBe(0)
   })
@@ -60,31 +60,52 @@ describe('F27 — decidir (funcion pura, sin proceso)', () => {
   it('commit con keyword y repo gobernado: DENY Y el probe se invoca UNA vez', () => {
     let llamadas = 0
     const espia = () => { llamadas++; return { governed: true } }
-    const r = decidir({ tool_name: 'Bash', tool_input: { command: 'git commit -m "Closes #7"' }, cwd: '/x' }, espia)
+    const r = decidir({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git commit -m "Closes #7"' }, cwd: '/x' }, espia)
     expect(llamadas).toBe(1)
     expect(r.hookSpecificOutput.permissionDecision).toBe('deny')
   })
 
   it('commit con keyword y probe que no puede saber: ASK, nunca silencio', () => {
-    const r = decidir({ tool_name: 'Bash', tool_input: { command: 'git commit -m "Closes #7"' }, cwd: '/x' }, () => ({ error: 'lo que sea' }))
+    const r = decidir({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git commit -m "Closes #7"' }, cwd: '/x' }, () => ({ error: 'lo que sea' }))
     expect(r.hookSpecificOutput.permissionDecision).toBe('ask')
   })
 
   it('commit con keyword y repo NO gobernado: sin decision', () => {
-    const r = decidir({ tool_name: 'Bash', tool_input: { command: 'git commit -m "Closes #7"' }, cwd: '/x' }, () => ({ governed: false }))
+    const r = decidir({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git commit -m "Closes #7"' }, cwd: '/x' }, () => ({ governed: false }))
     expect(r).toBeNull()
+  })
+
+  // El evento tiene que ser el que se espera: un `tool_name: 'Bash'` que
+  // llegase colgado de OTRO evento (o sin `hook_event_name`) no es este hook.
+  it('hook_event_name distinto de PreToolUse: sin decision, aunque el resto encaje', () => {
+    let llamadas = 0
+    const espia = () => { llamadas++; return { governed: true } }
+    const r = decidir({ hook_event_name: 'PostToolUse', tool_name: 'Bash', tool_input: { command: 'git commit -m "Closes #7"' }, cwd: '/x' }, espia)
+    expect(r).toBeNull()
+    expect(llamadas).toBe(0)
   })
 
   // LA ruptura deliberada: si se llamase a `probe` ANTES de saber que hay una
   // closing keyword, este test se pondria rojo porque `llamadas` dejaria de
-  // ser 0 para un comando sin ninguna. Ver el informe de la tarea para la
-  // comprobacion real de que esto rompe cuando se invierte el orden dentro
-  // de `decidir`.
+  // ser 0 aqui, para un comando compuesto sin ninguna keyword.
   it('el orden importa: para un comando sin closing keyword, el probe nunca corre', () => {
     let llamadas = 0
     const espia = () => { llamadas++; return { governed: true } }
-    decidir({ tool_name: 'Bash', tool_input: { command: 'git status && ls -la /etc' } }, espia)
+    decidir({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git status && ls -la /etc' } }, espia)
     expect(llamadas).toBe(0)
+  })
+
+  // Un `cwd` ausente, `null` o vacio NO se sustituye por el cwd del PROCESO
+  // del hook: eso contestaria sobre un directorio que quien invoco nunca
+  // nombro. `probeGovernedRepo` (el probe real, no un espia) ya convierte
+  // eso en `{error}`, y aqui debe salir `ask`, nunca silencio.
+  it.each([
+    ['ausente', undefined],
+    ['null', null],
+    ['cadena vacia', ''],
+  ])('cwd %s en el payload: ASK, nunca silencio', (_etiqueta, cwd) => {
+    const r = decidir({ hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git commit -m "Closes #451"' }, cwd }, probeGovernedRepo)
+    expect(r.hookSpecificOutput.permissionDecision).toBe('ask')
   })
 })
 
@@ -125,7 +146,7 @@ describe('F27 — el hook (extremo a extremo sobre el binario, via stdin)', () =
 
   it('una herramienta que no es Bash => sin decision', () => {
     const r = spawnSync('node', [hook], {
-      input: JSON.stringify({ tool_name: 'Write', tool_input: { command: 'git commit -m "Closes #1"' }, cwd: repoGobernado() }),
+      input: JSON.stringify({ hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { command: 'git commit -m "Closes #1"' }, cwd: repoGobernado() }),
       encoding: 'utf8',
     })
     expect((r.stdout || '').trim()).toBe('')
@@ -149,5 +170,27 @@ describe('F27 — el hook (extremo a extremo sobre el binario, via stdin)', () =
     chmodSync(d, 0o000)
     const r = correr('git commit -m "Closes #7"', dentro)
     expect(r.json.hookSpecificOutput.permissionDecision).toBe('ask')
+  })
+
+  // El bug real: `process.argv[1]` conserva la ruta tal como se invoco,
+  // `import.meta.url` llega con los symlinks ya resueltos. Sin resolverlos
+  // los dos antes de comparar, el cuerpo ejecutable no corre por esta ruta y
+  // la puerta entera se apaga en silencio (exit 0, stdout vacio),
+  // indistinguible de "no habia nada que denegar".
+  it('invocado a traves de un symlink de DIRECTORIO al repo: sigue denegando', () => {
+    const enlaces = mkdtempSync(join(tmpdir(), 'f27link-')); hechos.push(enlaces)
+    const enlaceRepo = join(enlaces, 'repo-enlazado')
+    symlinkSync(root, enlaceRepo, 'dir')
+    const hookViaEnlace = join(enlaceRepo, 'hooks', 'commit-keyword-guard.js')
+    const r = correr('git commit -m "Closes #451"', repoGobernado(), hookViaEnlace)
+    expect(r.json.hookSpecificOutput.permissionDecision).toBe('deny')
+  })
+
+  it('invocado por una ruta donde el propio FICHERO es un symlink: sigue denegando', () => {
+    const enlaces = mkdtempSync(join(tmpdir(), 'f27link-')); hechos.push(enlaces)
+    const hookEnlazado = join(enlaces, 'guard-enlazado.js')
+    symlinkSync(hook, hookEnlazado, 'file')
+    const r = correr('git commit -m "Closes #451"', repoGobernado(), hookEnlazado)
+    expect(r.json.hookSpecificOutput.permissionDecision).toBe('deny')
   })
 })
