@@ -15,7 +15,11 @@ describe('hooks.json', () => {
     // Genérico sobre TODOS los eventos del fichero, no sobre una lista escrita a
     // mano: enumerarlos aquí hacía que un hook nuevo quedara sin comprobar y el
     // test siguiera verde — es decir, un test que no podía fallar.
-    const cmds = Object.values(h.hooks).flat().flatMap((e) => e.hooks).map((x) => x.command)
+    const eventos = Object.values(h.hooks).flat()
+    for (const e of eventos) {
+      expect(e.hooks, `evento sin la clave "hooks": ${JSON.stringify(e)}`).toBeTruthy()
+    }
+    const cmds = eventos.flatMap((e) => e.hooks).map((x) => x.command)
     expect(cmds.length).toBeGreaterThan(0)
     for (const c of cmds) {
       expect(c).toContain('${CLAUDE_PLUGIN_ROOT}')

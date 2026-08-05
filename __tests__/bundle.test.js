@@ -1,11 +1,18 @@
 import { readFileSync, existsSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { isBuiltin } from 'node:module'
 import { describe, it, expect } from 'vitest'
+import { buildOptions } from '../scripts/build.mjs'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const bundles = ['dist/session-start.js', 'dist/stop.js']
+// Derivada de buildOptions.entryPoints, no repetida a mano: una tercera lista
+// de los mismos bundles se habría quedado atrás en silencio en cuanto el
+// build ganase un entry point, tal como ya les pasó a otras dos listas de
+// este mismo tipo en este repo. esbuild, sin `outbase`, nombra cada salida
+// por el basename de su entrada dentro de `outdir` — importar este módulo no
+// dispara ningún build (ver la guarda de `process.argv[1]` en build.mjs).
+const bundles = buildOptions.entryPoints.map((ep) => `${buildOptions.outdir}/${basename(ep)}`)
 
 // Extrae los especificadores de módulo externos de un bundle ESM.
 function externalSpecifiers(code) {
