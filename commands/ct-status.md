@@ -40,6 +40,8 @@ Misma convención de tres estados que `/ct-groom`, así que no hay vocabulario n
 
 **`ENTREGADO, ESPERANDO MERGE`** — los issues en `status:in-review`: trabajo terminado cuyo PR todavía no se ha mergeado. Es **informativo y no cuenta como hallazgo**: no altera el código de salida, y su worktree no es residuo (está ahí a propósito). Está aquí porque el comando responde tres preguntas —qué está en vuelo, **qué ha entregado**, qué es residuo— y ésta es la segunda. Lo único que hay que hacer con este bloque es mergear los PRs; recuerda que un `in-review` **retiene los tokens `area:`/`touches:` hasta el merge**, así que frena a sus vecinos de área. No confundir con el bloque de abajo: éste es lo que espera merge, aquél es lo ya mergeado que dejó restos. Los dos pueden salir a la vez.
 
+Y una regla que este informe no puede aplicar por ti: **lo que compruebes antes de mergear tiene que poder detener el merge.** Este comando imprime; no bloquea nada. Si lo usas como paso previo a un merge, el que decide eres tú — y una comprobación cuyo resultado no detiene la acción siguiente es decoración, no comprobación.
+
 **`ENTREGADO, SIN COSECHAR`** — slices ya cerrados como completados que todavía dejan `.worktrees/<n>` o `feat/<n>` en disco. Ocupan sitio y, sobre todo, el worktree **bloquea el redespacho de ese número**. Cuando confirmes que no queda nada que rescatar: `git worktree remove .worktrees/<n>` y `git branch -d feat/<n>`.
 
 **`RESIDUO`** — dos cosas distintas, y el informe las distingue porque el remedio no es el mismo:

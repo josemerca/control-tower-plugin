@@ -50,6 +50,15 @@
 // consulta falla, se dice y se sigue. Un detector que puede equivocarse no
 // puede tener poder de veto sobre el trabajo.
 //
+// Este módulo mira el EFECTO, después de que el commit ya está en la rama por
+// defecto: no hay forma de evitarlo desde aquí, solo de nombrarlo. Existe
+// además una puerta (`hooks/commit-keyword-guard.js`) que ataca la CAUSA,
+// denegando el `git commit` antes de que la keyword llegue a existir en el
+// historial — pero solo ve lo que pasa por un `git commit -m` de una sesión
+// de Claude. Lo que se le escapa a esa puerta (un commit tecleado fuera de
+// Claude, uno sin `-m`, un `-F <fichero>`, un `--amend --no-edit`) sigue sin
+// tener más red que este aviso. Ninguno de los dos afirma cazarlo todo.
+//
 // F18/H4 va en la MISMA llamada, con coste de red marginal CERO: la rama de
 // un slice es determinista (`feat/<n>`), así que un alias más por cada issue
 // en `status:in-review` convierte la disyuntiva que hoy dice el dispatcher
