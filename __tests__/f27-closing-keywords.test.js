@@ -42,3 +42,61 @@ describe('F27 — tokenizeSegments', () => {
     expect(tokenizeSegments(null)).toEqual([])
   })
 })
+
+import { extractCommitMessages } from '../scripts/closing-keywords.js'
+
+describe('F27 — extractCommitMessages', () => {
+  it('saca el mensaje de -m con espacio', () => {
+    expect(extractCommitMessages('git commit -m "arregla algo"')).toEqual(['arregla algo'])
+  })
+
+  it('saca el mensaje de la forma pegada -mX', () => {
+    expect(extractCommitMessages('git commit -marregla')).toEqual(['arregla'])
+  })
+
+  it('saca el mensaje de --message= y de --message con espacio', () => {
+    expect(extractCommitMessages('git commit --message=uno')).toEqual(['uno'])
+    expect(extractCommitMessages('git commit --message dos')).toEqual(['dos'])
+  })
+
+  it('varios -m se devuelven todos (git los concatena como parrafos)', () => {
+    expect(extractCommitMessages('git commit -m titulo -m cuerpo')).toEqual(['titulo', 'cuerpo'])
+  })
+
+  it('acepta opciones globales antes del subcomando', () => {
+    expect(extractCommitMessages('git -C /tmp/repo commit -m hola')).toEqual(['hola'])
+    expect(extractCommitMessages('git -c user.name=x commit -m hola')).toEqual(['hola'])
+    expect(extractCommitMessages('git --git-dir=/tmp/.git commit -m hola')).toEqual(['hola'])
+  })
+
+  it('acepta una ruta absoluta a git', () => {
+    expect(extractCommitMessages('/usr/bin/git commit -m hola')).toEqual(['hola'])
+  })
+
+  it('un --amend con -m si trae mensaje en linea', () => {
+    expect(extractCommitMessages('git commit --amend -m nuevo')).toEqual(['nuevo'])
+  })
+
+  // Los NEGATIVOS son los que importan: bloquear el camino feliz es el fallo caro.
+  it('gh pr create no es un commit y no aporta nada', () => {
+    expect(extractCommitMessages('gh pr create --body "Closes #42"')).toEqual([])
+  })
+
+  it('un commit encadenado con un gh pr create solo aporta lo suyo', () => {
+    expect(extractCommitMessages('git commit -m limpio && gh pr create --body "Closes #1"')).toEqual(['limpio'])
+  })
+
+  it('git sin subcomando commit no aporta nada', () => {
+    expect(extractCommitMessages('git log -m cosa')).toEqual([])
+    expect(extractCommitMessages('git push origin main')).toEqual([])
+  })
+
+  it('un commit sin -m no aporta nada (el mensaje lo pone el editor)', () => {
+    expect(extractCommitMessages('git commit --amend --no-edit')).toEqual([])
+    expect(extractCommitMessages('git commit -F mensaje.txt')).toEqual([])
+  })
+
+  it('lo que va detras de -- es pathspec, no mensaje', () => {
+    expect(extractCommitMessages('git commit -m real -- -m falso')).toEqual(['real'])
+  })
+})

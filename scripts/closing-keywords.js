@@ -74,3 +74,56 @@ export function tokenizeSegments(command) {
   pushSeg()
   return segments
 }
+
+// Opciones GLOBALES de git (las que van ANTES del subcomando) que consumen el
+// token siguiente. Sin esta lista, `git -C /tmp/repo commit -m x` leería
+// `/tmp/repo` como subcomando y el commit pasaría sin registrar.
+const GIT_GLOBAL_TAKES_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path'])
+
+const isGitBinary = (tok) => tok === 'git' || tok.endsWith('/git')
+
+/**
+ * messagesFromSegment: los mensajes de UN sub-comando, o `[]` si ese
+ * sub-comando no es un `git commit` con mensaje en línea.
+ *
+ * Lo que NO devuelve, y es deliberado: un `git commit` sin `-m` (abre
+ * `$EDITOR`), un `-F <fichero>` (el texto está en disco) y un `--amend
+ * --no-edit` (reutiliza un mensaje que no viaja en el comando). En esos tres el
+ * mensaje no está aquí, así que afirmar cualquier cosa sobre él sería
+ * inventarlo.
+ */
+function messagesFromSegment(tokens) {
+  let i = 0
+  if (!tokens.length || !isGitBinary(tokens[0])) return []
+  i = 1
+  while (i < tokens.length && tokens[i].startsWith('-')) {
+    const t = tokens[i]
+    if (t.includes('=')) { i += 1; continue }
+    i += GIT_GLOBAL_TAKES_VALUE.has(t) ? 2 : 1
+  }
+  if (tokens[i] !== 'commit') return []
+  i += 1
+
+  const out = []
+  for (; i < tokens.length; i++) {
+    const t = tokens[i]
+    // Todo lo que va detrás de `--` es pathspec, nunca mensaje.
+    if (t === '--') break
+    if (t === '-m' || t === '--message') { if (i + 1 < tokens.length) out.push(tokens[++i]); continue }
+    if (t.startsWith('--message=')) { out.push(t.slice('--message='.length)); continue }
+    // Forma pegada `-mTEXTO`. Se excluye `--…` para no tragarse `--mixed` y
+    // parecidos: sólo una opción corta puede llevar el valor pegado.
+    if (t.startsWith('-m') && t.length > 2 && !t.startsWith('--')) { out.push(t.slice(2)); continue }
+  }
+  return out
+}
+
+/**
+ * extractCommitMessages: de una línea de shell entera, SOLO los trozos que van
+ * a acabar siendo mensaje de commit. Todo lo demás del comando —incluido el
+ * `--body` de un `gh pr create`, que el contrato del loop EXIGE que lleve el
+ * cierre— queda fuera por construcción.
+ */
+export function extractCommitMessages(command) {
+  return tokenizeSegments(command).flatMap(messagesFromSegment)
+}
