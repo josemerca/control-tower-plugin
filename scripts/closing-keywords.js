@@ -109,11 +109,24 @@ function messagesFromSegment(tokens) {
     const t = tokens[i]
     // Todo lo que va detrás de `--` es pathspec, nunca mensaje.
     if (t === '--') break
-    if (t === '-m' || t === '--message') { if (i + 1 < tokens.length) out.push(tokens[++i]); continue }
+    if (t === '--message') { if (i + 1 < tokens.length) out.push(tokens[++i]); continue }
     if (t.startsWith('--message=')) { out.push(t.slice('--message='.length)); continue }
-    // Forma pegada `-mTEXTO`. Se excluye `--…` para no tragarse `--mixed` y
-    // parecidos: sólo una opción corta puede llevar el valor pegado.
-    if (t.startsWith('-m') && t.length > 2 && !t.startsWith('--')) { out.push(t.slice(2)); continue }
+    // Cúmulo de UN SOLO guion (getopt, que es lo que usa git): varias flags
+    // cortas pegadas como `-am`. Si aparece una `m` en el cúmulo, lo que va
+    // detrás de esa `m` es el valor si no está vacío; si está vacío, el valor
+    // es el token siguiente. Cubre tanto `-m` sola como `-am`, `-qm` y `-amhola`.
+    // El `--…` queda fuera por construcción: un cúmulo de guion doble no es
+    // esto, es una única opción larga (`--amend`, `--mixed`…) sin relación
+    // con la semántica de letras sueltas.
+    if (t.startsWith('-') && !t.startsWith('--')) {
+      const cluster = t.slice(1)
+      const mPos = cluster.indexOf('m')
+      if (mPos === -1) continue
+      const pegado = cluster.slice(mPos + 1)
+      if (pegado.length > 0) { out.push(pegado); continue }
+      if (i + 1 < tokens.length) out.push(tokens[++i])
+      continue
+    }
   }
   return out
 }

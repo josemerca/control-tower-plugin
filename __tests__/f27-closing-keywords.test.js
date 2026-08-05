@@ -99,4 +99,40 @@ describe('F27 — extractCommitMessages', () => {
   it('lo que va detras de -- es pathspec, no mensaje', () => {
     expect(extractCommitMessages('git commit -m real -- -m falso')).toEqual(['real'])
   })
+
+  // Flags cortas combinadas en UN cumulo de un solo guion: semantica getopt,
+  // la que usa git. Si aparece una 'm' en el cumulo, lo de detras es el valor
+  // si no esta vacio; si esta vacio, el valor es el token siguiente.
+  it('un cumulo -am con el mensaje en el token siguiente', () => {
+    expect(extractCommitMessages('git commit -am "hola"')).toEqual(['hola'])
+  })
+
+  it('un cumulo -qm con el mensaje en el token siguiente', () => {
+    expect(extractCommitMessages('git commit -qm "hola"')).toEqual(['hola'])
+  })
+
+  it('un cumulo -am con el mensaje pegado tras la m', () => {
+    expect(extractCommitMessages('git commit -amhola')).toEqual(['hola'])
+  })
+
+  // Camino feliz ya cubierto arriba, se repite aqui como ancla explicita del
+  // contraste con los cumulos: la 'm' sola sigue funcionando igual.
+  it('la m sola, con espacio o pegada, sigue funcionando', () => {
+    expect(extractCommitMessages('git commit -m hola')).toEqual(['hola'])
+    expect(extractCommitMessages('git commit -mhola')).toEqual(['hola'])
+  })
+
+  // Negativos: ningun cumulo sin 'm', ni un --amend de guion doble, aportan
+  // texto. Bloquear esto por error convertiria la barandilla en un ladrillo.
+  it('un cumulo sin m no aporta nada', () => {
+    expect(extractCommitMessages('git commit -a')).toEqual([])
+  })
+
+  it('-C tras commit reutiliza el mensaje de otro commit: no hay texto aqui', () => {
+    expect(extractCommitMessages('git commit -C HEAD')).toEqual([])
+  })
+
+  it('un --amend de guion doble solo no aporta nada', () => {
+    expect(extractCommitMessages('git commit --amend')).toEqual([])
+  })
 })
