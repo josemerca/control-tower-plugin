@@ -606,6 +606,11 @@ const EPIC_CONTEXT_SURRENDERS = {
   'seccion-sin-cerrar': 'la sección del issue tiene una valla de código (```) o un comentario HTML (<!--) SIN CERRAR, así que no se sabe dónde termina: reescribirla se llevaría por delante todo lo que venga detrás en el cuerpo (contexto heredado, criterios, gates, protegido y el marcador ct-order). Cierra el delimitador en el issue y vuelve a correr',
   'texto-sin-cerrar': 'el texto que trae el spec tiene una valla de código (```) o un comentario HTML (<!--) SIN CERRAR, y escribirlo en el cuerpo dejaría el issue en ese mismo estado. Ciérralo en el spec y vuelve a correr',
   'en-heredado': 'el spec ya no trae contexto del epic, y la única copia de esta sección en el body queda por detrás de la cabecera "## Contexto heredado", dentro de la zona que pertenece a la sesión coordinadora y que no se toca nunca. No se retira nada; si esa copia sobra, quítala tú',
+  // Aquí NO se afirma de quién es el texto, a diferencia de 'en-heredado':
+  // sin "## Acceptance criteria" localizable no hay forma de saber dónde acaba
+  // la zona de la sesión coordinadora, así que tampoco de saber si esa copia
+  // cae dentro. Lo único que se sabe es que no se puede tocar con seguridad.
+  'zona-sin-fin': 'no se puede saber dónde termina "## Contexto heredado" en este body: su cabecera está, pero "## Acceptance criteria" —la cabecera que la sigue siempre, y que marca el final de esa zona— no aparece exactamente una vez. Sin ese límite no se distingue qué hay por detrás que sea del issue y qué escribió la sesión coordinadora, así que esta sección no se reescribe ni se retira. Restaura (o desduplica) "## Acceptance criteria" y vuelve a correr',
 }
 
 // describeGaps (review round 3, Critical 2): nombra qué categorías, DE LAS

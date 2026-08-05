@@ -981,7 +981,14 @@ export function buildReconcileBody(existingBody, wantedIssue) {
       // retirada una sección que sigue ahí. Esta rama no se alcanza de ninguna
       // otra forma: con `wantedEpic` y `currentEpic` ambos nulos,
       // `epicDiffers` ya es false.
-      unresolvedEpicContext = 'en-heredado'
+      //
+      // El motivo viaja tal cual, sin colapsarlo a 'en-heredado': con la zona
+      // sin acotar NO se puede afirmar que ese texto sea de la coordinadora
+      // —sólo que no hay forma de saber dónde acaba lo suyo—, y decirlo sería
+      // exactamente la clase de afirmación de más que esta rama lleva once
+      // rondas quitando. Es la misma distinción que ya hace la ruta de
+      // Dependencias, unos bloques más arriba.
+      unresolvedEpicContext = epic.motivo
     }
   }
 

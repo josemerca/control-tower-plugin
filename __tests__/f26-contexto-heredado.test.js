@@ -1132,3 +1132,47 @@ describe('C2 (2ª oleada) — extremo a extremo: el --body enviado conserva el t
     expect(res.stdout).toMatch(/issue #501 reconciliado \(orden #1\):.*contexto del epic/)
   })
 })
+
+// La rendición del contexto del epic tiene que decir lo que SABE. Con la zona
+// sin acotar (sin "## Acceptance criteria" localizable) no se puede afirmar que
+// la copia sea texto de la coordinadora: sólo que no hay forma de saber dónde
+// acaba lo suyo. Es la misma distinción que ya hacía la ruta de Dependencias.
+describe('C2 (2ª oleada) — el motivo de la rendición del epic no afirma de quién es el texto', () => {
+  const conAcRenombrada = (pegado) => PEGADO_UNICO(pegado)
+    .replace('## Acceptance criteria (EARS, 1:1 con tests)', '## Criterios')
+
+  it('zona sin acotar → "zona-sin-fin", no "en-heredado"', () => {
+    const body = conAcRenombrada([EPIC_CONTEXT_HEADING, '- la regla que le tocaba al slice #2'])
+    const r = buildReconcileBody(body, { specLink: SPEC_LINK_3, ac: [], deps: [], epicContext: null })
+    expect(r.unresolvedEpicContext).toBe('zona-sin-fin')
+    expect(r.body).toBeNull() // y el cuerpo no se toca
+    expect(body).toContain(FIN_DEL_PEGADO)
+  })
+
+  it('con la zona acotada sí se puede afirmar: "en-heredado"', () => {
+    const body = PEGADO_UNICO([EPIC_CONTEXT_HEADING, '- la regla que le tocaba al slice #2'])
+    const r = buildReconcileBody(body, { specLink: SPEC_LINK_3, ac: ['AC-3.1 VIEJO'], deps: [], epicContext: null })
+    expect(r.unresolvedEpicContext).toBe('en-heredado')
+  })
+
+  // El motivo se busca por clave directa en EPIC_CONTEXT_SURRENDERS, sin
+  // respaldo: uno nuevo sin su frase saldría por stderr como "undefined".
+  it('el motivo nuevo tiene su frase: el aviso sale entero y no afirma de quién es el texto', () => {
+    const body = [
+      `> Slice \`#1\` del epic. Spec: [spec.md § 9. Slices](${specUrl('spec.md')})`, '',
+      '## Descripción', 'modelo', '',
+      INHERITED_CONTEXT_HEADING, 'Copio lo del vecino:', '',
+      EPIC_CONTEXT_HEADING, '- la regla del vecino', '',
+      FIN_DEL_PEGADO, '',
+      '## Criterios', '- AC-1.1', '',
+      '## Out of scope / Protected', '- 🚫 schema', '',
+      '<!-- ct-order:1 -->',
+    ].join('\n')
+    const issue = { number: 501, title: '#1 login', state: 'open', milestone: { title: 'Epic' }, labels: LABELS_1, body }
+    const res = invoke(['## 9. Slices', ONE_SLICE_TABLE, ''].join('\n'), [issue], ['--reconcile'])
+    expect(res.stderr).toMatch(/NO ha reescrito la sección "## Contexto del epic": no se puede saber dónde termina/)
+    expect(res.stderr).not.toMatch(/undefined/)
+    // Y no se afirma de quién es el texto, que es lo que este motivo existe para no decir.
+    expect(res.stderr).not.toMatch(/NO ha reescrito la sección "## Contexto del epic":[^\n]*pertenece a la sesión coordinadora/)
+  })
+})
