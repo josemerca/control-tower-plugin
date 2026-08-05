@@ -188,11 +188,70 @@ function scanLines(body, predicate) {
     const line = lines[i]
     const step = stepLine(line, state)
     state = step.state
-    if (!step.wasHidden && predicate(line, i)) {
+    if (!step.wasHidden && predicate(line, i, offset)) {
       return { index: i, offset, line }
     }
     offset += line.length + 1
   }
+  return null
+}
+
+// outsideOf (review final de rama, C2): el predicado "esta coincidencia NO
+// cae dentro de un rango prohibido del propio body". Una sola implementación,
+// compartida por locateSection y locateLine, porque el problema es el mismo
+// en las dos: ambas se quedan con la PRIMERA aparición sobre el body ENTERO,
+// sin ninguna noción de "esto de aquí es de otro dueño y no se toca".
+//
+// El caso real: la sesión coordinadora pega en "## Contexto heredado" el
+// contexto del issue del slice anterior — que lleva las MISMAS cabeceras y la
+// MISMA línea de enlace al spec que todo issue del epic, porque las escribe el
+// mismo generador. Sin este filtro, su texto se convierte en el objetivo del
+// splice, y el placeholder con el que se crea la sección («`/ct-groom` no
+// escribe aquí ni reescribe lo que escribas») pasa a ser mentira.
+//
+// `range` es `{ start, end }` en offsets absolutos del body, o null/undefined
+// (sin zona prohibida — el comportamiento de siempre). Intervalo semiabierto
+// [start, end): el carácter en `end` ya está fuera.
+//
+// QUÉ PROTEGE ESTO DEPENDE ENTERAMENTE DEL RANGO QUE SE LE PASE, y conviene
+// decirlo aquí porque la primera versión de este filtro se quedó corta por no
+// verlo. Si el rango es el de la sección heredada tal cual la devuelve
+// `locateSection`, no protege de ninguna cabecera: esa función TERMINA la
+// sección en la primera cabecera ATX (endurecimiento de F5, ronda 5), así que
+// la cabecera que alguien pegue dentro es justamente la que cierra el rango y
+// queda FUERA de él. El caller decide dónde acaba la zona — ver `zonaHeredada`
+// en reconcile.js, que la lleva hasta "## Acceptance criteria" precisamente
+// para que las cabeceras pegadas sí caigan dentro. Este helper no opina sobre
+// eso: sólo aplica el intervalo que recibe.
+function outsideOf(range) {
+  if (!range) return () => true
+  return (offset) => offset < range.start || offset >= range.end
+}
+
+// unterminatedDelimiter (review final de rama, C3): recorre `text` con el
+// MISMO escáner de estado que scanLines/locateSection (stepLine) y dice si al
+// llegar al final quedaba una valla de código o un comentario HTML ABIERTOS.
+// Devuelve `'valla'`, `'comentario'` o `null`.
+//
+// Es la mitad que faltaba del guardarraíl de secciones. `locateSection` y
+// `groom.js#truncationLine` sólo pueden cazar lo que termina una sección
+// ANTES de tiempo; un delimitador sin cerrar hace justo lo contrario: esconde
+// todas las líneas siguientes, así que deja de haber terminador y la sección
+// se traga todo lo que venga detrás. Sin ruido, sin aviso, y con un splice
+// posterior que borra desde la cabecera hasta el final del cuerpo.
+//
+// Vive aquí, y no en groom.js, por la misma razón por la que se reusa
+// `locateSection` sobre el texto del spec en vez de escribir un segundo
+// escáner: el de este fichero lleva encima el endurecimiento de vallas
+// (carácter, longitud, info string) y de comentarios multilínea de las rondas
+// 4 y 5 de F5, y una segunda implementación divergiría de él.
+export function unterminatedDelimiter(text) {
+  let state = initLineState()
+  for (const line of (text || '').split('\n')) {
+    state = stepLine(line, state).state
+  }
+  if (state.inComment) return 'comentario'
+  if (state.inFence) return 'valla'
   return null
 }
 
@@ -243,10 +302,15 @@ function headingMatcher(headings) {
 // SOLO esa sección, dejando intacto cualquier contenido humano antes,
 // después, o en cualquier sección nueva que el humano haya añadido en otro
 // punto del body.
-export function locateSection(body, headingText) {
+// `forbidden` (opcional, review final de rama C2): rango `{start, end}` del
+// body cuyo contenido pertenece a otro dueño. Una cabecera que caiga dentro
+// se DESCARTA y la búsqueda sigue con la siguiente aparición fuera del rango
+// — ver `outsideOf` arriba, incluido su límite medido.
+export function locateSection(body, headingText, forbidden = null) {
   const src = body || ''
   const matches = headingMatcher(headingText)
-  const heading = scanLines(src, matches)
+  const allowed = outsideOf(forbidden)
+  const heading = scanLines(src, (line, _i, offset) => matches(line) && allowed(offset))
   if (!heading) return null
   const headingStart = heading.offset
   // headingEnd: justo después del '\n' que cierra la línea de cabecera (si
@@ -307,9 +371,16 @@ export function extractSectionContent(body, headingText) {
 // que las englobe a las dos ("> Slice ", que también reclamaría una línea
 // citada cualquiera que empiece por esas palabras) — mismo criterio que
 // headingMatcher/AC_HEADING_FORMS.
-export function locateLine(body, prefix) {
+//
+// `forbidden` (opcional, review final de rama C2): mismo rango y mismo
+// criterio que en locateSection — ver `outsideOf`. Aquí es donde de verdad
+// muerde: la línea de enlace al spec NO es una cabecera, así que no cierra la
+// sección heredada y puede vivir dentro de ella (la coordinadora pega el
+// contexto del issue anterior, enlace incluido).
+export function locateLine(body, prefix, forbidden = null) {
   const prefixes = Array.isArray(prefix) ? prefix : [prefix]
-  const found = scanLines(body, (line) => prefixes.some((p) => line.startsWith(p)))
+  const allowed = outsideOf(forbidden)
+  const found = scanLines(body, (line, _i, offset) => prefixes.some((p) => line.startsWith(p)) && allowed(offset))
   if (!found) return null
   return { start: found.offset, end: found.offset + found.line.length, line: found.line }
 }

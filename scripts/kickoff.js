@@ -8,6 +8,7 @@ import { resolveGatesForAgent, renderGateKickoffLines } from './gates.js'
 // que ese path cambie no queden mensajes mandando al agente a un fichero que
 // ya no es el suyo (que es exactamente el defecto que esta ronda arregla).
 import { SLICE_REL_PATH } from './state-paths.js'
+import { EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING } from './groom.js'
 
 // ACCOUNT_MAP — qué CLAUDE_CONFIG_DIR (qué cuenta de Claude) recibe el agente
 // que se despacha para un repo.
@@ -165,6 +166,19 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
     // arbitraria y el kickoff se teclea entero en un pty; se nombra la sección
     // exacta, que es lo que hace falta para que la busque.
     `Hidrátate de ${SLICE_REL_PATH} y del issue de GitHub; los criterios de aceptación son ${slice.ac.join(', ') || '(ver issue)'}. Lee además la sección "## Out of scope / Protected" del issue: lo que hay ahí NO se toca, aunque parezca parte del trabajo.`,
+    // Mismo criterio que la línea de "Out of scope / Protected", justo encima,
+    // y por los mismos dos motivos: se NOMBRAN las secciones y no se interpola
+    // su texto —es prosa de longitud arbitraria y esto se teclea entero en un
+    // pty—, y se enumeran en vez de confiar en "hidrátate del issue", porque
+    // lo que se enumera se lee y lo que se deja a "ya lo verá" compite con el
+    // resto del cuerpo.
+    //
+    // La frase final cubre los dos casos distintos en que no hay nada que
+    // leer: la sección está y está vacía, o no está en absoluto (un issue
+    // creado antes de que estas secciones existieran nunca recibe la
+    // heredada). Sin ella, un agente que no encuentra lo que se le acaba de
+    // nombrar lo busca fuera del issue, que es justo lo que no puede hacer.
+    `Lee también las secciones "${EPIC_CONTEXT_HEADING}" y "${INHERITED_CONTEXT_HEADING}" del issue: traen lo que el spec y los slices ya mergeados condicionan sobre este trabajo y que no cabe en los criterios de aceptación. Si alguna está vacía o no aparece, no hay nada que heredar — no lo busques fuera del issue.`,
     `Sigue superpowers:subagent-driven-development (impl → spec-review → code-review) con TDD.`,
     addendum,
     ...gateLines,

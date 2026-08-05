@@ -16,7 +16,7 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { resolve as resolvePath, relative as relativePath } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { analyzeSlicesTable, isNoValueCell } from './slices.js'
-import { groomPlan } from './groom.js'
+import { groomPlan, readEpicContext, EPIC_CONTEXT_HEADING } from './groom.js'
 // F10: de "la ruta que me pasaron en argv + --section" a una URL absoluta
 // verificada contra GitHub (o a una referencia honesta sin enlace, diciendo
 // por qué). Ver scripts/spec-link.js para las tres decisiones que toma y por
@@ -493,6 +493,14 @@ const { ref: specRef, warnings: specLinkWarnings } = resolveSpecRef({
 })
 for (const w of specLinkWarnings) console.error(w)
 
+// El contexto común del epic: una sección del spec, fuera de la tabla de
+// slices, cuyo texto viaja idéntico al cuerpo de cada issue. Sus avisos se
+// imprimen aquí, junto a los del enlace al spec, y NUNCA abortan: un spec sin
+// esa sección es un spec válido, y bloquear un groom entero por una sección
+// opcional malformada sería desproporcionado. El remedio va dentro del aviso.
+const { content: epicContext, reason: epicContextReason, warnings: epicContextWarnings } = readEpicContext(specMd)
+for (const w of epicContextWarnings) console.error(w)
+
 const slices = report.slices
 // groomPlan lanza si hay órdenes de slice duplicados en la tabla §9 (T14/W-A):
 // se captura aquí y se reporta con la misma convención que el resto de errores
@@ -501,7 +509,7 @@ const slices = report.slices
 // stack trace crudo de una excepción sin capturar.
 let plan
 try {
-  plan = groomPlan(slices, { milestone, specRef })
+  plan = groomPlan(slices, { milestone, specRef, epicContext, epicContextReason })
 } catch (e) {
   console.error(e.message)
   process.exit(2)
@@ -528,23 +536,81 @@ const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignor
 // de verdad. Solo se intenta si hay un `--repo` real (string): en dry-run sin
 // --repo no hay contra qué comparar, así que se preserva el comportamiento de
 // siempre (solo imprime el plan, nunca toca `gh`).
-// driftCategories: lista qué categorías APLICABLES divergen (título/
-// milestone/enlace-al-spec/labels/deps/ac) — Descripción/Protegido a
-// propósito NO aparecen aquí: --reconcile nunca las toca (ver
-// buildReconcileBody en scripts/reconcile.js), así que no pertenecen a "lo
-// que se aplicaría". Se usa solo para mensajes dirigidos a un humano
-// (dry-run preview, log de "reconciliado") — nunca para decidir qué llamar
-// de verdad; eso lo deciden buildReconcileEditArgs/buildReconcileBody
-// directamente.
-function driftCategories(diff) {
+// fieldDriftCategories: las categorías que viajan por FLAGS de `gh issue edit`
+// (buildReconcileEditArgs) — título/milestone/labels. No tienen rama de
+// rendición: si divergen, se aplican. Descripción/Protegido/Gates a propósito
+// NO aparecen aquí ni abajo: --reconcile nunca las toca (ver
+// buildReconcileBody en scripts/reconcile.js), así que no pertenecen a "lo que
+// se ha escrito".
+function fieldDriftCategories(diff) {
   const cats = []
   if (diff.title) cats.push('título')
   if (diff.milestone) cats.push('milestone')
-  if (diff.specLink) cats.push('enlace al spec')
   if (diff.labels.missing.length || diff.labels.extra.length) cats.push('labels')
-  if (diff.deps.missing.length || diff.deps.extra.length) cats.push('dependencias')
-  if (diff.ac.missing.length || diff.ac.extra.length) cats.push('criterios de aceptación')
   return cats
+}
+
+// appliedCategories: qué se ha ESCRITO de verdad en este issue — flags +
+// cuerpo. Es la única lista que puede aparecer en la línea de "reconciliado",
+// que va por stdout, el canal que este script reserva para lo que ha pasado.
+//
+// Segunda oleada de la review final de rama: esa línea usaba "lo que DIVERGE"
+// (título/milestone/enlace/labels/deps/ac/contexto del epic, sin mirar ninguna
+// rendición), así que anunciaba por stdout la reescritura de una sección que
+// el código acababa de negarse a tocar y que stderr reportaba como no
+// reescrita en la misma corrida. El preview de --dry-run ya usaba
+// `bodyDriftCategories`; ahora las dos rutas responden la misma pregunta.
+//
+// El contexto del epic SÍ puede aparecer (--reconcile lo reescribe) aunque NO
+// cuente para el exit code: son dos preguntas distintas, y confundirlas es lo
+// que dejaba esta línea terminando en un dos-puntos pelado cuando esa era la
+// única categoría.
+//
+// Sólo para mensajes dirigidos a un humano — nunca para decidir qué llamar de
+// verdad; eso lo deciden buildReconcileEditArgs/buildReconcileBody.
+function appliedCategories(diff, bodyResult) {
+  return [...fieldDriftCategories(diff), ...bodyDriftCategories(diff, bodyResult)]
+}
+
+// bodyDriftCategories: de las categorías que viajan por `--body` (las que
+// buildReconcileBody splicea: enlace al spec, AC, dependencias y contexto del
+// epic), cuáles se han APLICADO de verdad en este body — no cuáles divergen.
+// La diferencia importa porque el preview de --dry-run nombra esta lista: una
+// categoría que diverge pero cuya sección no se pudo localizar (unresolvedAc/
+// unresolvedDeps/unresolvedEpicContext) no está en el body nuevo, y nombrarla
+// sería anunciar una escritura que no ocurre. Antes, el preview escribía una
+// lista FIJA ("dependencias/criterios de aceptación") que era falsa en cuanto
+// lo que cambiaba era otra cosa.
+//
+// El enlace al spec no tiene rama de rendición: si la línea no existe,
+// buildReconcileBody la antepone al principio del body.
+function bodyDriftCategories(diff, bodyResult) {
+  const cats = []
+  if (diff.specLink) cats.push('enlace al spec')
+  if ((diff.deps.missing.length || diff.deps.extra.length) && !bodyResult.unresolvedDeps) cats.push('dependencias')
+  if ((diff.ac.missing.length || diff.ac.extra.length) && !bodyResult.unresolvedAc) cats.push('criterios de aceptación')
+  if (diff.epicContextDiffers && !bodyResult.unresolvedEpicContext) cats.push('contexto del epic')
+  return cats
+}
+
+// EPIC_CONTEXT_SURRENDERS: por qué buildReconcileBody no pudo reescribir
+// "## Contexto del epic", en las palabras que le sirven a quien lee el
+// informe. Se reporta como `nota:` y NUNCA mueve el exit code (§4.4 del
+// diseño): esta sección no puede producir un 3 ni divergiendo, ni duplicada,
+// ni rindiéndose. Que se rindiera en SILENCIO era lo único indefendible —
+// AC y Dependencias se rinden en voz alta desde la review round 4.
+const EPIC_CONTEXT_SURRENDERS = {
+  'sin-ancla': 'no existe la sección en el issue, y tampoco ninguna de las dos cabeceras que sirven de ancla para ponerla en su sitio ("## Contexto heredado" o, en su defecto, "## Acceptance criteria"); añade a mano una de ellas y vuelve a correr',
+  'ancla-duplicada': 'no existe la sección en el issue y su ancla ("## Acceptance criteria") aparece más de una vez, así que insertarla ahí podría escribir dentro de texto ajeno; deja una sola copia del ancla y vuelve a correr',
+  duplicada: 'aparece más de una vez en el body y no hay forma de saber cuál copia es la del plugin — una puede ser texto pegado dentro de "## Contexto heredado", que no se toca nunca; deja una sola copia y vuelve a correr',
+  'seccion-sin-cerrar': 'la sección del issue tiene una valla de código (```) o un comentario HTML (<!--) SIN CERRAR, así que no se sabe dónde termina: reescribirla se llevaría por delante todo lo que venga detrás en el cuerpo (contexto heredado, criterios, gates, protegido y el marcador ct-order). Cierra el delimitador en el issue y vuelve a correr',
+  'texto-sin-cerrar': 'el texto que trae el spec tiene una valla de código (```) o un comentario HTML (<!--) SIN CERRAR, y escribirlo en el cuerpo dejaría el issue en ese mismo estado. Ciérralo en el spec y vuelve a correr',
+  'en-heredado': 'el spec ya no trae contexto del epic, y la única copia de esta sección en el body queda por detrás de la cabecera "## Contexto heredado", dentro de la zona que pertenece a la sesión coordinadora y que no se toca nunca. No se retira nada; si esa copia sobra, quítala tú',
+  // Aquí NO se afirma de quién es el texto, a diferencia de 'en-heredado':
+  // sin "## Acceptance criteria" localizable no hay forma de saber dónde acaba
+  // la zona de la sesión coordinadora, así que tampoco de saber si esa copia
+  // cae dentro. Lo único que se sabe es que no se puede tocar con seguridad.
+  'zona-sin-fin': 'no se puede saber dónde termina "## Contexto heredado" en este body: su cabecera está, pero "## Acceptance criteria" —la cabecera que la sigue siempre, y que marca el final de esa zona— no aparece exactamente una vez. Sin ese límite no se distingue qué hay por detrás que sea del issue y qué escribió la sesión coordinadora, así que esta sección no se reescribe ni se retira. Restaura (o desduplica) "## Acceptance criteria" y vuelve a correr',
 }
 
 // describeGaps (review round 3, Critical 2): nombra qué categorías, DE LAS
@@ -555,10 +621,34 @@ function driftCategories(diff) {
 // sección "machine" duplicada — --reconcile no decide cuál copia es la
 // correcta, así que tampoco puede aplicar nada ahí; sin nombrarlo aquí,
 // esta misma divergencia salía 0 en silencio bajo --reconcile.
-function describeGaps(gaps) {
+//
+// GAP_REASONS (review final de rama, C2): el motivo exacto lo decide
+// buildReconcileBody (`unresolvedReasons`), no este fichero. Antes había una
+// sola frase por categoría —"no se encontró la sección"— que era cierta para
+// el caso original y dejó de serlo en cuanto aparecieron los otros dos: una
+// sección DUPLICADA sí se encuentra (el problema es que hay dos y ninguna se
+// puede señalar como la del plugin), y una inserción sin ancla no habla de la
+// sección que falta sino de la que tendría que servir de referencia.
+const GAP_REASONS = {
+  ac: {
+    'sin-seccion': 'no se encontró la sección "## Acceptance criteria" en el body',
+    duplicada: 'la sección "## Acceptance criteria" aparece más de una vez y no hay forma de saber cuál copia es la del plugin — puede ser texto pegado dentro de "## Contexto heredado"',
+  },
+  deps: {
+    'sin-seccion': 'no se encontró la sección "## Dependencias" en el body',
+    duplicada: 'la sección "## Dependencias" aparece más de una vez y no hay forma de saber cuál copia es la del plugin — puede ser texto pegado dentro de "## Contexto heredado"',
+    'sin-ancla': 'no existe la sección "## Dependencias" y tampoco "## Out of scope / Protected", que es el único ancla seguro para insertarla',
+    'ancla-duplicada': 'no existe la sección "## Dependencias" y su ancla ("## Out of scope / Protected") aparece más de una vez, así que insertarla ahí podría escribir dentro de texto ajeno',
+    'en-heredado': 'la única "## Dependencias" del body está DENTRO de "## Contexto heredado" — es texto pegado por la sesión coordinadora, que no se toca nunca, así que no es la sección del issue. Tampoco se añade una segunda copia más abajo: el dispatcher lee la PRIMERA, o sea la de ella. Saca ese bloque de la sección heredada (o quítale la cabecera) y vuelve a correr',
+    'ancla-en-heredado': 'no existe la sección "## Dependencias" y la única "## Out of scope / Protected" del body está DENTRO de "## Contexto heredado", así que anclar la inserción ahí escribiría dentro del texto de la sesión coordinadora',
+    'zona-sin-fin': 'no se puede saber dónde termina "## Contexto heredado" en este body: su cabecera está, pero "## Acceptance criteria" —la cabecera que la sigue siempre, y que marca el final de esa zona— no aparece exactamente una vez. Sin ese límite no se distingue qué hay por detrás que sea del issue y qué escribió la sesión coordinadora, así que no se escribe nada ahí. Restaura (o desduplica) "## Acceptance criteria" y vuelve a correr',
+  },
+}
+function describeGaps(gaps, bodyResult) {
+  const reasons = bodyResult.unresolvedReasons || {}
   const parts = []
-  if (gaps.ac) parts.push('criterios de aceptación (no se encontró la sección "## Acceptance criteria" en el body)')
-  if (gaps.deps) parts.push('dependencias (no se encontró la sección "## Dependencias" en el body)')
+  if (gaps.ac) parts.push(`criterios de aceptación (${GAP_REASONS.ac[reasons.ac] ?? GAP_REASONS.ac['sin-seccion']})`)
+  if (gaps.deps) parts.push(`dependencias (${GAP_REASONS.deps[reasons.deps] ?? GAP_REASONS.deps['sin-seccion']})`)
   if (gaps.duplicates) parts.push('secciones duplicadas (## Dependencias/## Acceptance criteria — --reconcile no decide cuál copia es la correcta: une o borra la sobrante a mano)')
   return parts.join(' y ')
 }
@@ -805,7 +895,9 @@ if (typeof repo === 'string') {
     // bodyResult es puro (no toca `gh`, no muta nada) — seguro de calcular
     // siempre, con o sin --reconcile, con o sin --dry-run: es la única forma
     // de saber, ANTES de que nadie pida aplicar nada, si una divergencia de
-    // AC/Dependencias sería siquiera aplicable (Critical 2).
+    // AC/Dependencias sería siquiera aplicable (Critical 2) — y, desde la
+    // review final de rama, si hay algo que escribir en el body aunque nada
+    // de lo divergente cuente para el exit code (C1: el contexto del epic).
     const bodyResult = buildReconcileBody(found.body, iss)
     const gaps = reconcileGaps(diff, bodyResult)
     return { iss, found, diff, bodyResult, gaps }
@@ -815,11 +907,18 @@ if (typeof repo === 'string') {
   // rama de --dry-run, para que sea IDÉNTICO en preview y en corrida real.
   // Silencio aquí significa "spec e issues están de acuerdo": formatDrift
   // devuelve [] cuando no hay nada que reportar (ver scripts/reconcile.js).
-  for (const { found, diff, gaps } of reconcileEntries) {
+  for (const { found, diff, bodyResult, gaps } of reconcileEntries) {
     if (!found) continue
     for (const line of formatDrift(diff)) console.error(line)
     if (hasReconcileGap(gaps)) {
-      console.error(`aviso: slice #${diff.order} (issue #${found.number}) — --reconcile no puede aplicar del todo esta divergencia: ${describeGaps(gaps)}; revísala a mano en GitHub`)
+      console.error(`aviso: slice #${diff.order} (issue #${found.number}) — --reconcile no puede aplicar del todo esta divergencia: ${describeGaps(gaps, bodyResult)}; revísala a mano en GitHub`)
+    }
+    // La rendición del contexto del epic va por separado y como `nota:`: no
+    // entra en `reconcileGaps` porque esta sección nunca cuenta para el exit
+    // code (§4.4), pero callar que no se aplicó sería afirmar por omisión que
+    // sí. Solo se dice cuando de verdad había algo que escribir.
+    if (bodyResult.unresolvedEpicContext && diff.epicContextDiffers) {
+      console.error(`nota: slice #${diff.order} (issue #${found.number}) — --reconcile NO ha reescrito la sección "${EPIC_CONTEXT_HEADING}": ${EPIC_CONTEXT_SURRENDERS[bodyResult.unresolvedEpicContext]} (no cuenta para el exit code)`)
     }
     if (hasDrift(diff)) anyUnresolvedDrift = true
     if (hasReconcileGap(gaps)) anyReconcileGapRemains = true
@@ -827,16 +926,23 @@ if (typeof repo === 'string') {
   // --reconcile bajo --dry-run: NUNCA muta (ni aquí ni en la rama real de más
   // abajo) — solo hace explícito qué aplicaría una corrida real con
   // --reconcile, para que el preview no calle información que sí actuaría.
-  // El --body reconciliado (si deps/ac divergen) NO se imprime entero — sería
+  // El --body reconciliado (si diverge algo que viaje por él) NO se imprime entero — sería
   // un bloque de texto largo — se nombra por categoría, igual que el resto
   // de mensajes dirigidos a un humano de este bloque. El aviso de "gap" (si
   // lo hay) ya se imprimió arriba — no se repite aquí.
   if (reconcileFlag && dryRun) {
     for (const { found, diff, bodyResult } of reconcileEntries) {
-      if (!found || !hasDrift(diff)) continue
+      // "¿hay algo que escribir?" NO es "¿esto cuenta para el exit code?".
+      // `hasDrift` responde la segunda (excluye a propósito el contexto del
+      // epic, §4.4 del diseño), y gatear la escritura con ella hacía que el
+      // escenario primario de F26 —el autor edita la sección del spec y
+      // vuelve a correr— calculase el body nuevo y lo tirase. La primera
+      // pregunta la responde `bodyResult.body !== null`.
+      if (!found || !(hasDrift(diff) || bodyResult.body !== null)) continue
       const fieldArgs = buildReconcileEditArgs(diff)
       if (fieldArgs.length || bodyResult.body !== null) {
-        const bodyNote = bodyResult.body !== null ? ' --body <actualizado: dependencias/criterios de aceptación>' : ''
+        const bodyCats = bodyDriftCategories(diff, bodyResult)
+        const bodyNote = bodyResult.body !== null ? ` --body <actualizado: ${bodyCats.join(', ')}>` : ''
         console.error(`--reconcile aplicaría: gh issue edit ${found.number} --repo ${repo} ${fieldArgs.join(' ')}${bodyNote}`.trim())
       }
     }
@@ -1196,14 +1302,20 @@ for (const { iss, found, diff, bodyResult } of reconcileEntries) {
     // aviso de "gap" si --reconcile no puede aplicar algo) ya ocurrió ANTES
     // de la rama de --dry-run, así que es idéntica en preview y en corrida
     // real — aquí solo queda, opcionalmente, APLICAR lo que sí se puede.
-    if (reconcileFlag && hasDrift(diff)) {
+    // Mismo criterio que el preview de --dry-run, y por el mismo motivo: la
+    // pregunta "¿hay algo que escribir?" (`bodyResult.body !== null`) es
+    // distinta de "¿esto cuenta para el exit code?" (`hasDrift`, que excluye
+    // el contexto del epic a propósito — §4.4). Con una sola de las dos, una
+    // corrida cuya única divergencia era esa sección calculaba el body nuevo,
+    // lo tiraba, salía 0 y aun así informaba de que se había reescrito.
+    if (reconcileFlag && (hasDrift(diff) || bodyResult.body !== null)) {
       const fieldArgs = buildReconcileEditArgs(diff) // título/milestone/labels, vía flags (el enlace al spec vive en bodyResult.body, ver abajo — es un splice de una línea, no un flag)
       const allArgs = bodyResult.body !== null ? [...fieldArgs, '--body', bodyResult.body] : fieldArgs
-      // allArgs solo puede quedar vacío aquí si hasDrift es true pero NADA de
-      // lo divergente se pudo traducir a una mutación real — hoy, únicamente
-      // cuando la ÚNICA divergencia es de AC/Dependencias y su sección no se
-      // pudo localizar (gaps.ac/gaps.deps, ver el aviso ya impreso arriba).
-      // No hay ninguna llamada a `gh` que hacer en ese caso.
+      // allArgs solo puede quedar vacío aquí si no hay body nuevo que escribir
+      // y NADA de lo divergente se pudo traducir a una mutación real — hoy,
+      // únicamente cuando la ÚNICA divergencia es de AC/Dependencias y su
+      // sección no se pudo localizar (gaps.ac/gaps.deps, ver el aviso ya
+      // impreso arriba). No hay ninguna llamada a `gh` que hacer en ese caso.
       if (allArgs.length > 0) {
         // Mismo criterio que el resto de mutaciones de este fichero (labels,
         // milestone, project): un fallo de `gh` aquí NUNCA es benigno — auth,
@@ -1220,8 +1332,10 @@ for (const { iss, found, diff, bodyResult } of reconcileEntries) {
         }
         // El --body reconciliado no se imprime entero (puede ser un bloque de
         // texto largo) — se nombra por categoría, igual que el preview de
-        // --dry-run.
-        console.log(`issue #${found.number} reconciliado (orden #${iss.order}): ${driftCategories(diff).join(', ')}`)
+        // --dry-run, y con la MISMA lista: lo que se ha escrito, no lo que
+        // diverge. Una categoría cuya sección no se pudo localizar ya se
+        // reporta como `nota:` por stderr; nombrarla aquí sería contradecirse.
+        console.log(`issue #${found.number} reconciliado (orden #${iss.order}): ${appliedCategories(diff, bodyResult).join(', ')}`)
       }
     }
     if (projectNum && !hasProjectItem(existingProjectItems, repo, found.number)) {

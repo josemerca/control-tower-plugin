@@ -1,12 +1,163 @@
 // Lógica pura de grooming: de Slice[] (T1) a un plan de operaciones GitHub.
 import { isNoValueCell } from './slices.js'
 import { resolveGates, gateLabels, renderGatesIssueContent } from './gates.js'
+import { locateSection, unterminatedDelimiter, normalizeToLF } from './gh-issue-map.js'
 
 // GATES_HEADING (F21): la sección de gates del cuerpo del issue. Constante
 // exportada porque la nombran TRES sitios (este fichero al escribirla,
 // reconcile.js al compararla, y sus tests) y una cabecera escrita a mano en
 // tres sitios es una cabecera que acaba divergiendo en uno.
 export const GATES_HEADING = '## Gates'
+
+// Las DOS secciones de contexto del cuerpo de un issue, con dueños distintos
+// y por eso con reglas distintas:
+//
+//   EPIC_CONTEXT_HEADING      la escribe /ct-groom desde el spec, idéntica en
+//                             todos los issues del epic.
+//   INHERITED_CONTEXT_HEADING la escribe la sesión coordinadora. El plugin la
+//                             emite vacía al crear el issue y no vuelve a
+//                             tocarla nunca: ni la compara, ni la reescribe,
+//                             ni la inserta, ni la borra.
+//
+// Son constantes exportadas por el mismo motivo que GATES_HEADING: las nombran
+// el que las escribe, el que las compara y sus tests, y una cabecera tecleada
+// en tres sitios acaba divergiendo en uno. La primera es además la MISMA
+// cadena en el fichero de spec y en el cuerpo del issue: una sola que aprender.
+export const EPIC_CONTEXT_HEADING = '## Contexto del epic'
+export const INHERITED_CONTEXT_HEADING = '## Contexto heredado'
+
+// El placeholder afirma dos cosas que un humano necesita leer ahí mismo: quién
+// rellena la sección, y que lo que escriba no se lo va a pisar nadie. Una
+// sección vacía sin esa segunda frase invita a no usarla.
+export const INHERITED_CONTEXT_PLACEHOLDER =
+  '_(vacía — la rellena la sesión coordinadora cuando algo ya mergeado condiciona a este slice. `/ct-groom` no escribe aquí ni reescribe lo que escribas.)_'
+
+// EPIC_CONTEXT_REASONS (review final de rama, I1): por qué readEpicContext no
+// devuelve texto. No es decoración del mensaje: decide si `--reconcile` puede
+// RETIRAR la sección del cuerpo de los issues que ya la tengan.
+//
+//   ABSENT / EMPTY  el epic no tiene contexto común, y lo dice el spec. La
+//                   sección no debe existir en ningún cuerpo: retirarla es la
+//                   reconciliación correcta (§3.1 del diseño: una sección
+//                   presente pero vacía cuenta como ausente).
+//   MALFORMED       el spec SÍ tiene una opinión, pero no se ha podido leer un
+//                   texto válido. Eso no autoriza a tocar nada: borrar la
+//                   sección de los N issues porque alguien puso un `###` de
+//                   más sería destruir texto bueno a cambio de un error de
+//                   formato. Se avisa y se deja el cuerpo como está.
+export const EPIC_CONTEXT_REASONS = { ABSENT: 'ausente', EMPTY: 'vacia', MALFORMED: 'malformada' }
+
+// La frase que cierra los avisos de sección MALFORMADA. Está en una constante
+// porque la comparten los dos avisos de esa clase y tiene que decir
+// exactamente lo mismo en los dos: lo que un lector necesita saber es que su
+// error de formato no le ha borrado nada.
+const MALFORMED_KEEPS_WHAT_IS_THERE = 'Mientras esté así, no se toca ni se borra el contexto que ya tengan los issues de este epic: sin texto válido, el spec no tiene ninguna opinión que aplicar.'
+
+// truncationLine: la línea que truncó la sección, si resulta que locateSection
+// cortó antes de una cabecera H1/H2 o del final del fichero. `locateSection`
+// termina la sección cuando encuentra una cabecera de CUALQUIER nivel, o un
+// comentario HTML autocontenido (uno que abre y cierra en la misma línea —
+// ver gh-issue-map.js#locateSection). Terminar en una cabecera es legítimo si
+// es H1 o H2 (solo terminan la sección normalmente), pero si es H3+
+// (subcabecera del epic), o si es el comentario autocontenido, hay un
+// truncamiento que pierde contenido. Esta función devuelve esa línea
+// ofensora, o null si no la hay.
+//
+// El regex de cabeceras H1/H2 aquí debe ser coherente con ATX_HEADING_RE en
+// gh-issue-map.js — ambos gobiernan qué `locateSection` ve como cabecera. Si
+// divergen, emitiremos falsos avisos de truncamiento sobre secciones sanas.
+//
+// `contentEnd` apunta al '\n' que precede a la línea terminadora (o al final
+// del texto si no hay ninguna), así que la primera línea no vacía a partir de
+// ahí es esa línea terminadora.
+function truncationLine(specMd, loc) {
+  const rest = (specMd || '').slice(loc.contentEnd)
+  const line = rest.split('\n').find((l) => l.trim() !== '')
+  if (!line) return null // Final del fichero, no hay truncamiento
+
+  // Cabecera H1 o H2: termina la sección normalmente. El regex es coherente
+  // con ATX_HEADING_RE en gh-issue-map.js: acepta # o ## seguidos de espacio,
+  // tabulador, o fin de línea. Una cabecera desnuda (p.ej. "##" sin texto)
+  // también es válida y termina la sección sin truncamiento.
+  if (/^ {0,3}#{1,2}([ \t]|$)/.test(line)) return null
+
+  // Cualquier otra cosa: es un truncamiento
+  return line.trim()
+}
+
+// readEpicContext: lee del fichero de spec el texto que va a viajar, idéntico,
+// al cuerpo de cada issue del epic.
+//
+// La sección se localiza POR EL TEXTO DE SU CABECERA, nunca por un número de
+// sección — mismo criterio con el que analyzeSlicesTable localiza la tabla de
+// slices por sus columnas: los números de sección de un spec se mueven en
+// cuanto alguien inserta algo por delante.
+//
+// Devuelve `content: null` en los cuatro casos en que no hay nada que emitir
+// (ausente, vacía, con un delimitador sin cerrar dentro, o con un
+// truncamiento dentro), cada uno con su propio aviso: los cuatro se arreglan
+// de forma distinta y un mensaje único obligaría a adivinar cuál pasó. Un spec
+// sin esta sección es un spec VÁLIDO — de ahí que esto avise y nunca lance.
+//
+// `reason` (review final de rama, I1) es lo que impide que esos cuatro casos
+// se confundan aguas abajo. Los cuatro producen el mismo `content: null`, pero
+// NO significan lo mismo, y `buildReconcileBody` lee `null` como RETIRA LA
+// SECCIÓN ENTERA: sin el motivo, añadir un `###` de más al spec borraba el
+// contexto de los N issues del epic en el siguiente --reconcile. "El epic no
+// tiene contexto" (ausente/vacía) autoriza a retirar; "no he podido leer un
+// texto válido" (malformada) no autoriza nada — ver EPIC_CONTEXT_REASONS.
+export function readEpicContext(specMd) {
+  const warnings = []
+  // CRLF (review final de rama, I2). Se normaliza AQUÍ, antes de localizar
+  // nada, y por dos motivos distintos:
+  //
+  //   1. Lo que esta función devuelve viaja al CUERPO de los issues, y es el
+  //      primer valor multi-línea derivado del spec que lo hace (las celdas de
+  //      la tabla §9 pasan todas por `trim`, que se come el `\r`). Un `\r`
+  //      dentro del cuerpo no se ve, pero diffIssue y buildReconcileBody
+  //      comparan siempre texto normalizado a LF: contra un valor con `\r`
+  //      no pueden coincidir NUNCA — `nota:` en cada corrida y, desde el
+  //      arreglo de C1, una escritura en cada corrida, para siempre.
+  //   2. `locateSection` (y con ella el guardarraíl entero) mira las líneas
+  //      con ATX_HEADING_RE, que no reconoce "##\r" como cabecera: en un spec
+  //      CRLF, una cabecera desnuda deja de terminar la sección y ésta se
+  //      traga el resto del fichero. Ese fallo se arregla aquí, en la causa, y
+  //      no tocando el regex de truncationLine — ese regex está bien, y de
+  //      hecho coincide con ATX_HEADING_RE en rechazar "##\r"; lo que estaba
+  //      mal era el texto que se les daba a los dos.
+  const src = normalizeToLF(specMd || '')
+  const loc = locateSection(src, EPIC_CONTEXT_HEADING)
+  if (!loc) {
+    warnings.push(`aviso: el spec no trae la sección "${EPIC_CONTEXT_HEADING}" — ningún issue de este epic lleva contexto común (ni el que se cree ahora, ni el que ya exista: con --reconcile la sección se retira del cuerpo). Si lo quieres, añade esa sección al spec, fuera de la tabla de slices, y vuelve a correr.`)
+    return { content: null, reason: EPIC_CONTEXT_REASONS.ABSENT, warnings }
+  }
+  // Delimitador sin cerrar (review final de rama, C3). Va ANTES del
+  // truncamiento porque es el fallo OPUESTO y lo tapa: `truncationLine` sólo
+  // ve terminadores que cortan la sección demasiado pronto, y una valla (o un
+  // comentario) sin cerrar esconde todas las líneas siguientes, así que deja
+  // de haber terminador y `loc.content` se traga el resto del spec —tabla de
+  // slices incluida— sin nada que avisar. Se comprueba con el MISMO escáner
+  // que localiza la sección (gh-issue-map.js#unterminatedDelimiter), no con
+  // uno nuevo.
+  const abierto = unterminatedDelimiter(loc.content)
+  if (abierto) {
+    const que = abierto === 'valla' ? 'una valla de código (```) sin cerrar' : 'un comentario HTML (<!--) sin cerrar'
+    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec contiene ${que} y por eso NO se emite en ningún issue. Sin el cierre, la sección no termina donde parece: se traga todo lo que venga detrás en el spec (la tabla de slices incluida) y ese texto acabaría en el cuerpo de todos los issues. Cierra el delimitador y vuelve a correr. ${MALFORMED_KEEPS_WHAT_IS_THERE}`)
+    return { content: null, reason: EPIC_CONTEXT_REASONS.MALFORMED, warnings }
+  }
+
+  const truncating = truncationLine(src, loc)
+  if (truncating) {
+    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec contiene ("${truncating}") y por eso NO se emite en ningún issue. La sección se reescribe entera desde el spec: el reemplazo termina en la primera cosa que corta la sección (cabecera de cualquier nivel, comentario HTML, etc.), así que nada que corte puede vivir dentro. ${MALFORMED_KEEPS_WHAT_IS_THERE}`)
+    return { content: null, reason: EPIC_CONTEXT_REASONS.MALFORMED, warnings }
+  }
+  const content = loc.content.trim()
+  if (!content) {
+    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec está presente pero sin contenido — se trata igual que si no estuviera, o sea que ningún issue lleva contexto común (y con --reconcile la sección se retira del cuerpo de los que ya la tengan). Escribe algo debajo de la cabecera, o quítala.`)
+    return { content: null, reason: EPIC_CONTEXT_REASONS.EMPTY, warnings }
+  }
+  return { content, reason: null, warnings }
+}
 
 // gatesOf: la resolución de gates de un slice, en un solo sitio. La llaman
 // buildLabels y buildIssueBody por separado (es pura y barata) en vez de
@@ -215,7 +366,7 @@ export function renderAcContent(ac) {
   return (ac && ac.length) ? ac.map((a) => `- ${a}`).join('\n') : '- (rellenar desde el spec)'
 }
 
-export function buildIssueBody(slice, specRef) {
+export function buildIssueBody(slice, specRef, epicContext = null) {
   const lines = []
   lines.push(renderSpecLink(slice, specRef))
   lines.push('')
@@ -230,6 +381,25 @@ export function buildIssueBody(slice, specRef) {
     lines.push(descripcion)
     lines.push('')
   }
+  // Las dos secciones de contexto van DESPUÉS de la descripción y ANTES de los
+  // criterios de aceptación: son el contexto con el que esos criterios se
+  // interpretan, y detrás de ellos se leerían tarde.
+  //
+  // El contexto del epic sólo se emite si el spec trae texto real — sin él, el
+  // spec no tiene ninguna opinión, y una sección vacía afirmaría que sí la
+  // tiene y está en blanco. La heredada se emite SIEMPRE, aunque nadie haya
+  // escrito nada todavía: una sección que sólo existe cuando alguien se acordó
+  // de crearla es una sección que nadie crea cuando hace falta, y sin un sitio
+  // fijo cada quien inventa el suyo — con lo que ningún kickoff puede
+  // nombrarla.
+  if (epicContext) {
+    lines.push(EPIC_CONTEXT_HEADING)
+    lines.push(epicContext)
+    lines.push('')
+  }
+  lines.push(INHERITED_CONTEXT_HEADING)
+  lines.push(INHERITED_CONTEXT_PLACEHOLDER)
+  lines.push('')
   lines.push('## Acceptance criteria (EARS, 1:1 con tests)')
   lines.push(renderAcContent(slice.ac))
   lines.push('')
@@ -274,7 +444,13 @@ function findDuplicateOrders(slices) {
   return [...dupes].sort((a, b) => a - b)
 }
 
-export function groomPlan(slices, { milestone, specRef }) {
+export function groomPlan(slices, { milestone, specRef, epicContext = null, epicContextReason = null }) {
+  // epicContextUnknown (I1): "no he podido leer un texto válido" NO es "el
+  // epic no tiene contexto". Sin esta distinción, `epicContext: null` viajaba
+  // igual en los dos casos y buildReconcileBody lo leía siempre como "retira
+  // la sección". Es lo único que reconcile.js necesita saber del motivo: el
+  // resto del detalle vive en el aviso, que ya lo ha impreso el wrapper.
+  const epicContextUnknown = epicContextReason === EPIC_CONTEXT_REASONS.MALFORMED
   const dupes = findDuplicateOrders(slices)
   if (dupes.length) {
     throw new Error(`groomPlan: orden(es) de slice duplicado(s) en la tabla §9: ${dupes.join(', ')}`)
@@ -284,7 +460,7 @@ export function groomPlan(slices, { milestone, specRef }) {
     issues: slices.map((s) => ({
       order: s.n,
       title: buildIssueTitle(s),
-      body: buildIssueBody(s, specRef),
+      body: buildIssueBody(s, specRef, epicContext),
       labels: buildLabels(s),
       deps: s.deps,
       // F5: además del body ya renderizado (arriba), el plan lleva los
@@ -303,6 +479,14 @@ export function groomPlan(slices, { milestone, specRef }) {
       // la resolución de cabeza.
       gates: gatesOf(s).gates,
       gatesContent: renderGatesContent(s),
+      // El texto del epic viaja en el plan, no sólo dentro del body ya
+      // renderizado, por el mismo motivo que ac/descripcion/protectedLine:
+      // para que comparar este slice contra un issue existente no obligue a
+      // re-parsear el cuerpo recién generado. Mientras tanto, quien lea el
+      // JSON del --dry-run tiene que poder ver qué va a salir sin reproducir
+      // la lectura del spec.
+      epicContext,
+      epicContextUnknown,
     })),
   }
 }

@@ -6,7 +6,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { makeSpecDir, specUrl } from './fixtures/spec-repo.js'
 import { REAL_FAILING_TABLE, REAL_DEP_TABLE, REAL_TABLE_WITH_HASH_FIXED } from './fixtures/slices-real-tables.js'
-import { buildIssueBody } from '../scripts/groom.js'
+import { buildIssueBody, EPIC_CONTEXT_HEADING } from '../scripts/groom.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-groom.mjs')
 
@@ -588,8 +588,12 @@ describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avis
     // F6: un epic nuevo ya nunca produce stderr vacío — el groom dice qué
     // labels se inventaría y que lo creado no será despachable hasta que
     // alguien lo promueva a status:ready. Lo que este test comprueba es la
-    // ausencia del AVISO de tipo, no el silencio global.
-    expect(res.stderr).not.toMatch(/aviso:/)
+    // ausencia del AVISO de tipo, no el silencio global. F26: el spec de
+    // este test tampoco trae "## Contexto del epic", así que desde T3 el
+    // stderr trae ADEMÁS ese aviso — ortogonal a lo que aquí se comprueba.
+    // Se ancla a la columna Tipo (la única fuente del aviso que este test
+    // vigila), no a "aviso:" a secas.
+    expect(res.stderr).not.toMatch(/columna Tipo/)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -605,8 +609,12 @@ describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avis
     // F6: un epic nuevo ya nunca produce stderr vacío — el groom dice qué
     // labels se inventaría y que lo creado no será despachable hasta que
     // alguien lo promueva a status:ready. Lo que este test comprueba es la
-    // ausencia del AVISO de tipo, no el silencio global.
-    expect(res.stderr).not.toMatch(/aviso:/)
+    // ausencia del AVISO de tipo, no el silencio global. F26: el spec de
+    // este test tampoco trae "## Contexto del epic", así que desde T3 el
+    // stderr trae ADEMÁS ese aviso — ortogonal a lo que aquí se comprueba.
+    // Se ancla a la columna Tipo (la única fuente del aviso que este test
+    // vigila), no a "aviso:" a secas.
+    expect(res.stderr).not.toMatch(/columna Tipo/)
     const plan = JSON.parse(res.stdout)
     expect(plan.issues[0].labels.some((l) => l.startsWith('type:'))).toBe(false)
     rmSync(dir, { recursive: true, force: true })
@@ -635,8 +643,12 @@ describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avis
     // F6: un epic nuevo ya nunca produce stderr vacío — el groom dice qué
     // labels se inventaría y que lo creado no será despachable hasta que
     // alguien lo promueva a status:ready. Lo que este test comprueba es la
-    // ausencia del AVISO de tipo, no el silencio global.
-    expect(res.stderr).not.toMatch(/aviso:/)
+    // ausencia del AVISO de tipo, no el silencio global. F26: el spec de
+    // este test tampoco trae "## Contexto del epic", así que desde T3 el
+    // stderr trae ADEMÁS ese aviso — ortogonal a lo que aquí se comprueba.
+    // Se ancla a la columna Tipo (la única fuente del aviso que este test
+    // vigila), no a "aviso:" a secas.
+    expect(res.stderr).not.toMatch(/columna Tipo/)
     const plan = JSON.parse(res.stdout)
     expect(plan.issues[0].labels.some((l) => l.startsWith('type:'))).toBe(false)
     rmSync(dir, { recursive: true, force: true })
@@ -1133,7 +1145,12 @@ describe('ct-groom — normalización de marcado en un solo paso cierra la clase
     expect(labels).toContain('area:hoy')
     expect(labels).toContain('area:web')
     expect(labels).not.toContain('area:areaweb')
-    expect(res.stderr).not.toMatch(/aviso:/) // sin ningún aviso: ambos tokens se reconocen limpios (F6: el stderr ya no está vacío — trae labels nuevas y el recordatorio de status:backlog)
+    // sin ningún aviso de normalización: ambos tokens se reconocen limpios
+    // (F6: el stderr ya no está vacío — trae labels nuevas y el recordatorio
+    // de status:backlog. F26: tampoco está vacío por "## Contexto del epic"
+    // ausente — ortogonal a lo que este test vigila, así que se ancla a las
+    // columnas Área/Toca en vez de "aviso:" a secas).
+    expect(res.stderr).not.toMatch(/en columna (Área|Toca)/)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1307,7 +1324,13 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
       { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[MATCHING]]), FAKE_GH_LABELS_LIST: PLAN_LABELS_EXIST }) })
     expect(res.status).toBe(0)
-    expect(res.stderr).toBe('')
+    // F26: ONE_SLICE_SPEC no trae "## Contexto del epic", así que desde T3
+    // el stderr ya no está vacío por ese motivo — ortogonal a la divergencia
+    // que este test vigila. Se comprueba que ESA es la única línea (nada de
+    // "difiere"/"falta la label"/etc.), en vez de exigir vacío a secas.
+    const stderrLines = res.stderr.split('\n').filter(Boolean)
+    expect(stderrLines).toHaveLength(1)
+    expect(stderrLines[0]).toContain(EPIC_CONTEXT_HEADING)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1328,7 +1351,11 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
     // F6: este fixture (issue CERRADO, sin ninguna label status:) es también
     // la prueba de que el recordatorio de status:backlog no persigue a un
     // epic ya terminado: un issue cerrado no está pendiente de promoción.
-    expect(res.stderr).toBe('')
+    // F26: mismo caso que el test anterior — ONE_SLICE_SPEC no trae
+    // "## Contexto del epic", así que el stderr trae ese aviso y nada más.
+    const stderrLines = res.stderr.split('\n').filter(Boolean)
+    expect(stderrLines).toHaveLength(1)
+    expect(stderrLines[0]).toContain(EPIC_CONTEXT_HEADING)
     rmSync(dir, { recursive: true, force: true })
   })
 
