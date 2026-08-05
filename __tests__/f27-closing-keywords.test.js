@@ -336,4 +336,41 @@ describe('F27 — probeGovernedRepo', () => {
     expect(r.error).toBeTruthy()
     expect(r.governed).toBeUndefined()
   })
+
+  // El mensaje de error describe el valor recibido, pero construir esa
+  // descripcion no puede tumbar la funcion: un cwd invalido llega de fuera y
+  // puede traer justo el objeto pensado para romper quien lo serialice.
+  it('un objeto circular como cwd no lanza, y es ERROR', () => {
+    const circular = {}
+    circular.self = circular
+    expect(() => probeGovernedRepo(circular)).not.toThrow()
+    const r = probeGovernedRepo(circular)
+    expect(r.error).toBeTruthy()
+    expect(r.governed).toBeUndefined()
+  })
+
+  it('un getter que lanza al leerlo como cwd no lanza, y es ERROR', () => {
+    const hostil = {}
+    Object.defineProperty(hostil, 'x', { enumerable: true, get() { throw new Error('boom') } })
+    expect(() => probeGovernedRepo(hostil)).not.toThrow()
+    const r = probeGovernedRepo(hostil)
+    expect(r.error).toBeTruthy()
+    expect(r.governed).toBeUndefined()
+  })
+
+  it('un toJSON que lanza como cwd no lanza, y es ERROR', () => {
+    const hostil = { toJSON() { throw new Error('boom') } }
+    expect(() => probeGovernedRepo(hostil)).not.toThrow()
+    const r = probeGovernedRepo(hostil)
+    expect(r.error).toBeTruthy()
+    expect(r.governed).toBeUndefined()
+  })
+
+  it('un toString que lanza como cwd no lanza, y es ERROR', () => {
+    const hostil = { toString() { throw new Error('boom') } }
+    expect(() => probeGovernedRepo(hostil)).not.toThrow()
+    const r = probeGovernedRepo(hostil)
+    expect(r.error).toBeTruthy()
+    expect(r.governed).toBeUndefined()
+  })
 })

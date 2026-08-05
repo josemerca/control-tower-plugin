@@ -16,6 +16,14 @@ export const CONTRACT_MARKER = '<!-- ct-init:slices-contract -->'
 
 const AGENTS = 'AGENTS.md'
 
+// Describe un valor para un mensaje de error sin arriesgarse a lanzar: un
+// `cwd` invalido llega de fuera y puede traer un `toString` que lance, o ser
+// circular. `String(...)` ya evita el problema de `JSON.stringify` con los
+// ciclos, pero un `toString` hostil sigue pudiendo lanzar, así que se atrapa.
+function describirValor(v) {
+  try { return String(v) } catch { return '<no se pudo describir>' }
+}
+
 // `.git` puede ser un DIRECTORIO (checkout normal) o un FICHERO con un
 // `gitdir:` dentro (worktree). Los agentes despachados trabajan SIEMPRE en un
 // worktree, así que mirar sólo directorios dejaría fuera la mitad de la
@@ -42,7 +50,7 @@ export function probeGovernedRepo(cwd) {
   // contestaria sobre un directorio que quien llama nunca nombro. Eso es peor
   // que inventar un `false`: es responder sobre otra pregunta.
   if (typeof cwd !== 'string' || cwd.length === 0) {
-    return { error: `cwd invalido: se esperaba una cadena no vacia y llego ${typeof cwd} (${JSON.stringify(cwd)})` }
+    return { error: `cwd invalido: se esperaba una cadena no vacia y llego ${typeof cwd} (${describirValor(cwd)})` }
   }
   let dir
   try { dir = resolve(cwd) } catch (e) { return { error: `cwd invalido: ${e.message}` } }
