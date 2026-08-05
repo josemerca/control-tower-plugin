@@ -20,7 +20,7 @@ import { pathToFileURL } from 'node:url'
 // propia copia, que se quedaría atrás en silencio y daría por buena una
 // configuración que ya no es la del proyecto.
 export const buildOptions = {
-  entryPoints: ['hooks/session-start.js', 'hooks/stop.js'],
+  entryPoints: ['hooks/session-start.js', 'hooks/stop.js', 'hooks/commit-keyword-guard.js'],
   bundle: true,
   platform: 'node',
   format: 'esm',

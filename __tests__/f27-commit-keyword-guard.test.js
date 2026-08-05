@@ -193,4 +193,10 @@ describe('F27 — el hook (extremo a extremo sobre el binario, via stdin)', () =
     const r = correr('git commit -m "Closes #451"', repoGobernado(), hookEnlazado)
     expect(r.json.hookSpecificOutput.permissionDecision).toBe('deny')
   })
+
+  it('el BUNDLE de produccion decide igual que el fuente', () => {
+    const bundle = join(root, 'dist/commit-keyword-guard.js')
+    const r = correr('git commit -m "Closes #451"', repoGobernado(), bundle)
+    expect(r.json.hookSpecificOutput.permissionDecision).toBe('deny')
+  })
 })
