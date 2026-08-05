@@ -232,3 +232,72 @@ describe('F27 — findClosingKeywords', () => {
     expect(findClosingKeywords(undefined)).toEqual([])
   })
 })
+
+import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { probeGovernedRepo, CONTRACT_MARKER } from '../scripts/governed-repo.js'
+
+describe('F27 — probeGovernedRepo', () => {
+  const hechos = []
+  const tmp = () => { const d = mkdtempSync(join(tmpdir(), 'f27-')); hechos.push(d); return d }
+  afterAll(() => { for (const d of hechos) { try { chmodSync(d, 0o755) } catch {} ; rmSync(d, { recursive: true, force: true }) } })
+
+  it('un repo con AGENTS.md que lleva el marcador esta gobernado', () => {
+    const d = tmp()
+    mkdirSync(join(d, '.git'))
+    writeFileSync(join(d, 'AGENTS.md'), `# AGENTS\n${CONTRACT_MARKER}\ncosas\n`)
+    expect(probeGovernedRepo(d)).toEqual({ governed: true })
+  })
+
+  // La mitad de la cobertura de la puerta son los agentes despachados, y todos
+  // trabajan en un worktree, donde .git es un FICHERO.
+  it('un worktree, cuyo .git es un FICHERO, se reconoce igual', () => {
+    const d = tmp()
+    writeFileSync(join(d, '.git'), 'gitdir: /otro/sitio/.git/worktrees/2\n')
+    writeFileSync(join(d, 'AGENTS.md'), CONTRACT_MARKER)
+    expect(probeGovernedRepo(d)).toEqual({ governed: true })
+  })
+
+  it('sube desde un subdirectorio hasta la raiz', () => {
+    const d = tmp()
+    mkdirSync(join(d, '.git'))
+    writeFileSync(join(d, 'AGENTS.md'), CONTRACT_MARKER)
+    const sub = join(d, 'a', 'b')
+    mkdirSync(sub, { recursive: true })
+    expect(probeGovernedRepo(sub)).toEqual({ governed: true })
+  })
+
+  it('un repo sin AGENTS.md NO esta gobernado', () => {
+    const d = tmp()
+    mkdirSync(join(d, '.git'))
+    expect(probeGovernedRepo(d)).toEqual({ governed: false })
+  })
+
+  it('un AGENTS.md sin el marcador NO esta gobernado', () => {
+    const d = tmp()
+    mkdirSync(join(d, '.git'))
+    writeFileSync(join(d, 'AGENTS.md'), '# AGENTS\nsin marcador\n')
+    expect(probeGovernedRepo(d)).toEqual({ governed: false })
+  })
+
+  it('lo que no es un repo git NO esta gobernado', () => {
+    expect(probeGovernedRepo(tmp())).toEqual({ governed: false })
+  })
+
+  it('un AGENTS.md ilegible es ERROR, nunca "no gobernado"', () => {
+    const d = tmp()
+    mkdirSync(join(d, '.git'))
+    const f = join(d, 'AGENTS.md')
+    writeFileSync(f, CONTRACT_MARKER)
+    chmodSync(f, 0o000)
+    const r = probeGovernedRepo(d)
+    expect(r.error).toBeTruthy()
+    expect(r.governed).toBeUndefined()
+  })
+
+  it('un cwd que no existe es ERROR, nunca "no gobernado"', () => {
+    const r = probeGovernedRepo(join(tmpdir(), 'f27-no-existe-jamas', 'x'))
+    expect(r.error).toBeTruthy()
+  })
+})
