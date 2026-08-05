@@ -37,8 +37,15 @@ function isRepoRoot(dir) {
  * parar.
  */
 export function probeGovernedRepo(cwd) {
+  // `cwd` que no es una cadena no puede coercionarse en silencio: `String(cwd
+  // || '')` sobre `undefined`, `null` o `''` cae al cwd del PROCESO, y
+  // contestaria sobre un directorio que quien llama nunca nombro. Eso es peor
+  // que inventar un `false`: es responder sobre otra pregunta.
+  if (typeof cwd !== 'string' || cwd.length === 0) {
+    return { error: `cwd invalido: se esperaba una cadena no vacia y llego ${typeof cwd} (${JSON.stringify(cwd)})` }
+  }
   let dir
-  try { dir = resolve(String(cwd || '')) } catch (e) { return { error: `cwd invalido: ${e.message}` } }
+  try { dir = resolve(cwd) } catch (e) { return { error: `cwd invalido: ${e.message}` } }
   try {
     statSync(dir)
   } catch (e) {

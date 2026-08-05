@@ -300,4 +300,40 @@ describe('F27 — probeGovernedRepo', () => {
     const r = probeGovernedRepo(join(tmpdir(), 'f27-no-existe-jamas', 'x'))
     expect(r.error).toBeTruthy()
   })
+
+  // Un cwd que no es una cadena no puede coercionarse en silencio al cwd del
+  // PROCESO: eso contestaria sobre un directorio que quien llama nunca nombro.
+  // La aserción no depende de en que directorio corra el proceso de test: un
+  // `.error` presente y un `.governed` ausente ya distinguen "rehuse
+  // contestar" de "conteste que no", sin importar si ese directorio esta o no
+  // gobernado.
+  it('cwd undefined es ERROR, nunca una respuesta sobre el cwd del proceso', () => {
+    const r = probeGovernedRepo(undefined)
+    expect(r.error).toBeTruthy()
+    expect(r.governed).toBeUndefined()
+  })
+
+  it('cwd null es ERROR, nunca una respuesta sobre el cwd del proceso', () => {
+    const r = probeGovernedRepo(null)
+    expect(r.error).toBeTruthy()
+    expect(r.governed).toBeUndefined()
+  })
+
+  it('cwd cadena vacia es ERROR, nunca una respuesta sobre el cwd del proceso', () => {
+    const r = probeGovernedRepo('')
+    expect(r.error).toBeTruthy()
+    expect(r.governed).toBeUndefined()
+  })
+
+  it('cwd numerico es ERROR por tipo, no por coincidencia de ruta inexistente', () => {
+    const r = probeGovernedRepo(42)
+    expect(r.error).toBeTruthy()
+    expect(r.governed).toBeUndefined()
+  })
+
+  it('cwd objeto es ERROR', () => {
+    const r = probeGovernedRepo({})
+    expect(r.error).toBeTruthy()
+    expect(r.governed).toBeUndefined()
+  })
 })
