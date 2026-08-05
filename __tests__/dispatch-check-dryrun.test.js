@@ -398,6 +398,25 @@ describe('dispatch-check — T11 hook CT_CLAIM_PRECLAIM_DELAY_MS', () => {
   // ruido común se cancela en la resta en vez de sumarse. El umbral (la mitad
   // del valor nominal) sigue siendo el mismo, y sigue detectando exactamente
   // lo que tiene que detectar: un hook que no duerme lo que dice.
+  //
+  // POR QUÉ EL VALOR NOMINAL ES DE SEGUNDOS Y NO DE DÉCIMAS. El pareado quita
+  // el ruido COMÚN a las dos ramas, pero no el que las separa, y aquí ése
+  // manda: cada rama arranca su propio proceso `node`, y ese arranque cuesta
+  // del orden de medio segundo con una dispersión del mismo orden. Con un
+  // nominal de décimas, la señal y el ruido son del mismo tamaño, y la mediana
+  // de unas pocas muestras se cae por debajo del umbral sin que el hook haya
+  // hecho nada malo — que es exactamente lo que pasaba: medido en reposo, 1 de
+  // 15 diferencias pareadas caía por debajo del umbral, y bajo carga esa
+  // proporción bastaba para tumbar la mediana de cinco muestras.
+  //
+  // La cura no es más muestras (multiplica el coste sin separar señal de
+  // ruido): es que la señal domine. Con un nominal de segundos, el arranque
+  // pasa de valer tanto como la señal a valer una fracción pequeña de ella, y
+  // la muestra PEOR queda muy por encima del umbral en vez de rozarlo. Se
+  // bajan las iteraciones de cinco a tres para no pagar el nominal más alto
+  // cinco veces; aun así este fichero tarda unos segundos MÁS que antes, y ése
+  // es el precio deliberado de que deje de caerse solo. Tres es el mínimo con
+  // el que una mediana sigue significando algo.
   // ==========================================================================
   const preclaimEnv = {
     FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
@@ -411,9 +430,9 @@ describe('dispatch-check — T11 hook CT_CLAIM_PRECLAIM_DELAY_MS', () => {
   }
 
   it('valor positivo retrasa medible la escritura del claim frente a ausente (mismo resultado final, más lento)', () => {
-    const NOMINAL_MS = 600
+    const NOMINAL_MS = 2000
     const diffs = []
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 3; i++) {
       // Las dos ramas, una inmediatamente después de la otra, en la misma
       // iteración: ven la misma máquina.
       const a = timed(() => runReal(['3', '--repo', 'o/r'], { ...preclaimEnv }))
