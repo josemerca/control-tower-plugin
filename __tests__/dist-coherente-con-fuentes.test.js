@@ -99,10 +99,12 @@ async function comprobarDist(root) {
 // lector cree que ha hecho mal — así que se distinguen sin adivinar.
 //
 // La lista de inputs sale del metafile REAL de la corrida, no de `scripts/`
-// entero: los hooks solo importan scripts/state.js y scripts/state-paths.js,
-// así que un cambio en cualquier otro fichero de scripts/ no entra al bundle.
+// entero: cada hook importa sólo los módulos de scripts/ que de verdad usa
+// (session-start.js y stop.js: state.js y state-paths.js; commit-keyword-
+// guard.js: closing-keywords.js y governed-repo.js), así que un cambio en
+// cualquier OTRO fichero de scripts/ no entra al bundle de ningún hook.
 // Mirar el directorio entero habría dado un falso positivo con cualquier
-// cambio en esos otros ficheros, aunque el bundle no dependa de ellos.
+// cambio en esos otros ficheros, aunque ningún bundle dependa de ellos.
 function explicarIncoherencia(root, { faltan, sobran, difieren, inputs }) {
   const partes = ['el dist/ commiteado NO corresponde a los fuentes commiteados:']
   if (faltan.length) partes.push(`  el build produce ficheros que HEAD no tiene commiteados: ${faltan.join(', ')}`)

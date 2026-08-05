@@ -25,11 +25,31 @@
 // invocaciones basta.
 //
 // LO QUE NO VE: un `git commit` tecleado fuera de Claude, uno sin `-m` (abre
-// el editor), un `-F <fichero>`, un `--amend --no-edit`, expansión de
-// variable (`-m "$MSG"`), sustitución de comandos (`-m "$(...)"`), `eval
-// "..."`, `bash -c "..."` y subshell `( ... )`. Para todo eso sigue estando
-// el aviso de /ct-next sobre issues cerrados por un commit suelto: esto caza
-// la CAUSA, aquello el EFECTO, y ninguno de los dos afirma ser completo.
+// el editor), un `-F <fichero>`, un `--amend --no-edit`, `eval "..."`,
+// `bash -c "..."` y subshell `( ... )`. Ni una invocación ENVUELTA donde
+// `git` deja de ser el primer token — `sudo git commit`, `env FOO=1 git
+// commit`, `command git commit` — porque entonces el paso (1) ni siquiera
+// reconoce el `git commit` que hay detrás.
+//
+// CON `-C <ruta>` O `cd <ruta> && git commit` NO HAY CEGUERA, HAY UN REPO
+// EQUIVOCADO: el paso (3) juzga el repo del `cwd` de la SESIÓN, nunca el que
+// señala `<ruta>`, y eso corta en las dos direcciones — medido en los dos
+// sentidos. Con la sesión dentro de un repo gobernado y `<ruta>` apuntando a
+// uno que no lo es, `deny` de más sobre un commit que no le compete. Con la
+// sesión fuera de todo repo gobernado y `<ruta>` apuntando a uno que sí lo
+// es, ninguna protección sobre el commit que sí le competía.
+//
+// Lo que SÍ ve, y no hay que confundir con lo de arriba: closing-keywords.js
+// no interpreta `$(...)` ni backticks, sólo copia caracteres — así que un
+// mensaje construido con `-m "$MSG"` (expansión de variable) o
+// `-m "$(cat fichero)"` (contenido en disco) es invisible, PERO el heredoc
+// citado dentro de las propias comillas del `-m` —
+// `-m "$(cat <<'EOF' ... EOF)"`, la forma multilínea por defecto de Claude
+// Code— viaja entero, keyword incluida, en el mismo token, y SÍ se ve.
+//
+// Para todo lo que de verdad se escapa sigue estando el aviso de /ct-next
+// sobre issues cerrados por un commit suelto: esto caza la CAUSA, aquello el
+// EFECTO, y ninguno de los dos afirma ser completo.
 // ============================================================================
 import { readFileSync, realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'

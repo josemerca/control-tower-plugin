@@ -114,7 +114,19 @@ stdout: "El comando fue bloqueado: el hook devolvió `DENEGADO_POR_EL_EXPERIMENT
 efecto: ls: CENTINELA.txt: No such file or directory
 ```
 
-**El fichero no existe.** La puerta cubre también a los agentes despachados.
+**El fichero no existe: un `deny` sobrevive a `--dangerously-skip-permissions`.**
+Es exactamente esa pregunta, y no otra, la que este experimento contesta — un
+hook que devuelve `deny` sigue bloqueando aunque el agente arranque con el flag
+que los agentes despachados usan siempre.
+
+Lo que esto NO mide, y no hay que leerlo como si lo hiciera: si la puerta
+**cubre** a un agente despachado depende de una condición que este experimento
+no varió — **que la sesión de ese agente tenga el plugin cargado**. Los
+agentes despachados arrancan con su propio `CLAUDE_CONFIG_DIR` (ver
+`resolveAccount` en `scripts/dispatch.js`), así que sólo llevan encima el
+hook `PreToolUse` de esta puerta si el plugin está instalado también bajo esa
+cuenta. La medición dice que el `bypassPermissions` no es el obstáculo; no dice
+que todo agente despachado esté cubierto sin más.
 
 ### 2.3 Las nueve keywords, de la fuente
 

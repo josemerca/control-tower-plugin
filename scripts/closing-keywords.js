@@ -31,8 +31,21 @@
  * escapes) y `\` fuera de comillas. Lo que deliberadamente NO entiende, porque
  * no hace falta para decidir y sí complicaría el módulo: sustitución de
  * comandos (`$(…)`, backticks), subshells `( )`, expansión de variables y
- * redirecciones. Un mensaje construido por sustitución de comandos no es
- * visible aquí, y eso está declarado como límite de la puerta.
+ * redirecciones — ninguno de esos caracteres recibe tratamiento especial, se
+ * copian tal cual al token en curso, igual que cualquier otro carácter.
+ *
+ * LA PROPIEDAD REAL, y por qué no es lo mismo que "no ve sustitución de
+ * comandos": este módulo no resuelve nada, sólo copia caracteres — así que ve
+ * TODO lo que viaja literalmente en la línea, esté o no dentro de un `$(…)`,
+ * y NO ve nada que no viaje ahí. La forma por defecto de Claude Code para un
+ * mensaje multilínea es `-m "$(cat <<'EOF' ... EOF)"`, con el heredoc citado
+ * DENTRO de las comillas dobles del propio `-m`: su cuerpo entero —el texto
+ * real del commit, keyword incluida si la lleva— es parte del mismo token, y
+ * SÍ se ve. Lo que de verdad no se ve es lo que no está aquí en absoluto: una
+ * expansión de variable (`-m "$MSG"`, el valor vive en el entorno) o un
+ * `-m "$(cat fichero)"` cuyo contenido está en disco. Un futuro refactor que
+ * "simplifique" tratando cualquier `$(…)` como punto ciego borraría en
+ * silencio justo la cobertura del caso que motivó esta puerta.
  */
 export function tokenizeSegments(command) {
   const src = typeof command === 'string' ? command : ''
@@ -98,9 +111,8 @@ const CLUSTER_CONSUMES_REST = new Set(['F', 'C', 'c', 't', 'S', 'u'])
  * inventarlo.
  */
 function messagesFromSegment(tokens) {
-  let i = 0
   if (!tokens.length || !isGitBinary(tokens[0])) return []
-  i = 1
+  let i = 1
   while (i < tokens.length && tokens[i].startsWith('-')) {
     const t = tokens[i]
     if (t.includes('=')) { i += 1; continue }
@@ -166,8 +178,29 @@ export const CLOSING_KEYWORDS = [
 // `\b` a los dos lados: sin él, `prefix #42` y `foreclosed #42` dispararían.
 // Los dos puntos son opcionales porque GitHub acepta `Closes: #10` igual que
 // `Closes #10`. La referencia es `#N` o `owner/repo#N`.
+//
+// El espaciado entre la keyword y la referencia está ACOTADO a 10 caracteres
+// a cada lado del `:` opcional, y no es cosmético: dos `\s*` sin cota,
+// separados por un `:?` que puede o no consumir nada, dejan al motor de
+// regex libre para repartir CUALQUIER cantidad de espacios entre los dos
+// grupos de formas distintas, y cuando al final no hay referencia que casar
+// prueba todas esas formas antes de rendirse — cuadrático en el número de
+// espacios. Medido: `closes` seguido de 120.000 espacios tarda más de 10 s,
+// supera el `timeout: 5` del hook, y el hook muere sin decisión — la puerta
+// se apaga en silencio, justo el modo de fallo que esta rama existe para
+// combatir. La cota es asimétrica y hay que leerla tal cual es, no como "20
+// espacios de holgura entre keyword y referencia": son 10 caracteres A CADA
+// LADO del `:` tal como aparece de verdad en el texto, no 20 a repartir donde
+// convenga. Sin dos puntos, el motor sí puede repartir esos 20 entre los dos
+// grupos por backtracking; con dos puntos, la posición real del `:` fija
+// cuánto le toca a cada lado y ninguno de los dos grupos puede pedirle
+// prestado al otro — `Closes:` seguido de 11 espacios y `#10` ya no casa,
+// mientras que 20 espacios seguidos SIN dos puntos sí. Esa combinación no
+// aparece en un mensaje de commit real (`Closes #10`, `Closes: #10`), pero la
+// cota en sí no es "cualquier espaciado real pasa"; es la cifra de arriba,
+// medida por lado y no por el total.
 const CLOSING_RE = new RegExp(
-  String.raw`\b(${CLOSING_KEYWORDS.join('|')})\b\s*:?\s*(#\d+|[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+#\d+)`,
+  String.raw`\b(${CLOSING_KEYWORDS.join('|')})\b\s{0,10}:?\s{0,10}(#\d+|[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+#\d+)`,
   'gi',
 )
 

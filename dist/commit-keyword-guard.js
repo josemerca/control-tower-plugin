@@ -86,9 +86,8 @@ var GIT_GLOBAL_TAKES_VALUE = /* @__PURE__ */ new Set(["-C", "-c", "--git-dir", "
 var isGitBinary = (tok) => tok === "git" || tok.endsWith("/git");
 var CLUSTER_CONSUMES_REST = /* @__PURE__ */ new Set(["F", "C", "c", "t", "S", "u"]);
 function messagesFromSegment(tokens) {
-  let i = 0;
   if (!tokens.length || !isGitBinary(tokens[0])) return [];
-  i = 1;
+  let i = 1;
   while (i < tokens.length && tokens[i].startsWith("-")) {
     const t = tokens[i];
     if (t.includes("=")) {
@@ -144,7 +143,7 @@ var CLOSING_KEYWORDS = [
   "resolved"
 ];
 var CLOSING_RE = new RegExp(
-  String.raw`\b(${CLOSING_KEYWORDS.join("|")})\b\s*:?\s*(#\d+|[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+#\d+)`,
+  String.raw`\b(${CLOSING_KEYWORDS.join("|")})\b\s{0,10}:?\s{0,10}(#\d+|[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+#\d+)`,
   "gi"
 );
 function findClosingKeywords(text) {

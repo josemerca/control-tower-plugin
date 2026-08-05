@@ -199,4 +199,25 @@ describe('F27 — el hook (extremo a extremo sobre el binario, via stdin)', () =
     const r = correr('git commit -m "Closes #451"', repoGobernado(), bundle)
     expect(r.json.hookSpecificOutput.permissionDecision).toBe('deny')
   })
+
+  // El caso mas valioso, contra el BUNDLE de produccion: la forma multilinea
+  // por defecto de Claude Code (`-m "$(cat <<'EOF' ... EOF)"`) viaja literal
+  // dentro del comando, y el hook la deniega igual que a cualquier otro
+  // mensaje entrecomillado.
+  it('el heredoc citado dentro del -m, contra el BUNDLE: DENY igual que el fuente', () => {
+    const bundle = join(root, 'dist/commit-keyword-guard.js')
+    const command = [
+      'git commit -m "$(cat <<\'EOF\'',
+      'Documenta que el kickoff no lleva la keyword de cierre.',
+      '',
+      'Closes #451',
+      'EOF',
+      ')"',
+    ].join('\n')
+    const r = correr(command, repoGobernado(), bundle)
+    expect(r.json.hookSpecificOutput.permissionDecision).toBe('deny')
+    const motivo = r.json.hookSpecificOutput.permissionDecisionReason
+    expect(motivo).toContain('Closes')
+    expect(motivo).toContain('#451')
+  })
 })

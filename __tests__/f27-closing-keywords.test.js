@@ -136,9 +136,9 @@ describe('F27 — extractCommitMessages', () => {
     expect(extractCommitMessages('git commit --amend')).toEqual([])
   })
 
-  // Ronda 2: una flag que consume el resto del cumulo como SU valor
-  // obligatorio (F, C, c, t) tapa cualquier 'm' que venga detras. Esa 'm' es
-  // parte del valor de la otra flag, no el inicio de un mensaje.
+  // Una flag que consume el resto del cumulo como SU valor obligatorio
+  // (F, C, c, t) tapa cualquier 'm' que venga detras. Esa 'm' es parte del
+  // valor de la otra flag, no el inicio de un mensaje.
   it('la F pegada se come el nombre de fichero entero, la m de en medio no es mensaje', () => {
     expect(extractCommitMessages('git commit -Fmensaje.txt')).toEqual([])
   })
@@ -159,8 +159,9 @@ describe('F27 — extractCommitMessages', () => {
     expect(extractCommitMessages('git commit -F mensaje.txt')).toEqual([])
   })
 
-  // Anti-regresion explicita de la ronda 1: estos ya funcionaban y tienen
-  // que seguir funcionando igual tras el escaneo caracter a caracter.
+  // Anti-regresion explicita: los cumulos y formas de -m sin ninguna flag
+  // que consuma el resto tienen que seguir funcionando igual tras el escaneo
+  // caracter a caracter.
   it('anti-regresion: los cumulos y formas de -m que ya funcionaban siguen igual', () => {
     expect(extractCommitMessages('git commit -am "hola"')).toEqual(['hola'])
     expect(extractCommitMessages('git commit -qm "hola"')).toEqual(['hola'])
@@ -230,6 +231,25 @@ describe('F27 — findClosingKeywords', () => {
 
   it('entrada no-string devuelve lista vacia', () => {
     expect(findClosingKeywords(undefined)).toEqual([])
+  })
+
+  // El modo de fallo que esta rama combate: una keyword seguida de una
+  // cantidad patologica de espacios, sin ninguna referencia detras. Sin cota
+  // en los cuantificadores de espacio, el motor de regex reparte esos
+  // espacios de todas las formas posibles antes de rendirse — cuadratico en
+  // su numero — y una entrada de 120.000 supera el `timeout: 5` del hook: el
+  // proceso muere y la puerta se apaga en silencio sobre CUALQUIER commit de
+  // esa sesion, no solo el patologico. Acotar el espaciado a un maximo
+  // razonable dejando intactos los casos normales (medidos arriba: cero o un
+  // espacio, con o sin dos puntos) es lo que evita el colapso sin dejar de
+  // detectar nada real.
+  it('una keyword seguida de espacios patologicos termina rapido, sin bloquear el hook', () => {
+    const patologico = `closes${' '.repeat(120000)}`
+    const inicio = Date.now()
+    const resultado = findClosingKeywords(patologico)
+    const duracion = Date.now() - inicio
+    expect(resultado).toEqual([])
+    expect(duracion).toBeLessThan(1000)
   })
 })
 
@@ -372,5 +392,64 @@ describe('F27 — probeGovernedRepo', () => {
     const r = probeGovernedRepo(hostil)
     expect(r.error).toBeTruthy()
     expect(r.governed).toBeUndefined()
+  })
+})
+
+// El caso mas valioso de toda la puerta, y hasta ahora cazado por accidente:
+// nada ataba esta forma a un test, y `grep -n 'cat <<' __tests__/f27-*.test.js`
+// no devolvia nada antes de este bloque.
+describe('F27 — el heredoc citado dentro del -m (forma multilinea por defecto de Claude Code)', () => {
+  // `git commit -m "$(cat <<'EOF' ... EOF)"` es casi con seguridad la forma
+  // del commit real que motivo esta rama: el texto del heredoc viaja LITERAL
+  // dentro de las comillas dobles del propio `-m`, y closing-keywords.js no
+  // interpreta `$(...)` — solo copia caracteres — asi que ese texto, keyword
+  // incluida, es tan visible como cualquier otro mensaje entrecomillado.
+  const command = [
+    'git commit -m "$(cat <<\'EOF\'',
+    'Documenta que el kickoff no lleva la keyword de cierre.',
+    '',
+    'Closes #451',
+    'EOF',
+    ')"',
+  ].join('\n')
+
+  it('el mensaje completo, heredoc incluido, sale de extractCommitMessages', () => {
+    const mensajes = extractCommitMessages(command)
+    expect(mensajes).toHaveLength(1)
+    expect(mensajes[0]).toContain('Closes #451')
+  })
+
+  it('findClosingKeywords SI encuentra la keyword dentro de ese mensaje', () => {
+    const hallazgos = extractCommitMessages(command).flatMap(findClosingKeywords)
+    expect(hallazgos).toEqual([{ keyword: 'Closes', ref: '#451' }])
+  })
+})
+
+import { execFileSync } from 'node:child_process'
+import { dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+// El fixture autorreferencial: CONTRACT_MARKER lo define governed-repo.js a
+// mano, SLICES_MARKER_OPEN lo define ct-init.sh a mano, y todos los tests de
+// arriba escriben CONTRACT_MARKER y comprueban que se detecta CONTRACT_MARKER
+// — atan al lector consigo mismo, nunca con el escritor real. Cambiando solo
+// el literal de governed-repo.js, esa suite entera sigue en verde sobre un
+// repo sembrado por el ct-init.sh de verdad, con la puerta apagada.
+//
+// Este test ata a los dos: siembra con el ESCRITOR real (`bash
+// scripts/ct-init.sh <dir>`, sobre un repo git de verdad) y comprueba con el
+// LECTOR real (`probeGovernedRepo`) — sin que el literal del marcador
+// aparezca escrito en ningun sitio de este fichero.
+describe('F27 — el escritor (ct-init.sh) y el lector (probeGovernedRepo), atados por el mismo test', () => {
+  const hechos = []
+  afterAll(() => { for (const d of hechos) { try { chmodSync(d, 0o755) } catch {} ; rmSync(d, { recursive: true, force: true }) } })
+
+  it('un repo sembrado por ct-init.sh de verdad se reconoce como gobernado', () => {
+    const d = mkdtempSync(join(tmpdir(), 'f27-e2e-'))
+    hechos.push(d)
+    execFileSync('git', ['init', '-q'], { cwd: d })
+    const ctInit = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-init.sh')
+    execFileSync('bash', [ctInit, d], { encoding: 'utf8' })
+    expect(probeGovernedRepo(d)).toEqual({ governed: true })
   })
 })
