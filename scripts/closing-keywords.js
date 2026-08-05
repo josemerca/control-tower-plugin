@@ -82,6 +82,11 @@ const GIT_GLOBAL_TAKES_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', 
 
 const isGitBinary = (tok) => tok === 'git' || tok.endsWith('/git')
 
+// Letras que, dentro de un cúmulo de un solo guion, se comen TODO lo que
+// queda detrás como su propio valor (obligatorio u opcional-pegado):
+// ninguna letra posterior —ni una `m`— pertenece ya a otra opción.
+const CLUSTER_CONSUMES_REST = new Set(['F', 'C', 'c', 't', 'S', 'u'])
+
 /**
  * messagesFromSegment: los mensajes de UN sub-comando, o `[]` si ese
  * sub-comando no es un `git commit` con mensaje en línea.
@@ -112,19 +117,27 @@ function messagesFromSegment(tokens) {
     if (t === '--message') { if (i + 1 < tokens.length) out.push(tokens[++i]); continue }
     if (t.startsWith('--message=')) { out.push(t.slice('--message='.length)); continue }
     // Cúmulo de UN SOLO guion (getopt, que es lo que usa git): varias flags
-    // cortas pegadas como `-am`. Si aparece una `m` en el cúmulo, lo que va
-    // detrás de esa `m` es el valor si no está vacío; si está vacío, el valor
-    // es el token siguiente. Cubre tanto `-m` sola como `-am`, `-qm` y `-amhola`.
-    // El `--…` queda fuera por construcción: un cúmulo de guion doble no es
-    // esto, es una única opción larga (`--amend`, `--mixed`…) sin relación
-    // con la semántica de letras sueltas.
+    // cortas pegadas como `-am`. Se recorre carácter a carácter porque una
+    // flag anterior a la `m` puede comerse el resto del cúmulo como SU
+    // propio valor — `-Fmensaje.txt` no tiene mensaje: la `F` se come
+    // `mensaje.txt` entero, y la `m` que aparecería con una búsqueda ciega
+    // es sólo la primera letra de ese nombre de fichero, no un mensaje.
+    // Ante la duda, no extraer: un falso negativo aquí lo cubre otro
+    // detector del plugin; un falso positivo bloquea trabajo legítimo.
     if (t.startsWith('-') && !t.startsWith('--')) {
       const cluster = t.slice(1)
-      const mPos = cluster.indexOf('m')
-      if (mPos === -1) continue
-      const pegado = cluster.slice(mPos + 1)
-      if (pegado.length > 0) { out.push(pegado); continue }
-      if (i + 1 < tokens.length) out.push(tokens[++i])
+      let valor = null
+      for (let j = 0; j < cluster.length; j++) {
+        const ch = cluster[j]
+        if (ch === 'm') {
+          const pegado = cluster.slice(j + 1)
+          valor = pegado.length > 0 ? pegado : (i + 1 < tokens.length ? tokens[++i] : null)
+          break
+        }
+        if (CLUSTER_CONSUMES_REST.has(ch)) break // el resto es valor ajeno, no mensaje
+        // cualquier otra letra es una flag booleana: se sigue mirando
+      }
+      if (valor !== null) out.push(valor)
       continue
     }
   }

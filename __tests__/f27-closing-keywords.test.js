@@ -135,4 +135,41 @@ describe('F27 — extractCommitMessages', () => {
   it('un --amend de guion doble solo no aporta nada', () => {
     expect(extractCommitMessages('git commit --amend')).toEqual([])
   })
+
+  // Ronda 2: una flag que consume el resto del cumulo como SU valor
+  // obligatorio (F, C, c, t) tapa cualquier 'm' que venga detras. Esa 'm' es
+  // parte del valor de la otra flag, no el inicio de un mensaje.
+  it('la F pegada se come el nombre de fichero entero, la m de en medio no es mensaje', () => {
+    expect(extractCommitMessages('git commit -Fmensaje.txt')).toEqual([])
+  })
+
+  it('la C pegada se come el commit a reusar, la m de en medio no es mensaje', () => {
+    expect(extractCommitMessages('git commit -Cmabcdef')).toEqual([])
+  })
+
+  it('la c pegada se come el commit a reusar y editar, la m de en medio no es mensaje', () => {
+    expect(extractCommitMessages('git commit -cmabcdef')).toEqual([])
+  })
+
+  it('la t pegada se come la plantilla, la m de en medio no es mensaje', () => {
+    expect(extractCommitMessages('git commit -tplantilla.txt')).toEqual([])
+  })
+
+  it('-F con espacio sigue sin aportar mensaje (ya funcionaba, no romper)', () => {
+    expect(extractCommitMessages('git commit -F mensaje.txt')).toEqual([])
+  })
+
+  // Anti-regresion explicita de la ronda 1: estos ya funcionaban y tienen
+  // que seguir funcionando igual tras el escaneo caracter a caracter.
+  it('anti-regresion: los cumulos y formas de -m que ya funcionaban siguen igual', () => {
+    expect(extractCommitMessages('git commit -am "hola"')).toEqual(['hola'])
+    expect(extractCommitMessages('git commit -qm "hola"')).toEqual(['hola'])
+    expect(extractCommitMessages('git commit -aqm "hola"')).toEqual(['hola'])
+    expect(extractCommitMessages('git commit -amhola')).toEqual(['hola'])
+    expect(extractCommitMessages('git commit -m hola')).toEqual(['hola'])
+    expect(extractCommitMessages('git commit -mhola')).toEqual(['hola'])
+    expect(extractCommitMessages('git commit -ma')).toEqual(['a'])
+    expect(extractCommitMessages('git commit -a')).toEqual([])
+    expect(extractCommitMessages('git commit -C HEAD')).toEqual([])
+  })
 })
