@@ -1336,9 +1336,14 @@ if (accountMapErrors.length) {
 
 const account = resolveAccount(repo, ACCOUNT_MAP)
 const configDir = account.dir
+// F29 — el binario sale de la MISMA resolución que el config dir, y se dice
+// en la misma línea a propósito: son las dos mitades de «con qué cuenta se
+// despacha», y verlas juntas es lo que permite cazar una discrepancia entre
+// lo que el mapa eligió y lo que el wrapper va a exportar.
+const agentBin = account.bin
 const accountLabel = account.account === 'work' ? 'trabajo' : 'personal'
 if (account.matched) {
-  console.log(`cuenta resuelta: ${configDir} (${accountLabel}) — por la regla "${account.pattern}" de ACCOUNT_MAP.`)
+  console.log(`cuenta resuelta: ${configDir} (${accountLabel}) — por la regla "${account.pattern}" de ACCOUNT_MAP. Binario del agente: ${agentBin}.`)
 } else {
   // Requisito explícito: el fallback tiene que TENER VOZ. Antes, un repo que
   // no casaba con ningún patrón acababa en la cuenta personal sin que nada
@@ -2308,11 +2313,14 @@ if (cmuxPath) {
 } else {
   preflightFailures.push('`cmux` no está en el PATH de este proceso — ct-next.mjs lo invoca directamente (`cmux new-workspace ...`), así que sin él NINGÚN slice puede lanzarse. Instálalo o añádelo al PATH y reintenta.')
 }
-const claudePath = findInPath('claude')
+// F29: se busca el binario de LA CUENTA RESUELTA (`claude-personal` /
+// `claude-work`), no `claude` a secas — es el que se va a teclear, y el
+// preflight que mira otro nombre es un preflight que no comprueba nada.
+const claudePath = findInPath(agentBin)
 if (claudePath) {
-  console.log(`claude: ${claudePath} (encontrado en el PATH de este proceso).`)
+  console.log(`${agentBin}: ${claudePath} (encontrado en el PATH de este proceso).`)
 } else {
-  warn('`claude` no aparece en el PATH de ESTE proceso. No es concluyente — quien lo ejecuta de verdad es el shell de login que abre cmux, con su propio PATH (y `claude` puede ser incluso una función de shell, invisible desde aquí) — pero si tampoco está allí, cada sesión lanzada morirá nada más arrancar, con el claim ya puesto y sin agente. Compruébalo a mano antes de fiarte de un "lanzado".')
+  warn(`\`${agentBin}\` no aparece en el PATH de ESTE proceso. No es concluyente — quien lo ejecuta de verdad es el shell de login que abre cmux, con su propio PATH (y puede ser incluso una función de shell, invisible desde aquí) — pero si tampoco está allí, cada sesión lanzada morirá nada más arrancar, con el claim ya puesto y sin agente. Compruébalo a mano antes de fiarte de un "lanzado".`)
 }
 
 // CLAUDE_CONFIG_DIR resuelto: tiene que existir EN DISCO. Si no existe, la
@@ -2376,7 +2384,13 @@ for (let idx = 0; idx < selected.length; idx++) {
   // no de shell — un `$`, un backtick o un `\` en el kickoff seguirían
   // interpretándose dentro de las comillas dobles. shQuote() hace el
   // escapado POSIX real (comillas simples).
-  const agentCommand = `claude --dangerously-skip-permissions ${shQuote(kickoff)}`
+  // F29: `--dangerously-skip-permissions` se sigue pasando explícitamente
+  // aunque los wrappers de cuenta ya lo lleven dentro. Duplicarlo es inocuo
+  // (medido: `claude --dangerously-skip-permissions --dangerously-skip-permissions
+  // --version` → `2.1.223 (Claude Code)`, exit 0), y la alternativa era que
+  // el modo autónomo del agente dependiera del contenido de un fichero que
+  // este repo no versiona ni puede comprobar.
+  const agentCommand = `${agentBin} --dangerously-skip-permissions ${shQuote(kickoff)}`
   // ==========================================================================
   // F19/H1 — LO QUE SE TECLEA DEJA DE SER EL COMANDO ENTERO.
   //
@@ -2420,7 +2434,7 @@ for (let idx = 0; idx < selected.length; idx++) {
   const sentinelPath = join(launchDir, SENTINEL_FILENAME)
   let launcherScript
   try {
-    launcherScript = buildLauncherScript({ sentinelPath, agentCommand, issue: s.n, worktree: wt }, shQuote)
+    launcherScript = buildLauncherScript({ sentinelPath, agentCommand, agentBin, issue: s.n, worktree: wt }, shQuote)
   } catch (e) {
     failSlice(idx, `no se pudo construir el script de arranque de #${s.n}: ${e.message}. Sin él no hay forma de comprobar que el comando llegó a ejecutarse, y despachar sin esa comprobación es exactamente lo que esta ronda elimina.`)
     continue
@@ -3589,7 +3603,7 @@ for (let idx = 0; idx < plans.length; idx++) {
   //                 Se elige lo recuperable. Lo que NO se hace, y era todo el
   //                 hallazgo, es llamarlo "lanzado" y salir con 0.
   if (sentinel.status === 'no-claude') {
-    cleanupOrphanedWorktree(s, wt, branch, `el comando SÍ llegó a ejecutarse en la sesión de cmux (el centinela de arranque está escrito en ${sentinelPath}), pero \`claude\` NO resuelve en ese shell de login — \`command -v claude\` falló DENTRO de la propia sesión. El agente no va a arrancar: la línea siguiente muere con "command not found", igual que si no se hubiera lanzado nada. Esto no lo puede ver el preflight de ct-next.mjs, que solo mira el PATH de ESTE proceso; el que cuenta es el del shell que abre cmux (donde \`claude\` puede ser además un alias o una función). Arregla el PATH de tu shell de login —o instala \`claude\`— y reintenta`)
+    cleanupOrphanedWorktree(s, wt, branch, `el comando SÍ llegó a ejecutarse en la sesión de cmux (el centinela de arranque está escrito en ${sentinelPath}), pero \`${agentBin}\` NO resuelve en ese shell de login — \`command -v ${agentBin}\` falló DENTRO de la propia sesión. El agente no va a arrancar: la línea siguiente muere con "command not found", igual que si no se hubiera lanzado nada. Esto no lo puede ver el preflight de ct-next.mjs, que solo mira el PATH de ESTE proceso; el que cuenta es el del shell que abre cmux (donde \`${agentBin}\` puede ser además un alias o una función). Arregla el PATH de tu shell de login —o instala \`${agentBin}\` (es el wrapper no interactivo de la cuenta ${accountLabel}; ver ACCOUNT_MAP en scripts/kickoff.js y el override CT_AGENT_BIN_${account.account === 'work' ? 'WORK' : 'PERSONAL'})— y reintenta`)
   }
   if (sentinel.status === 'wrong-cwd') {
     console.error(`ATENCIÓN: el comando de #${s.n} SÍ se ejecutó (el centinela de arranque está escrito), pero el shell que lo ejecutó estaba en "${sentinel.cwd}", NO en ${wt}. El dato sale del \`$PWD\` del propio shell, no de lo que cmux diga de su ventana: hay un agente arrancando sobre un directorio que no es el worktree de este slice, así que puede estar tocando otro repo. NO se cuenta como lanzado con éxito, y NO se borra nada: revisa esa sesión antes.`)
