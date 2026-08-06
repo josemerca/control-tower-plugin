@@ -3,6 +3,11 @@
 > Escrito al cerrar F27, que mergeó en `main` como **0.26.0** (PR #9) y dejó el
 > feedback de campo del 1-ago **cerrado entero**: §8 completo y §7.3 completo.
 > Copiar el bloque de abajo tal cual en la sesión nueva.
+>
+> **Revisado el 2026-08-06 con el triaje ya hecho contra las fuentes.** De las
+> tres tareas que listaba, la 1 resultó no existir (medido) y la 3 quedó medida
+> en el propio triaje; sólo sigue abierta la 2. La §4 que avisaba de un fallo
+> intermitente se ha borrado: no existía tal fallo — ver la lección 9.
 
 ---
 
@@ -12,7 +17,7 @@ CONTEXTO. Trabajas en el plugin `control-tower-loop`
 
 ESTADO EXACTO AL EMPEZAR — compruébalo, no te lo creas:
 
-  main       0.26.0, limpio, sin worktrees vivos ni PRs abiertos
+  main       0.26.0 (48e45b8), limpio, sin worktrees vivos ni PRs abiertos
   contrato   §9 en v14, con 21 hashes registrados
 
   git -C . log --oneline -3
@@ -22,7 +27,14 @@ ESTADO EXACTO AL EMPEZAR — compruébalo, no te lo creas:
   grep '^SLICES_CONTRACT_VERSION=' scripts/ct-init.sh
 
   npx vitest run > /tmp/base.log 2>&1; echo $?
-  # espera exit 0 y 59 ficheros / 1684 tests. LEE EL FICHERO, no midas por tubería.
+  # espera exit 0 y 59 ficheros / 1685 tests. LEE EL FICHERO, no midas por tubería.
+
+  Y ANTES DE ROMPER NADA A PROPÓSITO, COMPRUEBA QUE ESTÁS SOLO EN EL ÁRBOL:
+
+    ls -lt ~/.claude*/projects/-Users-jpereag-Documents-control-tower-plugin/*.jsonl | head -3
+
+  Si hay un transcript escrito en los últimos minutos que no es el tuyo, hay
+  otra sesión en este mismo checkout. Ver la lección 9.
 
 EL FEEDBACK DE CAMPO ESTÁ CERRADO ENTERO — NO LO REABRAS
 
@@ -34,47 +46,51 @@ EL FEEDBACK DE CAMPO ESTÁ CERRADO ENTERO — NO LO REABRAS
 No queda NADA de ese documento. Si algo te parece abierto, es que ya está hecho:
 compruébalo antes de proponerlo.
 
---- LA TAREA: TRES COSAS DEL MISMO VIAJE, MEDIA SESIÓN ---
+--- LA TAREA: UNA COSA, Y UN CUARTO DE SESIÓN ---
 
-Las tres salen de la review de rama completa de F27. Ninguna es una feature
-nueva: las tres cierran huecos de lo que F27 acaba de construir.
+Salen de la review de rama completa de F27. Ninguna es una feature nueva:
+cierran huecos de lo que F27 construyó. De las tres que este documento listaba
+al escribirse, la 1 resultó no existir y la 3 ya está medida — queda la 2.
 
-=== 1. LA TERCERA COPIA DEL MARCADOR (la que importa) ===
+=== 1. LA TERCERA COPIA DEL MARCADOR — NO EXISTE EL HUECO. NO LO TRABAJES ===
 
-El literal del marcador del contrato está escrito A MANO en TRES sitios
-independientes, verificado:
+Este documento afirmaba que `conventions.js` estaba SUELTO, que nada ataba su
+copia del literal al escritor. **Es falso, y está medido.**
+
+El literal sí está escrito a mano en tres sitios, eso es cierto:
 
   scripts/ct-init.sh:156-157       el ESCRITOR (SLICES_MARKER_OPEN/CLOSE)
   scripts/governed-repo.js:15      lector — decide el ALCANCE de la puerta
   scripts/conventions.js:55-56     lector — poda el bloque antes de escanear
 
-POR QUÉ IMPORTA, y está medido: la review de F27 demostró que cambiando SOLO el
-literal de `governed-repo.js` la suite entera seguía VERDE y la puerta quedaba
-APAGADA sobre un repo sembrado por el `ct-init` real. La causa era que todos los
-tests escribían `CONTRACT_MARKER` y luego afirmaban que se detectaba
-`CONTRACT_MARKER` — autorreferencial, incapaz de fallar.
+Pero los dos literales de `conventions.js` YA están atados al escritor real.
+Medido rompiéndolos, que es la única forma que vale (lección 7):
 
-F27 lo cerró para el par ct-init ↔ governed-repo, con un test que corre el
-`ct-init.sh` REAL sobre un temporal y afirma que el lector lo ve:
+  CONTRACT_MARKER_OPEN  roto  ->  6 tests rojos en 3 ficheros
+  CONTRACT_MARKER_CLOSE roto  ->  los mismos 6
 
-  __tests__/f27-closing-keywords.test.js:443
+    __tests__/conventions.test.js         3 — «la SEGUNDA corrida no se detecta
+                                              a sí misma» siembra con el
+                                              `ct-init.sh` REAL y escanea con el
+                                              lector real, sin el literal en el
+                                              test. Es exactamente el patrón que
+                                              este documento pedía escribir.
+    __tests__/ct-init.test.js             2
+    __tests__/ct-next-conventions.test.js 1
 
-`conventions.js` SIGUE SUELTO. Nada ata su copia al escritor. Si diverge, la
-poda del bloque deja de funcionar y el escáner de convenciones empieza a leer el
-contrato del plugin como si fuera texto del usuario — en silencio.
+POR QUÉ ESTE DOCUMENTO SE EQUIVOCÓ, que es lo que hay que aprender: quien lo
+escribió buscó el literal con `grep` dentro de `__tests__/` y no lo encontró
+—correcto, no aparece— y concluyó que no había cobertura. Pero la ausencia del
+literal en el test es justo la SEÑAL DE QUE EL TEST ES BUENO, no de que falte.
+La cobertura no se audita leyendo: se audita rompiendo. Es la lección 7 aplicada
+al propio triaje y no sólo a los tests que uno escribe.
 
-QUÉ HACER: el mismo patrón que ya funciona. Un test que corra el `ct-init.sh`
-real y compruebe que `conventions.js` poda de verdad el bloque que ese script
-acaba de sembrar, sin que el literal aparezca escrito en el test.
-
-VERIFICACIÓN OBLIGATORIA: rompe a propósito el literal de `conventions.js`,
-confirma que tu test se pone ROJO, deshaz, confirma VERDE. Si sigue verde, tu
-test es tan autorreferencial como los que vienes a arreglar.
-
-Y decide, con criterio y diciéndolo: ¿tres copias con un test que las ata, o UNA
-constante compartida? La segunda parece obvia y puede no serlo — `ct-init.sh` es
-bash y no puede importar un módulo JS, así que como mucho se unifican los dos
-lectores. Mide qué cuesta cada opción antes de elegir.
+Lo que SIGUE siendo cierto del análisis original: el par ct-init ↔ governed-repo
+lo cerró F27 en `__tests__/f27-closing-keywords.test.js:443`, y unificar las tres
+copias en UNA constante es imposible mientras `ct-init.sh` sea bash y no pueda
+importar un módulo JS. Con los dos lectores atados al escritor por tests que
+fallan si divergen, el duplicado ya no puede morir en silencio. No hay nada que
+hacer aquí.
 
 === 2. `git -C <ruta>` DECIDE SOBRE EL REPO EQUIVOCADO ===
 
@@ -108,58 +124,42 @@ comentario de SLICES_PRISTINE_HASHES, scripts/ct-init.sh). Regla dura: se AÑADE
 un hash, nunca se sustituye — salvo que la versión no haya salido nunca de tu
 rama, que no es este caso porque la v14 ya está en main.
 
-=== 3. EL `ask` BAJO `--dangerously-skip-permissions`, SIN MEDIR ===
+=== 3. EL `ask` BAJO `--dangerously-skip-permissions` — MEDIDO. BLOQUEA ===
 
-El §2.2 del spec de F27 midió que un `deny` SIGUE BLOQUEANDO bajo
-`--dangerously-skip-permissions`, verificándolo por EFECTO (un fichero centinela
-que no llegó a existir):
+La pregunta era si un `ask` —la escalada de «no sé si este repo está gobernado»,
+la que sostiene el «nunca se degrada a silencio»— sobrevive al flag con el que
+arrancan todos los agentes despachados, o si se trata como un allow.
 
-  docs/superpowers/specs/2026-08-05-barandillas-del-7-3-design.md §2.2
+**Sobrevive.** Replicado el experimento del §2.2 del spec de F27 cambiando
+`deny` por `ask`, medido por EFECTO y con control:
 
-Pero el hook también devuelve `ask` — es la escalada de "no sé si este repo está
-gobernado", y la propiedad que sostiene el "nunca se degrada a silencio". Bajo
-`bypassPermissions` NADIE ha comprobado qué hace un `ask`. Puede que pregunte,
-puede que se trate como allow. Si es lo segundo, esa propiedad es falsa para
-todos los agentes despachados.
+  hook `ask` + `claude --dangerously-skip-permissions -p "... touch CENTINELA"`
+    -> CENTINELA.txt NO existe. La sesión reportó que la llamada devolvió
+       `PREGUNTA_DEL_EXPERIMENTO` en vez de ejecutarse.
+  permission_mode que RECIBIÓ el hook: `bypassPermissions`
+    -> no es una suposición del flag: el hook lo escribió a fichero.
+  control sin ningún hook, mismo montaje y mismo prompt
+    -> CENTINELA.txt SÍ existe. Sin el control, «el fichero no está» también
+       sería compatible con «el modelo no lo intentó».
 
-QUÉ HACER: replica el experimento del §2.2 cambiando `deny` por `ask`, y mide
-por EFECTO. Después escribe el resultado donde corresponda — el spec de F27, la
-cabecera del hook, y el contrato si cambia lo que la puerta promete.
+El «nunca se degrada a silencio» se sostiene bajo `bypassPermissions`.
 
-Diez minutos. Y si sale que `ask` no bloquea, es un hallazgo grande: dilo antes
-de seguir con lo demás.
+LO QUE ESTO NO DICE, y no hay que leerlo como si lo dijera. Igual que el §2.2:
+que la puerta CUBRA a un agente despachado sigue dependiendo de que el plugin
+esté instalado bajo la cuenta con la que ese agente arranca (`resolveAccount`,
+scripts/dispatch.js). Y se midió en `-p`, donde no hay humano a quien preguntar,
+así que el `ask` se resuelve BLOQUEANDO; en una sesión interactiva —como las de
+cmux— lo esperable es que pregunte y se quede parada. Las dos cosas son «no
+silencio», que es la propiedad que importa, pero no son la misma cosa.
 
-=== 4. UN FALLO INTERMITENTE, OBSERVADO UNA VEZ Y SIN CARACTERIZAR ===
-
-Esto NO es una tarea: es un aviso, para que no te vuelva loco si te pasa.
-
-Al cerrar F27 se observó UNA corrida de la suite completa con 6 tests rojos:
-
-  __tests__/conventions.test.js        3 rojos
-  __tests__/ct-next-conventions.test.js  1 rojo
-  __tests__/ct-init.test.js            2 rojos
-
-La firma: el escáner de convenciones reportó señales `[claim]` en líneas del
-`AGENTS.md` que están DENTRO del bloque del contrato que `ct-init` acababa de
-sembrar (AGENTS.md:410, 451, 475 — los `dispatch-check.mjs --requeue/--reopen`
-del propio contrato). O sea: la PODA del bloque no se aplicó. `conventions.js`
-poda por coincidencia exacta de línea con sus marcadores, así que o el fichero
-no estaba entero cuando se escaneó, o algo bajo carga se comió la poda.
-
-QUÉ SE SABE, y no más:
-  - Sólo se ha visto en una corrida COMPLETA (59 ficheros, en paralelo, ~110 s).
-  - NO se reproduce: 3 corridas aisladas de esos mismos 3 ficheros, verdes; y la
-    corrida completa siguiente, verde (59 ficheros, 1685 tests, exit 0).
-  - Es PREEXISTENTE. Los cambios que había en el árbol cuando ocurrió no tocan
-    ni las convenciones ni la poda (package.json, un test de manifiesto, dos
-    comentarios de ct-init.sh y dos ficheros de documentación).
-
-SI TE PASA: no lo trates como una regresión tuya. Primero aísla —corre esos 3
-ficheros solos— y si pasan, es esto. Y si consigues reproducirlo, CARACTERÍZALO:
-un test que falla una de cada N corridas es peor que uno que falla siempre,
-porque enseña a ignorar el rojo. En un repo cuya doctrina es que una
-comprobación que no puede detener la acción siguiente es decoración, una que
-miente en las dos direcciones es peor que no tenerla.
+REGALO DEL EXPERIMENTO, y este sí es un hueco de verdad: durante el montaje un
+hook quedó con un `SyntaxError` y murió con **exit 1 y stderr**. El `touch` se
+ejecutó igual. Es decir: un PreToolUse que REVIENTA no bloquea — abre la puerta,
+no la cierra. Es la lección 5 con otra ropa (allí el fallo era exit 0 y stdout
+vacío; aquí, exit 1 y un stack trace), y `hooks/commit-keyword-guard.js` hereda
+la propiedad: si algún día lanza, la puerta se apaga sola. Nadie lo ha medido
+sobre el hook real ni hay test que lo ate. Candidato claro para la ronda que
+venga.
 
 --- CÓMO TRABAJARLO ---
 
@@ -167,8 +167,8 @@ superpowers:brainstorming -> superpowers:writing-plans ->
 superpowers:subagent-driven-development, en un worktree aislado. NUNCA sobre
 main. Es el proceso que ha funcionado seis rondas seguidas.
 
-Ojo: son tres cosas pequeñas, no tres features. Si el brainstorming empieza a
-crecer, para y pregunta.
+Ojo: lo que queda es UNA cosa pequeña, no una feature. Si el brainstorming
+empieza a crecer, para y pregunta.
 
 --- DESPUÉS DE ESTO ---
 
@@ -201,7 +201,8 @@ despachar slices reales con 0.26.0. Dos preguntas que sólo el campo contesta:
   2. ¿Se notan los 61,5 ms que el hook añade a cada comando Bash? (medido, con
      timeout de 5 s, así que no es un riesgo de corte: es ergonomía)
 
-OCHO LECCIONES DE MÉTODO, TODAS PAGADAS EN F27
+NUEVE LECCIONES DE MÉTODO. LAS OCHO PRIMERAS, PAGADAS EN F27; LA NOVENA, AL
+ABRIR F28 — Y ES LA QUE MÁS CARA SALIÓ
 
 1. EL DEFECTO CARACTERÍSTICO DE ESTE REPO NO ES ESCRIBIR COSAS FALSAS: ES
    DUPLICAR LA MISMA VERDAD EN SITIOS QUE LUEGO DIVERGEN. En F27 aparecieron
@@ -244,9 +245,51 @@ OCHO LECCIONES DE MÉTODO, TODAS PAGADAS EN F27
    test que sigue verde con la implementación rota hay que rehacerlo, no
    aceptarlo.
 
+   Corolario que costó una sección entera de este documento (ver §1): esto
+   también vale AL REVÉS. Para afirmar que algo NO tiene cobertura, rómpelo y
+   mira. Un `grep` que no encuentra el literal en los tests no prueba que no
+   haya test — en los tests BUENOS el literal justamente no aparece.
+
 8. LA REVIEW DE RAMA COMPLETA VE LO QUE OCHO REVIEWS DE TAREA NO VEN. En F27
    encontró tres cosas que ninguna review de tarea podía ver: el fixture
    autorreferencial, que el caso que justifica la feature entera no tenía test, y
    que una afirmación del propio spec era falsa. No la saltes, y dispárala con el
    modelo más capaz.
+
+9. UN WORKING TREE, UNA SESIÓN. COMPRUÉBALO ANTES DE ROMPER NADA.
+
+   Lo que pasó, y merece contarse entero porque el fallo no fue de nadie en
+   particular: la sesión que cerró F27 seguía viva en este mismo checkout,
+   cerrando la deuda cosmética sobre `main`, cuando la sesión de F28 arrancó y
+   —aplicando la lección 7— rompió a propósito el literal de `conventions.js`
+   para medir su cobertura.
+
+   La otra sesión corrió la suite justo en esa ventana. Vio 6 tests rojos que no
+   tenían nada que ver con sus cambios, hizo un triaje impecable (aisló los 3
+   ficheros, volvieron verdes; repitió la suite completa, verde; comprobó que sus
+   ficheros no tocaban la poda) y concluyó lo único que los datos permitían: un
+   fallo intermitente preexistente. Lo dejó escrito en este documento como §4,
+   avisando a la sesión siguiente de que no lo tratara como regresión suya.
+
+   Ese aviso era un fantasma, y estuvo en `main` en el commit 9378784. Un
+   documento cuya doctrina es que una comprobación que miente es peor que no
+   tenerla acabó enseñando a ignorar un rojo real. Ése es el daño, no los veinte
+   minutos.
+
+   NADIE RAZONÓ MAL. La sesión de F28 no comprobó si estaba sola; la de F27 no
+   podía saber que sus datos estaban envenenados. Dos sesiones sobre el mismo
+   checkout convierten cualquier medición en no reproducible, y lo hacen en
+   silencio — que es la categoría de fallo que este plugin entero existe para
+   perseguir. El aislamiento por worktree no es higiene de proceso: es la
+   condición para que una medición signifique algo.
+
+   ANTES de romper nada a propósito, y antes de dar por buena cualquier corrida:
+   mira si hay otro transcript vivo en este proyecto (el comando está arriba, en
+   ESTADO EXACTO AL EMPEZAR). Y si vas a romper, hazlo en TU worktree — no en el
+   checkout principal, aunque sea sólo un minuto y aunque lo vayas a revertir.
+
+   Un descuido cercano que conviene tener presente: la revertida se hizo con
+   `git checkout -- scripts/conventions.js`, y esa ruta no estaba entre las que
+   la otra sesión tenía a medias. Si lo hubiera estado, le habría borrado el
+   trabajo sin dejar rastro ni en el reflog.
 ```

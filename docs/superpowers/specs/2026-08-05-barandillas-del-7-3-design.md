@@ -128,6 +128,42 @@ hook `PreToolUse` de esta puerta si el plugin está instalado también bajo esa
 cuenta. La medición dice que el `bypassPermissions` no es el obstáculo; no dice
 que todo agente despachado esté cubierto sin más.
 
+#### 2.2.1 Y un `ask` también — medido en F28
+
+Este experimento midió el `deny`, pero el hook emite **dos** decisiones, y la
+otra es la que sostiene la propiedad entera: el `ask` con el que escala cuando
+no ha podido averiguar si el repo está gobernado. Si bajo `bypassPermissions`
+un `ask` se tratara como un allow, «esta puerta nunca se degrada a silencio»
+sería falso para todos los agentes despachados, que es donde más importa.
+
+Se replicó el montaje de arriba cambiando sólo `deny` por `ask`, el 2026-08-06.
+**No se creó el centinela: un `ask` también bloquea.**
+
+Dos cosas que este experimento añade al de arriba, y que conviene copiar en el
+próximo:
+
+- **El `permission_mode` se comprobó, no se dedujo del flag.** El hook lo
+  escribió a fichero: `MODE=bypassPermissions`. Pasar `--dangerously-skip-permissions`
+  y dar por hecho que el hook lo recibe son dos afirmaciones distintas.
+- **Hubo control.** El mismo montaje y el mismo prompt sin ningún hook SÍ crean
+  el fichero. Sin él, «el centinela no está» también sería compatible con «el
+  modelo no llegó a intentarlo», y el experimento no distinguiría una cosa de
+  la otra.
+
+Con una salvedad que el §2.2 ya tiene y que aquí vale igual: se midió en `-p`,
+donde no hay humano a quien preguntar, así que el `ask` se resolvió
+**bloqueando**. En una sesión interactiva —como las de cmux— lo esperable es que
+pregunte y se quede parada. Las dos son «no silencio», que es la propiedad que
+importa; no son el mismo comportamiento.
+
+**Hallazgo lateral, y es un hueco de verdad.** Durante el montaje un hook quedó
+con un `SyntaxError` y murió con **exit 1 y stack trace en stderr**. El comando
+se ejecutó igual. Un `PreToolUse` que revienta **no bloquea: abre**. Es la misma
+familia que el bug de `realpathSync` sobre `argv[1]` (allí el fallo era exit 0 y
+stdout vacío; aquí, exit 1 y stderr), y `hooks/commit-keyword-guard.js` hereda
+la propiedad: el día que lance, la puerta se apaga sola y en silencio. No está
+medido sobre el hook real ni hay test que lo ate.
+
 ### 2.3 Las nueve keywords, de la fuente
 
 De la documentación de GitHub, verbatim: `close`, `closes`, `closed`, `fix`,
