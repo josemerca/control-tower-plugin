@@ -298,7 +298,7 @@ SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
 # ser el primer token y el parser no reconoce el commit). Un repo con el v13
 # se queda creyendo que esos dos casos SÍ están cubiertos, hasta que este
 # número suba.
-SLICES_CONTRACT_VERSION=14
+SLICES_CONTRACT_VERSION=15
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -356,6 +356,7 @@ ca63463cecb38df02011c5d079fd278488aa560bfb4ab5d0c7e95531d51e82e9  v10, 482 líne
 f1e9f868952d34a80bc7d15b50c0fce99cf375ebd3b1a76a37c6fdfa7b83e035  v12, 505 líneas — F23 (el milestone ya no puede divergir: el emparejado por ct-order está acotado al epic de la corrida)
 8ffbc5d943295835c0cf0dbfd20941b280b99b997124b0337d88da6bf267a086  v13, 521 líneas — F27 (las comprobaciones previas al merge son puertas; la puerta de closing keywords y sus límites)
 3896ed5610c6967510d6ad0ef83a18ef5eb6244a2015fd9af3b813bc8ba177b0  v14, 534 líneas — F27 (la puerta es propiedad de la sesión con el plugin cargado, no sólo del repo; con -C/cd a otro repo juzga el repo equivocado, no es ciega, y sus invocaciones envueltas sí lo son)
+82a0391f7bffdd86a9b6506fa8db5c8866003129e2065b28a5e3bbe228a1a400  v15, 540 líneas — F28 (la puerta cubre lo que ejecuta Claude por su tool Bash, nunca lo que teclea el humano: ni su terminal ni el prefijo ! de la propia sesión)
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -363,7 +364,7 @@ f1e9f868952d34a80bc7d15b50c0fce99cf375ebd3b1a76a37c6fdfa7b83e035  v12, 505 líne
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 14 -->
+<!-- ct-init:slices-contract-version: 15 -->
 ## Formato de la tabla §9 (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -670,10 +671,16 @@ loop una vez hay slices en vuelo.
     sección en su `AGENTS.md`. Es una propiedad de la SESIÓN, no sólo del
     repo: un agente despachado arranca con su propia cuenta
     (`CLAUDE_CONFIG_DIR`, ver `resolveAccount` en `scripts/dispatch.js`), así
-    que sólo lleva la puerta si el plugin está instalado también ahí. Lo que
-    esa puerta **no ve**, y por tanto sigue siendo tuyo: un `git commit`
-    tecleado fuera de Claude, uno **sin** `-m` (el mensaje lo pone el editor),
-    un `-F <fichero>` y un `--amend --no-edit`; ni una invocación
+    que sólo lleva la puerta si el plugin está instalado también ahí.
+    Y la regla que resume qué queda fuera, porque una lista de excepciones
+    envejece peor que el principio del que salen: **la puerta engancha en el
+    tool `Bash`, así que cubre lo que ejecuta CLAUDE, nunca lo que tecleas
+    TÚ**. Ni en tu terminal, ni con el prefijo `!` dentro de la propia sesión
+    de Claude: un `!` no pasa por el tool, así que ningún hook lo ve. Medido
+    en un repo gobernado, con el MISMO mensaje: bloqueado desde el tool
+    `Bash`, limpio con `!`. Lo que además **no ve**, y por tanto sigue siendo
+    tuyo: un `git commit` **sin** `-m` (el mensaje lo pone el editor), un
+    `-F <fichero>` y un `--amend --no-edit`; ni una invocación
     **envuelta**, donde `git` deja de ser el primer token — `sudo git
     commit`, `env FOO=1 git commit`, `command git commit`. Con `git -C
     <ruta> commit -m ...` o `cd <ruta> && git commit -m ...` el problema no
@@ -891,7 +898,7 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   mergear, no sólo para los gates: si lo compruebas a mano, que el resultado
   mande.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v14). Si el plugin trae una
+<sub>Esta sección la mantiene `/ct-init` (contrato v15). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>

@@ -44,12 +44,21 @@
 // medir sin trucos de permisos de fichero: un `probe` espía que cuenta sus
 // invocaciones basta.
 //
-// LO QUE NO VE: un `git commit` tecleado fuera de Claude, uno sin `-m` (abre
-// el editor), un `-F <fichero>`, un `--amend --no-edit`, `eval "..."`,
-// `bash -c "..."` y subshell `( ... )`. Ni una invocación ENVUELTA donde
-// `git` deja de ser el primer token — `sudo git commit`, `env FOO=1 git
-// commit`, `command git commit` — porque entonces el paso (1) ni siquiera
-// reconoce el `git commit` que hay detrás.
+// LO QUE NO VE, y el principio del que sale toda la lista: este hook engancha
+// en el tool `Bash`, así que cubre lo que ejecuta CLAUDE y nunca lo que teclea
+// el humano. Ni en su terminal, ni con el prefijo `!` de la propia sesión de
+// Claude — un `!` no llega al tool, así que ningún `PreToolUse` lo ve. Medido
+// en un repo gobernado con el MISMO mensaje: `deny` desde el tool `Bash`,
+// limpio con `!`. Esa asimetría importa más de lo que parece, porque el
+// commit que originó esta puerta lo lanzó el COORDINADOR, y el `!` es
+// precisamente su vía más cómoda.
+//
+// Y dentro ya de lo que Claude sí ejecuta, tampoco ve: un `git commit` sin
+// `-m` (abre el editor), un `-F <fichero>`, un `--amend --no-edit`,
+// `eval "..."`, `bash -c "..."` y subshell `( ... )`. Ni una invocación
+// ENVUELTA donde `git` deja de ser el primer token — `sudo git commit`,
+// `env FOO=1 git commit`, `command git commit` — porque entonces el paso (1)
+// ni siquiera reconoce el `git commit` que hay detrás.
 //
 // CON `-C <ruta>` O `cd <ruta> && git commit` NO HAY CEGUERA, HAY UN REPO
 // EQUIVOCADO: el paso (3) juzga el repo del `cwd` de la SESIÓN, nunca el que
