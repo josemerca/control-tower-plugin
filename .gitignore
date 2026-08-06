@@ -8,3 +8,10 @@ scripts/experiments/*-results/
 # Scratch del proceso subagent-driven (ledger, briefs, informes, paquetes de review).
 # Efímero por definición: el registro durable es el historial de git.
 .superpowers/
+
+# Worktrees de sesión creados por el harness dentro del propio checkout. Sin esta
+# línea, un `git add -A` en el checkout principal se traga un árbol de trabajo
+# anidado entero — el mismo accidente que `.worktrees/` ya tiene cubierto para los
+# worktrees de slice (ver el bloque de .worktrees/ en scripts/ct-init.sh). Se ignora
+# SOLO el subdirectorio: `.claude/` también guarda configuración que sí se versiona.
+.claude/worktrees/

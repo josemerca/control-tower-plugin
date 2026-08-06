@@ -99,10 +99,12 @@ async function comprobarDist(root) {
 // lector cree que ha hecho mal — así que se distinguen sin adivinar.
 //
 // La lista de inputs sale del metafile REAL de la corrida, no de `scripts/`
-// entero: los hooks solo importan scripts/state.js y scripts/state-paths.js,
-// así que un cambio en cualquier otro fichero de scripts/ no entra al bundle.
+// entero: cada hook importa sólo los módulos de scripts/ que de verdad usa
+// (session-start.js y stop.js: state.js y state-paths.js; commit-keyword-
+// guard.js: closing-keywords.js y governed-repo.js), así que un cambio en
+// cualquier OTRO fichero de scripts/ no entra al bundle de ningún hook.
 // Mirar el directorio entero habría dado un falso positivo con cualquier
-// cambio en esos otros ficheros, aunque el bundle no dependa de ellos.
+// cambio en esos otros ficheros, aunque ningún bundle dependa de ellos.
 function explicarIncoherencia(root, { faltan, sobran, difieren, inputs }) {
   const partes = ['el dist/ commiteado NO corresponde a los fuentes commiteados:']
   if (faltan.length) partes.push(`  el build produce ficheros que HEAD no tiene commiteados: ${faltan.join(', ')}`)
@@ -156,13 +158,16 @@ describe('el dist/ commiteado corresponde a los fuentes commiteados (F24)', () =
 
   it('los inputs del bundle salen del metafile real, no de una lista escrita a mano', async () => {
     const { inputs } = await comprobarDist(root)
-    // Los cuatro de hoy. Si este test se pone rojo porque el bundle importa
-    // algo nuevo, la lista de aquí se actualiza — pero nada más depende de
-    // ella: la lista de inputs que usa el diagnóstico sale del metafile en
-    // cada corrida, no de este literal.
+    // Este literal es un canario, no una fuente de verdad: cuando el bundle
+    // gane o pierda un input hay que actualizarlo a mano, pero nada MÁS
+    // depende de él — el diagnóstico de más arriba (faltan/sobran/difieren)
+    // saca su lista de inputs del metafile en cada corrida, nunca de aquí.
     expect(inputs).toEqual([
+      'hooks/commit-keyword-guard.js',
       'hooks/session-start.js',
       'hooks/stop.js',
+      'scripts/closing-keywords.js',
+      'scripts/governed-repo.js',
       'scripts/state-paths.js',
       'scripts/state.js',
     ])

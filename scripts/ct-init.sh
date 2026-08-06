@@ -269,7 +269,36 @@ SLICES_HEADING='## Formato de la tabla §9 (contrato con /ct-groom)'
 # de las dos puertas, o un issue nuevo (un epic duplicado, si el enlace al
 # spec tampoco casa). Un repo bootstrapeado con el v11 se queda con esa
 # promesa falsa hasta que este número suba.
-SLICES_CONTRACT_VERSION=12
+#
+# F27 sube de 12 a 13, y por el mismo criterio de siempre: el v12 no describe mal
+# el flujo, CALLA dos cosas que ahora existen. (a) No dice que las comprobaciones
+# previas al merge tienen que ser puertas — la regla más útil del periodo de
+# campo, que salió de un merge que entró con la comprobación imprimiendo `1`.
+# (b) Dice «cuidado con escribir esas keywords en cualquier commit» como si nada
+# protegiera, cuando el plugin ya bloquea el caso mayoritario, y no dice cuáles
+# son los cuatro que se le escapan. Un repo con el v12 no puede deducir ninguna
+# de las dos, y la segunda es peor que el silencio: lee «vigila tú» donde ya hay
+# una puerta, y no sabe dónde NO la hay.
+#
+# F27 sube de 13 a 14 por el mismo criterio, sobre su propio texto: el v13
+# PROMETÍA una cobertura que el código no da, y CALLABA dos puntos ciegos
+# reales. Decía que el plugin bloquea el commit «en un repo que tenga esta
+# sección en su AGENTS.md», como si bastara con el repo. Falso: la puerta la
+# trae la SESIÓN de Claude (el hook lo pone el plugin cargado, no el repo), y
+# un agente despachado arranca con su propia cuenta (`CLAUDE_CONFIG_DIR`) —
+# si esa cuenta no tiene el plugin instalado, no hay puerta, aunque el repo
+# lleve la sección entera. Un repo con el v13 lee «con esta sección basta» y
+# no tiene forma de sospechar que la cobertura depende de dónde arrancó el
+# agente. Y el v13 enumeraba cuatro puntos ciegos —sin `-m`, `-F`, `--amend
+# --no-edit`, fuera de Claude— pero no los otros dos, medidos con el mismo
+# parser: un commit que **apunta a otro repo** (`git -C <ruta> commit`,
+# `cd <ruta> && git commit`, que la puerta comprueba contra el repo de la
+# SESIÓN y no contra `<ruta>`) y una invocación **envuelta** (`sudo git
+# commit`, `env FOO=1 git commit`, `command git commit`, donde `git` deja de
+# ser el primer token y el parser no reconoce el commit). Un repo con el v13
+# se queda creyendo que esos dos casos SÍ están cubiertos, hasta que este
+# número suba.
+SLICES_CONTRACT_VERSION=14
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -325,6 +354,8 @@ cef9a97a07edc8c403a37ffc846df74422c4d7d1d5aad02d90001a477b2ef811  v8, 419 línea
 ca63463cecb38df02011c5d079fd278488aa560bfb4ab5d0c7e95531d51e82e9  v10, 482 líneas — F21 (la columna Gate: el gate humano deja de ser un efecto colateral del Tipo)
 6b799d34aa589c52cded8801aed641807e3d6591ae372fdd9973d6ebbb1d4d3d  v11, 493 líneas — F22 (el estado del slice vive en .agent/SLICE.md, ignorado; el STATE.md del worktree es el de la coordinadora y no se lee)
 f1e9f868952d34a80bc7d15b50c0fce99cf375ebd3b1a76a37c6fdfa7b83e035  v12, 505 líneas — F23 (el milestone ya no puede divergir: el emparejado por ct-order está acotado al epic de la corrida)
+8ffbc5d943295835c0cf0dbfd20941b280b99b997124b0337d88da6bf267a086  v13, 521 líneas — F27 (las comprobaciones previas al merge son puertas; la puerta de closing keywords y sus límites)
+3896ed5610c6967510d6ad0ef83a18ef5eb6244a2015fd9af3b813bc8ba177b0  v14, 534 líneas — F27 (la puerta es propiedad de la sesión con el plugin cargado, no sólo del repo; con -C/cd a otro repo juzga el repo equivocado, no es ciega, y sus invocaciones envueltas sí lo son)
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -332,7 +363,7 @@ f1e9f868952d34a80bc7d15b50c0fce99cf375ebd3b1a76a37c6fdfa7b83e035  v12, 505 líne
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 12 -->
+<!-- ct-init:slices-contract-version: 14 -->
 ## Formato de la tabla §9 (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -625,14 +656,35 @@ loop una vez hay slices en vuelo.
     por defecto, y **las comillas no protegen**. En un repo real, un commit de
     **documentación** que solo MENCIONABA la cadena `Closes #451` —dentro de
     una frase que explicaba que el kickoff no la llevaba— cerró ese issue como
-    *completed*. Cuidado con escribir esas keywords en cualquier commit, aunque
-    sea entrecomillándolas.
+    *completed*.
     `/ct-next` **avisa** (no bloquea) cuando una dependencia ya satisfecha
     consta cerrada por un **commit suelto** que no pertenece a ningún PR
     mergeado. Lo que **no** exige es que el cierre venga de un PR: cerrar el
     issue a mano es la práctica mayoritaria (medido: 86 de 97 cierres
     *completed* de un repo real no tienen ningún PR detrás) y además es un paso
     **prescrito** aquí mismo cuando se despacha con `--base <otra-rama>`.
+    Cuidado con escribir esas keywords en cualquier commit, aunque sea
+    entrecomillándolas. El plugin **bloquea** el commit cuando la keyword viaja
+    en el mensaje (`-m`) de un `git commit` lanzado desde **una sesión de
+    Claude que tenga este plugin cargado**, contra un repo que tenga esta
+    sección en su `AGENTS.md`. Es una propiedad de la SESIÓN, no sólo del
+    repo: un agente despachado arranca con su propia cuenta
+    (`CLAUDE_CONFIG_DIR`, ver `resolveAccount` en `scripts/dispatch.js`), así
+    que sólo lleva la puerta si el plugin está instalado también ahí. Lo que
+    esa puerta **no ve**, y por tanto sigue siendo tuyo: un `git commit`
+    tecleado fuera de Claude, uno **sin** `-m` (el mensaje lo pone el editor),
+    un `-F <fichero>` y un `--amend --no-edit`; ni una invocación
+    **envuelta**, donde `git` deja de ser el primer token — `sudo git
+    commit`, `env FOO=1 git commit`, `command git commit`. Con `git -C
+    <ruta> commit -m ...` o `cd <ruta> && git commit -m ...` el problema no
+    es que no la vea: la puerta decide sobre el repo del directorio de LA
+    SESIÓN, nunca sobre el que señala `<ruta>`, y eso corta en los dos
+    sentidos — puede bloquear un commit dirigido a un repo que no gobierna
+    (sesión dentro de uno gobernado, `<ruta>` fuera) y no proteger uno
+    dirigido a un repo que sí gobierna (sesión fuera, `<ruta>` dentro). Para
+    lo que se escape sigue estando el aviso de `/ct-next` de aquí arriba: eso
+    caza el EFECTO, la puerta caza la CAUSA, y ninguno de los dos lo caza
+    todo.
   Al diseñar la tabla: el slice del que dependen muchos es el **cuello de
   botella** del epic entero — nada detrás de él avanza hasta que ESE se
   mergee. Si quieres una ventana de paralelismo, tiene que salir de la
@@ -830,8 +882,16 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   gates: el loop los **escribe y los enseña** (kickoff, label `gate:`, sección
   `## Gates` del issue), pero **no impide mergear** un PR con su gate sin
   cerrar. El que cierra el gate eres tú.
+  **Y por eso tus comprobaciones previas al merge tienen que ser PUERTAS.**
+  Verifica el EFECTO, nunca el exit code: si el resultado de una comprobación no
+  puede detener el merge, no es una comprobación, es decoración. En campo, una
+  comprobación de contaminación del estado imprimió `1` y el merge entró igual —
+  hubo que arreglar la rama por defecto a posteriori—; la misma comprobación,
+  convertida en puerta, paró el siguiente. Vale para todo lo que mires antes de
+  mergear, no sólo para los gates: si lo compruebas a mano, que el resultado
+  mande.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v12). Si el plugin trae una
+<sub>Esta sección la mantiene `/ct-init` (contrato v14). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>
