@@ -153,7 +153,7 @@ quinta que no estaba en la lista y que gana:
 | Comprobación dentro del loop | Bajo | **Cero de la causa**: para entonces el commit existe y el issue ya se cerró. Sería otro detector de efecto |
 | Una línea en el kickoff | Muy bajo | Sólo agentes, y es un prompt, no un gate. El que se equivocó fue el coordinador |
 | Documentación sola | Muy bajo | Cero mecánica. Ya existe (§1.2) y no bastó |
-| **`PreToolUse` desde el propio plugin** | **Bajo**: el plugin ya tiene `hooks/hooks.json` con `SessionStart` y `Stop` | **89% de los commits medidos**, coordinador **y** agentes (§2.2) |
+| **`PreToolUse` desde el propio plugin** | **Bajo**: el plugin ya tiene `hooks/hooks.json` con `SessionStart` y `Stop` | **89% de los commits medidos**; coordinador siempre, agentes despachados sólo si su cuenta también carga el plugin (§2.2) |
 
 Se elige el `PreToolUse`. No cubre a un humano tecleando `git commit` en su
 terminal, y eso se dice en el spec, en el contrato y en el mensaje: **una
@@ -227,14 +227,24 @@ La lógica vive en `scripts/closing-keywords.js`, **módulo puro sin I/O**, como
 
 ### 3.5 Lo que la puerta no ve, y quién lo cubre
 
-El mensaje tiene que estar **en el comando**. No lo está en cuatro casos:
-
-- `git commit` sin `-m`, que abre `$EDITOR`;
-- `-F <fichero>`, con el texto en disco;
-- un heredoc hacia `-F -`;
-- `--amend --no-edit`, reutilizando un mensaje que ya la traía.
+El mensaje tiene que estar **en el comando**. No lo está en varios casos —la
+lista vive en la cabecera de `hooks/commit-keyword-guard.js`, que es la fuente
+única; describirla aquí con una cifra fija es lo que la dejó caducar la vez
+anterior—: `git commit` sin `-m` (abre `$EDITOR`), `-F <fichero>` (el texto
+está en disco), `--amend --no-edit` (reutiliza un mensaje que no viaja en el
+comando), `eval "..."`, `bash -c "..."` y subshell `( ... )` (el tokenizador no
+resuelve ninguno de los tres), y una invocación **envuelta** donde `git` deja
+de ser el primer token — `sudo git commit`, `env FOO=1 git commit`, `command
+git commit`.
 
 Y tampoco ve al humano que teclea `git commit` fuera de Claude (§3.1).
+
+**`git -C <ruta> commit` o `cd <ruta> && git commit` no son de esta lista.**
+No es que la puerta no los vea: los ve y decide, pero sobre el repo del `cwd`
+de la SESIÓN, nunca sobre el que señala `<ruta>`. Eso corta en las dos
+direcciones — puede bloquear un commit dirigido a un repo que no gobierna, y
+no proteger uno dirigido a un repo que sí gobierna desde una sesión que está
+fuera —, así que es un desajuste de alcance, no un punto ciego más.
 
 **Eso no es un agujero abierto: es reparto de trabajo.** `gh-closure.js` sigue
 cazando el **efecto** de todo lo que la puerta no vea. La causa y el efecto se
