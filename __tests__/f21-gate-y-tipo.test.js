@@ -468,7 +468,11 @@ describe('F21 — el contrato §9 documenta los gates y la invariante', () => {
     const dir = mkdtempSync(join(tmpdir(), 'f21-init-'))
     execFileSync('bash', [initScript, dir], { encoding: 'utf8' })
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    expect(agents).toMatch(/fuera de la tabla §9/i)
+    // F30: la sección dejó de llamarse "§9". Lo que este test defiende es la
+    // FRASE, no el nombre — así que se ancla en lo invariante ("fuera de la
+    // tabla … no llega al agente") y no en cómo se llame la tabla ese mes.
+    expect(agents).toMatch(/fuera de la tabla[^\n]*no llega al agente/i)
+    expect(agents).not.toMatch(/§9/)
     rmSync(dir, { recursive: true, force: true })
   })
 })
