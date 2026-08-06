@@ -223,7 +223,7 @@ describe('F20/H1 — la guarda de idempotencia (unitario)', () => {
     const sentinelPath = join(d, 'started')
     const marker = join(d, 'ran')
     const s = buildLauncherScript(
-      { sentinelPath, agentCommand: `printf 'X' >> ${shQuote(marker)}`, issue: 7, worktree: d },
+      { sentinelPath, agentCommand: `printf 'X' >> ${shQuote(marker)}`, agentBin: 'claude', issue: 7, worktree: d },
       shQuote,
     )
     const launcher = join(d, 'launch.sh')
@@ -239,7 +239,7 @@ describe('F20/H1 — la guarda de idempotencia (unitario)', () => {
   })
 
   it('el centinela se sigue escribiendo ANTES del agente: la guarda no invierte el orden', () => {
-    const s = buildLauncherScript({ sentinelPath: '/tmp/s', agentCommand: 'claude --x', issue: 7, worktree: '/wt' }, shQuote)
+    const s = buildLauncherScript({ sentinelPath: '/tmp/s', agentCommand: 'claude --x', agentBin: 'claude', issue: 7, worktree: '/wt' }, shQuote)
     expect(s.indexOf("> '/tmp/s'")).toBeLessThan(s.indexOf('claude --x'))
   })
 

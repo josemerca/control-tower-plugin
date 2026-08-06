@@ -39,11 +39,65 @@ import { EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING } from './groom.js'
 const personalDir = process.env.CT_ACCOUNT_PERSONAL_DIR || join(homedir(), '.claude-personal')
 const workDir = process.env.CT_ACCOUNT_WORK_DIR || join(homedir(), '.claude-work')
 
+// ============================================================================
+// F29 — EL BINARIO QUE SE TECLEA YA NO PUEDE SER `claude` A SECAS.
+//
+// `--env CLAUDE_CONFIG_DIR=…` (dispatch.js#buildCmuxArgv) se añadió en T10
+// precisamente para que el selector de cuenta no colgara la sesión: el
+// comentario de allí dice, medido contra el sandbox real, que sin esa opción
+// la sesión «se queda colgada en el selector interactivo de cuenta […]
+// esperando un humano tecleando 1/2 en /dev/tty». Ese arreglo asumía un
+// selector que MIRA la variable antes de preguntar.
+//
+// Medido de nuevo en esta máquina, contra el `.zshrc` real: la función
+// `claude()` del usuario pregunta SIEMPRE, sin mirar `CLAUDE_CONFIG_DIR`, y
+// además la PISA con su propio `export`. Un shell de login la resuelve antes
+// que a ningún PATH, así que el binario nunca llega a ejecutarse:
+//
+//   $ zsh -lic 'claude --version' </dev/null
+//     ¿Qué cuenta de Claude?  1) Personal  2) Mercadona
+//     Opción no válida
+//
+// Con un pty de verdad no sale ni ese error: se queda parada en el `read`. Y
+// lo peor es cómo se ve desde fuera — el centinela de arranque se escribe
+// ANTES de invocar al agente (a propósito: mide que la orden corrió, no que
+// el agente acabara) y `command -v claude` devuelve 0 para una función. O
+// sea: `/ct-next` diría «lanzado», con exit 0, sobre un agente que está
+// esperando una tecla que nadie va a pulsar. Es la clase de fallo de F19 por
+// una puerta que F19 no midió.
+//
+// La salida es no teclear un nombre que el usuario pueda haber envuelto, sino
+// el WRAPPER NO INTERACTIVO de la cuenta ya resuelta. Los dos existen en esta
+// máquina, son simétricos y fijan el config dir ellos mismos:
+//
+//   ~/.local/bin/claude-personal → export CLAUDE_CONFIG_DIR=…/.claude-personal
+//   ~/.local/bin/claude-work     → export CLAUDE_CONFIG_DIR=…/.claude-work
+//
+// Que el wrapper exporte la variable NO vuelve inerte el `--env` de cmux ni
+// el mapa: es el mapa el que elige CUÁL de los dos wrappers se teclea, así
+// que las dos vías dicen lo mismo. Clavar `claude-personal` para todo repo sí
+// lo habría vuelto inerte — un repo de `mercadona/*` habría arrancado con la
+// cuenta personal mientras ct-next.mjs imprimía `cuenta resuelta: … (trabajo)`.
+// Ese es exactamente el defecto que D4 vino a corregir, y no se reintroduce
+// por comodidad.
+//
+// CT_AGENT_BIN_PERSONAL / CT_AGENT_BIN_WORK: mismo criterio que
+// CT_ACCOUNT_*_DIR — override explícito para una máquina cuyos wrappers se
+// llamen de otra forma (o que no los tenga y quiera volver a `claude` a
+// secas), y para que los tests no dependan de lo que haya instalado quien los
+// corre. No cambia NINGUNA decisión: solo el nombre que se teclea para la
+// cuenta que el mapa ya eligió.
+// ============================================================================
+const personalBin = process.env.CT_AGENT_BIN_PERSONAL || 'claude-personal'
+const workBin = process.env.CT_AGENT_BIN_WORK || 'claude-work'
+
 export const ACCOUNT_MAP = {
   personal: ['josemerca/*', '*/menoplus', '*/munger'],
   work: ['mercadona/*', '*/mo.*'],
   personalDir,
   workDir,
+  personalBin,
+  workBin,
   // legacy: las listas EXACTAS del mapa viejo, conservadas solo para poder
   // detectar y anunciar una reclasificación de cuenta provocada por el
   // arreglo (ver dispatch.js#resolveAccountLegacy y el aviso que imprime

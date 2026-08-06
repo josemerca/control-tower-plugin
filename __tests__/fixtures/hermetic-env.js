@@ -45,9 +45,19 @@ export const FAKE_BIN_DIRS = [
   join(fixturesDir, 'fake-claude-bin'),
 ]
 
+// F29 — el binario del agente se fija a `claude` EN LOS TESTS, y es una
+// decisión del entorno hermético, no del código: el stub que hay en el PATH se
+// llama `claude` (fake-claude-bin/claude), así que pedirle a la suite entera
+// que busque `claude-personal` la haría depender de que la máquina tenga
+// instalados los wrappers reales — exactamente lo que este fichero existe para
+// evitar. El defecto de verdad (`claude-personal` / `claude-work`) y el hecho
+// de que la CUENTA lo elija se comprueban aparte, en
+// f29-binario-de-cuenta.test.js, sin PATH de por medio.
 export const ACCOUNT_ENV = {
   CT_ACCOUNT_PERSONAL_DIR: TEST_PERSONAL_DIR,
   CT_ACCOUNT_WORK_DIR: TEST_WORK_DIR,
+  CT_AGENT_BIN_PERSONAL: 'claude',
+  CT_AGENT_BIN_WORK: 'claude',
 }
 
 // hermeticEnv: base de entorno para cualquier invocación de ct-next.mjs en

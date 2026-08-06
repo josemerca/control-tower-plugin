@@ -215,7 +215,7 @@ describe('F19/H1 — el centinela ve lo que ninguna consulta a cmux puede ver', 
 describe('F19/H1 — formato del centinela (unitario)', () => {
   const q = shQuote
   it('el script escribe el centinela ANTES de lanzar al agente: si fuera después solo aparecería al terminar', () => {
-    const s = buildLauncherScript({ sentinelPath: '/tmp/s', agentCommand: 'claude --x', issue: 7, worktree: '/wt' }, q)
+    const s = buildLauncherScript({ sentinelPath: '/tmp/s', agentCommand: 'claude --x', agentBin: 'claude', issue: 7, worktree: '/wt' }, q)
     expect(s.indexOf('/tmp/s')).toBeLessThan(s.indexOf('claude --x'))
     expect(s).toMatch(/command -v claude/)
   })
@@ -258,7 +258,7 @@ describe('F19/H1 — formato del centinela (unitario)', () => {
     // propio script: el shell acabó ejecutando el Claude real.) Lo que se está
     // probando es el ESCAPADO, y para eso el programa da igual.
     const s = buildLauncherScript(
-      { sentinelPath: join(d, 'out'), agentCommand: `printf '%s' ${q(nasty)}`, issue: 1, worktree: '/wt' },
+      { sentinelPath: join(d, 'out'), agentCommand: `printf '%s' ${q(nasty)}`, agentBin: 'claude', issue: 1, worktree: '/wt' },
       q
     )
     const f = join(d, 'l.sh')

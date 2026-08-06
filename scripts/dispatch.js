@@ -519,6 +519,13 @@ export function matchesAccountPattern(slug, pattern) {
   return segmentMatches(parsed.owner, ownerSeg) && segmentMatches(parsed.name, repoSeg)
 }
 
+// F29 — nombre de comando aceptable para el binario del agente.
+// Deliberadamente estrecho: ni rutas (`/`), ni espacios, ni nada que un shell
+// pueda interpretar. Quien necesite una ruta absoluta que ponga el directorio
+// en el PATH de su shell de login, que es de todos modos quien resuelve el
+// nombre de verdad.
+const ACCOUNT_BIN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
+
 // validateAccountMap: lista de errores (vacía = mapa sano). Se llama al
 // ARRANCAR de ct-next.mjs, antes de tocar gh o el filesystem — el requisito
 // explícito es que un mapa mal formado no pueda descubrirse cuando ya se han
@@ -551,6 +558,20 @@ export function validateAccountMap(map) {
       errors.push(`ACCOUNT_MAP.${key} ("${d}") no es una ruta absoluta — CLAUDE_CONFIG_DIR viaja al daemon de cmux, que la resuelve desde SU propio cwd, no desde el tuyo`)
     }
   }
+  // F29 — los binarios son OPCIONALES en el mapa (uno anterior a F29 no los
+  // trae, y sigue valiendo: resolveAccount cae a `claude`, que es lo que se
+  // tecleaba entonces), pero si están tienen que ser un nombre de comando a
+  // secas. El valor viaja SIN COMILLAS a dos sitios —`command -v <bin>` dentro
+  // del launcher y la propia línea del agente— así que un espacio o un `;`
+  // aquí no son un nombre raro: son inyección de shell en un script que se
+  // sourcea en el shell de login del usuario.
+  for (const key of ['personalBin', 'workBin']) {
+    const b = map[key]
+    if (b === undefined) continue
+    if (typeof b !== 'string' || !ACCOUNT_BIN_RE.test(b)) {
+      errors.push(`ACCOUNT_MAP.${key} (${JSON.stringify(b)}) no es un nombre de comando válido — solo letras, dígitos, punto, guion y guion bajo, empezando por letra o dígito (p.ej. "claude-personal"). Se teclea sin comillas en el shell de login que abre cmux`)
+    }
+  }
   return errors
 }
 
@@ -569,18 +590,29 @@ export function validateAccountMap(map) {
 export function resolveAccount(slug, map) {
   const parsed = parseRepoSlug(slug)
   if (!parsed) {
-    return { dir: map.personalDir, account: 'personal', pattern: null, matched: false, conflictPattern: null, slugMalformed: true }
+    return { dir: map.personalDir, bin: personalBinOf(map), account: 'personal', pattern: null, matched: false, conflictPattern: null, slugMalformed: true }
   }
   const workPattern = (map.work || []).find((p) => matchesAccountPattern(slug, p)) ?? null
   const personalPattern = (map.personal || []).find((p) => matchesAccountPattern(slug, p)) ?? null
   if (workPattern) {
-    return { dir: map.workDir, account: 'work', pattern: workPattern, matched: true, conflictPattern: personalPattern, slugMalformed: false }
+    return { dir: map.workDir, bin: workBinOf(map), account: 'work', pattern: workPattern, matched: true, conflictPattern: personalPattern, slugMalformed: false }
   }
   if (personalPattern) {
-    return { dir: map.personalDir, account: 'personal', pattern: personalPattern, matched: true, conflictPattern: null, slugMalformed: false }
+    return { dir: map.personalDir, bin: personalBinOf(map), account: 'personal', pattern: personalPattern, matched: true, conflictPattern: null, slugMalformed: false }
   }
-  return { dir: map.personalDir, account: 'personal', pattern: null, matched: false, conflictPattern: null, slugMalformed: false }
+  return { dir: map.personalDir, bin: personalBinOf(map), account: 'personal', pattern: null, matched: false, conflictPattern: null, slugMalformed: false }
 }
+
+// F29 — `bin` viaja junto a `dir` porque salen de la MISMA decisión y tienen
+// que poder decirse en la misma frase. Un mapa sin binarios (anterior a F29)
+// cae a `claude`, que es literalmente lo que se tecleaba antes: el defecto
+// conserva el comportamiento, no lo adivina. El caso que NO se contempla —a
+// propósito— es un binario por repo o por slice: la cuenta es lo único que
+// distingue a un wrapper de otro, y hacerlos independientes permitiría teclear
+// `claude-work` con el config dir personal.
+const personalBinOf = (map) => map?.personalBin || DEFAULT_AGENT_BIN
+const workBinOf = (map) => map?.workBin || DEFAULT_AGENT_BIN
+export const DEFAULT_AGENT_BIN = 'claude'
 
 // resolveAccountLegacy: reimplementa, TAL CUAL, el algoritmo viejo (nombre
 // suelto + startsWith, con el owner descartado) sobre las listas viejas que

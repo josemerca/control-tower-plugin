@@ -147,15 +147,24 @@ export function buildTypedCommand(launcherPath, shQuote) {
 // qué tipo es. Un `-f` dejaría pasar el relanzamiento si alguien pusiera ahí
 // un directorio o un symlink roto.
 // ===========================================================================
-export function buildLauncherScript({ sentinelPath, agentCommand, issue, worktree }, shQuote) {
+//
+// F29 — `agentBin` NO es cosmético, y por eso es obligatorio en vez de tener
+// un defecto: es lo que se comprueba con `command -v`, y ese dato decide, allá
+// arriba en ct-next.mjs, si el worktree y el claim se DESHACEN (`no-claude` →
+// cleanupOrphanedWorktree). Comprobar `claude` mientras se teclea
+// `claude-personal` daría el veredicto sobre el binario equivocado en las dos
+// direcciones: un `ok` que precede a un «command not found», o un borrado de
+// worktree por un binario que no era el que se iba a usar.
+export function buildLauncherScript({ sentinelPath, agentCommand, agentBin, issue, worktree }, shQuote) {
   const q = shQuote
+  if (!agentBin) throw new Error('buildLauncherScript: falta agentBin — es el nombre que se comprueba con `command -v` dentro del shell de login, y de su resultado depende que ct-next.mjs deshaga o no el worktree y el claim')
   return `#!/bin/sh
 # Generado por /ct-next (plugin control-tower-loop) para el issue #${issue}.
 # NO lo edites: se reescribe en cada despacho. Ver scripts/launch-sentinel.js.
 #
 # Este script se SOURCEA en el shell de login que abre cmux (nunca se ejecuta
 # como subproceso), para que los alias, funciones y PATH del usuario —de donde
-# puede salir el propio \`claude\`— sigan valiendo.
+# puede salir el propio \`${agentBin}\`— sigan valiendo.
 #
 # Se puede sourcear MÁS DE UNA VEZ: /ct-next reenvía la línea si el centinela
 # no aparece (el pty se la puede comer). La guarda de abajo hace que solo el
@@ -165,7 +174,7 @@ export function buildLauncherScript({ sentinelPath, agentCommand, issue, worktre
 if [ -e ${q(sentinelPath)} ]; then
   printf '%s\\n' 'ct-next: el agente de #${issue} ya arrancó (centinela presente); este sourceo NO relanza nada.'
 else
-  if command -v claude >/dev/null 2>&1; then ct_next_claude=ok; else ct_next_claude=missing; fi
+  if command -v ${agentBin} >/dev/null 2>&1; then ct_next_claude=ok; else ct_next_claude=missing; fi
   printf '%s\\t%s\\t%s\\t%s\\n' ${q(SENTINEL_MAGIC)} ${q(SENTINEL_FORMAT_VERSION)} "$ct_next_claude" "$PWD" > ${q(sentinelPath)}
   unset ct_next_claude
 ${agentCommand}
