@@ -14,6 +14,26 @@
 // se pierda — el contrato del loop manda el cierre al CUERPO DEL PR, nunca a un
 // mensaje de commit.
 //
+// Y SIGUE SIENDO UNA PUERTA BAJO `--dangerously-skip-permissions`, que es el
+// flag con el que arrancan TODOS los agentes despachados. Las dos decisiones
+// que emite se midieron por EFECTO —un `touch CENTINELA.txt` y después la
+// pregunta de si el fichero existe—, no por exit code, y con el
+// `permission_mode` que recibe el hook escrito a fichero para no suponerlo a
+// partir del flag:
+//   `deny` (repo gobernado)     no se creó el centinela  — F27, spec §2.2
+//   `ask`  (no se pudo mirar)   no se creó el centinela  — F28, `bypassPermissions`
+// El control —el mismo montaje sin ningún hook— SÍ crea el fichero, así que la
+// ausencia mide el bloqueo y no un modelo que no lo intentó. La escalada a
+// `ask` es lo que sostiene que esta puerta nunca se degrade a silencio, y esa
+// propiedad está medida, no supuesta.
+//
+// Lo que esas dos medidas NO dicen: que la puerta CUBRA a un agente despachado
+// sigue dependiendo de que el plugin esté instalado bajo la cuenta con la que
+// ese agente arranca (`resolveAccount`, scripts/dispatch.js). Y se midieron en
+// `-p`, sin humano a quien preguntar, así que el `ask` se resolvió BLOQUEANDO;
+// en una sesión interactiva lo esperable es que pregunte y se quede parada.
+// Las dos cosas son «no silencio»; no son la misma cosa.
+//
 // EL ORDEN DE EVALUACIÓN DE `decidir` NO ES COSMÉTICO. Este hook corre en CADA
 // comando Bash de CADA sesión con el plugin cargado. Las dos primeras
 // preguntas son parseo puro, sin una sola lectura de disco; sólo el comando que
