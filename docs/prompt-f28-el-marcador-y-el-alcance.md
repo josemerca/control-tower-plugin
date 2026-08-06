@@ -129,6 +129,38 @@ cabecera del hook, y el contrato si cambia lo que la puerta promete.
 Diez minutos. Y si sale que `ask` no bloquea, es un hallazgo grande: dilo antes
 de seguir con lo demás.
 
+=== 4. UN FALLO INTERMITENTE, OBSERVADO UNA VEZ Y SIN CARACTERIZAR ===
+
+Esto NO es una tarea: es un aviso, para que no te vuelva loco si te pasa.
+
+Al cerrar F27 se observó UNA corrida de la suite completa con 6 tests rojos:
+
+  __tests__/conventions.test.js        3 rojos
+  __tests__/ct-next-conventions.test.js  1 rojo
+  __tests__/ct-init.test.js            2 rojos
+
+La firma: el escáner de convenciones reportó señales `[claim]` en líneas del
+`AGENTS.md` que están DENTRO del bloque del contrato que `ct-init` acababa de
+sembrar (AGENTS.md:410, 451, 475 — los `dispatch-check.mjs --requeue/--reopen`
+del propio contrato). O sea: la PODA del bloque no se aplicó. `conventions.js`
+poda por coincidencia exacta de línea con sus marcadores, así que o el fichero
+no estaba entero cuando se escaneó, o algo bajo carga se comió la poda.
+
+QUÉ SE SABE, y no más:
+  - Sólo se ha visto en una corrida COMPLETA (59 ficheros, en paralelo, ~110 s).
+  - NO se reproduce: 3 corridas aisladas de esos mismos 3 ficheros, verdes; y la
+    corrida completa siguiente, verde (59 ficheros, 1685 tests, exit 0).
+  - Es PREEXISTENTE. Los cambios que había en el árbol cuando ocurrió no tocan
+    ni las convenciones ni la poda (package.json, un test de manifiesto, dos
+    comentarios de ct-init.sh y dos ficheros de documentación).
+
+SI TE PASA: no lo trates como una regresión tuya. Primero aísla —corre esos 3
+ficheros solos— y si pasan, es esto. Y si consigues reproducirlo, CARACTERÍZALO:
+un test que falla una de cada N corridas es peor que uno que falla siempre,
+porque enseña a ignorar el rojo. En un repo cuya doctrina es que una
+comprobación que no puede detener la acción siguiente es decoración, una que
+miente en las dos direcciones es peor que no tenerla.
+
 --- CÓMO TRABAJARLO ---
 
 superpowers:brainstorming -> superpowers:writing-plans ->
@@ -145,14 +177,13 @@ crecer, para y pregunta.
                 (docs/superpowers/specs/2026-08-04-contexto-heredado-design.md).
                 Cambio de contrato mayor. Es lo único grande que queda.
 
-  Cosmético, 15 minutos entre los tres:
-    - package.json sigue en 0.1.0 contra 0.26.0 del plugin
-    - scripts/ct-init.sh:70 tiene un comentario que cita "la review final,
-      finding 6" — viola la regla del propio repo de que un comentario describe
-      la propiedad, no el proceso
-    - docs/backlog-congelado.md está CADUCADO: sus dos entradas (el STATE.md en
-      not_started y la label que sobrevive al cierre) ya están resueltas por F22
-      y por /ct-status, y el documento dice "no se implementan"
+  Deuda cosmética: YA CERRADA al terminar F27, no la busques.
+    - package.json pasó a 0.26.0, y hay un test en __tests__/manifest.test.js que
+      lo ata a plugin.json para que el duplicado no pueda divergir en silencio
+    - los dos comentarios de scripts/ct-init.sh que citaban "finding 6" y "la
+      review final" describen ahora la propiedad
+    - docs/backlog-congelado.md dice la verdad: está cerrado, y cada una de sus
+      dos entradas lleva escrito dónde aterrizó
 
   Lo que NO es del plugin: siete de los ocho comandos silenciosos del §7.1
   (MULTIOS de zsh, word-splitting, backticks en commit -m, --limit corto,
