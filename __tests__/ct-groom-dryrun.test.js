@@ -35,7 +35,7 @@ const QUIET_STDIO = ['ignore', 'pipe', 'pipe']
 const fakeGhDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-gh-bin')
 const fakeEnv = (overrides = {}) => ({ ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}`, ...overrides })
 
-const SPEC = `## 9. Slices
+const SPEC = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice (issue) | Tipo | Entrega | Dep | Acepta (AC) | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | login | backend | modelo | – | AC-1.1 | schema |
@@ -92,7 +92,7 @@ describe('ct-groom --dry-run', () => {
 
   it('spec con órdenes de slice duplicados sale con código distinto de 0 y mensaje nombrando el duplicado', () => {
     const dir = makeSpecDir('ctg-')
-    const DUP_SPEC = `## 9. Slices
+    const DUP_SPEC = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice (issue) | Tipo | Entrega | Dep | Acepta (AC) | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | login | backend | modelo | – | AC-1.1 | schema |
@@ -354,7 +354,7 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
 
   it('falta la columna "#" → exit != 0, mensaje nombra la columna y la consecuencia (orden/dependencias)', () => {
     const dir = makeSpecDir('ctg-')
-    const NO_HASH = `## 9. Slices
+    const NO_HASH = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|
 | x | backend | y | – | – | – |
@@ -382,7 +382,7 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
   // del cambio.
   it('falta la columna "Entrega" → YA NO aborta (F3: pasó a opcional), avisa por stderr y el dry-run sigue funcionando', () => {
     const dir = makeSpecDir('ctg-')
-    const NO_ENTREGA = `## 9. Slices
+    const NO_ENTREGA = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|
 | 1 | x | backend | – | – | – |
@@ -400,7 +400,7 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
 
   it('filas con "#" no entero a secas → exit != 0, mensaje dice cuántas, muestra un valor ofensor y dice qué escribir en su lugar', () => {
     const dir = makeSpecDir('ctg-')
-    const BAD_HASH = `## 9. Slices
+    const BAD_HASH = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | **S1** | x | backend | y | – | – | – |
@@ -429,7 +429,7 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
 
   it('tabla presente pero sin ninguna fila de datos → exit != 0, mensaje dice que no hay filas', () => {
     const dir = makeSpecDir('ctg-')
-    const EMPTY_TABLE = `## 9. Slices
+    const EMPTY_TABLE = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 `
@@ -476,7 +476,7 @@ describe('ct-groom — falla fuerte ante tabla §9 inusable (F1)', () => {
 describe('ct-groom — avisa pero continúa ante columnas ausentes o prefijo en la columna equivocada (F1)', () => {
   it('sin columnas Tipo/Acepta/Protegido/Área/Toca → dry-run sigue funcionando, stderr avisa de cada ausencia y su consecuencia', () => {
     const dir = makeSpecDir('ctg-')
-    const MINIMAL = `## 9. Slices
+    const MINIMAL = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Entrega | Dep |
 |---|---|---|---|
 | 1 | login | modelo | – |
@@ -490,7 +490,7 @@ describe('ct-groom — avisa pero continúa ante columnas ausentes o prefijo en 
 
   it('el aviso de columnas ausentes se ve en stderr al capturarlo explícitamente (spawnSync)', () => {
     const dir = makeSpecDir('ctg-')
-    const MINIMAL = `## 9. Slices
+    const MINIMAL = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Entrega | Dep |
 |---|---|---|---|
 | 1 | login | modelo | – |
@@ -509,7 +509,7 @@ describe('ct-groom — avisa pero continúa ante columnas ausentes o prefijo en 
 
   it('valor con prefijo de la otra columna ("area:x" en Toca) → dry-run no aborta, label se genera bien (touches:pbxproj, no touches:areapbxproj), y avisa', () => {
     const dir = makeSpecDir('ctg-')
-    const MISMATCHED = `## 9. Slices
+    const MISMATCHED = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
 | 1 | login | backend | modelo | – | – | – | – | area:pbxproj |
@@ -527,7 +527,7 @@ describe('ct-groom — avisa pero continúa ante columnas ausentes o prefijo en 
   it('valor prefijado correctamente ("area:medicacion" en Área, con backticks) → label sin duplicar el prefijo', () => {
     const dir = makeSpecDir('ctg-')
     const PREFIXED = [
-      '## 9. Slices',
+      '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices',
       '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |',
       '|---|---|---|---|---|---|---|---|---|',
       '| 1 | login | backend | modelo | – | – | – | `area:medicacion` | `touches:pbxproj` |',
@@ -556,7 +556,7 @@ describe('ct-groom — avisa pero continúa ante columnas ausentes o prefijo en 
 describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avisa, no aborta (F3)', () => {
   it('"Tipo" = "ios" (no es key de ADDENDA) → dry-run no aborta, la label type:ios se crea igual, y avisa por stderr con el valor, el slice, la consecuencia y el conjunto reconocido', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | pantalla | ios | pantalla de alta | – | – | – |
@@ -578,7 +578,7 @@ describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avis
 
   it('"Tipo" con un valor reconocido ("ui") no dispara ningún aviso de tipo', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
 | 1 | pantalla | ui | pantalla de alta | – | – | – | – | – |
@@ -599,7 +599,7 @@ describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avis
 
   it('"Tipo" vacío (columna presente, celda en blanco) no dispara ningún aviso de tipo (sigue sin label type:)', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
 | 1 | pantalla |  | pantalla de alta | – | – | – | – | – |
@@ -633,7 +633,7 @@ describe('ct-groom — "Tipo" con un valor que no es ninguna key de ADDENDA avis
   // "ninguno" (celda vacía, celda con marcador) deben comportarse igual.
   it.each(['-', '–', '—', '―', '−', '--'])('"Tipo" = marcador de "sin valor" ("%s") → sin aviso, y sin label "type:" (mismo trato que Tipo vacío)', (marker) => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
 | 1 | pantalla | ${marker} | pantalla de alta | – | – | – | – | – |
@@ -701,7 +701,7 @@ describe('ct-groom — Dep con contenido pero sin ninguna referencia #N reconoci
 
   it('texto legítimo alrededor de una referencia #N válida ("#1 (tras el merge)") no aborta', () => {
     const dir = makeSpecDir('ctg-')
-    const LEGIT = `## 9. Slices
+    const LEGIT = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | a | ui | x | – | – | – |
@@ -724,7 +724,7 @@ describe('ct-groom — Dep con contenido pero sin ninguna referencia #N reconoci
 describe('ct-groom — em dash (—) en Dep no aborta; el mensaje de Dep malformado dice qué escribir (CRITICAL 1)', () => {
   it('em dash (—) en Dep no aborta — el plan se genera con deps: []', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | a | ui | x | — | – | – |
@@ -756,7 +756,7 @@ describe('ct-groom — em dash (—) en Dep no aborta; el mensaje de Dep malform
 
   it('el mensaje de "Dep malformado" dice explícitamente qué escribir si no hay dependencias', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | a | ui | x | ninguna | – | – |
@@ -777,7 +777,7 @@ describe('ct-groom — em dash (—) en Dep no aborta; el mensaje de Dep malform
 describe('ct-groom — negrita/cursiva alrededor del prefijo en Área/Toca no duplica la label (CRITICAL 2)', () => {
   it('"**area:medicacion**"/"**touches:pbxproj**" (negrita) → labels sin duplicar el prefijo', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
 | 1 | login | backend | modelo | – | – | – | **area:medicacion** | **touches:pbxproj** |
@@ -795,7 +795,7 @@ describe('ct-groom — negrita/cursiva alrededor del prefijo en Área/Toca no du
 describe('ct-groom — un hueco (línea en blanco) dentro de la tabla §9 aborta fuerte, no trunca en silencio (3)', () => {
   it('línea en blanco entre 2 filas de datos → exit != 0 en vez de "1 issue creado, exit 0" (medio epic silencioso)', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | a | ui | primero | – | – | – |
@@ -823,7 +823,7 @@ describe('ct-groom — un hueco (línea en blanco) dentro de la tabla §9 aborta
 describe('ct-groom — celda "Slice" vacía o fila más corta que la cabecera aborta fuerte (4, actualizado por F3)', () => {
   it('celda Slice vacía → exit != 0 en vez de un issue titulado "#1" a secas', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 |  | ui | y | – | – | – |
@@ -845,7 +845,7 @@ describe('ct-groom — celda "Slice" vacía o fila más corta que la cabecera ab
 
   it('celda Entrega vacía (Slice con contenido) YA NO aborta (F3: Entrega es opcional)', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | a | ui |  | – | – | – |
@@ -861,7 +861,7 @@ describe('ct-groom — celda "Slice" vacía o fila más corta que la cabecera ab
 describe('ct-groom — Dep apunta a un slice inexistente o a sí mismo aborta fuerte (5)', () => {
   it('auto-referencia (slice #3 depende de #3) → exit != 0, mensaje nombra la auto-referencia', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | a | ui | x | – | – | – |
@@ -885,7 +885,7 @@ describe('ct-groom — Dep apunta a un slice inexistente o a sí mismo aborta fu
 
   it('referencia a un "#" inexistente (#99 en tabla de 2 slices) → exit != 0', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | a | ui | x | – | – | – |
@@ -908,7 +908,7 @@ describe('ct-groom — Dep apunta a un slice inexistente o a sí mismo aborta fu
 describe('ct-groom — token Área/Toca que normaliza a vacío avisa pero no aborta (6)', () => {
   it('"area:" vacío tras el prefijo → dry-run no aborta, avisa por stderr que la label queda inerte para ese slice', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
 | 1 | login | backend | modelo | – | – | – | area: | – |
@@ -968,7 +968,7 @@ describe('ct-groom — "no se encontró la tabla §9" distingue "no hay tabla" d
 describe('ct-groom — marcado envolviendo la CELDA COMPLETA de una lista por comas no duplica el prefijo (review round 2, CRITICAL)', () => {
   it('"**area:medicacion, area:otro**" / "`touches:pbxproj, touches:otro`" → labels correctas, sin duplicar, sin abortar', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Slices\n' +
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices\n' +
       '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
       '|---|---|---|---|---|---|---|---|---|\n' +
       '| 1 | login | backend | modelo | – | – | – | **area:medicacion, area:otro** | `touches:pbxproj, touches:otro` |\n')
@@ -988,7 +988,7 @@ describe('ct-groom — marcado envolviendo la CELDA COMPLETA de una lista por co
 describe('ct-groom — el escaneo post-hueco no arrastra una tabla ajena (review round 2, IMPORTANTE)', () => {
   it('regla horizontal ("---") antes de una tabla no relacionada, sin heading markdown → no aborta', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | a | ui | primero | – | – | – |
@@ -1008,7 +1008,7 @@ describe('ct-groom — el escaneo post-hueco no arrastra una tabla ajena (review
 describe('ct-groom — fila con más celdas que la cabecera aborta fuerte (review round 2, a)', () => {
   it('un "|" sin escapar en una celda (más celdas que la cabecera) → exit != 0 en vez de columnas desplazadas en silencio', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
 | 1 | a | ui | x | – | – | – | med | icacion | pbx |
@@ -1033,7 +1033,7 @@ describe('ct-groom — fila con más celdas que la cabecera aborta fuerte (revie
 describe('ct-groom — "Slice" con un marcador de "sin valor" aborta fuerte (review round 2, b — actualizado por F3)', () => {
   it('"Slice" = "–" → exit != 0 en vez de un issue titulado "#1 –"', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | – | ui | y | – | – | – |
@@ -1053,7 +1053,7 @@ describe('ct-groom — "Slice" con un marcador de "sin valor" aborta fuerte (rev
 
   it('"Entrega" = "–" (Slice con contenido) YA NO aborta', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | a | ui | – | – | – | – |
@@ -1067,7 +1067,7 @@ describe('ct-groom — "Slice" con un marcador de "sin valor" aborta fuerte (rev
 describe('ct-groom — marcador de "nada" envuelto en marcado en Dep no aborta (review round 2, c)', () => {
   it('"`–`" (backtick) en Dep no aborta', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Slices\n' +
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices\n' +
       '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |\n' +
       '|---|---|---|---|---|---|---|\n' +
       '| 1 | a | ui | x | `–` | – | – |\n')
@@ -1078,7 +1078,7 @@ describe('ct-groom — marcador de "nada" envuelto en marcado en Dep no aborta (
 
   it('"**–**" (negrita) en Dep no aborta', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | a | ui | x | **–** | – | – |
@@ -1096,7 +1096,7 @@ describe('ct-groom — marcador de "nada" envuelto en marcado en Dep no aborta (
 describe('ct-groom — varios defectos a la vez se reportan TODOS en una sola ejecución (mejora de uso)', () => {
   it('una fila con "#" malformado y otra con "Dep" malformado en la misma tabla → stderr trae AMBOS mensajes, un solo exit 2', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | **1** | a | ui | x | – | – | – |
@@ -1134,7 +1134,7 @@ describe('ct-groom — varios defectos a la vez se reportan TODOS en una sola ej
 describe('ct-groom — normalización de marcado en un solo paso cierra la clase entera (review round 3)', () => {
   it('REPRODUCCIÓN EXACTA del coordinador: "`area:hoy`, `area:web`" → labels limpias, sin abortar, sin aviso', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Slices\n' +
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices\n' +
       '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
       '|---|---|---|---|---|---|---|---|---|\n' +
       '| 1 | login | backend | modelo | – | – | – | `area:hoy`, `area:web` | – |\n')
@@ -1156,7 +1156,7 @@ describe('ct-groom — normalización de marcado en un solo paso cierra la clase
 
   it('las cuatro formas de marcado en la misma tabla, más un control negativo, todas correctas en una sola ejecución', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Slices\n' +
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices\n' +
       '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
       '|---|---|---|---|---|---|---|---|---|\n' +
       '| 1 | celda entera | backend | y | – | – | – | **area:medicacion, area:otro** | – |\n' +
@@ -1185,7 +1185,7 @@ describe('ct-groom — normalización de marcado en un solo paso cierra la clase
 describe('ct-groom — guion bajo simétrico + prefijo invertido (review round 4)', () => {
   it('control negativo de nombres de fichero (_layout.tsx, __init__.py, trailing_) llega a las labels SIN mutilar — falla si se vuelve a ^_+/_+$ asimétrico', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## 9. Slices
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
 | 1 | a | backend | y | – | – | – | – | _layout.tsx |
@@ -1207,7 +1207,7 @@ describe('ct-groom — guion bajo simétrico + prefijo invertido (review round 4
 
   it('matriz de envoltorios (backtick, asterisco, guion bajo, ~~, comillas rectas, paréntesis, anidado) — todas producen "area:med", ninguna duplica el prefijo', () => {
     const dir = makeSpecDir('ctg-')
-    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## 9. Slices\n' +
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices\n' +
       '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |\n' +
       '|---|---|---|---|---|---|---|---|---|\n' +
       '| 1 | backtick | backend | y | – | – | – | `area:med` | – |\n' +
@@ -1238,7 +1238,7 @@ describe('ct-groom — guion bajo simétrico + prefijo invertido (review round 4
 // la tabla en F1.
 // ============================================================================
 
-const ONE_SLICE_SPEC = `## 9. Slices
+const ONE_SLICE_SPEC = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
 | 1 | login | backend | modelo | – | AC-1.1 | schema | api | db |
@@ -1493,7 +1493,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
 // ============================================================================
 
 describe('ct-groom --dry-run — AC/Dependencias divergentes se detectan (review crítica: el body SÍ se compara para lo que lee el dispatcher)', () => {
-  const SPEC_2 = `## 9. Slices
+  const SPEC_2 = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | login | backend | modelo | #2 | AC-1.1, AC-1.2 | schema |
@@ -1562,7 +1562,7 @@ describe('ct-groom --dry-run — AC/Dependencias divergentes se detectan (review
 })
 
 describe('ct-groom --dry-run — labels: gateadas por columna (review, punto 2)', () => {
-  const NO_AREA_SPEC = `## 9. Slices
+  const NO_AREA_SPEC = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | login | backend | modelo | – | AC-1.1 | schema |
@@ -1625,7 +1625,7 @@ describe('ct-groom --dry-run — el exit 3 ante divergencia es una decisión exp
 // cerrado. Antes de este arreglo, el emparejado por marcador barría el REPO
 // ENTERO, así que el contrato §9 ("los # son únicos dentro de su milestone,
 // no del repo") era cierto en /ct-next y falso aquí.
-const TRES_SLICES = (a, b, c) => `## 9. Slices
+const TRES_SLICES = (a, b, c) => `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
 | ${a} | uno | backend | a | – | AC-${a}.1 | – | api | db |

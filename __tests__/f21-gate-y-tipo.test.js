@@ -52,7 +52,7 @@ const SLICE = { n: 7, name: 'barra de progreso', type: 'backend', ac: ['AC-7.1']
 // la parsea no comprueba nada.
 function specWith(rows) {
   return [
-    '## 9. Slices',
+    '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices',
     '',
     '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate |',
     '|---|---|---|---|---|---|---|---|---|---|',
@@ -229,7 +229,7 @@ describe('F21 — columna Gate en la tabla §9', () => {
     // del Tipo exactamente como antes. Un aviso que sale siempre y no describe
     // ninguna degradación es ruido que entrena a ignorar los demás.
     const md = [
-      '## 9. Slices', '',
+      '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices', '',
       '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |',
       '|---|---|---|---|---|---|---|---|---|',
       '| 1 | pantalla | ui | alta | – | AC-1.1 | – | med | app |', '',
@@ -434,7 +434,7 @@ describe('F21 — /ct-groom habla de los gates', () => {
 
   it('el caso por defecto (Tipo ui, sin columna Gate) sigue trayendo su gate sin que nadie declare nada', () => {
     const md = [
-      '## 9. Slices', '',
+      '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices', '',
       '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |',
       '|---|---|---|---|---|---|---|',
       '| 1 | pantalla | ui | alta | – | AC-1.1 | – |', '',

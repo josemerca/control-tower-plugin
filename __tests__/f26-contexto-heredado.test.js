@@ -26,7 +26,7 @@ describe('readEpicContext — la sección del spec y su guardarraíl', () => {
     EPIC_CONTEXT_HEADING,
     cuerpo,
     '',
-    '## 9. Slices',
+    '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices',
     '| # | Slice | Dep |',
     '|---|---|---|',
     '| 1 | A | – |',
@@ -217,7 +217,7 @@ const SLICES_TABLE = [
 // el reparto del texto sólo son ciertos si el wrapper de verdad los conecta.
 describe('/ct-groom --dry-run — el contexto del epic llega al plan', () => {
   it('con la sección en el spec: el texto sale en cada issue del dry-run', () => {
-    const spec = [EPIC_CONTEXT_HEADING, '- una regla común', '', '## 9. Slices', SLICES_TABLE, ''].join('\n')
+    const spec = [EPIC_CONTEXT_HEADING, '- una regla común', '', '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices', SLICES_TABLE, ''].join('\n')
     const res = dryRun(spec)
     expect(res.status).toBe(0)
     const plan = JSON.parse(res.stdout)
@@ -226,7 +226,7 @@ describe('/ct-groom --dry-run — el contexto del epic llega al plan', () => {
   })
 
   it('sin la sección: avisa por stderr y epicContext queda a null', () => {
-    const spec = ['## 9. Slices', SLICES_TABLE, ''].join('\n')
+    const spec = ['## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices', SLICES_TABLE, ''].join('\n')
     const res = dryRun(spec)
     expect(res.status).toBe(0)
     expect(res.stderr).toContain(EPIC_CONTEXT_HEADING)
@@ -237,7 +237,7 @@ describe('/ct-groom --dry-run — el contexto del epic llega al plan', () => {
   it('con una cabecera dentro: avisa nombrando la línea y no emite la sección', () => {
     const spec = [
       EPIC_CONTEXT_HEADING, 'preámbulo', '', '### 1 · Un detalle', 'texto del detalle', '',
-      '## 9. Slices', SLICES_TABLE, '',
+      '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices', SLICES_TABLE, '',
     ].join('\n')
     const res = dryRun(spec)
     expect(res.status).toBe(0)
@@ -484,7 +484,7 @@ const ONE_SLICE_TABLE = [
 ].join('\n')
 
 const specConContexto = (contexto) => [
-  EPIC_CONTEXT_HEADING, contexto, '', '## 9. Slices', ONE_SLICE_TABLE, '',
+  EPIC_CONTEXT_HEADING, contexto, '', '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices', ONE_SLICE_TABLE, '',
 ].join('\n')
 
 function invoke(specText, issues, extraArgs) {
@@ -572,7 +572,7 @@ describe('la rendición del contexto del epic se dice, y sigue sin mover el exit
     '<!-- ct-order:1 -->',
   ].join('\n')
 
-  const spec = [EPIC_CONTEXT_HEADING, '- regla', '', '## 9. Slices', SIN_ANCLA_TABLE, ''].join('\n')
+  const spec = [EPIC_CONTEXT_HEADING, '- regla', '', '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices', SIN_ANCLA_TABLE, ''].join('\n')
   const issue = { number: 501, title: '#1 login', state: 'open', milestone: { title: 'Epic' }, labels: LABELS_1, body: SIN_ANCLA_BODY }
 
   it('lo dice como nota:, nombra el ancla que falta, y no escribe nada', () => {
@@ -726,7 +726,7 @@ describe('C2 — nada de lo que escriba la coordinadora se toca', () => {
 // ============================================================================
 describe('C3 — un delimitador sin cerrar dentro de la sección del spec', () => {
   const specCon = (cuerpo) => [
-    '# Spec', '', EPIC_CONTEXT_HEADING, cuerpo, '', '## 9. Slices',
+    '# Spec', '', EPIC_CONTEXT_HEADING, cuerpo, '', '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices',
     '| # | Slice | Dep |', '|---|---|---|', '| 1 | A | – |',
   ].join('\n')
 
@@ -827,7 +827,7 @@ describe('I1 — "no tengo texto válido" no es "el epic no tiene contexto"', ()
   it('un spec malformado NO retira la sección del cuerpo de los issues', () => {
     const spec = [
       EPIC_CONTEXT_HEADING, 'preámbulo', '', '### 1 · un detalle', 'texto', '',
-      '## 9. Slices', ONE_SLICE_TABLE, '',
+      '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices', ONE_SLICE_TABLE, '',
     ].join('\n')
     const res = invoke(spec, [issueCon('- regla que YA está en el issue')], ['--reconcile'])
     expect(res.status).toBe(0)
@@ -836,7 +836,7 @@ describe('I1 — "no tengo texto válido" no es "el epic no tiene contexto"', ()
   })
 
   it('un spec SIN la sección sí la retira: eso sí significa "el epic no tiene contexto"', () => {
-    const spec = ['## 9. Slices', ONE_SLICE_TABLE, ''].join('\n')
+    const spec = ['## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices', ONE_SLICE_TABLE, ''].join('\n')
     const res = invoke(spec, [issueCon('- regla que YA está en el issue')], ['--reconcile'])
     expect(res.status).toBe(0)
     expect(res.stdout).toMatch(/reconciliado \(orden #1\): .*contexto del epic/)
@@ -856,18 +856,18 @@ describe('I2 — un spec en CRLF no mete \\r en el cuerpo de los issues', () => 
   const crlf = (...lineas) => lineas.join('\r\n')
 
   it('el contenido sale en LF puro', () => {
-    const r = readEpicContext(crlf('# Spec', '', EPIC_CONTEXT_HEADING, '- regla A', '- regla B', '', '## 9. Slices'))
+    const r = readEpicContext(crlf('# Spec', '', EPIC_CONTEXT_HEADING, '- regla A', '- regla B', '', '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices'))
     expect(r.content).toBe('- regla A\n- regla B')
     expect(r.content).not.toContain('\r')
   })
 
   it('el texto leído de un spec CRLF y el del MISMO spec en LF son idénticos', () => {
-    const lineas = ['# Spec', '', EPIC_CONTEXT_HEADING, '- regla A', '- regla B', '', '## 9. Slices']
+    const lineas = ['# Spec', '', EPIC_CONTEXT_HEADING, '- regla A', '- regla B', '', '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices']
     expect(readEpicContext(lineas.join('\r\n')).content).toBe(readEpicContext(lineas.join('\n')).content)
   })
 
   it('no converge nunca: el mismo texto no puede quedar en divergencia perpetua', () => {
-    const contexto = readEpicContext(crlf('# Spec', '', EPIC_CONTEXT_HEADING, '- regla A', '- regla B', '', '## 9. Slices')).content
+    const contexto = readEpicContext(crlf('# Spec', '', EPIC_CONTEXT_HEADING, '- regla A', '- regla B', '', '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices')).content
     const body = [SPEC_LINK_3, '', EPIC_CONTEXT_HEADING, '- regla A', '- regla B', '', '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-1', '', '## Out of scope / Protected', '- 🚫 nada'].join('\n')
     const wanted = { specLink: SPEC_LINK_3, ac: ['AC-1'], deps: [], epicContext: contexto }
     expect(buildReconcileBody(body, wanted).body).toBeNull() // segunda corrida: nada que escribir
@@ -992,7 +992,7 @@ describe('la línea de "reconciliado" nombra lo que se escribió, no lo que dive
       number: 501, title: '#1 login MAL', state: 'open', milestone: { title: 'Epic' },
       labels: LABELS_1, body: conAcDuplicada,
     }
-    const spec = ['## 9. Slices', ONE_SLICE_TABLE, ''].join('\n')
+    const spec = ['## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices', ONE_SLICE_TABLE, ''].join('\n')
     const res = invoke(spec, [issue], ['--reconcile'])
     expect(res.stdout).toMatch(/issue #501 reconciliado \(orden #1\): título/)
     expect(res.stdout).not.toMatch(/reconciliado \(orden #1\):.*criterios de aceptación/)
@@ -1169,7 +1169,7 @@ describe('C2 (2ª oleada) — el motivo de la rendición del epic no afirma de q
       '<!-- ct-order:1 -->',
     ].join('\n')
     const issue = { number: 501, title: '#1 login', state: 'open', milestone: { title: 'Epic' }, labels: LABELS_1, body }
-    const res = invoke(['## 9. Slices', ONE_SLICE_TABLE, ''].join('\n'), [issue], ['--reconcile'])
+    const res = invoke(['## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices', ONE_SLICE_TABLE, ''].join('\n'), [issue], ['--reconcile'])
     expect(res.stderr).toMatch(/NO ha reescrito la sección "## Contexto del epic": no se puede saber dónde termina/)
     expect(res.stderr).not.toMatch(/undefined/)
     // Y no se afirma de quién es el texto, que es lo que este motivo existe para no decir.

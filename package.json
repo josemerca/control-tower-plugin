@@ -1,6 +1,6 @@
 {
   "name": "control-tower-loop",
-  "version": "0.30.0",
+  "version": "0.31.0",
   "type": "module",
   "engines": { "node": ">=24" },
   "scripts": {

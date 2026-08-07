@@ -286,7 +286,11 @@ describe('ct-init.sh', () => {
     expect(table).toContain('| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate |')
     const specDir = mkdtempSync(join(tmpdir(), 'ct-example-'))
     const specPath = join(specDir, 'spec.md')
-    writeFileSync(specPath, `## 9. Desglose en slices\n${table}`)
+    // El envoltorio (hipótesis + cabecera de sección) lo pone el TEST, no el
+    // ejemplo sembrado: el bloque del contrato documenta la TABLA y no crece
+    // por la puerta de congelación de F32 (regla: el contrato no crece sin
+    // quitar). Un spec real lleva su "## Hipótesis" por la plantilla.
+    writeFileSync(specPath, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Desglose en slices\n${table}`)
     // F21: el ejemplo trae ahora una fila con un gate declarado, así que el
     // groom avisa por stderr (es su trabajo: un gate que no viene del Tipo se
     // dice en voz alta). Ese stderr es ESPERADO aquí — se captura en vez de

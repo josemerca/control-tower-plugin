@@ -17,7 +17,7 @@
 // absoluto silencio. No se parafrasea: son las filas exactas del informe
 // del incidente.
 export const REAL_FAILING_TABLE = [
-  '## 9. Slices',
+  '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices',
   '| # | Slice | Qué entrega (visible) | Área | Toca | Depende de |',
   '|---|---|---|---|---|---|',
   '| **S1** | Segmented control + "Plan actual" | La pestaña se parte en dos… | `area:medicacion` | `touches:pbxproj` | — |',
@@ -30,7 +30,7 @@ export const REAL_FAILING_TABLE = [
 // "S1"/"S2" en vez de "#1"/"#2" — deps: [] en silencio, exit 0, grafo de
 // dependencias borrado.
 export const REAL_DEP_TABLE = [
-  '## 9. Slices',
+  '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices',
   '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |',
   '|---|---|---|---|---|---|---|',
   '| 1 | a | ui | primero | – | – | – |',
@@ -50,7 +50,7 @@ export const REAL_DEP_TABLE = [
 // vuelve a ejecutar → aborta en una celda que significa correctamente
 // «ninguna dependencia»".
 export const REAL_TABLE_WITH_HASH_FIXED = [
-  '## 9. Slices',
+  '## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices',
   '| # | Slice | Qué entrega (visible) | Área | Toca | Depende de |',
   '|---|---|---|---|---|---|',
   '| 1 | Segmented control + "Plan actual" | La pestaña se parte en dos… | `area:medicacion` | `touches:pbxproj` | — |',
