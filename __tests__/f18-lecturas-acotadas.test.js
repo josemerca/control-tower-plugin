@@ -23,7 +23,7 @@ import { makeSpecDir } from './fixtures/spec-repo.js'
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-groom.mjs')
 const fakeGhDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-gh-bin')
 
-const SPEC = `## 9. Slices
+const SPEC = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
 | 1 | login | backend | modelo | – | AC-1.1 | – | api | db |

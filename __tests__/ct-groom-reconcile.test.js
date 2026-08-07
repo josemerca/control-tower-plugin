@@ -18,7 +18,7 @@ import { buildIssueBody } from '../scripts/groom.js'
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-groom.mjs')
 const fakeGhDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'fake-gh-bin')
 
-const ONE_SLICE_SPEC = `## 9. Slices
+const ONE_SLICE_SPEC = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
 | 1 | login | backend | modelo | – | AC-1.1 | schema | api | db |
@@ -282,7 +282,7 @@ describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y
   // escenario que preocupaba al coordinador: un autor corrige la tabla §9
   // (añade una dependencia, añade un AC) y antes de este fix no pasaba
   // nada. El slice #2 ya coincide del todo, para aislar la señal.
-  const SPEC_2 = `## 9. Slices
+  const SPEC_2 = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | login | backend | modelo | #2 | AC-1.1, AC-1.2 | schema |
@@ -419,7 +419,7 @@ describe('ct-groom (corrida real) — AC/Dependencias divergentes: se detectan y
 // trae columnas "Área" ni "Toca" — el body que produce es idéntico al de
 // matchingBody (esas columnas no alimentan el body, solo labels), así que
 // se reutiliza.
-const NO_AREA_SPEC = `## 9. Slices
+const NO_AREA_SPEC = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | login | backend | modelo | – | AC-1.1 | schema |
@@ -643,7 +643,7 @@ describe('ct-groom (corrida real) — el enlace al spec es el MISMO se invoque c
 })
 
 describe('ct-groom (corrida real) — un "## Dependencias"/"## Acceptance criteria" duplicado cuenta para el exit code (review round 4, importante 5)', () => {
-  const SPEC_2 = `## 9. Slices
+  const SPEC_2 = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
 |---|---|---|---|---|---|---|
 | 1 | login | backend | modelo | #2 | AC-1.1 | schema |

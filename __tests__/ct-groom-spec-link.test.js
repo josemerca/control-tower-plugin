@@ -36,6 +36,10 @@ const SPEC = `# Plan actual vs propuestas — design
 
 Texto.
 
+## Hipótesis
+
+Apuesta del fixture.
+
 ## 9. Slices
 
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |
@@ -154,7 +158,10 @@ describe('ct-groom — cuando no se puede construir un enlace bueno, no pasa cal
   it('tabla §9 sin ningún encabezado encima → enlace al fichero (que sí sirve) y aviso de que no aterriza en la sección', () => {
     const dir = makeSpecDir('ctg-link-')
     const spec = join(dir, 'spec.md')
-    writeFileSync(spec, '| # | Slice | Dep |\n|---|---|---|\n| 1 | login | – |\n')
+    // La hipótesis va DEBAJO de la tabla a propósito: la premisa del test es
+    // "ningún encabezado ENCIMA de la tabla", y la puerta de congelación (F32)
+    // solo exige que la sección exista en el spec, no dónde.
+    writeFileSync(spec, '| # | Slice | Dep |\n|---|---|---|\n| 1 | login | – |\n\n## Hipótesis\n\nApuesta del fixture.\n')
     const res = run(dir, spec)
     expect(res.status).toBe(0)
     expect(res.stderr).toMatch(/no vive bajo ningún encabezado/)
@@ -187,7 +194,7 @@ describe('ct-groom — cuando no se puede construir un enlace bueno, no pasa cal
   it('encabezado repetido en el documento: la tabla bajo la SEGUNDA copia enlaza al ancla sufijada, no a la primera', () => {
     const dir = makeSpecDir('ctg-link-')
     const spec = join(dir, 'spec.md')
-    writeFileSync(spec, `## 9. Slices\n\n(resumen)\n\n${SPEC.slice(SPEC.indexOf('## 9. Slices'))}`)
+    writeFileSync(spec, `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices\n\n(resumen)\n\n${SPEC.slice(SPEC.indexOf('## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices'))}`)
     const link = planOf(run(dir, spec, [], { FAKE_GH_CONTENTS_ANCHORS: '9-slices 9-slices-1' })).issues[0].specLink
     expect(link).toContain('#9-slices-1')
     rmSync(dir, { recursive: true, force: true })

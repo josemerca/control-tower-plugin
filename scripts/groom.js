@@ -85,6 +85,46 @@ function truncationLine(specMd, loc) {
   return line.trim()
 }
 
+// ============================================================================
+// F32 — LA PUERTA DE CONGELACIÓN (§4.1 del handoff F32). Groom gana UNA
+// comprobación, pre-registrada como "dos greps en la pasada que groom ya
+// hace": el spec no entra si tiene `[NEEDS CLARIFICATION` sin resolver o si
+// `## Hipótesis` falta o está vacía. Sin apuesta falsable no es un epic
+// (decisión de José, 2026-08-07); la CALIDAD de la hipótesis la juzga el
+// humano en la congelación — aquí solo se mira PRESENCIA.
+//
+// A propósito NO reutiliza locateSection: aquello es un extractor con
+// semántica de vallas y comentarios ocultos porque su texto viaja al cuerpo
+// de los issues. Esto es un detector de presencia, y un detector más listo
+// que su pre-registro es un instrumento distinto del que se congeló en §6.
+// El único refinamiento sobre el grep desnudo: un comentario HTML residual
+// de la plantilla no cuenta como contenido de la hipótesis — dejar el
+// placeholder puesto es exactamente el "relleno" que la puerta existe para
+// no dejar pasar en silencio.
+export const HYPOTHESIS_HEADING = '## Hipótesis'
+export const NEEDS_CLARIFICATION_MARKER = '[NEEDS CLARIFICATION'
+export const HYPOTHESIS_REASONS = { OK: 'ok', ABSENT: 'ausente', EMPTY: 'vacia' }
+
+export function analyzeSpecFreeze(specMd) {
+  const lines = normalizeToLF(specMd || '').split('\n')
+  const clarifications = []
+  lines.forEach((raw, i) => {
+    if (raw.includes(NEEDS_CLARIFICATION_MARKER)) clarifications.push({ line: i + 1, raw: raw.trim() })
+  })
+  // Cabecera de nivel 2 exacto cuyo texto EMPIEZA por "Hipótesis" — cubre
+  // "## Hipótesis" y "## Hipótesis del experimento" (la plantilla). Un
+  // "### Hipótesis" no cuenta: el grep pre-registrado es "## Hipótesis".
+  const at = lines.findIndex((l) => /^ {0,3}##[ \t]+Hipótesis(\b|$)/.test(l))
+  if (at === -1) return { hypothesis: HYPOTHESIS_REASONS.ABSENT, clarifications }
+  const body = []
+  for (let i = at + 1; i < lines.length; i++) {
+    if (/^ {0,3}#{1,6}([ \t]|$)/.test(lines[i])) break
+    body.push(lines[i])
+  }
+  const content = body.join('\n').replace(/<!--[\s\S]*?-->/g, '').trim()
+  return { hypothesis: content ? HYPOTHESIS_REASONS.OK : HYPOTHESIS_REASONS.EMPTY, clarifications }
+}
+
 // readEpicContext: lee del fichero de spec el texto que va a viajar, idéntico,
 // al cuerpo de cada issue del epic.
 //

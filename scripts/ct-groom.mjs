@@ -16,7 +16,7 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { resolve as resolvePath, relative as relativePath } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { analyzeSlicesTable, isNoValueCell } from './slices.js'
-import { groomPlan, readEpicContext, EPIC_CONTEXT_HEADING } from './groom.js'
+import { groomPlan, readEpicContext, EPIC_CONTEXT_HEADING, analyzeSpecFreeze, HYPOTHESIS_REASONS } from './groom.js'
 // F10: de "la ruta que me pasaron en argv + --section" a una URL absoluta
 // verificada contra GitHub (o a una referencia honesta sin enlace, diciendo
 // por qué). Ver scripts/spec-link.js para las tres decisiones que toma y por
@@ -192,6 +192,22 @@ const report = analyzeSlicesTable(specMd)
 // aquí se agregan además TODAS las clases que disparan, y se imprimen
 // juntas antes de un único `process.exit(2)`.
 const hardErrors = []
+
+// F32 — la puerta de congelación (ver groom.js#analyzeSpecFreeze): corre
+// sobre el spec ENTERO, antes de cualquier mutación y también bajo --dry-run
+// (misma doctrina que F1: un dry-run que valida menos que la corrida real es
+// una trampa). Se agrega a hardErrors como todo lo demás — las averías de
+// congelación y las de tabla se reportan JUNTAS, un solo exit 2.
+const freeze = analyzeSpecFreeze(specMd)
+if (freeze.clarifications.length) {
+  const first = freeze.clarifications[0]
+  hardErrors.push(`el spec tiene ${freeze.clarifications.length} marcador(es) "[NEEDS CLARIFICATION" sin resolver (ejemplo, línea ${first.line}: "${first.raw}") — se admiten mientras el spec está en DRAFT, pero groom solo acepta specs CONGELADOS y congelar con uno pendiente es inválido: resuélvelo con quien decide, o apárcalo en "## Decisiones aparcadas", y vuelve a intentarlo`)
+}
+if (freeze.hypothesis === HYPOTHESIS_REASONS.ABSENT) {
+  hardErrors.push('el spec no tiene sección "## Hipótesis" — sin apuesta falsable no es un epic y no entra por groom: añade "## Hipótesis del experimento" con la apuesta del epic (su calidad la juzga el humano en la congelación; groom solo mira que exista). El trabajo sin apuesta (mantenimiento, bugfixes) va como issues sueltos, no por groom')
+} else if (freeze.hypothesis === HYPOTHESIS_REASONS.EMPTY) {
+  hardErrors.push('la sección "## Hipótesis" del spec está vacía — escribe la apuesta falsable del epic bajo esa cabecera (un comentario de plantilla que sobrevive no cuenta como apuesta) y vuelve a intentarlo')
+}
 
 if (!report.tableFound) {
   // Distingue "no hay ninguna tabla markdown en el spec" de "hay tabla(s),

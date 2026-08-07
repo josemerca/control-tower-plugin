@@ -203,7 +203,7 @@ describe('F15/H1 — --requeue: devolver a la cola es una DECLARACIÓN de que no
 // ============================================================================
 // H2 — /ct-groom valida el Project ANTES de crear nada. Ahora sí.
 // ============================================================================
-const SPEC = `## 9. Slices
+const SPEC = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |
 |---|---|---|---|---|---|---|---|---|
 | 1 | login | backend | modelo | – | AC-1.1 | – | api | db |
