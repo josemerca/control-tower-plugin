@@ -217,3 +217,44 @@ describe('buildStateSeed / renderKickoff — issue vs. orden §9 (D4, defecto 4)
     expect(k.split('\n')[0]).not.toMatch(/orden #47/)
   })
 })
+
+// F32 — el modelo de dos niveles (handoff §4.3): nivel epic = CT, nivel slice =
+// los skills FORKADOS dentro del plugin. El kickoff es el único texto que el
+// agente despachado lee SEGURO, así que es aquí donde tiene que decir (a) qué
+// skills seguir —los propios, no los de un plugin que la tarea 6 desinstala—,
+// (b) cuál es el primer acto —el plan del slice, escrito contra el código real
+// con el ISSUE como spec—, y (c) las dos prohibiciones que la costura 3 del
+// fork ya impone pero que no pueden depender de que el agente llegue a leerla.
+describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan primero, prohibiciones)', () => {
+  const OPTS = { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs' }
+
+  it('cita los skills PROPIOS (control-tower-loop:*) y ninguna referencia al namespace superpowers:', () => {
+    const k = renderKickoff(SLICE, OPTS)
+    expect(k).toContain('control-tower-loop:subagent-driven-development')
+    expect(k).toContain('control-tower-loop:writing-plans')
+    // Con dos puntos a propósito: `docs/superpowers/plans/` (la ruta-convención
+    // de los planes) sí puede y debe aparecer; el namespace del plugin viejo, no.
+    expect(k).not.toMatch(/superpowers:/)
+  })
+
+  it('el primer acto es el plan del slice: writing-plans con el ISSUE como spec, guardado en docs/superpowers/plans/ y commiteado en el PR', () => {
+    const k = renderKickoff(SLICE, OPTS)
+    expect(k).toMatch(/plan del slice/i)
+    expect(k).toMatch(/issue como spec/i)
+    expect(k).toContain('docs/superpowers/plans/')
+    // El orden en el texto ES el orden de ejecución: el plan (writing-plans)
+    // tiene que aparecer ANTES de seguir con subagent-driven-development —
+    // SDD arranca en su rombo "Have implementation plan?" y la respuesta
+    // tiene que ser sí.
+    expect(k.indexOf('control-tower-loop:writing-plans'))
+      .toBeLessThan(k.indexOf('control-tower-loop:subagent-driven-development'))
+  })
+
+  it('prohibiciones explícitas: NO mergear (el merge es humano) y NO crear worktrees nuevos', () => {
+    const k = renderKickoff(SLICE, OPTS)
+    expect(k).toMatch(/NO mergees/)
+    expect(k).toMatch(/NO crees worktrees/)
+    // La razón de la prohibición del worktree viaja con ella: ya está en uno.
+    expect(k).toMatch(/ya estás en/i)
+  })
+})

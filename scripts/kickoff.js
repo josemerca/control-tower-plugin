@@ -207,7 +207,15 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
   const gateLines = renderGateKickoffLines(resolveGatesForAgent(slice))
   return [
     `Estás implementando UN slice (${slice.name}) del repo ${repo}, issue ${issueRefOf(slice)}${orderSuffixOf(slice)}.`,
-    `Es human-gated: NO empieces el siguiente slice; al terminar deja el PR listo y PARA.`,
+    // F32 — las dos prohibiciones nuevas viven AQUÍ y no solo en los skills
+    // forkados, porque el kickoff es el único texto que el agente despachado
+    // lee SEGURO (la costura 3 de finishing-a-development-branch impone lo
+    // mismo, pero solo si el agente llega a invocar ese skill). "NO crees
+    // worktrees nuevos" existe porque using-git-worktrees viaja en el fork y
+    // le diría que se cree uno: el aislamiento ya lo puso el dispatcher. El
+    // "al terminar deja el PR listo y PARA" que cerraba esta línea se fue a
+    // cambio: lo dice ya, con el comando literal, la línea de cierre de abajo.
+    `Es human-gated: NO mergees el PR (el merge es de la sesión coordinadora), NO empieces el siguiente slice, y NO crees worktrees nuevos — ya estás en el que te preparó el dispatcher.`,
     `Arranque verification-first: confirma pwd/rama, git log, y baseline verde ANTES de tocar nada.`,
     // F21, segundo hallazgo de la misma lente ("ninguna exigencia que el spec
     // le haga al agente puede depender de que el agente lea el spec"): la
@@ -233,7 +241,19 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
     // heredada). Sin ella, un agente que no encuentra lo que se le acaba de
     // nombrar lo busca fuera del issue, que es justo lo que no puede hacer.
     `Lee también las secciones "${EPIC_CONTEXT_HEADING}" y "${INHERITED_CONTEXT_HEADING}" del issue: traen lo que el spec y los slices ya mergeados condicionan sobre este trabajo y que no cabe en los criterios de aceptación. Si alguna está vacía o no aparece, no hay nada que heredar — no lo busques fuera del issue.`,
-    `Sigue superpowers:subagent-driven-development (impl → spec-review → code-review) con TDD.`,
+    // F32 — el modelo de dos niveles (§4.3 del handoff): nivel epic = CT,
+    // nivel slice = los skills FORKADOS en este plugin (control-tower-loop:*,
+    // ver skills/FORK.md) — nunca el namespace superpowers:, que la tarea 6
+    // desinstala. El plan del slice se escribe AQUÍ y no en el spec porque se
+    // escribe contra el código real, en el momento correcto; el issue trae
+    // los AC (EARS), "Protegido" y el "Contexto del epic" — exactamente la
+    // entrada que writing-plans pide como spec. Con el plan commiteado, el
+    // rombo "Have implementation plan?" de subagent-driven-development
+    // encuentra plan y SDD reengancha entero. El paréntesis que enumeraba su
+    // flujo (impl → spec-review → code-review) se quitó a cambio: lo define
+    // el propio skill, y duplicarlo aquí es lo que el fork vuelve innecesario.
+    `Primer acto, con el baseline verde: escribe el plan del slice con control-tower-loop:writing-plans usando el issue como spec (sus AC, "Protegido" y "Contexto del epic" son la entrada que writing-plans pide). Guárdalo en docs/superpowers/plans/ y commitéalo: viaja en el PR.`,
+    `Con el plan escrito, sigue control-tower-loop:subagent-driven-development con TDD.`,
     addendum,
     ...gateLines,
     // W-C: el claim (status:ready → status:in-progress) lo hace /ct-next en
