@@ -1,0 +1,1564 @@
+<title>Control Tower — el loop de desarrollo, paso a paso</title>
+<style>
+  :root {
+    --ground: #F4F7F6;
+    --surface: #FFFFFF;
+    --surface-2: #E9EFED;
+    --ink: #0E1918;
+    --ink-2: #4C5E5C;
+    --ink-3: #748683;
+    --line: #D2DEDB;
+    --line-strong: #B4C4C1;
+    --accent: #0B5D57;
+    --accent-soft: #E0EEEC;
+    --human: #8A5A00;
+    --human-soft: #F7EBD5;
+    --agent: #3A4C8A;
+    --agent-soft: #E4E8F6;
+    --alarm: #9E2B22;
+    --alarm-soft: #F8E4E1;
+    --ok: #2C6738;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, "Helvetica Neue", sans-serif;
+    --measure: 68ch;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0A1110;
+      --surface: #111A19;
+      --surface-2: #17221F;
+      --ink: #E6EDEB;
+      --ink-2: #9BADAA;
+      --ink-3: #7A8C89;
+      --line: #23312F;
+      --line-strong: #33443F;
+      --accent: #4FCDBC;
+      --accent-soft: #14302D;
+      --human: #E0A34A;
+      --human-soft: #2E2313;
+      --agent: #93A4E4;
+      --agent-soft: #1B2038;
+      --alarm: #EE7F70;
+      --alarm-soft: #331A17;
+      --ok: #74C685;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground: #0A1110;
+    --surface: #111A19;
+    --surface-2: #17221F;
+    --ink: #E6EDEB;
+    --ink-2: #9BADAA;
+    --ink-3: #7A8C89;
+    --line: #23312F;
+    --line-strong: #33443F;
+    --accent: #4FCDBC;
+    --accent-soft: #14302D;
+    --human: #E0A34A;
+    --human-soft: #2E2313;
+    --agent: #93A4E4;
+    --agent-soft: #1B2038;
+    --alarm: #EE7F70;
+    --alarm-soft: #331A17;
+    --ok: #74C685;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 0 28px 96px;
+  }
+
+  /* ---------- masthead ---------- */
+
+  .masthead {
+    border-bottom: 2px solid var(--ink);
+    padding: 56px 0 26px;
+    margin-bottom: 40px;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-size: clamp(2.1rem, 5.2vw, 3.3rem);
+    line-height: 1.04;
+    letter-spacing: -0.026em;
+    font-weight: 700;
+    margin: 0 0 18px;
+    text-wrap: balance;
+    max-width: 24ch;
+  }
+  .standfirst {
+    font-size: 1.09rem;
+    color: var(--ink-2);
+    max-width: var(--measure);
+    margin: 0;
+  }
+  .standfirst strong { color: var(--ink); font-weight: 600; }
+
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    margin: 34px 0 0;
+  }
+  .fact { background: var(--surface); padding: 13px 15px; }
+  .fact dt {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 4px;
+  }
+  .fact dd {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 13.5px;
+    font-variant-numeric: tabular-nums;
+    color: var(--ink);
+  }
+
+  /* ---------- generic structure ---------- */
+
+  section { margin: 0 0 76px; }
+
+  h2 {
+    font-size: clamp(1.45rem, 3vw, 1.95rem);
+    line-height: 1.14;
+    letter-spacing: -0.018em;
+    font-weight: 700;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+  .sec-head {
+    border-top: 1px solid var(--ink);
+    padding-top: 14px;
+    margin-bottom: 30px;
+  }
+  .sec-num {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 10px;
+  }
+  .sec-head p {
+    color: var(--ink-2);
+    max-width: var(--measure);
+    margin: 8px 0 0;
+  }
+
+  h3 {
+    font-size: 1.12rem;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+    margin: 0 0 8px;
+  }
+
+  p { max-width: var(--measure); }
+  p.wide { max-width: none; }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.875em;
+    background: var(--surface-2);
+    padding: 0.1em 0.34em;
+    border-radius: 2px;
+  }
+
+  pre {
+    font-family: var(--mono);
+    font-size: 12.6px;
+    line-height: 1.62;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--line-strong);
+    padding: 15px 17px;
+    margin: 0;
+    overflow-x: auto;
+    white-space: pre;
+    tab-size: 2;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  pre .c { color: var(--ink-3); }
+  pre .k { color: var(--accent); }
+  pre .h { color: var(--human); }
+
+  /* ---------- lane chips ---------- */
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 2.5px 7px;
+    border-radius: 2px;
+    white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  .chip::before {
+    content: "";
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .chip-human { color: var(--human); background: var(--human-soft); border-color: color-mix(in oklab, var(--human) 32%, transparent); }
+  .chip-coord { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in oklab, var(--accent) 32%, transparent); }
+  .chip-agent { color: var(--agent); background: var(--agent-soft); border-color: color-mix(in oklab, var(--agent) 32%, transparent); }
+  .chip-hook  { color: var(--ink-2); background: var(--surface-2); border-color: var(--line-strong); }
+
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 18px;
+    align-items: center;
+    margin: 0 0 24px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+  }
+  .legend .lg { display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink-2); }
+
+  /* ---------- figures ---------- */
+
+  figure {
+    margin: 0 0 34px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    padding: 22px 20px 16px;
+  }
+  figure .svg-scroll { overflow-x: auto; }
+  figure svg { max-width: 100%; height: auto; display: block; min-width: 620px; }
+  figcaption {
+    font-size: 13.5px;
+    color: var(--ink-2);
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--line);
+    max-width: 76ch;
+  }
+  figcaption b { color: var(--ink); font-weight: 600; }
+
+  /* ---------- phase + strips ---------- */
+
+  .phase {
+    margin: 0 0 38px;
+  }
+  .phase-bar {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    padding: 10px 14px;
+    margin-bottom: 0;
+  }
+  .phase-bar.is-human { border-left-color: var(--human); }
+  .phase-bar .pb-id {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    color: var(--ink-3);
+  }
+  .phase-bar .pb-name {
+    font-weight: 650;
+    font-size: 1.02rem;
+    letter-spacing: -0.008em;
+  }
+  .phase-bar .pb-note {
+    font-size: 13px;
+    color: var(--ink-2);
+  }
+
+  .strip {
+    display: grid;
+    grid-template-columns: 84px 1fr;
+    border: 1px solid var(--line);
+    border-top: none;
+    background: var(--surface);
+  }
+  .strip-rail {
+    border-right: 1px solid var(--line);
+    background: var(--surface-2);
+    padding: 15px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: flex-start;
+  }
+  .strip-rail .sid {
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.03em;
+    color: var(--ink);
+  }
+  .strip-body { padding: 15px 18px 16px; min-width: 0; }
+  .strip-body > h3 { margin-bottom: 6px; }
+  .strip-body > p { margin: 0 0 12px; font-size: 14.6px; color: var(--ink-2); }
+  .strip-body > p:last-child { margin-bottom: 0; }
+  .strip-body > p strong { color: var(--ink); font-weight: 600; }
+
+  .strip.gate {
+    border-left: 4px solid var(--human);
+  }
+  .strip.gate .strip-rail { background: var(--human-soft); }
+  .strip.gate .sid { color: var(--human); }
+
+  .io {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    margin: 12px 0 0;
+  }
+  .io > div { background: var(--surface-2); padding: 9px 11px; }
+  .io dt {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 3px;
+  }
+  .io dd { margin: 0; font-size: 13.4px; color: var(--ink); }
+  .io dd code { background: var(--surface); }
+
+  .cmd {
+    font-family: var(--mono);
+    font-size: 12.8px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    padding: 8px 11px;
+    margin: 0 0 12px;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  /* ---------- tables ---------- */
+
+  .tbl-scroll { overflow-x: auto; border: 1px solid var(--line); background: var(--surface); margin: 0 0 22px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.6px; min-width: 520px; }
+  th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  thead th {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line-strong);
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td code { white-space: nowrap; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .x-0 { color: var(--ok); font-weight: 600; }
+  .x-warn { color: var(--human); font-weight: 600; }
+  .x-bad { color: var(--alarm); font-weight: 600; }
+
+  /* ---------- artifact cards ---------- */
+
+  .art {
+    border: 1px solid var(--line);
+    background: var(--surface);
+    margin: 0 0 26px;
+  }
+  .art-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface-2);
+  }
+  .art-path {
+    font-family: var(--mono);
+    font-size: 13.4px;
+    font-weight: 600;
+    color: var(--ink);
+    word-break: break-all;
+  }
+  .art-body { padding: 16px; }
+  .art-body > p { margin: 0 0 14px; font-size: 14.6px; color: var(--ink-2); }
+  .art-body > p strong { color: var(--ink); font-weight: 600; }
+  .art-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    margin: 0 0 16px;
+  }
+  .art-meta > div { background: var(--surface-2); padding: 8px 11px; }
+  .art-meta dt {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 2px;
+  }
+  .art-meta dd { margin: 0; font-size: 13.2px; }
+
+  .fmt-label {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 7px;
+  }
+
+  /* ---------- callouts ---------- */
+
+  .note {
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--ink-3);
+    background: var(--surface);
+    padding: 13px 16px;
+    margin: 0 0 22px;
+    font-size: 14.4px;
+    color: var(--ink-2);
+  }
+  .note.warn { border-left-color: var(--human); }
+  .note.bad { border-left-color: var(--alarm); }
+  .note strong { color: var(--ink); font-weight: 650; }
+  .note p { margin: 0; max-width: 76ch; }
+  .note p + p { margin-top: 8px; }
+  .note .nt-title {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    display: block;
+    margin-bottom: 5px;
+  }
+
+  ul.tight { margin: 0 0 14px; padding-left: 22px; max-width: var(--measure); }
+  ul.tight li { margin-bottom: 6px; font-size: 14.6px; color: var(--ink-2); }
+  ul.tight li strong { color: var(--ink); font-weight: 600; }
+
+  details {
+    border: 1px solid var(--line);
+    background: var(--surface);
+    margin: 0 0 14px;
+  }
+  summary {
+    cursor: pointer;
+    padding: 11px 15px;
+    font-weight: 600;
+    font-size: 14.6px;
+    background: var(--surface-2);
+  }
+  details > *:not(summary) { margin: 14px 15px; }
+
+  footer {
+    border-top: 2px solid var(--ink);
+    padding-top: 20px;
+    font-size: 13.4px;
+    color: var(--ink-3);
+  }
+  footer p { max-width: 76ch; }
+
+  @media (max-width: 620px) {
+    .strip { grid-template-columns: 1fr; }
+    .strip-rail {
+      border-right: none;
+      border-bottom: 1px solid var(--line);
+      flex-direction: row;
+      align-items: center;
+      gap: 10px;
+    }
+    .wrap { padding: 0 18px 72px; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">control-tower-loop · plugin de Claude Code · F32</p>
+    <h1>El loop de desarrollo, paso a paso</h1>
+    <p class="standfirst">Un ciclo de desarrollo con agentes en el que la máquina despacha y verifica, y el humano decide exactamente <strong>tres veces</strong>: al congelar el spec, al promover un slice a la cola, y al mergear. Todo lo demás — el parseo del spec, la creación de issues, el aislamiento en worktrees, el claim, el release, la detección de residuo — lo hace el loop. Esta página documenta cada paso y el formato exacto de cada artefacto que viaja entre ellos.</p>
+    <dl class="facts">
+      <div class="fact"><dt>Plugin</dt><dd>0.32.0</dd></div>
+      <div class="fact"><dt>Contrato de slices</dt><dd>v16</dd></div>
+      <div class="fact"><dt>Plantilla del spec</dt><dd>v2</dd></div>
+      <div class="fact"><dt>Skills forkados</dt><dd>11 · sp 6.0.3</dd></div>
+      <div class="fact"><dt>Comandos</dt><dd>4</dd></div>
+      <div class="fact"><dt>Puertas humanas</dt><dd>3</dd></div>
+    </dl>
+  </header>
+
+  <!-- ============ 1. EL MAPA ============ -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">01 / EL MAPA</span>
+      <h2>Tres carriles, cuatro fases, tres puertas</h2>
+      <p>Hay <strong>dos sesiones vivas por repo con papeles opuestos</strong>: la coordinadora, en el checkout principal, que groomea, despacha, revisa y mergea; y una sesión despachada por slice, en su propio worktree, que implementa y para. El humano no está en un carril de ejecución: está en las juntas.</p>
+    </div>
+
+    <div class="legend">
+      <span class="lg"><span class="chip chip-human">Humano</span> decide, no ejecuta</span>
+      <span class="lg"><span class="chip chip-coord">Coordinadora</span> checkout principal</span>
+      <span class="lg"><span class="chip chip-agent">Agente del slice</span> <code>.worktrees/&lt;n&gt;</code></span>
+      <span class="lg"><span class="chip chip-hook">Hook</span> automático, sin sesión</span>
+    </div>
+
+    <figure>
+      <div class="svg-scroll">
+        <svg viewBox="0 0 1000 470" role="img" aria-label="El loop de Control Tower: la coordinadora escribe el design doc y el execution spec, el humano lo congela, ct-groom crea los issues en backlog, el humano los promueve a ready, ct-next despacha un slice a un worktree donde el agente escribe su plan e implementa con TDD y abre un PR, y el humano cierra los gates y mergea, lo que libera los tokens y devuelve el control a ct-next.">
+          <defs>
+            <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="currentColor"/>
+            </marker>
+            <marker id="ar-h" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="#8A5A00"/>
+            </marker>
+          </defs>
+
+          <!-- lane bands -->
+          <g fill="currentColor" opacity="0.045">
+            <rect x="118" y="78"  width="866" height="86"/>
+            <rect x="118" y="214" width="866" height="86"/>
+            <rect x="118" y="350" width="866" height="86"/>
+          </g>
+          <g font-family="ui-monospace, Menlo, monospace" font-size="10.5" letter-spacing="1.4" fill="currentColor" opacity="0.62">
+            <text x="14" y="116">HUMANO</text>
+            <text x="14" y="252">COORDIN.</text>
+            <text x="14" y="388">AGENTE</text>
+          </g>
+          <g stroke="currentColor" opacity="0.16" stroke-width="1">
+            <line x1="118" y1="78"  x2="984" y2="78"/>
+            <line x1="118" y1="164" x2="984" y2="164"/>
+            <line x1="118" y1="214" x2="984" y2="214"/>
+            <line x1="118" y1="300" x2="984" y2="300"/>
+            <line x1="118" y1="350" x2="984" y2="350"/>
+            <line x1="118" y1="436" x2="984" y2="436"/>
+          </g>
+
+          <!-- phase headers -->
+          <g font-family="ui-monospace, Menlo, monospace" font-size="10" letter-spacing="1.3" fill="currentColor" opacity="0.5">
+            <text x="130" y="60">F1 · DISEÑO</text>
+            <text x="440" y="60">F2 · GROOM</text>
+            <text x="640" y="60">F3 · DESPACHO</text>
+            <text x="838" y="60">F4 · CIERRE</text>
+          </g>
+          <g stroke="currentColor" opacity="0.2" stroke-dasharray="3 4">
+            <line x1="424" y1="46" x2="424" y2="440"/>
+            <line x1="624" y1="46" x2="624" y2="440"/>
+            <line x1="822" y1="46" x2="822" y2="440"/>
+          </g>
+
+          <!-- COORD nodes -->
+          <g stroke="#0B5D57" fill="none" stroke-width="1.6">
+            <rect x="130" y="228" width="126" height="58" rx="2"/>
+            <rect x="286" y="228" width="126" height="58" rx="2"/>
+            <rect x="452" y="228" width="150" height="58" rx="2"/>
+            <rect x="652" y="228" width="150" height="58" rx="2"/>
+          </g>
+          <g font-family="-apple-system, system-ui, sans-serif" font-size="12" fill="currentColor" text-anchor="middle">
+            <text x="193" y="251" font-weight="600">brainstorming</text>
+            <text x="193" y="269" opacity="0.68">→ design doc</text>
+            <text x="349" y="251" font-weight="600">execution spec</text>
+            <text x="349" y="269" opacity="0.68">DRAFT + procedencia</text>
+            <text x="527" y="251" font-weight="600">/ct-groom</text>
+            <text x="527" y="269" opacity="0.68">N issues · backlog</text>
+            <text x="727" y="251" font-weight="600">/ct-next</text>
+            <text x="727" y="269" opacity="0.68">claim + worktree</text>
+          </g>
+
+          <!-- HUMAN gates -->
+          <g stroke="#8A5A00" fill="#8A5A00" fill-opacity="0.1" stroke-width="1.6">
+            <rect x="286" y="92" width="126" height="58" rx="2"/>
+            <rect x="452" y="92" width="150" height="58" rx="2"/>
+            <rect x="838" y="92" width="146" height="58" rx="2"/>
+          </g>
+          <g font-family="-apple-system, system-ui, sans-serif" font-size="12" fill="#8A5A00" text-anchor="middle">
+            <text x="349" y="112" font-weight="700">PUERTA 1</text>
+            <text x="349" y="129">congelación</text>
+            <text x="349" y="144" font-size="10.5" opacity="0.85">15 líneas · PARA</text>
+            <text x="527" y="112" font-weight="700">PUERTA 2</text>
+            <text x="527" y="129">status:ready</text>
+            <text x="527" y="144" font-size="10.5" opacity="0.85">promoción manual</text>
+            <text x="911" y="112" font-weight="700">PUERTA 3</text>
+            <text x="911" y="129">gates + merge</text>
+            <text x="911" y="144" font-size="10.5" opacity="0.85">visual / apply</text>
+          </g>
+
+          <!-- AGENT nodes -->
+          <g stroke="#3A4C8A" fill="none" stroke-width="1.6">
+            <rect x="652" y="364" width="150" height="58" rx="2"/>
+            <rect x="838" y="364" width="146" height="58" rx="2"/>
+          </g>
+          <g font-family="-apple-system, system-ui, sans-serif" font-size="12" fill="currentColor" text-anchor="middle">
+            <text x="727" y="387" font-weight="600">plan del slice</text>
+            <text x="727" y="405" opacity="0.68">writing-plans + TDD</text>
+            <text x="911" y="387" font-weight="600">PR + --release</text>
+            <text x="911" y="405" opacity="0.68">Closes #N · PARA</text>
+          </g>
+
+          <!-- arrows -->
+          <g stroke="currentColor" stroke-width="1.5" fill="none" color="currentColor">
+            <line x1="256" y1="257" x2="280" y2="257" marker-end="url(#ar)"/>
+          </g>
+          <g stroke="#8A5A00" stroke-width="1.5" fill="none" color="#8A5A00">
+            <line x1="349" y1="222" x2="349" y2="156" marker-end="url(#ar-h)"/>
+            <path d="M 380 156 L 380 200 L 470 200 L 470 222" marker-end="url(#ar-h)"/>
+            <line x1="527" y1="222" x2="527" y2="156" marker-end="url(#ar-h)"/>
+            <path d="M 560 156 L 560 200 L 670 200 L 670 222" marker-end="url(#ar-h)"/>
+            <line x1="911" y1="358" x2="911" y2="156" marker-end="url(#ar-h)"/>
+          </g>
+          <g stroke="currentColor" stroke-width="1.5" fill="none" color="currentColor">
+            <line x1="727" y1="292" x2="727" y2="358" marker-end="url(#ar)"/>
+            <line x1="802" y1="393" x2="832" y2="393" marker-end="url(#ar)"/>
+          </g>
+          <!-- return arc: merge frees tokens -->
+          <g stroke="#8A5A00" stroke-width="1.5" fill="none" stroke-dasharray="5 4" color="#8A5A00">
+            <path d="M 862 92 C 862 24, 740 20, 727 222" marker-end="url(#ar-h)"/>
+          </g>
+
+          <!-- arrow labels -->
+          <g font-family="ui-monospace, Menlo, monospace" font-size="9.5" fill="currentColor" opacity="0.66">
+            <text x="268" y="248" text-anchor="middle">doc</text>
+            <text x="356" y="180" >resumen</text>
+            <text x="386" y="194" >CONGELADA</text>
+            <text x="534" y="180" >issues</text>
+            <text x="566" y="194" >ready</text>
+            <text x="733" y="326" >kickoff + SLICE.md</text>
+            <text x="817" y="386" text-anchor="middle">PR</text>
+            <text x="920" y="250" >release</text>
+          </g>
+          <g font-family="ui-monospace, Menlo, monospace" font-size="9.5" fill="#8A5A00">
+            <text x="984" y="16" text-anchor="end">merge → issue cerrado → tokens libres → siguiente slice</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption><b>Fig. 1 — El ciclo completo de un epic.</b> Las flechas ámbar cruzan una junta humana; las neutras son automáticas. El arco discontinuo de arriba es el único cierre del bucle: hasta que un PR se mergea y su issue se cierra como <i>completed</i>, ese slice retiene sus tokens de área y ningún vecino que los comparta se despacha.</figcaption>
+    </figure>
+
+    <div class="note">
+      <span class="nt-title">El modelo de dos niveles</span>
+      <p><strong>Control Tower es el patrón de desarrollo dirigido por subagentes, un nivel por encima.</strong> Nivel epic: la tabla de slices es el fichero de plan, <code>/ct-next</code> es el coordinador, la sesión despachada es el implementador, y la revisión humana del PR es el <i>two-stage review</i>. Nivel slice: dentro del worktree corre el conjunto entero de skills forkados — <code>writing-plans</code>, <code>subagent-driven-development</code>, <code>test-driven-development</code>, <code>systematic-debugging</code>. El mismo patrón, dos escalas.</p>
+    </div>
+  </section>
+
+  <!-- ============ 2. LOS PASOS ============ -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">02 / LOS PASOS</span>
+      <h2>Dieciséis pasos, de la idea al merge</h2>
+      <p>Cada paso dice quién lo ejecuta, con qué comando, qué lee y qué escribe. Los pasos con carril ámbar son los que no puede hacer la máquina.</p>
+    </div>
+
+    <!-- FASE 0 -->
+    <div class="phase">
+      <div class="phase-bar">
+        <span class="pb-id">FASE 0</span>
+        <span class="pb-name">Bootstrap</span>
+        <span class="pb-note">una vez por repo · <code>/ct-init</code></span>
+      </div>
+
+      <div class="strip">
+        <div class="strip-rail">
+          <span class="sid">S0</span>
+          <span class="chip chip-coord">Coord.</span>
+        </div>
+        <div class="strip-body">
+          <h3>Preparar el repo para el loop</h3>
+          <p>El scaffolder siembra el terreno y <strong>nada más</strong>: no es un planificador. Deja el contrato de la tabla de slices dentro de <code>AGENTS.md</code>, delimitado por marcadores y con su propia versión, para que quien escriba specs para ese repo tenga la cabecera exacta a mano. Rellenar los comandos reales del repo (build, test, lint, CI) en <code>AGENTS.md</code> sí exige explorar.</p>
+          <div class="cmd">bash ${CLAUDE_PLUGIN_ROOT}/scripts/ct-init.sh "$(pwd)"</div>
+          <p><strong>Dos avisos que hay que transmitir enteros, no resolver:</strong> si el repo ya traía su propio protocolo de claim, su propia ruta de worktrees o su propio fichero de estado, elegir cuál manda es decisión del usuario. Y si dice que <em>no se ha podido comprobar</em> (falta <code>node</code>), eso no es «no hay ninguna».</p>
+          <div class="io">
+            <div><dt>Escribe</dt><dd><code>.agent/STATE.md</code>, <code>AGENTS.md</code> (bloque del contrato), <code>.gitignore</code> (<code>.worktrees/</code> + <code>.agent/SLICE.md</code>)</dd></div>
+            <div><dt>No hace</dt><dd>No rellena <code>next_action</code> — se queda en <code>(sin slice asignado)</code>. No registra el repo en el tower.</dd></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FASE 1 -->
+    <div class="phase">
+      <div class="phase-bar">
+        <span class="pb-id">FASE 1</span>
+        <span class="pb-name">Diseño y congelación</span>
+        <span class="pb-note">nivel epic · <code>control-tower-loop:brainstorming</code></span>
+      </div>
+
+      <div class="strip">
+        <div class="strip-rail"><span class="sid">S1</span><span class="chip chip-coord">Coord.</span></div>
+        <div class="strip-body">
+          <h3>Explorar y preguntar, una pregunta a la vez</h3>
+          <p>Contexto del proyecto primero (ficheros, docs, commits recientes). Después, <strong>una sola pregunta por mensaje</strong>, preferiblemente de opción múltiple, sobre propósito, restricciones y criterios de éxito. Si el encargo describe varios subsistemas independientes, se señala <em>antes</em> de refinar detalles: eso se descompone en sub-proyectos, cada uno con su propio ciclo.</p>
+          <p>Luego 2–3 enfoques con sus <em>trade-offs</em> y una recomendación liderando, no una lista exhaustiva. Y el diseño presentado <strong>por secciones</strong>, pidiendo el visto bueno de cada una.</p>
+          <div class="io">
+            <div><dt>Puerta dura del skill</dt><dd>Cero código, cero scaffolding, cero skills de implementación hasta que el diseño esté aprobado. También en proyectos «triviales».</dd></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="strip">
+        <div class="strip-rail"><span class="sid">S2</span><span class="chip chip-coord">Coord.</span></div>
+        <div class="strip-body">
+          <h3>Escribir el design doc y auto-revisarlo</h3>
+          <p>Se commitea en <code>docs/superpowers/specs/YYYY-MM-DD-&lt;tema&gt;-design.md</code>. Después, cuatro pasadas con ojos frescos: <strong>placeholders</strong> (TBD, TODO, secciones a medias), <strong>consistencia interna</strong>, <strong>alcance</strong> (¿cabe en un plan?) y <strong>ambigüedad</strong> (si algo admite dos lecturas, se elige una y se hace explícita). Se arregla en el sitio; no hay segunda ronda.</p>
+          <div class="io">
+            <div><dt>Escribe</dt><dd><code>…-design.md</code>, commiteado</dd></div>
+            <div><dt>Destino</dt><dd>Será el <code>Handoff origen</code> del execution spec. Tras la congelación es historia: nadie lo edita.</dd></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="strip">
+        <div class="strip-rail"><span class="sid">S3</span><span class="chip chip-coord">Coord.</span></div>
+        <div class="strip-body">
+          <h3>Escribir el execution spec en DRAFT</h3>
+          <p>Un fichero por epic, desde <code>_TEMPLATE-execution-spec.md</code>. No es «el join y nada más»: es <strong>el registro del join y de sus entradas comprimidas</strong>, con un criterio único de qué entra — <em>lo que el ejecutor necesita y no puede derivar</em>.</p>
+          <p><strong>Cada decisión congelada lleva su procedencia:</strong> <code>hablada</code> (con la cita si se tiene), <code>deducida</code> (se sigue de una hablada o de una regla ya escrita del repo) o <code>propuesta</code> (la pone el agente). Regla dura: <strong>una <code>propuesta</code> no se congela</strong> — se pregunta, y entonces es hablada, o baja a «Decisiones aparcadas». Los huecos no se rellenan.</p>
+          <div class="io">
+            <div><dt>Escribe</dt><dd><code>…-execution.md</code>, Estado: DRAFT</dd></div>
+            <div><dt>Admitido en DRAFT</dt><dd><code>[NEEDS CLARIFICATION: …]</code></dd></div>
+            <div><dt>Prohibido aquí</dt><dd>El plan de cada slice. Se escribe después, contra el código real.</dd></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="strip gate">
+        <div class="strip-rail"><span class="sid">S4</span><span class="chip chip-human">Humano</span></div>
+        <div class="strip-body">
+          <h3>Puerta 1 — la congelación</h3>
+          <p>Esta puerta existe por una frase: <em>«yo no me suelo leer los specs, doy por hecho que lo hablado durante el brainstorming es ok y va al spec»</em>. Si el humano no lee el spec, quien lo escribe podría cerrar decisiones con firma ajena. La respuesta son las dos piezas de S3 (procedencia) y esta puerta.</p>
+          <p><strong>Se presentan como mucho quince líneas</strong>, en el chat, que caben en una pantalla: la hipótesis en una o dos líneas, cada decisión congelada a una línea con su etiqueta de procedencia, y el anti-scope. <strong>Y se para.</strong></p>
+          <div class="io">
+            <div><dt>El OK muta</dt><dd><code>DRAFT → CONGELADA</code> + fecha de congelación</dd></div>
+            <div><dt>Si pide cambios</dt><dd>Se corrige el spec y se vuelve a presentar el resumen</dd></div>
+            <div><dt>Sin OK</dt><dd>No hay groom. Es la única lectura del ciclo, por diseño.</dd></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FASE 2 -->
+    <div class="phase">
+      <div class="phase-bar">
+        <span class="pb-id">FASE 2</span>
+        <span class="pb-name">Groom</span>
+        <span class="pb-note">spec → GitHub · <code>/ct-groom</code></span>
+      </div>
+
+      <div class="strip">
+        <div class="strip-rail"><span class="sid">S5</span><span class="chip chip-coord">Coord.</span></div>
+        <div class="strip-body">
+          <h3>Groom en seco: la puerta de congelación y la validación de la tabla</h3>
+          <div class="cmd">node ${CLAUDE_PLUGIN_ROOT}/scripts/ct-groom.mjs "&lt;spec&gt;" --repo "&lt;owner/repo&gt;" --milestone "&lt;Epic&gt;" --dry-run</div>
+          <p>Antes incluso de mirar la tabla, <strong>dos comprobaciones sobre el spec entero</strong> — dos greps en la pasada que groom ya hacía:</p>
+          <ul class="tight">
+            <li><strong><code>[NEEDS CLARIFICATION</code> sin resolver → exit 2.</strong> Se admiten en DRAFT; congelar con un hueco pendiente es inválido. El mensaje nombra cuántos hay y la línea del primero.</li>
+            <li><strong><code>## Hipótesis</code> ausente o vacía → exit 2.</strong> Sin apuesta falsable no es un epic. El trabajo sin apuesta (mantenimiento, bugfixes) va como issues sueltos. Groom solo mira presencia; la <em>calidad</em> la juzga el humano al congelar.</li>
+          </ul>
+          <p>Después, la tabla entera, y <strong>todos los fallos juntos en un único exit 2</strong>: cabecera sin <code>Slice</code>+<code>Dep</code>, falta la columna <code>#</code>, hueco a mitad del bloque, un <code>#</code> que no es entero puro, filas con celdas de más o de menos, <code>Dep</code> ilegible o apuntando a un <code>#</code> inexistente o a sí misma, un <code>Gate</code> fuera del vocabulario, o una fila que pide y renuncia al mismo gate.</p>
+          <p><strong>El dry-run valida exactamente lo mismo que la corrida real</strong> — un dry-run que valida menos es una trampa. Con <code>--repo</code> ya no es offline: lee los issues de verdad para poder comparar.</p>
+        </div>
+      </div>
+
+      <div class="strip">
+        <div class="strip-rail"><span class="sid">S6</span><span class="chip chip-coord">Coord.</span></div>
+        <div class="strip-body">
+          <h3>Groom real: un issue por fila</h3>
+          <div class="cmd">node ${CLAUDE_PLUGIN_ROOT}/scripts/ct-groom.mjs "&lt;spec&gt;" --repo "&lt;owner/repo&gt;" --milestone "&lt;Epic&gt;" --project &lt;n&gt;</div>
+          <p><strong>Todo lo que lee va por delante de todo lo que escribe.</strong> Validación, resolución y verificación del enlace al spec, enumeración de issues, labels, milestones y — con <code>--project</code> — la introspección del Project v2 (que exige un campo de iteración llamado exactamente <code>Sprint</code> y una iteración que cubra hoy). Si aborta en cualquiera de esos pasos, no ha creado nada.</p>
+          <p>Superada la validación, el orden de escritura es <strong>milestone → labels → issues → alta en el Project con su Sprint</strong>. No hay transacción y no se finge que la haya: un fallo de red ahí deja creado lo anterior. De un abort a mitad se sale <strong>volviendo a correr, no limpiando a mano</strong>: el milestone se reutiliza por título, de las labels solo se crean las que faltan, y los issues se reconocen por su marcador <code>&lt;!-- ct-order:N --&gt;</code>.</p>
+          <div class="io">
+            <div><dt>Alcance</dt><dd>Una invocación = un milestone = un epic. Los <code>#</code> son 1..N <strong>por epic</strong>: cada spec puede empezar en 1.</dd></div>
+            <div><dt>Idempotencia</dt><dd>Solo por existencia. Reportar divergencia ≠ converger: sin <code>--reconcile</code> nunca edita un issue existente (exit 3).</dd></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="strip gate">
+        <div class="strip-rail"><span class="sid">S7</span><span class="chip chip-human">Humano</span></div>
+        <div class="strip-body">
+          <h3>Puerta 2 — promover a la cola</h3>
+          <p>Groom crea los issues en <code>status:backlog</code>, <strong>nunca en <code>status:ready</code></strong>. Es una gate humana deliberada: <code>/ct-next</code> no considera despachable nada que no esté en <code>ready</code>.</p>
+          <div class="cmd">gh issue edit &lt;n&gt; --repo &lt;owner/repo&gt; --add-label status:ready --remove-label status:backlog</div>
+          <p>Si <code>/ct-next</code> responde «No hay slices despachables» justo después de un groom, es casi seguro que sea esto. Al terminar, groom recuerda por stderr cuántos issues del epic siguen en backlog — contando también los que ya existían, porque el criterio es el estado real, no «acabo de crear algo».</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- FASE 3 -->
+    <div class="phase">
+      <div class="phase-bar">
+        <span class="pb-id">FASE 3</span>
+        <span class="pb-name">Despacho e implementación</span>
+        <span class="pb-note">nivel slice · <code>/ct-next</code> + skills forkados</span>
+      </div>
+
+      <div class="strip">
+        <div class="strip-rail"><span class="sid">S8</span><span class="chip chip-coord">Coord.</span></div>
+        <div class="strip-body">
+          <h3>Dry-run del dispatcher: comprobar lo que el run real necesita</h3>
+          <div class="cmd">node ${CLAUDE_PLUGIN_ROOT}/scripts/ct-next.mjs --repo "&lt;owner/repo&gt;" --cap 1 --dry-run</div>
+          <p>Verifica que <code>cmux</code> esté en el PATH, que el agente se vea desde aquí (solo aviso: quien lo resuelve de verdad es el shell de login), que el <code>CLAUDE_CONFIG_DIR</code> resuelto exista, que el worktree y la rama <code>feat/&lt;n&gt;</code> estén libres, y que el kickoff se renderice. <strong>Las mismas comprobaciones corren en la corrida real antes de escribir ningún claim.</strong></p>
+          <p>Imprime el kickoff en prosa legible — lo único que permite juzgar el prompt que recibirá el agente — y <strong>la tanda entera</strong>, con el problema de cada slice anotado en su propio bloque y un resumen de cuál rompería primero.</p>
+          <div class="io">
+            <div><dt>Canal</dt><dd>stdout = el producto (plan, selección, motivo de bloqueo). stderr = diagnóstico (<code>aviso:</code>, <code>ATENCIÓN:</code>, abortos).</dd></div>
+            <div><dt>Cuenta</dt><dd>Imprime siempre qué cuenta de Claude ha elegido, por qué regla, y qué wrapper se teclea.</dd></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="strip">
+        <div class="strip-rail"><span class="sid">S9</span><span class="chip chip-coord">Coord.</span></div>
+        <div class="strip-body">
+          <h3>Despachar: claim, worktree, semilla, lanzamiento verificado</h3>
+          <div class="cmd">node ${CLAUDE_PLUGIN_ROOT}/scripts/ct-next.mjs --repo "&lt;owner/repo&gt;" --cap 1</div>
+          <p>Cinco actos, en orden, y cada uno con su reverso si falla:</p>
+          <ul class="tight">
+            <li><strong>Diagnóstico primero.</strong> Colisión de orden, ambigüedad de <code>status:</code>, dependencias fuera de sección — impresos <em>antes</em> de seleccionar nada. Nunca bloquean por sí solos.</li>
+            <li><strong>Selección.</strong> Por orden dentro del epic, con las <code>merge-after</code> satisfechas (issue cerrado como <em>completed</em>), sin colisión de tokens <code>area:</code>/<code>touches:</code> y con hueco de <code>--cap</code>.</li>
+            <li><strong>Claim en código,</strong> no por prompt: <code>dispatch-check &lt;issue&gt; --repo &lt;repo&gt;</code> mueve <code>ready → in-progress</code> ANTES de crear el worktree.</li>
+            <li><strong>Aislamiento.</strong> <code>.worktrees/&lt;n&gt;</code> + rama <code>feat/&lt;n&gt;</code>, semilla de <code>.agent/SLICE.md</code>, y la regla de ignorado escrita en el <code>info/exclude</code> del directorio común — <strong>con verificación del efecto</strong>: si <code>git status</code> sigue viendo el fichero, el dispatch se aborta y el claim se revierte.</li>
+            <li><strong>Lanzamiento con centinela.</strong> <code>cmux --command</code> no ejecuta: <em>teclea</em>. Se teclea una línea corta que sourcea un launcher en disco (el kickoff viaja por fichero, donde ningún prompt puede morderlo), y ese launcher escribe un centinela con el <code>$PWD</code> real. Sin centinela no se dice «lanzado»: se reintenta el tecleo cada 2500 ms hasta agotar los 15 s de presupuesto.</li>
+          </ul>
+          <div class="note bad">
+            <span class="nt-title">La regla que queda</span>
+            <p>Si no se puede confirmar que el agente arrancó, el resultado no puede ser «lanzado» con exit 0. Y con el centinela ausente al agotarse la cota <strong>tampoco se revierte el claim</strong>: revertirlo con un agente que arranca tarde destruiría trabajo vivo, mientras que el residuo declarado con sus comandos exactos es recuperable.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="strip">
+        <div class="strip-rail"><span class="sid">S10</span><span class="chip chip-hook">Hook</span></div>
+        <div class="strip-body">
+          <h3>Hidratación y arranque verification-first</h3>
+          <p>El hook <code>SessionStart</code> inyecta el estado en toda sesión nueva del worktree. La regla de precedencia es única para todos los lectores: <strong>si existe <code>.agent/SLICE.md</code>, ése es el estado; si no, <code>.agent/STATE.md</code></strong>. La presencia del fichero es la señal de «estoy en un worktree de slice» — no hay variable de entorno ni detección de rutas. Y todo mensaje nombra el fichero que de verdad leyó, no una constante.</p>
+          <p>El primer acto del agente no es tocar código: <strong>confirmar <code>pwd</code>/rama, <code>git log</code>, y baseline verde antes de nada.</strong></p>
+          <div class="io">
+            <div><dt>Si <code>blocked</code> está puesto</dt><dd>El hook lo anuncia destacado y declara el <code>next_action</code> SUSPENDIDO. Levantarlo es una decisión humana explícita.</dd></div>
+            <div><dt>Hook <code>Stop</code></dt><dd>Bloquea el cierre de turno si hay trabajo por encima de <code>last_commit</code> sin registrar. Un commit que solo toca el fichero de estado no cuenta.</dd></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="strip">
+        <div class="strip-rail"><span class="sid">S11</span><span class="chip chip-agent">Agente</span></div>
+        <div class="strip-body">
+          <h3>Primer acto: el plan del slice, contra el código real</h3>
+          <p>El plan del epic (<code>## Enfoque técnico</code>) es previo a la tabla. El <strong>plan del slice</strong> es posterior, y lo escribe el agente despachado al arrancar con <code>control-tower-loop:writing-plans</code> <strong>usando el issue como spec</strong>: sus AC en EARS, su <code>## Out of scope / Protected</code> y su <code>## Contexto del epic</code> son exactamente la entrada que writing-plans pide.</p>
+          <p>Se guarda en <code>docs/superpowers/plans/</code> y se commitea: <strong>viaja en el PR</strong>. Con el plan escrito, el rombo «¿hay plan?» de <code>subagent-driven-development</code> encuentra plan y el skill reengancha entero.</p>
+          <div class="io">
+            <div><dt>Por qué aquí</dt><dd>Se escribe contra el código real, en el momento correcto. Un plan escrito en el spec sería un plan escrito a ciegas.</dd></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="strip">
+        <div class="strip-rail"><span class="sid">S12</span><span class="chip chip-agent">Agente</span></div>
+        <div class="strip-body">
+          <h3>Implementar: subagente por task, TDD, dos revisiones</h3>
+          <p><code>control-tower-loop:subagent-driven-development</code> con TDD: un subagente fresco por task, revisión entre tasks, iteración rápida. Los <code>Acepta</code> del issue son <strong>1:1 con tests</strong> — es lo que significa la cabecera <code>## Acceptance criteria (EARS, 1:1 con tests)</code>.</p>
+          <p>Lo que el agente <strong>no</strong> hace, dicho en el kickoff y no solo en los skills: no mergea el PR, no empieza el siguiente slice, y <strong>no crea worktrees nuevos</strong> — el aislamiento ya lo puso el dispatcher.</p>
+          <div class="io">
+            <div><dt>Si se bloquea</dt><dd><code>blocked: {reason, unblock}</code> en <code>.agent/SLICE.md</code>, <strong>nunca en prosa dentro de <code>next_action</code></strong>. El dispatcher lee ese campo y lo reporta con el motivo que el propio agente escribió.</dd></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="strip">
+        <div class="strip-rail"><span class="sid">S13</span><span class="chip chip-agent">Agente</span></div>
+        <div class="strip-body">
+          <h3>Cerrar el slice: PR, release, parar</h3>
+          <p><code>finishing-a-development-branch</code> tiene un paso 0 nuevo: si existe <code>.agent/SLICE.md</code>, <strong>no hay menú</strong>. El camino es fijo: tests verdes → push + PR → comando literal de release → <strong>PARAR</strong>.</p>
+          <div class="cmd">node &lt;dispatch-check&gt; &lt;issue&gt; --repo &lt;owner/repo&gt; --release</div>
+          <p>El PR lleva <code>Closes #N</code> <strong>en el cuerpo</strong> — no en el título, no en un comentario: GitHub solo interpreta las closing keywords en el cuerpo del PR y en los mensajes de commit. Y no es cosmético: es lo único que cierra el issue al mergear. Un PR mergeado con su issue abierto deja el slice reteniendo sus tokens para siempre, tapa el carril serializante, y ningún dependiente ve su <code>merge-after</code> satisfecho jamás.</p>
+          <div class="io">
+            <div><dt><code>--release</code> suelta</dt><dd>El <code>--cap</code>: deja de contar como agente vivo.</dd></div>
+            <div><dt><code>--release</code> NO suelta</dt><dd>Los tokens <code>area:</code>/<code>touches:</code>. Un <code>in-review</code> los retiene <strong>hasta el merge</strong>.</dd></div>
+            <div><dt>Puerta de contaminación</dt><dd>Se niega con exit 5 si la rama introduce <code>.agent/STATE.md</code> o <code>.agent/SLICE.md</code>, si la base no se puede determinar, o si la base resuelta es el mismo commit que HEAD.</dd></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- FASE 4 -->
+    <div class="phase">
+      <div class="phase-bar is-human">
+        <span class="pb-id">FASE 4</span>
+        <span class="pb-name">Cierre y cosecha</span>
+        <span class="pb-note">humano + <code>/ct-status</code></span>
+      </div>
+
+      <div class="strip gate">
+        <div class="strip-rail"><span class="sid">S14</span><span class="chip chip-human">Humano</span></div>
+        <div class="strip-body">
+          <h3>Puerta 3 — revisar, cerrar gates, decidir</h3>
+          <p>Dos gates humanos, vocabulario cerrado: <strong><code>visual</code></strong> — un humano tiene que VER el cambio, con captura o vídeo del antes/después en el PR; <strong><code>apply</code></strong> — nada se aplica contra un entorno real hasta que un humano revise el plan o el dry-run.</p>
+          <p>El loop <strong>escribe y enseña</strong> los gates — label <code>gate:&lt;token&gt;</code>, sección <code>## Gates</code> del issue, línea explícita en el kickoff, campo <code>gates</code> del <code>SLICE.md</code> — pero <strong>no impide mergear con uno sin cerrar</strong>. El que los cierra es el humano.</p>
+          <div class="cmd">node ${CLAUDE_PLUGIN_ROOT}/scripts/ct-status.mjs --repo "&lt;owner/repo&gt;"</div>
+          <p><code>/ct-status</code> responde de una vez la pregunta que el coordinador se contestaba a mano: qué está en vuelo, qué ha entregado y qué es residuo. <strong>No muta nada</strong> — ni una escritura en todo el camino, con un test que lo comprueba mirando el argv real con el que se llamó a <code>gh</code>. Y ninguna lectura lleva <code>--limit</code>: todo pagina.</p>
+          <div class="note warn">
+            <span class="nt-title">Una regla que el informe no puede aplicar por ti</span>
+            <p>Lo que compruebes antes de mergear tiene que poder detener el merge. Este comando imprime; no bloquea nada. Una comprobación cuyo resultado no detiene la acción siguiente es decoración, no comprobación.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="strip gate">
+        <div class="strip-rail"><span class="sid">S15</span><span class="chip chip-human">Humano</span></div>
+        <div class="strip-body">
+          <h3>Mergear — el único acto que desbloquea a los vecinos</h3>
+          <p>El merge dispara la cadena entera: <code>Closes #N</code> cierra el issue como <em>completed</em> → los tokens <code>area:</code>/<code>touches:</code> quedan libres → el <code>merge-after</code> de cada dependiente pasa a estar satisfecho. Ni el <code>--release</code>, ni el <code>--reopen</code>, ni nada automático hace esto.</p>
+          <div class="io">
+            <div><dt>Consecuencia práctica</dt><dd>Un PR sin mergear frena a sus vecinos de área. Reabrir tampoco los desbloquea: lo único que los desbloquea es el merge.</dd></div>
+            <div><dt>Trampa conocida</dt><dd>Las closing keywords de <strong>cualquier mensaje de commit</strong> que llegue a la rama por defecto aplican, y las comillas no protegen. El dispatcher <em>avisa</em> cuando una dependencia consta cerrada por un commit suelto que no pertenece a ningún PR mergeado — pero no bloquea.</dd></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="strip">
+        <div class="strip-rail"><span class="sid">S16</span><span class="chip chip-coord">Coord.</span></div>
+        <div class="strip-body">
+          <h3>Cosechar el residuo y anotar la evidencia</h3>
+          <p>Todos los caminos del plugin que borran un worktree son de fallo; <strong>ninguno cubre el éxito</strong>. Observado en campo: PR mergeado, issue cerrado, y <code>.worktrees/451</code> + <code>feat/451</code> seguían en disco con su agente trece horas vivo. Con seis slices son seis checkouts, seis ramas muertas y seis agentes zombis — y el worktree de un slice terminado <strong>bloquea el redespacho de ese número</strong>.</p>
+          <div class="cmd">git worktree remove .worktrees/&lt;n&gt;   &amp;&amp;   git branch -d feat/&lt;n&gt;</div>
+          <p>Cada corrida de <code>/ct-next</code> cruza los issues mergeados contra el disco y emite <code>cosecha pendiente:</code> con los comandos exactos. <strong>No borra nada</strong>, y es deliberado: «mergeado» no es «nadie está tocando eso», y borrar un worktree es irreversible. Por último, el <code>## Registro de cierre</code> del spec recoge la evidencia con la que se cerró cada gate — un gate cerrado sin evidencia es un gate no cerrado.</p>
+          <div class="io">
+            <div><dt>Y vuelta al S8</dt><dd>Con los tokens libres y el worktree cosechado, el siguiente slice del epic ya es despachable.</dd></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="margin-top:44px">Las aristas de vuelta</h3>
+    <p>Tres salidas de la senda feliz, todas deliberadamente manuales: nada automático las invoca.</p>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Situación</th><th>Comando</th><th>Transición</th><th>Qué comprueba antes</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>PR rechazado en revisión</strong> — se corrige encima de lo que hay</td>
+            <td><code>dispatch-check &lt;n&gt; --reopen</code></td>
+            <td class="num">in-review → <strong>in-progress</strong></td>
+            <td>Exige <code>status:in-review</code> exacto (exit 2 si no). Va a <code>in-progress</code> y no a <code>ready</code> porque <code>ready</code> no retiene tokens y un vecino se despacharía sobre una base que no contiene ese trabajo. No borra nada del disco: imprime qué queda.</td>
+          </tr>
+          <tr>
+            <td><strong>Abandonar el slice</strong> — empezar de cero, o romper un claim muerto</td>
+            <td><code>dispatch-check &lt;n&gt; --requeue</code></td>
+            <td class="num">in-progress → <strong>ready</strong></td>
+            <td>La única transición que suelta tokens sin merge, así que comprueba antes de declarar: exige <code>in-progress</code> exacto y que no queden ni <code>.worktrees/&lt;n&gt;</code> ni <code>feat/&lt;n&gt;</code>. Si no ha podido mirar, se niega: no se declara ausente lo que no se ha visto.</td>
+          </tr>
+          <tr>
+            <td><strong>Trabajo bloqueado</strong> — no se puede continuar</td>
+            <td>Campo <code>blocked</code> del <code>SLICE.md</code></td>
+            <td class="num">— (sin transición)</td>
+            <td>Ninguna transición del loop lo saca de ahí: el claim rancio no lo ve (worktree y rama existen), <code>--requeue</code> se niega por eso mismo, y <code>--release</code> mentiría. El dispatcher lo lee y avisa. <strong>No hay arreglo automático: es una decisión humana.</strong></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 3. LA MÁQUINA DE ESTADOS ============ -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">03 / EL ESTADO</span>
+      <h2>Un slice es una label</h2>
+      <p>No hay base de datos. El estado de un slice son las labels de su issue de GitHub, y el timeline del issue registra cada transición con su timestamp. Eso hace que el estado sobreviva a un <code>/clear</code>, a un redespacho y a otra máquina — y que dos recursos distintos, el <code>--cap</code> y los tokens de área, se liberen en momentos distintos.</p>
+    </div>
+
+    <figure>
+      <div class="svg-scroll">
+        <svg viewBox="0 0 960 340" role="img" aria-label="Máquina de estados de un slice: groom crea el issue en status backlog, el humano lo promueve a ready, dispatch-check lo reclama a in-progress, el release lo pasa a in-review, y el merge con Closes lo cierra como completed. Reopen vuelve de in-review a in-progress y requeue de in-progress a ready. El cap está ocupado solo en in-progress; los tokens de área se retienen en in-progress y en in-review hasta el merge.">
+          <defs>
+            <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M 0 1 L 10 5 L 0 9 z" fill="currentColor"/>
+            </marker>
+          </defs>
+
+          <!-- annotation brackets -->
+          <g stroke="#8A5A00" fill="none" stroke-width="1.4">
+            <path d="M 336 96 L 336 74 L 486 74 L 486 96"/>
+            <path d="M 336 52 L 336 34 L 866 34 L 866 52"/>
+          </g>
+          <g font-family="ui-monospace, Menlo, monospace" font-size="10.5" fill="#8A5A00" text-anchor="middle">
+            <text x="411" y="66">ocupa --cap</text>
+            <text x="601" y="26">retiene area: / touches:  —  hasta el merge</text>
+          </g>
+
+          <!-- states -->
+          <g stroke="currentColor" fill="none" stroke-width="1.6">
+            <rect x="24"  y="120" width="118" height="52" rx="2"/>
+            <rect x="186" y="120" width="118" height="52" rx="2"/>
+            <rect x="348" y="120" width="126" height="52" rx="2"/>
+            <rect x="518" y="120" width="126" height="52" rx="2"/>
+          </g>
+          <g stroke="#2C6738" fill="#2C6738" fill-opacity="0.08" stroke-width="1.8">
+            <rect x="688" y="120" width="150" height="52" rx="2"/>
+          </g>
+          <g font-family="ui-monospace, Menlo, monospace" font-size="12" fill="currentColor" text-anchor="middle">
+            <text x="83"  y="144">status:</text><text x="83"  y="160" font-weight="700">backlog</text>
+            <text x="245" y="144">status:</text><text x="245" y="160" font-weight="700">ready</text>
+            <text x="411" y="144">status:</text><text x="411" y="160" font-weight="700">in-progress</text>
+            <text x="581" y="144">status:</text><text x="581" y="160" font-weight="700">in-review</text>
+          </g>
+          <g font-family="ui-monospace, Menlo, monospace" font-size="12" fill="#2C6738" text-anchor="middle">
+            <text x="763" y="144">cerrado</text><text x="763" y="160" font-weight="700">completed</text>
+          </g>
+
+          <!-- forward arrows -->
+          <g stroke="currentColor" stroke-width="1.5" fill="none" color="currentColor">
+            <line x1="142" y1="146" x2="180" y2="146" marker-end="url(#ar2)"/>
+            <line x1="304" y1="146" x2="342" y2="146" marker-end="url(#ar2)"/>
+            <line x1="474" y1="146" x2="512" y2="146" marker-end="url(#ar2)"/>
+            <line x1="644" y1="146" x2="682" y2="146" marker-end="url(#ar2)"/>
+          </g>
+          <g font-family="ui-monospace, Menlo, monospace" font-size="9.5" fill="currentColor" text-anchor="middle">
+            <text x="161" y="112">HUMANO</text>
+            <text x="323" y="112">claim</text>
+            <text x="493" y="112">--release</text>
+            <text x="663" y="112">merge</text>
+            <text x="161" y="185" opacity="0.6">gh edit</text>
+            <text x="323" y="185" opacity="0.6">dispatch-</text><text x="323" y="197" opacity="0.6">check</text>
+            <text x="493" y="185" opacity="0.6">agente</text>
+            <text x="663" y="185" opacity="0.6">Closes #N</text>
+          </g>
+
+          <!-- return arcs -->
+          <g stroke="currentColor" stroke-width="1.4" fill="none" stroke-dasharray="5 4" color="currentColor">
+            <path d="M 581 178 L 581 236 L 411 236 L 411 178" marker-end="url(#ar2)"/>
+            <path d="M 411 178 L 411 288 L 245 288 L 245 178" marker-end="url(#ar2)"/>
+          </g>
+          <g font-family="ui-monospace, Menlo, monospace" font-size="10" fill="currentColor">
+            <text x="466" y="230">--reopen  ·  PR rechazado</text>
+            <text x="286" y="282">--requeue  ·  abandonar / claim muerto (suelta tokens)</text>
+          </g>
+
+          <!-- gate marker on human transition -->
+          <g stroke="#8A5A00" stroke-width="2.4" fill="none">
+            <line x1="161" y1="128" x2="161" y2="164"/>
+          </g>
+          <g stroke="#8A5A00" stroke-width="2.4" fill="none">
+            <line x1="663" y1="128" x2="663" y2="164"/>
+          </g>
+        </svg>
+      </div>
+      <figcaption><b>Fig. 2 — Los cinco estados y sus dos aristas de vuelta.</b> Las barras verticales ámbar marcan las dos transiciones que sólo un humano ejecuta. Nótese la asimetría que explica la mayoría de los bloqueos reales: el <code>--release</code> libera el <code>--cap</code> pero <b>no</b> los tokens de área, así que un PR abierto sin mergear frena a sus vecinos aunque no haya ningún agente corriendo.</figcaption>
+    </figure>
+
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>&nbsp;</th><th><code>status:in-progress</code></th><th><code>status:in-review</code></th></tr></thead>
+        <tbody>
+          <tr><td>Ocupa <code>--cap</code></td><td>sí (hay un agente corriendo)</td><td class="x-0">no</td></tr>
+          <tr><td>Retiene <code>area:</code>/<code>touches:</code></td><td>sí</td><td class="x-warn">sí, hasta el merge</td></tr>
+          <tr><td>Satisface un <code>merge-after</code></td><td>no</td><td>no (hace falta cerrar como <em>completed</em>)</td></tr>
+          <tr><td>Detección de claim rancio</td><td>sí (se cruza con worktree / rama / sesión cmux)</td><td>no — no tener sesión ahí es lo normal</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 4. ARTEFACTOS ============ -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">04 / ARTEFACTOS</span>
+      <h2>Once formatos, y qué viaja en cada uno</h2>
+      <p>El principio que ordena todo el catálogo: <strong>lo que escribas fuera de la tabla de slices y de <code>## Contexto del epic</code> no llega al agente</strong>. El agente que implementa un slice no recibe el spec — recibe un prompt de arranque y el cuerpo del issue. Una exigencia escrita en otra sección es invisible por muy contundente que esté redactada.</p>
+    </div>
+
+    <!-- A1 -->
+    <div class="art">
+      <div class="art-head">
+        <span class="art-path">docs/superpowers/specs/YYYY-MM-DD-&lt;tema&gt;-design.md</span>
+        <span class="chip chip-coord">Coordinadora</span>
+      </div>
+      <div class="art-body">
+        <p>El diseño validado en el brainstorming, aprobado sección a sección. No tiene plantilla rígida: cubre arquitectura, componentes, flujo de datos, manejo de errores y testing, con cada sección escalada a su complejidad — unas frases si es directo, hasta 200–300 palabras si tiene matiz.</p>
+        <div class="art-meta">
+          <div><dt>Escribe</dt><dd><code>brainstorming</code>, paso 6</dd></div>
+          <div><dt>Lee</dt><dd>El humano, sección a sección, durante el diseño</dd></div>
+          <div><dt>Vida</dt><dd>Commiteado. Tras la congelación es <strong>historia</strong>: nadie lo edita</dd></div>
+          <div><dt>Destino</dt><dd>Es el <code>Handoff origen</code> del execution spec</dd></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- A2 -->
+    <div class="art">
+      <div class="art-head">
+        <span class="art-path">docs/superpowers/specs/YYYY-MM-DD-&lt;tema&gt;-execution.md</span>
+        <span class="chip chip-coord">Coordinadora</span>
+      </div>
+      <div class="art-body">
+        <p><strong>El artefacto central del nivel epic.</strong> Un fichero por epic, trackeado, <code>DRAFT → CONGELADA</code>, archivado al cerrar el epic. Siete secciones más cabecera, y de todas ellas <strong>sólo una viaja al agente</strong>.</p>
+        <div class="art-meta">
+          <div><dt>Plantilla</dt><dd><code>_TEMPLATE-execution-spec.md</code> v2</dd></div>
+          <div><dt>Parseado por</dt><dd><code>/ct-groom</code>: la tabla, <code>## Contexto del epic</code>, <code>## Hipótesis</code> y los marcadores <code>[NEEDS CLARIFICATION</code></dd></div>
+          <div><dt>Puerta</dt><dd>Sin <code>Estado: CONGELADA</code> no hay groom</dd></div>
+        </div>
+        <p class="fmt-label">Formato</p>
+        <pre><code># &lt;Epic&gt; — Execution spec
+
+**Handoff origen:** `docs/superpowers/specs/YYYY-MM-DD-&lt;tema&gt;-design.md`
+**Fecha de congelación:** <span class="c">[la pone el OK del humano, no la sesión que escribe]</span>
+**Estado:** DRAFT
+
+<span class="k">## Hipótesis del experimento</span>       <span class="c">← OBLIGATORIA. groom: exit 2 si falta o está vacía</span>
+**Apuesta:** <span class="c">[qué creemos que pasará — formulado para poder ser FALSO]</span>
+**Cómo sabremos que falló:** <span class="c">[la observación concreta que la tumba]</span>
+**Anti-scope — qué NO hace este epic:** <span class="c">[lo único que impide que crezca]</span>
+
+<span class="k">## Decisiones congeladas</span>              <span class="c">← una por línea, con PROCEDENCIA</span>
+- **D-1 · &lt;título corto&gt;** — &lt;la decisión&gt;. *(Procedencia: hablada — «cita literal».)*
+- **D-2 · &lt;título corto&gt;** — &lt;la decisión&gt;. *(Procedencia: deducida de D-1.)*
+
+<span class="k">## Enfoque técnico</span>                    <span class="c">← el plan del EPIC. De aquí salen Área/Toca/Dep</span>
+
+<span class="k">## Contexto del epic</span>                  <span class="c">← LO ÚNICO QUE VIAJA AL AGENTE</span>
+<span class="c">Los invariantes van DENTRO: version floors, reglas de copy, naming,
+rutas que no se tocan. Una línea cada uno, con valores exactos.</span>
+
+<span class="k">## Tabla de slices</span>                    <span class="c">← contrato v16, ver más abajo. UNA sola por spec</span>
+
+<span class="k">## Decisiones aparcadas (BLOCKED)</span>     <span class="c">← huecos no hablados. Vacía al congelar = buen brainstorming</span>
+| ID | Fila | Qué falta decidir | Opciones vistas | Estado |
+
+<span class="k">## Registro de cierre (evidencia)</span>     <span class="c">← se rellena al cerrar cada slice</span>
+| Slice | specReviewedSha | codeReviewedSha | uiScreenshot | Gate cerrado con |</code></pre>
+      </div>
+    </div>
+
+    <!-- A3 -->
+    <div class="art">
+      <div class="art-head">
+        <span class="art-path">§ Tabla de slices — el contrato con /ct-groom</span>
+        <span class="chip chip-hook">Parseado</span>
+      </div>
+      <div class="art-body">
+        <p><strong>Es la única parte de un spec que un programa parsea.</strong> El contrato vive en <code>AGENTS.md</code> del repo (bloque <code>ct-init:slices-contract</code>, versionado, lo mantiene <code>/ct-init</code>) y no se duplica en el spec. La tabla se localiza <strong>por su cabecera de columnas</strong> <code>Slice</code>+<code>Dep</code>, nunca por un número de sección.</p>
+        <p class="fmt-label">Cabecera exacta, copiable tal cual</p>
+        <pre><code>| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate |
+|---|-------|------|---------|-----|--------|-----------|------|------|------|
+| 1 | walking skeleton | ui | pantalla vacía navegable | – | la ruta /hoy responde 200 | copy legal | hoy | – | – |
+| 2 | scoring          | backend | endpoint POST /score — consume getPillars() de #1 | #1 | un pilar sin datos devuelve null\, no 0 | schema | api | migration | visual |</code></pre>
+        <div class="tbl-scroll" style="margin-top:16px">
+          <table>
+            <thead><tr><th>Columna</th><th>Obligatoria</th><th>A dónde llega</th></tr></thead>
+            <tbody>
+              <tr><td><code>#</code></td><td>sí</td><td>Entero puro (<code>1</code>, <code>2</code>…). Orden del slice y target de <code>Dep</code>. Nunca <code>S1</code> ni <code>**1**</code>: la fila entera se descarta. Único <strong>dentro de su milestone</strong>, no del repo.</td></tr>
+              <tr><td><code>Slice</code></td><td>sí</td><td><strong>Título del issue</strong> (<code>#N &lt;Slice&gt;</code>). También es la primera línea del kickoff y el nombre del workspace de cmux — por eso corto y legible, no una frase.</td></tr>
+              <tr><td><code>Tipo</code></td><td>no</td><td>Label <code>type:&lt;valor&gt;</code> + qué <strong>addendum técnico</strong> recibe el agente. Reconocidos: <code>ui</code>, <code>backend</code>, <code>infra</code>, <code>bugfix</code>. Otro valor no aborta, avisa.</td></tr>
+              <tr><td><code>Entrega</code></td><td>no</td><td>Sección <code>## Descripción</code> del issue. Ya <strong>no</strong> alimenta el título.</td></tr>
+              <tr><td><code>Dep</code></td><td>—</td><td><code>#N</code> del <strong>orden</strong> de esta misma tabla, separadas por coma. Alimenta el grafo <code>merge-after</code>. En el issue va entre backticks a propósito: un <code>#N</code> desnudo lo autoenlazaría GitHub al issue N.</td></tr>
+              <tr><td><code>Acepta</code></td><td>no</td><td>Sección <code>## Acceptance criteria (EARS, 1:1 con tests)</code>, uno por línea. <strong>La coma separa siempre</strong> — se escapa con <code>\,</code>.</td></tr>
+              <tr><td><code>Protegido</code></td><td>no</td><td>Sección <code>## Out of scope / Protected</code>. Texto libre de una pieza: no se trocea por comas.</td></tr>
+              <tr><td><code>Área</code> / <code>Toca</code></td><td>no</td><td>Labels <code>area:&lt;x&gt;</code> / <code>touches:&lt;y&gt;</code>: los tokens con los que el dispatcher detecta colisión y fuerza serialización. Sin estas columnas, esa maquinaria queda inerte para ese slice.</td></tr>
+              <tr><td><code>Gate</code></td><td>no</td><td>Vocabulario <strong>cerrado</strong>: <code>visual</code>, <code>apply</code>. Un valor desconocido <strong>aborta</strong> (a diferencia de <code>Tipo</code>). Renuncia con <code>!</code> delante. Celda vacía = «no he declarado nada», <strong>no</strong> «renuncio a todo».</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p><strong>«Sin valor»</strong> se escribe <code>–</code>, <code>-</code>, <code>—</code>, <code>−</code>, <code>--</code> o celda vacía: todas las variantes de guion valen, porque un móvil con autocorrección sustituye una por otra sin que lo notes.</p>
+
+        <h3 style="margin-top:24px">Las 4 reglas de celda</h3>
+        <p>Van en la plantilla y no en el contrato porque <strong>las juzga un humano al congelar, no un parser</strong>.</p>
+        <ul class="tight">
+          <li><strong>1 · Clarificado = convergencia.</strong> Una fila está lista cuando dos lecturas independientes convergen en el mismo desenlace. Si te la puedes imaginar de dos formas, no lo está: <code>[NEEDS CLARIFICATION: …]</code> y a preguntar.</li>
+          <li><strong>2 · <code>Acepta</code> = postcondiciones, no acciones.</strong> Cada criterio afirma el <em>estado observable resultante</em> («el token caducado deja la sesión en login», no «se refresca el token»). EARS desambigua; el test 1:1 lo denota. La incompletitud de los criterios es casi toda resultado infra-especificado, no acción olvidada.</li>
+          <li><strong>3 · <code>Gate</code> = residuo de los <code>Acepta</code>.</strong> Lo observable que <em>no</em> puede tener test 1:1 va al Gate — ahí es donde entra el humano. El default por <code>Tipo</code> es una heurística, no la regla.</li>
+          <li><strong>4 · <code>Dep</code> declara interfaz.</strong> <em>La más importante de las cuatro.</em> La <code>Entrega</code> de una fila con <code>Dep</code> nombra <strong>qué consume del slice anterior</strong> — la función, el endpoint, el token, el fichero. Un <code>Dep</code> que sólo dice <code>#2</code> es un solape sin declarar, y el solape sin declarar es lo que hace que las reviews se rechacen.</li>
+        </ul>
+      </div>
+    </div>
+
+    <!-- A4 -->
+    <div class="art">
+      <div class="art-head">
+        <span class="art-path">Cuerpo del issue de GitHub — lo que el agente lee de verdad</span>
+        <span class="chip chip-hook">Generado</span>
+      </div>
+      <div class="art-body">
+        <p>El orden de las secciones no es cosmético: <strong>qué entrega → con qué contexto se interpreta → cómo se verifica → qué falta para poder mergearlo → qué queda fuera</strong>. Una cabecera conocida se reconoce por <strong>igualdad exacta</strong>, no por prefijo: un <code>## Acceptance criteria propuestos por QA (borrador)</code> escrito por un humano nunca se confunde con la sección real.</p>
+        <p class="fmt-label">Formato, en orden</p>
+        <pre><code>&gt; Slice `#1` del epic. Spec: [docs/…/spec-execution.md § Tabla de slices](https://github.com/owner/repo/blob/main/docs/…#tabla-de-slices)
+
+<span class="k">## Descripción</span>                            <span class="c">← sólo si `Entrega` trae valor real</span>
+&lt;texto de Entrega&gt;
+
+<span class="k">## Contexto del epic</span>                      <span class="c">← sólo si el spec trae texto. IDÉNTICO en todos los issues del epic</span>
+&lt;copiado literal del spec; --reconcile lo mantiene al día&gt;
+
+<span class="k">## Contexto heredado</span>                      <span class="c">← SIEMPRE, con placeholder. groom NO LA TOCA NUNCA</span>
+<span class="h">&lt;la escribe la coordinadora cuando algo ya mergeado condiciona a ESTE slice&gt;</span>
+
+<span class="k">## Acceptance criteria (EARS, 1:1 con tests)</span>
+- &lt;criterio 1&gt;
+- &lt;criterio 2&gt;
+
+<span class="k">## Dependencias</span>                           <span class="c">← sólo si hay deps</span>
+*(cada `#N` de esta sección es el ORDEN del slice, NO un número de issue)*
+- merge-after `#1`
+
+<span class="k">## Gates</span>                                  <span class="c">← SIEMPRE, también cuando no hay ninguno</span>
+&lt;gates resueltos, o la afirmación de que no hay&gt;
+
+<span class="k">## Out of scope / Protected</span>               <span class="c">← SIEMPRE</span>
+- 🚫 &lt;Protegido&gt;      <span class="c">|  - (ninguno declarado)</span>
+
+&lt;!-- ct-order:1 --&gt;                          <span class="c">← marcador greppable de orden. Bookkeeping, fuera de toda comparación</span></code></pre>
+        <div class="note warn" style="margin-top:16px">
+          <span class="nt-title">Tu zona, y dónde termina</span>
+          <p>Todo lo que hay <strong>entre <code>## Contexto heredado</code> y <code>## Acceptance criteria</code> es tuyo</strong>: <code>--reconcile</code> no escribe ni un byte ahí, ni en las cabeceras que pegues ni en la prosa que escribas alrededor. Aguanta que pegues el cuerpo de otro issue entero, que es justo lo que hace falta («el slice #2 dejó montado esto»).</p>
+          <p>El final de tu zona lo marca <code>## Acceptance criteria</code>. Si esa cabecera <strong>no aparece exactamente una vez</strong>, no hay forma de saber dónde termina lo tuyo — y entonces <code>--reconcile</code> no escribe nada por detrás del contexto heredado, se rinde en voz alta y te pide que la restaures. De los dos errores posibles, el caro es el que borra texto escrito a mano.</p>
+        </div>
+        <details>
+          <summary>Qué compara <code>/ct-groom</code> en un issue que ya existe, y qué no</summary>
+          <div class="tbl-scroll">
+            <table>
+              <thead><tr><th>Campo</th><th>¿Cuenta como divergencia (exit 3)?</th><th>¿Lo aplica <code>--reconcile</code>?</th></tr></thead>
+              <tbody>
+                <tr><td>Título <code>#N &lt;Slice&gt;</code></td><td class="x-bad">sí</td><td>sí</td></tr>
+                <tr><td>Línea de enlace al spec</td><td class="x-bad">sí (entera)</td><td>sí</td></tr>
+                <tr><td>Labels <code>type:</code>/<code>area:</code>/<code>touches:</code>/<code>gate:</code></td><td class="x-bad">sí, sólo los prefijos cuya columna trae la tabla</td><td>sí</td></tr>
+                <tr><td><code>## Dependencias</code> y <code>## Acceptance criteria</code></td><td class="x-bad">sí (por conjunto, sólo dentro de la sección reconocida)</td><td>sí, por splice quirúrgico</td></tr>
+                <tr><td><code>## Contexto del epic</code></td><td class="x-0">no — sólo <code>nota:</code></td><td class="x-warn">sí (se reescribe)</td></tr>
+                <tr><td><code>## Descripción</code> y <code>Protegido</code></td><td class="x-0">no — prosa que se edita rutinariamente</td><td class="x-0">nunca</td></tr>
+                <tr><td><code>## Contexto heredado</code></td><td class="x-0">fuera de la comparación, siempre</td><td class="x-0">nunca</td></tr>
+                <tr><td>Label <code>status:</code></td><td class="x-0">fuera de la comparación, siempre</td><td class="x-0">nunca</td></tr>
+                <tr><td>Milestone</td><td class="x-0">inalcanzable: un issue emparejado tiene, por construcción, el milestone de la corrida</td><td>—</td></tr>
+                <tr><td>Issue huérfano (su fila ya no está en la tabla)</td><td class="x-bad">sí</td><td class="x-0">nunca se toca</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <p><code>--reconcile</code> es <strong>EXPERIMENTAL</strong> y lo avisa por stderr en cuanto el flag está presente. Cinco rondas de review, cada una encontrando una forma nueva de corromper un body real, son evidencia de que la mitad de <em>detección</em> está mejor entendida que la mitad de <em>aplicación</em>.</p>
+        </details>
+      </div>
+    </div>
+
+    <!-- A5 -->
+    <div class="art">
+      <div class="art-head">
+        <span class="art-path">Vocabulario de labels</span>
+        <span class="chip chip-hook">Generado</span>
+      </div>
+      <div class="art-body">
+        <p>Las labels no son metadatos decorativos: son el estado ejecutable del loop. Se crean <strong>sólo si no existen ya</strong> en el repo, y groom nombra por stderr las nuevas junto a las reutilizadas — que es la forma de detectar que un spec ha inventado un sinónimo (<code>area:hoy</code> frente a <code>area:today</code>) en vez de reutilizar el vocabulario, que es lo único que hace funcionar la detección de colisión.</p>
+        <div class="tbl-scroll">
+          <table>
+            <thead><tr><th>Prefijo</th><th>Valores</th><th>Quién lo mueve</th><th>Qué decide</th></tr></thead>
+            <tbody>
+              <tr><td><code>status:</code></td><td><code>backlog</code> · <code>ready</code> · <code>in-progress</code> · <code>in-review</code> · <code>blocked</code></td><td>groom crea en <code>backlog</code>; humano promueve; <code>dispatch-check</code> reclama y libera</td><td>Despachabilidad, <code>--cap</code>, retención de tokens</td></tr>
+              <tr><td><code>type:</code></td><td>columna <code>Tipo</code> — reconocidos <code>ui</code>, <code>backend</code>, <code>infra</code>, <code>bugfix</code></td><td>groom</td><td>Addendum técnico del kickoff + gate por defecto</td></tr>
+              <tr><td><code>area:</code></td><td>columna <code>Área</code></td><td>groom</td><td>Token de colisión: dos slices con el mismo área no corren a la vez</td></tr>
+              <tr><td><code>touches:</code></td><td>columna <code>Toca</code></td><td>groom</td><td>Igual, más el <strong>carril serializante global</strong>: <code>migration</code>, <code>ci</code>, <code>pbxproj</code></td></tr>
+              <tr><td><code>gate:</code></td><td><code>visual</code> · <code>apply</code> · <code>none</code></td><td>groom (de <code>Gate</code>, o derivado de <code>Tipo</code>)</td><td>El gate humano que sobrevive a un redespacho, a un <code>--reopen</code> y a un <code>/clear</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="note">
+          <p><code>gate:none</code> existe porque <strong>el silencio no puede significar dos cosas distintas</strong>: sin esa label, «este slice no exige ningún gate» y «este issue es anterior a los gates» serían indistinguibles. Un issue groomeado antes de que existieran cae al <code>Tipo</code>, así que no pierde el gate que ya tenía.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- A6 -->
+    <div class="art">
+      <div class="art-head">
+        <span class="art-path">El kickoff — el prompt de arranque del agente despachado</span>
+        <span class="chip chip-hook">Generado</span>
+      </div>
+      <div class="art-body">
+        <p>No es un fichero del repo: se renderiza en cada dispatch y se escribe en un launcher temporal que cmux sourcea. Once líneas, y el orden importa — <strong>lo que se enumera se lee, y lo que se deja a «ya lo verá» compite con el resto del cuerpo del issue</strong>. Las secciones de prosa arbitraria se <em>nombran</em> en vez de interpolarse, porque esto se teclea entero en un pty.</p>
+        <p class="fmt-label">Estructura</p>
+        <pre><code><span class="c">1.</span> Estás implementando UN slice (&lt;Slice&gt;) del repo &lt;owner/repo&gt;, issue #N (orden #M).
+<span class="c">2.</span> Es human-gated: NO mergees el PR, NO empieces el siguiente slice, y NO crees
+   worktrees nuevos — ya estás en el que te preparó el dispatcher.
+<span class="c">3.</span> Arranque verification-first: confirma pwd/rama, git log, y baseline verde
+   ANTES de tocar nada.
+<span class="c">4.</span> Hidrátate de .agent/SLICE.md y del issue; los criterios de aceptación son
+   &lt;AC interpolados&gt;. Lee además "## Out of scope / Protected": eso NO se toca.
+<span class="c">5.</span> Lee también "## Contexto del epic" y "## Contexto heredado". Si alguna está
+   vacía o no aparece, no hay nada que heredar — no lo busques fuera del issue.
+<span class="c">6.</span> Primer acto, con el baseline verde: escribe el plan del slice con
+   control-tower-loop:writing-plans usando el issue como spec. Guárdalo en
+   docs/superpowers/plans/ y commitéalo: viaja en el PR.
+<span class="c">7.</span> Con el plan escrito, sigue control-tower-loop:subagent-driven-development con TDD.
+<span class="c">8.</span> &lt;addendum técnico según Tipo: ui | backend | infra | bugfix&gt;
+<span class="c">9.</span> <span class="h">&lt;líneas de GATE — qué tiene que ver o revisar un humano antes del merge&gt;</span>
+<span class="c">10.</span> Si el trabajo queda BLOQUEADO, márcalo en .agent/SLICE.md como
+   `blocked: {reason, unblock}` — NO en prosa dentro de next_action.
+<span class="c">11.</span> Al acabar: commit refs al issue, actualiza .agent/SLICE.md, abre el PR contra
+   &lt;base&gt; con `Closes #N` en el CUERPO del PR (no en el título, no en un
+   comentario), libera el claim con `node &lt;dispatch-check&gt; N --repo &lt;r&gt; --release`,
+   deja el estado mergeable y PARA.
+   + el POR QUÉ de ese Closes, aparte: es lo ÚNICO que cierra el issue al mergear.</code></pre>
+      </div>
+    </div>
+
+    <!-- A7 -->
+    <div class="art">
+      <div class="art-head">
+        <span class="art-path">.worktrees/&lt;n&gt;/.agent/SLICE.md</span>
+        <span class="chip chip-agent">Agente del slice</span>
+      </div>
+      <div class="art-body">
+        <p>El estado del slice. <strong>Ignorado por git, nunca commiteable</strong> — y la garantía no se confía a la documentación: <code>/ct-next</code> escribe la regla en el <code>info/exclude</code> del directorio común (una escritura cubre coordinadora y todos los worktrees) y <strong>después verifica el efecto</strong>. La presencia de este fichero es la señal de «estoy en un worktree de slice».</p>
+        <div class="art-meta">
+          <div><dt>Siembra</dt><dd><code>/ct-next</code> al despachar</dd></div>
+          <div><dt>Escribe</dt><dd>El agente del slice, turno a turno</dd></div>
+          <div><dt>Lee</dt><dd>Los hooks <code>SessionStart</code> y <code>Stop</code>, y <code>/ct-next</code> (para detectar bloqueos)</dd></div>
+          <div><dt>git</dt><dd><strong>ignorado</strong> · <code>--release</code> sale con exit 5 si la rama lo introduce</dd></div>
+        </div>
+        <p class="fmt-label">Semilla, tal cual se escribe</p>
+        <pre><code>---
+task: "&lt;Slice&gt;"
+role: "slice-agent (sesión DESPACHADA por /ct-next): implementas ESTE slice y PARAS.
+  No groomeas, no mergeas, no despachas el siguiente."
+gates: "visual — GATES HUMANOS pendientes: los cierra quien revisa el PR, NO tú."
+       <span class="c"># o: "ninguno (este slice no exige ningún gate humano antes de mergear)"</span>
+status: not_started
+branch: "feat/&lt;n&gt;"
+base: main
+last_commit: "&lt;SHA de la base&gt;"   <span class="c"># un SHA, no un nombre de rama: sin él el hook Stop queda desarmado</span>
+github_issue: &lt;n&gt;
+you_are_here: "worktree fresco para el issue #N de GitHub (orden #M)"
+next_action: "hidrátate del issue y empieza por el primer AC (&lt;AC-1&gt;)"
+blocked: null                     <span class="c"># explícito, no omitido</span>
+verify: ""                        <span class="c"># la comprobación PENDIENTE, nunca un hecho ya comprobado</span>
+tasks: []
+---
+## Current State
+(slice recién despachado, sin trabajo aún)</code></pre>
+        <div class="note">
+          <p><code>role</code> y <code>gates</code> son <strong>campos</strong> y no frases dentro de un prompt por la misma razón que <code>blocked</code>: lo que tiene que sobrevivir a una re-hidratación es un campo. El kickoff se pierde con el contexto de su sesión; este fichero lo inyecta el hook en toda sesión nueva del worktree. Ningún código del plugin decide nada con <code>role</code> ni con <code>gates</code> — el gate ejecutable son las labels.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- A8 -->
+    <div class="art">
+      <div class="art-head">
+        <span class="art-path">.agent/STATE.md &nbsp;(checkout principal)</span>
+        <span class="chip chip-coord">Coordinadora</span>
+      </div>
+      <div class="art-body">
+        <p>El otro fichero de estado, y el que <strong>no</strong> habla de ningún slice. Está trackeado y el dispatcher no lo toca: en el worktree de un slice se queda a cero diff. Mismos campos que el <code>SLICE.md</code>, con un <code>role</code> opuesto.</p>
+        <pre><code>role: "coordinador (checkout principal): groomeas, despachas con /ct-next, revisas y
+  mergeas. NO implementas slices aquí — eso pasa en .worktrees/&lt;n&gt;."
+next_action: "(sin slice asignado)"      <span class="c"># /ct-init lo deja así a propósito</span>
+blocked: null</code></pre>
+        <div class="note bad" style="margin-top:16px">
+          <span class="nt-title">Por qué <code>/ct-init</code> no rellena <code>next_action</code></span>
+          <p>Es un scaffolder, no un planificador. Si apunta a un pendiente encontrado por el repo, el hook de <code>SessionStart</code> hidratará <strong>todas</strong> las sesiones futuras de ese repo creyendo que eso es lo siguiente — aunque no tenga nada que ver con lo que se vaya a hacer.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- A9 -->
+    <div class="art">
+      <div class="art-head">
+        <span class="art-path">docs/superpowers/plans/YYYY-MM-DD-&lt;feature&gt;.md</span>
+        <span class="chip chip-agent">Agente del slice</span>
+      </div>
+      <div class="art-body">
+        <p>El plan del slice, escrito contra el código real y commiteado en el PR. Se escribe asumiendo un ingeniero <strong>con cero contexto del codebase</strong>: rutas exactas siempre, código completo en cada paso, comandos exactos con su salida esperada.</p>
+        <p class="fmt-label">Cabecera obligatoria + estructura de una task</p>
+        <pre><code># &lt;Feature&gt; Implementation Plan
+
+&gt; **For agentic workers:** REQUIRED SUB-SKILL: use control-tower-loop:subagent-driven-
+&gt; development (recommended) or control-tower-loop:executing-plans. Steps use `- [ ]`.
+
+**Goal:** &lt;una frase&gt;
+**Architecture:** &lt;2-3 frases&gt;
+**Tech Stack:** &lt;tecnologías clave&gt;
+
+## Global Constraints
+<span class="c">[los invariantes del spec — version floors, límites de dependencias, reglas de
+naming y copy — una línea cada uno, con los valores exactos copiados literalmente.
+Los requisitos de CADA task los incluyen implícitamente.]</span>
+
+---
+
+### Task N: &lt;Component&gt;
+
+**Files:**
+- Create: `exact/path/to/file.ts`
+- Modify: `exact/path/to/existing.ts:123-145`
+- Test:   `tests/exact/path/to/test.ts`
+
+**Interfaces:**
+- Consumes: <span class="c">[qué usa de tasks anteriores — firmas exactas]</span>
+- Produces: <span class="c">[de qué dependen las siguientes — nombres, tipos de parámetro y retorno.
+  El implementador de una task sólo ve la suya: este bloque es cómo aprende los
+  nombres que usan sus vecinas.]</span>
+
+- [ ] **Step 1: Write the failing test**      <span class="c">← con el código del test, no una descripción</span>
+- [ ] **Step 2: Run test to verify it fails** <span class="c">← con el comando y el fallo esperado</span>
+- [ ] **Step 3: Write minimal implementation**
+- [ ] **Step 4: Run test to verify it passes**
+- [ ] **Step 5: Commit**</code></pre>
+        <div class="note">
+          <span class="nt-title">Fallos de plan — nunca se escriben</span>
+          <p>«TBD», «implement later», «add appropriate error handling», «handle edge cases», «write tests for the above» sin el código, «similar to Task N» (se repite el código: el ingeniero puede leer las tasks en otro orden), y referencias a tipos o funciones que ninguna task define.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- A10 -->
+    <div class="art">
+      <div class="art-head">
+        <span class="art-path">El PR</span>
+        <span style="display:flex;gap:6px;align-items:center"><span class="chip chip-agent">Agente</span><span class="chip chip-human">Humano</span></span>
+      </div>
+      <div class="art-body">
+        <p>El paquete de entrega del slice. Contiene el código, los tests, <strong>el plan commiteado</strong> y — si el slice lleva gate <code>visual</code> — la captura del antes/después. Se abre contra la base del despacho y el agente <strong>para</strong>.</p>
+        <div class="art-meta">
+          <div><dt>Rama</dt><dd><code>feat/&lt;n&gt;</code> — determinista, es lo que permite cruzarla con el issue</dd></div>
+          <div><dt>Obligatorio en el cuerpo</dt><dd><code>Closes #N</code> — no en el título, no en un comentario</dd></div>
+          <div><dt>Quién mergea</dt><dd>El humano. Siempre.</dd></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- A11 -->
+    <div class="art">
+      <div class="art-head">
+        <span class="art-path">.agent/conventions-ack.md</span>
+        <span class="chip chip-human">Humano</span>
+      </div>
+      <div class="art-body">
+        <p>El acuse de recibo que hace que un aviso correcto <strong>deje de avisar sin borrar documentación correcta</strong>. Antes de que existiera, la única forma de callar un aviso era borrar el texto que lo disparaba.</p>
+        <pre><code>claim: 2026-07-28 — manda el claim del plugin; scripts/dispatch-check.sh se queda
+  para trabajo a mano fuera del loop
+residuo-status: 2026-07-28 — #101, #102 &lt;por qué se quedan así&gt;</code></pre>
+        <p>Silencia <strong>esa</strong> señal y sólo esa; las demás siguen avisando, y en las corridas siguientes queda una nota de una línea diciendo que está silenciada y desde cuándo — «decidido no mirar esto» y «aquí no hay nada» no son lo mismo. Hacen falta las tres cosas (señal, fecha y motivo): una línea que no parsee se reporta y no silencia nada. Y un acuse <strong>sin números</strong> no silencia nada: no hay comodín para «todos», que devolvería el mismo silencio estático que el mecanismo corrige.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 5. EXIT CODES ============ -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">05 / SEÑALES</span>
+      <h2>Los códigos de salida, que son la interfaz real</h2>
+      <p>Los cuatro ejecutables comparten convención de canal — <strong>stdout es el producto, stderr es el diagnóstico</strong> — y una gramática de tres estados: hecho, no se pudo comprobar, queda algo pendiente. Si <code>/ct-next</code> corre dentro de un <code>/loop</code>, esta tabla es lo que decide si toca seguir, parar o reintentar.</p>
+    </div>
+
+    <h3><code>/ct-groom</code></h3>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Exit</th><th>Significa</th><th>Qué hacer</th></tr></thead>
+        <tbody>
+          <tr><td class="num x-0">0</td><td>Sin divergencia real, o <code>--reconcile</code> la resolvió del todo</td><td>Nada</td></tr>
+          <tr><td class="num x-bad">1</td><td>La corrida se paró en seco: una de las dos puertas de alcance del epic, un fallo de lectura de <code>gh</code>, un fallo de escritura a mitad, o algo de <code>--project</code> que no se pudo dar por bueno</td><td>Leer el mensaje: dice <code>no se ha creado ni modificado nada</code> cuando así es</td></tr>
+          <tr><td class="num x-bad">2</td><td>La tabla es inválida, <strong>o el spec no pasa la puerta de congelación</strong> (<code>[NEEDS CLARIFICATION</code> pendiente, <code>## Hipótesis</code> ausente o vacía)</td><td>Arreglar el spec. Todos los fallos salen juntos, no de uno en uno</td></tr>
+          <tr><td class="num x-warn">3</td><td>Queda algo real sin reconciliar: divergencia de título/enlace/labels/AC/deps, una sección duplicada, o un issue huérfano</td><td>Revisar. <strong>Ojo con <code>groom --dry-run &amp;&amp; groom</code></strong>: el <code>3</code> del dry-run corta la cadena justo cuando hay algo que aplicar</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3><code>/ct-next</code></h3>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Exit</th><th>Significa</th><th>Qué hacer</th></tr></thead>
+        <tbody>
+          <tr><td class="num x-0">0</td><td>Progreso (algo se lanzó, total o parcialmente), o no había nada seleccionable <strong>y ya se explicó por qué</strong></td><td>Seguir con normalidad</td></tr>
+          <tr><td class="num x-bad">1</td><td>Algo se rompió o quedó a medias que un humano tiene que resolver: un issue huérfano en <code>in-progress</code>, una precondición sin cumplir, o al menos un slice <strong>lanzado sin verificar</strong></td><td>Parar. Ante un lanzamiento sin verificar, <strong>mirar la sesión de cmux ANTES de borrar nada</strong>: revertir el claim con un agente vivo es peor que dejarlo</td></tr>
+          <tr><td class="num x-bad">2</td><td>Error de uso o de configuración estática: flags mal puestos, <code>ACCOUNT_MAP</code> malformado, nombre de binario que no es un comando a secas</td><td>Corregir la invocación o el mapa</td></tr>
+          <tr><td class="num x-warn">3</td><td>Se seleccionó tanda y terminó con cero lanzamientos <strong>sin que nada quedara a medias</strong>: todos los candidatos se saltaron al reclamar. Ningún claim escrito, ninguna rama ni worktree creados</td><td>Reintentar más tarde. No es una señal de alarma, y ahora el mensaje puede afirmarlo con verdad</td></tr>
+          <tr><td class="num">130 / 143</td><td>SIGINT / SIGTERM. Una interrupción <strong>siempre se acusa</strong>, aunque llegue con la tanda ya terminada</td><td>Si llegó entre el claim y el worktree, el claim ya se revirtió automáticamente</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3><code>/ct-status</code> y <code>dispatch-check</code></h3>
+    <div class="tbl-scroll">
+      <table>
+        <thead><tr><th>Comando</th><th>Exit</th><th>Significa</th></tr></thead>
+        <tbody>
+          <tr><td rowspan="3"><code>ct-status</code></td><td class="num x-0">0</td><td>Nada que revisar: nada en vuelo sin señales de vida, ningún residuo, ninguna lectura a medias</td></tr>
+          <tr><td class="num x-warn">3</td><td>Hay algo que revisar: residuo, un claim sin proceso vivo, labels huérfanas, entregas sin cosechar</td></tr>
+          <tr><td class="num x-bad">1</td><td><strong>No se pudo comprobar.</strong> La precedencia es <code>1</code> &gt; <code>3</code> &gt; <code>0</code>, nunca al revés: una lectura incompleta no es un loop en reposo, y un <code>0</code> sobre datos truncados es exactamente el fallo que este comando viene a eliminar</td></tr>
+          <tr><td rowspan="4"><code>dispatch-check</code></td><td class="num x-warn">1</td><td>Colisión detectada a tiempo, o carrera perdida con revert limpio. <strong>Resultado normal del protocolo</strong>: ese slice se salta y se sigue con la tanda</td></tr>
+          <tr><td class="num x-warn">3</td><td>Fallo de infraestructura puntual — se trata igual que una colisión, pero el mensaje deja explícito que es un <code>gh</code> que falló</td></tr>
+          <tr><td class="num x-bad">4</td><td><strong>Issue huérfano</strong>: carrera perdida o fallo de readback, y el revert posterior también falló. El issue queda bloqueado en <code>in-progress</code> sin nadie trabajándolo. Esto <strong>para la tanda entera</strong></td></tr>
+          <tr><td class="num x-bad">5</td><td><code>--release</code> se niega: la rama introduce un fichero de estado, la base no se puede determinar, o la base resuelta es el mismo commit que HEAD</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 6. LÍMITES ============ -->
+  <section>
+    <div class="sec-head">
+      <span class="sec-num">06 / LÍMITES</span>
+      <h2>Lo que el loop no garantiza</h2>
+      <p>Escrito aquí porque un límite conocido y dicho es operable, y uno implícito no.</p>
+    </div>
+
+    <div class="note bad">
+      <span class="nt-title">El claim no es atómico</span>
+      <p>El lock con el que <code>dispatch-check</code> reclama un issue son labels de GitHub, <strong>sin compare-and-swap</strong>. Está reproducido y verificado —no sospechado— que dos dispatchers lanzados casi a la vez pueden reclamar el mismo token compartido y arrancar los dos. No hay ninguna espera ni reintento que cierre este hueco hoy.</p>
+      <p><strong>La mitigación es operativa: no lances dos <code>/ct-next</code> al mismo tiempo contra el mismo repo.</strong> El plan es migrar el claim a una primitiva atómica real vía refs de git; hasta entonces, ésta es la única garantía que existe.</p>
+    </div>
+
+    <div class="note warn">
+      <span class="nt-title">Nada vigila los claims entre invocaciones</span>
+      <p>El claim es una label, sin heartbeat: sólo se entera quien esté corriendo <code>/ct-next</code> o <code>/ct-status</code> en ese momento. Y la evidencia de vida es <strong>local a esta máquina</strong>, así que nunca se afirma «abandonado», sólo «aquí no hay ni rastro». Si el loop se despacha desde más de un sitio, «sin señal de vida» significa «no lo está trabajando nadie <em>aquí</em>».</p>
+    </div>
+
+    <ul class="tight">
+      <li><strong>Los gates se escriben y se enseñan; no se imponen.</strong> El loop no impide mergear con un gate sin cerrar. Es el humano.</li>
+      <li><strong>No hay transacción en el groom.</strong> Superada la validación, un fallo de red deja creado lo anterior. No hay rollback y no se finge que lo haya: de un abort a mitad se sale volviendo a correr.</li>
+      <li><strong>El enlace al spec apunta a la rama por defecto.</strong> Si el fichero se mueve o se renombra, el enlace de los issues ya creados muere. Se detecta en la siguiente corrida, pero no se corrige sin <code>--reconcile</code>. <strong>Groomea después de empujar el spec.</strong></li>
+      <li><strong>Un <code>merge-after #N</code> escrito fuera de su sección no gatea nada</strong> — se avisa, pero se despacha igual. El dominio de detección y el de aplicación son, deliberadamente, el mismo: sólo la sección reconocida.</li>
+      <li><strong><code>dist/</code> es lo que se ejecuta, no <code>hooks/</code>.</strong> Todo cambio en los hooks tiene que llevar un <code>dist/</code> reconstruido en el mismo commit, o el repo distribuye el hook viejo mientras la fuente dice otra cosa. Y la suite se queda en verde, porque <code>npm test</code> construye primero: prueba un <code>dist/</code> recién hecho mientras el commiteado se pudre.</li>
+      <li><strong>La medida está pre-registrada, no cosechada.</strong> El timeline de GitHub ya registra cada transición de label con su timestamp — media instrumentación existe sin recoger. El criterio de muerte sigue vigente: <em>si el loop cuesta más intervención humana de la que ahorra, se dice y se para.</em></li>
+    </ul>
+  </section>
+
+  <footer>
+    <p>Compuesto a partir del código y la documentación del plugin <code>control-tower-loop</code> en <code>/Users/jpereag/Documents/control-tower-plugin</code>: los cuatro <code>commands/*.md</code>, los skills forkados de <code>skills/</code>, los generadores de <code>scripts/groom.js</code> y <code>scripts/kickoff.js</code>, el contrato v16 de <code>scripts/ct-init.sh</code>, y la plantilla v2 del execution spec. Cada formato de esta página sale de la fuente que lo emite, no de una descripción de segunda mano.</p>
+  </footer>
+
+</div>
