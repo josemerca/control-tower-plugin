@@ -1,0 +1,68 @@
+# El documento del loop — fuente y derivados
+
+Documento de referencia del ciclo de desarrollo de Control Tower: los 16 pasos,
+las 3 puertas humanas, la máquina de estados de un slice, y el formato exacto de
+los 11 artefactos que viajan entre pasos.
+
+## Los ficheros
+
+| Fichero | Qué es | ¿Se edita a mano? |
+|---|---|---|
+| `loop.body.html` | **La fuente.** Fragmento HTML (sin `<html>`/`<head>`/`<body>`) — es también lo que se publica como Artifact, y por eso no puede traerlos | **sí, es el único que se edita** |
+| `build.mjs` | El generador de los dos derivados | sí |
+| `control-tower-loop.html` | Derivado: página autocontenida, un solo fichero, sin dependencias de red | **no** — se regenera |
+| `control-tower-loop.pdf` | Derivado: 29 páginas A4, para compartir e imprimir | **no** — se regenera |
+
+Los derivados están **trackeados**, mismo criterio que `dist/` en este repo:
+todo cambio en `loop.body.html` tiene que llevarlos reconstruidos **en el mismo
+commit**, o se distribuye una versión vieja mientras la fuente ya dice otra cosa.
+
+## Reconstruir
+
+```bash
+node docs/loop/build.mjs          # HTML + PDF   (~14 s)
+node docs/loop/build.mjs --html   # sólo HTML    (no necesita navegador)
+```
+
+El PDF se imprime con Chrome/Brave/Chromium/Edge en headless. Si no hay ninguno
+instalado, el HTML sí se genera y el script lo dice — no emite un PDF a medias.
+
+**Por qué el script espera al fichero y no al navegador:** medido en esta
+máquina, `--print-to-pdf` deja el PDF completo en disco a los ~2 s pero el
+proceso sigue vivo dos minutos largos (despierta el updater, que hereda los
+descriptores). Esperar la salida del proceso daba un `ETIMEDOUT` sobre un PDF
+perfectamente escrito — un fallo reportado sobre un éxito. Ahora se sondea el
+tamaño del fichero hasta que deja de crecer, y entonces se mata al navegador.
+
+La hoja de impresión vive en `build.mjs`, no en la fuente: la fuente se publica
+como página web y no se imprime nunca, así que mezclarlas obligaría a leer
+reglas de paginación a quien sólo edita contenido.
+
+## El Artifact
+
+La misma fuente está publicada como página privada en claude.ai:
+
+<https://claude.ai/code/artifact/d06f6ba2-d67a-4c23-a113-15c782690759>
+
+Para actualizarla sin cambiar la URL, hay que publicar **pasando esa URL**
+explícitamente: publicar sin ella crea un artifact nuevo en vez de actualizar el
+que ya se ha compartido.
+
+## Procedencia del contenido
+
+Cada formato de la página sale de la fuente que lo emite, no de una descripción
+de segunda mano:
+
+- los cuatro `commands/*.md` (`ct-init`, `ct-groom`, `ct-next`, `ct-status`);
+- los skills forkados de `skills/` (`brainstorming`, `writing-plans`,
+  `finishing-a-development-branch`, `subagent-driven-development`) y `skills/FORK.md`;
+- `scripts/groom.js` — `buildIssueTitle`, `buildLabels`, `buildIssueBody`;
+- `scripts/kickoff.js` — `renderKickoff`, `buildStateSeed`, `ADDENDA`;
+- `scripts/ct-init.sh` — el contrato de la tabla de slices, v16;
+- `skills/state-template/STATE.template.md`;
+- `hooks/hooks.json`;
+- la plantilla v2 del execution spec, que hoy vive en menoplus
+  (`docs/superpowers/specs/_TEMPLATE-execution-spec.md`).
+
+**Al cambiar cualquiera de esas fuentes, este documento queda desactualizado y
+nada lo comprueba.** No hay test que lo vigile; es un documento, no código.
