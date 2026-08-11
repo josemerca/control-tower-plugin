@@ -1,4 +1,4 @@
-# control-tower-loop
+# Control Tower Loop
 
 **Un ciclo de desarrollo con agentes en el que la máquina despacha y verifica, y el humano decide exactamente tres veces.**
 
