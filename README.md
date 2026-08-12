@@ -11,7 +11,7 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 | Versión | `0.34.0` · contrato de la tabla de slices `v16` |
 | Comandos | `/ct-init` · `/ct-groom` · `/ct-next` · `/ct-status` |
 | Puertas humanas | 3 — congelación, `status:ready`, merge |
-| Skills | 11, forkados de superpowers 6.0.3 |
+| Skills | 11 forkados de superpowers 6.0.3 + 1 propio (`writing-plans-prescriptive`) |
 | Requisitos | Node ≥ 24 · `gh` autenticado · `cmux` · git worktrees |
 | Licencia | [MIT](LICENSE) |
 
@@ -193,7 +193,7 @@ commands/     los cuatro slash commands (Markdown + prosa larga: son la document
 scripts/      la lógica — módulos puros y los tres ejecutables .mjs
 hooks/        SessionStart (hidratación), Stop (estado al día), PreToolUse (guarda de commits)
 dist/         bundles de los hooks — DERIVADO, trackeado, ver arriba
-skills/       los 11 skills forkados + LICENSE-superpowers + FORK.md
+skills/       los 11 skills forkados + writing-plans-prescriptive (propio) + LICENSE-superpowers + FORK.md
 __tests__/    62 ficheros, 1.745 tests
 docs/loop/    el documento del ciclo: fuente, HTML autocontenido y PDF
 docs/         los handoffs de cada ronda (prompt-fNN-*.md) — cómo se llegó hasta aquí
