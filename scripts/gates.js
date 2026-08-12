@@ -80,6 +80,15 @@ export const GATES = {
     kickoff: 'GATE HUMANO `apply` (lo pide el spec para ESTE slice, esté o no en su `Tipo`): no apliques nada contra un entorno real (`apply`, `deploy`, un script ejecutado sobre datos de verdad) por tu cuenta. Deja el plan/dry-run en el PR y PARA: el apply lo autoriza un humano después de revisarlo.',
     issue: '**`apply`** — nada se aplica contra un entorno real hasta que un humano revise el plan/dry-run que trae el PR. El agente deja el plan y para.',
   },
+  plan: {
+    // El único gate que corta ANTES de implementar, no antes de mergear: su
+    // valor está en parar cuando tirar el trabajo aún no cuesta nada. Por eso
+    // el texto pide publicar el plan como COMENTARIO del issue — el PR puede
+    // no existir todavía — y por eso no entra en TYPE_GATES: es opt-in por
+    // fila, para los slices delicados; en cada slice mataría el loop.
+    kickoff: 'GATE HUMANO `plan` (lo pide el spec para ESTE slice, esté o no en su `Tipo`): con el plan del slice escrito, validado con --check-plan y commiteado, publícalo como comentario del issue y PARA — no implementes nada hasta que un humano responda OK en ese comentario. No lo cierras tú: lo cierra quien revisa el plan.',
+    issue: '**`plan`** — antes de implementar, un humano tiene que revisar el PLAN del slice: el agente lo publica como comentario de este issue y se detiene hasta el OK. El agente no puede darlo por cumplido.',
+  },
 }
 
 // GATE_ORDER: orden canónico de salida (labels, cuerpo del issue, kickoff), para

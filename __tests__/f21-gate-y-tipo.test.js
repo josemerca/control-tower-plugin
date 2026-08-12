@@ -76,12 +76,14 @@ function dryRun(specText, extraArgs = []) {
 // 1. El vocabulario de gates: cerrado, y derivado de lo que YA existía.
 // ============================================================================
 describe('F21 — vocabulario de gates', () => {
-  it('los gates que existen salen de los addenda que ya los imponían, no de un invento nuevo', () => {
+  it('los gates que existen salen de los addenda que ya los imponían, más el añadido deliberado de F-jjponz-1', () => {
     // `ui` imponía "gate de screenshot obligatorio"; `infra`, "apply solo tras
     // review". Son las dos ÚNICAS frases de ADDENDA que exigían un acto
-    // humano; el resto son recordatorios técnicos. El vocabulario es
-    // exactamente ese, ni uno más.
-    expect(Object.keys(GATES).sort()).toEqual(['apply', 'visual'])
+    // humano; el resto son recordatorios técnicos. `plan` (F-jjponz-1) es el
+    // primer gate AÑADIDO por la vía que la doctrina de gates.js reserva para
+    // eso: acto deliberado, con su texto de kickoff y de issue (ver
+    // gate-plan.test.js). Ningún Tipo lo implica.
+    expect(Object.keys(GATES).sort()).toEqual(['apply', 'plan', 'visual'])
     expect(TYPE_GATES.ui).toEqual(['visual'])
     expect(TYPE_GATES.infra).toEqual(['apply'])
     expect(gatesForType('backend')).toEqual([])
