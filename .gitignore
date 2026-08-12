@@ -15,3 +15,8 @@ scripts/experiments/*-results/
 # worktrees de slice (ver el bloque de .worktrees/ en scripts/ct-init.sh). Se ignora
 # SOLO el subdirectorio: `.claude/` también guarda configuración que sí se versiona.
 .claude/worktrees/
+
+# Basura de Finder. Aparece sola al abrir cualquier carpeta del repo en macOS y
+# ensucia `git status` en cada sesión — dos de ellas convivían sin trackear a la
+# vez que se escribía esto.
+.DS_Store
