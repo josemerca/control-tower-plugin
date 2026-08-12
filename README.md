@@ -13,7 +13,7 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 | Puertas humanas | 3 — congelación, `status:ready`, merge |
 | Skills | 11, forkados de superpowers 6.0.3 |
 | Requisitos | Node ≥ 24 · `gh` autenticado · `cmux` · git worktrees |
-| Licencia | MIT |
+| Licencia | [MIT](LICENSE) |
 
 > ### 📘 La referencia completa
 > Este README es la vista de conjunto. El documento largo —los 16 pasos uno a uno, la máquina de estados, y el **formato exacto de los 11 artefactos** que viajan entre pasos— está en [`docs/loop/`](docs/loop/):
@@ -226,4 +226,6 @@ Y el criterio de muerte del proyecto, que sigue vigente: **si el loop cuesta má
 
 ## Licencia
 
-MIT. El fork de superpowers conserva su licencia MIT original en [`skills/LICENSE-superpowers`](skills/LICENSE-superpowers).
+[MIT](LICENSE), © 2026 José Agüera.
+
+El fork de superpowers conserva su aviso de copyright original, también MIT, en [`skills/LICENSE-superpowers`](skills/LICENSE-superpowers); las modificaciones están documentadas en [`skills/FORK.md`](skills/FORK.md).
