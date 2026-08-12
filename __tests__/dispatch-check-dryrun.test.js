@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -64,7 +64,52 @@ function run(issue, fixture) {
 // con una base real (`main`) y una rama (`feat/9`) que diverge de ella sin
 // tocar ningún fichero de estado, hace que el resultado dependa del fixture,
 // no del checkout en el que corra la suite.
-function mkReleaseDryRunRepo() {
+// Plan mínimo que cumple plan-contract.js — desde F-jjponz-1, --release exige
+// un plan prescriptivo commiteado en la rama, así que el fixture de release
+// lleva uno (con "Current state: does not exist." para no citar nada).
+const FENCE = '```'
+const minimalPlanFor = (issue) => [
+  `# #${issue} — fixture slice`,
+  '',
+  '> **This plan is written to be executed by task-scoped subagents with zero context.**',
+  '',
+  '## 1. Context and goal',
+  'Fixture.',
+  '### Desired end state',
+  'Work done.',
+  '### Out of scope',
+  'N/A — fixture.',
+  '## 2. Closed decisions',
+  '| Decision | Value |',
+  '|---|---|',
+  '| fixture | yes |',
+  '## 3. Reference patterns',
+  'N/A — fixture.',
+  '## 4. Inventory',
+  'work.txt',
+  '## 5. Interfaces',
+  'Consumes: N/A. Produces: N/A.',
+  '## 6. Test strategy',
+  'N/A — fixture.',
+  '## 7. Tasks',
+  '### Task 1 — do the work',
+  '**Objective:** the work is committed.',
+  '**Files:** work.txt',
+  'Current state: does not exist.',
+  FENCE,
+  'trabajo',
+  FENCE,
+  '**TDD:** No TDD — fixture.',
+  '**Tests:** N/A — fixture.',
+  '**Verification:** git log shows the commit.',
+  '## 8. Global verification',
+  'N/A — fixture.',
+  '## 9. Assumptions',
+  'None.',
+  '',
+].join('\n')
+
+function mkReleaseDryRunRepo(issue = 9) {
   const dir = mkdtempSync(join(tmpdir(), 'ct-release-dryrun-'))
   const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' })
   git('init', '-q', '-b', 'main')
@@ -75,6 +120,8 @@ function mkReleaseDryRunRepo() {
   git('commit', '-qm', 'base')
   git('checkout', '-qb', 'feat/9')
   writeFileSync(join(dir, 'work.txt'), 'trabajo\n')
+  mkdirSync(join(dir, 'docs', 'superpowers', 'plans'), { recursive: true })
+  writeFileSync(join(dir, 'docs', 'superpowers', 'plans', `2026-08-12-issue-${issue}-work.md`), minimalPlanFor(issue))
   git('add', '-A')
   git('commit', '-qm', 'work')
   return dir
@@ -317,7 +364,7 @@ describe('dispatch-check — fix review round 1 (Critical 2: fallos de gh() no d
   // (lee git real desde el cwd en TODO `--release`, dry-run o no) — pasaba
   // solo porque este checkout no tiene `.agent/` trackeado y `main` resuelve.
   it('--release cuyo gh edit falla → exit 1, mensaje claro (no crash sin capturar)', () => {
-    const dir = mkReleaseDryRunRepo()
+    const dir = mkReleaseDryRunRepo(19)
     const r = runReal(['19', '--repo', 'o/r', '--release'], {
       FAKE_GH_EDIT_FAIL_SUBSTR: '--add-label status:in-review',
     }, dir)

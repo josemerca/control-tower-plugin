@@ -635,7 +635,69 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     rmSync(dir, { recursive: true, force: true })
   })
 
+  // Plan mínimo que cumple plan-contract.js — desde F-jjponz-1, --release
+  // exige un plan prescriptivo commiteado en la rama.
+  const FENCE = '```'
+  const minimalPlanFor = (issue) => [
+    `# #${issue} — fixture slice`,
+    '',
+    '> **This plan is written to be executed by task-scoped subagents with zero context.**',
+    '',
+    '## 1. Context and goal',
+    'Fixture.',
+    '### Desired end state',
+    'Work done.',
+    '### Out of scope',
+    'N/A — fixture.',
+    '## 2. Closed decisions',
+    '| Decision | Value |',
+    '|---|---|',
+    '| fixture | yes |',
+    '## 3. Reference patterns',
+    'N/A — fixture.',
+    '## 4. Inventory',
+    'f.txt',
+    '## 5. Interfaces',
+    'Consumes: N/A. Produces: N/A.',
+    '## 6. Test strategy',
+    'N/A — fixture.',
+    '## 7. Tasks',
+    '### Task 1 — do the work',
+    '**Objective:** the work is committed.',
+    '**Files:** f.txt',
+    'Current state: does not exist.',
+    FENCE,
+    'trabajo',
+    FENCE,
+    '**TDD:** No TDD — fixture.',
+    '**Tests:** N/A — fixture.',
+    '**Verification:** git log shows the commit.',
+    '## 8. Global verification',
+    'N/A — fixture.',
+    '## 9. Assumptions',
+    'None.',
+    '',
+  ].join('\n')
+
+  const seedPlan = (wt, issue) => {
+    mkdirSync(join(wt, 'docs', 'superpowers', 'plans'), { recursive: true })
+    writeFileSync(join(wt, 'docs', 'superpowers', 'plans', `2026-08-12-issue-${issue}-fixture.md`), minimalPlanFor(issue))
+  }
+
   it('exit 0 con una rama limpia — el caso normal no paga nada', () => {
+    const { dir, wt, git } = mkSliceWorktree()
+    writeFileSync(join(wt, 'f.txt'), 'trabajo\n')
+    seedPlan(wt, 1)
+    git('add', '-A')
+    git('commit', '-qm', 'work')
+    const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
+      cwd: wt, encoding: 'utf8',
+    })
+    expect(r.status).toBe(0)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('exit 6 con la rama limpia pero SIN plan prescriptivo — el remedio nombra la skill (F-jjponz-1)', () => {
     const { dir, wt, git } = mkSliceWorktree()
     writeFileSync(join(wt, 'f.txt'), 'trabajo\n')
     git('add', '-A')
@@ -643,7 +705,34 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
       cwd: wt, encoding: 'utf8',
     })
+    expect(r.status).toBe(6)
+    expect(r.stderr).toContain('writing-plans-prescriptive')
+    expect(r.stderr).toContain('status:in-progress')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('--check-plan en verde con el plan en el árbol de trabajo, aún sin commitear (F-jjponz-1)', () => {
+    const { dir, wt } = mkSliceWorktree()
+    seedPlan(wt, 1)
+    const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--check-plan'], {
+      cwd: wt, encoding: 'utf8',
+    })
     expect(r.status).toBe(0)
+    expect(r.stdout).toContain('plan ok')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('--check-plan con una cita de memoria → exit 6 y nombra el fichero citado (F-jjponz-1)', () => {
+    const { dir, wt } = mkSliceWorktree()
+    seedPlan(wt, 1)
+    const roto = readFileSync(join(wt, 'docs', 'superpowers', 'plans', '2026-08-12-issue-1-fixture.md'), 'utf8')
+      .replace('Current state: does not exist.', 'Current state (f.txt):')
+    writeFileSync(join(wt, 'docs', 'superpowers', 'plans', '2026-08-12-issue-1-fixture.md'), roto)
+    const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--check-plan'], {
+      cwd: wt, encoding: 'utf8',
+    })
+    expect(r.status).toBe(6)
+    expect(r.stderr).toContain('f.txt')
     rmSync(dir, { recursive: true, force: true })
   })
 

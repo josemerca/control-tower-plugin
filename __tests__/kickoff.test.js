@@ -231,7 +231,8 @@ describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan pri
   it('cita los skills PROPIOS (control-tower-loop:*) y ninguna referencia al namespace superpowers:', () => {
     const k = renderKickoff(SLICE, OPTS)
     expect(k).toContain('control-tower-loop:subagent-driven-development')
-    expect(k).toContain('control-tower-loop:writing-plans')
+    expect(k).toContain('control-tower-loop:writing-plans-prescriptive')
+    expect(k).toContain('--check-plan')
     // Con dos puntos a propósito: `docs/superpowers/plans/` (la ruta-convención
     // de los planes) sí puede y debe aparecer; el namespace del plugin viejo, no.
     expect(k).not.toMatch(/superpowers:/)
@@ -246,7 +247,7 @@ describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan pri
     // tiene que aparecer ANTES de seguir con subagent-driven-development —
     // SDD arranca en su rombo "Have implementation plan?" y la respuesta
     // tiene que ser sí.
-    expect(k.indexOf('control-tower-loop:writing-plans'))
+    expect(k.indexOf('control-tower-loop:writing-plans-prescriptive'))
       .toBeLessThan(k.indexOf('control-tower-loop:subagent-driven-development'))
   })
 

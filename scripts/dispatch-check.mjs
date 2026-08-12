@@ -27,6 +27,7 @@ import { detectCollisions, claimLost } from './claim.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 import { parseStrictInt } from './argnum.js'
 import { NEVER_IN_A_SLICE_PR, SLICE_REL_PATH } from './state-paths.js'
+import { checkPlans } from './plan-contract.js'
 
 // ============================================================================
 // Finding 4 (auditoría de interrupción/staleness): dos cambios en este
@@ -82,6 +83,12 @@ import { NEVER_IN_A_SLICE_PR, SLICE_REL_PATH } from './state-paths.js'
 //       se queda en status:in-progress. Este código NO lo ve nunca
 //       ct-next.mjs — `--release` lo invoca el agente al entregar, no el
 //       bucle de claim, así que no pasa por classifyClaimOutcome.
+//   6 = NUEVO (F-jjponz-1) — el plan prescriptivo del slice falta en la rama,
+//       no se puede leer, o no cumple el contrato (plan-contract.js). Sale de
+//       `--release` (que se niega SIN mutar nada: el issue sigue en
+//       status:in-progress) y de `--check-plan` (modo read-only para que el
+//       agente valide ANTES de commitear). Igual que el 5, nunca lo ve
+//       classifyClaimOutcome.
 // El texto que este fichero imprime NO cambia de contenido (los mismos
 // detalles, incluido el comando manual de `--release`/revert) — solo deja
 // de ser la ÚNICA fuente de verdad para la decisión del caller.
@@ -159,8 +166,9 @@ const repo = arg('--repo')
 const release = has('--release')
 const reopen = has('--reopen')
 const requeue = has('--requeue')
+const checkPlan = has('--check-plan')
 const dryRun = has('--dry-run')
-const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release | --reopen | --requeue] [--dry-run]'
+const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release | --reopen | --requeue | --check-plan] [--dry-run]'
 if (issue === null || issue < 1) {
   dieErr(`<issue#> inválido: ${process.argv[2] === undefined ? '(ausente)' : `"${process.argv[2]}"`} — debe ser un entero >= 1 escrito con dígitos a secas (nada de "42x", "1e3", "4.2", espacios, ni signo "+"/"-": un número aproximado aquí reclamaría un issue que no es el que pediste).\n${usage}`, 2)
 }
@@ -170,7 +178,7 @@ if (typeof repo !== 'string' || repo.length === 0) { dieErr(usage, 2) }
 // juntos no tiene una interpretación razonable, y elegir uno en silencio sería
 // adivinar cuál quería quien lo escribió sobre una mutación de estado real.
 {
-  const pedidos = [release && '--release', reopen && '--reopen', requeue && '--requeue'].filter(Boolean)
+  const pedidos = [release && '--release', reopen && '--reopen', requeue && '--requeue', checkPlan && '--check-plan'].filter(Boolean)
   if (pedidos.length > 1) {
     dieErr(`${pedidos.join(' y ')} son mutuamente excluyentes: --release cierra el slice hacia revisión (in-progress → in-review), --reopen lo devuelve al banco de trabajo tras un rechazo (in-review → in-progress) y --requeue lo abandona y lo devuelve a la cola (in-progress → ready). Elige uno.\n${usage}`, 2)
   }
@@ -425,6 +433,56 @@ function stateFilesIntroducedByBranch() {
   return { known: true, base, hits: NEVER_IN_A_SLICE_PR.filter((p) => touched.includes(p)) }
 }
 
+// F-jjponz-1 — EL PLAN DEL SLICE ES UN ENTREGABLE, NO UNA COSTUMBRE.
+//
+// El kickoff pide el plan desde F32, pero un kickoff es un prompt, no un
+// gate (el LÍMITE de arriba lo dice para --release entero). Desde esta ronda
+// el plan tiene contrato (plan-contract.js) y el release lo comprueba con la
+// misma doctrina que el check de ficheros de estado: SE NIEGA, no avisa.
+// Mismo git diff de base (y las mismas tres trampas: --no-relative,
+// --no-renames, base === HEAD) que stateFilesIntroducedByBranch — pero sin
+// el filtro NEVER_IN_A_SLICE_PR, porque aquí buscamos lo que la rama APORTA.
+function branchIntroducedFiles() {
+  const base = sliceBaseRef()
+  if (!base) {
+    return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
+  }
+  let baseSha, headSha
+  try {
+    baseSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${base}^{commit}`], { encoding: 'utf8' }).trim()
+    headSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], { encoding: 'utf8' }).trim()
+  } catch (e) {
+    return { known: false, why: `no se pudo resolver \`${base}\` o HEAD a un commit: ${e.message}` }
+  }
+  if (baseSha === headSha) {
+    return { known: false, why: `la base resuelta (\`${base}\`) es EL MISMO commit que HEAD (${headSha.slice(0, 12)}) — un diff contra sí mismo sale vacío por construcción` }
+  }
+  let out = ''
+  try {
+    out = execFileSync('git', ['diff', '--no-relative', '--no-renames', '--name-only', `${base}...HEAD`], { encoding: 'utf8' })
+  } catch (e) {
+    return { known: false, why: `\`git diff ${base}...HEAD\` falló: ${e.message}` }
+  }
+  return { known: true, files: out.split('\n').map((l) => l.trim()).filter(Boolean) }
+}
+
+const readRepoFile = (p) => readFileSync(p, 'utf8')
+
+if (checkPlan) {
+  // Modo read-only: candidatos = el árbol de trabajo, commiteado o no — es
+  // el modo de ANTES de commitear. No toca GitHub, no mira labels.
+  let candidates = []
+  try {
+    candidates = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', 'docs/superpowers/plans'], { encoding: 'utf8' })
+      .split('\n').map((l) => l.trim()).filter(Boolean)
+  } catch (e) {
+    dieErr(`--check-plan: no se pudo listar docs/superpowers/plans (${e.message}). Corre esto desde la raíz del worktree del slice.`, 6)
+  }
+  const result = checkPlans({ issue, candidates, readFile: readRepoFile })
+  if (!result.ok) dieErr(`--check-plan: ${result.message}`, result.code)
+  dieOut(result.message, 0)
+}
+
 if (release) {
   const check = stateFilesIntroducedByBranch()
   if (!check.known) {
@@ -439,6 +497,17 @@ if (release) {
     // es justo cuando más falta hace.
     const pathspec = check.hits.join(' ')
     dieErr(`no se libera #${issue}: esta rama INTRODUCE ${lista} respecto a ${check.base}. Ese fichero es el estado de la sesión coordinadora, no producto de este slice: al mergear con squash, main se quedaría con el estado de este slice y cualquier sesión nueva del repo se hidrataría creyendo que es este agente. Restáuralo y vuelve a intentarlo: \`git checkout ${check.base} -- ${pathspec}\` y commitea (o \`git rm --cached\` si lo añadiste nuevo). El issue sigue en status:in-progress: no se ha movido nada.`, 5)
+  }
+  // F-jjponz-1 — el plan, DESPUÉS del check de ficheros de estado a propósito:
+  // la contaminación de main (exit 5) es la avería más cara y su mensaje debe
+  // ganar. Un plan ausente (exit 6) solo retrasa a ESTE slice.
+  const plan = branchIntroducedFiles()
+  if (!plan.known) {
+    dieErr(`no se puede liberar #${issue}: ${plan.why}, así que NO se ha podido comprobar si la rama trae el plan prescriptivo del slice. No se afirma que falte — comprueba a mano con \`git diff --name-only <base>...HEAD | grep docs/superpowers/plans\` y reintenta desde un cwd donde la base se resuelva.`, 6)
+  }
+  const planCheck = checkPlans({ issue, candidates: plan.files, readFile: readRepoFile })
+  if (!planCheck.ok) {
+    dieErr(`no se libera #${issue}: ${planCheck.message} El issue sigue en status:in-progress: no se ha movido nada.`, planCheck.code)
   }
   if (!dryRun && !fx) {
     const result = setStatus(issue, 'status:in-progress', 'status:in-review')
