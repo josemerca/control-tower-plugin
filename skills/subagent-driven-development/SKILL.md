@@ -25,12 +25,12 @@ digraph when_to_use {
     "Stay in this session?" [shape=diamond];
     "subagent-driven-development" [shape=box];
     "executing-plans" [shape=box];
-    "Write the plan now:\ncontrol-tower-loop:writing-plans,\nscoped to the issue" [shape=box];
+    "Write the plan now:\ncontrol-tower-loop:writing-plans-prescriptive,\nscoped to the issue" [shape=box];
     "Manual execution" [shape=box];
 
     "Have implementation plan?" -> "Tasks mostly independent?" [label="yes"];
-    "Have implementation plan?" -> "Write the plan now:\ncontrol-tower-loop:writing-plans,\nscoped to the issue" [label="no"];
-    "Write the plan now:\ncontrol-tower-loop:writing-plans,\nscoped to the issue" -> "Tasks mostly independent?";
+    "Have implementation plan?" -> "Write the plan now:\ncontrol-tower-loop:writing-plans-prescriptive,\nscoped to the issue" [label="no"];
+    "Write the plan now:\ncontrol-tower-loop:writing-plans-prescriptive,\nscoped to the issue" -> "Tasks mostly independent?";
     "Tasks mostly independent?" -> "Stay in this session?" [label="yes"];
     "Tasks mostly independent?" -> "Manual execution" [label="no - tightly coupled"];
     "Stay in this session?" -> "subagent-driven-development" [label="yes"];
@@ -38,7 +38,7 @@ digraph when_to_use {
 }
 ```
 
-**No plan yet?** Write it now with control-tower-loop:writing-plans, scoped to the issue you were dispatched for. A CT-dispatched issue brings acceptance criteria (EARS), «Protegido» and the «Contexto del epic» — exactly the spec that writing-plans expects as input. Save the plan under `docs/superpowers/plans/` and commit it: it travels in the PR. Do NOT go back to brainstorming — the design was frozen in the execution spec before the issue existed.
+**No plan yet?** Write it now with control-tower-loop:writing-plans-prescriptive, scoped to the issue you were dispatched for. A CT-dispatched issue brings acceptance criteria (EARS), «Protegido» and the «Contexto del epic» — exactly the spec that writing-plans-prescriptive expects as input. Save the plan under `docs/superpowers/plans/` (filename `YYYY-MM-DD-issue-<n>-<slug>.md`), validate it with `--check-plan` and commit it: it travels in the PR, and `--release` refuses without it. Do NOT go back to brainstorming — the design was frozen in the execution spec before the issue existed.
 
 **vs. Executing Plans (parallel session):**
 - Same session (no context switch)
@@ -411,7 +411,7 @@ Done!
 
 **Required workflow skills:**
 - **control-tower-loop:using-git-worktrees** - Ensures isolated workspace (creates one or verifies existing)
-- **control-tower-loop:writing-plans** - Creates the plan this skill executes
+- **control-tower-loop:writing-plans-prescriptive** - Creates the plan this skill executes
 - **[code-reviewer.md](./code-reviewer.md)** (bundled) - Code review template for the final whole-branch review
 - **control-tower-loop:finishing-a-development-branch** - Complete development after all tasks
 

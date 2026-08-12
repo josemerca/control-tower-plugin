@@ -110,15 +110,38 @@ describe('costura 1 — brainstorming termina en execution spec + congelación, 
 describe('costura 2 — SDD sin plan escribe el plan ahora, scoped al issue', () => {
   const skill = () => read('subagent-driven-development', 'SKILL.md')
 
-  it('la rama «no plan» manda a writing-plans con el issue como spec', () => {
+  it('la rama «no plan» manda a writing-plans-prescriptive con el issue como spec', () => {
     const s = skill()
     expect(s).toContain('Write the plan now')
-    expect(s).toContain('control-tower-loop:writing-plans')
+    expect(s).toContain('control-tower-loop:writing-plans-prescriptive')
     expect(s).toContain('scoped to the issue')
   })
 
   it('la rama antigua «brainstorm first» ya no está', () => {
     expect(skill()).not.toContain('brainstorm first')
+  })
+})
+
+describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive (skill propia)', () => {
+  it('la skill propia existe con su template', () => {
+    expect(existsSync(join(SKILLS, 'writing-plans-prescriptive', 'SKILL.md'))).toBe(true)
+    expect(existsSync(join(SKILLS, 'writing-plans-prescriptive', 'plan-template.md'))).toBe(true)
+  })
+
+  it('es propia, no forkada: fuera de la lista FORKED', () => {
+    expect(FORKED).not.toContain('writing-plans-prescriptive')
+  })
+
+  it('SDD ya no nombra a writing-plans a secas como destino de la rama «no plan»', () => {
+    const s = read('subagent-driven-development', 'SKILL.md')
+    expect(s).not.toMatch(/control-tower-loop:writing-plans[^-]/)
+  })
+
+  it('la skill impone la literalidad y la convención de nombre que el gate de --release busca', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    expect(s).toContain('Current state (')
+    expect(s).toContain('issue-<n>-')
+    expect(s).toContain('--check-plan')
   })
 })
 

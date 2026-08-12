@@ -1,6 +1,7 @@
 # Fork de superpowers — origen y costuras
 
-Los skills de este directorio (salvo `state-template`, que es propio) son un
+Los skills de este directorio (salvo `state-template` y
+`writing-plans-prescriptive`, que son propios) son un
 fork de **superpowers 6.0.3** (Jesse Vincent, MIT — ver
 [LICENSE-superpowers](./LICENSE-superpowers)), tomado del cache local
 `~/.claude/plugins/cache/claude-plugins-official/superpowers/6.0.3/` el
@@ -36,6 +37,12 @@ writing-plans · writing-skills.
 3. **finishing-a-development-branch**: paso 0 nuevo — si existe
    `.agent/SLICE.md` (despacho de CT) no hay menú: PR + `--release` + PARAR.
    El merge es humano.
+4. **subagent-driven-development** (segunda costura sobre el mismo fichero,
+   F-jjponz-1): la rama «no plan» ya no manda a writing-plans sino a
+   `writing-plans-prescriptive` — skill PROPIA (no existe upstream), con
+   contrato mecánico en `scripts/plan-contract.js` y gate duro en
+   `--release`. Un cherry-pick de upstream que restaure writing-plans aquí
+   desarma el gate: lo vigila `skills-fork.test.js` (costura 4).
 
 Reescritura mecánica en todos: el namespace upstream `superpowers:` pasó a
 `control-tower-loop:`, y las referencias a `../using-superpowers/references/`
