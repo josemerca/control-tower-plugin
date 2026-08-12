@@ -1254,7 +1254,7 @@ const ONE_SLICE_SPEC = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 // F21: `gate:none` se une al plan (una label de gate por issue, siempre —
 // ver gates.js#GATE_LABEL_NONE). Sin ella aquí, el mundo dejaría de ser
 // coherente y el groom diría, con razón, que se crearía una label nueva.
-const PLAN_LABELS_EXIST = JSON.stringify([[{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:none' }, { name: 'status:backlog' }]])
+const PLAN_LABELS_EXIST = JSON.stringify([[{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:plan' }, { name: 'status:backlog' }]])
 
 // SPEC_REF_OK: la referencia al spec que ct-groom.mjs resuelve para un spec
 // llamado "spec.md" dentro de un directorio de makeSpecDir (repo git con
@@ -1318,7 +1318,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
       title: '#1 login',
       state: 'open',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:none' }, { name: 'status:in-progress' }],
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:plan' }, { name: 'status:in-progress' }],
       body: matchingBody(),
     }
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
@@ -1342,7 +1342,7 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
       title: '#1 login',
       state: 'closed',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:none' }],
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:plan' }],
       body: matchingBody(),
     }
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
@@ -1578,7 +1578,7 @@ describe('ct-groom --dry-run — labels: gateadas por columna (review, punto 2)'
       // F21: `gate:none` sí la pide el spec — la columna `Tipo` está presente,
       // así que el spec SÍ tiene opinión sobre `gate:` (a diferencia de
       // `area:`, que es de lo que trata este test).
-      labels: [{ name: 'type:backend' }, { name: 'area:ops' }, { name: 'gate:none' }],
+      labels: [{ name: 'type:backend' }, { name: 'area:ops' }, { name: 'gate:plan' }],
       body: matchingBody(),
     }
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
@@ -1608,7 +1608,7 @@ describe('ct-groom --dry-run — el exit 3 ante divergencia es una decisión exp
       title: '#1 otro título',
       state: 'open',
       milestone: { title: 'Epic' },
-      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:none' }],
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:plan' }],
       body: matchingBody(),
     }
     const envOverrides = { FAKE_GH_LIST_SEQUENCE: JSON.stringify([[EXISTING]]), FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]) }
@@ -1946,7 +1946,7 @@ describe('ct-groom — puerta B: el mismo epic bajo otro título (F23)', () => {
       title: '#1 uno',
       state: 'open',
       milestone: { number: 2, title: 'Epic nuevo' },
-      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:none' }, { name: 'status:backlog' }],
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:plan' }, { name: 'status:backlog' }],
       body: buildIssueBody(
         { n: 1, name: 'uno', type: 'backend', entrega: 'a', deps: [], ac: ['AC-1.1'], protected: '–' },
         SPEC_REF_OK,

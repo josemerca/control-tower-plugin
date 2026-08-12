@@ -10,7 +10,7 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 |---|---|
 | Versión | `0.34.0` · contrato de la tabla de slices `v16` |
 | Comandos | `/ct-init` · `/ct-groom` · `/ct-next` · `/ct-status` |
-| Puertas humanas | 3 — congelación, `status:ready`, merge |
+| Puertas humanas | 3 por epic — congelación, `status:ready`, merge — más el gate `plan` en cada slice (renunciable por fila con `!plan`) |
 | Skills | 11 forkados de superpowers 6.0.3 + 1 propio (`writing-plans-prescriptive`) |
 | Requisitos | Node ≥ 24 · `gh` autenticado · `cmux` · git worktrees |
 | Licencia | [MIT](LICENSE) |

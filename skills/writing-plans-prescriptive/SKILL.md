@@ -72,8 +72,9 @@ will rely on — exact signatures, parameter and return types.
    without a valid committed plan.
 3. Commit the plan as the branch's first commit: it travels in the PR and gets reviewed with
    the code.
-4. If the issue carries the `plan` gate (see `.agent/SLICE.md` `gates` field): post the plan
-   as an issue comment and STOP until a human replies OK. You do not close that gate.
+4. Every slice carries the `plan` gate by default (check `.agent/SLICE.md` `gates` field —
+   it is absent only when the spec waived it with `!plan` for this row): post the plan as an
+   issue comment and STOP until a human replies OK. You do not close that gate.
 
 ## Execution handoff
 

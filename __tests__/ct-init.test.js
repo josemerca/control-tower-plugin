@@ -309,7 +309,7 @@ describe('ct-init.sh', () => {
     // ninguno de los dos caminos, esto se entera.
     expect(plan.issues[1].labels).toContain('gate:visual') // declarado, contra su Tipo
     expect(plan.issues[2].labels).toContain('gate:visual') // implícito, por Tipo: ui
-    expect(plan.issues[0].labels).toContain('gate:none')
+    expect(plan.issues[0].labels).toContain('gate:plan') // F-jjponz-2: el defecto universal, también en el ejemplo
     rmSync(dir, { recursive: true, force: true })
     rmSync(specDir, { recursive: true, force: true })
   })
