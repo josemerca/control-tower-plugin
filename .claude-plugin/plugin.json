@@ -1,7 +1,7 @@
 {
   "name": "control-tower-loop",
   "description": "Loop agéntico portable: hidratación por SessionStart, estado en .agent/ (STATE.md la coordinadora, SLICE.md cada slice), gates, dispatch, informe de estado del loop (/ct-status: qué está en vuelo, qué ha entregado y qué es residuo) y una puerta que impide que un mensaje de commit cierre un issue por mencionar una closing keyword. Sistema Control Tower.",
-  "version": "0.33.0",
+  "version": "0.34.0",
   "author": { "name": "José Agüera" },
   "license": "MIT"
 }
