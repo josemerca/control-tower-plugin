@@ -168,6 +168,12 @@ describe('el dist/ commiteado corresponde a los fuentes commiteados (F24)', () =
       'hooks/stop.js',
       'scripts/closing-keywords.js',
       'scripts/governed-repo.js',
+      // scope.js y scope-check-cli.js entran por dist/scope-check.js, el gate
+      // de conformidad que se vendoriza en el CI del repo destino (donde el
+      // plugin no está instalado). closing-keywords.js ya estaba: scope.js lo
+      // reutiliza en vez de llevar su propio reconocedor de closing keywords.
+      'scripts/scope-check-cli.js',
+      'scripts/scope.js',
       'scripts/state-paths.js',
       'scripts/state.js',
     ])

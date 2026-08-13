@@ -19,7 +19,7 @@
 // credenciales de Jose y puede fabricar cualquier artefacto de GitHub); lo que
 // tocó, sí. Ver scripts/scope.js.
 import { execFileSync } from 'node:child_process'
-import { parseScope, scopeViolations, issueFromPrBody } from './scope.js'
+import { parseScope, scopeViolations, issueFromPrBody, isSliceBranch } from './scope.js'
 
 const arg = (f) => {
   const i = process.argv.indexOf(f)
@@ -56,21 +56,36 @@ function morir(mensaje, detalle) {
 
 let prData
 try {
-  prData = JSON.parse(gh(['pr', 'view', pr, '--repo', repo, '--json', 'body,files']))
+  prData = JSON.parse(gh(['pr', 'view', pr, '--repo', repo, '--json', 'body,files,headRefName']))
 } catch (e) {
   morir(`no se pudo leer el PR #${pr} de ${repo}`, (e.stderr || e.message || '').toString().trim())
 }
 
 const issueN = issueFromPrBody(prData.body)
 if (!issueN) {
-  // Sin `Closes #N` el gate no sabe qué alcance aplicar. No es un descuido
-  // cosmético: ese `Closes` es lo ÚNICO que cierra el issue al mergear, y el
-  // kickoff se lo pide al agente literalmente. Un PR del loop sin él está roto
-  // por dos motivos a la vez.
-  morir(
-    `el PR #${pr} no declara un único issue con una closing keyword en su CUERPO`,
-    'el gate no puede saber qué alcance aplicar. Añade `Closes #<issue>` al cuerpo del PR (no al título, no en un comentario). Si el PR cierra dos issues, sepáralo en dos.',
-  )
+  // AQUÍ SE DECIDE SI ESTE GATE SOBREVIVE A LA SEMANA QUE VIENE.
+  //
+  // Un repo gobernado tiene PRs que NO son slices: documentación, chores,
+  // arreglos a mano. Ninguno lleva `Closes #N` y ninguno es cosecha del loop.
+  // Suspenderlos a todos convertiría el gate en un muro insatisfacible, y un
+  // muro así se desactiva entero en cuestión de días — es el fallo que
+  // conventions.js ya pagó en este repo (F14), y desactivado no protege nada.
+  //
+  // La discriminación es la RAMA, no el cuerpo del PR, porque `feat/<n>` la
+  // crea el dispatcher y no el agente. Un PR que viene de una rama de slice sin
+  // su `Closes` está roto por dos motivos a la vez —el gate no sabe qué alcance
+  // aplicar Y el issue no se cerrará al mergear, reteniendo sus tokens para
+  // siempre— así que ése sí sale rojo.
+  if (isSliceBranch(prData.headRefName)) {
+    morir(
+      `el PR #${pr} viene de la rama de slice \`${prData.headRefName}\` pero no declara un único issue con una closing keyword en su CUERPO`,
+      'Añade `Closes #<issue>` al cuerpo del PR (no al título, no en un comentario). Sin él, además, el issue no se cierra al mergear y el slice retiene sus tokens de `area:`/`touches:` para siempre.',
+    )
+  }
+  // Se dice en voz alta que no se ha comprobado nada. Un check verde y mudo
+  // sería indistinguible de un check verde que sí juzgó algo.
+  console.log(`✅ scope-check: el PR #${pr} no es un slice del loop (rama \`${prData.headRefName}\`, sin closing keyword). No hay alcance de epic que comprobar.`)
+  process.exit(0)
 }
 
 let issueBody

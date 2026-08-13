@@ -204,6 +204,24 @@ export function scopeViolations(files, patterns, extraExempt = []) {
 }
 
 /**
+ * isSliceBranch: ¿esta rama la creó el dispatcher?
+ *
+ * `feat/<n>` es la convención del propio plugin (el `branchNameOf` por defecto
+ * de dispatch.js). Existe para una sola decisión, y es la que salva al gate de
+ * morir de ruido: un PR SIN closing keyword que viene de una rama de slice está
+ * roto y sale rojo; uno que viene de cualquier otra rama simplemente no es
+ * cosecha del loop y el gate no tiene nada que decir sobre él.
+ *
+ * Sin esta distinción, el gate suspendería TODOS los PRs humanos y de
+ * documentación del repo — y un guard que solo se satisface desobedeciendo se
+ * desactiva entero en un día. Es exactamente el fallo que conventions.js ya
+ * pagó en este repo (F14): el muro insatisfacible.
+ */
+export function isSliceBranch(name) {
+  return /^feat\/\d+$/.test(String(name || '').trim())
+}
+
+/**
  * issueFromPrBody: de qué issue es este PR, según su propia closing keyword.
  *
  * Se apoya en findClosingKeywords (closing-keywords.js) en vez de reimplementar

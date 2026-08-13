@@ -109,6 +109,9 @@ function scopeViolations(files, patterns, extraExempt = []) {
   const exentos = [...LOOP_ARTIFACT_PATTERNS, ...Array.isArray(extraExempt) ? extraExempt.filter(Boolean) : []];
   return (files || []).map(normalizePath).filter((f) => f).filter((f) => !exentos.some((pat) => matchesPattern(f, pat))).filter((f) => !pats.some((pat) => matchesPattern(f, pat)));
 }
+function isSliceBranch(name) {
+  return /^feat\/\d+$/.test(String(name || "").trim());
+}
 function issueFromPrBody(prBody) {
   const encontrados = findClosingKeywords(typeof prBody === "string" ? prBody : "");
   const numeros = /* @__PURE__ */ new Set();
@@ -144,16 +147,20 @@ function morir(mensaje, detalle) {
 }
 var prData;
 try {
-  prData = JSON.parse(gh(["pr", "view", pr, "--repo", repo, "--json", "body,files"]));
+  prData = JSON.parse(gh(["pr", "view", pr, "--repo", repo, "--json", "body,files,headRefName"]));
 } catch (e) {
   morir(`no se pudo leer el PR #${pr} de ${repo}`, (e.stderr || e.message || "").toString().trim());
 }
 var issueN = issueFromPrBody(prData.body);
 if (!issueN) {
-  morir(
-    `el PR #${pr} no declara un \xFAnico issue con una closing keyword en su CUERPO`,
-    "el gate no puede saber qu\xE9 alcance aplicar. A\xF1ade `Closes #<issue>` al cuerpo del PR (no al t\xEDtulo, no en un comentario). Si el PR cierra dos issues, sep\xE1ralo en dos."
-  );
+  if (isSliceBranch(prData.headRefName)) {
+    morir(
+      `el PR #${pr} viene de la rama de slice \`${prData.headRefName}\` pero no declara un \xFAnico issue con una closing keyword en su CUERPO`,
+      "A\xF1ade `Closes #<issue>` al cuerpo del PR (no al t\xEDtulo, no en un comentario). Sin \xE9l, adem\xE1s, el issue no se cierra al mergear y el slice retiene sus tokens de `area:`/`touches:` para siempre."
+    );
+  }
+  console.log(`\u2705 scope-check: el PR #${pr} no es un slice del loop (rama \`${prData.headRefName}\`, sin closing keyword). No hay alcance de epic que comprobar.`);
+  process.exit(0);
 }
 var issueBody;
 try {

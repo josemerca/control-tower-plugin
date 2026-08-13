@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseScope, matchesPattern, scopeViolations, issueFromPrBody, LOOP_ARTIFACT_PATTERNS } from '../scripts/scope.js'
+import { parseScope, matchesPattern, scopeViolations, issueFromPrBody, isSliceBranch, LOOP_ARTIFACT_PATTERNS } from '../scripts/scope.js'
 
 // EL CASO QUE ORIGINA TODO ESTE FICHERO, verbatim del campo.
 //
@@ -201,6 +201,28 @@ describe('scopeViolations — el hecho, que es lo que no se puede falsificar', (
 
   it('lista de ficheros vacía → sin violaciones, sin throw', () => {
     expect(scopeViolations([], ['apps/**'])).toEqual([])
+  })
+})
+
+describe('isSliceBranch — lo que salva al gate de morir de ruido', () => {
+  // El gate juzga PRs de slice. Un PR de documentación, un chore o un arreglo a
+  // mano NO llevan `Closes #N` y no son cosecha del loop: hacerlos fallar
+  // suspendería todos los PRs humanos del repo y el gate se desactivaría entero
+  // en un día — el muro insatisfacible que conventions.js ya pagó aquí (F14).
+  //
+  // La discriminación es la rama, porque `feat/<n>` la crea el DISPATCHER (es
+  // el `branchNameOf` por defecto de dispatch.js), no el agente.
+  it('reconoce la rama que crea el dispatcher', () => {
+    expect(isSliceBranch('feat/662')).toBe(true)
+  })
+  it('una rama humana no es rama de slice', () => {
+    expect(isSliceBranch('docs/desenlace')).toBe(false)
+    expect(isSliceBranch('feat/scope-gate')).toBe(false)
+    expect(isSliceBranch('main')).toBe(false)
+  })
+  it('vacío o ausente no es rama de slice, sin throw', () => {
+    expect(isSliceBranch('')).toBe(false)
+    expect(isSliceBranch(null)).toBe(false)
   })
 })
 
