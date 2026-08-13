@@ -21,7 +21,23 @@ import { pathToFileURL } from 'node:url'
 // propia copia, que se quedaría atrás en silencio y daría por buena una
 // configuración que ya no es la del proyecto.
 export const buildOptions = {
-  entryPoints: ['hooks/session-start.js', 'hooks/stop.js', 'hooks/commit-keyword-guard.js'],
+  // entryPoints en forma de MAPA (nombre de salida → fuente), no de lista, y no
+  // es cosmético: en cuanto entró una fuente de `scripts/` junto a las de
+  // `hooks/`, esbuild calculó un `outbase` común y empezó a escribir
+  // `dist/hooks/*.js` y `dist/scripts/*.js` en vez de los `dist/*.js` planos que
+  // hooks.json y el vendorizado de ct-init esperan. El mapa fija el nombre de
+  // salida y deja de depender de dónde viva la fuente.
+  //
+  // scope-check NO es un hook: es el gate de conformidad que corre en el CI del
+  // REPO DESTINO, donde el plugin no está instalado. Se bundlea por el mismo
+  // motivo que los hooks —autocontenido, sin node_modules— y `ct-init`
+  // vendoriza el resultado junto al workflow.
+  entryPoints: {
+    'session-start': 'hooks/session-start.js',
+    stop: 'hooks/stop.js',
+    'commit-keyword-guard': 'hooks/commit-keyword-guard.js',
+    'scope-check': 'scripts/scope-check-cli.js',
+  },
   bundle: true,
   platform: 'node',
   format: 'esm',
