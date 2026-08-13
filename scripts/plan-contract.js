@@ -182,7 +182,16 @@ export function planFilesForIssue(issue, paths) {
 // INTRODUCE; en --check-plan, el contenido del directorio de planes). El
 // mensaje devuelto es prosa terminada, con remedio — quien lo recibe solo lo
 // imprime por stderr y sale con `code`.
-export function checkPlans({ issue, candidates, readFile }) {
+//
+// F-jjponz-3 — DOS lecturas distintas, y confundirlas hacía el gate
+// insatisfacible. El PLAN se lee siempre donde está ahora (`readFile`): lo
+// introduce esta rama, así que en la base no existe. Los ficheros que el plan
+// CITA se leen con `readCitedFile`, que en --release apunta a la base de la
+// rama: para entonces las tareas ya reescribieron esos ficheros, y compararlos
+// con el árbol solo demostraría que el slice hizo su trabajo. Por defecto es
+// el mismo lector, que es lo correcto en --check-plan (el plan se escribe
+// antes de implementar y cita el árbol tal y como está).
+export function checkPlans({ issue, candidates, readFile, readCitedFile }) {
   const files = planFilesForIssue(issue, candidates)
   if (!files.length) {
     return {
@@ -208,7 +217,7 @@ export function checkPlans({ issue, candidates, readFile }) {
         message: `no se ha podido leer ${file} (${e.message}) — no se afirma que el plan sea inválido, pero tampoco se puede comprobar. Arregla la lectura y reintenta.`,
       }
     }
-    const result = validatePlan(content, { readFile })
+    const result = validatePlan(content, { readFile: readCitedFile ?? readFile })
     if (!result.ok) {
       const detail = result.violations.map((v) => `  - [${v.rule}] ${v.detail}`).join('\n')
       return {

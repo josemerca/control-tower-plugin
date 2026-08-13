@@ -45,6 +45,13 @@ convention, which the validator enforces:
 Never quote from memory — the validator greps the repo and refuses citations that do not
 match.
 
+**Cite the files your slice rewrites, normally.** `--check-plan` reads the working tree (you
+have not implemented anything yet) and `--release` reads the **base of the branch** — the same
+state you wrote the plan against. So a citation of a file your tasks later rewrite keeps
+validating after the work is done. Never relabel a `Current state (path):` block as prose to
+get past the gate: that silently removes it from the only check that proves the plan describes
+the real repo.
+
 ## Structure
 
 Copy `plan-template.md` (in this skill's directory) and fill every hole. The 9 sections are

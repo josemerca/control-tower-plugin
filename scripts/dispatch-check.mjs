@@ -463,10 +463,29 @@ function branchIntroducedFiles() {
   } catch (e) {
     return { known: false, why: `\`git diff ${base}...HEAD\` falló: ${e.message}` }
   }
-  return { known: true, files: out.split('\n').map((l) => l.trim()).filter(Boolean) }
+  return { known: true, base: baseSha, files: out.split('\n').map((l) => l.trim()).filter(Boolean) }
 }
 
 const readRepoFile = (p) => readFileSync(p, 'utf8')
+
+// F-jjponz-3 — lector de los ficheros CITADOS por el plan en --release: la
+// base de la rama, no el árbol. `git show <sha>:<path>` resuelve el path
+// desde la raíz del repo (a diferencia de readFileSync, que lo resuelve desde
+// el cwd), así que de propina esto no depende del directorio desde el que se
+// invoque. Si el fichero no está en la base, se LANZA: el validador lo
+// convierte en una violación que dice dónde se miró, en vez de afirmar "cita
+// de memoria" — un fichero que el slice crea se cita con "Current state: does
+// not exist.", y confundir los dos casos manda a buscar el error donde no
+// está. maxBuffer explícito porque el default de execFileSync (1 MiB) haría
+// fallar la lectura de un fichero citado grande, y eso se leería como un plan
+// inválido cuando lo que pasa es que no se pudo comprobar.
+const readFileAtBase = (base) => (p) => {
+  try {
+    return execFileSync('git', ['show', `${base}:${p}`], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 })
+  } catch {
+    throw new Error(`no existe en la base de la rama (${String(base).slice(0, 12)})`)
+  }
+}
 
 if (checkPlan) {
   // Modo read-only: candidatos = el árbol de trabajo, commiteado o no — es
@@ -505,7 +524,12 @@ if (release) {
   if (!plan.known) {
     dieErr(`no se puede liberar #${issue}: ${plan.why}, así que NO se ha podido comprobar si la rama trae el plan prescriptivo del slice. No se afirma que falte — comprueba a mano con \`git diff --name-only <base>...HEAD | grep docs/superpowers/plans\` y reintenta desde un cwd donde la base se resuelva.`, 6)
   }
-  const planCheck = checkPlans({ issue, candidates: plan.files, readFile: readRepoFile })
+  const planCheck = checkPlans({
+    issue,
+    candidates: plan.files,
+    readFile: readRepoFile,
+    readCitedFile: readFileAtBase(plan.base),
+  })
   if (!planCheck.ok) {
     dieErr(`no se libera #${issue}: ${planCheck.message} El issue sigue en status:in-progress: no se ha movido nada.`, planCheck.code)
   }

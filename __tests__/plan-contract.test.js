@@ -161,4 +161,38 @@ describe('checkPlans — la decisión del gate', () => {
     expect(r.code).toBe(6)
     expect(r.message).toContain('## 9. Assumptions')
   })
+
+  // F-jjponz-3 — el plan y los ficheros que cita NO se leen en la misma foto:
+  // el plan lo introduce la rama (solo existe donde está ahora) y las citas se
+  // comprueban contra la base, donde el slice todavía no había tocado nada.
+  it('lee el PLAN con readFile y las CITAS con readCitedFile', () => {
+    const soloElPlan = (path) => {
+      if (path === PLAN_PATH) return VALID_PLAN
+      throw new Error(`el plan no está en la base: ${path}`)
+    }
+    const soloLoCitado = (path) => {
+      if (path === 'src/math.js') return REAL_FILE
+      throw new Error(`ENOENT: ${path}`)
+    }
+    expect(checkPlans({
+      issue: 7, candidates: [PLAN_PATH], readFile: soloElPlan, readCitedFile: soloLoCitado,
+    })).toMatchObject({ ok: true, code: 0 })
+  })
+
+  it('sin readCitedFile, las citas se leen con readFile — el modo --check-plan no cambia', () => {
+    const r = checkPlans({ issue: 7, candidates: [PLAN_PATH], readFile: fsOf(VALID_PLAN) })
+    expect(r).toMatchObject({ ok: true, code: 0 })
+  })
+
+  it('una cita que el lector de citas no encuentra es violación con el motivo de ESE lector', () => {
+    const r = checkPlans({
+      issue: 7,
+      candidates: [PLAN_PATH],
+      readFile: fsOf(VALID_PLAN),
+      readCitedFile: () => { throw new Error('no existe en la base de la rama (abc123def456)') },
+    })
+    expect(r.code).toBe(6)
+    expect(r.message).toContain('src/math.js')
+    expect(r.message).toContain('no existe en la base de la rama')
+  })
 })

@@ -143,6 +143,17 @@ describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive 
     expect(s).toContain('issue-<n>-')
     expect(s).toContain('--check-plan')
   })
+
+  // F-jjponz-3 — mientras el gate leía el árbol en --release, un plan que
+  // modificaba un fichero existente solo podía liberar reetiquetando sus
+  // citas como prosa, y eso las saca de la comprobación en silencio. Con las
+  // citas ya verificables contra la base, la skill tiene que decir las dos
+  // cosas: que se cita con normalidad, y que reetiquetar no es una salida.
+  it('dice dónde se verifica cada cita y prohíbe reetiquetarlas para esquivar el gate', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    expect(s).toMatch(/base of the branch/i)
+    expect(s).toMatch(/never relabel/i)
+  })
 })
 
 describe('costura 3 — finishing-a-development-branch en repo gobernado: PR + release + PARAR', () => {
