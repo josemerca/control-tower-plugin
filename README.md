@@ -8,7 +8,7 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 
 | | |
 |---|---|
-| Versión | `0.32.0` · contrato de la tabla de slices `v16` |
+| Versión | `0.33.0` · contrato de la tabla de slices `v16` |
 | Comandos | `/ct-init` · `/ct-groom` · `/ct-next` · `/ct-status` |
 | Puertas humanas | 3 — congelación, `status:ready`, merge |
 | Skills | 11, forkados de superpowers 6.0.3 |
