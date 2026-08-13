@@ -12,7 +12,14 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 // este mismo tipo en este repo. esbuild, sin `outbase`, nombra cada salida
 // por el basename de su entrada dentro de `outdir` — importar este módulo no
 // dispara ningún build (ver la guarda de `process.argv[1]` en build.mjs).
-const bundles = buildOptions.entryPoints.map((ep) => `${buildOptions.outdir}/${basename(ep)}`)
+// entryPoints es un MAPA (nombre de salida → fuente) desde que scope-check
+// entró desde `scripts/`: con la forma de lista, esbuild calculaba un outbase
+// común y anidaba las salidas en `dist/hooks/` y `dist/scripts/`. La derivación
+// sigue siendo derivación —las claves SON los nombres de salida—, que es lo que
+// esta línea protege: una tercera lista escrita a mano se quedaría atrás en
+// silencio en cuanto el build ganase un entry point, como ya les pasó a otras
+// dos listas de este mismo repo.
+const bundles = Object.keys(buildOptions.entryPoints).map((nombre) => `${buildOptions.outdir}/${nombre}.js`)
 
 // Extrae los especificadores de módulo externos de un bundle ESM.
 function externalSpecifiers(code) {
