@@ -1,0 +1,775 @@
+<title>Tres loops, un pipeline</title>
+<style>
+  :root {
+    --paper:   #F1F2EE;
+    --surface: #FAFAF8;
+    --surface-2: #E8EAE3;
+    --ink:     #171A18;
+    --ink-2:   #4A4F4B;
+    --ink-3:   #6E736C;
+    --rule:    #CFD2C9;
+    --rule-2:  #DFE1DA;
+    --accent:  #1B5E8C;
+    --yes:     #2E6B4F;
+    --part:    #8C6210;
+    --no:      #98392E;
+    --yes-bg:  #2E6B4F1A;
+    --part-bg: #8C62101A;
+    --no-bg:   #98392E14;
+
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --serif: "Iowan Old Style", "Source Serif 4", Charter, Georgia, ui-serif, serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:   #141613;
+      --surface: #1B1E1A;
+      --surface-2: #23261F;
+      --ink:     #E8EAE3;
+      --ink-2:   #A8AEA3;
+      --ink-3:   #868C81;
+      --rule:    #2E332C;
+      --rule-2:  #262A24;
+      --accent:  #6BA8CE;
+      --yes:     #77B894;
+      --part:    #CFA24A;
+      --no:      #D9877A;
+      --yes-bg:  #77B89418;
+      --part-bg: #CFA24A18;
+      --no-bg:   #D9877A14;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:   #141613;
+    --surface: #1B1E1A;
+    --surface-2: #23261F;
+    --ink:     #E8EAE3;
+    --ink-2:   #A8AEA3;
+    --ink-3:   #868C81;
+    --rule:    #2E332C;
+    --rule-2:  #262A24;
+    --accent:  #6BA8CE;
+    --yes:     #77B894;
+    --part:    #CFA24A;
+    --no:      #D9877A;
+    --yes-bg:  #77B89418;
+    --part-bg: #CFA24A18;
+    --no-bg:   #D9877A14;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.55;
+    margin: 0;
+    padding: clamp(1.5rem, 4vw, 4rem) clamp(1rem, 4vw, 3rem) 5rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 3rem; }
+
+  /* ---- masthead ---- */
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: .72rem;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 1rem;
+  }
+  h1 {
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: clamp(2.1rem, 6vw, 3.4rem);
+    letter-spacing: -.03em;
+    line-height: 1.02;
+    text-wrap: balance;
+    margin: 0 0 1rem;
+  }
+  .standfirst {
+    font-size: 1.15rem;
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 60ch;
+    margin: 0;
+  }
+  .masthead { border-bottom: 2px solid var(--ink); padding-bottom: 2rem; }
+
+  /* ---- identity cards ---- */
+  .who { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  .card { background: var(--surface); padding: 1.25rem 1.35rem; display: flex; flex-direction: column; gap: .6rem; }
+  .card-key {
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--paper); background: var(--ink); padding: .2rem .45rem; align-self: flex-start;
+  }
+  .card h3 { font-family: var(--sans); font-size: 1.05rem; font-weight: 700; letter-spacing: -.01em; margin: 0; }
+  .card h3 span { display: block; font-weight: 400; font-size: .85rem; color: var(--ink-3); letter-spacing: 0; }
+  .card dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: .3rem .8rem; font-size: .84rem; font-family: var(--sans); }
+  .card dt { font-family: var(--mono); font-size: .68rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); padding-top: .15rem; }
+  .card dd { margin: 0; color: var(--ink-2); }
+
+  /* ---- legend ---- */
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: center;
+    font-family: var(--sans); font-size: .84rem; color: var(--ink-2);
+    padding: .85rem 1.1rem; background: var(--surface); border: 1px solid var(--rule);
+  }
+  .legend-item { display: flex; align-items: center; gap: .5rem; }
+
+  .s { font-family: var(--mono); font-size: 1rem; line-height: 1; display: inline-block; }
+  .s-yes  { color: var(--yes); }
+  .s-part { color: var(--part); }
+  .s-no   { color: var(--ink-3); opacity: .55; }
+
+  /* ---- section ---- */
+  section { display: flex; flex-direction: column; gap: 1rem; }
+  h2 {
+    font-family: var(--sans); font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em;
+    margin: 0; text-wrap: balance;
+  }
+  .lede { margin: 0; color: var(--ink-2); max-width: 62ch; font-size: 1rem; }
+
+  /* ---- matrix ---- */
+  .scroll { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 760px; font-family: var(--sans); font-size: .88rem; }
+  thead th {
+    position: sticky; top: 0; background: var(--ink); color: var(--paper);
+    font-family: var(--mono); font-size: .68rem; letter-spacing: .1em; text-transform: uppercase;
+    font-weight: 400; text-align: left; padding: .7rem .8rem; white-space: nowrap;
+  }
+  thead th.state { text-align: center; width: 62px; }
+  th.cap { width: 38%; }
+  th.org { width: 26%; }
+
+  tbody.phase > tr.phase-row td {
+    background: var(--surface-2); border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule);
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ink-2); padding: .5rem .8rem;
+  }
+  tbody td { padding: .65rem .8rem; border-bottom: 1px solid var(--rule-2); vertical-align: top; }
+  tbody tr:last-child td { border-bottom: none; }
+  td.state { text-align: center; font-variant-numeric: tabular-nums; }
+  td.state.is-yes  { background: var(--yes-bg); }
+  td.state.is-part { background: var(--part-bg); }
+  td.state.is-no   { background: var(--no-bg); }
+  td.cap { font-weight: 500; }
+  td.cap em { display: block; font-family: var(--sans); font-style: normal; font-weight: 400; font-size: .8rem; color: var(--ink-3); margin-top: .2rem; line-height: 1.4; }
+  td.org { color: var(--ink-2); font-size: .82rem; }
+  td.org b { font-weight: 600; color: var(--ink); }
+  code { font-family: var(--mono); font-size: .86em; background: var(--surface-2); padding: .08em .3em; }
+
+  /* ---- takeaway ---- */
+  .thirds { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  .third { background: var(--surface); padding: 1.3rem; display: flex; flex-direction: column; gap: .5rem; }
+  .third .who-owns { font-family: var(--mono); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
+  .third h4 { font-family: var(--sans); font-size: 1rem; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+  .third p { margin: 0; font-size: .9rem; color: var(--ink-2); font-family: var(--sans); line-height: 1.5; }
+
+  ol.copy { margin: 0; padding-left: 0; list-style: none; counter-reset: c; display: flex; flex-direction: column; gap: .9rem; }
+  ol.copy li { counter-increment: c; display: grid; grid-template-columns: 2rem 1fr; gap: .9rem; align-items: baseline; }
+  ol.copy li::before {
+    content: counter(c); font-family: var(--mono); font-size: .8rem; color: var(--paper);
+    background: var(--accent); width: 1.5rem; height: 1.5rem; display: grid; place-items: center;
+  }
+  ol.copy strong { font-weight: 600; }
+  ol.copy p { margin: .2rem 0 0; color: var(--ink-2); font-size: .95rem; }
+
+  .flag { border-left: 3px solid var(--no); padding: .9rem 1.1rem; background: var(--surface); }
+  .flag p { margin: 0; font-size: .95rem; }
+  .flag p + p { margin-top: .6rem; }
+
+  footer { border-top: 1px solid var(--rule); padding-top: 1.5rem; font-size: .85rem; color: var(--ink-3); font-family: var(--sans); }
+  footer p { margin: 0 0 .5rem; max-width: 70ch; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Revisión interna · 14 agosto 2026</p>
+    <h1>Tres loops, un pipeline</h1>
+    <p class="standfirst">Tres personas hemos construido, por separado, una máquina para que un agente entregue software sin perder el control humano. No compiten: cada una resuelve bien un tercio distinto del mismo problema. Esto es el inventario de qué hace cada una y de dónde salió cada pieza.</p>
+  </header>
+
+  <section>
+    <div class="who">
+      <article class="card">
+        <span class="card-key">CT</span>
+        <h3>Control Tower <span>José Agüera · <code>josemerca/control-tower-plugin</code></span></h3>
+        <dl>
+          <dt>Forma</dt><dd>Plugin de Claude Code (JavaScript)</dd>
+          <dt>Piezas</dt><dd>4 comandos, 12 skills, 3 hooks</dd>
+          <dt>Estado</dt><dd>v0.34.0 · público · en uso</dd>
+          <dt>Fuerza</dt><dd>De la idea al slice: congelar el diseño y trocearlo con garantías</dd>
+        </dl>
+      </article>
+      <article class="card">
+        <span class="card-key">JJ</span>
+        <h3>Fork con contrato de plan <span>Juanjo Ponz · <code>jjponz/control-tower-plugin</code></span></h3>
+        <dl>
+          <dt>Forma</dt><dd>Fork de Control Tower + 1.930 líneas propias</dd>
+          <dt>Piezas</dt><dd>Gate <code>plan</code>, <code>plan-contract.js</code>, skill propia</dd>
+          <dt>Estado</dt><dd>Mergeado en su rama por defecto y distribuible · 1.823 de 1.824 tests</dd>
+          <dt>Fuerza</dt><dd>Del slice al plan: convertir el plan en artefacto comprobable</dd>
+        </dl>
+      </article>
+      <article class="card">
+        <span class="card-key">AS</span>
+        <h3>agentic-skills <span>Alejandro Capdevila · <code>alcaptar/agentic-skills</code></span></h3>
+        <dl>
+          <dt>Forma</dt><dd>Programa Python (<code>slice-runner</code>) + 2 skills</dd>
+          <dt>Piezas</dt><dd>410 ficheros, ~137 de test, hexagonal</dd>
+          <dt>Estado</dt><dd>Privado · en uso · <code>deploy-watch</code> apagado a propósito</dd>
+          <dt>Fuerza</dt><dd>Del plan al despliegue: conducir, juzgar, presupuestar y vigilar</dd>
+        </dl>
+      </article>
+    </div>
+  </section>
+
+  <section>
+    <h2>La matriz</h2>
+    <p class="lede">Ordenada por el orden real del trabajo, de la idea al despliegue. La columna «Origen» dice quién inventó la pieza: cuando pone <b>superpowers</b>, viene del plugin de Jesse Vincent (MIT) del que los tres partimos.</p>
+
+    <div class="legend">
+      <span class="legend-item"><span class="s s-yes">●</span> lo tiene</span>
+      <span class="legend-item"><span class="s s-part">◐</span> parcial o por otra vía</span>
+      <span class="legend-item"><span class="s s-no">○</span> no lo tiene</span>
+      <span class="legend-item" style="font-family:var(--mono);font-size:.72rem;letter-spacing:.06em;">CT = Control Tower · JJ = fork de Juanjo · AS = agentic-skills</span>
+    </div>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th class="cap" scope="col">Capacidad</th>
+            <th class="state" scope="col">CT</th>
+            <th class="state" scope="col">JJ</th>
+            <th class="state" scope="col">AS</th>
+            <th class="org" scope="col">Origen</th>
+          </tr>
+        </thead>
+
+        <tbody class="phase">
+          <tr class="phase-row"><td colspan="5">1 · Diseñar y congelar</td></tr>
+          <tr>
+            <td class="cap">Brainstorming guiado hasta un diseño aprobado</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>superpowers</b> — los tres lo forkan o lo envuelven</td>
+          </tr>
+          <tr>
+            <td class="cap">Execution spec que se congela<em>DRAFT → CONGELADA; después nadie edita una decisión en silencio</em></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Control Tower</b></td>
+          </tr>
+          <tr>
+            <td class="cap">Procedencia por decisión congelada<em>hablada / deducida / propuesta — y una propuesta nunca se congela sola</em></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Control Tower</b> — impide que el agente cuele decisiones inventadas</td>
+          </tr>
+          <tr>
+            <td class="cap">Puerta de congelación que cabe en una pantalla<em>15 líneas, no un documento entero que nadie lee</em></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Control Tower</b></td>
+          </tr>
+          <tr>
+            <td class="cap">Troceo en rebanadas verticales entregables</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org">Los tres, por separado</td>
+          </tr>
+          <tr>
+            <td class="cap">El contrato de cada frontera se decide por delante<em>deja construir a la vez a quien produce y a quien consume</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b></td>
+          </tr>
+        </tbody>
+
+        <tbody class="phase">
+          <tr class="phase-row"><td colspan="5">2 · Del spec a los issues</td></tr>
+          <tr>
+            <td class="cap">Un issue por rebanada, creado por un programa</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org">Los dos, por separado — <code>/ct-groom</code> y <code>/slice-spec</code></td>
+          </tr>
+          <tr>
+            <td class="cap">Tabla de columnas fijas que un parser lee<em>la única parte del spec que interpreta un programa</em></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Control Tower</b></td>
+          </tr>
+          <tr>
+            <td class="cap">El estado del ciclo vive en labels del issue</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org">Los dos, por separado</td>
+          </tr>
+          <tr>
+            <td class="cap">Grafo de dependencias entre rebanadas<em>nada sale hasta que su dependencia esté mergeada</em></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-part"><span class="s s-part" aria-label="parcial">◐</span></td>
+            <td class="org"><b>Control Tower</b> — en AS es orden de ejecución, no grafo</td>
+          </tr>
+          <tr>
+            <td class="cap">Dos rebanadas que tocan lo mismo no pueden volar a la vez<em>colisión por área y por ficheros tocados, comprobada</em></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Control Tower</b></td>
+          </tr>
+          <tr>
+            <td class="cap">Migraciones y CI serializadas globalmente</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Control Tower</b></td>
+          </tr>
+          <tr>
+            <td class="cap">Alta en Project v2 con el sprint vigente</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Control Tower</b></td>
+          </tr>
+        </tbody>
+
+        <tbody class="phase">
+          <tr class="phase-row"><td colspan="5">3 · El plan de la rebanada</td></tr>
+          <tr>
+            <td class="cap">El agente escribe un plan antes de tocar código</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-part"><span class="s s-part" aria-label="parcial">◐</span></td>
+            <td class="org"><b>superpowers</b> — en AS es un «entendimiento», no un plan de tareas</td>
+          </tr>
+          <tr>
+            <td class="cap">El plan tiene contrato mecánico y se valida<em>estructura, tareas numeradas, sin placeholders ni decisiones abiertas</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Juanjo</b></td>
+          </tr>
+          <tr>
+            <td class="cap">Comprobación de literalidad<em>el código que el plan cita como «actual» tiene que existir letra por letra en el repo</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Juanjo</b> — caza el fallo nº 1: citar de memoria</td>
+          </tr>
+          <tr>
+            <td class="cap">El plan lleva decisiones, nunca cuerpos de código<em>firmas, tipos y constantes sí; el cuerpo lo escribe quien implementa, en rojo primero</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Juanjo</b> — de 73.869 a 3.493 caracteres medidos</td>
+          </tr>
+          <tr>
+            <td class="cap">Techo de tamaño del plan<em>un folio A4, para que la revisión humana sea leer y no hojear</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-part"><span class="s s-part" aria-label="parcial">◐</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Juanjo</b> — hoy aplicado al plan entero, y eso aplasta los commits (ver abajo)</td>
+          </tr>
+          <tr>
+            <td class="cap">Validación en seco antes de commitear</td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Juanjo</b> — <code>--check-plan</code></td>
+          </tr>
+          <tr>
+            <td class="cap">Sin plan válido no se cierra la rebanada<em>se niega y sale con error; no avisa y sigue</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Juanjo</b> — sobre la doctrina de CT: lo que no puede parar el merge es decoración</td>
+          </tr>
+        </tbody>
+
+        <tbody class="phase">
+          <tr class="phase-row"><td colspan="5">4 · La puerta humana antes de implementar</td></tr>
+          <tr>
+            <td class="cap">El agente para y enseña lo que va a hacer<em>corregir aquí cuesta dos líneas; corregirlo en el PR cuesta tirar el trabajo</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org">Los dos, por separado — gate <code>plan</code> y «alineación»</td>
+          </tr>
+          <tr>
+            <td class="cap">La puerta se cierra respondiendo en el issue<em><code>-GO</code> o <code>-REVIEW &lt;corrección&gt;</code>; el programa lee los comentarios</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b> — en JJ hay que ir a la terminal y empujar al agente a mano</td>
+          </tr>
+          <tr>
+            <td class="cap">La aprobación se lee por coincidencia exacta<em>con texto detrás no arranca; con varias respuestas gana la última</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b></td>
+          </tr>
+          <tr>
+            <td class="cap">Dos relojes distintos para esperar<em>30 min a una máquina, 8 h a una persona, y cada paso estrena su cuenta</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b></td>
+          </tr>
+        </tbody>
+
+        <tbody class="phase">
+          <tr class="phase-row"><td colspan="5">5 · Implementar</td></tr>
+          <tr>
+            <td class="cap">Cada rebanada en su worktree aislado</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org">Los dos, por separado</td>
+          </tr>
+          <tr>
+            <td class="cap">Un subagente por tarea, sin heredar contexto</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-part"><span class="s s-part" aria-label="parcial">◐</span></td>
+            <td class="org"><b>superpowers</b> — AS usa una llamada sin estado por papel</td>
+          </tr>
+          <tr>
+            <td class="cap">TDD obligatorio: el test en rojo primero</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>superpowers</b> / convenciones propias en AS</td>
+          </tr>
+          <tr>
+            <td class="cap">El que conduce es un programa, no una sesión de chat<em>se lanza, para donde toca, y no acumula contexto que haya que compactar</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b> — reemplazó su propia versión anterior, que sí vivía en la sesión</td>
+          </tr>
+          <tr>
+            <td class="cap">Todo el estado fuera del contexto del agente</td>
+            <td class="state is-part"><span class="s s-part" aria-label="parcial">◐</span></td>
+            <td class="state is-part"><span class="s s-part" aria-label="parcial">◐</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org">CT reparte entre issue y ficheros de estado; AS sólo el issue</td>
+          </tr>
+          <tr>
+            <td class="cap">Elección de modelo según la complejidad de la tarea</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-part"><span class="s s-part" aria-label="parcial">◐</span></td>
+            <td class="org"><b>superpowers</b>, corregido por <b>Juanjo</b> al desaparecer el código del plan</td>
+          </tr>
+        </tbody>
+
+        <tbody class="phase">
+          <tr class="phase-row"><td colspan="5">6 · Verificar</td></tr>
+          <tr>
+            <td class="cap">Controles mecánicos: lint, tipos, tests<em>lo decide un código de salida, no la impresión de un agente</em></td>
+            <td class="state is-part"><span class="s s-part" aria-label="parcial">◐</span></td>
+            <td class="state is-part"><span class="s s-part" aria-label="parcial">◐</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org">CT lo delega en la CI; <b>Alejandro</b> los corre dentro del ciclo</td>
+          </tr>
+          <tr>
+            <td class="cap">La vara de medir la declara el repo y la confirma una persona<em>si el issue no declara controles, el programa para en vez de medir con la vara vacía</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b></td>
+          </tr>
+          <tr>
+            <td class="cap">El que escribe no es el que juzga<em>dos agentes distintos, con instrucciones distintas</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b></td>
+          </tr>
+          <tr>
+            <td class="cap">El juez no puede ejecutar nada<em>sin Bash: no puede convencerse a sí mismo de que está verde</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b></td>
+          </tr>
+          <tr>
+            <td class="cap">El juez no ve la salida del build<em>un lint sucio no gasta un intento del juez ni le ensucia el criterio</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b></td>
+          </tr>
+          <tr>
+            <td class="cap">Revisión de código de la rama completa</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>superpowers</b> / rúbrica propia en AS</td>
+          </tr>
+          <tr>
+            <td class="cap">El PR falla si toca ficheros fuera de su alcance<em>comprueba hechos, no firmas: lo que tocó no se puede falsificar</em></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Control Tower</b> — nació de un agente que fabricó una autorización</td>
+          </tr>
+          <tr>
+            <td class="cap">Guarda contra cierres de issue accidentales<em>bloquea la palabra clave de cierre en un mensaje de commit</em></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Control Tower</b></td>
+          </tr>
+        </tbody>
+
+        <tbody class="phase">
+          <tr class="phase-row"><td colspan="5">7 · Mergear</td></tr>
+          <tr>
+            <td class="cap">El merge lo decide siempre una persona</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org">Los tres — es el punto en el que coincidimos sin hablarlo</td>
+          </tr>
+          <tr>
+            <td class="cap">Puerta visual: sin captura del antes/después no se mergea</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Control Tower</b></td>
+          </tr>
+          <tr>
+            <td class="cap">Puerta de aplicación: nada contra un entorno real sin revisión</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org"><b>Control Tower</b></td>
+          </tr>
+          <tr>
+            <td class="cap">Un PR rechazado vuelve al banco sin salirse del ciclo</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org">Los dos, por separado — <code>--reopen</code>/<code>--requeue</code> y <code>reset</code></td>
+          </tr>
+        </tbody>
+
+        <tbody class="phase">
+          <tr class="phase-row"><td colspan="5">8 · Después del merge</td></tr>
+          <tr>
+            <td class="cap">Vigilancia del despliegue en producción<em>orquesta las skills de observabilidad que haya, sólo lectura</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-part"><span class="s s-part" aria-label="parcial">◐</span></td>
+            <td class="org"><b>Alejandro</b> — construido y hoy apagado a propósito mientras lo pule</td>
+          </tr>
+          <tr>
+            <td class="cap">El veredicto go/no-go lo calcula el código</td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b> — umbrales contra baseline, no la impresión del agente</td>
+          </tr>
+          <tr>
+            <td class="cap">El rollback se redacta, nunca se ejecuta solo</td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b></td>
+          </tr>
+          <tr>
+            <td class="cap">Cada rebanada declara cómo se comprueba viva en producción</td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b> — y es criterio de aceptación, no un buen deseo</td>
+          </tr>
+        </tbody>
+
+        <tbody class="phase">
+          <tr class="phase-row"><td colspan="5">9 · Medir y decidir</td></tr>
+          <tr>
+            <td class="cap">Coste real de cada rebanada, sacado del historial de GitHub</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-part"><span class="s s-part" aria-label="parcial">◐</span></td>
+            <td class="org"><b>Control Tower</b> — <code>/ct-harvest</code>, cero campos a mano</td>
+          </tr>
+          <tr>
+            <td class="cap">Informe de qué está en vuelo y qué es residuo</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-part"><span class="s s-part" aria-label="parcial">◐</span></td>
+            <td class="org"><b>Control Tower</b> — <code>/ct-status</code></td>
+          </tr>
+          <tr>
+            <td class="cap">Presupuesto en dinero por rebanada, con corte duro<em>50 $ y el run se aborta; medido: entre 1 y 11 $ reales</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b></td>
+          </tr>
+          <tr>
+            <td class="cap">Gasto desglosado por papel<em>cuánto costó entender, cuánto implementar, cuánto juzgar</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b></td>
+          </tr>
+          <tr>
+            <td class="cap">Reabrir la conversación exacta de cualquier llamada<em>qué herramienta usó cada turno y qué decidió</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b></td>
+          </tr>
+          <tr>
+            <td class="cap">Banco de pruebas para medir cómo se le habla al modelo<em>variantes × semillas × repeticiones, medido por una función determinista</em></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b> — nadie más puede responder «¿esto mejora algo?» con datos</td>
+          </tr>
+          <tr>
+            <td class="cap">Máquina de estados interrogable sin montar una ejecución</td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org"><b>Alejandro</b></td>
+          </tr>
+          <tr>
+            <td class="cap">Códigos de salida como contrato<em>cada uno dice si volver a invocar sirve o no sirve</em></td>
+            <td class="state is-part"><span class="s s-part" aria-label="parcial">◐</span></td>
+            <td class="state is-part"><span class="s s-part" aria-label="parcial">◐</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org">Los dos — AS con 14 códigos, CT con unos pocos</td>
+          </tr>
+        </tbody>
+
+        <tbody class="phase">
+          <tr class="phase-row"><td colspan="5">10 · Repartirlo a otros</td></tr>
+          <tr>
+            <td class="cap">Se instala como plugin de Claude Code</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="org">AS necesita Python y <code>uv</code>, y es privado</td>
+          </tr>
+          <tr>
+            <td class="cap">Suite de tests propia y verde</td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-part"><span class="s s-part" aria-label="parcial">◐</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org">JJ reparte hoy con 1 test en rojo y los hooks compilados desincronizados</td>
+          </tr>
+          <tr>
+            <td class="cap">Identidad de plugin propia<em>nombre, autor y versión que no choquen con los de nadie</em></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="state is-no"><span class="s s-no" aria-label="no lo tiene">○</span></td>
+            <td class="state is-yes"><span class="s s-yes" aria-label="lo tiene">●</span></td>
+            <td class="org">El fork publica el mismo nombre, la misma versión y el mismo autor</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Lo que dice la matriz leída entera</h2>
+    <p class="lede">Los huecos no están repartidos al azar. Cada uno tiene la columna llena justo donde los otros dos la tienen vacía.</p>
+    <div class="thirds">
+      <div class="third">
+        <span class="who-owns">Control Tower</span>
+        <h4>El tercio de delante</h4>
+        <p>De la idea al slice: congelar el diseño con procedencia, trocearlo en una tabla que un programa lee, y garantizar que dos rebanadas que tocan lo mismo no vuelan a la vez. Nadie más lo tiene.</p>
+      </div>
+      <div class="third">
+        <span class="who-owns">Fork de Juanjo</span>
+        <h4>El tercio del medio</h4>
+        <p>Del slice al plan: convertir el plan en un artefacto que un programa puede rechazar. Es lo que impide que el agente escriba código a ciegas dentro de un documento que nadie lee.</p>
+      </div>
+      <div class="third">
+        <span class="who-owns">agentic-skills</span>
+        <h4>El tercio de detrás</h4>
+        <p>Del plan al despliegue: conducir la rebanada como programa, con un juez independiente que no puede ejecutar nada, presupuesto en dinero, y vigilancia después del merge.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Qué copiaría, y por qué</h2>
+    <ol class="copy">
+      <li>
+        <div>
+          <strong>La puerta que se cierra respondiendo en el issue.</strong>
+          <p>Es lo primero y con diferencia. Hoy el gate del plan de Juanjo deja al agente parado en una ventana de terminal y hay que ir a empujarlo a mano con dos comandos. Con el mecanismo de Alejandro, esa puerta se cierra escribiendo un comentario. Sin esto, ninguna puerta nueva escala.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <strong>El contrato del plan, con el techo aplicado por tarea.</strong>
+          <p>La pieza es excelente y los números la avalan. Pero hoy el techo se aplica al plan entero y el agente no puede partir un issue congelado, así que junta todas las tareas en un commit: de 8 tareas a 1 en las dos rebanadas medidas. El límite es correcto; el punto donde muerde, no.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <strong>El que escribe no es el que juzga, y el juez no puede ejecutar nada.</strong>
+          <p>Hoy en Control Tower el mismo agente que implementa se da el visto bueno. Separar los dos papeles y quitarle al juez la capacidad de ejecutar es barato y cambia qué significa un «pasa».</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <strong>Presupuesto en dinero por rebanada, con corte duro.</strong>
+          <p>Medimos el coste después, mirando el historial. Un tope que aborta la ejecución lo para antes.</p>
+        </div>
+      </li>
+      <li>
+        <div>
+          <strong>El banco de pruebas, a medio plazo.</strong>
+          <p>Es lo único que permite contestar «¿este cambio en cómo le hablamos al modelo mejora algo?» con datos en vez de con una anécdota. Y es justo la pregunta que tenemos abierta sobre el techo del folio.</p>
+        </div>
+      </li>
+    </ol>
+  </section>
+
+  <section>
+    <h2>Lo que hay que decidir esta semana</h2>
+    <div class="flag">
+      <p><strong>Hay tres implementaciones del mismo ciclo y una ya se distribuye.</strong> El fork publica un plugin con el mismo nombre, la misma versión y el mismo autor que el original, con código distinto. Eso rompe la comprobación de versiones: un repo sembrado por el fork hace que el plugin original se declare a sí mismo desactualizado.</p>
+      <p>La decisión no es técnica: o Control Tower se convierte en el sitio donde esto converge y acepta contribuciones, o nos separamos de verdad —nombres distintos, numeraciones distintas— y asumimos que hay dos herramientas. Lo que no funciona es lo de ahora.</p>
+    </div>
+  </section>
+
+  <footer>
+    <p><strong>Cómo se ha hecho esta revisión.</strong> Ejecutado y medido: la suite del fork (1.823 de 1.824 tests, en su rama y en su rama por defecto), el tamaño real de los cuatro planes de <code>repo-pulse</code>, el diff completo del fork contra el original y los manifiestos de plugin de ambos. Leído: los <em>issues</em> y comentarios de <code>repo-pulse</code>, el <code>README</code> completo de <code>agentic-skills</code>, su documento de arranque, su mapa de madurez y su banco de pruebas, más su árbol de 410 ficheros. No leído: sus 78.000 palabras de notas de diseño ni sus ficheros de código uno a uno.</p>
+    <p>Las casillas «parcial» nunca significan «a medio hacer»: significan que esa capacidad existe por otra vía, y la columna de origen dice cuál.</p>
+  </footer>
+
+</div>
