@@ -1,0 +1,351 @@
+<title>Convergencia de los tres loops</title>
+<style>
+  :root {
+    --paper:   #F1F2EE;
+    --surface: #FAFAF8;
+    --surface-2: #E8EAE3;
+    --ink:     #171A18;
+    --ink-2:   #4A4F4B;
+    --ink-3:   #6E736C;
+    --rule:    #CFD2C9;
+    --rule-2:  #DFE1DA;
+    --accent:  #1B5E8C;
+    --yes:     #2E6B4F;
+    --part:    #8C6210;
+    --no:      #98392E;
+
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --serif: "Iowan Old Style", "Source Serif 4", Charter, Georgia, ui-serif, serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:   #141613;
+      --surface: #1B1E1A;
+      --surface-2: #23261F;
+      --ink:     #E8EAE3;
+      --ink-2:   #A8AEA3;
+      --ink-3:   #868C81;
+      --rule:    #2E332C;
+      --rule-2:  #262A24;
+      --accent:  #6BA8CE;
+      --yes:     #77B894;
+      --part:    #CFA24A;
+      --no:      #D9877A;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper:   #141613;
+    --surface: #1B1E1A;
+    --surface-2: #23261F;
+    --ink:     #E8EAE3;
+    --ink-2:   #A8AEA3;
+    --ink-3:   #868C81;
+    --rule:    #2E332C;
+    --rule-2:  #262A24;
+    --accent:  #6BA8CE;
+    --yes:     #77B894;
+    --part:    #CFA24A;
+    --no:      #D9877A;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 17px;
+    line-height: 1.55;
+    margin: 0;
+    padding: clamp(1.5rem, 4vw, 4rem) clamp(1rem, 4vw, 3rem) 5rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 3.25rem; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-3); margin: 0 0 1rem;
+  }
+  h1 {
+    font-family: var(--sans); font-weight: 700; font-size: clamp(2.1rem, 6vw, 3.4rem);
+    letter-spacing: -.03em; line-height: 1.02; text-wrap: balance; margin: 0 0 1rem;
+  }
+  .standfirst { font-size: 1.15rem; line-height: 1.5; color: var(--ink-2); max-width: 60ch; margin: 0; }
+  .masthead { border-bottom: 2px solid var(--ink); padding-bottom: 2rem; }
+  .status {
+    display: inline-flex; gap: .5rem; align-items: center; margin-top: 1.25rem;
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--part); border: 1px solid var(--part); padding: .25rem .6rem;
+  }
+
+  section { display: flex; flex-direction: column; gap: 1.1rem; }
+  h2 {
+    font-family: var(--sans); font-size: 1.5rem; font-weight: 700; letter-spacing: -.02em;
+    margin: 0; text-wrap: balance;
+  }
+  h2 .num {
+    font-family: var(--mono); font-size: .8rem; font-weight: 400; color: var(--accent);
+    letter-spacing: .1em; display: block; margin-bottom: .3rem;
+  }
+  p { margin: 0; }
+  .lede { color: var(--ink-2); max-width: 64ch; }
+  strong { font-weight: 600; }
+  code { font-family: var(--mono); font-size: .86em; background: var(--surface-2); padding: .08em .3em; }
+
+  /* ---- the two convergences ---- */
+  .duo { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  .duo > div { background: var(--surface); padding: 1.4rem; display: flex; flex-direction: column; gap: .55rem; }
+  .duo .tag { font-family: var(--mono); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase; color: var(--accent); }
+  .duo h3 { font-family: var(--sans); font-size: 1.15rem; font-weight: 700; margin: 0; letter-spacing: -.015em; }
+  .duo p { font-family: var(--sans); font-size: .93rem; color: var(--ink-2); line-height: 1.5; }
+
+  /* ---- split table ---- */
+  .scroll { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; font-family: var(--sans); font-size: .89rem; }
+  thead th {
+    background: var(--ink); color: var(--paper); font-family: var(--mono);
+    font-size: .68rem; letter-spacing: .1em; text-transform: uppercase; font-weight: 400;
+    text-align: left; padding: .7rem .8rem;
+  }
+  tbody td { padding: .7rem .8rem; border-bottom: 1px solid var(--rule-2); vertical-align: top; color: var(--ink-2); }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody td:first-child { color: var(--ink); font-weight: 500; white-space: nowrap; }
+  td .owner { font-family: var(--mono); font-size: .78rem; color: var(--accent); }
+
+  /* ---- rounds timeline ---- */
+  .rounds { display: flex; flex-direction: column; gap: 0; border-left: 2px solid var(--rule); padding-left: 0; }
+  .round { display: grid; grid-template-columns: 8.5rem 1fr; gap: 1.5rem; padding: 1.5rem 0 1.5rem 1.5rem; border-bottom: 1px solid var(--rule-2); position: relative; }
+  .round:last-child { border-bottom: none; }
+  .round::before {
+    content: ""; position: absolute; left: -5px; top: 1.95rem;
+    width: 8px; height: 8px; background: var(--accent); border: 2px solid var(--paper);
+  }
+  .round.urgent::before { background: var(--no); }
+  .round-key { display: flex; flex-direction: column; gap: .35rem; }
+  .round-key .rid { font-family: var(--mono); font-size: .95rem; font-weight: 600; letter-spacing: .02em; color: var(--ink); }
+  .round-key .who { font-family: var(--sans); font-size: .78rem; color: var(--ink-3); }
+  .round-body { display: flex; flex-direction: column; gap: .7rem; }
+  .round-body h3 { font-family: var(--sans); font-size: 1.1rem; font-weight: 700; margin: 0; letter-spacing: -.015em; text-wrap: balance; }
+  .round-body p { font-family: var(--sans); font-size: .93rem; color: var(--ink-2); line-height: 1.55; }
+  .round-body ul { margin: 0; padding-left: 1.1rem; font-family: var(--sans); font-size: .92rem; color: var(--ink-2); display: flex; flex-direction: column; gap: .35rem; }
+  .gate {
+    font-family: var(--mono); font-size: .78rem; color: var(--yes);
+    border-top: 1px dashed var(--rule); padding-top: .6rem; line-height: 1.5;
+  }
+  .gate b { font-weight: 400; letter-spacing: .08em; text-transform: uppercase; font-size: .68rem; color: var(--ink-3); display: block; margin-bottom: .2rem; }
+  @media (max-width: 620px) { .round { grid-template-columns: 1fr; gap: .8rem; } }
+
+  /* ---- callouts ---- */
+  .note { border-left: 3px solid var(--accent); padding: .9rem 1.1rem; background: var(--surface); font-family: var(--sans); font-size: .93rem; color: var(--ink-2); line-height: 1.55; }
+  .note strong { color: var(--ink); }
+  .flag { border-left: 3px solid var(--no); padding: .9rem 1.1rem; background: var(--surface); font-family: var(--sans); font-size: .93rem; color: var(--ink-2); line-height: 1.55; }
+  .flag strong { color: var(--ink); }
+
+  ul.plain { margin: 0; padding-left: 1.1rem; font-family: var(--sans); font-size: .95rem; color: var(--ink-2); display: flex; flex-direction: column; gap: .6rem; line-height: 1.55; }
+  ul.plain strong { color: var(--ink); }
+
+  footer { border-top: 1px solid var(--rule); padding-top: 1.5rem; font-size: .85rem; color: var(--ink-3); font-family: var(--sans); }
+  footer p { max-width: 70ch; }
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Propuesta · 14 agosto 2026</p>
+    <h1>Convergencia de los tres loops</h1>
+    <p class="standfirst">Tres implementaciones del mismo ciclo, construidas por separado, y una de ellas ya se reparte bajo el nombre y la versión de otra. Esto es qué proponemos hacer con eso: quién se queda cada tercio, en qué orden entra cada pieza y qué decisiones hacen falta antes de mover nada.</p>
+    <span class="status">Sin aprobar · pendiente de D-1</span>
+  </header>
+
+  <section>
+    <h2><span class="num">01</span>La tesis</h2>
+    <p class="lede">Hay <strong>dos convergencias distintas</strong>, y confundirlas es el error a evitar.</p>
+    <div class="duo">
+      <div>
+        <span class="tag">Con el fork de Juanjo</span>
+        <h3>Convergencia de código</h3>
+        <p>Es un fork de Control Tower: su trabajo se mergea de vuelta. Un pull request y ya. No hay decisión arquitectónica que tomar, sólo dos ajustes de diseño antes de aceptarlo.</p>
+      </div>
+      <div>
+        <span class="tag">Con agentic-skills</span>
+        <h3>Convergencia de mecanismos</h3>
+        <p>Es un programa de Python. No se puede fusionar dentro de un plugin de JavaScript, y forzarlo sería reescribir uno de los dos. Se adoptan sus <em>ideas</em>, reimplementadas y con atribución — y se acuerda dónde acaba una herramienta y empieza la otra.</p>
+      </div>
+    </div>
+    <div class="note"><strong>Control Tower es el punto de convergencia de los dos tercios de delante</strong> — de la idea al slice, y del slice al plan — porque es el único de los tres que es público, instalable como plugin y ya base de otro. <strong>agentic-skills se mantiene como herramienta separada</strong> para el tercio de detrás, con una frontera escrita en vez de una fusión.</div>
+  </section>
+
+  <section>
+    <h2><span class="num">02</span>El reparto</h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th scope="col">Tercio</th><th scope="col">Dueño</th><th scope="col">Qué cubre</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Delante<br><span class="owner">idea → slice</span></td>
+            <td class="owner">Control Tower</td>
+            <td>Congelación con procedencia, tabla de slices, grafo de dependencias, colisión por área, puertas humanas del epic</td>
+          </tr>
+          <tr>
+            <td>Medio<br><span class="owner">slice → plan</span></td>
+            <td class="owner">Control Tower, con la pieza del fork</td>
+            <td>El plan como artefacto comprobable: literalidad, taxonomía de bloques con presupuesto, validación en seco y gate duro</td>
+          </tr>
+          <tr>
+            <td>Detrás<br><span class="owner">plan → despliegue</span></td>
+            <td class="owner">agentic-skills</td>
+            <td>Conducción como programa, juez independiente, presupuesto en dinero, vigilancia después del merge</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="lede">Control Tower <strong>adopta selectivamente</strong> del tercio de detrás lo que puede vivir dentro de un plugin: el juez independiente y el presupuesto. Lo que depende de la observabilidad de Mercadona se queda donde está y se encadena.</p>
+  </section>
+
+  <section>
+    <h2><span class="num">03</span>El plan, por rondas</h2>
+    <div class="rounds">
+
+      <article class="round urgent">
+        <div class="round-key">
+          <span class="rid">Ronda 0</span>
+          <span class="who">Juanjo · esta semana</span>
+        </div>
+        <div class="round-body">
+          <h3>Desactivar la colisión</h3>
+          <p>No entrega funcionalidad. Quita un problema que crece solo mientras nadie lo toque: el fork publica un plugin con el mismo nombre, la misma versión y el mismo autor que el original, con código distinto.</p>
+          <ul>
+            <li>Cambiar <code>name</code>, <code>owner</code> y <code>version</code> en <code>plugin.json</code> y <code>marketplace.json</code>.</li>
+            <li>Arreglar el <code>dist/</code> desincronizado — hoy reparte hooks compilados que no corresponden a sus fuentes.</li>
+          </ul>
+          <p class="gate"><b>Criterio de cierre</b>Los dos plugins se instalan a la vez en una máquina sin pisarse, y <code>ct-init</code> deja de declarar desactualizado al plugin original.</p>
+        </div>
+      </article>
+
+      <article class="round">
+        <div class="round-key">
+          <span class="rid">F35</span>
+          <span class="who">Juanjo abre el PR · José mergea</span>
+        </div>
+        <div class="round-body">
+          <h3>El contrato del plan entra en Control Tower</h3>
+          <ul>
+            <li><strong>Entra:</strong> gate <code>plan</code> en modo <strong>opt-in</strong>, <code>plan-contract.js</code>, <code>--check-plan</code>, gate duro en <code>--release</code> y la skill propia.</li>
+            <li><strong>Cambio pedido antes de mergear:</strong> el techo de tamaño se aplica <strong>por tarea</strong>, no al plan entero. Hoy el agente no puede partir un issue congelado, así que para caber junta todas las tareas en un commit — medido: de 8 tareas en un plan a 1 en los dos siguientes.</li>
+            <li><strong>Fuera de esta ronda:</strong> el <code>plan</code> siempre-on, que espera a F36, y el cambio de tier de modelo, que es una decisión propia con su commit propio.</li>
+          </ul>
+          <p class="gate"><b>Criterio de cierre</b>Los planes de <code>repo-pulse</code> #3 y #4 revalidan con el techo nuevo y producen dos o más tareas cada uno.</p>
+        </div>
+      </article>
+
+      <article class="round">
+        <div class="round-key">
+          <span class="rid">F36</span>
+          <span class="who">José · desbloquea el resto</span>
+        </div>
+        <div class="round-body">
+          <h3>Cerrar una puerta sin ir a la terminal</h3>
+          <p>Es la ronda de la que dependen las demás. Hoy cerrar un gate <strong>no despierta al agente</strong>: responder en GitHub no le llega, y hay que ir a su ventana de terminal y empujarlo con dos comandos.</p>
+          <ul>
+            <li><strong>Se adopta de agentic-skills:</strong> la puerta se cierra respondiendo en el issue; el token de aprobación se lee por <strong>coincidencia exacta</strong> y gana la última respuesta; <strong>dos relojes</strong> distintos para esperar a una máquina y a una persona, y cada paso estrena su cuenta.</li>
+            <li><strong>Decisión abierta (D-3):</strong> en Control Tower el agente es una sesión viva, no un programa que consulta. O consulta el issue él mismo — barato, pero depende de que obedezca, y aquí un prompt no es un gate — o un proceso lo vigila y lo empuja. <strong>Recomendada la segunda</strong>: convierte un prompt en un mecanismo.</li>
+          </ul>
+          <p class="gate"><b>Criterio de cierre</b>Cerrar un gate respondiendo en GitHub, sin tocar la terminal, demostrado en <code>repo-pulse</code>. Al cerrarla se enciende el <code>plan</code> siempre-on que F35 dejó opt-in.</p>
+        </div>
+      </article>
+
+      <article class="round">
+        <div class="round-key">
+          <span class="rid">F37</span>
+          <span class="who">José</span>
+        </div>
+        <div class="round-body">
+          <h3>El juez independiente</h3>
+          <ul>
+            <li>El que escribe no es el que juzga: dos agentes distintos con instrucciones distintas.</li>
+            <li><strong>El juez no puede ejecutar nada</strong> — sin acceso a la terminal, así que no puede convencerse a sí mismo de que está verde.</li>
+            <li>Los controles mecánicos corren <strong>antes</strong> del juez y <strong>el juez no ve su salida</strong>: un lint sucio no gasta un intento adversarial ni le ensucia el criterio.</li>
+          </ul>
+          <p class="gate"><b>Criterio de cierre</b>El pull request de un slice trae un veredicto emitido por un agente que no ejecutó nada.</p>
+        </div>
+      </article>
+
+      <article class="round">
+        <div class="round-key">
+          <span class="rid">F38</span>
+          <span class="who">José</span>
+        </div>
+        <div class="round-body">
+          <h3>La medida</h3>
+          <ul>
+            <li>Presupuesto <strong>en dinero</strong> por slice con corte duro, y gasto desglosado por papel: cuánto costó entender, cuánto implementar, cuánto juzgar. Se junta con la cosecha actual, que mide el historial de GitHub y no el gasto.</li>
+            <li><strong>Decisión aparte, no ronda:</strong> el banco de pruebas de prompts. Es un proyecto en sí mismo, y es lo único que permite contestar con datos si un cambio en cómo le hablamos al modelo mejora algo — empezando por el número del techo del plan.</li>
+          </ul>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">04</span>La frontera con agentic-skills</h2>
+    <ul class="plain">
+      <li><strong>La vigilancia después del merge se queda donde está.</strong> Depende de la observabilidad de Mercadona — Prometheus, Elasticsearch, logs de Google Cloud, Sentry. Control Tower <strong>para en el merge</strong>; quien quiera la fase siguiente encadena la herramienta de Alejandro. Es un acuerdo de frontera, no de código.</li>
+      <li><strong>El orquestador como programa se aplaza, no se descarta.</strong> Alejandro llegó por el camino que Control Tower lleva hoy —una skill orquestando dentro de tu sesión— y decidió reemplazarla por un programa aparte. Es la pregunta arquitectónica de fondo y no se aborda en estas cuatro rondas: se revisa al cerrarlas, con los datos de F38 encima.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="num">05</span>Decisiones que necesitan dueño</h2>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th scope="col">#</th><th scope="col">Decisión</th><th scope="col">Dueño</th><th scope="col">Cuándo</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>D-1</td><td>¿Control Tower acepta contribuciones externas, con pull request y revisión?</td><td class="owner">José</td><td>Antes de F35</td></tr>
+          <tr><td>D-2</td><td>El techo del plan por tarea: qué número exacto</td><td class="owner">José + Juanjo</td><td>En F35, con el dato de cuántas vueltas de validación costó</td></tr>
+          <tr><td>D-3</td><td>Cómo se cierra un gate: que consulte el agente, o un proceso que lo vigile</td><td class="owner">José</td><td>En F36</td></tr>
+          <tr><td>D-4</td><td>¿El orquestador deja de ser una sesión de chat?</td><td class="owner">José</td><td>Aplazada — se revisa al cerrar F38</td></tr>
+          <tr><td>D-5</td><td>¿agentic-skills se abre al equipo o sigue siendo personal?</td><td class="owner">Alejandro</td><td>Cuando quiera</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="num">06</span>Fuera de alcance</h2>
+    <p class="lede">Escrito a propósito y por delante, con la misma regla que un execution spec: lo que no se va a hacer, dicho antes de que alguien lo proponga a mitad.</p>
+    <ul class="plain">
+      <li><strong>No se fusiona agentic-skills dentro de Control Tower</strong>, ni al revés.</li>
+      <li><strong>No se reescribe Control Tower en Python.</strong></li>
+      <li><strong>No se sube el número de agentes en paralelo</strong> antes de que el ciclo se haya ganado la confianza. Es el aviso que cita el propio mapa de madurez de Alejandro, y es la trampa clásica.</li>
+      <li><strong>No se toca el brainstorming ni la congelación.</strong> Es lo único de los tres tercios que no está en discusión, y es la pieza que impide que un agente cuele decisiones inventadas como si fueran tuyas.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="num">07</span>Riesgos</h2>
+    <div class="flag">
+      <p><strong>La divergencia gana usuarios mientras se decide.</strong> El fork ya se reparte. Cada persona que lo instale antes de la Ronda 0 se lleva un plugin que dice ser Control Tower, sin la comprobación de alcance del pull request y con los hooks compilados desincronizados.</p>
+    </div>
+    <ul class="plain">
+      <li><strong>Cambiar un número inventado por otro número inventado.</strong> El techo por tarea es mejor que el techo por plan, pero sin banco de pruebas seguimos calibrando a ojo.</li>
+      <li><strong>Absorber demasiado y romper la premisa.</strong> Control Tower vale porque es un plugin ligero que se instala y ya. Cada mecanismo que se adopta lo engorda: la vara es si la pieza cabe en un plugin sin arrastrar un runtime detrás.</li>
+      <li><strong>Que las rondas se queden sin dueño.</strong> La Ronda 0 y F35 dependen de Juanjo; F36 a F38 no dependen de nadie más que de José. Si D-1 se responde que no, este plan entero se cae y hay que escribir el otro: el de la separación limpia.</li>
+    </ul>
+  </section>
+
+  <footer>
+    <p>Documento de trabajo. El inventario de capacidades del que sale esta propuesta —46 capacidades, tres columnas y el origen de cada pieza— está en <em>Tres loops, un pipeline</em>. Los dos viven versionados en <code>docs/</code> del repositorio de Control Tower.</p>
+  </footer>
+
+</div>
