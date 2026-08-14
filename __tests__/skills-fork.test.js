@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ROLE_BUDGETS, CODE_BUDGETS } from '../scripts/plan-contract.js'
 
 // F32 — el fork de superpowers 6.0.3 dentro del plugin (decisión cerrada en
 // F31 §5: los 11 skills usados se forkan a control-tower-loop:* y superpowers
@@ -153,6 +154,44 @@ describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive 
     const s = read('writing-plans-prescriptive', 'SKILL.md')
     expect(s).toMatch(/base of the branch/i)
     expect(s).toMatch(/never relabel/i)
+  })
+
+  // F-jjponz-4 — la skill ordenaba pegar "the complete final content" de cada
+  // fichero, y eso produjo un plan de 74k caracteres con el 65% de código, con
+  // cinco defectos que viajaron pegados. La doctrina nueva vive en la prosa,
+  // pero los NÚMEROS los manda plan-contract.js: si divergen, el agente escribe
+  // planes que el validador rechaza y nadie sabe cuál de los dos manda.
+  it('enumera los cuatro roles de bloque', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    for (const rol of ['Current state (', 'Contract (', 'Call site (', 'Final text (']) {
+      expect(s).toContain(rol)
+    }
+  })
+
+  it('sus presupuestos son los del validador: la prosa y el código no pueden divergir', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    for (const n of [...Object.values(ROLE_BUDGETS), CODE_BUDGETS.task, CODE_BUDGETS.plan]) {
+      expect(s).toContain(String(n))
+    }
+  })
+
+  it('la doctrina del volcado ya no está', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    expect(s).not.toMatch(/paste the code the plan shows/i)
+    expect(s).not.toMatch(/complete final content/i)
+  })
+
+  it('dice que la configuración va en prosa y que un test va por nombre y aserción', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    expect(s).toMatch(/configuration/i)
+    expect(s).toMatch(/never appears as a block/i)
+  })
+
+  it('el template no pide el estado final completo y sus huecos nombran los roles', () => {
+    const t = read('writing-plans-prescriptive', 'plan-template.md')
+    expect(t).not.toMatch(/the complete final state/i)
+    expect(t).toContain('Contract (')
+    expect(t).toContain('No code — ')
   })
 })
 

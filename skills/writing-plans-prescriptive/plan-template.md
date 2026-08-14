@@ -1,9 +1,10 @@
 # {{#<issue> — what this slice delivers}}
 
 > **This plan is written to be executed by task-scoped subagents with zero context and no
-> authority to decide.** Every diff embeds the current state (copied verbatim from the repo)
-> and the complete final state. Do not improvise: follow the tasks literally. On ambiguity,
-> the issue body and AGENTS.md win.
+> authority to decide.** Every task carries the current state of what it touches (copied
+> verbatim), the contracts it must honour and the exact commands that verify it — not the
+> bodies: those you write test-first. Do not improvise on names, signatures, constants or test
+> names: they are decided here. On ambiguity, the issue body and AGENTS.md win.
 
 ## 1. Context and goal
 
@@ -32,13 +33,18 @@ Protected" section. If nothing: N/A — <reason>.}}
 
 ## 4. Inventory
 
-{{Every file this slice creates or modifies, with what consumes it.}}
+| File | Action | Consumed by | Block in §7 |
+|---|---|---|---|
+| {{path}} | create / modify | {{who}} | Contract / Call site / Current state / Final text / prose (config) / none (body by TDD) |
 
 ## 5. Interfaces
 
-Consumes: {{the interface the issue's "Dependencias" section declares — copied exactly, or
-N/A — no dependencies}}
-Produces: {{what later slices rely on — exact names, signatures, types, or N/A — <reason>}}
+Consumes: {{the interface the issue declares for its dependency — names and signatures inline,
+no code block; or N/A — no dependencies. If it has to be quoted from the repo, quote it inside
+the task that consumes it, with `Current state (path, lines A-B):`.}}
+Produces: {{what later slices rely on — one exported name and signature per line, no code
+block: the block lives in the task that creates the file, which is what the task brief
+carries. Or N/A — <reason>.}}
 
 ## 6. Test strategy
 
@@ -51,14 +57,34 @@ here with the reason so the implementer does not invent them.}}
 
 **Objective:** {{one sentence: the observable behavior this commit delivers}}
 
-**Files:** {{exact paths}}
+**Files:** {{exact paths, each marked (create) or (modify)}}
 
-Current state (path/to/file.ext):
+Current state (path/to/file.ext, lines A-B):
 
-{{code block copied verbatim from the repo — or the line "Current state: does not exist."
-followed by the complete final content}}
+{{ONLY the tramo that changes, max 25 lines, copied verbatim from the repo — the validator
+greps it.}}
 
-**TDD:** {{red first: literal test name and assertion → minimal green | No TDD — <reason>}}
+Contract (path/to/file.ext):
+
+{{Max 80 lines: types, interfaces, exact signatures, typed errors, and constants the implementer
+cannot derive (formats, flags, magic values). NO function bodies: those are written test-first.}}
+
+Call site (path/to/consumer.ext):
+
+{{Max 25 lines, before -> after: how the call reads in the consumer once this task is done —
+route, handler, component usage.}}
+
+Final text (path/to/doc.md):
+
+{{Max 30 lines, text artifacts only (.md/.txt/.rst/.adoc): the exact replacement wording, and
+only claims you verified against the repo. Never for code or configuration.}}
+
+{{Configuration (tsconfig, package.json, CI workflows, lockfiles) never gets a block: state the
+change in prose with the value inline. A task with no block at all says so with the exact line:
+No code — <reason>. Blocks add up to 120 lines per task and 350 per plan.}}
+
+**TDD:** {{red first: literal test name and the assertion that pins the boundary → minimal green
+| No TDD — <reason>}}
 
 **Tests:** {{added: named one by one / removed on purpose: named one by one | N/A — <reason>}}
 
@@ -70,7 +96,7 @@ followed by the complete final content}}
 
 **Files:** {{...}}
 
-{{Diffs with the same Current state convention.}}
+{{Same four block roles, same budgets.}}
 
 **TDD:** {{... | No TDD — <reason>}}
 
