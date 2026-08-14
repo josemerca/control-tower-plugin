@@ -155,11 +155,13 @@ El principio que ordena todo el diseño:
 | Kickoff | `/ct-next` | prompt efímero + launcher temporal |
 | `SLICE.md` | `/ct-next` siembra, el agente escribe | `.worktrees/<n>/.agent/` — **ignorado por git** |
 | `STATE.md` | `/ct-init`, la coordinadora | `.agent/` — trackeado |
-| Plan del slice | el agente, con `writing-plans` | `docs/superpowers/plans/` — commiteado, viaja en el PR |
+| Plan del slice | el agente, con `writing-plans-prescriptive` | `docs/superpowers/plans/` — commiteado, viaja en el PR |
 | PR | el agente | GitHub — con la closing keyword en el **cuerpo** |
 | `conventions-ack.md` | el humano | `.agent/` — silencia un aviso sin borrar documentación |
 
 **El formato exacto de cada uno está en [la referencia completa](docs/loop/control-tower-loop.pdf)**, sacado en cada caso de la función que lo emite, no de una descripción.
+
+El plan del slice tiene contrato mecánico (`scripts/plan-contract.js`), y desde F-jjponz-4 ese contrato acota **qué** puede llevar un bloque de código: cada uno declara su rol —`Current state` (el tramo que cambia, comprobado verbatim contra el repo), `Contract` (tipos, firmas, errores tipados, constantes no deducibles), `Call site` (cómo queda la llamada en el consumidor) o `Final text` (documentación)— con su presupuesto de líneas. Los cuerpos de los módulos y los ficheros de test **no van en el plan**: los escribe el implementador con TDD, y la configuración se describe en prosa. El motivo es el gate `plan`: un plan de 74k caracteres que no cabe en un comentario del issue no se revisa, se hojea — y lo que viaja sin revisar son defectos.
 
 ### Las 4 reglas de celda de la tabla de slices
 

@@ -195,6 +195,31 @@ describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive 
   })
 })
 
+// F-jjponz-4 — costura 5. La selección de modelo de SDD daba por hecho que la
+// tarea traía el código completo ("transcription plus testing") y por eso
+// mandaba esas tareas al tier más barato. Desde que el plan lleva contratos y
+// no cuerpos, NINGUNA tarea es transcripción: ese atajo enrutaría al modelo más
+// barato justo el eslabón que ahora escribe el código.
+describe('costura 5 — SDD ya no supone que la tarea trae el código completo', () => {
+  const skill = () => read('subagent-driven-development', 'SKILL.md')
+
+  it('el atajo de "transcripción" ya no existe', () => {
+    expect(skill()).not.toMatch(/contains the complete code to write/i)
+  })
+
+  it('el suelo del implementador es el tier intermedio, y se dice por qué', () => {
+    const s = skill()
+    expect(s).toMatch(/mid-tier model as the floor/i)
+    expect(s).toMatch(/contract/i)
+  })
+
+  it('FORK.md la documenta como costura, para que un cherry-pick no la pise', () => {
+    const fork = readFileSync(join(SKILLS, 'FORK.md'), 'utf8')
+    expect(fork).toMatch(/costura 5/i)
+    expect(fork).toMatch(/subagent-driven-development/)
+  })
+})
+
 describe('costura 3 — finishing-a-development-branch en repo gobernado: PR + release + PARAR', () => {
   const skill = () => read('finishing-a-development-branch', 'SKILL.md')
 

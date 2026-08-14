@@ -252,7 +252,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
     // encuentra plan y SDD reengancha entero. El paréntesis que enumeraba su
     // flujo (impl → spec-review → code-review) se quitó a cambio: lo define
     // el propio skill, y duplicarlo aquí es lo que el fork vuelve innecesario.
-    `Primer acto, con el baseline verde: escribe el plan del slice con control-tower-loop:writing-plans-prescriptive usando el issue como spec (sus AC, "Protegido" y "Contexto del epic" son la entrada que la skill pide). Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${slice.n}-<slug>.md, valídalo con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --check-plan\` hasta exit 0, y commitéalo: viaja en el PR, y el --release del final se negará (exit 6) sin un plan válido commiteado.`,
+    `Primer acto, con el baseline verde: escribe el plan del slice con control-tower-loop:writing-plans-prescriptive usando el issue como spec (sus AC, "Protegido" y "Contexto del epic" son la entrada que la skill pide). SOLO bloques esenciales, cada uno con su etiqueta de rol: contratos, call sites y el tramo que cambia — los cuerpos de los módulos y los ficheros de test los escribe el implementador con TDD, y la configuración se describe en prosa. Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${slice.n}-<slug>.md, valídalo con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --check-plan\` hasta exit 0, y commitéalo: viaja en el PR, y el --release del final se negará (exit 6) sin un plan válido commiteado.`,
     `Con el plan escrito, sigue control-tower-loop:subagent-driven-development con TDD.`,
     addendum,
     ...gateLines,

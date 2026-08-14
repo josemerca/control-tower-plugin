@@ -122,14 +122,15 @@ most expensive — which silently defeats this section.
 
 **Turn count beats token price.** Wall-clock and context cost scale with how
 many turns a subagent takes, and the cheapest models routinely take 2-3× the
-turns on multi-step work — costing more overall. Use a mid-tier model as the
-floor for reviewers and for implementers working from prose descriptions.
-When the task's plan text contains the complete code to write, the
-implementation is transcription plus testing: use the cheapest tier for
-that implementer. Single-file mechanical fixes also take the cheapest tier.
+turns on multi-step work — costing more overall.
+Use a **mid-tier model as the floor** for reviewers and for every implementer:
+a task brief carries the contract and the test names, not the finished code, so
+implementing it is writing code test-first, never transcription. The cheapest
+tier is for single-file mechanical fixes only — a rename, a version bump, a
+moved line.
 
 **Task complexity signals (implementation tasks):**
-- Touches 1-2 files with a complete spec → cheap model
+- One file, contract given, behaviour pinned by one named test → mid-tier model
 - Touches multiple files with integration concerns → standard model
 - Requires design judgment or broad codebase understanding → most capable model
 
