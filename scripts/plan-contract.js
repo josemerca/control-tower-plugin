@@ -53,6 +53,86 @@ const FORBIDDEN = [
 const TASK_HEADING = /^### Task (\d+) — /
 const CURRENT_STATE = /^Current state \(([^),]+)(?:,[^)]*)?\):\s*$/
 
+// ============================================================================
+// F-jjponz-4 — LA TAXONOMÍA DE BLOQUES.
+//
+// La primera versión de la skill ordenaba pegar "the complete final content" de
+// cada fichero. Medido en campo (slice #2 de repo-pulse): 73.868 caracteres de
+// plan, 1.271 líneas de código (65%), publicado partido en DOS comentarios
+// porque no cabía en uno; y de sus 14 commits, CINCO arreglaban defectos que
+// venían pegados en el plan — una fuga de directorio, un `catch` desnudo que se
+// tragaba fallos reales de git, un tipo exportado que filtraba emails, un texto
+// de documentación que afirmaba algo falso y cuatro vectores de test que no
+// pinchaban el umbral que decían pinchar. Un cuerpo escrito a ciegas, sin
+// compilador y sin ejecutar nada, llega con defectos y nadie los ve: el gate
+// humano `plan` que debía cazarlos tenía 74k caracteres que revisar.
+//
+// Por qué el rol y no un límite de líneas: un tope bruto rechazaría un fichero
+// de tipos legítimo (el mayor medido, 71 líneas) y aceptaría un cuerpo de 25.
+// Lo que se comprueba es QUÉ es cada bloque. Así el rechazo mecánico coincide
+// con el criterio semántico —el plan cierra DECISIONES y deja los CUERPOS al
+// TDD— y de paso el humano lee el plan como un índice de roles.
+// ============================================================================
+
+export const ROLE_BUDGETS = { 'Current state': 25, Contract: 80, 'Call site': 25, 'Final text': 30 }
+export const COMMAND_BUDGET = 20
+export const CODE_BUDGETS = { task: 120, plan: 350, chars: 45000 }
+
+const ROLE_LABELS = [
+  ['Current state', CURRENT_STATE],
+  ['Contract', /^Contract \(([^),]+)(?:,[^)]*)?\):\s*$/],
+  ['Call site', /^Call site \(([^),]+)(?:,[^)]*)?\):\s*$/],
+  ['Final text', /^Final text \(([^),]+)(?:,[^)]*)?\):\s*$/],
+]
+
+const ROLE_MENU =
+  'Todo bloque va precedido por una de estas cuatro etiquetas: "Current state (path):" (el ' +
+  'tramo de hoy, que se comprueba verbatim), "Contract (path):" (tipos, firmas, errores ' +
+  'tipados y constantes que el implementador no puede deducir), "Call site (path):" (cómo ' +
+  'queda la llamada en el consumidor) o "Final text (path.md):" (texto cuyo valor literal ES ' +
+  'el entregable). Los comandos van con su lenguaje (```bash) o detrás de **Verification:**. ' +
+  'Un cuerpo de módulo no tiene etiqueta porque no va en el plan: lo escribe el implementador, ' +
+  'en rojo primero.'
+
+const TEXT_EXTENSIONS = ['.md', '.txt', '.rst', '.adoc']
+const CONFIG_EXTENSIONS = ['.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.lock', '.properties', '.env']
+const CONFIG_BASENAMES = ['.gitignore', '.dockerignore', '.npmrc', '.editorconfig', 'Dockerfile', 'Makefile']
+const TEST_PATH = /(\.|_)(test|spec)\.|(^|\/)(__tests__|tests?)\//
+const COMMAND_LANGS = new Set(['bash', 'sh', 'shell', 'console', 'zsh'])
+const NO_CODE = /^No code — .+/
+
+const ends = (path, list) => list.some((ext) => path.toLowerCase().endsWith(ext))
+const isText = (path) => ends(path, TEXT_EXTENSIONS)
+const isTest = (path) => TEST_PATH.test(path)
+const isConfig = (path) =>
+  ends(path, CONFIG_EXTENSIONS) || CONFIG_BASENAMES.includes(path.split('/').pop())
+
+function roleOf(line) {
+  for (const [rol, re] of ROLE_LABELS) {
+    const m = re.exec(line)
+    if (m) return { rol, path: m[1].trim() }
+  }
+  return null
+}
+
+const BUDGET_REMEDY = {
+  'Current state': 'cita solo el tramo que cambia y acótalo en la etiqueta: "Current state (path, lines 40-58):".',
+  Contract: 'un contrato son declaraciones: tipos, firmas, errores tipados y constantes no deducibles. Si no cabe, lo que estás pegando es un cuerpo: quítalo y deja la firma — el cuerpo lo escribe el implementador con el test delante.',
+  'Call site': 'el call site es la llamada, no el consumidor entero: deja las líneas que cambian, antes → después.',
+  'Final text': 'parte el reemplazo en tramos, cada uno con su "Current state (path, lines A-B):".',
+}
+
+function bodyAtFence(lines, openIdx) {
+  const body = []
+  for (let j = openIdx + 1; j < lines.length; j++) {
+    if (lines[j].fence) return body
+    body.push(lines[j].line)
+  }
+  return null
+}
+
+const langAt = (line) => line.slice(3).trim().toLowerCase()
+
 // Anota cada línea con si es estructural (fuera de fence) — el único parseo
 // de markdown que este contrato necesita. Un fence abre y cierra con una
 // línea que EMPIEZA por tres backticks, como en el resto de parsers del repo.
@@ -131,14 +211,122 @@ export function validatePlan(markdown, { readFile } = {}) {
     for (let i = t.at + 1; i < end; i++) {
       if (lines[i].structural && lines[i].line.startsWith('## ')) { boundary = i; break }
     }
+    t.boundary = boundary
     const block = lines.slice(t.at + 1, boundary)
     for (const marker of TASK_MARKERS) {
       if (!block.some((l) => l.structural && l.line.includes(marker))) {
         push('tasks', `${t.name}: falta ${marker}`)
       }
     }
-    if (!block.some((l) => l.fence)) push('tasks', `${t.name}: no contiene ningún bloque de código`)
   })
+
+  // F-jjponz-4, pasada A — los bloques CON rol. Comprueba dónde vive cada uno,
+  // sobre qué fichero, y cuánto ocupa.
+  const taskOf = (i) => tasks.find((t) => i > t.at && i < t.boundary)
+  const roleBlocks = []
+  lines.forEach((l, i) => {
+    if (!l.structural) return
+    const found = roleOf(l.line)
+    if (!found) return
+    const { rol, path } = found
+    const body = fenceBodyAfter(lines, i + 1)
+    if (body === null) {
+      // Para "Current state" ese aviso ya lo emite la pasada de literalidad,
+      // que es su dueña desde F-jjponz-1: no se duplica.
+      if (rol !== 'Current state') {
+        push('roles', `línea ${i + 1}: "${l.line.trim()}" no lleva bloque de código a continuación.`)
+      }
+      return
+    }
+    const len = body === '' ? 0 : body.split('\n').length
+    const task = taskOf(i)
+    if (!task) {
+      push('roles', `línea ${i + 1}: "${l.line.trim()}" está fuera de una "### Task N". Los bloques viven DENTRO de la tarea que los usa: subagent-driven-development entrega al implementador su task brief (scripts/task-brief extrae la tarea, no el plan entero), así que un bloque escrito fuera no le llega nunca. Nombra las firmas en prosa aquí y pon el bloque en la tarea.`)
+    }
+    if (isConfig(path)) {
+      push('config', `línea ${i + 1}: "${l.line.trim()}" apunta a configuración (${path}). Las configuraciones NO llevan bloque: describe el cambio en prosa con el valor inline — p.ej. «el script \`build\` pasa a \`tsc -p tsconfig.build.json\`». Solo el código lleva bloque.`)
+    } else if (rol !== 'Current state' && isTest(path)) {
+      push('tests', `línea ${i + 1}: "${l.line.trim()}" apunta a un fichero de test (${path}). El cuerpo del test lo escribe el implementador en rojo primero: en el plan van el NOMBRE literal del test y su aserción clave, en **TDD:** y **Tests:**. Si lo que citas es una aserción que YA existe y hay que cambiar, cítala con "Current state (${path}, lines A-B):".`)
+    }
+    if (rol === 'Final text' && !isText(path)) {
+      push('roles', `línea ${i + 1}: "Final text (${path})" solo vale para texto cuyo valor literal es el entregable (${TEXT_EXTENSIONS.join(', ')}). Para código, el plan lleva su contrato y el cuerpo lo escribe el implementador con TDD.`)
+    }
+    if (len > ROLE_BUDGETS[rol]) {
+      push('budget', `línea ${i + 1}: el bloque "${l.line.trim()}" tiene ${len} líneas y su presupuesto son ${ROLE_BUDGETS[rol]}. ${BUDGET_REMEDY[rol]}`)
+    }
+    roleBlocks.push({ rol, path, at: i, len, task })
+  })
+
+  for (const rol of ['Contract', 'Call site']) {
+    const vistos = new Map()
+    for (const b of roleBlocks) {
+      if (b.rol !== rol || !b.task) continue
+      const clave = `${b.task.name}::${b.path}`
+      if (vistos.has(clave)) {
+        push('roles', `${b.task.name}: dos bloques "${rol} (${b.path})" (líneas ${vistos.get(clave) + 1} y ${b.at + 1}). El contrato de un fichero se escribe UNA vez por tarea: junta las declaraciones en un solo bloque — trocearlo no compra presupuesto.`)
+        continue
+      }
+      vistos.set(clave, b.at)
+    }
+  }
+
+  // F-jjponz-4, pasada B — los bloques SIN rol. Es la que mata el idiom
+  // "Final content:"/"Current state: does not exist." que producía los
+  // volcados. Un bloque de comandos queda exento: se delata por su lenguaje o
+  // por venir detrás de **Verification:**.
+  let menuPendiente = true
+  lines.forEach((l, i) => {
+    if (!l.fence || !l.opens) return
+    let prev = i - 1
+    while (prev >= 0 && lines[prev].line.trim() === '') prev--
+    const etiqueta = prev >= 0 ? lines[prev].line.trim() : ''
+    if (prev >= 0 && lines[prev].structural && roleOf(lines[prev].line)) return
+    const lang = langAt(l.line)
+    const esComando = COMMAND_LANGS.has(lang) || etiqueta.includes('**Verification:**')
+    const body = bodyAtFence(lines, i)
+    if (!esComando) {
+      // El menú de roles va UNA vez: un plan con veinte volcados producía
+      // veinte copias del mismo párrafo, y un mensaje que no se puede leer no
+      // es un remedio.
+      push('roles', `línea ${i + 1}: bloque de código sin etiqueta de rol${etiqueta ? ` (lo precede "${etiqueta}")` : ''}.${menuPendiente ? ` ${ROLE_MENU}` : ''}`)
+      menuPendiente = false
+      return
+    }
+    if (body === null) return
+    if (body.some((linea) => linea.includes('<<'))) {
+      push('commands', `línea ${i + 1}: el bloque de comandos lleva un heredoc (<<). Un heredoc es un fichero entero colado por la puerta de atrás: si su contenido importa, va como "Contract (path):"; si no, no va.`)
+    }
+    if (body.length > COMMAND_BUDGET) {
+      push('commands', `línea ${i + 1}: el bloque de comandos tiene ${body.length} líneas y su presupuesto son ${COMMAND_BUDGET}. Un bloque de comandos son los comandos y su salida esperada, no un script: si hace falta un script, va al repo y el plan lo invoca.`)
+    }
+  })
+
+  // F-jjponz-4 — sustituye la regla vieja ("cada tarea contiene al menos un
+  // bloque de código"): con **Verification:** obligatorio y su bloque de
+  // comandos, aquella quedaba satisfecha siempre y no comprobaba nada.
+  for (const t of tasks) {
+    if (roleBlocks.some((b) => b.task === t)) continue
+    const declara = lines
+      .slice(t.at + 1, t.boundary)
+      .some((l) => l.structural && NO_CODE.test(l.line.trim()))
+    if (!declara) {
+      push('tasks', `${t.name}: no lleva ningún bloque con etiqueta de rol (Current state / Contract / Call site / Final text), y un bloque de comandos no cuenta. Si la tarea de verdad no lleva código —configuración descrita en prosa, o documentación—, dilo con la línea exacta: "No code — <razón>".`)
+    }
+  }
+
+  for (const t of tasks) {
+    const total = roleBlocks.filter((b) => b.task === t).reduce((n, b) => n + b.len, 0)
+    if (total > CODE_BUDGETS.task) {
+      push('budget', `${t.name}: acumula ${total} líneas de código en sus bloques y el presupuesto de una tarea son ${CODE_BUDGETS.task}. Una tarea es UN commit: si de verdad necesita más contrato que esto, o el commit son dos, o estás volcando cuerpos que escribe el implementador.`)
+    }
+  }
+  const totalPlan = roleBlocks.reduce((n, b) => n + b.len, 0)
+  if (totalPlan > CODE_BUDGETS.plan) {
+    push('budget', `el plan acumula ${totalPlan} líneas de código en sus bloques y el presupuesto son ${CODE_BUDGETS.plan}. Por encima de eso el gate humano \`plan\` deja de ser una revisión y pasa a ser un acto de fe — que es justo lo que este contrato existe para evitar. Recorta a lo esencial (contratos, call sites y el tramo que cambia) o parte el slice.`)
+  }
+  if (String(markdown).length > CODE_BUDGETS.chars) {
+    push('size', `el plan mide ${String(markdown).length} caracteres y el máximo son ${CODE_BUDGETS.chars}. El gate \`plan\` exige publicarlo como UN comentario del issue y GitHub corta en 65.536: un plan que hay que partir en dos no se revisa, se hojea. Recorta código, no contexto.`)
+  }
 
   lines.forEach((l, i) => {
     if (!l.structural) return

@@ -66,7 +66,9 @@ function run(issue, fixture) {
 // no del checkout en el que corra la suite.
 // Plan mínimo que cumple plan-contract.js — desde F-jjponz-1, --release exige
 // un plan prescriptivo commiteado en la rama, así que el fixture de release
-// lleva uno (con "Current state: does not exist." para no citar nada).
+// lleva uno. Su único bloque va bajo "Final text (work.txt):" (F-jjponz-4:
+// todo bloque declara su rol) y ese rol no se comprueba contra el repo, así
+// que el fixture sigue sin citar nada.
 const FENCE = '```'
 const minimalPlanFor = (issue) => [
   `# #${issue} — fixture slice`,
@@ -95,7 +97,7 @@ const minimalPlanFor = (issue) => [
   '### Task 1 — do the work',
   '**Objective:** the work is committed.',
   '**Files:** work.txt',
-  'Current state: does not exist.',
+  'Final text (work.txt):',
   FENCE,
   'trabajo',
   FENCE,

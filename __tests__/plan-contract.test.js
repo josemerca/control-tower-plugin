@@ -2,7 +2,9 @@
 // lo que es: un módulo puro. El filesystem entra por inyección (`readFile`),
 // así que la literalidad se prueba sin tocar disco.
 import { describe, it, expect } from 'vitest'
-import { validatePlan, checkPlans, planFilesForIssue } from '../scripts/plan-contract.js'
+import {
+  validatePlan, checkPlans, planFilesForIssue, ROLE_BUDGETS, COMMAND_BUDGET, CODE_BUDGETS,
+} from '../scripts/plan-contract.js'
 
 // Tres backticks construidos en runtime: ninguna línea de ESTE fichero puede
 // empezar por un fence real, o cualquier herramienta que embeba este fichero
@@ -59,6 +61,85 @@ const readFile = (path) => {
   throw new Error(`ENOENT: ${path}`)
 }
 
+// ============================================================================
+// F-jjponz-4 — fixtures de la taxonomía de bloques.
+//
+// El plan del slice #2 de repo-pulse midió 73.868 caracteres con 1.271 líneas
+// de código (65% del plan): cuerpos de módulo y ficheros de test completos.
+// De sus 14 commits, 5 arreglaban defectos que venían pegados en el plan. A
+// ese tamaño el gate humano `plan` no revisa, hojea. Desde esta ronda cada
+// bloque declara su ROL y cada rol tiene presupuesto.
+// ============================================================================
+
+const CABECERA = (titulo) => [
+  `# ${titulo}`,
+  '',
+  '> **This plan is written to be executed by task-scoped subagents with zero context.**',
+  '',
+  '## 1. Context and goal',
+  'Hay que exponer sum() por el barrel.',
+  '### Desired end state',
+  'El barrel exporta sum().',
+  '### Out of scope',
+  'N/A — nada que excluir.',
+  '## 2. Closed decisions',
+  '| Decision | Value |',
+  '|---|---|',
+  '| test runner | vitest |',
+  '## 3. Reference patterns',
+  'src/math.js',
+  '## 4. Inventory',
+  '| File | Action | Block |',
+  '|---|---|---|',
+  '| src/index.js | create | Contract |',
+  '## 5. Interfaces',
+  'Consumes: N/A. Produces: sum(a, b) -> number desde src/index.js.',
+  '## 6. Test strategy',
+  'Unit con vitest.',
+]
+
+const COLA = [
+  '## 8. Global verification',
+  'npm test en verde.',
+  '## 9. Assumptions',
+  'Ninguna.',
+  '',
+]
+
+const bloque = ([etiqueta, cuerpo, lang = '']) => [etiqueta, F + lang, ...cuerpo, F]
+
+// Construye un plan válido con una tarea por elemento de `tareas`. Cada tarea
+// es una lista de bloques [etiqueta, cuerpo, lang?]; una tarea sin ningún
+// bloque con rol declara el escape `No code — <razón>`.
+const planConTareas = (tareas, { antesDeLasTareas = [] } = {}) => [
+  ...CABECERA('#9 — el análisis expone su contrato'),
+  ...antesDeLasTareas.flatMap(bloque),
+  '## 7. Tasks',
+  ...tareas.flatMap((bloques, i) => [
+    `### Task ${i + 1} — hacer el trabajo ${i + 1}`,
+    `**Objective:** el trabajo ${i + 1} queda hecho.`,
+    '**Files:** src/index.js',
+    ...bloques.flatMap(bloque),
+    ...(bloques.length ? [] : ['No code — la configuración se describe en prosa con el valor inline.']),
+    '**TDD:** No TDD — fixture.',
+    '**Tests:** N/A — fixture.',
+    '**Verification:** npm test',
+    F + 'bash',
+    'npm test',
+    F,
+  ]),
+  ...COLA,
+].join('\n')
+
+const lineasDe = (n) => Array.from({ length: n }, (_, i) => `export const c${i} = ${i}`)
+
+const CITA_REAL = ['Current state (src/math.js):', ['export function sum(a, b) {', '  return a + b', '}']]
+const CONTRATO = ['Contract (src/index.js):', ["export { sum } from './math.js'"], 'js']
+const CALL_SITE = ['Call site (src/app.js):', ["import { sum } from './index.js'"], 'js']
+const TEXTO = ['Final text (README.md):', ['## Uso', 'Importa `sum` desde `src/index.js`.']]
+
+const PLAN_CON_ROLES = planConTareas([[CITA_REAL, CONTRATO, CALL_SITE, TEXTO], []])
+
 describe('validatePlan — el plan válido de referencia', () => {
   it('pasa entero, literalidad incluida', () => {
     const r = validatePlan(VALID_PLAN, { readFile })
@@ -109,7 +190,11 @@ describe('validatePlan — literalidad', () => {
     expect(r.violations.some((v) => v.rule === 'literality' && v.detail.includes('src/math.js'))).toBe(true)
   })
 
-  it('"Current state: does not exist." no comprueba nada', () => {
+  // F-jjponz-4: "Current state: does not exist." + contenido final era el
+  // idiom que producía los volcados. Sigue sin comprobar literalidad (no casa
+  // la regex), pero ahora la valla que le sigue no tiene rol y eso ES
+  // violación — el caso vive completo en el describe de la taxonomía.
+  it('una etiqueta que no casa la convención no comprueba literalidad', () => {
     const nuevo = VALID_PLAN.replace(
       ['Current state (src/math.js):', F, 'export function sum(a, b) {', '  return a + b', '}', F].join('\n'),
       ['Current state: does not exist.', F, 'nuevo contenido', F].join('\n'),
@@ -194,5 +279,185 @@ describe('checkPlans — la decisión del gate', () => {
     expect(r.code).toBe(6)
     expect(r.message).toContain('src/math.js')
     expect(r.message).toContain('no existe en la base de la rama')
+  })
+
+  it('un volcado sin etiqueta de rol sale con code 6 y el mensaje trae el remedio (F-jjponz-4)', () => {
+    const volcado = PLAN_CON_ROLES.replace('Contract (src/index.js):', 'Final content:')
+    const r = checkPlans({ issue: 7, candidates: [PLAN_PATH], readFile: fsOf(volcado) })
+    expect(r.code).toBe(6)
+    expect(r.message).toContain('Contract (path):')
+  })
+})
+
+// ============================================================================
+// F-jjponz-4 — la taxonomía de bloques
+// ============================================================================
+
+const violacionesDe = (plan, regla) =>
+  validatePlan(plan, { readFile }).violations.filter((v) => v.rule === regla)
+
+describe('validatePlan — taxonomía de bloques', () => {
+  it('el plan con los cuatro roles pasa entero', () => {
+    expect(validatePlan(PLAN_CON_ROLES, { readFile })).toMatchObject({ ok: true, violations: [] })
+  })
+
+  it('un bloque sin etiqueta de rol es violación, y el mensaje enumera los cuatro roles', () => {
+    const roto = PLAN_CON_ROLES.replace('Contract (src/index.js):', 'Así queda el fichero:')
+    const [v] = violacionesDe(roto, 'roles')
+    expect(v.detail).toContain('Así queda el fichero:')
+    for (const rol of ['Current state (path):', 'Contract (path):', 'Call site (path):', 'Final text (path.md):']) {
+      expect(v.detail).toContain(rol)
+    }
+  })
+
+  it('"Final content:" — la etiqueta que producía los volcados — ya no vale', () => {
+    const roto = PLAN_CON_ROLES.replace('Contract (src/index.js):', 'Final content:')
+    expect(violacionesDe(roto, 'roles')[0].detail).toContain('Final content:')
+  })
+
+  it('"Current state: does not exist." seguido de valla es violación: el idiom del volcado está muerto', () => {
+    const roto = PLAN_CON_ROLES.replace('Contract (src/index.js):', 'Current state: does not exist.')
+    expect(violacionesDe(roto, 'roles')).toHaveLength(1)
+  })
+
+  it('un Contract NO se comprueba verbatim: el fichero todavía no existe', () => {
+    // `readFile` lanza ENOENT para todo lo que no sea src/math.js, y el
+    // contrato apunta a src/index.js, que este plan crea.
+    expect(violacionesDe(PLAN_CON_ROLES, 'literality')).toEqual([])
+  })
+
+  it('"Final text" vale sobre un fichero de texto y no sobre código', () => {
+    expect(violacionesDe(PLAN_CON_ROLES, 'roles')).toEqual([])
+    const roto = planConTareas([[['Final text (src/index.js):', ["export const x = 1"]]]])
+    const [v] = violacionesDe(roto, 'roles')
+    expect(v.detail).toContain('.md')
+  })
+
+  it('un bloque de comandos no necesita etiqueta: lo delata su lenguaje', () => {
+    const plan = planConTareas([[CONTRATO, ['Y se comprueba así:', ['npm run build'], 'bash']]])
+    expect(violacionesDe(plan, 'roles')).toEqual([])
+  })
+
+  it('un heredoc en un bloque de comandos es un fichero colado por la puerta de atrás', () => {
+    const plan = planConTareas([[CONTRATO, ['Y se siembra así:', ['cat > f.txt <<EOF', 'hola', 'EOF'], 'bash']]])
+    expect(violacionesDe(plan, 'commands')).toHaveLength(1)
+  })
+
+  it('un bloque con rol fuera de una tarea es violación y nombra el task brief', () => {
+    const plan = planConTareas([[CITA_REAL]], { antesDeLasTareas: [CONTRATO] })
+    const [v] = violacionesDe(plan, 'roles')
+    expect(v.detail).toContain('task brief')
+  })
+
+  it('dos bloques Contract del mismo fichero en la misma tarea es violación', () => {
+    const plan = planConTareas([[CONTRATO, CONTRATO]])
+    expect(violacionesDe(plan, 'roles')).toHaveLength(1)
+  })
+
+  it('dos tareas distintas pueden llevar Contract del mismo fichero: una lo crea, otra lo extiende', () => {
+    expect(violacionesDe(planConTareas([[CONTRATO], [CONTRATO]]), 'roles')).toEqual([])
+  })
+})
+
+describe('validatePlan — presupuesto por rol', () => {
+  const rutaDe = { 'Current state': 'src/math.js', Contract: 'src/index.js', 'Call site': 'src/app.js', 'Final text': 'README.md' }
+
+  it.each(Object.entries(ROLE_BUDGETS))('un bloque %s de presupuesto+1 líneas es violación', (rol, budget) => {
+    const plan = planConTareas([[[`${rol} (${rutaDe[rol]}):`, lineasDe(budget + 1)]]])
+    const [v] = violacionesDe(plan, 'budget')
+    expect(v.detail).toContain(String(budget))
+  })
+
+  it('un Contract de 80 líneas pasa: el fichero de tipos legítimo medido tenía 71', () => {
+    const plan = planConTareas([[['Contract (src/index.js):', lineasDe(ROLE_BUDGETS.Contract)]]])
+    expect(violacionesDe(plan, 'budget')).toEqual([])
+  })
+
+  it('una tarea que acumula más del presupuesto de tarea es violación y dice que un commit son dos', () => {
+    const mitad = Math.ceil(CODE_BUDGETS.task / 2) + 1
+    const plan = planConTareas([[
+      ['Contract (src/index.js):', lineasDe(Math.min(mitad, ROLE_BUDGETS.Contract))],
+      ['Contract (src/otro.js):', lineasDe(Math.min(mitad, ROLE_BUDGETS.Contract))],
+    ]])
+    const [v] = violacionesDe(plan, 'budget')
+    expect(v.detail).toContain('commit')
+  })
+
+  it('un plan que acumula más del presupuesto de plan es violación y nombra el gate humano', () => {
+    const tareas = Array.from({ length: 6 }, () => [['Contract (src/index.js):', lineasDe(ROLE_BUDGETS.Contract)]])
+    const detalles = violacionesDe(planConTareas(tareas), 'budget').map((v) => v.detail)
+    expect(detalles.some((d) => d.includes('gate') && d.includes(String(CODE_BUDGETS.plan)))).toBe(true)
+  })
+
+  it('los bloques de comandos no cuentan para el acumulado', () => {
+    const comandos = Array.from({ length: 40 }, (_, i) => [`Se comprueba (${i}):`, ['npm test'], 'bash'])
+    expect(violacionesDe(planConTareas([[CONTRATO, ...comandos]]), 'budget')).toEqual([])
+  })
+
+  it('un bloque de comandos más largo que su presupuesto es violación', () => {
+    const plan = planConTareas([[CONTRATO, ['Se comprueba así:', lineasDe(COMMAND_BUDGET + 1), 'bash']]])
+    expect(violacionesDe(plan, 'commands')).toHaveLength(1)
+  })
+})
+
+describe('validatePlan — las configuraciones no llevan bloque', () => {
+  it.each([
+    'package.json', 'server/tsconfig.json', '.github/workflows/ci.yml',
+    'pnpm-lock.yaml', '.gitignore', 'Dockerfile',
+  ])('un bloque sobre %s es violación y el remedio es prosa con el valor inline', (path) => {
+    const plan = planConTareas([[[`Contract (${path}):`, ['{ "a": 1 }']]]])
+    const [v] = violacionesDe(plan, 'config')
+    expect(v.detail).toContain('prosa')
+  })
+
+  it('un fichero de código con nombre de config (vite.config.ts) NO es configuración', () => {
+    const plan = planConTareas([[['Contract (vite.config.ts):', ['export default {}']]]])
+    expect(violacionesDe(plan, 'config')).toEqual([])
+  })
+})
+
+describe('validatePlan — los ficheros de test no llevan bloque de estado final', () => {
+  it.each(['src/git.test.ts', 'src/git.spec.js', '__tests__/plan-contract.test.js'])(
+    'Contract sobre %s es violación y remite a TDD/Tests',
+    (path) => {
+      const plan = planConTareas([[[`Contract (${path}):`, ['it("x", () => {})']]]])
+      const [v] = violacionesDe(plan, 'tests')
+      expect(v.detail).toContain('**TDD:**')
+    },
+  )
+
+  it('Current state sobre un fichero de test SÍ vale: endurecer una aserción exige citar la de hoy', () => {
+    const citaDeTest = ['Current state (src/math.test.js, lines 1-2):', ['expect(sum(2, 2)).toBe(4)']]
+    const plan = planConTareas([[citaDeTest]])
+    const readFileConTest = (p) => {
+      if (p === 'src/math.test.js') return 'expect(sum(2, 2)).toBe(4)\n'
+      throw new Error(`ENOENT: ${p}`)
+    }
+    const r = validatePlan(plan, { readFile: readFileConTest })
+    expect(r.violations.filter((v) => v.rule === 'tests')).toEqual([])
+    expect(r.violations.filter((v) => v.rule === 'literality')).toEqual([])
+  })
+})
+
+describe('validatePlan — "al menos un bloque con rol" por tarea', () => {
+  it('una tarea cuyo único bloque es la verificación en bash es violación', () => {
+    const plan = planConTareas([[CONTRATO], []]).replace(
+      'No code — la configuración se describe en prosa con el valor inline.', 'Aquí no hay nada.',
+    )
+    const [v] = violacionesDe(plan, 'tasks')
+    expect(v.detail).toContain('No code — ')
+  })
+
+  it('…salvo que declare la línea exacta "No code — <razón>"', () => {
+    expect(violacionesDe(planConTareas([[CONTRATO], []]), 'tasks')).toEqual([])
+  })
+})
+
+describe('validatePlan — el plan tiene que caber en un comentario del issue', () => {
+  it(`más de ${CODE_BUDGETS.chars} caracteres es violación y nombra el corte de GitHub`, () => {
+    const relleno = Array.from({ length: 2000 }, (_, i) => `Contexto de la decisión número ${i}.`).join('\n')
+    const plan = PLAN_CON_ROLES.replace('Unit con vitest.', `Unit con vitest.\n${relleno}`)
+    const [v] = violacionesDe(plan, 'size')
+    expect(v.detail).toContain('65.536')
   })
 })

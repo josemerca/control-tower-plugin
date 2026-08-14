@@ -644,7 +644,9 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
   })
 
   // Plan mínimo que cumple plan-contract.js — desde F-jjponz-1, --release
-  // exige un plan prescriptivo commiteado en la rama.
+  // exige un plan prescriptivo commiteado en la rama. Su único bloque va bajo
+  // "Final text (f.txt):" (F-jjponz-4: todo bloque declara su rol), un rol que
+  // no se comprueba contra el repo: el fixture sigue sin citar nada.
   const FENCE = '```'
   const minimalPlanFor = (issue) => [
     `# #${issue} — fixture slice`,
@@ -673,7 +675,7 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     '### Task 1 — do the work',
     '**Objective:** the work is committed.',
     '**Files:** f.txt',
-    'Current state: does not exist.',
+    'Final text (f.txt):',
     FENCE,
     'trabajo',
     FENCE,
@@ -696,7 +698,7 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
   // `Current state (<path>):` con `<body>` dentro de la valla.
   const seedPlanCitando = (wt, issue, path, body) => {
     const plan = minimalPlanFor(issue)
-      .replace('Current state: does not exist.', `Current state (${path}):`)
+      .replace('Final text (f.txt):', `Current state (${path}):`)
       .replace(`${FENCE}\ntrabajo\n${FENCE}`, `${FENCE}\n${body}\n${FENCE}`)
     mkdirSync(join(wt, 'docs', 'superpowers', 'plans'), { recursive: true })
     writeFileSync(join(wt, 'docs', 'superpowers', 'plans', `2026-08-12-issue-${issue}-fixture.md`), plan)
@@ -744,7 +746,7 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     const { dir, wt } = mkSliceWorktree()
     seedPlan(wt, 1)
     const roto = readFileSync(join(wt, 'docs', 'superpowers', 'plans', '2026-08-12-issue-1-fixture.md'), 'utf8')
-      .replace('Current state: does not exist.', 'Current state (f.txt):')
+      .replace('Final text (f.txt):', 'Current state (f.txt):')
     writeFileSync(join(wt, 'docs', 'superpowers', 'plans', '2026-08-12-issue-1-fixture.md'), roto)
     const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--check-plan'], {
       cwd: wt, encoding: 'utf8',
