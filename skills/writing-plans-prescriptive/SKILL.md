@@ -50,15 +50,23 @@ the line right above it. The validator enforces the labels and their budgets:
 
 | Label above the block | What goes inside | Budget |
 |---|---|---|
-| `Current state (path[, lines A-B]):` | the tramo that changes, copied **verbatim** from the file | 25 lines |
-| `Contract (path):` | types, interfaces, exact signatures, typed errors, and constants the implementer cannot derive (a `git log` format string, a set of flags, a magic value) — **no function bodies** | 80 lines |
-| `Call site (path):` | how the call reads in the consumer once this task is done: route, handler, component usage, before → after | 25 lines |
-| `Final text (path.md):` | the exact replacement wording, only where the literal text IS the deliverable — `.md`, `.txt`, `.rst`, `.adoc` | 30 lines |
+| `Current state (path[, lines A-B]):` | the tramo that changes, copied **verbatim** from the file | 12 lines |
+| `Contract (path):` | types, interfaces, exact signatures, typed errors, and constants the implementer cannot derive (a `git log` format string, a set of flags, a magic value) — **no function bodies** | 25 lines |
+| `Call site (path):` | how the call reads in the consumer once this task is done: route, handler, component usage, before → after | 10 lines |
+| `Final text (path.md):` | the exact replacement wording, only where the literal text IS the deliverable — `.md`, `.txt`, `.rst`, `.adoc` | 12 lines |
 
-A task adds up to **120** lines across its blocks (a task is one commit — if it needs more
-contract than that, the commit is two), and the whole plan to **350**. Command blocks (```bash,
-or any block right after `**Verification:**`) are exempt from those totals, and must not smuggle
-a file in through a heredoc.
+A task adds up to **30** lines across its blocks (a task is one commit), and the whole plan to
+**40**. Command blocks (```bash, or any block right after `**Verification:**`) are exempt from
+those totals, and must not smuggle a file in through a heredoc.
+
+**The whole plan fits on one A4 page: 3500 characters, about 50 lines.** That is the real
+constraint, and the budgets above only exist to keep you inside it. The gate asks a human to
+*read* the plan before any code is written; what does not fit on a page is not read, it is
+skimmed, and what gets skimmed lets defects through — that is exactly how five of them shipped
+in the slice measured above. If your plan does not fit, do not shrink the prose that explains the
+decisions: cut the blocks to the decisions only.
+And if it still does not fit, **the slice is two** — atomic changes were already the doctrine;
+this contract just makes it checkable.
 
 Three things never get a block:
 
@@ -148,8 +156,9 @@ what the task brief carries.
 ## Examples
 
 All four come from the same real slice: a git-history analysis module in a Node/TypeScript
-monorepo. The plan measured 1.271 lines of code; the same slice specified with the rules above
-measures around 265.
+monorepo. That plan measured 1.271 lines of code across 22 A4 pages. Specified with the rules
+above, its eight tasks no longer fit on one page — so that slice was really three, and the
+budgets say so instead of leaving it to taste.
 
 **1. A new module with logic — `server/src/analysis/git.ts`.**
 
@@ -157,8 +166,8 @@ Wrong (what was written): `Current state: does not exist.` plus 113 lines of fin
 implementer rewrote 84% of it, and two of the defects that reached the branch were in the parts
 it pasted first.
 
-Right: one `Contract (server/src/analysis/git.ts):` block with only what cannot be derived or
-invented — and which, in the real slice, survived byte for byte:
+Right: one `Contract (server/src/analysis/git.ts):` block of about ten lines, with only what
+cannot be derived or invented — and which, in the real slice, survived byte for byte:
 
 - the format string `'%x00%H%x1f%aI%x1f%aE'`, with the reason inline: `%aE` applies `.mailmap`,
   `%ae` does not;

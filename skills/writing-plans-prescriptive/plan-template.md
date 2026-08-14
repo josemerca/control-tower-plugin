@@ -61,27 +61,28 @@ here with the reason so the implementer does not invent them.}}
 
 Current state (path/to/file.ext, lines A-B):
 
-{{ONLY the tramo that changes, max 25 lines, copied verbatim from the repo — the validator
+{{ONLY the tramo that changes, max 12 lines, copied verbatim from the repo — the validator
 greps it.}}
 
 Contract (path/to/file.ext):
 
-{{Max 80 lines: types, interfaces, exact signatures, typed errors, and constants the implementer
+{{Max 25 lines: types, interfaces, exact signatures, typed errors, and constants the implementer
 cannot derive (formats, flags, magic values). NO function bodies: those are written test-first.}}
 
 Call site (path/to/consumer.ext):
 
-{{Max 25 lines, before -> after: how the call reads in the consumer once this task is done —
+{{Max 10 lines, before -> after: how the call reads in the consumer once this task is done —
 route, handler, component usage.}}
 
 Final text (path/to/doc.md):
 
-{{Max 30 lines, text artifacts only (.md/.txt/.rst/.adoc): the exact replacement wording, and
+{{Max 12 lines, text artifacts only (.md/.txt/.rst/.adoc): the exact replacement wording, and
 only claims you verified against the repo. Never for code or configuration.}}
 
 {{Configuration (tsconfig, package.json, CI workflows, lockfiles) never gets a block: state the
 change in prose with the value inline. A task with no block at all says so with the exact line:
-No code — <reason>. Blocks add up to 120 lines per task and 350 per plan.}}
+No code — <reason>. Blocks add up to 30 lines per task and 40 per plan, and the whole plan fits
+on ONE A4 page: 3500 characters. If it does not fit, the slice is two.}}
 
 **TDD:** {{red first: literal test name and the assertion that pins the boundary → minimal green
 | No TDD — <reason>}}

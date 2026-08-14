@@ -170,9 +170,14 @@ describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive 
 
   it('sus presupuestos son los del validador: la prosa y el código no pueden divergir', () => {
     const s = read('writing-plans-prescriptive', 'SKILL.md')
-    for (const n of [...Object.values(ROLE_BUDGETS), CODE_BUDGETS.task, CODE_BUDGETS.plan]) {
-      expect(s).toContain(String(n))
-    }
+    const numeros = [...Object.values(ROLE_BUDGETS), CODE_BUDGETS.task, CODE_BUDGETS.plan, CODE_BUDGETS.chars]
+    for (const n of numeros) expect(s).toContain(String(n))
+  })
+
+  it('dice que el plan entero cabe en un folio A4, y que si no cabe el slice son dos', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    expect(s).toMatch(/one A4 page/i)
+    expect(s).toMatch(/the slice is\s+\*\*two\*\*|the slice is two/i)
   })
 
   it('la doctrina del volcado ya no está', () => {

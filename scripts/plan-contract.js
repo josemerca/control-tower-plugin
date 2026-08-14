@@ -74,9 +74,21 @@ const CURRENT_STATE = /^Current state \(([^),]+)(?:,[^)]*)?\):\s*$/
 // TDD— y de paso el humano lee el plan como un índice de roles.
 // ============================================================================
 
-export const ROLE_BUDGETS = { 'Current state': 25, Contract: 80, 'Call site': 25, 'Final text': 30 }
-export const COMMAND_BUDGET = 20
-export const CODE_BUDGETS = { task: 120, plan: 350, chars: 45000 }
+// El techo de todo esto es UN FOLIO A4: a un espacio, con márgenes normales,
+// una página da unas 50 líneas y ~3.500 caracteres. Es la unidad de revisión
+// humana — el gate `plan` pide leer el plan, y lo que no cabe en una página no
+// se lee, se hojea. Los presupuestos por rol están calibrados para que quepan
+// DENTRO de ese folio junto a la prosa: el suelo estructural (título,
+// blockquote, 9 secciones, 2 subsecciones y 5 marcadores por tarea) ya gasta
+// ~400 caracteres más ~250 por tarea, así que un plan de tres tareas tiene unos
+// 2.300 caracteres para reparto entre prosa y bloques.
+//
+// Consecuencia buscada: un slice que no cabe en un folio no es un slice, son
+// dos. La doctrina del repo ya era esa —cambios atómicos— y este contrato la
+// hace comprobable.
+export const ROLE_BUDGETS = { 'Current state': 12, Contract: 25, 'Call site': 10, 'Final text': 12 }
+export const COMMAND_BUDGET = 8
+export const CODE_BUDGETS = { task: 30, plan: 40, chars: 3500 }
 
 const ROLE_LABELS = [
   ['Current state', CURRENT_STATE],
@@ -325,7 +337,8 @@ export function validatePlan(markdown, { readFile } = {}) {
     push('budget', `el plan acumula ${totalPlan} líneas de código en sus bloques y el presupuesto son ${CODE_BUDGETS.plan}. Por encima de eso el gate humano \`plan\` deja de ser una revisión y pasa a ser un acto de fe — que es justo lo que este contrato existe para evitar. Recorta a lo esencial (contratos, call sites y el tramo que cambia) o parte el slice.`)
   }
   if (String(markdown).length > CODE_BUDGETS.chars) {
-    push('size', `el plan mide ${String(markdown).length} caracteres y el máximo son ${CODE_BUDGETS.chars}. El gate \`plan\` exige publicarlo como UN comentario del issue y GitHub corta en 65.536: un plan que hay que partir en dos no se revisa, se hojea. Recorta código, no contexto.`)
+    const folios = (String(markdown).length / CODE_BUDGETS.chars).toFixed(1)
+    push('size', `el plan mide ${String(markdown).length} caracteres — ${folios} folios— y el máximo es UN folio A4 (${CODE_BUDGETS.chars} caracteres, unas 50 líneas). El gate \`plan\` pide que un humano LEA el plan antes de que se implemente, y lo que no cabe en una página no se lee: se hojea, y lo que se hojea deja pasar defectos. Recorta a las decisiones (contratos, call sites y el tramo que cambia) y, si aun así no cabe, el slice son dos: partirlo es la respuesta correcta, no encoger la letra.`)
   }
 
   lines.forEach((l, i) => {

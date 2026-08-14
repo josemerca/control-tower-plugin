@@ -368,7 +368,7 @@ describe('validatePlan — presupuesto por rol', () => {
     expect(v.detail).toContain(String(budget))
   })
 
-  it('un Contract de 80 líneas pasa: el fichero de tipos legítimo medido tenía 71', () => {
+  it('un Contract justo en su presupuesto pasa: el del ejemplo real son ~10 líneas', () => {
     const plan = planConTareas([[['Contract (src/index.js):', lineasDe(ROLE_BUDGETS.Contract)]]])
     expect(violacionesDe(plan, 'budget')).toEqual([])
   })
@@ -453,11 +453,17 @@ describe('validatePlan — "al menos un bloque con rol" por tarea', () => {
   })
 })
 
-describe('validatePlan — el plan tiene que caber en un comentario del issue', () => {
-  it(`más de ${CODE_BUDGETS.chars} caracteres es violación y nombra el corte de GitHub`, () => {
-    const relleno = Array.from({ length: 2000 }, (_, i) => `Contexto de la decisión número ${i}.`).join('\n')
+describe('validatePlan — el plan entero cabe en un folio A4', () => {
+  it(`más de ${CODE_BUDGETS.chars} caracteres es violación, dice cuántos folios son y que el slice son dos`, () => {
+    const relleno = Array.from({ length: 200 }, (_, i) => `Contexto de la decisión número ${i}.`).join('\n')
     const plan = PLAN_CON_ROLES.replace('Unit con vitest.', `Unit con vitest.\n${relleno}`)
     const [v] = violacionesDe(plan, 'size')
-    expect(v.detail).toContain('65.536')
+    expect(v.detail).toMatch(/folio/)
+    expect(v.detail).toMatch(/el slice son dos/)
+  })
+
+  it('el plan de referencia con los cuatro roles cabe en el folio', () => {
+    expect(PLAN_CON_ROLES.length).toBeLessThanOrEqual(CODE_BUDGETS.chars)
+    expect(violacionesDe(PLAN_CON_ROLES, 'size')).toEqual([])
   })
 })
