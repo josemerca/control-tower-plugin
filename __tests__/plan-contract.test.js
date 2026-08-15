@@ -383,10 +383,14 @@ describe('validatePlan — presupuesto por rol', () => {
     expect(v.detail).toContain('commit')
   })
 
-  it('un plan que acumula más del presupuesto de plan es violación y nombra el gate humano', () => {
+  // F-jjponz-5: NO hay presupuesto de plan. Un tope global obligaba al agente
+  // a limar caracteres —14 de las 24 corridas de --check-plan del slice #3
+  // fallaron por `size`— y su única salida real (partir el slice) no la puede
+  // accionar: viene despachado para un issue congelado. Lo que sí puede partir
+  // es una tarea, así que el techo va por tarea.
+  it('seis tareas, cada una dentro de SU presupuesto, no acumulan violación de plan', () => {
     const tareas = Array.from({ length: 6 }, () => [['Contract (src/index.js):', lineasDe(ROLE_BUDGETS.Contract)]])
-    const detalles = violacionesDe(planConTareas(tareas), 'budget').map((v) => v.detail)
-    expect(detalles.some((d) => d.includes('gate') && d.includes(String(CODE_BUDGETS.plan)))).toBe(true)
+    expect(violacionesDe(planConTareas(tareas), 'budget')).toEqual([])
   })
 
   it('los bloques de comandos no cuentan para el acumulado', () => {
@@ -453,17 +457,30 @@ describe('validatePlan — "al menos un bloque con rol" por tarea', () => {
   })
 })
 
-describe('validatePlan — el plan entero cabe en un folio A4', () => {
-  it(`más de ${CODE_BUDGETS.chars} caracteres es violación, dice cuántos folios son y que el slice son dos`, () => {
-    const relleno = Array.from({ length: 200 }, (_, i) => `Contexto de la decisión número ${i}.`).join('\n')
-    const plan = PLAN_CON_ROLES.replace('Unit con vitest.', `Unit con vitest.\n${relleno}`)
+describe('validatePlan — cada TAREA cabe en un folio A4', () => {
+  const tareaGorda = (n) => [
+    ['Contract (src/index.js):', ['export const x = 1']],
+    ...Array.from({ length: n }, (_, i) => [`Se comprueba (${i}):`, [`npm test -- caso-${i}`], 'bash']),
+  ]
+
+  it(`una tarea de más de ${CODE_BUDGETS.chars} caracteres es violación, la nombra, dice cuántos folios ocupa y que la tarea son dos`, () => {
+    const relleno = Array.from({ length: 100 }, (_, i) => `Detalle cerrado número ${i} de esta tarea.`)
+    const plan = planConTareas([[CONTRATO]]).replace(
+      '**TDD:** No TDD — fixture.', `${relleno.join('\n')}\n**TDD:** No TDD — fixture.`,
+    )
     const [v] = violacionesDe(plan, 'size')
+    expect(v.detail).toMatch(/Task 1/)
     expect(v.detail).toMatch(/folio/)
-    expect(v.detail).toMatch(/el slice son dos/)
+    expect(v.detail).toMatch(/la tarea son dos/)
   })
 
-  it('el plan de referencia con los cuatro roles cabe en el folio', () => {
-    expect(PLAN_CON_ROLES.length).toBeLessThanOrEqual(CODE_BUDGETS.chars)
+  it('el presupuesto es POR TAREA: dos tareas grandes pero cada una dentro del folio pasan', () => {
+    const plan = planConTareas([tareaGorda(45), tareaGorda(45)])
+    expect(plan.length).toBeGreaterThan(CODE_BUDGETS.chars)
+    expect(violacionesDe(plan, 'size')).toEqual([])
+  })
+
+  it('el plan de referencia no dispara nada de tamaño', () => {
     expect(violacionesDe(PLAN_CON_ROLES, 'size')).toEqual([])
   })
 })

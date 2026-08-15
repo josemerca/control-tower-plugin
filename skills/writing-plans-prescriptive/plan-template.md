@@ -81,8 +81,8 @@ only claims you verified against the repo. Never for code or configuration.}}
 
 {{Configuration (tsconfig, package.json, CI workflows, lockfiles) never gets a block: state the
 change in prose with the value inline. A task with no block at all says so with the exact line:
-No code — <reason>. Blocks add up to 30 lines per task and 40 per plan, and the whole plan fits
-on ONE A4 page: 3500 characters. If it does not fit, the slice is two.}}
+No code — <reason>. Blocks add up to 30 lines per task, and each task fits on ONE A4 page: 3500
+characters. If a task does not fit, the task is two — never collapse two commits into one.}}
 
 **TDD:** {{red first: literal test name and the assertion that pins the boundary → minimal green
 | No TDD — <reason>}}

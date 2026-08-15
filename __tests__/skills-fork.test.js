@@ -170,14 +170,17 @@ describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive 
 
   it('sus presupuestos son los del validador: la prosa y el código no pueden divergir', () => {
     const s = read('writing-plans-prescriptive', 'SKILL.md')
-    const numeros = [...Object.values(ROLE_BUDGETS), CODE_BUDGETS.task, CODE_BUDGETS.plan, CODE_BUDGETS.chars]
+    const numeros = [...Object.values(ROLE_BUDGETS), CODE_BUDGETS.task, CODE_BUDGETS.chars]
     for (const n of numeros) expect(s).toContain(String(n))
   })
 
-  it('dice que el plan entero cabe en un folio A4, y que si no cabe el slice son dos', () => {
+  it('dice que cada TAREA cabe en un folio A4, y que si no cabe la tarea son dos', () => {
     const s = read('writing-plans-prescriptive', 'SKILL.md')
     expect(s).toMatch(/one A4 page/i)
-    expect(s).toMatch(/the slice is\s+\*\*two\*\*|the slice is two/i)
+    expect(s).toMatch(/the task is two/i)
+    // Y no vuelve a pedir lo que el agente NO puede hacer desde un issue
+    // congelado: partir el slice.
+    expect(s).not.toMatch(/the slice is two/i)
   })
 
   it('la doctrina del volcado ya no está', () => {

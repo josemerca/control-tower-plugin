@@ -55,18 +55,20 @@ the line right above it. The validator enforces the labels and their budgets:
 | `Call site (path):` | how the call reads in the consumer once this task is done: route, handler, component usage, before → after | 10 lines |
 | `Final text (path.md):` | the exact replacement wording, only where the literal text IS the deliverable — `.md`, `.txt`, `.rst`, `.adoc` | 12 lines |
 
-A task adds up to **30** lines across its blocks (a task is one commit), and the whole plan to
-**40**. Command blocks (```bash, or any block right after `**Verification:**`) are exempt from
-those totals, and must not smuggle a file in through a heredoc.
+A task adds up to **30** lines across its blocks. Command blocks (```bash, or any block right
+after `**Verification:**`) are exempt from that total, and must not smuggle a file in through a
+heredoc.
 
-**The whole plan fits on one A4 page: 3500 characters, about 50 lines.** That is the real
-constraint, and the budgets above only exist to keep you inside it. The gate asks a human to
-*read* the plan before any code is written; what does not fit on a page is not read, it is
-skimmed, and what gets skimmed lets defects through — that is exactly how five of them shipped
-in the slice measured above. If your plan does not fit, do not shrink the prose that explains the
-decisions: cut the blocks to the decisions only.
-And if it still does not fit, **the slice is two** — atomic changes were already the doctrine;
-this contract just makes it checkable.
+**Each task fits on one A4 page: 3500 characters, about 50 lines.** The task is the unit
+because it is what a human reads in one sitting at the gate, and it is exactly what the
+implementer receives as its task brief. There is no ceiling on the plan as a whole: a plan with
+twelve tasks is a badly cut slice, and that gets fixed when the spec is frozen — where there is
+a human — not by you, who were dispatched for an issue that is already frozen.
+
+If a task does not fit, do not shrink the prose that explains the decisions: cut the blocks to
+the decisions only. And if it still does not fit, **the task is two** — one task is one commit,
+and splitting a commit is in your hands. What is not in your hands is splitting the slice, so
+never collapse two commits' worth of work into one task to buy room.
 
 Three things never get a block:
 
@@ -156,9 +158,8 @@ what the task brief carries.
 ## Examples
 
 All four come from the same real slice: a git-history analysis module in a Node/TypeScript
-monorepo. That plan measured 1.271 lines of code across 22 A4 pages. Specified with the rules
-above, its eight tasks no longer fit on one page — so that slice was really three, and the
-budgets say so instead of leaving it to taste.
+monorepo. That plan measured 1.271 lines of code across 22 A4 pages — and five of the slice's
+commits went to fixing defects that had travelled pasted inside it.
 
 **1. A new module with logic — `server/src/analysis/git.ts`.**
 

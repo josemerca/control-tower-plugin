@@ -74,21 +74,27 @@ const CURRENT_STATE = /^Current state \(([^),]+)(?:,[^)]*)?\):\s*$/
 // TDD— y de paso el humano lee el plan como un índice de roles.
 // ============================================================================
 
-// El techo de todo esto es UN FOLIO A4: a un espacio, con márgenes normales,
-// una página da unas 50 líneas y ~3.500 caracteres. Es la unidad de revisión
-// humana — el gate `plan` pide leer el plan, y lo que no cabe en una página no
-// se lee, se hojea. Los presupuestos por rol están calibrados para que quepan
-// DENTRO de ese folio junto a la prosa: el suelo estructural (título,
-// blockquote, 9 secciones, 2 subsecciones y 5 marcadores por tarea) ya gasta
-// ~400 caracteres más ~250 por tarea, así que un plan de tres tareas tiene unos
-// 2.300 caracteres para reparto entre prosa y bloques.
+// UN FOLIO A4 POR TAREA: a un espacio y con márgenes normales, una página da
+// unas 50 líneas y ~3.500 caracteres. La unidad es la TAREA, no el plan, y el
+// motivo es una medida de campo (F-jjponz-5).
 //
-// Consecuencia buscada: un slice que no cabe en un folio no es un slice, son
-// dos. La doctrina del repo ya era esa —cambios atómicos— y este contrato la
-// hace comprobable.
+// La primera versión puso el folio al plan entero. Resultado medido sobre los
+// transcripts de las sesiones despachadas: el agente invocó `--check-plan` 24
+// veces en un slice y 14 en otro, y de esas, 14 y 9 fallaron por `size`. O sea
+// que la mayor parte de esas vueltas no fue pensar el slice: fue limar
+// caracteres. Y la salida que el diseño asumía —«si no cabe, el slice son
+// dos»— el agente NO puede accionarla: viene despachado para un issue
+// congelado, así que hizo lo único que podía, colapsar tareas (un slice acabó
+// siendo un commit con cuatro endpoints y cuatro módulos, justo lo que «una
+// tarea = un commit» quiere evitar).
+//
+// Una TAREA sí la puede partir el agente. Por eso el techo va donde el remedio
+// es accionable, y no hay ningún tope agregado por plan: un plan de doce
+// tareas es un slice mal cortado, y eso se arregla en la congelación del spec,
+// que es donde hay un humano.
 export const ROLE_BUDGETS = { 'Current state': 12, Contract: 25, 'Call site': 10, 'Final text': 12 }
 export const COMMAND_BUDGET = 8
-export const CODE_BUDGETS = { task: 30, plan: 40, chars: 3500 }
+export const CODE_BUDGETS = { task: 30, chars: 3500 }
 
 const ROLE_LABELS = [
   ['Current state', CURRENT_STATE],
@@ -332,13 +338,12 @@ export function validatePlan(markdown, { readFile } = {}) {
       push('budget', `${t.name}: acumula ${total} líneas de código en sus bloques y el presupuesto de una tarea son ${CODE_BUDGETS.task}. Una tarea es UN commit: si de verdad necesita más contrato que esto, o el commit son dos, o estás volcando cuerpos que escribe el implementador.`)
     }
   }
-  const totalPlan = roleBlocks.reduce((n, b) => n + b.len, 0)
-  if (totalPlan > CODE_BUDGETS.plan) {
-    push('budget', `el plan acumula ${totalPlan} líneas de código en sus bloques y el presupuesto son ${CODE_BUDGETS.plan}. Por encima de eso el gate humano \`plan\` deja de ser una revisión y pasa a ser un acto de fe — que es justo lo que este contrato existe para evitar. Recorta a lo esencial (contratos, call sites y el tramo que cambia) o parte el slice.`)
-  }
-  if (String(markdown).length > CODE_BUDGETS.chars) {
-    const folios = (String(markdown).length / CODE_BUDGETS.chars).toFixed(1)
-    push('size', `el plan mide ${String(markdown).length} caracteres — ${folios} folios— y el máximo es UN folio A4 (${CODE_BUDGETS.chars} caracteres, unas 50 líneas). El gate \`plan\` pide que un humano LEA el plan antes de que se implemente, y lo que no cabe en una página no se lee: se hojea, y lo que se hojea deja pasar defectos. Recorta a las decisiones (contratos, call sites y el tramo que cambia) y, si aun así no cabe, el slice son dos: partirlo es la respuesta correcta, no encoger la letra.`)
+  for (const t of tasks) {
+    const largo = lines.slice(t.at, t.boundary).map((l) => l.line).join('\n').length
+    if (largo > CODE_BUDGETS.chars) {
+      const folios = (largo / CODE_BUDGETS.chars).toFixed(1)
+      push('size', `${t.name}: la tarea mide ${largo} caracteres — ${folios} folios — y el máximo es UN folio A4 (${CODE_BUDGETS.chars} caracteres, unas 50 líneas). Es lo que un humano lee de una sentada en el gate \`plan\`, y es también lo que el implementador recibe como task brief. Recorta a las decisiones (contrato, call site y el tramo que cambia) y, si aun así no cabe, la tarea son dos: una tarea es un commit, y partir un commit sí está en tu mano.`)
+    }
   }
 
   lines.forEach((l, i) => {
