@@ -80,6 +80,16 @@ export const GATES = {
     kickoff: 'GATE HUMANO `apply` (lo pide el spec para ESTE slice, esté o no en su `Tipo`): no apliques nada contra un entorno real (`apply`, `deploy`, un script ejecutado sobre datos de verdad) por tu cuenta. Deja el plan/dry-run en el PR y PARA: el apply lo autoriza un humano después de revisarlo.',
     issue: '**`apply`** — nada se aplica contra un entorno real hasta que un humano revise el plan/dry-run que trae el PR. El agente deja el plan y para.',
   },
+  plan: {
+    // El único gate que corta ANTES de implementar, no antes de mergear: su
+    // valor está en parar cuando tirar el trabajo aún no cuesta nada. Por eso
+    // el texto pide publicar el plan como COMENTARIO del issue — el PR puede
+    // no existir todavía. F-jjponz-2: está implicado POR DEFECTO en todo
+    // slice (ver gatesForType, abajo) — no vive en TYPE_GATES porque no es
+    // un eje técnico; la renuncia por fila es `!plan`, ruidosa como todas.
+    kickoff: 'GATE HUMANO `plan` (implicado por defecto en TODO slice, salvo renuncia `!plan` en el spec): con el plan del slice escrito, validado con --check-plan y commiteado, publícalo como comentario del issue y PARA — no implementes nada hasta que un humano responda OK en ese comentario. No lo cierras tú: lo cierra quien revisa el plan.',
+    issue: '**`plan`** — antes de implementar, un humano tiene que revisar el PLAN del slice: el agente lo publica como comentario de este issue y se detiene hasta el OK. El agente no puede darlo por cumplido.',
+  },
 }
 
 // GATE_ORDER: orden canónico de salida (labels, cuerpo del issue, kickoff), para
@@ -101,7 +111,16 @@ export const TYPE_GATES = {
 }
 
 export function gatesForType(type) {
-  return TYPE_GATES[typeof type === 'string' ? type.trim() : ''] ?? []
+  const typed = TYPE_GATES[typeof type === 'string' ? type.trim() : ''] ?? []
+  // F-jjponz-2 — `plan` está implicado en TODO slice, venga el Tipo que
+  // venga: el plan del slice siempre pasa por revisión humana antes de
+  // implementar, salvo renuncia EXPLÍCITA por fila (`!plan` en la columna
+  // Gate, con el mismo ruido que cualquier renuncia). Vive aquí y no en
+  // TYPE_GATES a propósito: TYPE_GATES mapea el eje TÉCNICO (ui→visual,
+  // infra→apply) y este defecto es transversal a todos los tipos —
+  // meterlo en cada entrada del mapa lo haría depender de que el Tipo
+  // exista en el mapa, y un `Tipo: backend` (sin entrada) lo perdería.
+  return [...typed, 'plan']
 }
 
 // cleanGateToken: mismo criterio de tolerancia a marcado inline que el resto de

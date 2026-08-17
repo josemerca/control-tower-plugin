@@ -5,8 +5,19 @@ import { resolveAccount, resolveAccountLegacy, validateAccountMap } from '../scr
 
 const SLICE = { n: 7, name: 'refresh token', type: 'backend', ac: ['AC-7.1'], deps: [1], issue: '#7' }
 
+// F-jjponz-4 — estos cuatro tests buscaban los marcadores de cada addendum
+// (`contrato`, `screenshot`, `dry-run`…) sobre el kickoff ENTERO, usándolo como
+// proxy del addendum. Es el falso positivo cruzado que `gates.js` avisa: en
+// cuanto el texto común del kickoff usa una de esas palabras —esta ronda añadió
+// "contratos" al Primer acto— los tests de ui/infra/bugfix fallan sin que nada
+// esté roto. La ausencia se comprueba ahora contra el addendum REAL (ADDENDA ya
+// se exporta), que es lo que de verdad quieren decir: "el kickoff de este Tipo
+// no lleva el addendum de otro".
+const otrosAddenda = (tipo) =>
+  Object.entries(ADDENDA).filter(([t]) => t !== tipo).map(([, texto]) => texto)
+
 describe('renderKickoff', () => {
-  it('backend: has backend markers, not ui/infra/bugfix', () => {
+  it('backend: lleva su addendum y ninguno de los otros', () => {
     const k = renderKickoff(SLICE, { repo: 'o/r' })
     expect(k).toContain('subagent-driven-development')
     // F22: el fichero de estado de un agente de slice es `.agent/SLICE.md`.
@@ -14,35 +25,26 @@ describe('renderKickoff', () => {
     // `.agent/STATE.md` de la coordinadora era mandarlo al fichero trackeado
     // cuya contaminación motivó toda esta ronda.
     expect(k).toContain('.agent/SLICE.md')
-    expect(k.toLowerCase()).toMatch(/migraci|rollback|contrato/) // backend present
-    // Verify other addenda are NOT present
-    expect(k.toLowerCase()).not.toMatch(/screenshot|design system/) // not ui
-    expect(k.toLowerCase()).not.toMatch(/dry-run.*plan primero/) // not infra
-    expect(k.toLowerCase()).not.toMatch(/reproduce-first.*test que falla/) // not bugfix
+    expect(k).toContain(ADDENDA.backend)
+    for (const otro of otrosAddenda('backend')) expect(k).not.toContain(otro)
   })
-  it('ui: has ui markers, not backend/infra/bugfix', () => {
+  it('ui: lleva su addendum y ninguno de los otros', () => {
     const k = renderKickoff({ ...SLICE, type: 'ui' }, { repo: 'o/r' })
-    expect(k.toLowerCase()).toMatch(/screenshot|design system/) // ui present
-    // Verify other addenda are NOT present
-    expect(k.toLowerCase()).not.toMatch(/migraci|rollback|contrato/) // not backend
-    expect(k.toLowerCase()).not.toMatch(/dry-run.*plan primero/) // not infra
-    expect(k.toLowerCase()).not.toMatch(/reproduce-first.*test que falla/) // not bugfix
+    expect(k).toContain(ADDENDA.ui)
+    expect(k.toLowerCase()).toMatch(/screenshot|design system/)
+    for (const otro of otrosAddenda('ui')) expect(k).not.toContain(otro)
   })
-  it('infra: has infra markers, not ui/backend/bugfix', () => {
+  it('infra: lleva su addendum y ninguno de los otros', () => {
     const k = renderKickoff({ ...SLICE, type: 'infra' }, { repo: 'o/r' })
-    expect(k.toLowerCase()).toMatch(/dry-run.*plan primero/) // infra present
-    // Verify other addenda are NOT present
-    expect(k.toLowerCase()).not.toMatch(/screenshot|design system/) // not ui
-    expect(k.toLowerCase()).not.toMatch(/migraci|rollback|contrato/) // not backend
-    expect(k.toLowerCase()).not.toMatch(/reproduce-first.*test que falla/) // not bugfix
+    expect(k).toContain(ADDENDA.infra)
+    expect(k.toLowerCase()).toMatch(/dry-run.*plan primero/)
+    for (const otro of otrosAddenda('infra')) expect(k).not.toContain(otro)
   })
-  it('bugfix: has bugfix markers, not ui/backend/infra', () => {
+  it('bugfix: lleva su addendum y ninguno de los otros', () => {
     const k = renderKickoff({ ...SLICE, type: 'bugfix' }, { repo: 'o/r' })
-    expect(k.toLowerCase()).toMatch(/reproduce-first.*test que falla/) // bugfix present
-    // Verify other addenda are NOT present
-    expect(k.toLowerCase()).not.toMatch(/screenshot|design system/) // not ui
-    expect(k.toLowerCase()).not.toMatch(/migraci|rollback|contrato/) // not backend
-    expect(k.toLowerCase()).not.toMatch(/dry-run.*plan primero/) // not infra
+    expect(k).toContain(ADDENDA.bugfix)
+    expect(k.toLowerCase()).toMatch(/reproduce-first.*test que falla/)
+    for (const otro of otrosAddenda('bugfix')) expect(k).not.toContain(otro)
   })
 })
 
@@ -231,7 +233,8 @@ describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan pri
   it('cita los skills PROPIOS (control-tower-loop:*) y ninguna referencia al namespace superpowers:', () => {
     const k = renderKickoff(SLICE, OPTS)
     expect(k).toContain('control-tower-loop:subagent-driven-development')
-    expect(k).toContain('control-tower-loop:writing-plans')
+    expect(k).toContain('control-tower-loop:writing-plans-prescriptive')
+    expect(k).toContain('--check-plan')
     // Con dos puntos a propósito: `docs/superpowers/plans/` (la ruta-convención
     // de los planes) sí puede y debe aparecer; el namespace del plugin viejo, no.
     expect(k).not.toMatch(/superpowers:/)
@@ -246,8 +249,16 @@ describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan pri
     // tiene que aparecer ANTES de seguir con subagent-driven-development —
     // SDD arranca en su rombo "Have implementation plan?" y la respuesta
     // tiene que ser sí.
-    expect(k.indexOf('control-tower-loop:writing-plans'))
+    expect(k.indexOf('control-tower-loop:writing-plans-prescriptive'))
       .toBeLessThan(k.indexOf('control-tower-loop:subagent-driven-development'))
+  })
+
+  // F-jjponz-4 — el kickoff avisa del recorte antes de que el agente escriba
+  // 1.271 líneas de código en el plan y se coma un rechazo del validador.
+  it('el primer acto dice que los bloques son SOLO los esenciales, y que los cuerpos los escribe el implementador', () => {
+    const k = renderKickoff(SLICE, OPTS)
+    expect(k).toMatch(/bloques esenciales/i)
+    expect(k).toMatch(/cuerpos/i)
   })
 
   it('prohibiciones explícitas: NO mergear (el merge es humano) y NO crear worktrees nuevos', () => {

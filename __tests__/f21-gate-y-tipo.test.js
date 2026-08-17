@@ -76,17 +76,22 @@ function dryRun(specText, extraArgs = []) {
 // 1. El vocabulario de gates: cerrado, y derivado de lo que YA existía.
 // ============================================================================
 describe('F21 — vocabulario de gates', () => {
-  it('los gates que existen salen de los addenda que ya los imponían, no de un invento nuevo', () => {
+  it('los gates que existen salen de los addenda que ya los imponían, más el añadido deliberado de F-jjponz-1', () => {
     // `ui` imponía "gate de screenshot obligatorio"; `infra`, "apply solo tras
     // review". Son las dos ÚNICAS frases de ADDENDA que exigían un acto
-    // humano; el resto son recordatorios técnicos. El vocabulario es
-    // exactamente ese, ni uno más.
-    expect(Object.keys(GATES).sort()).toEqual(['apply', 'visual'])
+    // humano; el resto son recordatorios técnicos. `plan` (F-jjponz-1) es el
+    // primer gate AÑADIDO por la vía que la doctrina de gates.js reserva para
+    // eso: acto deliberado, con su texto de kickoff y de issue (ver
+    // gate-plan.test.js). Ningún Tipo lo implica.
+    expect(Object.keys(GATES).sort()).toEqual(['apply', 'plan', 'visual'])
     expect(TYPE_GATES.ui).toEqual(['visual'])
     expect(TYPE_GATES.infra).toEqual(['apply'])
-    expect(gatesForType('backend')).toEqual([])
-    expect(gatesForType('')).toEqual([])
-    expect(gatesForType(undefined)).toEqual([])
+    // F-jjponz-2: `plan` está implicado en TODO slice (gatesForType lo añade
+    // siempre); la renuncia por fila es `!plan`. Los Tipos sin gate técnico
+    // llevan exactamente ese defecto y nada más.
+    expect(gatesForType('backend')).toEqual(['plan'])
+    expect(gatesForType('')).toEqual(['plan'])
+    expect(gatesForType(undefined)).toEqual(['plan'])
   })
 
   it('los addenda dejan de llevar gate dentro: quedan recordatorios TÉCNICOS y nada más', () => {
@@ -106,11 +111,11 @@ describe('F21 — vocabulario de gates', () => {
 // 2. resolveGates: los dos ejes, por fin separados.
 // ============================================================================
 describe('F21 — resolveGates(tipo, celda Gate)', () => {
-  it('sin celda: los gates salen del Tipo, exactamente como antes (el caso por defecto no exige escribir nada)', () => {
-    expect(resolveGates('ui', '').gates).toEqual(['visual'])
-    expect(resolveGates('ui', undefined).gates).toEqual(['visual'])
-    expect(resolveGates('infra', '').gates).toEqual(['apply'])
-    expect(resolveGates('backend', '').gates).toEqual([])
+  it('sin celda: los gates salen del Tipo más el defecto universal `plan` (F-jjponz-2)', () => {
+    expect(resolveGates('ui', '').gates).toEqual(['visual', 'plan'])
+    expect(resolveGates('ui', undefined).gates).toEqual(['visual', 'plan'])
+    expect(resolveGates('infra', '').gates).toEqual(['apply', 'plan'])
+    expect(resolveGates('backend', '').gates).toEqual(['plan'])
   })
 
   it('un marcador de "sin valor" en Gate significa "no he declarado nada", NO "renuncio a todo"', () => {
@@ -119,33 +124,33 @@ describe('F21 — resolveGates(tipo, celda Gate)', () => {
     // está renunciando al gate de su Tipo — leerlo así sería quitar un gate
     // en silencio, justo lo contrario de lo que esta ronda pide.
     for (const marker of ['-', '–', '—', '―', '−', '--']) {
-      expect(resolveGates('ui', marker).gates, marker).toEqual(['visual'])
+      expect(resolveGates('ui', marker).gates, marker).toEqual(['visual', 'plan'])
       expect(resolveGates('ui', marker).waived, marker).toEqual([])
     }
   })
 
   it('el caso que motiva la ronda: un gate que el Tipo NO implica se declara, y queda marcado como tal', () => {
     const r = resolveGates('backend', 'visual')
-    expect(r.gates).toEqual(['visual'])
+    expect(r.gates).toEqual(['visual', 'plan'])
     expect(r.added).toEqual(['visual']) // lo que hay que decir en voz alta
-    expect(r.implied).toEqual([])
+    expect(r.implied).toEqual(['plan'])
   })
 
   it('renunciar a un gate implicado por el Tipo es explícito (`!visual`) y queda registrado', () => {
     const r = resolveGates('ui', '!visual')
-    expect(r.gates).toEqual([])
+    expect(r.gates).toEqual(['plan'])
     expect(r.waived).toEqual(['visual'])
   })
 
   it('renunciar a un gate que el Tipo no implica no hace nada, y eso se reporta (no se calla)', () => {
     const r = resolveGates('backend', '!visual')
-    expect(r.gates).toEqual([])
+    expect(r.gates).toEqual(['plan'])
     expect(r.inertWaivers).toEqual(['visual'])
   })
 
   it('declarar un gate que el Tipo ya implica es redundante, no un error, y se reporta', () => {
     const r = resolveGates('ui', 'visual')
-    expect(r.gates).toEqual(['visual'])
+    expect(r.gates).toEqual(['visual', 'plan'])
     expect(r.redundant).toEqual(['visual'])
     expect(r.added).toEqual([])
   })
@@ -157,20 +162,20 @@ describe('F21 — resolveGates(tipo, celda Gate)', () => {
 
   it('un token que no está en el vocabulario NO produce gate y se reporta (nunca se inventa un gate que nadie sabe comprobar)', () => {
     const r = resolveGates('backend', 'seguridad')
-    expect(r.gates).toEqual([])
+    expect(r.gates).toEqual(['plan'])
     expect(r.unknown).toEqual(['seguridad'])
     expect(resolveGates('ui', '!seguridad').unknown).toEqual(['seguridad'])
   })
 
   it('"none" no es un token válido: renunciar es por gate, con nombre, nunca en bloque', () => {
     expect(resolveGates('ui', 'none').unknown).toEqual(['none'])
-    expect(resolveGates('ui', 'none').gates).toEqual(['visual']) // el gate del Tipo sigue en pie
+    expect(resolveGates('ui', 'none').gates).toEqual(['visual', 'plan']) // el gate del Tipo sigue en pie
   })
 
   it('tolera mayúsculas y marcado inline, igual que el resto de columnas de la tabla §9', () => {
-    expect(resolveGates('backend', '`Visual`').gates).toEqual(['visual'])
-    expect(resolveGates('ui', '**!visual**').gates).toEqual([])
-    expect(resolveGates('ui', '! visual').gates).toEqual([])
+    expect(resolveGates('backend', '`Visual`').gates).toEqual(['visual', 'plan'])
+    expect(resolveGates('ui', '**!visual**').gates).toEqual(['plan'])
+    expect(resolveGates('ui', '! visual').gates).toEqual(['plan'])
   })
 
   it('el orden de los gates resueltos es determinista, venga como venga la celda', () => {
@@ -184,8 +189,8 @@ describe('F21 — resolveGates(tipo, celda Gate)', () => {
     // Mismo error, y mismo remedio, que slices.js#stripColumnPrefix para
     // "area:x" dentro de la columna Área. Sin esto, escribir lo que se ve en
     // GitHub caía en el abort de "gate desconocido".
-    expect(resolveGates('backend', 'gate:visual').gates).toEqual(['visual'])
-    expect(resolveGates('ui', '!gate:visual').gates).toEqual([])
+    expect(resolveGates('backend', 'gate:visual').gates).toEqual(['visual', 'plan'])
+    expect(resolveGates('ui', '!gate:visual').gates).toEqual(['plan'])
   })
 
   it('un "!" sin ningún gate detrás se reporta, no se descarta en silencio', () => {
@@ -195,21 +200,23 @@ describe('F21 — resolveGates(tipo, celda Gate)', () => {
   })
 
   it('un token con espacios ("visual visual", sin coma) no cuela como gate', () => {
-    expect(resolveGates('backend', 'visual visual').gates).toEqual([])
+    expect(resolveGates('backend', 'visual visual').gates).toEqual(['plan'])
     expect(resolveGates('backend', 'visual visual').unknown).toEqual(['visual visual'])
   })
 
   it('declarar el mismo gate dos veces no lo duplica en la salida', () => {
-    expect(resolveGates('backend', 'visual, visual').gates).toEqual(['visual'])
+    expect(resolveGates('backend', 'visual, visual').gates).toEqual(['visual', 'plan'])
     expect(resolveGates('backend', 'visual, visual').added).toEqual(['visual'])
   })
 
-  it('un Tipo que no matchea exactamente (mayúsculas, errata) NO implica ningún gate — el aviso de /ct-groom es quien lo dice', () => {
+  it('un Tipo que no matchea exactamente (mayúsculas, errata) NO implica ningún gate técnico — el aviso de /ct-groom es quien lo dice', () => {
     // Se documenta como comportamiento, no se "arregla" haciéndolo
     // case-insensitive: ADDENDA compara igual de exacto, y dos criterios
     // distintos para la misma columna serían peores que uno estricto con voz.
-    expect(gatesForType('UI')).toEqual([])
-    expect(gatesForType('iu')).toEqual([])
+    // El defecto universal `plan` (F-jjponz-2) no depende del Tipo, así que
+    // sobrevive incluso a una errata.
+    expect(gatesForType('UI')).toEqual(['plan'])
+    expect(gatesForType('iu')).toEqual(['plan'])
   })
 })
 
@@ -256,12 +263,16 @@ describe('F21 — el gate llega a GitHub, no solo al kickoff', () => {
     expect(buildLabels(backendConGate)).toContain('gate:visual')
   })
 
-  it('un slice SIN gates lleva `gate:none` — el silencio no puede significar dos cosas distintas', () => {
-    // Sin esta label, "el issue no tiene ninguna label gate:" significaría a la
-    // vez "este slice no tiene gates" y "este issue es anterior a los gates", y
-    // el dispatcher necesita distinguirlas para saber si puede derivar del
-    // Tipo (ver el bloque de redespacho, más abajo).
-    expect(buildLabels(backendPelado)).toContain(GATE_LABEL_NONE)
+  it('un slice sin gates técnicos lleva el defecto `gate:plan`; `gate:none` queda para la renuncia total', () => {
+    // Sin la label `gate:none`, "el issue no tiene ninguna label gate:"
+    // significaría a la vez "este slice no tiene gates" y "este issue es
+    // anterior a los gates" (ver el bloque de redespacho, más abajo). Con el
+    // defecto universal de F-jjponz-2, la única forma de quedarse sin gates
+    // es renunciar explícitamente a todos — `!plan` en un Tipo sin gate
+    // técnico.
+    expect(buildLabels(backendPelado)).toContain('gate:plan')
+    expect(buildLabels(backendPelado)).not.toContain(GATE_LABEL_NONE)
+    expect(buildLabels({ ...backendPelado, gate: '!plan' })).toContain(GATE_LABEL_NONE)
     expect(buildLabels(uiSlice)).not.toContain(GATE_LABEL_NONE)
   })
 
@@ -287,7 +298,7 @@ describe('F21 — el gate llega a GitHub, no solo al kickoff', () => {
 
   it('groomPlan expone los gates resueltos como dato estructurado', () => {
     const plan = groomPlan([backendConGate], { milestone: 'Epic', specRef: {} })
-    expect(plan.issues[0].gates).toEqual(['visual'])
+    expect(plan.issues[0].gates).toEqual(['visual', 'plan'])
   })
 })
 
@@ -390,7 +401,7 @@ describe('F21 — /ct-groom habla de los gates', () => {
     expect(res.stderr.toLowerCase()).toMatch(/renuncia/)
     expect(res.stderr).toContain('visual')
     const plan = JSON.parse(res.stdout)
-    expect(plan.issues[0].labels).toContain(GATE_LABEL_NONE)
+    expect(plan.issues[0].labels).toContain('gate:plan') // el defecto universal sigue en pie
     expect(plan.issues[0].labels).not.toContain('gate:visual')
   })
 
@@ -429,7 +440,10 @@ describe('F21 — /ct-groom habla de los gates', () => {
     expect(res.stderr).toContain('ui→visual')
     expect(res.stderr).toContain('columna "Gate"') // el remedio, en el propio aviso
     const plan = JSON.parse(res.stdout)
-    expect(plan.issues[0].labels).toContain(GATE_LABEL_NONE)
+    // pierde el gate TÉCNICO de su Tipo (visual), pero el defecto universal
+    // `plan` no depende del Tipo y sobrevive a la errata.
+    expect(plan.issues[0].labels).toContain('gate:plan')
+    expect(plan.issues[0].labels).not.toContain('gate:visual')
   })
 
   it('el caso por defecto (Tipo ui, sin columna Gate) sigue trayendo su gate sin que nadie declare nada', () => {

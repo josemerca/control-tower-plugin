@@ -314,7 +314,7 @@ SLICES_HEADING_LEGACY='## Formato de la tabla §9 (contrato con /ct-groom)'
 # ser el primer token y el parser no reconoce el commit). Un repo con el v13
 # se queda creyendo que esos dos casos SÍ están cubiertos, hasta que este
 # número suba.
-SLICES_CONTRACT_VERSION=16
+SLICES_CONTRACT_VERSION=18
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -374,6 +374,8 @@ f1e9f868952d34a80bc7d15b50c0fce99cf375ebd3b1a76a37c6fdfa7b83e035  v12, 505 líne
 3896ed5610c6967510d6ad0ef83a18ef5eb6244a2015fd9af3b813bc8ba177b0  v14, 534 líneas — F27 (la puerta es propiedad de la sesión con el plugin cargado, no sólo del repo; con -C/cd a otro repo juzga el repo equivocado, no es ciega, y sus invocaciones envueltas sí lo son)
 82a0391f7bffdd86a9b6506fa8db5c8866003129e2065b28a5e3bbe228a1a400  v15, 540 líneas — F28 (la puerta cubre lo que ejecuta Claude por su tool Bash, nunca lo que teclea el humano: ni su terminal ni el prefijo ! de la propia sesión)
 bb8e3298fe9b587b929ab58fbf96f76909463a1cea292fa110878d4ba293f38e  v16, 540 líneas — F30 (la sección deja de llamarse "tabla §9" y pasa a "tabla de slices": el número era un fósil, groom localiza la tabla por sus columnas Slice+Dep y --section está obsoleto)
+4d6eebf4ea94b7197879d30293dc4719d82399b7feeb7711829c28a1dcaa7f1c  v17, 543 líneas — F-jjponz-1 (el gate `plan` entra en el vocabulario: revisión humana del plan del slice antes de implementar, siempre opt-in)
+9a45d3acdc0d5a776affb390ba890b90b86d77e2a5712626a839a93d7462bfba  v18, 544 líneas — F-jjponz-2 (el gate `plan` pasa a estar implicado por defecto en TODO slice; renuncia por fila con `!plan`)
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -381,7 +383,7 @@ bb8e3298fe9b587b929ab58fbf96f76909463a1cea292fa110878d4ba293f38e  v16, 540 líne
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 16 -->
+<!-- ct-init:slices-contract-version: 18 -->
 ## Formato de la tabla de slices (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -426,11 +428,15 @@ copiable tal cual:
   - `visual` — un humano tiene que VER el cambio: captura/vídeo del
     antes/después en el PR;
   - `apply` — nada se aplica contra un entorno real hasta que un humano
-    revise el plan/dry-run.
+    revise el plan/dry-run;
+  - `plan` — antes de implementar, un humano revisa el PLAN del slice: el
+    agente lo publica como comentario del issue y se detiene hasta el OK.
+    Está implicado **por defecto en todos los slices**, venga el `Tipo` que
+    venga; se renuncia por fila con `!plan` (y la renuncia se anuncia).
 
   **No hace falta escribir nada en el caso normal**: `Tipo: ui` implica
-  `visual` e `Tipo: infra` implica `apply`, igual que antes. La columna sirve
-  para las dos desviaciones:
+  `visual`, `Tipo: infra` implica `apply`, y **todo slice** lleva `plan` de
+  serie. La columna sirve para las dos desviaciones:
   - **añadir** un gate que el `Tipo` no implica — `Tipo: backend` +
     `Gate: visual` (el caso real: una migración con backfill que mueve una
     barra de progreso muy visible). `/ct-groom` lo **anuncia por stderr**:
@@ -915,7 +921,7 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   mergear, no sólo para los gates: si lo compruebas a mano, que el resultado
   mande.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v16). Si el plugin trae una
+<sub>Esta sección la mantiene `/ct-init` (contrato v18). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>

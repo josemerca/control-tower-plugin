@@ -475,7 +475,7 @@ const SLICE_1 = { n: 1, name: 'login', type: 'backend', entrega: 'modelo', deps:
 // Las labels que el plan produce hoy para SLICE_1 (verificado contra
 // groom.js#buildLabels). `status:` nunca se compara, así que da igual cuál
 // lleve el issue.
-const LABELS_1 = [{ name: 'type:backend' }, { name: 'gate:none' }, { name: 'status:backlog' }]
+const LABELS_1 = [{ name: 'type:backend' }, { name: 'gate:plan' }, { name: 'status:backlog' }]
 
 const ONE_SLICE_TABLE = [
   '| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido |',

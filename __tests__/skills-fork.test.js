@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { ROLE_BUDGETS, CODE_BUDGETS } from '../scripts/plan-contract.js'
 
 // F32 — el fork de superpowers 6.0.3 dentro del plugin (decisión cerrada en
 // F31 §5: los 11 skills usados se forkan a control-tower-loop:* y superpowers
@@ -110,15 +111,120 @@ describe('costura 1 — brainstorming termina en execution spec + congelación, 
 describe('costura 2 — SDD sin plan escribe el plan ahora, scoped al issue', () => {
   const skill = () => read('subagent-driven-development', 'SKILL.md')
 
-  it('la rama «no plan» manda a writing-plans con el issue como spec', () => {
+  it('la rama «no plan» manda a writing-plans-prescriptive con el issue como spec', () => {
     const s = skill()
     expect(s).toContain('Write the plan now')
-    expect(s).toContain('control-tower-loop:writing-plans')
+    expect(s).toContain('control-tower-loop:writing-plans-prescriptive')
     expect(s).toContain('scoped to the issue')
   })
 
   it('la rama antigua «brainstorm first» ya no está', () => {
     expect(skill()).not.toContain('brainstorm first')
+  })
+})
+
+describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive (skill propia)', () => {
+  it('la skill propia existe con su template', () => {
+    expect(existsSync(join(SKILLS, 'writing-plans-prescriptive', 'SKILL.md'))).toBe(true)
+    expect(existsSync(join(SKILLS, 'writing-plans-prescriptive', 'plan-template.md'))).toBe(true)
+  })
+
+  it('es propia, no forkada: fuera de la lista FORKED', () => {
+    expect(FORKED).not.toContain('writing-plans-prescriptive')
+  })
+
+  it('SDD ya no nombra a writing-plans a secas como destino de la rama «no plan»', () => {
+    const s = read('subagent-driven-development', 'SKILL.md')
+    expect(s).not.toMatch(/control-tower-loop:writing-plans[^-]/)
+  })
+
+  it('la skill impone la literalidad y la convención de nombre que el gate de --release busca', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    expect(s).toContain('Current state (')
+    expect(s).toContain('issue-<n>-')
+    expect(s).toContain('--check-plan')
+  })
+
+  // F-jjponz-3 — mientras el gate leía el árbol en --release, un plan que
+  // modificaba un fichero existente solo podía liberar reetiquetando sus
+  // citas como prosa, y eso las saca de la comprobación en silencio. Con las
+  // citas ya verificables contra la base, la skill tiene que decir las dos
+  // cosas: que se cita con normalidad, y que reetiquetar no es una salida.
+  it('dice dónde se verifica cada cita y prohíbe reetiquetarlas para esquivar el gate', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    expect(s).toMatch(/base of the branch/i)
+    expect(s).toMatch(/never relabel/i)
+  })
+
+  // F-jjponz-4 — la skill ordenaba pegar "the complete final content" de cada
+  // fichero, y eso produjo un plan de 74k caracteres con el 65% de código, con
+  // cinco defectos que viajaron pegados. La doctrina nueva vive en la prosa,
+  // pero los NÚMEROS los manda plan-contract.js: si divergen, el agente escribe
+  // planes que el validador rechaza y nadie sabe cuál de los dos manda.
+  it('enumera los cuatro roles de bloque', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    for (const rol of ['Current state (', 'Contract (', 'Call site (', 'Final text (']) {
+      expect(s).toContain(rol)
+    }
+  })
+
+  it('sus presupuestos son los del validador: la prosa y el código no pueden divergir', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    const numeros = [...Object.values(ROLE_BUDGETS), CODE_BUDGETS.task, CODE_BUDGETS.chars]
+    for (const n of numeros) expect(s).toContain(String(n))
+  })
+
+  it('dice que cada TAREA cabe en un folio A4, y que si no cabe la tarea son dos', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    expect(s).toMatch(/one A4 page/i)
+    expect(s).toMatch(/the task is two/i)
+    // Y no vuelve a pedir lo que el agente NO puede hacer desde un issue
+    // congelado: partir el slice.
+    expect(s).not.toMatch(/the slice is two/i)
+  })
+
+  it('la doctrina del volcado ya no está', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    expect(s).not.toMatch(/paste the code the plan shows/i)
+    expect(s).not.toMatch(/complete final content/i)
+  })
+
+  it('dice que la configuración va en prosa y que un test va por nombre y aserción', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    expect(s).toMatch(/configuration/i)
+    expect(s).toMatch(/never appears as a block/i)
+  })
+
+  it('el template no pide el estado final completo y sus huecos nombran los roles', () => {
+    const t = read('writing-plans-prescriptive', 'plan-template.md')
+    expect(t).not.toMatch(/the complete final state/i)
+    expect(t).toContain('Contract (')
+    expect(t).toContain('No code — ')
+  })
+})
+
+// F-jjponz-4 — costura 5. La selección de modelo de SDD daba por hecho que la
+// tarea traía el código completo ("transcription plus testing") y por eso
+// mandaba esas tareas al tier más barato. Desde que el plan lleva contratos y
+// no cuerpos, NINGUNA tarea es transcripción: ese atajo enrutaría al modelo más
+// barato justo el eslabón que ahora escribe el código.
+describe('costura 5 — SDD ya no supone que la tarea trae el código completo', () => {
+  const skill = () => read('subagent-driven-development', 'SKILL.md')
+
+  it('el atajo de "transcripción" ya no existe', () => {
+    expect(skill()).not.toMatch(/contains the complete code to write/i)
+  })
+
+  it('el suelo del implementador es el tier intermedio, y se dice por qué', () => {
+    const s = skill()
+    expect(s).toMatch(/mid-tier model as the floor/i)
+    expect(s).toMatch(/contract/i)
+  })
+
+  it('FORK.md la documenta como costura, para que un cherry-pick no la pise', () => {
+    const fork = readFileSync(join(SKILLS, 'FORK.md'), 'utf8')
+    expect(fork).toMatch(/costura 5/i)
+    expect(fork).toMatch(/subagent-driven-development/)
   })
 })
 

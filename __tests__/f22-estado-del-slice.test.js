@@ -599,10 +599,18 @@ describe('F22 — ct-init deja la regla commiteada en el .gitignore', () => {
 describe('F22 — --release se niega si la rama lleva un fichero de estado', () => {
   const dispatchCheck = join(here, '..', 'scripts', 'dispatch-check.mjs')
 
-  const mkSliceWorktree = () => {
+  const mkSliceWorktree = ({ baseFiles = {} } = {}) => {
     const dir = mkGitRepo()
     const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
     writeFileSync(join(dir, STATE_REL_PATH), '---\ntask: el epic\n---\n# c\n')
+    // F-jjponz-3: ficheros que ya existen EN LA BASE de la rama. Son los que
+    // un plan cita como "Current state (fichero)" y que una tarea del slice
+    // reescribe después — el caso que ningún fixture cubría, porque todos
+    // creaban ficheros nuevos ("does not exist") y no ejercitaban nunca la
+    // comprobación de literalidad en el gate de --release.
+    for (const [rel, content] of Object.entries(baseFiles)) {
+      writeFileSync(join(dir, rel), content)
+    }
     git('add', '-A')
     git('commit', '-qm', 'estado coordinadora')
     git('worktree', 'add', '-q', '-b', 'feat/1', '.worktrees/1', 'HEAD')
@@ -635,7 +643,81 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     rmSync(dir, { recursive: true, force: true })
   })
 
+  // Plan mínimo que cumple plan-contract.js — desde F-jjponz-1, --release
+  // exige un plan prescriptivo commiteado en la rama. Su único bloque va bajo
+  // "Final text (f.txt):" (F-jjponz-4: todo bloque declara su rol), un rol que
+  // no se comprueba contra el repo: el fixture sigue sin citar nada.
+  const FENCE = '```'
+  const minimalPlanFor = (issue) => [
+    `# #${issue} — fixture slice`,
+    '',
+    '> **This plan is written to be executed by task-scoped subagents with zero context.**',
+    '',
+    '## 1. Context and goal',
+    'Fixture.',
+    '### Desired end state',
+    'Work done.',
+    '### Out of scope',
+    'N/A — fixture.',
+    '## 2. Closed decisions',
+    '| Decision | Value |',
+    '|---|---|',
+    '| fixture | yes |',
+    '## 3. Reference patterns',
+    'N/A — fixture.',
+    '## 4. Inventory',
+    'f.txt',
+    '## 5. Interfaces',
+    'Consumes: N/A. Produces: N/A.',
+    '## 6. Test strategy',
+    'N/A — fixture.',
+    '## 7. Tasks',
+    '### Task 1 — do the work',
+    '**Objective:** the work is committed.',
+    '**Files:** f.txt',
+    'Final text (f.txt):',
+    FENCE,
+    'trabajo',
+    FENCE,
+    '**TDD:** No TDD — fixture.',
+    '**Tests:** N/A — fixture.',
+    '**Verification:** git log shows the commit.',
+    '## 8. Global verification',
+    'N/A — fixture.',
+    '## 9. Assumptions',
+    'None.',
+    '',
+  ].join('\n')
+
+  const seedPlan = (wt, issue) => {
+    mkdirSync(join(wt, 'docs', 'superpowers', 'plans'), { recursive: true })
+    writeFileSync(join(wt, 'docs', 'superpowers', 'plans', `2026-08-12-issue-${issue}-fixture.md`), minimalPlanFor(issue))
+  }
+
+  // Igual que seedPlan, pero su Task 1 CITA un fichero en vez de crearlo:
+  // `Current state (<path>):` con `<body>` dentro de la valla.
+  const seedPlanCitando = (wt, issue, path, body) => {
+    const plan = minimalPlanFor(issue)
+      .replace('Final text (f.txt):', `Current state (${path}):`)
+      .replace(`${FENCE}\ntrabajo\n${FENCE}`, `${FENCE}\n${body}\n${FENCE}`)
+    mkdirSync(join(wt, 'docs', 'superpowers', 'plans'), { recursive: true })
+    writeFileSync(join(wt, 'docs', 'superpowers', 'plans', `2026-08-12-issue-${issue}-fixture.md`), plan)
+  }
+
   it('exit 0 con una rama limpia — el caso normal no paga nada', () => {
+    const { dir, wt, git } = mkSliceWorktree()
+    writeFileSync(join(wt, 'f.txt'), 'trabajo\n')
+    seedPlan(wt, 1)
+    git('add', '-A')
+    git('commit', '-qm', 'work')
+    const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
+      cwd: wt, encoding: 'utf8',
+    })
+    expect(r.status).toBe(0)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('exit 6 con la rama limpia pero SIN plan prescriptivo — el remedio nombra la skill (F-jjponz-1)', () => {
     const { dir, wt, git } = mkSliceWorktree()
     writeFileSync(join(wt, 'f.txt'), 'trabajo\n')
     git('add', '-A')
@@ -643,7 +725,121 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
       cwd: wt, encoding: 'utf8',
     })
+    expect(r.status).toBe(6)
+    expect(r.stderr).toContain('writing-plans-prescriptive')
+    expect(r.stderr).toContain('status:in-progress')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('--check-plan en verde con el plan en el árbol de trabajo, aún sin commitear (F-jjponz-1)', () => {
+    const { dir, wt } = mkSliceWorktree()
+    seedPlan(wt, 1)
+    const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--check-plan'], {
+      cwd: wt, encoding: 'utf8',
+    })
     expect(r.status).toBe(0)
+    expect(r.stdout).toContain('plan ok')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('--check-plan con una cita de memoria → exit 6 y nombra el fichero citado (F-jjponz-1)', () => {
+    const { dir, wt } = mkSliceWorktree()
+    seedPlan(wt, 1)
+    const roto = readFileSync(join(wt, 'docs', 'superpowers', 'plans', '2026-08-12-issue-1-fixture.md'), 'utf8')
+      .replace('Final text (f.txt):', 'Current state (f.txt):')
+    writeFileSync(join(wt, 'docs', 'superpowers', 'plans', '2026-08-12-issue-1-fixture.md'), roto)
+    const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--check-plan'], {
+      cwd: wt, encoding: 'utf8',
+    })
+    expect(r.status).toBe(6)
+    expect(r.stderr).toContain('f.txt')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // ==========================================================================
+  // F-jjponz-3 — el gate del plan en --release era INSATISFACIBLE para
+  // cualquier plan que modifique un fichero existente.
+  //
+  // Los dos modos compartían lector (`readFileSync` del árbol de trabajo). En
+  // --check-plan eso es correcto: el plan se escribe ANTES de implementar y
+  // cita el árbol tal y como está. En --release las tareas YA se ejecutaron,
+  // así que toda cita de un fichero que el slice reescribe ha dejado de
+  // existir verbatim y el gate salía con exit 6 — o sea, solo lo pasaban los
+  // planes que se limitan a crear ficheros nuevos.
+  //
+  // Descubierto en el e2e del slice #1 de repo-pulse (un plan que actualiza
+  // AGENTS.md): el agente solo pudo liberar reetiquetando sus tres citas como
+  // prosa, lo que las saca del gate en silencio. Es decir, el bug no
+  // bloqueaba: empujaba a esquivar la comprobación que da nombre a la
+  // feature.
+  //
+  // La corrección es asimétrica y se apoya en lo que ya hace --check-plan: el
+  // release verifica las citas contra la MISMA foto contra la que se validó
+  // el plan cuando se escribió, que es la base de la rama.
+  // ==========================================================================
+
+  it('exit 0 cuando el plan cita un fichero que este slice MODIFICA: la cita se comprueba en la BASE, no en HEAD (F-jjponz-3)', () => {
+    const { dir, wt, git } = mkSliceWorktree({ baseFiles: { 'AGENTS.md': 'texto de antes del slice\n' } })
+    seedPlanCitando(wt, 1, 'AGENTS.md', 'texto de antes del slice')
+    // La tarea hace lo que el plan ordena: reescribe el fichero citado.
+    writeFileSync(join(wt, 'AGENTS.md'), 'texto nuevo que trae el slice\n')
+    git('add', '-A')
+    git('commit', '-qm', 'work')
+    const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
+      cwd: wt, encoding: 'utf8',
+    })
+    expect(r.status).toBe(0)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('exit 6 si la cita no existe TAMPOCO en la base, aunque la rama la escriba en HEAD — el fix endurece el gate, no lo desarma (F-jjponz-3)', () => {
+    const { dir, wt, git } = mkSliceWorktree({ baseFiles: { 'AGENTS.md': 'texto de antes del slice\n' } })
+    // Cita inventada... y el trabajo del slice la deja escrita en el árbol:
+    // con el lector viejo (HEAD) esto pasaba en verde. Es exactamente la
+    // forma de colar una cita de memoria por la puerta del release.
+    seedPlanCitando(wt, 1, 'AGENTS.md', 'esto no estuvo nunca en el fichero')
+    writeFileSync(join(wt, 'AGENTS.md'), 'esto no estuvo nunca en el fichero\n')
+    git('add', '-A')
+    git('commit', '-qm', 'work')
+    const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
+      cwd: wt, encoding: 'utf8',
+    })
+    expect(r.status).toBe(6)
+    expect(r.stderr).toContain('AGENTS.md')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('exit 6 con mensaje honesto si el fichero citado NO existía en la base: un fichero que crea el slice se cita con "does not exist" (F-jjponz-3)', () => {
+    const { dir, wt, git } = mkSliceWorktree()
+    seedPlanCitando(wt, 1, 'nuevo.txt', 'contenido nuevo')
+    writeFileSync(join(wt, 'nuevo.txt'), 'contenido nuevo\n')
+    git('add', '-A')
+    git('commit', '-qm', 'work')
+    const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
+      cwd: wt, encoding: 'utf8',
+    })
+    expect(r.status).toBe(6)
+    expect(r.stderr).toContain('nuevo.txt')
+    // No se afirma "cita de memoria" cuando lo que pasa es que el fichero no
+    // estaba en la base: el mensaje tiene que decir DÓNDE se miró.
+    expect(r.stderr).toContain('base')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('--check-plan sigue leyendo el ÁRBOL DE TRABAJO: es el modo de ANTES de implementar (F-jjponz-3)', () => {
+    const { dir, wt } = mkSliceWorktree({ baseFiles: { 'AGENTS.md': 'texto de antes del slice\n' } })
+    seedPlanCitando(wt, 1, 'AGENTS.md', 'texto de antes del slice')
+    const verde = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--check-plan'], {
+      cwd: wt, encoding: 'utf8',
+    })
+    expect(verde.status).toBe(0)
+    // Y si el árbol ya no dice eso, --check-plan lo canta: en ese modo el
+    // árbol ES el estado que el plan cita, y no se sustituye por la base.
+    writeFileSync(join(wt, 'AGENTS.md'), 'otra cosa\n')
+    const rojo = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--check-plan'], {
+      cwd: wt, encoding: 'utf8',
+    })
+    expect(rojo.status).toBe(6)
     rmSync(dir, { recursive: true, force: true })
   })
 

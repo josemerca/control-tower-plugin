@@ -108,7 +108,7 @@ describe('ct-groom — labels: distingue las que ya existían de las que crea (F
       // F21: el plan produce además `gate:none` (una label de gate por issue,
       // siempre) — sin ella en el repo, esta corrida SÍ tendría una label nueva
       // que crear y el test dejaría de probar el caso "no hay nada que decir".
-      FAKE_GH_LABELS_LIST: JSON.stringify([[{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:none' }, { name: 'status:backlog' }]]),
+      FAKE_GH_LABELS_LIST: JSON.stringify([[{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:plan' }, { name: 'status:backlog' }]]),
       FAKE_GH_ARGV_LOG_FILE: argvLog,
     })
     expect(res.status).toBe(0)
