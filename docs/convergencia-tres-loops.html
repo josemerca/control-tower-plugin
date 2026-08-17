@@ -81,6 +81,11 @@
     font-family: var(--mono); font-size: .7rem; letter-spacing: .1em; text-transform: uppercase;
     color: var(--part); border: 1px solid var(--part); padding: .25rem .6rem;
   }
+  .status.ok { color: var(--yes); border-color: var(--yes); }
+  tr.resolved td { color: var(--ink-3); }
+  tr.resolved td:first-child { text-decoration: line-through; color: var(--ink-3); font-weight: 400; }
+  tr.resolved b { color: var(--yes); font-weight: 600; }
+  tr.spawned td:first-child { color: var(--accent); }
 
   section { display: flex; flex-direction: column; gap: 1.1rem; }
   h2 {
@@ -160,7 +165,7 @@
     <p class="eyebrow">Propuesta · 14 agosto 2026</p>
     <h1>Convergencia de los tres loops</h1>
     <p class="standfirst">Tres implementaciones del mismo ciclo, construidas por separado, y una de ellas ya se reparte bajo el nombre y la versión de otra. Esto es qué proponemos hacer con eso: quién se queda cada tercio, en qué orden entra cada pieza y qué decisiones hacen falta antes de mover nada.</p>
-    <span class="status">Sin aprobar · pendiente de D-1</span>
+    <span class="status ok">D-1 resuelta · 14 ago 2026 · el repo acepta contribuciones externas</span>
   </header>
 
   <section>
@@ -311,11 +316,12 @@
           <tr><th scope="col">#</th><th scope="col">Decisión</th><th scope="col">Dueño</th><th scope="col">Cuándo</th></tr>
         </thead>
         <tbody>
-          <tr><td>D-1</td><td>¿Control Tower acepta contribuciones externas, con pull request y revisión?</td><td class="owner">José</td><td>Antes de F35</td></tr>
+          <tr class="resolved"><td>D-1</td><td>¿Control Tower acepta contribuciones externas, con pull request y revisión? — <b>Resuelta el 14 ago: sí.</b> Desbloquea la Ronda 0 y F35, y hace nacer D-6</td><td class="owner">José</td><td>✔ cerrada</td></tr>
           <tr><td>D-2</td><td>El techo del plan por tarea: qué número exacto</td><td class="owner">José + Juanjo</td><td>En F35, con el dato de cuántas vueltas de validación costó</td></tr>
           <tr><td>D-3</td><td>Cómo se cierra un gate: que consulte el agente, o un proceso que lo vigile</td><td class="owner">José</td><td>En F36</td></tr>
           <tr><td>D-4</td><td>¿El orquestador deja de ser una sesión de chat?</td><td class="owner">José</td><td>Aplazada — se revisa al cerrar F38</td></tr>
           <tr><td>D-5</td><td>¿agentic-skills se abre al equipo o sigue siendo personal?</td><td class="owner">Alejandro</td><td>Cuando quiera</td></tr>
+          <tr class="spawned"><td>D-6</td><td><strong>Nace de D-1.</strong> Este repo no tiene integración continua: no existe <code>.github/workflows/</code>. Aceptar pull requests externos sin nada que corra la suite deja la verificación entera en manos de quien revisa — y el fork está hoy en rojo justo porque nada lo cazó. ¿Se monta CI antes del primer PR externo?</td><td class="owner">José</td><td><strong>Antes de F35</strong></td></tr>
         </tbody>
       </table>
     </div>
