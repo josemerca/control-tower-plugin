@@ -1,6 +1,7 @@
 # Convergencia de los tres loops — propuesta
 
-**Fecha:** 2026-08-14 · **Estado:** PROPUESTA, sin aprobar
+**Fecha:** 2026-08-14 · **Estado:** APROBADA en su decisión de fondo — D-1 resuelta el 2026-08-14
+(**sí**, este repo acepta contribuciones externas). Las rondas siguen sin ejecutar.
 **Inventario de capacidades:** [`tres-loops-un-pipeline.html`](./tres-loops-un-pipeline.html)
 (publicado en <https://claude.ai/code/artifact/c3dda928-cbdb-4409-8bbd-6b1a86480ef3>)
 
@@ -129,11 +130,12 @@ Lo que **CT no absorbe**, y el acuerdo que lo sustituye:
 
 | # | Decisión | Dueño | Cuándo |
 |---|---|---|---|
-| D-1 | ¿Control Tower acepta contribuciones externas, con PR y revisión? | José | Antes de F35 |
+| ~~D-1~~ | ~~¿Control Tower acepta contribuciones externas, con PR y revisión?~~ — **RESUELTA 2026-08-14: sí.** Con ella quedan desbloqueadas la Ronda 0 y F35, y aparece D-6 | José | ✔ |
 | D-2 | El techo del plan por tarea: qué número exacto | José + Juanjo | En F35, con el dato de cuántas vueltas de `--check-plan` costó |
 | D-3 | Cómo se cierra un gate: que consulte el agente, o un proceso que lo vigile | José | En F36 |
 | D-4 | ¿El orquestador de CT deja de ser una sesión de chat? | José | Aplazada — se revisa al cerrar F38 |
 | D-5 | ¿`agentic-skills` se abre al equipo o sigue siendo personal? | Alejandro | Cuando quiera |
+| D-6 | **Nace de D-1:** este repo no tiene CI (no existe `.github/workflows/`). Aceptar PRs externos sin nada que corra la suite deja la verificación en manos de quien revisa. ¿Se monta CI antes del primer PR externo? | José | **Antes de F35** |
 
 ---
 
