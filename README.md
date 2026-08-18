@@ -112,6 +112,50 @@ Empieza siempre en seco:
 /ct-next  --dry-run      # comprueba lo que el run real necesita, e imprime el kickoff en prosa
 ```
 
+## `ct-run`: la implementación conducida por un programa (experimental)
+
+Entre el gate del plan y la pull request hay un tramo que hoy conduce una sesión
+de chat siguiendo `subagent-driven-development`: despacha un implementador por
+tarea, un revisor detrás, y mantiene un ledger en disco para no perder el sitio
+cuando la conversación se compacte.
+
+`scripts/ct-run.mjs` sustituye **al conductor, no a las piezas**. La secuencia la
+decide una tabla (`scripts/run-machine.js`, función pura) y las dos llamadas al
+modelo pasan a ser procesos hijos sin estado. Por cada tarea del plan:
+
+```
+git add (sólo las rutas que declara el implementador)
+  → los comandos de su **Verification:**, con los logs a disco
+    → el juez (el diff, la rúbrica y las RUTAS de los logs)
+      → commit
+```
+
+Lo que cambia respecto de hoy, en una línea por propiedad:
+
+| | Con la sesión de chat | Con `ct-run` |
+|---|---|---|
+| Quién decide el paso siguiente | un modelo leyendo prosa | una función pura sobre el estado |
+| Quién mide si la tarea está verde | el implementador se lo reporta a sí mismo | el programa ejecuta los comandos del plan |
+| Qué puede ejecutar el juez | tiene `Bash` | nada: se lo quita el binario, no una promesa |
+| Qué devuelve el juez | prosa | JSON validado contra un esquema |
+| Quién comitea | el implementador | el programa — así un veto no deja rastro que deshacer |
+| Presupuesto | ninguno | reintentos por tarea y tope en dinero por slice |
+
+```bash
+ct-run --plan .agent/plan.md --issue 42 --max-usd 20 --model-judge opus
+```
+
+Sale por un código por decisión, no uno por excepción: `0` entregado, `1` el juez
+veta, `4` los controles siguen en rojo, `5` no se pudieron **medir**, `6` el plan
+no es ejecutable, `7` se agotó el dinero. Reinvocarlo **reanuda** — el estado
+vive en `.agent/run-<issue>.json`, y al retomar lo cruza con `git log`: si no
+cuentan lo mismo, para en vez de reimplementar encima de una tarea comiteada.
+
+Es experimental y **no está en el camino por defecto**: `scripts/kickoff.js` no lo
+menciona, así que si el experimento falla no hay nada que revertir. El diseño y
+lo que se midió para tomarlo están en
+[`docs/superpowers/specs/2026-08-18-el-conductor-como-programa-design.md`](docs/superpowers/specs/2026-08-18-el-conductor-como-programa-design.md).
+
 ## El estado de un slice es una label
 
 No hay base de datos. El estado son las labels del issue, y el timeline de GitHub registra cada transición con su timestamp — así sobrevive a un `/clear`, a un redespacho y a otra máquina.
@@ -192,11 +236,11 @@ Si no, el repo sigue distribuyendo el hook viejo mientras la fuente ya dice otra
 
 ```
 commands/     los cuatro slash commands (Markdown + prosa larga: son la documentación)
-scripts/      la lógica — módulos puros y los tres ejecutables .mjs
+scripts/      la lógica — módulos puros y los ejecutables .mjs (los cuatro del loop y ct-run)
 hooks/        SessionStart (hidratación), Stop (estado al día), PreToolUse (guarda de commits)
 dist/         bundles de los hooks — DERIVADO, trackeado, ver arriba
 skills/       los 11 skills forkados + writing-plans-prescriptive (propio) + LICENSE-superpowers + FORK.md
-__tests__/    62 ficheros, 1.745 tests
+__tests__/    70 ficheros, 2.026 tests
 docs/loop/    el documento del ciclo: fuente, HTML autocontenido y PDF
 docs/         los handoffs de cada ronda (prompt-fNN-*.md) — cómo se llegó hasta aquí
 ```
