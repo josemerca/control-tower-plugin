@@ -242,3 +242,60 @@ describe('las rutas que la tarea declara en **Files:**', () => {
     expect(t.files).toEqual([{ path: 'web/src/App.test.tsx', action: null }])
   })
 })
+
+// ---------------------------------------------------------------------------
+// EL NOMBRE DE TEST QUE DECLARA **TDD:**
+// ---------------------------------------------------------------------------
+describe('el nombre del test que declara **TDD:**', () => {
+  it('lee el nombre del test que declara **TDD:**', () => {
+    // La tarea 1 del plan ejecutable: **TDD:** `test('renders the app title in a DOM')` — ...
+    expect(taskOf(EJECUTABLE, 1).tddName).toBe('renders the app title in a DOM')
+  })
+
+  it('un No TDD no declara ningún test', () => {
+    // La tarea 4 dice "No TDD — son los tokens de marca..." y la 8 "No TDD — es documentación...".
+    expect(taskOf(EJECUTABLE, 4).tddName).toBeNull()
+    expect(taskOf(EJECUTABLE, 8).tddName).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LAS ETIQUETAS DE ROL DE LOS BLOQUES — Current state / Contract / Call site / Final text
+// ---------------------------------------------------------------------------
+describe('las etiquetas de rol de los bloques de la tarea', () => {
+  it('lee los ficheros que nombra cada etiqueta de rol', () => {
+    expect(taskOf(EJECUTABLE, 5).blockPaths).toEqual([
+      { role: 'Current state', path: 'web/src/App.tsx' },
+      { role: 'Contract', path: 'web/src/Header.tsx' },
+    ])
+    expect(taskOf(EJECUTABLE, 4).blockPaths).toEqual([
+      { role: 'Contract', path: 'web/src/tokens.css' },
+      { role: 'Call site', path: 'web/src/main.tsx' },
+    ])
+    expect(taskOf(EJECUTABLE, 8).blockPaths).toEqual([
+      { role: 'Current state', path: 'AGENTS.md' },
+      { role: 'Final text', path: 'AGENTS.md' },
+    ])
+  })
+
+  it('lee el texto literal de un bloque Final text', () => {
+    const plan = [
+      '### Task 1 — reescribe una nota',
+      '**Files:** `docs/nota.md` (modify)',
+      'Final text (docs/nota.md):',
+      '',
+      F + 'md',
+      'primera línea',
+      'segunda línea',
+      F,
+      '**TDD:** No TDD — es documentación.',
+      '**Tests:** N/A — no hay código nuevo.',
+      '**Verification:**',
+      F + 'bash',
+      'npm test',
+      F,
+    ].join('\n')
+    const t = extractTasks(plan).tasks[0]
+    expect(t.finalTexts).toEqual([{ path: 'docs/nota.md', text: 'primera línea\nsegunda línea' }])
+  })
+})

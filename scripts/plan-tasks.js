@@ -8,8 +8,11 @@
 // exactamente lo que un conductor que no razona necesita del plan.
 //
 // Este módulo extrae, por tarea: los comandos de su **Verification:**, los
-// nombres de test que la tarea AÑADE y los que RETIRA a propósito. Con eso, el
-// programa mide la tarea sin preguntarle al implementador si le salió bien.
+// nombres de test que la tarea AÑADE y los que RETIRA a propósito, las rutas
+// de **Files:**, el nombre del test que declara **TDD:**, la ruta de cada
+// bloque con etiqueta de rol y el texto literal de sus bloques `Final text`.
+// Con eso, el programa mide la tarea sin preguntarle al implementador si le
+// salió bien.
 //
 // PURO a propósito, como `plan-contract.js`: entra el markdown, sale la lista.
 // Ni un import.
@@ -59,11 +62,12 @@ const TASK_HEADING = /^### Task (\d+) — (.*)$/
 const VERIFICATION = '**Verification:**'
 const TESTS = '**Tests:**'
 const FILES = '**Files:**'
+const TDD = '**TDD:**'
 
 // Cualquier otro marcador de tarea corta el párrafo: si tras **Verification:**
 // viene **Objective:** en vez de un bloque, es que no hay bloque, y decirlo es
 // mejor que seguir buscando hasta el final del fichero.
-const OTHER_MARKERS = ['**Objective:**', FILES, '**TDD:**', TESTS]
+const OTHER_MARKERS = ['**Objective:**', FILES, TDD, TESTS]
 
 // Las tres formas del §2.5. El orden importa: "retira a propósito" antes que
 // "retira", o la corta se come a la larga y parte por el sitio equivocado.
@@ -151,6 +155,76 @@ export function splitFiles(text) {
   return rutas
 }
 
+// Las cuatro etiquetas de rol de un bloque del plan, con su ruta. Duplicadas
+// de `plan-contract.js` (constante `ROLE_LABELS`), por la misma razón que
+// `annotate`: este módulo no depende de aquél.
+export const ROLES = ['Current state', 'Contract', 'Call site', 'Final text']
+
+const ROLE_LABELS = [
+  ['Current state', /^Current state \(([^),]+)(?:,[^)]*)?\):\s*$/],
+  ['Contract', /^Contract \(([^),]+)(?:,[^)]*)?\):\s*$/],
+  ['Call site', /^Call site \(([^),]+)(?:,[^)]*)?\):\s*$/],
+  ['Final text', /^Final text \(([^),]+)(?:,[^)]*)?\):\s*$/],
+]
+
+function roleOf(line) {
+  for (const [role, re] of ROLE_LABELS) {
+    const m = re.exec(line)
+    if (m) return { role, path: m[1].trim() }
+  }
+  return null
+}
+
+// El cuerpo del cercado que sigue a una línea, saltando líneas en blanco antes
+// de él. Se devuelve tal cual, sin recortar: un bloque `Final text` es
+// contenido literal, y lo que hay que comprobar es justo lo que no se toca.
+// Duplicada de `plan-contract.js`, por la misma razón que `annotate`.
+function fenceBodyAfter(lines, from) {
+  let i = from
+  while (i < lines.length && lines[i].line.trim() === '') i++
+  if (i >= lines.length || !lines[i].fence || !lines[i].opens) return null
+  const body = []
+  for (let j = i + 1; j < lines.length; j++) {
+    if (lines[j].fence) return body.join('\n')
+    body.push(lines[j].line)
+  }
+  return null
+}
+
+// El nombre de test de **TDD:** vive AL REVÉS que en **Tests:**: la comilla
+// está DENTRO del paréntesis de la llamada —`test('nombre')`—, no fuera con
+// una aclaración detrás. Medido contra la tarea 1 del plan real: aplicar
+// quotedNames al párrafo entero devuelve 'jsdom' (la comilla de
+// `environment: 'jsdom'`, más adelante en el mismo párrafo), porque el barrido
+// por profundidad se come el nombre real junto con los paréntesis de
+// `test(...)`. Por eso primero se aísla el interior del primer paréntesis
+// balanceado del párrafo, y SOBRE ESE interior sí vale quotedNames — que sigue
+// siendo el barrido correcto si el nombre citado trajera los suyos.
+function firstParenBody(text) {
+  const start = text.indexOf('(')
+  if (start === -1) return null
+  let depth = 0
+  for (let i = start; i < text.length; i++) {
+    if (text[i] === '(') depth++
+    else if (text[i] === ')') {
+      depth--
+      if (depth === 0) return text.slice(start + 1, i)
+    }
+  }
+  return null
+}
+
+// "No TDD — <razón>" es una declaración legítima: la tarea no lleva
+// comportamiento que poner en rojo, y no declara ningún test.
+const NO_TDD = /^No TDD\b/i
+
+function tddNameOf(text) {
+  if (NO_TDD.test(text)) return null
+  const cuerpo = firstParenBody(text)
+  const nombres = quotedNames(cuerpo === null ? text : cuerpo)
+  return nombres[0] || null
+}
+
 // Junta el párrafo que arranca en `from`: la línea del marcador y sus
 // continuaciones, hasta la primera línea en blanco, otro marcador, un cercado o
 // un encabezado. Devuelve el texto sin el marcador y dónde se quedó.
@@ -215,6 +289,10 @@ export function extractTasks(markdown) {
     let testsDeclared = false
     let files = []
     let filesDeclared = false
+    let tddDeclared = false
+    let tddName = null
+    const blockPaths = []
+    const finalTexts = []
 
     cuerpo.forEach((l, i) => {
       if (!l.structural) return
@@ -239,6 +317,19 @@ export function extractTasks(markdown) {
         const { text } = paragraphFrom(cuerpo, i, FILES)
         files = splitFiles(text)
       }
+      if (t.startsWith(TDD) && !tddDeclared) {
+        tddDeclared = true
+        const { text } = paragraphFrom(cuerpo, i, TDD)
+        tddName = tddNameOf(text)
+      }
+      const rol = roleOf(l.line)
+      if (rol) {
+        blockPaths.push(rol)
+        if (rol.role === 'Final text') {
+          const body = fenceBodyAfter(cuerpo, i + 1)
+          if (body !== null) finalTexts.push({ path: rol.path, text: body })
+        }
+      }
     })
 
     if (commands === null) {
@@ -250,7 +341,17 @@ export function extractTasks(markdown) {
       push(h.n, 'tests-line', `la tarea ${h.n} no declara "${TESTS}".`)
     }
 
-    return { n: h.n, name: h.name, commands: commands || [], testsAdded: added, testsRemoved: removed, files }
+    return {
+      n: h.n,
+      name: h.name,
+      commands: commands || [],
+      testsAdded: added,
+      testsRemoved: removed,
+      files,
+      tddName,
+      blockPaths,
+      finalTexts,
+    }
   })
 
   if (!tasks.length) push(0, 'tasks', 'el plan no declara ninguna tarea ("### Task N — ...").')
