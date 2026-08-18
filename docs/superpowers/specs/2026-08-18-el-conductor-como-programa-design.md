@@ -31,6 +31,7 @@ Lo que cambia, en una línea por propiedad:
 | Qué puede ejecutar el juez | tiene `Bash` (`code-reviewer.md:8` es un `general-purpose`) | nada: el binario no se lo da |
 | Qué devuelve el juez | prosa ("give a clear verdict") | JSON validado contra un esquema |
 | Presupuesto | ninguno declarado | reintentos por tarea y tope en dinero por slice |
+| Medida | ninguna | una fila por intento de un paso de una tarea (§10) |
 
 ### 1.1 Lo que NO cambia
 
@@ -84,7 +85,7 @@ inocuo o incluso útil; para el juez es contaminación directa.
 Esto está **medido a medias a propósito**: el binario dice que los hooks corren,
 pero en esta máquina el plugin no está instalado (`~/.claude/plugins/installed_plugins.json`
 no lo lista), así que el efecto concreto **no se ha observado**. Es la primera
-tarea verificable de la implementación (§10, paso 0), no una suposición que
+tarea verificable de la implementación (§11, paso 0), no una suposición que
 viaje escondida en el diseño.
 
 ### 2.3 La cuenta se hereda, no hay que elegirla
@@ -257,12 +258,18 @@ scripts/ct-run.mjs        infraestructura: argv, cableado, canales, códigos de 
         ├── scripts/run-machine.js   dominio PURO, cero imports: la tabla del §3.3
         ├── scripts/plan-tasks.js    dominio: el plan → tareas + su vara (§2.5)
         ├── scripts/verdict.js       dominio: el esquema del veredicto y su validación
-        └── scripts/harness-call.js  dominio: construye argv y prompt, NO ejecuta
+        ├── scripts/harness-call.js  dominio: construye argv y prompt, NO ejecuta
+        └── scripts/run-metrics.js   dominio: compone la fila de telemetría (§10)
 ```
 
 Puertos que inyecta `ct-run.mjs` y que `conduct.js` sólo consume:
-`readFile`, `writeFile`, `runCommand({ cmd, argv, cwd, timeoutMs }) → { code, stdout, stderr }`,
-`now()`.
+`readFile`, `writeFile`, `appendLine(path, text)`,
+`runCommand({ cmd, argv, cwd, timeoutMs }) → { code, stdout, stderr }`, `now()`.
+
+`appendLine` es un puerto propio y no un `writeFile` disfrazado: la telemetría es
+append-only sobre ficheros que viven fuera del repo, y un fallo suyo **no cierra
+el run** (§10.5), así que su tratamiento de errores no es el de escribir el
+estado.
 
 Nada por debajo de `conduct.js` importa `node:fs` ni `node:child_process`: es lo
 que permite testear el bucle entero sin tocar disco ni lanzar un proceso, y es la
@@ -341,6 +348,11 @@ tocarlo arrastra `npm run build` en el mismo commit, y el fichero está ignorado
 por construcción y nunca lo stagea el programa (que stagea rutas nombradas).
 Queda anotado como decisión a revisar si aparece un `git add -A` en el camino.
 
+No confundir este fichero con la telemetría: el estado del run es **mutable, uno
+por issue y dentro del worktree**, porque su único trabajo es que reinvocar
+retome; la telemetría es **append-only y fuera del repo** (§10.5), porque su
+trabajo es sobrevivir al worktree y no viajar en la pull request.
+
 **Al reanudar, el programa no se cree el fichero a solas.** Cruza la tarea que
 dice el estado con los commits que hay desde `baseSha`: si discrepan, para y lo
 dice. No adivina, porque adivinar aquí significa reimplementar encima de una
@@ -392,7 +404,100 @@ perdería.
 
 ---
 
-## 10. Lo que hace falta construir
+## 10. Telemetría
+
+Una fila por **intento de un paso de una tarea**. Es la granularidad más fina que
+el programa ya conoce sin esfuerzo, y agregar hacia arriba (por tarea, por plan,
+por epic) es una suma; deshacer una agregación no es nada.
+
+### 10.1 La identidad de una fila
+
+```
+repo          org/repo — dos repos pueden compartir número de issue
+epic          el milestone, vía epicKeyOf() (§10.3)
+issue         el número del issue del slice: ES la identidad del plan padre
+plan          la ruta del plan
+plan_sha256   el hash de su contenido (§10.2)
+task          1..N
+task_name     el texto de "### Task N — <name>"
+tasks_total   N
+step          implement | controls | judge | commit
+attempt       1..3 — la vuelta dentro de esta tarea (§10.4)
+session       el identificador de la conversación de esa llamada
+written_at    marca de tiempo
+```
+
+Y como medidas, según el paso: el estado de cada control con la ruta de su log; el
+veredicto con su conteo por severidad; coste, turnos y duración de la llamada; y
+el tamaño del diff juzgado.
+
+### 10.2 Por qué el número de issue no basta como identidad del plan
+
+El plan se llama `docs/superpowers/plans/YYYY-MM-DD-issue-<n>-<slug>.md`, y el
+segmento `issue-<n>-` es exactamente cómo lo encuentra el gate de `--release`.
+Así que el número del issue **es** la identidad del plan padre y no hay que
+inventar ninguna.
+
+Lo que no cubre es que un plan **se reescribe**: tras el gate `plan`, o tras un
+rechazo en revisión. Dos runs contra dos versiones del mismo fichero serían
+indistinguibles, y las métricas mentirían justo donde más se van a usar —
+comparar el antes y el después de cambiar un plan. De ahí `plan_sha256`, que es
+además el idioma que el repo ya usa para esta misma clase de problema
+(`SLICES_PRISTINE_HASHES` en `ct-init`).
+
+### 10.3 El epic, sembrado en el despacho
+
+En Control Tower el epic **es el milestone**. No es una interpretación: lo declara
+la cabecera de `scripts/gh-issue-map.js:915` — *"una invocación = un `--milestone`
+= un epic"* — y `epicKeyOf(rawIssue)` (línea 938) lo deriva del issue crudo, con
+`NO_MILESTONE_KEY = '(sin milestone)'` para los que no tienen. `/ct-next` ya lo
+calcula hoy, para detectar colisiones del marcador `ct-order` dentro de un mismo
+epic.
+
+Así que el epic se **siembra en el despacho**: `buildStateSeed` gana un campo
+`epic` en el estado de `.agent/SLICE.md`, y el programa lo lee de ahí. La
+alternativa —una llamada a `gh` al arrancar cada run— metería red en el camino
+crítico para un dato que el dispatcher ya tenía en la mano.
+
+La ausencia se declara, no se rellena: un issue sin milestone se anota como
+`(sin milestone)`, con la constante que ya existe. Es la misma regla que impidió
+que `ct-next` asumiera `main` en silencio cuando no conocía la base.
+
+### 10.4 El intento es una dimensión, no un contador agregado
+
+Sin `attempt` no se puede medir cuántas veces vetó el juez, ni cuántas vueltas
+costó cada tarea — que es justamente el dato que decide si este experimento
+merece la pena. `agentic-skills` lo resuelve con contadores agregados por slice
+cerrada (`reintentos_verify`, `descartes_verify`) porque allí la unidad es la
+slice; aquí la unidad es la tarea, así que la fila por intento sale gratis del
+contador que la máquina ya lleva, y la agregación se hace al leer.
+
+### 10.5 Dónde se escribe, y por qué fuera del repo
+
+En `~/.claude/control-tower/log/<concepto>.jsonl` (o su equivalente bajo
+`CLAUDE_CONFIG_DIR`), append-only, un fichero por concepto y el mismo patrón de
+nombre para todos. Fuera del repo por el motivo explícito de `agentic-skills`:
+para que ningún `git add` de la slice se lleve la telemetría dentro de la pull
+request.
+
+El diff juzgado va en un fichero aparte, unido a su fila por la misma clave: es
+lo que pesa, y separarlo es lo que permite contar hallazgos sin cargarlo.
+
+**Escribir telemetría no puede tumbar un run.** Si el fichero no se puede
+escribir, se avisa por stderr y el run sigue: la medida es para nosotros, no para
+la máquina, y ninguna transición depende de ella.
+
+### 10.6 Lo que esto adelanta
+
+La ronda F38 ("la medida") pide presupuesto en dinero por slice y gasto
+desglosado por papel, y observa que `/ct-harvest` hoy mide el historial de GitHub
+y no el gasto. Con estas filas escritas con esta identidad, F38 llega con el dato
+ya recogido y le queda la lectura. No se reclama su alcance: aquí no se toca
+`/ct-harvest` ni se construye ningún informe.
+
+---
+
+## 11. Lo que hace falta construir
 
 ### Paso 0 — medir el hook (una tarde, sin escribir producto)
 
@@ -423,12 +528,17 @@ que ningún programa puede ejecutar.
 - `scripts/harness-call.js` — argv y prompt de las dos llamadas.
 - `scripts/conduct.js` — el bucle, con los puertos inyectados.
 - `scripts/ct-run.mjs` — el ejecutable: argv, canales, tabla de salida.
+- `scripts/run-metrics.js` — la fila de telemetría del §10 y su identidad.
 - `prompts/task-implementer.md` y `prompts/task-judge.md`.
 - `scripts/ct-init.sh` — la regla de ignore de `.agent/run-*.json`.
+- `scripts/kickoff.js` — **un campo**: `epic` en el estado que siembra
+  `buildStateSeed`, con `epicKeyOf(rawIssue)` de `gh-issue-map.js` (§10.3), y
+  `scripts/ct-next.mjs` para pasárselo. No se toca la línea 256, que es la que
+  nombra `subagent-driven-development`: el camino por defecto no cambia.
 
 ---
 
-## 11. Tests que fijan las propiedades
+## 12. Tests que fijan las propiedades
 
 Con los idiomas que ya usa el repo: `vitest`, un fichero por concepto,
 fixtures herméticas (`__tests__/fixtures/hermetic-env.js`), y `const F = '```'`
@@ -443,10 +553,12 @@ cercado real.
 | `__tests__/ct-run-dryrun.test.js` | el ejecutable con `--dry-run` y arnés falso por `CT_RUN_HARNESS_FIXTURE`, y que la fixture **sin** `--dry-run` se rechaza |
 | `__tests__/ct-run-exit-code-contract.test.js` | cada código de la tabla del §9 lo emite exactamente un camino, y stdout/stderr no se mezclan |
 | `__tests__/ct-run-commit-message.test.js` | el mensaje que compone el programa nunca contiene una closing keyword |
+| `__tests__/run-metrics.test.js` | la fila lleva **los once campos de identidad** del §10.1 —un issue sin milestone se anota `(sin milestone)`, no vacío— y un fallo al escribirla no cambia el código de salida del run |
+| `__tests__/kickoff.test.js` | el estado sembrado trae `epic`, y trae `(sin milestone)` cuando el issue no tiene ninguno |
 
 ---
 
-## 12. Riesgos
+## 13. Riesgos
 
 | Riesgo | Mitigación |
 |---|---|
@@ -456,17 +568,24 @@ cercado real.
 | Dos runs a la vez en el mismo worktree | El fichero de estado se abre en exclusiva; un segundo run sale por `8` |
 | El plan declara comandos que no existen en la máquina | Resultado `indeterminate`, cierre por `5`, sin reintentar a ciegas |
 | Muerte del programa entre el commit y la persistencia | Al reanudar se cruza el estado con `git log` y, si discrepan, para |
+| La telemetría no se puede escribir (permisos, disco) | Aviso por stderr y el run sigue: ninguna transición depende de la medida (§10.5) |
+| Un plan reescrito hace incomparables dos runs | `plan_sha256` en la identidad de la fila (§10.2) |
 | Absorber demasiado y romper la premisa del plugin (§7 del documento de convergencia) | Cero dependencias nuevas, cero runtime nuevo: Node 24 y `claude`, que ya son requisitos |
 
 ---
 
-## 13. Lo que esto NO hace
+## 14. Lo que esto NO hace
 
 - **No sustituye a `subagent-driven-development`.** Convive: `ct-run` es una
-  herramienta que la sesión despachada puede invocar. `scripts/kickoff.js` no se
-  toca, así que el camino por defecto sigue siendo el de hoy y no hay nada que
-  revertir si el experimento falla. Cambiarlo, cuando haya datos, es un commit
-  de una línea (`kickoff.js:256`).
+  herramienta que la sesión despachada puede invocar. El camino por defecto sigue
+  siendo el de hoy y no hay nada que revertir si el experimento falla. Cambiarlo,
+  cuando haya datos, es un commit de una línea (`kickoff.js:256`).
+- **Del despacho toca un campo y sólo uno.** `scripts/kickoff.js` gana `epic` en
+  el estado que siembra (§10.3) y `ct-next.mjs` se lo pasa. No cambia el prompt
+  del kickoff, ni la línea que nombra el skill, ni el mecanismo de arranque. Y
+  como `kickoff.js` no está en el grafo de dependencias de los hooks —que sólo
+  importan `state.js`, `state-paths.js`, `closing-keywords.js` y
+  `governed-repo.js`—, no arrastra `npm run build`.
 - **No toca el fork.** Ninguna costura nueva en `skills/FORK.md`.
 - **No reescribe nada en Python**, ni mueve nada de `agentic-skills` aquí. Lo que
   se porta es la **forma** y las decisiones, no el código: la máquina resultante
@@ -480,7 +599,7 @@ cercado real.
 
 ---
 
-## 14. Versión
+## 15. Versión
 
 El spec no sube versión. La implementación del paso 1 sube la minor a `0.35.0`
 en `package.json` y `.claude-plugin/plugin.json`, que es lo que hace cada ronda.
