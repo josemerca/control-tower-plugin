@@ -61,12 +61,25 @@ export const REPORT_SCHEMA = Object.freeze({
 })
 
 export const IMPLEMENTER_TOOLS = 'Read, Write, Edit, Grep, Glob, Bash'
-// El juez no puede ejecutar, y no es una promesa en prosa: se lo quita la
+// El juez no puede EJECUTAR, y no es una promesa en prosa: se lo quita la
 // declaración del agente (`agents/ct-judge.md`), igual que antes se lo quitaba
 // el binario. Tampoco ve la SALIDA de los controles —se le pasan rutas— porque
 // un lint sucio no debe ensuciarle el criterio al único agente cuyo valor es el
 // juicio.
-export const JUDGE_TOOLS = 'Read, Grep, Glob'
+//
+// `Write` SÍ, y no debilita lo anterior: el canal por el que entrega su
+// veredicto es un fichero, así que sin `Write` el paso `judge` no se puede
+// cerrar —medido en la tarea 1 del slice #5 de repo-pulse, la primera vez que
+// este agente juzgó algo—. Lo que podría escribir de más no llega a ninguna
+// parte: `ct-step commit` comitea las rutas que declaró el IMPLEMENTADOR, no lo
+// que haya en el árbol.
+//
+// Esta constante es una COPIA del frontmatter de `agents/ct-judge.md`, y quien
+// las ata es `step-contracts.test.js`: se duplica porque este módulo es puro y
+// no lee disco, no porque dé igual que divergan. Divergieron una vez, y el
+// resultado fue que `ct-step next` anunciaba unas herramientas que no eran las
+// del juez que se iba a despachar.
+export const JUDGE_TOOLS = 'Read, Grep, Glob, Write'
 
 const esTexto = (v) => typeof v === 'string' && v.trim() !== ''
 

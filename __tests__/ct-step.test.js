@@ -259,6 +259,45 @@ describe('los controles los mide el programa, no el implementador', () => {
     expect(r.stdout).toMatch(/controles: failed/)
     expect(readFileSync(estado().lastControlsLog, 'utf8')).toMatch(/dijo que añadía el test 'uno pinta uno'/)
   })
+
+  // ==========================================================================
+  // EL ÁMBITO DE ESA COMPROBACIÓN — los dos de abajo son el mismo bug por sus
+  // dos caras, y el de arriba no cazaba ninguna: reescribe el plan SIN
+  // comitearlo, así que el nombre del test no llega al índice y
+  // `git grep --cached` no lo encuentra mire donde mire.
+  //
+  // En la vida real el plan SÍ está comiteado —lo exige el gate— y un plan
+  // prescriptivo CITA el código verbatim. Medido en el slice #5 de repo-pulse:
+  // el nombre de cada test de cada tarea vive dentro de `docs/`. Por eso el
+  // plan de estos dos se comitea: sin eso, el test pasa con el bug puesto.
+  // ==========================================================================
+  const planComiteado = (texto) => {
+    writeFileSync(join(repo, 'plan.md'), texto)
+    execFileSync('git', ['add', 'plan.md'], { cwd: repo, stdio: 'ignore' })
+    execFileSync('git', ['commit', '-q', '-m', 'el plan del slice'], { cwd: repo, stdio: 'ignore' })
+  }
+  const conLineaDeTests = (linea) => PLAN.replace(
+    '**Tests:** N/A — fixture.\n**Verification:** el fichero está.',
+    `**Tests:** ${linea}\n**Verification:** el fichero está.`,
+  )
+
+  it('un test RETIRADO que sigue nombrado en el plan comiteado no es un test que siga estando', () => {
+    // El falso positivo: el trabajo bien hecho y los controles en rojo, así que
+    // la tarea no se podía cerrar por mucho que el implementador insistiera.
+    planComiteado(conLineaDeTests("retira `'uno pinta uno'`."))
+    ct('report', informe(['uno.txt']))
+    expect(ct('controls').stdout).toMatch(/controles: done/)
+  })
+
+  it('un test PROMETIDO que sólo está en el plan, y no en lo que la tarea tocó, es rojo', () => {
+    // El falso negativo, que es el grave: sin acotar el ámbito, esta
+    // comprobación aprueba una tarea que prometió un test y no lo escribió
+    // —exactamente el fallo para el que existe— porque el nombre está en el plan.
+    planComiteado(conLineaDeTests("añade `'uno pinta uno'`."))
+    ct('report', informe(['uno.txt']))
+    expect(ct('controls').stdout).toMatch(/controles: failed/)
+    expect(readFileSync(estado().lastControlsLog, 'utf8')).toMatch(/dijo que añadía el test 'uno pinta uno'/)
+  })
 })
 
 describe('el veredicto que no se puede leer no es un veredicto', () => {

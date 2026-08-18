@@ -7,20 +7,43 @@
 // importa MÁS y no menos — antes lo imponía el binario, ahora lo impone esta
 // validación.
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage,
   VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS,
 } from '../scripts/step-contracts.js'
 
-
+const AGENTE_JUEZ = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-judge.md')
+// La línea `tools:` del frontmatter, que es la que decide de verdad qué puede
+// hacer el juez. La constante del módulo es una copia suya.
+const toolsDelAgente = () => {
+  const m = /^tools:\s*(.+)$/m.exec(readFileSync(AGENTE_JUEZ, 'utf8'))
+  return m ? m[1].trim() : null
+}
 
 describe('quién puede qué', () => {
-  it('el juez no tiene shell y el implementador sí, y eso lo declara el agente', () => {
+  it('el juez no tiene shell, y quien se lo quita es la declaración del agente', () => {
     // Antes se lo quitaba el binario con --tools; ahora lo declara
     // agents/ct-judge.md. La propiedad es la misma: estructural, no una promesa
-    // dentro del prompt.
-    expect(JUDGE_TOOLS).not.toMatch(/Bash|Write|Edit/)
+    // dentro del prompt. Por eso se mira el FICHERO y no sólo la constante.
+    expect(toolsDelAgente()).not.toMatch(/Bash|Edit/)
+    expect(JUDGE_TOOLS).not.toMatch(/Bash|Edit/)
     expect(IMPLEMENTER_TOOLS).toMatch(/Bash/)
+  })
+
+  it('la constante no puede divergir del agente que se despacha', () => {
+    // Divergieron: al darle `Write` al juez —sin él no puede entregar su
+    // veredicto y el paso no cierra nunca— la constante se quedó atrás, y
+    // `ct-step next` pasó a anunciar unas herramientas que no eran las del juez
+    // real. Un módulo puro no puede leer el fichero, así que lo que impide que
+    // vuelva a pasar es este test y no el código.
+    expect(JUDGE_TOOLS).toBe(toolsDelAgente())
+  })
+
+  it('el juez puede escribir su veredicto: es el canal por el que contesta', () => {
+    expect(toolsDelAgente()).toMatch(/Write/)
   })
 })
 
