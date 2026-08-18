@@ -390,6 +390,14 @@ function verboControls() {
     resultado = OUTCOMES.FAILED
   }
 
+  // Y por último lo que los BLOQUES del plan prometen, que sigue siendo
+  // gratis: nada de esto ejecuta un comando.
+  const bloques = bloquesDeclarados(t)
+  if (bloques.length) {
+    lineas.push('# bloques declarados por la tarea', ...bloques.map((f) => `- ${f}`), '')
+    resultado = OUTCOMES.FAILED
+  }
+
   for (const comando of resultado === OUTCOMES.FAILED ? [] : t.commands) {
     const medido = ejecutarControl(comando)
     lineas.push(`$ ${comando}`, medido.output ?? '', `-> exit ${medido.code}`, '')
@@ -445,25 +453,78 @@ function alcanceDeclarado(t) {
   return fallos
 }
 
+// Comprueba si `nombre` aparece en el ÍNDICE, acotado a `run.lastPaths` (lo
+// que la tarea stageó, no el índice entero). Un plan prescriptivo CITA el
+// código verbatim y vive comiteado en docs/, así que buscar en todo el índice
+// encuentra siempre el nombre: el retirado "sigue estando" (falso positivo,
+// medido en la tarea 1 del slice #5 de repo-pulse) y el prometido "ya está"
+// aunque nadie lo escribiera (falso negativo, que es justo el fallo que esta
+// comprobación existe para cazar). Sin ficheros stageados no hay dónde mirar,
+// y eso es un NO. Compartida por `testsDeclarados` y `bloquesDeclarados`:
+// misma pregunta, mismo ámbito, mismo mecanismo.
+function enElIndice(nombre) {
+  const ambito = run.lastPaths || []
+  if (!ambito.length) return false
+  try {
+    execFileSync('git', ['grep', '--cached', '--quiet', '-F', '-e', nombre, '--', ...ambito], { cwd: repoRoot, stdio: 'ignore', timeout: 60_000 })
+    return true
+  } catch { return false }
+}
+
 function testsDeclarados(t) {
   const fallos = []
-  // El AMBITO es lo que la tarea stageo, no el indice entero. Un plan
-  // prescriptivo CITA el codigo verbatim y vive comiteado en docs/, asi que
-  // buscar el nombre de un test en todo el indice lo encuentra siempre: el
-  // retirado "sigue estando" (falso positivo, medido en la tarea 1 del slice
-  // #5 de repo-pulse) y el prometido "ya esta" aunque nadie lo escribiera
-  // (falso negativo, que es justo el fallo que esta comprobacion existe para
-  // cazar). Sin ficheros stageados no hay donde mirar, y eso es un NO.
-  const ambito = run.lastPaths || []
-  const enElIndice = (nombre) => {
-    if (!ambito.length) return false
-    try {
-      execFileSync('git', ['grep', '--cached', '--quiet', '-F', '-e', nombre, '--', ...ambito], { cwd: repoRoot, stdio: 'ignore', timeout: 60_000 })
-      return true
-    } catch { return false }
-  }
   for (const n of t.testsAdded) if (!enElIndice(n)) fallos.push(`la tarea dijo que añadía el test '${n}' y no está en lo stageado`)
   for (const n of t.testsRemoved) if (enElIndice(n)) fallos.push(`la tarea dijo que retiraba el test '${n}' y sigue estando`)
+  return fallos
+}
+
+// Lo que los BLOQUES del plan prometen tiene que estar, igual que
+// `alcanceDeclarado` mide lo que **Files:** promete. Tres comprobaciones,
+// todas acotadas a `run.lastPaths` por la misma razón que `testsDeclarados`:
+// el plan vive comiteado dentro del repo, así que buscar en el repo es
+// buscar en el plan.
+//
+//  - `blockPaths`: cada `{role, path}` exige que `path` esté entre las rutas
+//    tocadas. Un Contract o un Call site que nadie tocó es andamiaje
+//    declarado y nunca escrito.
+//  - `tddName`: mismo `enElIndice` que `testsDeclarados`, y el mismo
+//    mensaje — el test que la tarea prometió en su **TDD:** es tan exigible
+//    como los de **Tests:**.
+//  - `finalTexts`: el texto tiene que aparecer verbatim en el ÍNDICE de su
+//    ruta. Se compara contra `git show :<path>` y no con `git grep`, porque
+//    es un bloque MULTILÍNEA y `git grep` trabaja línea a línea; comparar el
+//    contenido stageado entero es lo que permite decir QUÉ línea falta, que
+//    es la mitad del valor de esta comprobación.
+//
+// El mensaje de cada fallo dice si se arregla el PLAN o el CÓDIGO, igual que
+// en `alcanceDeclarado`: confundir las dos cuesta un ciclo entero.
+function bloquesDeclarados(t) {
+  const fallos = []
+  const tocadas = run.lastPaths || []
+
+  for (const { role, path } of t.blockPaths) {
+    if (!tocadas.includes(path)) {
+      fallos.push(`la tarea ${t.n} declara un bloque ${role} (${path}) y no está entre lo que tocó — falta en el CÓDIGO, o el bloque sobra en el PLAN`)
+    }
+  }
+
+  if (t.tddName && !enElIndice(t.tddName)) {
+    fallos.push(`la tarea dijo que añadía el test '${t.tddName}' y no está en lo stageado`)
+  }
+
+  for (const { path, text } of t.finalTexts) {
+    const indexado = git(['show', `:${path}`], { allowFail: true })
+    if (indexado === null) {
+      fallos.push(`la tarea ${t.n} declara un Final text (${path}) y ese fichero no está entre lo que tocó — falta en el CÓDIGO, o el bloque sobra en el PLAN`)
+      continue
+    }
+    for (const linea of text.split('\n')) {
+      if (linea.trim() !== '' && !indexado.includes(linea)) {
+        fallos.push(`la tarea ${t.n} declara Final text (${path}) y la línea '${linea}' no está verbatim en lo stageado — falta en el CÓDIGO, o el PLAN cita mal el texto`)
+      }
+    }
+  }
+
   return fallos
 }
 

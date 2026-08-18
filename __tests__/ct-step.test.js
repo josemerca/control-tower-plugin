@@ -278,6 +278,45 @@ describe('el alcance de la tarea lo decide el plan', () => {
   })
 })
 
+describe('lo que los bloques del plan prometen tiene que estar', () => {
+  it('un fichero que un bloque nombra y la tarea no tocó es rojo', () => {
+    const conBloque = PLAN.replace(
+      '**Files:** `uno.txt` (create).\n**TDD:** No TDD — fixture.',
+      ['**Files:** `uno.txt` (create).', '', 'Contract (falta.txt):', '', F + 'ts', 'function foo(): void', F, '', '**TDD:** No TDD — fixture.'].join('\n'),
+    )
+    writeFileSync(join(repo, 'plan.md'), conBloque)
+    ct('report', informe(['uno.txt']))
+    const r = ct('controls')
+    expect(r.stdout).toMatch(/controles: failed/)
+    expect(readFileSync(estado().lastControlsLog, 'utf8')).toMatch(/bloque Contract \(falta\.txt\).*no está entre lo que tocó/)
+  })
+
+  it('el test que declara el TDD tiene que estar en lo stageado', () => {
+    writeFileSync(join(repo, 'plan.md'), PLAN.replace(
+      '**TDD:** No TDD — fixture.',
+      "**TDD:** `it('uno se sabe de memoria')`",
+    ))
+    ct('report', informe(['uno.txt']))
+    const r = ct('controls')
+    expect(r.stdout).toMatch(/controles: failed/)
+    expect(readFileSync(estado().lastControlsLog, 'utf8')).toMatch(/dijo que añadía el test 'uno se sabe de memoria' y no está en lo stageado/)
+  })
+
+  it('el texto de Final text tiene que aparecer verbatim', () => {
+    const conFinalText = PLAN.replace(
+      '**Files:** `uno.txt` (create).\n**TDD:** No TDD — fixture.',
+      ['**Files:** `uno.txt` (create), `doc.md` (create).', '', 'Final text (doc.md):', '', F + 'md', 'línea uno', 'línea dos', F, '', '**TDD:** No TDD — fixture.'].join('\n'),
+    )
+    writeFileSync(join(repo, 'plan.md'), conFinalText)
+    // El implementador stagea doc.md con una de las dos líneas cambiada.
+    writeFileSync(join(repo, 'doc.md'), 'línea uno\nlínea distinta\n')
+    ct('report', informe(['uno.txt', 'doc.md']))
+    const r = ct('controls')
+    expect(r.stdout).toMatch(/controles: failed/)
+    expect(readFileSync(estado().lastControlsLog, 'utf8')).toMatch(/Final text \(doc\.md\).*'línea dos'.*no está verbatim/)
+  })
+})
+
 describe('los controles los mide el programa, no el implementador', () => {
   it('un control en rojo devuelve la tarea y, agotado, sale por 4', () => {
     writeFileSync(join(repo, 'plan.md'), PLAN.replace('test -f uno.txt', 'test -f no-existe.txt'))
