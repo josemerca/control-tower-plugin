@@ -1045,6 +1045,13 @@ export function buildDispatchInput(rawOpenIssues, rawClosedIssues) {
       const orderMap = perEpic.get(epicKeyOf(raw))
       return {
         ...issue,
+        // D-4 — el epic viaja con el issue porque aquí ya está calculado. En
+        // Control Tower el epic ES el milestone (ver la cabecera de
+        // `epicKeyOf`, arriba), y `/ct-next` ya lo deriva para detectar
+        // colisiones del marcador `ct-order`. Sembrarlo en el despacho evita
+        // que cada run de `ct-run` le pregunte a `gh` por un dato que el
+        // dispatcher tenía en la mano — o sea, red en el camino crítico.
+        epic: epicKeyOf(raw),
         deps: (issue.deps || []).map((d) => (orderMap && orderMap.has(d) ? orderMap.get(d) : null)),
       }
     })

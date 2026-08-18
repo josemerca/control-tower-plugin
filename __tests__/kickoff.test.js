@@ -89,6 +89,23 @@ describe('buildStateSeed', () => {
     expect(meta.github_issue).toBe(7)
     expect(meta.branch).toBe('feat/7')
   })
+  // D-4 — el epic viaja sembrado en el estado del slice, no preguntado a gh en
+  // cada run: lo lee la telemetría de ct-run, que agrega por epic.
+  it('siembra el epic que trae el slice', () => {
+    const { meta } = parseState(buildStateSeed({ ...SLICE, epic: '12' }, { branch: 'feat/7', base: 'main' }))
+    expect(meta.epic).toBe('12')
+  })
+
+  it('un slice sin milestone DECLARA la ausencia, no la deja vacía', () => {
+    // Misma regla que impidió que ct-next asumiera `main` en silencio cuando no
+    // conocía la base: un hueco en una métrica se lee como un cero, y un cero
+    // es una afirmación.
+    for (const sinEpic of [{ ...SLICE }, { ...SLICE, epic: null }, { ...SLICE, epic: '' }]) {
+      const { meta } = parseState(buildStateSeed(sinEpic, { branch: 'feat/7', base: 'main' }))
+      expect(meta.epic).toBe('(sin milestone)')
+    }
+  })
+
   it('handles issue: null → github_issue: null', () => {
     const sliceNoIssue = { ...SLICE, issue: null }
     const seed = buildStateSeed(sliceNoIssue, { branch: 'feat/7', base: 'main' })

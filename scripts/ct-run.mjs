@@ -41,7 +41,7 @@
 // salida está al final, y cada fila dice si reinvocar sirve.
 // ============================================================================
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, writeSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, writeSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -51,6 +51,7 @@ import {
   buildArgv, readEnvelope, readVerdict, readReport, outcomeOfVerdict, commitMessage,
   VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS,
 } from './harness.js'
+import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures } from './run-metrics.js'
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -154,6 +155,29 @@ const git = (argv, { allowFail = false } = {}) => {
 }
 
 // ---------------------------------------------------------------------------
+// La telemetría. Append-only, fuera del repo, y —esto es lo importante— UN
+// FALLO SUYO NO TUMBA EL RUN: se avisa por stderr y se sigue. La medida es para
+// nosotros, no para la máquina, y ninguna transición depende de ella. Un
+// programa que muere porque no pudo escribir su propia métrica es un programa
+// que convirtió el termómetro en parte del motor.
+// ---------------------------------------------------------------------------
+let metricsAvisado = false
+function medir(identity, measures) {
+  try {
+    const destino = metricsPath('ct-run', { configDir: process.env.CLAUDE_CONFIG_DIR })
+    mkdirSync(dirname(destino), { recursive: true })
+    appendFileSync(destino, metricLine(metricRow(identity, measures, { now: new Date().toISOString() })))
+  } catch (e) {
+    // Una vez por run: si el disco está lleno, repetir el aviso en cada intento
+    // de cada paso convierte el stderr en ruido y esconde lo que sí importa.
+    if (!metricsAvisado) {
+      metricsAvisado = true
+      err(`aviso: no se pudo escribir la telemetría (${String(e.message).trim()}). El run sigue: ninguna transición depende de la medida.`)
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Precondiciones (exit 8). Todas comprueban algo que, de faltar, haría que el
 // run gastase dinero para acabar mal.
 // ---------------------------------------------------------------------------
@@ -247,6 +271,38 @@ if (existsSync(stateFile)) {
 
 const guardar = () => writeFileSync(stateFile, JSON.stringify(run, null, 2) + '\n')
 
+// La identidad de cada fila (§10.1). El epic se LEE del estado que sembró el
+// despacho, no se le pregunta a gh: `buildStateSeed` lo escribe con
+// `epicKeyOf()` y así no hay red en el camino crítico de cada run.
+const PLAN_SHA = planSha256(planText)
+const repoSlug = (() => {
+  const url = (git(['remote', 'get-url', 'origin'], { allowFail: true }) || '').trim()
+  const m = /[:/]([^/:]+\/[^/]+?)(?:\.git)?$/.exec(url)
+  return m ? m[1] : null
+})()
+const epicDelSlice = (() => {
+  const texto = readFileSync(join(repoRoot, '.agent', 'SLICE.md'), 'utf8')
+  const m = /^epic:\s*(.+)$/m.exec(texto)
+  return m ? m[1].trim() : null
+})()
+
+// El intento es una DIMENSIÓN, no un contador agregado: las vueltas que lleva
+// ESTA tarea, sean por control rojo, por veto o por corrección.
+const intento = () => run.controlRetries + run.judgeRetries + run.correctionRetries + 1
+const identidad = (step, session = null) => ({
+  repo: repoSlug,
+  epic: epicDelSlice,
+  issue,
+  plan: planPath,
+  plan_sha256: PLAN_SHA,
+  task: run.task,
+  task_name: tarea()?.name ?? null,
+  tasks_total: run.tasksTotal,
+  step,
+  attempt: intento(),
+  session,
+})
+
 // ---------------------------------------------------------------------------
 // El arnés: la única puerta por la que se llama al modelo.
 // ---------------------------------------------------------------------------
@@ -315,6 +371,12 @@ function implementar() {
   if (!env.ok) { turno(`implementador: ${env.why}`); return { outcome: OUTCOMES.DISCARDED, fatal: env.why } }
 
   const { report, why } = readReport(env.structured)
+  medir(identidad('implement', env.sessionId), {
+    outcome: report ? 'done' : 'discarded',
+    cost_usd: env.costUsd ?? 0,
+    paths: report ? report.paths.length : 0,
+    why: report ? null : why,
+  })
   if (!report) { turno(`informe descartado: ${why}`); return { outcome: OUTCOMES.DISCARDED } }
 
   turno(`implementado (${report.paths.length} ficheros, sesión ${env.sessionId ?? 'sin id'}, ${env.costUsd.toFixed(4)} USD)`)
@@ -392,6 +454,7 @@ function controlar() {
   }
 
   writeFileSync(log, lineas.join('\n'))
+  medir(identidad('controls'), { outcome: resultado, controls_log: log, commands: t.commands.length })
   run = { ...run, lastControlsLog: log }
   turno(`controles: ${resultado} (log en ${log})`)
   return { outcome: resultado }
@@ -448,7 +511,11 @@ function juzgar() {
   if (!env.ok) { turno(`juez: ${env.why}`); return { outcome: OUTCOMES.DISCARDED, fatal: env.why } }
 
   const { verdict, why } = readVerdict(env.structured)
-  if (!verdict) { turno(`veredicto descartado: ${why}`); return { outcome: OUTCOMES.DISCARDED } }
+  if (!verdict) {
+    medir(identidad('judge', env.sessionId), { outcome: 'discarded', cost_usd: env.costUsd ?? 0, why })
+    turno(`veredicto descartado: ${why}`)
+    return { outcome: OUTCOMES.DISCARDED }
+  }
 
   const outcome = outcomeOfVerdict(verdict)
   const graves = verdict.findings.filter((f) => f.severity !== 'low')
@@ -459,6 +526,11 @@ function juzgar() {
       ? graves.map((f) => `- [${f.severity}] ${f.where}: ${f.what}`).join('\n')
       : null,
   }
+  // El diff juzgado va en su fichero, unido a la fila por la ruta: es lo que
+  // pesa, y separarlo es lo que permite contar hallazgos sin cargarlo.
+  medir(identidad('judge', env.sessionId), {
+    outcome, cost_usd: env.costUsd ?? 0, review_package: paquete, ...verdictMeasures(verdict),
+  })
   turno(`veredicto ${verdict.ruling} con ${verdict.findings.length} hallazgo(s) → ${outcome} (${env.costUsd.toFixed(4)} USD)`)
   return { outcome }
 }
@@ -481,7 +553,9 @@ function commitear() {
   }
   const hecho = git(['commit', '-m', mensaje], { allowFail: true })
   if (hecho === null) return { outcome: OUTCOMES.FAILED }
-  turno(`commiteada: ${baseShaActual().slice(0, 7)}`)
+  const sha = baseShaActual().trim()
+  medir(identidad('commit'), { outcome: 'done', commit: sha })
+  turno(`commiteada: ${sha.slice(0, 7)}`)
   run = { ...run, lastFindings: null, lastPaths: null, lastSummary: null }
   return { outcome: OUTCOMES.DONE }
 }

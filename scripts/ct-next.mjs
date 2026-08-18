@@ -2363,7 +2363,7 @@ for (let idx = 0; idx < selected.length; idx++) {
   // del brief) que no los trae: renderKickoff/buildStateSeed indexan
   // slice.ac como array y usan slice.issue con `??`/`||` — sin este default
   // revientan con un TypeError en vez de imprimir el plan.
-  const sliceForKickoff = { ...s, ac: s.ac || [], issue: s.issue ?? null }
+  const sliceForKickoff = { ...s, ac: s.ac || [], issue: s.issue ?? null, epic: s.epic ?? null }
   let kickoff
   let stateSeed
   try {

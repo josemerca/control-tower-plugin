@@ -9,6 +9,7 @@ import { resolveGatesForAgent, renderGateKickoffLines } from './gates.js'
 // ya no es el suyo (que es exactamente el defecto que esta ronda arregla).
 import { SLICE_REL_PATH } from './state-paths.js'
 import { EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING } from './groom.js'
+import { NO_MILESTONE_KEY } from './gh-issue-map.js'
 
 // ACCOUNT_MAP — qué CLAUDE_CONFIG_DIR (qué cuenta de Claude) recibe el agente
 // que se despacha para un repo.
@@ -394,6 +395,12 @@ export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
       // de tu last_commit" dejaría de significar nada. Si no se pudo resolver,
       // se siembra vacío a propósito — un sha inventado sería peor que ninguno.
       last_commit: baseSha,
+      // D-4 — el epic, sembrado en el despacho y no preguntado en cada run.
+      // La ausencia se DECLARA con la constante que ya existe, no se rellena
+      // ni se deja vacía: es la misma regla que impidió que ct-next asumiera
+      // `main` en silencio cuando no conocía la base. Su lector es la
+      // telemetría de ct-run, que agrega por epic.
+      epic: slice.epic || NO_MILESTONE_KEY,
       github_issue: issueNum,
       // D4, defecto 4: este campo imprimía el número de ISSUE llamándolo
       // "slice #N" — dos espacios de identificadores distintos (ver el

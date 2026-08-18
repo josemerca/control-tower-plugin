@@ -601,6 +601,16 @@ lo que pesa, y separarlo es lo que permite contar hallazgos sin cargarlo.
 escribir, se avisa por stderr y el run sigue: la medida es para nosotros, no para
 la máquina, y ninguna transición depende de ella.
 
+**Implementado así** (`scripts/run-metrics.js` compone la fila,
+`ct-run.mjs` la escribe), con dos precisiones que el diseño no fijaba:
+
+- El aviso sale **una vez por run**, no una por paso. Con el disco lleno, un
+  aviso por intento convierte el stderr en ruido y esconde lo que sí importa.
+- El diff juzgado se queda en `.agent/run-<issue>/`, dentro del worktree, y la
+  fila lo referencia por ruta. Cumple lo que pedía el diseño —no viaja en la
+  pull request, porque esa carpeta está en el `.gitignore` que siembra
+  `ct-init`— y evita mandar al juez a leer fuera de su directorio de trabajo.
+
 ### 10.6 Lo que esto adelanta
 
 La ronda F38 ("la medida") pide presupuesto en dinero por slice y gasto
@@ -644,6 +654,12 @@ que ningún programa puede ejecutar.
 `prompts/task-implementer.md`, `prompts/task-judge.md` y las reglas de ignore en
 `scripts/ct-init.sh` (`.agent/run-*.json` y `.agent/run-*/`). La versión sube a
 `0.35.0` en los dos ficheros que la declaran.
+
+La telemetría del §10 y el campo `epic` del §10.3 están construidos:
+`scripts/run-metrics.js` con los once campos de identidad, `gh-issue-map.js`
+llevando el epic en el issue ya mapeado, `buildStateSeed` sembrándolo con
+`(sin milestone)` cuando no lo hay, y `ct-run.mjs` emitiendo una fila por
+intento de cada paso.
 
 ### Lo que la implementación decidió y este diseño no traía
 
@@ -742,8 +758,8 @@ cercado real.
 | `__tests__/plan-contract.test.js` (+5) | la regla nueva: una tarea con `**Verification:**` sin bloque de comandos deja de validar |
 | `__tests__/harness.test.js` (32) | el argv flag por flag, la envoltura leída de una **salida real** del binario, el veredicto que se descarta y el mensaje de commit sin closing keywords |
 | `__tests__/ct-run-dryrun.test.js` (20) | el bucle entero contra un repo temporal de verdad: los códigos del §9, que comitea el programa, que sólo entra lo declarado, la reanudación y que la fixture **sin** `--dry-run` se rechaza |
-| `__tests__/run-metrics.test.js` | la fila lleva **los once campos de identidad** del §10.1 —un issue sin milestone se anota `(sin milestone)`, no vacío— y un fallo al escribirla no cambia el código de salida del run |
-| `__tests__/kickoff.test.js` | el estado sembrado trae `epic`, y trae `(sin milestone)` cuando el issue no tiene ninguno |
+| `__tests__/run-metrics.test.js` (14) | la fila lleva **los once campos de identidad** del §10.1 —un issue sin milestone se anota `(sin milestone)`, no vacío— y un fallo al escribirla no cambia el código de salida del run |
+| `__tests__/kickoff.test.js` (+2) | el estado sembrado trae `epic`, y trae `(sin milestone)` cuando el issue no tiene ninguno |
 
 Los dos ficheros que el diseño listaba aparte —el contrato de códigos de salida
 y el del mensaje de commit— viven dentro de esos dos últimos, que es donde está
