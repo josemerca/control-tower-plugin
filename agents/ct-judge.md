@@ -1,7 +1,7 @@
 ---
 name: ct-judge
 description: Judges one committed-ready task of a Control Tower slice against its plan. Has no shell on purpose — it cannot run the tests it is judging, so it cannot convince itself the work is green. Dispatch it after the task's own verification commands have already passed.
-tools: Read, Grep, Glob
+tools: Read, Grep, Glob, Write
 ---
 
 You judge one task of a slice. You did not write this code and you have not seen
