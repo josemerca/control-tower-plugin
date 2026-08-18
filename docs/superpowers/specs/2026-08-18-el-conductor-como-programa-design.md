@@ -677,6 +677,57 @@ escribir el código con el binario delante.
 
 ---
 
+## 11.bis La primera corrida real (2026-08-18)
+
+No una simulación: repo de verdad, `claude` de verdad, dos tareas (`sum` y luego
+`mul`, con sus tests), `--model haiku`.
+
+```
+run nuevo: issue #1, 2 tareas, base 54011cb, tope 3 USD
+[tarea 1/2] implementado (2 ficheros, 0.1220 USD)
+[tarea 1/2] controles: done
+[tarea 1/2] veredicto PASS con 0 hallazgo(s) → done (0.0344 USD)
+[tarea 1/2] commiteada: b497b81
+[tarea 2/2] implementado (2 ficheros, 0.0399 USD)
+[tarea 2/2] controles: done
+[tarea 2/2] veredicto FAIL con 3 hallazgo(s) → failed (0.0361 USD)
+[tarea 2/2] implementado (2 ficheros, 0.0616 USD)
+[tarea 2/2] controles: done
+[tarea 2/2] veredicto PASS con 0 hallazgo(s) → done (0.0388 USD)
+[tarea 2/2] commiteada: e3619c1
+run delivered: tarea 2/2, 0 descarte(s), 0.3326 USD
+```
+
+**Lo que quedó demostrado**: el bucle entero cierra solo, el veto del juez
+devuelve la tarea al implementador y el reintento la arregla, el programa
+comitea uno por tarea con su mensaje, el estado se persiste, y una slice de dos
+tareas con seis llamadas cuesta **0,33 USD** con haiku. Extrapolado a ocho
+tareas sin vetos: unos 0,80 USD. El `--max-usd 50` del diseño era una cifra
+puesta a ojo con dos órdenes de magnitud de margen.
+
+**Lo que NO quedó demostrado, y es lo importante.** La tarea 2 pedía `mul()` y
+su test. El implementador escribió `mul()` y **no** escribió el test. La primera
+vez lo cazó el juez (`FAIL`, tres hallazgos, uno de ellos leyendo el log de los
+controles que le pasamos por ruta). La segunda vez el implementador entregó un
+fichero de test que **no usa la API de `node:test`**, la suite siguió contando
+un test en vez de dos, y el juez le dio `PASS`. **Se comiteó una tarea cuyo test
+no existe.**
+
+Tres cosas se siguen de ahí, y ninguna es cosmética:
+
+1. **La vara de un plan mide que nada se rompió, no que se haya añadido lo
+   prometido.** De ahí la comprobación de tests declarados que ahora abre el
+   paso de controles: es mecánica, es gratis y habría cazado la primera vuelta.
+   No habría cazado la segunda —el nombre estaba, escrito en un fichero que no
+   ejecuta nadie— y eso es el límite honrado de una comprobación por nombre.
+2. **El juez barato es barato.** Tres céntimos y medio por veredicto es
+   tentador, y un juez que aprueba un test que no corre no está juzgando. Por
+   eso existe `--model-judge`: es el paso donde ahorrar sale caro.
+3. **Nada de esto se ve desde dentro del bucle.** El programa hizo todo lo que
+   tenía que hacer y salió por `0`. Quien mira el exit code está mirando si el
+   conductor funcionó, no si el trabajo está bien — y ese sigue siendo el papel
+   del humano que abre la pull request.
+
 ## 12. Tests que fijan las propiedades
 
 Con los idiomas que ya usa el repo: `vitest`, un fichero por concepto,
@@ -713,6 +764,7 @@ lo que fijan.
 | Muerte del programa entre el commit y la persistencia | Al reanudar se cruza el estado con `git log` y, si discrepan, para |
 | La telemetría no se puede escribir (permisos, disco) | Aviso por stderr y el run sigue: ninguna transición depende de la medida (§10.5) |
 | Un plan reescrito hace incomparables dos runs | `plan_sha256` en la identidad de la fila (§10.2) |
+| El juez aprueba trabajo que no cumple la tarea | Medido en la corrida real: pasa, y con un modelo barato pasa más. La comprobación de tests declarados quita de en medio los casos mecánicos; para el resto, `--model-judge` y el humano de la pull request |
 | Absorber demasiado y romper la premisa del plugin (§7 del documento de convergencia) | Cero dependencias nuevas, cero runtime nuevo: Node 24 y `claude`, que ya son requisitos |
 
 ---
