@@ -62,7 +62,7 @@ import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS } from './r
 import { extractTasks } from './plan-tasks.js'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage,
-  VERDICT_SCHEMA, REPORT_SCHEMA, JUDGE_TOOLS,
+  VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS,
 } from './step-contracts.js'
 import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures } from './run-metrics.js'
 
@@ -246,7 +246,10 @@ function verboNext() {
     case STEPS.IMPLEMENT: {
       const brief = escribirBrief()
       const informe = join(workDir, `task-${run.task}-report.json`)
-      out('DESPACHA UN IMPLEMENTADOR (subagente con Read, Write, Edit, Grep, Glob, Bash) con:')
+      // La lista sale de la constante y no se teclea otra vez: la copia a mano
+      // de las del juez ya divergió una vez, y `ct-step next` acabó anunciando
+      // unas herramientas que no eran las del agente que se despachaba.
+      out(`DESPACHA UN IMPLEMENTADOR (subagente con ${IMPLEMENTER_TOOLS}) con:`)
       out(`  - la rúbrica de ${join(PLUGIN_ROOT, 'prompts', 'task-implementer.md')}`)
       out(`  - el brief de la tarea: ${brief}`)
       out(`  - que escriba su informe en: ${informe}`)

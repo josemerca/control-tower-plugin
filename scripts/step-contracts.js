@@ -99,7 +99,12 @@ export const REPORT_SCHEMA = Object.freeze({
   },
 })
 
-export const IMPLEMENTER_TOOLS = 'Read, Write, Edit, Grep, Glob, Bash'
+// `Skill` está aquí porque la rúbrica del implementador
+// (`prompts/task-implementer.md`) ya no lleva el ciclo TDD dentro: manda cargar
+// `control-tower-loop:test-driven-development`, la copia que trae el plugin. Sin
+// esta herramienta esa primera línea es imposible de cumplir y el implementador
+// se queda sin el oficio que la rúbrica delega.
+export const IMPLEMENTER_TOOLS = 'Read, Write, Edit, Grep, Glob, Bash, Skill'
 // El juez no puede EJECUTAR, y no es una promesa en prosa: se lo quita la
 // declaración del agente (`agents/ct-judge.md`), igual que antes se lo quitaba
 // el binario. Tampoco ve la SALIDA de los controles —se le pasan rutas— porque
