@@ -190,6 +190,41 @@ describe('los controles los mide el programa', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// La primera corrida REAL del conductor (2026-08-18, dos tareas, haiku) enseñó
+// este agujero: la tarea 2 pedía `mul()` y su test, el implementador escribió
+// `mul()` y no el test, y `node --test` volvió VERDE porque la suite del commit
+// anterior seguía pasando. La vara del plan mide que nada se rompió, no que se
+// haya añadido lo prometido.
+// ---------------------------------------------------------------------------
+describe('los tests que la tarea dijo que añadía', () => {
+  const planConTests = PLAN.replace(
+    '**Tests:** N/A — fixture.\n**Verification:** el fichero está.',
+    "**Tests:** añade `'uno pinta uno'`.\n**Verification:** el fichero está.",
+  )
+
+  it('si el test declarado no está en lo stageado, la tarea vuelve en rojo', () => {
+    writeFileSync(join(repo, 'plan.md'), planConTests)
+    const r = correr(['--plan', 'plan.md', '--issue', '7', '--dry-run'], {
+      calls: [informe(['uno.txt']), informe(['uno.txt']), informe(['uno.txt'])],
+    })
+    expect(r.status).toBe(4)
+    expect(readFileSync(join(repo, '.agent', 'run-7', 'task-1-controls-1.log'), 'utf8'))
+      .toMatch(/dijo que añadía el test 'uno pinta uno'/)
+    expect(commits()).toBe(1)
+  })
+
+  it('con el test declarado presente en el índice, la tarea sigue adelante', () => {
+    writeFileSync(join(repo, 'plan.md'), planConTests)
+    writeFileSync(join(repo, 'uno.txt'), "test('uno pinta uno', () => {})\n")
+    const r = correr(['--plan', 'plan.md', '--issue', '7', '--dry-run'], {
+      calls: [informe(['uno.txt']), pasa(), informe(['dos.txt']), pasa()],
+    })
+    expect(r.status).toBe(0)
+    expect(commits()).toBe(3)
+  })
+})
+
 describe('el veredicto que no se puede leer no es un veredicto', () => {
   it('un juez que incumple el esquema se descarta y se le vuelve a preguntar', () => {
     const r = correr(['--plan', 'plan.md', '--issue', '7', '--dry-run'], {

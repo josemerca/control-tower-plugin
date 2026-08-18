@@ -333,13 +333,56 @@ const controlsFixture = dryRun && process.env.CT_RUN_CONTROLS_FIXTURE
   : null
 let controlsRonda = 0
 
+// LOS TESTS QUE LA TAREA DIJO QUE AÑADÍA TIENEN QUE EXISTIR.
+//
+// Esto no estaba, y la primera corrida real del conductor enseñó por qué hace
+// falta: la tarea 2 pedía `mul()` y su test, el implementador escribió `mul()`
+// y NO escribió el test, y `node --test` volvió verde — porque la suite del
+// commit anterior seguía pasando. La vara del plan mide que nada se rompió, no
+// que se haya añadido lo que la tarea prometía. Sin esta comprobación, lo único
+// que separaba esa tarea de entrar en un commit era el juicio de un modelo.
+//
+// Se busca en el ÍNDICE (`--cached`) y no en el worktree, porque el índice es
+// exactamente lo que se va a commitear: un test que existe en un fichero sin
+// stagear no está en la tarea.
+function testsDeclarados(t) {
+  const fallos = []
+  const enElIndice = (nombre) => {
+    try {
+      execFileSync('git', ['grep', '--cached', '--quiet', '-F', '--', nombre], {
+        cwd: repoRoot, stdio: 'ignore', timeout: 60_000,
+      })
+      return true
+    } catch { return false }
+  }
+  for (const nombre of t.testsAdded) {
+    if (!enElIndice(nombre)) fallos.push(`la tarea dijo que añadía el test '${nombre}' y no está en lo stageado`)
+  }
+  // Y el que la tarea retira a propósito no puede seguir ahí: si sigue, o no se
+  // retiró, o se retiró otro.
+  for (const nombre of t.testsRemoved) {
+    if (enElIndice(nombre)) fallos.push(`la tarea dijo que retiraba el test '${nombre}' y sigue estando`)
+  }
+  return fallos
+}
+
 function controlar() {
   const t = tarea()
   const log = join(workDir, `task-${run.task}-controls-${++controlsRonda}.log`)
   const lineas = []
   let resultado = OUTCOMES.DONE
 
-  for (const comando of t.commands) {
+  // Primero los nombres, que son gratis: si la tarea no trajo lo que prometía,
+  // no hace falta pagar una suite entera para saberlo.
+  if (!controlsFixture) {
+    const fallos = testsDeclarados(t)
+    if (fallos.length) {
+      lineas.push('# tests declarados por la tarea', ...fallos.map((f) => `- ${f}`), '')
+      resultado = OUTCOMES.FAILED
+    }
+  }
+
+  for (const comando of resultado === OUTCOMES.FAILED ? [] : t.commands) {
     const medido = controlsFixture
       ? (controlsFixture[controlsRonda - 1] ?? { code: 0, output: 'fixture sin ronda' })
       : ejecutarControl(comando)
