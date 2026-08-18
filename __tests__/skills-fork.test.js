@@ -241,3 +241,18 @@ describe('costura 3 — finishing-a-development-branch en repo gobernado: PR + r
     expect(skill()).toMatch(/merge is (a )?human/i)
   })
 })
+
+// F39 — costura 6. `prompts/task-implementer.md` ya no lleva el ciclo de TDD
+// (Test-Driven Development, desarrollo guiado por pruebas) escrito dentro:
+// carga la skill forkeada. Un cherry-pick de upstream sobre
+// test-driven-development ahora cambia el comportamiento del implementador de
+// `ct-step`, que antes era inmune por no depender de ninguna skill del fork.
+describe('costura 6 — el implementador de ct-step carga la skill del fork, no la de upstream', () => {
+  const prompt = () => readFileSync(join(ROOT, 'prompts', 'task-implementer.md'), 'utf8')
+
+  it('costura 6: el implementador carga la skill del plugin, no la de upstream', () => {
+    const p = prompt()
+    expect(p).toContain('control-tower-loop:test-driven-development')
+    expect(p).not.toContain('superpowers:')
+  })
+})
