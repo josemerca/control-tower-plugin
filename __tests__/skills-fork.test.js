@@ -253,6 +253,11 @@ describe('costura 6 — el implementador de ct-step carga la skill del fork, no 
   it('costura 6: el implementador carga la skill del plugin, no la de upstream', () => {
     const p = prompt()
     expect(p).toContain('control-tower-loop:test-driven-development')
-    expect(p).not.toContain('superpowers:')
+    // Prohibición amplia y no el literal `superpowers:`: lo que se vigila es
+    // que el implementador no acabe colgando de upstream por NINGUNA vía —
+    // ni el prefijo de skill, ni una URL (github.com/obra/superpowers-skills),
+    // ni el nombre del proyecto suelto en prosa. El literal con dos puntos
+    // deja pasar cualquiera de esas otras formas.
+    expect(p).not.toMatch(/superpowers/i)
   })
 })
