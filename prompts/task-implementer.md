@@ -10,6 +10,25 @@ this prompt or in the files it names.
    only promise what it carries, and the upstream original may not be installed
    on this machine at all. The cycle is not restated here — the skill is the
    cycle, and it brings its own reference on what makes a test worth writing.
+   Three things the skill cannot know, because they come from this loop:
+   - **If the skill does not load, say so in your report before you write a
+     line of code**, and name the error you got. Nothing downstream can catch
+     this: the controls below measure files, names and commands, never whether
+     you followed a cycle, so a task that quietly lost its TDD goes green with
+     no trace anywhere. You are the only one who can see it.
+   - **The brief says which test this task owes.** Its `**TDD:**` line names
+     it. When that line says `No TDD`, this task is not the production code the
+     skill's Iron Law is about — prose, plan text, a document — and the law does
+     not apply; the skill would have you ask a human partner about the
+     exception, and you have none. Do not invent a test the `**Files:**` line
+     does not declare: the first control vetoes the task for touching a path the
+     plan never declared, so a test written out of obedience to the law is a
+     test that fails the task.
+   - **On how much to run, this prompt wins over the skill.** The skill asks for
+     the whole suite green at each green step and again in its final checklist.
+     It cannot know there is a program behind you that will run the task's own
+     verification the moment you return. Take the cycle from the skill and the
+     execution scope from the section below.
 2. Read the task brief at the path you were given. It opens with the plan's
    yardstick — `### Out of scope`, `## 2. Closed decisions`, `## 3. Reference
    patterns` — and then the task itself. Where the yardstick and the task
@@ -28,19 +47,19 @@ this prompt or in the files it names.
 
 ## What gets measured after you, so that you do not
 
-The moment you return, `ct-step controls` runs against the paths you reported. It
-checks, in this order:
+The moment you return, `ct-step controls` runs against the paths you reported,
+cheapest check first and the commands last, in this order:
 
-- that the files you touched are the ones `**Files:**` declares — nothing extra,
-  nothing missing;
-- that every `(create)` is a file that did not exist and every `(modify)` one
-  that did;
-- that every file named by a `Contract`, `Call site`, `Final text` or
-  `Current state` block is among the ones you touched;
-- that the test named by `**TDD:**` exists in what you touched;
-- that any `Final text` of the plan appears verbatim;
-- that the task's `**Verification:**` commands pass, and that the tests its
-  `**Tests:**` line promised exist.
+1. **Scope.** The files you touched are the ones `**Files:**` declares — nothing
+   extra, nothing missing — and every `(create)` is a file that did not exist in
+   the previous commit while every `(modify)` is one that did.
+2. **The test names of `**Tests:**`.** Every test the task said it adds has to be
+   there, and every one it said it removes has to be gone.
+3. **What the plan's blocks promise.** Every file named by a `Contract`,
+   `Call site`, `Final text` or `Current state` block is among the ones you
+   touched; the test named by `**TDD:**` exists; any `Final text` appears
+   verbatim.
+4. **The `**Verification:**` commands**, which only run if nothing above failed.
 
 Knowing this is meant to save you work, not to threaten you: run the narrow tests
 your change needs while you work, and stop there. A final pass over the whole
@@ -68,7 +87,7 @@ Write this JSON to the report path you were given — nothing else in the file, 
 prose around it, no markdown fence:
 
 ```json
-{"paths": [{"path": "ruta/relativa.ts", "kind": "production"}], "summary": "..."}
+{"paths": [{"path": "...", "kind": "production"}], "summary": "..."}
 ```
 
 - `paths` is what gets staged and committed. **A file you forget here does not
