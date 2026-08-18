@@ -89,7 +89,13 @@ characters. If a task does not fit, the task is two — never collapse two commi
 
 **Tests:** {{added: named one by one / removed on purpose: named one by one | N/A — <reason>}}
 
-**Verification:** {{exact command and expected output}}
+**Verification:** {{what the commands prove, in prose if it helps — but the commands themselves
+go in the fenced block below, one per line, already run. A program executes this block: prose
+with arrows and parentheses is not executable, and `--check-plan` rejects a task without it.}}
+
+```bash
+{{command}}   # {{expected: exit 0, N tests}}
+```
 
 ### Task 2 — {{name}}
 
@@ -104,6 +110,10 @@ characters. If a task does not fit, the task is two — never collapse two commi
 **Tests:** {{... | N/A — <reason>}}
 
 **Verification:** {{...}}
+
+```bash
+{{command}}   # {{expected}}
+```
 
 ## 8. Global verification
 

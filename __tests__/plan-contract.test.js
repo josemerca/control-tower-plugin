@@ -48,7 +48,10 @@ const VALID_PLAN = [
   F,
   '**TDD:** red first: expect(sum(2, 2)).toBe(4)',
   '**Tests:** add tests/math.test.js',
-  '**Verification:** npm test',
+  '**Verification:** npm test, en verde.',
+  F + 'bash',
+  'npm test',
+  F,
   '## 8. Global verification',
   'npm test en verde.',
   '## 9. Assumptions',
@@ -482,5 +485,115 @@ describe('validatePlan — cada TAREA cabe en un folio A4', () => {
 
   it('el plan de referencia no dispara nada de tamaño', () => {
     expect(violacionesDe(PLAN_CON_ROLES, 'size')).toEqual([])
+  })
+})
+
+// ===========================================================================
+// D-4 — la vara de la tarea tiene que ser EJECUTABLE.
+//
+// El contrato ya exigía que **Verification:** estuviera. Lo que no exigía es
+// que dijera algo que se pueda correr, y esa diferencia es la que decide si el
+// plan lo puede ejecutar un programa o hace falta un humano interpretando
+// prosa. La fixture del caso real vive en plan-tasks.test.js; aquí se fija el
+// borde del contrato.
+// ===========================================================================
+describe('los comandos de **Verification:** van en un bloque, no en la frase', () => {
+  const planCon = (verificacion) => [
+    '# #7 — sum() devuelve la suma',
+    '',
+    '> **This plan is written to be executed by task-scoped subagents with zero context.**',
+    '',
+    '## 1. Context and goal',
+    'sum() existe y hay que cubrirla.',
+    '### Desired end state',
+    'sum() con test.',
+    '### Out of scope',
+    'N/A — nada que excluir.',
+    '## 2. Closed decisions',
+    '| Decision | Value |',
+    '|---|---|',
+    '| test runner | vitest |',
+    '## 3. Reference patterns',
+    'src/math.js',
+    '## 4. Inventory',
+    'tests/math.test.js (crear).',
+    '## 5. Interfaces',
+    'Consumes: nothing. Produces: sum(a, b) -> number.',
+    '## 6. Test strategy',
+    'Unit con vitest.',
+    '## 7. Tasks',
+    '### Task 1 — cover sum',
+    '**Objective:** sum queda cubierta.',
+    '**Files:** tests/math.test.js',
+    'No code — el test se describe por nombre y aserción.',
+    '**TDD:** red first: expect(sum(2, 2)).toBe(4)',
+    '**Tests:** add tests/math.test.js',
+    ...verificacion,
+    '## 8. Global verification',
+    'npm test en verde.',
+    '## 9. Assumptions',
+    'Ninguna.',
+    '',
+  ].join('\n')
+
+  const rulesOf = (plan) => validatePlan(plan, { readFile: () => null })
+    .violations.filter((v) => v.rule === 'verification')
+
+  it('una tarea que verifica con prosa en línea NO pasa el contrato', () => {
+    // Ésta es exactamente la forma del plan real del slice #5 de repo-pulse, y
+    // la que pedía la plantilla hasta esta ronda.
+    const plan = planCon(['**Verification:** `npm test` → exit 0. `npm run lint` → exit 0.'])
+    expect(rulesOf(plan)).toHaveLength(1)
+    expect(rulesOf(plan)[0].detail).toMatch(/no ejecuta prosa/)
+  })
+
+  it('la misma tarea con los comandos en bloque sí pasa', () => {
+    expect(rulesOf(planCon([
+      '**Verification:** los dos en verde.',
+      F + 'bash',
+      'npm test   # exit 0',
+      'npm run lint   # exit 0',
+      F,
+    ]))).toEqual([])
+  })
+
+  it('acepta el bloque aunque el párrafo de **Verification:** lleve prosa delante', () => {
+    expect(rulesOf(planCon([
+      '**Verification:** primero `npm install`, y después:',
+      F + 'bash',
+      'npm test   # exit 0',
+      F,
+    ]))).toEqual([])
+  })
+
+  it('el bloque de Current state de la tarea NO cuenta como bloque de comandos', () => {
+    // Sin la regla de "el bloque INMEDIATAMENTE posterior", un plan con
+    // cualquier cercado suelto en la tarea pasaría dando por verificada una
+    // tarea cuya vara sigue siendo prosa.
+    const plan = planCon([
+      '**Verification:** `npm test` → exit 0.',
+      '',
+      'Current state (src/math.js):',
+      F,
+      'export function sum(a, b) {',
+      '}',
+      F,
+    ])
+    expect(rulesOf(plan)).toHaveLength(1)
+  })
+
+  it('un plan con varias tareas nombra cuáles fallan, no cuántas', () => {
+    const plan = planCon(['**Verification:** `npm test` → exit 0.'])
+      .replace('## 8. Global verification', [
+        '### Task 2 — otra',
+        '**Objective:** otra cosa.',
+        '**Files:** tests/otra.test.js',
+        'No code — descrito en prosa.',
+        '**TDD:** No TDD — fixture.',
+        '**Tests:** N/A — fixture.',
+        '**Verification:** `npm test` otra vez, en prosa.',
+        '## 8. Global verification',
+      ].join('\n'))
+    expect(rulesOf(plan).map((v) => v.detail.match(/tarea (\d+)/)[1])).toEqual(['1', '2'])
   })
 })

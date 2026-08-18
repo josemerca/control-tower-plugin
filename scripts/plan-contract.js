@@ -19,6 +19,8 @@
 // quien lo cablea (dispatch-check.mjs) aporta el filesystem real.
 // ============================================================================
 
+import { extractTasks } from './plan-tasks.js'
+
 const BLOCKQUOTE_MARKER = 'This plan is written to be executed by task-scoped subagents'
 
 export const PLAN_SECTIONS = [
@@ -237,6 +239,35 @@ export function validatePlan(markdown, { readFile } = {}) {
       }
     }
   })
+
+  // D-4 — LA VARA DE LA TAREA TIENE QUE SER EJECUTABLE.
+  //
+  // Hasta aquí el contrato comprobaba que **Verification:** ESTÁ (es uno de los
+  // cinco TASK_MARKERS), no que diga algo que se pueda correr. La diferencia no
+  // era teórica: medido contra el plan real del slice #5 de repo-pulse, SIETE
+  // de sus ocho tareas verificaban con prosa en línea — "`npm test -w web` →
+  // exit 0. `npm run build && npm run lint` → exit 0." — y el plan validaba sin
+  // una sola queja. Es fiel a plan-template.md, que pedía "{{exact command and
+  // expected output}}" sin decir dónde; el agujero era de la plantilla.
+  //
+  // Un humano lee esa prosa y sabe qué correr. Un programa no: entre los
+  // comandos hay flechas, puntos, "y después:" y paréntesis explicativos con
+  // un `wc -l AGENTS.md` dentro. Separar comando de comentario a base de
+  // heurísticas es adivinar, y adivinar aquí significa dar por verde una tarea
+  // que nadie midió.
+  //
+  // Por eso los comandos van en el bloque cercado que sigue al párrafo de
+  // **Verification:** — el mismo bloque que las reglas de rol ya eximían por su
+  // etiqueta y al que COMMAND_BUDGET ya le pone tope. La regla no inventa
+  // formato: hace obligatorio el que ya estaba exento.
+  //
+  // El detalle vive en plan-tasks.js, que es quien luego los ejecuta: un
+  // contrato que aceptara planes que su propio ejecutor no sabe leer no sería
+  // un contrato.
+  for (const problema of extractTasks(markdown).problems) {
+    if (problema.rule !== 'verification-block') continue
+    push('verification', problema.detail)
+  }
 
   // F-jjponz-4, pasada A — los bloques CON rol. Comprueba dónde vive cada uno,
   // sobre qué fichero, y cuánto ocupa.
