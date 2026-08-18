@@ -192,3 +192,15 @@ describe('el mensaje que compone el programa', () => {
     expect(msg('una tarea')).toContain('(#42, tarea 2/8)')
   })
 })
+
+describe('el modelo de cada llamada', () => {
+  it('sin --model, el argv no lo menciona y manda el de la cuenta', () => {
+    expect(buildArgv({ tools: JUDGE_TOOLS, schema: VERDICT_SCHEMA, prompt: 'x' })).not.toContain('--model')
+  })
+
+  it('con modelo, entra justo antes del prompt', () => {
+    const a = buildArgv({ tools: JUDGE_TOOLS, schema: VERDICT_SCHEMA, prompt: 'x', model: 'haiku' })
+    expect(a[a.indexOf('--model') + 1]).toBe('haiku')
+    expect(a.at(-1)).toBe('x')
+  })
+})

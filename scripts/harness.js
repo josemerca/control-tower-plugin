@@ -92,7 +92,7 @@ export const IMPLEMENTER_TOOLS = 'Read,Write,Edit,Grep,Glob,Bash'
 // valor es el juicio.
 export const JUDGE_TOOLS = 'Read,Grep,Glob'
 
-export function buildArgv({ tools, schema, prompt }) {
+export function buildArgv({ tools, schema, prompt, model }) {
   return [
     '-p',
     '--setting-sources', '',
@@ -100,6 +100,12 @@ export function buildArgv({ tools, schema, prompt }) {
     '--tools', tools,
     '--output-format', 'json',
     '--json-schema', JSON.stringify(schema),
+    // Sin `--model`, la llamada usa el modelo por defecto de la cuenta. El flag
+    // existe porque las dos llamadas no valen lo mismo: el juez es el único
+    // paso cuyo valor entero es el juicio, y el implementador de una tarea
+    // prescriptiva es el que más tokens quema. Poder separarlos es la palanca
+    // de coste que queda después de --strict-mcp-config.
+    ...(model ? ['--model', model] : []),
     prompt,
   ]
 }

@@ -101,6 +101,8 @@ const USAGE = `uso: ct-run --plan <fichero> --issue <n> [--max-usd 50] [--dry-ru
   --plan                 el plan prescriptivo del slice, ya pasado por el gate
   --issue                el issue del slice (nombra el fichero de estado)
   --max-usd              tope de dinero de la slice entera (defecto: 50)
+  --model                modelo de las dos llamadas (defecto: el de la cuenta)
+  --model-judge          modelo sólo del juez, si tiene que ser otro
   --allow-default-account  no exigir CLAUDE_CONFIG_DIR (la llamada usa la cuenta por defecto)
   --dry-run              no llama al modelo ni ejecuta los controles: los lee de
                          CT_RUN_HARNESS_FIXTURE y CT_RUN_CONTROLS_FIXTURE`
@@ -109,6 +111,8 @@ const dryRun = has('--dry-run')
 const planPath = arg('--plan')
 const issueRaw = arg('--issue')
 const maxUsdRaw = arg('--max-usd', '50')
+const modelo = typeof arg('--model') === 'string' ? arg('--model') : null
+const modeloJuez = typeof arg('--model-judge') === 'string' ? arg('--model-judge') : modelo
 
 // Las variables de fixture son EXCLUSIVAMENTE para tests. Si quedan colgadas en
 // el entorno sin --dry-run, el programa no decide con datos fabricados ni, sobre
@@ -251,13 +255,13 @@ const fixtureCalls = dryRun && process.env.CT_RUN_HARNESS_FIXTURE
   : null
 let fixtureCall = 0
 
-function llamar({ paso, tools, schema, prompt }) {
+function llamar({ paso, tools, schema, prompt, model }) {
   if (fixtureCalls) {
     const siguiente = fixtureCalls[fixtureCall++]
     if (!siguiente) return { ok: false, why: 'la fixture del arnés se quedó sin respuestas' }
     return readEnvelope(typeof siguiente === 'string' ? siguiente : JSON.stringify(siguiente))
   }
-  const argv = buildArgv({ tools, schema, prompt })
+  const argv = buildArgv({ tools, schema, prompt, model })
   try {
     const stdout = execFileSync('claude', argv, {
       encoding: 'utf8',
@@ -306,7 +310,7 @@ function implementar() {
     ...(run.lastFindings ? ['', '### The judge sent this back', '', run.lastFindings] : []),
   ].join('\n')
 
-  const env = llamar({ paso: 'implement', tools: IMPLEMENTER_TOOLS, schema: REPORT_SCHEMA, prompt })
+  const env = llamar({ paso: 'implement', tools: IMPLEMENTER_TOOLS, schema: REPORT_SCHEMA, prompt, model: modelo })
   run = { ...run, spendUsd: run.spendUsd + (env.costUsd || 0) }
   if (!env.ok) { turno(`implementador: ${env.why}`); return { outcome: OUTCOMES.DISCARDED, fatal: env.why } }
 
@@ -396,7 +400,7 @@ function juzgar() {
     `- The implementer's own summary, for context only: ${JSON.stringify(run.lastSummary ?? '')}`,
   ].join('\n')
 
-  const env = llamar({ paso: 'judge', tools: JUDGE_TOOLS, schema: VERDICT_SCHEMA, prompt })
+  const env = llamar({ paso: 'judge', tools: JUDGE_TOOLS, schema: VERDICT_SCHEMA, prompt, model: modeloJuez })
   run = { ...run, spendUsd: run.spendUsd + (env.costUsd || 0) }
   if (!env.ok) { turno(`juez: ${env.why}`); return { outcome: OUTCOMES.DISCARDED, fatal: env.why } }
 
