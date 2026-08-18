@@ -112,48 +112,45 @@ Empieza siempre en seco:
 /ct-next  --dry-run      # comprueba lo que el run real necesita, e imprime el kickoff en prosa
 ```
 
-## `ct-run`: la implementación conducida por un programa (experimental)
+## `ct-step`: la secuencia de la implementación, decidida por una tabla (experimental)
 
 Entre el gate del plan y la pull request hay un tramo que hoy conduce una sesión
 de chat siguiendo `subagent-driven-development`: despacha un implementador por
 tarea, un revisor detrás, y mantiene un ledger en disco para no perder el sitio
 cuando la conversación se compacte.
 
-`scripts/ct-run.mjs` sustituye **al conductor, no a las piezas**. La secuencia la
-decide una tabla (`scripts/run-machine.js`, función pura) y las dos llamadas al
-modelo pasan a ser procesos hijos sin estado. Por cada tarea del plan:
+`scripts/ct-step.mjs` **no sustituye a esa sesión**: le quita una sola
+responsabilidad, la de decidir qué toca ahora. La sesión sigue conduciendo y
+sigue despachando subagentes; la secuencia la decide `scripts/run-machine.js`,
+una función pura, y la sesión la **consulta**:
 
-```
-git add (sólo las rutas que declara el implementador)
-  → los comandos de su **Verification:**, con los logs a disco
-    → el juez (el diff, la rúbrica y las RUTAS de los logs)
-      → commit
+```bash
+ct-step next                     # "toca implementar la tarea 3; el brief está en X"
+ct-step report informe.json      # valida las rutas, las stagea, transiciona
+ct-step controls                 # ejecuta los comandos de **Verification:** y MIDE
+ct-step verdict veredicto.json   # valida contra el esquema, transiciona
+ct-step commit                   # valida el mensaje y comitea
 ```
 
 Lo que cambia respecto de hoy, en una línea por propiedad:
 
-| | Con la sesión de chat | Con `ct-run` |
+| | Conduciendo con prosa | Con `ct-step` |
 |---|---|---|
-| Quién decide el paso siguiente | un modelo leyendo prosa | una función pura sobre el estado |
-| Quién mide si la tarea está verde | el implementador se lo reporta a sí mismo | el programa ejecuta los comandos del plan |
-| Qué puede ejecutar el juez | tiene `Bash` | nada: se lo quita el binario, no una promesa |
-| Qué devuelve el juez | prosa | JSON validado contra un esquema |
-| Quién comitea | el implementador | el programa — así un veto no deja rastro que deshacer |
-| Presupuesto | ninguno | reintentos por tarea y tope en dinero por slice |
+| Quién decide el paso siguiente | un modelo leyendo una skill | una tabla — y **pedir un paso que no toca se rechaza** (exit `9`) |
+| Dónde vive el sitio en el que va | un ledger que el modelo escribe | `.agent/run-<issue>.json`, que sobrevive a una compactación |
+| Quién mide si la tarea está verde | el implementador se lo reporta a sí mismo | `ct-step controls`, que además comprueba que los tests prometidos existen |
+| Qué puede ejecutar el juez | `code-reviewer.md` despacha un `general-purpose`: tiene `Bash` | nada: `agents/ct-judge.md` se declara sin `Bash` |
+| Qué devuelve el juez | prosa | un JSON validado contra un esquema; lo que no cumple se descarta |
+| Quién comitea | el implementador | el programa, y valida su propio mensaje contra las closing keywords |
 
-```bash
-ct-run --plan .agent/plan.md --issue 42 --max-usd 20 --model-judge opus
-```
+**Es experimental y no está en el camino por defecto.** Ninguna skill, ningún
+slash command, ningún hook y ningún kickoff lo invocan — y eso no es una promesa:
+lo comprueba `__tests__/d4-sigue-siendo-de-jose.test.js`, porque *sustituir la
+sesión por un programa* es la decisión **D-4** del documento de convergencia, que
+está aplazada y cuyo dueño es José.
 
-Sale por un código por decisión, no uno por excepción: `0` entregado, `1` el juez
-veta, `4` los controles siguen en rojo, `5` no se pudieron **medir**, `6` el plan
-no es ejecutable, `7` se agotó el dinero. Reinvocarlo **reanuda** — el estado
-vive en `.agent/run-<issue>.json`, y al retomar lo cruza con `git log`: si no
-cuentan lo mismo, para en vez de reimplementar encima de una tarea comiteada.
-
-Es experimental y **no está en el camino por defecto**: `scripts/kickoff.js` no lo
-menciona, así que si el experimento falla no hay nada que revertir. El diseño y
-lo que se midió para tomarlo están en
+El diseño, lo que se midió para tomarlo y lo que la primera corrida real enseñó
+están en
 [`docs/superpowers/specs/2026-08-18-el-conductor-como-programa-design.md`](docs/superpowers/specs/2026-08-18-el-conductor-como-programa-design.md).
 
 ## El estado de un slice es una label
@@ -236,7 +233,7 @@ Si no, el repo sigue distribuyendo el hook viejo mientras la fuente ya dice otra
 
 ```
 commands/     los cuatro slash commands (Markdown + prosa larga: son la documentación)
-scripts/      la lógica — módulos puros y los ejecutables .mjs (los cuatro del loop y ct-run)
+scripts/      la lógica — módulos puros y los ejecutables .mjs (los cuatro del loop y ct-step)
 hooks/        SessionStart (hidratación), Stop (estado al día), PreToolUse (guarda de commits)
 dist/         bundles de los hooks — DERIVADO, trackeado, ver arriba
 skills/       los 11 skills forkados + writing-plans-prescriptive (propio) + LICENSE-superpowers + FORK.md

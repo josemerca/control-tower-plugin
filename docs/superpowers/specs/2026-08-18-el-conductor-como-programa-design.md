@@ -6,6 +6,39 @@
 > slice trae un veredicto emitido por un agente que no ejecutó nada") por un
 > mecanismo distinto al que F37 describe.
 
+> ## Nota de implementación (18 ago 2026) — **la variante sin programa**
+>
+> Lo construido **no** es un programa conductor: es `scripts/ct-step.mjs`, la
+> misma máquina de estados **como oráculo que la sesión consulta**. La sesión
+> despachada sigue conduciendo, sigue despachando subagentes y sigue abriendo la
+> pull request; lo que deja de hacer es **decidir la secuencia**.
+>
+> El motivo es D-4. Este spec la declaraba "hecha antes de tiempo y a propósito",
+> y en el documento de convergencia D-4 está **aplazada, con dueño José y con un
+> cuándo** ("se revisa al cerrar F38"). Sustituir la sesión por un programa ES la
+> decisión, no un detalle de implementación, así que se coge todo lo que se puede
+> coger sin tomarla:
+>
+> | Propiedad | ¿Sobrevive sin programa conductor? |
+> |---|---|
+> | La secuencia la decide una tabla, no prosa | **Sí** — y cada verbo rechaza lo que no sea el paso que toca (código `9`) |
+> | El sitio en el que va, en disco y no en la conversación | **Sí** — `.agent/run-<issue>.json`, y el ledger de SDD deja de hacer falta |
+> | La tarea la mide el programa, no el implementador | **Sí** — `ct-step controls` |
+> | Comitea el programa, no el implementador | **Sí** — `ct-step commit`, con la guarda de closing keywords |
+> | El juez no puede ejecutar | **Sí** — `agents/ct-judge.md`, declarado sin `Bash` |
+> | El veredicto validado contra un esquema | **A medias** — lo impone `ct-step verdict` al leerlo, no el binario: `--json-schema` sólo existe en modo `--print` |
+> | Presupuesto en dinero y gasto por papel | **No** — `total_cost_usd` sólo lo devuelve una llamada headless. De rebote, deja de tocar el alcance de F38 |
+>
+> Un test lo sostiene: `__tests__/d4-sigue-siendo-de-jose.test.js` comprueba que
+> nada del camino por defecto —ni los slash commands, ni el kickoff, ni las
+> skills, ni los hooks, ni el dispatcher— invoca `ct-step`. El día que D-4 se
+> apruebe, ese test se borra en el mismo commit que lo enchufe, y ese commit será
+> la decisión tomada por su dueño.
+>
+> Lo que sigue describe el diseño original (el conductor como programa). Se deja
+> tal cual porque es lo que hay que leer el día que D-4 se decida; las secciones
+> que la implementación cambió lo dicen en su sitio.
+
 ---
 
 ## 1. Qué se construye
@@ -329,37 +362,37 @@ Cuatro capas con el idioma que ya usa el repo: módulo puro con entrada/salida
 inyectada, como `plan-contract.js` con su `{ readFile }`.
 
 ```
-scripts/ct-run.mjs        el ejecutable: argv, precondiciones, el bucle, el I/O
-  ├── scripts/run-machine.js   PURO, cero imports: la tabla del §3.3
-  ├── scripts/plan-tasks.js    PURO: el plan → tareas + su vara (§2.5)
-  ├── scripts/harness.js       las dos llamadas en datos: argv, esquemas,
-  │                            lectura de la envoltura, mensaje de commit
-  └── scripts/run-metrics.js   PURO: compone la fila de telemetría (§10)
+scripts/ct-step.mjs          el CLI de cinco verbos: argv, precondiciones, I/O
+  ├── scripts/run-machine.js     PURO, cero imports: la tabla del §3.3
+  ├── scripts/plan-tasks.js      PURO: el plan → tareas + su vara (§2.5)
+  ├── scripts/step-contracts.js  PURO: qué se acepta de cada subagente, y el
+  │                              mensaje de commit con su guarda
+  └── scripts/run-metrics.js     PURO: compone la fila de telemetría (§10)
+
+agents/ct-judge.md             el juez, declarado SIN Bash
+prompts/task-implementer.md    la rúbrica del implementador
 ```
 
-**Cinco ficheros y no siete.** El diseño original separaba `verdict.js` de
-`harness-call.js` y `conduct.js` de `ct-run.mjs`, con puertos inyectados para
-poder testear el bucle sin tocar disco. Se fusionaron los dos primeros —el
-esquema del veredicto no tiene vida fuera de la llamada que lo pide— y el bucle
-se quedó dentro del ejecutable, que se testea con el idioma que el repo ya usa
-para esto: fixture por variable de entorno **rechazada sin `--dry-run`**
-(`dispatch-check.mjs:257`).
+**Cinco ficheros y no siete, y ninguno conduce.** El diseño original separaba
+`verdict.js` de `harness-call.js` y `conduct.js` de `ct-run.mjs`, con puertos
+inyectados para poder testear el bucle sin tocar disco. No hay bucle que testear:
+`ct-step` es un CLI que aplica una transición y termina, y eso se prueba
+invocándolo. El esquema del veredicto vive con lo que lo valida, y el argv de
+`claude -p` desapareció con el conductor.
 
 `run-metrics.js` sí se quedó aparte, y por la razón que decía el diseño: la
 telemetría es append-only sobre ficheros de fuera del repo y **un fallo suyo no
-cierra el run** (§10.5). Ese tratamiento de errores no es el de escribir el
-estado, y mezclarlos sería exactamente cómo una medida acaba tumbando aquello
-que mide. En vez de un puerto `appendLine` inyectado, la escritura vive en una
-función propia de `ct-run.mjs` que traga su excepción y avisa por stderr — la
-propiedad es la misma y no hace falta una capa para tenerla.
+cambia lo que hace el paso** (§10.5). Ese tratamiento de errores no es el de
+escribir el estado, y mezclarlos sería exactamente cómo una medida acaba tumbando
+aquello que mide. En vez de un puerto `appendLine` inyectado, la escritura es una
+función que traga su excepción y avisa una vez.
 
-Y el doble no cubre a git. `__tests__/ct-run-dryrun.test.js` monta un repo
-temporal y sustituye sólo las dos cosas caras —las llamadas al modelo y los
-comandos de los controles—; git corre de verdad, porque la mitad de las
-propiedades que este diseño existe para sostener (que comitea el programa, que
-se stagea antes de medir, que un veto no deja rastro) no existen si git es un
-doble. Ese test encontró dos defectos que ningún test con puertos habría visto
-(§10).
+Y el doble no cubre a git. `__tests__/ct-step.test.js` monta un repo temporal y
+no simula nada más: el informe y el veredicto **son ficheros JSON**, o sea
+exactamente lo que escribirá un subagente. git corre de verdad, porque la mitad
+de las propiedades que este diseño existe para sostener (que comitea el programa,
+que se stagea antes de medir, que un veto no deja rastro) no existen si git es un
+doble.
 
 Lo que sí se mantuvo entero: `run-machine.js` y `plan-tasks.js` son puros sin un
 solo import, que es la frontera que separa `plan-contract.js` de
@@ -399,45 +432,38 @@ barandilla que el repo construyó en F27 no cubre este camino.
 
 ---
 
-## 6. Las dos llamadas al modelo
+## 6. Los dos subagentes
 
-Los dos prompts son ficheros que el programa lee verbatim: `prompts/task-implementer.md`
-y `prompts/task-judge.md`. La rúbrica del juez va **dentro** de su fichero y
-delante del diff, como en `JudgeInvocation.text` del original.
+> **Cambiado en la implementación.** No son dos llamadas headless: son dos
+> subagentes que despacha la sesión.
 
 | | Implementador | Juez |
 |---|---|---|
-| Herramientas | `Read,Write,Edit,Grep,Glob,Bash` | `Read,Grep,Glob` |
-| Prompt | rúbrica de implementación + el fichero de `task-brief` | rúbrica de juicio + datos del run + el diff de `review-package` |
-| Salida | informe con las rutas que tocó | JSON validado contra el esquema del veredicto |
-| Contexto heredado | ninguno | ninguno |
+| Quién es | un subagente de propósito general | `ct-judge` (`agents/ct-judge.md`) |
+| Herramientas | `Read, Write, Edit, Grep, Glob, Bash` | `Read, Grep, Glob` — **declaradas ahí, sin `Bash`** |
+| Qué recibe | la rúbrica de `prompts/task-implementer.md` y el brief de `task-brief` | su propia rúbrica, el paquete de revisión del índice, el brief y las RUTAS de los logs |
+| Qué escribe | `{paths, summary}` en el JSON que le dice `ct-step next` | `{ruling, findings}` en el JSON que le dice `ct-step next` |
+| Quién lo valida | `ct-step report` — una ruta absoluta o con `..` descarta el informe entero | `ct-step verdict` — lo que no cumple el esquema es un descarte |
 
-El argv sale entero del paso 0 (§2.2 y §2.8), y es el mismo salvo por las
-herramientas y por el esquema:
+Que el juez no pueda ejecutar sigue siendo **estructural**: se lo quita la
+declaración del agente, no una frase dentro del prompt. Antes se lo quitaba el
+binario con `--tools`; el sitio cambia, la propiedad no. Y sigue sin ver la
+salida de los controles: se le pasan rutas, porque un `lint` sucio no debe gastar
+un intento adversarial ni ensuciarle el criterio al único agente cuyo valor es el
+juicio.
 
-```
-claude -p
-  --setting-sources ""        # sin la fuente `user` no corre el hook que hidrata
-  --strict-mcp-config         # cero servidores MCP: 38x más barato
-  --tools "<las de la tabla>"
-  --output-format json        # trae structured_output, total_cost_usd y session_id
-  --json-schema '<json literal>'   # SOLO el juez; toma el esquema, no una ruta
-  <prompt>
-```
-
-con el stdin cerrado y el `cwd` en el worktree del slice. El juez puede trabajar
-ahí dentro porque lo que lo contaminaba era la fuente de ajustes, no el
-directorio: medido, sin `user` no recibe la hidratación y sigue pudiendo leer.
-
-Que el juez no pueda ejecutar es **estructural**: se lo quita el binario, no una
-promesa en prosa. Y no ve la salida de los controles: el programa le pasa
-**rutas**. Un `lint` sucio no debe gastar un intento adversarial ni ensuciarle el
-criterio al único agente cuyo valor es el juicio.
+Lo que sí cambia de verdad: **el esquema ya no lo impone la herramienta.**
+`--json-schema` sólo existe en modo `--print` (§2.1), así que un subagente puede
+contestar cualquier cosa y es `ct-step` quien la rechaza al leerla. El efecto
+sobre la máquina es el mismo —un veredicto ilegible es `discarded` y se vuelve a
+preguntar— pero el modelo no está obligado de antemano.
 
 No se reusa `skills/subagent-driven-development/implementer-prompt.md` a
 propósito: su línea 111 dice "your report is the test evidence", que es
 exactamente la propiedad que este diseño quita. No tocar ese fichero significa
-además **ninguna costura nueva** en `skills/FORK.md`.
+además **ninguna costura nueva** en `skills/FORK.md`. Y `code-reviewer.md`
+tampoco se toca: despacha un `general-purpose` con `Bash`, que es justo lo que
+`ct-judge` existe para no ser.
 
 ---
 
@@ -476,45 +502,51 @@ tarea ya comiteada.
 
 ## 8. Cómo se lanza, y cómo se ve
 
-La sesión del slice, tras cerrar el gate `plan`, lanza el programa **una vez, en
-background**, y sigue siendo la misma sesión de siempre: no se abre ninguna
-ventana ni ninguna sesión nueva.
+> **Cambiado en la implementación.** No se lanza nada: la sesión **pregunta**.
 
-Mientras corre, el progreso se ve en un log en disco —una línea por turno, con la
-herramienta y la ruta que tocó, que es lo que hace `StderrTurnLog` en el
-original— así que `tail -f` desde cualquier terminal cuenta lo que está pasando.
-La sesión, al terminar el programa, lee **el código de salida y las rutas**, no
-los contenidos.
+`ct-step next` dice en qué tarea y en qué paso va el run, y prepara lo que ese
+paso necesita —el brief de la tarea, o el paquete de revisión del índice—. La
+sesión despacha el subagente que toque, le pasa la ruta del fichero donde tiene
+que escribir, y vuelve con `ct-step report …` o `ct-step verdict …`.
 
-Y para saber qué hizo una llamada concreta: cada `claude -p` deja su conversación
-en `~/.claude/projects/`, identificada por su sesión. Si el programa apunta ese
-identificador junto al paso y la tarea, se puede abrir *la conversación del juez
-de la tarea 5* — que hoy, con una sesión de chat, exige rebobinar una
-conversación entera.
+No hay background, no hay tope de 10 minutos que esquivar y no hay log de turnos
+que seguir con `tail -f`: cada paso es una invocación corta que termina, y el
+progreso se ve preguntando. Lo que sí se conserva es que **la sesión no carga el
+contenido**: los diffs y los logs viajan por RUTA, nunca por el canal.
+
+Lo que se pierde de la versión original: cada `claude -p` dejaba su conversación
+en `~/.claude/projects/` con un `session_id` que la telemetría apuntaba, así que
+se podía abrir *la conversación del juez de la tarea 5*. Un subagente de la sesión
+no expone ese identificador, así que la fila lleva `session: null` y para
+rebobinar hay que volver a la conversación de la sesión.
 
 ---
 
 ## 9. Códigos de salida
 
-Uno por decisión, no uno por excepción: cada fila dice si reinvocar sirve. Sigue
+Uno por decisión, no uno por excepción: cada fila dice qué hacer después. Sigue
 la gramática del repo (stdout es el producto, stderr el diagnóstico) y reusa el
 significado del `6` que ya tiene `dispatch-check`.
 
-| | Significado | ¿Reinvocar sirve? |
+| | Significado | Qué hacer |
 |---|---|---|
-| `0` | todas las tareas comiteadas con veredicto PASA; la rama está lista para la pull request | no hace falta |
-| `1` | el juez veta y se agotaron los reintentos; el trabajo hasta la tarea K-1 está comiteado | no, hay que mirar el veredicto |
-| `2` | error de uso | no |
-| `3` | no hay veredicto de fiar: el juez incumplió el esquema tras los descartes, o `claude` no se pudo lanzar | sí, si lo de abajo se arregló |
-| `4` | los controles siguen en rojo tras agotar los reintentos | no, hay que mirar los logs |
-| `5` | los controles no se pudieron **medir** (comando inexistente, tope de tiempo) | no, hay que mirar qué se colgó |
-| `6` | el plan no es ejecutable: falta el bloque de comandos de `**Verification:**`, o no se pueden extraer los nombres de test | no, hay que arreglar el plan |
-| `7` | tope de dinero agotado con el run abierto | sí, subiendo el tope a conciencia |
-| `8` | precondiciones: no es un worktree de slice, índice sucio, falta `claude`, falta `CLAUDE_CONFIG_DIR` | sí, arreglado el entorno |
+| `0` | el paso se aplicó; si el run cerró, todas las tareas están comiteadas con veredicto PASA | seguir con `ct-step next`, o abrir la pull request |
+| `1` | el juez veta y se agotaron los reintentos; el trabajo hasta la tarea K-1 está comiteado | mirar el veredicto |
+| `2` | error de uso | arreglar la invocación |
+| `3` | no hay veredicto de fiar: el juez incumplió el esquema tras los descartes | volver a despachar el juez, o mirar por qué contesta así |
+| `4` | los controles siguen en rojo tras agotar los reintentos | mirar los logs |
+| `5` | los controles no se pudieron **medir** (comando inexistente, tope de tiempo) | mirar qué se colgó |
+| `6` | el plan no es ejecutable: falta el bloque de comandos de `**Verification:**` | arreglar el plan |
+| `8` | precondiciones: no es un worktree de slice, índice sucio en un run nuevo, el estado no cuadra con `git log` | arreglar el entorno |
+| `9` | **ese no es el paso que toca** | preguntar con `ct-step next` |
 | `10` | excepción que el programa no sabe nombrar | el estado persistido sigue siendo bueno |
 
 `1` es un veredicto y `3` no lo es: esa es la distinción que un booleano
-perdería.
+perdería. Y el `9` es el que convierte la secuencia en mecanismo — sin él, "la
+tabla decide el orden" sería una promesa que el conductor puede incumplir.
+
+El `7` del diseño original (tope de dinero agotado) **no existe**: sin llamadas
+headless no hay `total_cost_usd` que acumular.
 
 ---
 
@@ -602,7 +634,7 @@ escribir, se avisa por stderr y el run sigue: la medida es para nosotros, no par
 la máquina, y ninguna transición depende de ella.
 
 **Implementado así** (`scripts/run-metrics.js` compone la fila,
-`ct-run.mjs` la escribe), con dos precisiones que el diseño no fijaba:
+`ct-step.mjs` la escribe), con dos precisiones que el diseño no fijaba:
 
 - El aviso sale **una vez por run**, no una por paso. Con el disco lleno, un
   aviso por intento convierte el stderr en ruido y esconde lo que sí importa.
@@ -649,16 +681,21 @@ que ningún programa puede ejecutar.
 
 ### Paso 2 — el conductor — **HECHO (2026-08-18)**
 
-`scripts/run-machine.js`, `scripts/harness.js`, `scripts/run-metrics.js`,
-`scripts/ct-run.mjs`, el campo `epic` de `scripts/kickoff.js` y `scripts/ct-next.mjs`,
-`prompts/task-implementer.md`, `prompts/task-judge.md` y las reglas de ignore en
-`scripts/ct-init.sh` (`.agent/run-*.json` y `.agent/run-*/`). La versión sube a
-`0.35.0` en los dos ficheros que la declaran.
+`scripts/run-machine.js`, `scripts/plan-tasks.js`, `scripts/step-contracts.js`,
+`scripts/run-metrics.js`, `scripts/ct-step.mjs`, `agents/ct-judge.md`,
+`prompts/task-implementer.md`, el campo `epic` de `scripts/kickoff.js` y
+`scripts/ct-next.mjs`, y las reglas de ignore en `scripts/ct-init.sh`
+(`.agent/run-*.json` y `.agent/run-*/`). La versión sube a `0.35.0` en los dos
+ficheros que la declaran.
+
+**El conductor-programa no está**: `ct-run.mjs` se escribió, se midió (§11.bis) y
+se retiró, y en su sitio quedó `ct-step` — la misma máquina, consultada en vez de
+conductora. El motivo, en la nota de arriba: D-4 es de José.
 
 La telemetría del §10 y el campo `epic` del §10.3 están construidos:
 `scripts/run-metrics.js` con los once campos de identidad, `gh-issue-map.js`
 llevando el epic en el issue ya mapeado, `buildStateSeed` sembrándolo con
-`(sin milestone)` cuando no lo hay, y `ct-run.mjs` emitiendo una fila por
+`(sin milestone)` cuando no lo hay, y `ct-step.mjs` emitiendo una fila por
 intento de cada paso.
 
 ### Lo que la implementación decidió y este diseño no traía
@@ -694,6 +731,12 @@ escribir el código con el binario delante.
 ---
 
 ## 11.bis La primera corrida real (2026-08-18)
+
+> **Se midió con el conductor-programa, que después se retiró** para no tocar
+> D-4. Se deja porque lo que enseñó no depende de quién conduzca: dos de las tres
+> lecciones son sobre la vara del plan y sobre el juez, y siguen valiendo enteras
+> con `ct-step`. La que caducó es la del coste — sin llamadas headless no hay
+> `total_cost_usd`.
 
 No una simulación: repo de verdad, `claude` de verdad, dos tareas (`sum` y luego
 `mul`, con sus tests), `--model haiku`.
@@ -756,8 +799,9 @@ cercado real.
 | `__tests__/run-machine.test.js` (48) | **tabla exhaustiva** de los 24 pares (paso, resultado), incluidos los imposibles: cada uno lanza. Y que los contadores por tarea se reinician al avanzar y los de slice no |
 | `__tests__/plan-tasks.test.js` (19) | las tres trampas, **contra el plan real del slice #5 de repo-pulse como fixture**, no contra la plantilla. El caso del paréntesis anidado demuestra con el barrido malo que la trampa es real |
 | `__tests__/plan-contract.test.js` (+5) | la regla nueva: una tarea con `**Verification:**` sin bloque de comandos deja de validar |
-| `__tests__/harness.test.js` (32) | el argv flag por flag, la envoltura leída de una **salida real** del binario, el veredicto que se descarta y el mensaje de commit sin closing keywords |
-| `__tests__/ct-run-dryrun.test.js` (20) | el bucle entero contra un repo temporal de verdad: los códigos del §9, que comitea el programa, que sólo entra lo declarado, la reanudación y que la fixture **sin** `--dry-run` se rechaza |
+| `__tests__/step-contracts.test.js` (23) | el veredicto que se descarta (incluido el `PASS` con hallazgo grave, que se contradice), el informe con rutas de fuera del worktree, y el mensaje de commit sin closing keywords |
+| `__tests__/ct-step.test.js` (29) | el oráculo contra un repo temporal de verdad: **la guardia del paso** (pedir lo que no toca sale por `9`), los códigos del §9, que comitea el programa, que sólo entra lo declarado, y que el estado sobrevive entre invocaciones |
+| `__tests__/d4-sigue-siendo-de-jose.test.js` (6) | **nada del camino por defecto invoca `ct-step`**: ni los slash commands, ni el kickoff, ni las skills, ni los hooks, ni el dispatcher. Y que D-4 sigue aplazada y con dueño en el documento de convergencia |
 | `__tests__/run-metrics.test.js` (14) | la fila lleva **los once campos de identidad** del §10.1 —un issue sin milestone se anota `(sin milestone)`, no vacío— y un fallo al escribirla no cambia el código de salida del run |
 | `__tests__/kickoff.test.js` (+2) | el estado sembrado trae `epic`, y trae `(sin milestone)` cuando el issue no tiene ninguno |
 
@@ -787,7 +831,11 @@ lo que fijan.
 
 ## 14. Lo que esto NO hace
 
-- **No sustituye a `subagent-driven-development`.** Convive: `ct-run` es una
+- **No cierra D-4, y hay un test que lo defiende.** La respuesta a "¿el
+  orquestador deja de ser una sesión de chat?" sigue siendo NO: la sesión sigue
+  conduciendo. Lo único que se le quita es decidir la secuencia, y eso no es la
+  decisión — es lo que se puede coger sin tomarla.
+- **No sustituye a `subagent-driven-development`.** Convive: `ct-step` es una
   herramienta que la sesión despachada puede invocar. El camino por defecto sigue
   siendo el de hoy y no hay nada que revertir si el experimento falla. Cambiarlo,
   cuando haya datos, es un commit de una línea (`kickoff.js:256`).

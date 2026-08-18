@@ -6,7 +6,7 @@
 // agregación no es nada, así que se guarda lo fino y se suma al leer.
 //
 // Módulo PURO: compone la fila y decide dónde va. No escribe. Quien escribe es
-// `ct-run.mjs`, y lo hace tragándose la excepción a propósito (ver más abajo).
+// `ct-step.mjs`, y lo hace tragándose la excepción a propósito (ver más abajo).
 //
 // ---------------------------------------------------------------------------
 // DOS CAMPOS DE IDENTIDAD QUE NO SON OBVIOS

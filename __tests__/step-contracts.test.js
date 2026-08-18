@@ -1,91 +1,26 @@
-// Las dos llamadas al modelo, en datos (scripts/harness.js): qué argv se
-// construye, qué se acepta como respuesta y qué escribe el programa.
+// Lo que cruza la frontera entre la sesión y sus subagentes
+// (scripts/step-contracts.js): qué se acepta como respuesta y qué escribe el
+// plugin.
 //
-// La fixture de la envoltura es la salida REAL de `claude -p --output-format
-// json` capturada el 2026-08-18 durante el paso 0 del spec. Un test contra una
-// envoltura inventada por mí sólo demuestra que sé leer lo que yo mismo
-// escribí.
+// El argv de `claude -p` ya no está: se fue con el conductor-programa (D-4
+// aplazada). Lo que queda es el esquema, que con un subagente al otro lado
+// importa MÁS y no menos — antes lo imponía el binario, ahora lo impone esta
+// validación.
 import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
 import {
-  buildArgv, readEnvelope, readVerdict, readReport, outcomeOfVerdict, commitMessage,
+  readVerdict, readReport, outcomeOfVerdict, commitMessage,
   VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS,
-} from '../scripts/harness.js'
+} from '../scripts/step-contracts.js'
 
-const here = dirname(fileURLToPath(import.meta.url))
-const ENVELOPE_REAL = readFileSync(join(here, 'fixtures', 'claude-envelope-verdict.json'), 'utf8')
 
-describe('el argv de las dos llamadas', () => {
-  const argv = (over = {}) => buildArgv({ tools: JUDGE_TOOLS, schema: VERDICT_SCHEMA, prompt: 'juzga', ...over })
 
-  it('apaga la fuente de ajustes que hidrata al agente del slice', () => {
-    // Medido: sin esto, una llamada lanzada dentro del worktree nace leyendo
-    // `.agent/SLICE.md` — el juez juzgaría con el contexto del implementado.
-    const a = argv()
-    expect(a[a.indexOf('--setting-sources') + 1]).toBe('')
-  })
-
-  it('lleva --strict-mcp-config, que es la flag que decide el presupuesto', () => {
-    // 0,5552 USD contra 0,0145 USD por la misma llamada. No es una opción.
-    expect(argv()).toContain('--strict-mcp-config')
-  })
-
-  it('pide la envoltura JSON, que es de donde salen coste y sesión', () => {
-    const a = argv()
-    expect(a[a.indexOf('--output-format') + 1]).toBe('json')
-  })
-
-  it('pasa el esquema como JSON literal, no como ruta', () => {
-    // "--json-schema is not valid JSON" es lo que devuelve el binario si se le
-    // pasa un fichero. Medido.
-    const a = argv()
-    const valor = a[a.indexOf('--json-schema') + 1]
-    expect(() => JSON.parse(valor)).not.toThrow()
-    expect(JSON.parse(valor)).toEqual(VERDICT_SCHEMA)
-  })
-
-  it('el prompt va el último, como argumento posicional', () => {
-    expect(argv({ prompt: 'juzga esto' }).at(-1)).toBe('juzga esto')
-  })
-
-  it('al juez el binario le quita Bash; al implementador se lo da', () => {
-    // Estructural: no es una promesa en prosa dentro del prompt.
+describe('quién puede qué', () => {
+  it('el juez no tiene shell y el implementador sí, y eso lo declara el agente', () => {
+    // Antes se lo quitaba el binario con --tools; ahora lo declara
+    // agents/ct-judge.md. La propiedad es la misma: estructural, no una promesa
+    // dentro del prompt.
     expect(JUDGE_TOOLS).not.toMatch(/Bash|Write|Edit/)
     expect(IMPLEMENTER_TOOLS).toMatch(/Bash/)
-    const juez = argv()
-    expect(juez[juez.indexOf('--tools') + 1]).toBe('Read,Grep,Glob')
-  })
-})
-
-describe('la envoltura de --output-format json', () => {
-  it('lee coste, sesión y veredicto de una salida REAL del binario', () => {
-    const e = readEnvelope(ENVELOPE_REAL)
-    expect(e.ok).toBe(true)
-    expect(e.costUsd).toBe(0.55523)
-    expect(e.sessionId).toBe('7dee1f8b-c8b8-4514-9c1d-e25d26bae6af')
-    expect(e.structured).toEqual({
-      ruling: 'FAIL',
-      findings: [{ severity: 'high', what: expect.any(String), where: expect.any(String) }],
-    })
-    expect(e.denials).toEqual([])
-  })
-
-  it('una salida que no es JSON no es un modelo que respondió mal: es claude que no arrancó', () => {
-    const e = readEnvelope('command not found: claude')
-    expect(e.ok).toBe(false)
-    expect(e.why).toMatch(/no llegó a completarse/)
-  })
-
-  it('is_error se propaga como llamada fallida, con su subtype en el motivo', () => {
-    const e = readEnvelope(JSON.stringify({ is_error: true, subtype: 'error_max_turns' }))
-    expect(e.ok).toBe(false)
-    expect(e.why).toMatch(/error_max_turns/)
-  })
-
-  it('sin total_cost_usd el coste es 0 y no NaN, que envenenaría el acumulado', () => {
-    expect(readEnvelope(JSON.stringify({ result: 'x' })).costUsd).toBe(0)
   })
 })
 
@@ -193,14 +128,3 @@ describe('el mensaje que compone el programa', () => {
   })
 })
 
-describe('el modelo de cada llamada', () => {
-  it('sin --model, el argv no lo menciona y manda el de la cuenta', () => {
-    expect(buildArgv({ tools: JUDGE_TOOLS, schema: VERDICT_SCHEMA, prompt: 'x' })).not.toContain('--model')
-  })
-
-  it('con modelo, entra justo antes del prompt', () => {
-    const a = buildArgv({ tools: JUDGE_TOOLS, schema: VERDICT_SCHEMA, prompt: 'x', model: 'haiku' })
-    expect(a[a.indexOf('--model') + 1]).toBe('haiku')
-    expect(a.at(-1)).toBe('x')
-  })
-})

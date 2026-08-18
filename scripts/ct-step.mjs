@@ -63,7 +63,7 @@ import { extractTasks } from './plan-tasks.js'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage,
   VERDICT_SCHEMA, REPORT_SCHEMA, JUDGE_TOOLS,
-} from './harness.js'
+} from './step-contracts.js'
 import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures } from './run-metrics.js'
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))

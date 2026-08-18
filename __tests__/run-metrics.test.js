@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, IDENTITY_FIELDS } from '../scripts/run-metrics.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const SCRIPT = join(here, '..', 'scripts', 'ct-run.mjs')
+const SCRIPT = join(here, '..', 'scripts', 'ct-step.mjs')
 const F = '```'
 const AHORA = '2026-08-18T10:00:00.000Z'
 
@@ -72,13 +72,13 @@ describe('el plan se reescribe, y por eso el issue no basta como identidad', () 
 
 describe('dónde se escribe', () => {
   it('fuera del repo, para que ningún git add de la slice la meta en la PR', () => {
-    const p = metricsPath('ct-run', { home: '/casa' })
-    expect(p).toBe('/casa/.claude/control-tower/log/ct-run.jsonl')
+    const p = metricsPath('ct-step', { home: '/casa' })
+    expect(p).toBe('/casa/.claude/control-tower/log/ct-step.jsonl')
   })
 
   it('bajo CLAUDE_CONFIG_DIR cuando lo hay, que es donde vive el estado de esa cuenta', () => {
-    expect(metricsPath('ct-run', { configDir: '/casa/.claude-work' }))
-      .toBe('/casa/.claude-work/control-tower/log/ct-run.jsonl')
+    expect(metricsPath('ct-step', { configDir: '/casa/.claude-work' }))
+      .toBe('/casa/.claude-work/control-tower/log/ct-step.jsonl')
   })
 })
 
@@ -100,9 +100,12 @@ describe('el conteo por severidad', () => {
 })
 
 // ---------------------------------------------------------------------------
-// Y el run de verdad: que las filas salen, y que no salir no cambia nada.
+// Y contra el oráculo de verdad: que las filas salen, y —lo que de verdad hay
+// que fijar— que NO salir no cambia lo que hace el paso. Un programa que muere
+// porque no pudo escribir su propia métrica ha convertido el termómetro en parte
+// del motor.
 // ---------------------------------------------------------------------------
-describe('la telemetría de un run entero', () => {
+describe('la telemetría de un paso real', () => {
   const PLAN = [
     '# #7 — una tarea',
     '',
@@ -121,12 +124,6 @@ describe('la telemetría de un run entero', () => {
     '',
   ].join('\n')
 
-  const envoltura = (structured) => ({
-    is_error: false, session_id: 'sesion-de-mentira', total_cost_usd: 0.02,
-    structured_output: structured, result: JSON.stringify(structured),
-    permission_denials: [], subtype: 'success',
-  })
-
   let repo, casa
 
   beforeEach(() => {
@@ -144,61 +141,43 @@ describe('la telemetría de un run entero', () => {
     g('add', '-A')
     g('commit', '-q', '-m', 'base')
     writeFileSync(join(repo, 'uno.txt'), 'uno\n')
+    writeFileSync(join(repo, 'report.json'), JSON.stringify({ paths: ['uno.txt'], summary: 'hecho' }))
   })
   afterEach(() => {
     rmSync(repo, { recursive: true, force: true })
     rmSync(casa, { recursive: true, force: true })
   })
 
-  const correr = (configDir) => spawnSync('node', [SCRIPT, '--plan', 'plan.md', '--issue', '7', '--dry-run'], {
+  const ct = (configDir, ...args) => spawnSync('node', [SCRIPT, ...args, '--plan', 'plan.md', '--issue', '7'], {
     cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      CLAUDE_CONFIG_DIR: configDir,
-      CT_RUN_HARNESS_FIXTURE: JSON.stringify([
-        envoltura({ paths: ['uno.txt'], summary: 'hecho' }),
-        envoltura({ ruling: 'PASS', findings: [{ severity: 'low', what: 'nit', where: 'uno.txt:1' }] }),
-      ]),
-    },
+    env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
   })
 
-  it('escribe una fila por paso, con el epic sembrado y el hash del plan', () => {
-    const r = correr(casa)
+  it('la fila lleva la identidad completa, con el epic sembrado y el hash del plan', () => {
+    const r = ct(casa, 'report', 'report.json')
     expect(r.status).toBe(0)
-    const filas = readFileSync(join(casa, 'control-tower', 'log', 'ct-run.jsonl'), 'utf8')
+    const filas = readFileSync(join(casa, 'control-tower', 'log', 'ct-step.jsonl'), 'utf8')
       .trim().split('\n').map((l) => JSON.parse(l))
-    expect(filas.map((f) => f.step)).toEqual(['implement', 'controls', 'judge', 'commit'])
-    for (const f of filas) {
-      expect(f.repo).toBe('josemerca/control-tower-plugin')
-      expect(f.epic).toBe('12')          // leído del SLICE.md que sembró el despacho
-      expect(f.issue).toBe(7)
-      expect(f.task).toBe(1)
-      expect(f.attempt).toBe(1)
-      expect(f.plan_sha256).toBe(planSha256(PLAN))
-    }
-    const juez = filas.find((f) => f.step === 'judge')
-    expect(juez.findings_low).toBe(1)
-    expect(juez.session).toBe('sesion-de-mentira')
-    // El diff juzgado va en su fichero, unido a la fila por la ruta: es lo que
-    // pesa, y separarlo permite contar hallazgos sin cargarlo.
-    expect(existsSync(juez.review_package)).toBe(true)
-    expect(filas.find((f) => f.step === 'commit').commit).toMatch(/^[0-9a-f]{40}$/)
+    expect(filas).toHaveLength(1)
+    const f = filas[0]
+    expect(f.repo).toBe('josemerca/control-tower-plugin')
+    expect(f.epic).toBe('12')            // leído del SLICE.md que sembró el despacho
+    expect(f.issue).toBe(7)
+    expect(f.step).toBe('implement')
+    expect(f.attempt).toBe(1)
+    expect(f.plan_sha256).toBe(planSha256(PLAN))
+    expect(f.written_at).toMatch(/^\d{4}-\d{2}-\d{2}T/)
   })
 
-  it('si la telemetría no se puede escribir, el run TERMINA IGUAL y sólo avisa', () => {
+  it('si no se puede escribir, el paso hace lo MISMO y sólo avisa', () => {
     // Un fichero donde debería ir el directorio: mkdir falla con ENOTDIR.
     const bloqueado = join(casa, 'bloqueado')
     writeFileSync(bloqueado, 'no soy un directorio\n')
-    const r = correr(bloqueado)
-    expect(r.status).toBe(0)                       // el mismo código que con telemetría
-    expect(r.stdout).toMatch(/run delivered/)
+    const r = ct(bloqueado, 'report', 'report.json')
+    expect(r.status).toBe(0)                            // el mismo código que con telemetría
+    expect(r.stdout).toMatch(/stageados 1 fichero/)     // y el paso se aplicó igual
     expect(r.stderr).toMatch(/no se pudo escribir la telemetría/)
-  })
-
-  it('el aviso sale UNA vez por run, no una por paso', () => {
-    const bloqueado = join(casa, 'bloqueado')
-    writeFileSync(bloqueado, 'x\n')
-    const r = correr(bloqueado)
-    expect(r.stderr.match(/no se pudo escribir la telemetría/g)).toHaveLength(1)
+    // La transición se guardó: la medida no decide nada.
+    expect(JSON.parse(readFileSync(join(repo, '.agent', 'run-7.json'), 'utf8')).step).toBe('controls')
   })
 })

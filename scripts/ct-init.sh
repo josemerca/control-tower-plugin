@@ -100,7 +100,7 @@ else
   echo ".agent/SLICE.md ya está en $GITIGNORE, no se duplica"
 fi
 
-# D-4 — el estado del run de ct-run, y su carpeta de trabajo (briefs, logs de
+# D-4 — el estado del run de ct-step, y su carpeta de trabajo (briefs, logs de
 # los controles, paquetes de revisión). Mismo motivo que la línea de arriba y
 # uno más: estos ficheros son el bucle INTERNO de una slice dentro de su
 # worktree y viven menos que el worktree. Lo que vive en GitHub es el estado del

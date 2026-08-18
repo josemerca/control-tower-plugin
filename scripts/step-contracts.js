@@ -1,45 +1,20 @@
 // ============================================================================
-// HARNESS — las dos llamadas al modelo, en datos: qué argv, qué prompt, qué se
-// acepta como respuesta.
+// STEP-CONTRACTS — lo que cruza la frontera entre la sesión y sus subagentes.
 //
-// Este módulo NO ejecuta nada. Construye el argv y lee la respuesta; quien
-// lanza el proceso es `ct-run.mjs`. Es la misma frontera que separa
-// `plan-contract.js` de `dispatch-check.mjs`, y es lo que permite testear el
-// contrato de las llamadas sin gastar un céntimo.
+// La sesión despacha un implementador y un juez; lo que vuelve de ellos son
+// ficheros. Este módulo dice qué se acepta como respuesta y qué escribe el
+// plugin, y es PURO: no lanza procesos, no lee disco.
 //
-// ---------------------------------------------------------------------------
-// EL ARGV NO ES UNA PREFERENCIA: CADA FLAG SALE DE UNA MEDIDA (spec §2.1, §2.2,
-// §2.8, medidas el 2026-08-18 contra `claude` 2.1.234)
+// Antes esto construía además el argv de `claude -p` —el conductor-programa que
+// hacía las dos llamadas él mismo—, y eso se fue con D-4: la decisión de que el
+// orquestador deje de ser una sesión de chat está aplazada y su dueño es José.
+// Lo que sobrevive es la parte que vale igual con un subagente al otro lado: el
+// ESQUEMA de lo que se acepta.
 //
-// --setting-sources ""   El hook SessionStart de ESTE plugin hidrata cualquier
-//                        llamada lanzada dentro del worktree de un slice: sin
-//                        esta flag, el juez nace leyendo el estado del slice
-//                        que tiene que juzgar. Medido con un canario en
-//                        `.agent/SLICE.md` y `--tools ""`: lo repetía. La
-//                        fuente `user` es la que habilita el plugin, así que
-//                        quitarla apaga sus hooks — y la autenticación OAuth
-//                        sobrevive, que es lo que `--bare` no permitía.
-//
-// --strict-mcp-config    38 VECES MÁS BARATO. Una llamada headless carga por
-//                        defecto todos los servidores MCP de la máquina, y las
-//                        definiciones de sus herramientas entran en el contexto
-//                        AUNQUE la llamada vaya con `--tools ""`: `--tools`
-//                        decide qué puede usar el modelo, no qué se le manda.
-//                        Medido: 0,5552 USD contra 0,0145 USD por la misma
-//                        llamada. A 16 llamadas por slice, la flag es la
-//                        diferencia entre 9 dólares y 23 céntimos.
-//
-// --output-format json   Trae `structured_output` (la respuesta ya parseada),
-//                        `total_cost_usd` (el tope en dinero lo mide el binario,
-//                        no lo estima el programa), `session_id` (para poder
-//                        abrir LA conversación del juez de la tarea 5) y
-//                        `permission_denials`.
-//
-// --json-schema          Toma el JSON LITERAL, no una ruta: pasarle un fichero
-//                        falla con "--json-schema is not valid JSON".
-//
-// Y el stdin va cerrado: sin eso el binario espera 3 segundos a que le llegue
-// algo por la entrada estándar y lo avisa por stderr.
+// Y el esquema importa más ahora, no menos. Con `claude -p` lo imponía el
+// binario (`--json-schema`, que sólo existe en modo `--print`); con un subagente
+// lo impone esta validación, y un veredicto que no cumple es un descarte — se
+// vuelve a preguntar en vez de interpretar hacia el lado que convenga.
 // ============================================================================
 
 import { findClosingKeywords } from './closing-keywords.js'
@@ -85,57 +60,13 @@ export const REPORT_SCHEMA = Object.freeze({
   },
 })
 
-export const IMPLEMENTER_TOOLS = 'Read,Write,Edit,Grep,Glob,Bash'
-// El juez no puede ejecutar, y no es una promesa en prosa: se lo quita el
-// binario. Tampoco ve la salida de los controles — el programa le pasa RUTAS —
-// porque un lint sucio no debe ensuciarle el criterio al único agente cuyo
-// valor es el juicio.
-export const JUDGE_TOOLS = 'Read,Grep,Glob'
-
-export function buildArgv({ tools, schema, prompt, model }) {
-  return [
-    '-p',
-    '--setting-sources', '',
-    '--strict-mcp-config',
-    '--tools', tools,
-    '--output-format', 'json',
-    '--json-schema', JSON.stringify(schema),
-    // Sin `--model`, la llamada usa el modelo por defecto de la cuenta. El flag
-    // existe porque las dos llamadas no valen lo mismo: el juez es el único
-    // paso cuyo valor entero es el juicio, y el implementador de una tarea
-    // prescriptiva es el que más tokens quema. Poder separarlos es la palanca
-    // de coste que queda después de --strict-mcp-config.
-    ...(model ? ['--model', model] : []),
-    prompt,
-  ]
-}
-
-// ============================================================================
-// LA RESPUESTA
-// ============================================================================
-
-// La envoltura de `--output-format json`. Un stdout que no es JSON no es un
-// error del modelo: es que `claude` no llegó a arrancar, y eso se distingue.
-export function readEnvelope(stdout) {
-  let raw
-  try {
-    raw = JSON.parse(String(stdout))
-  } catch {
-    return { ok: false, why: 'la salida de claude no es JSON: la llamada no llegó a completarse' }
-  }
-  if (!raw || typeof raw !== 'object') {
-    return { ok: false, why: 'la salida de claude no es un objeto' }
-  }
-  return {
-    ok: raw.is_error !== true,
-    why: raw.is_error === true ? `claude devolvió is_error (subtype: ${raw.subtype ?? 'sin subtype'})` : null,
-    sessionId: raw.session_id ?? null,
-    costUsd: Number(raw.total_cost_usd) || 0,
-    structured: raw.structured_output ?? null,
-    text: typeof raw.result === 'string' ? raw.result : '',
-    denials: Array.isArray(raw.permission_denials) ? raw.permission_denials : [],
-  }
-}
+export const IMPLEMENTER_TOOLS = 'Read, Write, Edit, Grep, Glob, Bash'
+// El juez no puede ejecutar, y no es una promesa en prosa: se lo quita la
+// declaración del agente (`agents/ct-judge.md`), igual que antes se lo quitaba
+// el binario. Tampoco ve la SALIDA de los controles —se le pasan rutas— porque
+// un lint sucio no debe ensuciarle el criterio al único agente cuyo valor es el
+// juicio.
+export const JUDGE_TOOLS = 'Read, Grep, Glob'
 
 const esTexto = (v) => typeof v === 'string' && v.trim() !== ''
 
@@ -200,7 +131,7 @@ export function commitMessage({ issue, task, tasksTotal, name }) {
   const titulo = `${sanear(name)} (#${issue}, tarea ${task}/${tasksTotal})`
   const cuerpo = [
     '',
-    `Tarea ${task} de ${tasksTotal} del plan del slice, implementada y juzgada por ct-run.`,
+    `Tarea ${task} de ${tasksTotal} del plan del slice, implementada y juzgada paso a paso con ct-step.`,
     '',
     'Co-Authored-By: Claude <noreply@anthropic.com>',
   ].join('\n')

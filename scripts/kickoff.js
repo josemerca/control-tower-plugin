@@ -399,7 +399,7 @@ export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
       // La ausencia se DECLARA con la constante que ya existe, no se rellena
       // ni se deja vacía: es la misma regla que impidió que ct-next asumiera
       // `main` en silencio cuando no conocía la base. Su lector es la
-      // telemetría de ct-run, que agrega por epic.
+      // telemetría de ct-step, que agrega por epic.
       epic: slice.epic || NO_MILESTONE_KEY,
       github_issue: issueNum,
       // D4, defecto 4: este campo imprimía el número de ISSUE llamándolo
