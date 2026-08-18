@@ -21,9 +21,28 @@ import { findClosingKeywords } from './closing-keywords.js'
 
 export const SEVERITIES = ['high', 'medium', 'low']
 
+// Las ocho reglas de la rúbrica del juez, en el orden en que la recorre (la
+// rúbrica en sí se escribe en una tarea posterior de este mismo plan; aquí
+// sólo se fija el vocabulario). Enum CERRADO, y no por la validación por la
+// validación: la telemetría cuenta hallazgos por regla (`findings_by_rule` en
+// run-metrics.js), y una regla inventada por el juez convertiría esa cuenta en
+// ruido. Un `rule` que no está aquí descarta el veredicto igual que ya
+// descarta un `ruling` inventado — el descarte no es un error, es "vuelve a
+// preguntar": un hallazgo que no encaja en ninguna regla es un hallazgo que el
+// juez no ha sabido justificar.
+export const VERDICT_RULES = [
+  'objetivo', 'asercion-tdd', 'contrato', 'decisiones-cerradas',
+  'patrones', 'manipulacion-tests', 'fixture-theater', 'alcance',
+]
+
 // El veredicto. `ruling` y `findings` bastan: la severidad es lo que separa un
 // veto de un refunfuño, y el resto de la prosa del juez no la lee ningún
 // programa.
+//
+// Cada hallazgo lleva además su REGLA: cuál de las ocho de la rúbrica incumple.
+// Antes de esto un hallazgo decía severidad, qué y dónde, pero no POR QUÉ es un
+// hallazgo — y sin eso, la telemetría no puede contar cuántos vetos vienen de
+// cada regla, que es justo el dato que dice si la rúbrica está bien calibrada.
 export const VERDICT_SCHEMA = Object.freeze({
   type: 'object',
   additionalProperties: false,
@@ -35,8 +54,9 @@ export const VERDICT_SCHEMA = Object.freeze({
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['severity', 'what', 'where'],
+        required: ['rule', 'severity', 'what', 'where'],
         properties: {
+          rule: { type: 'string', enum: VERDICT_RULES },
           severity: { type: 'string', enum: SEVERITIES },
           what: { type: 'string' },
           where: { type: 'string' },
@@ -113,6 +133,10 @@ export function readVerdict(structured) {
     if (!f || typeof f !== 'object') return { why: `el hallazgo ${i} no es un objeto` }
     if (!SEVERITIES.includes(f.severity)) return { why: `el hallazgo ${i} tiene una severidad desconocida: ${JSON.stringify(f.severity)}` }
     if (!esTexto(f.what) || !esTexto(f.where)) return { why: `el hallazgo ${i} no dice qué o dónde` }
+    // La regla es el enum CERRADO: no se asume ninguna por defecto, porque una
+    // regla inventada por el juez ensuciaría el conteo por regla de la
+    // telemetría tanto como un `rule` ausente.
+    if (!VERDICT_RULES.includes(f.rule)) return { why: `el hallazgo ${i} incumple una regla desconocida: ${JSON.stringify(f.rule)}` }
   }
   // La coherencia que el original comprueba en el propio agregado: un PASA con
   // un hallazgo grave se contradice a sí mismo. No se "interpreta" hacia el

@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage,
-  VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS, PATH_KINDS,
+  VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS, PATH_KINDS, VERDICT_RULES,
 } from '../scripts/step-contracts.js'
 
 const AGENTE_JUEZ = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-judge.md')
@@ -58,8 +58,8 @@ describe('el veredicto', () => {
     ['sin structured_output', null, /no devolvió structured_output/],
     ['con un ruling inventado', { ruling: 'MAYBE', findings: [] }, /ruling desconocido/],
     ['con findings que no es lista', { ruling: 'PASS', findings: 'ninguno' }, /no es una lista/],
-    ['con una severidad inventada', { ruling: 'FAIL', findings: [{ severity: 'catastrophic', what: 'x', where: 'y' }] }, /severidad desconocida/],
-    ['con un hallazgo mudo', { ruling: 'FAIL', findings: [{ severity: 'high', what: '', where: 'y' }] }, /no dice qué o dónde/],
+    ['con una severidad inventada', { ruling: 'FAIL', findings: [{ rule: 'contrato', severity: 'catastrophic', what: 'x', where: 'y' }] }, /severidad desconocida/],
+    ['con un hallazgo mudo', { ruling: 'FAIL', findings: [{ rule: 'contrato', severity: 'high', what: '', where: 'y' }] }, /no dice qué o dónde/],
   ])('se descarta %s', (_caso, structured, motivo) => {
     const r = readVerdict(structured)
     expect(r.verdict).toBeUndefined()
@@ -69,9 +69,24 @@ describe('el veredicto', () => {
   it('un PASS con un hallazgo grave se descarta: se contradice a sí mismo', () => {
     // No se interpreta hacia el lado prudente. Un juez que no se entiende a sí
     // mismo no ha juzgado, y volver a preguntar cuesta menos que decidir por él.
-    const r = v('PASS', [{ severity: 'high', what: 'sql injection', where: 'db.js:10' }])
+    const r = v('PASS', [{ rule: 'contrato', severity: 'high', what: 'sql injection', where: 'db.js:10' }])
     expect(r.verdict).toBeUndefined()
     expect(r.why).toMatch(/contradice la rúbrica/)
+  })
+
+  it('el hallazgo nombra la regla que incumple', () => {
+    const r = v('FAIL', [{ rule: 'manipulacion-tests', severity: 'high', what: 'debilitó una aserción', where: 'a.test.js:12' }])
+    expect(r.verdict.findings[0].rule).toBe('manipulacion-tests')
+  })
+
+  it('una regla fuera del enum descarta el veredicto', () => {
+    // El mismo criterio que ya aplica a un ruling inventado: una regla que no
+    // está en VERDICT_RULES no es un hallazgo sin justificar, es un dato que no
+    // se entiende — se descarta y se vuelve a preguntar, no es un error.
+    const r = v('FAIL', [{ rule: 'me-lo-invento', severity: 'high', what: 'x', where: 'y' }])
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/regla desconocida/)
+    expect(VERDICT_RULES).not.toContain('me-lo-invento')
   })
 })
 

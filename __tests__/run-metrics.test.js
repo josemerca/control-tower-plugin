@@ -87,15 +87,31 @@ describe('el conteo por severidad', () => {
     expect(verdictMeasures({
       ruling: 'FAIL',
       findings: [
-        { severity: 'high', what: 'a', where: 'x' },
-        { severity: 'low', what: 'b', where: 'y' },
-        { severity: 'low', what: 'c', where: 'z' },
+        { rule: 'contrato', severity: 'high', what: 'a', where: 'x' },
+        { rule: 'alcance', severity: 'low', what: 'b', where: 'y' },
+        { rule: 'alcance', severity: 'low', what: 'c', where: 'z' },
       ],
-    })).toEqual({ ruling: 'FAIL', findings_total: 3, findings_high: 1, findings_medium: 0, findings_low: 2 })
+    })).toEqual({
+      ruling: 'FAIL', findings_total: 3, findings_high: 1, findings_medium: 0, findings_low: 2,
+      findings_by_rule: { contrato: 1, alcance: 2 },
+    })
   })
 
   it('un PASA limpio cuenta cero de todo, y lo dice', () => {
     expect(verdictMeasures({ ruling: 'PASS', findings: [] }).findings_total).toBe(0)
+  })
+
+  it('la telemetría del veredicto cuenta por regla', () => {
+    // Un contador por regla PRESENTE en el veredicto, no las ocho a cero: una
+    // regla que no aparece no aporta nada a la cuenta.
+    expect(verdictMeasures({
+      ruling: 'FAIL',
+      findings: [
+        { rule: 'manipulacion-tests', severity: 'high', what: 'a', where: 'x' },
+        { rule: 'manipulacion-tests', severity: 'low', what: 'b', where: 'y' },
+        { rule: 'alcance', severity: 'low', what: 'c', where: 'z' },
+      ],
+    }).findings_by_rule).toEqual({ 'manipulacion-tests': 2, alcance: 1 })
   })
 })
 

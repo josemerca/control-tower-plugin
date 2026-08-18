@@ -84,9 +84,13 @@ const informe = (paths, nombre = 'report.json') => {
   writeFileSync(p, JSON.stringify({ paths: paths.map((path) => ({ path, kind: 'production' })), summary: 'hecho' }))
   return p
 }
+// A estos tests no les importa la regla: la tarea 4 la añadió al contrato, y
+// una regla válida cualquiera basta para que el veredicto siga siendo válido
+// sin reescribir cada llamada de este fichero.
 const veredicto = (ruling, findings = [], nombre = 'verdict.json') => {
   const p = join(repo, nombre)
-  writeFileSync(p, JSON.stringify({ ruling, findings }))
+  const conRegla = findings.map((f) => ({ rule: 'alcance', ...f }))
+  writeFileSync(p, JSON.stringify({ ruling, findings: conRegla }))
   return p
 }
 const crudo = (texto, nombre = 'crudo.json') => {

@@ -79,13 +79,23 @@ export const metricLine = (fila) => JSON.stringify(fila) + '\n'
 
 // El conteo por severidad del veredicto, que es lo que permite leer "cuántos
 // vetos" sin volver a cargar los hallazgos.
+//
+// `findings_by_rule` se añade al lado, no sustituye nada: un contador por cada
+// regla de VERDICT_RULES que aparece en ESTE veredicto (no las ocho a cero,
+// porque una regla ausente no aporta nada a la cuenta). Es el dato que dice si
+// la rúbrica del juez está bien calibrada —qué regla veta más, cuál no veta
+// nunca— y sólo es fiable porque el enum de `rule` es cerrado: sin eso, cada
+// juez inventaría su propio vocabulario y la cuenta sería ruido.
 export function verdictMeasures(verdict) {
   const findings = verdict?.findings || []
+  const findingsByRule = {}
+  for (const f of findings) findingsByRule[f.rule] = (findingsByRule[f.rule] || 0) + 1
   return {
     ruling: verdict?.ruling ?? null,
     findings_total: findings.length,
     findings_high: findings.filter((f) => f.severity === 'high').length,
     findings_medium: findings.filter((f) => f.severity === 'medium').length,
     findings_low: findings.filter((f) => f.severity === 'low').length,
+    findings_by_rule: findingsByRule,
   }
 }
