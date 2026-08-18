@@ -23,6 +23,22 @@ const toolsDelAgente = () => {
   return m ? m[1].trim() : null
 }
 
+// Los ocho encabezados de la rúbrica — "### 1. `objetivo` — ..." — en el
+// orden en que el agente los recorre. VERDICT_RULES es una copia suya: este
+// repo ya sufrió el mismo desacople con JUDGE_TOOLS (divergió del frontmatter
+// del agente y la constante se quedó atrás), y aquí el riesgo es peor porque
+// no hay ningún error de esquema que lo delate — un `rule` renombrado en el
+// código no rompe ct-judge.md, sólo hace que TODO veredicto que use ese `rule`
+// se descarte en tiempo de ejecución hasta que el run se agota.
+const reglasDelAgente = () => {
+  const texto = readFileSync(AGENTE_JUEZ, 'utf8')
+  const regex = /^### \d+\.\s+`([a-z-]+)`/gm
+  const reglas = []
+  let m
+  while ((m = regex.exec(texto)) !== null) reglas.push(m[1])
+  return reglas
+}
+
 describe('quién puede qué', () => {
   it('el juez no tiene shell, y quien se lo quita es la declaración del agente', () => {
     // Antes se lo quitaba el binario con --tools; ahora lo declara
@@ -44,6 +60,18 @@ describe('quién puede qué', () => {
 
   it('el juez puede escribir su veredicto: es el canal por el que contesta', () => {
     expect(toolsDelAgente()).toMatch(/Write/)
+  })
+
+  it('el implementador puede cargar skills: sin ella no puede seguir su propia rúbrica', () => {
+    expect(IMPLEMENTER_TOOLS).toMatch(/\bSkill\b/)
+  })
+
+  it('VERDICT_RULES no puede divergir de los ocho encabezados de la rúbrica', () => {
+    // Renombrar una regla en el código sin tocar el agente (o al revés) no
+    // rompe ningún esquema: sólo hace que un veredicto con ese `rule` se
+    // descarte en cada ejecución. Este test es lo que lo convierte en un
+    // fallo de test en vez de en un fallo silencioso en producción.
+    expect(VERDICT_RULES).toEqual(reglasDelAgente())
   })
 })
 

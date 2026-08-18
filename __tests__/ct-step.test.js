@@ -315,6 +315,42 @@ describe('lo que los bloques del plan prometen tiene que estar', () => {
     expect(r.stdout).toMatch(/controles: failed/)
     expect(readFileSync(estado().lastControlsLog, 'utf8')).toMatch(/Final text \(doc\.md\).*'línea dos'.*no está verbatim/)
   })
+
+  // ==========================================================================
+  // EL CASO ADVERSARIAL de la comprobación anterior. `git show :<path>`
+  // devuelve contenido para CUALQUIER fichero del índice, esté o no entre lo
+  // que la tarea tocó — así que por sí sola esa comprobación no cierra el
+  // hueco: un `Final text` que cite un fichero ya comiteado, con el texto ya
+  // verbatim ahí desde antes, la pasaría aunque la tarea no lo haya tocado.
+  // Lo que cierra el hueco es que todo bloque `Final text (path):` entra
+  // TAMBIÉN en `blockPaths`, y ese bucle sí exige pertenencia a `run.lastPaths`
+  // (ver la nota sobre `bloquesDeclarados` en ct-step.mjs). La garantía es
+  // real pero implícita: nada la fijaba hasta este test, así que simplificar
+  // ese bucle por parecer redundante con `finalTexts` reintroduciría en
+  // silencio el fallo que este test existe para cazar — el mismo tipo de
+  // falso negativo que ya sufrió `testsDeclarados` (ver `planComiteado` más
+  // abajo): el plan vive comiteado en `docs/`, así que buscar en el repo es
+  // buscar en el plan.
+  // ==========================================================================
+  it('un Final text que cita un fichero YA COMITEADO, y la tarea no lo toca, es rojo aunque el contenido ya esté verbatim', () => {
+    writeFileSync(join(repo, 'ya-existe.md'), 'línea uno\nlínea dos\n')
+    execFileSync('git', ['add', 'ya-existe.md'], { cwd: repo, stdio: 'ignore' })
+    execFileSync('git', ['commit', '-q', '-m', 'ya existía con el texto'], { cwd: repo, stdio: 'ignore' })
+
+    const conFinalText = PLAN.replace(
+      '**Files:** `uno.txt` (create).\n**TDD:** No TDD — fixture.',
+      ['**Files:** `uno.txt` (create).', '', 'Final text (ya-existe.md):', '', F + 'md', 'línea uno', 'línea dos', F, '', '**TDD:** No TDD — fixture.'].join('\n'),
+    )
+    writeFileSync(join(repo, 'plan.md'), conFinalText)
+    execFileSync('git', ['add', 'plan.md'], { cwd: repo, stdio: 'ignore' })
+    execFileSync('git', ['commit', '-q', '-m', 'el plan del slice'], { cwd: repo, stdio: 'ignore' })
+
+    // La tarea sólo declara y toca uno.txt: ya-existe.md queda fuera.
+    ct('report', informe(['uno.txt']))
+    const r = ct('controls')
+    expect(r.stdout).toMatch(/controles: failed/)
+    expect(readFileSync(estado().lastControlsLog, 'utf8')).toMatch(/bloque Final text \(ya-existe\.md\).*no está entre lo que tocó/)
+  })
 })
 
 describe('los controles los mide el programa, no el implementador', () => {

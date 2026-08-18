@@ -2,9 +2,18 @@
 // camino por defecto de subagent-driven-development llama a este script SIN
 // el flag, así que sin `--with-plan-context` su salida no puede cambiar ni un
 // byte. Por eso el primer test no compara contra una expectativa escrita a
-// mano, sino contra la salida del propio script tal como está en HEAD — es la
-// única vara que no puede mentir si alguien toca el script sin querer romper
-// ese contrato.
+// mano, sino contra la salida del propio script en un punto fijo del
+// historial — es la única vara que no puede mentir si alguien toca el script
+// sin querer romper ese contrato.
+//
+// Ese punto fijo es el sha `2f30f9a` (el último commit anterior a esta ronda,
+// justo antes de que `1c2fc61` metiera el script y este test en el MISMO
+// commit) y no HEAD. Un baseline en HEAD es un baseline móvil: el script y su
+// test entraron juntos, así que en un checkout limpio HEAD:script ES el
+// fichero bajo prueba — se puede romper el camino sin flag y el test
+// comparándose consigo mismo sigue en verde. Fijarlo a un commit anterior al
+// de la introducción del contrato es lo único que deja al test comparar
+// contra algo que no es el propio cambio que podría romperlo.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, readFileSync, chmodSync, rmSync } from 'node:fs'
@@ -17,6 +26,9 @@ const REPO_ROOT = join(here, '..')
 const SCRIPT = join(REPO_ROOT, 'skills', 'subagent-driven-development', 'scripts', 'task-brief')
 const PLAN = join(REPO_ROOT, 'docs', 'superpowers', 'plans', '2026-08-18-los-dos-agentes-y-la-vara-del-plan.md')
 const TASK = '7'
+// El último commit anterior a esta ronda, anterior también a `1c2fc61` (que
+// metió el script y este test en el mismo commit). Ver la nota de cabecera.
+const BASELINE_SHA = '2f30f9a'
 
 let dir
 
@@ -33,18 +45,18 @@ const run = (args) => {
 }
 
 describe('task-brief', () => {
-  it('sin el flag la salida es byte a byte la de hoy', () => {
-    const headScript = join(dir, 'task-brief-head')
-    writeFileSync(headScript, execFileSync('git', ['show', 'HEAD:skills/subagent-driven-development/scripts/task-brief'], { cwd: REPO_ROOT, encoding: 'utf8' }))
-    chmodSync(headScript, 0o755)
+  it('sin el flag la salida es byte a byte la de antes de esta ronda', () => {
+    const baselineScript = join(dir, 'task-brief-baseline')
+    writeFileSync(baselineScript, execFileSync('git', ['show', `${BASELINE_SHA}:skills/subagent-driven-development/scripts/task-brief`], { cwd: REPO_ROOT, encoding: 'utf8' }))
+    chmodSync(baselineScript, 0o755)
 
-    const outHead = join(dir, 'head-brief.md')
+    const outBaseline = join(dir, 'baseline-brief.md')
     const outNew = join(dir, 'new-brief.md')
 
-    execFileSync(headScript, [PLAN, TASK, outHead], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    execFileSync(baselineScript, [PLAN, TASK, outBaseline], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
     execFileSync(SCRIPT, [PLAN, TASK, outNew], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
-    expect(readFileSync(outNew)).toEqual(readFileSync(outHead))
+    expect(readFileSync(outNew)).toEqual(readFileSync(outBaseline))
   })
 
   it('con el flag añade las tres secciones de vara', () => {

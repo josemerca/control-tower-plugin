@@ -137,8 +137,7 @@ objective promised.
 
 **What settles it:** whether the promised behaviour is produced by production
 code, or only by the test's own scaffolding — a mock, a fixture, a stub, a
-hard-coded expected value — with no production line behind it. Scaffolding that
-sits over production code doing the work is scaffolding. This is the one
+hard-coded expected value — with no production line behind it. This is the one
 judgement the
 `kind` label exists for: a suite reported green over a diff whose `production`
 side does not contain the behaviour is visible here at a glance and nowhere
