@@ -156,8 +156,14 @@ Medidas contra el plan del slice #5 de `repo-pulse`, 8 tareas, no contra la
 plantilla. Es la lección de la iteración anterior: validar un parser contra
 `plan-template.md` esconde defectos que el artefacto real sí tiene.
 
-1. **Los comandos viven en el bloque cercado inmediatamente posterior a
-   `**Verification:**`, no en línea.** En línea llegan mezclados con prosa
+1. **Los comandos TIENEN QUE vivir en el bloque cercado posterior a
+   `**Verification:**`, y en el plan real no vivían ahí.** Corregido al
+   implementar: de las ocho tareas del plan real, **sólo la primera** trae
+   bloque; las otras siete verifican en línea. Este spec decía lo contrario, y
+   el plan real no está mal escrito — es fiel a `plan-template.md`, que pedía
+   "{{exact command and expected output}}" sin decir dónde. El agujero era de la
+   plantilla, así que la regla del contrato y la plantilla cambiaron juntas.
+   En línea los comandos llegan mezclados con prosa
    (`→ exit 0.`, `y después:`, paréntesis explicativos, y un `wc -l AGENTS.md`
    dentro de un paréntesis). Y tiene que ser el bloque **inmediatamente**
    posterior, no cualquier bloque en lenguaje de comandos de la tarea: las
@@ -323,27 +329,41 @@ Cuatro capas con el idioma que ya usa el repo: módulo puro con entrada/salida
 inyectada, como `plan-contract.js` con su `{ readFile }`.
 
 ```
-scripts/ct-run.mjs        infraestructura: argv, cableado, canales, códigos de salida
-  └── scripts/conduct.js  aplicación: el bucle. Recibe los puertos, no los crea
-        ├── scripts/run-machine.js   dominio PURO, cero imports: la tabla del §3.3
-        ├── scripts/plan-tasks.js    dominio: el plan → tareas + su vara (§2.5)
-        ├── scripts/verdict.js       dominio: el esquema del veredicto y su validación
-        ├── scripts/harness-call.js  dominio: construye argv y prompt, NO ejecuta
-        └── scripts/run-metrics.js   dominio: compone la fila de telemetría (§10)
+scripts/ct-run.mjs        el ejecutable: argv, precondiciones, el bucle, el I/O
+  ├── scripts/run-machine.js   PURO, cero imports: la tabla del §3.3
+  ├── scripts/plan-tasks.js    PURO: el plan → tareas + su vara (§2.5)
+  ├── scripts/harness.js       las dos llamadas en datos: argv, esquemas,
+  │                            lectura de la envoltura, mensaje de commit
+  └── scripts/run-metrics.js   PURO: compone la fila de telemetría (§10)
 ```
 
-Puertos que inyecta `ct-run.mjs` y que `conduct.js` sólo consume:
-`readFile`, `writeFile`, `appendLine(path, text)`,
-`runCommand({ cmd, argv, cwd, timeoutMs }) → { code, stdout, stderr }`, `now()`.
+**Cinco ficheros y no siete.** El diseño original separaba `verdict.js` de
+`harness-call.js` y `conduct.js` de `ct-run.mjs`, con puertos inyectados para
+poder testear el bucle sin tocar disco. Se fusionaron los dos primeros —el
+esquema del veredicto no tiene vida fuera de la llamada que lo pide— y el bucle
+se quedó dentro del ejecutable, que se testea con el idioma que el repo ya usa
+para esto: fixture por variable de entorno **rechazada sin `--dry-run`**
+(`dispatch-check.mjs:257`).
 
-`appendLine` es un puerto propio y no un `writeFile` disfrazado: la telemetría es
-append-only sobre ficheros que viven fuera del repo, y un fallo suyo **no cierra
-el run** (§10.5), así que su tratamiento de errores no es el de escribir el
-estado.
+`run-metrics.js` sí se quedó aparte, y por la razón que decía el diseño: la
+telemetría es append-only sobre ficheros de fuera del repo y **un fallo suyo no
+cierra el run** (§10.5). Ese tratamiento de errores no es el de escribir el
+estado, y mezclarlos sería exactamente cómo una medida acaba tumbando aquello
+que mide. En vez de un puerto `appendLine` inyectado, la escritura vive en una
+función propia de `ct-run.mjs` que traga su excepción y avisa por stderr — la
+propiedad es la misma y no hace falta una capa para tenerla.
 
-Nada por debajo de `conduct.js` importa `node:fs` ni `node:child_process`: es lo
-que permite testear el bucle entero sin tocar disco ni lanzar un proceso, y es la
-misma frontera que separa `plan-contract.js` de `dispatch-check.mjs`.
+Y el doble no cubre a git. `__tests__/ct-run-dryrun.test.js` monta un repo
+temporal y sustituye sólo las dos cosas caras —las llamadas al modelo y los
+comandos de los controles—; git corre de verdad, porque la mitad de las
+propiedades que este diseño existe para sostener (que comitea el programa, que
+se stagea antes de medir, que un veto no deja rastro) no existen si git es un
+doble. Ese test encontró dos defectos que ningún test con puertos habría visto
+(§10).
+
+Lo que sí se mantuvo entero: `run-machine.js` y `plan-tasks.js` son puros sin un
+solo import, que es la frontera que separa `plan-contract.js` de
+`dispatch-check.mjs`.
 
 ---
 
@@ -362,6 +382,13 @@ git add (sólo las rutas que declara el implementador)
 que un veto no deje rastro que deshacer, y aquí encaja sin fricción porque en
 Control Tower una tarea ya es un commit. Se stagea **antes** de medir porque un
 control que lee el índice no ve un fichero nuevo sin stagear.
+
+Y por eso el paquete de revisión **no** lo compone
+`skills/subagent-driven-development/scripts/review-package`, aunque el §2.6 lo
+diera por reutilizable: aquel script diffea un rango de **commits**, y en este
+diseño lo que hay que juzgar todavía no es un commit — está en el índice. El
+programa compone su propio paquete con `git diff --cached`. El script de la
+skill se queda donde está, sin tocar.
 
 El mensaje del commit lo compone el programa y lo valida con
 `findClosingKeywords` (`scripts/closing-keywords.js`) **antes** de commitear.
@@ -610,20 +637,43 @@ json` regala `structured_output`, `total_cost_usd` y `session_id` (§2.1), y
 Vale aunque el conductor no llegue nunca: `--check-plan` deja de aceptar planes
 que ningún programa puede ejecutar.
 
-### Paso 2 — el conductor
+### Paso 2 — el conductor — **HECHO (2026-08-18)**
 
-- `scripts/run-machine.js` — la tabla del §3.3, pura.
-- `scripts/verdict.js` — esquema del veredicto y su validación.
-- `scripts/harness-call.js` — argv y prompt de las dos llamadas.
-- `scripts/conduct.js` — el bucle, con los puertos inyectados.
-- `scripts/ct-run.mjs` — el ejecutable: argv, canales, tabla de salida.
-- `scripts/run-metrics.js` — la fila de telemetría del §10 y su identidad.
-- `prompts/task-implementer.md` y `prompts/task-judge.md`.
-- `scripts/ct-init.sh` — la regla de ignore de `.agent/run-*.json`.
-- `scripts/kickoff.js` — **un campo**: `epic` en el estado que siembra
-  `buildStateSeed`, con `epicKeyOf(rawIssue)` de `gh-issue-map.js` (§10.3), y
-  `scripts/ct-next.mjs` para pasárselo. No se toca la línea 256, que es la que
-  nombra `subagent-driven-development`: el camino por defecto no cambia.
+`scripts/run-machine.js`, `scripts/harness.js`, `scripts/run-metrics.js`,
+`scripts/ct-run.mjs`, el campo `epic` de `scripts/kickoff.js` y `scripts/ct-next.mjs`,
+`prompts/task-implementer.md`, `prompts/task-judge.md` y las reglas de ignore en
+`scripts/ct-init.sh` (`.agent/run-*.json` y `.agent/run-*/`). La versión sube a
+`0.35.0` en los dos ficheros que la declaran.
+
+### Lo que la implementación decidió y este diseño no traía
+
+Seis cosas. Las dos primeras las encontró un test; las otras cuatro salieron de
+escribir el código con el binario delante.
+
+1. **El tope de dinero cortaba antes del commit.** El diseño decía "el tope se
+   comprueba antes de la llamada siguiente" y el bucle lo comprobaba al empezar
+   cada paso — incluido `commit`, que no llama a nadie. Efecto: una tarea
+   implementada y juzgada, o sea pagada entera, se tiraba a la basura y el
+   worktree se quedaba con el índice lleno. Ahora el tope sólo mira los dos
+   pasos que pagan.
+2. **La precondición de índice limpio hacía irrecuperable cualquier run
+   reanudado.** Tras un veto el índice está lleno por construcción, y esa
+   suciedad es justamente el trabajo que se retoma. Se exige sólo en un run
+   nuevo.
+3. **El implementador también lleva esquema**, aunque el §6 sólo se lo diera al
+   juez. El programa necesita las rutas que se tocaron para stagearlas, y sacar
+   rutas de un informe en prosa es la trampa del §2.5 en el otro extremo del
+   bucle. Y esas rutas se filtran: una ruta absoluta o con `..` se rechaza, que
+   la lista la escribe un modelo y acaba en un `git add`.
+4. **Seis descartes cortan el run** (código `3`). El §3.3 dejaba ese camino
+   respaldado sólo por el tope en dinero, pero un juez que nunca cumple el
+   esquema son llamadas de céntimo y medio repetidas durante horas.
+5. **`--allow-default-account`.** El §2.3 mandaba parar si falta
+   `CLAUDE_CONFIG_DIR`, y sigue siendo el defecto; pero en una máquina sin el
+   wrapper de cuentas esa variable no existe y `claude` funciona perfectamente,
+   así que hay una salida explícita en vez de un bloqueo sin remedio.
+6. **El paquete de revisión se compone del índice** y no con `review-package`
+   (§5).
 
 ---
 
@@ -636,14 +686,17 @@ cercado real.
 
 | Test | Propiedad que fija |
 |---|---|
-| `__tests__/run-machine.test.js` | **tabla exhaustiva** de pares (paso, resultado), incluidos los imposibles: cada uno lanza. Y que los contadores por tarea se reinician al avanzar y los de slice no |
-| `__tests__/plan-tasks.test.js` | las tres trampas, **contra un plan real como fixture**, no contra la plantilla. Un caso por trampa, y el caso del paréntesis anidado falla hoy sin el barrido por profundidad |
-| `__tests__/plan-contract.test.js` | la regla nueva: una tarea con `**Verification:**` sin bloque de comandos deja de validar |
-| `__tests__/ct-run-dryrun.test.js` | el ejecutable con `--dry-run` y arnés falso por `CT_RUN_HARNESS_FIXTURE`, y que la fixture **sin** `--dry-run` se rechaza |
-| `__tests__/ct-run-exit-code-contract.test.js` | cada código de la tabla del §9 lo emite exactamente un camino, y stdout/stderr no se mezclan |
-| `__tests__/ct-run-commit-message.test.js` | el mensaje que compone el programa nunca contiene una closing keyword |
+| `__tests__/run-machine.test.js` (48) | **tabla exhaustiva** de los 24 pares (paso, resultado), incluidos los imposibles: cada uno lanza. Y que los contadores por tarea se reinician al avanzar y los de slice no |
+| `__tests__/plan-tasks.test.js` (19) | las tres trampas, **contra el plan real del slice #5 de repo-pulse como fixture**, no contra la plantilla. El caso del paréntesis anidado demuestra con el barrido malo que la trampa es real |
+| `__tests__/plan-contract.test.js` (+5) | la regla nueva: una tarea con `**Verification:**` sin bloque de comandos deja de validar |
+| `__tests__/harness.test.js` (32) | el argv flag por flag, la envoltura leída de una **salida real** del binario, el veredicto que se descarta y el mensaje de commit sin closing keywords |
+| `__tests__/ct-run-dryrun.test.js` (20) | el bucle entero contra un repo temporal de verdad: los códigos del §9, que comitea el programa, que sólo entra lo declarado, la reanudación y que la fixture **sin** `--dry-run` se rechaza |
 | `__tests__/run-metrics.test.js` | la fila lleva **los once campos de identidad** del §10.1 —un issue sin milestone se anota `(sin milestone)`, no vacío— y un fallo al escribirla no cambia el código de salida del run |
 | `__tests__/kickoff.test.js` | el estado sembrado trae `epic`, y trae `(sin milestone)` cuando el issue no tiene ninguno |
+
+Los dos ficheros que el diseño listaba aparte —el contrato de códigos de salida
+y el del mensaje de commit— viven dentro de esos dos últimos, que es donde está
+lo que fijan.
 
 ---
 
