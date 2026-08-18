@@ -14,8 +14,7 @@ an agent that can run the tests it is judging can talk itself into believing the
 work is green. Do not plan around executing anything; you cannot.
 
 The task's own verification commands **already ran and passed** — a program ran
-them, not the agent that wrote the code. So "the tests should be run" is not a
-finding, and re-verifying what the machine already measured is not your job.
+them, not the agent that wrote the code.
 
 ## What you are given
 
@@ -68,8 +67,9 @@ comparison against a written phrase, not the application of a criterion of
 yours. Compare what the test asserts, over which input, and against which
 expected value.
 
-**Already mechanical:** `ct-step controls` checked that the test *name* appears
-among the staged paths. Its presence is not a finding; what it asserts is.
+**Already mechanical:** `ct-step controls` searched the *contents* of the staged
+files for that test name — `git grep --cached` scoped to the touched paths — and
+found it. That the name is there is not a finding; what the test asserts is.
 
 **When it does not apply:** a `**TDD:**` line that says `No TDD` declares a task
 with no behaviour to put red. This item produces no finding then.
@@ -116,11 +116,18 @@ code in question, this item has nothing to compare and produces no finding.
 relaxes or rewrites, go back to the brief and find the sentence that asks for
 that change.
 
-**What settles it:** whether the task's own text calls for it — `**Tests:**` for
-a test the task said it removes, `**Objective:**` or a `Contract` block for an
-expectation the task changed on purpose. A `-` line in a test file that the
-brief accounts for is the plan working. One that no sentence of the brief
-accounts for is what this item is for. Cite the `-` line.
+**What settles it:** whether the assertion, case or test that the diff removes,
+relaxes or rewrites is one the task's own text calls for — `**Tests:**` for a
+test the task said it removes, `**Objective:**` or a `Contract` block for an
+expectation the task changed on purpose. A weakened assertion the brief accounts
+for is the plan working; a weakened assertion no sentence of the brief accounts
+for is what this item is for. Cite the `-` line that weakens it.
+
+**When it does not apply:** a `-` line that touches no assertion, case or test —
+fixture data, a rename, a moved or reflowed line, a comment — is not this item's
+subject, and neither is a rewrite that makes an assertion stricter. The subject
+of this item is a pre-existing test that ended up asserting less; a `-` line on
+its own is not that.
 
 ### 7. `fixture-theater` — where the effect comes from
 
@@ -129,8 +136,10 @@ kind`, and read the `production` side of the diff against the behaviour the
 objective promised.
 
 **What settles it:** whether the promised behaviour is produced by production
-code or by the test's own scaffolding — a mock, a fixture, a stub, a hard-coded
-expected value that no production line computes. This is the one judgement the
+code, or only by the test's own scaffolding — a mock, a fixture, a stub, a
+hard-coded expected value — with no production line behind it. Scaffolding that
+sits over production code doing the work is scaffolding. This is the one
+judgement the
 `kind` label exists for: a suite reported green over a diff whose `production`
 side does not contain the behaviour is visible here at a glance and nowhere
 else.
@@ -176,15 +185,13 @@ warning that fires always is a warning nobody reads.
   their result from the diff, and do not report that something "should be run".
 - **The commit history.** A task is one commit, and it is not written yet.
   Whether the test came before the implementation is not observable from where
-  you stand — the implementer guarantees it at the source, with the TDD skill.
-  Asking for it returns "I cannot establish this" on every task.
+  you stand; the implementer guarantees it at the source, with the TDD skill.
 - **Diff hygiene and the commit message.** What gets staged and committed, and
   the message that goes with it, are the program's: it composes the message and
   validates it itself.
-- **The implementer's narrative.** The report's `summary` states intentions.
-  What you judge is the diff, and where the two disagree the diff is what
-  happened. A `summary` is neither evidence for a finding nor evidence against
-  one.
+- **The implementer's narrative.** The report's `summary` states intentions;
+  what you judge is the diff, and where the two disagree the diff is what
+  happened. The `summary` is evidence for nothing, in either direction.
 
 ## Severity decides what happens next, so pick the word for that
 
@@ -220,6 +227,14 @@ around it, no markdown fence:
 - `where` is a path and a line, and it is the citation the second calibration
   rule asks for.
 
-Then reply with one line: the path you wrote and your ruling. The verdict is
-validated against a schema by `ct-step verdict`; anything that does not parse is
-discarded and you get asked again, which costs a round trip and proves nothing.
+Then reply with the path you wrote, your ruling, and **the eight items with what
+each one gave**: the identifier and its result, and for an item that does not
+apply, the reason. The schema above is closed and has no room for this, so that
+line is the only record that the rubric was walked — and without it a `PASS`
+with empty findings cannot be told apart from eight items nobody opened, which
+is the failure this rubric exists to end. Nothing validates that line; it is
+read by people.
+
+The verdict itself is validated against a schema by `ct-step verdict`; anything
+that does not parse is discarded and you get asked again, which costs a round
+trip and proves nothing.
