@@ -58,11 +58,12 @@
 const TASK_HEADING = /^### Task (\d+) — (.*)$/
 const VERIFICATION = '**Verification:**'
 const TESTS = '**Tests:**'
+const FILES = '**Files:**'
 
 // Cualquier otro marcador de tarea corta el párrafo: si tras **Verification:**
 // viene **Objective:** en vez de un bloque, es que no hay bloque, y decirlo es
 // mejor que seguir buscando hasta el final del fichero.
-const OTHER_MARKERS = ['**Objective:**', '**Files:**', '**TDD:**', TESTS]
+const OTHER_MARKERS = ['**Objective:**', FILES, '**TDD:**', TESTS]
 
 // Las tres formas del §2.5. El orden importa: "retira a propósito" antes que
 // "retira", o la corta se come a la larga y parte por el sitio equivocado.
@@ -132,6 +133,24 @@ function splitTests(text) {
   }
 }
 
+// Parte el párrafo de **Files:** en las rutas que declara, con su acción.
+// Formato real, medido en el plan del slice #5:
+//   **Files:** `web/package.json` (modify), `web/src/testing/setup.ts` (create)
+// Los backticks se tiran; la acción es opcional (una ruta sin paréntesis
+// detrás queda con action: null).
+export function splitFiles(text) {
+  const rutas = []
+  const re = /`([^`]+)`(?:\s*\(([^)]+)\))?/g
+  let m
+  while ((m = re.exec(text)) !== null) {
+    const path = m[1].trim()
+    if (!path) continue
+    const action = m[2] ? m[2].trim() : null
+    rutas.push({ path, action })
+  }
+  return rutas
+}
+
 // Junta el párrafo que arranca en `from`: la línea del marcador y sus
 // continuaciones, hasta la primera línea en blanco, otro marcador, un cercado o
 // un encabezado. Devuelve el texto sin el marcador y dónde se quedó.
@@ -194,6 +213,8 @@ export function extractTasks(markdown) {
     let added = []
     let removed = []
     let testsDeclared = false
+    let files = []
+    let filesDeclared = false
 
     cuerpo.forEach((l, i) => {
       if (!l.structural) return
@@ -213,6 +234,11 @@ export function extractTasks(markdown) {
           removed = partido.removed
         }
       }
+      if (t.startsWith(FILES) && !filesDeclared) {
+        filesDeclared = true
+        const { text } = paragraphFrom(cuerpo, i, FILES)
+        files = splitFiles(text)
+      }
     })
 
     if (commands === null) {
@@ -224,7 +250,7 @@ export function extractTasks(markdown) {
       push(h.n, 'tests-line', `la tarea ${h.n} no declara "${TESTS}".`)
     }
 
-    return { n: h.n, name: h.name, commands: commands || [], testsAdded: added, testsRemoved: removed }
+    return { n: h.n, name: h.name, commands: commands || [], testsAdded: added, testsRemoved: removed, files }
   })
 
   if (!tasks.length) push(0, 'tasks', 'el plan no declara ninguna tarea ("### Task N — ...").')

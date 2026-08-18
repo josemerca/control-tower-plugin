@@ -211,3 +211,34 @@ describe('los tests que la tarea retira a propósito', () => {
     expect(taskOf(REAL, 5).testsAdded).not.toContain('renders the app title in a DOM')
   })
 })
+
+// ---------------------------------------------------------------------------
+// LAS RUTAS QUE EL PLAN DECLARA — **Files:**
+// ---------------------------------------------------------------------------
+describe('las rutas que la tarea declara en **Files:**', () => {
+  it('lee las rutas de **Files:** con su acción', () => {
+    // La tarea 1 del plan ejecutable:
+    //   **Files:** `web/package.json` (modify), `web/vite.config.ts` (modify),
+    //   `web/src/testing/setup.ts` (create), `web/src/App.test.tsx` (modify)
+    expect(taskOf(EJECUTABLE, 1).files).toEqual([
+      { path: 'web/package.json', action: 'modify' },
+      { path: 'web/vite.config.ts', action: 'modify' },
+      { path: 'web/src/testing/setup.ts', action: 'create' },
+      { path: 'web/src/App.test.tsx', action: 'modify' },
+    ])
+  })
+
+  it('una ruta sin acción declarada la deja en null', () => {
+    const plan = [
+      '### Task 1 — sin acción',
+      '**Files:** `web/src/App.test.tsx`',
+      '**Tests:** N/A — nada.',
+      '**Verification:**',
+      F + 'bash',
+      'npm test',
+      F,
+    ].join('\n')
+    const t = extractTasks(plan).tasks[0]
+    expect(t.files).toEqual([{ path: 'web/src/App.test.tsx', action: null }])
+  })
+})
