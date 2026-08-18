@@ -27,7 +27,7 @@ const PLAN = [
   '',
   '### Task 1 — la primera',
   '**Objective:** un fichero.',
-  '**Files:** uno.txt',
+  '**Files:** `uno.txt` (create).',
   '**TDD:** No TDD — fixture.',
   '**Tests:** N/A — fixture.',
   '**Verification:** el fichero está.',
@@ -38,7 +38,7 @@ const PLAN = [
   '',
   '### Task 2 — la segunda',
   '**Objective:** otro fichero.',
-  '**Files:** dos.txt',
+  '**Files:** `dos.txt` (create).',
   '**TDD:** No TDD — fixture.',
   '**Tests:** N/A — fixture.',
   '**Verification:** el otro fichero está.',
@@ -246,6 +246,35 @@ describe('el veto no deja rastro que deshacer', () => {
     expect(estado().step).toBe('commit')     // agotado el presupuesto: entrega
     expect(ct('commit').status).toBe(0)
     expect(commits()).toBe(2)
+  })
+})
+
+describe('el alcance de la tarea lo decide el plan', () => {
+  it('una ruta tocada que el plan no declara para esa tarea es rojo', () => {
+    // La tarea 1 declara sólo uno.txt; el informe trae también dos.txt.
+    ct('report', informe(['uno.txt', 'dos.txt']))
+    const r = ct('controls')
+    expect(r.stdout).toMatch(/controles: failed/)
+    expect(readFileSync(estado().lastControlsLog, 'utf8')).toMatch(/dos\.txt.*sobra/)
+  })
+
+  it('una ruta declarada que la tarea no tocó es rojo', () => {
+    // El informe no trae nada: uno.txt, que la tarea 1 declara, se queda sin tocar.
+    ct('report', informe([]))
+    const r = ct('controls')
+    expect(r.stdout).toMatch(/controles: failed/)
+    expect(readFileSync(estado().lastControlsLog, 'utf8')).toMatch(/uno\.txt.*no está entre lo que tocó/)
+  })
+
+  it('(create) sobre un fichero que ya existía es rojo', () => {
+    writeFileSync(join(repo, 'existente.txt'), 'ya estaba\n')
+    execFileSync('git', ['add', 'existente.txt'], { cwd: repo, stdio: 'ignore' })
+    execFileSync('git', ['commit', '-q', '-m', 'ya existía'], { cwd: repo, stdio: 'ignore' })
+    writeFileSync(join(repo, 'plan.md'), PLAN.replace('`uno.txt` (create)', '`existente.txt` (create)'))
+    ct('report', informe(['existente.txt']))
+    const r = ct('controls')
+    expect(r.stdout).toMatch(/controles: failed/)
+    expect(readFileSync(estado().lastControlsLog, 'utf8')).toMatch(/existente\.txt.*ya existía en el commit anterior/)
   })
 })
 

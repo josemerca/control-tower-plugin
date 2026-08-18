@@ -371,10 +371,19 @@ function verboControls() {
   const lineas = []
   let resultado = OUTCOMES.DONE
 
-  // Primero los nombres, que son gratis. La vara de un plan mide que nada se
-  // rompió, no que se haya añadido lo prometido — medido en campo: una tarea
-  // pidió una función y su test, llegó la función sin el test, y la suite siguió
-  // verde porque la del commit anterior pasaba.
+  // Delante de todo el alcance, que es lo más gratis: comparar dos listas de
+  // rutas y mirar el árbol del commit anterior no cuesta nada, así que corre
+  // incluso antes que los nombres de test.
+  const fueraDeAlcance = alcanceDeclarado(t)
+  if (fueraDeAlcance.length) {
+    lineas.push('# alcance declarado por la tarea', ...fueraDeAlcance.map((f) => `- ${f}`), '')
+    resultado = OUTCOMES.FAILED
+  }
+
+  // Después los nombres, que también son gratis. La vara de un plan mide que
+  // nada se rompió, no que se haya añadido lo prometido — medido en campo: una
+  // tarea pidió una función y su test, llegó la función sin el test, y la
+  // suite siguió verde porque la del commit anterior pasaba.
   const fallos = testsDeclarados(t)
   if (fallos.length) {
     lineas.push('# tests declarados por la tarea', ...fallos.map((f) => `- ${f}`), '')
@@ -393,6 +402,47 @@ function verboControls() {
   run = { ...run, lastControlsLog: log }
   out(`controles: ${resultado} (log en ${log})`)
   return resultado
+}
+
+// El alcance de la tarea lo decide el PLAN, no el implementador: esta
+// comprobación cruza `run.lastPaths` (lo que la tarea stageó, en `report`)
+// contra `t.files` (lo que la tarea declara en **Files:**). Una ruta a un lado y
+// no al otro es un fallo, y también lo es una acción que no cuadra con el
+// árbol del commit anterior — `git cat-file -e HEAD:<path>`, no el disco,
+// porque el implementador ya creó el fichero cuando esto corre. Una ruta con
+// `action: null` no se comprueba contra git: es una decisión del plan, no un
+// olvido (tarea 1, `splitFiles`).
+//
+// El mensaje de cada fallo dice si se arregla el PLAN o el CÓDIGO, porque un
+// plan que se dejó una ruta en **Files:** es tan probable como un
+// implementador que tocó de más, y confundirlas cuesta un ciclo entero.
+function alcanceDeclarado(t) {
+  const fallos = []
+  const tocadas = run.lastPaths || []
+  const declaradas = t.files
+
+  for (const ruta of tocadas) {
+    if (!declaradas.some((f) => f.path === ruta)) {
+      fallos.push(`la tarea ${t.n} tocó '${ruta}' y el plan no la declara en sus **Files:** — sobra en el CÓDIGO, o hace falta añadirla al PLAN`)
+    }
+  }
+
+  for (const f of declaradas) {
+    if (!tocadas.includes(f.path)) {
+      fallos.push(`el plan declara '${f.path}' en las **Files:** de la tarea ${t.n} y no está entre lo que tocó — falta en el CÓDIGO, o sobra en el PLAN`)
+      continue
+    }
+    if (f.action === null) continue
+    const existiaAntes = git(['cat-file', '-e', `HEAD:${f.path}`], { allowFail: true }) !== null
+    if (f.action === 'create' && existiaAntes) {
+      fallos.push(`el plan declara '${f.path}' como (create) y ya existía en el commit anterior — revisa el PLAN, la acción debería ser (modify)`)
+    }
+    if (f.action === 'modify' && !existiaAntes) {
+      fallos.push(`el plan declara '${f.path}' como (modify) y no existía en el commit anterior — revisa el PLAN, la acción debería ser (create)`)
+    }
+  }
+
+  return fallos
 }
 
 function testsDeclarados(t) {
