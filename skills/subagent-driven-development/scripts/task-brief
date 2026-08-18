@@ -3,10 +3,26 @@
 # implementer reads in one call, so the task text never has to be pasted
 # through the controller's context.
 #
-# Usage: task-brief PLAN_FILE TASK_NUMBER [OUTFILE]
+# usage: task-brief [--with-plan-context] PLAN_FILE TASK_NUMBER [OUTFILE]
+# El flag va PRIMERO y es opcional. Con él, y solo con él, el fichero de salida
+# lleva delante de la tarea las secciones "### Out of scope", "## 2. Closed
+# decisions" y "## 3. Reference patterns", cada una con su encabezado, y una
+# línea que dice que son la vara y que ganan a la tarea si la contradicen.
+# Sin el flag la salida es la de siempre, byte a byte: el camino por defecto de
+# subagent-driven-development llama a este script y esa decisión es de José.
+#
 # Default OUTFILE: <repo-root>/.superpowers/sdd/task-<N>-brief.md
 # (per worktree; concurrent runs in the same working tree share it).
 set -euo pipefail
+
+with_plan_context=0
+if [ $# -ge 1 ] && [ "$1" = "--with-plan-context" ]; then
+  with_plan_context=1
+  shift
+elif [ $# -ge 1 ] && [[ "$1" == --* ]]; then
+  echo "usage: task-brief [--with-plan-context] PLAN_FILE TASK_NUMBER [OUTFILE]" >&2
+  exit 2
+fi
 
 if [ $# -lt 2 ] || [ $# -gt 3 ]; then
   echo "usage: task-brief PLAN_FILE TASK_NUMBER [OUTFILE]" >&2
@@ -24,17 +40,55 @@ else
   out="$dir/task-${n}-brief.md"
 fi
 
+# Extrae una sección por su encabezado literal (con su nivel de "#"), hasta el
+# siguiente encabezado de igual o menor nivel, respetando los cercados de
+# código para no confundir un comentario "# ..." de un bloque con un
+# encabezado real.
+extract_section() {
+  local heading=$1
+  awk -v hdr="$heading" '
+    function heading_level(s) { match(s, /^#+/); return RLENGTH }
+    BEGIN { hlvl = heading_level(hdr) }
+    /^```/ { infence = !infence }
+    !infence && !found && index($0, hdr) == 1 { found = 1; insec = 1; print; next }
+    insec && !infence && $0 ~ /^#+[ \t]/ {
+      lvl = heading_level($0)
+      if (lvl <= hlvl) { insec = 0 }
+    }
+    insec { print }
+  ' "$plan"
+}
+
+task_tmp=$(mktemp)
+trap 'rm -f "$task_tmp"' EXIT
+
 awk -v n="$n" '
   /^```/ { infence = !infence }
   !infence && /^#+[ \t]+Task[ \t]+[0-9]+/ {
     intask = ($0 ~ ("^#+[ \t]+Task[ \t]+" n "([^0-9]|$)"))
   }
   intask { print }
-' "$plan" > "$out"
+' "$plan" > "$task_tmp"
 
-if [ ! -s "$out" ]; then
+if [ ! -s "$task_tmp" ]; then
   echo "task ${n} not found in ${plan} (no heading matching 'Task ${n}')" >&2
   exit 3
+fi
+
+if [ "$with_plan_context" -eq 1 ]; then
+  {
+    echo "> Estas secciones son la vara del plan: si contradicen la tarea, ganan ellas."
+    echo
+    extract_section "### Out of scope"
+    echo
+    extract_section "## 2. Closed decisions"
+    echo
+    extract_section "## 3. Reference patterns"
+    echo
+    cat "$task_tmp"
+  } > "$out"
+else
+  cat "$task_tmp" > "$out"
 fi
 
 echo "wrote ${out}: $(wc -l < "$out" | tr -d ' ') lines"
