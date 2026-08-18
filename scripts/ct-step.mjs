@@ -306,9 +306,17 @@ function escribirBrief() {
 // comitea, así que lo que hay que juzgar todavía no es un commit.
 function escribirPaquete() {
   const paquete = join(workDir, `task-${run.task}-review.diff`)
+  const kinds = run.lastKinds || {}
+  // El kind de cada ruta se vuelca aquí porque este paquete es lo único que
+  // lee el juez: no ve `run.lastKinds`, así que si el dato no aparece en el
+  // paquete es como si no existiera para él. Y le hace falta para su único
+  // juicio propio del kind — que un diff con la suite en verde puede seguir
+  // siendo un FAIL si no toca ningún fichero de producción.
+  const rutas = (run.lastPaths || []).map((p) => `- ${p} (${kinds[p] ?? 'kind desconocido'})`).join('\n') || '(ninguna)'
   writeFileSync(paquete, [
     `# Review package: task ${run.task}/${run.tasksTotal} of issue #${issue} (staged, not yet committed)`,
     '', '## Files changed', git(['diff', '--cached', '--stat']) || '',
+    '', '## Rutas y su kind', rutas,
     '', '## Diff', git(['diff', '--cached', '-U10']) || '',
   ].join('\n'))
   return paquete
@@ -340,9 +348,20 @@ function verboReport() {
   }
   // Se stagea ANTES de medir: un control que lee el índice no ve un fichero
   // nuevo sin stagear.
-  git(['add', '--', ...report.paths])
-  run = { ...run, lastPaths: report.paths, lastSummary: report.summary }
-  out(`stageados ${report.paths.length} fichero(s): ${report.paths.join(', ')}`)
+  const rutas = report.paths.map((p) => p.path)
+  git(['add', '--', ...rutas])
+  // `lastPaths` sigue siendo una lista de CADENAS y no de los objetos del
+  // informe: alimenta el `--` de un `git grep` en `testsDeclarados`, que acota
+  // el ámbito de esa comprobación a lo que la tarea stageó — la propiedad más
+  // frágil de todo esto (ver el commit que la arregló, e4cc3dc). Pasarle
+  // objetos rompería ese pathspec. El kind vive aparte, en `lastKinds`.
+  run = {
+    ...run,
+    lastPaths: rutas,
+    lastKinds: Object.fromEntries(report.paths.map((p) => [p.path, p.kind])),
+    lastSummary: report.summary,
+  }
+  out(`stageados ${report.paths.length} fichero(s): ${rutas.join(', ')}`)
   return OUTCOMES.DONE
 }
 
@@ -451,7 +470,7 @@ function verboCommit() {
   if (git(['commit', '-m', mensaje], { allowFail: true }) === null) return OUTCOMES.FAILED
   const sha = headSha()
   medir('commit', { outcome: 'done', commit: sha })
-  run = { ...run, lastFindings: null, lastPaths: null, lastSummary: null }
+  run = { ...run, lastFindings: null, lastPaths: null, lastKinds: null, lastSummary: null }
   out(`commiteada la tarea ${run.task}/${run.tasksTotal}: ${sha.slice(0, 7)}`)
   return OUTCOMES.DONE
 }

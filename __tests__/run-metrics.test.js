@@ -141,7 +141,7 @@ describe('la telemetría de un paso real', () => {
     g('add', '-A')
     g('commit', '-q', '-m', 'base')
     writeFileSync(join(repo, 'uno.txt'), 'uno\n')
-    writeFileSync(join(repo, 'report.json'), JSON.stringify({ paths: ['uno.txt'], summary: 'hecho' }))
+    writeFileSync(join(repo, 'report.json'), JSON.stringify({ paths: [{ path: 'uno.txt', kind: 'production' }], summary: 'hecho' }))
   })
   afterEach(() => {
     rmSync(repo, { recursive: true, force: true })

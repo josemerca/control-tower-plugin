@@ -50,12 +50,31 @@ export const VERDICT_SCHEMA = Object.freeze({
 // La razón es la misma que hizo falta un `plan-tasks.js`: el programa necesita
 // las RUTAS que se tocaron para stagearlas, y sacar rutas de un informe en
 // prosa es la trampa del §2.5 otra vez, en el otro extremo del bucle.
+//
+// Cada ruta lleva además su KIND: si es código de producción o de test. El
+// dato tiene un único consumidor, el juez —`escribirPaquete` en
+// `scripts/ct-step.mjs` lo vuelca al paquete de revisión—, que así puede ver
+// de un vistazo si un diff con la suite en verde no toca ningún fichero de
+// producción, en vez de tener que releer cada ruta del diff para averiguarlo.
+export const PATH_KINDS = ['production', 'test']
+
 export const REPORT_SCHEMA = Object.freeze({
   type: 'object',
   additionalProperties: false,
   required: ['paths', 'summary'],
   properties: {
-    paths: { type: 'array', items: { type: 'string' } },
+    paths: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['path', 'kind'],
+        properties: {
+          path: { type: 'string' },
+          kind: { type: 'string', enum: PATH_KINDS },
+        },
+      },
+    },
     summary: { type: 'string' },
   },
 })
@@ -114,16 +133,23 @@ export function outcomeOfVerdict(verdict) {
   return verdict.findings.some((f) => f.severity !== 'low') ? 'corrections-ordered' : 'done'
 }
 
+// Una ruta con su kind. La severidad es la misma que ya tenía la ruta sola: un
+// kind ausente o que no está en PATH_KINDS descarta el informe entero — no se
+// asume 'production' por defecto, porque asumir es exactamente lo que este
+// dato existe para evitar.
+const esRutaValida = (p) => p !== null && typeof p === 'object' && esTexto(p.path) && PATH_KINDS.includes(p.kind)
+
 export function readReport(structured) {
   if (!structured || typeof structured !== 'object') return { why: 'el implementador no devolvió structured_output' }
   const { paths, summary } = structured
-  if (!Array.isArray(paths) || !paths.every(esTexto)) return { why: 'el informe no trae la lista de rutas tocadas' }
+  if (!Array.isArray(paths) || !paths.every(esRutaValida)) return { why: 'el informe no trae la lista de rutas tocadas, cada una con su kind (production o test)' }
   if (!esTexto(summary)) return { why: 'el informe no trae resumen' }
   // Una ruta absoluta o que sube de directorio no se stagea: el programa hace
   // `git add` de lo que diga esta lista, así que la lista es una superficie de
-  // ataque, no un dato de confianza.
-  const fuera = paths.filter((p) => p.startsWith('/') || p.split('/').includes('..'))
-  if (fuera.length) return { why: `el informe declara rutas fuera del worktree: ${fuera.join(', ')}` }
+  // ataque, no un dato de confianza. La comprobación mira `p.path`: el kind no
+  // participa en si una ruta se sale del worktree.
+  const fuera = paths.filter((p) => p.path.startsWith('/') || p.path.split('/').includes('..'))
+  if (fuera.length) return { why: `el informe declara rutas fuera del worktree: ${fuera.map((p) => p.path).join(', ')}` }
   return { report: { paths, summary } }
 }
 

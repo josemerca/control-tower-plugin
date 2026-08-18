@@ -75,10 +75,13 @@ const ct = (...args) => spawnSync('node', [SCRIPT, ...args, '--plan', 'plan.md',
   env: { ...process.env, CLAUDE_CONFIG_DIR: join(repo, '.telemetria') },
 })
 
-// Lo que escribiría un subagente, a fichero.
+// Lo que escribiría un subagente, a fichero. `paths` sigue siendo una lista de
+// rutas simples porque a estos tests no les importa el kind: la tarea 3 lo
+// añadió al contrato, y el valor por defecto 'production' basta para que el
+// informe siga siendo válido sin reescribir cada llamada de este fichero.
 const informe = (paths, nombre = 'report.json') => {
   const p = join(repo, nombre)
-  writeFileSync(p, JSON.stringify({ paths, summary: 'hecho' }))
+  writeFileSync(p, JSON.stringify({ paths: paths.map((path) => ({ path, kind: 'production' })), summary: 'hecho' }))
   return p
 }
 const veredicto = (ruling, findings = [], nombre = 'verdict.json') => {
@@ -133,6 +136,16 @@ describe('next: la sesión pregunta y el oráculo contesta', () => {
     expect(r.stdout).toMatch(/DESPACHA EL JUEZ .*ct-judge.*SIN Bash/)
     const paquete = join(repo, '.agent', 'run-7', 'task-1-review.diff')
     expect(readFileSync(paquete, 'utf8')).toMatch(/\+uno/)
+  })
+
+  it('el paquete de revisión dice de cada ruta si es producción o test, para que el juez lo vea', () => {
+    // El kind existe para un solo consumidor: el juez, que tiene que poder ver
+    // si un diff con la suite en verde no toca ningún fichero de producción.
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    const paquete = join(repo, '.agent', 'run-7', 'task-1-review.diff')
+    expect(readFileSync(paquete, 'utf8')).toMatch(/uno\.txt.*production/)
   })
 
   it('cuando el juez devolvió la tarea, next se lo dice al implementador', () => {
@@ -200,7 +213,7 @@ describe('el camino feliz', () => {
   })
 
   it('rechaza rutas de fuera del worktree: la lista la escribe un modelo', () => {
-    const r = ct('report', crudo(JSON.stringify({ paths: ['/etc/passwd'], summary: 'ups' })))
+    const r = ct('report', crudo(JSON.stringify({ paths: [{ path: '/etc/passwd', kind: 'production' }], summary: 'ups' })))
     expect(r.stdout).toMatch(/informe descartado.*fuera del worktree/)
     expect(estado().discards).toBe(1)
   })

@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage,
-  VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS,
+  VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS, PATH_KINDS,
 } from '../scripts/step-contracts.js'
 
 const AGENTE_JUEZ = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-judge.md')
@@ -98,12 +98,16 @@ describe('de veredicto a resultado de la tabla', () => {
 
 describe('el informe del implementador', () => {
   it('trae las rutas que tocó, que es lo que el programa stagea', () => {
-    expect(readReport({ paths: ['src/a.js', 'src/a.test.js'], summary: 'hecho' }).report.paths).toHaveLength(2)
+    const paths = [
+      { path: 'src/a.js', kind: 'production' },
+      { path: 'src/a.test.js', kind: 'test' },
+    ]
+    expect(readReport({ paths, summary: 'hecho' }).report.paths).toHaveLength(2)
   })
 
   it.each([
-    ['una ruta absoluta', ['/etc/passwd']],
-    ['una ruta que se sale del worktree', ['../otro-repo/secreto.txt']],
+    ['una ruta absoluta', [{ path: '/etc/passwd', kind: 'production' }]],
+    ['una ruta que se sale del worktree', [{ path: '../otro-repo/secreto.txt', kind: 'production' }]],
   ])('rechaza %s: la lista la escribe un modelo, no es un dato de confianza', (_caso, paths) => {
     const r = readReport({ paths, summary: 'hecho' })
     expect(r.report).toBeUndefined()
@@ -117,6 +121,25 @@ describe('el informe del implementador', () => {
   it('el esquema del informe pide rutas y resumen, y nada más', () => {
     expect(REPORT_SCHEMA.required).toEqual(['paths', 'summary'])
     expect(REPORT_SCHEMA.additionalProperties).toBe(false)
+  })
+
+  it('el informe declara de cada ruta si es producción o test', () => {
+    const r = readReport({ paths: [{ path: 'src/a.js', kind: 'production' }], summary: 'hecho' })
+    expect(r.report.paths[0].kind).toBe('production')
+  })
+
+  it('un kind desconocido descarta el informe', () => {
+    // No se asume producción por defecto: un kind que no está en PATH_KINDS
+    // (aquí 'infra') tira el informe entero, igual que ya hace una ruta que se
+    // sale del worktree.
+    const r = readReport({ paths: [{ path: 'src/a.js', kind: 'infra' }], summary: 'hecho' })
+    expect(r.report).toBeUndefined()
+    expect(PATH_KINDS).not.toContain('infra')
+  })
+
+  it('un informe sin kind se descarta', () => {
+    const r = readReport({ paths: [{ path: 'src/a.js' }], summary: 'hecho' })
+    expect(r.report).toBeUndefined()
   })
 })
 
