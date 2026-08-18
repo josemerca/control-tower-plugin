@@ -378,9 +378,18 @@ function verboControls() {
 
 function testsDeclarados(t) {
   const fallos = []
+  // El AMBITO es lo que la tarea stageo, no el indice entero. Un plan
+  // prescriptivo CITA el codigo verbatim y vive comiteado en docs/, asi que
+  // buscar el nombre de un test en todo el indice lo encuentra siempre: el
+  // retirado "sigue estando" (falso positivo, medido en la tarea 1 del slice
+  // #5 de repo-pulse) y el prometido "ya esta" aunque nadie lo escribiera
+  // (falso negativo, que es justo el fallo que esta comprobacion existe para
+  // cazar). Sin ficheros stageados no hay donde mirar, y eso es un NO.
+  const ambito = run.lastPaths || []
   const enElIndice = (nombre) => {
+    if (!ambito.length) return false
     try {
-      execFileSync('git', ['grep', '--cached', '--quiet', '-F', '--', nombre], { cwd: repoRoot, stdio: 'ignore', timeout: 60_000 })
+      execFileSync('git', ['grep', '--cached', '--quiet', '-F', '-e', nombre, '--', ...ambito], { cwd: repoRoot, stdio: 'ignore', timeout: 60_000 })
       return true
     } catch { return false }
   }
