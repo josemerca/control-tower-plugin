@@ -69,6 +69,23 @@ De `claude --help`:
 - `--bare` — "skip hooks, LSP, plugin sync […] and CLAUDE.md auto-discovery",
   pero "Anthropic auth is strictly `ANTHROPIC_API_KEY` or apiKeyHelper". Con
   cuentas OAuth (`claude-personal`/`claude-work`) **no sirve**.
+- `--strict-mcp-config` — "Only use MCP servers from `--mcp-config`, ignoring
+  all other MCP configurations". Sin alcance funcional aparente para este
+  diseño, y sin embargo la flag que más dinero decide: ver §2.8.
+
+Tres cosas más, medidas ejecutando el binario y no leyendo su ayuda:
+
+- **`--json-schema` toma el JSON literal, no una ruta.** Pasarle un fichero
+  falla con `--json-schema is not valid JSON`. El programa lee el esquema y lo
+  pasa como argumento.
+- **`--output-format json` ya trae hecho medio diseño.** La envoltura incluye
+  `structured_output` (el veredicto ya parseado, sin tocar `result`),
+  `total_cost_usd` (el tope en dinero del §3.4 lo mide el propio binario),
+  `session_id` (la conversación de esa llamada, §8), `permission_denials`,
+  `num_turns` e `is_error`.
+- **Hay que cerrarle el stdin.** Sin `< /dev/null` el binario espera 3 segundos
+  a que le llegue algo por la entrada estándar y lo avisa por stderr. El
+  programa lanza con el stdin cerrado, o le pasa el prompt por ahí.
 
 ### 2.2 En `claude -p` los hooks corren, y este plugin hidrata
 
@@ -82,11 +99,30 @@ Consecuencia: una llamada headless lanzada dentro del worktree del slice puede
 nacer **hidratada como si fuera el agente del slice**. Para el implementador es
 inocuo o incluso útil; para el juez es contaminación directa.
 
-Esto está **medido a medias a propósito**: el binario dice que los hooks corren,
-pero en esta máquina el plugin no está instalado (`~/.claude/plugins/installed_plugins.json`
-no lo lista), así que el efecto concreto **no se ha observado**. Es la primera
-tarea verificable de la implementación (§11, paso 0), no una suposición que
-viaje escondida en el diseño.
+**Medido el 2026-08-18** en una máquina que sí tiene el plugin instalado
+(`control-tower-loop@control-tower` 0.34.0, `claude` 2.1.234), con un worktree
+de mentira que sólo tenía `.agent/SLICE.md` y una palabra clave dentro. La
+llamada se hizo con `--tools ""` a propósito: sin herramientas el modelo no
+puede leer el fichero, así que si repite la palabra clave es porque venía en su
+contexto y no porque la haya ido a buscar.
+
+| Llamada | ¿Repite la palabra clave? |
+|---|---|
+| `claude -p --tools ""` | **sí** — nace hidratado |
+| `claude -p --tools "" --setting-sources project,local` | no |
+| `claude -p --tools "" --setting-sources project` | no |
+| `claude -p --tools "" --setting-sources ""` | no |
+
+La hidratación es real y **la palanca es `--setting-sources` sin `user`**: este
+plugin se habilita en `~/.claude/settings.json`, que es la fuente `user`, así
+que quitarla apaga sus hooks. Las cuatro llamadas devolvieron respuesta y
+salieron por `0`, o sea que **la autenticación OAuth sobrevive**, que es
+justo lo que `--bare` no permitía (§2.1).
+
+Medido también lo que el juez necesita poder hacer sin esa fuente:
+`claude -p --setting-sources "" --tools "Read,Grep,Glob"` **leyó el fichero sin
+un solo `permission_denials`**. Apagar los ajustes de usuario no le quita al
+juez la lectura, que es su única herramienta de trabajo.
 
 ### 2.3 La cuenta se hereda, no hay que elegirla
 
@@ -172,6 +208,31 @@ plantilla. Es la lección de la iteración anterior: validar un parser contra
   `529d2f4`. Medido en esta rama: `1 failed | 1895 passed (1896)`, así que
   "verde" aquí significa "1 failed y ese 1 es ése".
 
+### 2.8 La flag que decide el presupuesto: `--strict-mcp-config`
+
+Medido el 2026-08-18 con la **misma** llamada dos veces —juez de mentira,
+`--model haiku`, `--tools ""`, `--output-format json` y el esquema del
+veredicto— cambiando una sola flag:
+
+| Llamada | `cache_creation` | `cache_read` | `total_cost_usd` |
+|---|---|---|---|
+| sin `--strict-mcp-config` | 256.356 | 328.670 | **0,5552** |
+| con `--strict-mcp-config` | 1.418 | 31.090 | **0,0145** |
+
+**38 veces más cara** por no ponerla. La causa es que una llamada headless carga
+por defecto todos los servidores MCP configurados en la máquina, y las
+definiciones de sus herramientas entran en el contexto **aunque la llamada vaya
+con `--tools ""`**: `--tools` decide qué puede usar el modelo, no qué se le
+manda. En una máquina con los conectores típicos enchufados eso son ~585.000
+tokens de contexto en cada llamada, pagados 16 veces por una slice de 8 tareas.
+
+Las dos llamadas van con `--strict-mcp-config` y sin `--mcp-config`, o sea, con
+cero servidores MCP. Ninguna de las dos los necesita: el implementador trabaja
+con las herramientas locales del binario y el juez sólo lee.
+
+Y el coste de la máquina deja de ser una estimación del programa: `total_cost_usd`
+lo devuelve cada llamada, y el tope se acumula sumando lo que dice el binario.
+
 ---
 
 ## 3. La máquina de estados
@@ -245,6 +306,15 @@ código**; su único respaldo es el tope en dinero.
 segundos. Dos llamadas al modelo por tarea significan 16 llamadas en una slice
 de 8 tareas: **el tope en dinero no es opcional desde el primer día**.
 
+El gasto no se estima: cada llamada devuelve `total_cost_usd` en la envoltura de
+`--output-format json` (§2.1) y el run acumula esa cifra. El tope se comprueba
+**antes** de lanzar la llamada siguiente, no después de gastarla.
+
+Y el orden de magnitud de ese tope depende de una flag, no del modelo: con
+`--strict-mcp-config` la misma slice cuesta 38 veces menos (§2.8). Un `--max-usd`
+de 50 con la flag puesta es holgado; sin ella, se agota antes de la mitad de las
+tareas y el run muere por `7` sin que nada esté roto.
+
 ---
 
 ## 4. Fronteras y flujo de dependencias
@@ -314,6 +384,23 @@ delante del diff, como en `JudgeInvocation.text` del original.
 | Prompt | rúbrica de implementación + el fichero de `task-brief` | rúbrica de juicio + datos del run + el diff de `review-package` |
 | Salida | informe con las rutas que tocó | JSON validado contra el esquema del veredicto |
 | Contexto heredado | ninguno | ninguno |
+
+El argv sale entero del paso 0 (§2.2 y §2.8), y es el mismo salvo por las
+herramientas y por el esquema:
+
+```
+claude -p
+  --setting-sources ""        # sin la fuente `user` no corre el hook que hidrata
+  --strict-mcp-config         # cero servidores MCP: 38x más barato
+  --tools "<las de la tabla>"
+  --output-format json        # trae structured_output, total_cost_usd y session_id
+  --json-schema '<json literal>'   # SOLO el juez; toma el esquema, no una ruta
+  <prompt>
+```
+
+con el stdin cerrado y el `cwd` en el worktree del slice. El juez puede trabajar
+ahí dentro porque lo que lo contaminaba era la fuente de ajustes, no el
+directorio: medido, sin `user` no recibe la hidratación y sigue pudiendo leer.
 
 Que el juez no pueda ejecutar es **estructural**: se lo quita el binario, no una
 promesa en prosa. Y no ve la salida de los controles: el programa le pasa
@@ -499,14 +586,16 @@ ya recogido y le queda la lectura. No se reclama su alcance: aquí no se toca
 
 ## 11. Lo que hace falta construir
 
-### Paso 0 — medir el hook (una tarde, sin escribir producto)
+### Paso 0 — medir el hook — **HECHO (2026-08-18)**
 
-Comprobar en una máquina con el plugin instalado si `claude -p` lanzado dentro
-del worktree de un slice recibe la hidratación de `SessionStart`, y con qué
-`--setting-sources` deja de recibirla sin romper la autenticación OAuth. El
-resultado se anota en el spec antes de escribir `harness-call.js`, porque decide
-su argv. Si resultara que no hay palanca, el juez tendría que correr con el
-directorio de trabajo fuera del worktree, y eso sí es un cambio de diseño.
+Se midió lo que pedía —la hidratación existe, y `--setting-sources` sin `user`
+es la palanca, con OAuth intacto (§2.2)— así que el juez **se queda dentro del
+worktree** y no hay cambio de diseño.
+
+De propina salieron tres cosas que el diseño no tenía y que sí decide el argv:
+`--strict-mcp-config` abarata la misma llamada 38 veces (§2.8), `--output-format
+json` regala `structured_output`, `total_cost_usd` y `session_id` (§2.1), y
+`--json-schema` toma el JSON literal y no una ruta. El argv completo, en §6.
 
 ### Paso 1 — hacer los planes ejecutables (no necesita máquina de estados)
 
@@ -562,8 +651,9 @@ cercado real.
 
 | Riesgo | Mitigación |
 |---|---|
-| El juez nace hidratado por `SessionStart` y deja de ser independiente | Paso 0: medirlo antes de escribir el argv. `--bare` no es la palanca (exige clave de API) |
-| Coste: 16 llamadas al modelo en una slice de 8 tareas | Tope en dinero desde el primer día, con corte duro y código de salida propio |
+| El juez nace hidratado por `SessionStart` y deja de ser independiente | **Medido y resuelto** (§2.2): `--setting-sources ""`. `--bare` no era la palanca (exige clave de API) |
+| Coste: 16 llamadas al modelo en una slice de 8 tareas | `--strict-mcp-config` en las dos llamadas (§2.8) y tope en dinero desde el primer día, con corte duro y código de salida propio |
+| Una máquina enchufa un servidor MCP nuevo y el coste por llamada se dispara sin que nadie toque el conductor | El argv lleva `--strict-mcp-config` fijo, no configurable: la inmunidad no depende de cómo tenga cada uno su máquina |
 | El programa comitea, y el hook de closing keywords no cubre ese camino | El programa valida su mensaje con el mismo módulo que el hook |
 | Dos runs a la vez en el mismo worktree | El fichero de estado se abre en exclusiva; un segundo run sale por `8` |
 | El plan declara comandos que no existen en la máquina | Resultado `indeterminate`, cierre por `5`, sin reintentar a ciegas |
