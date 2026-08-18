@@ -867,6 +867,29 @@ describe('ct-init.sh', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
+  // D-4 — el estado del run de ct-run y su carpeta de trabajo. Son el bucle
+  // INTERNO de una slice dentro de su worktree: viven menos que el worktree, y
+  // la carpeta lleva los diffs de cada tarea, que son el mismo contenido que el
+  // commit. Verlos aparecer como ficheros nuevos en la PR es ruido puro.
+  it('añade las reglas del run de ct-run a .gitignore', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const gi = readFileSync(join(dir, '.gitignore'), 'utf8')
+    expect(gi).toContain('.agent/run-*.json')
+    expect(gi).toContain('.agent/run-*/')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('idempotente también para las reglas del run: dos corridas, una línea de cada', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const lineas = readFileSync(join(dir, '.gitignore'), 'utf8').split('\n')
+    expect(lineas.filter((l) => l === '.agent/run-*.json')).toHaveLength(1)
+    expect(lineas.filter((l) => l === '.agent/run-*/')).toHaveLength(1)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('idempotente: correrlo dos veces no duplica la línea .worktrees/ en .gitignore', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
