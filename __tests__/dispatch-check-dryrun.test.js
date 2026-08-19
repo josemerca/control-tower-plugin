@@ -129,6 +129,14 @@ function mkReleaseDryRunRepo(issue = 9) {
   writeFileSync(join(dir, 'docs', 'superpowers', 'plans', `2026-08-12-issue-${issue}-work.md`), minimalPlanFor(issue))
   git('add', '-A')
   git('commit', '-qm', 'work')
+  // El gate del run: --release exige un run de ct-step ENTREGADO. Local del
+  // worktree y sin commitear, que es como lo deja ct-step (ct-init lo
+  // gitignorea). Los tests que prueban su AUSENCIA lo borran.
+  mkdirSync(join(dir, '.agent'), { recursive: true })
+  writeFileSync(join(dir, '.agent', `run-${issue}.json`), JSON.stringify({
+    plan: `docs/superpowers/plans/2026-08-12-issue-${issue}-work.md`,
+    issue, task: 1, tasksTotal: 1, step: 'commit', closed: 'delivered',
+  }))
   return dir
 }
 
@@ -161,6 +169,42 @@ describe('dispatch-check --dry-run', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  // Review de capde (2026-08-19), punto 1: el kickoff manda conducir con
+  // ct-step, pero un prompt no es un gate. El gate es este: sin run ENTREGADO
+  // no se libera, y el exit 7 lo distingue del plan ausente (6) y de los
+  // ficheros de estado (5).
+  it('--release sin run de ct-step entregado → exit 7, y el issue no se mueve', () => {
+    const dir = mkReleaseDryRunRepo()
+    rmSync(join(dir, '.agent', 'run-9.json'))
+    let threw = false
+    try {
+      execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(7)
+      expect((e.stdout || '') + (e.stderr || '')).toMatch(/no existe .agent\/run-9\.json/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+    expect(threw).toBe(true)
+  })
+
+  it('--release con run a medias → exit 7 y dice por dónde va', () => {
+    const dir = mkReleaseDryRunRepo()
+    writeFileSync(join(dir, '.agent', 'run-9.json'), JSON.stringify({ issue: 9, task: 1, tasksTotal: 3, step: 'judge' }))
+    let threw = false
+    try {
+      execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO })
+    } catch (e) {
+      threw = true
+      expect(e.status).toBe(7)
+      expect((e.stdout || '') + (e.stderr || '')).toMatch(/no está entregado.*tarea 1\/3.*judge/)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+    expect(threw).toBe(true)
   })
 
   it('error de uso (sin --repo) → exit 2', () => {

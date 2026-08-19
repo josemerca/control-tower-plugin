@@ -188,3 +188,31 @@ function trasElCommit(run, outcome) {
       return imposible(run, outcome)
   }
 }
+
+// ============================================================================
+// EL GATE DEL RELEASE (la mitad que lee; la que escribe está en ct-step.mjs,
+// que persiste `closed: 'delivered'` al cerrar bien).
+//
+// `dispatch-check --release` no puede fiarse de que la sesión haya obedecido
+// el kickoff — un prompt no es un gate (doctrina del documento de
+// convergencia al descartar la opción (a) de F36). Esto lo convierte en
+// mecanismo: sin un run de ct-step ENTREGADO, no se libera. Pura a propósito:
+// recibe el contenido crudo del fichero (o null si no existe) y contesta,
+// sin git ni disco, para poder probarse sola.
+// ============================================================================
+export function deliveredRun(raw, issue) {
+  if (raw === null) {
+    return { ok: false, why: `no existe .agent/run-${issue}.json: la implementación no la condujo ct-step (o el run se borró). El kickoff manda conducir con ct-step, y este gate es lo que convierte esa orden en mecanismo.` }
+  }
+  let run
+  try { run = JSON.parse(raw) } catch (e) {
+    return { ok: false, why: `.agent/run-${issue}.json no es JSON válido (${e.message}): no se puede afirmar que el run esté entregado.` }
+  }
+  if (Number(run.issue) !== Number(issue)) {
+    return { ok: false, why: `.agent/run-${issue}.json dice issue ${run.issue}, no ${issue}: ese run es de otro slice.` }
+  }
+  if (run.closed !== RUN_STATES.DELIVERED) {
+    return { ok: false, why: `el run del issue ${issue} no está entregado (closed: ${run.closed ?? '(ausente)'}, tarea ${run.task}/${run.tasksTotal}, paso ${run.step}): termina el run con ct-step hasta "run delivered" y reintenta.` }
+  }
+  return { ok: true }
+}

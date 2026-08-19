@@ -14,6 +14,8 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { deliveredRun } from '../scripts/run-machine.js'
+
 const here = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(here, '..', 'scripts', 'ct-step.mjs')
 const F = '```'
@@ -259,6 +261,9 @@ describe('el alcance de la tarea lo decide el plan', () => {
     execFileSync('git', ['add', 'existente.txt'], { cwd: repo, stdio: 'ignore' })
     execFileSync('git', ['commit', '-q', '-m', 'ya existía'], { cwd: repo, stdio: 'ignore' })
     writeFileSync(join(repo, 'plan.md'), PLAN.replace('`uno.txt` (create)', '`existente.txt` (create)'))
+    // El implementador lo cambia de verdad: el alcance se mide sobre el
+    // ÍNDICE, y un fichero declarado pero sin cambios no stagea nada.
+    writeFileSync(join(repo, 'existente.txt'), 'ya estaba, y ahora cambia\n')
     ct('report', informe(['existente.txt']))
     const r = ct('controls')
     expect(r.stdout).toMatch(/controles: failed/)
@@ -503,5 +508,87 @@ describe('el sitio en el que va está en disco, no en la conversación', () => {
       .trim().split('\n').map((l) => JSON.parse(l))
     expect(filas[0].outcome).toBe('discarded')
     expect(filas[0].summary).toBeNull()
+  })
+})
+
+// Review de capde (2026-08-19), punto 2: el índice acumulaba entre intentos y
+// el control de alcance miraba la lista del informe, no lo que de verdad se
+// comitea. Las dos mitades del arreglo, cada una con su test.
+describe('el índice no acumula entre intentos', () => {
+  it('la ruta fuera de alcance del intento 1 NO viaja en el commit del intento 2', () => {
+    // Intento 1: el implementador toca de más; se stagea y el control lo caza.
+    ct('report', informe(['uno.txt', 'dos.txt']))
+    expect(ct('controls').stdout).toMatch(/controles: failed/)
+    // Intento 2: reporta solo lo legítimo. El reset de `report` vacía el
+    // índice, así que el dos.txt del intento 1 no queda stageado a escondidas.
+    ct('report', informe(['uno.txt']))
+    expect(ct('controls').stdout).toMatch(/controles: done/)
+    ct('verdict', veredicto('PASS'))
+    expect(ct('commit').status).toBe(0)
+    const files = execFileSync('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: repo, encoding: 'utf8' })
+    expect(files).toMatch(/uno\.txt/)
+    expect(files).not.toMatch(/dos\.txt/)
+  })
+
+  it('el alcance mide el ÍNDICE, no la lista del informe: lo stageado sin declarar es rojo', () => {
+    ct('report', informe(['uno.txt']))
+    // Algo stagea dos.txt por fuera del informe — da igual quién.
+    execFileSync('git', ['add', 'dos.txt'], { cwd: repo })
+    expect(ct('controls').stdout).toMatch(/controles: failed/)
+    const registro = readFileSync(join(repo, '.agent', 'run-7', 'task-1-controls-1.log'), 'utf8')
+    expect(registro).toMatch(/dos\.txt.*no la declara/)
+  })
+})
+
+// Review de capde (2026-08-19), punto 3 / criterio de cierre de F37: el PR de
+// un slice trae un VEREDICTO, no una frase del mensaje de commit afirmándolo.
+describe('el veredicto viaja en la pull request', () => {
+  it('el PASS de cada tarea acaba trackeado y dentro del commit de su tarea', () => {
+    tareaOk('uno.txt')
+    const ruta = join('docs', 'superpowers', 'verdicts', 'issue-7-task-1.json')
+    expect(existsSync(join(repo, ruta))).toBe(true)
+    const files = execFileSync('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: repo, encoding: 'utf8' })
+    expect(files).toMatch(/issue-7-task-1\.json/)
+    const guardado = JSON.parse(readFileSync(join(repo, ruta), 'utf8'))
+    expect(guardado.verdict.ruling).toBe('PASS')
+    expect(guardado.task).toBe(1)
+  })
+
+  it('un FAIL no deja veredicto trackeado: solo viaja el que aprueba', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'mal', where: 'uno.txt:1' }]))
+    expect(existsSync(join(repo, 'docs', 'superpowers', 'verdicts', 'issue-7-task-1.json'))).toBe(false)
+  })
+})
+
+// Review de capde (2026-08-19), punto 1: un prompt no es un gate. La mitad
+// ct-step: el cierre bueno se persiste y deliveredRun (que lee el gate de
+// dispatch-check --release) lo acepta o explica por qué no.
+describe('el cierre bueno se persiste, y el gate del release lo lee', () => {
+  it('run delivered → closed: "delivered" en el fichero, y deliveredRun lo acepta', () => {
+    tareaOk('uno.txt')
+    tareaOk('dos.txt')
+    expect(estado().closed).toBe('delivered')
+    expect(deliveredRun(readFileSync(join(repo, '.agent', 'run-7.json'), 'utf8'), 7)).toEqual({ ok: true })
+  })
+
+  it('sobre un run entregado, next dice "ya está" y los verbos que transicionan salen por 9', () => {
+    tareaOk('uno.txt')
+    tareaOk('dos.txt')
+    const n = ct('next')
+    expect(n.status).toBe(0)
+    expect(n.stdout).toMatch(/run delivered/)
+    expect(ct('report', informe(['uno.txt'])).status).toBe(9)
+  })
+
+  it('deliveredRun rechaza el run ausente, el de otro issue y el no entregado', () => {
+    expect(deliveredRun(null, 7).ok).toBe(false)
+    expect(deliveredRun(JSON.stringify({ issue: 8, closed: 'delivered' }), 7).ok).toBe(false)
+    expect(deliveredRun('esto no es json', 7).ok).toBe(false)
+    tareaOk('uno.txt') // 1 de 2: el run va bien pero NO está entregado
+    const parcial = deliveredRun(readFileSync(join(repo, '.agent', 'run-7.json'), 'utf8'), 7)
+    expect(parcial.ok).toBe(false)
+    expect(parcial.why).toMatch(/no está entregado/)
   })
 })

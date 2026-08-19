@@ -34,6 +34,10 @@ Cinco piezas, y ninguna es "reescribir un prompt":
   `controls` y su resultado sigue siendo `done` / `failed` / `indeterminate`.
 - **D-4 sigue aplazada y sigue siendo de José.** Nada de esto mete `ct-step` en
   el camino por defecto, y `d4-sigue-siendo-de-jose.test.js` sigue en pie.
+  > **Superado (2026-08-19, commit `3071d8a`):** este fork tomó la decisión
+  > después de cerrar esta ronda — el kickoff enchufa ct-step, el guardián se
+  > borró en ese mismo commit, y `dispatch-check --release` exige el run
+  > entregado. La frase de arriba describe lo que era verdad al escribirse.
 - **El juez sigue sin poder ejecutar.** Gana rúbrica, no `Bash`.
 - **El gate del plan sigue siendo humano.** Esto endurece lo que pasa *después*
   del gate, no lo sustituye.
@@ -316,7 +320,7 @@ el test pasa con el bug puesto.
 | `step-contracts.test.js` | un informe sin `kind` se descarta; un `kind` inventado se descarta; un `rule` fuera del enum se descarta |
 | `task-brief` (nuevo) | sin flag, la salida es **byte a byte** la de hoy; con flag, añade §1, §2 y §3 |
 | `skills-fork.test.js` | la costura 6: el implementador sigue cargando la skill del plugin y no la de upstream |
-| `d4-sigue-siendo-de-jose.test.js` | sin cambios, y sigue verde |
+| `d4-sigue-siendo-de-jose.test.js` | sin cambios, y sigue verde *(borrado después, en `3071d8a`, al tomar este fork la D-4)* |
 
 ---
 

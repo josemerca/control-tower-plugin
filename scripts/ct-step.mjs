@@ -2,15 +2,15 @@
 // ============================================================================
 // ct-step.mjs — LA MÁQUINA DE ESTADOS COMO ORÁCULO, NO COMO CONDUCTOR.
 //
-// La decisión D-4 del documento de convergencia —"¿el orquestador deja de ser
-// una sesión de chat?"— está APLAZADA y su dueño es José: se revisa al cerrar
-// F38, con los datos de F38 encima. Este fichero existe para coger lo que se
-// puede coger hoy sin tocar esa decisión.
+// El orquestador sigue siendo una sesión de chat (la pregunta literal de D-4
+// —"¿deja de serlo?"— sigue contestándose NO): la sesión despachada por
+// /ct-next sigue conduciendo, sigue despachando subagentes y sigue abriendo la
+// pull request. Lo que cambia es que YA NO DECIDE LA SECUENCIA: la pregunta.
 //
-// La respuesta a D-4 sigue siendo NO: el orquestador sigue siendo una sesión de
-// chat. La sesión despachada por /ct-next sigue conduciendo, sigue despachando
-// subagentes y sigue abriendo la pull request. Lo que cambia es que YA NO DECIDE
-// LA SECUENCIA: la pregunta.
+// Lo que este fork SÍ tomó (commit 3071d8a; en upstream lo reservaba a José el
+// test d4-sigue-siendo-de-jose, borrado en ese mismo commit) es el camino por
+// defecto: el kickoff de /ct-next manda conducir consultando este fichero, y
+// `dispatch-check --release` exige el run entregado (exit 7 si no).
 //
 //   ct-step next                    → "toca implementar la tarea 3; el brief está en X"
 //   ct-step report informe.json     → valida las rutas, las stagea, transiciona
@@ -173,6 +173,17 @@ const commitsDesde = (sha) => {
 let run
 if (existsSync(stateFile)) {
   run = JSON.parse(readFileSync(stateFile, 'utf8'))
+  // Un run entregado no tiene paso siguiente, y se sabe SIN reconstruir la
+  // tabla: el cierre bueno se persiste como `closed` (es lo que lee el gate
+  // de `dispatch-check --release`). `next` contesta "ya está" y sale bien;
+  // cualquier verbo que transicione es el error de secuencia de siempre.
+  if (run.closed === RUN_STATES.DELIVERED) {
+    if (verbo === 'next') {
+      out(`run delivered: las ${run.tasksTotal} tareas del issue ${issue} están comiteadas con veredicto. No queda paso — abre la pull request y libera con dispatch-check --release.`)
+      process.exit(EXIT.OK)
+    }
+    die(`el run del issue ${issue} ya está entregado: no queda paso que dar`, EXIT.WRONG_STEP)
+  }
   // No se cree el fichero a solas: cruza la tarea que dice el estado con los
   // commits que hay desde baseSha. Adivinar aquí es reimplementar encima de una
   // tarea ya comiteada.
@@ -360,8 +371,14 @@ function verboReport() {
     return OUTCOMES.DISCARDED
   }
   // Se stagea ANTES de medir: un control que lee el índice no ve un fichero
-  // nuevo sin stagear.
+  // nuevo sin stagear. Y ANTES de stagear, el índice se VACÍA (reset mixto:
+  // el worktree no se toca) — entre intentos el índice acumula: el intento 1
+  // pudo stagear una ruta fuera de alcance que el veto devolvió, y sin este
+  // reset esa versión viajaría dentro del commit del intento 2 sin que
+  // ningún control volviera a verla. Tras reset+add, el índice es
+  // EXACTAMENTE lo que el último informe declara — que es lo que se comitea.
   const rutas = report.paths
+  git(['reset', '-q'])
   git(['add', '--', ...rutas])
   // `lastPaths` alimenta el `--` de un `git grep` en `testsDeclarados`, que
   // acota el ámbito de esa comprobación a lo que la tarea stageó — la
@@ -422,8 +439,15 @@ function verboControls() {
   return resultado
 }
 
+// Lo que de verdad se comitea es el ÍNDICE, no la lista que declaró el
+// informe: las comprobaciones de alcance miden `git diff --cached` en vez de
+// `run.lastPaths`, para que nada stageado —lo declare el informe o no— escape
+// al control. Es la segunda mitad del reset de `report`: aquel garantiza que
+// el índice sea lo declarado, y esto lo VERIFICA en vez de suponerlo.
+const stagedPaths = () => (git(['diff', '--cached', '--name-only']) || '').split('\n').map((l) => l.trim()).filter(Boolean)
+
 // El alcance de la tarea lo decide el PLAN, no el implementador: esta
-// comprobación cruza `run.lastPaths` (lo que la tarea stageó, en `report`)
+// comprobación cruza el ÍNDICE (lo que de verdad se va a commitear)
 // contra `t.files` (lo que la tarea declara en **Files:**). Una ruta a un lado y
 // no al otro es un fallo, y también lo es una acción que no cuadra con el
 // árbol del commit anterior — `git cat-file -e HEAD:<path>`, no el disco,
@@ -436,7 +460,7 @@ function verboControls() {
 // implementador que tocó de más, y confundirlas cuesta un ciclo entero.
 function alcanceDeclarado(t) {
   const fallos = []
-  const tocadas = run.lastPaths || []
+  const tocadas = stagedPaths()
   const declaradas = t.files
 
   for (const ruta of tocadas) {
@@ -463,8 +487,8 @@ function alcanceDeclarado(t) {
   return fallos
 }
 
-// Comprueba si `nombre` aparece en el ÍNDICE, acotado a `run.lastPaths` (lo
-// que la tarea stageó, no el índice entero). Un plan prescriptivo CITA el
+// Comprueba si `nombre` aparece en el ÍNDICE, acotado a lo stageado (no al
+// índice entero del repo). Un plan prescriptivo CITA el
 // código verbatim y vive comiteado en docs/, así que buscar en todo el índice
 // encuentra siempre el nombre: el retirado "sigue estando" (falso positivo,
 // medido en la tarea 1 del slice #5 de repo-pulse) y el prometido "ya está"
@@ -473,7 +497,7 @@ function alcanceDeclarado(t) {
 // y eso es un NO. Compartida por `testsDeclarados` y `bloquesDeclarados`:
 // misma pregunta, mismo ámbito, mismo mecanismo.
 function enElIndice(nombre) {
-  const ambito = run.lastPaths || []
+  const ambito = stagedPaths()
   if (!ambito.length) return false
   try {
     execFileSync('git', ['grep', '--cached', '--quiet', '-F', '-e', nombre, '--', ...ambito], { cwd: repoRoot, stdio: 'ignore', timeout: 60_000 })
@@ -490,7 +514,7 @@ function testsDeclarados(t) {
 
 // Lo que los BLOQUES del plan prometen tiene que estar, igual que
 // `alcanceDeclarado` mide lo que **Files:** promete. Tres comprobaciones,
-// todas acotadas a `run.lastPaths` por la misma razón que `testsDeclarados`:
+// todas acotadas a lo stageado por la misma razón que `testsDeclarados`:
 // el plan vive comiteado dentro del repo, así que buscar en el repo es
 // buscar en el plan.
 //
@@ -510,7 +534,7 @@ function testsDeclarados(t) {
 // en `alcanceDeclarado`: confundir las dos cuesta un ciclo entero.
 function bloquesDeclarados(t) {
   const fallos = []
-  const tocadas = run.lastPaths || []
+  const tocadas = stagedPaths()
 
   for (const { role, path } of t.blockPaths) {
     if (!tocadas.includes(path)) {
@@ -571,6 +595,25 @@ function verboVerdict() {
     lastVerdict: verdict,
     lastFindings: graves.length ? graves.map((f) => `- [${f.severity}] ${f.where}: ${f.what}`).join('\n') : null,
   }
+  if (verdict.ruling === 'PASS') {
+    // El veredicto VIAJA en la pull request (criterio de cierre de F37: "el
+    // PR de un slice trae un veredicto emitido por un agente que no ejecutó
+    // nada"): el que aprueba la tarea se escribe en una ruta trackeada y se
+    // stagea, así `commit` lo lleva dentro del commit de su tarea. Lo que
+    // llega al PR es el JSON del juez, no una frase del mensaje de commit
+    // afirmándolo. Con `ruling` y no con el outcome a propósito: un PASS con
+    // hallazgos medios ordena correcciones, y si el presupuesto se agota la
+    // tarea entrega igual — ese PASS es el veredicto que la aprueba y tiene
+    // que viajar (el reset de `report` lo desstagea entre intentos y el PASS
+    // siguiente lo reescribe, así al commit llega siempre el último). Se
+    // stagea DESPUÉS de los controles a propósito: es un artefacto de la
+    // maquinaria, como el plan, no alcance del implementador.
+    const ruta = join('docs', 'superpowers', 'verdicts', `issue-${issue}-task-${run.task}.json`)
+    mkdirSync(join(repoRoot, 'docs', 'superpowers', 'verdicts'), { recursive: true })
+    writeFileSync(join(repoRoot, ruta), JSON.stringify({ issue, task: run.task, task_name: tarea()?.name ?? null, verdict }, null, 2) + '\n')
+    git(['add', '--', ruta])
+    out(`veredicto guardado y stageado: ${ruta}`)
+  }
   out(`veredicto ${verdict.ruling} con ${verdict.findings.length} hallazgo(s) → ${outcome}`)
   return outcome
 }
@@ -613,6 +656,11 @@ try {
   const antes = run.step
   const transicion = after(run, outcome, DEFAULT_BUDGETS)
   run = transicion.run
+  // El cierre bueno se PERSISTE: "entregado" tiene que poder leerse del
+  // fichero sin reconstruir la tabla, porque `dispatch-check --release` lo
+  // exige antes de liberar. Un prompt no es un gate; esto es la mitad
+  // ct-step del gate.
+  if (transicion.state === RUN_STATES.DELIVERED) run = { ...run, closed: RUN_STATES.DELIVERED }
   guardar()
 
   if (transicion.state === RUN_STATES.OPEN) {

@@ -697,6 +697,14 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     writeFileSync(join(wt, 'docs', 'superpowers', 'plans', `2026-08-12-issue-${issue}-fixture.md`), minimalPlanFor(issue))
   }
 
+  // El gate del run de --release (exit 7): estos tests prueban OTRAS puertas,
+  // así que se les da un run entregado para que la del run no interfiera.
+  // Sin commitear, que es como lo deja ct-step (ct-init lo gitignorea).
+  const seedRun = (wt, issue) => {
+    mkdirSync(join(wt, '.agent'), { recursive: true })
+    writeFileSync(join(wt, '.agent', `run-${issue}.json`), JSON.stringify({ issue, task: 1, tasksTotal: 1, step: 'commit', closed: 'delivered' }))
+  }
+
   // Igual que seedPlan, pero su Task 1 CITA un fichero en vez de crearlo:
   // `Current state (<path>):` con `<body>` dentro de la valla.
   const seedPlanCitando = (wt, issue, path, body) => {
@@ -713,6 +721,7 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     seedPlan(wt, 1)
     git('add', '-A')
     git('commit', '-qm', 'work')
+    seedRun(wt, 1)
     const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
       cwd: wt, encoding: 'utf8',
     })
@@ -788,6 +797,7 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     writeFileSync(join(wt, 'AGENTS.md'), 'texto nuevo que trae el slice\n')
     git('add', '-A')
     git('commit', '-qm', 'work')
+    seedRun(wt, 1)
     const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
       cwd: wt, encoding: 'utf8',
     })

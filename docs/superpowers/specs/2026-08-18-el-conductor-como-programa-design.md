@@ -29,11 +29,15 @@
 > | El veredicto validado contra un esquema | **A medias** — lo impone `ct-step verdict` al leerlo, no el binario: `--json-schema` sólo existe en modo `--print` |
 > | Presupuesto en dinero y gasto por papel | **No** — `total_cost_usd` sólo lo devuelve una llamada headless. De rebote, deja de tocar el alcance de F38 |
 >
-> Un test lo sostiene: `__tests__/d4-sigue-siendo-de-jose.test.js` comprueba que
-> nada del camino por defecto —ni los slash commands, ni el kickoff, ni las
-> skills, ni los hooks, ni el dispatcher— invoca `ct-step`. El día que D-4 se
-> apruebe, ese test se borra en el mismo commit que lo enchufe, y ese commit será
-> la decisión tomada por su dueño.
+> Un test lo sostenía: `__tests__/d4-sigue-siendo-de-jose.test.js` comprobaba
+> que nada del camino por defecto —ni los slash commands, ni el kickoff, ni las
+> skills, ni los hooks, ni el dispatcher— invocaba `ct-step`. El día que D-4 se
+> aprobara, ese test se borraría en el mismo commit que lo enchufara.
+>
+> **Ese commit existe: `3071d8a` (2026-08-19, este fork).** El kickoff de
+> /ct-next manda conducir con ct-step, el guardián se borró ahí mismo, y
+> `dispatch-check --release` exige desde `0.36.1` un run entregado (exit 7).
+> En upstream la decisión sigue teniendo dueño y fecha.
 >
 > Lo que sigue describe el diseño original (el conductor como programa). Se deja
 > tal cual porque es lo que hay que leer el día que D-4 se decida; las secciones
