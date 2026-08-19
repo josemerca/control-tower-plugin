@@ -104,6 +104,15 @@ El plan está dentro del repo; buscar en el repo es buscar en el plan.
 
 ### 3.1 El informe: la ruta ya no es una cadena
 
+> **REVERTIDO tras implementarlo (commits `f8ec2a9`, `d2515e6`, `9538af1`).** El `kind` se
+> construyó, se usó y se quitó, y el motivo vale más que el campo: **el juez tiene el diff
+> delante y distingue un fichero de test de uno de producción sin que nadie se lo diga**. La
+> etiqueta no le aportaba nada que no pudiera ver, la producía el agente al que se juzga, no la
+> verificaba nadie, y cuando venía mal no degradaba el juicio sino que lo DESACTIVABA: un test
+> mal etiquetado como producción dejaba de ser mirado justo por el ítem que busca tests
+> debilitados. Los dos ítems que dependían de ella (§7, `manipulacion-tests` y `fixture-theater`)
+> se quedan, apuntando al diff. Lo que sigue describe lo que se construyó, no lo que hay hoy.
+
 ```
 hoy       {"paths": ["web/src/App.tsx"], "summary": "..."}
 propuesto {"paths": [{"path": "web/src/App.tsx", "kind": "production"}], "summary": "..."}

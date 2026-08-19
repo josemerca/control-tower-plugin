@@ -201,6 +201,9 @@ npx vitest run __tests__/plan-tasks.test.js   # exit 0
 
 ### Task 3 — el informe dice de cada ruta si es producción o test
 
+> **Nota de cierre:** esta tarea se implementó y despues se revirtió — ver el bloque de §3.1
+> del design doc. El `kind` ya no existe; el rechazo de rutas duplicadas que llego por aqui, si.
+
 **Objective:** el informe del implementador etiqueta cada ruta, y `ct-step` sigue stageando lo
 mismo.
 
