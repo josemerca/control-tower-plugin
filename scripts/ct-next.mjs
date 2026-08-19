@@ -36,6 +36,10 @@ import { assessLocalLiveness } from './liveness.js'
 // lado de ct-next.mjs dentro del plugin, con independencia de dónde esté
 // instalado.
 const dispatchCheckPath = join(dirname(fileURLToPath(import.meta.url)), 'dispatch-check.mjs')
+// La misma resolución para ct-step.mjs: el kickoff interpola la ruta absoluta
+// real, nunca el token ${CLAUDE_PLUGIN_ROOT} (que en un prompt de texto plano
+// no lo sustituye nadie).
+const ctStepPath = join(dirname(fileURLToPath(import.meta.url)), 'ct-step.mjs')
 
 // ============================================================================
 // D5, hallazgo F (segunda mitad) — QUE EL DESTINO DE LA SALIDA SE ROMPA NO
@@ -2372,7 +2376,7 @@ for (let idx = 0; idx < selected.length; idx++) {
     // sabe contra qué rama salió su worktree, `gh pr create` lo apunta a la
     // rama por defecto del repo — con `--base <otra-rama>`, un diff que no es
     // el suyo.
-    kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath, base: resolvedBase })
+    kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath, ctStepPath, base: resolvedBase })
     stateSeed = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase, baseSha: resolvedBaseSha })
   } catch (e) {
     failSlice(idx, `no se pudo renderizar el kickoff/SLICE.md de #${s.n}: ${e.message}. El agente se lanzaría sin prompt utilizable — antes, esto solo se descubría en el run real.`)

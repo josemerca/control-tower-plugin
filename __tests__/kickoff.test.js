@@ -19,7 +19,7 @@ const otrosAddenda = (tipo) =>
 describe('renderKickoff', () => {
   it('backend: lleva su addendum y ninguno de los otros', () => {
     const k = renderKickoff(SLICE, { repo: 'o/r' })
-    expect(k).toContain('subagent-driven-development')
+    expect(k).toContain('ct-step')
     // F22: el fichero de estado de un agente de slice es `.agent/SLICE.md`.
     // El kickoff SOLO lo recibe un agente de slice, así que nombrar aquí el
     // `.agent/STATE.md` de la coordinadora era mandarlo al fichero trackeado
@@ -245,11 +245,14 @@ describe('buildStateSeed / renderKickoff — issue vs. orden §9 (D4, defecto 4)
 // con el ISSUE como spec—, y (c) las dos prohibiciones que la costura 3 del
 // fork ya impone pero que no pueden depender de que el agente llegue a leerla.
 describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan primero, prohibiciones)', () => {
-  const OPTS = { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs' }
+  const OPTS = { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs', ctStepPath: '/x/ct-step.mjs' }
 
   it('cita los skills PROPIOS (control-tower-loop:*) y ninguna referencia al namespace superpowers:', () => {
     const k = renderKickoff(SLICE, OPTS)
-    expect(k).toContain('control-tower-loop:subagent-driven-development')
+    // D-4 tomada en este fork: la conducción es de ct-step, y el kickoff ya
+    // no manda a subagent-driven-development — lo prohíbe explícitamente.
+    expect(k).toContain('/x/ct-step.mjs')
+    expect(k).not.toMatch(/sigue control-tower-loop:subagent-driven-development/)
     expect(k).toContain('control-tower-loop:writing-plans-prescriptive')
     expect(k).toContain('--check-plan')
     // Con dos puntos a propósito: `docs/superpowers/plans/` (la ruta-convención
@@ -263,11 +266,11 @@ describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan pri
     expect(k).toMatch(/issue como spec/i)
     expect(k).toContain('docs/superpowers/plans/')
     // El orden en el texto ES el orden de ejecución: el plan (writing-plans)
-    // tiene que aparecer ANTES de seguir con subagent-driven-development —
-    // SDD arranca en su rombo "Have implementation plan?" y la respuesta
-    // tiene que ser sí.
+    // tiene que aparecer ANTES de la conducción por ct-step — la máquina
+    // arranca sobre un plan commiteado (`--plan` es su primer argumento) y
+    // sin plan no hay run.
     expect(k.indexOf('control-tower-loop:writing-plans-prescriptive'))
-      .toBeLessThan(k.indexOf('control-tower-loop:subagent-driven-development'))
+      .toBeLessThan(k.indexOf('/x/ct-step.mjs'))
   })
 
   // F-jjponz-4 — el kickoff avisa del recorte antes de que el agente escriba
