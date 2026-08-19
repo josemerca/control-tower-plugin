@@ -87,17 +87,20 @@ Write this JSON to the report path you were given — nothing else in the file, 
 prose around it, no markdown fence:
 
 ```json
-{"paths": [{"path": "...", "kind": "production"}], "summary": "..."}
+{"paths": ["ruta/relativa/al/repo.ts", "otra.ts"], "summary": "..."}
 ```
 
-- `paths` is what gets staged and committed. **A file you forget here does not
-  make it into the commit**, and one you list but did not touch is a lie nothing
-  can detect. Paths must stay inside the repository: absolute paths and `..` are
-  rejected and the whole report is discarded.
-- `kind` is `production` or `test`, one per path, and it is the judge who reads
-  it: it is how a green diff that touches no production file becomes visible at a
-  glance. A missing or unknown `kind` discards the whole report — `production` is
-  not assumed for you.
+Those two fields are the whole object; there is no third one to add.
+
+- `paths` is a flat list of strings, each one a path relative to the repository
+  root, and it is what gets staged and committed. **A file you forget here does
+  not make it into the commit**, and one you list but did not touch is a lie
+  nothing can detect. Paths must stay inside the repository: an absolute path or
+  one that walks up with `..` is rejected and the whole report is discarded with
+  it.
+- **The same path twice discards the report too.** A list that declares one file
+  more than once cannot say which of the two declarations counts, so nothing is
+  guessed for you: list each file you touched exactly once.
 - `summary`: what you did, and anything the next step needs to know — a closed
   decision you obeyed and would have argued with, a decision the brief left
   thinner than it looked, a real problem you deliberately did not fix.

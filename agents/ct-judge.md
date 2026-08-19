@@ -18,11 +18,10 @@ them, not the agent that wrote the code.
 
 ## What you are given
 
-- **The review package.** `## Files changed` lists the staged files; `## Rutas y
-  su kind` labels every path the implementer touched as `production` or `test`;
-  `## Diff` is the staged diff of this task and nothing else. That label is the
-  only place the production/test distinction is written down, and it comes from
-  the implementer's report.
+- **The review package.** `## Files changed` lists the staged files; `## Rutas
+  tocadas` lists every path the implementer touched; `## Diff` is the staged diff
+  of this task and nothing else. Nothing in the package classifies those paths
+  for you: what each file is, you read off the diff and off the repository.
 - **The task brief.** It opens with the plan's yardstick — `### Out of scope`,
   `## 2. Closed decisions`, `## 3. Reference patterns` — and then carries the
   task itself with its `**Objective:**`, `**Files:**`, `**TDD:**`, `**Tests:**`
@@ -111,10 +110,11 @@ code in question, this item has nothing to compare and produces no finding.
 
 ### 6. `manipulacion-tests` — a pre-existing test that stopped asserting
 
-**Where to look:** the `-` lines of the diff in the files labelled `test` in
-`## Rutas y su kind`. For each assertion, case or test that a `-` line removes,
-relaxes or rewrites, go back to the brief and find the sentence that asks for
-that change.
+**Where to look:** the `-` lines of the diff in its test files. Which of the
+touched files are test files you decide by reading them — their path and their
+contents are both in front of you, and no one has to tell you. For each
+assertion, case or test that a `-` line removes, relaxes or rewrites, go back to
+the brief and find the sentence that asks for that change.
 
 **What settles it:** whether the assertion, case or test that the diff removes,
 relaxes or rewrites is one the task's own text calls for — `**Tests:**` for a
@@ -131,17 +131,16 @@ its own is not that.
 
 ### 7. `fixture-theater` — where the effect comes from
 
-**Where to look:** split the touched paths by their label in `## Rutas y su
-kind`, and read the `production` side of the diff against the behaviour the
-objective promised.
+**Where to look:** the whole diff, read against the behaviour the objective
+promised. The task's verification already ran and passed, so the suite is green
+over exactly these lines; the question this item opens is which of them produce
+that behaviour. Which files are production code and which are the test's own
+scaffolding you decide by reading them — nothing in the package splits them for
+you.
 
 **What settles it:** whether the promised behaviour is produced by production
 code, or only by the test's own scaffolding — a mock, a fixture, a stub, a
-hard-coded expected value — with no production line behind it. This is the one
-judgement the
-`kind` label exists for: a suite reported green over a diff whose `production`
-side does not contain the behaviour is visible here at a glance and nowhere
-else.
+hard-coded expected value — with no production line behind it.
 
 **When it does not apply:** a task whose `**Files:**` declares only prose, plan
 text or documents has no production side to look for.
