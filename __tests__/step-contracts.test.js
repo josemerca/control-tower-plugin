@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage,
   VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS, VERDICT_RULES,
+  PACKAGE_SECTIONS,
 } from '../scripts/step-contracts.js'
 
 const AGENTE_JUEZ = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-judge.md')
@@ -37,6 +38,32 @@ const reglasDelAgente = () => {
   let m
   while ((m = regex.exec(texto)) !== null) reglas.push(m[1])
   return reglas
+}
+
+// Los encabezados del paquete de revisión que cita el párrafo "The review
+// package." de "What you are given" — el único sitio de la rúbrica que habla
+// del paquete que escribe `escribirPaquete`. Se aísla ese párrafo antes de
+// buscar, porque el resto del fichero también cita encabezados entre
+// comillas invertidas (los del BRIEF: `## 2. Closed decisions`, `### Out of
+// scope`...) y esos no son de este paquete. Los espacios se normalizan porque
+// el ajuste de línea de Markdown puede partir una comilla invertida en dos
+// líneas del fichero sin partir el texto que representa. El párrafo nombra
+// cada encabezado al presentarlo y puede volver a nombrarlo después (para
+// explicar de dónde sale la lista); una repetición no añade una segunda
+// entrada, sólo cuenta la primera mención de cada uno.
+const seccionesDelPaquete = () => {
+  const texto = readFileSync(AGENTE_JUEZ, 'utf8')
+  const parrafo = /- \*\*The review package\.\*\*([\s\S]*?)\n- \*\*The task brief/.exec(texto)
+  if (!parrafo) return []
+  const normalizado = parrafo[1].replace(/\s+/g, ' ')
+  const regex = /`## ([^`]+)`/g
+  const secciones = []
+  let m
+  while ((m = regex.exec(normalizado)) !== null) {
+    const seccion = m[1].trim()
+    if (!secciones.includes(seccion)) secciones.push(seccion)
+  }
+  return secciones
 }
 
 describe('quién puede qué', () => {
@@ -72,6 +99,15 @@ describe('quién puede qué', () => {
     // descarte en cada ejecución. Este test es lo que lo convierte en un
     // fallo de test en vez de en un fallo silencioso en producción.
     expect(VERDICT_RULES).toEqual(reglasDelAgente())
+  })
+
+  it('PACKAGE_SECTIONS no puede divergir de los encabezados que la rúbrica cita por su nombre', () => {
+    // El mismo fallo que ya tuvieron JUDGE_TOOLS y VERDICT_RULES, con un
+    // agravante: aquí ni siquiera hay un esquema que descarte nada. Si
+    // `escribirPaquete` renombra un encabezado sin tocar la rúbrica, el juez
+    // sigue recibiendo instrucciones para leer una sección que no existe, y
+    // nada se entera salvo este test.
+    expect(PACKAGE_SECTIONS).toEqual(seccionesDelPaquete())
   })
 })
 

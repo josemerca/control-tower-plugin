@@ -62,7 +62,7 @@ import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS } from './r
 import { extractTasks } from './plan-tasks.js'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage,
-  IMPLEMENTER_TOOLS, JUDGE_TOOLS,
+  IMPLEMENTER_TOOLS, JUDGE_TOOLS, PACKAGE_SECTIONS,
 } from './step-contracts.js'
 import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures } from './run-metrics.js'
 
@@ -317,11 +317,12 @@ function escribirPaquete() {
   // al que se juzga, no la verificaba nadie, y cuando venía mal no degradaba
   // el juicio: lo desactivaba. No se vuelva a añadir.
   const rutas = (run.lastPaths || []).map((p) => `- ${p}`).join('\n') || '(ninguna)'
+  const [SECCION_FILES, SECCION_RUTAS, SECCION_DIFF] = PACKAGE_SECTIONS
   writeFileSync(paquete, [
     `# Review package: task ${run.task}/${run.tasksTotal} of issue #${issue} (staged, not yet committed)`,
-    '', '## Files changed', git(['diff', '--cached', '--stat']) || '',
-    '', '## Rutas tocadas', rutas,
-    '', '## Diff', git(['diff', '--cached', '-U10']) || '',
+    '', `## ${SECCION_FILES}`, git(['diff', '--cached', '--stat']) || '',
+    '', `## ${SECCION_RUTAS}`, rutas,
+    '', `## ${SECCION_DIFF}`, git(['diff', '--cached', '-U10']) || '',
   ].join('\n'))
   return paquete
 }

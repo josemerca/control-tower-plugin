@@ -20,8 +20,12 @@ them, not the agent that wrote the code.
 
 - **The review package.** `## Files changed` lists the staged files; `## Rutas
   tocadas` lists every path the implementer touched; `## Diff` is the staged diff
-  of this task and nothing else. Nothing in the package classifies those paths
-  for you: what each file is, you read off the diff and off the repository.
+  of this task and nothing else. The two lists come from different places:
+  `## Files changed` is read off the index itself, and `## Rutas tocadas` is
+  read off the implementer's own report of what it touched — a declared path
+  and a changed path are not the same fact. Nothing in the package classifies
+  those paths for you: what each file is, you read off the diff and off the
+  repository.
 - **The task brief.** It opens with the plan's yardstick — `### Out of scope`,
   `## 2. Closed decisions`, `## 3. Reference patterns` — and then carries the
   task itself with its `**Objective:**`, `**Files:**`, `**TDD:**`, `**Tests:**`

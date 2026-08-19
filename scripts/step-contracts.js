@@ -121,6 +121,18 @@ export const IMPLEMENTER_TOOLS = 'Read, Write, Edit, Grep, Glob, Bash, Skill'
 // del juez que se iba a despachar.
 export const JUDGE_TOOLS = 'Read, Grep, Glob, Write'
 
+// Los tres encabezados del paquete de revisión que escribe `escribirPaquete`
+// en `scripts/ct-step.mjs`, en el orden en que aparecen en el fichero. La
+// rúbrica del juez (`agents/ct-judge.md`) los cita por su nombre entre
+// comillas invertidas en "What you are given" para decirle al juez qué trae
+// cada sección — y ese cruce es el mismo desacople que ya sufrieron
+// JUDGE_TOOLS y VERDICT_RULES: dos copias a mano de la misma cadena, sin nada
+// que las ate. Aquí es peor que con JUDGE_TOOLS porque tampoco hay un error
+// de ejecución que lo delate — un encabezado renombrado en el script deja a
+// la rúbrica señalando una sección que no existe, y el juez sigue
+// contestando como si la hubiera leído.
+export const PACKAGE_SECTIONS = ['Files changed', 'Rutas tocadas', 'Diff']
+
 const esTexto = (v) => typeof v === 'string' && v.trim() !== ''
 
 // Validación a mano y no con una librería de esquemas: el spec exige cero
