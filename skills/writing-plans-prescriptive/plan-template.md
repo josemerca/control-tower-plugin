@@ -57,7 +57,7 @@ here with the reason so the implementer does not invent them.}}
 
 **Objective:** {{one sentence: the observable behavior this commit delivers}}
 
-**Files:** {{exact paths, each marked (create) or (modify)}}
+**Files:** {{exact paths between backticks, each marked (create) or (modify)}}
 
 Current state (path/to/file.ext, lines A-B):
 

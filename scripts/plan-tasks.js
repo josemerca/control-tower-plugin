@@ -137,11 +137,19 @@ function splitTests(text) {
   }
 }
 
+// Las únicas dos acciones que el resto del programa sabe interpretar
+// (`alcanceDeclarado`, en ct-step.mjs, sólo tiene ramas para éstas). Igual que
+// "una ruta sin acción declarada no se comprueba contra git, y no es un
+// problema del plan", una acción que no sea ninguna de las dos tampoco lo es:
+// mejor no comprobar nada que comprobar con un valor que nadie declaró.
+const KNOWN_ACTIONS = ['create', 'modify']
+
 // Parte el párrafo de **Files:** en las rutas que declara, con su acción.
 // Formato real, medido en el plan del slice #5:
 //   **Files:** `web/package.json` (modify), `web/src/testing/setup.ts` (create)
 // Los backticks se tiran; la acción es opcional (una ruta sin paréntesis
-// detrás queda con action: null).
+// detrás queda con action: null), y lo que no sea "create" ni "modify"
+// también queda en null en vez de colarse tal cual.
 export function splitFiles(text) {
   const rutas = []
   const re = /`([^`]+)`(?:\s*\(([^)]+)\))?/g
@@ -149,7 +157,8 @@ export function splitFiles(text) {
   while ((m = re.exec(text)) !== null) {
     const path = m[1].trim()
     if (!path) continue
-    const action = m[2] ? m[2].trim() : null
+    const cruda = m[2] ? m[2].trim() : null
+    const action = KNOWN_ACTIONS.includes(cruda) ? cruda : null
     rutas.push({ path, action })
   }
   return rutas
@@ -316,6 +325,14 @@ export function extractTasks(markdown) {
         filesDeclared = true
         const { text } = paragraphFrom(cuerpo, i, FILES)
         files = splitFiles(text)
+        // Hay texto y no salió ni una ruta: casi siempre porque las rutas no
+        // van entre backticks, que es lo único que `splitFiles` reconoce. Sin
+        // este aviso, `alcanceDeclarado` (en ct-step.mjs) ve `files: []` y
+        // reporta TODO lo tocado como fuera de alcance, con un mensaje que no
+        // menciona el formato — falla del lado seguro, pero a ciegas.
+        if (text.trim() !== '' && files.length === 0) {
+          push(h.n, 'files-line', `la tarea ${h.n} declara "${FILES}" pero no se extrajo ninguna ruta: las rutas van entre backticks, por ejemplo \`path/to/fichero.ext\` (create).`)
+        }
       }
       if (t.startsWith(TDD) && !tddDeclared) {
         tddDeclared = true

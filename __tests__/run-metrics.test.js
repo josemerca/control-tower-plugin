@@ -129,7 +129,7 @@ describe('la telemetría de un paso real', () => {
     '',
     '### Task 1 — la única',
     '**Objective:** un fichero.',
-    '**Files:** uno.txt',
+    '**Files:** `uno.txt`',
     '**TDD:** No TDD — fixture.',
     '**Tests:** N/A — fixture.',
     '**Verification:** el fichero está.',

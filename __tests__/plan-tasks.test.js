@@ -241,6 +241,46 @@ describe('las rutas que la tarea declara en **Files:**', () => {
     const t = extractTasks(plan).tasks[0]
     expect(t.files).toEqual([{ path: 'web/src/App.test.tsx', action: null }])
   })
+
+  it('una acción que no es "create" ni "modify" también deja la ruta en null', () => {
+    // `alcanceDeclarado`, en ct-step.mjs, sólo tiene ramas para 'create' y
+    // 'modify'. Un valor distinto ("renombra", un typo, lo que sea) no debe
+    // colarse tal cual: se trata como si no hubiera acción declarada.
+    const plan = [
+      '### Task 1 — acción rara',
+      '**Files:** `web/src/App.test.tsx` (renombra)',
+      '**Tests:** N/A — nada.',
+      '**Verification:**',
+      F + 'bash',
+      'npm test',
+      F,
+    ].join('\n')
+    const t = extractTasks(plan).tasks[0]
+    expect(t.files).toEqual([{ path: 'web/src/App.test.tsx', action: null }])
+  })
+
+  it('un párrafo de **Files:** con texto que no rinde ninguna ruta es un problema del plan', () => {
+    // Formato incorrecto (sin backticks): `splitFiles` no extrae nada, y sin
+    // este aviso `alcanceDeclarado` reportaría TODAS las rutas tocadas como
+    // fuera de alcance sin decir por qué.
+    const plan = [
+      '### Task 1 — sin backticks',
+      '**Files:** uno.txt (create)',
+      '**Tests:** N/A — nada.',
+      '**Verification:**',
+      F + 'bash',
+      'npm test',
+      F,
+    ].join('\n')
+    const { tasks, problems } = extractTasks(plan)
+    expect(tasks[0].files).toEqual([])
+    expect(problems.map((p) => p.rule)).toContain('files-line')
+  })
+
+  it('los dos planes reales siguen sin un solo problema de "files-line"', () => {
+    expect(extractTasks(REAL).problems.map((p) => p.rule)).not.toContain('files-line')
+    expect(extractTasks(EJECUTABLE).problems.map((p) => p.rule)).not.toContain('files-line')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -297,5 +337,27 @@ describe('las etiquetas de rol de los bloques de la tarea', () => {
     ].join('\n')
     const t = extractTasks(plan).tasks[0]
     expect(t.finalTexts).toEqual([{ path: 'docs/nota.md', text: 'primera línea\nsegunda línea' }])
+  })
+
+  it('extrae íntegro, sin recortar, el Final text (AGENTS.md) de la tarea 8 del plan real', () => {
+    // La única prueba de finalTexts hasta ahora era un markdown sintético de
+    // dos líneas. La tarea 8 del plan real es el caso de verdad: multilínea,
+    // con backticks dentro del propio texto.
+    const t8 = taskOf(EJECUTABLE, 8)
+    expect(t8.finalTexts).toEqual([
+      {
+        path: 'AGENTS.md',
+        text: [
+          '## Frontera `web/` ↔ `server/`',
+          'Las abrió el esqueleto (#1) y las cerró el primer slice de UI (#5):',
+          '- **En dev, `web/` llega al server por el proxy** — `web/vite.config.ts` encamina',
+          '  `/api` a `http://127.0.0.1:3000`. El server no lleva CORS y no debe llevarlo:',
+          '  la foto de los repos locales no sale de `127.0.0.1`.',
+          '- **`web/` NO importa de `server/`** — los tipos del payload se declaran en',
+          '  `web/src/api/types.ts`. Un tipo importado del server puede arrastrar campos de',
+          '  autor hasta el DOM, y eso es justo lo que no puede pasar.',
+        ].join('\n'),
+      },
+    ])
   })
 })
