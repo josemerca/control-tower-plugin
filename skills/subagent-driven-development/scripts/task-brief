@@ -59,6 +59,21 @@ extract_section() {
   ' "$plan"
 }
 
+# Envuelve extract_section: si el plan no trae esa sección, un hueco en
+# blanco se lee como "existe y está vacía", que no es lo mismo que "no
+# existe" — y la línea de arriba ya dice que estas secciones son la vara.
+# Declararlo ausente es lo único que no miente.
+print_section() {
+  local heading=$1
+  local contenido
+  contenido=$(extract_section "$heading")
+  if [ -z "$contenido" ]; then
+    echo "(sección '${heading}' no encontrada en el plan)"
+  else
+    printf '%s\n' "$contenido"
+  fi
+}
+
 task_tmp=$(mktemp)
 trap 'rm -f "$task_tmp"' EXIT
 
@@ -79,11 +94,11 @@ if [ "$with_plan_context" -eq 1 ]; then
   {
     echo "> Estas secciones son la vara del plan: si contradicen la tarea, ganan ellas."
     echo
-    extract_section "### Out of scope"
+    print_section "### Out of scope"
     echo
-    extract_section "## 2. Closed decisions"
+    print_section "## 2. Closed decisions"
     echo
-    extract_section "## 3. Reference patterns"
+    print_section "## 3. Reference patterns"
     echo
     cat "$task_tmp"
   } > "$out"

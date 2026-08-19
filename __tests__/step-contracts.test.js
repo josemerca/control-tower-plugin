@@ -88,6 +88,10 @@ describe('el veredicto', () => {
     ['con findings que no es lista', { ruling: 'PASS', findings: 'ninguno' }, /no es una lista/],
     ['con una severidad inventada', { ruling: 'FAIL', findings: [{ rule: 'contrato', severity: 'catastrophic', what: 'x', where: 'y' }] }, /severidad desconocida/],
     ['con un hallazgo mudo', { ruling: 'FAIL', findings: [{ rule: 'contrato', severity: 'high', what: '', where: 'y' }] }, /no dice qué o dónde/],
+    // Sin fijar este caso, una regresión que cambiara la condición a
+    // `f.rule && !VERDICT_RULES.includes(f.rule)` dejaría pasar en silencio
+    // un hallazgo sin `rule` — sólo cazaría la regla INVENTADA, no la AUSENTE.
+    ['con un hallazgo sin rule', { ruling: 'FAIL', findings: [{ severity: 'high', what: 'x', where: 'y' }] }, /regla desconocida/],
   ])('se descarta %s', (_caso, structured, motivo) => {
     const r = readVerdict(structured)
     expect(r.verdict).toBeUndefined()
@@ -161,6 +165,20 @@ describe('el informe del implementador', () => {
     expect(readReport({ summary: 'ya está' }).why).toMatch(/rutas tocadas/)
   })
 
+  it('rechaza la misma ruta declarada dos veces: el juez vería sólo una de las dos etiquetas', () => {
+    // `Object.fromEntries` (escribirPaquete, ct-step.mjs) se queda con la
+    // ÚLTIMA entrada de una ruta repetida. Un informe con 'a.js' como
+    // production y otra vez como test dejaría al juez viendo la etiqueta
+    // equivocada — y esa etiqueta enruta hallazgos de su rúbrica.
+    const paths = [
+      { path: 'src/a.js', kind: 'production' },
+      { path: 'src/a.js', kind: 'test' },
+    ]
+    const r = readReport({ paths, summary: 'hecho' })
+    expect(r.report).toBeUndefined()
+    expect(r.why).toMatch(/misma ruta/)
+  })
+
   it('el esquema del informe pide rutas y resumen, y nada más', () => {
     expect(REPORT_SCHEMA.required).toEqual(['paths', 'summary'])
     expect(REPORT_SCHEMA.additionalProperties).toBe(false)
@@ -183,6 +201,59 @@ describe('el informe del implementador', () => {
   it('un informe sin kind se descarta', () => {
     const r = readReport({ paths: [{ path: 'src/a.js' }], summary: 'hecho' })
     expect(r.report).toBeUndefined()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// REPORT_SCHEMA y VERDICT_SCHEMA se exportan, pero nada los ejecuta: quien
+// valida de verdad es readReport/readVerdict, escritos a mano más arriba en
+// step-contracts.js. Sin este test, los dos esquemas pueden divergir del
+// validador en silencio — ninguna suite se entera hasta que alguien lee el
+// esquema, se cree lo que dice, y descubre que no es lo que se exige.
+//
+// Lo que SÍ se ata aquí: el REQUIRED que cada esquema declara (en la raíz y
+// en cada item de array) es exactamente lo que el validador exige — quitar
+// cualquiera de esos campos de un payload por lo demás válido lo descarta.
+//
+// Lo que NO se ata, y hay que decirlo: los dos esquemas declaran
+// `additionalProperties: false`, tanto en el objeto raíz como en cada item de
+// paths/findings, y ni readReport ni readVerdict comprueban de verdad que no
+// sobre una propiedad — un campo de más pasa hoy sin que ninguno de los dos
+// se entere. Cerrar ese hueco es cambiar el validador, no añadir un test, y
+// no es parte de este arreglo.
+// ---------------------------------------------------------------------------
+describe('los esquemas declarados, atados a lo que valida de verdad', () => {
+  const informeValido = () => ({
+    paths: [{ path: 'src/a.js', kind: 'production' }],
+    summary: 'hecho',
+  })
+  const veredictoValido = () => ({
+    ruling: 'FAIL',
+    findings: [{ rule: 'contrato', severity: 'high', what: 'x', where: 'y' }],
+  })
+
+  it.each(REPORT_SCHEMA.required)('readReport exige "%s", como declara REPORT_SCHEMA.required', (campo) => {
+    const payload = informeValido()
+    delete payload[campo]
+    expect(readReport(payload).report).toBeUndefined()
+  })
+
+  it.each(REPORT_SCHEMA.properties.paths.items.required)('cada ruta exige "%s", como declara el esquema del item', (campo) => {
+    const payload = informeValido()
+    delete payload.paths[0][campo]
+    expect(readReport(payload).report).toBeUndefined()
+  })
+
+  it.each(VERDICT_SCHEMA.required)('readVerdict exige "%s", como declara VERDICT_SCHEMA.required', (campo) => {
+    const payload = veredictoValido()
+    delete payload[campo]
+    expect(readVerdict(payload).verdict).toBeUndefined()
+  })
+
+  it.each(VERDICT_SCHEMA.properties.findings.items.required)('cada hallazgo exige "%s", como declara el esquema del item', (campo) => {
+    const payload = veredictoValido()
+    delete payload.findings[0][campo]
+    expect(readVerdict(payload).verdict).toBeUndefined()
   })
 })
 

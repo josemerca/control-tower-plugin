@@ -62,7 +62,7 @@ import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS } from './r
 import { extractTasks } from './plan-tasks.js'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage,
-  VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS,
+  IMPLEMENTER_TOOLS, JUDGE_TOOLS,
 } from './step-contracts.js'
 import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures } from './run-metrics.js'
 
@@ -434,13 +434,13 @@ function alcanceDeclarado(t) {
 
   for (const ruta of tocadas) {
     if (!declaradas.some((f) => f.path === ruta)) {
-      fallos.push(`la tarea ${t.n} tocó '${ruta}' y el plan no la declara en sus **Files:** — sobra en el CÓDIGO, o hace falta añadirla al PLAN`)
+      fallos.push(`la tarea ${t.n} tocó '${ruta}' y el plan no la declara en sus **Files:** — dos explicaciones son igual de plausibles y este control no puede arbitrar entre ellas: sobra en el CÓDIGO, o hace falta añadirla al PLAN`)
     }
   }
 
   for (const f of declaradas) {
     if (!tocadas.includes(f.path)) {
-      fallos.push(`el plan declara '${f.path}' en las **Files:** de la tarea ${t.n} y no está entre lo que tocó — falta en el CÓDIGO, o sobra en el PLAN`)
+      fallos.push(`el plan declara '${f.path}' en las **Files:** de la tarea ${t.n} y no está entre lo que tocó — dos explicaciones son igual de plausibles y este control no puede arbitrar entre ellas: falta en el CÓDIGO, o sobra en el PLAN`)
       continue
     }
     if (f.action === null) continue

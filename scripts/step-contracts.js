@@ -179,6 +179,15 @@ export function readReport(structured) {
   // participa en si una ruta se sale del worktree.
   const fuera = paths.filter((p) => p.path.startsWith('/') || p.path.split('/').includes('..'))
   if (fuera.length) return { why: `el informe declara rutas fuera del worktree: ${fuera.map((p) => p.path).join(', ')}` }
+  // La misma ruta dos veces es otra superficie de ataque, aunque más sutil:
+  // `escribirPaquete` (ct-step.mjs) construye el mapa de etiquetas con
+  // `Object.fromEntries`, que ante dos entradas de la misma ruta se queda con
+  // la ÚLTIMA. Un informe que declara 'a.js' como production y otra vez como
+  // test dejaría al juez viendo sólo una de las dos etiquetas — y esa
+  // etiqueta enruta hallazgos de su rúbrica. Mismo criterio que una ruta
+  // fuera del worktree: se descarta el informe entero, no se decide por él.
+  const repetidas = [...new Set(paths.map((p) => p.path).filter((ruta, i, todas) => todas.indexOf(ruta) !== i))]
+  if (repetidas.length) return { why: `el informe declara la misma ruta más de una vez: ${repetidas.join(', ')}` }
   return { report: { paths, summary } }
 }
 

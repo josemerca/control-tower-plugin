@@ -86,6 +86,34 @@ describe('task-brief', () => {
     expect(texto).not.toContain('## 4. Inventory')
   })
 
+  it('si al plan le falta una sección de vara, lo dice en vez de dejar un hueco mudo', () => {
+    // Un plan sin "### Out of scope" ni "## 3. Reference patterns" (pero con
+    // su "## 2. Closed decisions"): las dos ausentes tienen que declararse,
+    // no dejar dos líneas en blanco indistinguibles de una sección vacía.
+    const planIncompleto = join(dir, 'plan-incompleto.md')
+    writeFileSync(planIncompleto, [
+      '# Plan de prueba',
+      '',
+      '## 7. Tasks',
+      '',
+      '### Task 1 — la única tarea',
+      '',
+      '**Files:**',
+      '- `a.js` (create)',
+      '',
+    ].join('\n'))
+
+    const out = join(dir, 'plan-incompleto-brief.md')
+    const r = run(['--with-plan-context', planIncompleto, '1', out])
+    expect(r.status).toBe(0)
+
+    const texto = readFileSync(out, 'utf8')
+    expect(texto).toMatch(/### Out of scope.*no encontrada en el plan/)
+    expect(texto).toMatch(/## 3\. Reference patterns.*no encontrada en el plan/)
+    // La línea que dice que son la vara sigue imprimiéndose igual.
+    expect(texto).toMatch(/vara/i)
+  })
+
   it('el flag desconocido sale por 2', () => {
     const out = join(dir, 'flag-desconocido.md')
     const r = run(['--nope', PLAN, TASK, out])
