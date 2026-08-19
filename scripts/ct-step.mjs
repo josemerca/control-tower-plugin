@@ -309,17 +309,18 @@ function escribirBrief() {
 // comitea, así que lo que hay que juzgar todavía no es un commit.
 function escribirPaquete() {
   const paquete = join(workDir, `task-${run.task}-review.diff`)
-  const kinds = run.lastKinds || {}
-  // El kind de cada ruta se vuelca aquí porque este paquete es lo único que
-  // lee el juez: no ve `run.lastKinds`, así que si el dato no aparece en el
-  // paquete es como si no existiera para él. Y le hace falta para su único
-  // juicio propio del kind — que un diff con la suite en verde puede seguir
-  // siendo un FAIL si no toca ningún fichero de producción.
-  const rutas = (run.lastPaths || []).map((p) => `- ${p} (${kinds[p] ?? 'kind desconocido'})`).join('\n') || '(ninguna)'
+  // Esta sección llevaba, junto a cada ruta, si era código de producción o de
+  // test (el `kind` que declaraba el informe del implementador). Se quitó: el
+  // juez tiene el diff delante y distingue un test de un fichero de
+  // producción sin que nadie se lo diga, así que la etiqueta no le aportaba
+  // nada que no pudiera ver por sí mismo. La producía además el propio agente
+  // al que se juzga, no la verificaba nadie, y cuando venía mal no degradaba
+  // el juicio: lo desactivaba. No se vuelva a añadir.
+  const rutas = (run.lastPaths || []).map((p) => `- ${p}`).join('\n') || '(ninguna)'
   writeFileSync(paquete, [
     `# Review package: task ${run.task}/${run.tasksTotal} of issue #${issue} (staged, not yet committed)`,
     '', '## Files changed', git(['diff', '--cached', '--stat']) || '',
-    '', '## Rutas y su kind', rutas,
+    '', '## Rutas tocadas', rutas,
     '', '## Diff', git(['diff', '--cached', '-U10']) || '',
   ].join('\n'))
   return paquete
@@ -344,24 +345,29 @@ function leerJson(ruta, quien) {
 function verboReport() {
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del informe')
   const { report, why } = porLeer ? { why: porLeer } : readReport(valor)
-  medir('implement', { outcome: report ? 'done' : 'discarded', paths: report ? report.paths.length : 0, why: report ? null : why })
+  // El resumen entra en la telemetría sólo cuando hay informe válido: un
+  // informe descartado no tiene resumen que contar, igual que `why` sólo
+  // lleva valor cuando se descarta.
+  medir('implement', {
+    outcome: report ? 'done' : 'discarded',
+    paths: report ? report.paths.length : 0,
+    why: report ? null : why,
+    summary: report ? report.summary : null,
+  })
   if (!report) {
     out(`informe descartado: ${why}`)
     return OUTCOMES.DISCARDED
   }
   // Se stagea ANTES de medir: un control que lee el índice no ve un fichero
   // nuevo sin stagear.
-  const rutas = report.paths.map((p) => p.path)
+  const rutas = report.paths
   git(['add', '--', ...rutas])
-  // `lastPaths` sigue siendo una lista de CADENAS y no de los objetos del
-  // informe: alimenta el `--` de un `git grep` en `testsDeclarados`, que acota
-  // el ámbito de esa comprobación a lo que la tarea stageó — la propiedad más
-  // frágil de todo esto (ver el commit que la arregló, e4cc3dc). Pasarle
-  // objetos rompería ese pathspec. El kind vive aparte, en `lastKinds`.
+  // `lastPaths` alimenta el `--` de un `git grep` en `testsDeclarados`, que
+  // acota el ámbito de esa comprobación a lo que la tarea stageó — la
+  // propiedad más frágil de todo esto (ver el commit que la arregló, e4cc3dc).
   run = {
     ...run,
     lastPaths: rutas,
-    lastKinds: Object.fromEntries(report.paths.map((p) => [p.path, p.kind])),
     lastSummary: report.summary,
   }
   out(`stageados ${report.paths.length} fichero(s): ${rutas.join(', ')}`)
@@ -584,7 +590,7 @@ function verboCommit() {
   if (git(['commit', '-m', mensaje], { allowFail: true }) === null) return OUTCOMES.FAILED
   const sha = headSha()
   medir('commit', { outcome: 'done', commit: sha })
-  run = { ...run, lastFindings: null, lastPaths: null, lastKinds: null, lastSummary: null }
+  run = { ...run, lastFindings: null, lastPaths: null, lastSummary: null }
   out(`commiteada la tarea ${run.task}/${run.tasksTotal}: ${sha.slice(0, 7)}`)
   return OUTCOMES.DONE
 }

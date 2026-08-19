@@ -71,13 +71,17 @@ export const VERDICT_SCHEMA = Object.freeze({
 // las RUTAS que se tocaron para stagearlas, y sacar rutas de un informe en
 // prosa es la trampa del §2.5 otra vez, en el otro extremo del bucle.
 //
-// Cada ruta lleva además su KIND: si es código de producción o de test. El
-// dato tiene un único consumidor, el juez —`escribirPaquete` en
-// `scripts/ct-step.mjs` lo vuelca al paquete de revisión—, que así puede ver
-// de un vistazo si un diff con la suite en verde no toca ningún fichero de
-// producción, en vez de tener que releer cada ruta del diff para averiguarlo.
-export const PATH_KINDS = ['production', 'test']
-
+// Aquí hubo un KIND por ruta ('production' o 'test'). La idea era que el
+// juez —vía `escribirPaquete` en `scripts/ct-step.mjs`— viera de un vistazo si
+// un diff con la suite en verde no tocaba ningún fichero de producción. Se
+// quitó: el juez tiene el diff delante y distingue un fichero de test de uno
+// de producción sin que nadie se lo diga, así que la etiqueta no le aportaba
+// nada que no pudiera ver por sí mismo. La producía además el propio agente al
+// que se juzga, no la verificaba nadie, y cuando venía mal no degradaba el
+// juicio: lo DESACTIVABA — el ítem de la rúbrica que mira los ficheros de test
+// dejaba de mirar un test mal etiquetado. Una capa de indirección entre el
+// juez y la evidencia que sólo podía introducir error. No se vuelva a añadir
+// sin resolver antes ese problema de raíz.
 export const REPORT_SCHEMA = Object.freeze({
   type: 'object',
   additionalProperties: false,
@@ -85,15 +89,7 @@ export const REPORT_SCHEMA = Object.freeze({
   properties: {
     paths: {
       type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['path', 'kind'],
-        properties: {
-          path: { type: 'string' },
-          kind: { type: 'string', enum: PATH_KINDS },
-        },
-      },
+      items: { type: 'string' },
     },
     summary: { type: 'string' },
   },
@@ -162,31 +158,21 @@ export function outcomeOfVerdict(verdict) {
   return verdict.findings.some((f) => f.severity !== 'low') ? 'corrections-ordered' : 'done'
 }
 
-// Una ruta con su kind. La severidad es la misma que ya tenía la ruta sola: un
-// kind ausente o que no está en PATH_KINDS descarta el informe entero — no se
-// asume 'production' por defecto, porque asumir es exactamente lo que este
-// dato existe para evitar.
-const esRutaValida = (p) => p !== null && typeof p === 'object' && esTexto(p.path) && PATH_KINDS.includes(p.kind)
-
 export function readReport(structured) {
   if (!structured || typeof structured !== 'object') return { why: 'el implementador no devolvió structured_output' }
   const { paths, summary } = structured
-  if (!Array.isArray(paths) || !paths.every(esRutaValida)) return { why: 'el informe no trae la lista de rutas tocadas, cada una con su kind (production o test)' }
+  if (!Array.isArray(paths) || !paths.every(esTexto)) return { why: 'el informe no trae la lista de rutas tocadas' }
   if (!esTexto(summary)) return { why: 'el informe no trae resumen' }
   // Una ruta absoluta o que sube de directorio no se stagea: el programa hace
   // `git add` de lo que diga esta lista, así que la lista es una superficie de
-  // ataque, no un dato de confianza. La comprobación mira `p.path`: el kind no
-  // participa en si una ruta se sale del worktree.
-  const fuera = paths.filter((p) => p.path.startsWith('/') || p.path.split('/').includes('..'))
-  if (fuera.length) return { why: `el informe declara rutas fuera del worktree: ${fuera.map((p) => p.path).join(', ')}` }
-  // La misma ruta dos veces es otra superficie de ataque, aunque más sutil:
-  // `escribirPaquete` (ct-step.mjs) construye el mapa de etiquetas con
-  // `Object.fromEntries`, que ante dos entradas de la misma ruta se queda con
-  // la ÚLTIMA. Un informe que declara 'a.js' como production y otra vez como
-  // test dejaría al juez viendo sólo una de las dos etiquetas — y esa
-  // etiqueta enruta hallazgos de su rúbrica. Mismo criterio que una ruta
-  // fuera del worktree: se descarta el informe entero, no se decide por él.
-  const repetidas = [...new Set(paths.map((p) => p.path).filter((ruta, i, todas) => todas.indexOf(ruta) !== i))]
+  // ataque, no un dato de confianza.
+  const fuera = paths.filter((p) => p.startsWith('/') || p.split('/').includes('..'))
+  if (fuera.length) return { why: `el informe declara rutas fuera del worktree: ${fuera.join(', ')}` }
+  // La misma ruta dos veces es un informe que no se entiende a sí mismo: no
+  // hay forma de decidir cuál de las dos declaraciones vale. Mismo criterio
+  // que una ruta fuera del worktree: se descarta el informe entero, no se
+  // decide por él.
+  const repetidas = [...new Set(paths.filter((ruta, i, todas) => todas.indexOf(ruta) !== i))]
   if (repetidas.length) return { why: `el informe declara la misma ruta más de una vez: ${repetidas.join(', ')}` }
   return { report: { paths, summary } }
 }

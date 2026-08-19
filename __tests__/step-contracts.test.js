@@ -12,7 +12,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage,
-  VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS, PATH_KINDS, VERDICT_RULES,
+  VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS, VERDICT_RULES,
 } from '../scripts/step-contracts.js'
 
 const AGENTE_JUEZ = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-judge.md')
@@ -145,16 +145,13 @@ describe('de veredicto a resultado de la tabla', () => {
 
 describe('el informe del implementador', () => {
   it('trae las rutas que tocó, que es lo que el programa stagea', () => {
-    const paths = [
-      { path: 'src/a.js', kind: 'production' },
-      { path: 'src/a.test.js', kind: 'test' },
-    ]
+    const paths = ['src/a.js', 'src/a.test.js']
     expect(readReport({ paths, summary: 'hecho' }).report.paths).toHaveLength(2)
   })
 
   it.each([
-    ['una ruta absoluta', [{ path: '/etc/passwd', kind: 'production' }]],
-    ['una ruta que se sale del worktree', [{ path: '../otro-repo/secreto.txt', kind: 'production' }]],
+    ['una ruta absoluta', ['/etc/passwd']],
+    ['una ruta que se sale del worktree', ['../otro-repo/secreto.txt']],
   ])('rechaza %s: la lista la escribe un modelo, no es un dato de confianza', (_caso, paths) => {
     const r = readReport({ paths, summary: 'hecho' })
     expect(r.report).toBeUndefined()
@@ -165,15 +162,8 @@ describe('el informe del implementador', () => {
     expect(readReport({ summary: 'ya está' }).why).toMatch(/rutas tocadas/)
   })
 
-  it('rechaza la misma ruta declarada dos veces: el juez vería sólo una de las dos etiquetas', () => {
-    // `Object.fromEntries` (escribirPaquete, ct-step.mjs) se queda con la
-    // ÚLTIMA entrada de una ruta repetida. Un informe con 'a.js' como
-    // production y otra vez como test dejaría al juez viendo la etiqueta
-    // equivocada — y esa etiqueta enruta hallazgos de su rúbrica.
-    const paths = [
-      { path: 'src/a.js', kind: 'production' },
-      { path: 'src/a.js', kind: 'test' },
-    ]
+  it('rechaza la misma ruta declarada dos veces: es un informe que no se entiende a sí mismo', () => {
+    const paths = ['src/a.js', 'src/a.js']
     const r = readReport({ paths, summary: 'hecho' })
     expect(r.report).toBeUndefined()
     expect(r.why).toMatch(/misma ruta/)
@@ -182,25 +172,6 @@ describe('el informe del implementador', () => {
   it('el esquema del informe pide rutas y resumen, y nada más', () => {
     expect(REPORT_SCHEMA.required).toEqual(['paths', 'summary'])
     expect(REPORT_SCHEMA.additionalProperties).toBe(false)
-  })
-
-  it('el informe declara de cada ruta si es producción o test', () => {
-    const r = readReport({ paths: [{ path: 'src/a.js', kind: 'production' }], summary: 'hecho' })
-    expect(r.report.paths[0].kind).toBe('production')
-  })
-
-  it('un kind desconocido descarta el informe', () => {
-    // No se asume producción por defecto: un kind que no está en PATH_KINDS
-    // (aquí 'infra') tira el informe entero, igual que ya hace una ruta que se
-    // sale del worktree.
-    const r = readReport({ paths: [{ path: 'src/a.js', kind: 'infra' }], summary: 'hecho' })
-    expect(r.report).toBeUndefined()
-    expect(PATH_KINDS).not.toContain('infra')
-  })
-
-  it('un informe sin kind se descarta', () => {
-    const r = readReport({ paths: [{ path: 'src/a.js' }], summary: 'hecho' })
-    expect(r.report).toBeUndefined()
   })
 })
 
@@ -224,7 +195,7 @@ describe('el informe del implementador', () => {
 // ---------------------------------------------------------------------------
 describe('los esquemas declarados, atados a lo que valida de verdad', () => {
   const informeValido = () => ({
-    paths: [{ path: 'src/a.js', kind: 'production' }],
+    paths: ['src/a.js'],
     summary: 'hecho',
   })
   const veredictoValido = () => ({
@@ -238,10 +209,8 @@ describe('los esquemas declarados, atados a lo que valida de verdad', () => {
     expect(readReport(payload).report).toBeUndefined()
   })
 
-  it.each(REPORT_SCHEMA.properties.paths.items.required)('cada ruta exige "%s", como declara el esquema del item', (campo) => {
-    const payload = informeValido()
-    delete payload.paths[0][campo]
-    expect(readReport(payload).report).toBeUndefined()
+  it('cada ruta de paths es una cadena, como declara el esquema del item', () => {
+    expect(REPORT_SCHEMA.properties.paths.items).toEqual({ type: 'string' })
   })
 
   it.each(VERDICT_SCHEMA.required)('readVerdict exige "%s", como declara VERDICT_SCHEMA.required', (campo) => {
