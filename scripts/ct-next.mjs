@@ -1451,47 +1451,51 @@ function detectDefaultBranch(repoSlug) {
   return out
 }
 
-// Verificación local de que la rama base resuelta EXISTE en el checkout (fix
-// round 1, Important): `detectDefaultBranch`/`--base` resuelven un NOMBRE
-// (contra GitHub, o a mano), pero `git worktree add -b <branch> <wt>
-// <resolvedBase>` necesita que ese nombre resuelva como referencia real EN
-// EL CHECKOUT LOCAL. Dos escenarios reales sin esta comprobación: un --base
-// con un typo ("mian"), o una rama por defecto que existe en GitHub pero
-// nunca se fetcheó en local (`git clone --single-branch`, checkout viejo).
-// Sin esta guarda, la secuencia sería: se hace el claim (status:ready →
-// status:in-progress) → `git worktree add` falla con un error interno de
-// git ("fatal: invalid reference…") → se revierte el claim → exit 1. El
-// estado queda consistente (no hay corrupción), pero se quema un ciclo
-// entero de claim/revert por algo que se podía saber OFFLINE, sin tocar gh,
-// antes de reclamar nada.
+// LA BASE SALE DEL REMOTO, NO DE LA COPIA LOCAL (Paso 1 del spec de la
+// primera corrida en un repo ajeno, 20 ago 2026).
 //
-// Se comprueba con `git rev-parse --verify --quiet <ref>^{commit}` (silencia
-// su propio error; el mensaje lo decidimos nosotros) contra DOS referencias:
-// la rama local, y `origin/<rama>` (la copia remote-tracking) — para poder
-// distinguir "no existe en ningún sitio que este checkout conozca" (typo
-// probable) de "existe en origin pero no se ha fetcheado/creado en local"
-// (arreglo: `git fetch`), en vez de dar el mismo mensaje genérico para dos
-// causas con remedios distintos.
-function verifyBaseExistsLocally(base) {
-  const existsAsCommit = (ref) => {
-    try {
-      // timeout+killSignal (MENOR, revisión externa: "TODA llamada
-      // bloqueante" de la cabecera de finding 1 no era del todo cierto —
-      // faltaban esta y las otras dos llamadas de git/gh puramente locales
-      // de este fichero, sin protección alguna contra un cuelgue real).
-      execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutFor(), killSignal: 'SIGKILL' })
-      return true
-    } catch {
-      return false
-    }
-  }
-  if (existsAsCommit(base)) return
-  if (existsAsCommit(`origin/${base}`)) {
-    console.error(`la rama base "${base}" existe en origin pero no en tu checkout local (probablemente falta un \`git fetch\`). Corre \`git fetch origin ${base}\` (o crea la rama local con \`git branch ${base} origin/${base}\`) y reintenta, o pasa --base <otra-rama> que sí tengas en local.`)
+// Antes esto era `verifyBaseExistsLocally`: comprobaba que el nombre resuelto
+// existiera EN EL CHECKOUT, prefiriendo la rama local y mirando
+// `origin/<rama>` solo si la local no estaba. Cerraba un fallo real (un
+// `--base` con typo quemaba un ciclo entero de claim/revert), y abría otro
+// peor, medido en campo: la rama local puede existir Y ESTAR VIEJA.
+//
+// jjponz/rust-monitoring#10. El worktree del slice salió de un `main` local
+// que estaba un commit por detrás de su remoto, porque otra pull request había
+// mergeado diecinueve minutos antes. De ahí, en cadena: el plan se escribió
+// citando verbatim un AGENTS.md que ya no era el de la base, la pull request
+// nació en conflicto, y por el conflicto GitHub no pudo calcular su referencia
+// de merge y NO ARRANCÓ NI UN CHECK. El criterio de aceptación del slice era
+// "la integración continua ejecuta los cuatro comandos en cada pull request",
+// y se entregó sin que eso se hubiera demostrado nunca.
+//
+// Así que la copia local deja de decidir. Se hace `git fetch origin <base>` y
+// el worktree se corta de `origin/<base>`: lo único que puede estar rancio
+// —una rama local que nadie actualizó— sale de la ecuación en vez de
+// diagnosticarse. El fetch NO es opcional y su fallo es terminal: sin él no se
+// sabe si la base está al día, y despachar sin saberlo es exactamente lo que
+// pasó en esa corrida.
+//
+// Lo que NO cambia: el nombre de la rama. `base:` en la semilla del slice
+// sigue siendo `main` y no `origin/main`, porque de ahí sale el `--base` de
+// `gh pr create`, que no acepta una rama remota. Cambia de dónde SALE el
+// worktree, no contra qué se abre la pull request.
+function fetchAndVerifyBaseOnRemote(base) {
+  try {
+    // timeout+killSignal como el resto de las llamadas bloqueantes de este
+    // fichero (finding 1). A diferencia de las otras, ésta SÍ toca la red: es
+    // el único punto del despacho que lo hace con git.
+    execFileSync('git', ['fetch', 'origin', base], { cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutFor(), killSignal: 'SIGKILL' })
+  } catch (e) {
+    console.error(`no se pudo hacer \`git fetch origin ${base}\` en ${repoRoot} (${e.message}). El worktree del slice se corta de origin/${base}, así que sin fetch no se puede saber si la base está al día — y un slice que nace por detrás de su remoto acaba en una pull request en conflicto, que GitHub deja sin ningún check. Arréglalo (¿red? ¿remote origin? ¿credenciales?) y reintenta: NO se ha reclamado nada.`)
     process.exit(1)
   }
-  console.error(`la rama base "${base}" no existe ni en tu checkout local ni como origin/${base} — revisa el nombre (¿--base con un typo?), o corre \`git fetch\` si es una rama remota reciente que tu checkout todavía no conoce.`)
-  process.exit(1)
+  try {
+    execFileSync('git', ['rev-parse', '--verify', '--quiet', `origin/${base}^{commit}`], { cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutFor(), killSignal: 'SIGKILL' })
+  } catch {
+    console.error(`la rama base "${base}" no existe en el remoto: tras el fetch, origin/${base} no resuelve a ningún commit. Revisa el nombre (¿--base con un typo?) o pasa --base <otra-rama> que exista en origin.`)
+    process.exit(1)
+  }
 }
 
 // Guarda de identidad de repo (finding 1 de la review final, el más grave de
@@ -1576,20 +1580,20 @@ if (fx) {
   }
   ensureRepoIdentity(repoRoot, repo)
   resolvedBase = typeof baseArg === 'string' ? baseArg : detectDefaultBranch(repo)
-  // Fix round 1, Important: verificación local ANTES del bucle de despacho,
-  // offline (ni gh ni red) — ver el comentario de verifyBaseExistsLocally.
-  verifyBaseExistsLocally(resolvedBase)
-  // F22: se resuelve UNA vez, aquí, donde `verifyBaseExistsLocally` acaba de
+  // Paso 1: fetch y verificación CONTRA EL REMOTO antes del bucle de despacho
+  // — ver el comentario de fetchAndVerifyBaseOnRemote.
+  fetchAndVerifyBaseOnRemote(resolvedBase)
+  // F22: se resuelve UNA vez, aquí, donde fetchAndVerifyBaseOnRemote acaba de
   // demostrar que la referencia existe. Si aun así fallara, se sigue con
   // cadena vacía: la semilla lo trata como "sin last_commit" y el hook calla,
   // que es el comportamiento de antes de este cambio — degradar es
   // aceptable, mentir no.
   try {
-    resolvedBaseSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${resolvedBase}^{commit}`], {
+    resolvedBaseSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `origin/${resolvedBase}^{commit}`], {
       cwd: repoRoot, encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
     }).trim()
   } catch {
-    console.error(`aviso: no se pudo resolver "${resolvedBase}" a un sha concreto, así que la semilla del slice irá sin \`last_commit\`. El hook de cierre de turno no podrá avisar al agente de que su estado se ha quedado atrás.`)
+    console.error(`aviso: no se pudo resolver "origin/${resolvedBase}" a un sha concreto, así que la semilla del slice irá sin \`last_commit\`. El hook de cierre de turno no podrá avisar al agente de que su estado se ha quedado atrás.`)
   }
 }
 
@@ -3170,7 +3174,7 @@ for (let idx = 0; idx < plans.length; idx++) {
       console.log(`destino: ${wt} / rama ${branch} — SIN CONFIRMAR: la consulta a git se intentó y FALLÓ (el detalle y el comando manual están en el aviso correspondiente, por stderr), así que no se puede afirmar que estén libres. Esto NO es modo fixture: la corrida real hará exactamente esta misma comprobación, y si vuelve a fallar tampoco lo sabrá.`)
     }
     console.log(`CLAUDE_CONFIG_DIR=${configDir}`)
-    console.log(`git worktree add -b ${branch} ${wt} ${resolvedBase}`)
+    console.log(`git worktree add -b ${branch} ${wt} origin/${resolvedBase}`)
     console.log(`seed ${wt}/${SLICE_REL_PATH}:\n${stateSeed}`)
     // D4, defecto 3: el kickoff, en PROSA. La línea `cmux ...` de abajo lo
     // lleva dentro, pero doblemente escapado (comillas POSIX + el
@@ -3415,7 +3419,7 @@ for (let idx = 0; idx < plans.length; idx++) {
     // `= null` cuyo único consumidor era un guard inalcanzable dentro de
     // `handleInterrupt` — ver el comentario de `activeClaim` para el porqué
     // de retirarlo.)
-    execFileSync('git', ['worktree', 'add', '-b', branch, wt, resolvedBase], { cwd: repoRoot, stdio: 'inherit', timeout: childTimeoutFor('worktree-add'), killSignal: 'SIGKILL' })
+    execFileSync('git', ['worktree', 'add', '-b', branch, wt, `origin/${resolvedBase}`], { cwd: repoRoot, stdio: 'inherit', timeout: childTimeoutFor('worktree-add'), killSignal: 'SIGKILL' })
   } catch (e) {
     // Si el worktree o la rama ya existen, `git worktree add` falla con
     // exit != 0 — lo dejamos fallar ruidoso en vez de reusar en silencio
