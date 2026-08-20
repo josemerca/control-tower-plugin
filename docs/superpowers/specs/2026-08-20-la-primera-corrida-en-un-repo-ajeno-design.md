@@ -604,7 +604,7 @@ cierran los agujeros por los que pasaron el conflicto y el control imposible; el
 tercero y el cuarto recuperan lo que hoy se pierde entre el juez y la pull
 request; los dos últimos son la medida.
 
-### Paso 1 — la base sale del remoto (H2, primera mitad)
+### Paso 1 — la base sale del remoto (H2, primera mitad) — **HECHO**
 
 `ct-next.mjs`: `git fetch origin <base>` antes de resolver, y `git worktree add
 -b <rama> <wt> origin/<base>`. `verifyBaseExistsLocally` pasa a verificar la
@@ -615,15 +615,59 @@ Vale por sí solo, no toca ninguna decisión de diseño, y es lo que impide de u
 golpe el conflicto, el plan literal contra un árbol obsoleto y la pull request sin
 checks.
 
-### Paso 2 — la semántica de los controles se valida (H1)
+### Paso 2 — la semántica de los controles se valida (H1) — **HECHO**
 
-`plan-contract.js`: rechazar todo comando cuyo `# expected:` declare un número
-impreso en vez de un código de salida, y todo comando que termine en una tubería
-cuyo último tramo no pueda fallar (`grep -c`, `wc -l`, `tail`, `head`). La
-plantilla y `writing-plans-prescriptive/SKILL.md` cambian con la regla, como ya
-cambiaron juntas la vez anterior: el `# expected:` deja de ser un número y pasa a
-ser el código de salida, y un comando que mide una cuenta se envuelve en un
-predicado (`test "$(...)" -eq N`).
+`plan-tasks.js` gana la regla `verification-predicate` y `plan-contract.js` la
+reenvía junto a `verification-block`, así que sale por la misma violación
+(`verification`): para quien arregla el plan las dos son el mismo trabajo, hacer
+que la vara mida.
+
+**Lo que la regla mira, y lo que decidió no mirar.** El diseño original decía
+"rechazar todo comando cuyo `# expected:` declare un número impreso". Eso se
+descartó al implementar: el comentario es prosa libre y `# expected: exit 0, 1
+passed` lleva un número dentro, así que ahí empieza a adivinar. Lo que se mira es
+el **último tramo de la tubería**, que es lo que decide `$?`, contra una lista
+**cerrada** de cuatro entradas cuyo código de salida es demostrablemente
+independiente de lo que el plan afirma, cada una con su prueba y su remedio:
+
+| Último tramo | Por qué su exit code no puede afirmarlo |
+|---|---|
+| `grep -c` (y `-rc`, `--count`) | sale con 0 con una coincidencia y con 1 con ninguna: nunca dice cuántas |
+| `wc` | sale con 0 con doce líneas y con doce mil |
+| `\| tail`, `\| head` | tira el exit code del comando que importa y deja el de `tail`, que es 0 casi siempre |
+| `git status` | sale con 0 con el árbol sucio y con el árbol limpio |
+
+`grep -q` y el `grep` pelado **no** se tocan: ahí el exit code ya es la aserción.
+Y ante `&&`, `||` o `;` la regla **no se pronuncia**, porque entonces el exit code
+depende de qué llegó a correr: un falso positivo que bloquea un plan correcto en
+un gate es peor que el agujero. El parseo respeta comillas y `$(...)` — sin lo
+segundo, el propio arreglo (`test "$(… | grep -c …)" -eq 0`) se leería como una
+tubería que acaba en `grep -c` y la regla vetaría la corrección en vez del
+defecto.
+
+**Medido contra realidad, y esto es lo que hay que retener.** El fixture del plan
+real del slice #5 de `repo-pulse` traía un `wc -l AGENTS.md` cuya intención
+declarada era "AGENTS.md sigue por debajo de 150 líneas": un control que no puede
+fallar nunca. Y el plan de ESTA rama —
+`docs/superpowers/plans/2026-08-18-los-dos-agentes-y-la-vara-del-plan.md`, el que
+produjo el código que este documento revisa— trae **cinco** controles de la misma
+clase, dos de ellos invertidos igual que el de `rust-monitoring`:
+
+```
+grep -c 'superpowers:' prompts/task-implementer.md                    # 0
+grep -c 'Read, Write, Edit, Grep, Glob, Bash' scripts/ct-step.mjs     # 0
+```
+
+Los dos afirman una ausencia, y `grep -c` sale con 1 cuando no encuentra: verdes
+exactamente cuando deberían estar rojos. No se corrigen: son el registro de un
+plan ya ejecutado, y `checkPlans` solo valida el plan cuyo nombre lleva
+`issue-<n>-`, así que no rompen ningún gate. Se dejan escritos aquí porque
+convierten H1 de anécdota en patrón: el defecto no vino de una sesión torpe en un
+repo ajeno, estaba también en el plan de casa.
+
+La plantilla y `writing-plans-prescriptive/SKILL.md` cambian con la regla, como ya
+cambiaron juntas la vez anterior: el `# expected:` pasa a ser el código de salida,
+y toda afirmación sobre una cuenta, una línea o una salida se envuelve en `test`.
 
 Es la siguiente regla de la serie que abrió `5b97fdd` en ese mismo fichero, y la
 misma clase de arreglo: hacer obligatorio lo que ya se daba por supuesto. Aquella

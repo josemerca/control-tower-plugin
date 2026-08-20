@@ -64,7 +64,7 @@ describe('la vara de la tarea: el bloque de comandos', () => {
     // La tarea 8 del plan real ocupa dos líneas antes de terminar el párrafo.
     expect(taskOf(EJECUTABLE, 8).commands).toEqual([
       'npm test && npm run lint && npm run build   # exit 0',
-      'wc -l AGENTS.md',
+      'test "$(wc -l < AGENTS.md)" -le 150',
     ])
   })
 
@@ -73,7 +73,7 @@ describe('la vara de la tarea: el bloque de comandos', () => {
     // cuenta el que va inmediatamente detrás de **Verification:**, y por eso
     // ninguna tarea del plan ejecutable trae TypeScript entre sus comandos.
     for (const t of extractTasks(EJECUTABLE).tasks) {
-      expect(t.commands.every((c) => /^(npm|wc|git|node|npx)\b/.test(c))).toBe(true)
+      expect(t.commands.every((c) => /^(npm|test|git|node|npx)\b/.test(c))).toBe(true)
     }
   })
 
@@ -359,5 +359,90 @@ describe('las etiquetas de rol de los bloques de la tarea', () => {
         ].join('\n'),
       },
     ])
+  })
+})
+
+// Paso 2 del spec de la primera corrida en un repo ajeno: LA VARA TIENE QUE
+// PODER MEDIR LO QUE DICE MEDIR.
+//
+// `verification-block` (5b97fdd) cerró "la verificación es prosa". Queda el
+// agujero de al lado, medido en jjponz/rust-monitoring#10: la verificación es
+// un comando ejecutable, está en su bloque, y su código de salida dice lo
+// CONTRARIO de lo que su comentario dice medir. `ct-step controls` puntúa solo
+// por exit code, y `grep -c` sale con 1 cuando no encuentra nada y con 0 cuando
+// encuentra: aquel control solo podía ponerse verde en el caso MALO. Ninguna
+// implementación podía superarlo, y pasó `--check-plan` y pasó el gate humano.
+//
+// La regla no adivina intenciones: nombra una lista cerrada de últimos tramos
+// cuyo código de salida es DEMOSTRABLEMENTE independiente de lo que el plan
+// afirma, y para cada uno dice cómo se escribe el predicado equivalente.
+describe('la vara tiene que poder medir lo que dice medir (verification-predicate)', () => {
+  const planCon = (comandos) => [
+    '### Task 1 — una tarea',
+    '',
+    '**Objective:** algo.',
+    '',
+    '**Files:** `a.js` (modify)',
+    '',
+    '**TDD:** No TDD — configuración.',
+    '',
+    '**Tests:** N/A — configuración.',
+    '',
+    '**Verification:** los comandos.',
+    '',
+    `${F}bash`,
+    ...comandos,
+    F,
+    '',
+  ].join('\n')
+
+  const reglas = (comandos) => extractTasks(planCon(comandos)).problems.filter((p) => p.rule === 'verification-predicate')
+
+  it('el control invertido de rust-monitoring, verbatim: `grep -c` cerrando la tubería', () => {
+    const r = reglas(["git diff HEAD -- AGENTS.md | grep -c 'ct-init:slices-contract'   # expected: 0"])
+    expect(r).toHaveLength(1)
+    expect(r[0].detail).toMatch(/grep -c/)
+    expect(r[0].detail).toMatch(/test "\$\(/)
+  })
+
+  it('`grep -c` sin tubería tampoco vale: su exit code dice "encontré algo", nunca cuántos', () => {
+    expect(reglas(["grep -c '^      - run: cargo ' .github/workflows/ci.yml   # expected: 4"])).toHaveLength(1)
+  })
+
+  it('el arreglo SÍ valida: el predicado que envuelve la cuenta, con su tubería dentro de `$(...)`', () => {
+    expect(reglas(['test "$(git diff HEAD -- AGENTS.md | grep -c \'ct-init:slices-contract\')" -eq 0'])).toEqual([])
+  })
+
+  it('`grep -q` y el `grep` pelado no se tocan: ahí el exit code ES la aserción', () => {
+    expect(reglas(["grep -q 'cargo clippy' AGENTS.md"])).toEqual([])
+    expect(reglas(["grep 'cargo clippy' AGENTS.md"])).toEqual([])
+  })
+
+  it('`wc` nunca es un control: sale por 0 con doce líneas y con doce mil — y lo trae el plan real', () => {
+    expect(reglas(['wc -l AGENTS.md'])).toHaveLength(1)
+  })
+
+  it('`| tail` cierra la tubería con el exit code de tail, no con el del comando que importa', () => {
+    expect(reglas(['make check 2>&1 | tail -80'])).toHaveLength(1)
+    // Suelto, sobre un fichero, sí asserta algo (que el fichero se puede leer).
+    expect(reglas(['tail -5 CHANGELOG.md'])).toEqual([])
+  })
+
+  it('`git status` sale por 0 con el árbol sucio y con el árbol limpio', () => {
+    expect(reglas(['git status --short   # expected: vacío'])).toHaveLength(1)
+  })
+
+  it('un `#` o un `|` entre comillas no son comentario ni tubería', () => {
+    expect(reglas(["grep -c '#ct-init' AGENTS.md"])).toHaveLength(1)
+    expect(reglas(['grep -q "a|b" AGENTS.md'])).toEqual([])
+  })
+
+  it('con `&&`, `||` o `;` no se pronuncia: el exit code depende de qué llegó a correr', () => {
+    expect(reglas(['npm test && npm run lint && npm run build   # exit 0'])).toEqual([])
+    expect(reglas(['cargo test || wc -l x'])).toEqual([])
+  })
+
+  it('el plan real ejecutable sigue sin problemas, con su `wc -l` convertido en predicado', () => {
+    expect(extractTasks(EJECUTABLE).problems).toEqual([])
   })
 })

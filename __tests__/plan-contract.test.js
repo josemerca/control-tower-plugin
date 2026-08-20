@@ -557,6 +557,30 @@ describe('los comandos de **Verification:** van en un bloque, no en la frase', (
     ]))).toEqual([])
   })
 
+  // Paso 2 del spec de la primera corrida en un repo ajeno: el bloque puede
+  // estar y sus comandos medir al revés. `--check-plan` es la puerta que dejó
+  // pasar el control invertido de jjponz/rust-monitoring#10, así que la regla
+  // tiene que llegar HASTA AQUÍ y no quedarse en el extractor.
+  it('el control invertido de rust-monitoring, con su bloque y todo, NO pasa el contrato', () => {
+    const plan = planCon([
+      '**Verification:** la sección protegida no se toca.',
+      F + 'bash',
+      "git diff HEAD -- AGENTS.md | grep -c 'ct-init:slices-contract'   # expected: 0",
+      F,
+    ])
+    expect(rulesOf(plan)).toHaveLength(1)
+    expect(rulesOf(plan)[0].detail).toMatch(/no puede afirmar lo que el control dice medir/)
+  })
+
+  it('el mismo control escrito como predicado sí pasa', () => {
+    expect(rulesOf(planCon([
+      '**Verification:** la sección protegida no se toca.',
+      F + 'bash',
+      'test "$(git diff HEAD -- AGENTS.md | grep -c \'ct-init:slices-contract\')" -eq 0',
+      F,
+    ]))).toEqual([])
+  })
+
   it('acepta el bloque aunque el párrafo de **Verification:** lleve prosa delante', () => {
     expect(rulesOf(planCon([
       '**Verification:** primero `npm install`, y después:',

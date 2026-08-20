@@ -94,8 +94,16 @@ go in the fenced block below, one per line, already run. A program executes this
 with arrows and parentheses is not executable, and `--check-plan` rejects a task without it.}}
 
 ```bash
-{{command}}   # {{expected: exit 0, N tests}}
+{{command}}   # {{expected: exit 0 — the comment says what exit 0 will mean here}}
 ```
+
+{{The program scores this block by EXIT CODE and nothing else, so every command has to be a
+predicate: a command whose exit code IS the claim. Anything you want to assert about a count, a
+line or a piece of output goes inside `test`: `test "$(… | grep -c 'x')" -eq 2`,
+`test "$(wc -l < f)" -le 150`, `test -z "$(git status --porcelain)"`. Never leave the claim in
+the comment while the exit code says something else — `grep -c` exits 0 for "found at least
+one" and 1 for "found none", so `grep -c … # expected: 0` is green exactly when it should be
+red. `--check-plan` rejects the commands it can prove cannot measure their own claim.}}
 
 ### Task 2 — {{name}}
 
@@ -112,7 +120,7 @@ with arrows and parentheses is not executable, and `--check-plan` rejects a task
 **Verification:** {{...}}
 
 ```bash
-{{command}}   # {{expected}}
+{{command}}   # {{expected: exit 0 — a predicate, as in Task 1}}
 ```
 
 ## 8. Global verification

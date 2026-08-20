@@ -269,6 +269,92 @@ function commandsAfter(lines, from) {
 }
 
 // ============================================================================
+// LA VARA TIENE QUE PODER MEDIR LO QUE DICE MEDIR
+//
+// `verification-block` cerró "la verificación es prosa". Esto cierra el agujero
+// de al lado, medido en jjponz/rust-monitoring#10: la verificación ES un comando
+// ejecutable, vive en su bloque, y su código de salida dice lo CONTRARIO de lo
+// que su comentario dice medir.
+//
+//   git diff HEAD -- AGENTS.md | grep -c 'ct-init:slices-contract'   # expected: 0
+//
+// `ct-step controls` puntúa SOLO por código de salida, y `grep -c` sale con 1
+// cuando no encuentra nada y con 0 cuando encuentra. O sea que ese control solo
+// podía ponerse verde en el caso MALO —la sección protegida tocada— y fallaba
+// siempre en el bueno. Ninguna implementación podía superarlo, y aun así pasó
+// `--check-plan` y pasó el gate humano de un humano leyendo 246 líneas en 125
+// segundos. El comentario decía la verdad; el exit code decía lo contrario, y el
+// exit code es el que manda.
+//
+// LO QUE ESTA REGLA NO HACE: leer el `# expected:`. Ahí empieza a adivinar —el
+// comentario es prosa libre y "exit 0, 1 passed" lleva un número dentro. Lo que
+// mira es el ÚLTIMO TRAMO de la tubería, que es lo que decide `$?`, contra una
+// lista CERRADA de comandos cuyo código de salida es demostrablemente
+// independiente de lo que el plan afirma. Cada entrada trae su prueba y su
+// remedio; nada más se toca.
+//
+// Y CALLA CUANDO NO PUEDE PROBARLO: ante `&&`, `||` o `;` no se pronuncia,
+// porque entonces el exit code depende de qué llegó a correr. Un falso positivo
+// aquí bloquea un plan correcto en un gate, que es peor que el agujero.
+
+// El último tramo de la tubería, sin su comentario final. `null` = no se analiza
+// (hay encadenamiento y el exit code ya no es de un solo comando).
+//
+// Respeta comillas y `$(...)`: sin lo segundo, el propio ARREGLO del control de
+// rust-monitoring —`test "$(… | grep -c …)" -eq 0`— se leería como una tubería
+// que acaba en `grep -c` y la regla vetaría la corrección en vez del defecto.
+export function lastPipelineStage(command) {
+  let stage = ''
+  let quote = null
+  let depth = 0
+  let piped = false
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i]
+    if (quote) { stage += c; if (c === quote) quote = null; continue }
+    if (c === "'" || c === '"' || c === '`') { quote = c; stage += c; continue }
+    if (c === '$' && command[i + 1] === '(') { depth++; stage += '$('; i++; continue }
+    if (c === ')' && depth > 0) { depth--; stage += c; continue }
+    if (depth > 0) { stage += c; continue }
+    if (c === '#' && (i === 0 || /\s/.test(command[i - 1]))) break
+    if (c === ';') return null
+    if (c === '&' && command[i + 1] === '&') return null
+    if (c === '|') {
+      if (command[i + 1] === '|') return null
+      piped = true
+      stage = ''
+      continue
+    }
+    stage += c
+  }
+  return { stage: stage.trim(), piped }
+}
+
+// Un flag corto que lleve la letra pedida (`-c`, `-rc`, `-ic`), o su forma
+// larga. `--color` no cuenta: empieza por dos guiones y no es `--count`.
+const shortFlagHas = (arg, letra) => /^-[A-Za-z]+$/.test(arg) && arg.includes(letra)
+
+// La lista cerrada. `words` son las palabras del último tramo.
+const NOT_A_PREDICATE = [
+  {
+    matches: (words) => /^(grep|egrep|fgrep|rg)$/.test(words[0]) &&
+      words.slice(1).some((a) => a === '--count' || shortFlagHas(a, 'c')),
+    why: '`grep -c` sale con 0 si encuentra AL MENOS UNA coincidencia y con 1 si no encuentra ninguna: su código de salida nunca dice cuántas. Un control que afirma una cuenta se escribe como predicado — `test "$(… | grep -c …)" -eq N` — y entonces el exit code ES la afirmación. (`grep -q`, o el `grep` pelado, sí valen: ahí el exit code ya es la aserción.)',
+  },
+  {
+    matches: (words) => words[0] === 'wc',
+    why: '`wc` sale con 0 con doce líneas y con doce mil: lo que el plan afirma es el número, y el número va por la salida estándar, no por el código de salida. Envuélvelo en un predicado: `test "$(wc -l < fichero)" -le 150`.',
+  },
+  {
+    matches: (words, piped) => piped && /^(tail|head)$/.test(words[0]),
+    why: 'cerrar una tubería con `tail` o `head` tira el código de salida del comando que importa y deja el de `tail`, que es 0 casi siempre — `make check 2>&1 | tail -80` sale por 0 aunque `make check` haya fallado. Deja el comando solo, o captura su código sin tubería (`cmd > fichero 2>&1; echo $?`).',
+  },
+  {
+    matches: (words) => words[0] === 'git' && words[1] === 'status',
+    why: '`git status` sale con 0 con el árbol sucio y con el árbol limpio, así que como control no mide nada. Para "no queda nada sin commitear" el predicado es `test -z "$(git status --porcelain)"`.',
+  },
+]
+
+// ============================================================================
 // LA ENTRADA PÚBLICA
 //
 // Devuelve `{ tasks, problems }`. `problems` no está vacío cuando el plan no es
@@ -353,6 +439,16 @@ export function extractTasks(markdown) {
       push(h.n, 'verification-block', `la tarea ${h.n} no trae bloque de comandos detrás de "${VERIFICATION}": su verificación es prosa, y un programa no ejecuta prosa.`)
     } else if (commands.length === 0) {
       push(h.n, 'verification-block', `la tarea ${h.n} trae un bloque de comandos vacío detrás de "${VERIFICATION}".`)
+    } else {
+      for (const comando of commands) {
+        const tramo = lastPipelineStage(comando)
+        if (!tramo || !tramo.stage) continue
+        const words = tramo.stage.split(/\s+/).filter(Boolean)
+        const roto = NOT_A_PREDICATE.find((r) => r.matches(words, tramo.piped))
+        if (roto) {
+          push(h.n, 'verification-predicate', `la tarea ${h.n} verifica con \`${comando}\`, y su código de salida no puede afirmar lo que el control dice medir: ${roto.why}`)
+        }
+      }
     }
     if (!testsDeclared) {
       push(h.n, 'tests-line', `la tarea ${h.n} no declara "${TESTS}".`)

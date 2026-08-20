@@ -122,8 +122,15 @@ over the test file: that one is allowed, and it goes through the literality chec
 in the repo. Verify each claim against the repo before writing it: a real plan dictated the line
 "the analysis is the ONLY code that runs git" while the same plan created a fixture helper that
 also ran git, and the false line shipped. Same rule for `**Verification:**`: run the command
-first, then write the output you saw, and put the command in the block — not in the sentence. A `grep -c` that "should print 2" and prints 3 is a task
-whose verification cannot pass.
+first, then write down what you saw, and put the command in the block — not in the sentence.
+And write it as a **predicate**, because the program that runs your block scores it by exit code
+and reads nothing else: a claim left in the `# expected:` comment while the exit code says
+something different is a control that cannot work. A real plan shipped
+`git diff HEAD -- AGENTS.md | grep -c 'marker'   # expected: 0` past this gate and past a human
+one; `grep -c` exits 0 when it finds at least one match and 1 when it finds none, so that
+control could only go green in the case it existed to forbid, and no implementation could ever
+pass it. Wrap the claim: `test "$(git diff HEAD -- AGENTS.md | grep -c 'marker')" -eq 0`.
+`--check-plan` now rejects the commands it can prove cannot measure their own claim.
 
 **Cite the files your slice rewrites, normally.** `--check-plan` reads the working tree (you
 have not implemented anything yet) and `--release` reads the **base of the branch** — the same
@@ -144,9 +151,11 @@ line `No code — <reason>` for a task that is configuration in prose or documen
 `**TDD:**` (the failing test first, with its literal name and assertion, or
 `No TDD — <reason>`), `**Tests:**` (added / deliberately removed, named one by one), and
 `**Verification:**` (exact commands, already run, and their output) — **the commands go in a
-fenced block right after the marker, one per line**, because the thing that runs them may be a
-program and not a person. Prose in line reads fine and executes never: `--check-plan` fails a
-task whose `**Verification:**` has no command block.
+fenced block right after the marker, one per line, each one a predicate**, because the thing
+that runs them is a program and it reads only their exit code. Prose in line reads fine and
+executes never, and a command that prints its answer instead of returning it measures nothing:
+`--check-plan` fails a task whose `**Verification:**` has no command block, and one whose
+commands cannot measure what they claim.
 
 No placeholders and no open decisions anywhere: not `TBD`, not "add error handling", not
 "similar to Task 3", and no reference to a symbol no task defines. What you must not leave open

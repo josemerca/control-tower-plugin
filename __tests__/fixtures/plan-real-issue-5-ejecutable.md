@@ -523,7 +523,7 @@ debajo de las 150 líneas que pide su propia cabecera (`wc -l AGENTS.md`).
 
 ```bash
 npm test && npm run lint && npm run build   # exit 0
-wc -l AGENTS.md
+test "$(wc -l < AGENTS.md)" -le 150
 ```
 
 ## 8. Global verification

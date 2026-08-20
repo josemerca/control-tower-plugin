@@ -264,8 +264,15 @@ export function validatePlan(markdown, { readFile } = {}) {
   // El detalle vive en plan-tasks.js, que es quien luego los ejecuta: un
   // contrato que aceptara planes que su propio ejecutor no sabe leer no sería
   // un contrato.
+  // Dos reglas, una violación: `verification-block` (la verificación es prosa
+  // que nadie puede ejecutar) y `verification-predicate` (la verificación ES un
+  // comando y su código de salida dice lo contrario de lo que su comentario dice
+  // medir — el control invertido de jjponz/rust-monitoring#10, que atravesó
+  // justamente esta puerta). Las dos salen por `verification` porque para quien
+  // arregla el plan son el mismo trabajo: hacer que la vara mida.
+  const VERIFICATION_RULES = ['verification-block', 'verification-predicate']
   for (const problema of extractTasks(markdown).problems) {
-    if (problema.rule !== 'verification-block') continue
+    if (!VERIFICATION_RULES.includes(problema.rule)) continue
     push('verification', problema.detail)
   }
 
