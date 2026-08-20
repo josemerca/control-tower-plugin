@@ -107,6 +107,32 @@ solo limpia el sufijo. Cero juicio humano en el código.
 > (`wantedFrozenDecisions`), no contra el crudo del spec: limpio-vs-limpio, sin
 > falsos diffs.
 
+**El formato de entrada se fija contra la plantilla real, no contra un ejemplo.**
+El sufijo lo escribe `_TEMPLATE-execution-spec.md` (el núcleo, ver §8 y
+`commands/ct-groom.md`). Como esa plantilla vive fuera de este árbol, la evidencia
+del formato en el repo son las dos líneas de `docs/loop/loop.body.html`:
+
+```
+- **D-1 · <título>** — <la decisión>. *(Procedencia: hablada — «cita literal».)*
+- **D-2 · <título>** — <la decisión>. *(Procedencia: deducida de D-1.)*
+```
+
+El fixture de test copia **estas líneas literales** (con la cita entre comillas y
+el guion), no un caso inventado. La cita literal es lo que hace frágil el
+recorte: puede llevar paréntesis, comillas o, en el peor caso, envolverse a dos
+líneas.
+
+**La limpieza falla de forma observable.** El recorte del sufijo es un `.replace`
+best-effort; no pretende cubrir cada variante (`_(…)_` con guion bajo, sin
+envolver, envuelto a dos líneas). Lo que **no** puede pasar es que un fallo del
+recorte viaje en silencio al cuerpo de los N issues —eso sería exactamente el
+«no poder comprobar NO es estar limpio» que `scope.js` prohíbe por doctrina—. Por
+eso, **si tras limpiar la palabra `Procedencia` sigue apareciendo** en la sección,
+`readFrozenDecisions` **avisa por el mismo canal que los demás guardarraíles**
+(warning, nombrando la línea) y proyecta igualmente el texto: el aviso convierte
+un fallo mudo en uno que alguien lee. Es una comprobación, no un juicio: no
+decide si la decisión es válida, solo si el recorte hizo su trabajo.
+
 ### 3.3 La restricción de las cabeceras internas (heredada de §3.3 de F26)
 
 `locateSection` termina una sección en **cualquier** cabecera ATX (incluidas
@@ -132,6 +158,40 @@ enlace al spec → Descripción → Contexto del epic → Decisiones congeladas
 
 El contrato de orden pasa a ser `epic → decisiones → heredado → criterios`. Es
 contexto para interpretar los AC; leerlo después es leerlo tarde.
+
+### 3.5 El consumidor: llegar al issue no es llegar al plan del slice
+
+El issue **no es** el punto donde una decisión se convierte en código: eso pasa
+cuando el agente escribe el plan del slice con `writing-plans-prescriptive`. Y ese
+agente trabaja contra una **lista blanca cerrada** —`skills/writing-plans-prescriptive/SKILL.md`
+enumera lo único de lo que «is allowed to plan from» (AC, Out of scope/Protected,
+Contexto del epic, Contexto heredado, Dependencias) y le prohíbe expresamente ir
+al spec («The execution spec itself is out of reach on purpose»)—. Proyectar la
+sección al body **sin tocar esa lista** entrega transporte sin destinatario: la
+decisión llega al issue y muere ahí, porque el agente ni la tiene enumerada ni
+puede ir a buscarla.
+
+Cerrar el hueco en esta fase cuesta **tres ediciones de texto, cero código de
+verificación**:
+
+1. **La lista blanca de la skill** (`SKILL.md`) gana `## Decisiones congeladas`
+   como entrada permitida del plan.
+2. **La enumeración del kickoff** (`kickoff.js`, la línea que lista «sus AC,
+   "Protegido" y "Contexto del epic"» como entrada de la skill) gana la sección
+   —lo que se enumera se lee; lo que se deja a «ya lo verá» compite con el resto
+   del cuerpo, como dice el propio comentario de `kickoff.js`—.
+3. **El destino explícito:** el kickoff instruye al agente a volcar cada decisión
+   congelada en **`## 2. Closed decisions`** del plan del slice —la sección que el
+   contrato de plan (`plan-contract.js`) ya exige y que `dispatch-check --check-plan`
+   valida—. Es su casa natural: existe, está machine-checked, y la decisión del
+   epic aterriza donde el `--release` la busca.
+
+Esto es **prosa dirigida al agente**, no un guard que compruebe que obedeció. El
+guard machine-checked (que `## 2. Closed decisions` contenga cada `D-N` del issue)
+es deseable pero es **fase 2** (§8): añade contrato nuevo y desborda «que las
+lea». El vocabulario de procedencia de `## 9. Assumptions` (`issue / epic context
+/ repo convention / your call`) queda como referencia para el agente al volcar,
+no como algo que esta fase valide.
 
 ## 4. Contrato
 
@@ -181,54 +241,94 @@ reporta como `nota:`. Se añade a `DUPLICATE_CHECKS` con `machine: false`.
 
 ### 4.5 El kickoff
 
-Una línea nueva que **nombra la sección sin interpolar su texto** (mismo criterio
-que F21/F26: la prosa es de longitud arbitraria y el kickoff se teclea entero en
-un pty). Honesta con el caso «no está / está vacía»: no hay nada que respetar y
-se dice, para que el agente no lo busque fuera del issue. El texto deja claro que
-son decisiones del epic que este trabajo **debe respetar** (no reinterpretar).
+Dos cosas, no una (ver §3.5):
+
+1. **La sección se enumera como entrada del plan**, junto a AC/Protegido/Contexto
+   del epic, en la línea del kickoff que describe la entrada de
+   `writing-plans-prescriptive`. No basta con un «léela también» aparte: lo que se
+   enumera como entrada se usa; lo que se nombra al margen compite con el resto del
+   cuerpo.
+2. **El kickoff nombra el destino:** el agente vuelca cada decisión congelada en
+   `## 2. Closed decisions` del plan del slice, y las **debe respetar** (no
+   reinterpretar).
+
+Se **nombra la sección sin interpolar su texto** (mismo criterio que F21/F26: la
+prosa es de longitud arbitraria y el kickoff se teclea entero en un pty). Honesto
+con el caso «no está / está vacía»: no hay nada que respetar y se dice, para que
+el agente no lo busque fuera del issue.
+
+Y la **lista blanca de `writing-plans-prescriptive/SKILL.md`** gana la sección
+como entrada permitida: sin eso, el kickoff nombra algo que la skill declara
+fuera de alcance, y las dos fuentes se contradicen.
 
 ## 5. Lo que hace falta construir
 
 | Pieza | Dónde |
 |---|---|
+| `readSpecSection(specMd, heading, { strip })` — el lector puro extraído (localiza, guardarraíles, `reason`), con `readEpicContext` reescrito encima como una línea | `scripts/groom.js` (ver I1 en §7) |
 | Constante de cabecera `## Decisiones congeladas` | `scripts/groom.js` |
-| `readFrozenDecisions` (espejo de `readEpicContext`) + limpieza de procedencia + guardarraíl de cabeceras internas + `reason` | `scripts/groom.js` (puro), llamado desde `scripts/ct-groom.mjs` |
+| `readFrozenDecisions` = `readSpecSection(…, { strip: PROCEDENCIA_SUFFIX_RE })` + aviso observable si sobrevive `Procedencia` | `scripts/groom.js` (puro), llamado desde `scripts/ct-groom.mjs` |
 | Emisión de la sección al crear | `scripts/groom.js#buildIssueBody` (bloque espejo del de epic context) |
 | El texto viajando en el plan (`frozenDecisions` + `frozenDecisionsUnknown`) | `scripts/groom.js#groomPlan` |
 | Comparación (`frozenDecisionsDiffers`, con rama unknown) | `scripts/reconcile.js#diffIssue` |
 | Nota en el informe | `scripts/reconcile.js#formatDrift` |
 | Splice + inserción anclada antes de heredado | `scripts/reconcile.js#buildReconcileBody` |
 | Duplicados, `machine: false` | `scripts/reconcile.js#DUPLICATE_CHECKS` |
-| La línea que nombra la sección | `scripts/kickoff.js#renderKickoff` |
+| **Enumerar la sección como entrada del plan + nombrar el destino `## 2. Closed decisions`** | `scripts/kickoff.js#renderKickoff` |
+| **La sección en la lista blanca de entradas del plan** (B1) | `skills/writing-plans-prescriptive/SKILL.md` |
 | Wiring: leer del spec, pasar a `groomPlan`, categoría de reporte | `scripts/ct-groom.mjs` |
-| Contrato de la sección del spec | `commands/ct-groom.md` |
+| Contrato de la sección del spec (referenciando la plantilla real) | `commands/ct-groom.md` |
 
-Todo **aditivo**: constante nueva, función nueva, un parámetro más en firmas
-existentes (`buildIssueBody`, `groomPlan`). No se reemplaza ninguna línea de
-lógica existente.
+Casi todo **aditivo**: constante nueva, función nueva, un parámetro más en firmas
+existentes (`buildIssueBody`, `groomPlan`), dos ediciones de texto (SKILL.md y la
+enumeración del kickoff). La **única** reescritura de lógica existente es extraer
+`readSpecSection` y reexpresar `readEpicContext` sobre él (I1): es un refactor de
+bajo riesgo —`readEpicContext` ya tiene sus 5 tests, que quedan verdes sin
+tocarlos— y elimina el clon del lector antes de crearlo.
 
 ## 6. Tests que fijan las propiedades
 
 Espejo de los tests de `## Contexto del epic`, con Vitest y el mismo patrón que
 la suite existente (import directo para lo puro; `ct-groom --dry-run` para el E2E):
 
-1. **`readFrozenDecisions` quita la procedencia** de cada línea y conserva la
-   decisión; sección ausente → `null`; vacía → `null` (con su reason).
-2. **El guardarraíl corta:** una sección con `###` dentro no se emite y el aviso
-   nombra la línea.
+1. **`readFrozenDecisions` quita la procedencia** de cada línea (fixture con el
+   formato **literal de la plantilla**, `*(Procedencia: hablada — «cita literal».)*`,
+   copiado de `docs/loop/loop.body.html`) y conserva la decisión; sección ausente
+   → `null`; vacía → `null` (con su reason).
+2. **El guardarraíl corta y el aviso nombra la línea:** una sección con `###`
+   dentro no se emite, `reason === malformada`, **y el warning contiene la línea
+   ofensora** (no solo el reason — I3.2).
 3. **`buildIssueBody` emite `## Decisiones congeladas`** cuando hay contenido, y
    **no la emite** cuando no lo hay (body idéntico al de hoy sin ella).
 4. **E2E `ct-groom --dry-run`:** un spec con la sección → el cuerpo la lleva,
    limpia; sin la sección → el cuerpo no la lleva.
-5. **`--reconcile` la reescribe** cuando el spec cambia, y **solo ella**.
-6. **La inserción respeta el orden** `epic → decisiones → heredado`, y se rinde
-   sin ancla en vez de escribir a ciegas.
+5. **`--reconcile` la reescribe** cuando el spec cambia, **y solo ella**: el test
+   afirma que la sección nueva cambia **y que el resto del body es byte-idéntico**
+   (AC, gates, protegido, marcador `ct-order`) — no basta con comprobar el texto
+   nuevo (I3.5).
+6. **La inserción respeta el orden** `epic → decisiones → heredado`, **y se rinde
+   sin ancla** en vez de escribir a ciegas: test explícito del caso «no hay
+   `## Contexto heredado` ni `## Acceptance criteria`» → `body: null` +
+   `unresolvedFrozenDecisions === 'sin-ancla'` (I3.6).
 7. **Los reason de retirada** distinguen ausente/vacía (retira) de malformada
    (no toca) — regresión directa de la corrección I1 de F26.
-8. **No mueve el exit code**, ni divergiendo ni duplicada.
-9. **El kickoff nombra la sección** con la cabecera exacta leída de la constante.
-10. **El cuerpo con la sección nueva no altera** lo que extraen `extractAc` /
-    `extractDepsInSection` / `extractStrayDeps` / `extractSectionContent`.
+8. **No mueve el exit code**, ni divergiendo ni duplicada: se comprueba el **exit
+   real de `ct-groom --reconcile`** (E2E) y no solo `formatDrift` — que el `nota:`
+   no suba el código a `3` (I3.8).
+9. **El kickoff enumera la sección** como entrada del plan, usando la **constante**
+   `FROZEN_DECISIONS_HEADING` (no el literal — que es justo lo que la constante
+   existe para evitar, §4.1), y nombra el destino `## 2. Closed decisions` (I3.9,
+   B1).
+10. **Contenido HOSTIL no rompe nada.** El cuerpo con la sección nueva no altera
+    lo que extraen `extractAc` / `extractDepsInSection` / `extractStrayDeps` /
+    `extractSectionContent` **ni `extractOrder`** — el test mete en la prosa de una
+    decisión las cadenas peligrosas (`ct-order:99`, `merge-after #7`, `AC-1.1`,
+    `closes #3`) y afirma que `extractOrder` devuelve el orden REAL del slice, no
+    el de la decisión (I2). Este es el test que protege el dispatch.
+11. **B2 — fallo de limpieza observable:** una decisión cuyo sufijo NO casa el
+    recorte (envuelto a dos líneas, o `_(…)_`) → la sección se proyecta **con un
+    warning** que nombra la línea donde sobrevive `Procedencia`. El fallo no es
+    mudo.
 
 ## 7. Riesgos
 
@@ -252,6 +352,38 @@ donde se decide qué canal manda.
 agente lo tenga delante sin abrir otro fichero. El campo ya lo paga a mano con el
 contexto del epic; la diferencia es que las N copias no pueden divergir.
 
+**I2 — prosa del spec por delante del marcador `ct-order`.** `extractOrder`
+(`gh-issue-map.js`) hace `body.match(/ct-order:(\d+)/)` sobre el body entero y se
+queda con la **primera** aparición; la sección nueva va muy por delante del
+marcador real. Una decisión que mencione `ct-order:N` —en un repo que se
+auto-groomea y cuyos specs hablan de `ct-order` sin parar, esto no es
+hipotético— haría que los N issues leyeran el mismo orden falso,
+`buildOrderIndex` colisionaría y el epic entero se caería del despacho, con un
+síntoma que no apunta a la causa. Mitigación: es riesgo preexistente de F26, pero
+esta ronda lo **duplica**, así que el test §6.10 usa contenido hostil (incluido
+`ct-order:`) y afirma que `extractOrder` sigue devolviendo el orden real. (El
+`merge-after #N` en prosa produce `strayDeps` de ruido —no mueve el exit code—;
+se acepta.)
+
+**B2 — el recorte de procedencia es best-effort sobre un formato externo.** La
+regex no cubre cada variante y el formato lo gobierna una plantilla que vive fuera
+del árbol. Mitigación: el fixture se fija contra el formato literal de la
+plantilla (§3.2), y **el fallo es observable** —si sobrevive `Procedencia`, se
+avisa—, en vez de viajar mudo a los N issues.
+
+**I1 — deuda de duplicación.** Sin el refactor, esta ronda clonaría ~52 líneas
+del lector y ~65 del bloque de reconcile (la parte más frágil, la que acumula
+I1/C2/C3): cada corrección futura de guardarraíl habría que aplicarla dos veces y
+los tests de una copia no protegerían a la otra. Mitigación: se extrae
+`readSpecSection` (el lector puro, barato y ya cubierto por 5 tests), que borra la
+mitad de la duplicación. El bloque de `buildReconcileBody` **sí se duplica** esta
+ronda (refactorizarlo es más caro y arriesgado que el lector); a cambio, el test
+de paridad de §6 (los escenarios se corren contra las dos secciones) hace que una
+divergencia futura salte. **`## Invariantes`** viene del mismo núcleo de la
+plantilla (`docs/prompt-f31`) y tiene **exactamente este mismo hueco**: se
+reconoce aquí y se deja fuera a propósito (§8) para no clonar por tercera vez sin
+decidirlo.
+
 ## 8. Lo que esta fase NO hace
 
 **Cumplimiento de ningún tipo.** Nada aquí verifica que el agente respetó una
@@ -264,9 +396,24 @@ no se toca.
 (§7) y la pregunta «¿el vehículo de una decisión de ficheros es `Alcance:` o esta
 sección?» se resuelven en la fase de cumplimiento, no aquí.
 
-**Añadir la sección a una plantilla de spec.** El original no tiene plantilla de
-execution-spec; la sección se documenta en `commands/ct-groom.md` (como se
-documenta hoy `## Contexto del epic`) y con eso basta para la fase «que las lea».
+**Tocar la plantilla de execution-spec.** El spec **sí** tiene plantilla —la
+gobierna `_TEMPLATE-execution-spec.md` (el núcleo, según `commands/ct-groom.md`),
+que vive fuera de este árbol— y esta sección viene de su núcleo. Esta fase **no**
+la edita: se documenta el contrato en `commands/ct-groom.md` (como se documenta
+hoy `## Contexto del epic`, referenciando la plantilla, no negándola) y con eso
+basta para «que las lea». Mantener la plantilla al día es de quien la posee.
+
+**El guard machine-checked del destino.** Que `dispatch-check --check-plan`
+verifique que `## 2. Closed decisions` del plan contiene cada `D-N` del issue
+—cerrando el bucle de B1 con una máquina en vez de con prosa— es deseable, pero
+añade contrato nuevo y desborda «que las lea». Esta fase cierra el consumo con la
+whitelist + el kickoff (§3.5); el guard es fase 2.
+
+**`## Invariantes`.** Viene del mismo núcleo de la plantilla y tiene el mismo
+hueco que las decisiones congeladas (transporte inexistente hoy). Se reconoce
+(§7, I1) y se deja fuera a propósito: la ronda siguiente es este mismo calco, y
+merece decidirse —no arrastrarse— junto con qué hacer con la duplicación del
+bloque de reconcile.
 
 **Filtrar por procedencia.** El código quita el sufijo; no descarta una
 `propuesta` mal metida en la sección. Es responsabilidad del autor, como los
@@ -275,7 +422,12 @@ quiere, es otra ronda.
 
 ## 9. Versión
 
-`0.35.0` — cambio de contrato aditivo: el cuerpo de los issues gana una sección
-`## Decisiones congeladas` y el spec gana una sección opcional con esa cabecera.
-Nada de lo que hoy funciona deja de funcionar: un spec sin la sección produce los
-mismos issues de hoy.
+`0.35.0` — cambio de contrato aditivo en la superficie: el cuerpo de los issues
+gana una sección `## Decisiones congeladas`, el spec gana una sección opcional con
+esa cabecera, y el plan del slice la recibe como entrada (whitelist + kickoff,
+destino `## 2. Closed decisions`). Nada de lo que hoy funciona deja de funcionar:
+un spec sin la sección produce los mismos issues de hoy. Internamente hay dos
+cambios no-aditivos, ambos de bajo riesgo y cubiertos por tests existentes: se
+extrae `readSpecSection` bajo `readEpicContext` (I1) y se ancla `extractOrder` al
+marcador cerrado `<!-- ct-order:N -->` (I2, corrige un riesgo preexistente que
+esta ronda hace alcanzable).
