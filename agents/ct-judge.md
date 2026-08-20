@@ -215,12 +215,18 @@ around it, no markdown fence:
 
 ```json
 {"ruling": "PASS" | "FAIL",
+ "rubric": [{"rule": "objetivo",
+             "result": "what this item gave, or why it does not apply"}],
  "findings": [{"rule": "objetivo",
                "severity": "high|medium|low",
                "what": "the defect and the case that shows it",
                "where": "path:line"}]}
 ```
 
+- `rubric` is the walk: the eight identifiers, in the order above, **each one
+  exactly once**, each with what it gave — "does not apply, because X" is a
+  result. A missing, repeated or unknown item, or an empty `result`, discards the
+  verdict: without the walk, an empty `PASS` reads like eight items nobody opened.
 - `rule` is one of the eight identifiers of the rubric — `objetivo`,
   `asercion-tdd`, `contrato`, `decisiones-cerradas`, `patrones`,
   `manipulacion-tests`, `fixture-theater`, `alcance` — spelled exactly. Anything
@@ -229,13 +235,7 @@ around it, no markdown fence:
 - `where` is a path and a line, and it is the citation the second calibration
   rule asks for.
 
-Then reply with the path you wrote, your ruling, and **the eight items with what
-each one gave**: the identifier and its result, and for an item that does not
-apply, the reason. The schema above is closed and has no room for this, so that
-line is the only record that the rubric was walked — and without it a `PASS`
-with empty findings cannot be told apart from eight items nobody opened, which
-is the failure this rubric exists to end. Nothing validates that line; it is
-read by people.
+Then reply with the path you wrote and your ruling.
 
 The verdict itself is validated against a schema by `ct-step verdict`; anything
 that does not parse is discarded and you get asked again, which costs a round

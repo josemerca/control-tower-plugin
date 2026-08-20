@@ -40,6 +40,25 @@ const reglasDelAgente = () => {
   return reglas
 }
 
+// El esquema que la rúbrica le ENSEÑA al juez: el bloque ```json de "What you
+// write", que es lo único que el agente lee para saber qué forma tiene el
+// fichero que escribe. Si el validador exige un campo que ese bloque no
+// muestra, el juez no puede acertar ni por casualidad y cada veredicto se
+// descarta hasta que el run se agota — el mismo desacople de JUDGE_TOOLS y
+// VERDICT_RULES, con la factura pagada en round trips.
+const esquemaDelAgente = () => {
+  const texto = readFileSync(AGENTE_JUEZ, 'utf8')
+  const m = /## What you write[\s\S]*?```json\n([\s\S]*?)```/.exec(texto)
+  return m ? m[1] : ''
+}
+
+// El paseo por la rúbrica tal y como el esquema lo exige: los ocho ítems, cada
+// uno exactamente una vez, cada uno con lo que dio. Se construye desde
+// VERDICT_RULES y no desde una lista a mano por la misma razón por la que el
+// esquema tampoco duplica la lista: dos copias de los ocho identificadores
+// divergen, y el test que las ataba dejaría de mirar los ocho.
+const recorridoCompleto = () => VERDICT_RULES.map((rule) => ({ rule, result: 'sin hallazgos' }))
+
 // Los encabezados del paquete de revisión que cita el párrafo "The review
 // package." de "What you are given" — el único sitio de la rúbrica que habla
 // del paquete que escribe `escribirPaquete`. Se aísla ese párrafo antes de
@@ -101,6 +120,16 @@ describe('quién puede qué', () => {
     expect(VERDICT_RULES).toEqual(reglasDelAgente())
   })
 
+  it('la rúbrica le enseña al juez el campo del recorrido en vez de pedírselo en prosa', () => {
+    // El paseo por los ocho ítems se pedía en prosa, al final del fichero, y
+    // se pedía para la RESPUESTA del subagente — que no se persiste. Ahora es
+    // un campo del veredicto, así que el bloque que el juez copia tiene que
+    // mostrarlo: un validador que exige lo que el agente no ve descarta todos
+    // los veredictos de la corrida sin que ninguno sea culpa del juez.
+    expect(esquemaDelAgente()).toMatch(/"rubric"/)
+    expect(esquemaDelAgente()).toMatch(/"result"/)
+  })
+
   it('PACKAGE_SECTIONS no puede divergir de los encabezados que la rúbrica cita por su nombre', () => {
     // El mismo fallo que ya tuvieron JUDGE_TOOLS y VERDICT_RULES, con un
     // agravante: aquí ni siquiera hay un esquema que descarte nada. Si
@@ -112,10 +141,10 @@ describe('quién puede qué', () => {
 })
 
 describe('el veredicto', () => {
-  const v = (ruling, findings = []) => readVerdict({ ruling, findings })
+  const v = (ruling, findings = [], rubric = recorridoCompleto()) => readVerdict({ ruling, rubric, findings })
 
   it('un PASA limpio se lee y vale', () => {
-    expect(v('PASS').verdict).toEqual({ ruling: 'PASS', findings: [] })
+    expect(v('PASS').verdict).toEqual({ ruling: 'PASS', rubric: recorridoCompleto(), findings: [] })
   })
 
   it.each([
@@ -155,6 +184,72 @@ describe('el veredicto', () => {
     expect(r.verdict).toBeUndefined()
     expect(r.why).toMatch(/regla desconocida/)
     expect(VERDICT_RULES).not.toContain('me-lo-invento')
+  })
+
+  // -------------------------------------------------------------------------
+  // EL PASEO POR LA RÚBRICA, medido en jjponz/rust-monitoring#10: los tres
+  // veredictos que viajaron commiteados en aquella pull request eran
+  // `{"ruling": "PASS", "findings": []}` — exactamente el artefacto que la
+  // propia rúbrica declara indistinguible de ocho ítems que nadie abrió. La
+  // rúbrica pedía el paseo, pero lo pedía en PROSA y para la respuesta
+  // conversacional del subagente, que no se persiste: nada la capturaba, y el
+  // esquema que se validaba y viajaba era sólo `{ruling, findings}`.
+  //
+  // Y en aquel slice el PASS vacío era el resultado CORRECTO: cuatro de los
+  // ocho ítems no tenían sujeto (un esqueleto sobre un repo vacío, sin
+  // patrones que citar, sin tests previos, sin contratos). Eso es lo que
+  // duele: era correcto y nadie podía saberlo leyendo el fichero. Por eso el
+  // recorrido no es un campo informativo — es la diferencia entre "no
+  // aplicaba" y "no se miró", y la carga la lleva el esquema, no la prosa.
+  // -------------------------------------------------------------------------
+  it('el veredicto trae el paseo por los ocho ítems, y viaja dentro de él', () => {
+    const r = v('PASS')
+    expect(r.verdict.rubric.map((paso) => paso.rule)).toEqual(VERDICT_RULES)
+  })
+
+  it('se descarta el veredicto que no trae el recorrido: es el fichero de la corrida de campo', () => {
+    // El payload literal de rust-monitoring#10. Hoy se aceptaba; que se
+    // descarte es todo el arreglo.
+    const r = readVerdict({ ruling: 'PASS', findings: [] })
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/recorrido de la rúbrica/)
+  })
+
+  it('se descarta un recorrido que nombra un ítem que no es de la rúbrica', () => {
+    // Mismo criterio que un `rule` inventado en un hallazgo: un ítem que no
+    // está en VERDICT_RULES no es un paseo laxo, es un dato que no se
+    // entiende. Se vuelve a preguntar.
+    const recorrido = [...recorridoCompleto().slice(1), { rule: 'me-lo-invento', result: 'bien' }]
+    const r = v('PASS', [], recorrido)
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/ítem desconocido/)
+  })
+
+  it('se descarta un recorrido que repite un ítem: nueve pasos no son ocho ítems', () => {
+    // Nueve entradas con los ocho identificadores presentes: sin la
+    // comprobación de repetidos, un recuento por conjunto daría los ocho por
+    // recorridos y el duplicado pasaría. Es el mismo criterio que readReport
+    // aplica a una ruta declarada dos veces.
+    const r = v('PASS', [], [...recorridoCompleto(), { rule: 'alcance', result: 'otra vez' }])
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/repite/)
+  })
+
+  it('se descarta un recorrido incompleto, y el motivo dice qué ítem falta', () => {
+    // Sin nombrar el ítem que falta, el descarte cuesta un round trip y el
+    // juez no sabe por dónde volver.
+    const r = v('PASS', [], recorridoCompleto().filter((paso) => paso.rule !== 'fixture-theater'))
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/fixture-theater/)
+  })
+
+  it('se descarta el ítem que se nombra pero no dice lo que dio: un texto vacío es el ítem sin abrir otra vez', () => {
+    // Ocho identificadores sin resultado son el mismo artefacto que el PASS
+    // con hallazgos vacíos, sólo que más largo.
+    const recorrido = recorridoCompleto().map((paso) => (paso.rule === 'patrones' ? { rule: 'patrones', result: '   ' } : paso))
+    const r = v('PASS', [], recorrido)
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/patrones/)
   })
 })
 
@@ -236,6 +331,7 @@ describe('los esquemas declarados, atados a lo que valida de verdad', () => {
   })
   const veredictoValido = () => ({
     ruling: 'FAIL',
+    rubric: recorridoCompleto(),
     findings: [{ rule: 'contrato', severity: 'high', what: 'x', where: 'y' }],
   })
 
@@ -259,6 +355,25 @@ describe('los esquemas declarados, atados a lo que valida de verdad', () => {
     const payload = veredictoValido()
     delete payload.findings[0][campo]
     expect(readVerdict(payload).verdict).toBeUndefined()
+  })
+
+  it.each(VERDICT_SCHEMA.properties.rubric.items.required)('cada paso del recorrido exige "%s", como declara el esquema del item', (campo) => {
+    const payload = veredictoValido()
+    delete payload.rubric[0][campo]
+    expect(readVerdict(payload).verdict).toBeUndefined()
+  })
+
+  it('el esquema del recorrido no duplica los ocho identificadores: los toma de VERDICT_RULES', () => {
+    // Identidad y no igualdad a propósito. Una segunda lista con los mismos
+    // ocho valores pasaría un toEqual y divergiría en el primer renombrado,
+    // que es el fallo que este fichero ya caza dos veces (JUDGE_TOOLS y
+    // VERDICT_RULES contra ct-judge.md).
+    expect(VERDICT_SCHEMA.properties.rubric.items.properties.rule.enum).toBe(VERDICT_RULES)
+  })
+
+  it('el esquema pide el recorrido entero: ni un paso más, ni uno menos', () => {
+    expect(VERDICT_SCHEMA.properties.rubric.minItems).toBe(VERDICT_RULES.length)
+    expect(VERDICT_SCHEMA.properties.rubric.maxItems).toBe(VERDICT_RULES.length)
   })
 })
 

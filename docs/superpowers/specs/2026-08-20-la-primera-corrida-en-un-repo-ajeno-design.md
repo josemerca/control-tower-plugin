@@ -465,7 +465,7 @@ Doce campos de identidad, iguales en todas las filas:
 | `task` / `task_name` / `tasks_total` | la tarea y su nombre literal del encabezado | |
 | `step` | `implement` \| `controls` \| `judge` \| `commit` | `commit` **se retira** (§6.2) |
 | `attempt` | la vuelta dentro de esta tarea, como dimensión y no como contador | |
-| `session` | la conversación de esa llamada | **siempre `null`** |
+| `session` | la conversación de esa llamada | **retirado** (§6.2) |
 | `written_at` | marca de tiempo | |
 
 Y las medidas, que dependen del paso. Esto es todo lo que hay, literalmente:
@@ -488,9 +488,13 @@ vez de un cero.
 
 **1. La duración de lo que el programa sí ejecuta.** No se puede medir la llamada
 al subagente, pero el paso `controls` lo ejecuta el programa entero: su
-`duration_ms`, y el de cada comando, son exactos y gratis. Es además el único
-número de tiempo que hoy no se puede reconstruir restando `written_at`
-consecutivos, porque entre dos filas hay latencia de sesión mezclada con trabajo.
+`duration_ms` es exacto y gratis. Es además el único número de tiempo que no se
+puede reconstruir restando `written_at` consecutivos, porque entre dos filas hay
+latencia de sesión mezclada con trabajo.
+
+Del paso, y no de cada comando: una duración por comando solo se lee si va con la
+identidad del comando al lado, y eso ya es el hueco de "qué control falló", que
+está fuera de esta ronda.
 
 **2. Dos campos de identidad que faltan, y uno que hay que decidir.** La corrida
 los pide a gritos en cuanto las filas dejen de vivir en una sola máquina:
@@ -503,9 +507,10 @@ los pide a gritos en cuanto las filas dejen de vivir en una sola máquina:
   escribió. En cuanto viajen en el repo, filas de dos máquinas se mezclan en el
   mismo fichero y sin actor no se sabe de quién es el coste. `git config
   user.email` es local y gratis.
-- **`session`** o se llena o se quita. Un campo que siempre es `null` enseña a
-  quien lee el fichero a ignorar la columna, y el día que se llene nadie la
-  mirará.
+- **`session` se quita.** Un campo que siempre es `null` enseña a quien lee el
+  fichero a ignorar la columna, y la de al lado se salta detrás. Y su rama en
+  `normalizar` era un no-op idéntico al caso genérico: tratamiento especial que
+  no hacía nada.
 
 **3. La fila `commit` se retira.** Lleva dos cosas —`outcome: done` y el sha— y
 las dos están enteras en `git log`: el sha es el sha, y el hecho de que la tarea
@@ -674,16 +679,37 @@ misma clase de arreglo: hacer obligatorio lo que ya se daba por supuesto. Aquell
 cerró "la verificación es prosa"; ésta cierra "la verificación es un comando que
 mide al revés". Ver §5.1.
 
-### Paso 3 — el paseo por la rúbrica entra en el esquema (H3)
+### Paso 3 — el paseo por la rúbrica entra en el esquema (H3) — **HECHO**
 
-`step-contracts.js`: el esquema del veredicto crece un campo con los ocho ítems y
-su resultado, y un `PASS` que no los traiga se descarta igual que se descarta un
-`rule` inventado. `ct-judge.md` deja de pedir en prosa lo que el esquema ya
-exige, y el fichero que viaja en la pull request pasa a ser auditable.
+`step-contracts.js`: el veredicto gana `rubric`, obligatorio — un array de ocho
+pasos `{rule, result}`, con el enum del ítem tomado del **mismo array**
+`VERDICT_RULES` y no de una copia, porque dos listas de ocho identificadores
+divergen al primer renombrado. Se descarta el veredicto al que le falte el campo,
+el que nombre un ítem desconocido, el que repita uno, el que no pase por los
+ocho, y el que traiga un `result` vacío: ocho identificadores sin resultado son el
+mismo artefacto vacío, solo más largo. La comprobación va después del bucle de
+`findings` para que los descartes que ya existían conserven su `why`.
 
-De paso, partir `where` en cita y ubicación, como hace `Finding` allí.
+`ct-judge.md` documenta el campo y **pierde** el párrafo de siete líneas que pedía
+el paseo en prosa: 242 líneas antes, 242 después. Es deliberado — todo lo que se
+añade a ese fichero compite por la atención del juez, que tiene ocho ítems que
+recorrer de verdad. El porqué largo vive en el comentario de `step-contracts.js`,
+que lo leen personas.
 
-### Paso 4 — lo que el implementador dejó fuera viaja solo (H4)
+**Lo que el orden NO valida, y por qué:** la presencia, la unicidad y la
+completitud sí; el orden no. Quemar un viaje de ida y vuelta del juez por el orden
+de una lista no compra nada, y el prompt sigue pidiendo el orden de la rúbrica.
+
+**Y lo que la implementación entendió mejor que este spec:** lo grave del caso de
+`rust-monitoring` no es que aquel `PASS` vacío estuviera mal. Es que **era
+correcto** —cuatro de los ocho ítems no tenían sujeto— y no había forma de saberlo
+leyendo el fichero. El recorrido es lo que distingue "no aplicaba, y por esto" de
+"no se miró".
+
+Queda fuera partir `where` en cita y ubicación, como hace `Finding` en
+`agentic-skills`: no es de este paso.
+
+### Paso 4 — lo que el implementador dejó fuera viaja solo (H4) — **HECHO**
 
 Lo mínimo es una línea: `ct-step report` imprime el `summary`, y `ct-step next`
 lo repite en el paso de commit. Lo correcto es lo de `agentic-skills`: que el
@@ -691,7 +717,7 @@ esquema del informe lleve una lista de lo dejado fuera en vez de prosa libre, qu
 el prompt del implementador diga dónde acaba cada elemento, y que `ct-step`
 componga con ella el tramo de deuda del cuerpo de la pull request.
 
-### Paso 5 — las métricas viajan en la pull request (§6.3)
+### Paso 5 — las métricas viajan en la pull request (§6.3) — **HECHO**
 
 `ct-step.mjs`: `medir()` escribe además en
 `docs/superpowers/metrics/issue-<n>.jsonl`, y `commit` la stagea después de los
@@ -703,17 +729,41 @@ hoy**, con veredictos o sin métricas.
 Es la mitad más barata de todo el documento y la que más se nota: sin ella, cada
 corrida que hagamos en un repo ajeno vuelve sin datos.
 
-### Paso 6 — dos añadidos a la medida y la retirada de la fila `commit` (§6.2)
+### Paso 6 — dos añadidos a la medida y la retirada de la fila `commit` (§6.2) — **HECHO**
 
-`run-metrics.js` gana `plugin_version` y `actor` en la identidad, y `session` se
-llena o se quita. `verboControls` emite `duration_ms`, el suyo y el de cada
-comando. Y `verboCommit` deja de emitir fila: fuera `medir('commit', ...)`, el
-dominio de `step` baja a tres valores, el test de la secuencia de filas pasa a
-afirmar tres, y el §10.1 del diseño de D-4 se corrige donde dice cuatro.
+`run-metrics.js` gana `plugin_version` y `actor`, y **`session` se va**. Los dos
+nuevos llevan centinela propio —`(sin versión)`, `(sin actor)`— y no `null`, con
+un argumento que este spec no traía: por esas dos columnas se **agrupa**, y un
+nulo funde en el mismo grupo las filas que no traían el dato con las que lo
+traían vacío. El módulo sigue puro: los valores llegan dentro del objeto de
+identidad, y `ct-step` los aporta leyendo el manifiesto del plugin y
+`git config user.email`.
 
-Ninguno necesita una decisión de diseño: los dos añadidos son datos que el
-programa ya tiene en la mano y tira, y la retirada quita una fila cuyo contenido
-entero está en `git log`.
+`session` se retira y no se rellena. Además de valer `null` en todas las filas, su
+rama en `normalizar` (`valor ?? null`) era un no-op idéntico al caso genérico: un
+campo con tratamiento especial que no hacía nada, fingiendo una semántica que no
+tenía. Vuelve el día que una llamada headless devuelva un identificador; añadirlo
+cuesta una línea, y prometer una dimensión que el mecanismo no puede dar cuesta la
+confianza en el resto de la fila.
+
+`verboControls` emite `duration_ms`. Y `verboCommit` deja de emitir fila: fuera
+`medir('commit', ...)`, el dominio de `step` baja a tres valores, y el §10.1 del
+diseño de D-4 se corrige donde dice cuatro.
+
+**Y un defecto que apareció al construirlo, en las dos direcciones.** Hacer que la
+telemetría viaje abre un camino nuevo por el que podía romperse el principio más
+viejo de todo esto ("ninguna transición depende de la medida"): el `git add` del
+fichero. Sin `allowFail`, un repo que ignore esa ruta hacía que la excepción
+subiera y la tarea se quedara **sin comitear**, con el run atascado. Medido. Y
+persiguiéndolo apareció que el `git add` del **veredicto** —código de `590b995`,
+anterior a esta ronda— tenía exactamente el mismo defecto: con `docs/` ignorado,
+`ct-step verdict` reventaba y dejaba el run en exit 9.
+
+Los dos avisan y siguen, por decisión humana tomada al encontrarlo. Un veredicto
+que no puede viajar degrada el criterio de cierre de F37 y hay que verlo —de ahí
+el aviso y no el silencio—, pero pararlo no lo arregla: el veredicto sigue
+escrito en la carpeta del run, y quien revisa la pull request ve que no está. El
+trabajo se comitea; la evidencia de que no viajó se cuenta.
 
 ## 8. Lo que esto NO propone
 

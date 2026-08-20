@@ -15,6 +15,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { deliveredRun } from '../scripts/run-machine.js'
+import { VERDICT_RULES } from '../scripts/step-contracts.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(here, '..', 'scripts', 'ct-step.mjs')
@@ -79,18 +80,22 @@ const ct = (...args) => spawnSync('node', [SCRIPT, ...args, '--plan', 'plan.md',
 
 // Lo que escribiría un subagente, a fichero. `paths` es una lista de rutas
 // simples: el informe no distingue producción de test (ver step-contracts.js).
-const informe = (paths, nombre = 'report.json') => {
+const informe = (paths, nombre = 'report.json', summary = 'hecho') => {
   const p = join(repo, nombre)
-  writeFileSync(p, JSON.stringify({ paths, summary: 'hecho' }))
+  writeFileSync(p, JSON.stringify({ paths, summary }))
   return p
 }
 // A estos tests no les importa la regla: la tarea 4 la añadió al contrato, y
 // una regla válida cualquiera basta para que el veredicto siga siendo válido
-// sin reescribir cada llamada de este fichero.
+// sin reescribir cada llamada de este fichero. Lo mismo vale para el RECORRIDO
+// de la rúbrica, que el contrato exige entero desde el Paso 3: se compone aquí
+// a partir de la lista de reglas del propio módulo, así que ni se teclea ocho
+// veces ni se queda atrás el día que la rúbrica cambie de tamaño.
+const recorridoCompleto = () => VERDICT_RULES.map((rule) => ({ rule, result: `mirado en el test: ${rule}` }))
 const veredicto = (ruling, findings = [], nombre = 'verdict.json') => {
   const p = join(repo, nombre)
   const conRegla = findings.map((f) => ({ rule: 'alcance', ...f }))
-  writeFileSync(p, JSON.stringify({ ruling, findings: conRegla }))
+  writeFileSync(p, JSON.stringify({ ruling, rubric: recorridoCompleto(), findings: conRegla }))
   return p
 }
 const crudo = (texto, nombre = 'crudo.json') => {
@@ -484,11 +489,13 @@ describe('el sitio en el que va está en disco, no en la conversación', () => {
     expect(r.stderr).toMatch(/no cuentan lo mismo/)
   })
 
-  it('escribe telemetría: una fila por paso, con el epic sembrado', () => {
+  it('escribe telemetría con el epic sembrado en todas sus filas', () => {
+    // La SECUENCIA de pasos la fija el test del Paso 6, al final del fichero:
+    // ahí se retiró la fila de `commit` y ese es el sitio donde consta el motivo.
     tareaOk('uno.txt')
     const filas = readFileSync(join(repo, '.telemetria', 'control-tower', 'log', 'ct-step.jsonl'), 'utf8')
       .trim().split('\n').map((l) => JSON.parse(l))
-    expect(filas.map((f) => f.step)).toEqual(['implement', 'controls', 'judge', 'commit'])
+    expect(filas.length).toBeGreaterThan(0)
     expect(filas.every((f) => f.epic === '12')).toBe(true)
   })
 
@@ -590,5 +597,120 @@ describe('el cierre bueno se persiste, y el gate del release lo lee', () => {
     const parcial = deliveredRun(readFileSync(join(repo, '.agent', 'run-7.json'), 'utf8'), 7)
     expect(parcial.ok).toBe(false)
     expect(parcial.why).toMatch(/no está entregado/)
+  })
+})
+
+// Pasos 4, 5 y 6 del spec de la primera corrida en un repo ajeno.
+describe('lo que el implementador avisa, y la telemetría, no se quedan donde nadie los lee', () => {
+  it('Paso 4: `report` imprime el resumen del informe', () => {
+    // El prompt del implementador le manda poner en `summary` la decisión
+    // cerrada que obedeció a disgusto y el problema que vio y no tocó. Medido en
+    // campo (jjponz/rust-monitoring#10): dijo que el Cargo.lock se commitea "para
+    // CI reproducible" mientras el workflow corre sin --locked, y eso llegó a la
+    // pull request SOLO porque aquella sesión abrió el fichero del informe por su
+    // cuenta. Ningún verbo lo imprimía y ningún otro lo consultaba.
+    const r = ct('report', informe(['uno.txt'], 'report.json', 'obedecí la fila del Cargo.lock y creo que se paga caro'))
+    expect(r.status).toBe(0)
+    expect(r.stdout).toMatch(/obedecí la fila del Cargo.lock/)
+  })
+
+  it('Paso 4: `next` lo repite en el paso de commit, que es cuando la sesión escribe la pull request', () => {
+    ct('report', informe(['uno.txt'], 'report.json', 'la decisión de la tarea 2 deja el lockfile sin hacer valer'))
+    ct('controls')
+    ct('verdict', veredicto('PASS'))
+    const r = ct('next')
+    expect(r.stdout).toMatch(/paso: commit/)
+    expect(r.stdout).toMatch(/lockfile sin hacer valer/)
+  })
+
+  it('Paso 5: la telemetría viaja DENTRO del commit de su tarea', () => {
+    tareaOk('uno.txt')
+    const tocados = execFileSync('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: repo, encoding: 'utf8' })
+    expect(tocados).toMatch(/docs\/superpowers\/metrics\/issue-7\.jsonl/)
+    const filas = readFileSync(join(repo, 'docs', 'superpowers', 'metrics', 'issue-7.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l))
+    expect(filas.every((f) => f.issue === 7 && f.task === 1)).toBe(true)
+  })
+
+  it('Paso 5: NO se stagea antes de los controles, o el control de alcance vetaría la tarea', () => {
+    // El veredicto ya resolvió esto mismo: es un artefacto de la maquinaria, no
+    // alcance del implementador, así que entra en el índice DESPUÉS de medir.
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    const enIndice = execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: repo, encoding: 'utf8' })
+    expect(enIndice).not.toMatch(/metrics/)
+    expect(enIndice).toMatch(/uno\.txt/)
+  })
+
+  it('Paso 5: las filas del intento que el juez vetó viajan también — el coste de las vueltas es el dato', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'no', where: 'uno.txt:1' }]))
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('verdict', veredicto('PASS'))
+    ct('commit')
+    const commiteado = execFileSync('git', ['show', 'HEAD:docs/superpowers/metrics/issue-7.jsonl'], { cwd: repo, encoding: 'utf8' })
+    const filas = commiteado.trim().split('\n').map((l) => JSON.parse(l))
+    expect(filas.filter((f) => f.attempt === 1).length).toBeGreaterThan(0)
+    expect(filas.filter((f) => f.attempt === 2).length).toBeGreaterThan(0)
+    expect(filas.find((f) => f.step === 'judge' && f.attempt === 1).ruling).toBe('FAIL')
+  })
+
+  it('Paso 6: la fila de `controls` lleva cuánto tardó, que es el único tiempo que ejecuta el programa', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    const filas = readFileSync(join(repo, '.telemetria', 'control-tower', 'log', 'ct-step.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l))
+    const controles = filas.find((f) => f.step === 'controls')
+    expect(typeof controles.duration_ms).toBe('number')
+    expect(controles.duration_ms).toBeGreaterThanOrEqual(0)
+  })
+
+  it('Paso 6: no hay fila de `commit`: su sha y su hecho están enteros en git log', () => {
+    tareaOk('uno.txt')
+    const filas = readFileSync(join(repo, '.telemetria', 'control-tower', 'log', 'ct-step.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l))
+    expect(filas.map((f) => f.step)).toEqual(['implement', 'controls', 'judge'])
+  })
+})
+
+describe('un fallo de la telemetría no puede tumbar la tarea', () => {
+  it('si la ruta del veredicto está gitignoreada, `git add` falla y la tarea se comitea igual', () => {
+    // Mismo defecto que el de las métricas, en código anterior (590b995, el que
+    // hizo viajar el veredicto): `git add` sobre una ruta ignorada sale con 1, la
+    // excepción subía y el run se quedaba atascado en exit 9 con la tarea sin
+    // comitear. Decisión humana, tomada al encontrarlo: avisar y seguir. Un
+    // veredicto que no puede viajar degrada el contrato de F37 y hay que verlo,
+    // pero un run atascado no lo arregla — y el veredicto sigue en disco, en la
+    // carpeta del run.
+    writeFileSync(join(repo, '.gitignore'), 'docs/superpowers/verdicts/\n')
+    execFileSync('git', ['add', '--', '.gitignore'], { cwd: repo })
+    execFileSync('git', ['commit', '-q', '-m', 'ignora los veredictos'], { cwd: repo })
+    const r = tareaOk('uno.txt')
+    expect(r.status).toBe(0)
+    expect(commits()).toBe(3)
+    expect(execFileSync('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: repo, encoding: 'utf8' })).toMatch(/uno\.txt/)
+  })
+
+  it('si la ruta de las métricas está gitignoreada, `git add` falla y la tarea se comitea igual', () => {
+    // El principio es del diseño y es viejo: "ninguna transición depende de la
+    // medida". Al hacer que la telemetría VIAJE aparece un camino nuevo por el
+    // que podía romperlo — el `git add` del fichero — y `git add` sobre una ruta
+    // ignorada sale con 1. Un repo que ignore `docs/` no es raro.
+    // Se ignora SOLO la ruta de las métricas, no `docs/` entero: con `docs/`
+    // ignorado el que revienta primero es el `git add` del VEREDICTO, que es
+    // código anterior a este cambio y tiene el mismo defecto — sale por 9 y deja
+    // el run atascado. Ese hallazgo se reporta aparte; este test mide lo mío.
+    writeFileSync(join(repo, '.gitignore'), 'docs/superpowers/metrics/\n')
+    // Solo el .gitignore: un `git add -A` se llevaría también `uno.txt`, y
+    // entonces el control de ALCANCE vetaría la tarea (un `(create)` de un
+    // fichero que ya está en el commit anterior) y el fallo sería otro.
+    execFileSync('git', ['add', '--', '.gitignore'], { cwd: repo })
+    execFileSync('git', ['commit', '-q', '-m', 'ignora las metricas'], { cwd: repo })
+    const r = tareaOk('uno.txt')
+    expect(r.status).toBe(0)
+    expect(commits()).toBe(3)
+    expect(execFileSync('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: repo, encoding: 'utf8' })).toMatch(/uno\.txt/)
   })
 })

@@ -103,7 +103,7 @@ const USAGE = `uso: ct-step <verbo> [args] --plan <fichero> --issue <n>
   next                      dice qué paso toca y prepara lo que ese paso necesita
   report <fichero.json>     el informe del implementador: rutas tocadas + resumen
   controls                  ejecuta los comandos de **Verification:** de la tarea
-  verdict <fichero.json>    el veredicto del juez: ruling + findings
+  verdict <fichero.json>    el veredicto del juez: ruling + recorrido de la rúbrica + findings
   commit                    comitea la tarea con el mensaje que compone el plugin
 
 La secuencia la decide run-machine.js: un verbo que no sea el paso que toca sale
@@ -206,7 +206,29 @@ const guardar = () => writeFileSync(stateFile, JSON.stringify(run, null, 2) + '\
 const tarea = () => tasks.find((t) => t.n === run.task)
 
 // ---------------------------------------------------------------------------
-// La telemetría: append-only, fuera del repo, y un fallo suyo NO tumba nada.
+// La telemetría: append-only, DOS destinos, y un fallo suyo NO tumba nada.
+//
+// El diseño la puso solo fuera del repo, con el motivo de `agentic-skills`
+// copiado tal cual: "para que ningún `git add` de la slice se lleve la
+// telemetría dentro de la pull request". La primera corrida en un repo ajeno
+// (jjponz/rust-monitoring#10) refutó la conclusión sin tocar el motivo: las doce
+// filas de aquel run existen en `~/.claude/control-tower/log/ct-step.jsonl` DE
+// LA MÁQUINA DE QUIEN DESPACHÓ, y en ningún otro sitio. El veredicto del juez
+// viajó y se puede leer; las métricas del mismo run, no. Para un loop que se
+// evalúa entre dos personas y dos repositorios, unas métricas que solo existen
+// en el portátil del que implementó son unas métricas que no existen.
+//
+// El motivo original era evitar que la telemetría entrara en el diff POR
+// ACCIDENTE, arrastrada por un `git add` del implementador. Eso ya tiene
+// respuesta, la misma que se le dio al veredicto: la escribe y la stagea el
+// PROGRAMA, en una ruta que decide el programa, y se stagea en `commit` —
+// después de los controles y del juez. Si estuviera en el índice cuando corren
+// los controles, `alcanceDeclarado` la vería como una ruta que el plan no
+// declara y vetaría la tarea.
+//
+// El fichero local sigue siendo el acumulado de la máquina (todos los repos,
+// todos los epics); el del repo es el de este slice, y es el que se lee en la
+// pull request.
 // ---------------------------------------------------------------------------
 const PLAN_SHA = planSha256(planText)
 const repoSlug = (() => {
@@ -219,18 +241,40 @@ const epicDelSlice = (() => {
   return m ? m[1].trim() : null
 })()
 const intento = () => run.controlRetries + run.judgeRetries + run.correctionRetries + 1
+// Los dos campos de identidad que el módulo de la fila NO puede ir a buscar (es
+// puro): los aporta quien escribe. La versión sale del manifiesto del plugin —un
+// `ct-step` reescrito hace incomparables dos runs, igual que un plan reescrito— y
+// el actor de la configuración local de git, que es de quien es el coste en
+// cuanto las filas de dos máquinas se mezclen en la misma pull request. Los dos
+// degradan a su centinela si no se pueden leer: la fila sale igual, con la
+// ausencia declarada.
+const PLUGIN_VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(join(PLUGIN_ROOT, 'package.json'), 'utf8')).version || null
+  } catch {
+    return null
+  }
+})()
+const ACTOR = (git(['config', 'user.email'], { allowFail: true }) || '').trim() || null
+
+// La ruta DENTRO del repo, relativa: la misma que se stagea en `commit`.
+const METRICS_REL = join('docs', 'superpowers', 'metrics', `issue-${issue}.jsonl`)
 
 function medir(step, measures) {
-  try {
-    const destino = metricsPath('ct-step', { configDir: process.env.CLAUDE_CONFIG_DIR })
-    mkdirSync(dirname(destino), { recursive: true })
-    appendFileSync(destino, metricLine(metricRow({
-      repo: repoSlug, epic: epicDelSlice, issue, plan: planPath, plan_sha256: PLAN_SHA,
-      task: run.task, task_name: tarea()?.name ?? null, tasks_total: run.tasksTotal,
-      step, attempt: intento(), session: null,
-    }, measures, { now: new Date().toISOString() })))
-  } catch (e) {
-    err(`aviso: no se pudo escribir la telemetría (${String(e.message).trim()}). Esto sigue: ninguna transición depende de la medida.`)
+  const linea = metricLine(metricRow({
+    repo: repoSlug, epic: epicDelSlice, issue, plan: planPath, plan_sha256: PLAN_SHA,
+    task: run.task, task_name: tarea()?.name ?? null, tasks_total: run.tasksTotal,
+    step, attempt: intento(), plugin_version: PLUGIN_VERSION, actor: ACTOR,
+  }, measures, { now: new Date().toISOString() }))
+  // Los dos destinos se intentan por separado: que el disco de la cuenta esté
+  // lleno no puede costarle al repo la fila que viaja, ni al revés.
+  for (const destino of [metricsPath('ct-step', { configDir: process.env.CLAUDE_CONFIG_DIR }), join(repoRoot, METRICS_REL)]) {
+    try {
+      mkdirSync(dirname(destino), { recursive: true })
+      appendFileSync(destino, linea)
+    } catch (e) {
+      err(`aviso: no se pudo escribir la telemetría en ${destino} (${String(e.message).trim()}). Esto sigue: ninguna transición depende de la medida.`)
+    }
   }
 }
 
@@ -298,6 +342,13 @@ function verboNext() {
       out('COMITEA LA TAREA:')
       out(`  ct-step commit --plan ${planPath} --issue ${issue}`)
       out('El mensaje lo compone el plugin y lo valida contra las closing keywords.')
+      // Se repite aquí y no solo en `report` porque este es el momento en el que
+      // la sesión escribe la pull request: un aviso dado veinte minutos antes,
+      // dos subagentes atrás, ya se ha ido de su contexto.
+      if (run.lastSummary) {
+        out('')
+        out(`Lo que dijo el implementador de esta tarea, por si va en la pull request: ${run.lastSummary}`)
+      }
       break
     default:
       die(`el estado tiene un paso que esta versión no conoce: ${run.step}`, EXIT.UNNAMED)
@@ -389,11 +440,26 @@ function verboReport() {
     lastSummary: report.summary,
   }
   out(`stageados ${report.paths.length} fichero(s): ${rutas.join(', ')}`)
+  // El resumen se IMPRIME. Es el canal por el que el implementador avisa de una
+  // skill que no cargó, de una decisión cerrada que obedeció a disgusto o de un
+  // problema que vio y no tocó — y hasta aquí no lo leía nadie: no lo imprimía
+  // ningún verbo, el juez tiene orden de ignorarlo, y `run.lastSummary` no lo
+  // consultaba nadie. Medido en campo (jjponz/rust-monitoring#10): el aviso de
+  // que el lockfile commiteado "para CI reproducible" no se hace valer en la
+  // integración continua llegó a la pull request solo porque aquella sesión
+  // abrió el fichero del informe por iniciativa propia.
+  if (report.summary) out(`el implementador dice: ${report.summary}`)
   return OUTCOMES.DONE
 }
 
 function verboControls() {
   const t = tarea()
+  // El único tiempo que este programa puede medir de verdad: las dos llamadas
+  // al modelo las hace la sesión, así que de ellas no hay ni coste ni turnos ni
+  // duración. Y es el único que no se puede reconstruir restando `written_at`
+  // consecutivos, porque entre dos filas hay latencia de sesión mezclada con
+  // trabajo.
+  const arranque = Date.now()
   const log = join(workDir, `task-${run.task}-controls-${intento()}.log`)
   const lineas = []
   let resultado = OUTCOMES.DONE
@@ -433,7 +499,7 @@ function verboControls() {
   }
 
   writeFileSync(log, lineas.join('\n'))
-  medir('controls', { outcome: resultado, controls_log: log, commands: t.commands.length })
+  medir('controls', { outcome: resultado, controls_log: log, commands: t.commands.length, duration_ms: Date.now() - arranque })
   run = { ...run, lastControlsLog: log }
   out(`controles: ${resultado} (log en ${log})`)
   return resultado
@@ -611,8 +677,19 @@ function verboVerdict() {
     const ruta = join('docs', 'superpowers', 'verdicts', `issue-${issue}-task-${run.task}.json`)
     mkdirSync(join(repoRoot, 'docs', 'superpowers', 'verdicts'), { recursive: true })
     writeFileSync(join(repoRoot, ruta), JSON.stringify({ issue, task: run.task, task_name: tarea()?.name ?? null, verdict }, null, 2) + '\n')
-    git(['add', '--', ruta])
-    out(`veredicto guardado y stageado: ${ruta}`)
+    // `allowFail`, por la misma razón que el `git add` de la telemetría en
+    // `commit`: sin él, un repo que ignore esta ruta hace que la excepción suba
+    // y deje la tarea SIN COMITEAR con el run atascado en el paso del juez.
+    // Medido. Un veredicto que no puede viajar degrada el criterio de cierre de
+    // F37 y hay que verlo —de ahí el aviso, no un silencio—, pero pararlo no lo
+    // arregla: el veredicto sigue escrito en la carpeta del run, y quien revisa
+    // la pull request ve que no está. El trabajo se comitea; la evidencia de que
+    // no viajó se cuenta.
+    if (git(['add', '--', ruta], { allowFail: true }) === null) {
+      err(`aviso: el veredicto se escribió en ${ruta} pero NO se pudo stagear, así que no viajará en la pull request (¿la ruta está gitignoreada en este repo?). La tarea se comitea igual.`)
+    } else {
+      out(`veredicto guardado y stageado: ${ruta}`)
+    }
   }
   out(`veredicto ${verdict.ruling} con ${verdict.findings.length} hallazgo(s) → ${outcome}`)
   return outcome
@@ -631,9 +708,28 @@ function verboCommit() {
     err(`la tarea ${run.task} no dejó nada stageado: no hay nada que commitear`)
     return OUTCOMES.FAILED
   }
+  // La telemetría entra AQUÍ, con todas las filas de esta tarea ya escritas —
+  // incluidas las de los intentos que el juez vetó, que es el dato que dice lo
+  // que costaron las vueltas. El `git reset` que `report` hace al empezar cada
+  // intento desstagea, no borra contenido, así que siguen en el fichero.
+  //
+  // Y NO hay fila de `commit`: era la única que se escribía DESPUÉS del commit,
+  // así que viajaba dentro del commit de la tarea siguiente y la de la última no
+  // viajaba nunca. Lo que llevaba —el sha y el hecho de que la tarea se
+  // comiteó— está entero en `git log`. Sin ella, el fichero que se stagea aquí
+  // contiene exactamente las filas de esta tarea y de las anteriores, y no queda
+  // ninguna fuera de la pull request.
+  // `allowFail`, y no por prudencia genérica: sin él este `git add` es el primer
+  // camino por el que la telemetría podría tumbar un run, que es justo lo que el
+  // diseño prohíbe ("ninguna transición depende de la medida"). Medido: con
+  // `docs/` en el .gitignore del repo, `git add` sale con 1, la excepción sube y
+  // la tarea se queda SIN COMITEAR con el run atascado. La medida se pierde y el
+  // trabajo se comitea, nunca al revés.
+  if (existsSync(join(repoRoot, METRICS_REL)) && git(['add', '--', METRICS_REL], { allowFail: true }) === null) {
+    err(`aviso: no se pudo stagear la telemetría (${METRICS_REL}) — la tarea se comitea sin ella. ¿La ruta está gitignoreada en este repo?`)
+  }
   if (git(['commit', '-m', mensaje], { allowFail: true }) === null) return OUTCOMES.FAILED
   const sha = headSha()
-  medir('commit', { outcome: 'done', commit: sha })
   run = { ...run, lastFindings: null, lastPaths: null, lastSummary: null }
   out(`commiteada la tarea ${run.task}/${run.tasksTotal}: ${sha.slice(0, 7)}`)
   return OUTCOMES.DONE

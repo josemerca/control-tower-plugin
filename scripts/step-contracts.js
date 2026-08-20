@@ -35,20 +35,52 @@ export const VERDICT_RULES = [
   'patrones', 'manipulacion-tests', 'fixture-theater', 'alcance',
 ]
 
-// El veredicto. `ruling` y `findings` bastan: la severidad es lo que separa un
-// veto de un refunfuño, y el resto de la prosa del juez no la lee ningún
-// programa.
+// El veredicto: el fallo, el RECORRIDO de la rúbrica y los hallazgos. La
+// severidad es lo que separa un veto de un refunfuño, y el resto de la prosa
+// del juez no la lee ningún programa.
 //
 // Cada hallazgo lleva además su REGLA: cuál de las ocho de la rúbrica incumple.
 // Antes de esto un hallazgo decía severidad, qué y dónde, pero no POR QUÉ es un
 // hallazgo — y sin eso, la telemetría no puede contar cuántos vetos vienen de
 // cada regla, que es justo el dato que dice si la rúbrica está bien calibrada.
+//
+// Y `rubric` es el paseo por los ocho ítems, cada uno exactamente una vez con
+// lo que dio. La rúbrica ya lo pedía, pero lo pedía en PROSA y para la
+// respuesta conversacional del subagente, que nadie captura: lo que se validaba
+// y se persistía era sólo `{ruling, findings}`. Medido en
+// jjponz/rust-monitoring#10, donde los tres veredictos que viajaron
+// commiteados en la pull request eran `{"ruling": "PASS", "findings": []}` —
+// exactamente el artefacto que la propia rúbrica declara indistinguible de ocho
+// ítems que nadie abrió. Lo peor de aquel caso es que el PASS vacío era
+// CORRECTO: cuatro de los ocho ítems no tenían sujeto (un esqueleto sobre un
+// repo vacío, sin patrones que citar, sin tests previos, sin contratos), y no
+// había forma de saberlo leyendo el fichero. El recorrido es lo que distingue
+// "no aplicaba, y por esto" de "no se miró"; por eso entra en el esquema y no
+// en una línea que nadie valida.
+//
+// El enum del ítem es el MISMO array VERDICT_RULES, no una copia: dos listas de
+// ocho identificadores divergen al primer renombrado, que es el desacople que
+// este módulo ya pagó con JUDGE_TOOLS.
 export const VERDICT_SCHEMA = Object.freeze({
   type: 'object',
   additionalProperties: false,
-  required: ['ruling', 'findings'],
+  required: ['ruling', 'rubric', 'findings'],
   properties: {
     ruling: { type: 'string', enum: ['PASS', 'FAIL'] },
+    rubric: {
+      type: 'array',
+      minItems: VERDICT_RULES.length,
+      maxItems: VERDICT_RULES.length,
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['rule', 'result'],
+        properties: {
+          rule: { type: 'string', enum: VERDICT_RULES },
+          result: { type: 'string' },
+        },
+      },
+    },
     findings: {
       type: 'array',
       items: {
@@ -139,7 +171,7 @@ const esTexto = (v) => typeof v === 'string' && v.trim() !== ''
 // dependencias nuevas, y lo que hay que comprobar cabe en veinte líneas.
 export function readVerdict(structured) {
   if (!structured || typeof structured !== 'object') return { why: 'el juez no devolvió structured_output' }
-  const { ruling, findings } = structured
+  const { ruling, rubric, findings } = structured
   if (ruling !== 'PASS' && ruling !== 'FAIL') return { why: `ruling desconocido: ${JSON.stringify(ruling)}` }
   if (!Array.isArray(findings)) return { why: 'findings no es una lista' }
   for (const [i, f] of findings.entries()) {
@@ -151,6 +183,25 @@ export function readVerdict(structured) {
     // telemetría tanto como un `rule` ausente.
     if (!VERDICT_RULES.includes(f.rule)) return { why: `el hallazgo ${i} incumple una regla desconocida: ${JSON.stringify(f.rule)}` }
   }
+  // El recorrido de la rúbrica, con el mismo criterio que el `rule` de un
+  // hallazgo: enum CERRADO y descarte, no interpretación. Aquí el descarte
+  // cubre además la CARDINALIDAD, que en un hallazgo no aplica — la rúbrica son
+  // ocho ítems y se contestan los ocho, así que un recorrido corto, uno con un
+  // ítem repetido y uno con un identificador que nadie reconoce son el mismo
+  // fallo: un veredicto del que no se puede afirmar que la rúbrica se recorrió.
+  if (!Array.isArray(rubric)) return { why: 'el veredicto no trae el recorrido de la rúbrica' }
+  const recorridos = []
+  for (const [i, paso] of rubric.entries()) {
+    if (!paso || typeof paso !== 'object') return { why: `el paso ${i} del recorrido no es un objeto` }
+    if (!VERDICT_RULES.includes(paso.rule)) return { why: `el recorrido nombra un ítem desconocido de la rúbrica: ${JSON.stringify(paso.rule)}` }
+    // Un ítem nombrado sin resultado son los ocho identificadores sin nada
+    // detrás: el mismo PASS vacío de rust-monitoring#10, sólo más largo.
+    if (!esTexto(paso.result)) return { why: `el ítem ${paso.rule} del recorrido no dice lo que dio` }
+    if (recorridos.includes(paso.rule)) return { why: `el recorrido repite el ítem ${paso.rule} de la rúbrica` }
+    recorridos.push(paso.rule)
+  }
+  const sinRecorrer = VERDICT_RULES.filter((regla) => !recorridos.includes(regla))
+  if (sinRecorrer.length) return { why: `el recorrido no pasa por ${sinRecorrer.join(', ')}: la rúbrica son ocho ítems y se contestan los ocho` }
   // La coherencia que el original comprueba en el propio agregado: un PASA con
   // un hallazgo grave se contradice a sí mismo. No se "interpreta" hacia el
   // lado prudente — se descarta y se vuelve a preguntar, porque un juez que no
@@ -158,7 +209,7 @@ export function readVerdict(structured) {
   if (ruling === 'PASS' && findings.some((f) => f.severity === 'high')) {
     return { why: 'un PASS con un hallazgo de severidad high contradice la rúbrica: un hallazgo grave es FAIL' }
   }
-  return { verdict: { ruling, findings } }
+  return { verdict: { ruling, rubric, findings } }
 }
 
 // De veredicto a resultado de la tabla. Las tres salidas son las tres que

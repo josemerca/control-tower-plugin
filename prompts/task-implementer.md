@@ -105,4 +105,11 @@ Those two fields are the whole object; there is no third one to add.
   decision you obeyed and would have argued with, a decision the brief left
   thinner than it looked, a real problem you deliberately did not fix.
 
+  **This lands in the pull request**: the program prints it, repeats it back to
+  the session at the commit step, and commits it with the task's telemetry. So
+  write one sentence that stands on its own, without the context of this
+  conversation. "Obeyed a decision I disagree with" tells nobody anything; "the
+  lockfile is committed for a reproducible CI but the workflow runs without
+  --locked, so it is not enforced" is a line a reviewer can act on.
+
 Then reply with one line: the report path and how many files you touched.

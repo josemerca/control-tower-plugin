@@ -23,13 +23,14 @@ const AHORA = '2026-08-18T10:00:00.000Z'
 const IDENT = {
   repo: 'josemerca/control-tower-plugin', epic: '12', issue: 7,
   plan: 'plan.md', plan_sha256: 'abc', task: 2, task_name: 'la segunda',
-  tasks_total: 8, step: 'judge', attempt: 3, session: 'sesion-1',
+  tasks_total: 8, step: 'judge', attempt: 3,
+  plugin_version: '0.36.1', actor: 'alcaptar',
 }
 
 describe('la identidad de la fila', () => {
-  it('lleva los once campos del diseño, ni uno menos', () => {
+  it('lleva los doce campos del diseño, ni uno menos', () => {
     const fila = metricRow(IDENT, {}, { now: AHORA })
-    expect(IDENTITY_FIELDS).toHaveLength(11)
+    expect(IDENTITY_FIELDS).toHaveLength(12)
     for (const campo of IDENTITY_FIELDS) expect(fila).toHaveProperty(campo)
     expect(fila.written_at).toBe(AHORA)
   })
@@ -38,6 +39,71 @@ describe('la identidad de la fila', () => {
     for (const vacio of [null, undefined, '']) {
       expect(metricRow({ ...IDENT, epic: vacio }, {}, { now: AHORA }).epic).toBe('(sin milestone)')
     }
+  })
+
+  // EL MISMO ARGUMENTO QUE `plan_sha256`, APLICADO AL LOOP EN VEZ DE AL PLAN: un
+  // plan se reescribe y entonces dos runs contra dos versiones del mismo fichero
+  // son indistinguibles justo donde más se van a mirar. `ct-step` también se
+  // reescribe —y se reescribe más que ningún plan—, así que sin la versión del
+  // plugin dos runs contra dos loops distintos se comparan como si fueran el
+  // mismo mecanismo. La corrida de campo que motiva esto se hizo con 0.36.1: sin
+  // el campo, esa cifra sólo existe en la memoria de quien estaba delante.
+  it('la versión del plugin viaja en la fila: un ct-step reescrito hace incomparables dos runs', () => {
+    expect(metricRow(IDENT, {}, { now: AHORA }).plugin_version).toBe('0.36.1')
+    expect(IDENTITY_FIELDS).toContain('plugin_version')
+  })
+
+  // HOY DA IGUAL Y VA A DEJAR DE DAR IGUAL. Cada fila vive en el disco de quien
+  // la escribió, así que el actor es implícito; en cuanto las filas viajen
+  // dentro de la pull request, en un mismo fichero se mezclarán filas de dos
+  // máquinas distintas y sin actor no se sabrá de quién es el coste — que es
+  // justo el dato por el que se mira este fichero.
+  it('el actor viaja en la fila: en cuanto las filas se mezclen, el coste tiene dueño', () => {
+    expect(metricRow(IDENT, {}, { now: AHORA }).actor).toBe('alcaptar')
+    expect(IDENTITY_FIELDS).toContain('actor')
+  })
+
+  // La regla del fichero, aplicada a los dos campos nuevos: la ausencia se
+  // DECLARA. Un `null` en una columna por la que se agrupa (¿qué versión?, ¿de
+  // quién?) se lee como un valor más y funde en un mismo grupo las filas que no
+  // lo traían con las que lo traían vacío. El centinela mantiene el tipo de la
+  // columna y dice en voz alta que ahí no había dato, igual que `epic` lleva
+  // años diciendo `(sin milestone)`.
+  it('sin versión y sin actor se declara la ausencia, no se deja el hueco', () => {
+    for (const vacio of [null, undefined, '']) {
+      const fila = metricRow({ ...IDENT, plugin_version: vacio, actor: vacio }, {}, { now: AHORA })
+      expect(fila.plugin_version).toBe('(sin versión)')
+      expect(fila.actor).toBe('(sin actor)')
+    }
+  })
+
+  // EL MÓDULO SIGUE SIENDO PURO, y estos dos campos son justo los que invitan a
+  // romperlo: la versión está en el package.json del plugin y el actor está en
+  // el entorno, a una línea de distancia. Si los buscara él, la fila diría quién
+  // ESCRIBE la métrica en vez de quién corrió el paso, y el módulo dejaría de
+  // ser testeable sin montar un disco.
+  it('no va a buscar el actor al entorno: el valor llega DENTRO de la identidad', () => {
+    const previo = process.env.USER
+    process.env.USER = 'un-actor-del-entorno'
+    try {
+      const { plugin_version: version, actor } = metricRow({ ...IDENT, plugin_version: null, actor: null }, {}, { now: AHORA })
+      expect(actor).toBe('(sin actor)')
+      expect(version).toBe('(sin versión)')
+    } finally {
+      if (previo === undefined) delete process.env.USER
+      else process.env.USER = previo
+    }
+  })
+
+  // `session` SE FUE, y no por limpieza: prometía una dimensión que el mecanismo
+  // no puede dar. Con `ct-step` las llamadas al modelo son subagentes de la
+  // sesión y no hay identificador de conversación que recoger, así que su único
+  // escritor la pasaba `null` a pelo y la columna era nula en TODAS las filas.
+  // Una columna siempre nula enseña a saltársela, y la de al lado se salta
+  // detrás. Vuelve el día que haya algo que meter dentro.
+  it('`session` ya no es un campo: una columna siempre nula enseña a ignorar el fichero', () => {
+    expect(IDENTITY_FIELDS).not.toContain('session')
+    expect(metricRow({ ...IDENT, session: 'sesion-1' }, {}, { now: AHORA })).not.toHaveProperty('session')
   })
 
   it('el intento es una dimensión de la fila, no un contador agregado', () => {
