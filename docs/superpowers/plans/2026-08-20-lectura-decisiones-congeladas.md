@@ -14,7 +14,9 @@
 
 **Regla de estilo (del usuario, no negociable):** todo a imagen y semejanza de lo existente. Cada pieza es el espejo de su equivalente de `## Contexto del epic`, con los mismos comentarios que explican el porqué. Los edits son casi todos **aditivos** (constante nueva, función nueva, un parámetro más en firmas existentes, dos ediciones de texto). La **única** reescritura de lógica es extraer `readSpecSection` y reexpresar `readEpicContext` encima (Task 1, I1): refactor de bajo riesgo, sus 5 tests quedan verdes sin tocarlos, y evita clonar el lector.
 
-**Cambios frente a la primera versión (revisión):** B1 (consumo: whitelist + kickoff + destino), B2 (formato contra la plantilla real + fallo observable), I1 (extraer `readSpecSection`), I2 (test con contenido hostil, `extractOrder`), I3 (completar tests 2/5/6/8/9).
+**Cambios frente a la primera versión (review 1):** B1 (consumo: whitelist + kickoff + destino), B2 (formato contra la plantilla real + fallo observable), I1 (extraer `readSpecSection`), I2 (test con contenido hostil, `extractOrder`), I3 (completar tests 2/5/6/8/9).
+
+**Cambios frente a la segunda versión (review 2):** P1 (`extractOrder` anclado al marcador ENTERO en su línea — `ct-order:99 -->` en prosa ya no lo burla; el test lo ejerce), P2 (corregir la anotación «LO ÚNICO QUE VIAJA AL AGENTE» en `docs/loop/loop.body.html` + regenerar derivados), y el test hostil ahora ejerce de verdad `extractDepsInSection`/`extractStrayDeps` con la aserción que refleja el comportamiento real (strayDeps recoge el `#7`, ruido aceptado).
 
 ---
 
@@ -263,18 +265,31 @@ Importa los extractores de `gh-issue-map.js` y afirma que una decisión que mete
 cadenas peligrosas en su prosa NO envenena lo que la máquina lee:
 
 ```javascript
-import { extractOrder, extractAc, extractStrayDeps } from '../scripts/gh-issue-map.js'
+import { extractOrder, extractAc, extractDepsInSection, extractStrayDeps } from '../scripts/gh-issue-map.js'
 
-describe('buildIssueBody — decisiones con contenido hostil no rompe los extractores (I2)', () => {
-  const HOSTILE = '- **D-1** — respeta el marcador ct-order:99, no toques merge-after #7, mira AC-1.1 y closes #3.'
-  it('extractOrder devuelve el orden REAL del slice, no el ct-order de la decisión', () => {
+describe('buildIssueBody — decisiones con contenido hostil no rompe los extractores (I2/P1)', () => {
+  // La prosa mete EL PEOR caso para cada extractor: un ct-order con su cierre
+  // "-->" (que una regex laxa casaría), un merge-after, un AC y un closes.
+  const HOSTILE = '- **D-1** — respeta el marcador ct-order:99 -->, no toques merge-after #7, mira AC-1.1 y closes #3.'
+  it('extractOrder devuelve el orden REAL del slice, no el ct-order:99 --> de la prosa (P1)', () => {
     const body = buildIssueBody(SLICE, SPEC_REF, null, HOSTILE) // SLICE.n === 1
-    expect(extractOrder(body)).toBe(1) // el marcador real <!-- ct-order:1 --> va al final; NO el 99 de la prosa
+    expect(extractOrder(body)).toBe(1) // solo casa la LÍNEA "<!-- ct-order:1 -->" del final; NO el 99 con --> de la prosa
   })
   it('extractAc no se traga el AC-1.1 metido en la prosa de la decisión', () => {
     const body = buildIssueBody(SLICE, SPEC_REF, null, HOSTILE)
-    // extractAc lee la sección de AC, no la de decisiones — el AC-1.1 hostil no la contamina
-    expect(extractAc(body)).toEqual(SLICE.ac)
+    expect(extractAc(body)).toEqual(SLICE.ac) // lee la sección de AC, no la de decisiones
+  })
+  it('extractDepsInSection lee SOLO "## Dependencias", ajena al merge-after de la prosa', () => {
+    const body = buildIssueBody(SLICE, SPEC_REF, null, HOSTILE)
+    expect(extractDepsInSection(body).deps).toEqual([]) // devuelve {deps, malformed}; SLICE no tiene deps y el #7 hostil vive fuera de esa sección
+  })
+  it('extractStrayDeps SÍ recoge el merge-after #7 de la prosa — ruido conocido y aceptado, no un fallo', () => {
+    const body = buildIssueBody(SLICE, SPEC_REF, null, HOSTILE)
+    // Documenta la limitación honestamente (spec §7): un merge-after en prosa
+    // produce un stray dep. NO mueve el exit code (es nota, no divergencia
+    // máquina). Aquí se fija el comportamiento REAL, no uno aspiracional; si
+    // algún día molesta, se acota extractStrayDeps y se cambia esta aserción.
+    expect(extractStrayDeps(body, [])).toContain(7)
   })
 })
 ```
@@ -289,17 +304,21 @@ describe('buildIssueBody — decisiones con contenido hostil no rompe los extrac
 - [ ] **Fix I2 — anclar `extractOrder` al marcador que groom escribe de verdad**
 
 `buildIssueBody` escribe el marcador SIEMPRE como comentario cerrado
-(`<!-- ct-order:${slice.n} -->`). Endurecer `extractOrder` (`scripts/gh-issue-map.js`,
-~línea 665-666) para exigir el cierre `-->`, que ninguna prosa suelta trae:
+(`<!-- ct-order:${slice.n} -->`), SIEMPRE en su propia línea. Endurecer
+`extractOrder` (`scripts/gh-issue-map.js`, ~línea 665-666) para exigir el
+**comentario completo `<!-- … -->` en una línea entera** — no basta con el cierre
+`-->`, porque una prosa que diga `ct-order:99 -->` seguiría casando:
 
 ```javascript
 export function extractOrder(body) {
-  // Anclado al marcador REAL: "<!-- ct-order:N -->" (con el cierre "-->"), no un
-  // "ct-order:N" cualquiera. Sin este ancla, cualquier sección que mencione la
-  // cadena por DELANTE del marcador (p.ej. una decisión congelada que hable de
-  // ct-order) se leería como el orden del issue, colisionaría en buildOrderIndex
-  // y sacaría el epic entero del despacho (I2 del RFC de decisiones congeladas).
-  const m = (body || '').match(/ct-order:(\d+)\s*-->/)
+  // Anclado al marcador REAL y ENTERO: una línea que sea exactamente
+  // "<!-- ct-order:N -->" (apertura <!-- + cierre -->, con /m para línea a
+  // línea). No basta exigir solo "-->": una decisión congelada que escriba
+  // "ct-order:99 -->" en su prosa lo burlaría. Sin este ancla, cualquier texto
+  // por DELANTE del marcador real se leería como el orden del issue,
+  // colisionaría en buildOrderIndex y sacaría el epic entero del despacho
+  // (I2/P1 del RFC de decisiones congeladas).
+  const m = (body || '').match(/^<!--\s*ct-order:(\d+)\s*-->\s*$/m)
   return m ? Number(m[1]) : null
 }
 ```
@@ -307,9 +326,11 @@ export function extractOrder(body) {
 - [ ] **Regresión de gh-issue-map tras el fix I2**
 
 Run: `npx vitest run __tests__/gh-issue-map.test.js __tests__/gh-issues.test.js __tests__/dispatch.test.js`
-Expected: PASS. Si algún test alimenta un `ct-order:N` **sin** el cierre `-->`,
-es un fixture que no refleja lo que groom escribe: actualízalo al marcador real
-(`<!-- ct-order:N -->`), no relajes la regex.
+Expected: PASS. Todos los fixtures del repo escriben el marcador como
+`<!-- ct-order:N -->` en su propia línea (verificado), así que el anclaje a línea
+completa no rompe ninguno. Si alguno alimentara el marcador **inline** (pegado a
+otro texto en la misma línea), es un fixture que no refleja lo que `buildIssueBody`
+escribe: ponlo en su propia línea, no relajes la regex.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -989,10 +1010,11 @@ git commit -m "feat: --reconcile reescribe/inserta/retira ## Decisiones congelad
 
 ---
 
-## Task 7: Documentar la sección en el comando (commands/ct-groom.md)
+## Task 7: Documentar la sección + corregir el doc contradictorio (P2)
 
 **Files:**
 - Modify: `commands/ct-groom.md` (tras la sección de `## Contexto del epic`, ~línea 59)
+- Modify: `docs/loop/loop.body.html` (~línea 1158) — **la fuente**; `control-tower-loop.html` y el `.pdf` son derivados y se **regeneran**, no se editan a mano (ver `docs/loop/README.md`)
 
 - [ ] **Step 1: Añadir la subsección de documentación**
 
@@ -1016,16 +1038,33 @@ no metas cabeceras (`###`) dentro, o la sección no se emite (mismo guardarraíl
 el contexto del epic). Un spec sin esta sección es válido.
 ```
 
-- [ ] **Step 2: Verify docs consistency (no test framework, revisión manual)**
+- [ ] **Step 2: Corregir la anotación «LO ÚNICO QUE VIAJA AL AGENTE» en la FUENTE (P2)**
 
-Run: `grep -n "Decisiones congeladas" commands/ct-groom.md`
-Expected: la nueva subsección aparece.
+Edita **solo** `docs/loop/loop.body.html` (~1158): la anotación de
+`## Contexto del epic` dice `← LO ÚNICO QUE VIAJA AL AGENTE` y con esta ronda ya no
+es la única sección que viaja. Cámbiala para reflejar los dos canales, p.ej.:
 
-- [ ] **Step 3: Commit**
+```html
+<span class="k">## Contexto del epic</span>                  <span class="c">← viaja al agente (junto a ## Decisiones congeladas)</span>
+```
+
+- [ ] **Step 3: Regenerar los derivados (mismo commit, ver README.md)**
+
+Run: `node docs/loop/build.mjs`
+Expected: `control-tower-loop.html` y `control-tower-loop.pdf` se reconstruyen
+desde la fuente. NO se editan a mano — la anotación corregida propaga sola.
+
+- [ ] **Step 4: Verify docs consistency (revisión manual)**
+
+Run: `grep -rn "Decisiones congeladas" commands/ct-groom.md; grep -rln "ÚNICO QUE VIAJA" docs/loop/`
+Expected: la subsección de `ct-groom.md` aparece, y `grep` de «ÚNICO QUE VIAJA» ya
+**no** devuelve nada en `docs/loop/` (fuente corregida y derivados regenerados).
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add commands/ct-groom.md
-git commit -m "docs: documenta la sección ## Decisiones congeladas en ct-groom"
+git add commands/ct-groom.md docs/loop/loop.body.html docs/loop/control-tower-loop.html docs/loop/control-tower-loop.pdf
+git commit -m "docs: documenta ## Decisiones congeladas y corrige el doc que la contradecía (P2)"
 ```
 
 ---

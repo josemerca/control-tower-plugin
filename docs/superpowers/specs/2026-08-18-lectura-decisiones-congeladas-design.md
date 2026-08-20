@@ -278,6 +278,7 @@ fuera de alcance, y las dos fuentes se contradicen.
 | **La sección en la lista blanca de entradas del plan** (B1) | `skills/writing-plans-prescriptive/SKILL.md` |
 | Wiring: leer del spec, pasar a `groomPlan`, categoría de reporte | `scripts/ct-groom.mjs` |
 | Contrato de la sección del spec (referenciando la plantilla real) | `commands/ct-groom.md` |
+| **Corregir la anotación «LO ÚNICO QUE VIAJA AL AGENTE»** (P2) | `docs/loop/loop.body.html`, `docs/loop/control-tower-loop.html` |
 
 Casi todo **aditivo**: constante nueva, función nueva, un parámetro más en firmas
 existentes (`buildIssueBody`, `groomPlan`), dos ediciones de texto (SKILL.md y la
@@ -319,12 +320,18 @@ la suite existente (import directo para lo puro; `ct-groom --dry-run` para el E2
    `FROZEN_DECISIONS_HEADING` (no el literal — que es justo lo que la constante
    existe para evitar, §4.1), y nombra el destino `## 2. Closed decisions` (I3.9,
    B1).
-10. **Contenido HOSTIL no rompe nada.** El cuerpo con la sección nueva no altera
-    lo que extraen `extractAc` / `extractDepsInSection` / `extractStrayDeps` /
-    `extractSectionContent` **ni `extractOrder`** — el test mete en la prosa de una
-    decisión las cadenas peligrosas (`ct-order:99`, `merge-after #7`, `AC-1.1`,
-    `closes #3`) y afirma que `extractOrder` devuelve el orden REAL del slice, no
-    el de la decisión (I2). Este es el test que protege el dispatch.
+10. **Contenido HOSTIL: lo que la máquina decide no se envenena.** El test mete en
+    la prosa de una decisión las cadenas peligrosas —incluida `ct-order:99 -->`
+    **con su cierre** (el caso que una regex laxa casaría), más `merge-after #7`,
+    `AC-1.1`, `closes #3`— y afirma, extractor por extractor:
+    - `extractOrder` devuelve el orden REAL del slice, **no** el `99` de la prosa
+      (fix P1: anclado a la línea completa `<!-- ct-order:N -->`). **Este es el que
+      protege el dispatch.**
+    - `extractAc` y `extractDepsInSection` (que leen sus propias secciones) quedan
+      intactos.
+    - `extractStrayDeps` **sí** recoge el `#7` de la prosa: es ruido conocido y
+      aceptado (§7), no mueve el exit code. El test fija ese comportamiento REAL,
+      no uno aspiracional — no se afirma una limpieza que no existe.
 11. **B2 — fallo de limpieza observable:** una decisión cuyo sufijo NO casa el
     recorte (envuelto a dos líneas, o `_(…)_`) → la sección se proyecta **con un
     warning** que nombra la línea donde sobrevive `Procedencia`. El fallo no es
@@ -360,10 +367,13 @@ auto-groomea y cuyos specs hablan de `ct-order` sin parar, esto no es
 hipotético— haría que los N issues leyeran el mismo orden falso,
 `buildOrderIndex` colisionaría y el epic entero se caería del despacho, con un
 síntoma que no apunta a la causa. Mitigación: es riesgo preexistente de F26, pero
-esta ronda lo **duplica**, así que el test §6.10 usa contenido hostil (incluido
-`ct-order:`) y afirma que `extractOrder` sigue devolviendo el orden real. (El
-`merge-after #N` en prosa produce `strayDeps` de ruido —no mueve el exit code—;
-se acepta.)
+esta ronda lo **duplica**, así que se endurece `extractOrder` para que solo case
+el **marcador entero en su línea** (`^<!-- ct-order:N -->$`), no un `ct-order:N`
+suelto **ni un `ct-order:N -->` en prosa** (P1 del review: exigir solo el cierre
+`-->` no bastaba). El test §6.10 mete justamente `ct-order:99 -->` en la prosa y
+afirma que `extractOrder` devuelve el orden real. (El `merge-after #N` en prosa
+sí produce `strayDeps` de ruido —no mueve el exit code—; se acepta y el test lo
+fija tal cual.)
 
 **B2 — el recorte de procedencia es best-effort sobre un formato externo.** La
 regex no cubre cada variante y el formato lo gobierna una plantilla que vive fuera
@@ -396,12 +406,21 @@ no se toca.
 (§7) y la pregunta «¿el vehículo de una decisión de ficheros es `Alcance:` o esta
 sección?» se resuelven en la fase de cumplimiento, no aquí.
 
-**Tocar la plantilla de execution-spec.** El spec **sí** tiene plantilla —la
-gobierna `_TEMPLATE-execution-spec.md` (el núcleo, según `commands/ct-groom.md`),
-que vive fuera de este árbol— y esta sección viene de su núcleo. Esta fase **no**
-la edita: se documenta el contrato en `commands/ct-groom.md` (como se documenta
-hoy `## Contexto del epic`, referenciando la plantilla, no negándola) y con eso
-basta para «que las lea». Mantener la plantilla al día es de quien la posee.
+**Tocar la plantilla EXTERNA de execution-spec.** El spec **sí** tiene plantilla
+—la gobierna `_TEMPLATE-execution-spec.md` (el núcleo, según `commands/ct-groom.md`),
+que vive **fuera de este árbol**— y esta sección viene de su núcleo. Esta fase
+**no** la edita: se documenta el contrato en `commands/ct-groom.md` (como se
+documenta hoy `## Contexto del epic`, referenciando la plantilla, no negándola) y
+con eso basta para «que las lea». Mantener esa plantilla al día es de quien la
+posee.
+
+> **Lo que sí se corrige (P2), porque es del repo y este cambio lo vuelve
+> falso:** los docs `docs/loop/loop.body.html` y `docs/loop/control-tower-loop.html`
+> anotan hoy `## Contexto del epic` como «LO ÚNICO QUE VIAJA AL AGENTE». Al añadir
+> un segundo canal que también viaja, esa anotación pasa a mentir. Se actualiza a
+> «contexto y decisiones congeladas viajan al agente» (o se marca la anotación
+> como histórica). No es la plantilla externa: son artefactos versionados aquí, y
+> dejar una contradicción dentro del propio repo es justo lo que P2 señala.
 
 **El guard machine-checked del destino.** Que `dispatch-check --check-plan`
 verifique que `## 2. Closed decisions` del plan contiene cada `D-N` del issue
