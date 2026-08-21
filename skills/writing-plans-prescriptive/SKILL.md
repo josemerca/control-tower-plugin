@@ -45,7 +45,21 @@ stop — never guess through a blocker.
 ## What carries a code block — and what does not
 
 Before writing any task, read the actual files this slice will touch and at least one
-analogous file as a reference pattern. Then every code block you write declares its **role** on
+analogous file as a reference pattern.
+
+**And find this repo's written yardstick, because `## 3. Reference patterns` carries both.**
+An analogous file shows the shape; a convention document states the rule, and a rule holds even
+where no analogous file exists — which is why a slice on an empty repo still has something to
+measure against. Look for `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING`, anything under a
+`docs/conventions/` or `rules` directory, and the project skills under `.claude/skills`; the
+issue's "Contexto del epic" is where a human may have named them already. List what you find
+under `Rules to obey:`, **by path**, and if the repo genuinely declares none, say so with
+`N/A — <reason>` instead of inventing a plausible one: `--check-plan` reads every path you name
+there and fails the plan on one that does not exist. This section is what the judge opens to
+decide whether the diff honours this repo's conventions, so a path you cited from memory leaves
+the implementer and the judge both measuring against a file that is not there.
+
+Then every code block you write declares its **role** on
 the line right above it. The validator enforces the labels and their budgets:
 
 | Label above the block | What goes inside | Budget |

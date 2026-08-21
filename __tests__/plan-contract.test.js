@@ -621,3 +621,60 @@ describe('los comandos de **Verification:** van en un bloque, no en la frase', (
     expect(rulesOf(plan).map((v) => v.detail.match(/tarea (\d+)/)[1])).toEqual(['1', '2'])
   })
 })
+
+// ---------------------------------------------------------------------------
+// §3 ES LA VARA DEL REPO, Y UNA VARA QUE NO EXISTE NO MIDE.
+//
+// `## 3. Reference patterns` dejó de ser sólo "ficheros a los que parecerse":
+// es lo único del plan que le dice al implementador cómo se escribe aquí y al
+// juez contra qué bloquear. Y lo escribe un AGENTE, que puede citar
+// `docs/conventions/domain.md` porque le suena a que un repo así lo tendría —
+// y entonces ninguno de los dos abre nada y los dos siguen como si hubieran
+// medido. Misma regla que la literalidad de `Current state`, aplicada a la otra
+// clase de cita: allí el texto citado existe verbatim, aquí el fichero existe.
+// ---------------------------------------------------------------------------
+describe('validatePlan — las rutas de §3 existen', () => {
+  const conSeccion3 = (contenido) => VALID_PLAN.replace('## 3. Reference patterns\nsrc/math.js', `## 3. Reference patterns\n${contenido}`)
+
+  it('una ruta real entre comillas invertidas pasa', () => {
+    expect(violacionesDe(conSeccion3('Files to imitate: `src/math.js`'), 'reference-paths')).toEqual([])
+  })
+
+  it('una ruta que el repo no tiene falla, y el mensaje la nombra', () => {
+    const v = violacionesDe(conSeccion3('Rules to obey: `docs/conventions/domain.md`'), 'reference-paths')
+    expect(v).toHaveLength(1)
+    expect(v[0].detail).toMatch(/docs\/conventions\/domain\.md/)
+  })
+
+  it('AGENTS.md cuenta como ruta aunque no lleve barra: es el sitio más probable de la vara', () => {
+    expect(violacionesDe(conSeccion3('Rules to obey: `AGENTS.md`'), 'reference-paths')).toHaveLength(1)
+  })
+
+  it('una skill no se comprueba en disco: no es un fichero del repo', () => {
+    // Lleva dos puntos y ninguna barra. Si se tratara como ruta, toda skill
+    // citada vetaría el plan y la vara secundaria sería imposible de declarar.
+    expect(violacionesDe(conSeccion3('Rules to obey: `backend-engineering:backend-best-practices`'), 'reference-paths')).toEqual([])
+  })
+
+  it('un token que no es una ruta no se mira', () => {
+    // §3 describe idiomas, y describirlos exige citar código: `test(...)` y
+    // `describe` son prosa técnica, no ficheros.
+    expect(violacionesDe(conSeccion3('Files to imitate: `src/math.js` — tests planos con `test(...)`, sin `describe`'), 'reference-paths')).toEqual([])
+  })
+
+  it('un directorio se salta: el único puerto que este módulo recibe lee ficheros', () => {
+    expect(violacionesDe(conSeccion3('Rules to obey: `docs/conventions/`'), 'reference-paths')).toEqual([])
+  })
+
+  it('la regla está acotada a §3: en el resto del plan hay rutas que la slice va a crear', () => {
+    // Exigir que existan fuera de §3 vetaría todos los planes: `## 4. Inventory`
+    // nombra precisamente los ficheros que la slice crea.
+    const plan = VALID_PLAN.replace('src/math.js (modificar), tests/math.test.js (crear).', '`src/aun-no-existe.js` (crear).')
+    expect(violacionesDe(plan, 'reference-paths')).toEqual([])
+  })
+
+  it('sin readFile inyectado no se afirma ni se niega, igual que la literalidad', () => {
+    const r = validatePlan(conSeccion3('Rules to obey: `docs/conventions/domain.md`'), {})
+    expect(r.violations.filter((v) => v.rule === 'reference-paths')).toEqual([])
+  })
+})

@@ -41,8 +41,12 @@ this prompt or in the files it names.
    them at a gate. One you believe is wrong you obey anyway, and then you say so
    in your report: which decision, and what you think it costs. Silence is the
    failure being prevented here, not disagreement — but the place for the
-   disagreement is the report, never the diff. The reference patterns name real
-   files: read them and follow their shape instead of inventing your own.
+   disagreement is the report, never the diff. `## 3. Reference patterns` is the
+   yardstick of this repo and names two kinds of thing, both real paths:
+   `Files to imitate:`, whose shape you follow instead of inventing your own, and
+   `Rules to obey:` — this repo's written conventions. **Open both before you
+   write.** The judge that reads your diff opens that same section and blocks on
+   those same documents, so a rule you did not read is a round trip you paid for.
 4. Write the smallest code that makes the task true. The brief carries contracts
    and signatures, not bodies. Bodies are written with the compiler in front of
    you, not recalled from memory — so read the code you are extending before you

@@ -107,14 +107,34 @@ the diff does not touch is not a finding. Neither is your disagreement with a
 row: a human closed these at a gate, and reopening one is the failure this item
 names, not obeying one you would have argued with.
 
-### 5. `patrones` — the shape the plan pointed at
+### 5. `patrones` — the yardstick of this repo
 
-**Where to look:** `## 3. Reference patterns` names real files. Open them, and
-compare them with the code in the diff that plays the same role.
+**Where to look:** `## 3. Reference patterns`, which names two kinds of thing and
+both are real paths the program already checked exist. `Files to imitate:` are
+exemplars — open them and compare them with the code in the diff that plays the
+same role. `Rules to obey:` are this repo's written conventions (`AGENTS.md`, a
+`docs/conventions/` file, `CONTRIBUTING`) and any skill named there — **open them
+and read the rules that bear on this diff.**
 
-**What settles it:** the idiom of the files the plan names and of the files the
-diff touches — never your own preferences. If the plan names no pattern for the
-code in question, this item has nothing to compare and produces no finding.
+**What settles it:** for an exemplar, the idiom of the file the plan names
+against the idiom of the diff. For a rule document, whether the diff does what
+that document says — and here you do have a criterion, because it is written
+down and you can quote it. Cite the rule and its path in `evidence`: not "this
+reads badly" but "line 34 of `docs/conventions/infrastructure.md` says X and this
+does Y". Anything you cannot pin to a sentence of a document the plan names is
+**not** this item's business — that is the difference between a real finding and
+the defensive veto a verifier asked for defects always produces.
+
+Where an exemplar and a rule disagree, the rule wins: committed code is
+circumstance, a written convention is the rule.
+
+**When the yardstick is empty:** `## 3. Reference patterns` that names no rule
+document for the code in question — `N/A`, or exemplars only — is this item
+**`sin-vara`**, not `conforme`. You were asked to judge how this repo writes code
+and you were handed nothing that says how. Say that, and do not substitute a
+convention of your own: a repo whose slices come back `sin-vara` needs to write
+its conventions down, and that is a fact worth surfacing. Reserve `no-aplica` for
+a diff with nothing to compare at all — prose, plan text, a document.
 
 ### 6. `manipulacion-tests` — a pre-existing test that stopped asserting
 

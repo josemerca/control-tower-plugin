@@ -29,7 +29,16 @@ Protected" section. If nothing: N/A — <reason>.}}
 
 ## 3. Reference patterns
 
-{{Real files in this repo the implementer must imitate.}}
+{{The yardstick of this repo for this slice, in two lists. It is the only part of the plan that
+tells the implementer how code is written here and the judge what to block on, so every path you
+name is grepped by `--check-plan`: a path that does not exist fails the plan.}}
+
+Files to imitate: {{real files whose shape the implementer copies — same role, same layer. Or
+N/A — <reason>.}}
+
+Rules to obey: {{this repo's own convention documents, by path — `AGENTS.md`, `CLAUDE.md`, a file
+under `docs/conventions/`, `CONTRIBUTING` — plus any skill the issue's "Contexto del epic" names
+(a skill is not a path and is not checked on disk). Or N/A — this repo declares none.}}
 
 ## 4. Inventory
 

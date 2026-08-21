@@ -123,6 +123,11 @@ const NO_CODE = /^No code — .+/
 
 const ends = (path, list) => list.some((ext) => path.toLowerCase().endsWith(ext))
 const isText = (path) => ends(path, TEXT_EXTENSIONS)
+
+// Si un token entre comillas invertidas de §3 es una ruta del repo que hay que
+// comprobar. Ver el porqué largo junto a la regla `reference-paths`, al final de
+// validatePlan.
+const esRutaCitada = (t) => !t.endsWith('/') && !/\s/.test(t) && (t.includes('/') || isText(t))
 const isTest = (path) => TEST_PATH.test(path)
 const isConfig = (path) =>
   ends(path, CONFIG_EXTENSIONS) || CONFIG_BASENAMES.includes(path.split('/').pop())
@@ -410,6 +415,57 @@ export function validatePlan(markdown, { readFile } = {}) {
       push('literality', `el bloque "Current state (${path})" NO existe verbatim en ese fichero — cita de memoria`)
     }
   })
+
+  // ---------------------------------------------------------------------------
+  // §3 ES LA VARA DEL REPO, Y UNA VARA QUE NO EXISTE NO MIDE.
+  //
+  // `## 3. Reference patterns` dejó de ser sólo "ficheros a los que parecerse":
+  // es lo único del plan que le dice al implementador cómo se escribe en este
+  // repo y al juez contra qué bloquear. Y lo escribe un AGENTE, así que puede
+  // citar `docs/conventions/domain.md` porque le suena a que un repo así lo
+  // tendría. Entonces el implementador no lo abre (no está), el juez no lo abre
+  // (no está), y los dos siguen adelante como si hubieran medido.
+  //
+  // Es la MISMA regla que la literalidad de `Current state`, aplicada a la otra
+  // clase de cita del plan: allí se comprueba que el texto citado existe verbatim
+  // en el fichero, aquí que el fichero citado existe. Tercera de la serie —
+  // `5b97fdd` cerró "la vara es prosa", `verification-predicate` cerró "la vara
+  // mide al revés", y ésta cierra "la vara no existe".
+  //
+  // ACOTADA A §3 a propósito: en el resto del plan hay rutas que la slice va a
+  // CREAR, y exigir que existan ahí vetaría todos los planes.
+  //
+  // QUÉ SE TRATA COMO RUTA. Un token entre comillas invertidas, sólo si no lleva
+  // espacios y (lleva una barra o acaba en una extensión de texto). Así
+  // `docs/conventions/infra.md` y `AGENTS.md` se comprueban, mientras que
+  // `test(...)`, `describe` y la skill `backend-engineering:backend-best-practices`
+  // no se miran — una skill no es un fichero del repo y su existencia no se
+  // comprueba en disco.
+  //
+  // Y un token que acaba en `/` se salta: es un directorio, y el único puerto de
+  // lectura que este módulo recibe es de ficheros. Comprobar directorios pedía
+  // una costura de IO nueva por todo el camino de `checkPlans`, y el agujero que
+  // deja (un directorio inventado pasa) es más pequeño que la costura.
+  // ---------------------------------------------------------------------------
+  if (readFile) {
+    const desde = lines.findIndex((l) => l.structural && l.line.startsWith('## 3. Reference patterns'))
+    if (desde !== -1) {
+      let hasta = lines.findIndex((l, i) => i > desde && l.structural && /^## /.test(l.line))
+      if (hasta === -1) hasta = lines.length
+      for (let i = desde + 1; i < hasta; i++) {
+        if (!lines[i].structural) continue
+        for (const cita of lines[i].line.match(/`[^`]+`/g) || []) {
+          const ruta = cita.slice(1, -1).trim()
+          if (!esRutaCitada(ruta)) continue
+          try {
+            readFile(ruta)
+          } catch {
+            push('reference-paths', `línea ${i + 1}: §3 nombra "${ruta}" y no se puede leer en el repo. §3 es la vara con la que el implementador escribe y el juez bloquea: una ruta citada de memoria deja a los dos midiendo contra un fichero que no está. Cita una ruta real, o quítala.`)
+          }
+        }
+      }
+    }
+  }
 
   return { ok: violations.length === 0, violations }
 }
