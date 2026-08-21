@@ -3,12 +3,12 @@
 //
 // EL DEFECTO QUE CIERRA. El gate `plan` (scripts/gates.js) le dice al agente:
 // «publícalo como comentario del issue y PARA — no implementes nada hasta que un
-// humano responda OK en ese comentario». El humano contesta en GitHub… y NADIE
-// LO LEE: ni un fichero de este plugin leía comentarios de issue. Así que el
-// «ok» de GitHub no tenía ninguna consecuencia mecánica —era un registro— y el
-// go que de verdad reanudaba el trabajo era el que la persona teclaba a mano en
-// la sesión de cmux. Dos veces el mismo permiso, y el que contaba no era el que
-// queda escrito.
+// humano conteste». El humano contestaba en GitHub… y NADIE LO LEÍA: ni un
+// fichero de este plugin leía comentarios de issue. Así que el «ok» de GitHub no
+// tenía ninguna consecuencia mecánica —era un registro— y el go que de verdad
+// reanudaba el trabajo era el que la persona teclaba a mano en la sesión de
+// cmux. Dos veces el mismo permiso, y el que contaba no era el que queda
+// escrito.
 //
 // Medido en jjponz/rust-monitoring#2: el plan se publicó a las 15:31:48, el «ok»
 // llegó a las 15:33:53, y la primera tarea no apareció comiteada hasta las
@@ -23,54 +23,73 @@
 // alguien tiene que aprender, y la que existe ya cubre el caso: si escribes algo
 // que no es exactamente `-OK`, no pasa nada, y eso es lo que querías.
 //
-// LA VENTANA ES EL TIEMPO, NO UN MARCADOR. Sólo cuentan los comentarios
-// POSTERIORES al arranque del vigilante. `agentic-skills` acota su ventana a los
-// comentarios posteriores al del entendimiento, y para eso necesita reconocer
-// ese comentario por un marcador que escribe el agente
-// (`UnderstandingComment.is_the_understanding`) — o sea que su ventana depende
-// del agente al que vigila. Aquí no hace falta: el vigilante sabe cuándo
-// arrancó y `gh` da el `createdAt` de cada comentario, así que la ventana sale
-// de dos datos que no pasan por ningún agente.
+// ---------------------------------------------------------------------------
+// LA VENTANA ES EL CONJUNTO DE COMENTARIOS QUE YA ESTABAN, NO UNA FECHA DE
+// CORTE. Y esto es una corrección, no una preferencia.
 //
-// Y da gratis la propiedad que de verdad importa: un `-OK` de un despacho
-// ANTERIOR del mismo issue no arranca nada, porque es más viejo que este
-// vigilante. Sin ventana, redespachar un slice cuyo issue ya tenía un go
-// heredaría ese go y saltaría el gate en silencio.
+// La primera versión cortaba por tiempo: valían los comentarios cuyo `createdAt`
+// fuera posterior al arranque del vigilante. Parecía limpio y estaba roto, y lo
+// cazó una revisión adversarial: `createdAt` lo pone el servidor de GitHub y el
+// instante de corte lo ponía `Date.now()` de esta máquina. Son DOS RELOJES. Con
+// el local atrasado quince minutos, un `-OK` heredado de un despacho anterior
+// entraba en la ventana y saltaba el gate EN SILENCIO —justo lo que la ventana
+// existía para impedir—; con el local adelantado, un `-OK` legítimo escrito en
+// los primeros minutos quedaba fuera y no volvía a entrar nunca, porque su
+// `createdAt` no cambia de un sondeo al siguiente.
 //
-// Módulo PURO: no habla con `gh`, no mira el reloj, no lanza procesos. Recibe
-// los comentarios y el instante de corte, y contesta. Quien hace la entrada y
-// salida es scripts/ct-watch-go.mjs.
+// Ahora la ventana son IDENTIFICADORES: el vigilante fotografía los `id` de los
+// comentarios que había al arrancar (`gh` los da: `IC_kwDO…`), y cuenta como
+// respuesta cualquier comentario cuyo `id` no estuviera en esa foto. No hay
+// ningún reloj implicado, ni el de GitHub ni el nuestro, así que no hay deriva
+// que pueda romperlo. Y es más simple: se fue el `Date.parse` entero.
+//
+// La propiedad que la ventana sostiene sigue siendo la misma, y es la que
+// importa: un `-OK` de un despacho ANTERIOR del mismo issue no arranca nada.
+// Sin ella, redespachar un slice cuyo issue ya tenía un go heredaría ese go y
+// saltaría el gate sin que nadie se enterara.
+// ---------------------------------------------------------------------------
+//
+// Módulo PURO: no habla con `gh`, no mira el reloj (ya no hay reloj), no lanza
+// procesos. Recibe los comentarios y la foto inicial, y contesta. Quien hace la
+// entrada y salida es scripts/ct-watch-go.mjs.
 // ============================================================================
 
 // El token, exacto y en una sola línea. Se exporta porque lo nombran el que lo
-// busca (este módulo), el que lo explica al humano (gates.js) y sus tests: una
-// cadena tecleada en tres sitios acaba divergiendo en uno, que es el desacople
-// que este repo ya pagó con JUDGE_TOOLS, VERDICT_RULES y PACKAGE_SECTIONS.
+// busca (este módulo), los dos textos que lo explican al agente y al humano
+// (gates.js) y sus tests: una cadena tecleada en cuatro sitios acaba
+// divergiendo en uno, que es el desacople que este repo ya pagó con
+// JUDGE_TOOLS, VERDICT_RULES y PACKAGE_SECTIONS. Y aquí el fallo sería mudo: se
+// renombra el token, los textos siguen diciendo lo de antes, la persona escribe
+// lo que le dijeron y el trabajo no arranca nunca sin que nada falle.
 export const GO_TOKEN = '-OK'
 
-// `createdAt` de gh viene en ISO 8601 con Z. Un comentario cuya fecha no se
-// puede interpretar NO cuenta: es el mismo criterio que el resto del loop
-// —ante un dato que no se entiende no se decide por él—, y aquí el lado
-// prudente es claro, porque el que no cuenta sólo hace esperar.
-function instanteDe(comentario) {
-  const t = Date.parse(comentario?.createdAt ?? '')
-  return Number.isNaN(t) ? null : t
+// Los `id` de los comentarios que ya estaban. Un comentario sin `id` legible NO
+// entra en la foto: así, si apareciera luego, contaría como nuevo — que es el
+// lado prudente aquí, porque el efecto de contarlo de más es esperar (el token
+// tiene que ser exacto de todas formas), y el de contarlo de menos sería honrar
+// un go viejo.
+export function commentIds(comentarios) {
+  const ids = new Set()
+  for (const c of comentarios || []) {
+    if (typeof c?.id === 'string' && c.id !== '') ids.add(c.id)
+  }
+  return ids
 }
 
-// ¿Hay un go en esta ventana? `desde` es el instante de arranque del vigilante
-// en milisegundos (el mismo reloj que Date.parse devuelve).
+// ¿Hay un go entre los comentarios que NO estaban en la foto inicial?
 //
 // Se recorre AL REVÉS y se contesta con el primero que se reconoce, o sea el
-// ÚLTIMO en el tiempo: si alguien escribe `-OK` y luego se arrepiente, lo que
-// vale es lo último que dijo. (Hoy sólo hay una respuesta reconocible, así que
-// recorrer al revés y buscar «alguno» dan lo mismo; se recorre al revés porque
-// es lo que sigue siendo correcto el día que haya una segunda respuesta, y
-// porque el coste es cero.)
-export function hasGo(comentarios, desde) {
+// último de la lista. Hoy sólo hay una respuesta reconocible, así que esto da lo
+// mismo que buscar «alguno» — y no implementa ningún «me arrepiento»: un `-OK`
+// seguido de «espera, no» sigue siendo un go, porque lo único que este módulo
+// reconoce es el token. Se recorre así porque es lo que sigue siendo correcto el
+// día que haya una segunda respuesta, y porque el coste es cero.
+export function hasGo(comentarios, idsPrevios) {
+  const previos = idsPrevios instanceof Set ? idsPrevios : new Set(idsPrevios || [])
   for (const comentario of [...(comentarios || [])].reverse()) {
-    const cuando = instanteDe(comentario)
-    if (cuando === null || cuando < desde) continue
-    if (String(comentario.body ?? '').trim() === GO_TOKEN) return true
+    const id = typeof comentario?.id === 'string' ? comentario.id : ''
+    if (id !== '' && previos.has(id)) continue
+    if (String(comentario?.body ?? '').trim() === GO_TOKEN) return true
   }
   return false
 }

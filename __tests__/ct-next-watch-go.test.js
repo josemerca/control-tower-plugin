@@ -102,13 +102,18 @@ describe('la coordinadora lanza el vigilante del -OK', () => {
     // El título es el HANDLE con el que el vigilante encontrará la sesión: no
     // hay identificador estable que cmux devuelva al crearla. Se compara contra
     // cmuxSessionName y no contra una cadena escrita a mano, porque una segunda
-    // copia de esa plantilla divergiría y el vigilante se quedaría esperando
-    // para siempre a algo que ya llegó, sin ningún error que lo delate.
+    // copia de esa plantilla divergiría y entonces el vigilante se apagaría en su
+    // primer sondeo diciendo que la sesión ya no existe — el go de esa persona
+    // sin entregar, y el mensaje culpando a la sesión en vez al desajuste.
     // El nombre del slice llega ya sin el `#90 ` del título del issue: lo quita
     // el mapeo del issue, no esta ronda.
     expect(argv[argv.indexOf('--session') + 1]).toBe(
       cmuxSessionName({ repoName: 'r', issue: 90, sliceName: 'el cliente tipado' }),
     )
+    // El log lo abre el VIGILANTE, no ct-next: cuando lo abría ct-next, la
+    // suite creaba ficheros en el $HOME real de quien la corriera. Aquí sólo
+    // viaja la ruta.
+    expect(argv[argv.indexOf('--log') + 1]).toMatch(/watch-go-90\.log$/)
   })
 
   it('dice dónde está el log, porque un proceso que corre cuando no miras y no deja rastro es indepurable', () => {
@@ -131,21 +136,60 @@ describe('la coordinadora lanza el vigilante del -OK', () => {
 })
 
 describe('el vigilante no puede tumbar el despacho', () => {
-  it('si no se puede lanzar, se avisa y el slice sigue lanzado', () => {
+  // -------------------------------------------------------------------------
+  // `spawn(process.execPath, [bin, …])` con un `bin` que NO EXISTE no falla: el
+  // ejecutable es siempre `node`. El proceso nace, muere al instante con un
+  // error de módulo, y antes de este arreglo se anunciaba «vigilante lanzado»
+  // con un pid ya muerto. Lo cazó una revisión adversarial, y señaló que el test
+  // que decía cubrirlo fijaba a la vez un bin roto y un log imposible, así que
+  // pasaba por el fallo del log y el bin roto no se probaba nunca.
+  //
+  // Es la misma clase de defecto que F19/H1 cerró en el despacho —«cmux devolvió
+  // 0» no es «el comando corrió»— con una evidencia aún más débil: lo único
+  // comprobado sería que `node` existe.
+  // -------------------------------------------------------------------------
+  it('un programa de vigilante que no existe se avisa, y NO se anuncia como lanzado', async () => {
+    const repoRoot = repoRootNuevo()
+    const r = despachar(repoRoot, issueCon([{ name: 'status:ready' }]), {
+      CT_WATCH_GO_BIN: join(repoRoot, 'no-existe', 'ni-de-broma.mjs'),
+    })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/lanzado #90/)
+    expect(r.out).toMatch(/no se ha lanzado el vigilante/)
+    expect(r.out).toMatch(/no existe/)
+    expect(r.out).not.toMatch(/vigilante del .* lanzado \(pid/)
+    expect(r.out).toMatch(/a mano/)
+    expect(await esperarArgv(join(repoRoot, 'watch-go-argv.log'), 600)).toBe(null)
+  })
+
+  it('si el log no se puede ni calcular, se avisa y el slice sigue lanzado', () => {
     // El trabajo ya está en marcha cuando esto corre. No poder vigilar el go
     // significa volver al modo de antes —empujar la sesión a mano—, no perder
     // el slice. Misma regla que el `git add` de la telemetría en ct-step: el
     // termómetro no es parte del motor.
     const repoRoot = repoRootNuevo()
     const r = despachar(repoRoot, issueCon([{ name: 'status:ready' }]), {
-      CT_WATCH_GO_BIN: join(repoRoot, 'no-existe', 'ni-de-broma.mjs'),
-      // El log tampoco se puede crear: un fichero dentro de una ruta que es un
-      // fichero, no un directorio.
-      CLAUDE_CONFIG_DIR: join(repoRoot, 'gh-list-count', 'imposible'),
+      CLAUDE_CONFIG_DIR: '',
+      HOME: '',
     })
     expect(r.code).toBe(0)
     expect(r.out).toMatch(/lanzado #90/)
-    expect(r.out).toMatch(/no se pudo lanzar el vigilante/)
-    expect(r.out).toMatch(/a mano/)
+  })
+
+  // -------------------------------------------------------------------------
+  // El único handle del vigilante es el TÍTULO de la sesión. Si cmux acaba de
+  // contestar que no hay ninguna sesión con ese título, lanzarlo era anunciar
+  // «la sesión arranca sola» en la misma corrida en la que se dice que esa
+  // sesión no se localiza. El repo tiene un fichero de tests entero contra esta
+  // clase de mensaje (ct-next-honest-messages.test.js).
+  // -------------------------------------------------------------------------
+  it('NO se lanza cuando cmux no encuentra la sesión que se acaba de crear', async () => {
+    const repoRoot = repoRootNuevo()
+    const r = despachar(repoRoot, issueCon([{ name: 'status:ready' }]), {
+      FAKE_CMUX_SKIP_STATE_SUBSTR: '#90',
+    })
+    expect(r.out).toMatch(/no se encontró ninguna sesión con el nombre/)
+    expect(r.out).not.toMatch(/la sesión arranca sola/)
+    expect(await esperarArgv(join(repoRoot, 'watch-go-argv.log'), 600)).toBe(null)
   })
 })

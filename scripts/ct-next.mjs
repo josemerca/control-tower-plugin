@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, statSync, accessSync, constants as fsConstants, writeSync, realpathSync, openSync } from 'node:fs'
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, statSync, accessSync, constants as fsConstants, writeSync, realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { tmpdir, homedir } from 'node:os'
 import { randomBytes } from 'node:crypto'
@@ -755,11 +755,30 @@ function verifyCmuxLaunch(expectedTitle, expectedCwd) {
 // tabla §9) no para a esperar a nadie, así que no hay nada que vigilar y un
 // proceso sondeando GitHub durante ocho horas para nada es peor que su ausencia.
 //
+// Y SÓLO SI EL SLICE CONTÓ COMO LANZADO. El único handle del vigilante es el
+// TÍTULO de la sesión, así que en los dos caminos que no cuentan —'not-found'
+// (cmux contestó y no hay ninguna sesión con ese título) y 'wrong-cwd' (la hay,
+// pero en otro directorio, y el slice se apunta en `unverifiedLaunches`)—
+// lanzarlo era anunciar «la sesión arranca sola» en la misma corrida en la que
+// se acaba de decir que esa sesión no se localiza. Lo cazó una revisión
+// adversarial, y el repo tiene un fichero de tests entero contra esta clase de
+// mensaje (`ct-next-honest-messages.test.js`).
+//
 // NO ROMPE EL DESPACHO. Va después de que el claim esté resuelto y el slice
 // contado como lanzado, y cualquier fallo aquí se AVISA y sigue: el trabajo ya
 // está en marcha, y no poder vigilar el go significa volver al modo de antes
 // —empujar a mano—, no perder el slice. Es la misma regla que el `git add` de la
-// telemetría en ct-step: el termómetro no es parte del motor.
+// telemetría en ct-step: el termómetro no es parte del motor. Por eso hay
+// además un manejador de `error`: un fallo ASÍNCRONO de `spawn` (EAGAIN, EMFILE)
+// no lo ve el `try/catch`, y sin manejador sería un `'error'` sin atender que
+// tumbaría ct-next entero — perdiéndose el resumen de la tanda y su exit code.
+//
+// EL LOG LO ABRE EL VIGILANTE, no esta función. Cuando lo abría aquí, la suite
+// creaba directorios y ficheros en el `$HOME` real de quien la corriera (los
+// tests sustituyen el BINARIO, no el disco) — justo lo que
+// `__tests__/fixtures/hermetic-env.js` existe para evitar—, y además quedaba un
+// descriptor sin cerrar por slice. Aquí sólo se calcula la ruta, para poder
+// decirla y para pasársela.
 //
 // CT_WATCH_GO_BIN sigue el patrón de CT_ACCOUNT_*_DIR: no cambia NINGUNA
 // decisión, sólo qué programa se lanza. Existe para que los tests puedan
@@ -772,19 +791,26 @@ function lanzarVigilanteDelGo(slice, sessionName) {
   // `sliceForKickoff` es de `ac`/`issue`/`epic`. Así esto no obliga a ensanchar
   // el objeto de `plans`.
   if (!resolveGatesForAgent(slice).includes('plan')) return
+  const aviso = (por) => console.error(`  aviso: no se ha lanzado el vigilante del ${GO_TOKEN} de #${slice.n} (${por}) — el slice está lanzado y el gate sigue en pie, pero tendrás que empujar su sesión a mano tras dar el go.`)
   try {
-    const dir = controlTowerLogDir({ configDir: process.env.CLAUDE_CONFIG_DIR || null, home: homedir() })
-    mkdirSync(dir, { recursive: true })
-    const logPath = join(dir, `watch-go-${slice.n}.log`)
-    const fd = openSync(logPath, 'a')
     const bin = process.env.CT_WATCH_GO_BIN || ctWatchGoPath
+    // `spawn(process.execPath, [bin, …])` con un `bin` que no existe NO falla:
+    // el ejecutable es siempre `node`, así que el proceso nace, muere al
+    // instante con un error de módulo, y sin esta comprobación se anunciaba
+    // «vigilante lanzado» con un pid que ya no existía. Es la misma clase de
+    // defecto que F19/H1 cerró en el despacho —«cmux devolvió 0» no es «el
+    // comando corrió»— con una evidencia todavía más débil: aquí lo único
+    // comprobado sería que `node` existe.
+    if (!existsSync(bin)) return aviso(`el programa del vigilante no existe: ${bin}`)
+    const logPath = join(controlTowerLogDir({ configDir: process.env.CLAUDE_CONFIG_DIR || null, home: homedir() }), `watch-go-${slice.n}.log`)
     const hijo = spawn(process.execPath, [
-      bin, '--issue', String(slice.n), '--repo', repo, '--session', sessionName,
-    ], { detached: true, stdio: ['ignore', fd, fd] })
+      bin, '--issue', String(slice.n), '--repo', repo, '--session', sessionName, '--log', logPath,
+    ], { detached: true, stdio: 'ignore' })
+    hijo.on('error', (e) => aviso(`fallo al arrancarlo: ${e.message}`))
     hijo.unref()
     console.log(`  vigilante del ${GO_TOKEN} de #${slice.n} lanzado (pid ${hijo.pid}) — cuando contestes ${GO_TOKEN} en el issue, la sesión arranca sola. Log: ${logPath}`)
   } catch (e) {
-    console.error(`  aviso: no se pudo lanzar el vigilante del ${GO_TOKEN} de #${slice.n} (${e.message}) — el slice está lanzado y el gate sigue en pie, pero tendrás que empujar su sesión a mano tras dar el go.`)
+    aviso(e.message)
   }
 }
 
@@ -3700,6 +3726,12 @@ for (let idx = 0; idx < plans.length; idx++) {
   // `claude` resoluble. Lo que queda por decidir es solo cuánto sabemos de la
   // VENTANA, que es una pregunta menos importante y ya no puede producir un
   // falso "lanzado" por sí sola.
+  // El vigilante del `-OK` sólo se lanza si este slice CUENTA como lanzado, y
+  // `launchedCount` es exactamente ese hecho: las dos ramas que no lo
+  // incrementan ('wrong-cwd' y 'not-found') son las que apuntan el slice en
+  // `unverifiedLaunches`, y en las dos el título de la sesión —el único handle
+  // del vigilante— es justo lo que cmux acaba de negar.
+  const lanzadosAntesDeVerificar = launchedCount
   if (launchCheck.status === 'confirmed') {
     console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — verificado: la sesión cmux está corriendo en ese directorio, y el comando llegó a ejecutarse de verdad (centinela de arranque escrito por el propio shell, con $PWD=${sentinel.cwd} y \`claude\` resoluble).${reenvio}`)
     launchedCount++
@@ -3744,7 +3776,7 @@ for (let idx = 0; idx < plans.length; idx++) {
   // claim. Esta línea se conserva como idempotente por si el flujo de arriba
   // cambiara; no es la que cierra la ventana.)
   activeClaim = null
-  lanzarVigilanteDelGo(s, name)
+  if (launchedCount > lanzadosAntesDeVerificar) lanzarVigilanteDelGo(s, name)
 }
 
 // D2 review, menor 1: TODO este bloque de conteo/exit-code es exclusivo del

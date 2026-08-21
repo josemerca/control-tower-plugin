@@ -40,6 +40,7 @@
 // hookTimeout: mismo razonamiento para los `afterEach` (que borran árboles de
 // directorios temporales); su default es 10 s y bajo carga se queda igual de
 // corto.
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
@@ -64,7 +65,10 @@ export default defineConfig({
     // da un FAKE_WATCH_GO_LOG — así el mismo doble sirve para no hacer daño y
     // para comprobar que el lanzamiento ocurre con los argumentos correctos.
     env: {
-      CT_WATCH_GO_BIN: new URL('./__tests__/fixtures/fake-watch-go-bin/recorder.mjs', import.meta.url).pathname,
+      // `fileURLToPath` y no `.pathname`: con el checkout bajo una ruta con
+      // espacios o no-ASCII, `.pathname` viene percent-encoded y apuntaría a un
+      // fichero que no existe. Es lo que usan los otros 56 ficheros del repo.
+      CT_WATCH_GO_BIN: fileURLToPath(new URL('./__tests__/fixtures/fake-watch-go-bin/recorder.mjs', import.meta.url)),
     },
   },
 })
