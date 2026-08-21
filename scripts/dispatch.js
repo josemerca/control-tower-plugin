@@ -709,12 +709,12 @@ export function buildCmuxSendKeyArgv({ workspace, key = 'Enter' }) {
 //
 // Y buscarla es por igualdad exacta del título (`w.title === name`): no hay
 // identificador estable que cmux nos devuelva al crearla y podamos guardar, así
-// que el nombre ES el handle. Un espacio de más en una de las dos copias no
-// rompe nada de forma ruidosa — simplemente no encuentra la sesión, y el
-// vigilante se queda esperando para siempre a algo que ya llegó. Es el mismo
+// que el nombre ES el handle. Un espacio de más en una de las dos copias hace
+// que el vigilante no encuentre nunca la sesión — se apaga en su primer sondeo
+// diciendo que ya no existe (exit 4), o sea que el go de esa persona no se
+// entrega y el mensaje culpa a la sesión en vez de al desajuste. Es el mismo
 // desacople que este repo ya pagó tres veces (JUDGE_TOOLS, VERDICT_RULES,
-// PACKAGE_SECTIONS), con el agravante de que aquí no hay ningún error que lo
-// delate.
+// PACKAGE_SECTIONS).
 export function cmuxSessionName({ repoName, issue, sliceName }) {
   return `${repoName} · #${issue} ${sliceName}`
 }

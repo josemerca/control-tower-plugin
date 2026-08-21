@@ -62,18 +62,38 @@ function correr(env = {}, { timeoutMs = 800, pollMs = 40 } = {}) {
   }
 }
 
-const comentario = (body, msDesdeAhora = 60_000) => ({
-  body, createdAt: new Date(Date.now() + msDesdeAhora).toISOString(),
-})
+// Los comentarios se identifican por `id` (`gh` lo da: `IC_kwDO…`), que es la
+// ventana: cuenta lo que no estaba en la foto inicial. `createdAt` va también
+// porque `gh` lo devuelve, pero NADIE lo mira — y hay un test del módulo puro
+// que impide volver a cortar por tiempo.
+let n = 0
+const comentario = (body, id = null) => ({ id: id ?? `IC_${++n}`, body, createdAt: new Date().toISOString() })
 const pendienteDe = () => JSON.parse(readFileSync(stateFile, 'utf8'))[0].pending
+
+// El go tiene que LLEGAR después de que el vigilante saque su foto inicial: un
+// payload FIJO que ya trae el `-OK` está, por definición, dentro de esa foto, y
+// entonces no cuenta — que es exactamente la propiedad de la ventana. Así que
+// los casos de entrega van en secuencia: primer sondeo sin go (la foto), el
+// siguiente con él. Es además más fiel a lo que pasa de verdad.
+let secuencias = 0
+const conGo = (extra = {}) => ({
+  FAKE_GH_VIEW_COMMENTS_SEQUENCE: JSON.stringify([
+    { comments: [] },
+    { comments: [comentario(GO_TOKEN)] },
+  ]),
+  FAKE_GH_VIEW_COMMENTS_COUNTER_FILE: join(dir, `contador-${++secuencias}`),
+  ...extra,
+})
+
+// PATH sin `cmux` — pero CON `node`, o el stub de `gh` (que es un script con
+// shebang `env node`) tampoco arrancaría y el test mediría otra cosa.
+const sinCmux = () => [join(AQUI, 'fixtures', 'fake-gh-bin'), dirname(process.execPath), '/usr/bin', '/bin'].join(':')
 
 describe('el vigilante entrega el go', () => {
   it('ve el token y teclea la línea en la sesión del slice', () => {
-    const r = correr({
-      FAKE_GH_VIEW_COMMENTS: JSON.stringify({ comments: [comentario(GO_TOKEN)] }),
-    })
+    const r = correr(conGo())
     expect(r.status).toBe(0)
-    expect(r.stdout).toMatch(/línea entregada/)
+    expect(r.stdout).toMatch(/línea enviada/)
     // El `send-key Enter` consume el pendiente: que esté a null es la prueba de
     // que la línea se ENVIÓ y se ejecutó, no que se quedó en la línea de
     // edición. Los dos pasos van separados porque `cmux send` no añade Enter.
@@ -83,15 +103,9 @@ describe('el vigilante entrega el go', () => {
   it('espera mientras no hay token, y arranca en el tick en que aparece', () => {
     // Lo que de verdad importa: que no se rinda en el primer sondeo. El primer
     // payload no trae go; el segundo sí.
-    const r = correr({
-      FAKE_GH_VIEW_COMMENTS_SEQUENCE: JSON.stringify([
-        { comments: [] },
-        { comments: [comentario(GO_TOKEN)] },
-      ]),
-      FAKE_GH_VIEW_COMMENTS_COUNTER_FILE: join(dir, 'contador'),
-    })
+    const r = correr(conGo())
     expect(r.status).toBe(0)
-    expect(r.stdout).toMatch(/línea entregada/)
+    expect(r.stdout).toMatch(/línea enviada/)
   })
 })
 
@@ -107,13 +121,15 @@ describe('el vigilante no entrega lo que no es un go', () => {
     expect(pendienteDe()).toBeUndefined()
   })
 
-  it('un go anterior al arranque del vigilante no cuenta: es el de un despacho previo', () => {
+  it('un go que ya estaba al arrancar no cuenta: es el de un despacho previo', () => {
     // Sin ventana, redespachar un slice cuyo issue ya llevaba un go heredaría
-    // ese go y el gate se saltaría en silencio.
+    // ese go y el gate se saltaría en silencio. El payload es FIJO, así que el
+    // `-OK` está ya en la foto inicial que el vigilante saca antes de buscar.
     const r = correr({
-      FAKE_GH_VIEW_COMMENTS: JSON.stringify({ comments: [comentario(GO_TOKEN, -3_600_000)] }),
+      FAKE_GH_VIEW_COMMENTS: JSON.stringify({ comments: [comentario(GO_TOKEN, 'IC_heredado')] }),
     })
     expect(r.status).toBe(3)
+    expect(r.stdout).toMatch(/1 comentario\(s\) ya presentes/)
     expect(pendienteDe()).toBeUndefined()
   })
 })
@@ -130,12 +146,28 @@ describe('lo que no puede tumbar la vigilancia', () => {
 
   it('si la sesión no existe lo dice y muere, en vez de fingir que sigue vigilando', () => {
     writeFileSync(stateFile, JSON.stringify([]))
-    const r = correr({
-      FAKE_GH_VIEW_COMMENTS: JSON.stringify({ comments: [comentario(GO_TOKEN)] }),
-    })
+    const r = correr(conGo())
     expect(r.status).toBe(1)
-    expect(r.stdout).toMatch(/no se encontró la sesión/)
+    expect(r.stdout).toMatch(/cmux dice que no existe/)
     expect(r.stdout).toMatch(/a mano/)
+  })
+
+  // -------------------------------------------------------------------------
+  // EL HALLAZGO QUE MÁS DOLÍA de la revisión adversarial: `consultarSesion`
+  // distingue «cmux contestó que no está» de «no se pudo preguntar», y el
+  // camino de ENTREGA tiraba esa distinción. O sea que un timeout de cmux justo
+  // en el tick en que llegaba el `-OK` mataba una vigilancia de ocho horas en
+  // el único instante que importaba, y encima diagnosticaba lo contrario de lo
+  // que había pasado. Cuando no hay nada que perder se reintentaba; con el go
+  // ya en la mano, se abandonaba.
+  // -------------------------------------------------------------------------
+  it('si el go llega y justo entonces no se puede preguntar a cmux, NO se abandona', () => {
+    const r = correr(conGo({ PATH: sinCmux() }), { timeoutMs: 500, pollMs: 40 })
+    // Sale por plazo (nunca puede entregar, porque cmux no está), NO por el
+    // exit 1 de «no hay sesión»: la diferencia es que sigue intentándolo.
+    expect(r.status).toBe(3)
+    expect(r.stdout).toMatch(/el go está visto pero no se pudo consultar cmux/)
+    expect(r.stdout).toMatch(/se reintenta la entrega/)
   })
 
   // -------------------------------------------------------------------------
@@ -161,20 +193,36 @@ describe('lo que no puede tumbar la vigilancia', () => {
     // segunda no se sigue nada. Se quita `cmux` del PATH —no se le pide al stub
     // que finja— porque lo que hay que ejercer es que la consulta no se puede
     // hacer, no que conteste otra cosa.
-    const soloGh = `${join(AQUI, 'fixtures', 'fake-gh-bin')}:/usr/bin:/bin`
-    const r = correr({ PATH: soloGh }, { timeoutMs: 400, pollMs: 40 })
+    const r = correr({ PATH: sinCmux() }, { timeoutMs: 400, pollMs: 40 })
     expect(r.status).toBe(3)
     expect(r.stdout).toMatch(/no se pudo consultar cmux/)
     expect(r.stdout).toMatch(/plazo agotado/)
   })
 
   it('si el tecleo falla lo dice y muere: el go se vio y no se pudo entregar', () => {
-    const r = correr({
-      FAKE_GH_VIEW_COMMENTS: JSON.stringify({ comments: [comentario(GO_TOKEN)] }),
-      FAKE_CMUX_SEND_FAIL: '1',
-    })
+    const r = correr(conGo({ FAKE_CMUX_SEND_FAIL: '1' }))
     expect(r.status).toBe(1)
-    expect(r.stdout).toMatch(/no se pudo teclear/)
+    expect(r.stdout).toMatch(/no se pudo escribir/)
+  })
+})
+
+describe('la foto inicial', () => {
+  // Si la primera lectura falla y se diera la foto por vacía, un `-OK`
+  // heredado de un despacho anterior contaría como nuevo y saltaría el gate en
+  // silencio — justo lo que la ventana existe para impedir. Así que se
+  // reintenta hasta conseguirla, y si no se consigue no se entrega nada.
+  it('no se da por vacía: si no se puede leer ni una vez, no se entrega nada', () => {
+    const r = correr({ FAKE_GH_VIEW_FAIL: '1' }, { timeoutMs: 300, pollMs: 40 })
+    expect(r.status).toBe(3)
+    expect(r.stdout).toMatch(/sin poder leer ni una vez/)
+    expect(r.stdout).not.toMatch(/foto inicial/)
+  })
+
+  it('se anuncia cuántos comentarios no van a contar', () => {
+    const r = correr({
+      FAKE_GH_VIEW_COMMENTS: JSON.stringify({ comments: [comentario('hola'), comentario('qué tal')] }),
+    }, { timeoutMs: 300, pollMs: 40 })
+    expect(r.stdout).toMatch(/foto inicial: 2 comentario\(s\) ya presentes/)
   })
 })
 

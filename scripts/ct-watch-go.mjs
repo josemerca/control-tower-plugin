@@ -13,20 +13,28 @@
 //
 // LO LANZA LA COORDINADORA, DESPRENDIDO. `ct-next` lo arranca con
 // `spawn(..., { detached: true }).unref()` justo después de despachar el slice,
-// y sólo si ese slice lleva el gate `plan`. Desprendido porque tiene que
-// sobrevivir a que se cierre la sesión coordinadora: si sólo viviera mientras
-// alguien mira, no serviría para el caso que motiva todo esto — el gate pedido a
-// la 01:00 esperando a que alguien se despierte, que en la medida de F33 fue el
-// 54% del reloj de un epic.
+// y sólo si ese slice lleva el gate `plan` Y contó como lanzado. Desprendido
+// porque tiene que sobrevivir a que se cierre la sesión coordinadora: si sólo
+// viviera mientras alguien mira, no serviría para el caso que motiva todo esto —
+// el gate pedido a la 01:00 esperando a que alguien se despierte, que en la
+// medida de F33 fue el 54% del reloj de un epic.
 //
 // POR QUÉ NO UNA WORKSPACE DE CMUX. Se consideró, porque es el segundo plano que
 // este repo ya conoce, y se descartó con un motivo concreto: lanzar por cmux es
 // TECLEAR UN COMANDO EN UN PTY, y ése es el camino frágil de este plugin. Existe
-// `launch-sentinel.js` entero porque no había forma de saber si el comando
-// llegó a ejecutarse, y `ct-next` lleva un bucle de reenvío porque el prompt del
-// shell se comía caracteres. Pagar todo eso para un bucle que nadie va a mirar
-// no sale a cuenta: un `spawn` no pasa por ningún pty, ni por comillas, ni
-// necesita centinela.
+// `launch-sentinel.js` entero porque no había forma de saber si el comando llegó
+// a ejecutarse, y `ct-next` lleva un bucle de reenvío porque el prompt del shell
+// se comía caracteres. Pagar todo eso para un bucle que nadie va a mirar no sale
+// a cuenta: un `spawn` no pasa por ningún pty, ni por comillas, ni necesita
+// centinela.
+//
+// LÍMITE HEREDADO, DICHO SIN ADORNOS: para ENTREGAR la línea sí se usa ese
+// camino frágil (`cmux send` + `send-key`), y aquí no hay centinela que pruebe
+// que la sesión la recibió. Lo único que se sabe es que los dos comandos
+// devolvieron 0, y así se dice en el log — no «la sesión ha arrancado». Un
+// centinela de verdad exigiría que el agente escribiera algo, o sea depender del
+// agente al que se le entrega, que es justo lo que este reparto evita. Ese
+// límite se acepta y no se disfraza.
 //
 // LO QUE DELIBERADAMENTE NO TIENE, y no es un olvido:
 //
@@ -42,15 +50,21 @@
 //   - NI `-REVIEW`. Mandar una corrección por comentario y que el plan se rehaga
 //     es otra función; para pedir cambios sigue estando el terminal.
 //
-// EL LOG VA FUERA DEL REPO, en ~/.claude/control-tower/log/. No es una decisión
-// nueva: es donde run-metrics.js#metricsPath ya pone lo suyo, y por el motivo
-// que ya está escrito allí — «fuera del repo, para que ningún git add de la
-// slice la meta en la PR». Un proceso que corre cuando no estás mirando y no
-// deja rastro en ningún sitio es indepurable.
+// EL LOG LO ABRE ESTE PROCESO, no quien lo lanza, y va fuera del repo
+// (`~/.claude/control-tower/log/`). No es una decisión nueva: es donde
+// run-metrics.js#metricsPath ya pone lo suyo, y por el motivo que ya está
+// escrito allí — «fuera del repo, para que ningún git add de la slice la meta en
+// la PR». Un proceso que corre cuando no estás mirando y no deja rastro en
+// ningún sitio es indepurable. Lo abre ÉL porque, cuando lo abría `ct-next`, la
+// suite acabó creando ficheros en el `$HOME` real de quien la corriera — que es
+// exactamente lo que `__tests__/fixtures/hermetic-env.js` existe para evitar— y
+// además dejaba un descriptor sin cerrar por slice.
 // ============================================================================
 
 import { execFileSync } from 'node:child_process'
-import { hasGo, GO_TOKEN } from './go-response.js'
+import { mkdirSync, openSync, writeSync, closeSync } from 'node:fs'
+import { dirname } from 'node:path'
+import { hasGo, commentIds, GO_TOKEN } from './go-response.js'
 import { buildCmuxSendArgv, buildCmuxSendKeyArgv } from './dispatch.js'
 import { parseStrictInt } from './argnum.js'
 
@@ -71,15 +85,34 @@ const arg = (nombre) => {
   return i === -1 ? null : process.argv[i + 1] ?? null
 }
 
-const ahora = () => new Date().toISOString()
-const log = (msg) => process.stdout.write(`${ahora()} ${msg}\n`)
-
 const issue = arg('--issue')
 const repo = arg('--repo')
 const sesion = arg('--session')
+const logPath = arg('--log')
 if (!issue || !repo || !sesion) {
-  process.stderr.write('uso: ct-watch-go.mjs --issue N --repo owner/name --session "<título de la workspace>"\n')
+  process.stderr.write('uso: ct-watch-go.mjs --issue N --repo owner/name --session "<título de la workspace>" [--log <ruta>]\n')
   process.exit(2)
+}
+
+// El log, si se pide. Que no se pueda abrir NO impide vigilar: perder el rastro
+// es peor que no tenerlo, pero mucho menos malo que perder el go.
+let logFd = null
+if (logPath) {
+  try {
+    mkdirSync(dirname(logPath), { recursive: true })
+    logFd = openSync(logPath, 'a')
+  } catch (e) {
+    process.stderr.write(`aviso: no se pudo abrir el log ${logPath} (${e.message}) — se vigila igual, sin rastro en disco\n`)
+  }
+}
+const log = (msg) => {
+  const linea = `${new Date().toISOString()} ${msg}\n`
+  if (logFd !== null) { try { writeSync(logFd, linea) } catch { /* el rastro se pierde, la vigilancia no */ } }
+  process.stdout.write(linea)
+}
+const terminar = (codigo) => {
+  if (logFd !== null) { try { closeSync(logFd) } catch { /* ya está */ } }
+  process.exit(codigo)
 }
 
 // Los dos plazos se pueden ajustar por entorno, con el mismo criterio que
@@ -101,11 +134,6 @@ const timeoutMs = plazo('CT_WATCH_GO_TIMEOUT_MS', DEFAULT_TIMEOUT_MS)
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-// La ventana. Se fija ANTES del primer sondeo: todo comentario anterior a este
-// instante queda fuera, y con él cualquier `-OK` heredado de un despacho previo
-// del mismo issue. Ver go-response.js.
-const arrancadoEn = Date.now()
-
 function leerComentarios() {
   try {
     const raw = execFileSync('gh', ['issue', 'view', String(issue), '--repo', repo, '--json', 'comments'], {
@@ -123,21 +151,19 @@ function leerComentarios() {
   }
 }
 
-// Localizar la sesión por su título. NO se reutiliza `queryAllCmuxWorkspaces` de
-// ct-next.mjs a propósito: esa función degrada la ausencia en DECISIONES (si no
-// encuentra la sesión concluye "abandonado" o "no lanzado", y eso mueve exit
-// codes), y por eso necesita distinguir "cmux no contestó" de "cmux contestó que
-// no hay nada" y llevar 60 líneas de comentario sobre esquemas que podrían
-// cambiar. Este proceso no decide NADA por ausencia: si no la encuentra,
-// reintenta; si nunca la encuentra, caduca. La forma sencilla es aquí la
-// correcta, y el título viene de cmuxSessionName, así que no hay cadena tecleada
-// dos veces.
 // Devuelve `{ consultado, ref }`. La distinción entre "cmux contestó y la sesión
 // NO está" (`consultado: true, ref: null`) y "no se pudo preguntar"
 // (`consultado: false`) es la misma que ct-next.mjs sostiene con tanto cuidado
 // en `queryAllCmuxWorkspaces`, y por el mismo motivo: de las dos se sigue algo
 // distinto. Que no esté significa que no hay a quién entregarle nada; no poder
 // preguntar no significa nada y sólo se puede reintentar.
+//
+// LAS DOS SE USAN, y en los dos sitios. La primera versión de este fichero
+// distinguía las dos aquí y luego tiraba `consultado` en el camino de ENTREGA:
+// un timeout de cmux justo en el tick en que llegaba el `-OK` mataba la
+// vigilancia de ocho horas en el único instante que importaba, y encima
+// diagnosticaba "no se encontró la sesión" cuando la sesión estaba ahí. Lo cazó
+// una revisión adversarial.
 function consultarSesion() {
   try {
     const windows = JSON.parse(execFileSync('cmux', ['list-windows', '--json'], {
@@ -163,38 +189,69 @@ function consultarSesion() {
 // mandarlo aparte, medido en F20/H1.
 const LINEA = `El humano ha respondido ${GO_TOKEN} en el issue #${issue}: el gate \`plan\` queda cerrado. Continúa con ct-step next.`
 
-function empujar(ref) {
-  execFileSync('cmux', buildCmuxSendArgv({ workspace: ref, text: LINEA }), {
-    stdio: ['ignore', 'ignore', 'pipe'], timeout: CMUX_TIMEOUT_MS, killSignal: 'SIGKILL',
-  })
-  execFileSync('cmux', buildCmuxSendKeyArgv({ workspace: ref }), {
-    stdio: ['ignore', 'ignore', 'pipe'], timeout: CMUX_TIMEOUT_MS, killSignal: 'SIGKILL',
-  })
-}
-
 log(`vigilando el ${GO_TOKEN} de ${repo}#${issue} para la sesión "${sesion}" — tick ${pollMs} ms, plazo ${timeoutMs} ms`)
 
+// ---------------------------------------------------------------------------
+// LA FOTO INICIAL. La ventana son los comentarios que YA ESTABAN (ver
+// go-response.js), así que hay que sacarla antes de buscar nada — y hay que
+// SACARLA DE VERDAD: si la primera lectura falla y se diera por vacía, un `-OK`
+// heredado de un despacho anterior contaría como nuevo y saltaría el gate en
+// silencio, que es justo lo que la ventana existe para impedir. Así que se
+// reintenta hasta conseguirla, dentro del mismo plazo.
+// ---------------------------------------------------------------------------
+const arrancadoEn = Date.now()
 const limite = arrancadoEn + timeoutMs
+let previos = null
+while (previos === null) {
+  const iniciales = leerComentarios()
+  if (iniciales !== null) { previos = commentIds(iniciales); break }
+  if (Date.now() >= limite) {
+    log(`plazo agotado sin poder leer ni una vez los comentarios de ${repo}#${issue}: no se puede distinguir un go nuevo de uno heredado, así que no se entrega nada. Empuja la sesión a mano tras dar el go.`)
+    terminar(3)
+  }
+  await sleep(Math.min(pollMs, Math.max(0, limite - Date.now())))
+}
+log(`foto inicial: ${previos.size} comentario(s) ya presentes, que no cuentan como respuesta`)
+
 for (;;) {
   const comentarios = leerComentarios()
-  if (comentarios && hasGo(comentarios, arrancadoEn)) {
+  if (comentarios && hasGo(comentarios, previos)) {
     log(`${GO_TOKEN} visto en ${repo}#${issue}`)
-    const { ref } = consultarSesion()
-    if (!ref) {
-      // Se dice y se muere. Insistir no arregla nada —la sesión no está— y un
-      // proceso vivo sondeando una sesión que no existe es peor que su ausencia:
-      // parece que el gate sigue vigilado.
-      log(`ERROR: no se encontró la sesión de cmux "${sesion}", así que el go no se pudo entregar. Empuja la sesión a mano.`)
-      process.exit(1)
+    const { consultado, ref } = consultarSesion()
+    if (ref) {
+      try {
+        execFileSync('cmux', buildCmuxSendArgv({ workspace: ref, text: LINEA }), {
+          stdio: ['ignore', 'ignore', 'pipe'], timeout: CMUX_TIMEOUT_MS, killSignal: 'SIGKILL',
+        })
+      } catch (e) {
+        log(`ERROR: el go se vio y el texto no se pudo escribir en "${sesion}" (${ref}): ${String(e.message).trim()}. Empuja la sesión a mano.`)
+        terminar(1)
+      }
+      try {
+        execFileSync('cmux', buildCmuxSendKeyArgv({ workspace: ref }), {
+          stdio: ['ignore', 'ignore', 'pipe'], timeout: CMUX_TIMEOUT_MS, killSignal: 'SIGKILL',
+        })
+      } catch (e) {
+        // `send` sin `send-key` deja el texto en la línea de edición SIN
+        // ejecutar (medido en F20/H1), así que hay que decir eso y no "no se
+        // pudo teclear": quien lo lea va a encontrarse la línea escrita en la
+        // ventana y tiene que saber que sólo le falta el Enter.
+        log(`ERROR: el texto quedó escrito en la línea de edición de "${sesion}" (${ref}) pero el Enter falló: ${String(e.message).trim()}. Ve a esa ventana y pulsa Enter, o empuja la sesión a mano.`)
+        terminar(1)
+      }
+      // Lo que se sabe es esto y no más: los dos comandos devolvieron 0. No hay
+      // centinela que pruebe que la sesión lo recibió y actuó (ver la cabecera),
+      // así que el mensaje no afirma que haya arrancado.
+      log(`línea enviada a "${sesion}" (${ref}): \`cmux send\` y \`send-key Enter\` devolvieron 0. No hay forma de comprobar desde aquí que la sesión la haya procesado. Vigilancia terminada.`)
+      terminar(0)
     }
-    try {
-      empujar(ref)
-    } catch (e) {
-      log(`ERROR: el go se vio pero no se pudo teclear en "${sesion}" (${ref}): ${String(e.message).trim()}. Empuja la sesión a mano.`)
-      process.exit(1)
+    if (consultado) {
+      log(`ERROR: el go se vio, pero cmux dice que no existe ninguna sesión "${sesion}", así que no hay a quién entregárselo. Empuja la sesión a mano.`)
+      terminar(1)
     }
-    log(`línea entregada a "${sesion}" (${ref}). Vigilancia terminada.`)
-    process.exit(0)
+    // No se pudo PREGUNTAR por la sesión. De eso no se sigue nada, y menos con
+    // el go ya en la mano: se reintenta en el próximo tick.
+    log(`el go está visto pero no se pudo consultar cmux para localizar la sesión — se reintenta la entrega en el próximo tick`)
   }
   // ---------------------------------------------------------------------------
   // SIN SESIÓN NO HAY NADA QUE VIGILAR, Y ESO ES UNA COTA DE VERDAD.
@@ -210,19 +267,16 @@ for (;;) {
   // vigilando una sesión que no está es peor que su ausencia, porque parece que
   // el gate sigue cubierto.
   //
-  // Sólo se muere si cmux CONTESTÓ que no está. Si no se pudo preguntar (daemon
-  // caído, timeout), eso no significa nada y se reintenta: es la misma
-  // distinción que ct-next.mjs sostiene entre "no hay sesión" y "no
-  // concluyente".
+  // Sólo se muere si cmux CONTESTÓ que no está.
   // ---------------------------------------------------------------------------
   const sesionAhora = consultarSesion()
   if (sesionAhora.consultado && !sesionAhora.ref) {
     log(`la sesión "${sesion}" ya no existe, así que no hay a quién entregarle el go. Vigilancia terminada.`)
-    process.exit(4)
+    terminar(4)
   }
   if (Date.now() >= limite) {
     log(`plazo agotado sin ver ningún ${GO_TOKEN} en ${repo}#${issue}. La sesión sigue parada en el gate: dale el go en el issue y empújala a mano, o vuelve a lanzar este vigilante.`)
-    process.exit(3)
+    terminar(3)
   }
   await sleep(Math.min(pollMs, Math.max(0, limite - Date.now())))
 }
