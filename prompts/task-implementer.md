@@ -47,6 +47,9 @@ this prompt or in the files it names.
    `Rules to obey:` — this repo's written conventions. **Open both before you
    write.** The judge that reads your diff opens that same section and blocks on
    those same documents, so a rule you did not read is a round trip you paid for.
+   Where those rules speak about boundaries — what the core may import, how a
+   dependency arrives, what objects may cross — your imports and constructors are
+   the lines the judge will read against them.
 4. Write the smallest code that makes the task true. The brief carries contracts
    and signatures, not bodies. Bodies are written with the compiler in front of
    you, not recalled from memory — so read the code you are extending before you

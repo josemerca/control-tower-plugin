@@ -133,6 +133,16 @@ does Y". Anything you cannot pin to a sentence of a document the plan names is
 **not** this item's business — that is the difference between a real finding and
 the defensive veto a verifier asked for defects always produces.
 
+**Boundaries are this item's subject too.** Where a rule document prescribes how
+this repo draws its boundaries — what its core may import, how a dependency
+arrives (injected rather than constructed where it is used), which objects are
+allowed to cross a boundary — the lines of the diff that answer those questions
+are its imports, its constructors and its signatures: read them against those
+sentences the same way, citing the rule and its path in `evidence`. A boundary
+crossed with no rule document that speaks of boundaries is not a finding, and
+you do not bring an architecture of your own to fill that silence: the law of
+this item does not change here.
+
 Where an exemplar and a rule disagree, the rule wins: committed code is
 circumstance, a written convention is the rule.
 

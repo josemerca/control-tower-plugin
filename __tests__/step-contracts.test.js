@@ -24,6 +24,20 @@ const toolsDelAgente = () => {
   return m ? m[1].trim() : null
 }
 
+const PROMPT_IMPLEMENTADOR = join(dirname(fileURLToPath(import.meta.url)), '..', 'prompts', 'task-implementer.md')
+
+// El punto 3 del prompt del implementador, aislado hasta el punto 4: es donde
+// vive la frase espejo de e473c97 ("Rules to obey... Open both before you
+// write"). Se acota porque el prompt YA contenía la palabra "boundary" antes
+// de este slice, en el punto "You do not touch files outside the task"
+// (frontera del ALCANCE de la tarea, un sujeto ajeno a las boundaries de
+// arquitectura) — un match contra el fichero entero pasaría igual con la
+// frase espejo borrada.
+const punto3DelImplementador = () => {
+  const m = /^3\.\s[\s\S]*?(?=^4\.\s)/m.exec(readFileSync(PROMPT_IMPLEMENTADOR, 'utf8'))
+  return m ? m[0] : ''
+}
+
 const PLANTILLA_PLAN = join(
   dirname(fileURLToPath(import.meta.url)), '..',
   'skills', 'writing-plans-prescriptive', 'plan-template.md',
@@ -151,6 +165,34 @@ describe('quién puede qué', () => {
     expect(seccion3DeLaPlantilla()).toMatch(/skill/i)
     expect(item5DeLaRubrica()).toMatch(/skill/i)
     expect(toolsDelAgente()).toMatch(/\bSkill\b/)
+  })
+
+  it('boundaries se mide dentro de patrones: el ítem 5 dirige la mirada a imports e inyección', () => {
+    // §3.6 del handoff, cerrado como ABSORBIDO. La pregunta dirigida: cuando un
+    // documento de reglas habla de fronteras, los renglones del diff que
+    // contestan son sus imports, sus constructores y sus firmas. Sin esta
+    // dirección, el juez audita texto literal y no mira la arquitectura
+    // (medido en rust-monitoring run-4 tarea 2).
+    expect(item5DeLaRubrica()).toMatch(/boundar/i)
+    expect(item5DeLaRubrica()).toMatch(/import/i)
+    expect(item5DeLaRubrica()).toMatch(/inject/i)
+  })
+
+  it('boundaries no es un noveno ítem: la decisión del §3.6 queda fijada', () => {
+    // Ítem propio solo cuando el par sujeto+vara es nuevo. La vara de boundaries
+    // son los Rules to obey que patrones ya abre: un encabezado propio solo
+    // duplicaría el sin-vara en repos sin convención de arquitectura.
+    expect(VERDICT_RULES).not.toContain('boundaries')
+    expect(reglasDelAgente()).not.toContain('boundaries')
+  })
+
+  it('la vara de boundaries es la misma a los dos lados: el implementador la lee antes de escribir', () => {
+    // La propiedad de e473c97: el juez no es una sorpresa porque implementador y
+    // juez miden con el mismo texto. Se exige la frase distintiva (no sólo
+    // /boundar/i) dentro del punto 3 aislado: el fichero ya traía "boundary" en
+    // otro punto y otro sujeto antes de este slice, así que un match flojo
+    // contra el fichero entero no detectaría que esta frase se borre.
+    expect(punto3DelImplementador()).toMatch(/rules speak about boundaries/i)
   })
 
   it('VERDICT_RULES no puede divergir de los ocho encabezados de la rúbrica', () => {
