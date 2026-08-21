@@ -103,9 +103,17 @@ export const planSha256 = (texto) => createHash('sha256').update(String(texto ??
 // sí viajaba. Así que `ct-step` escribe además una copia DENTRO del repo y la
 // stagea él, después de los controles. Lo que el motivo prohibía era que la
 // arrastrase un `git add` del implementador, no que viajara.
+// La carpeta, aparte de la fila: desde esta ronda hay un segundo inquilino que
+// no es telemetría —el log del vigilante del `-OK`, que corre desprendido y sin
+// él sería indepurable— y las dos cosas van al mismo sitio por el mismo motivo.
+// Se extrae en vez de duplicar el `join`, y `metricsPath` sigue siendo quien
+// decide la extensión de LO SUYO.
+export function controlTowerLogDir({ configDir = null, home = null } = {}) {
+  return join(configDir || join(home || homedir(), '.claude'), 'control-tower', 'log')
+}
+
 export function metricsPath(concepto, { configDir = null, home = null } = {}) {
-  const raiz = configDir || join(home || homedir(), '.claude')
-  return join(raiz, 'control-tower', 'log', `${concepto}.jsonl`)
+  return join(controlTowerLogDir({ configDir, home }), `${concepto}.jsonl`)
 }
 
 // La fila. `measures` son las medidas del paso —el estado de los controles con

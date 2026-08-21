@@ -87,8 +87,8 @@ export const GATES = {
     // no existir todavía. F-jjponz-2: está implicado POR DEFECTO en todo
     // slice (ver gatesForType, abajo) — no vive en TYPE_GATES porque no es
     // un eje técnico; la renuncia por fila es `!plan`, ruidosa como todas.
-    kickoff: 'GATE HUMANO `plan` (implicado por defecto en TODO slice, salvo renuncia `!plan` en el spec): con el plan del slice escrito, validado con --check-plan y commiteado, publícalo como comentario del issue y PARA — no implementes nada hasta que un humano responda OK en ese comentario. No lo cierras tú: lo cierra quien revisa el plan.',
-    issue: '**`plan`** — antes de implementar, un humano tiene que revisar el PLAN del slice: el agente lo publica como comentario de este issue y se detiene hasta el OK. El agente no puede darlo por cumplido.',
+    kickoff: 'GATE HUMANO `plan` (implicado por defecto en TODO slice, salvo renuncia `!plan` en el spec): con el plan del slice escrito, validado con --check-plan y commiteado, publícalo como comentario del issue y PARA — no implementes nada hasta que un humano conteste `-OK` en un comentario de ese issue. Un vigilante que lanzó la coordinadora lo está mirando y te teclea la línea cuando llegue, así que PARAR de verdad es lo correcto: no sondees tú el issue ni te des el gate por cumplido. No lo cierras tú: lo cierra quien revisa el plan.',
+    issue: '**`plan`** — antes de implementar, un humano tiene que revisar el PLAN del slice: el agente lo publica como comentario de este issue y se detiene. Para darle el go, contesta con un comentario que sea exactamente `-OK` (sin nada más: cualquier otra cosa no arranca nada, a propósito) y el trabajo sigue solo. El agente no puede darlo por cumplido.',
   },
 }
 

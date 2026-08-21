@@ -47,5 +47,24 @@ export default defineConfig({
     testTimeout: 120_000,
     hookTimeout: 120_000,
     teardownTimeout: 60_000,
+    // CT_WATCH_GO_BIN — NINGÚN test lanza el vigilante del `-OK` de verdad.
+    //
+    // `ct-next` lo lanza DESPRENDIDO tras despachar un slice con gate `plan`, o
+    // sea en la mayoría de los tests que despachan algo. Medido la primera vez
+    // que la suite corrió con esto puesto: 42 procesos `ct-watch-go.mjs`
+    // huérfanos, cada uno sondeando cada 30 s durante ocho horas. Un `pkill`
+    // después de cada corrida no es una solución: la suite no puede dejar
+    // procesos detrás, punto.
+    //
+    // Va aquí y no en cada test porque el defecto es exactamente ese: que un
+    // test que NO habla de esto lo lance sin querer. Los tres ficheros que sí
+    // hablan de esto fijan su propio valor y no dependen de éste.
+    //
+    // La grabadora, además de no sondear nada, apunta su argv cuando el test le
+    // da un FAKE_WATCH_GO_LOG — así el mismo doble sirve para no hacer daño y
+    // para comprobar que el lanzamiento ocurre con los argumentos correctos.
+    env: {
+      CT_WATCH_GO_BIN: new URL('./__tests__/fixtures/fake-watch-go-bin/recorder.mjs', import.meta.url).pathname,
+    },
   },
 })
