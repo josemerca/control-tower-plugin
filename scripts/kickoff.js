@@ -9,6 +9,7 @@ import { resolveGatesForAgent, renderGateKickoffLines } from './gates.js'
 // ya no es el suyo (que es exactamente el defecto que esta ronda arregla).
 import { SLICE_REL_PATH } from './state-paths.js'
 import { EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING } from './groom.js'
+import { NO_MILESTONE_KEY } from './gh-issue-map.js'
 
 // ACCOUNT_MAP — qué CLAUDE_CONFIG_DIR (qué cuenta de Claude) recibe el agente
 // que se despacha para un repo.
@@ -196,7 +197,7 @@ function baseRefOf(base) {
     : 'la rama base de la que salió este worktree'
 }
 
-export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
+export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, base }) {
   const addendum = ADDENDA[slice.type] || ''
   // F21 — LOS GATES, POR FIN SEPARADOS DEL TIPO. `resolveGatesForAgent` (ver
   // gates.js) prefiere lo que DECLARA el issue (sus labels `gate:`, que es lo
@@ -247,13 +248,16 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
     // desinstala. El plan del slice se escribe AQUÍ y no en el spec porque se
     // escribe contra el código real, en el momento correcto; el issue trae
     // los AC (EARS), "Protegido" y el "Contexto del epic" — exactamente la
-    // entrada que writing-plans pide como spec. Con el plan commiteado, el
-    // rombo "Have implementation plan?" de subagent-driven-development
-    // encuentra plan y SDD reengancha entero. El paréntesis que enumeraba su
-    // flujo (impl → spec-review → code-review) se quitó a cambio: lo define
-    // el propio skill, y duplicarlo aquí es lo que el fork vuelve innecesario.
+    // entrada que writing-plans pide como spec. Y con el plan commiteado, la
+    // conducción ya NO es de subagent-driven-development: en este fork D-4
+    // está tomada — la secuencia la dicta ct-step, la máquina consultada. La
+    // línea de abajo es el enchufe que `d4-sigue-siendo-de-jose.test.js`
+    // guardaba, y ese test se borró en el mismo commit que esta línea, como
+    // su propia cabecera pedía. `ctStepPath` llega resuelto como ruta
+    // absoluta desde ct-next.mjs, por el mismo motivo que `dispatchCheckPath`
+    // (el token ${CLAUDE_PLUGIN_ROOT} no existe en un prompt de texto plano).
     `Primer acto, con el baseline verde: escribe el plan del slice con control-tower-loop:writing-plans-prescriptive usando el issue como spec (sus AC, "Protegido" y "Contexto del epic" son la entrada que la skill pide). SOLO bloques esenciales, cada uno con su etiqueta de rol: contratos, call sites y el tramo que cambia — los cuerpos de los módulos y los ficheros de test los escribe el implementador con TDD, y la configuración se describe en prosa. Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${slice.n}-<slug>.md, valídalo con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --check-plan\` hasta exit 0, y commitéalo: viaja en el PR, y el --release del final se negará (exit 6) sin un plan válido commiteado.`,
-    `Con el plan escrito, sigue control-tower-loop:subagent-driven-development con TDD.`,
+    `Con el plan commiteado y el gate 'plan' con OK humano, la implementación NO la conduces con subagent-driven-development ni con su ledger: la secuencia la dicta la máquina. Pregunta el paso con \`node ${ctStepPath} next --plan docs/superpowers/plans/<el-plan-que-commiteaste>.md --issue ${slice.n}\` y obedece LITERALMENTE lo que imprima en cada paso (donde diga \`ct-step\`, es \`node ${ctStepPath}\`): despacha el implementador como subagente con la rúbrica y el brief que te indique, luego \`ct-step report\`, \`ct-step controls\`, despacha el juez como subagente ct-judge (declarado sin Bash), \`ct-step verdict\` y \`ct-step commit\` — comitea ct-step, nunca tú ni el implementador. Vuelve a \`next\` tras cada paso hasta "run delivered".`,
     addendum,
     ...gateLines,
     // W-C: el claim (status:ready → status:in-progress) lo hace /ct-next en
@@ -394,6 +398,12 @@ export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
       // de tu last_commit" dejaría de significar nada. Si no se pudo resolver,
       // se siembra vacío a propósito — un sha inventado sería peor que ninguno.
       last_commit: baseSha,
+      // D-4 — el epic, sembrado en el despacho y no preguntado en cada run.
+      // La ausencia se DECLARA con la constante que ya existe, no se rellena
+      // ni se deja vacía: es la misma regla que impidió que ct-next asumiera
+      // `main` en silencio cuando no conocía la base. Su lector es la
+      // telemetría de ct-step, que agrega por epic.
+      epic: slice.epic || NO_MILESTONE_KEY,
       github_issue: issueNum,
       // D4, defecto 4: este campo imprimía el número de ISSUE llamándolo
       // "slice #N" — dos espacios de identificadores distintos (ver el

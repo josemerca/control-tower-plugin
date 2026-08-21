@@ -70,7 +70,7 @@ describe('ct-next — resolución de la rama base por defecto (W-D)', () => {
     })
     expect(r.code).toBe(0)
     const gitLogTxt = readFileSync(gitLog, 'utf8')
-    expect(gitLogTxt).toMatch(/worktree add -b feat\/42 \S*\/42 develop/)
+    expect(gitLogTxt).toMatch(/worktree add -b feat\/42 \S*\/42 origin\/develop/)
     const stateMd = readFileSync(join(repoRoot, '.worktrees', '42', '.agent', 'SLICE.md'), 'utf8')
     expect(stateMd).toMatch(/base: develop/)
   })
@@ -110,7 +110,7 @@ describe('ct-next — resolución de la rama base por defecto (W-D)', () => {
     })
     expect(r.code).toBe(0)
     const gitLogTxt = readFileSync(gitLog, 'utf8')
-    expect(gitLogTxt).toMatch(/worktree add -b feat\/42 \S*\/42 release\/9/)
+    expect(gitLogTxt).toMatch(/worktree add -b feat\/42 \S*\/42 origin\/release\/9/)
     const stateMd = readFileSync(join(repoRoot, '.worktrees', '42', '.agent', 'SLICE.md'), 'utf8')
     expect(stateMd).toMatch(/base: release\/9/)
     const argv = readFileSync(argvLog, 'utf8')
@@ -140,7 +140,7 @@ describe('ct-next — resolución de la rama base por defecto (W-D)', () => {
     })
     expect(r.code).toBe(0)
     expect(r.out).toMatch(/develop/)
-    expect(r.out).toMatch(/git worktree add -b feat\/42 \S*\/42 develop/)
+    expect(r.out).toMatch(/git worktree add -b feat\/42 \S*\/42 origin\/develop/)
   })
 
   it('--dry-run con CT_NEXT_FIXTURE nunca llama a `gh repo view` de verdad (fixture atado a --dry-run, sin tocar gh real)', () => {
@@ -164,6 +164,13 @@ function existsSyncSafe(path) {
   }
 }
 
+// PARTE DE ESTE BLOQUE QUEDÓ INVERTIDA por el Paso 1 (ver el último describe
+// del fichero): el Important de aquí exigía que la rama base existiera en el
+// CHECKOUT LOCAL, y ahora el worktree se corta de `origin/<base>`, así que el
+// estado de la copia local no decide nada. Su caso "existe en origin pero no
+// en local → exit 1" se retiró: hoy es el caso bueno. El otro —un --base con
+// typo que no resuelve en ningún sitio— sigue vivo, medido contra el remoto.
+//
 // Fix round 1 de la review de W-D: un Important (la rama base se resolvía
 // contra GitHub pero nunca se comprobaba que existiera EN EL CHECKOUT
 // LOCAL — `git worktree add` fallaba tarde, ya después del claim, quemando
@@ -172,23 +179,6 @@ function existsSyncSafe(path) {
 // modo fixture; la guarda de respuesta vacía de gh era intestable con el
 // fixture, y no rechazaba el literal "null").
 describe('ct-next — rama base: fix round 1 de la review (Important + Minor 1/2/3)', () => {
-  it('Important: la rama base existe en origin pero no en el checkout local → exit 1, sugiere `git fetch`, no crea worktree ni intenta el claim', () => {
-    const repoRoot = makeRepoRoot()
-    const argvLog = join(repoRoot, 'gh-argv-log')
-    const gitLog = join(repoRoot, 'git-log')
-    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
-      FAKE_GIT_TOPLEVEL: repoRoot,
-      FAKE_GIT_BASE_NOT_LOCAL: '1',
-      FAKE_GH_ARGV_LOG_FILE: argvLog,
-      FAKE_GIT_LOG_FILE: gitLog,
-    })
-    expect(r.code).toBe(1)
-    expect(r.out).toMatch(/existe en origin pero no en tu checkout local/i)
-    expect(r.out).toMatch(/git fetch/i)
-    expect(existsSyncSafe(gitLog)).not.toMatch(/worktree add/)
-    expect(existsSyncSafe(argvLog)).not.toMatch(/issue edit/) // el claim nunca se intenta
-  })
-
   it('Important: la rama base no existe ni en local ni en origin → exit 1, mensaje distinto (typo probable), no crea worktree', () => {
     const repoRoot = makeRepoRoot()
     const gitLog = join(repoRoot, 'git-log')
@@ -199,7 +189,7 @@ describe('ct-next — rama base: fix round 1 de la review (Important + Minor 1/2
       FAKE_GIT_LOG_FILE: gitLog,
     })
     expect(r.code).toBe(1)
-    expect(r.out).toMatch(/no existe ni en tu checkout local ni como origin\/mian/i)
+    expect(r.out).toMatch(/no existe en el remoto/i)
     expect(r.out).toMatch(/typo/i)
     expect(existsSyncSafe(gitLog)).not.toMatch(/worktree add/)
   })
@@ -258,5 +248,109 @@ describe('ct-next — rama base: fix round 1 de la review (Important + Minor 1/2
     })
     expect(r.code).toBe(1)
     expect(r.out).toMatch(/no devolvió ningún nombre de rama utilizable/i)
+  })
+})
+
+// Paso 1 del spec de la primera corrida en un repo ajeno
+// (docs/superpowers/specs/2026-08-20-...): el worktree se cortaba del main
+// LOCAL. `verifyBaseExistsLocally` preferia la rama local y solo miraba
+// `origin/<base>` cuando la local no existia, y no habia `git fetch` en
+// ninguna parte del despacho.
+//
+// Medido en campo (jjponz/rust-monitoring#10): la rama del slice salio de un
+// `main` que estaba un commit por detras de su remoto —la pull request #1 ya
+// habia mergeado y habia reescrito AGENTS.md— y de ahi salieron tres cosas en
+// cadena: un plan literal contra un arbol obsoleto, una pull request en
+// conflicto y, por el conflicto, CERO checks de integracion continua (sin
+// referencia de merge GitHub no crea ningun run).
+//
+// Lo que fija este bloque: se hace fetch, el worktree sale de `origin/<base>`,
+// y una base ausente del checkout local ya NO es un error — que es la mitad
+// del arreglo: el estado de la copia local deja de decidir nada.
+describe('ct-next — la base sale del remoto, no de la copia local (Paso 1)', () => {
+  it('hace `git fetch origin <base>` antes de crear el worktree, y corta el worktree de `origin/<base>`', () => {
+    const repoRoot = makeRepoRoot()
+    const gitLog = join(repoRoot, 'git-log')
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GH_COUNTER_FILE: join(repoRoot, 'gh-list-count'),
+      FAKE_GIT_LOG_FILE: gitLog,
+      FAKE_GH_DEFAULT_BRANCH: 'develop',
+    })
+    expect(r.code).toBe(0)
+    const log = readFileSync(gitLog, 'utf8')
+    expect(log).toMatch(/^fetch origin develop$/m)
+    expect(log).toMatch(/worktree add -b feat\/42 \S*\/42 origin\/develop/)
+    // El fetch va ANTES: refrescar despues de resolver no refresca nada.
+    expect(log.indexOf('fetch origin develop')).toBeLessThan(log.indexOf('worktree add'))
+  })
+
+  it('el `base:` sembrado en SLICE.md sigue siendo el nombre de la rama, nunca `origin/<rama>`', () => {
+    // `gh pr create --base <rama>` no acepta una rama remota, y ese valor sale
+    // de aqui: lo que cambia es de donde SALE el worktree, no contra que rama
+    // se abre la pull request.
+    const repoRoot = makeRepoRoot()
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GH_COUNTER_FILE: join(repoRoot, 'gh-list-count'),
+      FAKE_GH_DEFAULT_BRANCH: 'develop',
+    })
+    expect(r.code).toBe(0)
+    const sliceMd = readFileSync(join(repoRoot, '.worktrees', '42', '.agent', 'SLICE.md'), 'utf8')
+    expect(sliceMd).toMatch(/^base: develop$/m)
+    expect(sliceMd).not.toMatch(/origin\/develop/)
+  })
+
+  it('la base ausente del checkout local ya NO es un error: el worktree sale del remoto igualmente', () => {
+    // Esta es la inversion deliberada del comportamiento anterior. Antes esto
+    // era exit 1 con "existe en origin pero no en tu checkout local"; ahora el
+    // estado de la copia local no decide nada, porque no se usa.
+    const repoRoot = makeRepoRoot()
+    const gitLog = join(repoRoot, 'git-log')
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GIT_BASE_NOT_LOCAL: '1',
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GH_COUNTER_FILE: join(repoRoot, 'gh-list-count'),
+      FAKE_GIT_LOG_FILE: gitLog,
+      FAKE_GH_DEFAULT_BRANCH: 'develop',
+    })
+    expect(r.code).toBe(0)
+    expect(readFileSync(gitLog, 'utf8')).toMatch(/worktree add -b feat\/42 \S*\/42 origin\/develop/)
+  })
+
+  it('la base que no existe en el remoto → exit 1, sin worktree y sin claim', () => {
+    const repoRoot = makeRepoRoot()
+    const gitLog = join(repoRoot, 'git-log')
+    const argvLog = join(repoRoot, 'gh-argv-log')
+    const r = runReal(['--repo', 'o/r', '--cap', '1', '--base', 'mian'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GIT_BASE_NOT_REMOTE: '1',
+      FAKE_GIT_LOG_FILE: gitLog,
+      FAKE_GH_ARGV_LOG_FILE: argvLog,
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/origin\/mian/)
+    expect(existsSyncSafe(gitLog)).not.toMatch(/worktree add/)
+    expect(existsSyncSafe(argvLog)).not.toMatch(/issue edit/)
+  })
+
+  it('si el `git fetch` falla → exit 1, sin worktree y sin claim: sin fetch no se sabe si la base esta al dia', () => {
+    const repoRoot = makeRepoRoot()
+    const gitLog = join(repoRoot, 'git-log')
+    const argvLog = join(repoRoot, 'gh-argv-log')
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GIT_FETCH_FAIL: '1',
+      FAKE_GIT_LOG_FILE: gitLog,
+      FAKE_GH_ARGV_LOG_FILE: argvLog,
+      FAKE_GH_DEFAULT_BRANCH: 'develop',
+    })
+    expect(r.code).toBe(1)
+    expect(r.out).toMatch(/fetch/i)
+    expect(existsSyncSafe(gitLog)).not.toMatch(/worktree add/)
+    expect(existsSyncSafe(argvLog)).not.toMatch(/issue edit/)
   })
 })

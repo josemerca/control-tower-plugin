@@ -100,6 +100,23 @@ else
   echo ".agent/SLICE.md ya está en $GITIGNORE, no se duplica"
 fi
 
+# D-4 — el estado del run de ct-step, y su carpeta de trabajo (briefs, logs de
+# los controles, paquetes de revisión). Mismo motivo que la línea de arriba y
+# uno más: estos ficheros son el bucle INTERNO de una slice dentro de su
+# worktree y viven menos que el worktree. Lo que vive en GitHub es el estado del
+# SLICE, y durante todo el run el issue no cambia de estado.
+#
+# La carpeta lleva además los diffs de cada tarea, que son el mismo contenido
+# que el commit: verlos aparecer como ficheros nuevos en la PR es ruido puro.
+for regla in '.agent/run-*.json' '.agent/run-*/'; do
+  if ! grep -qxF "$regla" "$GITIGNORE"; then
+    echo "$regla" >> "$GITIGNORE"
+    echo "añadido $regla a $GITIGNORE"
+  else
+    echo "$regla ya está en $GITIGNORE, no se duplica"
+  fi
+done
+
 AGENTS_MD="$TARGET/AGENTS.md"
 if [ ! -f "$AGENTS_MD" ]; then
   cat > "$AGENTS_MD" <<'EOF'

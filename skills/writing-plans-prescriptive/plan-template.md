@@ -29,7 +29,16 @@ Protected" section. If nothing: N/A — <reason>.}}
 
 ## 3. Reference patterns
 
-{{Real files in this repo the implementer must imitate.}}
+{{The yardstick of this repo for this slice, in two lists. It is the only part of the plan that
+tells the implementer how code is written here and the judge what to block on, so every path you
+name is grepped by `--check-plan`: a path that does not exist fails the plan.}}
+
+Files to imitate: {{real files whose shape the implementer copies — same role, same layer. Or
+N/A — <reason>.}}
+
+Rules to obey: {{this repo's own convention documents, by path — `AGENTS.md`, `CLAUDE.md`, a file
+under `docs/conventions/`, `CONTRIBUTING` — plus any skill the issue's "Contexto del epic" names
+(a skill is not a path and is not checked on disk). Or N/A — this repo declares none.}}
 
 ## 4. Inventory
 
@@ -57,7 +66,7 @@ here with the reason so the implementer does not invent them.}}
 
 **Objective:** {{one sentence: the observable behavior this commit delivers}}
 
-**Files:** {{exact paths, each marked (create) or (modify)}}
+**Files:** {{exact paths between backticks, each marked (create) or (modify)}}
 
 Current state (path/to/file.ext, lines A-B):
 
@@ -89,7 +98,21 @@ characters. If a task does not fit, the task is two — never collapse two commi
 
 **Tests:** {{added: named one by one / removed on purpose: named one by one | N/A — <reason>}}
 
-**Verification:** {{exact command and expected output}}
+**Verification:** {{what the commands prove, in prose if it helps — but the commands themselves
+go in the fenced block below, one per line, already run. A program executes this block: prose
+with arrows and parentheses is not executable, and `--check-plan` rejects a task without it.}}
+
+```bash
+{{command}}   # {{expected: exit 0 — the comment says what exit 0 will mean here}}
+```
+
+{{The program scores this block by EXIT CODE and nothing else, so every command has to be a
+predicate: a command whose exit code IS the claim. Anything you want to assert about a count, a
+line or a piece of output goes inside `test`: `test "$(… | grep -c 'x')" -eq 2`,
+`test "$(wc -l < f)" -le 150`, `test -z "$(git status --porcelain)"`. Never leave the claim in
+the comment while the exit code says something else — `grep -c` exits 0 for "found at least
+one" and 1 for "found none", so `grep -c … # expected: 0` is green exactly when it should be
+red. `--check-plan` rejects the commands it can prove cannot measure their own claim.}}
 
 ### Task 2 — {{name}}
 
@@ -104,6 +127,10 @@ characters. If a task does not fit, the task is two — never collapse two commi
 **Tests:** {{... | N/A — <reason>}}
 
 **Verification:** {{...}}
+
+```bash
+{{command}}   # {{expected: exit 0 — a predicate, as in Task 1}}
+```
 
 ## 8. Global verification
 

@@ -19,6 +19,8 @@
 // quien lo cablea (dispatch-check.mjs) aporta el filesystem real.
 // ============================================================================
 
+import { extractTasks } from './plan-tasks.js'
+
 const BLOCKQUOTE_MARKER = 'This plan is written to be executed by task-scoped subagents'
 
 export const PLAN_SECTIONS = [
@@ -121,6 +123,11 @@ const NO_CODE = /^No code — .+/
 
 const ends = (path, list) => list.some((ext) => path.toLowerCase().endsWith(ext))
 const isText = (path) => ends(path, TEXT_EXTENSIONS)
+
+// Si un token entre comillas invertidas de §3 es una ruta del repo que hay que
+// comprobar. Ver el porqué largo junto a la regla `reference-paths`, al final de
+// validatePlan.
+const esRutaCitada = (t) => !t.endsWith('/') && !/\s/.test(t) && (t.includes('/') || isText(t))
 const isTest = (path) => TEST_PATH.test(path)
 const isConfig = (path) =>
   ends(path, CONFIG_EXTENSIONS) || CONFIG_BASENAMES.includes(path.split('/').pop())
@@ -237,6 +244,42 @@ export function validatePlan(markdown, { readFile } = {}) {
       }
     }
   })
+
+  // D-4 — LA VARA DE LA TAREA TIENE QUE SER EJECUTABLE.
+  //
+  // Hasta aquí el contrato comprobaba que **Verification:** ESTÁ (es uno de los
+  // cinco TASK_MARKERS), no que diga algo que se pueda correr. La diferencia no
+  // era teórica: medido contra el plan real del slice #5 de repo-pulse, SIETE
+  // de sus ocho tareas verificaban con prosa en línea — "`npm test -w web` →
+  // exit 0. `npm run build && npm run lint` → exit 0." — y el plan validaba sin
+  // una sola queja. Es fiel a plan-template.md, que pedía "{{exact command and
+  // expected output}}" sin decir dónde; el agujero era de la plantilla.
+  //
+  // Un humano lee esa prosa y sabe qué correr. Un programa no: entre los
+  // comandos hay flechas, puntos, "y después:" y paréntesis explicativos con
+  // un `wc -l AGENTS.md` dentro. Separar comando de comentario a base de
+  // heurísticas es adivinar, y adivinar aquí significa dar por verde una tarea
+  // que nadie midió.
+  //
+  // Por eso los comandos van en el bloque cercado que sigue al párrafo de
+  // **Verification:** — el mismo bloque que las reglas de rol ya eximían por su
+  // etiqueta y al que COMMAND_BUDGET ya le pone tope. La regla no inventa
+  // formato: hace obligatorio el que ya estaba exento.
+  //
+  // El detalle vive en plan-tasks.js, que es quien luego los ejecuta: un
+  // contrato que aceptara planes que su propio ejecutor no sabe leer no sería
+  // un contrato.
+  // Dos reglas, una violación: `verification-block` (la verificación es prosa
+  // que nadie puede ejecutar) y `verification-predicate` (la verificación ES un
+  // comando y su código de salida dice lo contrario de lo que su comentario dice
+  // medir — el control invertido de jjponz/rust-monitoring#10, que atravesó
+  // justamente esta puerta). Las dos salen por `verification` porque para quien
+  // arregla el plan son el mismo trabajo: hacer que la vara mida.
+  const VERIFICATION_RULES = ['verification-block', 'verification-predicate']
+  for (const problema of extractTasks(markdown).problems) {
+    if (!VERIFICATION_RULES.includes(problema.rule)) continue
+    push('verification', problema.detail)
+  }
 
   // F-jjponz-4, pasada A — los bloques CON rol. Comprueba dónde vive cada uno,
   // sobre qué fichero, y cuánto ocupa.
@@ -372,6 +415,57 @@ export function validatePlan(markdown, { readFile } = {}) {
       push('literality', `el bloque "Current state (${path})" NO existe verbatim en ese fichero — cita de memoria`)
     }
   })
+
+  // ---------------------------------------------------------------------------
+  // §3 ES LA VARA DEL REPO, Y UNA VARA QUE NO EXISTE NO MIDE.
+  //
+  // `## 3. Reference patterns` dejó de ser sólo "ficheros a los que parecerse":
+  // es lo único del plan que le dice al implementador cómo se escribe en este
+  // repo y al juez contra qué bloquear. Y lo escribe un AGENTE, así que puede
+  // citar `docs/conventions/domain.md` porque le suena a que un repo así lo
+  // tendría. Entonces el implementador no lo abre (no está), el juez no lo abre
+  // (no está), y los dos siguen adelante como si hubieran medido.
+  //
+  // Es la MISMA regla que la literalidad de `Current state`, aplicada a la otra
+  // clase de cita del plan: allí se comprueba que el texto citado existe verbatim
+  // en el fichero, aquí que el fichero citado existe. Tercera de la serie —
+  // `5b97fdd` cerró "la vara es prosa", `verification-predicate` cerró "la vara
+  // mide al revés", y ésta cierra "la vara no existe".
+  //
+  // ACOTADA A §3 a propósito: en el resto del plan hay rutas que la slice va a
+  // CREAR, y exigir que existan ahí vetaría todos los planes.
+  //
+  // QUÉ SE TRATA COMO RUTA. Un token entre comillas invertidas, sólo si no lleva
+  // espacios y (lleva una barra o acaba en una extensión de texto). Así
+  // `docs/conventions/infra.md` y `AGENTS.md` se comprueban, mientras que
+  // `test(...)`, `describe` y la skill `backend-engineering:backend-best-practices`
+  // no se miran — una skill no es un fichero del repo y su existencia no se
+  // comprueba en disco.
+  //
+  // Y un token que acaba en `/` se salta: es un directorio, y el único puerto de
+  // lectura que este módulo recibe es de ficheros. Comprobar directorios pedía
+  // una costura de IO nueva por todo el camino de `checkPlans`, y el agujero que
+  // deja (un directorio inventado pasa) es más pequeño que la costura.
+  // ---------------------------------------------------------------------------
+  if (readFile) {
+    const desde = lines.findIndex((l) => l.structural && l.line.startsWith('## 3. Reference patterns'))
+    if (desde !== -1) {
+      let hasta = lines.findIndex((l, i) => i > desde && l.structural && /^## /.test(l.line))
+      if (hasta === -1) hasta = lines.length
+      for (let i = desde + 1; i < hasta; i++) {
+        if (!lines[i].structural) continue
+        for (const cita of lines[i].line.match(/`[^`]+`/g) || []) {
+          const ruta = cita.slice(1, -1).trim()
+          if (!esRutaCitada(ruta)) continue
+          try {
+            readFile(ruta)
+          } catch {
+            push('reference-paths', `línea ${i + 1}: §3 nombra "${ruta}" y no se puede leer en el repo. §3 es la vara con la que el implementador escribe y el juez bloquea: una ruta citada de memoria deja a los dos midiendo contra un fichero que no está. Cita una ruta real, o quítala.`)
+          }
+        }
+      }
+    }
+  }
 
   return { ok: violations.length === 0, violations }
 }
