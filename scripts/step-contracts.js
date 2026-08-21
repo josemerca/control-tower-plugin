@@ -21,7 +21,7 @@ import { findClosingKeywords } from './closing-keywords.js'
 
 export const SEVERITIES = ['high', 'medium', 'low']
 
-// Las ocho reglas de la rúbrica del juez, en el orden en que la recorre (la
+// Las nueve reglas de la rúbrica del juez, en el orden en que la recorre (la
 // rúbrica en sí se escribe en una tarea posterior de este mismo plan; aquí
 // sólo se fija el vocabulario). Enum CERRADO, y no por la validación por la
 // validación: la telemetría cuenta hallazgos por regla (`findings_by_rule` en
@@ -30,9 +30,28 @@ export const SEVERITIES = ['high', 'medium', 'low']
 // descarta un `ruling` inventado — el descarte no es un error, es "vuelve a
 // preguntar": un hallazgo que no encaja en ninguna regla es un hallazgo que el
 // juez no ha sabido justificar.
+//
+// El noveno entra DETRÁS de `alcance` y no intercalado entre los ítems de
+// test: el orden de este array ES el orden en que el juez recorre la rúbrica
+// —`reglasDelAgente()` lo ata encabezado a encabezado en
+// step-contracts.test.js—, así que meterlo en medio renumera seis encabezados
+// de `ct-judge.md` sin cambiar nada que se pueda medir.
+//
+// `test-desiderata` juzga los tests NUEVOS de la tarea como instrumento
+// (determinista, aislado, y que verifique comportamiento real) y bloquea sólo
+// con esas tres; lo demás avisa en `low` y nunca en `medium`, porque un
+// `medium` compra una vuelta pagada al implementador sobre una tarea cuya
+// suite ya está verde. Es el único ítem cuya vara NO la pone el plan: las tres
+// son propiedades de un test, no gusto del repo, así que no puede volver
+// `sin-vara` — un noveno ítem que en un repo sin convenciones saliera siempre
+// sin vara inflaría justo la columna (`rubric_sin_vara`) que se añadió para
+// medir si la vara llega. Los tests PREEXISTENTES debilitados siguen siendo de
+// `manipulacion-tests`: un assert relajado en un test que ya existía es UN
+// defecto y no dos, y duplicarlo falsearía `findings_by_rule`.
 export const VERDICT_RULES = [
   'objetivo', 'asercion-tdd', 'contrato', 'decisiones-cerradas',
   'patrones', 'manipulacion-tests', 'fixture-theater', 'alcance',
+  'test-desiderata',
 ]
 
 // Lo que un ítem del recorrido pudo hacer. El recorrido ya distinguía "no se
@@ -62,12 +81,12 @@ export const RUBRIC_OUTCOMES = ['conforme', 'no-aplica', 'sin-vara']
 // severidad es lo que separa un veto de un refunfuño, y el resto de la prosa
 // del juez no la lee ningún programa.
 //
-// Cada hallazgo lleva además su REGLA: cuál de las ocho de la rúbrica incumple.
+// Cada hallazgo lleva además su REGLA: cuál de las nueve de la rúbrica incumple.
 // Antes de esto un hallazgo decía severidad, qué y dónde, pero no POR QUÉ es un
 // hallazgo — y sin eso, la telemetría no puede contar cuántos vetos vienen de
 // cada regla, que es justo el dato que dice si la rúbrica está bien calibrada.
 //
-// Y `rubric` es el paseo por los ocho ítems, cada uno exactamente una vez con
+// Y `rubric` es el paseo por los nueve ítems, cada uno exactamente una vez con
 // lo que dio. La rúbrica ya lo pedía, pero lo pedía en PROSA y para la
 // respuesta conversacional del subagente, que nadie captura: lo que se validaba
 // y se persistía era sólo `{ruling, findings}`. Medido en
@@ -93,7 +112,7 @@ export const RUBRIC_OUTCOMES = ['conforme', 'no-aplica', 'sin-vara']
 // una vuelta pagada sin decirle qué mirar.
 //
 // El enum del ítem es el MISMO array VERDICT_RULES, no una copia: dos listas de
-// ocho identificadores divergen al primer renombrado, que es el desacople que
+// nueve identificadores divergen al primer renombrado, que es el desacople que
 // este módulo ya pagó con JUDGE_TOOLS.
 export const VERDICT_SCHEMA = Object.freeze({
   type: 'object',
@@ -241,8 +260,8 @@ export function readVerdict(structured) {
   }
   // El recorrido de la rúbrica, con el mismo criterio que el `rule` de un
   // hallazgo: enum CERRADO y descarte, no interpretación. Aquí el descarte
-  // cubre además la CARDINALIDAD, que en un hallazgo no aplica — la rúbrica son
-  // ocho ítems y se contestan los ocho, así que un recorrido corto, uno con un
+  // cubre además la CARDINALIDAD, que en un hallazgo no aplica — la rúbrica se
+  // recorre entera y se contesta entera, así que un recorrido corto, uno con un
   // ítem repetido y uno con un identificador que nadie reconoce son el mismo
   // fallo: un veredicto del que no se puede afirmar que la rúbrica se recorrió.
   if (!Array.isArray(rubric)) return { why: 'el veredicto no trae el recorrido de la rúbrica' }
@@ -250,7 +269,7 @@ export function readVerdict(structured) {
   for (const [i, paso] of rubric.entries()) {
     if (!paso || typeof paso !== 'object') return { why: `el paso ${i} del recorrido no es un objeto` }
     if (!VERDICT_RULES.includes(paso.rule)) return { why: `el recorrido nombra un ítem desconocido de la rúbrica: ${JSON.stringify(paso.rule)}` }
-    // Un ítem nombrado sin resultado son los ocho identificadores sin nada
+    // Un ítem nombrado sin resultado son los identificadores sin nada
     // detrás: el mismo PASS vacío de rust-monitoring#10, sólo más largo.
     if (!esTexto(paso.result)) return { why: `el ítem ${paso.rule} del recorrido no dice lo que dio` }
     // El resultado en prosa dice lo que dio; `outcome` dice de qué CLASE fue,
@@ -261,7 +280,10 @@ export function readVerdict(structured) {
     recorridos.push(paso.rule)
   }
   const sinRecorrer = VERDICT_RULES.filter((regla) => !recorridos.includes(regla))
-  if (sinRecorrer.length) return { why: `el recorrido no pasa por ${sinRecorrer.join(', ')}: la rúbrica son ocho ítems y se contestan los ocho` }
+  // El número sale del array y no de la prosa: el noveno ítem dejó obsoleto de
+  // golpe un "ocho" escrito a mano, y este `why` es el texto que el juez lee
+  // para volver a contestar tras un descarte.
+  if (sinRecorrer.length) return { why: `el recorrido no pasa por ${sinRecorrer.join(', ')}: la rúbrica son ${VERDICT_RULES.length} ítems y se contestan los ${VERDICT_RULES.length}` }
   // La coherencia que el original comprueba en el propio agregado: un PASA con
   // un hallazgo grave se contradice a sí mismo. No se "interpreta" hacia el
   // lado prudente — se descarta y se vuelve a preguntar, porque un juez que no

@@ -57,7 +57,32 @@ const item5DeLaRubrica = () => {
   return m ? m[0] : ''
 }
 
-// Los ocho encabezados de la rúbrica — "### 1. `objetivo` — ..." — en el
+// El ítem `test-desiderata`, aislado hasta el siguiente encabezado, con el
+// mismo recorte que `item5DeLaRubrica`: es el único sitio donde se le dice al
+// juez qué mira en los tests que la tarea ACABA de escribir.
+const item9DeLaRubrica = () => {
+  const m = /^### 9\. `test-desiderata`[\s\S]*?(?=^### |^## )/m.exec(readFileSync(AGENTE_JUEZ, 'utf8'))
+  return m ? m[0] : ''
+}
+
+// La lista de identificadores que el bullet `rule` de "What you write" le
+// enseña al juez. Es una TERCERA copia de VERDICT_RULES —después del array y de
+// los encabezados— y la que no rompe nada al quedarse corta: un identificador
+// que no aparece ahí es un ítem que el juez recorre pero del que nunca se
+// atreve a emitir un hallazgo.
+const identificadoresQueElJuezPuedeEscribir = () => {
+  const m = /- `rule` is one of the[\s\S]*?(?=\n- `where`)/.exec(readFileSync(AGENTE_JUEZ, 'utf8'))
+  return m ? m[0].replace(/\s+/g, ' ') : ''
+}
+
+// El punto 1 del prompt del implementador (la carga de la skill de TDD),
+// aislado hasta el punto 2: es donde vive la frase espejo de este ítem.
+const punto1DelImplementador = () => {
+  const m = /^1\.\s[\s\S]*?(?=^2\.\s)/m.exec(readFileSync(PROMPT_IMPLEMENTADOR, 'utf8'))
+  return m ? m[0] : ''
+}
+
+// Los encabezados de la rúbrica — "### 1. `objetivo` — ..." — en el
 // orden en que el agente los recorre. VERDICT_RULES es una copia suya: este
 // repo ya sufrió el mismo desacople con JUDGE_TOOLS (divergió del frontmatter
 // del agente y la constante se quedó atrás), y aquí el riesgo es peor porque
@@ -85,11 +110,11 @@ const esquemaDelAgente = () => {
   return m ? m[1] : ''
 }
 
-// El paseo por la rúbrica tal y como el esquema lo exige: los ocho ítems, cada
+// El paseo por la rúbrica tal y como el esquema lo exige: todos los ítems, cada
 // uno exactamente una vez, cada uno con lo que dio. Se construye desde
 // VERDICT_RULES y no desde una lista a mano por la misma razón por la que el
-// esquema tampoco duplica la lista: dos copias de los ocho identificadores
-// divergen, y el test que las ataba dejaría de mirar los ocho.
+// esquema tampoco duplica la lista: dos copias de los identificadores
+// divergen, y el test que las ataba dejaría de mirarlos todos.
 const recorridoCompleto = () => VERDICT_RULES.map((rule) => ({ rule, result: 'sin hallazgos', outcome: 'conforme' }))
 
 // Los encabezados del paquete de revisión que cita el párrafo "The review
@@ -195,7 +220,59 @@ describe('quién puede qué', () => {
     expect(punto3DelImplementador()).toMatch(/rules speak about boundaries/i)
   })
 
-  it('VERDICT_RULES no puede divergir de los ocho encabezados de la rúbrica', () => {
+  it('test-desiderata es el noveno ítem, y va detrás de alcance', () => {
+    // El §3.6 lo cerró como ítem PROPIO (a diferencia de boundaries y rollout,
+    // absorbidos en patrones): sujeto nuevo (los tests que la tarea acaba de
+    // escribir) y vara nueva (propiedades del test, no convenciones del repo).
+    // La POSICIÓN también es decisión: el orden del array es el orden del paseo,
+    // e intercalarlo renumeraría seis encabezados sin cambiar nada medible.
+    expect(VERDICT_RULES.at(-1)).toBe('test-desiderata')
+    expect(reglasDelAgente().at(-1)).toBe('test-desiderata')
+  })
+
+  it('el ítem 9 nombra las tres violaciones que bloquean, y descarta el medium', () => {
+    const item = item9DeLaRubrica()
+    expect(item).toMatch(/determinis/i)
+    expect(item).toMatch(/isolat/i)
+    expect(item).toMatch(/real behaviour/i)
+    expect(item).toMatch(/never reports `medium`/i)
+  })
+
+  it('el ítem 9 juzga los tests nuevos y devuelve los preexistentes a manipulacion-tests', () => {
+    // El §3.5 del handoff: un assert relajado en un test que YA existía es un
+    // defecto y no dos. Sin la frase, los dos ítems se solapan y el conteo por
+    // regla que lee la telemetría cuenta doble el mismo hallazgo.
+    expect(item9DeLaRubrica()).toMatch(/manipulacion-tests/)
+  })
+
+  it('el ítem 9 mide con la misma skill que el implementador tenía orden de seguir', () => {
+    // El juez corre en el worktree del REPO DESTINO: skills/ del plugin no es
+    // una ruta que `Read` alcance ahí, y por eso este ítem era imposible antes
+    // del Slice 1. Y es la MISMA copia que el prompt del implementador nombra:
+    // un juez que bloquea con un texto que el implementador no recibió es una
+    // sorpresa, que es justo lo que el espejo de e473c97 existe para impedir.
+    expect(item9DeLaRubrica()).toMatch(/control-tower-loop:test-driven-development/)
+    expect(readFileSync(PROMPT_IMPLEMENTADOR, 'utf8')).toMatch(/control-tower-loop:test-driven-development/)
+    expect(toolsDelAgente()).toMatch(/\bSkill\b/)
+  })
+
+  it('la lista de identificadores que el juez puede escribir no se queda corta', () => {
+    // Los encabezados ya están atados; esta lista no lo estaba. Un identificador
+    // ausente aquí no rompe ningún esquema: sólo hace que el juez recorra el
+    // ítem y no se atreva a emitir un hallazgo suyo, porque el fichero le dice
+    // que ese `rule` no es de los válidos.
+    const lista = identificadoresQueElJuezPuedeEscribir()
+    for (const regla of VERDICT_RULES) expect(lista).toContain(`\`${regla}\``)
+  })
+
+  it('la vara de los tests nuevos es la misma a los dos lados: el implementador la lee antes de escribir', () => {
+    const punto1 = punto1DelImplementador()
+    expect(punto1).toMatch(/determinis/i)
+    expect(punto1).toMatch(/isolat/i)
+    expect(punto1).toMatch(/real behaviour/i)
+  })
+
+  it('VERDICT_RULES no puede divergir de los encabezados de la rúbrica', () => {
     // Renombrar una regla en el código sin tocar el agente (o al revés) no
     // rompe ningún esquema: sólo hace que un veredicto con ese `rule` se
     // descarte en cada ejecución. Este test es lo que lo convierte en un
@@ -204,7 +281,7 @@ describe('quién puede qué', () => {
   })
 
   it('la rúbrica le enseña al juez el campo del recorrido en vez de pedírselo en prosa', () => {
-    // El paseo por los ocho ítems se pedía en prosa, al final del fichero, y
+    // El paseo por los ítems se pedía en prosa, al final del fichero, y
     // se pedía para la RESPUESTA del subagente — que no se persiste. Ahora es
     // un campo del veredicto, así que el bloque que el juez copia tiene que
     // mostrarlo: un validador que exige lo que el agente no ve descarta todos
@@ -302,7 +379,7 @@ describe('el veredicto', () => {
   // recorrido no es un campo informativo — es la diferencia entre "no
   // aplicaba" y "no se miró", y la carga la lleva el esquema, no la prosa.
   // -------------------------------------------------------------------------
-  it('el veredicto trae el paseo por los ocho ítems, y viaja dentro de él', () => {
+  it('el veredicto trae el paseo por todos los ítems, y viaja dentro de él', () => {
     const r = v('PASS')
     expect(r.verdict.rubric.map((paso) => paso.rule)).toEqual(VERDICT_RULES)
   })
@@ -325,9 +402,9 @@ describe('el veredicto', () => {
     expect(r.why).toMatch(/ítem desconocido/)
   })
 
-  it('se descarta un recorrido que repite un ítem: nueve pasos no son ocho ítems', () => {
-    // Nueve entradas con los ocho identificadores presentes: sin la
-    // comprobación de repetidos, un recuento por conjunto daría los ocho por
+  it('se descarta un recorrido que repite un ítem: un paso de más no es un ítem más', () => {
+    // Una entrada de más con todos los identificadores presentes: sin la
+    // comprobación de repetidos, un recuento por conjunto los daría todos por
     // recorridos y el duplicado pasaría. Es el mismo criterio que readReport
     // aplica a una ruta declarada dos veces.
     const r = v('PASS', [], [...recorridoCompleto(), { rule: 'alcance', result: 'otra vez', outcome: 'conforme' }])
@@ -341,6 +418,15 @@ describe('el veredicto', () => {
     const r = v('PASS', [], recorridoCompleto().filter((paso) => paso.rule !== 'fixture-theater'))
     expect(r.verdict).toBeUndefined()
     expect(r.why).toMatch(/fixture-theater/)
+  })
+
+  it('el motivo del descarte cuenta los ítems que la rúbrica tiene hoy, no los que tenía', () => {
+    // El mensaje decía "ocho" en literal, y el noveno ítem lo convirtió en una
+    // mentira dirigida justo al agente que tiene que volver a contestar.
+    const r = v('PASS', [], recorridoCompleto().filter((paso) => paso.rule !== 'test-desiderata'))
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/test-desiderata/)
+    expect(r.why).toContain(String(VERDICT_RULES.length))
   })
 
   it('se descarta el ítem que se nombra pero no dice lo que dio: un texto vacío es el ítem sin abrir otra vez', () => {
@@ -522,9 +608,9 @@ describe('los esquemas declarados, atados a lo que valida de verdad', () => {
     expect(readVerdict(payload).verdict).toBeUndefined()
   })
 
-  it('el esquema del recorrido no duplica los ocho identificadores: los toma de VERDICT_RULES', () => {
+  it('el esquema del recorrido no duplica los identificadores: los toma de VERDICT_RULES', () => {
     // Identidad y no igualdad a propósito. Una segunda lista con los mismos
-    // ocho valores pasaría un toEqual y divergiría en el primer renombrado,
+    // valores pasaría un toEqual y divergiría en el primer renombrado,
     // que es el fallo que este fichero ya caza dos veces (JUDGE_TOOLS y
     // VERDICT_RULES contra ct-judge.md).
     expect(VERDICT_SCHEMA.properties.rubric.items.properties.rule.enum).toBe(VERDICT_RULES)

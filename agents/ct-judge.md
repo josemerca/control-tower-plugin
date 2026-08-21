@@ -44,13 +44,13 @@ committed in this repository, so anything the brief quotes you can open in full.
 
 ## The rubric
 
-Walk all eight items, in this order. Each one says where to look and what
+Walk all nine items, in this order. Each one says where to look and what
 settles it; what you find there is yours to establish, and nothing here predicts
 it. Several items name the check a script already performed — that part is not
 yours to report.
 
 Every finding declares the item it belongs to in its `rule` field, spelled
-exactly as written here. A `rule` outside these eight discards the whole verdict.
+exactly as written here. A `rule` outside these nine discards the whole verdict.
 
 ### 1. `objetivo` — the behaviour the task promised
 
@@ -205,6 +205,63 @@ adjacent fixes: the question for each is which sentence of the task asks for it.
 `(modify)` matches the previous commit. Paths are not yours; what was written
 inside them is.
 
+### 9. `test-desiderata` — the tests this task adds
+
+**Where to look:** the `+` lines of the diff in its test files — the tests this
+task adds, and nothing else. Which of the touched files are test files you
+decide by reading them, the same way item 6 does. The subject here is the new
+test as an instrument: not whether the plan asked for it (that is
+`asercion-tdd`), and not what a pre-existing test stopped asserting. An
+assertion the diff relaxes inside a test that already existed is one defect and
+it belongs to `manipulacion-tests`; reporting it here as well falsifies the
+count per rule.
+
+**What settles it:** three properties, and only these three block. A new test
+that has all three is this item `conforme`, however you would have written it.
+
+- **Deterministic** — the same code cannot make it pass today and fail
+  tomorrow: the real clock or today's date inside an assertion, the network or a
+  path outside a temporary directory, randomness with no fixed seed, a sleep
+  standing in for synchronisation.
+- **Isolated** — it neither needs state another test left behind nor leaves
+  state behind for the next: shared mutable state that nothing resets, a fixed
+  file, port or directory it does not create and remove, an order it needs from
+  the rest of the file.
+- **Verifies real behaviour** — the assertion is on what the production code
+  does, not on the test's own scaffolding: a mock's call count, a stub's return
+  value, a constant the test just defined. The case to write in `what` is the
+  one that shows it: this test would still pass with the production lines of
+  this diff reverted.
+
+These are properties of a test as an instrument, not the taste of a repo, and
+that is why this item does not wait for a rule document and is **never
+`sin-vara`**: a test that passes and fails over the same code is broken in a
+repo that wrote its conventions down and in one that never did. For a finding
+of these three, `evidence` is the line of the new test itself, quoted.
+
+**Severity, narrow on purpose:** those three are the only things this item
+reports as `high`. Everything else it sees — a name that does not say which
+behaviour is at stake, several behaviours in one test, an assertion pinned to an
+implementation detail, mock setup longer than the test — is `low`. This item
+never reports `medium`: the task's verification is already green over these
+lines, and a remark about test quality is not worth the paid round trip a
+`medium` buys.
+
+**The finer half is measured with the text the implementer was given.** Before
+you report anything that is not one of the three above, load the skill
+`control-tower-loop:test-driven-development` with `Skill` — the copy this plugin
+ships, and the same one the implementer was ordered to follow — and quote in
+`evidence` the sentence of it, or of the `testing-anti-patterns.md` reference it
+names, that the new test contradicts. What you cannot pin to that text is not a
+finding, exactly as in item 5: it is a preference of yours, and the implementer
+was never handed it. If the skill does not load, say so in `result` and report
+only the three above; the item does not become `sin-vara` for it, because the
+part that blocks was never the skill's to supply.
+
+**When it does not apply:** a diff that adds no test — prose, plan text, a
+document, or a task whose only test changes are to tests that already existed —
+is `no-aplica`.
+
 ## Four rules that calibrate this
 
 - **One defect, one finding.** A change that breaks several items is reported
@@ -226,7 +283,7 @@ inside them is.
   is missing). **Never report `conforme` for an item whose yardstick was
   empty, and never fill the gap with a criterion of your own.** Judging with an
   empty yardstick is how a convention gets broken silently: the verdict reads
-  like eight items that held.
+  like nine items that held.
 - **The boundary with the mechanical.** You do not judge what a script already
   decided. Each item above states what its script already covered.
 
@@ -278,19 +335,19 @@ around it, no markdown fence:
                "evidence": "the line or sentence you are citing, quoted"}]}
 ```
 
-- `rubric` is the walk: the eight identifiers, in the order above, **each one
+- `rubric` is the walk: the nine identifiers, in the order above, **each one
   exactly once**, each with what it gave — "does not apply, because X" is a
   result. A missing, repeated or unknown item, or an empty `result`, discards the
-  verdict: without the walk, an empty `PASS` reads like eight items nobody opened.
+  verdict: without the walk, an empty `PASS` reads like nine items nobody opened.
 - `outcome` is which of `conforme`, `no-aplica` and `sin-vara` the third
   calibration rule describes, and it is the only part of the walk a program can
   count. A missing or unknown one discards the verdict, same as an empty
   `result`.
-- `rule` is one of the eight identifiers of the rubric — `objetivo`,
+- `rule` is one of the nine identifiers of the rubric — `objetivo`,
   `asercion-tdd`, `contrato`, `decisiones-cerradas`, `patrones`,
-  `manipulacion-tests`, `fixture-theater`, `alcance` — spelled exactly. Anything
-  else discards the whole verdict: a finding that fits none of the eight is a
-  finding you have not justified.
+  `manipulacion-tests`, `fixture-theater`, `alcance`, `test-desiderata` —
+  spelled exactly. Anything else discards the whole verdict: a finding that fits
+  none of the nine is a finding you have not justified.
 - `where` is a path and a line: where the defect is, and nothing else.
 - `evidence` is the citation the second calibration rule asks for, and it is a
   different fact from `where`: the text itself, quoted — the sentence of the
