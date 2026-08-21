@@ -5,9 +5,17 @@
 #
 # usage: task-brief [--with-plan-context] PLAN_FILE TASK_NUMBER [OUTFILE]
 # El flag va PRIMERO y es opcional. Con él, y solo con él, el fichero de salida
-# lleva delante de la tarea las secciones "### Out of scope", "## 2. Closed
-# decisions" y "## 3. Reference patterns", cada una con su encabezado, y una
-# línea que dice que son la vara y que ganan a la tarea si la contradicen.
+# lleva delante de la tarea las secciones "### Desired end state", "### Out of
+# scope", "## 2. Closed decisions" y "## 3. Reference patterns", cada una con su
+# encabezado.
+#
+# LAS CUATRO SECCIONES NO TIENEN LA MISMA AUTORIDAD, y van bajo dos líneas
+# distintas por eso. Las tres últimas son la VARA: si contradicen la tarea,
+# ganan ellas. "### Desired end state" no lo es — es el fin del slice, y viaja
+# para que quien implementa y quien juzga sepan a qué sirve la tarea, que es lo
+# único que ataba la tarea a los criterios de aceptación del issue y no llegaba.
+# Darle autoridad de vara sería una licencia para ensanchar la tarea ("sirve al
+# fin del slice"), y eso debilita justo el ítem `alcance`, que hoy funciona.
 # Sin el flag la salida es la de siempre, byte a byte: el camino por defecto de
 # subagent-driven-development llama a este script y esa decisión es de José.
 #
@@ -92,6 +100,12 @@ fi
 
 if [ "$with_plan_context" -eq 1 ]; then
   {
+    echo "> El fin del slice, para situar esta tarea en él. NO es vara: no amplía el"
+    echo "> **Files:** de la tarea ni lo que ésta declara fuera de alcance, y una tarea que"
+    echo "> sirve al fin del slice haciendo algo que su texto no pide sigue estando fuera."
+    echo
+    print_section "### Desired end state"
+    echo
     echo "> Estas secciones son la vara del plan: si contradicen la tarea, ganan ellas."
     echo
     print_section "### Out of scope"

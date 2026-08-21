@@ -35,6 +35,29 @@ export const VERDICT_RULES = [
   'patrones', 'manipulacion-tests', 'fixture-theater', 'alcance',
 ]
 
+// Lo que un ítem del recorrido pudo hacer. El recorrido ya distinguía "no se
+// miró" de "se miró", pero dentro de "se miró" seguía habiendo dos cosas que
+// se leían igual, y una de ellas es un agujero:
+//
+//   `no-aplica` — el ítem no tiene SUJETO. No hay tests previos que debilitar,
+//     no hay símbolos que comparar, la tarea es prosa. Es la rúbrica
+//     funcionando: no hay nada que mirar y se dice.
+//   `sin-vara`  — el ítem tiene sujeto pero le falta el INSUMO con el que
+//     medirlo. El plan no nombró ningún patrón, o la sección que tenía que
+//     llegar en el brief no llegó. El juez no juzgó: juzgó a ciegas.
+//
+// Sin este campo las dos salen como un `result` en prosa que nadie agrega, y
+// `patrones: N/A` es indistinguible de `patrones: conforme`. Es la mitad de H5
+// del informe de la corrida en repo ajeno, y la razón por la que dos personas
+// mirando veredictos a mano sospechaban que el juez no miraba: no había forma
+// de saberlo. `run-metrics.js` cuenta los `sin-vara` por intento, así que el
+// agujero pasa de sospecha a columna.
+//
+// Enum CERRADO por el mismo motivo que VERDICT_RULES: lo que no se puede contar
+// no se puede leer, y un cuarto valor inventado por el juez convierte la cuenta
+// en ruido.
+export const RUBRIC_OUTCOMES = ['conforme', 'no-aplica', 'sin-vara']
+
 // El veredicto: el fallo, el RECORRIDO de la rúbrica y los hallazgos. La
 // severidad es lo que separa un veto de un refunfuño, y el resto de la prosa
 // del juez no la lee ningún programa.
@@ -58,6 +81,17 @@ export const VERDICT_RULES = [
 // "no aplicaba, y por esto" de "no se miró"; por eso entra en el esquema y no
 // en una línea que nadie valida.
 //
+// Y cada hallazgo lleva `evidence`: la CITA literal que lo sostiene — la frase
+// del plan que se incumple, o la línea del diff que lo prueba. No es `what`
+// (que narra el defecto) ni `where` (que ubica): es el texto que alguien puede
+// contrastar sin abrir nada. La rúbrica ya exigía citar antes de bloquear
+// ("evidence before blocking"), pero lo exigía en PROSA, en un fichero de
+// doscientas cuarenta líneas donde compite con ocho ítems que hay que recorrer
+// de verdad. Un campo obligatorio del esquema no se olvida; una frase sí. Y se
+// exige en las tres severidades y no sólo en `high`: un campo condicional se
+// olvida igual que la prosa, y un `medium` sin cita manda al implementador a
+// una vuelta pagada sin decirle qué mirar.
+//
 // El enum del ítem es el MISMO array VERDICT_RULES, no una copia: dos listas de
 // ocho identificadores divergen al primer renombrado, que es el desacople que
 // este módulo ya pagó con JUDGE_TOOLS.
@@ -74,10 +108,11 @@ export const VERDICT_SCHEMA = Object.freeze({
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['rule', 'result'],
+        required: ['rule', 'result', 'outcome'],
         properties: {
           rule: { type: 'string', enum: VERDICT_RULES },
           result: { type: 'string' },
+          outcome: { type: 'string', enum: RUBRIC_OUTCOMES },
         },
       },
     },
@@ -86,12 +121,13 @@ export const VERDICT_SCHEMA = Object.freeze({
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['rule', 'severity', 'what', 'where'],
+        required: ['rule', 'severity', 'what', 'where', 'evidence'],
         properties: {
           rule: { type: 'string', enum: VERDICT_RULES },
           severity: { type: 'string', enum: SEVERITIES },
           what: { type: 'string' },
           where: { type: 'string' },
+          evidence: { type: 'string' },
         },
       },
     },
@@ -178,6 +214,10 @@ export function readVerdict(structured) {
     if (!f || typeof f !== 'object') return { why: `el hallazgo ${i} no es un objeto` }
     if (!SEVERITIES.includes(f.severity)) return { why: `el hallazgo ${i} tiene una severidad desconocida: ${JSON.stringify(f.severity)}` }
     if (!esTexto(f.what) || !esTexto(f.where)) return { why: `el hallazgo ${i} no dice qué o dónde` }
+    // La cita, con el mismo trato que el qué y el dónde: sin ella el hallazgo
+    // no se puede contrastar, y un veto que no se puede contrastar es el veto
+    // defensivo que la calibración de la rúbrica existe para impedir.
+    if (!esTexto(f.evidence)) return { why: `el hallazgo ${i} no cita la evidencia que lo sostiene` }
     // La regla es el enum CERRADO: no se asume ninguna por defecto, porque una
     // regla inventada por el juez ensuciaría el conteo por regla de la
     // telemetría tanto como un `rule` ausente.
@@ -197,6 +237,10 @@ export function readVerdict(structured) {
     // Un ítem nombrado sin resultado son los ocho identificadores sin nada
     // detrás: el mismo PASS vacío de rust-monitoring#10, sólo más largo.
     if (!esTexto(paso.result)) return { why: `el ítem ${paso.rule} del recorrido no dice lo que dio` }
+    // El resultado en prosa dice lo que dio; `outcome` dice de qué CLASE fue,
+    // que es lo único agregable. Sin él, "no había con qué medir" y "medí y
+    // está bien" son el mismo dato.
+    if (!RUBRIC_OUTCOMES.includes(paso.outcome)) return { why: `el ítem ${paso.rule} del recorrido no dice de qué clase fue su resultado: ${JSON.stringify(paso.outcome)}` }
     if (recorridos.includes(paso.rule)) return { why: `el recorrido repite el ítem ${paso.rule} de la rúbrica` }
     recorridos.push(paso.rule)
   }

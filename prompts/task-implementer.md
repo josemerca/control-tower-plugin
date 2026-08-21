@@ -29,10 +29,14 @@ this prompt or in the files it names.
      It cannot know there is a program behind you that will run the task's own
      verification the moment you return. Take the cycle from the skill and the
      execution scope from the section below.
-2. Read the task brief at the path you were given. It opens with the plan's
-   yardstick — `### Out of scope`, `## 2. Closed decisions`, `## 3. Reference
-   patterns` — and then the task itself. Where the yardstick and the task
-   disagree, the yardstick wins.
+2. Read the task brief at the path you were given. It opens with `### Desired
+   end state` — the end state of the whole slice, so you know what your task
+   serves — and then the plan's yardstick: `### Out of scope`, `## 2. Closed
+   decisions`, `## 3. Reference patterns`. Then the task itself. Where the
+   yardstick and the task disagree, the yardstick wins. The desired end state is
+   **not** yardstick: it does not widen your `**Files:**` line, and code that
+   serves the slice's end without a sentence of this task asking for it is code
+   that fails the task.
 3. **The closed decisions are orders, not options.** A human already reviewed
    them at a gate. One you believe is wrong you obey anyway, and then you say so
    in your report: which decision, and what you think it costs. Silence is the

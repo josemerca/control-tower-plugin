@@ -91,10 +91,14 @@ const informe = (paths, nombre = 'report.json', summary = 'hecho') => {
 // de la rúbrica, que el contrato exige entero desde el Paso 3: se compone aquí
 // a partir de la lista de reglas del propio módulo, así que ni se teclea ocho
 // veces ni se queda atrás el día que la rúbrica cambie de tamaño.
-const recorridoCompleto = () => VERDICT_RULES.map((rule) => ({ rule, result: `mirado en el test: ${rule}` }))
+// Y lo mismo con los dos campos que el contrato añadió después: la CLASE del
+// resultado de cada paso y la CITA de cada hallazgo. A estos tests tampoco les
+// importan —lo que miden es la máquina, no el juicio—, así que se rellenan aquí
+// con un valor válido en vez de en cada una de las veinte llamadas del fichero.
+const recorridoCompleto = () => VERDICT_RULES.map((rule) => ({ rule, result: `mirado en el test: ${rule}`, outcome: 'conforme' }))
 const veredicto = (ruling, findings = [], nombre = 'verdict.json') => {
   const p = join(repo, nombre)
-  const conRegla = findings.map((f) => ({ rule: 'alcance', ...f }))
+  const conRegla = findings.map((f) => ({ rule: 'alcance', evidence: 'la línea que lo prueba', ...f }))
   writeFileSync(p, JSON.stringify({ ruling, rubric: recorridoCompleto(), findings: conRegla }))
   return p
 }

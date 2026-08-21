@@ -59,24 +59,28 @@ describe('task-brief', () => {
     expect(readFileSync(outNew)).toEqual(readFileSync(outBaseline))
   })
 
-  it('con el flag añade las tres secciones de vara', () => {
+  it('con el flag añade el fin del slice y las tres secciones de vara', () => {
     const out = join(dir, 'con-flag.md')
     const r = run(['--with-plan-context', PLAN, TASK, out])
     expect(r.status).toBe(0)
 
     const texto = readFileSync(out, 'utf8')
+    expect(texto).toContain('### Desired end state')
     expect(texto).toContain('### Out of scope')
     expect(texto).toContain('## 2. Closed decisions')
     expect(texto).toContain('## 3. Reference patterns')
     expect(texto).toMatch(/vara/i)
     expect(texto).toMatch(/ganan/i)
 
-    // Las tres secciones van delante de la tarea, y la tarea sigue entera.
+    // Las cuatro secciones van delante de la tarea, en el orden del plan, y la
+    // tarea sigue entera.
+    const idxDesired = texto.indexOf('### Desired end state')
     const idxOutOfScope = texto.indexOf('### Out of scope')
     const idxClosed = texto.indexOf('## 2. Closed decisions')
     const idxReference = texto.indexOf('## 3. Reference patterns')
     const idxTask = texto.indexOf('### Task 7')
-    expect(idxOutOfScope).toBeGreaterThanOrEqual(0)
+    expect(idxDesired).toBeGreaterThanOrEqual(0)
+    expect(idxOutOfScope).toBeGreaterThan(idxDesired)
     expect(idxClosed).toBeGreaterThan(idxOutOfScope)
     expect(idxReference).toBeGreaterThan(idxClosed)
     expect(idxTask).toBeGreaterThan(idxReference)
@@ -84,6 +88,31 @@ describe('task-brief', () => {
 
     // Cada sección se corta antes de la siguiente, no se traga el plan entero.
     expect(texto).not.toContain('## 4. Inventory')
+  })
+
+  // -------------------------------------------------------------------------
+  // LAS CUATRO SECCIONES NO TIENEN LA MISMA AUTORIDAD. El fin del slice viaja
+  // para que quien implementa y quien juzga sepan a qué sirve la tarea —era lo
+  // único que la ataba a los criterios de aceptación del issue y no llegaba—,
+  // pero darle autoridad de vara sería una licencia para ensanchar la tarea
+  // ("sirve al fin del slice"), y eso debilita el ítem `alcance`, que hoy
+  // funciona. Por eso van bajo dos líneas distintas, y por eso hay un test.
+  // -------------------------------------------------------------------------
+  it('el fin del slice no viaja como vara: dice que no amplía el alcance de la tarea', () => {
+    const out = join(dir, 'autoridades.md')
+    expect(run(['--with-plan-context', PLAN, TASK, out]).status).toBe(0)
+
+    const texto = readFileSync(out, 'utf8')
+    const idxDesired = texto.indexOf('### Desired end state')
+    const cabecera = texto.slice(0, idxDesired)
+
+    // La línea que precede al fin del slice lo desmarca de la vara.
+    expect(cabecera).toMatch(/no amplía/i)
+    expect(cabecera).toMatch(/\*\*Files:\*\*/)
+    // Y la línea de "ganan ellas" NO cubre al fin del slice: va después, con
+    // las tres que sí son vara.
+    expect(cabecera).not.toMatch(/ganan/i)
+    expect(texto.indexOf('ganan')).toBeGreaterThan(idxDesired)
   })
 
   it('si al plan le falta una sección de vara, lo dice en vez de dejar un hueco mudo', () => {

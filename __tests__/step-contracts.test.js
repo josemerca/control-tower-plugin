@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage,
   VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS, VERDICT_RULES,
-  PACKAGE_SECTIONS,
+  PACKAGE_SECTIONS, RUBRIC_OUTCOMES,
 } from '../scripts/step-contracts.js'
 
 const AGENTE_JUEZ = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-judge.md')
@@ -57,7 +57,7 @@ const esquemaDelAgente = () => {
 // VERDICT_RULES y no desde una lista a mano por la misma razón por la que el
 // esquema tampoco duplica la lista: dos copias de los ocho identificadores
 // divergen, y el test que las ataba dejaría de mirar los ocho.
-const recorridoCompleto = () => VERDICT_RULES.map((rule) => ({ rule, result: 'sin hallazgos' }))
+const recorridoCompleto = () => VERDICT_RULES.map((rule) => ({ rule, result: 'sin hallazgos', outcome: 'conforme' }))
 
 // Los encabezados del paquete de revisión que cita el párrafo "The review
 // package." de "What you are given" — el único sitio de la rúbrica que habla
@@ -130,6 +130,23 @@ describe('quién puede qué', () => {
     expect(esquemaDelAgente()).toMatch(/"result"/)
   })
 
+  it('la rúbrica le enseña al juez los dos campos nuevos, o no puede acertar ni por casualidad', () => {
+    // Mismo argumento que el test de arriba, aplicado a `outcome` y a
+    // `evidence`: el validador los exige, así que el bloque que el juez copia
+    // tiene que mostrarlos. Un campo que sólo vive en el validador descarta
+    // todos los veredictos de la corrida sin que ninguno sea culpa del juez.
+    expect(esquemaDelAgente()).toMatch(/"outcome"/)
+    expect(esquemaDelAgente()).toMatch(/"evidence"/)
+  })
+
+  it('los tres valores de outcome están en la rúbrica, escritos igual que en el enum', () => {
+    // El enum es cerrado y el juez sólo puede escribir lo que la rúbrica le
+    // enseña. Si el código renombra `sin-vara` y el fichero sigue diciendo lo
+    // de antes, el juez escribe el valor viejo y el veredicto se descarta.
+    const texto = readFileSync(AGENTE_JUEZ, 'utf8')
+    for (const valor of RUBRIC_OUTCOMES) expect(texto).toContain(valor)
+  })
+
   it('PACKAGE_SECTIONS no puede divergir de los encabezados que la rúbrica cita por su nombre', () => {
     // El mismo fallo que ya tuvieron JUDGE_TOOLS y VERDICT_RULES, con un
     // agravante: aquí ni siquiera hay un esquema que descarte nada. Si
@@ -151,12 +168,12 @@ describe('el veredicto', () => {
     ['sin structured_output', null, /no devolvió structured_output/],
     ['con un ruling inventado', { ruling: 'MAYBE', findings: [] }, /ruling desconocido/],
     ['con findings que no es lista', { ruling: 'PASS', findings: 'ninguno' }, /no es una lista/],
-    ['con una severidad inventada', { ruling: 'FAIL', findings: [{ rule: 'contrato', severity: 'catastrophic', what: 'x', where: 'y' }] }, /severidad desconocida/],
-    ['con un hallazgo mudo', { ruling: 'FAIL', findings: [{ rule: 'contrato', severity: 'high', what: '', where: 'y' }] }, /no dice qué o dónde/],
+    ['con una severidad inventada', { ruling: 'FAIL', findings: [{ rule: 'contrato', severity: 'catastrophic', what: 'x', where: 'y', evidence: 'z' }] }, /severidad desconocida/],
+    ['con un hallazgo mudo', { ruling: 'FAIL', findings: [{ rule: 'contrato', severity: 'high', what: '', where: 'y', evidence: 'z' }] }, /no dice qué o dónde/],
     // Sin fijar este caso, una regresión que cambiara la condición a
     // `f.rule && !VERDICT_RULES.includes(f.rule)` dejaría pasar en silencio
     // un hallazgo sin `rule` — sólo cazaría la regla INVENTADA, no la AUSENTE.
-    ['con un hallazgo sin rule', { ruling: 'FAIL', findings: [{ severity: 'high', what: 'x', where: 'y' }] }, /regla desconocida/],
+    ['con un hallazgo sin rule', { ruling: 'FAIL', findings: [{ severity: 'high', what: 'x', where: 'y', evidence: 'z' }] }, /regla desconocida/],
   ])('se descarta %s', (_caso, structured, motivo) => {
     const r = readVerdict(structured)
     expect(r.verdict).toBeUndefined()
@@ -166,13 +183,13 @@ describe('el veredicto', () => {
   it('un PASS con un hallazgo grave se descarta: se contradice a sí mismo', () => {
     // No se interpreta hacia el lado prudente. Un juez que no se entiende a sí
     // mismo no ha juzgado, y volver a preguntar cuesta menos que decidir por él.
-    const r = v('PASS', [{ rule: 'contrato', severity: 'high', what: 'sql injection', where: 'db.js:10' }])
+    const r = v('PASS', [{ rule: 'contrato', severity: 'high', what: 'sql injection', where: 'db.js:10', evidence: 'query(`… ${id}`)' }])
     expect(r.verdict).toBeUndefined()
     expect(r.why).toMatch(/contradice la rúbrica/)
   })
 
   it('el hallazgo nombra la regla que incumple', () => {
-    const r = v('FAIL', [{ rule: 'manipulacion-tests', severity: 'high', what: 'debilitó una aserción', where: 'a.test.js:12' }])
+    const r = v('FAIL', [{ rule: 'manipulacion-tests', severity: 'high', what: 'debilitó una aserción', where: 'a.test.js:12', evidence: '-  expect(x).toBe(3)' }])
     expect(r.verdict.findings[0].rule).toBe('manipulacion-tests')
   })
 
@@ -180,7 +197,7 @@ describe('el veredicto', () => {
     // El mismo criterio que ya aplica a un ruling inventado: una regla que no
     // está en VERDICT_RULES no es un hallazgo sin justificar, es un dato que no
     // se entiende — se descarta y se vuelve a preguntar, no es un error.
-    const r = v('FAIL', [{ rule: 'me-lo-invento', severity: 'high', what: 'x', where: 'y' }])
+    const r = v('FAIL', [{ rule: 'me-lo-invento', severity: 'high', what: 'x', where: 'y', evidence: 'z' }])
     expect(r.verdict).toBeUndefined()
     expect(r.why).toMatch(/regla desconocida/)
     expect(VERDICT_RULES).not.toContain('me-lo-invento')
@@ -219,7 +236,7 @@ describe('el veredicto', () => {
     // Mismo criterio que un `rule` inventado en un hallazgo: un ítem que no
     // está en VERDICT_RULES no es un paseo laxo, es un dato que no se
     // entiende. Se vuelve a preguntar.
-    const recorrido = [...recorridoCompleto().slice(1), { rule: 'me-lo-invento', result: 'bien' }]
+    const recorrido = [...recorridoCompleto().slice(1), { rule: 'me-lo-invento', result: 'bien', outcome: 'conforme' }]
     const r = v('PASS', [], recorrido)
     expect(r.verdict).toBeUndefined()
     expect(r.why).toMatch(/ítem desconocido/)
@@ -230,7 +247,7 @@ describe('el veredicto', () => {
     // comprobación de repetidos, un recuento por conjunto daría los ocho por
     // recorridos y el duplicado pasaría. Es el mismo criterio que readReport
     // aplica a una ruta declarada dos veces.
-    const r = v('PASS', [], [...recorridoCompleto(), { rule: 'alcance', result: 'otra vez' }])
+    const r = v('PASS', [], [...recorridoCompleto(), { rule: 'alcance', result: 'otra vez', outcome: 'conforme' }])
     expect(r.verdict).toBeUndefined()
     expect(r.why).toMatch(/repite/)
   })
@@ -246,10 +263,69 @@ describe('el veredicto', () => {
   it('se descarta el ítem que se nombra pero no dice lo que dio: un texto vacío es el ítem sin abrir otra vez', () => {
     // Ocho identificadores sin resultado son el mismo artefacto que el PASS
     // con hallazgos vacíos, sólo que más largo.
-    const recorrido = recorridoCompleto().map((paso) => (paso.rule === 'patrones' ? { rule: 'patrones', result: '   ' } : paso))
+    const recorrido = recorridoCompleto().map((paso) => (paso.rule === 'patrones' ? { rule: 'patrones', result: '   ', outcome: 'conforme' } : paso))
     const r = v('PASS', [], recorrido)
     expect(r.verdict).toBeUndefined()
     expect(r.why).toMatch(/patrones/)
+  })
+
+  // -------------------------------------------------------------------------
+  // LA VARA VACÍA. El recorrido ya distinguía "no se miró" de "se miró"; dentro
+  // de "se miró" seguían colapsando dos cosas distintas, y una es un agujero:
+  // un ítem sin SUJETO (no hay tests previos que debilitar) y un ítem sin
+  // INSUMO (el plan no nombró ningún patrón). El segundo es un juez que dijo
+  // PASS a ciegas, y en prosa se lee igual que el primero. Es la mitad de H5.
+  // -------------------------------------------------------------------------
+  it('cada paso del recorrido dice de qué clase fue su resultado', () => {
+    const r = v('PASS')
+    expect(r.verdict.rubric.every((paso) => RUBRIC_OUTCOMES.includes(paso.outcome))).toBe(true)
+  })
+
+  it('se descarta el paso que no dice de qué clase fue: es "N/A" indistinguible de "conforme" otra vez', () => {
+    const recorrido = recorridoCompleto().map(({ rule, result }) => ({ rule, result }))
+    const r = v('PASS', [], recorrido)
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/de qué clase/)
+  })
+
+  it('se descarta una clase inventada, con el mismo criterio que una regla inventada', () => {
+    const recorrido = recorridoCompleto().map((paso) => (paso.rule === 'patrones' ? { ...paso, outcome: 'regular' } : paso))
+    const r = v('PASS', [], recorrido)
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/patrones/)
+    expect(RUBRIC_OUTCOMES).not.toContain('regular')
+  })
+
+  it('un ítem sin vara viaja en el veredicto, y no bloquea: lo que hace es dejar de esconderse', () => {
+    // El caso de rust-monitoring, ahora legible. `patrones` sin patrón que
+    // citar sigue dando un PASS —no es un defecto del implementador—, pero el
+    // fichero ya dice que ese ítem se recorrió sin nada con lo que medir.
+    const recorrido = recorridoCompleto().map((paso) => (
+      paso.rule === 'patrones'
+        ? { rule: 'patrones', result: 'el plan dice "N/A": no hay patrón que comparar', outcome: 'sin-vara' }
+        : paso))
+    const r = v('PASS', [], recorrido)
+    expect(r.verdict.ruling).toBe('PASS')
+    expect(r.verdict.rubric.find((paso) => paso.rule === 'patrones').outcome).toBe('sin-vara')
+  })
+
+  // -------------------------------------------------------------------------
+  // LA CITA. La rúbrica ya exigía citar antes de bloquear, pero en PROSA y en
+  // un fichero donde compite con ocho ítems que hay que recorrer de verdad. Un
+  // campo obligatorio no se olvida.
+  // -------------------------------------------------------------------------
+  it('se descarta el hallazgo que no cita la evidencia que lo sostiene', () => {
+    const r = v('FAIL', [{ rule: 'contrato', severity: 'high', what: 'la firma no casa', where: 'a.js:3' }])
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/evidencia/)
+  })
+
+  it('la cita se exige también en un medium: es el que manda al implementador a una vuelta pagada', () => {
+    // Un campo obligatorio sólo para `high` se olvida igual que la prosa, y un
+    // `medium` sin cita cuesta un viaje de ida y vuelta sin decir qué mirar.
+    const r = v('PASS', [{ rule: 'alcance', severity: 'medium', what: 'un helper que nadie pidió', where: 'a.js:9' }])
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/evidencia/)
   })
 })
 
@@ -332,7 +408,7 @@ describe('los esquemas declarados, atados a lo que valida de verdad', () => {
   const veredictoValido = () => ({
     ruling: 'FAIL',
     rubric: recorridoCompleto(),
-    findings: [{ rule: 'contrato', severity: 'high', what: 'x', where: 'y' }],
+    findings: [{ rule: 'contrato', severity: 'high', what: 'x', where: 'y', evidence: 'z' }],
   })
 
   it.each(REPORT_SCHEMA.required)('readReport exige "%s", como declara REPORT_SCHEMA.required', (campo) => {
@@ -369,6 +445,10 @@ describe('los esquemas declarados, atados a lo que valida de verdad', () => {
     // que es el fallo que este fichero ya caza dos veces (JUDGE_TOOLS y
     // VERDICT_RULES contra ct-judge.md).
     expect(VERDICT_SCHEMA.properties.rubric.items.properties.rule.enum).toBe(VERDICT_RULES)
+  })
+
+  it('el esquema del outcome tampoco duplica sus tres valores: los toma de RUBRIC_OUTCOMES', () => {
+    expect(VERDICT_SCHEMA.properties.rubric.items.properties.outcome.enum).toBe(RUBRIC_OUTCOMES)
   })
 
   it('el esquema pide el recorrido entero: ni un paso más, ni uno menos', () => {

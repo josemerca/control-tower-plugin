@@ -160,7 +160,30 @@ describe('el conteo por severidad', () => {
     })).toEqual({
       ruling: 'FAIL', findings_total: 3, findings_high: 1, findings_medium: 0, findings_low: 2,
       findings_by_rule: { contrato: 1, alcance: 2 },
+      rubric_sin_vara: 0,
     })
+  })
+
+  it('cuenta los ítems que el juez recorrió sin nada con lo que medirlos', () => {
+    // La columna que convierte H5 de sospecha en dato. Dos personas mirando
+    // veredictos a mano no podían saber si el juez no encontraba nada o si no
+    // tenía con qué buscar; un run con esta cifra alta es lo segundo.
+    expect(verdictMeasures({
+      ruling: 'PASS',
+      findings: [],
+      rubric: [
+        { rule: 'objetivo', result: 'está', outcome: 'conforme' },
+        { rule: 'patrones', result: 'el plan dice N/A', outcome: 'sin-vara' },
+        { rule: 'manipulacion-tests', result: 'no hay tests previos', outcome: 'no-aplica' },
+      ],
+    }).rubric_sin_vara).toBe(1)
+  })
+
+  it('un veredicto sin recorrido cuenta cero, no revienta', () => {
+    // `verdictMeasures` mide, y una medida no puede ser el motivo de que un
+    // paso no cierre: es el principio que este módulo ya sostiene con el resto
+    // de sus campos.
+    expect(verdictMeasures({ ruling: 'PASS', findings: [] }).rubric_sin_vara).toBe(0)
   })
 
   it('un PASA limpio cuenta cero de todo, y lo dice', () => {

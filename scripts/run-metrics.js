@@ -153,5 +153,12 @@ export function verdictMeasures(verdict) {
     findings_medium: findings.filter((f) => f.severity === 'medium').length,
     findings_low: findings.filter((f) => f.severity === 'low').length,
     findings_by_rule: findingsByRule,
+    // Cuántos ítems de la rúbrica se recorrieron SIN el insumo con el que
+    // medirlos. Es la única clase de `outcome` que se cuenta: `conforme` y
+    // `no-aplica` son la rúbrica funcionando, y ya se deducen del total. Un
+    // run con esta columna alta es un juez que dijo PASS a ciegas, que es
+    // exactamente lo que no se podía ver leyendo los veredictos de
+    // rust-monitoring a mano.
+    rubric_sin_vara: (verdict?.rubric || []).filter((paso) => paso.outcome === 'sin-vara').length,
   }
 }
