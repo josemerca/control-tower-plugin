@@ -153,6 +153,30 @@ function main() {
       process.exitCode = 1
       return
     }
+    // FAKE_GH_VIEW_COMMENTS — el camino de `--json comments`, que es el que usa
+    // el vigilante del `-OK` (scripts/ct-watch-go.mjs). Va aparte del de labels
+    // porque son dos preguntas distintas al mismo subcomando: sin separarlas,
+    // el vigilante recibiría la lista de labels y no encontraría `comments` en
+    // ella nunca.
+    //
+    // FAKE_GH_VIEW_COMMENTS_SEQUENCE (opcional) es una lista de payloads, uno
+    // por llamada, para poder probar lo que de verdad importa del vigilante:
+    // que en el primer tick NO hay go y sigue esperando, y que en un tick
+    // POSTERIOR sí lo hay y entonces empuja. Con un payload fijo sólo se puede
+    // probar uno de los dos.
+    if (joined.includes('--json comments')) {
+      const seq = process.env.FAKE_GH_VIEW_COMMENTS_SEQUENCE
+        ? JSON.parse(process.env.FAKE_GH_VIEW_COMMENTS_SEQUENCE)
+        : null
+      if (seq) {
+        const i = nextCallIndex(process.env.FAKE_GH_VIEW_COMMENTS_COUNTER_FILE)
+        process.stdout.write(JSON.stringify(seq[Math.min(i, seq.length - 1)]))
+      } else {
+        process.stdout.write(process.env.FAKE_GH_VIEW_COMMENTS || '{"comments":[]}')
+      }
+      process.exitCode = 0
+      return
+    }
     process.stdout.write(process.env.FAKE_GH_VIEW_LABELS || '[]')
     process.exitCode = 0
     return
