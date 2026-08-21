@@ -182,12 +182,28 @@ export const IMPLEMENTER_TOOLS = 'Read, Write, Edit, Grep, Glob, Bash, Skill'
 // parte: `ct-step commit` comitea las rutas que declaró el IMPLEMENTADOR, no lo
 // que haya en el árbol.
 //
+// `Skill` SÍ, y por la misma razón por la que la tiene el implementador: la
+// rúbrica le manda ejercerla. Desde `e473c97`, el `Rules to obey:` de `## 3.
+// Reference patterns` admite declarar una skill como vara secundaria, y el ítem
+// `patrones` manda abrirla («any skill named there — open them and read the
+// rules»). Pero un nombre de skill (`backend-engineering:backend-best-practices`)
+// no es una ruta: `Read` no lo abre, y `plan-contract.js` tampoco lo comprueba en
+// disco A PROPÓSITO. Sin esta herramienta la vara secundaria era inalcanzable, y
+// en silencio: el juez contestaría `conforme` sobre un documento que nunca pudo
+// abrir, que es justo el agujero que `sin-vara` existe para cerrar. Es el defecto
+// §3.1 de `docs/prompt-juez-lo-que-queda.md`, y es lo que hace `agentic-skills`
+// en su `slice_verifier_judge.py`: TOOLS = ("Read", "Grep", "Glob", "Skill").
+//
+// No debilita el «sin shell»: `Skill` carga instrucciones, no ejecuta procesos.
+// Lo que el juez no puede hacer sigue decidiéndolo la ausencia de `Bash` en la
+// declaración del agente.
+//
 // Esta constante es una COPIA del frontmatter de `agents/ct-judge.md`, y quien
 // las ata es `step-contracts.test.js`: se duplica porque este módulo es puro y
 // no lee disco, no porque dé igual que divergan. Divergieron una vez, y el
 // resultado fue que `ct-step next` anunciaba unas herramientas que no eran las
 // del juez que se iba a despachar.
-export const JUDGE_TOOLS = 'Read, Grep, Glob, Write'
+export const JUDGE_TOOLS = 'Read, Grep, Glob, Write, Skill'
 
 // Los tres encabezados del paquete de revisión que escribe `escribirPaquete`
 // en `scripts/ct-step.mjs`, en el orden en que aparecen en el fichero. La

@@ -24,6 +24,25 @@ const toolsDelAgente = () => {
   return m ? m[1].trim() : null
 }
 
+const PLANTILLA_PLAN = join(
+  dirname(fileURLToPath(import.meta.url)), '..',
+  'skills', 'writing-plans-prescriptive', 'plan-template.md',
+)
+// El `## 3. Reference patterns` de la plantilla del plan: la sección que declara
+// qué se admite como vara. Se aísla hasta el siguiente `## ` porque el resto de
+// la plantilla también nombra skills y no todas son vara del juez.
+const seccion3DeLaPlantilla = () => {
+  const m = /^## 3\. Reference patterns$([\s\S]*?)^## /m.exec(readFileSync(PLANTILLA_PLAN, 'utf8'))
+  return m ? m[1] : ''
+}
+
+// El ítem `patrones` de la rúbrica, aislado hasta el siguiente encabezado: es el
+// único sitio donde al juez se le manda abrir la vara del repo.
+const item5DeLaRubrica = () => {
+  const m = /^### 5\. `patrones`[\s\S]*?(?=^### |^## )/m.exec(readFileSync(AGENTE_JUEZ, 'utf8'))
+  return m ? m[0] : ''
+}
+
 // Los ocho encabezados de la rúbrica — "### 1. `objetivo` — ..." — en el
 // orden en que el agente los recorre. VERDICT_RULES es una copia suya: este
 // repo ya sufrió el mismo desacople con JUDGE_TOOLS (divergió del frontmatter
@@ -110,6 +129,28 @@ describe('quién puede qué', () => {
 
   it('el implementador puede cargar skills: sin ella no puede seguir su propia rúbrica', () => {
     expect(IMPLEMENTER_TOOLS).toMatch(/\bSkill\b/)
+  })
+
+  it('el juez puede cargar skills: la vara secundaria que §3 admite no es una ruta', () => {
+    // El defecto §3.1 del handoff. `Rules to obey:` admitía declarar una skill y
+    // la rúbrica mandaba abrirla, pero el frontmatter era `Read, Grep, Glob,
+    // Write`: un nombre de skill no es una ruta que `Read` pueda abrir, y
+    // `plan-contract` no lo comprueba en disco a propósito. La vara secundaria
+    // era inalcanzable en silencio — el juez habría dicho `conforme` sobre un
+    // documento que nunca abrió.
+    expect(toolsDelAgente()).toMatch(/\bSkill\b/)
+    expect(JUDGE_TOOLS).toMatch(/\bSkill\b/)
+  })
+
+  it('nadie puede admitir una skill como vara sin darle al juez con qué abrirla', () => {
+    // Las tres puntas del defecto, atadas: la plantilla del plan la admite, la
+    // rúbrica manda abrirla, el frontmatter la concede. La primera vez se
+    // hicieron dos de tres y nada se enteró. Si alguien toma más adelante la
+    // opción B del §3.1 (quitar las skills de §3), este test se pone rojo y le
+    // obliga a quitarla de los tres sitios, no de uno.
+    expect(seccion3DeLaPlantilla()).toMatch(/skill/i)
+    expect(item5DeLaRubrica()).toMatch(/skill/i)
+    expect(toolsDelAgente()).toMatch(/\bSkill\b/)
   })
 
   it('VERDICT_RULES no puede divergir de los ocho encabezados de la rúbrica', () => {
