@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFrozenDecisions, FROZEN_DECISIONS_HEADING, buildIssueBody, groomPlan } from '../scripts/groom.js'
 import { extractOrder, extractAc, extractDepsInSection, extractStrayDeps } from '../scripts/gh-issue-map.js'
+import { renderKickoff } from '../scripts/kickoff.js'
 
 const SLICE = { n: 1, name: 'login', type: 'backend', entrega: '', gate: '', deps: [], ac: ['AC-1.1'], protected: '', area: [], touches: [] }
 const SPEC_REF = { path: 'spec.md', heading: null, url: null, reason: 'sin publicar' }
@@ -103,5 +104,21 @@ describe('buildIssueBody — decisiones con contenido hostil no rompe los extrac
     // produce un stray dep. NO mueve el exit code (es nota, no divergencia
     // máquina). Aquí se fija el comportamiento REAL, no uno aspiracional.
     expect(extractStrayDeps(body, [])).toContain(7)
+  })
+})
+
+describe('kickoff — decisiones congeladas (B1)', () => {
+  const slice = { n: 2, name: 'scoring', type: 'backend', deps: [1], ac: ['AC'], gate: '', protected: '' }
+  // renderKickoff devuelve el texto del kickoff como una sola cadena.
+  it('nombra la sección usando la CONSTANTE, no un literal (I3.9)', () => {
+    expect(renderKickoff(slice, { repo: 'o/r' })).toContain(FROZEN_DECISIONS_HEADING)
+  })
+  it('la enumera como entrada del plan (misma frase que AC/Protegido)', () => {
+    const entradaLine = renderKickoff(slice, { repo: 'o/r' }).split('\n').find((l) => l.includes('entrada que la skill pide'))
+    expect(entradaLine).toBeDefined()
+    expect(entradaLine).toContain(FROZEN_DECISIONS_HEADING)
+  })
+  it('nombra el destino ## 2. Closed decisions', () => {
+    expect(renderKickoff(slice, { repo: 'o/r' })).toContain('## 2. Closed decisions')
   })
 })

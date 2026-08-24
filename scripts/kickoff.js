@@ -8,7 +8,7 @@ import { resolveGatesForAgent, renderGateKickoffLines } from './gates.js'
 // que ese path cambie no queden mensajes mandando al agente a un fichero que
 // ya no es el suyo (que es exactamente el defecto que esta ronda arregla).
 import { SLICE_REL_PATH } from './state-paths.js'
-import { EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING } from './groom.js'
+import { EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING, FROZEN_DECISIONS_HEADING } from './groom.js'
 
 // ACCOUNT_MAP — qué CLAUDE_CONFIG_DIR (qué cuenta de Claude) recibe el agente
 // que se despacha para un repo.
@@ -241,6 +241,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
     // heredada). Sin ella, un agente que no encuentra lo que se le acaba de
     // nombrar lo busca fuera del issue, que es justo lo que no puede hacer.
     `Lee también las secciones "${EPIC_CONTEXT_HEADING}" y "${INHERITED_CONTEXT_HEADING}" del issue: traen lo que el spec y los slices ya mergeados condicionan sobre este trabajo y que no cabe en los criterios de aceptación. Si alguna está vacía o no aparece, no hay nada que heredar — no lo busques fuera del issue.`,
+    `Lee también la sección "${FROZEN_DECISIONS_HEADING}" del issue: son decisiones del epic con consecuencia sobre este trabajo, que DEBES respetar (no las reinterpretes ni las cambies) y que van a "## 2. Closed decisions" de tu plan. Si no aparece, no hay ninguna — no la busques fuera del issue.`,
     // F32 — el modelo de dos niveles (§4.3 del handoff): nivel epic = CT,
     // nivel slice = los skills FORKADOS en este plugin (control-tower-loop:*,
     // ver skills/FORK.md) — nunca el namespace superpowers:, que la tarea 6
@@ -252,7 +253,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
     // encuentra plan y SDD reengancha entero. El paréntesis que enumeraba su
     // flujo (impl → spec-review → code-review) se quitó a cambio: lo define
     // el propio skill, y duplicarlo aquí es lo que el fork vuelve innecesario.
-    `Primer acto, con el baseline verde: escribe el plan del slice con control-tower-loop:writing-plans-prescriptive usando el issue como spec (sus AC, "Protegido" y "Contexto del epic" son la entrada que la skill pide). SOLO bloques esenciales, cada uno con su etiqueta de rol: contratos, call sites y el tramo que cambia — los cuerpos de los módulos y los ficheros de test los escribe el implementador con TDD, y la configuración se describe en prosa. Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${slice.n}-<slug>.md, valídalo con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --check-plan\` hasta exit 0, y commitéalo: viaja en el PR, y el --release del final se negará (exit 6) sin un plan válido commiteado.`,
+    `Primer acto, con el baseline verde: escribe el plan del slice con control-tower-loop:writing-plans-prescriptive usando el issue como spec (sus AC, "Protegido", "${EPIC_CONTEXT_HEADING}" y "${FROZEN_DECISIONS_HEADING}" son la entrada que la skill pide; vuelca cada decisión congelada en "## 2. Closed decisions" del plan — son del epic y las DEBES respetar, no reinterpretar). SOLO bloques esenciales, cada uno con su etiqueta de rol: contratos, call sites y el tramo que cambia — los cuerpos de los módulos y los ficheros de test los escribe el implementador con TDD, y la configuración se describe en prosa. Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${slice.n}-<slug>.md, valídalo con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --check-plan\` hasta exit 0, y commitéalo: viaja en el PR, y el --release del final se negará (exit 6) sin un plan válido commiteado.`,
     `Con el plan escrito, sigue control-tower-loop:subagent-driven-development con TDD.`,
     addendum,
     ...gateLines,
