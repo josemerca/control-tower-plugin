@@ -68,8 +68,9 @@ Y trae tres cosas gratis:
 
 1. **`Acepta` no cambia de significado.** Sigue siendo «EARS, 1:1 con tests»,
    literalmente. Ningún repo ya gobernado hereda un cambio semántico.
-2. **El «no aplica» es un guion**, el idioma que ya usan `Dep`, `Protegido`,
-   `Área` y `Toca` — reconocido por `isNoValueCell`. Cero juicio.
+2. **El «no aplica» se declara, no se deduce de una celda vacía** (§2.2).
+   Cero juicio, y la omisión por descuido deja de ser indistinguible de la
+   decisión deliberada.
 3. **Ningún cruce con los tests de integración**, que era el requisito. Lo que
    cabe en un test no puede acabar en la columna de travesías por descuido:
    está en otra celda.
@@ -82,14 +83,14 @@ comprobar cabe en un test, va en `Acepta`; si necesita el sistema en pie, va en
 
 Aplicando ese criterio a las 8 filas de `mo-monitoring v1`:
 
-| Slice | ¿Celda `E2E`? | Por qué |
+| Slice | Celda `E2E` | Por qué |
 |---|---|---|
-| #1 esqueleto | – | sus criterios son comandos de CI |
-| #2 modelo y environment | – | tipos y env vars: unidades |
-| #3 repositorio prometheus | – | registry en memoria |
-| #4 summary collector | – | exposición de un collector: unidad |
+| #1 esqueleto | `no` | sus criterios son comandos de CI |
+| #2 modelo y environment | `no` | tipos y env vars: unidades |
+| #3 repositorio prometheus | `no` | registry en memoria |
+| #4 summary collector | `no` | exposición de un collector: unidad |
 | **#5 exposición y exporter** | **sí** | hay que hacer bind de un puerto de verdad |
-| #6 logging JSON | – | el formatter se prueba unitariamente |
+| #6 logging JSON | `no` | el formatter se prueba unitariamente |
 | #7 instrument y guard | **frontera** | «un log dentro de una transacción APM lleva el mismo trace_id» necesita un APM alcanzable; si el repo no lo declara, es *no-verificado* |
 | **#8 golden tests de paridad** | **sí** | «el example compila y **sirve** `/metrics`» |
 
@@ -99,11 +100,55 @@ aparato existe para los repos de producto, donde casi toda fila `ui` traerá
 celda. Un diseño que produjera seis informes de relleno por epic sería la forma
 más segura de que nadie leyera el séptimo.
 
+### 2.2 El «no aplica» se declara: la celda tiene tres estados, no dos
+
+Una celda vacía significaría dos cosas incompatibles: **(a)** se pensó y este
+slice no tiene nada que atravesar, y **(b)** nadie rellenó la columna. Las dos
+producen el mismo resultado —no hay e2e— y son indistinguibles, así que con
+**(b)** la feature queda inerte y nadie se entera.
+
+Es la ambigüedad que `gates.js` ya resolvió para el caso gemelo, y con el mismo
+remedio:
+
+> `GATE_LABEL_NONE` — por qué existe una label para decir "ninguno". Sin ella,
+> "este issue no tiene ninguna label `gate:`" significaría a la vez dos cosas
+> incompatibles: (a) este slice no exige ningún gate, y (b) este issue se
+> groomeó ANTES de que los gates existieran.
+
+Con una diferencia que decide el diseño: `gate:none` **lo deriva el plugin**,
+mientras que aquí la distinción entre (a) y (b) sólo la sabe quien escribe el
+spec. **No hay forma de derivarla**, así que se declara:
+
+| Celda | Significa | Efecto |
+|---|---|---|
+| uno o más recorridos | hay e2e | label `gate:e2e` + sección `## E2E` |
+| `no` (o `n/a`) | **se pensó y no hay** | ningún e2e, y silencio |
+| vacía, `–`, `—`, `-` | **no declarado** | `/ct-groom` **aborta**, nombrando la fila |
+
+**Y la columna sigue siendo opcional: si la pones, la rellenas.** Ausente = este
+epic no usa la feature, silencio total y retrocompatible byte a byte. Presente =
+el autor se ha comprometido a decidir fila por fila, y una celda sin decidir es
+una fila a medias, no un defecto.
+
+**Por qué aborta y no avisa.** Un aviso dejaría la ambigüedad viva —los avisos
+se ignoran, y F14 documenta lo que pasa con los que se ignoran— y entonces el
+token no habría servido para nada. El abort es lo que la elimina. Es el trato
+que este repo ya da a lo que no puede desambiguar (token de gate desconocido,
+contradicción en la celda `Gate`, colisión de orden), `/ct-groom` valida todo
+antes de escribir nada, y `--dry-run` comprueba exactamente lo mismo.
+
+**Por qué la plantilla trae la columna.** El bloque del contrato que `/ct-init`
+siembra en `AGENTS.md` la incluye. Así, un spec escrito con la plantilla nueva
+la tiene —y por tanto obliga a declarar fila por fila—, y uno anterior no la
+tiene y sigue funcionando igual. El bucle se cierra sin ningún guard sobre
+intención.
+
 ## 3. El diseño
 
 ### 3.1 La columna
 
-Undécima columna de la tabla §9, **opcional**, con `–` para «no aplica»:
+Undécima columna de la tabla §9, **opcional**, con `no` para «no aplica» —
+nunca un guion, que significa «no declarado» y aborta (§2.2):
 
 ```
 | # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate | E2E |
@@ -111,7 +156,8 @@ Undécima columna de la tabla §9, **opcional**, con `–` para «no aplica»:
 
 Una celda puede declarar **varios recorridos**, separados por comas no
 escapadas — el mismo troceo que ya usa `Acepta` (`splitEscapedCommas`), y por
-la misma razón: un recorrido lleva comas casi siempre.
+la misma razón: un recorrido lleva comas casi siempre. O el token `no`, que es
+la declaración positiva de que no hay ninguno (§2.2).
 
 **Opcional, y su ausencia no se avisa.** `Acepta` y `Entrega` ya son opcionales
 (`missingOptionalColumns`), así que el camino existe. Pero `E2E` **no** entra en
@@ -258,8 +304,17 @@ sostiene todo el plugin.
 
 - Cabecera: `E2E` (resuelta por `col('e2e')`, case-insensitive como todas).
 - Opcional. Ausente = ningún slice del epic tiene e2e. **No se avisa** (§3.1).
-- Celda con marcador de «sin valor» (`–`, `—`, `-`, vacía…) = sin e2e, vía
-  `isNoValueCell`. Mismo idioma que `Dep`/`Protegido`/`Área`/`Toca`.
+- Celda `no` o `n/a` = **declarado sin e2e**. Case-insensitive, marcado inline
+  tolerado (`` `no` ``, `**no**`), y comparado sobre la **celda entera limpia**,
+  nunca por prefijo — un recorrido que empiece por «no…» es un recorrido. El
+  criterio de comparar la cadena entera y no un prefijo es el que `state.js` ya
+  aplica al campo `blocked`, y por el mismo motivo.
+- Celda con marcador de «sin valor» (`–`, `—`, `-`, vacía…) = **no declarado**,
+  y aborta (§4.3). Ése es el significado que `parseGateCell` ya le da a ese
+  marcador —«no he declarado nada aquí»—, así que no se reinterpreta: se toma
+  literal y se exige una decisión.
+- Celda con el token `no` **y** algún recorrido = contradicción, aborta. Mismo
+  trato que `visual` y `!visual` en la misma celda `Gate`.
 - Varios recorridos por celda, separados por comas no escapadas (`\,` es una
   coma literal). Marcado inline tolerado (`` `curl …` ``) por el mismo criterio
   que el resto de la tabla.
@@ -284,8 +339,11 @@ sostiene todo el plugin.
   `## Gates`, «este slice no tiene e2e» no es una afirmación que quien abre el
   PR necesite leer — la ausencia de la sección ya lo dice, y emitirla vacía en
   el 75% de los issues es ruido.
-- **Aborta** (sin escribir nada) si `Gate` trae el token `e2e` y la celda `E2E`
-  de esa fila está vacía, nombrando la fila.
+- **Aborta** (sin escribir nada), nombrando la fila, en cuatro casos: la
+  columna `E2E` existe y una celda está sin declarar (§2.2); la celda dice `no`
+  y además trae un recorrido; `Gate` trae el token `e2e` y la celda dice `no`; y
+  `Gate` trae `e2e` con la celda sin declarar. Los cuatro son la misma familia:
+  el spec dice dos cosas incompatibles sobre la misma fila.
 - `--dry-run` valida exactamente lo mismo.
 - `--reconcile` detecta divergencia de la sección `## E2E` como ya hace con las
   demás, y **no la aplica** sin el flag.
@@ -356,7 +414,7 @@ dirección prudente: el lado que puede pedir trabajo de más nunca se cree solo.
 | Pieza | Para qué |
 |---|---|
 | `slices.js#col` y el patrón de columna opcional | Resolver la cabecera `E2E`. `Entrega` y `Acepta` ya recorren ese camino |
-| `slices.js#splitEscapedCommas` · `cleanEmphasis` · `isNoValueCell` | Trocear la celda y reconocer el guion. **Ya es** el parser de esta tabla; no se toca una línea |
+| `slices.js#splitEscapedCommas` · `cleanEmphasis` · `isNoValueCell` | Trocear la celda, y reconocer el guion **con el significado que ya tiene** («no he declarado nada aquí», el que documenta `parseGateCell`) para exigir la decisión. **Ya es** el parser de esta tabla; no se toca una línea |
 | `gates.js#GATES` · `GATE_ORDER` · `gateLabels` · `gatesFromLabels` · `renderGateKickoffLines` · `renderGatesIssueContent` | El token con sus dos textos, su label, su orden y su ida y vuelta. Ese fichero existe para esto: «añadir un gate nuevo aquí es un acto deliberado con su texto de kickoff y de issue» |
 | El patrón de puerta de `--release` (`stateFilesIntroducedByBranch`, `branchIntroducedFiles`) | La tercera puerta. Ya implementan literalmente los tres estados: `{known:false, why}` → exit propio diciendo que no se ha podido comprobar; incumple → exit propio sin mutar; pasa → sigue |
 | `gh-issue-map.js#locateSection` · `extractSectionContent` | Leer la sección `## E2E` del cuerpo del issue, en la puerta y en `--reconcile` |
@@ -431,16 +489,20 @@ tests verdes → e2e → commitear informe → push → PR (+ informe pegado) �
    existentes, ni al revés.
 2. Un spec **sin** columna `E2E` produce exactamente los mismos issues que hoy,
    y **ningún aviso** por columna ausente.
-3. Una celda con `–` (y las seis variantes de `isNoValueCell`) no produce
-   `gate:e2e` ni sección `## E2E`.
+3. Una celda `no` (y `n/a`, `**no**`, `NO`) no produce `gate:e2e` ni sección
+   `## E2E`, y **no** aborta.
+3b. Una celda con `–` (y las seis variantes de `isNoValueCell`) **aborta**,
+   nombrando la fila — pero sólo si la columna existe.
+3c. Un recorrido que empieza por «no…» es un recorrido, no el token.
+3d. `no` + un recorrido en la misma celda aborta.
 4. Una celda con dos recorridos separados por coma produce dos; con `\,`
    produce uno con coma literal dentro.
 5. `Gate: e2e` con celda vacía aborta el groom, sin escribir nada, nombrando la
    fila.
 6. `TYPE_GATES` sigue sin implicar `e2e` para ningún `Tipo`.
 7. La label sobrevive la ida y vuelta por `gateLabels`/`gatesFromLabels`.
-8. Las 8 filas de `mo-monitoring v1` como caso de mesa: exactamente 2 producen
-   `gate:e2e`.
+8. Las 8 filas de `mo-monitoring v1` como caso de mesa: con `no` en las seis
+   sin recorrido, exactamente 2 producen `gate:e2e` y el groom no aborta.
 9. `--release` con recorridos y sin informe sale **7** y no mueve la label
    (comprobado sobre el `argv` real de `gh`, como ya se comprueba que
    `/ct-status` no escribe).
@@ -490,16 +552,27 @@ declarar rojo y pararse — como con los tests.
 Cerrado por diseño: *no-verificado* libera. El único estado que retiene es el
 rojo, y un rojo es trabajo real pendiente.
 
-### 8.5 La columna se rellena mal, o no se rellena
+### 8.5 El `no` que se escribe por inercia
 
-El riesgo que queda tras separar las columnas no es el cruce: es la **omisión**.
-Un epic de producto cuyo autor no rellene `E2E` en ninguna fila pasa por la
-Puerta 1 sin que nada lo señale, y esta feature queda inerte para ese epic. No
-se cierra en esta fase a propósito: un aviso del tipo «este epic tiene filas
-`ui` y ninguna celda `E2E`» es una heurística de texto sobre intención, y F14
-dejó documentado lo que pasa con los detectores sensibles («un guard que sólo se
-satisface destruyendo trabajo no es un guard»). Se apunta como candidato a la
-ronda siguiente, con datos de campo.
+La omisión dentro de un epic que usa la columna está cerrada por §2.2: una celda
+sin declarar aborta. Lo que queda es más blando y no tiene arreglo mecánico:
+**una columna que exige rellenar diez filas se rellena copiando el `no` de
+arriba.** Un `no` escrito sin pensar es indistinguible de uno pensado, y ningún
+parser puede separarlos.
+
+Se acota, no se cierra: el `no` es una palabra que hay que **teclear en la fila**
+mientras se decide esa fila, no un defecto que se hereda del silencio. Eso es
+todo lo que un contrato de tabla puede hacer; el resto es la Puerta 1, que es
+humana por diseño. Y hay un límite honesto en la otra dirección: **un epic que no
+ponga la columna en absoluto sigue siendo silencioso** — por diseño, porque es
+lo que hace esto retrocompatible. Lo compensa que la plantilla del contrato que
+`/ct-init` siembra ya la trae (§2.2), así que los epics nuevos nacen con ella.
+
+Un aviso del tipo «este epic tiene filas `ui` y ninguna celda `E2E`» queda
+descartado, y no por falta de tiempo: es una heurística de texto sobre intención,
+y F14 dejó documentado cómo acaban («un guard que sólo se satisface destruyendo
+trabajo no es un guard»). Peor aquí: la única forma de callarlo sería inventarse
+un recorrido, que es lo que este diseño existe para evitar.
 
 ### 8.6 Fontanería, dicha antes de empezar
 
@@ -524,7 +597,6 @@ ronda siguiente, con datos de campo.
 - **E2E por epic.** Sólo por slice. El e2e del flujo completo cuando el
   milestone cierra es otra decisión y otra ronda.
 - **La barandilla contra la falsificación** (§8.1).
-- **El aviso por columna sin rellenar** (§8.5).
 - **Tocar `visual` ni `apply`.** El residuo que necesita ojos sigue siendo del
   humano.
 - **Ejecutar nada contra un entorno real.** Lo que `Fuera de límites` prohíbe se
