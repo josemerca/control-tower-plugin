@@ -26,104 +26,20 @@ import { NO_MILESTONE_KEY } from './gh-issue-map.js'
 // ct-slice-judge reconoce como sin-vara.
 export const SENAL_AUSENTE = '(sin señal declarada — el issue no trae la sección "## Señal de observabilidad"; el juez de slice mide su ítem observabilidad como sin-vara)'
 
-// ACCOUNT_MAP — qué CLAUDE_CONFIG_DIR (qué cuenta de Claude) recibe el agente
-// que se despacha para un repo.
+// AGENT_BIN — el nombre del ejecutable del agente que se teclea en la sesión
+// de cmux. UNO, sin cuentas: F35 se llevó ACCOUNT_MAP y toda la resolución de
+// «qué cuenta hace qué», así que el agente arranca con la configuración
+// ambiente de quien lanza.
 //
-// FORMA DE LOS PATRONES (D4, defecto 1 — la lógica de matching vive en
-// dispatch.js#matchesAccountPattern, con el porqué del cambio documentado
-// allí): cada patrón es `<owner>/<repo>` — SIEMPRE las dos mitades, nunca un
-// nombre suelto. Cada mitad puede ser:
-//   - un literal exacto            `mercadona`, `control-tower`
-//   - `*`                          cualquier owner / cualquier repo
-//   - un prefijo con `*` al final  `mo.*` casa `mo.foo`, NO casa `momento`
-// Un `*` en cualquier otra posición es un patrón malformado y ct-next.mjs
-// aborta al arrancar (exit 2) en vez de interpretarlo a medias.
-//
-// La versión anterior de este mapa (`personal: ['menoplus','munger',
-// 'control-tower']`, `work: ['mo.','mercadona']`) casaba por PREFIJO DE
-// NOMBRE con el owner ya descartado, con tres consecuencias verificadas:
-// `mercadona/algun-tool-interno` acababa en la cuenta PERSONAL, la entrada
-// `'mercadona'` no podía casar jamás, y `control-tower` casaba también
-// `control-tower-de-otro`. Ahora el owner cuenta.
-//
-// CT_ACCOUNT_PERSONAL_DIR / CT_ACCOUNT_WORK_DIR: override explícito de los
-// dos directorios, para máquinas donde las cuentas de Claude no viven bajo
-// $HOME (y para que los tests no dependan del $HOME de quien los corre). No
-// es un modo de prueba encubierto: no cambia NINGUNA decisión, solo a qué
-// ruta apunta la cuenta ya elegida, y ct-next.mjs comprueba que la ruta
-// resultante exista en disco antes de lanzar nada.
-const personalDir = process.env.CT_ACCOUNT_PERSONAL_DIR || join(homedir(), '.claude-personal')
-const workDir = process.env.CT_ACCOUNT_WORK_DIR || join(homedir(), '.claude-work')
-
-// ============================================================================
-// F29 — EL BINARIO QUE SE TECLEA YA NO PUEDE SER `claude` A SECAS.
-//
-// `--env CLAUDE_CONFIG_DIR=…` (dispatch.js#buildCmuxArgv) se añadió en T10
-// precisamente para que el selector de cuenta no colgara la sesión: el
-// comentario de allí dice, medido contra el sandbox real, que sin esa opción
-// la sesión «se queda colgada en el selector interactivo de cuenta […]
-// esperando un humano tecleando 1/2 en /dev/tty». Ese arreglo asumía un
-// selector que MIRA la variable antes de preguntar.
-//
-// Medido de nuevo en esta máquina, contra el `.zshrc` real: la función
-// `claude()` del usuario pregunta SIEMPRE, sin mirar `CLAUDE_CONFIG_DIR`, y
-// además la PISA con su propio `export`. Un shell de login la resuelve antes
-// que a ningún PATH, así que el binario nunca llega a ejecutarse:
-//
-//   $ zsh -lic 'claude --version' </dev/null
-//     ¿Qué cuenta de Claude?  1) Personal  2) Mercadona
-//     Opción no válida
-//
-// Con un pty de verdad no sale ni ese error: se queda parada en el `read`. Y
-// lo peor es cómo se ve desde fuera — el centinela de arranque se escribe
-// ANTES de invocar al agente (a propósito: mide que la orden corrió, no que
-// el agente acabara) y `command -v claude` devuelve 0 para una función. O
-// sea: `/ct-next` diría «lanzado», con exit 0, sobre un agente que está
-// esperando una tecla que nadie va a pulsar. Es la clase de fallo de F19 por
-// una puerta que F19 no midió.
-//
-// La salida es no teclear un nombre que el usuario pueda haber envuelto, sino
-// el WRAPPER NO INTERACTIVO de la cuenta ya resuelta. Los dos existen en esta
-// máquina, son simétricos y fijan el config dir ellos mismos:
-//
-//   ~/.local/bin/claude-personal → export CLAUDE_CONFIG_DIR=…/.claude-personal
-//   ~/.local/bin/claude-work     → export CLAUDE_CONFIG_DIR=…/.claude-work
-//
-// Que el wrapper exporte la variable NO vuelve inerte el `--env` de cmux ni
-// el mapa: es el mapa el que elige CUÁL de los dos wrappers se teclea, así
-// que las dos vías dicen lo mismo. Clavar `claude-personal` para todo repo sí
-// lo habría vuelto inerte — un repo de `mercadona/*` habría arrancado con la
-// cuenta personal mientras ct-next.mjs imprimía `cuenta resuelta: … (trabajo)`.
-// Ese es exactamente el defecto que D4 vino a corregir, y no se reintroduce
-// por comodidad.
-//
-// CT_AGENT_BIN_PERSONAL / CT_AGENT_BIN_WORK: mismo criterio que
-// CT_ACCOUNT_*_DIR — override explícito para una máquina cuyos wrappers se
-// llamen de otra forma (o que no los tenga y quiera volver a `claude` a
-// secas), y para que los tests no dependan de lo que haya instalado quien los
-// corre. No cambia NINGUNA decisión: solo el nombre que se teclea para la
-// cuenta que el mapa ya eligió.
-// ============================================================================
-const personalBin = process.env.CT_AGENT_BIN_PERSONAL || 'claude-personal'
-const workBin = process.env.CT_AGENT_BIN_WORK || 'claude-work'
-
-export const ACCOUNT_MAP = {
-  personal: ['josemerca/*', '*/menoplus', '*/munger'],
-  work: ['mercadona/*', '*/mo.*'],
-  personalDir,
-  workDir,
-  personalBin,
-  workBin,
-  // legacy: las listas EXACTAS del mapa viejo, conservadas solo para poder
-  // detectar y anunciar una reclasificación de cuenta provocada por el
-  // arreglo (ver dispatch.js#resolveAccountLegacy y el aviso que imprime
-  // ct-next.mjs). Borrables juntas en cuanto ese aviso deje de aparecer en
-  // las corridas reales.
-  legacy: {
-    personal: ['menoplus', 'munger', 'control-tower'],
-    work: ['mo.', 'mercadona'],
-  },
-}
+// El override existe por lo que documentaba F29, y sigue siendo cierto: en el
+// .zshrc real de la máquina `claude` era una FUNCIÓN de shell interactiva
+// («¿Qué cuenta? 1/2») y un shell de login resuelve la función antes que
+// cualquier PATH — el agente se quedaba colgado en el `read` para siempre
+// mientras /ct-next lo daba por LANZADO (el centinela se escribe antes de
+// invocar al agente, y `command -v` devuelve 0 para una función). Si eso pasa,
+// la salida es apuntar CT_AGENT_BIN a un wrapper no interactivo; no volver a
+// meter un mapa de cuentas.
+export const AGENT_BIN = process.env.CT_AGENT_BIN || 'claude'
 
 // Exportado (F3): ct-groom.mjs necesita el conjunto de valores de `Tipo`
 // reconocidos para avisar cuando el spec trae un valor que no matchea

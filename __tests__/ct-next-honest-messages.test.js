@@ -13,7 +13,6 @@ import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACCOUNT_ENV } from './fixtures/hermetic-env.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-next.mjs')
@@ -40,7 +39,7 @@ function makeRepoRoot() {
 function runReal(args, envOverrides = {}) {
   const r = spawnSync(process.execPath, [script, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
+    env: { ...process.env, PATH: fakePath, ...envOverrides },
   })
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
 }
@@ -254,7 +253,7 @@ describe('D5/F — el reenvío de la salida de dispatch-check no decide el resul
     const repoRoot = makeRepoRoot()
     const child = spawn(process.execPath, [script, '--repo', 'o/r', '--cap', '1'], {
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...baseEnv(repoRoot) },
+      env: { ...process.env, PATH: fakePath, ...baseEnv(repoRoot) },
     })
     let err = ''
     child.stderr.on('data', (d) => { err += d.toString() })
@@ -424,8 +423,7 @@ describe('D5/C — SIGINT que llega con el trabajo ya hecho', () => {
     const child = spawn(process.execPath, [script, '--repo', 'o/r', '--cap', '1'], {
       env: {
         ...process.env,
-        ...ACCOUNT_ENV,
-        PATH: fakePath,
+                PATH: fakePath,
         ...baseEnv(repoRoot),
         // F8 — handshake en vez de ventana. Antes esto era
         // FAKE_GIT_WORKTREE_ADD_DELAY_MS: '2000', o sea "git worktree add

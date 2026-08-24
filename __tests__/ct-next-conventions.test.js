@@ -11,7 +11,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACCOUNT_ENV, hermeticEnv } from './fixtures/hermetic-env.js'
+import {hermeticEnv} from './fixtures/hermetic-env.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -43,7 +43,7 @@ const openIssue42 = { number: 42, title: '#42 algo', labels: [{ name: 'status:re
 function runReal(args, envOverrides = {}) {
   const r = spawnSync('node', [script, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
+    env: { ...process.env, PATH: fakePath, ...envOverrides },
   })
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
 }

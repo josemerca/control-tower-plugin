@@ -6,7 +6,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { shQuote } from '../scripts/shquote.js'
 // D4: entorno hermético (dirs de cuenta + stubs de cmux/claude) — ver fixtures/hermetic-env.js
-import { ACCOUNT_ENV, hermeticEnv } from './fixtures/hermetic-env.js'
+import {hermeticEnv} from './fixtures/hermetic-env.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-next.mjs')
@@ -60,13 +60,14 @@ describe('ct-next --dry-run', () => {
     expect(r.out).toContain('git worktree add')
     expect(r.out).toContain('cmux')
     expect(r.out).toContain('new-workspace')
-    expect(r.out).toMatch(/\.claude-personal/) // account map: menoplus → personal
-    // T10, hallazgo en vivo: CLAUDE_CONFIG_DIR tiene que viajar como --env
-    // DENTRO del argv de cmux (protocolo del daemon), no como env local del
-    // proceso `cmux` cliente — si no, la sesión queda colgada en el
-    // selector interactivo de cuenta en vez de arrancar con la cuenta ya
-    // resuelta. Pin end-to-end de que ct-next.mjs realmente lo emite así.
-    expect(r.out).toMatch(/cmux .*--env CLAUDE_CONFIG_DIR=\S*\.claude-personal/)
+    // F35: aquí se comprobaba que el argv de cmux llevara
+    // `--env CLAUDE_CONFIG_DIR=<dir de la cuenta resuelta>` (hallazgo T10: el
+    // daemon de cmux solo recibe el entorno por --env, no del proceso
+    // cliente). Sin resolución de cuenta no hay nada que exportar, y el pin
+    // pasa a ser el contrario: la línea de cmux no lleva ningún --env, y la
+    // sesión hereda la configuración ambiente de quien lanza.
+    expect(r.out).not.toMatch(/--env/)
+    expect(r.out).not.toMatch(/\.claude-personal/)
   })
 
   it('no reproduce la garantía de fixture con un slice sin ac/issue (defensivo: no crashea)', () => {
@@ -411,7 +412,7 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
     const r = spawnSync('node', [script, ...args], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'], // finding 11: no ecoar el ruido esperado al padre
-      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
+      env: { ...process.env, PATH: fakePath, ...envOverrides },
     })
     return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
   }
@@ -429,7 +430,7 @@ describe('ct-next — worktree huérfano en fallo parcial (review round 1, Impor
     try {
       spawnSync('node', [script, ...args], {
         stdio: ['ignore', fd, fd],
-        env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
+        env: { ...process.env, PATH: fakePath, ...envOverrides },
       })
     } finally {
       closeSync(fd)
@@ -628,7 +629,7 @@ describe('ct-next — guarda de identidad de repo (review final, finding 1)', ()
     const r = spawnSync('node', [script, ...args], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
+      env: { ...process.env, PATH: fakePath, ...envOverrides },
     })
     return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
   }
@@ -716,7 +717,7 @@ describe('ct-next — enumeración de issues sin --limit fijo (review final, fin
     const r = spawnSync('node', [script, ...args], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
+      env: { ...process.env, PATH: fakePath, ...envOverrides },
     })
     return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
   }
@@ -803,7 +804,7 @@ describe('ct-next — D1 finding 1: alcance del orden por epic (milestone), cami
     const r = spawnSync('node', [script, ...args], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
+      env: { ...process.env, PATH: fakePath, ...envOverrides },
     })
     return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
   }

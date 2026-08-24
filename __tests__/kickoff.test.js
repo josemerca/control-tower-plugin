@@ -2,9 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { renderKickoff, buildStateSeed, ACCOUNT_MAP, ADDENDA, SENAL_AUSENTE } from '../scripts/kickoff.js'
+import { renderKickoff, buildStateSeed, ADDENDA, SENAL_AUSENTE } from '../scripts/kickoff.js'
 import { parseState } from '../scripts/state.js'
-import { resolveAccount, resolveAccountLegacy, validateAccountMap } from '../scripts/dispatch.js'
 
 const SLICE = { n: 7, name: 'refresh token', type: 'backend', ac: ['AC-7.1'], deps: [1], issue: '#7' }
 
@@ -154,44 +153,6 @@ describe('ADDENDA', () => {
   })
 })
 
-describe('ACCOUNT_MAP', () => {
-  it('tiene personal/work y dirs', () => {
-    expect(ACCOUNT_MAP.personal.some((p) => p.endsWith('/menoplus'))).toBe(true)
-    expect(ACCOUNT_MAP.personalDir).toMatch(/claude-personal/)
-    expect(ACCOUNT_MAP.workDir).toMatch(/claude-work/)
-  })
-
-  // D4, defecto 1: el mapa REAL (no uno de laboratorio) tiene que pasar su
-  // propia validación — si no, ct-next.mjs abortaría con exit 2 en CADA
-  // corrida, y eso solo se descubriría al ejecutarlo.
-  it('el mapa por defecto es válido según validateAccountMap', () => {
-    expect(validateAccountMap(ACCOUNT_MAP)).toEqual([])
-  })
-
-  // El caso concreto que motivó todo el defecto 1, fijado end-to-end contra
-  // el mapa REAL: con el mapa anterior, este repo se despachaba con la cuenta
-  // PERSONAL (`mercadona` no podía casar nunca porque el owner se descartaba
-  // antes de llegar al matcher).
-  it('un repo cualquiera de la org mercadona va a la cuenta de TRABAJO', () => {
-    const r = resolveAccount('mercadona/algun-tool-interno', ACCOUNT_MAP)
-    expect(r.dir).toBe(ACCOUNT_MAP.workDir)
-    expect(r.matched).toBe(true)
-  })
-
-  it('los repos personales conocidos siguen yendo a la cuenta personal', () => {
-    for (const slug of ['menoplus-app/menoplus', 'josemerca/control-tower', 'josemerca/control-tower-plugin']) {
-      expect(resolveAccount(slug, ACCOUNT_MAP).dir).toBe(ACCOUNT_MAP.personalDir)
-    }
-  })
-
-  // La `legacy` existe solo para poder ANUNCIAR una reclasificación; si
-  // alguien la borra sin borrar también el aviso de ct-next.mjs, ese aviso
-  // deja de existir en silencio.
-  it('conserva las listas legacy para poder detectar reclasificaciones de cuenta', () => {
-    expect(ACCOUNT_MAP.legacy.work).toContain('mercadona')
-    expect(resolveAccountLegacy('mercadona/algun-tool-interno', ACCOUNT_MAP).dir).toBe(ACCOUNT_MAP.personalDir)
-  })
-})
 
 // D4, defecto 4: el número de ISSUE y el número de ORDEN §9 son dos espacios
 // de identificadores distintos. El STATE.md sembrado llamaba "slice #N" al

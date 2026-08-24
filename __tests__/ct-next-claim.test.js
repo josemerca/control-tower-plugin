@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 // D4: entorno hermético (dirs de cuenta + stubs de cmux/claude) — ver fixtures/hermetic-env.js
-import { ACCOUNT_ENV, hermeticEnv } from './fixtures/hermetic-env.js'
+import {hermeticEnv} from './fixtures/hermetic-env.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-next.mjs')
@@ -46,7 +46,7 @@ function run(args, envOverrides = {}) {
 }
 
 function runReal(args, envOverrides = {}) {
-  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides } })
+  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, PATH: fakePath, ...envOverrides } })
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
 }
 
@@ -279,8 +279,7 @@ describe('ct-next — dispatch-check.mjs ausente (W-C, fix round 1, finding 2)',
         encoding: 'utf8',
         env: {
           ...process.env,
-          ...ACCOUNT_ENV,
-          PATH: fakePath,
+                    PATH: fakePath,
           FAKE_GIT_TOPLEVEL: repoRoot,
           FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
         },
@@ -372,8 +371,7 @@ describe('ct-next — maxBuffer explícito al capturar la salida de dispatch-che
         maxBuffer: 20 * 1024 * 1024,
         env: {
           ...process.env,
-          ...ACCOUNT_ENV,
-          PATH: fakePath,
+                    PATH: fakePath,
           FAKE_GIT_TOPLEVEL: repoRoot,
           FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
         },

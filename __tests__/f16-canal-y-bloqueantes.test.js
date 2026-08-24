@@ -295,11 +295,13 @@ describe('F16/H2 — los avisos de los tres ejecutables van por el mismo canal',
   // en stderr (ct-next.mjs:888 emitía `console.log(\`aviso: ...\`)`), mientras
   // ct-groom.mjs emite los suyos por console.error.
   it('ct-next manda los avisos a STDERR, no a stdout', () => {
-    // Un repo que no casa con ningún patrón de ACCOUNT_MAP → aviso de
-    // "cuenta por defecto".
+    // F35: el vehículo era el aviso de "cuenta por defecto" de ACCOUNT_MAP,
+    // que ya no existe. Se usa `--base`, que avisa por lo mismo de siempre
+    // (una base que no sea la rama por defecto rompe las closing keywords) y
+    // no depende de nada del entorno.
     const fx = JSON.stringify({ issues: [], mergedIssues: [] })
-    const r = runNext(['--repo', 'desconocido-org/desconocido-repo', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fx })
-    expect(r.stderr).toMatch(/aviso: ningún patrón de ACCOUNT_MAP/)
+    const r = runNext(['--repo', 'o/r', '--cap', '1', '--base', 'otra-rama', '--dry-run'], { CT_NEXT_FIXTURE: fx })
+    expect(r.stderr).toMatch(/aviso: --base otra-rama/)
     expect(r.stdout).not.toMatch(/^aviso:/m)
   })
 
@@ -318,7 +320,7 @@ describe('F16/H2 — los avisos de los tres ejecutables van por el mismo canal',
       issues: [{ n: 2, order: 2, status: 'ready', deps: [], touches: ['api'], name: 'refresh', type: 'backend' }],
       mergedIssues: [],
     })
-    const r = runNext(['--repo', 'desconocido-org/desconocido-repo', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fx })
+    const r = runNext(['--repo', 'o/r', '--cap', '1', '--base', 'otra-rama', '--dry-run'], { CT_NEXT_FIXTURE: fx })
     expect(r.stdout).toMatch(/git worktree add/)
     expect(r.stdout).not.toMatch(/aviso:/)
     expect(r.stderr).toMatch(/aviso:/)
@@ -328,7 +330,7 @@ describe('F16/H2 — los avisos de los tres ejecutables van por el mismo canal',
   // y sigue ahí: sin él, un exit 0 con avisos se lee como "todo bien".
   it('el recap final de avisos sigue en stderr y cuenta los mismos avisos', () => {
     const fx = JSON.stringify({ issues: [], mergedIssues: [] })
-    const r = runNext(['--repo', 'desconocido-org/desconocido-repo', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: fx })
+    const r = runNext(['--repo', 'o/r', '--cap', '1', '--base', 'otra-rama', '--dry-run'], { CT_NEXT_FIXTURE: fx })
     expect(r.stderr).toMatch(/A PESAR de \d+ aviso\(s\)/)
   })
 })

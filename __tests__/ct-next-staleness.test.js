@@ -19,7 +19,6 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 // D4: entorno hermético (dirs de cuenta + stubs de cmux/claude) — ver fixtures/hermetic-env.js
-import { ACCOUNT_ENV } from './fixtures/hermetic-env.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-next.mjs')
@@ -34,7 +33,7 @@ const fakePath = [
 ].join(':')
 
 function runReal(args, envOverrides = {}) {
-  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides } })
+  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, PATH: fakePath, ...envOverrides } })
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
 }
 
@@ -173,8 +172,7 @@ describe('ct-next — colisión contra un in-progress SIN evidencia local (findi
       encoding: 'utf8',
       env: {
         ...process.env,
-        ...ACCOUNT_ENV,
-        PATH: pathWithMissingCmuxStub,
+                PATH: pathWithMissingCmuxStub,
         FAKE_GIT_TOPLEVEL: repoRoot,
         FAKE_GH_LIST_SEQUENCE: JSON.stringify([[issue41Stuck, issue42Ready], []]),
       },
@@ -215,7 +213,7 @@ describe('ct-next — staleness no se consulta en absoluto cuando no hace falta 
     ].join(':')
     const r = spawnSync('node', [script, '--repo', 'o/r', '--cap', '1'], {
       encoding: 'utf8',
-      env: { ...process.env, ...ACCOUNT_ENV, PATH: pathWithMissingCmuxStub, FAKE_GIT_TOPLEVEL: repoRoot, FAKE_GH_LIST_SEQUENCE: JSON.stringify([[], []]) },
+      env: { ...process.env, PATH: pathWithMissingCmuxStub, FAKE_GIT_TOPLEVEL: repoRoot, FAKE_GH_LIST_SEQUENCE: JSON.stringify([[], []]) },
     })
     expect(r.status).toBe(0)
     const out = (r.stdout || '') + (r.stderr || '')
