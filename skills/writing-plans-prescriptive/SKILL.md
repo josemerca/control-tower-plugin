@@ -33,8 +33,10 @@ are non-negotiable and machine-checked by `plan-contract.js`: the fixed structur
 
 You were dispatched for exactly one issue. Its body carries everything you are allowed to
 plan from: the acceptance criteria (EARS), the "Out of scope / Protected" section, the
-"Contexto del epic" and "Contexto heredado" sections, and the "Dependencias" section with the
-interface this slice consumes. The execution spec itself is out of reach on purpose — do not
+"Contexto del epic" and "Contexto heredado" sections, the "Dependencias" section with the
+interface this slice consumes, and the "Decisiones congeladas" section — the epic-level
+decisions this slice **must respect**; copy each one into `## 2. Closed decisions` of your
+plan (do not reinterpret them). The execution spec itself is out of reach on purpose — do not
 go looking for it.
 
 **Zero questions.** There is no human in this session. Every ambiguity you resolve goes to
