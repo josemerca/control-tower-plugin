@@ -15,11 +15,11 @@ commands) and hand every **body** to TDD.
 That split is what makes the plan a **knowledge checkpoint**: cheap for a human to read, and cheap
 to implement again from scratch if the first attempt goes wrong. A plan that carries the final
 content of a module is code instead of a checkpoint, and it costs twice. Measured in the field: one
-slice plan reached 73.868 characters, 65% of its lines inside code blocks, too big to publish as a
-single issue comment, and five of that slice's commits went to defects that had travelled inside it
-(a leaked temp directory, a bare `catch` that swallowed real git failures, a type export that leaked
-author emails, a documentation line that asserted something false, and four test vectors that missed
-the threshold they claimed to pin). Code written blind, with no compiler and nothing executed,
+slice plan reached 73.868 characters, 65% of its lines inside code blocks, too big for one issue
+comment, and five of that slice's commits went to defects that had travelled inside it
+(a leaked temp directory, a bare `catch` that swallowed git failures, a type export leaking author
+emails, a doc line asserting something false, and four test vectors that missed the threshold they
+pinned). Code written blind, with no compiler and nothing executed,
 arrives with defects nobody sees: the human `plan` gate that should catch them had 74k characters to
 read, and at that size an OK is an act of faith.
 
@@ -35,10 +35,9 @@ are non-negotiable and machine-checked by `plan-contract.js`: the fixed structur
 You were dispatched for exactly one issue. Its body carries everything you are allowed to
 plan from: the acceptance criteria (EARS), the "Out of scope / Protected" section, the
 "Contexto del epic" and "Contexto heredado" sections, the "Dependencias" section with the
-interface this slice consumes, and the "Decisiones congeladas" section — the epic-level
-decisions this slice **must respect**; copy each one into `## 2. Closed decisions` of your
-plan (do not reinterpret them). The execution spec stays out of reach on purpose: the issue is
-the whole input.
+interface this slice consumes, and "Decisiones congeladas" — decisions you **must respect**,
+copied to `## 2. Closed decisions`. The execution spec stays out of reach on purpose: the
+issue is the whole input.
 
 **Zero questions.** There is no human in this session. Every ambiguity you resolve goes to
 `## 9. Assumptions` with its provenance (issue / epic context / repo convention / your call).
