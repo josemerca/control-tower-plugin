@@ -839,7 +839,7 @@
         <div class="strip-body">
           <h3>Dry-run del dispatcher: comprobar lo que el run real necesita</h3>
           <div class="cmd">node ${CLAUDE_PLUGIN_ROOT}/scripts/ct-next.mjs --repo "&lt;owner/repo&gt;" --cap 1 --dry-run</div>
-          <p>Verifica que <code>cmux</code> esté en el PATH, que el agente se vea desde aquí (solo aviso: quien lo resuelve de verdad es el shell de login), que el <code>CLAUDE_CONFIG_DIR</code> resuelto exista, que el worktree y la rama <code>feat/&lt;n&gt;</code> estén libres, y que el kickoff se renderice. <strong>Las mismas comprobaciones corren en la corrida real antes de escribir ningún claim.</strong></p>
+          <p>Verifica que <code>cmux</code> esté en el PATH, que el agente se vea desde aquí (solo aviso: quien lo resuelve de verdad es el shell de login), que el worktree y la rama <code>feat/&lt;n&gt;</code> estén libres, y que el kickoff se renderice. <strong>Las mismas comprobaciones corren en la corrida real antes de escribir ningún claim.</strong></p>
           <p>Imprime el kickoff en prosa legible — lo único que permite juzgar el prompt que recibirá el agente — y <strong>la tanda entera</strong>, con el problema de cada slice anotado en su propio bloque y un resumen de cuál rompería primero.</p>
           <div class="io">
             <div><dt>Canal</dt><dd>stdout = el producto (plan, selección, motivo de bloqueo). stderr = diagnóstico (<code>aviso:</code>, <code>ATENCIÓN:</code>, abortos).</dd></div>
@@ -1504,7 +1504,7 @@ residuo-status: 2026-07-28 — #101, #102 &lt;por qué se quedan así&gt;</code>
         <tbody>
           <tr><td class="num x-0">0</td><td>Progreso (algo se lanzó, total o parcialmente), o no había nada seleccionable <strong>y ya se explicó por qué</strong></td><td>Seguir con normalidad</td></tr>
           <tr><td class="num x-bad">1</td><td>Algo se rompió o quedó a medias que un humano tiene que resolver: un issue huérfano en <code>in-progress</code>, una precondición sin cumplir, o al menos un slice <strong>lanzado sin verificar</strong></td><td>Parar. Ante un lanzamiento sin verificar, <strong>mirar la sesión de cmux ANTES de borrar nada</strong>: revertir el claim con un agente vivo es peor que dejarlo</td></tr>
-          <tr><td class="num x-bad">2</td><td>Error de uso o de configuración estática: flags mal puestos, <code>ACCOUNT_MAP</code> malformado, nombre de binario que no es un comando a secas</td><td>Corregir la invocación o el mapa</td></tr>
+          <tr><td class="num x-bad">2</td><td>Error de uso o de configuración estática: flags mal puestos, nombre de binario que no es un comando a secas</td><td>Corregir la invocación</td></tr>
           <tr><td class="num x-warn">3</td><td>Se seleccionó tanda y terminó con cero lanzamientos <strong>sin que nada quedara a medias</strong>: todos los candidatos se saltaron al reclamar. Ningún claim escrito, ninguna rama ni worktree creados</td><td>Reintentar más tarde. No es una señal de alarma, y ahora el mensaje puede afirmarlo con verdad</td></tr>
           <tr><td class="num">130 / 143</td><td>SIGINT / SIGTERM. Una interrupción <strong>siempre se acusa</strong>, aunque llegue con la tanda ya terminada</td><td>Si llegó entre el claim y el worktree, el claim ya se revirtió automáticamente</td></tr>
         </tbody>

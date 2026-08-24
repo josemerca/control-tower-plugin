@@ -44,7 +44,6 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { ACCOUNT_ENV } from './fixtures/hermetic-env.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
 import { buildLauncherScript } from '../scripts/launch-sentinel.js'
 import { buildStateSeed } from '../scripts/kickoff.js'
@@ -78,7 +77,7 @@ const openIssue90 = { number: 90, title: '#90 algo', labels: [{ name: 'status:re
 function runReal(args, envOverrides = {}) {
   const r = spawnSync('node', [script, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
+    env: { ...process.env, PATH: fakePath, ...envOverrides },
   })
   return { code: r.status, out: r.stdout || '', err: r.stderr || '', all: (r.stdout || '') + (r.stderr || '') }
 }

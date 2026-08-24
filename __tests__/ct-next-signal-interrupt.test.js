@@ -24,7 +24,6 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 // D4: entorno hermético (dirs de cuenta + stubs de cmux/claude) — ver fixtures/hermetic-env.js
-import { ACCOUNT_ENV } from './fixtures/hermetic-env.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-next.mjs')
@@ -49,7 +48,7 @@ function makeRepoRoot() {
 }
 
 function runInterruptible(args, envOverrides) {
-  return spawn('node', [script, ...args], { env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides } })
+  return spawn('node', [script, ...args], { env: { ...process.env, PATH: fakePath, ...envOverrides } })
 }
 
 // ===========================================================================
@@ -106,7 +105,7 @@ function collectOutput(child) {
 }
 
 function runRealSync(args, envOverrides) {
-  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides } })
+  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, PATH: fakePath, ...envOverrides } })
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
 }
 
@@ -402,8 +401,7 @@ describe('ct-next — `git worktree add` genuinamente colgado, sin que la señal
       encoding: 'utf8',
       env: {
         ...process.env,
-        ...ACCOUNT_ENV,
-        PATH: fakePath,
+                PATH: fakePath,
         FAKE_GIT_TOPLEVEL: repoRoot,
         FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue77], []]),
         FAKE_GH_COUNTER_FILE: counterFile,
@@ -463,7 +461,7 @@ describe('ct-next — CT_NEXT_CHILD_TIMEOUT_MS / CT_NEXT_TEST_DELAY_AFTER_CLAIM_
   it('CT_NEXT_CHILD_TIMEOUT_MS no numérico → exit 2, uso claro, nada de gh/git tocado', () => {
     const r = spawnSync('node', [script, '--repo', 'o/r', '--cap', '1'], {
       encoding: 'utf8',
-      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, CT_NEXT_CHILD_TIMEOUT_MS: 'not-a-number' },
+      env: { ...process.env, PATH: fakePath, CT_NEXT_CHILD_TIMEOUT_MS: 'not-a-number' },
     })
     expect(r.status).toBe(2)
     expect((r.stdout || '') + (r.stderr || '')).toMatch(/CT_NEXT_CHILD_TIMEOUT_MS inválido/)
@@ -472,7 +470,7 @@ describe('ct-next — CT_NEXT_CHILD_TIMEOUT_MS / CT_NEXT_TEST_DELAY_AFTER_CLAIM_
   it('CT_NEXT_CHILD_TIMEOUT_MS negativo → exit 2', () => {
     const r = spawnSync('node', [script, '--repo', 'o/r', '--cap', '1'], {
       encoding: 'utf8',
-      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, CT_NEXT_CHILD_TIMEOUT_MS: '-5' },
+      env: { ...process.env, PATH: fakePath, CT_NEXT_CHILD_TIMEOUT_MS: '-5' },
     })
     expect(r.status).toBe(2)
   })
@@ -480,7 +478,7 @@ describe('ct-next — CT_NEXT_CHILD_TIMEOUT_MS / CT_NEXT_TEST_DELAY_AFTER_CLAIM_
   it('CT_NEXT_CHILD_TIMEOUT_MS por encima del techo (25h) → exit 2', () => {
     const r = spawnSync('node', [script, '--repo', 'o/r', '--cap', '1'], {
       encoding: 'utf8',
-      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, CT_NEXT_CHILD_TIMEOUT_MS: String(25 * 60 * 60 * 1000) },
+      env: { ...process.env, PATH: fakePath, CT_NEXT_CHILD_TIMEOUT_MS: String(25 * 60 * 60 * 1000) },
     })
     expect(r.status).toBe(2)
   })
@@ -488,7 +486,7 @@ describe('ct-next — CT_NEXT_CHILD_TIMEOUT_MS / CT_NEXT_TEST_DELAY_AFTER_CLAIM_
   it('CT_NEXT_TEST_DELAY_AFTER_CLAIM_MS negativo → exit 2', () => {
     const r = spawnSync('node', [script, '--repo', 'o/r', '--cap', '1'], {
       encoding: 'utf8',
-      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, CT_NEXT_TEST_DELAY_AFTER_CLAIM_MS: '-1' },
+      env: { ...process.env, PATH: fakePath, CT_NEXT_TEST_DELAY_AFTER_CLAIM_MS: '-1' },
     })
     expect(r.status).toBe(2)
   })
@@ -496,7 +494,7 @@ describe('ct-next — CT_NEXT_CHILD_TIMEOUT_MS / CT_NEXT_TEST_DELAY_AFTER_CLAIM_
   it('CT_NEXT_TEST_DELAY_AFTER_CLAIM_MS por encima del techo (60001ms) → exit 2', () => {
     const r = spawnSync('node', [script, '--repo', 'o/r', '--cap', '1'], {
       encoding: 'utf8',
-      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, CT_NEXT_TEST_DELAY_AFTER_CLAIM_MS: '60001' },
+      env: { ...process.env, PATH: fakePath, CT_NEXT_TEST_DELAY_AFTER_CLAIM_MS: '60001' },
     })
     expect(r.status).toBe(2)
   })
@@ -512,7 +510,7 @@ describe('ct-next — CT_NEXT_CHILD_TIMEOUT_MS / CT_NEXT_TEST_DELAY_AFTER_CLAIM_
   it('CT_NEXT_TEST_CHILD_TIMEOUT_SCOPE con un alcance desconocido → exit 2, nombrando los válidos', () => {
     const r = spawnSync('node', [script, '--repo', 'o/r', '--cap', '1'], {
       encoding: 'utf8',
-      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, CT_NEXT_TEST_CHILD_TIMEOUT_SCOPE: 'worktree_add' },
+      env: { ...process.env, PATH: fakePath, CT_NEXT_TEST_CHILD_TIMEOUT_SCOPE: 'worktree_add' },
     })
     expect(r.status).toBe(2)
     const out = (r.stdout || '') + (r.stderr || '')
@@ -527,7 +525,7 @@ describe('ct-next — CT_NEXT_CHILD_TIMEOUT_MS / CT_NEXT_TEST_DELAY_AFTER_CLAIM_
     // esperando el exit 2 de SIEMPRE, no el del alcance.
     const r = spawnSync('node', [script, '--repo', 'o/r', '--cap', '1'], {
       encoding: 'utf8',
-      env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, CT_NEXT_TEST_CHILD_TIMEOUT_SCOPE: '', CT_NEXT_CHILD_TIMEOUT_MS: 'not-a-number' },
+      env: { ...process.env, PATH: fakePath, CT_NEXT_TEST_CHILD_TIMEOUT_SCOPE: '', CT_NEXT_CHILD_TIMEOUT_MS: 'not-a-number' },
     })
     expect(r.status).toBe(2)
     expect((r.stdout || '') + (r.stderr || '')).toMatch(/CT_NEXT_CHILD_TIMEOUT_MS inválido/)
