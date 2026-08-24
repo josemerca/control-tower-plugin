@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, IDENTITY_FIELDS } from '../scripts/run-metrics.js'
+import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, IDENTITY_FIELDS, aggregateVerdictMeasures, metricsRepoRelPath, METRICS_REPO_DIR } from '../scripts/run-metrics.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(here, '..', 'scripts', 'ct-step.mjs')
@@ -201,6 +201,124 @@ describe('el conteo por severidad', () => {
         { rule: 'alcance', severity: 'low', what: 'c', where: 'z' },
       ],
     }).findings_by_rule).toEqual({ 'manipulacion-tests': 2, alcance: 1 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// EL AGREGADO QUE `/ct-harvest` LEE (§3.4 del handoff). `rubric_sin_vara`
+// viajaba en la pull request desde `1422c67` y no lo leía nadie: la columna
+// existía en disco y la pregunta —«¿está llegando la vara?»— se contestaba
+// abriendo ficheros `jsonl` a mano. Las filas de aquí abajo son realistas
+// (identidad completa, como `IDENT`, más las medidas), no `{ruling:'PASS'}` a
+// secas: el agregador lee líneas reales, no objetos de prueba idealizados.
+// ---------------------------------------------------------------------------
+describe('el agregado de lo que el juez dejó escrito (§3.4)', () => {
+  const veredicto = (measures) => metricLine(metricRow({ ...IDENT, step: 'judge' }, measures, { now: AHORA }))
+  const pasoNoVeredicto = (step, measures) => metricLine(metricRow({ ...IDENT, step }, measures, { now: AHORA }))
+
+  it('suma los sin-vara de todos los veredictos del fichero: la fila es por intento y agregar es sumar', () => {
+    const texto = [
+      veredicto({ ruling: 'PASS', rubric_sin_vara: 1 }),
+      veredicto({ ruling: 'PASS', rubric_sin_vara: 0 }),
+      veredicto({ ruling: 'FAIL', rubric_sin_vara: 2 }),
+    ].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.rubricSinVara).toBe(3)
+    expect(r.verdicts).toBe(3)
+    expect(r.measured).toBe(3)
+    expect(r.legacy).toBe(0)
+  })
+
+  it('las filas que no son veredicto (implement, controls, commit) no entran en la cuenta', () => {
+    const texto = [
+      pasoNoVeredicto('implement', { outcome: 'done' }),
+      pasoNoVeredicto('controls', { outcome: 'done' }),
+      pasoNoVeredicto('commit', { outcome: 'done' }),
+      veredicto({ ruling: 'PASS', rubric_sin_vara: 0 }),
+    ].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.verdicts).toBe(1)
+    expect(r.rows).toBe(4)
+  })
+
+  it('una fila de juez DESCARTADA no es un veredicto: no infla el denominador', () => {
+    // ct-step.mjs:652 escribe estas filas SIN ninguna medida de veredicto.
+    const texto = metricLine(metricRow({ ...IDENT, step: 'judge' }, { outcome: 'discarded', why: 'sin outcome' }, { now: AHORA }))
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.verdicts).toBe(0)
+  })
+
+  it('una fila anterior a la columna cuenta como vieja y NO como un cero', () => {
+    const texto = [
+      veredicto({ ruling: 'PASS', rubric_sin_vara: 2 }),
+      veredicto({ ruling: 'PASS', rubric_sin_vara: 0 }),
+      veredicto({ ruling: 'PASS' }), // esquema viejo: sin rubric_sin_vara
+    ].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.measured).toBe(2)
+    expect(r.legacy).toBe(1)
+  })
+
+  it('si ningún veredicto trae la columna, sin-vara es null y no 0 — un cero afirmaría una medida que no se hizo', () => {
+    const texto = [veredicto({ ruling: 'PASS' }), veredicto({ ruling: 'FAIL' })].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.rubricSinVara).toBeNull()
+    expect(r.legacy).toBe(2)
+  })
+
+  it('los hallazgos se agregan por regla sumando findings_by_rule de todas las filas', () => {
+    const texto = [
+      veredicto({ ruling: 'FAIL', findings_by_rule: { patrones: 2, alcance: 1 } }),
+      veredicto({ ruling: 'FAIL', findings_by_rule: { patrones: 1 } }),
+    ].join('')
+    expect(aggregateVerdictMeasures(texto).findingsByRule).toEqual({ patrones: 3, alcance: 1 })
+  })
+
+  it('una regla que ya no está en la rúbrica se sigue contando: filtrar contra el enum de hoy borraría historia', () => {
+    const texto = veredicto({ ruling: 'FAIL', findings_by_rule: { 'una-regla-retirada': 4 } })
+    expect(aggregateVerdictMeasures(texto).findingsByRule).toEqual({ 'una-regla-retirada': 4 })
+  })
+
+  it('una línea ilegible se cuenta y no tira el fichero: las buenas se siguen agregando', () => {
+    const texto = [veredicto({ ruling: 'PASS', rubric_sin_vara: 1 }), '{no es json\n', veredicto({ ruling: 'PASS', rubric_sin_vara: 1 })].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.malformed).toBe(1)
+    expect(r.verdicts).toBe(2)
+    expect(r.rubricSinVara).toBe(2)
+  })
+
+  it('una línea que es JSON válido pero no un objeto también es ilegible', () => {
+    const texto = ['[1,2]', 'null', '"x"'].join('\n') + '\n'
+    expect(aggregateVerdictMeasures(texto).malformed).toBe(3)
+  })
+
+  it('las líneas vacías y el salto final no son líneas ilegibles', () => {
+    const texto = veredicto({ ruling: 'PASS', rubric_sin_vara: 0 }) + '\n\n'
+    expect(aggregateVerdictMeasures(texto).malformed).toBe(0)
+  })
+
+  it('un rubric_sin_vara que no es un entero no negativo no se suma: se trata como fila vieja', () => {
+    const texto = [
+      veredicto({ ruling: 'PASS', rubric_sin_vara: '2' }),
+      veredicto({ ruling: 'PASS', rubric_sin_vara: -1 }),
+      veredicto({ ruling: 'PASS', rubric_sin_vara: 1.5 }),
+    ].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.measured).toBe(0)
+    expect(r.legacy).toBe(3)
+    expect(r.rubricSinVara).toBeNull()
+  })
+
+  it('un fichero vacío no revienta y no afirma nada', () => {
+    for (const vacio of ['', undefined]) {
+      const r = aggregateVerdictMeasures(vacio)
+      expect(r).toEqual({ rows: 0, malformed: 0, verdicts: 0, measured: 0, legacy: 0, rubricSinVara: null, findingsByRule: {} })
+    }
+  })
+
+  it('el lector mira exactamente donde el escritor escribe', () => {
+    expect(metricsRepoRelPath(7)).toBe('docs/superpowers/metrics/issue-7.jsonl')
+    expect(METRICS_REPO_DIR).toBe('docs/superpowers/metrics')
   })
 })
 

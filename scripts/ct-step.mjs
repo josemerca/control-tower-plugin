@@ -64,7 +64,7 @@ import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage,
   IMPLEMENTER_TOOLS, JUDGE_TOOLS, PACKAGE_SECTIONS,
 } from './step-contracts.js'
-import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures } from './run-metrics.js'
+import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, metricsRepoRelPath } from './run-metrics.js'
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -257,8 +257,9 @@ const PLUGIN_VERSION = (() => {
 })()
 const ACTOR = (git(['config', 'user.email'], { allowFail: true }) || '').trim() || null
 
-// La ruta DENTRO del repo, relativa: la misma que se stagea en `commit`.
-const METRICS_REL = join('docs', 'superpowers', 'metrics', `issue-${issue}.jsonl`)
+// La ruta la dicta run-metrics.js, que es quien también se la enseña a
+// /ct-harvest: el escritor y el lector no pueden divergir.
+const METRICS_REL = metricsRepoRelPath(issue)
 
 function medir(step, measures) {
   const linea = metricLine(metricRow({

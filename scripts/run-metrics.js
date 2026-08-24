@@ -108,6 +108,16 @@ export function metricsPath(concepto, { configDir = null, home = null } = {}) {
   return join(raiz, 'control-tower', 'log', `${concepto}.jsonl`)
 }
 
+// LA RUTA DENTRO DEL REPO, en una sola constante y no en dos: la escribe
+// `ct-step commit` y la lee `/ct-harvest`. Copiada a mano en los dos sitios,
+// un renombrado deja al lector mirando un directorio que ya no existe y el
+// informe dice «sin telemetría» de un epic que sí la tiene — el mismo hueco
+// leído como un cero contra el que existe el resto de este fichero. En POSIX
+// a propósito (no `join`): es a la vez pathspec de `git add` y ruta de la API
+// de contenidos de GitHub, y las dos hablan con barras hacia delante.
+export const METRICS_REPO_DIR = 'docs/superpowers/metrics'
+export const metricsRepoRelPath = (issue) => `${METRICS_REPO_DIR}/issue-${issue}.jsonl`
+
 // La fila. `measures` son las medidas del paso —el estado de los controles con
 // la ruta de su log, el veredicto con su conteo por severidad, coste, turnos y
 // duración de la llamada, el tamaño del diff juzgado— y viajan aparte de la
@@ -161,4 +171,73 @@ export function verdictMeasures(verdict) {
     // rust-monitoring a mano.
     rubric_sin_vara: (verdict?.rubric || []).filter((paso) => paso.outcome === 'sin-vara').length,
   }
+}
+
+// ---------------------------------------------------------------------------
+// EL LECTOR DE LO QUE `verdictMeasures` ESCRIBIÓ. Vive pegado a él a propósito:
+// mientras el escritor y el lector de la fila estén en el mismo fichero, un
+// campo renombrado no puede quedar escrito por un sitio y leído por otro.
+//
+// De qué agujero sale: `rubric_sin_vara` viajaba en la pull request desde
+// `1422c67` y NO LO LEÍA NADIE (§3.4 del handoff). La columna existía en disco
+// y el §2 —«¿está llegando la vara?»— se contestaba abriendo ficheros `jsonl`
+// a mano.
+//
+// SE SUMA AL LEER, que es lo que la cabecera de este módulo promete: la fila es
+// por INTENTO, y dos intentos de juez sobre la misma tarea son dos filas que se
+// suman. Por eso se devuelve también `verdicts`: un 3 sobre 12 veredictos y un
+// 3 sobre 3 no son el mismo repo, y quien lee la cifra tiene que ver la N sin
+// preguntar.
+//
+// LAS TRES TOLERANCIAS, y ninguna es cosmética:
+//
+//  1. `legacy` — una fila de veredicto SIN `rubric_sin_vara` es telemetría
+//     anterior a la columna (el PR #11 de jjponz/rust-monitoring dejó 15 filas
+//     así). NO cuenta como cero: un cero afirmaría que el juez tuvo su vara, y
+//     lo que pasó es que nadie lo midió. Si ningún veredicto la trae,
+//     `rubricSinVara` sale `null` y quien pinte la tabla tiene prohibido
+//     imprimir `0`.
+//  2. `malformed` — una línea que no es JSON, o que es JSON y no es un objeto,
+//     se cuenta y se sigue. Tirar el fichero entero por una línea rota perdería
+//     las buenas, y hacerla bajar el exit sería pedir que se «arregle y repita»
+//     algo que se escribió hace tres semanas y no se puede rehacer.
+//  3. Un veredicto es una fila con `ruling`, NO una fila de paso `judge`:
+//     `ct-step` escribe filas de juez descartado (`outcome: 'discarded'`) sin
+//     ninguna medida, y contarlas inflaría el denominador de la cifra que este
+//     agregado existe para hacer legible.
+//
+// Y `findings_by_rule` se suma TAL CUAL VIENE, sin cruzarlo con VERDICT_RULES:
+// una regla retirada de la rúbrica tiene que seguir viéndose en la telemetría
+// vieja. Filtrar contra el enum de hoy borraría historia en silencio.
+export function aggregateVerdictMeasures(texto) {
+  let rows = 0
+  let malformed = 0
+  let verdicts = 0
+  let measured = 0
+  let legacy = 0
+  let sinVara = 0
+  const findingsByRule = {}
+  for (const linea of String(texto ?? '').split('\n')) {
+    if (linea.trim() === '') continue
+    let fila
+    try {
+      fila = JSON.parse(linea)
+    } catch {
+      malformed += 1
+      continue
+    }
+    if (fila === null || typeof fila !== 'object' || Array.isArray(fila)) { malformed += 1; continue }
+    rows += 1
+    if (!Object.hasOwn(fila, 'ruling')) continue
+    verdicts += 1
+    const n = fila.rubric_sin_vara
+    if (Number.isInteger(n) && n >= 0) { measured += 1; sinVara += n } else { legacy += 1 }
+    const porRegla = fila.findings_by_rule
+    if (porRegla && typeof porRegla === 'object' && !Array.isArray(porRegla)) {
+      for (const [regla, cuantos] of Object.entries(porRegla)) {
+        if (Number.isInteger(cuantos) && cuantos > 0) findingsByRule[regla] = (findingsByRule[regla] || 0) + cuantos
+      }
+    }
+  }
+  return { rows, malformed, verdicts, measured, legacy, rubricSinVara: measured ? sinVara : null, findingsByRule }
 }
