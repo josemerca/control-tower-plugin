@@ -897,4 +897,77 @@ describe('ct-init.sh', () => {
     expect(gi).not.toMatch(/node_modules\/\.worktrees\//) // nunca concatenadas en la misma línea
     rmSync(dir, { recursive: true, force: true })
   })
+
+  // -------------------------------------------------------------------------
+  // La plantilla del execution spec. El flujo tras /ct-init es brainstorming →
+  // design doc → execution spec, y `skills/brainstorming/SKILL.md` (pasos 8 y
+  // §"After the self-review") manda escribir ese spec «from the repo's
+  // `_TEMPLATE-execution-spec.md`». Hasta aquí esa plantilla NO viajaba con el
+  // plugin: vivía suelta en un repo privado, así que el paso 8 se quedaba sin
+  // su fuente en cualquier repo recién bootstrapeado y el spec había que
+  // escribirlo adivinando sus secciones.
+  //
+  // El destino es `docs/superpowers/specs/` y no la raíz porque es la carpeta
+  // que el plugin YA declara como casa del spec en código que corre:
+  // LOOP_ARTIFACT_PATTERNS (scripts/scope.js) exime `docs/superpowers/specs/**`
+  // precisamente porque «el skill de brainstorming escribe aquí el design doc y
+  // el execution spec». La misma ruta que documenta docs/loop/README.md.
+  it('siembra la plantilla del execution spec en docs/superpowers/specs/', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    const out = execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const dest = join(dir, 'docs', 'superpowers', 'specs', '_TEMPLATE-execution-spec.md')
+    expect(existsSync(dest)).toBe(true)
+    expect(readFileSync(dest, 'utf8')).toBe(readFileSync(join(root, 'templates', '_TEMPLATE-execution-spec.md'), 'utf8'))
+    expect(out).toMatch(/creado .*_TEMPLATE-execution-spec\.md/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('idempotente: no pisa una plantilla de execution spec ya existente', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    const dest = join(dir, 'docs', 'superpowers', 'specs', '_TEMPLATE-execution-spec.md')
+    mkdirSync(dirname(dest), { recursive: true })
+    writeFileSync(dest, 'MIA, editada a mano\n')
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    expect(readFileSync(dest, 'utf8')).toBe('MIA, editada a mano\n')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // El test que de verdad importa: la plantilla que se siembra tiene que PASAR
+  // las puertas del propio /ct-groom. Las dos trampas que traía la versión que
+  // circulaba a mano las detecta esto y nada más:
+  //
+  //  1. `[NEEDS CLARIFICATION` escrito literal en su comentario didáctico.
+  //     analyzeSpecFreeze hace un includes() línea a línea sobre TODO el
+  //     fichero, sin descartar comentarios HTML (el descarte solo cubre el
+  //     cuerpo de la hipótesis), así que la plantilla se autoinvalidaba: exit 2
+  //     en cualquier spec que la copiara sin borrar ese bloque, estando
+  //     perfectamente congelado.
+  //  2. Un comentario multilínea DENTRO de `## Contexto del epic`.
+  //     readEpicContext no lo descarta, y esa sección se copia byte a byte al
+  //     cuerpo de todos los issues del epic: las instrucciones de la plantilla
+  //     acababan pegadas en los N issues.
+  it('la plantilla sembrada pasa las puertas de congelación de /ct-groom y su tabla parsea con el contrato vigente', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const md = readFileSync(join(dir, 'docs', 'superpowers', 'specs', '_TEMPLATE-execution-spec.md'), 'utf8')
+    const { analyzeSpecFreeze, readEpicContext } = await import('../scripts/groom.js')
+    const { analyzeSlicesTable } = await import('../scripts/slices.js')
+
+    const freeze = analyzeSpecFreeze(md)
+    expect(freeze.clarifications).toEqual([])
+    expect(freeze.hypothesis).toBe('ok')
+
+    expect(readEpicContext(md).content).not.toMatch(/<!--/)
+
+    const table = analyzeSlicesTable(md)
+    expect(table.tableFound).toBe(true)
+    expect(table.gateColumnPresent).toBe(true)
+    expect(table.missingRequiredColumns).toEqual([])
+    expect(table.invalidRows).toEqual([])
+    expect(table.malformedDepRows).toEqual([])
+    expect(table.invalidDepRefs).toEqual([])
+    expect(table.slices.map((s) => s.deps)).toEqual([[], [1]])
+
+    rmSync(dir, { recursive: true, force: true })
+  })
 })
