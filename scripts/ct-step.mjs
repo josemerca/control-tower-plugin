@@ -68,6 +68,7 @@ import {
 import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures } from './run-metrics.js'
 import { parseStateSafe } from './state.js'
 import { SLICE_REL_PATH } from './state-paths.js'
+import { findClosingKeywords } from './closing-keywords.js'
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -827,6 +828,56 @@ function verboE2e() {
   return outcome
 }
 
+// Comitea el informe de e2e que `escribirInformeE2e` dejó STAGEADO. No se hace
+// desde allí: comitear pertenece al momento en que se sabe si el run CIERRA,
+// no a cuando el fichero se escribe, y eso sólo se sabe después de aplicar la
+// transición. Por eso quien llama a esto es el despacho final, no `verboE2e`.
+//
+// SÓLO en DELIVERED (verde, o verde con algún no-verificado): en BLOCKED_E2E
+// (rojo) el run NO cierra, así que `.agent/run-<issue>.json` se vuelve a
+// cargar en el próximo intento — y ahí la invariante de commits compara
+// `hechos` contra `esperados` (`tasksTotal` en el paso `e2e`, ver la rama de
+// arriba). Un commit de más aquí haría `hechos > esperados` y tumbaría ESE
+// intento con PRECONDITION antes de que nadie llegara a arreglar el rojo. En
+// DELIVERED el run no se vuelve a cargar nunca (el guard `closed ===
+// DELIVERED` de la carga del estado contesta y sale ANTES del cruce de
+// commits), así que comitear ahí no rompe ninguna cuenta futura. El informe
+// del camino rojo se queda stageado a propósito: es la prueba de que está
+// esperando a quien arregle el fallo.
+function comprometerInformeE2e() {
+  const ruta = join('docs', 'superpowers', 'e2e', `${issue}.md`)
+  // No cierra el issue: es el informe de la travesía, no el trabajo que la
+  // cierra, así que el mensaje no lleva ninguna closing keyword — y se
+  // comprueba, con el mismo mecanismo que `commitMessage` (step-contracts.js),
+  // porque el hook `commit-keyword-guard` es un PreToolUse sobre la Bash de
+  // una SESIÓN: un `git commit` lanzado por este programa no pasa por esa
+  // puerta, así que si el programa no se mira el mensaje, nadie lo hace.
+  // Sin prefijo de conventional commits ("docs:", "feat:"): ésa es la
+  // convención de los commits HUMANOS de este propio repo (ver `git log`),
+  // no la de los que emite el programa dentro de una slice — `commitMessage`
+  // (step-contracts.js), que comitea cada tarea, tampoco lo usa. Mismo estilo
+  // que aquél: título descriptivo + cuerpo con el porqué + coautoría.
+  const mensaje = `informe de e2e del issue #${issue}
+
+Generado por ct-step tras el paso e2e de la slice. No cierra el issue.
+
+Co-Authored-By: Claude <noreply@anthropic.com>`
+  const keywords = findClosingKeywords(mensaje)
+  if (keywords.length) {
+    err(`aviso: el mensaje del commit del informe de e2e contiene una closing keyword (${keywords.map((k) => `${k.keyword} ${k.ref}`).join(', ')}) y cerraría el issue sin que nadie lo haya decidido — NO se comitea. El informe (${ruta}) queda stageado.`)
+    return
+  }
+  // `allowFail`, mismo criterio que el resto de commits de artefactos de este
+  // programa (veredicto, telemetría): no comitear no puede tumbar un run ya
+  // ENTREGADO, así que se avisa y el fichero se queda stageado en vez de
+  // perderse.
+  if (git(['commit', '-m', mensaje], { allowFail: true }) === null) {
+    err(`aviso: el informe de e2e (${ruta}) quedó stageado pero NO se pudo comitear — revísalo a mano antes de abrir la pull request.`)
+    return
+  }
+  out(`informe de e2e comiteado: ${ruta}`)
+}
+
 // ---------------------------------------------------------------------------
 // Aplicar el resultado a la tabla, y decir qué toca ahora.
 // ---------------------------------------------------------------------------
@@ -850,6 +901,14 @@ try {
   // ct-step del gate.
   if (transicion.state === RUN_STATES.DELIVERED) run = { ...run, closed: RUN_STATES.DELIVERED }
   guardar()
+
+  // El informe de e2e se comitea AQUÍ, tras persistir el estado y sólo si el
+  // verbo que se acaba de aplicar fue `e2e` y la transición cerró el run en
+  // DELIVERED — ver el comentario de `comprometerInformeE2e` para el porqué
+  // de esa condición exacta (y de por qué el camino rojo NO comitea nada).
+  if (verbo === 'e2e' && transicion.state === RUN_STATES.DELIVERED) {
+    comprometerInformeE2e()
+  }
 
   if (transicion.state === RUN_STATES.OPEN) {
     out('')

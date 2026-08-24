@@ -78,6 +78,19 @@ describe('readE2eReport', () => {
     expect(readE2eReport({ runs: [{ run: A, verdict: 'no-verificado' }] }, [A]).outcome).toBe(OUTCOMES.DISCARDED)
   })
 
+  // Finding 2 de la review de Task 8: un rojo a medias no se descartaba, y
+  // `escribirInformeE2e` (ct-step.mjs) confía en que lo que llega aquí ya está
+  // validado — sin esta rama, un rojo sin uno de sus cuatro campos colaba
+  // "undefined" literal en el markdown de la pull request.
+  it('un rojo sin uno de los cuatro campos que lo sostienen → DISCARDED', () => {
+    for (const campo of ['expected', 'actual', 'repro', 'refuted_by']) {
+      const incompleto = { ...rojo(A) }
+      delete incompleto[campo]
+      const r = readE2eReport({ runs: [incompleto] }, [A])
+      expect(r.outcome, campo).toBe(OUTCOMES.DISCARDED)
+    }
+  })
+
   it('EL ROJO GANA AL MAL FORMADO', () => {
     // Un rojo dice algo del PRODUCTO; un formato roto, del informe. Emitiendo
     // el descarte primero, el agente arreglaría el formato, reintentaría y sólo

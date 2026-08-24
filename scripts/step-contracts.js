@@ -372,6 +372,17 @@ export function readE2eReport(structured, declaredRuns) {
       problemas.push(`el recorrido "${run}" se declara no-verificado sin \`reason\` y \`unblock\``)
       continue
     }
+    // Mismo trato que `verde` (evidencia) y `no-verificado` (reason/unblock):
+    // un rojo es lo que bloquea la entrega, y sin los cuatro campos que la
+    // rúbrica del agente exige (`expected`, `actual`, `repro`, `refuted_by`)
+    // no hay con qué contrastarlo. Sin esta rama, un rojo a medias colaba
+    // "undefined" literal en `docs/superpowers/e2e/<issue>.md` — un artefacto
+    // de la pull request — porque `escribirInformeE2e` (ct-step.mjs) confía
+    // en que lo que llega aquí ya está validado y no vuelve a comprobar nada.
+    if (e.verdict === 'rojo' && !(esTexto(e.expected) && esTexto(e.actual) && esTexto(e.repro) && esTexto(e.refuted_by))) {
+      problemas.push(`el recorrido "${run}" se declara rojo sin los cuatro campos que lo sostienen (\`expected\`, \`actual\`, \`repro\`, \`refuted_by\`)`)
+      continue
+    }
     buenos.push(e)
   }
   for (const e of structured.runs) {
