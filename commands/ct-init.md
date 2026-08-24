@@ -30,6 +30,22 @@ supongas cuál de las dos es. `--force` reemplaza igualmente; **nunca lo pases
 por tu cuenta**, y solo después de que el usuario confirme que esa sección no
 lleva trabajo suyo.
 
+El scaffolder crea también `.agent/conventions.md` — la vara del repo: los
+documentos de reglas del código, que `ct-step` pega en el brief de cada tarea.
+**Este es el momento de confirmación humana**: el scaffolder imprime, por STDOUT, un bloque determinista que empieza por el literal `Candidatos a la vara de este repo (barrido determinista — PROPONE, no declara):` — es el barrido del §3.12 (docs/prompt-juez-lo-que-queda.md), no una impresión tuya.
+**Transmítele al usuario esa lista tal cual**, con sus motivos y sus marcas
+`[esqueleto: sólo encabezados]`. Si al explorar el repo ves un candidato que
+el barrido no trajo, puedes proponerlo también, pero **diciendo que es tuyo y
+no del barrido**. Escribe en el fichero SOLO lo que el usuario confirme — no
+lo rellenes por tu cuenta, y si no confirma nada, déjalo con su placeholder:
+la ausencia se mide (`sin-vara`), no se rellena. Si el scaffolder dice que
+**no se ha podido barrer** (falta `node`), dilo también: ese caso no es "aquí
+no hay convenciones", es "no se ha mirado". Un candidato marcado esqueleto
+declarado hoy hace que el juez mida contra un documento vacío: proponlo igual,
+pero cuéntale al usuario esa mitad. No es `.agent/conventions-ack.md` (eso son
+acuses de señales de colisión de protocolo del loop, ver más abajo); este
+fichero declara cómo se escribe código en este repo.
+
 Al `.gitignore` se le añaden **dos** líneas, las dos idempotentes: `.worktrees/` (los worktrees de slice viven dentro del checkout, y sin esa línea un `git add -A` se traga un árbol de trabajo entero) y `.agent/SLICE.md` (el estado de una sesión despachada, que es estado vivo y local, nunca producto — ver F22 en `commands/ct-next.md`).
 
 El scaffolder siembra además `docs/superpowers/specs/_TEMPLATE-execution-spec.md`,

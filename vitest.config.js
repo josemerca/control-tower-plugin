@@ -40,6 +40,7 @@
 // hookTimeout: mismo razonamiento para los `afterEach` (que borran árboles de
 // directorios temporales); su default es 10 s y bajo carga se queda igual de
 // corto.
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
@@ -47,5 +48,27 @@ export default defineConfig({
     testTimeout: 120_000,
     hookTimeout: 120_000,
     teardownTimeout: 60_000,
+    // CT_WATCH_GO_BIN — NINGÚN test lanza el vigilante del `-OK` de verdad.
+    //
+    // `ct-next` lo lanza DESPRENDIDO tras despachar un slice con gate `plan`, o
+    // sea en la mayoría de los tests que despachan algo. Medido la primera vez
+    // que la suite corrió con esto puesto: 42 procesos `ct-watch-go.mjs`
+    // huérfanos, cada uno sondeando cada 30 s durante ocho horas. Un `pkill`
+    // después de cada corrida no es una solución: la suite no puede dejar
+    // procesos detrás, punto.
+    //
+    // Va aquí y no en cada test porque el defecto es exactamente ese: que un
+    // test que NO habla de esto lo lance sin querer. Los tres ficheros que sí
+    // hablan de esto fijan su propio valor y no dependen de éste.
+    //
+    // La grabadora, además de no sondear nada, apunta su argv cuando el test le
+    // da un FAKE_WATCH_GO_LOG — así el mismo doble sirve para no hacer daño y
+    // para comprobar que el lanzamiento ocurre con los argumentos correctos.
+    env: {
+      // `fileURLToPath` y no `.pathname`: con el checkout bajo una ruta con
+      // espacios o no-ASCII, `.pathname` viene percent-encoded y apuntaría a un
+      // fichero que no existe. Es lo que usan los otros 56 ficheros del repo.
+      CT_WATCH_GO_BIN: fileURLToPath(new URL('./__tests__/fixtures/fake-watch-go-bin/recorder.mjs', import.meta.url)),
+    },
   },
 })

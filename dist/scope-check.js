@@ -43,7 +43,24 @@ var LOOP_ARTIFACT_PATTERNS = [
   // puede cubrirlo: no juzga prosa, juzga ficheros. La inmutabilidad de las
   // secciones congeladas del spec es una comprobación DISTINTA y está sin
   // construir.
-  "docs/superpowers/specs/**"
+  "docs/superpowers/specs/**",
+  // `ct-step verdict` escribe aquí el veredicto del juez cuando el ruling es
+  // PASS, lo stagea y lo deja DENTRO del commit de la tarea, porque el
+  // veredicto tiene que viajar en la pull request (criterio de cierre de F37:
+  // «el PR de un slice trae un veredicto emitido por un agente que no ejecutó
+  // nada»). El implementador no elige esa escritura y no puede evitarla, así
+  // que sin esta exención el gate se pone rojo en CUALQUIER epic que declare su
+  // línea `Alcance:` y pide algo imposible —«o el trabajo sale del PR, o el
+  // alcance del epic cambia»—, que es el muro insatisfacible de F14 otra vez.
+  "docs/superpowers/verdicts/**",
+  // La telemetría del run: una fila por intento de cada paso de cada tarea. La
+  // escribe el loop, no el implementador, y por el mismo motivo que el
+  // veredicto va a dejar de vivir solo en el disco de quien la escribió para
+  // viajar en la pull request. La exención se pone ANTES de que llegue esa
+  // escritura a propósito: al revés, el primer slice que la produzca sale rojo
+  // por un fichero del loop y quien lea el gate no podrá distinguir si el rojo
+  // lo puso el agente o la maquinaria.
+  "docs/superpowers/metrics/**"
 ];
 function normalizePath(p) {
   return String(p || "").replace(/^\.\//, "").replace(/^\/+/, "");

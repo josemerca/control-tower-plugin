@@ -1,10 +1,10 @@
 # {{#<issue> — what this slice delivers}}
 
-> **This plan is written to be executed by task-scoped subagents with zero context and no
-> authority to decide.** Every task carries the current state of what it touches (copied
-> verbatim), the contracts it must honour and the exact commands that verify it — not the
-> bodies: those you write test-first. Do not improvise on names, signatures, constants or test
-> names: they are decided here. On ambiguity, the issue body and AGENTS.md win.
+> **This plan is written to be executed by task-scoped subagents that arrive with zero context
+> and decide nothing.** Every task carries the current state of what it touches (copied
+> verbatim), the contracts it honours and the exact commands that verify it; its bodies are
+> yours to write, test-first. Names, signatures, constants and test names come from this
+> document, which decided them. On ambiguity, the issue body and AGENTS.md win.
 
 ## 1. Context and goal
 
@@ -21,15 +21,25 @@ criteria.}}
 {{What this slice deliberately does not do — start from the issue's "Out of scope /
 Protected" section. If nothing: N/A — <reason>.}}
 
-## 2. Closed decisions (do NOT reopen)
+## 2. Closed decisions (take as given)
 
 | Decision | Value |
 |---|---|
-| {{decision}} | {{an order, not an option}} |
+| {{decision}} | {{an order: one value, stated}} |
 
 ## 3. Reference patterns
 
-{{Real files in this repo the implementer must imitate.}}
+{{The yardstick of this repo for this slice, in two lists. It is the only part of the plan that
+tells the implementer how code is written here and the judge what to block on, so every path you
+name is grepped by `--check-plan`: a path that is not in the repo fails the plan.}}
+
+Files to imitate: {{real files whose shape the implementer copies — same role, same layer. Or
+N/A — <reason>.}}
+
+Rules to obey: {{start from `.agent/conventions.md` where the repo declares one; then this repo's
+own convention documents, by path — `AGENTS.md`, `CLAUDE.md`, a file
+under `docs/conventions/`, `CONTRIBUTING` — plus any skill the issue's "Contexto del epic" names
+(a skill is not a path and is not checked on disk). Or N/A — this repo declares none.}}
 
 ## 4. Inventory
 
@@ -40,16 +50,16 @@ Protected" section. If nothing: N/A — <reason>.}}
 ## 5. Interfaces
 
 Consumes: {{the interface the issue declares for its dependency — names and signatures inline,
-no code block; or N/A — no dependencies. If it has to be quoted from the repo, quote it inside
+in prose; or N/A — no dependencies. If it has to be quoted from the repo, quote it inside
 the task that consumes it, with `Current state (path, lines A-B):`.}}
-Produces: {{what later slices rely on — one exported name and signature per line, no code
-block: the block lives in the task that creates the file, which is what the task brief
-carries. Or N/A — <reason>.}}
+Produces: {{what later slices rely on — one exported name and signature per line, in prose:
+the block lives in the task that creates the file, which is what the task brief carries. Or
+N/A — <reason>.}}
 
 ## 6. Test strategy
 
 {{What gets tested and how, following AGENTS.md commands. If a task carries no tests, say so
-here with the reason so the implementer does not invent them.}}
+here with the reason, so the implementer knows it is deliberate.}}
 
 ## 7. Tasks
 
@@ -57,7 +67,7 @@ here with the reason so the implementer does not invent them.}}
 
 **Objective:** {{one sentence: the observable behavior this commit delivers}}
 
-**Files:** {{exact paths, each marked (create) or (modify)}}
+**Files:** {{exact paths between backticks, each marked (create) or (modify)}}
 
 Current state (path/to/file.ext, lines A-B):
 
@@ -67,7 +77,7 @@ greps it.}}
 Contract (path/to/file.ext):
 
 {{Max 25 lines: types, interfaces, exact signatures, typed errors, and constants the implementer
-cannot derive (formats, flags, magic values). NO function bodies: those are written test-first.}}
+cannot derive (formats, flags, magic values). Declarations only: bodies are written test-first.}}
 
 Call site (path/to/consumer.ext):
 
@@ -77,19 +87,33 @@ route, handler, component usage.}}
 Final text (path/to/doc.md):
 
 {{Max 12 lines, text artifacts only (.md/.txt/.rst/.adoc): the exact replacement wording, and
-only claims you verified against the repo. Never for code or configuration.}}
+only claims you verified against the repo. Code and configuration travel by their own labels.}}
 
-{{Configuration (tsconfig, package.json, CI workflows, lockfiles) never gets a block: state the
-change in prose with the value inline. A task with no block at all says so with the exact line:
-No code — <reason>. Blocks add up to 30 lines per task, and each task fits on ONE A4 page: 3500
-characters. If a task does not fit, the task is two — never collapse two commits into one.}}
+{{Configuration (tsconfig, package.json, CI workflows, lockfiles) travels as prose with the
+value inline. A task whose work carries no block says so with the exact line:
+No code — <reason>. Blocks add up to 30 lines per task, and each task fits on ONE A4 page:
+3500 characters. If a task does not fit, the task is two: one task is one commit.}}
 
 **TDD:** {{red first: literal test name and the assertion that pins the boundary → minimal green
 | No TDD — <reason>}}
 
 **Tests:** {{added: named one by one / removed on purpose: named one by one | N/A — <reason>}}
 
-**Verification:** {{exact command and expected output}}
+**Verification:** {{what the commands prove, in prose if it helps — the commands themselves go
+in the fenced block below, one per line, already run. A program executes that block, so it
+carries commands and `--check-plan` rejects a task without one.}}
+
+```bash
+{{command}}   # {{expected: exit 0 — the comment says what exit 0 will mean here}}
+```
+
+{{The program scores this block by EXIT CODE and nothing else, so every command is a predicate:
+a command whose exit code IS the claim. Anything you assert about a count, a line or a piece of
+output goes inside `test`: `test "$(… | grep -c 'x')" -eq 2`, `test "$(wc -l < f)" -le 150`,
+`test -z "$(git status --porcelain)"`. Keep the claim in the command and out of the comment:
+`grep -c` exits 0 for "found at least one" and 1 for "found none", so
+`grep -c … # expected: 0` goes green exactly when it should go red. `--check-plan` rejects the
+commands it can prove cannot measure their own claim.}}
 
 ### Task 2 — {{name}}
 
@@ -105,9 +129,22 @@ characters. If a task does not fit, the task is two — never collapse two commi
 
 **Verification:** {{...}}
 
+```bash
+{{command}}   # {{expected: exit 0 — a predicate, as in Task 1}}
+```
+
 ## 8. Global verification
 
-{{End-to-end validation once every task is committed: commands, what to look at.}}
+{{End-to-end validation once every task is committed. A program runs it (`ct-step global`,
+after the last commit), so the commands go in a fenced block — each one a predicate, exit 0,
+same rules as a task's **Verification:** block. Prose before and after the block is welcome:
+what to start, what to look at with human eyes. A slice with no end-to-end to run
+(documentation, pure configuration) declares it with the exact line `N/A — <reason>` instead
+of a block; `--check-plan` rejects a §8 that is only prose.}}
+
+```bash
+{{command}}   # {{expected: exit 0 — a predicate, as in every task}}
+```
 
 ## 9. Assumptions
 

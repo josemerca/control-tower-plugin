@@ -1403,7 +1403,9 @@ rutas que no se tocan. Una línea cada uno, con valores exactos.</span>
 <span class="c">6.</span> Primer acto, con el baseline verde: escribe el plan del slice con
    control-tower-loop:writing-plans usando el issue como spec. Guárdalo en
    docs/superpowers/plans/ y commitéalo: viaja en el PR.
-<span class="c">7.</span> Con el plan escrito, sigue control-tower-loop:subagent-driven-development con TDD.
+<span class="c">7.</span> Con el plan commiteado y el gate 'plan' con OK humano, conduce la implementación
+   consultando ct-step (next → report → controls → juez ct-judge → verdict → commit;
+   comitea ct-step, nunca tú ni el implementador) hasta "run delivered".
 <span class="c">8.</span> &lt;addendum técnico según Tipo: ui | backend | infra | bugfix&gt;
 <span class="c">9.</span> <span class="h">&lt;líneas de GATE — qué tiene que ver o revisar un humano antes del merge&gt;</span>
 <span class="c">10.</span> Si el trabajo queda BLOQUEADO, márcalo en .agent/SLICE.md como

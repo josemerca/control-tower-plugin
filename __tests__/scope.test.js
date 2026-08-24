@@ -191,6 +191,41 @@ describe('scopeViolations — el hecho, que es lo que no se puede falsificar', (
     expect(scopeViolations(['docs/superpowers/specs/2026-08-12-x-execution.md'], ['apps/**'])).toEqual([])
   })
 
+  // EL DEFECTO MEDIDO: `ct-step report` escribe el veredicto del juez en
+  // `docs/superpowers/verdicts/issue-<n>-task-<t>.json`, lo stagea y lo mete
+  // DENTRO del commit de cada tarea («el veredicto VIAJA en la pull request»,
+  // criterio de cierre de F37). Con esa ruta sin exentar, un epic que declare
+  // `Alcance: src/**` y tenga el gate instalado sale ROJO por un fichero que el
+  // agente no escribió y no puede impedir que se escriba — comprobado
+  // ejecutando la función, que devolvía
+  // `docs/superpowers/verdicts/issue-2-task-1.json` como violación. Y el
+  // mensaje que da el gate («o el trabajo sale del PR, o el alcance del epic
+  // cambia») es imposible de obedecer: es el muro insatisfacible de F14 otra
+  // vez, y un guard que solo se satisface desobedeciendo se desactiva entero.
+  it('el veredicto del juez está exento: lo escribe y lo stagea ct-step, no el agente', () => {
+    expect(scopeViolations(['docs/superpowers/verdicts/issue-2-task-1.json'], ['src/**'])).toEqual([])
+    expect(LOOP_ARTIFACT_PATTERNS).toContain('docs/superpowers/verdicts/**')
+  })
+
+  // La telemetría del run va a viajar en el PR por la misma razón que el
+  // veredicto, y la exención tiene que estar ANTES de que llegue la escritura:
+  // si llega primero, el siguiente slice de cualquier epic con alcance
+  // declarado sale rojo por el fichero de métricas, y quien lo lea no sabrá si
+  // el rojo lo puso el agente o el loop.
+  it('la telemetría del run está exenta: la escribe el loop, no el implementador', () => {
+    expect(scopeViolations(['docs/superpowers/metrics/ct-step.jsonl'], ['src/**'])).toEqual([])
+    expect(LOOP_ARTIFACT_PATTERNS).toContain('docs/superpowers/metrics/**')
+  })
+
+  // EL CONTRAPESO, y sin él los dos tests de arriba pasarían con una lista de
+  // exentos que eximiera de más (`docs/**`, o peor, `**`). Una ruta fuera de
+  // alcance sigue siendo violación, incluso —y sobre todo— si es vecina de las
+  // exentas dentro de `docs/superpowers/`.
+  it('las exenciones nuevas no ensanchan el agujero: lo de al lado sigue violando', () => {
+    expect(scopeViolations(['lib/ajeno.js'], ['src/**'])).toEqual(['lib/ajeno.js'])
+    expect(scopeViolations(['docs/superpowers/apuntes.md'], ['src/**'])).toEqual(['docs/superpowers/apuntes.md'])
+  })
+
   // Sin patrones el resultado NO puede ser «nada viola»: eso convertiría un
   // epic sin alcance declarado en un epic con barra libre, que es exactamente
   // el fallo que el gate viene a cerrar. Devolver todos los ficheros deja al

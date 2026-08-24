@@ -8,7 +8,7 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 
 | | |
 |---|---|
-| Versión | `0.34.0` · contrato de la tabla de slices `v18` |
+| Versión | `0.36.1` · contrato de la tabla de slices `v18` |
 | Comandos | `/ct-init` · `/ct-groom` · `/ct-next` · `/ct-status` |
 | Puertas humanas | 3 por epic — congelación, `status:ready`, merge — más el gate `plan` en cada slice (renunciable por fila con `!plan`) |
 | Skills | 11 forkados de superpowers 6.0.3 + 1 propio (`writing-plans-prescriptive`) |
@@ -66,7 +66,7 @@ Hay **dos sesiones vivas por repo, con papeles opuestos**: la *coordinadora*, en
 
 ### El modelo de dos niveles
 
-Control Tower es el patrón de desarrollo dirigido por subagentes **un nivel por encima**: la tabla de slices es el fichero de plan, `/ct-next` es el coordinador, la sesión despachada es el implementador, y la revisión humana del PR es el *two-stage review*. Dentro del worktree, un nivel más abajo, corre el conjunto entero de skills — `writing-plans`, `subagent-driven-development`, `test-driven-development`, `systematic-debugging`. El mismo patrón, dos escalas.
+Control Tower es el patrón de desarrollo dirigido por subagentes **un nivel por encima**: la tabla de slices es el fichero de plan, `/ct-next` es el coordinador, la sesión despachada es el implementador, y la revisión humana del PR es el *two-stage review*. Dentro del worktree, un nivel más abajo, la sesión escribe el plan con `writing-plans-prescriptive` y conduce la implementación **consultando `ct-step`** (la máquina de estados como oráculo); los skills forkados (`test-driven-development`, `systematic-debugging`…) los cargan los subagentes que la máquina manda despachar. El mismo patrón, dos escalas.
 
 ## Instalación
 
@@ -111,6 +111,55 @@ Empieza siempre en seco:
 /ct-groom --dry-run      # valida EXACTAMENTE lo mismo que la corrida real
 /ct-next  --dry-run      # comprueba lo que el run real necesita, e imprime el kickoff en prosa
 ```
+
+## `ct-step`: la secuencia de la implementación, decidida por una tabla
+
+Entre el gate del plan y la pull request hay un tramo que antes conducía una
+sesión de chat siguiendo `subagent-driven-development`: despachaba un
+implementador por tarea, un revisor detrás, y mantenía un ledger en disco para
+no perder el sitio cuando la conversación se compactara.
+
+`scripts/ct-step.mjs` **no sustituye a esa sesión**: le quita una sola
+responsabilidad, la de decidir qué toca ahora. La sesión sigue conduciendo y
+sigue despachando subagentes; la secuencia la decide `scripts/run-machine.js`,
+una función pura, y la sesión la **consulta**:
+
+```bash
+ct-step next                     # "toca implementar la tarea 3; el brief está en X"
+ct-step report informe.json      # valida las rutas, las stagea, transiciona
+ct-step controls                 # ejecuta los comandos de **Verification:** y MIDE
+ct-step verdict veredicto.json   # valida contra el esquema, transiciona
+ct-step commit                   # valida el mensaje y comitea
+ct-step global                   # tras la última tarea: corre ## 8. Global verification
+ct-step slice-verdict v.json     # el juicio del slice ENTERO (ct-slice-judge, sin Bash)
+```
+
+Lo que cambia respecto de hoy, en una línea por propiedad:
+
+| | Conduciendo con prosa | Con `ct-step` |
+|---|---|---|
+| Quién decide el paso siguiente | un modelo leyendo una skill | una tabla — y **pedir un paso que no toca se rechaza** (exit `9`) |
+| Dónde vive el sitio en el que va | un ledger que el modelo escribe | `.agent/run-<issue>.json`, que sobrevive a una compactación |
+| Quién mide si la tarea está verde | el implementador se lo reporta a sí mismo | `ct-step controls`, que además comprueba que los tests prometidos existen |
+| Qué puede ejecutar el juez | `code-reviewer.md` despacha un `general-purpose`: tiene `Bash` | nada: `agents/ct-judge.md` se declara sin `Bash` |
+| Qué devuelve el juez | prosa | un JSON validado contra un esquema; lo que no cumple se descarta |
+| Quién comitea | el implementador | el programa, y valida su propio mensaje contra las closing keywords |
+| Quién ejecuta `## 8. Global verification` | nadie — el plan la declaraba y ningún programa la corría | `ct-step global`, tras la última tarea; en rojo no se abre la pull request (exit `11`/`12`) |
+| Quién juzga el slice ENTERO | nadie — el juicio era por tarea | `agents/ct-slice-judge.md` (sin `Bash`): el fin del slice y la coherencia entre tareas, con veredicto que viaja en su propio commit |
+
+**Es el camino por defecto desde `0.36.0`**: el kickoff que compone `/ct-next`
+manda conducir la implementación consultando `ct-step` (y prohíbe SDD como
+conductor), y desde `0.36.1` `dispatch-check --release` lo convierte en gate —
+sin un run **entregado** (`closed: "delivered"` en `.agent/run-<issue>.json`)
+no se libera (exit `7`), porque un prompt no es un gate. Nota de historia: en
+upstream esto era la decisión **D-4** del documento de convergencia (aplazada,
+dueño José) y la vigilaba `__tests__/d4-sigue-siendo-de-jose.test.js`; este
+fork la tomó en `3071d8a`, borrando el test en el mismo commit que enchufó el
+kickoff, como su propia cabecera pedía.
+
+El diseño, lo que se midió para tomarlo y lo que la primera corrida real enseñó
+están en
+[`docs/superpowers/specs/2026-08-18-el-conductor-como-programa-design.md`](docs/superpowers/specs/2026-08-18-el-conductor-como-programa-design.md).
 
 ## El estado de un slice es una label
 
@@ -192,11 +241,11 @@ Si no, el repo sigue distribuyendo el hook viejo mientras la fuente ya dice otra
 
 ```
 commands/     los cuatro slash commands (Markdown + prosa larga: son la documentación)
-scripts/      la lógica — módulos puros y los tres ejecutables .mjs
+scripts/      la lógica — módulos puros y los ejecutables .mjs (los cuatro del loop y ct-step)
 hooks/        SessionStart (hidratación), Stop (estado al día), PreToolUse (guarda de commits)
 dist/         bundles de los hooks — DERIVADO, trackeado, ver arriba
 skills/       los 11 skills forkados + writing-plans-prescriptive (propio) + LICENSE-superpowers + FORK.md
-__tests__/    62 ficheros, 1.745 tests
+__tests__/    72 ficheros, 2.091 tests
 docs/loop/    el documento del ciclo: fuente, HTML autocontenido y PDF
 docs/         los handoffs de cada ronda (prompt-fNN-*.md) — cómo se llegó hasta aquí
 ```

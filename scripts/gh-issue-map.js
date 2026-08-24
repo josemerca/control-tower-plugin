@@ -585,6 +585,25 @@ export function extractDeps(body) {
   return [...(body || '').matchAll(/merge-after `?#(\d+)/g)].map((m) => parseInt(m[1], 10))
 }
 
+// SENAL_HEADING (Slice 10): la sección del cuerpo del issue que declara la
+// señal de observabilidad del slice (o su exención razonada `N/A — <razón>`).
+// La constante NACE aquí y no en groom.js, aunque sea groom quien la escribe:
+// este fichero es la capa inferior (groom.js ya importa de aquí) y mapGhIssue
+// también la necesita para extraerla del body — ponerla en groom.js crearía
+// un import circular. groom.js la re-exporta para que sus consumidores no
+// tengan que saber dónde nació, el mismo trato que sus cabeceras hermanas.
+export const SENAL_HEADING = '## Señal de observabilidad'
+
+// extractSenal (Slice 10): section-scoped con extractSectionContent — la
+// primera aparición gana, misma postura que extractAc (locateSection siempre
+// devuelve la primera copia; un duplicado es un merge mal resuelto y la
+// primera es la que compara y obedece todo el mundo). Devuelve el contenido
+// trimmed verbatim, o null sin sección — mapGhIssue colapsa además el
+// contenido vacío a null (sección presente pero en blanco = ausente).
+export function extractSenal(body) {
+  return extractSectionContent(body, SENAL_HEADING)
+}
+
 // DEPS_HEADING / extractDepsInSection: fuente ÚNICA de "qué deps ve
 // cualquiera que lea este body" — mapGhIssue (dispatcher real) y
 // reconcile.js#depsInSection la comparten (D1 finding 2). `malformed: true`
@@ -791,6 +810,12 @@ export function mapGhIssue(i) {
     // structs representan el mismo concepto, así que usan la misma palabra.
     name: (i.title || '').replace(/^#\d+\s*/, ''),
     ac: extractAc(body),
+    // senal (Slice 10): la señal de observabilidad que el issue declara —
+    // sección "## Señal de observabilidad" del body, primera aparición gana
+    // (misma postura que extractAc). Contenido vacío = ausente: `null` y no
+    // '' para que buildStateSeed (kickoff.js) pueda declarar la ausencia con
+    // SENAL_AUSENTE sin distinguir dos formas de "nada".
+    senal: extractSenal(body) || null,
     issue: `#${i.number}`,
   }
 }
@@ -1045,6 +1070,13 @@ export function buildDispatchInput(rawOpenIssues, rawClosedIssues) {
       const orderMap = perEpic.get(epicKeyOf(raw))
       return {
         ...issue,
+        // D-4 — el epic viaja con el issue porque aquí ya está calculado. En
+        // Control Tower el epic ES el milestone (ver la cabecera de
+        // `epicKeyOf`, arriba), y `/ct-next` ya lo deriva para detectar
+        // colisiones del marcador `ct-order`. Sembrarlo en el despacho evita
+        // que cada run de `ct-step` le pregunte a `gh` por un dato que el
+        // dispatcher tenía en la mano — o sea, red en el camino crítico.
+        epic: epicKeyOf(raw),
         deps: (issue.deps || []).map((d) => (orderMap && orderMap.has(d) ? orderMap.get(d) : null)),
       }
     })

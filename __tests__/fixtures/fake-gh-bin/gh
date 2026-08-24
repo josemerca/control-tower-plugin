@@ -153,6 +153,30 @@ function main() {
       process.exitCode = 1
       return
     }
+    // FAKE_GH_VIEW_COMMENTS — el camino de `--json comments`, que es el que usa
+    // el vigilante del `-OK` (scripts/ct-watch-go.mjs). Va aparte del de labels
+    // porque son dos preguntas distintas al mismo subcomando: sin separarlas,
+    // el vigilante recibiría la lista de labels y no encontraría `comments` en
+    // ella nunca.
+    //
+    // FAKE_GH_VIEW_COMMENTS_SEQUENCE (opcional) es una lista de payloads, uno
+    // por llamada, para poder probar lo que de verdad importa del vigilante:
+    // que en el primer tick NO hay go y sigue esperando, y que en un tick
+    // POSTERIOR sí lo hay y entonces empuja. Con un payload fijo sólo se puede
+    // probar uno de los dos.
+    if (joined.includes('--json comments')) {
+      const seq = process.env.FAKE_GH_VIEW_COMMENTS_SEQUENCE
+        ? JSON.parse(process.env.FAKE_GH_VIEW_COMMENTS_SEQUENCE)
+        : null
+      if (seq) {
+        const i = nextCallIndex(process.env.FAKE_GH_VIEW_COMMENTS_COUNTER_FILE)
+        process.stdout.write(JSON.stringify(seq[Math.min(i, seq.length - 1)]))
+      } else {
+        process.stdout.write(process.env.FAKE_GH_VIEW_COMMENTS || '{"comments":[]}')
+      }
+      process.exitCode = 0
+      return
+    }
     process.stdout.write(process.env.FAKE_GH_VIEW_LABELS || '[]')
     process.exitCode = 0
     return
@@ -262,6 +286,45 @@ function main() {
       return
     }
     process.stdout.write(process.env.FAKE_GH_LABELS_LIST || '[[]]')
+    process.exitCode = 0
+    return
+  }
+
+  // `gh api repos/<o>/<r>/contents/docs/superpowers/metrics[...]` (ct-harvest.mjs,
+  // §3.4): el LISTADO del directorio de telemetría y la lectura RAW de un
+  // fichero. Va antes de la rama genérica de `contents/` (la del spec
+  // renderizado en HTML de ct-groom) porque aquélla casa con cualquier ruta.
+  //
+  // Sin FAKE_GH_METRICS_DIR_JSON el listado FALLA, que es la vida real de todo
+  // repo anterior a la telemetría del juez: el default no puede ser un
+  // directorio vacío inventado.
+  if (argv[0] === 'api' && /^repos\/[^/]+\/[^/]+\/contents\/docs\/superpowers\/metrics/.test(argv[1] || '')) {
+    const ruta = argv[1]
+    const esDirectorio = /\/contents\/docs\/superpowers\/metrics$/.test(ruta)
+    if (esDirectorio) {
+      if (!process.env.FAKE_GH_METRICS_DIR_JSON) {
+        console.error('fake-gh: api contents (metrics dir) failed (simulado: 404 Not Found)')
+        process.exitCode = 1
+        return
+      }
+      process.stdout.write(process.env.FAKE_GH_METRICS_DIR_JSON)
+      process.exitCode = 0
+      return
+    }
+    const fallo = process.env.FAKE_GH_METRICS_FILE_FAIL
+    if (fallo && ruta.includes(fallo)) {
+      console.error('fake-gh: api contents (metrics file) failed (simulado)')
+      process.exitCode = 1
+      return
+    }
+    const ficheros = JSON.parse(process.env.FAKE_GH_METRICS_FILES || '{}')
+    const nombre = ruta.split('/').pop()
+    if (!Object.hasOwn(ficheros, nombre)) {
+      console.error('fake-gh: api contents (metrics file) 404 (simulado)')
+      process.exitCode = 1
+      return
+    }
+    process.stdout.write(ficheros[nombre])
     process.exitCode = 0
     return
   }

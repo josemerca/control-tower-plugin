@@ -1,13 +1,16 @@
 #!/usr/bin/env node
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, statSync, accessSync, constants as fsConstants, writeSync, realpathSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { tmpdir } from 'node:os'
+import { tmpdir, homedir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { dirname, join, isAbsolute, delimiter as pathDelimiter } from 'node:path'
-import { planDispatch, parseRepoSlug, buildCmuxArgv, buildCmuxSendArgv, buildCmuxSendKeyArgv, collectFinishedResidue, formatFinishedResidueWarning } from './dispatch.js'
+import { planDispatch, parseRepoSlug, buildCmuxArgv, buildCmuxSendArgv, buildCmuxSendKeyArgv, cmuxSessionName, collectFinishedResidue, formatFinishedResidueWarning } from './dispatch.js'
 import { renderKickoff, buildStateSeed, AGENT_BIN } from './kickoff.js'
 import { parseStrictInt } from './argnum.js'
+import { resolveGatesForAgent } from './gates.js'
+import { GO_TOKEN } from './go-response.js'
+import { controlTowerLogDir } from './run-metrics.js'
 import { shQuote } from './shquote.js'
 import {
   buildLauncherScript, buildTypedCommand, parseSentinel, sameDir,
@@ -36,6 +39,13 @@ import { assessLocalLiveness } from './liveness.js'
 // lado de ct-next.mjs dentro del plugin, con independencia de dónde esté
 // instalado.
 const dispatchCheckPath = join(dirname(fileURLToPath(import.meta.url)), 'dispatch-check.mjs')
+// La misma resolución para ct-step.mjs: el kickoff interpola la ruta absoluta
+// real, nunca el token ${CLAUDE_PLUGIN_ROOT} (que en un prompt de texto plano
+// no lo sustituye nadie).
+const ctStepPath = join(dirname(fileURLToPath(import.meta.url)), 'ct-step.mjs')
+// El vigilante del `-OK`: se lanza desprendido tras despachar un slice con gate
+// `plan`. Ver lanzarVigilanteDelGo.
+const ctWatchGoPath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch-go.mjs')
 
 // ============================================================================
 // D5, hallazgo F (segunda mitad) — QUE EL DESTINO DE LA SALIDA SE ROMPA NO
@@ -726,6 +736,84 @@ function verifyCmuxLaunch(expectedTitle, expectedCwd) {
 //                    saberlo NO se puede decir «lanzado», y TAMPOCO se puede
 //                    revertir el claim: un revert con un agente que arranca
 //                    tres segundos tarde es peor que el residuo.
+// ============================================================================
+// EL VIGILANTE DEL `-OK` — un solo go, y en el issue.
+//
+// El gate `plan` manda al agente publicar su plan como comentario del issue y
+// PARAR hasta que un humano conteste. Hasta esta ronda esa respuesta no la leía
+// nadie: el trabajo se reanudaba cuando la persona iba a la ventana de cmux y
+// empujaba la sesión a mano. O sea que el permiso se daba dos veces y el que
+// contaba no era el que queda escrito.
+//
+// Se lanza DESPRENDIDO (`detached` + `unref`) porque tiene que sobrevivir a que
+// se cierre esta sesión coordinadora. Si sólo viviera mientras alguien mira, no
+// serviría para el caso que motiva todo esto: en la medida de F33, el 54% del
+// reloj de un epic fue un gate pedido de noche esperando a que alguien se
+// despertara.
+//
+// SÓLO SI EL SLICE LLEVA EL GATE `plan`. Un slice que lo renunció (`!plan` en la
+// tabla §9) no para a esperar a nadie, así que no hay nada que vigilar y un
+// proceso sondeando GitHub durante ocho horas para nada es peor que su ausencia.
+//
+// Y SÓLO SI EL SLICE CONTÓ COMO LANZADO. El único handle del vigilante es el
+// TÍTULO de la sesión, así que en los dos caminos que no cuentan —'not-found'
+// (cmux contestó y no hay ninguna sesión con ese título) y 'wrong-cwd' (la hay,
+// pero en otro directorio, y el slice se apunta en `unverifiedLaunches`)—
+// lanzarlo era anunciar «la sesión arranca sola» en la misma corrida en la que
+// se acaba de decir que esa sesión no se localiza. Lo cazó una revisión
+// adversarial, y el repo tiene un fichero de tests entero contra esta clase de
+// mensaje (`ct-next-honest-messages.test.js`).
+//
+// NO ROMPE EL DESPACHO. Va después de que el claim esté resuelto y el slice
+// contado como lanzado, y cualquier fallo aquí se AVISA y sigue: el trabajo ya
+// está en marcha, y no poder vigilar el go significa volver al modo de antes
+// —empujar a mano—, no perder el slice. Es la misma regla que el `git add` de la
+// telemetría en ct-step: el termómetro no es parte del motor. Por eso hay
+// además un manejador de `error`: un fallo ASÍNCRONO de `spawn` (EAGAIN, EMFILE)
+// no lo ve el `try/catch`, y sin manejador sería un `'error'` sin atender que
+// tumbaría ct-next entero — perdiéndose el resumen de la tanda y su exit code.
+//
+// EL LOG LO ABRE EL VIGILANTE, no esta función. Cuando lo abría aquí, la suite
+// creaba directorios y ficheros en el `$HOME` real de quien la corriera (los
+// tests sustituyen el BINARIO, no el disco) — justo lo que
+// `__tests__/fixtures/hermetic-env.js` existe para evitar—, y además quedaba un
+// descriptor sin cerrar por slice. Aquí sólo se calcula la ruta, para poder
+// decirla y para pasársela.
+//
+// CT_WATCH_GO_BIN sigue el patrón de CT_ACCOUNT_*_DIR: no cambia NINGUNA
+// decisión, sólo qué programa se lanza. Existe para que los tests puedan
+// comprobar que el vigilante se lanza con los argumentos correctos sin poner un
+// proceso real a sondear GitHub durante ocho horas.
+// ============================================================================
+function lanzarVigilanteDelGo(slice, sessionName) {
+  // Los gates salen del slice tal cual lo mapeó el issue: `resolveGatesForAgent`
+  // sólo mira `gatesDeclared`/`gates`/`type`, y la normalización que hace
+  // `sliceForKickoff` es de `ac`/`issue`/`epic`. Así esto no obliga a ensanchar
+  // el objeto de `plans`.
+  if (!resolveGatesForAgent(slice).includes('plan')) return
+  const aviso = (por) => console.error(`  aviso: no se ha lanzado el vigilante del ${GO_TOKEN} de #${slice.n} (${por}) — el slice está lanzado y el gate sigue en pie, pero tendrás que empujar su sesión a mano tras dar el go.`)
+  try {
+    const bin = process.env.CT_WATCH_GO_BIN || ctWatchGoPath
+    // `spawn(process.execPath, [bin, …])` con un `bin` que no existe NO falla:
+    // el ejecutable es siempre `node`, así que el proceso nace, muere al
+    // instante con un error de módulo, y sin esta comprobación se anunciaba
+    // «vigilante lanzado» con un pid que ya no existía. Es la misma clase de
+    // defecto que F19/H1 cerró en el despacho —«cmux devolvió 0» no es «el
+    // comando corrió»— con una evidencia todavía más débil: aquí lo único
+    // comprobado sería que `node` existe.
+    if (!existsSync(bin)) return aviso(`el programa del vigilante no existe: ${bin}`)
+    const logPath = join(controlTowerLogDir({ configDir: process.env.CLAUDE_CONFIG_DIR || null, home: homedir() }), `watch-go-${slice.n}.log`)
+    const hijo = spawn(process.execPath, [
+      bin, '--issue', String(slice.n), '--repo', repo, '--session', sessionName, '--log', logPath,
+    ], { detached: true, stdio: 'ignore' })
+    hijo.on('error', (e) => aviso(`fallo al arrancarlo: ${e.message}`))
+    hijo.unref()
+    console.log(`  vigilante del ${GO_TOKEN} de #${slice.n} lanzado (pid ${hijo.pid}) — cuando contestes ${GO_TOKEN} en el issue, la sesión arranca sola. Log: ${logPath}`)
+  } catch (e) {
+    aviso(e.message)
+  }
+}
+
 async function waitForLaunchSentinel(sentinelPath, expectedCwd, budgetMs = launchSentinelTimeoutMs) {
   const deadline = Date.now() + budgetMs
   // Bucle ASÍNCRONO (no un `Atomics.wait` síncrono como el de los stubs): cada
@@ -1412,47 +1500,51 @@ function detectDefaultBranch(repoSlug) {
   return out
 }
 
-// Verificación local de que la rama base resuelta EXISTE en el checkout (fix
-// round 1, Important): `detectDefaultBranch`/`--base` resuelven un NOMBRE
-// (contra GitHub, o a mano), pero `git worktree add -b <branch> <wt>
-// <resolvedBase>` necesita que ese nombre resuelva como referencia real EN
-// EL CHECKOUT LOCAL. Dos escenarios reales sin esta comprobación: un --base
-// con un typo ("mian"), o una rama por defecto que existe en GitHub pero
-// nunca se fetcheó en local (`git clone --single-branch`, checkout viejo).
-// Sin esta guarda, la secuencia sería: se hace el claim (status:ready →
-// status:in-progress) → `git worktree add` falla con un error interno de
-// git ("fatal: invalid reference…") → se revierte el claim → exit 1. El
-// estado queda consistente (no hay corrupción), pero se quema un ciclo
-// entero de claim/revert por algo que se podía saber OFFLINE, sin tocar gh,
-// antes de reclamar nada.
+// LA BASE SALE DEL REMOTO, NO DE LA COPIA LOCAL (Paso 1 del spec de la
+// primera corrida en un repo ajeno, 20 ago 2026).
 //
-// Se comprueba con `git rev-parse --verify --quiet <ref>^{commit}` (silencia
-// su propio error; el mensaje lo decidimos nosotros) contra DOS referencias:
-// la rama local, y `origin/<rama>` (la copia remote-tracking) — para poder
-// distinguir "no existe en ningún sitio que este checkout conozca" (typo
-// probable) de "existe en origin pero no se ha fetcheado/creado en local"
-// (arreglo: `git fetch`), en vez de dar el mismo mensaje genérico para dos
-// causas con remedios distintos.
-function verifyBaseExistsLocally(base) {
-  const existsAsCommit = (ref) => {
-    try {
-      // timeout+killSignal (MENOR, revisión externa: "TODA llamada
-      // bloqueante" de la cabecera de finding 1 no era del todo cierto —
-      // faltaban esta y las otras dos llamadas de git/gh puramente locales
-      // de este fichero, sin protección alguna contra un cuelgue real).
-      execFileSync('git', ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`], { cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutFor(), killSignal: 'SIGKILL' })
-      return true
-    } catch {
-      return false
-    }
-  }
-  if (existsAsCommit(base)) return
-  if (existsAsCommit(`origin/${base}`)) {
-    console.error(`la rama base "${base}" existe en origin pero no en tu checkout local (probablemente falta un \`git fetch\`). Corre \`git fetch origin ${base}\` (o crea la rama local con \`git branch ${base} origin/${base}\`) y reintenta, o pasa --base <otra-rama> que sí tengas en local.`)
+// Antes esto era `verifyBaseExistsLocally`: comprobaba que el nombre resuelto
+// existiera EN EL CHECKOUT, prefiriendo la rama local y mirando
+// `origin/<rama>` solo si la local no estaba. Cerraba un fallo real (un
+// `--base` con typo quemaba un ciclo entero de claim/revert), y abría otro
+// peor, medido en campo: la rama local puede existir Y ESTAR VIEJA.
+//
+// jjponz/rust-monitoring#10. El worktree del slice salió de un `main` local
+// que estaba un commit por detrás de su remoto, porque otra pull request había
+// mergeado diecinueve minutos antes. De ahí, en cadena: el plan se escribió
+// citando verbatim un AGENTS.md que ya no era el de la base, la pull request
+// nació en conflicto, y por el conflicto GitHub no pudo calcular su referencia
+// de merge y NO ARRANCÓ NI UN CHECK. El criterio de aceptación del slice era
+// "la integración continua ejecuta los cuatro comandos en cada pull request",
+// y se entregó sin que eso se hubiera demostrado nunca.
+//
+// Así que la copia local deja de decidir. Se hace `git fetch origin <base>` y
+// el worktree se corta de `origin/<base>`: lo único que puede estar rancio
+// —una rama local que nadie actualizó— sale de la ecuación en vez de
+// diagnosticarse. El fetch NO es opcional y su fallo es terminal: sin él no se
+// sabe si la base está al día, y despachar sin saberlo es exactamente lo que
+// pasó en esa corrida.
+//
+// Lo que NO cambia: el nombre de la rama. `base:` en la semilla del slice
+// sigue siendo `main` y no `origin/main`, porque de ahí sale el `--base` de
+// `gh pr create`, que no acepta una rama remota. Cambia de dónde SALE el
+// worktree, no contra qué se abre la pull request.
+function fetchAndVerifyBaseOnRemote(base) {
+  try {
+    // timeout+killSignal como el resto de las llamadas bloqueantes de este
+    // fichero (finding 1). A diferencia de las otras, ésta SÍ toca la red: es
+    // el único punto del despacho que lo hace con git.
+    execFileSync('git', ['fetch', 'origin', base], { cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutFor(), killSignal: 'SIGKILL' })
+  } catch (e) {
+    console.error(`no se pudo hacer \`git fetch origin ${base}\` en ${repoRoot} (${e.message}). El worktree del slice se corta de origin/${base}, así que sin fetch no se puede saber si la base está al día — y un slice que nace por detrás de su remoto acaba en una pull request en conflicto, que GitHub deja sin ningún check. Arréglalo (¿red? ¿remote origin? ¿credenciales?) y reintenta: NO se ha reclamado nada.`)
     process.exit(1)
   }
-  console.error(`la rama base "${base}" no existe ni en tu checkout local ni como origin/${base} — revisa el nombre (¿--base con un typo?), o corre \`git fetch\` si es una rama remota reciente que tu checkout todavía no conoce.`)
-  process.exit(1)
+  try {
+    execFileSync('git', ['rev-parse', '--verify', '--quiet', `origin/${base}^{commit}`], { cwd: repoRoot, stdio: 'ignore', timeout: childTimeoutFor(), killSignal: 'SIGKILL' })
+  } catch {
+    console.error(`la rama base "${base}" no existe en el remoto: tras el fetch, origin/${base} no resuelve a ningún commit. Revisa el nombre (¿--base con un typo?) o pasa --base <otra-rama> que exista en origin.`)
+    process.exit(1)
+  }
 }
 
 // Guarda de identidad de repo (finding 1 de la review final, el más grave de
@@ -1537,20 +1629,20 @@ if (fx) {
   }
   ensureRepoIdentity(repoRoot, repo)
   resolvedBase = typeof baseArg === 'string' ? baseArg : detectDefaultBranch(repo)
-  // Fix round 1, Important: verificación local ANTES del bucle de despacho,
-  // offline (ni gh ni red) — ver el comentario de verifyBaseExistsLocally.
-  verifyBaseExistsLocally(resolvedBase)
-  // F22: se resuelve UNA vez, aquí, donde `verifyBaseExistsLocally` acaba de
+  // Paso 1: fetch y verificación CONTRA EL REMOTO antes del bucle de despacho
+  // — ver el comentario de fetchAndVerifyBaseOnRemote.
+  fetchAndVerifyBaseOnRemote(resolvedBase)
+  // F22: se resuelve UNA vez, aquí, donde fetchAndVerifyBaseOnRemote acaba de
   // demostrar que la referencia existe. Si aun así fallara, se sigue con
   // cadena vacía: la semilla lo trata como "sin last_commit" y el hook calla,
   // que es el comportamiento de antes de este cambio — degradar es
   // aceptable, mentir no.
   try {
-    resolvedBaseSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${resolvedBase}^{commit}`], {
+    resolvedBaseSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `origin/${resolvedBase}^{commit}`], {
       cwd: repoRoot, encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
     }).trim()
   } catch {
-    console.error(`aviso: no se pudo resolver "${resolvedBase}" a un sha concreto, así que la semilla del slice irá sin \`last_commit\`. El hook de cierre de turno no podrá avisar al agente de que su estado se ha quedado atrás.`)
+    console.error(`aviso: no se pudo resolver "origin/${resolvedBase}" a un sha concreto, así que la semilla del slice irá sin \`last_commit\`. El hook de cierre de turno no podrá avisar al agente de que su estado se ha quedado atrás.`)
   }
 }
 
@@ -2307,12 +2399,12 @@ for (let idx = 0; idx < selected.length; idx++) {
   if (numErr) { failSlice(idx, numErr); continue }
   const branch = `feat/${s.n}`
   const wt = `${repoRoot}/.worktrees/${s.n}`
-  const name = `${repoName} · #${s.n} ${s.name}`
+  const name = cmuxSessionName({ repoName, issue: s.n, sliceName: s.name })
   // Normaliza ac/issue por si el slice viene de un fixture de test (como el
   // del brief) que no los trae: renderKickoff/buildStateSeed indexan
   // slice.ac como array y usan slice.issue con `??`/`||` — sin este default
   // revientan con un TypeError en vez de imprimir el plan.
-  const sliceForKickoff = { ...s, ac: s.ac || [], issue: s.issue ?? null }
+  const sliceForKickoff = { ...s, ac: s.ac || [], issue: s.issue ?? null, epic: s.epic ?? null }
   let kickoff
   let stateSeed
   try {
@@ -2321,7 +2413,7 @@ for (let idx = 0; idx < selected.length; idx++) {
     // sabe contra qué rama salió su worktree, `gh pr create` lo apunta a la
     // rama por defecto del repo — con `--base <otra-rama>`, un diff que no es
     // el suyo.
-    kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath, base: resolvedBase })
+    kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath, ctStepPath, base: resolvedBase })
     stateSeed = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase, baseSha: resolvedBaseSha })
   } catch (e) {
     failSlice(idx, `no se pudo renderizar el kickoff/SLICE.md de #${s.n}: ${e.message}. El agente se lanzaría sin prompt utilizable — antes, esto solo se descubría en el run real.`)
@@ -3114,7 +3206,7 @@ for (let idx = 0; idx < plans.length; idx++) {
       // redirigido stdout a un fichero no lo tiene "arriba" en ningún sitio.
       console.log(`destino: ${wt} / rama ${branch} — SIN CONFIRMAR: la consulta a git se intentó y FALLÓ (el detalle y el comando manual están en el aviso correspondiente, por stderr), así que no se puede afirmar que estén libres. Esto NO es modo fixture: la corrida real hará exactamente esta misma comprobación, y si vuelve a fallar tampoco lo sabrá.`)
     }
-    console.log(`git worktree add -b ${branch} ${wt} ${resolvedBase}`)
+    console.log(`git worktree add -b ${branch} ${wt} origin/${resolvedBase}`)
     console.log(`seed ${wt}/${SLICE_REL_PATH}:\n${stateSeed}`)
     // D4, defecto 3: el kickoff, en PROSA. La línea `cmux ...` de abajo lo
     // lleva dentro, pero doblemente escapado (comillas POSIX + el
@@ -3359,7 +3451,7 @@ for (let idx = 0; idx < plans.length; idx++) {
     // `= null` cuyo único consumidor era un guard inalcanzable dentro de
     // `handleInterrupt` — ver el comentario de `activeClaim` para el porqué
     // de retirarlo.)
-    execFileSync('git', ['worktree', 'add', '-b', branch, wt, resolvedBase], { cwd: repoRoot, stdio: 'inherit', timeout: childTimeoutFor('worktree-add'), killSignal: 'SIGKILL' })
+    execFileSync('git', ['worktree', 'add', '-b', branch, wt, `origin/${resolvedBase}`], { cwd: repoRoot, stdio: 'inherit', timeout: childTimeoutFor('worktree-add'), killSignal: 'SIGKILL' })
   } catch (e) {
     // Si el worktree o la rama ya existen, `git worktree add` falla con
     // exit != 0 — lo dejamos fallar ruidoso en vez de reusar en silencio
@@ -3582,6 +3674,12 @@ for (let idx = 0; idx < plans.length; idx++) {
   // `claude` resoluble. Lo que queda por decidir es solo cuánto sabemos de la
   // VENTANA, que es una pregunta menos importante y ya no puede producir un
   // falso "lanzado" por sí sola.
+  // El vigilante del `-OK` sólo se lanza si este slice CUENTA como lanzado, y
+  // `launchedCount` es exactamente ese hecho: las dos ramas que no lo
+  // incrementan ('wrong-cwd' y 'not-found') son las que apuntan el slice en
+  // `unverifiedLaunches`, y en las dos el título de la sesión —el único handle
+  // del vigilante— es justo lo que cmux acaba de negar.
+  const lanzadosAntesDeVerificar = launchedCount
   if (launchCheck.status === 'confirmed') {
     console.log(`lanzado #${s.n} en ${wt} — verificado: la sesión cmux está corriendo en ese directorio, y el comando llegó a ejecutarse de verdad (centinela de arranque escrito por el propio shell, con $PWD=${sentinel.cwd} y \`claude\` resoluble).${reenvio}`)
     launchedCount++
@@ -3626,6 +3724,7 @@ for (let idx = 0; idx < plans.length; idx++) {
   // claim. Esta línea se conserva como idempotente por si el flujo de arriba
   // cambiara; no es la que cierra la ventana.)
   activeClaim = null
+  if (launchedCount > lanzadosAntesDeVerificar) lanzarVigilanteDelGo(s, name)
 }
 
 // D2 review, menor 1: TODO este bloque de conteo/exit-code es exclusivo del

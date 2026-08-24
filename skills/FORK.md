@@ -53,6 +53,12 @@ writing-plans · writing-skills.
    el tier barato queda para arreglos mecánicos de un fichero. Un cherry-pick
    que restaure el atajo devuelve la regresión: lo vigila `skills-fork.test.js`
    (costura 5).
+6. **test-driven-development** (F39): `prompts/task-implementer.md` ya no lleva el
+   ciclo escrito dentro — carga `control-tower-loop:test-driven-development`. A
+   partir de aquí, un cherry-pick de upstream sobre esa skill cambia el
+   comportamiento del implementador de `ct-step`, que antes era inmune. El fork
+   se tomó de 6.0.3; comprueba qué cambió en el ciclo antes de traerlo. Lo
+   vigila `skills-fork.test.js` (costura 6).
 
 Reescritura mecánica en todos: el namespace upstream `superpowers:` pasó a
 `control-tower-loop:`, y las referencias a `../using-superpowers/references/`

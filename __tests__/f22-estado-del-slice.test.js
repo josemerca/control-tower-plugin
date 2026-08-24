@@ -302,7 +302,6 @@ function mkRealDispatchRepo({ trackAgentState = true } = {}) {
   git('init', '-q', '-b', 'main')
   git('config', 'user.email', 'test@test')
   git('config', 'user.name', 'test')
-  git('remote', 'add', 'origin', 'https://github.com/o/r.git')
   if (trackAgentState) {
     mkdirSync(join(dir, '.agent'), { recursive: true })
     writeFileSync(join(dir, '.agent', 'STATE.md'), '---\ntask: el epic\n---\n# coordinadora\n')
@@ -310,6 +309,26 @@ function mkRealDispatchRepo({ trackAgentState = true } = {}) {
   writeFileSync(join(dir, '.gitignore'), `${SLICE_REL_PATH}\n!${SLICE_REL_PATH}\n`)
   git('add', '-A')
   git('commit', '-qm', 'base')
+  // UN ORIGIN DE VERDAD, FETCHEABLE Y OFFLINE (Paso 1 del spec de la primera
+  // corrida en un repo ajeno). Estos dos tests corren git DE VERDAD, y desde
+  // el Paso 1 ct-next.mjs hace `git fetch origin <base>` y corta el worktree
+  // de `origin/<base>`: con el `https://github.com/o/r.git` que había aquí, el
+  // fetch salía a la red, fallaba, y la corrida moría ANTES de llegar a la
+  // puerta de efecto que estos tests existen para probar.
+  //
+  // El truco es la RUTA: un repo bare local colgado de `.../github.com/o/r.git`
+  // satisface las dos cosas a la vez sin tocar nada de producción — `git fetch`
+  // lo alcanza porque es una ruta del disco, y la guarda de identidad de
+  // ct-next.mjs lo lee como `o/r` porque su regex busca `github.com[:/]owner/repo`
+  // en la URL del remote, y una ruta con ese tramo dentro casa igual que una URL.
+  // Se clona DESPUÉS del commit para que `origin/main` exista, y vive DENTRO
+  // de `.git/` para que no aparezca en `git status --porcelain` (la puerta de
+  // efecto de F22 lee esa salida) y se lo lleve la limpieza del propio repo.
+  const origin = join(dir, '.git', 'test-origin', 'github.com', 'o', 'r.git')
+  mkdirSync(dirname(origin), { recursive: true })
+  execFileSync('git', ['clone', '-q', '--bare', dir, origin], { stdio: 'ignore' })
+  git('remote', 'add', 'origin', origin)
+  git('fetch', '-q', 'origin', 'main')
   return dir
 }
 
@@ -680,6 +699,9 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     '**TDD:** No TDD — fixture.',
     '**Tests:** N/A — fixture.',
     '**Verification:** git log shows the commit.',
+    FENCE + 'bash',
+    'git log --oneline -1',
+    FENCE,
     '## 8. Global verification',
     'N/A — fixture.',
     '## 9. Assumptions',
@@ -690,6 +712,14 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
   const seedPlan = (wt, issue) => {
     mkdirSync(join(wt, 'docs', 'superpowers', 'plans'), { recursive: true })
     writeFileSync(join(wt, 'docs', 'superpowers', 'plans', `2026-08-12-issue-${issue}-fixture.md`), minimalPlanFor(issue))
+  }
+
+  // El gate del run de --release (exit 7): estos tests prueban OTRAS puertas,
+  // así que se les da un run entregado para que la del run no interfiera.
+  // Sin commitear, que es como lo deja ct-step (ct-init lo gitignorea).
+  const seedRun = (wt, issue) => {
+    mkdirSync(join(wt, '.agent'), { recursive: true })
+    writeFileSync(join(wt, '.agent', `run-${issue}.json`), JSON.stringify({ issue, task: 1, tasksTotal: 1, step: 'commit', closed: 'delivered' }))
   }
 
   // Igual que seedPlan, pero su Task 1 CITA un fichero en vez de crearlo:
@@ -708,6 +738,7 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     seedPlan(wt, 1)
     git('add', '-A')
     git('commit', '-qm', 'work')
+    seedRun(wt, 1)
     const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
       cwd: wt, encoding: 'utf8',
     })
@@ -783,6 +814,7 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     writeFileSync(join(wt, 'AGENTS.md'), 'texto nuevo que trae el slice\n')
     git('add', '-A')
     git('commit', '-qm', 'work')
+    seedRun(wt, 1)
     const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
       cwd: wt, encoding: 'utf8',
     })
