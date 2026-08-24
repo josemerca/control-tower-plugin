@@ -203,6 +203,16 @@ describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive 
     expect(s).not.toMatch(/complete final content/i)
   })
 
+  it('describe el brief que ct-step entrega de verdad, con la vara del plan', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    const ctStep = readFileSync(join(ROOT, 'scripts', 'ct-step.mjs'), 'utf8')
+    expect(ctStep).toContain('--with-plan-context')
+    expect(s).toContain('--with-plan-context')
+    expect(s).toContain('## 2. Closed decisions')
+    expect(s).toContain('## 3. Reference patterns')
+    expect(s).not.toMatch(/extracts that task and nothing more/i)
+  })
+
   it('dice que la configuración va en prosa y que un test va por nombre y aserción', () => {
     const s = read('writing-plans-prescriptive', 'SKILL.md')
     expect(s).toMatch(/configuration/i)
