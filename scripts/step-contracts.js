@@ -102,8 +102,8 @@ export const RUBRIC_OUTCOMES = ['conforme', 'no-aplica', 'sin-vara']
 //
 // Y cada hallazgo lleva `evidence`: la CITA literal que lo sostiene — la frase
 // del plan que se incumple, o la línea del diff que lo prueba. No es `what`
-// (que narra el defecto) ni `where` (que ubica): es el texto que alguien puede
-// contrastar sin abrir nada. La rúbrica ya exigía citar antes de bloquear
+// (que narra el defecto) ni `path`/`line` (que ubican): es el texto que alguien
+// puede contrastar sin abrir nada. La rúbrica ya exigía citar antes de bloquear
 // ("evidence before blocking"), pero lo exigía en PROSA, en un fichero de
 // doscientas cuarenta líneas donde compite con ocho ítems que hay que recorrer
 // de verdad. Un campo obligatorio del esquema no se olvida; una frase sí. Y se
@@ -114,6 +114,22 @@ export const RUBRIC_OUTCOMES = ['conforme', 'no-aplica', 'sin-vara']
 // El enum del ítem es el MISMO array VERDICT_RULES, no una copia: dos listas de
 // nueve identificadores divergen al primer renombrado, que es el desacople que
 // este módulo ya pagó con JUDGE_TOOLS.
+//
+// Y la ubicación son DOS campos, `path` y `line`, y no la cadena `"path:line"`
+// que llevaba hasta aquí. Lo que impedía la cadena es agregar: la telemetría
+// cuenta hallazgos por regla (`findings_by_rule`) y no puede contarlos por
+// fichero, porque partir por el último `:` una cadena que escribió un modelo es
+// adivinar — un `C:\` de Windows, un `a.js:10-14`, un `src/a.js` sin línea y un
+// `toda la clase Foo` son la misma cadena para el programa. Es el §3.13 del
+// handoff, y es la forma que ya tiene el `Finding` de `agentic-skills`.
+//
+// `path` es obligatorio y `line` NO, y la asimetría es deliberada: un hallazgo
+// del fichero entero (un import que sobra en todo el módulo, un fichero que no
+// debería existir) no tiene línea que citar, y exigírsela al juez sólo compra
+// dos cosas malas — un número inventado, o un descarte más de los seis que
+// matan el run (§3.2). Ausente y `null` son lo mismo. Lo que sí se rechaza es
+// una línea que no se puede leer como número: `"12"` y `12` no se agregan
+// igual, y tolerar la cadena hoy es telemetría sucia mañana.
 export const VERDICT_SCHEMA = Object.freeze({
   type: 'object',
   additionalProperties: false,
@@ -140,12 +156,13 @@ export const VERDICT_SCHEMA = Object.freeze({
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['rule', 'severity', 'what', 'where', 'evidence'],
+        required: ['rule', 'severity', 'what', 'path', 'evidence'],
         properties: {
           rule: { type: 'string', enum: VERDICT_RULES },
           severity: { type: 'string', enum: SEVERITIES },
           what: { type: 'string' },
-          where: { type: 'string' },
+          path: { type: 'string' },
+          line: { type: ['integer', 'null'], minimum: 1 },
           evidence: { type: 'string' },
         },
       },
@@ -248,7 +265,14 @@ export function readVerdict(structured) {
   for (const [i, f] of findings.entries()) {
     if (!f || typeof f !== 'object') return { why: `el hallazgo ${i} no es un objeto` }
     if (!SEVERITIES.includes(f.severity)) return { why: `el hallazgo ${i} tiene una severidad desconocida: ${JSON.stringify(f.severity)}` }
-    if (!esTexto(f.what) || !esTexto(f.where)) return { why: `el hallazgo ${i} no dice qué o dónde` }
+    if (!esTexto(f.what) || !esTexto(f.path)) return { why: `el hallazgo ${i} no dice qué o dónde: hacen falta 'what' y 'path'` }
+    // `line` es opcional y `null` vale: un hallazgo del fichero entero no tiene
+    // línea, y exigirla sería pedir un número inventado o gastar un descarte de
+    // los seis que matan el run. Lo que no vale es una línea que no es un
+    // número: la cadena `"12"` pasa el `typeof` y rompe cualquier agregación.
+    if (f.line !== undefined && f.line !== null && !(Number.isInteger(f.line) && f.line > 0)) {
+      return { why: `el hallazgo ${i} trae una línea que no es un número: ${JSON.stringify(f.line)} — un entero, o null (u omitida) si el hallazgo es del fichero entero` }
+    }
     // La cita, con el mismo trato que el qué y el dónde: sin ella el hallazgo
     // no se puede contrastar, y un veto que no se puede contrastar es el veto
     // defensivo que la calibración de la rúbrica existe para impedir.
@@ -301,6 +325,18 @@ export function outcomeOfVerdict(verdict) {
   // Un PASA con hallazgos que no son de severidad baja no bloquea, pero tampoco
   // se ignora: vuelve al implementador con presupuesto propio.
   return verdict.findings.some((f) => f.severity !== 'low') ? 'corrections-ordered' : 'done'
+}
+
+// `path:line` a partir de los dos campos, en UN solo sitio. El hallazgo los
+// lleva separados para que un programa pueda agrupar por fichero, pero quien
+// lee el aviso de corrección quiere la ubicación de una pieza. Vive aquí,
+// pegado al esquema, para que el próximo lector no invente su propia
+// recomposición: dos formatos de la misma ubicación es la divergencia que este
+// módulo ya pagó con JUDGE_TOOLS. Sin línea imprime sólo el fichero, que es
+// exactamente lo que ese hallazgo dice.
+export function findingLocation(finding) {
+  const { path, line } = finding || {}
+  return line === undefined || line === null ? String(path ?? '') : `${path}:${line}`
 }
 
 export function readReport(structured) {

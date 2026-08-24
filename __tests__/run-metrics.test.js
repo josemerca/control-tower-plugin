@@ -153,9 +153,9 @@ describe('el conteo por severidad', () => {
     expect(verdictMeasures({
       ruling: 'FAIL',
       findings: [
-        { rule: 'contrato', severity: 'high', what: 'a', where: 'x' },
-        { rule: 'alcance', severity: 'low', what: 'b', where: 'y' },
-        { rule: 'alcance', severity: 'low', what: 'c', where: 'z' },
+        { rule: 'contrato', severity: 'high', what: 'a', path: 'x' },
+        { rule: 'alcance', severity: 'low', what: 'b', path: 'y' },
+        { rule: 'alcance', severity: 'low', what: 'c', path: 'z' },
       ],
     })).toEqual({
       ruling: 'FAIL', findings_total: 3, findings_high: 1, findings_medium: 0, findings_low: 2,
@@ -196,9 +196,9 @@ describe('el conteo por severidad', () => {
     expect(verdictMeasures({
       ruling: 'FAIL',
       findings: [
-        { rule: 'manipulacion-tests', severity: 'high', what: 'a', where: 'x' },
-        { rule: 'manipulacion-tests', severity: 'low', what: 'b', where: 'y' },
-        { rule: 'alcance', severity: 'low', what: 'c', where: 'z' },
+        { rule: 'manipulacion-tests', severity: 'high', what: 'a', path: 'x' },
+        { rule: 'manipulacion-tests', severity: 'low', what: 'b', path: 'y' },
+        { rule: 'alcance', severity: 'low', what: 'c', path: 'z' },
       ],
     }).findings_by_rule).toEqual({ 'manipulacion-tests': 2, alcance: 1 })
   })

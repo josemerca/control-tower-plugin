@@ -57,6 +57,6 @@ Las líneas ilegibles de un `jsonl` se cuentan y se dicen; no tiran el fichero n
 
 - **`*` en `release→merge`** marca que esa celda se midió contra el **cierre del issue** y no contra el merge de un PR. Va en la propia celda, no en una nota al pie: una nota al pie no viaja cuando alguien copia la tabla.
 - **Dos PRs cerrando un mismo issue** se dice en voz alta como motivo (y baja el exit a `1`) en vez de elegir uno en silencio.
-- **`--json`** emite `{repo, milestone, filas, motivos}` con los segundos en crudo, para pegarlo en el desenlace del epic sin traducir.
+- **`--json`** emite `{repo, milestone, filas, motivos, telemetry}` con los segundos en crudo, para pegarlo en el desenlace del epic sin traducir. La quinta clave es la lectura del DIRECTORIO de telemetría (`{dir, status: ok|no-leido, why}`), distinta del `telemetry` que cada fila lleva dentro.
 - **`--json`** lleva la telemetría de cada slice DENTRO de su fila (`telemetry.status`: `ok` / `sin-fichero` / `no-leido`), por el mismo motivo por el que `type` y `gate` viajan dentro.
 - El formato de duración (`1m03`, `2h06m17`, `9h41m23`) es el mismo con el que se escribió a mano el desenlace del despacho 1, para poder comparar tabla cosechada y tabla escrita sin convertir nada.

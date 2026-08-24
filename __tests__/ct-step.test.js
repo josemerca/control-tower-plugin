@@ -154,8 +154,8 @@ describe('next: la sesión pregunta y el oráculo contesta', () => {
   it('cuando el juez devolvió la tarea, next se lo dice al implementador', () => {
     ct('report', informe(['uno.txt']))
     ct('controls')
-    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'está mal', where: 'uno.txt:1' }]))
-    expect(ct('next').stdout).toMatch(/El juez devolvió esta tarea[\s\S]*está mal/)
+    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'está mal', path: 'uno.txt', line: 1 }]))
+    expect(ct('next').stdout).toMatch(/El juez devolvió esta tarea[\s\S]*uno\.txt:1: está mal/)
   })
 })
 
@@ -223,7 +223,7 @@ describe('el camino feliz', () => {
 })
 
 describe('el veto no deja rastro que deshacer', () => {
-  const veta = () => ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'mal', where: 'uno.txt:1' }]))
+  const veta = () => ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }]))
 
   it('tres vetos agotan el presupuesto, salen por 1 y NO comitean', () => {
     for (let i = 0; i < 3; i++) {
@@ -236,7 +236,7 @@ describe('el veto no deja rastro que deshacer', () => {
   })
 
   it('un PASS con hallazgos medios corrige y luego entrega igual', () => {
-    const queja = () => ct('verdict', veredicto('PASS', [{ severity: 'medium', what: 'falta un caso', where: 'uno.txt:1' }]))
+    const queja = () => ct('verdict', veredicto('PASS', [{ severity: 'medium', what: 'falta un caso', path: 'uno.txt', line: 1 }]))
     for (let i = 0; i < 3; i++) {
       ct('report', informe(['uno.txt']))
       ct('controls')
@@ -441,7 +441,7 @@ describe('el veredicto que no se puede leer no es un veredicto', () => {
 
   it('un PASS con hallazgo grave se descarta: se contradice a sí mismo', () => {
     preparar()
-    const r = ct('verdict', veredicto('PASS', [{ severity: 'high', what: 'mal', where: 'uno.txt:1' }]))
+    const r = ct('verdict', veredicto('PASS', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }]))
     expect(r.stdout).toMatch(/contradice la rúbrica/)
   })
 
@@ -568,7 +568,7 @@ describe('el veredicto viaja en la pull request', () => {
   it('un FAIL no deja veredicto trackeado: solo viaja el que aprueba', () => {
     ct('report', informe(['uno.txt']))
     ct('controls')
-    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'mal', where: 'uno.txt:1' }]))
+    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }]))
     expect(existsSync(join(repo, 'docs', 'superpowers', 'verdicts', 'issue-7-task-1.json'))).toBe(false)
   })
 })
@@ -649,7 +649,7 @@ describe('lo que el implementador avisa, y la telemetría, no se quedan donde na
   it('Paso 5: las filas del intento que el juez vetó viajan también — el coste de las vueltas es el dato', () => {
     ct('report', informe(['uno.txt']))
     ct('controls')
-    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'no', where: 'uno.txt:1' }]))
+    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'no', path: 'uno.txt', line: 1 }]))
     ct('report', informe(['uno.txt']))
     ct('controls')
     ct('verdict', veredicto('PASS'))

@@ -345,7 +345,8 @@ around it, no markdown fence:
  "findings": [{"rule": "objetivo",
                "severity": "high|medium|low",
                "what": "the defect and the case that shows it",
-               "where": "path:line",
+               "path": "src/thing.js",
+               "line": 42,
                "evidence": "the line or sentence you are citing, quoted"}]}
 ```
 
@@ -362,10 +363,17 @@ around it, no markdown fence:
   `manipulacion-tests`, `fixture-theater`, `alcance`, `test-desiderata` —
   spelled exactly. Anything else discards the whole verdict: a finding that fits
   none of the nine is a finding you have not justified.
-- `where` is a path and a line: where the defect is, and nothing else.
+- `path` and `line` are where the defect is, and they are two fields on purpose
+  and not one `path:line` string: a program groups findings by file, and it
+  cannot split a string it did not write. `path` is the file as the diff names
+  it, and a missing or empty one discards the verdict. `line` is a bare number —
+  `42`, not `"42"`, not a range: a finding about the whole file (an import the
+  module never needed, a file that should not exist) leaves it out or sets it to
+  `null`, and anything that is neither a number nor `null` discards the verdict.
 - `evidence` is the citation the second calibration rule asks for, and it is a
-  different fact from `where`: the text itself, quoted — the sentence of the
-  brief that the diff does not honour, or the line of the diff that breaks it.
+  different fact from `path` and `line`: the text itself, quoted — the
+  sentence of the brief that the diff does not honour, or the line of the
+  diff that breaks it.
   A location tells the reader where to look; the quote is what lets them
   disagree with you without opening anything. A finding without it is discarded.
 

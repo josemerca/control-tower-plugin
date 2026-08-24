@@ -61,7 +61,7 @@ import { dirname, join } from 'node:path'
 import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS } from './run-machine.js'
 import { extractTasks } from './plan-tasks.js'
 import {
-  readVerdict, readReport, outcomeOfVerdict, commitMessage,
+  readVerdict, readReport, outcomeOfVerdict, commitMessage, findingLocation,
   IMPLEMENTER_TOOLS, JUDGE_TOOLS, PACKAGE_SECTIONS,
 } from './step-contracts.js'
 import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, metricsRepoRelPath } from './run-metrics.js'
@@ -660,7 +660,7 @@ function verboVerdict() {
   run = {
     ...run,
     lastVerdict: verdict,
-    lastFindings: graves.length ? graves.map((f) => `- [${f.severity}] ${f.where}: ${f.what}`).join('\n') : null,
+    lastFindings: graves.length ? graves.map((f) => `- [${f.severity}] ${findingLocation(f)}: ${f.what}`).join('\n') : null,
   }
   if (verdict.ruling === 'PASS') {
     // El veredicto VIAJA en la pull request (criterio de cierre de F37: "el

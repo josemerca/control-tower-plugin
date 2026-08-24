@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
-  readVerdict, readReport, outcomeOfVerdict, commitMessage,
+  readVerdict, readReport, outcomeOfVerdict, commitMessage, findingLocation,
   VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS, VERDICT_RULES,
   PACKAGE_SECTIONS, RUBRIC_OUTCOMES,
 } from '../scripts/step-contracts.js'
@@ -78,7 +78,7 @@ const item9DeLaRubrica = () => {
 // que no aparece ahí es un ítem que el juez recorre pero del que nunca se
 // atreve a emitir un hallazgo.
 const identificadoresQueElJuezPuedeEscribir = () => {
-  const m = /- `rule` is one of the[\s\S]*?(?=\n- `where`)/.exec(readFileSync(AGENTE_JUEZ, 'utf8'))
+  const m = /- `rule` is one of the[\s\S]*?(?=\n- `path`)/.exec(readFileSync(AGENTE_JUEZ, 'utf8'))
   return m ? m[0].replace(/\s+/g, ' ') : ''
 }
 
@@ -340,6 +340,17 @@ describe('quién puede qué', () => {
     expect(esquemaDelAgente()).toMatch(/"evidence"/)
   })
 
+  it('la rúbrica le enseña al juez los dos campos de la ubicación, y ya no el campo viejo', () => {
+    // Mismo argumento que `outcome` y `evidence`: un campo obligatorio que sólo
+    // vive en el validador descarta todos los veredictos de la corrida sin que
+    // ninguno sea culpa del juez. Y el `not`: un ejemplo que enseñe también el
+    // `where` viejo es un juez que rellena el viejo, no trae `path`, y quema
+    // MAX_DISCARDS con un veredicto correcto dentro.
+    expect(esquemaDelAgente()).toMatch(/"path"/)
+    expect(esquemaDelAgente()).toMatch(/"line"/)
+    expect(esquemaDelAgente()).not.toMatch(/"where"/)
+  })
+
   it('los tres valores de outcome están en la rúbrica, escritos igual que en el enum', () => {
     // El enum es cerrado y el juez sólo puede escribir lo que la rúbrica le
     // enseña. Si el código renombra `sin-vara` y el fichero sigue diciendo lo
@@ -369,12 +380,12 @@ describe('el veredicto', () => {
     ['sin structured_output', null, /no devolvió structured_output/],
     ['con un ruling inventado', { ruling: 'MAYBE', findings: [] }, /ruling desconocido/],
     ['con findings que no es lista', { ruling: 'PASS', findings: 'ninguno' }, /no es una lista/],
-    ['con una severidad inventada', { ruling: 'FAIL', findings: [{ rule: 'contrato', severity: 'catastrophic', what: 'x', where: 'y', evidence: 'z' }] }, /severidad desconocida/],
-    ['con un hallazgo mudo', { ruling: 'FAIL', findings: [{ rule: 'contrato', severity: 'high', what: '', where: 'y', evidence: 'z' }] }, /no dice qué o dónde/],
+    ['con una severidad inventada', { ruling: 'FAIL', findings: [{ rule: 'contrato', severity: 'catastrophic', what: 'x', path: 'y', evidence: 'z' }] }, /severidad desconocida/],
+    ['con un hallazgo mudo', { ruling: 'FAIL', findings: [{ rule: 'contrato', severity: 'high', what: '', path: 'y', evidence: 'z' }] }, /no dice qué o dónde/],
     // Sin fijar este caso, una regresión que cambiara la condición a
     // `f.rule && !VERDICT_RULES.includes(f.rule)` dejaría pasar en silencio
     // un hallazgo sin `rule` — sólo cazaría la regla INVENTADA, no la AUSENTE.
-    ['con un hallazgo sin rule', { ruling: 'FAIL', findings: [{ severity: 'high', what: 'x', where: 'y', evidence: 'z' }] }, /regla desconocida/],
+    ['con un hallazgo sin rule', { ruling: 'FAIL', findings: [{ severity: 'high', what: 'x', path: 'y', evidence: 'z' }] }, /regla desconocida/],
   ])('se descarta %s', (_caso, structured, motivo) => {
     const r = readVerdict(structured)
     expect(r.verdict).toBeUndefined()
@@ -384,13 +395,13 @@ describe('el veredicto', () => {
   it('un PASS con un hallazgo grave se descarta: se contradice a sí mismo', () => {
     // No se interpreta hacia el lado prudente. Un juez que no se entiende a sí
     // mismo no ha juzgado, y volver a preguntar cuesta menos que decidir por él.
-    const r = v('PASS', [{ rule: 'contrato', severity: 'high', what: 'sql injection', where: 'db.js:10', evidence: 'query(`… ${id}`)' }])
+    const r = v('PASS', [{ rule: 'contrato', severity: 'high', what: 'sql injection', path: 'db.js', line: 10, evidence: 'query(`… ${id}`)' }])
     expect(r.verdict).toBeUndefined()
     expect(r.why).toMatch(/contradice la rúbrica/)
   })
 
   it('el hallazgo nombra la regla que incumple', () => {
-    const r = v('FAIL', [{ rule: 'manipulacion-tests', severity: 'high', what: 'debilitó una aserción', where: 'a.test.js:12', evidence: '-  expect(x).toBe(3)' }])
+    const r = v('FAIL', [{ rule: 'manipulacion-tests', severity: 'high', what: 'debilitó una aserción', path: 'a.test.js', line: 12, evidence: '-  expect(x).toBe(3)' }])
     expect(r.verdict.findings[0].rule).toBe('manipulacion-tests')
   })
 
@@ -398,7 +409,7 @@ describe('el veredicto', () => {
     // El mismo criterio que ya aplica a un ruling inventado: una regla que no
     // está en VERDICT_RULES no es un hallazgo sin justificar, es un dato que no
     // se entiende — se descarta y se vuelve a preguntar, no es un error.
-    const r = v('FAIL', [{ rule: 'me-lo-invento', severity: 'high', what: 'x', where: 'y', evidence: 'z' }])
+    const r = v('FAIL', [{ rule: 'me-lo-invento', severity: 'high', what: 'x', path: 'y', evidence: 'z' }])
     expect(r.verdict).toBeUndefined()
     expect(r.why).toMatch(/regla desconocida/)
     expect(VERDICT_RULES).not.toContain('me-lo-invento')
@@ -525,7 +536,7 @@ describe('el veredicto', () => {
   // campo obligatorio no se olvida.
   // -------------------------------------------------------------------------
   it('se descarta el hallazgo que no cita la evidencia que lo sostiene', () => {
-    const r = v('FAIL', [{ rule: 'contrato', severity: 'high', what: 'la firma no casa', where: 'a.js:3' }])
+    const r = v('FAIL', [{ rule: 'contrato', severity: 'high', what: 'la firma no casa', path: 'a.js', line: 3 }])
     expect(r.verdict).toBeUndefined()
     expect(r.why).toMatch(/evidencia/)
   })
@@ -533,9 +544,47 @@ describe('el veredicto', () => {
   it('la cita se exige también en un medium: es el que manda al implementador a una vuelta pagada', () => {
     // Un campo obligatorio sólo para `high` se olvida igual que la prosa, y un
     // `medium` sin cita cuesta un viaje de ida y vuelta sin decir qué mirar.
-    const r = v('PASS', [{ rule: 'alcance', severity: 'medium', what: 'un helper que nadie pidió', where: 'a.js:9' }])
+    const r = v('PASS', [{ rule: 'alcance', severity: 'medium', what: 'un helper que nadie pidió', path: 'a.js', line: 9 }])
     expect(r.verdict).toBeUndefined()
     expect(r.why).toMatch(/evidencia/)
+  })
+
+  // -------------------------------------------------------------------------
+  // LA UBICACIÓN, EN DOS CAMPOS. Era la cadena `"path:line"`, y lo que impedía
+  // es agregar: partir por el último `:` una cadena que escribió un modelo es
+  // adivinar. §3.13 del handoff.
+  // -------------------------------------------------------------------------
+  it('el hallazgo ubica en dos campos, y el veredicto los conserva separados', () => {
+    const r = v('FAIL', [{ rule: 'contrato', severity: 'high', what: 'la firma no casa', path: 'src/db.js', line: 10, evidence: 'function q(id, extra)' }])
+    expect(r.verdict.findings[0].path).toBe('src/db.js')
+    expect(r.verdict.findings[0].line).toBe(10)
+  })
+
+  it('se descarta el hallazgo que no dice en qué fichero está', () => {
+    const r = v('FAIL', [{ rule: 'contrato', severity: 'high', what: 'la firma no casa', line: 10, evidence: 'z' }])
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/no dice qué o dónde/)
+  })
+
+  it.each([
+    ['sin línea', {}],
+    ['con la línea a null', { line: null }],
+  ])('un hallazgo del fichero entero vale %s: la línea no es obligatoria', (_caso, extra) => {
+    // Exigir línea siempre sólo compra un número inventado o un descarte más de
+    // los seis que matan el run (§3.2 del handoff).
+    const r = v('FAIL', [{ rule: 'alcance', severity: 'high', what: 'este fichero no lo pide ninguna frase', path: 'src/de-mas.js', evidence: '**Files:** src/a.js', ...extra }])
+    expect(r.verdict.findings[0].path).toBe('src/de-mas.js')
+  })
+
+  it.each([
+    ['una cadena', '12'],
+    ['un rango', '12-18'],
+    ['un cero', 0],
+    ['un decimal', 3.5],
+  ])('se descarta el hallazgo cuya línea es %s: lo que no es número no se agrega', (_caso, line) => {
+    const r = v('FAIL', [{ rule: 'contrato', severity: 'high', what: 'x', path: 'a.js', line, evidence: 'z' }])
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/línea que no es un número/)
   })
 })
 
@@ -543,7 +592,7 @@ describe('de veredicto a resultado de la tabla', () => {
   const o = (ruling, findings = []) => outcomeOfVerdict({ ruling, findings })
 
   it('FAIL es un veto', () => {
-    expect(o('FAIL', [{ severity: 'high', what: 'x', where: 'y' }])).toBe('failed')
+    expect(o('FAIL', [{ severity: 'high', what: 'x', path: 'y' }])).toBe('failed')
   })
 
   it('PASS limpio entrega', () => {
@@ -552,11 +601,11 @@ describe('de veredicto a resultado de la tabla', () => {
 
   it('PASS con hallazgos sólo de severidad baja entrega igual', () => {
     // Si cada nimiedad volviera al implementador, el bucle no terminaría nunca.
-    expect(o('PASS', [{ severity: 'low', what: 'nombre mejorable', where: 'a.js' }])).toBe('done')
+    expect(o('PASS', [{ severity: 'low', what: 'nombre mejorable', path: 'a.js' }])).toBe('done')
   })
 
   it('PASS con un hallazgo medio es un refunfuño: corrige, pero no bloquea', () => {
-    expect(o('PASS', [{ severity: 'medium', what: 'falta un caso', where: 'a.test.js' }])).toBe('corrections-ordered')
+    expect(o('PASS', [{ severity: 'medium', what: 'falta un caso', path: 'a.test.js' }])).toBe('corrections-ordered')
   })
 })
 
@@ -618,7 +667,7 @@ describe('los esquemas declarados, atados a lo que valida de verdad', () => {
   const veredictoValido = () => ({
     ruling: 'FAIL',
     rubric: recorridoCompleto(),
-    findings: [{ rule: 'contrato', severity: 'high', what: 'x', where: 'y', evidence: 'z' }],
+    findings: [{ rule: 'contrato', severity: 'high', what: 'x', path: 'y', evidence: 'z' }],
   })
 
   it.each(REPORT_SCHEMA.required)('readReport exige "%s", como declara REPORT_SCHEMA.required', (campo) => {
@@ -664,6 +713,21 @@ describe('los esquemas declarados, atados a lo que valida de verdad', () => {
   it('el esquema pide el recorrido entero: ni un paso más, ni uno menos', () => {
     expect(VERDICT_SCHEMA.properties.rubric.minItems).toBe(VERDICT_RULES.length)
     expect(VERDICT_SCHEMA.properties.rubric.maxItems).toBe(VERDICT_RULES.length)
+  })
+})
+
+// La ubicación se recompone en un solo sitio: el aviso de corrección la quiere
+// de una pieza, y la cosecha la querrá mañana.
+describe('la ubicación de un hallazgo, de dos campos a una pieza', () => {
+  it('con línea es `path:line`', () => {
+    expect(findingLocation({ path: 'src/a.js', line: 4 })).toBe('src/a.js:4')
+  })
+
+  it.each([
+    ['sin línea', { path: 'src/a.js' }],
+    ['con la línea a null', { path: 'src/a.js', line: null }],
+  ])('%s es sólo el fichero, que es lo que ese hallazgo dice', (_caso, f) => {
+    expect(findingLocation(f)).toBe('src/a.js')
   })
 })
 
