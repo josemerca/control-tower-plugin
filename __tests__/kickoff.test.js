@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP, ADDENDA, SENAL_AUSENTE } from '../scripts/kickoff.js'
 import { parseState } from '../scripts/state.js'
 import { resolveAccount, resolveAccountLegacy, validateAccountMap } from '../scripts/dispatch.js'
@@ -316,6 +319,20 @@ describe('la señal en el despacho (Slice 10)', () => {
     // La constante abre con "(sin señal declarada" — es el prefijo con el que
     // la rúbrica del juez de slice reconoce el estado sin-vara.
     expect(SENAL_AUSENTE.startsWith('(sin señal declarada')).toBe(true)
+  })
+
+  it('la apertura que la rúbrica del juez de slice cita es un prefijo real de SENAL_AUSENTE', () => {
+    // Hallazgo low del juez del Slice 10: el cruce era unidireccional — el
+    // test de arriba vigila la constante, pero la CITA del agente («it opens
+    // with `(sin señal declarada`») no estaba atada a ella, así que editar esa
+    // frase en agents/ct-slice-judge.md rompería el reconocimiento de sin-vara
+    // sin que ningún test lo notara. Se lee del fichero real, como todas las
+    // ataduras agente↔constante de step-contracts.test.js.
+    const agente = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-slice-judge.md'), 'utf8')
+    const cita = /opens with\s+`([^`]+)`/.exec(agente)
+    expect(cita).not.toBeNull()
+    expect(SENAL_AUSENTE.startsWith(cita[1])).toBe(true)
   })
 
   it('la exención razonada viaja al SLICE.md tal cual (N/A — razón)', () => {
