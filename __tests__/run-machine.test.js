@@ -1,6 +1,6 @@
 // La tabla que decide el paso siguiente (scripts/run-machine.js).
 //
-// Este fichero es EXHAUSTIVO a propósito: recorre los 24 pares (paso,
+// Este fichero es EXHAUSTIVO a propósito: recorre los 30 pares (paso,
 // resultado) que existen y comprueba, uno a uno, o bien a dónde va el run, o
 // bien que la transición LANZA. La razón es que el valor entero del diseño está
 // en que la secuencia no la decida un modelo: una tabla con un hueco no es una
@@ -19,6 +19,7 @@ const DESCRITOS = new Set([
   'controls/done', 'controls/failed', 'controls/indeterminate',
   'judge/done', 'judge/failed', 'judge/corrections-ordered', 'judge/discarded',
   'commit/done', 'commit/failed',
+  'e2e/done', 'e2e/failed', 'e2e/indeterminate', 'e2e/discarded',
   // over-budget lo entiende cualquier paso.
   ...PASOS.map((p) => `${p}/over-budget`),
 ])

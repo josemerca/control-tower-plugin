@@ -29,6 +29,14 @@ export const STEPS = Object.freeze({
   CONTROLS: 'controls',
   JUDGE: 'judge',
   COMMIT: 'commit',
+  // E2E — el único paso que NO es por tarea: se entra al comitear la última y
+  // sólo si la slice declara recorridos. Va aquí y no colgado de `controls`
+  // porque `controls` mide lo que el PLAN prometió contra el árbol, por tarea,
+  // y esto atraviesa lo que el SPEC declaró contra el sistema levantado, por
+  // slice. Colgarlo de controls obligaría a que cada tarea arrastrara un e2e
+  // que no le toca, o a un controls especial en la última — una rama de la
+  // tabla que no describe ningún estado real.
+  E2E: 'e2e',
 })
 
 export const OUTCOMES = Object.freeze({
@@ -46,6 +54,9 @@ export const RUN_STATES = Object.freeze({
   BLOCKED_CONTROLS: 'blocked-controls',
   BLOCKED_JUDGE: 'blocked-judge',
   BLOCKED_COMMIT: 'blocked-commit',
+  // Mismo sitio y misma forma que sus tres hermanos: un cierre en fallo del que
+  // sale una persona, no un reintento.
+  BLOCKED_E2E: 'blocked-e2e',
   ABORTED_BUDGET: 'aborted-budget',
 })
 
@@ -56,11 +67,17 @@ export const DEFAULT_BUDGETS = Object.freeze({
 })
 
 // El run recién nacido: tarea 1, paso implement, todos los contadores a cero.
-export function newRun({ plan, issue, baseSha, tasksTotal }) {
+export function newRun({ plan, issue, baseSha, tasksTotal, e2eRuns }) {
   return freeze({
     plan, issue, baseSha,
     task: 1,
     tasksTotal,
+    // e2eRuns — los recorridos que la columna E2E del spec declara para esta
+    // slice, sembrados por /ct-next en .agent/SLICE.md (ct-step no habla con
+    // GitHub). Lista vacía y no `undefined` a propósito: `[]` significa "esta
+    // slice no tiene e2e" y es un dato, mientras que `undefined` no se
+    // distingue de "una versión vieja escribió este run".
+    e2eRuns: Array.isArray(e2eRuns) ? [...e2eRuns] : [],
     step: STEPS.IMPLEMENT,
     controlRetries: 0,
     judgeRetries: 0,
@@ -104,6 +121,7 @@ export function after(run, outcome, budgets = DEFAULT_BUDGETS) {
     case STEPS.CONTROLS: return trasLosControles(run, outcome, budgets)
     case STEPS.JUDGE: return trasElJuez(run, outcome, budgets)
     case STEPS.COMMIT: return trasElCommit(run, outcome)
+    case STEPS.E2E: return trasElE2e(run, outcome)
     default: return imposible(run, outcome)
   }
 }
@@ -179,11 +197,42 @@ function trasElCommit(run, outcome) {
             judgeRetries: 0,
             correctionRetries: 0,
           })
-        : cerrado(run, RUN_STATES.DELIVERED)
+        // Comiteada la última tarea, la slice está implementada — pero si el
+        // spec declaró recorridos, todavía no está verificada de punta a punta.
+        // `task` NO avanza: el paso es de la slice, no de una tarea sexta que no
+        // existe. (Ojo: eso rompe la invariante `commits === task - 1` que
+        // ct-step comprueba al cargar el estado — ver Task 8.)
+        : (run.e2eRuns || []).length
+          ? abierto(run, { step: STEPS.E2E })
+          : cerrado(run, RUN_STATES.DELIVERED)
     // Un commit que falla no se reintenta: si git dice que no, es el índice o
     // el mensaje, y ninguna de las dos cosas se arregla volviendo a implementar.
     case OUTCOMES.FAILED:
       return cerrado(run, RUN_STATES.BLOCKED_COMMIT)
+    default:
+      return imposible(run, outcome)
+  }
+}
+
+function trasElE2e(run, outcome) {
+  switch (outcome) {
+    case OUTCOMES.DONE:
+      return cerrado(run, RUN_STATES.DELIVERED)
+    // El no-verificado ENTREGA. No es indulgencia: si retuviera el run, un
+    // docker que no arranca o una credencial caducada dejaría el slice en
+    // status:in-progress ocupando `area:`/`touches:` y una plaza de `--cap` sin
+    // nadie trabajando — el modo de fallo que F13 y F18 se dedicaron a quitar.
+    // Lo que no pasa nunca es que se afirme verde: el motivo viaja en el
+    // informe y `--release` lo imprime.
+    case OUTCOMES.INDETERMINATE:
+      return cerrado(run, RUN_STATES.DELIVERED)
+    case OUTCOMES.FAILED:
+      return cerrado(run, RUN_STATES.BLOCKED_E2E)
+    // Un informe que no se puede leer no gasta reintento: no se tocó el código
+    // ni el entorno. Mismo trato que en `implement`, y con el mismo respaldo —
+    // el tope de descartes de la slice.
+    case OUTCOMES.DISCARDED:
+      return abierto(run, { step: STEPS.E2E, discards: run.discards + 1 })
     default:
       return imposible(run, outcome)
   }
