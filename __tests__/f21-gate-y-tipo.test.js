@@ -475,30 +475,12 @@ describe('F21 — el contrato §9 documenta los gates y la invariante', () => {
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     expect(agents).toContain('**Gate**')
     expect(agents).toContain('`!visual`')
-    // `e2e` queda fuera de este bucle TEMPORALMENTE: su propia sección de
-    // AGENTS.md ("## Cómo se atraviesa este repo (e2e)") y el contrato v19
-    // que la siembra son el encargo de una tarea posterior de esta misma
-    // ronda (feature "e2e al cierre del slice"), no de ésta. El filtro se
-    // quita cuando esa tarea siembre la sección — y el test CANARIO de abajo
-    // es lo que obliga a acordarse: en cuanto `e2e` aparezca documentado en
-    // el AGENTS.md sembrado, ese test se pone en rojo por su cuenta.
-    for (const g of Object.keys(GATES).filter((g) => g !== 'e2e')) expect(agents, g).toContain(`\`${g}\``)
+    // Tarea 5 de "e2e al cierre del slice" cerró la deuda temporal que este
+    // test llevaba: el contrato v19 ya documenta `e2e` (columna `E2E` +
+    // gate derivado), así que el guardián vuelve a cubrir el vocabulario
+    // ENTERO, sin excepción.
+    for (const g of Object.keys(GATES)) expect(agents, g).toContain(`\`${g}\``)
     expect(agents).toContain('gate:none')
-    rmSync(dir, { recursive: true, force: true })
-  })
-
-  // CANARIO, no exención: fija el estado ACTUAL (el contrato sembrado por
-  // ct-init.sh todavía NO documenta `e2e`) para que el filtro del test de
-  // arriba no sobreviva a su propio motivo. Un `// TODO(task-5)` no habría
-  // fallado nunca; este test sí: en cuanto la tarea que siembra
-  // "## Cómo se atraviesa este repo (e2e)" (y el contrato v19) exista, este
-  // test se pone en rojo — y ROJO es la señal de "borra el filtro de arriba
-  // y este test juntos", no de que algo se haya roto.
-  it('CANARIO — el día que AGENTS.md documente `e2e`, este test debe fallar', () => {
-    const dir = mkdtempSync(join(tmpdir(), 'f21-init-e2e-canario-'))
-    execFileSync('bash', [initScript, dir], { encoding: 'utf8' })
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    expect(agents, 'e2e ya está documentado en AGENTS.md: quita el filtro del test de arriba y borra este canario').not.toContain('`e2e`')
     rmSync(dir, { recursive: true, force: true })
   })
 
