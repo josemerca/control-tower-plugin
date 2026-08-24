@@ -111,3 +111,36 @@ describe('aborts de la columna E2E', () => {
     expect(r.status).toBe(0)
   })
 })
+
+// ============================================================================
+// El gate "e2e", dicho en voz alta (task "e2e al cierre del slice", adición
+// 2). `resolveGates` nunca clasifica este caso como `g.added` — `e2e` no
+// viene de ningún `Tipo` (no vive en TYPE_GATES), así que con una fila que
+// sólo trae recorridos (sin nada escrito a mano en "Gate") lo mete en
+// `implied`. El aviso tiene que salir igual: si no sale, la label
+// "gate:e2e" llega al issue y el reporte de groom se queda callado, que es
+// la MISMA fuga que F21 cerró para la columna "Gate".
+//
+// Y tiene que nombrar la columna correcta: el mensaje genérico de "added"
+// dice "es deliberado (para eso está la columna Gate)", que aquí es FALSO —
+// declarar "e2e" a mano en "Gate" es uno de los cuatro aborts de arriba. Un
+// aviso que manda al autor a la columna equivocada es peor que ninguno.
+// ============================================================================
+describe('el gate "e2e" se anuncia por stderr, y nombra la columna correcta', () => {
+  it('una fila con recorridos produce el aviso y nombra "E2E", nunca "Gate"', () => {
+    const r = groom('–', 'curl -i :9115/metrics responde 200')
+    expect(r.status).toBe(0)
+    expect(r.stderr).toMatch(/gate/i)
+    expect(r.stderr).toContain('"e2e"')
+    expect(r.stderr).toMatch(/columna "E2E"/)
+    expect(r.stderr).not.toMatch(/columna "Gate"/)
+    const plan = JSON.parse(r.stdout)
+    expect(plan.issues[0].labels).toContain('gate:e2e')
+  })
+
+  it('una fila sin recorridos (`no`) no lleva ningún aviso de "e2e"', () => {
+    const r = groom('–', 'no')
+    expect(r.status).toBe(0)
+    expect(r.stderr).not.toContain('"e2e"')
+  })
+})

@@ -97,7 +97,7 @@ import {
 // como número de issue — un --reconcile con la copia vieja habría reescrito
 // el formato nuevo de vuelta al viejo, reintroduciendo el enlace falso en
 // cada corrida).
-import { renderDepsContent, renderAcContent, GATES_HEADING, EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING } from './groom.js'
+import { renderDepsContent, renderAcContent, GATES_HEADING, E2E_HEADING, EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING } from './groom.js'
 
 // ownedLabelsOnly: el spec solo es autoridad sobre un prefijo (`type:`,
 // `area:`, `touches:`) SI la tabla §9 trae la columna que lo alimenta
@@ -217,6 +217,12 @@ const DUPLICATE_CHECKS = [
   // `ownedLabelPrefixes`, ver ct-groom.mjs) es lo que hace que una divergencia
   // de gate REAL no pase desapercibida.
   { headings: GATES_HEADING, label: 'Gates', machine: false },
+  // La sección "## E2E" es igual de "no machine" que Gates y por el mismo
+  // motivo: ningún código del dispatcher la parsea — la lee el AGENTE
+  // despachado como instrucción en lenguaje natural (ver gates.js#GATES.e2e),
+  // y el canal que sí obedece la máquina es la label "gate:e2e" (ya cubierta
+  // por `labels`, arriba). Un duplicado aquí es cosmético.
+  { headings: E2E_HEADING, label: 'E2E', machine: false },
   { headings: '## Out of scope / Protected', label: 'Out of scope / Protected', machine: false },
   // Las dos secciones de contexto duplicadas son cosméticas: ninguna máquina
   // decide nada con ellas. Se avisa —un duplicado suele ser un merge mal
@@ -356,6 +362,24 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
   const currentGates = extractSectionContent(body, GATES_HEADING)
   const gatesDiffers = currentGates === null || currentGates.trim() !== (wantedIssue.gatesContent || '').trim()
 
+  // E2E: mismo trato que Gates ("nota", no "divergencia"; --reconcile no la
+  // reescribe), pero con el estado de TRES valores de Descripción/Contexto del
+  // epic, no el de Gates/Protegido — porque, a diferencia de esas dos, la
+  // sección NO se emite siempre (ver groom.js#buildIssueBody: sólo si hay
+  // recorridos). `null` en los dos lados es acuerdo real (este slice no tiene
+  // recorridos, y el issue no trae la sección), no divergencia; tratarlo como
+  // Gates trataría "ningún slice con e2e:no" como divergiendo siempre.
+  const currentE2e = extractSectionContent(body, E2E_HEADING)
+  const wantedE2e = wantedIssue.e2eContent ?? null
+  let e2eDiffers
+  if (currentE2e === null && wantedE2e === null) {
+    e2eDiffers = false
+  } else if (currentE2e === null || wantedE2e === null) {
+    e2eDiffers = true
+  } else {
+    e2eDiffers = currentE2e.trim() !== wantedE2e.trim()
+  }
+
   const duplicates = DUPLICATE_CHECKS.filter((c) => countHeadingLines(body, c.headings) > 1)
   const duplicateSections = duplicates.map((c) => c.label)
   const duplicateMachineSections = duplicates.filter((c) => c.machine).map((c) => c.label)
@@ -385,6 +409,7 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
     epicContextDiffers,
     protectedDiffers,
     gatesDiffers,
+    e2eDiffers,
     duplicateSections,
     duplicateMachineSections,
     strayDeps,
@@ -522,6 +547,10 @@ export function formatDrift(diff) {
   // esta nota sepa dónde mirar si de verdad le preocupa un gate — sin esa
   // frase, "no cuenta para el exit code" se lee como "los gates no importan".
   if (diff.gatesDiffers) lines.push(`nota: ${head}: la sección "${GATES_HEADING}" difiere del spec (no cuenta para el exit code; --reconcile no la reescribe). El gate que obedece el dispatcher son las labels "gate:" de este issue, que sí se comparan arriba — si un issue es anterior a los gates, esta sección le falta entera y basta con re-groomear su body a mano`)
+  // Mismo motivo que la nota de Gates, de al lado: se nombra la label
+  // "gate:e2e" como el canal que SÍ cuenta, para que "no cuenta para el exit
+  // code" no se lea como "los recorridos no importan".
+  if (diff.e2eDiffers) lines.push(`nota: ${head}: la sección "${E2E_HEADING}" difiere del spec (no cuenta para el exit code; --reconcile no la reescribe). El gate que obedece el dispatcher es la label "gate:e2e" de este issue, que sí se compara arriba — si el issue no trae la sección y el spec pide recorridos, basta con re-groomear su body a mano`)
   for (const section of diff.duplicateSections || []) {
     if ((diff.duplicateMachineSections || []).includes(section)) continue // ya reportada arriba como divergencia:
     // Sólo la primera se COMPARA (locateSection siempre devuelve esa), y

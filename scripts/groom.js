@@ -1,6 +1,6 @@
 // Lógica pura de grooming: de Slice[] (T1) a un plan de operaciones GitHub.
 import { isNoValueCell } from './slices.js'
-import { resolveGates, gateLabels, renderGatesIssueContent } from './gates.js'
+import { resolveGates, resolveE2e, gateLabels, renderGatesIssueContent } from './gates.js'
 import { locateSection, unterminatedDelimiter, normalizeToLF } from './gh-issue-map.js'
 
 // GATES_HEADING (F21): la sección de gates del cuerpo del issue. Constante
@@ -8,6 +8,21 @@ import { locateSection, unterminatedDelimiter, normalizeToLF } from './gh-issue-
 // reconcile.js al compararla, y sus tests) y una cabecera escrita a mano en
 // tres sitios es una cabecera que acaba divergiendo en uno.
 export const GATES_HEADING = '## Gates'
+
+// E2E_HEADING: la sección de recorridos del cuerpo del issue. Constante
+// exportada por el mismo motivo que GATES_HEADING: la nombran quien la escribe
+// (buildIssueBody), quien detecta divergencia (reconcile.js) y quien la lee en
+// la puerta del release (dispatch-check.mjs). Tres consumidores, una fuente.
+export const E2E_HEADING = '## E2E'
+
+// renderE2eContent: los recorridos, uno por línea y VERBATIM. Verbatim porque
+// la puerta del release exige que el título de cada entrada del informe cite el
+// recorrido tal cual: si esta función reformateara (capitalizar, quitar un
+// punto final), el agente citaría lo que ve y la comparación fallaría por un
+// carácter que nadie escribió.
+export function renderE2eContent(slice) {
+  return resolveE2e(slice.e2e).runs.map((r) => `- ${r}`).join('\n')
+}
 
 // Las DOS secciones de contexto del cuerpo de un issue, con dueños distintos
 // y por eso con reglas distintas:
@@ -204,7 +219,7 @@ export function readEpicContext(specMd) {
 // pasarse el resultado, para que ninguna de las dos pueda quedarse con una
 // resolución vieja si mañana cambia la forma del slice.
 export function gatesOf(slice) {
-  return resolveGates(slice.type, slice.gate)
+  return resolveGates(slice.type, slice.gate, slice.e2e)
 }
 
 // F3: el título viene de `slice.name` (columna "Slice" del spec §9), no de
@@ -457,6 +472,18 @@ export function buildIssueBody(slice, specRef, epicContext = null) {
   lines.push(GATES_HEADING)
   lines.push(renderGatesContent(slice))
   lines.push('')
+  // La sección se emite SÓLO si hay recorridos — a diferencia de "## Gates",
+  // que se emite siempre. El motivo de aquélla ("«este slice no tiene gates»
+  // es una afirmación que un humano que abre el PR necesita poder leer") no
+  // aplica aquí: la ausencia de la sección ya lo dice, y emitirla vacía en las
+  // tres cuartas partes de los issues es ruido. Medido en mo-monitoring v1:
+  // 6 de 8 filas no tienen recorrido.
+  const e2eContent = renderE2eContent(slice)
+  if (e2eContent) {
+    lines.push(E2E_HEADING)
+    lines.push(e2eContent)
+    lines.push('')
+  }
   lines.push('## Out of scope / Protected')
   lines.push(renderProtectedLine(slice))
   lines.push('')
@@ -519,6 +546,12 @@ export function groomPlan(slices, { milestone, specRef, epicContext = null, epic
       // la resolución de cabeza.
       gates: gatesOf(s).gates,
       gatesContent: renderGatesContent(s),
+      // e2eContent (a diferencia de gatesContent): `null` cuando no hay
+      // recorridos, no `''` — reconcile.js#diffIssue necesita distinguir "esta
+      // sección no debería existir" (null en los dos lados es acuerdo) de
+      // "existe pero está vacía", igual que ya hace con `descripcion`. Ver
+      // buildIssueBody: la sección misma sólo se escribe si hay contenido.
+      e2eContent: renderE2eContent(s) || null,
       // El texto del epic viaja en el plan, no sólo dentro del body ya
       // renderizado, por el mismo motivo que ac/descripcion/protectedLine:
       // para que comparar este slice contra un issue existente no obligue a

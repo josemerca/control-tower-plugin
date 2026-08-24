@@ -484,12 +484,43 @@ for (const s of report.slices) {
 // salen tal cual de su `Tipo` (el caso masivamente mayoritario) no imprime
 // nada, que es lo que mantiene útiles a los que sí salen.
 // ============================================================================
+// e2eAddedAdvisory (task "e2e al cierre del slice", adición 2): el mensaje
+// genérico de `g.added` dice "es deliberado (para eso está la columna
+// "Gate")" — FALSO para `e2e`, que no se declara ahí: se DERIVA de que la fila
+// traiga recorridos en la columna "E2E", y escribirlo a mano en "Gate" es uno
+// de los cuatro aborts que la columna E2E ya construyó (ver
+// e2eGateWithoutRunsRows, arriba). Un aviso que manda al autor a la columna
+// equivocada es peor que ningún aviso, así que este texto nombra "E2E" y
+// nunca "Gate".
+//
+// Por qué vive en una función y se llama desde DOS sitios: `e2e` nunca lo
+// implica ningún `Tipo` (no vive en TYPE_GATES), así que `resolveGates` lo
+// clasifica como "implied" (silencioso, igual que un gate de Tipo) en vez de
+// "added" en el caso normal (fila con recorridos, sin nada escrito a mano en
+// "Gate") — y por tanto el bucle de `g.added`, de abajo, nunca lo ve en ese
+// caso, que es el único que ocurre en la práctica (el otro, "Gate: e2e" a
+// mano, ya aborta antes de llegar aquí). Sin el segundo disparador, pasar
+// `s.e2e` a `resolveGates` (adición 1) no cambiaría nada visible: el gate
+// seguiría llegando al issue por las labels y el reporte de groom seguiría sin
+// mencionarlo — exactamente la fuga que F21 cerró para "Gate", reabierta para
+// "E2E".
+function e2eAddedAdvisory(n) {
+  return `aviso: el slice #${n} lleva el gate "e2e" porque su fila declara recorridos en la columna "E2E" (no en "Gate": ese gate no se declara ahí, se DERIVA) — se dice en voz alta porque cambia lo que hay que comprobar antes de mergear: el issue llevará la label "gate:e2e", el agente despachado recibirá la instrucción, y quien revise el PR tiene que cerrarlo`
+}
+
 for (const s of report.slices) {
-  const g = resolveGates(s.type, s.gate)
+  const g = resolveGates(s.type, s.gate, s.e2e)
   const typeRef = s.type && !isNoValueCell(s.type) ? `"${s.type}"` : '(sin Tipo)'
   for (const gate of g.added) {
+    if (gate === 'e2e') { console.error(e2eAddedAdvisory(s.n)); continue }
     console.error(`aviso: el slice #${s.n} declara el gate "${gate}", que su Tipo ${typeRef} no implica — es deliberado (para eso está la columna "Gate"), y se dice en voz alta porque cambia lo que hay que comprobar antes de mergear: el issue llevará la label "gate:${gate}", el agente despachado recibirá la instrucción, y quien revise el PR tiene que cerrarlo`)
   }
+  // El caso REAL (ver el comentario de `e2eAddedAdvisory`): con recorridos y
+  // sin nada escrito a mano en "Gate", `e2e` sale en `implied`, no en
+  // `added`. `g.added.includes('e2e')` es inalcanzable en una corrida que
+  // pase de los hardErrors (ver arriba), pero se comprueba igual para no
+  // anunciar el mismo gate dos veces si alguna vez dejara de serlo.
+  if (g.implied.includes('e2e') && !g.added.includes('e2e')) console.error(e2eAddedAdvisory(s.n))
   for (const gate of g.waived) {
     console.error(`aviso: el slice #${s.n} RENUNCIA al gate "${gate}" que implica su Tipo ${typeRef} (celda "Gate": "${s.gate}") — ese gate NO se le pedirá al agente, no aparecerá como label del issue y nadie lo comprobará antes de mergear. Si no era eso lo que querías, quita el "!" de esa celda`)
   }
