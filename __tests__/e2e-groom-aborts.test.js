@@ -37,15 +37,41 @@ Que esto funcione.
 | 1 | uno | backend | algo | – | un criterio | – | core | – | ${gateCell} | ${e2eCell} |
 `
 
-function groom(gateCell, e2eCell) {
+// specSinColumnaE2e: la MISMA tabla, pero sin la columna "E2E" en absoluto
+// (ni cabecera ni celda). Existe para el abort 4 en solitario: con la
+// columna presente, cualquier celda "E2E" sin declarar dispara YA el abort 1
+// (celda sin declarar), así que un test con la columna puesta no puede
+// distinguir "abort 4 funciona" de "abort 1 lo está enmascarando" — pasaría
+// igual aunque abort 4 no existiera. La condición del abort 4
+// (`parseGateCell(s.gate).add.includes('e2e') && r.runs.length === 0`)
+// deliberadamente NO mira `e2eColumnPresent`, así que la única forma de
+// probarlo de verdad es un spec donde el abort 1 no pueda dispararse nunca.
+const specSinColumnaE2e = (gateCell) => `# Spec
+
+Estado: CONGELADA
+
+## Hipótesis del experimento
+Que esto funcione.
+
+## 9. Slices
+
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate |
+|---|-------|------|---------|-----|--------|-----------|------|------|------|
+| 1 | uno | backend | algo | – | un criterio | – | core | – | ${gateCell} |
+`
+
+function run(spec) {
   const dir = mkdtempSync(join(tmpdir(), 'ct-e2e-'))
   mkdirSync(join(dir, 'docs'), { recursive: true })
-  const spec = join(dir, 'docs', 'spec.md')
-  writeFileSync(spec, specWith(gateCell, e2eCell))
-  const r = spawnSync(process.execPath, [GROOM, spec, '--repo', 'o/r', '--dry-run'], { encoding: 'utf8', env: fakeEnv() })
+  const specFile = join(dir, 'docs', 'spec.md')
+  writeFileSync(specFile, spec)
+  const r = spawnSync(process.execPath, [GROOM, specFile, '--repo', 'o/r', '--dry-run'], { encoding: 'utf8', env: fakeEnv() })
   rmSync(dir, { recursive: true, force: true })
   return r
 }
+
+const groom = (gateCell, e2eCell) => run(specWith(gateCell, e2eCell))
+const groomSinE2e = (gateCell) => run(specSinColumnaE2e(gateCell))
 
 describe('aborts de la columna E2E', () => {
   it('celda sin declarar (guion) aborta y nombra la fila', () => {
@@ -53,7 +79,7 @@ describe('aborts de la columna E2E', () => {
     expect(r.status).not.toBe(0)
     expect(r.stderr).toMatch(/E2E/)
     expect(r.stderr).toMatch(/#1/)
-    expect(r.stderr).toMatch(/\bno\b/)
+    expect(r.stderr).toMatch(/"no"/)
   })
 
   it('el token junto a un recorrido aborta', () => {
@@ -68,9 +94,11 @@ describe('aborts de la columna E2E', () => {
     expect(r.stderr).toMatch(/#1/)
   })
 
-  it('Gate: e2e con la celda sin declarar aborta', () => {
-    const r = groom('e2e', '–')
+  it('Gate: e2e sin columna "E2E" en la tabla aborta (abort 4 en solitario, sin que abort 1 lo enmascare)', () => {
+    const r = groomSinE2e('e2e')
     expect(r.status).not.toBe(0)
+    expect(r.stderr).toMatch(/#1/)
+    expect(r.stderr).toMatch(/e2e/)
   })
 
   it('celda `no` sin nada más NO aborta', () => {

@@ -335,6 +335,18 @@ if (!report.tableFound) {
   // Las cuatro condiciones de abort de la columna E2E. Todas comparten forma
   // con las dos de `Gate` (arriba) y con el mismo criterio: /ct-groom valida
   // TODO antes de escribir nada, y --dry-run comprueba exactamente lo mismo.
+  //
+  // Review round 2 (finding 2): las tres primeras versiones de estos mensajes
+  // sólo nombraban la fila ("slice #N"), nunca lo que había escrito en la
+  // celda — a diferencia de las dos de `Gate` de arriba, que sí citan el
+  // token literal. "slice #5 tiene un problema" manda al autor a buscarlo;
+  // citar la celda se lo pone delante. `quoteCell` normaliza el caso vacío
+  // (nunca imprimir "" a secas) porque una celda vacía y una con espacios en
+  // blanco son indistinguibles a simple vista sin decirlo explícitamente.
+  const quoteCell = (raw) => {
+    const trimmed = String(raw ?? '').trim()
+    return trimmed ? `"${trimmed}"` : '(vacía)'
+  }
   const e2eUndeclaredRows = []
   const e2eContradictoryRows = []
   const e2eGateWithoutRunsRows = []
@@ -344,21 +356,21 @@ if (!report.tableFound) {
     // ronda no la tiene, y ahí "no declarado" es el estado correcto de todas
     // sus filas. La columna presente es el compromiso; ausente, no hay nada
     // que reprochar.
-    if (report.e2eColumnPresent && !r.declared) e2eUndeclaredRows.push({ n: s.n })
-    if (r.contradiction) e2eContradictoryRows.push({ n: s.n })
-    if (parseGateCell(s.gate).add.includes('e2e') && r.runs.length === 0) e2eGateWithoutRunsRows.push({ n: s.n, none: r.none })
+    if (report.e2eColumnPresent && !r.declared) e2eUndeclaredRows.push({ n: s.n, cell: s.e2e })
+    if (r.contradiction) e2eContradictoryRows.push({ n: s.n, cell: s.e2e })
+    if (parseGateCell(s.gate).add.includes('e2e') && r.runs.length === 0) e2eGateWithoutRunsRows.push({ n: s.n, none: r.none, gateCell: s.gate, e2eCell: s.e2e })
   }
   if (e2eUndeclaredRows.length) {
     const first = e2eUndeclaredRows[0]
-    hardErrors.push(`${e2eUndeclaredRows.length} fila(s) de la tabla §9 tienen la columna "E2E" sin declarar (ejemplo, slice #${first.n}) — esta tabla TIENE columna "E2E", así que cada fila tiene que decidir: escribe el recorrido a atravesar, o "no" si este slice no tiene nada que atravesar. Un guion ahí significa "no he declarado nada" (el mismo significado que en Dep/Acepta/Protegido/Área/Toca), y con eso no se distingue "se pensó y no hay" de "nadie rellenó la columna" — que es justo la ambigüedad que el token "no" existe para quitar. Si este epic no usa e2e en absoluto, quita la columna entera`)
+    hardErrors.push(`${e2eUndeclaredRows.length} fila(s) de la tabla §9 tienen la columna "E2E" sin declarar (ejemplo, slice #${first.n}: ${quoteCell(first.cell)}) — esta tabla TIENE columna "E2E", así que cada fila tiene que decidir: escribe el recorrido a atravesar, o "no" si este slice no tiene nada que atravesar. Un guion ahí significa "no he declarado nada" (el mismo significado que en Dep/Acepta/Protegido/Área/Toca), y con eso no se distingue "se pensó y no hay" de "nadie rellenó la columna" — que es justo la ambigüedad que el token "no" existe para quitar. Si este epic no usa e2e en absoluto, quita la columna entera`)
   }
   if (e2eContradictoryRows.length) {
     const first = e2eContradictoryRows[0]
-    hardErrors.push(`${e2eContradictoryRows.length} fila(s) de la tabla §9 dicen "no" Y declaran un recorrido en la MISMA celda "E2E" (ejemplo, slice #${first.n}) — no se elige un ganador en silencio: deja el recorrido, o deja el "no", y vuelve a intentarlo`)
+    hardErrors.push(`${e2eContradictoryRows.length} fila(s) de la tabla §9 dicen "no" Y declaran un recorrido en la MISMA celda "E2E" (ejemplo, slice #${first.n}: ${quoteCell(first.cell)}) — no se elige un ganador en silencio: deja el recorrido, o deja el "no", y vuelve a intentarlo`)
   }
   if (e2eGateWithoutRunsRows.length) {
     const first = e2eGateWithoutRunsRows[0]
-    hardErrors.push(`${e2eGateWithoutRunsRows.length} fila(s) de la tabla §9 declaran el gate "e2e" en la columna "Gate" pero su celda "E2E" ${first.none ? 'dice "no"' : 'está sin declarar'} (ejemplo, slice #${first.n}) — nadie sabría qué atravesar. El gate "e2e" no se escribe a mano: se DERIVA de que la columna "E2E" traiga un recorrido. Quita el "e2e" de la columna "Gate" y escribe el recorrido en "E2E"`)
+    hardErrors.push(`${e2eGateWithoutRunsRows.length} fila(s) de la tabla §9 declaran el gate "e2e" en la columna "Gate" pero su celda "E2E" ${first.none ? 'dice "no"' : 'está sin declarar'} (ejemplo, slice #${first.n}: Gate=${quoteCell(first.gateCell)}, E2E=${quoteCell(first.e2eCell)}) — nadie sabría qué atravesar. El gate "e2e" no se escribe a mano: se DERIVA de que la columna "E2E" traiga un recorrido. Quita el "e2e" de la columna "Gate" y escribe el recorrido en "E2E"`)
   }
 
   if (report.invalidDepRefs.length) {
