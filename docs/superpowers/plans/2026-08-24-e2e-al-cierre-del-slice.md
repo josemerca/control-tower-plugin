@@ -13,7 +13,13 @@
 ## Global Constraints
 
 - **Rama:** `alcaptar/merge_3_e2e`, base `un-solo-go` (`5990363`). No rebasar sin decirlo.
-- **Baseline de la suite:** `npm test` da **2185/2186** en árbol limpio. El único fallo es `ct-init.test.js > SLICES_PRISTINE_HASHES no registra hashes de bloques que no existieron nunca`, **preexistente**. Cualquier otro fallo es de este trabajo. Correr `npm test` ANTES de la primera tarea y anotar el número.
+- **Baseline de la suite, MEDIDO en esta rama el 2026-08-24:** `npm test` da **2198 passed / 1 failed (2199 total)**, 74 de 75 ficheros, ~125 s. (El `2185/2186` que cita la descripción de la #32 es de antes de los tres últimos commits de esa rama: no lo uses.)
+
+  El único fallo es `ct-init.test.js > SLICES_PRISTINE_HASHES no registra hashes de bloques que no existieron nunca`, **preexistente**, y su mensaje lista **exactamente un** hash huérfano: `4d6eebf4ea94b7197879d30293dc4719d82399b7feeb7711829c28a1dcaa7f1c`.
+
+  **Cualquier otro fallo, y cualquier hash de más en ese mensaje, es de este trabajo.** Ese test es especialmente relevante para la Task 5, que añade un hash a esa misma lista: si al acabar el mensaje lista dos hashes, el segundo es tuyo — el hash que registres tiene que ser el del bloque que el `ct-init.sh` modificado siembra de verdad (ver el comando en esa tarea), no uno calculado a mano.
+
+  **Y antes de nada: `npm install`.** Un worktree recién creado no trae `node_modules`, y `npm test` muere en el build con `Cannot find package 'esbuild'`.
 - **Versión del plugin:** `0.41.0` en `.claude-plugin/plugin.json` y `package.json` (tarea 8).
 - **Contrato de la tabla de slices:** `SLICES_CONTRACT_VERSION=19` en `scripts/ct-init.sh` (tarea 5).
 - **Vocabulario cerrado de gates, orden canónico:** `visual`, `apply`, `plan`, `e2e`. `e2e` va **último** en el objeto `GATES` porque `GATE_ORDER = Object.keys(GATES)`.
@@ -157,7 +163,7 @@ Expected: PASS, 5 tests.
 - [ ] **Step 5: Correr la suite entera**
 
 Run: `npm test`
-Expected: 2186 passed / 1 failed — el mismo fallo preexistente de `SLICES_PRISTINE_HASHES` y ninguno más.
+Expected: 2199 tests, 1 failed — el mismo fallo preexistente de `SLICES_PRISTINE_HASHES` con **un solo** hash en su mensaje, y ninguno más.
 
 - [ ] **Step 6: Commit**
 

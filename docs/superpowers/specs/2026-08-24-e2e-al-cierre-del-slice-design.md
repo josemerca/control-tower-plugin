@@ -691,10 +691,12 @@ reescrita, no.
   entregado. La primera versión de este diseño se escribió contra la foto de
   `main` y por eso proponía exits ya ocupados y una puerta en paralelo. Antes de
   cada tarea, mirar el fichero real y no este documento.
-- `npm test` da **2185/2186** en árbol limpio: el fallo de
-  `SLICES_PRISTINE_HASHES` es **preexistente** y toca justo `ct-init.sh`, que
-  este cambio modifica. Se verifica antes y después para no atribuirse un rojo
-  que ya estaba.
+- `npm test` da **2198/2199** en árbol limpio (medido el 2026-08-24; el
+  2185/2186 de la descripción de la #32 es anterior a sus tres últimos commits).
+  El fallo de `SLICES_PRISTINE_HASHES` es **preexistente** y toca justo
+  `ct-init.sh`, que este cambio modifica: su mensaje lista un hash huérfano, y
+  si al acabar lista dos, el segundo es de este trabajo. Un worktree nuevo
+  necesita `npm install` antes de cualquier cosa.
 - Nada de `hooks/`, así que no hay que reconstruir `dist/`. Si eso cambia,
   aplica la regla del `dist/`.
 
