@@ -8,7 +8,23 @@ import { resolveGatesForAgent, renderGateKickoffLines } from './gates.js'
 // que ese path cambie no queden mensajes mandando al agente a un fichero que
 // ya no es el suyo (que es exactamente el defecto que esta ronda arregla).
 import { SLICE_REL_PATH } from './state-paths.js'
-import { EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING, FROZEN_DECISIONS_HEADING } from './groom.js'
+// parseSenalCell (Slice 10): el MISMO clasificador que usa el groom — un solo
+// discriminador de "señal declarada / exención / nada" para groom, kickoff y
+// (en prosa) la rúbrica del juez de slice, que no pueda divergir entre quien
+// valida la celda y quien anuncia la línea.
+import { EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING, FROZEN_DECISIONS_HEADING, parseSenalCell } from './groom.js'
+import { NO_MILESTONE_KEY } from './gh-issue-map.js'
+
+// SENAL_AUSENTE (Slice 10): el valor del campo `senal:` cuando el issue no
+// trae la sección "## Señal de observabilidad" — la ausencia se DECLARA, no
+// se omite (mismo criterio que `gates:`/`blocked:`: un campo que solo existe
+// cuando hay algo es un campo que nadie escribe cuando le hace falta). Es UNA
+// constante única, importada también por ct-step.mjs (el otro escritor: el
+// fallback del paquete del juez cuando el SLICE.md fue sembrado por un plugin
+// anterior a la columna), para que los dos escritores no diverjan. Su
+// apertura "(sin señal declarada" es literalmente lo que la rúbrica de
+// ct-slice-judge reconoce como sin-vara.
+export const SENAL_AUSENTE = '(sin señal declarada — el issue no trae la sección "## Señal de observabilidad"; el juez de slice mide su ítem observabilidad como sin-vara)'
 
 // ACCOUNT_MAP — qué CLAUDE_CONFIG_DIR (qué cuenta de Claude) recibe el agente
 // que se despacha para un repo.
@@ -196,7 +212,7 @@ function baseRefOf(base) {
     : 'la rama base de la que salió este worktree'
 }
 
-export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
+export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, base }) {
   const addendum = ADDENDA[slice.type] || ''
   // F21 — LOS GATES, POR FIN SEPARADOS DEL TIPO. `resolveGatesForAgent` (ver
   // gates.js) prefiere lo que DECLARA el issue (sus labels `gate:`, que es lo
@@ -242,19 +258,33 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, base }) {
     // nombrar lo busca fuera del issue, que es justo lo que no puede hacer.
     `Lee también las secciones "${EPIC_CONTEXT_HEADING}" y "${INHERITED_CONTEXT_HEADING}" del issue: traen lo que el spec y los slices ya mergeados condicionan sobre este trabajo y que no cabe en los criterios de aceptación. Si alguna está vacía o no aparece, no hay nada que heredar — no lo busques fuera del issue.`,
     `Lee también la sección "${FROZEN_DECISIONS_HEADING}" del issue: son decisiones del epic con consecuencia sobre este trabajo, que DEBES respetar (no las reinterpretes ni las cambies) y que van a "## 2. Closed decisions" de tu plan. Si no aparece, no hay ninguna — no la busques fuera del issue.`,
+    // Slice 10 — la señal, NOMBRADA cuando el issue la declara: "ninguna
+    // exigencia que el spec le haga al agente puede depender de que el agente
+    // lea el spec" — sin esta línea, el juez de slice exigiría lo que al
+    // implementador nadie nombró. Condicional como las líneas de gate: con
+    // exención razonada o sin declaración, NINGUNA línea (nada que exigir; el
+    // silencio cuando no hay nada que decir es lo que mantiene útiles a las
+    // líneas que sí salen). El discriminador es parseSenalCell, el MISMO del
+    // groom — no una segunda lectura de la celda que pueda divergir.
+    parseSenalCell(slice.senal || '').kind === 'senal'
+      ? 'Este slice declara una SEÑAL DE OBSERVABILIDAD (sección "## Señal de observabilidad" del issue): lo que esa señal promete tiene que emitirlo el código de PRODUCCIÓN de este slice, instrumentado como ya instrumenta este repo y sin labels de cardinalidad ilimitada — el juez del slice entero lo comprueba contra el diff acumulado antes del PR.'
+      : '',
     // F32 — el modelo de dos niveles (§4.3 del handoff): nivel epic = CT,
     // nivel slice = los skills FORKADOS en este plugin (control-tower-loop:*,
     // ver skills/FORK.md) — nunca el namespace superpowers:, que la tarea 6
     // desinstala. El plan del slice se escribe AQUÍ y no en el spec porque se
     // escribe contra el código real, en el momento correcto; el issue trae
     // los AC (EARS), "Protegido" y el "Contexto del epic" — exactamente la
-    // entrada que writing-plans pide como spec. Con el plan commiteado, el
-    // rombo "Have implementation plan?" de subagent-driven-development
-    // encuentra plan y SDD reengancha entero. El paréntesis que enumeraba su
-    // flujo (impl → spec-review → code-review) se quitó a cambio: lo define
-    // el propio skill, y duplicarlo aquí es lo que el fork vuelve innecesario.
+    // entrada que writing-plans pide como spec. Y con el plan commiteado, la
+    // conducción ya NO es de subagent-driven-development: en este fork D-4
+    // está tomada — la secuencia la dicta ct-step, la máquina consultada. La
+    // línea de abajo es el enchufe que `d4-sigue-siendo-de-jose.test.js`
+    // guardaba, y ese test se borró en el mismo commit que esta línea, como
+    // su propia cabecera pedía. `ctStepPath` llega resuelto como ruta
+    // absoluta desde ct-next.mjs, por el mismo motivo que `dispatchCheckPath`
+    // (el token ${CLAUDE_PLUGIN_ROOT} no existe en un prompt de texto plano).
     `Primer acto, con el baseline verde: escribe el plan del slice con control-tower-loop:writing-plans-prescriptive usando el issue como spec (sus AC, "Protegido", "${EPIC_CONTEXT_HEADING}" y "${FROZEN_DECISIONS_HEADING}" son la entrada que la skill pide; vuelca cada decisión congelada en "## 2. Closed decisions" del plan — son del epic y las DEBES respetar, no reinterpretar). SOLO bloques esenciales, cada uno con su etiqueta de rol: contratos, call sites y el tramo que cambia — los cuerpos de los módulos y los ficheros de test los escribe el implementador con TDD, y la configuración se describe en prosa. Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${slice.n}-<slug>.md, valídalo con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --check-plan\` hasta exit 0, y commitéalo: viaja en el PR, y el --release del final se negará (exit 6) sin un plan válido commiteado.`,
-    `Con el plan escrito, sigue control-tower-loop:subagent-driven-development con TDD.`,
+    `Con el plan commiteado y el gate 'plan' con OK humano, la implementación NO la conduces con subagent-driven-development ni con su ledger: la secuencia la dicta la máquina. Pregunta el paso con \`node ${ctStepPath} next --plan docs/superpowers/plans/<el-plan-que-commiteaste>.md --issue ${slice.n}\` y obedece LITERALMENTE lo que imprima en cada paso (donde diga \`ct-step\`, es \`node ${ctStepPath}\`): despacha el implementador como subagente con la rúbrica y el brief que te indique, luego \`ct-step report\`, \`ct-step controls\`, despacha el juez como subagente ct-judge (declarado sin Bash), \`ct-step verdict\` y \`ct-step commit\` — comitea ct-step, nunca tú ni el implementador. Tras el commit de la última tarea quedan dos pasos más, que \`next\` también dicta: \`ct-step global\` (la Global verification del plan la ejecuta el programa, no un agente) y el juicio del slice entero — despacha ct-slice-judge como subagente (declarado sin Bash) y entrega su JSON con \`ct-step slice-verdict\`. Vuelve a \`next\` tras cada paso hasta "run delivered".`,
     addendum,
     ...gateLines,
     // W-C: el claim (status:ready → status:in-progress) lo hace /ct-next en
@@ -337,6 +367,15 @@ function renderStateGates(gates) {
   return `${list.join(', ')} — GATES HUMANOS pendientes: los cierra quien revisa el PR, NO tú. Detalle en la sección "## Gates" del issue.`
 }
 
+// renderStateSenal (Slice 10): el valor del campo `senal:` — el texto de la
+// sección del issue, verbatim (señal o exención `N/A — <razón>`, tal cual: el
+// lector distingue la exención solo por su prefijo), o SENAL_AUSENTE cuando
+// el issue no declara nada. Nunca un hueco: la ausencia se declara, no se
+// omite — ver el comentario de SENAL_AUSENTE.
+function renderStateSenal(senal) {
+  return (senal || '').trim() || SENAL_AUSENTE
+}
+
 export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
   const issueNum = slice.issue != null ? parseInt(String(slice.issue).replace('#', ''), 10) : null
   return renderState({
@@ -380,6 +419,15 @@ export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
       // verdad por accidente; el gate ejecutable son las labels `gate:` del
       // issue.
       gates: renderStateGates(resolveGatesForAgent(slice)),
+      // senal (Slice 10) — MISMO ARGUMENTO QUE `gates` (F21): lo que tiene
+      // que sobrevivir a una re-hidratación es un CAMPO, no una frase dentro
+      // de un prompt que se pierde con el contexto de su sesión. Se siembra
+      // SIEMPRE (texto verbatim del issue, o SENAL_AUSENTE — la ausencia se
+      // declara, no se omite). Sus lectores: ct-step, que lo pega como
+      // primera sección del paquete del juez de slice —leído del disco, sin
+      // agente en medio, la doctrina del §3.3— y el propio agente al
+      // re-hidratarse.
+      senal: renderStateSenal(slice.senal),
       status: 'not_started',
       branch,
       base,
@@ -395,6 +443,12 @@ export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
       // de tu last_commit" dejaría de significar nada. Si no se pudo resolver,
       // se siembra vacío a propósito — un sha inventado sería peor que ninguno.
       last_commit: baseSha,
+      // D-4 — el epic, sembrado en el despacho y no preguntado en cada run.
+      // La ausencia se DECLARA con la constante que ya existe, no se rellena
+      // ni se deja vacía: es la misma regla que impidió que ct-next asumiera
+      // `main` en silencio cuando no conocía la base. Su lector es la
+      // telemetría de ct-step, que agrega por epic.
+      epic: slice.epic || NO_MILESTONE_KEY,
       github_issue: issueNum,
       // D4, defecto 4: este campo imprimía el número de ISSUE llamándolo
       // "slice #N" — dos espacios de identificadores distintos (ver el

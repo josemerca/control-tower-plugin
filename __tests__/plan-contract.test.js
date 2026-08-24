@@ -48,9 +48,12 @@ const VALID_PLAN = [
   F,
   '**TDD:** red first: expect(sum(2, 2)).toBe(4)',
   '**Tests:** add tests/math.test.js',
-  '**Verification:** npm test',
+  '**Verification:** npm test, en verde.',
+  F + 'bash',
+  'npm test',
+  F,
   '## 8. Global verification',
-  'npm test en verde.',
+  'N/A — fixture.',
   '## 9. Assumptions',
   'Ninguna.',
   '',
@@ -100,7 +103,7 @@ const CABECERA = (titulo) => [
 
 const COLA = [
   '## 8. Global verification',
-  'npm test en verde.',
+  'N/A — fixture.',
   '## 9. Assumptions',
   'Ninguna.',
   '',
@@ -482,5 +485,220 @@ describe('validatePlan — cada TAREA cabe en un folio A4', () => {
 
   it('el plan de referencia no dispara nada de tamaño', () => {
     expect(violacionesDe(PLAN_CON_ROLES, 'size')).toEqual([])
+  })
+})
+
+// ===========================================================================
+// D-4 — la vara de la tarea tiene que ser EJECUTABLE.
+//
+// El contrato ya exigía que **Verification:** estuviera. Lo que no exigía es
+// que dijera algo que se pueda correr, y esa diferencia es la que decide si el
+// plan lo puede ejecutar un programa o hace falta un humano interpretando
+// prosa. La fixture del caso real vive en plan-tasks.test.js; aquí se fija el
+// borde del contrato.
+// ===========================================================================
+describe('los comandos de **Verification:** van en un bloque, no en la frase', () => {
+  const planCon = (verificacion) => [
+    '# #7 — sum() devuelve la suma',
+    '',
+    '> **This plan is written to be executed by task-scoped subagents with zero context.**',
+    '',
+    '## 1. Context and goal',
+    'sum() existe y hay que cubrirla.',
+    '### Desired end state',
+    'sum() con test.',
+    '### Out of scope',
+    'N/A — nada que excluir.',
+    '## 2. Closed decisions',
+    '| Decision | Value |',
+    '|---|---|',
+    '| test runner | vitest |',
+    '## 3. Reference patterns',
+    'src/math.js',
+    '## 4. Inventory',
+    'tests/math.test.js (crear).',
+    '## 5. Interfaces',
+    'Consumes: nothing. Produces: sum(a, b) -> number.',
+    '## 6. Test strategy',
+    'Unit con vitest.',
+    '## 7. Tasks',
+    '### Task 1 — cover sum',
+    '**Objective:** sum queda cubierta.',
+    '**Files:** tests/math.test.js',
+    'No code — el test se describe por nombre y aserción.',
+    '**TDD:** red first: expect(sum(2, 2)).toBe(4)',
+    '**Tests:** add tests/math.test.js',
+    ...verificacion,
+    '## 8. Global verification',
+    'N/A — fixture.',
+    '## 9. Assumptions',
+    'Ninguna.',
+    '',
+  ].join('\n')
+
+  const rulesOf = (plan) => validatePlan(plan, { readFile: () => null })
+    .violations.filter((v) => v.rule === 'verification')
+
+  it('una tarea que verifica con prosa en línea NO pasa el contrato', () => {
+    // Ésta es exactamente la forma del plan real del slice #5 de repo-pulse, y
+    // la que pedía la plantilla hasta esta ronda.
+    const plan = planCon(['**Verification:** `npm test` → exit 0. `npm run lint` → exit 0.'])
+    expect(rulesOf(plan)).toHaveLength(1)
+    expect(rulesOf(plan)[0].detail).toMatch(/no ejecuta prosa/)
+  })
+
+  it('la misma tarea con los comandos en bloque sí pasa', () => {
+    expect(rulesOf(planCon([
+      '**Verification:** los dos en verde.',
+      F + 'bash',
+      'npm test   # exit 0',
+      'npm run lint   # exit 0',
+      F,
+    ]))).toEqual([])
+  })
+
+  // Paso 2 del spec de la primera corrida en un repo ajeno: el bloque puede
+  // estar y sus comandos medir al revés. `--check-plan` es la puerta que dejó
+  // pasar el control invertido de jjponz/rust-monitoring#10, así que la regla
+  // tiene que llegar HASTA AQUÍ y no quedarse en el extractor.
+  it('el control invertido de rust-monitoring, con su bloque y todo, NO pasa el contrato', () => {
+    const plan = planCon([
+      '**Verification:** la sección protegida no se toca.',
+      F + 'bash',
+      "git diff HEAD -- AGENTS.md | grep -c 'ct-init:slices-contract'   # expected: 0",
+      F,
+    ])
+    expect(rulesOf(plan)).toHaveLength(1)
+    expect(rulesOf(plan)[0].detail).toMatch(/no puede afirmar lo que el control dice medir/)
+  })
+
+  it('el mismo control escrito como predicado sí pasa', () => {
+    expect(rulesOf(planCon([
+      '**Verification:** la sección protegida no se toca.',
+      F + 'bash',
+      'test "$(git diff HEAD -- AGENTS.md | grep -c \'ct-init:slices-contract\')" -eq 0',
+      F,
+    ]))).toEqual([])
+  })
+
+  it('acepta el bloque aunque el párrafo de **Verification:** lleve prosa delante', () => {
+    expect(rulesOf(planCon([
+      '**Verification:** primero `npm install`, y después:',
+      F + 'bash',
+      'npm test   # exit 0',
+      F,
+    ]))).toEqual([])
+  })
+
+  it('el bloque de Current state de la tarea NO cuenta como bloque de comandos', () => {
+    // Sin la regla de "el bloque INMEDIATAMENTE posterior", un plan con
+    // cualquier cercado suelto en la tarea pasaría dando por verificada una
+    // tarea cuya vara sigue siendo prosa.
+    const plan = planCon([
+      '**Verification:** `npm test` → exit 0.',
+      '',
+      'Current state (src/math.js):',
+      F,
+      'export function sum(a, b) {',
+      '}',
+      F,
+    ])
+    expect(rulesOf(plan)).toHaveLength(1)
+  })
+
+  it('un plan con varias tareas nombra cuáles fallan, no cuántas', () => {
+    const plan = planCon(['**Verification:** `npm test` → exit 0.'])
+      .replace('## 8. Global verification', [
+        '### Task 2 — otra',
+        '**Objective:** otra cosa.',
+        '**Files:** tests/otra.test.js',
+        'No code — descrito en prosa.',
+        '**TDD:** No TDD — fixture.',
+        '**Tests:** N/A — fixture.',
+        '**Verification:** `npm test` otra vez, en prosa.',
+        '## 8. Global verification',
+      ].join('\n'))
+    expect(rulesOf(plan).map((v) => v.detail.match(/tarea (\d+)/)[1])).toEqual(['1', '2'])
+  })
+
+  // §3.7-A del handoff: el mismo par de reglas (bloque / predicado), aplicado
+  // a "## 8. Global verification" en vez de a **Verification:** de una tarea.
+  // Las dos salen por `verification` en el gate, igual que las de tarea.
+  const buenaVerificacion = ['**Verification:** en verde.', F + 'bash', 'npm test   # exit 0', F]
+  const conGlobal = (bloqueGlobal) => planCon(buenaVerificacion)
+    .replace('## 8. Global verification\nN/A — fixture.', bloqueGlobal)
+
+  it('§8 en prosa (no "N/A") es violación de "verification"', () => {
+    const plan = conGlobal('## 8. Global verification\nQue todo siga en verde.')
+    expect(rulesOf(plan)).toHaveLength(1)
+    expect(rulesOf(plan)[0].detail).toMatch(/no ejecuta prosa/)
+  })
+
+  it('§8 con su bloque de comandos es válida', () => {
+    const plan = conGlobal(['## 8. Global verification', '', F + 'bash', 'npm run build && npm test', F].join('\n'))
+    expect(rulesOf(plan)).toEqual([])
+  })
+
+  it('§8 cuyo último tramo es `grep -c` es violación de predicado', () => {
+    const plan = conGlobal(['## 8. Global verification', '', F + 'bash', "grep -c 'algo' AGENTS.md", F].join('\n'))
+    expect(rulesOf(plan)).toHaveLength(1)
+    expect(rulesOf(plan)[0].detail).toMatch(/no puede afirmar lo que el control dice medir/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// §3 ES LA VARA DEL REPO, Y UNA VARA QUE NO EXISTE NO MIDE.
+//
+// `## 3. Reference patterns` dejó de ser sólo "ficheros a los que parecerse":
+// es lo único del plan que le dice al implementador cómo se escribe aquí y al
+// juez contra qué bloquear. Y lo escribe un AGENTE, que puede citar
+// `docs/conventions/domain.md` porque le suena a que un repo así lo tendría —
+// y entonces ninguno de los dos abre nada y los dos siguen como si hubieran
+// medido. Misma regla que la literalidad de `Current state`, aplicada a la otra
+// clase de cita: allí el texto citado existe verbatim, aquí el fichero existe.
+// ---------------------------------------------------------------------------
+describe('validatePlan — las rutas de §3 existen', () => {
+  const conSeccion3 = (contenido) => VALID_PLAN.replace('## 3. Reference patterns\nsrc/math.js', `## 3. Reference patterns\n${contenido}`)
+
+  it('una ruta real entre comillas invertidas pasa', () => {
+    expect(violacionesDe(conSeccion3('Files to imitate: `src/math.js`'), 'reference-paths')).toEqual([])
+  })
+
+  it('una ruta que el repo no tiene falla, y el mensaje la nombra', () => {
+    const v = violacionesDe(conSeccion3('Rules to obey: `docs/conventions/domain.md`'), 'reference-paths')
+    expect(v).toHaveLength(1)
+    expect(v[0].detail).toMatch(/docs\/conventions\/domain\.md/)
+  })
+
+  it('AGENTS.md cuenta como ruta aunque no lleve barra: es el sitio más probable de la vara', () => {
+    expect(violacionesDe(conSeccion3('Rules to obey: `AGENTS.md`'), 'reference-paths')).toHaveLength(1)
+  })
+
+  it('una skill no se comprueba en disco: no es un fichero del repo', () => {
+    // Lleva dos puntos y ninguna barra. Si se tratara como ruta, toda skill
+    // citada vetaría el plan y la vara secundaria sería imposible de declarar.
+    expect(violacionesDe(conSeccion3('Rules to obey: `backend-engineering:backend-best-practices`'), 'reference-paths')).toEqual([])
+  })
+
+  it('un token que no es una ruta no se mira', () => {
+    // §3 describe idiomas, y describirlos exige citar código: `test(...)` y
+    // `describe` son prosa técnica, no ficheros.
+    expect(violacionesDe(conSeccion3('Files to imitate: `src/math.js` — tests planos con `test(...)`, sin `describe`'), 'reference-paths')).toEqual([])
+  })
+
+  it('un directorio se salta: el único puerto que este módulo recibe lee ficheros', () => {
+    expect(violacionesDe(conSeccion3('Rules to obey: `docs/conventions/`'), 'reference-paths')).toEqual([])
+  })
+
+  it('la regla está acotada a §3: en el resto del plan hay rutas que la slice va a crear', () => {
+    // Exigir que existan fuera de §3 vetaría todos los planes: `## 4. Inventory`
+    // nombra precisamente los ficheros que la slice crea.
+    const plan = VALID_PLAN.replace('src/math.js (modificar), tests/math.test.js (crear).', '`src/aun-no-existe.js` (crear).')
+    expect(violacionesDe(plan, 'reference-paths')).toEqual([])
+  })
+
+  it('sin readFile inyectado no se afirma ni se niega, igual que la literalidad', () => {
+    const r = validatePlan(conSeccion3('Rules to obey: `docs/conventions/domain.md`'), {})
+    expect(r.violations.filter((v) => v.rule === 'reference-paths')).toEqual([])
   })
 })

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildIssueTitle, buildLabels, buildIssueBody, groomPlan, renderDepsContent, renderAcContent, DEPS_ORDER_NOTE } from '../scripts/groom.js'
+import { buildIssueTitle, buildLabels, buildIssueBody, groomPlan, renderDepsContent, renderAcContent, DEPS_ORDER_NOTE, parseSenalCell, renderSenalContent, SENAL_HEADING } from '../scripts/groom.js'
 
 // F3: el título del issue viene de `slice.name` (columna "Slice" del spec),
 // no de `slice.entrega` (columna "Entrega") — buildIssueTitle componía
@@ -194,5 +194,93 @@ describe('groom puro', () => {
     }
     expect(message).toMatch(/1/)
     expect(message).toMatch(/3/)
+  })
+})
+
+// Slice 10 — parseSenalCell es EL clasificador de la celda `Señal`: lo
+// comparten groom (validación + render), kickoff (la línea condicional) y,
+// en prosa, la rúbrica del juez de slice. Un solo clasificador para que
+// "qué es una exención" no pueda divergir entre quien la valida y quien la
+// anuncia. La exención se escribe `N/A — <razón>` (el idioma que el repo ya
+// tiene para "no aplica, y por esto"); una exención SIN razón es una señal
+// no declarada disfrazada de decisión y se distingue con su propio kind.
+describe('parseSenalCell / renderSenalContent — la señal y su exención (Slice 10)', () => {
+  it('señal declarada: kind senal con el texto verbatim', () => {
+    expect(parseSenalCell('métrica `backfill_progress` con label `estado`'))
+      .toEqual({ kind: 'senal', text: 'métrica `backfill_progress` con label `estado`' })
+    // Solo trim — el texto no se re-renderiza ni se normaliza.
+    expect(parseSenalCell('  log de arranque  ')).toEqual({ kind: 'senal', text: 'log de arranque' })
+  })
+  it('N/A — <razón> es exención razonada; el texto viaja verbatim', () => {
+    expect(parseSenalCell('N/A — pantalla sin telemetría nueva que prometer'))
+      .toEqual({ kind: 'exencion', text: 'N/A — pantalla sin telemetría nueva que prometer' })
+    // Case-insensitive y con los otros separadores del idioma: la razón es lo
+    // que queda tras quitar N/A y los separadores iniciales.
+    expect(parseSenalCell('n/a: refactor puro').kind).toBe('exencion')
+    expect(parseSenalCell('N/A - sin efecto observable').kind).toBe('exencion')
+    // El texto conserva su `N/A —` dentro — el consumidor (el juez) lo
+    // distingue solo por el prefijo, sin re-parsear.
+    expect(parseSenalCell('n/a: refactor puro').text).toBe('n/a: refactor puro')
+  })
+  it('N/A a secas (o con separador sin razón detrás) es exencion-sin-razon', () => {
+    expect(parseSenalCell('N/A').kind).toBe('exencion-sin-razon')
+    expect(parseSenalCell('n/a').kind).toBe('exencion-sin-razon')
+    expect(parseSenalCell('N/A —').kind).toBe('exencion-sin-razon')
+    expect(parseSenalCell('N/A -').kind).toBe('exencion-sin-razon')
+    expect(parseSenalCell('N/A:').kind).toBe('exencion-sin-razon')
+    expect(parseSenalCell('N/A —  ').kind).toBe('exencion-sin-razon')
+  })
+  it('celda vacía, guiones y null son ninguna — nunca una exención', () => {
+    expect(parseSenalCell(null).kind).toBe('ninguna')
+    expect(parseSenalCell(undefined).kind).toBe('ninguna')
+    expect(parseSenalCell('').kind).toBe('ninguna')
+    expect(parseSenalCell('   ').kind).toBe('ninguna')
+    for (const marker of ['-', '–', '—', '―', '−', '--']) {
+      expect(parseSenalCell(marker).kind).toBe('ninguna')
+    }
+    // "N/Algo" no es la familia N/A: \b exige el límite de palabra.
+    expect(parseSenalCell('N/Algo que medir').kind).toBe('senal')
+  })
+  it('renderSenalContent: null sin declaración; texto verbatim con señal o exención', () => {
+    expect(renderSenalContent({ ...SLICE, senal: '' })).toBe(null)
+    expect(renderSenalContent({ ...SLICE, senal: '–' })).toBe(null)
+    // Exención sin razón → null: esta función es pura y no lanza — el wrapper
+    // (ct-groom.mjs) aborta ANTES de llegar a render con un hardError.
+    expect(renderSenalContent({ ...SLICE, senal: 'N/A' })).toBe(null)
+    expect(renderSenalContent({ ...SLICE, senal: 'métrica x' })).toBe('métrica x')
+    expect(renderSenalContent({ ...SLICE, senal: 'N/A — razón real' })).toBe('N/A — razón real')
+  })
+})
+
+// Slice 10 — la sección `## Señal de observabilidad` del cuerpo del issue:
+// se emite SOLO cuando hay contenido (señal o exención, verbatim de la
+// celda), tras los AC y antes de `## Dependencias` — cierra la zona del
+// lector "cómo se verifica → qué debe observarse" sin tocar ningún ancla de
+// inserción de --reconcile.
+describe('buildIssueBody — la sección de señal (Slice 10)', () => {
+  it('con señal declarada, "## Señal de observabilidad" va tras los AC y antes de "## Dependencias"', () => {
+    const b = buildIssueBody({ ...SLICE, senal: 'métrica `x` con label `y`' }, SPEC_REF)
+    expect(b).toContain(SENAL_HEADING)
+    expect(b).toContain('métrica `x` con label `y`')
+    expect(b.indexOf('## Acceptance criteria')).toBeLessThan(b.indexOf(SENAL_HEADING))
+    expect(b.indexOf(SENAL_HEADING)).toBeLessThan(b.indexOf('## Dependencias'))
+  })
+  it('sin declaración no se emite la sección', () => {
+    expect(buildIssueBody(SLICE, SPEC_REF)).not.toContain(SENAL_HEADING)
+    expect(buildIssueBody({ ...SLICE, senal: '–' }, SPEC_REF)).not.toContain(SENAL_HEADING)
+    // La exención razonada SÍ se emite, verbatim — no es "sin declaración".
+    expect(buildIssueBody({ ...SLICE, senal: 'N/A — sin telemetría nueva' }, SPEC_REF))
+      .toContain('N/A — sin telemetría nueva')
+  })
+  it('groomPlan lleva senal estructurada en cada issue', () => {
+    const conSenal = { ...SLICE, n: 1, senal: 'métrica x' }
+    const sinSenal = { ...SLICE, n: 2, senal: '' }
+    const exenta = { ...SLICE, n: 3, senal: 'N/A — razón' }
+    const plan = groomPlan([conSenal, sinSenal, exenta], { milestone: 'Epic', specRef: SPEC_REF })
+    // Junto a descripcion/protectedLine y por el mismo motivo: reconcile
+    // compara sin re-parsear el body que este mismo plan acaba de generar.
+    expect(plan.issues[0].senal).toBe('métrica x')
+    expect(plan.issues[1].senal).toBe(null)
+    expect(plan.issues[2].senal).toBe('N/A — razón')
   })
 })

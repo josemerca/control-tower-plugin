@@ -16,7 +16,10 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { resolve as resolvePath, relative as relativePath } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { analyzeSlicesTable, isNoValueCell } from './slices.js'
-import { groomPlan, readEpicContext, readFrozenDecisions, EPIC_CONTEXT_HEADING, FROZEN_DECISIONS_HEADING, analyzeSpecFreeze, HYPOTHESIS_REASONS } from './groom.js'
+// parseSenalCell (Slice 10): el MISMO clasificador con el que groom.js decide
+// qué renderiza — aquí se usa para abortar ANTES de cualquier render o
+// mutación cuando una fila declara una exención sin razón.
+import { groomPlan, readEpicContext, readFrozenDecisions, EPIC_CONTEXT_HEADING, FROZEN_DECISIONS_HEADING, analyzeSpecFreeze, HYPOTHESIS_REASONS, parseSenalCell } from './groom.js'
 // F10: de "la ruta que me pasaron en argv + --section" a una URL absoluta
 // verificada contra GitHub (o a una referencia honesta sin enlace, diciendo
 // por qué). Ver scripts/spec-link.js para las tres decisiones que toma y por
@@ -332,6 +335,26 @@ if (!report.tableFound) {
     hardErrors.push(`${contradictoryGateRows.length} fila(s) de la tabla §9 piden y renuncian al MISMO gate en la columna "Gate" (ejemplo, slice #${first.n}: "${first.token}" y "!${first.token}") — no se elige un ganador en silencio sobre un gate humano: deja solo uno de los dos y vuelve a intentarlo`)
   }
 
+  // ==========================================================================
+  // Slice 10 — LA COLUMNA `Señal`: la exención sin razón aborta FUERTE, por el
+  // precedente exacto del Gate desconocido — lo que no se puede leer no puede
+  // colar en silencio. Una exención `N/A` a secas no es "no declaro nada" (para
+  // eso está la celda vacía o el "–"): es una DECISIÓN de eximir al slice de
+  // prometer señal, y una decisión sin razón legible es una señal sin declarar
+  // disfrazada de decisión — el humano que groomea no puede aprobarla y el juez
+  // de slice no puede citarla como no-aplica. Va en `hardErrors`, es decir
+  // ANTES de la primera mutación y también bajo --dry-run.
+  const senalSinRazonRows = []
+  for (const s of report.slices) {
+    if (parseSenalCell(s.senal).kind === 'exencion-sin-razon') {
+      senalSinRazonRows.push({ n: s.n, raw: s.senal })
+    }
+  }
+  if (senalSinRazonRows.length) {
+    const first = senalSinRazonRows[0]
+    hardErrors.push(`${senalSinRazonRows.length} fila(s) de la tabla de slices declaran en "Señal" una exención sin razón (ejemplo, slice #${first.n}: "${first.raw}") — una exención de señal se escribe "N/A — <razón>": la razón es lo que un humano aprueba en el groom y lo que el juez de slice cita como no-aplica. Si lo que quieres es no declarar nada, deja la celda vacía o con "–"; corrige esas filas y vuelve a intentarlo`)
+  }
+
   if (report.invalidDepRefs.length) {
     const first = report.invalidDepRefs[0]
     const example = first.reason === 'self'
@@ -361,6 +384,11 @@ const OPTIONAL_COLUMN_CONSEQUENCE = {
   Protegido: 'los issues se crearán sin sección "Protegido" explícita',
   'Área': 'la maquinaria de colisión (claim.js#tokensOf) queda inerte para todos los slices de este epic',
   Toca: 'la serialización de touches (dispatch.js#SERIALIZING_TOUCHES) queda inerte para todos los slices de este epic',
+  // Slice 10: a diferencia de `Gate` (cuya ausencia no degrada nada y por eso
+  // NO entra en esta lista), la ausencia de `Señal` degrada algo medible — el
+  // tercer ítem del juez de slice sale sin-vara en todo el epic, y esa cuenta
+  // viaja en la telemetría (rubric_sin_vara).
+  'Señal': 'los issues se crearán sin sección "## Señal de observabilidad" — el juez de slice medirá su ítem observabilidad como sin-vara en todos los slices de este epic',
 }
 for (const col of report.missingOptionalColumns) {
   console.error(`aviso: la tabla §9 no tiene columna "${col}" — ${OPTIONAL_COLUMN_CONSEQUENCE[col] || 'se omite esa información en los issues'}`)

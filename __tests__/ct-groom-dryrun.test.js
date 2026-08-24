@@ -1324,15 +1324,16 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
       { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[MATCHING]]), FAKE_GH_LABELS_LIST: PLAN_LABELS_EXIST }) })
     expect(res.status).toBe(0)
-    // F26/decisiones: ONE_SLICE_SPEC no trae "## Contexto del epic" NI
-    // "## Decisiones congeladas", así que el stderr trae los dos avisos de
-    // ausencia de sección — ambos ortogonales a la divergencia que este test
-    // vigila. Se comprueba que SOLO están esos dos (nada de "difiere"/"falta
-    // la label"/etc.), en vez de exigir vacío a secas.
+    // F26 + Slice 10 + decisiones: ONE_SLICE_SPEC no trae "## Contexto del
+    // epic", ni "## Decisiones congeladas", ni columna "Señal", así que el
+    // stderr trae los TRES avisos de ausencia — todos ortogonales a la
+    // divergencia que este test vigila. Se comprueba que SOLO están esos tres
+    // (nada de "difiere"/"falta la label"/etc.), en vez de exigir vacío a secas.
     const stderrLines = res.stderr.split('\n').filter(Boolean)
-    expect(stderrLines).toHaveLength(2)
-    expect(stderrLines.join('\n')).toContain(EPIC_CONTEXT_HEADING)
-    expect(stderrLines.join('\n')).toContain(FROZEN_DECISIONS_HEADING)
+    expect(stderrLines).toHaveLength(3)
+    expect(stderrLines.some((l) => l.includes(EPIC_CONTEXT_HEADING))).toBe(true)
+    expect(stderrLines.some((l) => l.includes(FROZEN_DECISIONS_HEADING))).toBe(true)
+    expect(stderrLines.some((l) => l.includes('no tiene columna "Señal"'))).toBe(true)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1353,13 +1354,15 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
     // F6: este fixture (issue CERRADO, sin ninguna label status:) es también
     // la prueba de que el recordatorio de status:backlog no persigue a un
     // epic ya terminado: un issue cerrado no está pendiente de promoción.
-    // F26/decisiones: mismo caso que el test anterior — ONE_SLICE_SPEC no trae
-    // ni "## Contexto del epic" ni "## Decisiones congeladas", así que el
-    // stderr trae esos dos avisos y nada más.
+    // F26 + Slice 10 + decisiones: mismo caso que el test anterior —
+    // ONE_SLICE_SPEC no trae ni "## Contexto del epic", ni "## Decisiones
+    // congeladas", ni columna "Señal", así que el stderr trae esos tres avisos
+    // y nada más.
     const stderrLines = res.stderr.split('\n').filter(Boolean)
-    expect(stderrLines).toHaveLength(2)
-    expect(stderrLines.join('\n')).toContain(EPIC_CONTEXT_HEADING)
-    expect(stderrLines.join('\n')).toContain(FROZEN_DECISIONS_HEADING)
+    expect(stderrLines).toHaveLength(3)
+    expect(stderrLines.some((l) => l.includes(EPIC_CONTEXT_HEADING))).toBe(true)
+    expect(stderrLines.some((l) => l.includes(FROZEN_DECISIONS_HEADING))).toBe(true)
+    expect(stderrLines.some((l) => l.includes('no tiene columna "Señal"'))).toBe(true)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -2010,6 +2013,88 @@ describe('ct-groom — puerta B: el mismo epic bajo otro título (F23)', () => {
     expect(res.stderr).toMatch(/#452\s+ct-order:2/)   // puerta B
     // Un solo cierre: el pie aparece exactamente una vez.
     expect(res.stderr.match(/no se ha creado ni modificado nada/g)).toHaveLength(1)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// Slice 10 — la columna `Señal` en el wrapper: la exención sin razón es
+// hardError (exit 2, ANTES de cualquier mutación y también bajo --dry-run —
+// precedente del Gate desconocido: lo que no se puede leer no puede colar en
+// silencio), y la ausencia de la columna avisa POR CONSECUENCIA (el juez de
+// slice medirá su ítem observabilidad como sin-vara en todo el epic).
+describe('la columna Señal en el groom (Slice 10)', () => {
+  const CON_SENAL = (senal1, senal2) => `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Señal |
+|---|---|---|---|---|---|---|---|
+| 1 | login | backend | modelo | – | AC-1.1 | schema | ${senal1} |
+| 2 | refresh | backend | flow | #1 | AC-2.1 | – | ${senal2} |
+`
+
+  it('una exención sin razón aborta con exit 2 nombrando la fila, la sintaxis N/A — <razón> y el remedio', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, CON_SENAL('N/A', 'métrica x'))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', env: fakeEnv() })
+    expect(res.status).toBe(2)
+    expect(res.stderr).toMatch(/slice #1: "N\/A"/)
+    expect(res.stderr).toMatch(/N\/A — <razón>/)
+    expect(res.stderr).toMatch(/deja la celda vacía o con "–"/)
+    expect(res.stderr).toMatch(/corrige esas filas y vuelve a intentarlo/)
+    // Aborta ANTES de imprimir ningún plan: bajo --dry-run tampoco sale JSON.
+    expect(res.stdout).toBe('')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('las exenciones sin razón se agregan con el resto de hardErrors en una sola corrida', () => {
+    const dir = makeSpecDir('ctg-')
+    // Dos defectos a la vez: la exención sin razón (Señal) y un Dep
+    // malformado ("S1") — los dos mensajes deben salir en UNA sola ejecución,
+    // como el resto de hardErrors agregados.
+    const DOS_DEFECTOS = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Señal |
+|---|---|---|---|---|---|---|---|
+| 1 | login | backend | modelo | – | AC-1.1 | schema | N/A — |
+| 2 | refresh | backend | flow | S1 | AC-2.1 | – | – |
+`
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, DOS_DEFECTOS)
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', env: fakeEnv() })
+    expect(res.status).toBe(2)
+    expect(res.stderr).toMatch(/exención sin razón/)
+    expect(res.stderr).toMatch(/sin ninguna dependencia reconocible/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('tabla sin columna Señal: aviso por consecuencia por stderr, exit 0', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, SPEC)
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', env: fakeEnv() })
+    expect(res.status).toBe(0)
+    expect(res.stderr).toMatch(/no tiene columna "Señal"/)
+    // El aviso describe la CONSECUENCIA medible, no solo la ausencia.
+    expect(res.stderr).toMatch(/sin sección "## Señal de observabilidad"/)
+    expect(res.stderr).toMatch(/observabilidad como sin-vara/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el dry-run enseña la sección "## Señal de observabilidad" en el body del slice que la declara y no en el que no', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, CON_SENAL('–', 'métrica `backfill_progress` con label `estado`'))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', env: fakeEnv() })
+    expect(res.status).toBe(0)
+    const plan = JSON.parse(res.stdout)
+    expect(plan.issues[0].body).not.toContain('## Señal de observabilidad')
+    expect(plan.issues[1].body).toContain('## Señal de observabilidad')
+    expect(plan.issues[1].body).toContain('métrica `backfill_progress` con label `estado`')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('la exención razonada viaja verbatim al body y no aborta nada', () => {
+    const dir = makeSpecDir('ctg-')
+    const spec = join(dir, 'spec.md'); writeFileSync(spec, CON_SENAL('N/A — pantalla sin telemetría nueva que prometer', 'métrica x'))
+    const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'], { encoding: 'utf8', env: fakeEnv() })
+    expect(res.status).toBe(0)
+    const plan = JSON.parse(res.stdout)
+    expect(plan.issues[0].body).toContain('## Señal de observabilidad')
+    expect(plan.issues[0].body).toContain('N/A — pantalla sin telemetría nueva que prometer')
     rmSync(dir, { recursive: true, force: true })
   })
 })

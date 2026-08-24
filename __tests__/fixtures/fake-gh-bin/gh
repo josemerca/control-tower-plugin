@@ -266,6 +266,45 @@ function main() {
     return
   }
 
+  // `gh api repos/<o>/<r>/contents/docs/superpowers/metrics[...]` (ct-harvest.mjs,
+  // §3.4): el LISTADO del directorio de telemetría y la lectura RAW de un
+  // fichero. Va antes de la rama genérica de `contents/` (la del spec
+  // renderizado en HTML de ct-groom) porque aquélla casa con cualquier ruta.
+  //
+  // Sin FAKE_GH_METRICS_DIR_JSON el listado FALLA, que es la vida real de todo
+  // repo anterior a la telemetría del juez: el default no puede ser un
+  // directorio vacío inventado.
+  if (argv[0] === 'api' && /^repos\/[^/]+\/[^/]+\/contents\/docs\/superpowers\/metrics/.test(argv[1] || '')) {
+    const ruta = argv[1]
+    const esDirectorio = /\/contents\/docs\/superpowers\/metrics$/.test(ruta)
+    if (esDirectorio) {
+      if (!process.env.FAKE_GH_METRICS_DIR_JSON) {
+        console.error('fake-gh: api contents (metrics dir) failed (simulado: 404 Not Found)')
+        process.exitCode = 1
+        return
+      }
+      process.stdout.write(process.env.FAKE_GH_METRICS_DIR_JSON)
+      process.exitCode = 0
+      return
+    }
+    const fallo = process.env.FAKE_GH_METRICS_FILE_FAIL
+    if (fallo && ruta.includes(fallo)) {
+      console.error('fake-gh: api contents (metrics file) failed (simulado)')
+      process.exitCode = 1
+      return
+    }
+    const ficheros = JSON.parse(process.env.FAKE_GH_METRICS_FILES || '{}')
+    const nombre = ruta.split('/').pop()
+    if (!Object.hasOwn(ficheros, nombre)) {
+      console.error('fake-gh: api contents (metrics file) 404 (simulado)')
+      process.exitCode = 1
+      return
+    }
+    process.stdout.write(ficheros[nombre])
+    process.exitCode = 0
+    return
+  }
+
   // `gh api repos/<o>/<r>/contents/<ruta>?ref=<rama> -H "Accept:
   // application/vnd.github.html"` (ct-groom.mjs, F10): el spec RENDERIZADO por
   // GitHub. ct-groom.mjs lo pide por dos cosas a la vez — que el fichero

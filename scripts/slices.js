@@ -383,7 +383,13 @@ export function analyzeSlicesTable(specMd) {
         // ninguna cabecera existente: "gate" no es substring de
         // #/slice/tipo/entrega/dep/acepta/protegido/área/toca, ni ninguna de
         // esas lo es de "gate".
-        iGate = col('gate')
+        iGate = col('gate'),
+        // iSenal (Slice 10): la señal de observabilidad que el slice promete.
+        // Mismo trato de tilde que Área/Area (el autor humano teclea las dos
+        // grafías); ninguna de las dos es substring de otra cabecera ni al
+        // revés — verificado contra #/slice/tipo/entrega/dep/acepta/protegido/
+        // área/area/toca/gate.
+        iSenal = colAny('señal', 'senal')
 
   const missingRequiredColumns = []
   if (iN === -1) missingRequiredColumns.push('#')
@@ -403,6 +409,13 @@ export function analyzeSlicesTable(specMd) {
   if (iProt === -1) missingOptionalColumns.push('Protegido')
   if (iArea === -1) missingOptionalColumns.push('Área')
   if (iToca === -1) missingOptionalColumns.push('Toca')
+  // "Señal" SÍ entra en missingOptionalColumns, a diferencia de "Gate" (ver
+  // el comentario de abajo): la consecuencia de que falte la columna es
+  // MEDIBLE — el juez de slice mide su ítem `observabilidad` como sin-vara en
+  // todos los slices del epic — así que el aviso por consecuencia de
+  // ct-groom.mjs describe una degradación real, no ruido que entrena a
+  // ignorar los demás avisos.
+  if (iSenal === -1) missingOptionalColumns.push('Señal')
   // "Gate" NO entra en missingOptionalColumns, y no es un olvido (F21). Cada
   // entrada de esa lista produce, en ct-groom.mjs, un aviso por stderr con la
   // CONSECUENCIA de que falte la columna ("los issues se crearán sin label
@@ -562,6 +575,11 @@ export function analyzeSlicesTable(specMd) {
       // de gates, igual que no sabe de labels ni de addenda: su trabajo es
       // convertir una tabla markdown en celdas fiables.
       gate: (cells[iGate] || '').trim(),
+      // senal (Slice 10): la celda CRUDA, sin resolver — espejo de `gate`. La
+      // resolución (señal declarada, exención razonada `N/A — <razón>`,
+      // exención sin razón, nada) vive entera en groom.js#parseSenalCell:
+      // este parser no sabe de señales, su trabajo es entregar celdas fiables.
+      senal: (cells[iSenal] || '').trim(),
       deps,
       ac,
       protected: (cells[iProt] || '').trim(),

@@ -1,7 +1,14 @@
 // Lógica pura de grooming: de Slice[] (T1) a un plan de operaciones GitHub.
 import { isNoValueCell } from './slices.js'
 import { resolveGates, gateLabels, renderGatesIssueContent } from './gates.js'
-import { locateSection, unterminatedDelimiter, normalizeToLF } from './gh-issue-map.js'
+import { locateSection, unterminatedDelimiter, normalizeToLF, SENAL_HEADING } from './gh-issue-map.js'
+
+// SENAL_HEADING (Slice 10) nace en gh-issue-map.js (capa inferior: este
+// fichero ya importa de allí y mapGhIssue también la necesita — aquí crearía
+// un import circular) y se re-exporta para que los consumidores de groom no
+// tengan que saber dónde nació — el mismo trato que las cabeceras hermanas
+// GATES_HEADING/EPIC_CONTEXT_HEADING, que sí nacieron aquí.
+export { SENAL_HEADING }
 
 // GATES_HEADING (F21): la sección de gates del cuerpo del issue. Constante
 // exportada porque la nombran TRES sitios (este fichero al escribirla,
@@ -382,6 +389,56 @@ export function renderGatesContent(slice) {
   return renderGatesIssueContent(gatesOf(slice), slice.type)
 }
 
+// parseSenalCell (Slice 10): EL clasificador de la celda `Señal` — UNO solo,
+// reutilizado por groom (validación en ct-groom.mjs + render aquí), por
+// kickoff (la línea condicional del despacho) y, en prosa, por la rúbrica del
+// juez de slice. La celda es texto libre de UNA pieza (la coma no separa,
+// como `Protegido`), y la exención razonada se escribe `N/A — <razón>`: el
+// idioma que el repo ya tiene para "no aplica, y por esto" (el §8 del plan de
+// slice y el `**Tests:** N/A` de una tarea). Devuelve `{ kind, text }`:
+//
+//   ninguna             celda vacía, null, o con marcador de "sin valor"
+//                       (guiones) — NO DECLARADA, nunca una exención.
+//   senal               texto libre con contenido: la señal, trimmed verbatim.
+//   exencion            `N/A — <razón>` con razón no vacía; `text` es la
+//                       celda trimmed VERBATIM (con su `N/A —` dentro) — el
+//                       consumidor la distingue solo por su prefijo, sin
+//                       re-parsear ni re-renderizar nada.
+//   exencion-sin-razon  la familia N/A sin razón legible detrás — el wrapper
+//                       la convierte en hardError (exit 2): una exención que
+//                       nadie puede leer es una señal sin declarar disfrazada
+//                       de decisión.
+//
+// La detección de la familia N/A es /^n\/a(\b|$)/i, SIN tolerancia de énfasis
+// (misma postura que la columna `#`: "**N/A**" no perdona negrita); la razón
+// es lo que queda tras quitar `N/A` y los separadores iniciales (—/–/-/: y
+// espacios).
+export function parseSenalCell(raw) {
+  const trimmed = (raw ?? '').trim()
+  if (!trimmed || isNoValueCell(trimmed)) return { kind: 'ninguna', text: null }
+  if (/^n\/a(\b|$)/i.test(trimmed)) {
+    const razon = trimmed.replace(/^n\/a/i, '').replace(/^[\s—–\-:]+/, '').trim()
+    if (!razon) return { kind: 'exencion-sin-razon', text: null }
+    return { kind: 'exencion', text: trimmed }
+  }
+  return { kind: 'senal', text: trimmed }
+}
+
+// renderSenalContent (Slice 10): qué debería decir la sección
+// `## Señal de observabilidad` — la misma fuente única de verdad que
+// renderDescripcion/renderProtectedLine, compartida entre crear el issue
+// (buildIssueBody) y compararlo después (reconcile.js#diffIssue). `null`
+// significa "la sección no debería existir": sin declaración no hay nada que
+// emitir (a diferencia de `## Gates`, aquí no hay fallback que distinguir y
+// una sección que sale siempre es el aviso-que-sale-siempre que entrena a
+// ignorar). Con una exención sin razón también devuelve `null` — esta función
+// es pura y no lanza: el wrapper (ct-groom.mjs) aborta con hardError ANTES de
+// llegar a ningún render.
+export function renderSenalContent(slice) {
+  const { kind, text } = parseSenalCell(slice.senal)
+  return (kind === 'senal' || kind === 'exencion') ? text : null
+}
+
 // renderSpecLink (F5 review round 3, importante 5): la línea de enlace al
 // spec ES contenido que el spec posee de verdad — no es bookkeeping como el
 // marcador `ct-order`. Extraída por el mismo motivo que renderDescripcion/
@@ -529,6 +586,21 @@ export function buildIssueBody(slice, specRef, epicContext = null, frozenDecisio
   lines.push('## Acceptance criteria (EARS, 1:1 con tests)')
   lines.push(renderAcContent(slice.ac))
   lines.push('')
+  // Slice 10: la señal de observabilidad va tras los AC y ANTES de
+  // "## Dependencias" — cierra la zona del lector "cómo se verifica → qué
+  // debe observarse" sin tocar ningún ancla de inserción de --reconcile (el
+  // contexto del epic se inserta antes de "## Contexto heredado"/los AC; las
+  // deps se anclan en "## Out of scope / Protected"). Solo se emite cuando
+  // hay contenido (señal o exención razonada, VERBATIM de la celda): sin
+  // declaración, silencio — ambos casos son sin-vara para el juez y una
+  // sección que saliera en todos los issues de todos los epics que no usan
+  // la columna sería el aviso-que-sale-siempre que entrena a ignorar.
+  const senal = renderSenalContent(slice)
+  if (senal) {
+    lines.push(SENAL_HEADING)
+    lines.push(senal)
+    lines.push('')
+  }
   const deps = slice.deps || []
   if (deps.length) {
     lines.push('## Dependencias')
@@ -602,6 +674,10 @@ export function groomPlan(slices, { milestone, specRef, epicContext = null, epic
       ac: s.ac || [],
       descripcion: renderDescripcion(s),
       protectedLine: renderProtectedLine(s),
+      // Slice 10: la señal estructurada viaja junto a descripcion/
+      // protectedLine y por el mismo motivo — reconcile compara contra un
+      // issue existente sin re-parsear el body que este plan acaba de generar.
+      senal: renderSenalContent(s),
       specLink: renderSpecLink(s, specRef),
       // F21: los gates RESUELTOS (no la celda cruda) viajan en el plan por el
       // mismo motivo que ac/descripcion/protectedLine — reconcile.js y el
