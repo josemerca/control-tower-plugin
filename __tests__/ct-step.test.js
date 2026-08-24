@@ -16,6 +16,13 @@ import { fileURLToPath } from 'node:url'
 
 import { deliveredRun } from '../scripts/run-machine.js'
 import { VERDICT_RULES, SLICE_VERDICT_RULES } from '../scripts/step-contracts.js'
+// Slice 10: renderState siembra el SLICE.md de los tests de señal por el
+// mismo camino que buildStateSeed (pliega/entrecomilla los valores largos —
+// la razón de que ct-step lea `senal:` con parseStateSafe y no con regex), y
+// SENAL_AUSENTE es la constante única con la que declara la ausencia el
+// paquete del juez de slice.
+import { renderState } from '../scripts/state.js'
+import { SENAL_AUSENTE } from '../scripts/kickoff.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(here, '..', 'scripts', 'ct-step.mjs')
@@ -120,9 +127,10 @@ const crudo = (texto, nombre = 'crudo.json') => {
   writeFileSync(p, texto)
   return p
 }
-// El veredicto del juez de SLICE (§3.7-B): recorrido de DOS ítems, compuesto
-// desde la lista del módulo por el mismo motivo que `recorridoCompleto` — que
-// el fixture no se quede atrás si la rúbrica cambia.
+// El veredicto del juez de SLICE (§3.7-B): el recorrido se compone desde
+// SLICE_VERDICT_RULES (map), nunca una lista a mano, por el mismo motivo que
+// `recorridoCompleto` — que el fixture no se quede atrás si la rúbrica cambia
+// de tamaño (Slice 10 la subió de dos a tres ítems sin tocar estas líneas).
 const recorridoDeSlice = () => SLICE_VERDICT_RULES.map((rule) => ({ rule, result: `mirado en el test: ${rule}`, outcome: 'conforme' }))
 const veredictoDeSlice = (ruling, findings = [], nombre = 'slice-verdict.json') => {
   const p = join(repo, nombre)
@@ -953,5 +961,56 @@ describe('el juicio del slice entero (§3.7-B)', () => {
     const juez = filas.find((f) => f.step === 'slice-judge')
     expect(juez.task).toBeNull()
     expect(juez.ruling).toBe('PASS')
+  })
+
+  // Slice 10 — la señal cruza el embudo en el paquete: ct-step la lee del
+  // campo `senal:` del SLICE.md (disco, sin agente en medio — la doctrina del
+  // §3.3) y la pega como PRIMERA sección `## Señal`, delante del diff -U10
+  // donde quedaría enterrada. El fallback SENAL_AUSENTE cubre un SLICE.md
+  // sembrado por un plugin anterior a la columna.
+  const sembrarSenalEnSliceMd = (senal) => {
+    const g = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    // Por el MISMO camino que buildStateSeed (renderState): es lo que hace
+    // que un valor largo llegue plegado/entrecomillado por YAML, como en un
+    // despacho real.
+    writeFileSync(join(repo, '.agent', 'SLICE.md'), renderState({ meta: { issue: 7, epic: 12, senal }, body: '# slice de mentira' }))
+    g('add', '.agent/SLICE.md')
+    g('commit', '-q', '-m', 'siembra la senal del slice')
+  }
+
+  it('el paquete de slice abre con "## Señal" y lleva el texto del campo senal: del SLICE.md', () => {
+    sembrarSenalEnSliceMd('métrica `backfill_progress` con label `estado`')
+    enJuezDeSlice()
+    ct('next')
+    const paquete = readFileSync(join(repo, '.agent', 'run-7', 'slice-review.diff'), 'utf8')
+    expect(paquete).toMatch(/## Señal/)
+    expect(paquete).toContain('métrica `backfill_progress` con label `estado`')
+    // Primera: antes de Commits/Files changed/Diff.
+    expect(paquete.indexOf('## Señal')).toBeLessThan(paquete.indexOf('## Commits'))
+  })
+
+  it('sin campo senal: en el SLICE.md, la sección declara la ausencia con SENAL_AUSENTE', () => {
+    // El fixture de montarRepo siembra un SLICE.md SIN campo senal — el caso
+    // de un plugin anterior a la columna.
+    enJuezDeSlice()
+    ct('next')
+    const paquete = readFileSync(join(repo, '.agent', 'run-7', 'slice-review.diff'), 'utf8')
+    expect(paquete).toMatch(/## Señal/)
+    expect(paquete).toContain(SENAL_AUSENTE)
+    expect(paquete.indexOf('## Señal')).toBeLessThan(paquete.indexOf('## Commits'))
+  })
+
+  it('una señal larga (plegada por YAML) llega entera al paquete', () => {
+    // > 100 caracteres en una sola pieza: renderState (yaml.stringify) la
+    // pliega en varias líneas del frontmatter — una regex de línea única (la
+    // de `epic:`) la truncaría y la vara del ítem llegaría a medias sin que
+    // nadie lo viera. Esta es la razón de parseStateSafe.
+    const larga = 'métrica `harvest_rows_total` con label `estado` acotado a los valores enumerados del contrato, emitida por el worker de cosecha en cada lote confirmado'
+    expect(larga.length).toBeGreaterThan(100)
+    sembrarSenalEnSliceMd(larga)
+    enJuezDeSlice()
+    ct('next')
+    const paquete = readFileSync(join(repo, '.agent', 'run-7', 'slice-review.diff'), 'utf8')
+    expect(paquete).toContain(larga)
   })
 })

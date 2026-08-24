@@ -55,12 +55,13 @@ export const VERDICT_RULES = [
 ]
 
 // La rúbrica del juez de SLICE (§3.7-B del handoff
-// docs/prompt-juez-lo-que-queda.md), DOS ítems y no nueve — el argumento es el
+// docs/prompt-juez-lo-que-queda.md), TRES ítems y no nueve — el argumento es el
 // mismo que ya cerró `boundaries` y `rollout` como absorbidos: todo lo que se
 // añade compite por la atención del juez, y `agents/ct-slice-judge.md` no
 // hereda ninguno de los nueve de `ct-judge.md` (ésos son por-tarea: marcadores,
 // brief, paquete stageado de UNA tarea; aquí el sujeto es el slice entero, ya
-// comiteado). Los dos ítems son exactamente los dos agujeros que §3.7 nombra:
+// comiteado). Los dos primeros son exactamente los dos agujeros que §3.7
+// nombra:
 //
 //   `estado-final`  — si las tareas juntas entregan el `### Desired end
 //     state` del plan. Nadie lo miraba: el juez de tarea tiene ese mismo
@@ -71,10 +72,29 @@ export const VERDICT_RULES = [
 //     alguna debía retirar. `ct-judge` juzga UNA tarea; esto no lo miraba
 //     nadie.
 //
+// `observabilidad` (Slice 10, §3.9) es el tercero, y entra DETRÁS — el mismo
+// argumento con el que `test-desiderata` entró noveno en VERDICT_RULES: el
+// orden del array ES el orden del recorrido, los encabezados de la rúbrica
+// están atados por test, e intercalarlo renumeraría sin medir nada. Mide las
+// tres comprobaciones del §3.9 sobre la SEÑAL que la slice declaró (sección
+// `## Señal` del paquete, pegada por el programa desde el SLICE.md del
+// despacho) contra el diff ACUMULADO: que lo prometido lo emita código de
+// producción, con la instrumentación que EL REPO ya usa, sin labels de
+// cardinalidad ilimitada. Vive AQUÍ y no en `ct-judge` por tres razones
+// cerradas: (a) el sujeto es la señal DE LA SLICE — una tarea puede
+// legítimamente no emitirla porque la emite la siguiente, y el único diff con
+// el sujeto completo es el acumulado, que solo ve este juez; (b) el argumento
+// del §3.6: todo ítem compite por la atención, y `ct-judge` ya recorre 9 por
+// CADA tarea y reintento mientras aquí son 3 una vez por slice; (c) es donde
+// lo tiene `agentic-skills` (su ítem 9 juzga la slice entera). No se absorbe
+// en `estado-final` porque mide OTRA fuente (la señal declarada, no el
+// `### Desired end state`) con su propio `no-aplica`/`sin-vara`, y la
+// telemetría necesita contarlo por regla.
+//
 // Mismo enum CERRADO que VERDICT_RULES, y por el mismo motivo: la telemetría
 // cuenta hallazgos por regla, y una regla inventada por este juez ensuciaría
 // esa cuenta igual que ensuciaría la del juez de tarea.
-export const SLICE_VERDICT_RULES = ['estado-final', 'coherencia']
+export const SLICE_VERDICT_RULES = ['estado-final', 'coherencia', 'observabilidad']
 
 // Lo que un ítem del recorrido pudo hacer. El recorrido ya distinguía "no se
 // miró" de "se miró", pero dentro de "se miró" seguía habiendo dos cosas que
@@ -300,14 +320,17 @@ export const PACKAGE_SECTIONS = ['Files changed', 'Rutas tocadas', 'Diff']
 // es el test, no el código.
 export const SLICE_JUDGE_TOOLS = 'Read, Grep, Glob, Write'
 
-// Los tres encabezados del paquete de SLICE que escribe `escribirPaqueteDeSlice`
-// en `scripts/ct-step.mjs`: el registro de commits de la slice (que no existe
-// en el paquete por tarea, porque una tarea es UN commit sin historia propia
-// que mostrar), el resumen de ficheros tocados y el diff acumulado desde la
-// base. Mismo cruce que `PACKAGE_SECTIONS`: la rúbrica de
+// Los cuatro encabezados del paquete de SLICE que escribe `escribirPaqueteDeSlice`
+// en `scripts/ct-step.mjs`: la señal de observabilidad que el issue del slice
+// declaró (Slice 10 — PRIMERA porque es la vara del ítem `observabilidad`:
+// detrás del diff `-U10` quedaría enterrada), el registro de commits de la
+// slice (que no existe en el paquete por tarea, porque una tarea es UN commit
+// sin historia propia que mostrar), el resumen de ficheros tocados y el diff
+// acumulado desde la base. Mismo cruce que `PACKAGE_SECTIONS`: la rúbrica de
 // `agents/ct-slice-judge.md` los cita por su nombre, y sin este test un
-// encabezado renombrado deja al juez señalando una sección que no existe.
-export const SLICE_PACKAGE_SECTIONS = ['Commits', 'Files changed', 'Diff']
+// encabezado renombrado deja al juez señalando una sección que no existe — el
+// test que los ata obliga a que paquete y agente cambien en la MISMA tarea.
+export const SLICE_PACKAGE_SECTIONS = ['Señal', 'Commits', 'Files changed', 'Diff']
 
 const esTexto = (v) => typeof v === 'string' && v.trim() !== ''
 

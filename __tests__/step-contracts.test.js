@@ -425,9 +425,43 @@ describe('quién puede qué', () => {
 // patrones de test que ya atan al juez de tarea, aplicados al fichero nuevo.
 // ---------------------------------------------------------------------------
 describe('el juez de slice (§3.7-B)', () => {
-  it('SLICE_VERDICT_RULES son los dos encabezados de la rúbrica de ct-slice-judge.md', () => {
+  it('SLICE_VERDICT_RULES son los tres encabezados de la rúbrica de ct-slice-judge.md', () => {
     expect(SLICE_VERDICT_RULES).toEqual(reglasDeAgente(AGENTE_JUEZ_DE_SLICE))
-    expect(SLICE_VERDICT_RULES).toEqual(['estado-final', 'coherencia'])
+    // Slice 10: `observabilidad` es el tercer ítem — las tres comprobaciones
+    // del §3.9 contra el diff acumulado, la señal DE LA SLICE como sujeto.
+    expect(SLICE_VERDICT_RULES).toEqual(['estado-final', 'coherencia', 'observabilidad'])
+  })
+
+  // El orden del array ES el orden del recorrido y los encabezados están
+  // atados por test — intercalarlo renumeraría los encabezados de
+  // ct-slice-judge.md sin medir nada distinto (el mismo argumento con el que
+  // `test-desiderata` entró noveno en el juez de tarea).
+  it('observabilidad es el tercero y último: entra detrás, nunca intercalado', () => {
+    expect(SLICE_VERDICT_RULES.at(-1)).toBe('observabilidad')
+    expect(SLICE_VERDICT_RULES.slice(0, 2)).toEqual(['estado-final', 'coherencia'])
+  })
+
+  // La TERCERA copia de los identificadores (después del array y de los
+  // encabezados): la lista que el bullet `rule` de "What you write" le enseña
+  // al juez — un identificador que no aparece ahí es un ítem que el juez
+  // recorre pero del que nunca se atreve a emitir un hallazgo. Mismo motivo
+  // que `identificadoresQueElJuezPuedeEscribir` en el juez de tarea.
+  it('el bullet de rule de ct-slice-judge.md nombra los tres identificadores', () => {
+    const texto = readFileSync(AGENTE_JUEZ_DE_SLICE, 'utf8')
+    const m = /- `rule` is one of the[\s\S]*?(?=\n- `path`)/.exec(texto)
+    const bullet = m ? m[0].replace(/\s+/g, ' ') : ''
+    for (const rule of SLICE_VERDICT_RULES) {
+      expect(bullet).toContain(`\`${rule}\``)
+    }
+  })
+
+  // La telemetría (`findings_by_rule`) cuenta hallazgos por NOMBRE de regla y
+  // `aggregateVerdictMeasures` funde tal cual todo lo que trae `ruling`: un
+  // nombre compartido entre los dos jueces haría indistinguibles sus cuentas.
+  it('observabilidad no choca con ninguna regla del juez de tarea', () => {
+    expect(VERDICT_RULES).not.toContain('observabilidad')
+    // Disjunción completa: ningún identificador vive en las dos rúbricas.
+    expect(SLICE_VERDICT_RULES.filter((r) => VERDICT_RULES.includes(r))).toEqual([])
   })
 
   it('el juez de slice no tiene shell ni Edit', () => {
@@ -451,17 +485,23 @@ describe('el juez de slice (§3.7-B)', () => {
     expect(esquema).toMatch(/"path"/)
   })
 
-  it('SLICE_PACKAGE_SECTIONS no puede divergir de los encabezados que la rúbrica cita por su nombre', () => {
+  it('SLICE_PACKAGE_SECTIONS abre con Señal y no puede divergir de la rúbrica', () => {
     expect(SLICE_PACKAGE_SECTIONS).toEqual(seccionesDelPaqueteDeSlice())
+    // Slice 10: `Señal` PRIMERA, porque es la vara del ítem `observabilidad`
+    // — detrás del diff -U10 quedaría enterrada. La atadura de arriba obliga
+    // a que paquete y agente cambien en la MISMA tarea.
+    expect(SLICE_PACKAGE_SECTIONS).toEqual(['Señal', 'Commits', 'Files changed', 'Diff'])
   })
 
   it('el esquema del recorrido de slice no duplica los identificadores: los toma de SLICE_VERDICT_RULES', () => {
     expect(SLICE_VERDICT_SCHEMA.properties.rubric.items.properties.rule.enum).toBe(SLICE_VERDICT_RULES)
   })
 
-  it('el esquema de slice pide el recorrido entero: dos ítems, ni uno más ni uno menos', () => {
-    expect(SLICE_VERDICT_SCHEMA.properties.rubric.minItems).toBe(2)
-    expect(SLICE_VERDICT_SCHEMA.properties.rubric.maxItems).toBe(2)
+  it('el esquema de slice pide el recorrido entero: tres ítems, ni uno más ni uno menos', () => {
+    // Slice 10: el esquema deriva de SLICE_VERDICT_RULES.length — sube a 3
+    // solo, sin tocar schemaFor ni readSliceVerdict.
+    expect(SLICE_VERDICT_SCHEMA.properties.rubric.minItems).toBe(3)
+    expect(SLICE_VERDICT_SCHEMA.properties.rubric.maxItems).toBe(3)
   })
 
   const recorridoDeSlice = () => SLICE_VERDICT_RULES.map((rule) => ({ rule, result: `mirado: ${rule}`, outcome: 'conforme' }))
@@ -491,11 +531,21 @@ describe('el juez de slice (§3.7-B)', () => {
     expect(r.why).toMatch(/contradice la rúbrica/)
   })
 
-  it('readSliceVerdict descarta un recorrido incompleto: la rúbrica son 2 ítems', () => {
+  it('readSliceVerdict descarta un recorrido incompleto: la rúbrica son 3 ítems', () => {
     const r = readSliceVerdict({ ruling: 'PASS', rubric: [recorridoDeSlice()[0]], findings: [] })
     expect(r.verdict).toBeUndefined()
     expect(r.why).toMatch(/coherencia/)
-    expect(r.why).toContain('2 ítems')
+    expect(r.why).toContain('3 ítems')
+  })
+
+  // El mensaje de recorrido incompleto deriva de `rules` y nombra lo que
+  // falta: un juez de slice que conteste el recorrido viejo de dos ítems se
+  // descarta con el nombre del tercero en el texto que lee para reintentar.
+  it('un recorrido de slice sin observabilidad se descarta nombrándolo', () => {
+    const soloDos = recorridoDeSlice().filter((p) => p.rule !== 'observabilidad')
+    const r = readSliceVerdict({ ruling: 'PASS', rubric: soloDos, findings: [] })
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/observabilidad/)
   })
 
   it('readVerdict (el de TAREA) sigue exigiendo el recorrido de nueve: no hay regresión', () => {

@@ -68,6 +68,13 @@ import {
   SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS,
 } from './step-contracts.js'
 import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, metricsRepoRelPath } from './run-metrics.js'
+// Slice 10: parseStateSafe lee el campo `senal:` del SLICE.md (ver
+// senalDelSlice, abajo, para por qué NO vale la regex de `epic:`), y
+// SENAL_AUSENTE es la constante ÚNICA con la que los dos escritores del canal
+// (buildStateSeed al sembrar, este módulo al empaquetar el fallback) declaran
+// que no hay señal — importada, no copiada, para que no diverjan.
+import { parseStateSafe } from './state.js'
+import { SENAL_AUSENTE } from './kickoff.js'
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -256,6 +263,19 @@ const repoSlug = (() => {
 const epicDelSlice = (() => {
   const m = /^epic:\s*(.+)$/m.exec(readFileSync(join(repoRoot, '.agent', 'SLICE.md'), 'utf8'))
   return m ? m[1].trim() : null
+})()
+// Slice 10: la señal de observabilidad que el despacho sembró en el SLICE.md
+// (campo `senal:`, buildStateSeed). Se parsea con `parseStateSafe` y NO con
+// la regex de `epic:` porque el YAML de `renderState` pliega y entrecomilla
+// los valores largos —y una señal es una frase, no un token— así que una
+// regex de línea única la truncaría: la vara del ítem `observabilidad`
+// llegaría a medias al juez de slice sin que nadie lo viera. `parseStateSafe`
+// ya existe en state.js y nunca lanza; un SLICE.md sin el campo (sembrado por
+// un plugin anterior a la columna) sale null y el paquete declara la ausencia
+// con SENAL_AUSENTE.
+const senalDelSlice = (() => {
+  const { meta } = parseStateSafe(readFileSync(join(repoRoot, '.agent', 'SLICE.md'), 'utf8'))
+  return typeof meta.senal === 'string' && meta.senal.trim() ? meta.senal.trim() : null
 })()
 const intento = () => run.controlRetries + run.judgeRetries + run.correctionRetries + 1
 // Los dos campos de identidad que el módulo de la fila NO puede ir a buscar (es
@@ -468,9 +488,17 @@ function escribirPaquete() {
 // se ve en el orden de los commits, no en el diff acumulado por sí solo.
 function escribirPaqueteDeSlice() {
   const paquete = join(workDir, 'slice-review.diff')
-  const [SECCION_COMMITS, SECCION_FILES, SECCION_DIFF] = SLICE_PACKAGE_SECTIONS
+  const [SECCION_SENAL, SECCION_COMMITS, SECCION_FILES, SECCION_DIFF] = SLICE_PACKAGE_SECTIONS
+  // Slice 10: la señal cruza el embudo AQUÍ, leída del disco (el campo
+  // `senal:` que el despacho sembró en el SLICE.md) y sin agente en medio —
+  // la misma doctrina del §3.3 con la que la vara del repo viaja en el brief.
+  // PRIMERA sección porque es la vara del ítem `observabilidad`: detrás del
+  // diff -U10 quedaría enterrada. El fallback SENAL_AUSENTE cubre un SLICE.md
+  // sembrado por un plugin anterior a la columna: la ausencia se declara, no
+  // se omite, y su texto es exactamente lo que la rúbrica lee como sin-vara.
   writeFileSync(paquete, [
     `# Slice review package: issue #${issue} — ${run.tasksTotal} tasks committed since ${run.baseSha.slice(0, 7)}`,
+    '', `## ${SECCION_SENAL}`, senalDelSlice ?? SENAL_AUSENTE,
     '', `## ${SECCION_COMMITS}`, git(['log', '--reverse', '--format=%h %s', `${run.baseSha}..HEAD`]) || '',
     '', `## ${SECCION_FILES}`, git(['diff', '--stat', run.baseSha, 'HEAD']) || '',
     '', `## ${SECCION_DIFF}`, git(['diff', '-U10', run.baseSha, 'HEAD']) || '',

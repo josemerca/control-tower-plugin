@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { renderKickoff, buildStateSeed, ACCOUNT_MAP, ADDENDA } from '../scripts/kickoff.js'
+import { renderKickoff, buildStateSeed, ACCOUNT_MAP, ADDENDA, SENAL_AUSENTE } from '../scripts/kickoff.js'
 import { parseState } from '../scripts/state.js'
 import { resolveAccount, resolveAccountLegacy, validateAccountMap } from '../scripts/dispatch.js'
 
@@ -287,5 +287,53 @@ describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan pri
     expect(k).toMatch(/NO crees worktrees/)
     // La razón de la prohibición del worktree viaja con ella: ya está en uno.
     expect(k).toMatch(/ya estás en/i)
+  })
+})
+
+// Slice 10 — la señal en el despacho. El campo `senal:` se siembra SIEMPRE
+// (con el texto verbatim del issue, o con SENAL_AUSENTE — la ausencia se
+// declara, no se omite, mismo criterio que gates:/blocked:), porque su lector
+// es ct-step, que lo pega como primera sección del paquete del juez de slice
+// sin ningún agente en medio. La línea del kickoff, en cambio, es
+// CONDICIONAL: solo sale con señal declarada — "ninguna exigencia que el spec
+// le haga al agente puede depender de que el agente lea el spec", y con
+// exención o sin declaración no hay nada que exigir (el silencio cuando no
+// hay nada que decir es lo que mantiene útiles a las líneas que sí salen).
+describe('la señal en el despacho (Slice 10)', () => {
+  const OPTS = { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs', ctStepPath: '/x/ct-step.mjs' }
+
+  it('buildStateSeed siembra senal: con el texto del issue, verbatim', () => {
+    const seed = buildStateSeed({ ...SLICE, senal: 'métrica `backfill_progress` con label `estado`' }, { branch: 'feat/7', base: 'main' })
+    const { meta } = parseState(seed)
+    expect(meta.senal).toBe('métrica `backfill_progress` con label `estado`')
+  })
+
+  it('buildStateSeed declara la ausencia con SENAL_AUSENTE cuando el issue no trae sección', () => {
+    for (const sinSenal of [{ ...SLICE }, { ...SLICE, senal: null }, { ...SLICE, senal: '' }, { ...SLICE, senal: '  ' }]) {
+      const { meta } = parseState(buildStateSeed(sinSenal, { branch: 'feat/7', base: 'main' }))
+      expect(meta.senal).toBe(SENAL_AUSENTE)
+    }
+    // La constante abre con "(sin señal declarada" — es el prefijo con el que
+    // la rúbrica del juez de slice reconoce el estado sin-vara.
+    expect(SENAL_AUSENTE.startsWith('(sin señal declarada')).toBe(true)
+  })
+
+  it('la exención razonada viaja al SLICE.md tal cual (N/A — razón)', () => {
+    const { meta } = parseState(buildStateSeed({ ...SLICE, senal: 'N/A — pantalla sin telemetría nueva que prometer' }, { branch: 'feat/7', base: 'main' }))
+    expect(meta.senal).toBe('N/A — pantalla sin telemetría nueva que prometer')
+  })
+
+  it('renderKickoff nombra la señal cuando el issue la declara', () => {
+    const k = renderKickoff({ ...SLICE, senal: 'métrica x' }, OPTS)
+    expect(k).toContain('Este slice declara una SEÑAL DE OBSERVABILIDAD (sección "## Señal de observabilidad" del issue): lo que esa señal promete tiene que emitirlo el código de PRODUCCIÓN de este slice, instrumentado como ya instrumenta este repo y sin labels de cardinalidad ilimitada — el juez del slice entero lo comprueba contra el diff acumulado antes del PR.')
+    // Tras la línea de "Lee también las secciones…" — la zona de "qué leer
+    // del issue", antes del primer acto.
+    expect(k.indexOf('Lee también las secciones')).toBeLessThan(k.indexOf('SEÑAL DE OBSERVABILIDAD'))
+  })
+
+  it('renderKickoff calla con exención y calla sin declaración', () => {
+    expect(renderKickoff({ ...SLICE, senal: 'N/A — sin telemetría nueva' }, OPTS)).not.toContain('SEÑAL DE OBSERVABILIDAD')
+    expect(renderKickoff(SLICE, OPTS)).not.toContain('SEÑAL DE OBSERVABILIDAD')
+    expect(renderKickoff({ ...SLICE, senal: '–' }, OPTS)).not.toContain('SEÑAL DE OBSERVABILIDAD')
   })
 })
