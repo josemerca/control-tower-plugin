@@ -183,8 +183,15 @@ F21 dejó anotada al añadir `Gate`.
 | celda → recorridos | `splitEscapedCommas` + `cleanEmphasis` + `isNoValueCell` | **ya funciona**, sin tocar una línea |
 | celda → label | `gate:e2e`, **derivada** de que la celda tenga contenido | nuevo |
 | celda → issue | sección propia `## E2E` en el cuerpo | cambio en `groom.js` |
-| issue → agente | `gates.js#renderGateKickoffLines` | ya existe; un texto nuevo |
+| issue → agente | `gates.js#renderGateKickoffLines` (el gate) + el kickoff nombra los recorridos | ya existe; un texto nuevo |
+| issue → **programa** | el campo `e2e` de `.agent/SLICE.md`, sembrado por `/ct-next` | nuevo — es el que lee `ct-step` (§3.6) |
 | issue → agente re-hidratado | el campo `gates:` de `.agent/SLICE.md`, vía `resolveGatesForAgent` | **gratis**: viene por venir |
+
+Los dos últimos saltos son distintos y conviene no confundirlos: el campo
+`gates` es **texto legible para un agente** —su propio comentario en
+`buildStateSeed` avisa de que «ningún código del plugin decide nada con este
+campo»— y el campo `e2e` nuevo sí lo lee un programa. Por eso su forma es una
+lista y no una frase, y por eso `--release` no se fía de él (§3.6).
 
 **Por qué la label se deriva y no se escribe.** Escrita a mano habría dos sitios
 diciendo lo mismo, y dos sitios divergen. Derivada: sin celda no hay label, y
@@ -236,67 +243,101 @@ Cuatro decisiones:
    decirle dónde no entrar, y el sitio donde se le dice tiene que ser el mismo
    del que saca cómo levantarlo.
 
-### 3.4 La travesía
+### 3.4 El e2e es un paso de la máquina, no una puerta al lado
 
-En el worktree, con los tests ya verdes y antes de abrir el PR:
+La #31 (`d4-conductor-como-programa`) convirtió la fase de implementación en una
+máquina de estados: `ct-step` es el oráculo y `run-machine.js` la tabla. Por
+cada tarea del plan, `implement → controls → judge → commit`; al comitear la
+última, el run cierra en `DELIVERED`. Y `dispatch-check --release` **ya exige
+ese run entregado** (exit 7, vía `deliveredRun`), con la doctrina de siempre:
+*«un prompt no es un gate; esto lo convierte en mecanismo»*.
 
-1. Lee la sección `## E2E` de su issue. Sus recorridos y sólo los suyos.
-2. Lee la sección de `AGENTS.md`. Sin ella, todo queda *no-verificado*.
-3. Levanta y **espera la señal declarada**. Si no llega en el plazo:
-   *no-verificado*, **no rojo** — no ha probado el código, ha fallado el
-   entorno, y confundirlos manda a buscar el error donde no está.
-4. Recorre cada recorrido con las herramientas declaradas.
-5. **Tira el entorno pase lo que pase**, incluido si algo revienta a mitad
-   («restore pase lo que pase», del shop, y por las mismas razones).
-6. Escribe el informe, lo commitea, abre el PR y pega el informe como
-   comentario del PR.
+Con esa máquina delante, un e2e enganchado al lado del `--release` serían **dos
+mecanismos en paralelo verificando la misma entrega** — justo lo que la #31
+acaba de quitar al hacer que la secuencia la decida una tabla. Así que el e2e es
+un paso más:
 
-### 3.5 El informe: fichero commiteado y comentario en el PR
+```
+por cada tarea:  implement → controls → judge → commit
+                                                  │
+                        (última tarea) ────────────┤
+                                                   ├─ sin recorridos ──→ DELIVERED
+                                                   └─ con recorridos ──→ e2e ──→ DELIVERED
+                                                                          │
+                                                                          └─ rojo ─→ BLOCKED_E2E
+```
 
-Las dos cosas, con precedente exacto: el plan del slice ya se commitea en
-`docs/superpowers/plans/` **y** se publica como comentario del issue para el
-gate `plan`. Mismo reparto — el fichero es lo que la puerta valida
-mecánicamente, el comentario es para que el humano lo lea sin abrir ficheros, en
-el sitio donde ya está mirando en la Puerta 3.
+Y trae tres cosas ya construidas:
 
-Vive en `docs/superpowers/e2e/<issue>.md` — **el número de issue a secas**, sin
-slug. Un slug lo derivarían dos partes distintas (el agente al escribir, la
-puerta al buscar) y al divergir la puerta diría «falta el informe» sobre un
-fichero que existe. El número es el único identificador que las dos partes ya
-tienen sin calcular nada — mismo criterio por el que `/ct-next` usa
-`.worktrees/<n>` y `feat/<n>`.
+| Necesidad | Lo que ya existe |
+|---|---|
+| Los tres estados | `OUTCOMES.DONE` / `FAILED` / `INDETERMINATE` — verde / rojo / no-verificado, con esos nombres |
+| El cierre en rojo | la familia `BLOCKED_CONTROLS` / `BLOCKED_JUDGE` / `BLOCKED_COMMIT`; se añade `BLOCKED_E2E` |
+| El informe ilegible | `OUTCOMES.DISCARDED`, que en `implement` ya repite el paso sin gastar reintento |
 
-Requiere una entrada en `scope.js#LOOP_ARTIFACT_PATTERNS`, y encaja con el
-criterio de esa lista («sólo contiene lo que manda EL PLUGIN»): el kickoff lo
-ordena, igual que ordena el plan.
+**Y no hace falta ninguna puerta nueva para imponerlo:** sin pasar el e2e el run
+no llega a `DELIVERED`, así que el exit 7 que `--release` ya tiene lo cubre. La
+obediencia es estructural, no un aviso — `ct-step` rechaza con **9** cualquier
+verbo que no sea el paso que toca, así que el e2e no se puede saltar ni
+adelantar.
+
+### 3.5 El verbo, y quién redacta la evidencia
+
+```
+ct-step e2e informe.json --plan <fichero> --issue <n>
+```
+
+El agente entrega **datos estructurados**, no prosa: el mismo canal que `report`
+y `verdict`, validado por un esquema de `step-contracts.js`. Y el markdown
+legible que va al PR **lo escribe el programa**, en
+`docs/superpowers/e2e/<issue>.md`.
+
+Ese reparto no es estético, es el mismo que la #31 razonó para el commit:
+*«comitea el programa, no el implementador: un veto no deja rastro que
+deshacer»*. Si el markdown lo redactara el agente, habría que validar su prosa
+—y validar prosa es lo que este repo evita— mientras que un JSON contra un
+esquema se comprueba en veinte líneas. De paso desaparece la clase entera de
+fallos de formato: no puede faltar un encabezado ni citar mal un recorrido,
+porque el programa los copia de la lista que ya tiene.
 
 **Y no va al «Registro de cierre (evidencia)» del spec**, aunque esa tabla
-exista y `scope.js` ya exima `docs/superpowers/specs/**` para que el slice la
-rellene. La razón está escrita en ese mismo fichero: «esta exención deja al
-agente escribir en el spec CONGELADO sin que el gate lo vea — y en el incidente
-del despacho 1 el agente metió ahí parte de su autorización falsa». Aumentar el
-tráfico por un agujero ya documentado como incidente, para meter por él justo
-la evidencia de que algo se verificó, es la peor combinación posible. Un
-directorio nuevo no abre ningún agujero: nadie más escribe ahí.
+exista y `scope.js` ya exima `docs/superpowers/specs/**`. La razón está escrita
+en ese fichero: «esta exención deja al agente escribir en el spec CONGELADO sin
+que el gate lo vea — y en el incidente del despacho 1 el agente metió ahí parte
+de su autorización falsa». Meter por ese agujero justo la evidencia de que algo
+se verificó es la peor combinación posible. Un directorio nuevo no abre ninguno.
 
-### 3.6 Los tres estados
+### 3.6 De dónde saca el run los recorridos
 
-| Estado | Qué significa | Qué hace |
+`ct-step` **no invoca `gh` en ningún sitio**: es local, y sus tests no montan el
+fake de `gh`. Así que el run no puede leerse el issue. Los recorridos llegan por
+donde ya llegan los gates, y se verifican donde ya se verifica todo:
+
+1. **`/ct-next` los siembra** en `.agent/SLICE.md` al despachar, junto al campo
+   `gates` que ya escribe, y en el kickoff. `ct-step` los lee de ahí.
+2. **`dispatch-check --release` los verifica contra el ISSUE** (vía `gh`, la
+   fuente que el agente no controla): que el run entregado cubra los recorridos
+   que el issue declara. **Exit 8**, libre en ese ejecutable.
+
+Los dos, y no uno: `.agent/SLICE.md` es agent-reachable —`dispatch-check` ya
+desconfía de su `base:` por eso mismo—, así que como canal de trabajo vale y
+como prueba no. El paso 1 es rápido y local; el paso 2 es el que no se fía.
+
+### 3.7 Los tres estados
+
+| Estado | `OUTCOME` | Qué hace la tabla |
 |---|---|---|
-| **verde** | El recorrido se completa como dice la celda | Adjunta evidencia y libera |
-| **rojo** | El recorrido **no** se completa | **No libera.** Para y lo dice |
-| **no-verificado** | No se pudo recorrer (entorno, credencial, sección sin rellenar) | Libera, con el motivo escrito en el PR |
+| **verde** | `DONE` | cierra en `DELIVERED`; `--release` libera |
+| **rojo** | `FAILED` | cierra en `BLOCKED_E2E`; `ct-step` sale **7** y `--release` se niega con el 7 que ya tiene |
+| **no-verificado** | `INDETERMINATE` | cierra en `DELIVERED` con el motivo escrito; `--release` libera y lo dice |
+| informe ilegible | `DISCARDED` | repite el paso, sin gastar reintento (tope de descartes de la slice) |
 
-El rojo corta por la misma razón por la que el paso 1 de
-`finishing-a-development-branch` ya corta con los tests en rojo: un recorrido
-declarado del spec que no se completa no es un PR listo para revisar.
-
-El *no-verificado* **no** corta, y es deliberado: un docker que no arranca o una
-credencial caducada dejaría el slice en `status:in-progress` reteniendo
-`area:`/`touches:` y una plaza de `--cap` sin nadie trabajando — el modo de
-fallo que F13 y F18 se dedicaron a quitar. Lo que nunca pasa es que se afirme
-verde lo que no se pudo correr: la misma gramática de tres estados que ya
-sostiene todo el plugin.
+El rojo corta por lo mismo que corta un control en rojo: un recorrido declarado
+por el spec que no se completa no es una entrega. El *no-verificado* no corta y
+es deliberado: un docker que no arranca dejaría el slice en `status:in-progress`
+reteniendo `area:`/`touches:` y una plaza de `--cap` sin nadie trabajando — el
+modo de fallo que F13 y F18 se dedicaron a quitar. Lo que nunca pasa es que se
+afirme verde lo que no se pudo correr.
 
 ## 4. Contrato
 
@@ -348,64 +389,77 @@ sostiene todo el plugin.
 - `--reconcile` detecta divergencia de la sección `## E2E` como ya hace con las
   demás, y **no la aplica** sin el flag.
 
-### 4.4 El kickoff
+### 4.4 El kickoff y la semilla
 
-Un texto nuevo en `GATES.e2e.kickoff`, con las cuatro cosas que el agente tiene
-que saber: que sus recorridos están en la sección `## E2E` de su issue, que no
-los elige él, que el entorno lo declara `AGENTS.md`, y que el informe es un
-entregable commiteado. **No va en `ADDENDA`**: ver §5.
+- Un texto nuevo en `GATES.e2e.kickoff` con las cuatro cosas que el agente tiene
+  que saber: que sus recorridos están en `## E2E` de su issue y en su
+  `.agent/SLICE.md`, que no los elige él, que el entorno lo declara `AGENTS.md`,
+  y que el paso se cierra con `ct-step e2e`. **No va en `ADDENDA`**: ver §5.
+- `buildStateSeed` gana un campo `e2e` con los recorridos, por el mismo motivo
+  por el que `gates` y `role` son campos y no frases: lo que tiene que sobrevivir
+  a una re-hidratación es un campo. A diferencia de `gates`, este sí lo lee un
+  programa (`ct-step`), y eso se dice donde se siembra.
 
-### 4.5 El informe
+### 4.5 El contrato del informe
 
-Una entrada por recorrido declarado:
+`E2E_SCHEMA` en `step-contracts.js`, una entrada por recorrido:
 
-```markdown
-### <el recorrido, verbatim como está en el issue>
-- Veredicto: verde | rojo | no-verificado
-- Cómo se levantó: <comando literal>
-- Travesía:
-      $ <comando ejecutado, literal>
-      <su salida, literal>
-- Si rojo: qué se esperaba / qué pasó / reproducción mínima copiable / qué lo refutaría
-- Si no-verificado: qué faltó / qué lo desbloquearía
+```json
+{
+  "runs": [
+    {
+      "run": "el server escucha en 9115 por defecto y en el puerto indicado si se pasa",
+      "verdict": "verde",
+      "brought_up": "cargo run --example serve",
+      "evidence": [{ "command": "curl -sS -o /dev/null -w '%{http_code}' localhost:9115/metrics", "output": "200" }]
+    }
+  ]
+}
 ```
 
-Lo que el validador exige: una entrada por recorrido declarado (ni una menos),
-el título citando el recorrido **verbatim**, un veredicto de los tres, y al
-menos un par comando/salida en las verdes. Los cuatro campos del rojo salen del
-informe del shop, que pide las mismas cinco cosas por cada defecto de producto
-porque sin ellas «el humano vuelve a preguntar».
+Lo que `readE2eReport` exige: una entrada por recorrido sembrado (ni una menos
+ni una de más), `run` **idéntico** al sembrado, `verdict` de los tres,
+`evidence` con al menos un par comando/salida si es `verde`, y `reason` +
+`unblock` si es `no-verificado` (el formato de `blocked`, no el campo — §5).
 
-### 4.6 Códigos de salida de `dispatch-check --release`
+- Devuelve un `OUTCOME`, no un booleano: `DONE` si todo verde o
+  verde+no-verificado, `FAILED` si algún rojo, `DISCARDED` si el JSON no se
+  puede leer. Es la firma de `readVerdict`/`outcomeOfVerdict`, que es la que la
+  tabla consume.
+- **El rojo gana al mal formado.** Si hay un rojo y además falta una entrada, el
+  outcome es `FAILED`: un rojo dice algo del producto y un formato roto dice
+  algo del informe; emitiendo lo segundo primero, el agente arregla el formato,
+  reintenta y sólo entonces descubre el rojo — dos vueltas para un dato que ya
+  se tenía.
 
-Los `0`-`6` están cogidos. La tercera puerta va detrás de las dos que ya hay,
-con el orden razonado que ese fichero sostiene —de la avería más cara a la que
-sólo retrasa a este slice—: estado (5) → plan (6) → e2e (7/8).
+### 4.6 Códigos de salida
+
+**`ct-step`** — el mapa salta de 6 a 8, así que el 7 está libre:
+
+| Situación | Exit |
+|---|---|
+| El paso se aplicó | `0` (`OK`) |
+| Algún recorrido en rojo, run en `BLOCKED_E2E` | **`7`** (`E2E_RED`) |
+| Se pidió `e2e` sin ser el paso que toca | `9` (`WRONG_STEP`, ya existe) |
+| El informe no se puede leer, y se agotaron los descartes | `3` (`NO_VERDICT`, ya existe) |
+
+**`dispatch-check --release`** — los `0`-`7` están cogidos:
 
 | Situación | Exit | Muta |
 |---|---|---|
-| No se pudo determinar qué recorridos declara el issue | **7** | nada — «no se afirma que no los tenga» |
-| Hay recorridos y falta el informe, o está incompleto | **7** | nada |
-| El informe da **rojo** en algún recorrido | **8** | nada — sigue en `status:in-progress` |
-| Todo verde, o verde y no-verificado con su motivo | 0 | libera a `in-review` |
-| El issue no declara recorridos | 0 | libera |
+| El run no está entregado (incluye «no pasó el e2e») | `7` | nada — **ya existe** |
+| El run está entregado pero no cubre los recorridos que el issue declara | **`8`** | nada |
+| No se pudo leer el cuerpo del issue | **`8`** | nada — «no se afirma que no los tenga» |
 
-Dos exits y no uno porque son dos consecuencias distintas para quien los
-recibe: el 7 es «vuelve y hazlo», el 8 es «el código no cumple». Fundirlos
-obligaría a desambiguar parseando texto libre, que es el defecto que el
-contrato de exits de `dispatch-check` vino a cerrar.
+Un solo exit nuevo en cada ejecutable. Y el orden de puertas de `--release` no
+cambia de criterio —de la avería más cara a la que sólo retrasa a este slice—:
+estado (5) → plan (6) → run entregado (7) → correspondencia del e2e (8).
 
-La puerta lee el issue por `gh` y **no** `.agent/SLICE.md`, aunque sea local y
-gratis: ese fichero es agent-reachable — el propio `dispatch-check` ya
-desconfía de su `base:` por eso mismo. Una puerta no puede leer su condición de
-un sitio donde escribe quien la tiene que pasar.
-
-**Y lee la sección `## E2E`, no la label `gate:e2e`.** Las dos pueden discrepar
-si alguien edita el issue a mano, y manda la sección, porque es la única de las
-dos que dice **qué** atravesar. Una label sin sección no describe ningún
-trabajo: la puerta libera y lo dice por `stderr` como aviso. Una sección sin
-label sí describe trabajo, y la puerta lo exige igual. La asimetría va en la
-dirección prudente: el lado que puede pedir trabajo de más nunca se cree solo.
+**La comprobación del 8 lee la sección `## E2E`, no la label `gate:e2e`.** Las
+dos pueden discrepar si alguien edita el issue a mano, y manda la sección porque
+es la única que dice **qué** atravesar: una label sin sección no describe ningún
+trabajo (se libera, con aviso por `stderr`), y una sección sin label sí lo
+describe (se exige igual). La asimetría va en la dirección prudente.
 
 ## 5. Reutilización: qué se consume y qué NO se acopla
 
@@ -414,110 +468,151 @@ dirección prudente: el lado que puede pedir trabajo de más nunca se cree solo.
 | Pieza | Para qué |
 |---|---|
 | `slices.js#col` y el patrón de columna opcional | Resolver la cabecera `E2E`. `Entrega` y `Acepta` ya recorren ese camino |
-| `slices.js#splitEscapedCommas` · `cleanEmphasis` · `isNoValueCell` | Trocear la celda, y reconocer el guion **con el significado que ya tiene** («no he declarado nada aquí», el que documenta `parseGateCell`) para exigir la decisión. **Ya es** el parser de esta tabla; no se toca una línea |
-| `gates.js#GATES` · `GATE_ORDER` · `gateLabels` · `gatesFromLabels` · `renderGateKickoffLines` · `renderGatesIssueContent` | El token con sus dos textos, su label, su orden y su ida y vuelta. Ese fichero existe para esto: «añadir un gate nuevo aquí es un acto deliberado con su texto de kickoff y de issue» |
-| El patrón de puerta de `--release` (`stateFilesIntroducedByBranch`, `branchIntroducedFiles`) | La tercera puerta. Ya implementan literalmente los tres estados: `{known:false, why}` → exit propio diciendo que no se ha podido comprobar; incumple → exit propio sin mutar; pasa → sigue |
-| `gh-issue-map.js#locateSection` · `extractSectionContent` | Leer la sección `## E2E` del cuerpo del issue, en la puerta y en `--reconcile` |
-| `conventions.js#CONTRACT_MARKER_OPEN/CLOSE` y la siembra de `ct-init.sh` | Meter la sección en `AGENTS.md` sin pisar nada, tolerando CRLF |
-| El campo `gates:` de `buildStateSeed` | Que una sesión re-hidratada sepa que tiene un e2e pendiente. Gratis: sale de `resolveGatesForAgent` |
+| `slices.js#splitEscapedCommas` · `cleanEmphasis` · `isNoValueCell` | Trocear la celda, y reconocer el guion **con el significado que ya tiene** («no he declarado nada aquí», el que documenta `parseGateCell`) para exigir la decisión |
+| `gates.js#GATES` · `GATE_ORDER` · `gateLabels` · `gatesFromLabels` · `renderGateKickoffLines` · `renderGatesIssueContent` | El token con sus dos textos, su label, su orden y su ida y vuelta. Ese fichero existe para esto |
+| `run-machine.js#after` y su tabla · `OUTCOMES` · `RUN_STATES` | El paso, sus tres resultados y su cierre. **La coincidencia es exacta**: `DONE`/`FAILED`/`INDETERMINATE` ya son verde/rojo/no-verificado, y `BLOCKED_*` ya es la familia del cierre en fallo |
+| `step-contracts.js#readVerdict` / `readReport` / `outcomeOfVerdict` | El patrón del artefacto de paso: JSON del agente → esquema a mano (cero dependencias) → un `OUTCOME` que la tabla consume. `readE2eReport` es un hermano, no una copia |
+| `ct-step.mjs#EXIT` y su `codigoDe` | El código de salida del paso, con el 7 que está libre en ese mapa |
+| `run-metrics.js#metricRow` / `metricLine` | El paso se mide como los otros tres, sin instrumentación nueva |
+| `gh-issue-map.js#locateSection` · `extractSectionContent` | Leer la sección `## E2E` del cuerpo del issue, en `--release` y en `--reconcile` |
+| `buildStateSeed` | El campo `e2e` en `.agent/SLICE.md`, junto al `gates` que ya siembra |
+| `conventions.js#CONTRACT_MARKER_OPEN/CLOSE` y la siembra de `ct-init.sh` | La sección de `AGENTS.md`, sin pisar nada y tolerando CRLF |
 
 **No se acopla, aunque el código sirviera: el propósito es otro.**
 
-1. **`SLICES_CONTRACT_VERSION` + `SLICES_PRISTINE_HASHES`.** Hashean el bloque
+1. **`SLICES_CONTRACT_VERSION` + `SLICES_PRISTINE_HASHES`.** Hashean su bloque
    para detectar **si el usuario lo tocó** y decidir si se puede actualizar. La
    sección de e2e de `AGENTS.md` es una **plantilla que el usuario tiene que
    rellenar**: con hashes de pristine, rellenarla se leería como manipulación y
    el plugin dejaría de tocarla justo cuando está bien usada. Propósito opuesto
-   con el mismo código. Se toman los marcadores y la siembra; se deja fuera
-   versión y pristine. (La versión del **contrato de tabla** sí sube: eso es
-   otra cosa, y es su uso legítimo.)
+   con el mismo código. Se toman los marcadores y la siembra. (La versión del
+   **contrato de tabla** sí sube: ése es su uso legítimo.)
 2. **`ADDENDA` de `kickoff.js`.** Es el sitio obvio, y es **el defecto que F21
    arregló**: hasta esa ronda el único gate del plugin era media frase dentro de
    ese objeto, y eso hacía que `Tipo` decidiera a la vez el recordatorio técnico
-   y el gate humano. Hay veinte líneas de comentario explicando por qué se sacó.
-   Volver a meter una exigencia ahí es reabrirlo con otra ropa.
+   y el gate humano. Volver a meter una exigencia ahí es reabrirlo con otra ropa.
 3. **`state.js#readBlocked` / `blockNotice`.** Tienta para *no-verificado*: ya
    hay un canal `{reason, unblock}` que el dispatcher lee y reporta. Pero
-   `blocked` significa «este slice no avanza», y *no-verificado* **sí libera**.
-   Marcarlo `blocked` lo dejaría retenido — el fallo de F18. Se toma el
-   **formato** `{reason, unblock}`, no el campo.
-4. **`plan-contract.js#checkPlans`.** Valida un artefacto contra un contrato y
-   devuelve `{ok, message, code}`. Se copia esa **convención de retorno**
-   porque es la del repo; el código no: su contrato son bloques prescriptivos,
-   presupuestos de líneas y citas verbatim contra la base de la rama. Valida una
-   *promesa*; aquí hay que validar una *evidencia*.
-5. **`ct-watch-go.mjs` y `launch-sentinel.js`.** Los dos sondean con timeout
+   `blocked` significa «este slice no avanza», y *no-verificado* **sí** cierra en
+   `DELIVERED`. Marcarlo `blocked` lo dejaría retenido — el fallo de F18. Se toma
+   el **formato** `{reason, unblock}`, no el campo.
+4. **El paso `controls`.** Ejecuta los comandos que el plan declara y los mide:
+   parece el sitio natural para «ejecutar algo y ver si pasa». Pero `controls` es
+   **por tarea** y mide lo que el plan prometió (tests, lint) contra el árbol; el
+   e2e es **por slice**, contra el sistema levantado, y su guion viene del spec y
+   no del plan. Colgarlo de `controls` obligaría a que cada tarea arrastrara un
+   e2e que no le corresponde, o a un `controls` especial en la última — que es
+   una rama de la tabla que no describe ningún estado real.
+5. **`plan-contract.js#checkPlans`.** Valida que el plan cumpla su contrato:
+   bloques prescriptivos, presupuestos de línea, citas verbatim contra la base.
+   Valida una *promesa*; aquí hay que validar una *evidencia*, y el hermano
+   correcto es `readVerdict` (arriba), no éste.
+6. **`ct-watch-go.mjs` y `launch-sentinel.js`.** Los dos sondean con timeout
    distinguiendo «no» de «no se pudo preguntar» — la forma que pide
    `Listo cuando`. Pero uno comprueba que un comando arrancó dentro de un pty de
    cmux y el otro sondea la API de GitHub; ninguno es «espera a que un servicio
    local responda». Se hereda el **criterio**, no el código.
-6. **El «Registro de cierre (evidencia)» del spec.** Ver §3.5.
-7. **La columna `Acepta`.** La tentación era meter el e2e dentro. Ver §2: son
-   dos afirmaciones distintas y mezclarlas obliga a un juicio que nadie puede
-   hacer de forma reproducible.
+7. **El «Registro de cierre (evidencia)» del spec.** Ver §3.5.
+8. **La columna `Acepta`.** Ver §2: son dos afirmaciones distintas, y mezclarlas
+   obliga a un juicio que nadie puede hacer de forma reproducible.
 
 ## 6. Lo que hace falta construir
 
 | Fichero | Cambio |
 |---|---|
-| `scripts/slices.js` | La columna `E2E`: índice, troceo, `–`; **no** en `missingOptionalColumns` |
-| `scripts/gates.js` | Token `e2e` con sus dos textos; derivar la label de la celda |
+| `scripts/slices.js` | La columna `E2E`: índice, celda cruda, `e2eColumnPresent`; **no** en `missingOptionalColumns` |
+| `scripts/gates.js` | `resolveE2e`, el token `no`, el gate `e2e` derivado y sus dos textos |
 | `scripts/groom.js` | La sección `## E2E` del cuerpo del issue |
-| `scripts/ct-groom.mjs` | El abort de token-sin-celda, también en `--dry-run` |
+| `scripts/ct-groom.mjs` | Los cuatro aborts, también en `--dry-run` |
 | `scripts/reconcile.js` | Divergencia de la sección `## E2E` |
-| `scripts/e2e-report.js` (nuevo, puro) | El contrato del informe → `{ok, message, code}` |
-| `scripts/dispatch-check.mjs` | La tercera puerta (exits 7 y 8) |
+| `scripts/run-machine.js` | `STEPS.E2E`, `RUN_STATES.BLOCKED_E2E`, la transición terminal y `trasElE2e` |
+| `scripts/step-contracts.js` | `E2E_SCHEMA` y `readE2eReport` |
+| `scripts/ct-step.mjs` | El verbo `e2e`, su `EXIT.E2E_RED = 7`, y la redacción del markdown |
+| `scripts/kickoff.js` | El campo `e2e` de `buildStateSeed` |
+| `scripts/ct-next.mjs` | Sembrar los recorridos al despachar |
+| `scripts/dispatch-check.mjs` | La comprobación de correspondencia (exit 8) |
 | `scripts/scope.js` | `docs/superpowers/e2e/**` en `LOOP_ARTIFACT_PATTERNS` |
 | `scripts/ct-init.sh` | La sección de `AGENTS.md`; contrato de tabla a v19 |
-| `skills/finishing-a-development-branch/SKILL.md` | El paso 0, de cinco pasos a seis |
-| `commands/ct-groom.md` · `ct-next.md` · `README.md` | Documentar, incluido el límite de §8.1 |
+| `commands/ct-groom.md` · `ct-next.md` · `ct-step.md` · `README.md` | Documentar, incluido el límite de §8.1 |
 
-Un solo fichero nuevo: la columna la parsea `slices.js`, que es donde se
-parsean las diez que ya hay.
+**Cero ficheros nuevos.** Cada pieza cae en el módulo que ya hace ese trabajo: la
+columna en el parser de la tabla, el paso en la tabla de la máquina, el esquema
+en la familia de esquemas de paso, el verbo en el oráculo.
 
-**El paso 0 del carril fijo** pasa a:
-
-```
-tests verdes → e2e → commitear informe → push → PR (+ informe pegado) → --release → PARA
-                ↓
-          rojo: PARA aquí
-```
+**Y `skills/finishing-a-development-branch/SKILL.md` NO se toca**, al contrario
+de lo que decía la versión anterior de este diseño. Esa skill dejó de conducir
+el tramo interno cuando la #31 puso a `ct-step` a hacerlo: el carril del e2e lo
+impone la tabla, no una lista de pasos en prosa. De paso, esta PR deja de tocar
+una de las tres costuras vigiladas del fork.
 
 ## 7. Tests que fijan las propiedades
+
+**La columna y su transporte**
 
 1. `col('e2e')` resuelve la columna y no colisiona con ninguna de las diez
    existentes, ni al revés.
 2. Un spec **sin** columna `E2E` produce exactamente los mismos issues que hoy,
    y **ningún aviso** por columna ausente.
-3. Una celda `no` (y `n/a`, `**no**`, `NO`) no produce `gate:e2e` ni sección
+3. El token `no` (y `n/a`, `NO`, `` `no` ``) no produce `gate:e2e` ni sección
    `## E2E`, y **no** aborta.
-3b. Una celda con `–` (y las seis variantes de `isNoValueCell`) **aborta**,
-   nombrando la fila — pero sólo si la columna existe.
-3c. Un recorrido que empieza por «no…» es un recorrido, no el token.
-3d. `no` + un recorrido en la misma celda aborta.
-4. Una celda con dos recorridos separados por coma produce dos; con `\,`
-   produce uno con coma literal dentro.
-5. `Gate: e2e` con celda vacía aborta el groom, sin escribir nada, nombrando la
-   fila.
-6. `TYPE_GATES` sigue sin implicar `e2e` para ningún `Tipo`.
-7. La label sobrevive la ida y vuelta por `gateLabels`/`gatesFromLabels`.
-8. Las 8 filas de `mo-monitoring v1` como caso de mesa: con `no` en las seis
-   sin recorrido, exactamente 2 producen `gate:e2e` y el groom no aborta.
-9. `--release` con recorridos y sin informe sale **7** y no mueve la label
-   (comprobado sobre el `argv` real de `gh`, como ya se comprueba que
-   `/ct-status` no escribe).
-10. `--release` con informe en rojo sale **8** y no mueve la label.
-11. `--release` con informe verde libera; con verde + no-verificado, libera.
-12. `--release` sin recorridos libera sin mirar ningún informe.
-13. Un informe al que le falta la entrada de un recorrido es incompleto, aunque
-    las que trae estén verdes.
-14. Un título que no cita el recorrido verbatim es incompleto.
-15. Label sin sección libera con aviso por `stderr`; sección sin label se exige
-    igual (§4.6).
-16. La sección sembrada en `AGENTS.md` no se pisa si ya existe, y rellenarla
-    **no** hace que el plugin deje de reconocerla.
-17. La costura del fork sigue vigilada: `skills-fork.test.js` actualizado a
-    propósito, con el paso 0 de seis pasos.
+4. Un marcador de sin-valor **aborta**, nombrando la fila — pero sólo si la
+   columna existe.
+5. Un recorrido que empieza por «no…» es un recorrido, no el token.
+6. `no` + un recorrido en la misma celda aborta.
+7. Dos recorridos separados por coma son dos; con `\,`, uno con coma dentro.
+8. `Gate: e2e` sin recorridos aborta (las dos variantes: celda `no` y celda sin
+   declarar).
+9. `TYPE_GATES` sigue sin implicar `e2e` para ningún `Tipo`.
+10. La label sobrevive la ida y vuelta por `gateLabels`/`gatesFromLabels`.
+11. Las 8 filas de `mo-monitoring v1` como caso de mesa: con `no` en las seis sin
+    recorrido, exactamente 2 producen `gate:e2e` y el groom no aborta.
+12. `buildStateSeed` siembra los recorridos, y sobreviven a un redespacho.
+
+**La tabla de la máquina** (pura: se prueba sin disco ni procesos)
+
+13. Comitear la última tarea **con** recorridos deja el run en `step: e2e`,
+    `state: open`; **sin** recorridos cierra en `DELIVERED`, como hoy.
+14. `e2e` + `DONE` cierra en `DELIVERED`.
+15. `e2e` + `FAILED` cierra en `BLOCKED_E2E`.
+16. `e2e` + `INDETERMINATE` cierra en `DELIVERED`.
+17. `e2e` + `DISCARDED` repite el paso y suma un descarte, sin gastar reintento.
+18. `e2e` + `CORRECTIONS_ORDERED` **lanza** — el par que la tabla no describe no
+    cae en una rama genérica (la propiedad `_impossible` que el fichero ya
+    sostiene).
+19. `deliveredRun` sigue exigiendo `closed: 'delivered'`: un run parado en `e2e`
+    no está entregado.
+
+**El esquema y el verbo**
+
+20. `readE2eReport` devuelve `DONE` con todo verde; `FAILED` con un rojo;
+    `DONE` con verde+no-verificado; `DISCARDED` con JSON ilegible.
+21. Falta la entrada de un recorrido → `DISCARDED`, aunque las demás estén
+    verdes.
+22. Una entrada de más (recorrido que el issue no declara) → `DISCARDED`.
+23. Un `run` que no es idéntico al sembrado → `DISCARDED`.
+24. Un verde sin `evidence` → `DISCARDED`.
+25. **El rojo gana al mal formado**: rojo + entrada que falta → `FAILED`.
+26. `ct-step e2e` fuera de su paso sale **9** y dice cuál toca.
+27. `ct-step e2e` con un rojo sale **7** y persiste `BLOCKED_E2E`.
+28. `ct-step e2e` en verde escribe `docs/superpowers/e2e/<issue>.md` con un
+    apartado por recorrido y su evidencia, y el fichero queda stageado.
+
+**La puerta del release**
+
+29. Run entregado que cubre los recorridos del issue → libera.
+30. Run entregado que **no** los cubre → **8**, y ninguna llamada de escritura a
+    `gh` (comprobado sobre el `argv` real).
+31. Cuerpo del issue ilegible → **8**, y el mensaje no afirma que no haya
+    recorridos.
+32. Issue sin sección `## E2E` → libera sin mirar nada.
+33. Label `gate:e2e` sin sección → libera, con aviso por `stderr`.
+34. El orden se respeta: una rama que introduce `.agent/STATE.md` sale **5**,
+    no 8, aunque además falte el e2e.
+
+**El repo destino**
+
+35. La sección de `AGENTS.md` se siembra con sus campos; rellenarla no hace que
+    el plugin deje de reconocerla; no se duplica al correr `/ct-init` dos veces.
 
 ## 8. Riesgos
 
@@ -574,11 +669,28 @@ y F14 dejó documentado cómo acaban («un guard que sólo se satisface destruye
 trabajo no es un guard»). Peor aquí: la única forma de callarlo sería inventarse
 un recorrido, que es lo que este diseño existe para evitar.
 
-### 8.6 Fontanería, dicha antes de empezar
+### 8.6 Esta PR toca la máquina de la #31
+
+`run-machine.js`, `ct-step.mjs` y `step-contracts.js` los introdujo la #31, que
+está **abierta y por debajo** en la cadena. Si esa PR se mueve, aquí hay
+conflicto — y no en un fichero periférico, sino en la tabla de transiciones.
+
+Se acepta a cambio de no montar un segundo mecanismo en paralelo (§3.4), y se
+acota así: la tabla se toca **sólo** para añadir un paso terminal y su estado de
+cierre, sin cambiar ninguna transición existente. Un conflicto en un `switch` al
+que sólo se le ha añadido un `case` se resuelve leyendo; uno en una transición
+reescrita, no.
+
+### 8.7 Fontanería, dicha antes de empezar
 
 - La rama ya está reasentada sobre `un-solo-go` (`5990363`), y es una rama
-  propia: el commit del diseño no está en `un-solo-go` ni en `main`. Si #31 o
-  #32 cambian, hay que rebasar otra vez.
+  propia: el commit del diseño no está en `un-solo-go` ni en `main`.
+- **El árbol de `un-solo-go` no es el de `main`.** Trae `ct-step.mjs`,
+  `run-machine.js`, `step-contracts.js`, `plan-tasks.js`, `run-metrics.js`,
+  `go-response.js` y `ct-watch-go.mjs`, y `--release` ya tiene la puerta del run
+  entregado. La primera versión de este diseño se escribió contra la foto de
+  `main` y por eso proponía exits ya ocupados y una puerta en paralelo. Antes de
+  cada tarea, mirar el fichero real y no este documento.
 - `npm test` da **2185/2186** en árbol limpio: el fallo de
   `SLICES_PRISTINE_HASHES` es **preexistente** y toca justo `ct-init.sh`, que
   este cambio modifica. Se verifica antes y después para no atribuirse un rojo
@@ -588,15 +700,19 @@ un recorrido, que es lo que este diseño existe para evitar.
 
 ## 9. Lo que esta fase NO hace
 
-- **Multiplataforma.** El shop tiene tres skills de plataforma coordinadas por
-  un padre con hijos persistentes, barreras por grupo de flags y un solo
-  escritor. Aquí hay un agente en un worktree. Cuando haga falta, el patrón está
-  descrito y probado ahí.
+- **Multiplataforma.** El shop tiene tres skills de plataforma coordinadas por un
+  padre con hijos persistentes, barreras por grupo de flags y un solo escritor.
+  Aquí hay un agente en un worktree. Cuando haga falta, el patrón está descrito y
+  probado ahí.
 - **Gestión de flags.** Ni Unleash, ni GrowthBook, ni fases, ni restore. Si un
   recorrido necesita una flag puesta, es *no-verificado* con su motivo.
-- **E2E por epic.** Sólo por slice. El e2e del flujo completo cuando el
-  milestone cierra es otra decisión y otra ronda.
+- **E2E por epic.** Sólo por slice. El e2e del flujo completo cuando el milestone
+  cierra es otra decisión y otra ronda.
 - **La barandilla contra la falsificación** (§8.1).
+- **Reintentos del paso e2e.** `controls` y `judge` tienen presupuesto de
+  reintento; `e2e` no lo estrena en esta fase: un rojo cierra en `BLOCKED_E2E` y
+  lo arregla una persona. Reintentar una travesía contra un entorno que puede
+  tener estado sucio es una decisión que merece datos de campo antes que código.
 - **Tocar `visual` ni `apply`.** El residuo que necesita ojos sigue siendo del
   humano.
 - **Ejecutar nada contra un entorno real.** Lo que `Fuera de límites` prohíbe se
