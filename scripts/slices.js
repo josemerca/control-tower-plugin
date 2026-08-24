@@ -343,6 +343,12 @@ export function analyzeSlicesTable(specMd) {
       missingRequiredColumns: [],
       missingOptionalColumns: [],
       gateColumnPresent: false,
+      // e2eColumnPresent: mismo motivo que gateColumnPresent, y no derivable
+      // de las celdas — una columna presente con todo "–" es indistinguible
+      // de una columna ausente si solo se miran los valores. Lo consume el
+      // paso siguiente de esta feature para decidir si exige una decisión de
+      // e2e por fila.
+      e2eColumnPresent: false,
       totalDataRows: 0,
       rowsAfterGap: [],
       skippedRows: [],
@@ -383,7 +389,23 @@ export function analyzeSlicesTable(specMd) {
         // ninguna cabecera existente: "gate" no es substring de
         // #/slice/tipo/entrega/dep/acepta/protegido/área/toca, ni ninguna de
         // esas lo es de "gate".
-        iGate = col('gate')
+        iGate = col('gate'),
+        // iE2e: la columna que declara QUÉ se atraviesa en este slice, separada
+        // de `Acepta` a propósito. La primera versión del diseño marcaba
+        // criterios DENTRO de `Acepta` con un prefijo `[e2e]`, y se cayó al
+        // aplicarla al caso real: de los cuatro `Acepta` del slice #5 de
+        // mo-monitoring, el 1 y el 2 hablan de la respuesta del mismo router y
+        // ningún criterio los separa. Dos personas congelando el mismo spec
+        // marcarían cosas distintas — y esa marca era la única barrera contra
+        // que el agente se inventara un flujo. Con una columna propia no se
+        // clasifica a posteriori un texto que ya existía: se decide al
+        // escribir, y en qué columna se escribe ES la decisión.
+        //
+        // No colisiona con ninguna cabecera existente (misma comprobación que
+        // F21 dejó anotada para `gate`): "e2e" no es substring de
+        // #/slice/tipo/entrega/dep/acepta/protegido/área/toca/gate, ni ninguna
+        // de esas lo es de "e2e".
+        iE2e = col('e2e')
 
   const missingRequiredColumns = []
   if (iN === -1) missingRequiredColumns.push('#')
@@ -416,6 +438,13 @@ export function analyzeSlicesTable(specMd) {
   // insatisfacibles y los repetidos sin novedad. Lo que sí se expone es el
   // hecho crudo (`gateColumnPresent`), porque ct-groom.mjs lo necesita para
   // decidir si el spec tiene alguna opinión sobre las labels `gate:`.
+  //
+  // "E2E" tampoco entra en missingOptionalColumns, por el MISMO motivo que
+  // "Gate" (arriba): cada entrada de esa lista produce un aviso con la
+  // CONSECUENCIA de que falte la columna, y la consecuencia de que falte
+  // "E2E" es que ningún slice del epic tiene e2e — que es exactamente el
+  // comportamiento anterior a esta ronda. Avisarlo en todos los repos que no
+  // usan la feature es ruido puro.
 
   const slices = []
   const skippedRows = []
@@ -562,6 +591,11 @@ export function analyzeSlicesTable(specMd) {
       // de gates, igual que no sabe de labels ni de addenda: su trabajo es
       // convertir una tabla markdown en celdas fiables.
       gate: (cells[iGate] || '').trim(),
+      // e2e: la celda CRUDA, sin resolver — mismo contrato que `gate`, y por
+      // el mismo motivo. Los tres estados de esta celda (recorridos / el token
+      // `no` / no declarado) los resuelve gates.js#resolveE2e; este parser no
+      // sabe de e2e igual que no sabe de gates.
+      e2e: (cells[iE2e] || '').trim(),
       deps,
       ac,
       protected: (cells[iProt] || '').trim(),
@@ -602,6 +636,10 @@ export function analyzeSlicesTable(specMd) {
     // por qué, arriba). ct-groom.mjs lo usa para decidir si el spec es
     // autoridad sobre las labels `gate:` de un issue ya existente.
     gateColumnPresent: iGate !== -1,
+    // e2eColumnPresent: mismo motivo que gateColumnPresent (ver el early
+    // return de más arriba) — no se puede derivar de las celdas, porque una
+    // columna presente con todo "–" es indistinguible de una columna ausente.
+    e2eColumnPresent: iE2e !== -1,
     totalDataRows,
     rowsAfterGap,
     skippedRows,
