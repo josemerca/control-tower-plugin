@@ -147,7 +147,7 @@ export function gatesForType(type) {
 }
 
 // cleanGateToken: mismo criterio de tolerancia a marcado inline que el resto de
-// la tabla §9 (slices.js#cleanEmphasis) — un autor que ya ha demostrado
+// la tabla §9 (cells.js#cleanEmphasis) — un autor que ya ha demostrado
 // escribir "**S1**" y "`–`" escribirá "`visual`" igual de fácil, y una columna
 // nueva no puede ser más quisquillosa que las ocho que ya existen. El `!` de
 // renuncia se quita ANTES de limpiar (y se tolera un espacio detrás: "! visual")
