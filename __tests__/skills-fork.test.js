@@ -215,8 +215,8 @@ describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive 
 
   it('dice que la configuración va en prosa y que un test va por nombre y aserción', () => {
     const s = read('writing-plans-prescriptive', 'SKILL.md')
-    expect(s).toMatch(/configuration/i)
-    expect(s).toMatch(/never appears as a block/i)
+    expect(s).toMatch(/configuration travels as prose/i)
+    expect(s).toMatch(/a test travels as two things/i)
   })
 
   it('el template no pide el estado final completo y sus huecos nombran los roles', () => {
