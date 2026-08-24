@@ -50,4 +50,25 @@ describe('columna E2E', () => {
     const res = analyzeSlicesTable(table('', ''))
     expect(res.missingOptionalColumns || []).not.toContain('E2E')
   })
+
+  // e2eColumnPresent: expuesto porque NO es derivable de las celdas (una
+  // columna con todo "–" es indistinguible de una columna ausente). La
+  // Tarea 3 lo consume para decidir si exige una decisión de e2e por fila,
+  // así que el booleano tiene que ser exacto: `toBe`, no una comprobación de
+  // "truthy" que dejaría pasar por error un índice numérico.
+  it('e2eColumnPresent es true cuando la cabecera E2E está', () => {
+    const res = analyzeSlicesTable(table(' E2E |', ' un recorrido |'))
+    expect(res.e2eColumnPresent).toBe(true)
+  })
+
+  it('e2eColumnPresent es false cuando la cabecera E2E no está', () => {
+    const res = analyzeSlicesTable(table('', ''))
+    expect(res.e2eColumnPresent).toBe(false)
+  })
+
+  it('e2eColumnPresent es false también en el camino de "no se encontró tabla"', () => {
+    const res = analyzeSlicesTable('# Un documento sin tabla §9 en absoluto\n\nsolo texto.\n')
+    expect(res.tableFound).toBe(false)
+    expect(res.e2eColumnPresent).toBe(false)
+  })
 })
