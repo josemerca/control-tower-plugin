@@ -62,9 +62,12 @@ import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS } from './r
 import { extractTasks } from './plan-tasks.js'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage,
+  readE2eReport, E2E_SCHEMA,
   IMPLEMENTER_TOOLS, JUDGE_TOOLS, PACKAGE_SECTIONS,
 } from './step-contracts.js'
 import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures } from './run-metrics.js'
+import { parseStateSafe } from './state.js'
+import { SLICE_REL_PATH } from './state-paths.js'
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -77,6 +80,7 @@ const EXIT = {
   CONTROLS_RED: 4,        // los controles siguen en rojo tras los reintentos
   CONTROLS_UNMEASURED: 5, // no se pudieron MEDIR
   PLAN_NOT_EXECUTABLE: 6, // el plan no declara comandos ejecutables
+  E2E_RED: 7,             // algún recorrido de e2e no se completa
   PRECONDITION: 8,        // entorno: no es un worktree de slice, falta el plan
   WRONG_STEP: 9,          // se pidió un paso que no es el que toca
   UNNAMED: 10,            // excepción que el programa no sabe nombrar
@@ -105,13 +109,14 @@ const USAGE = `uso: ct-step <verbo> [args] --plan <fichero> --issue <n>
   controls                  ejecuta los comandos de **Verification:** de la tarea
   verdict <fichero.json>    el veredicto del juez: ruling + recorrido de la rúbrica + findings
   commit                    comitea la tarea con el mensaje que compone el plugin
+  e2e <fichero.json>        el informe de la travesía de punta a punta de la slice
 
 La secuencia la decide run-machine.js: un verbo que no sea el paso que toca sale
 por 9 y dice cuál es. El estado vive en .agent/run-<issue>.json.`
 
 const verbo = process.argv[2]
 if (!verbo || verbo.startsWith('--')) die(USAGE, EXIT.USAGE)
-if (!['next', 'report', 'controls', 'verdict', 'commit'].includes(verbo)) {
+if (!['next', 'report', 'controls', 'verdict', 'commit', 'e2e'].includes(verbo)) {
   die(`verbo desconocido: ${verbo}\n\n${USAGE}`, EXIT.USAGE)
 }
 
@@ -191,14 +196,28 @@ if (existsSync(stateFile)) {
   if (hechos === null) {
     die(`el estado dice baseSha ${run.baseSha}, que no existe en este worktree. Borra ${stateFile} si el run es de otra rama.`, EXIT.PRECONDITION)
   }
-  if (hechos !== run.task - 1) {
-    die(`el estado y git no cuentan lo mismo: el fichero va por la tarea ${run.task} (o sea ${run.task - 1} commits) y desde ${run.baseSha.slice(0, 7)} hay ${hechos}. No se sigue a ciegas.`, EXIT.PRECONDITION)
+  // En `e2e` la cuenta es otra: el paso es de la SLICE, no de una tarea, así
+  // que `task` no avanzó al comitear la última y los commits hechos son
+  // `tasksTotal`, no `task - 1`. Sin esta rama, el paso terminal muere en
+  // PRECONDITION la primera vez que se entra en él.
+  const esperados = run.step === STEPS.E2E ? run.tasksTotal : run.task - 1
+  if (hechos !== esperados) {
+    die(`el estado y git no cuentan lo mismo: el fichero va por la tarea ${run.task}${run.step === STEPS.E2E ? ' con el e2e pendiente (todas comiteadas)' : ''} y desde ${run.baseSha.slice(0, 7)} hay ${hechos}. No se sigue a ciegas.`, EXIT.PRECONDITION)
   }
 } else {
   if ((git(['diff', '--cached', '--name-only']) || '').trim()) {
     die('el índice tiene cambios stageados y este run es nuevo. ct-step comitea el índice tarea a tarea: vacíalo (git reset) o comitéalo tú.', EXIT.PRECONDITION)
   }
-  run = newRun({ plan: planPath, issue, baseSha: headSha(), tasksTotal: tasks.length })
+  // e2eRuns — ct-step no habla con GitHub (ver run-machine.js#newRun), así que
+  // los recorridos que la columna E2E del spec declaró para esta slice sólo
+  // pueden llegar por el fichero que /ct-next sembró: .agent/SLICE.md. Se lee
+  // con el parser que ya existe para ese fichero (scripts/state.js) en vez de
+  // teclear otro YAML a mano — dos parsers del mismo frontmatter divergen
+  // igual que ya divergieron JUDGE_TOOLS y VERDICT_RULES antes de unificarse.
+  // Ausente o no-lista: `newRun` ya normaliza eso a `[]` ("sin e2e"), y no lo
+  // confunde con `undefined` ("versión vieja que no escribió el campo").
+  const { meta: sliceMeta } = parseStateSafe(readFileSync(join(repoRoot, SLICE_REL_PATH), 'utf8'))
+  run = newRun({ plan: planPath, issue, baseSha: headSha(), tasksTotal: tasks.length, e2eRuns: sliceMeta.e2e })
   writeFileSync(stateFile, JSON.stringify(run, null, 2) + '\n')
 }
 
@@ -282,7 +301,7 @@ function medir(step, measures) {
 // LA GUARDIA DEL PASO. Es lo que convierte la secuencia en mecanismo: pedir un
 // paso que no toca no se corrige con un aviso, se rechaza.
 // ---------------------------------------------------------------------------
-const VERBO_DE = { report: STEPS.IMPLEMENT, controls: STEPS.CONTROLS, verdict: STEPS.JUDGE, commit: STEPS.COMMIT }
+const VERBO_DE = { report: STEPS.IMPLEMENT, controls: STEPS.CONTROLS, verdict: STEPS.JUDGE, commit: STEPS.COMMIT, e2e: STEPS.E2E }
 function exigirPaso(v) {
   if (run.step !== VERBO_DE[v]) {
     die(`"${v}" no es el paso que toca: el run está en "${run.step}" (tarea ${run.task}/${run.tasksTotal}). Pregunta con "ct-step next".`, EXIT.WRONG_STEP)
@@ -349,6 +368,18 @@ function verboNext() {
         out('')
         out(`Lo que dijo el implementador de esta tarea, por si va en la pull request: ${run.lastSummary}`)
       }
+      break
+    case STEPS.E2E:
+      // No hay brief ni paquete que escribir: aquí no se despacha un
+      // subagente de tarea, se atraviesa la slice entera con el entorno ya
+      // levantado por quien conduce. `AGENTS.md` es el sitio con el "Levantar"
+      // y el "Listo cuando" de cada recorrido — este verbo no los repite.
+      out('ATRAVIESA LA SLICE DE PUNTA A PUNTA (todas las tareas están comiteadas):')
+      for (const r of run.e2eRuns) out(`  - ${r}`)
+      out('')
+      out('El entorno para levantarla está en AGENTS.md ("Levantar" y "Listo cuando" de cada recorrido).')
+      out(`Escribe el informe cumpliendo E2E_SCHEMA (scripts/step-contracts.js: cada recorrido lleva ${E2E_SCHEMA.properties.runs.items.required.join(' y ')}) y ciérralo con:`)
+      out(`  ct-step e2e <fichero.json> --plan ${planPath} --issue ${issue}`)
       break
     default:
       die(`el estado tiene un paso que esta versión no conoce: ${run.step}`, EXIT.UNNAMED)
@@ -735,6 +766,67 @@ function verboCommit() {
   return OUTCOMES.DONE
 }
 
+// El markdown lo escribe el PROGRAMA, no el agente que atraviesa la slice.
+// Mismo reparto que el commit ("comitea el programa, no el implementador"):
+// así no hay prosa que validar, no puede faltar un encabezado ni citarse mal
+// un recorrido, y lo que llega a la pull request es EXACTAMENTE lo que
+// `readE2eReport` aceptó — no una narración aparte que alguien podría
+// desalinear del JSON validado.
+function escribirInformeE2e(runs) {
+  const seccionDe = (r) => {
+    const lineas = [`## ${r.run}`, '', `**Veredicto:** ${r.verdict}`]
+    if (r.brought_up) lineas.push('', `**Cómo se levantó:** ${r.brought_up}`)
+    if (r.verdict === 'verde') {
+      lineas.push('', '**Evidencia:**', '')
+      for (const e of r.evidence || []) lineas.push(`- \`${e.command}\` → \`${e.output}\``)
+    } else if (r.verdict === 'rojo') {
+      lineas.push(
+        '',
+        `**Esperado:** ${r.expected}`,
+        `**Real:** ${r.actual}`,
+        `**Cómo reproducirlo:** ${r.repro}`,
+        `**Por qué no cuenta:** ${r.refuted_by}`,
+      )
+    } else {
+      lineas.push('', `**Motivo:** ${r.reason}`, `**Para desbloquear:** ${r.unblock}`)
+    }
+    return lineas.join('\n')
+  }
+  const md = [`# E2E — issue #${issue}`, ...runs.map(seccionDe), ''].join('\n\n')
+  const ruta = join('docs', 'superpowers', 'e2e', `${issue}.md`)
+  mkdirSync(join(repoRoot, 'docs', 'superpowers', 'e2e'), { recursive: true })
+  writeFileSync(join(repoRoot, ruta), md)
+  // `allowFail`, mismo motivo que el veredicto y la telemetría: un repo que
+  // gitignora `docs/` no puede dejar el run atascado por un `git add` que
+  // lanza. El informe queda escrito en el árbol aunque no viaje en el commit;
+  // lo que se pierde se avisa, no se calla.
+  if (git(['add', '--', ruta], { allowFail: true }) === null) {
+    err(`aviso: el informe de e2e se escribió en ${ruta} pero NO se pudo stagear, así que no viajará en la pull request (¿la ruta está gitignoreada en este repo?).`)
+  }
+  return ruta
+}
+
+function verboE2e() {
+  const { valor, why: porLeer } = leerJson(process.argv[3], 'del informe de e2e')
+  const { outcome, runs, why } = porLeer
+    ? { outcome: OUTCOMES.DISCARDED, why: porLeer }
+    : readE2eReport(valor, run.e2eRuns)
+  medir('e2e', {
+    outcome,
+    runs: runs ? runs.length : 0,
+    red: runs ? runs.filter((r) => r.verdict === 'rojo').length : 0,
+    unverified: runs ? runs.filter((r) => r.verdict === 'no-verificado').length : 0,
+    why: why || null,
+  })
+  if (outcome === OUTCOMES.DISCARDED) {
+    out(`informe de e2e descartado: ${why}`)
+    return outcome
+  }
+  escribirInformeE2e(runs)
+  for (const r of runs) out(`${r.verdict === 'verde' ? 'verde' : r.verdict}: ${r.run}`)
+  return outcome
+}
+
 // ---------------------------------------------------------------------------
 // Aplicar el resultado a la tabla, y decir qué toca ahora.
 // ---------------------------------------------------------------------------
@@ -742,7 +834,7 @@ try {
   if (verbo === 'next') verboNext()
 
   exigirPaso(verbo)
-  const outcome = { report: verboReport, controls: verboControls, verdict: verboVerdict, commit: verboCommit }[verbo]()
+  const outcome = { report: verboReport, controls: verboControls, verdict: verboVerdict, commit: verboCommit, e2e: verboE2e }[verbo]()
 
   if (run.discards >= MAX_DISCARDS && outcome === OUTCOMES.DISCARDED) {
     guardar()
@@ -786,6 +878,7 @@ function codigoDe(estado, paso, outcome) {
       // El veto del juez y "no hubo veredicto" cierran por el mismo sitio y
       // significan cosas distintas: uno es un juicio y el otro su ausencia.
       return outcome === OUTCOMES.DISCARDED ? EXIT.NO_VERDICT : EXIT.VETOED
+    case RUN_STATES.BLOCKED_E2E: return EXIT.E2E_RED
     case RUN_STATES.ABORTED_BUDGET: return EXIT.UNNAMED // aquí nadie mide dinero
     default: return EXIT.UNNAMED
   }
