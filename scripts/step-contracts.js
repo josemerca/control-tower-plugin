@@ -18,6 +18,7 @@
 // ============================================================================
 
 import { findClosingKeywords } from './closing-keywords.js'
+import { OUTCOMES } from './run-machine.js'
 
 export const SEVERITIES = ['high', 'medium', 'low']
 
@@ -163,6 +164,47 @@ export const REPORT_SCHEMA = Object.freeze({
   },
 })
 
+export const E2E_VERDICTS = ['verde', 'rojo', 'no-verificado']
+
+// E2E_SCHEMA: lo que se le pide al agente que atraviesa. Declarativo y
+// exportado por el mismo motivo que VERDICT_SCHEMA: el prompt lo cita, y dos
+// copias a mano de la misma forma divergen (pasó con JUDGE_TOOLS).
+export const E2E_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['runs'],
+  properties: {
+    runs: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['run', 'verdict'],
+        properties: {
+          run: { type: 'string' },
+          verdict: { enum: E2E_VERDICTS },
+          brought_up: { type: 'string' },
+          evidence: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['command', 'output'],
+              properties: { command: { type: 'string' }, output: { type: 'string' } },
+            },
+          },
+          expected: { type: 'string' },
+          actual: { type: 'string' },
+          repro: { type: 'string' },
+          refuted_by: { type: 'string' },
+          reason: { type: 'string' },
+          unblock: { type: 'string' },
+        },
+      },
+    },
+  },
+})
+
 // `Skill` está aquí porque la rúbrica del implementador
 // (`prompts/task-implementer.md`) ya no lleva el ciclo TDD dentro: manda cargar
 // `control-tower-loop:test-driven-development`, la copia que trae el plugin. Sin
@@ -282,6 +324,65 @@ export function readReport(structured) {
   const repetidas = [...new Set(paths.filter((ruta, i, todas) => todas.indexOf(ruta) !== i))]
   if (repetidas.length) return { why: `el informe declara la misma ruta más de una vez: ${repetidas.join(', ')}` }
   return { report: { paths, summary } }
+}
+
+// readE2eReport: el informe -> un OUTCOME. Validación a mano y no con una
+// librería de esquemas, igual que readVerdict y por lo mismo: el spec exige
+// cero dependencias nuevas y lo que hay que comprobar cabe aquí.
+//
+// LA COMPARACIÓN DE `run` ES IDÉNTICA, sólo colapsando espacios. El recorrido
+// llega al agente verbatim desde la celda del spec precisamente para que esto
+// sea posible; normalizar más (minúsculas, quitar puntuación) haría pasar por
+// "el mismo recorrido" dos textos que un humano escribió distintos, y ese
+// título es la única prueba de que se atravesó lo que se pidió y no otra cosa.
+//
+// LO QUE NO COMPRUEBA: que la salida sea real. Ver la cabecera del test.
+const colapsa = (s) => String(s || '').replace(/\s+/g, ' ').trim()
+
+export function readE2eReport(structured, declaredRuns) {
+  const declared = (declaredRuns || []).map(colapsa).filter(Boolean)
+  if (!structured || typeof structured !== 'object' || Array.isArray(structured)) {
+    return { outcome: OUTCOMES.DISCARDED, why: 'el agente no devolvió structured_output' }
+  }
+  if (!Array.isArray(structured.runs)) {
+    return { outcome: OUTCOMES.DISCARDED, why: '`runs` no es una lista' }
+  }
+  const problemas = []
+  const buenos = []
+  const vistos = new Set()
+  for (const run of declared) {
+    const e = structured.runs.find((x) => x && colapsa(x.run) === run)
+    if (!e) { problemas.push(`falta la entrada del recorrido "${run}"`); continue }
+    vistos.add(e)
+    if (!E2E_VERDICTS.includes(e.verdict)) {
+      problemas.push(`el recorrido "${run}" trae un veredicto desconocido: ${JSON.stringify(e.verdict)}`)
+      continue
+    }
+    if (e.verdict === 'verde') {
+      const ev = Array.isArray(e.evidence) ? e.evidence.filter((x) => x && esTexto(x.command) && esTexto(x.output)) : []
+      if (!ev.length) {
+        problemas.push(`el recorrido "${run}" se declara verde sin evidencia: hace falta al menos un par comando/salida`)
+        continue
+      }
+    }
+    if (e.verdict === 'no-verificado' && !(esTexto(e.reason) && esTexto(e.unblock))) {
+      // El formato de `blocked` (state.js), no el campo: "por qué" y "qué haría
+      // falta". Sin las dos, un no-verificado es un encogimiento de hombros que
+      // libera el slice sin dejar a nadie sabiendo qué arreglar.
+      problemas.push(`el recorrido "${run}" se declara no-verificado sin \`reason\` y \`unblock\``)
+      continue
+    }
+    buenos.push(e)
+  }
+  for (const e of structured.runs) {
+    if (!vistos.has(e)) problemas.push(`el informe trae una entrada que esta slice no declara: "${colapsa(e && e.run)}"`)
+  }
+  // EL ROJO GANA AL MAL FORMADO: ver el test homónimo.
+  if (buenos.some((e) => e.verdict === 'rojo')) {
+    return { outcome: OUTCOMES.FAILED, runs: buenos, why: problemas.length ? problemas.join('; ') : null }
+  }
+  if (problemas.length) return { outcome: OUTCOMES.DISCARDED, why: problemas.join('; ') }
+  return { outcome: OUTCOMES.DONE, runs: buenos }
 }
 
 // ============================================================================
