@@ -143,6 +143,20 @@ crossed with no rule document that speaks of boundaries is not a finding, and
 you do not bring an architecture of your own to fill that silence: the law of
 this item does not change here.
 
+**The pattern of delivery is this item's subject too.** A pattern well executed
+and coherent with itself can still be the wrong pattern, and that is the check a
+verifier who only reads the implementation lets through: what settles it is not
+whether the change works but whether it is the shape of change this repo's rules
+prescribe for a change of this kind. Where a rule document says how a change
+reaches production — expand-contract, a second action beside the old one, the
+new behaviour gated inside the method — the lines of the diff that answer are
+the ones that alter a signature, a constructor or a public contract, and the
+call sites left on the old path: read them against those sentences the same way,
+citing the rule and its path in `evidence`. Which shape this change owed is what
+that document says and not what you would have done, and a delivery no rule
+document speaks of is not a finding: the law of this item does not change here
+either.
+
 Where an exemplar and a rule disagree, the rule wins: committed code is
 circumstance, a written convention is the rule.
 

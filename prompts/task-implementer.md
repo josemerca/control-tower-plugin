@@ -58,6 +58,11 @@ this prompt or in the files it names.
    Where those rules speak about boundaries — what the core may import, how a
    dependency arrives, what objects may cross — your imports and constructors are
    the lines the judge will read against them.
+   And where they say how a change of this kind must reach production —
+   expand-contract, a second action beside the old one, the new behaviour gated
+   inside the method — that shape is not yours to pick either: a signature, a
+   constructor or a public contract you change is what the judge reads against
+   those sentences.
 4. Write the smallest code that makes the task true. The brief carries contracts
    and signatures, not bodies. Bodies are written with the compiler in front of
    you, not recalled from memory — so read the code you are extending before you

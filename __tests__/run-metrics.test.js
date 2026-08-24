@@ -191,7 +191,7 @@ describe('el conteo por severidad', () => {
   })
 
   it('la telemetría del veredicto cuenta por regla', () => {
-    // Un contador por regla PRESENTE en el veredicto, no las ocho a cero: una
+    // Un contador por regla PRESENTE en el veredicto, no todas a cero: una
     // regla que no aparece no aporta nada a la cuenta.
     expect(verdictMeasures({
       ruling: 'FAIL',

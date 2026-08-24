@@ -57,6 +57,13 @@ const item5DeLaRubrica = () => {
   return m ? m[0] : ''
 }
 
+// El ítem 5 con los espacios normalizados. El ajuste de línea de Markdown puede
+// partir en dos líneas del fichero una frase que en el texto es una sola, así
+// que una expresión que busque la frase distintiva contra el crudo se pondría
+// roja al reflowear un párrafo sin haber borrado nada. Mismo recurso que
+// `seccionesDelPaquete` usa por el mismo motivo.
+const item5Normalizado = () => item5DeLaRubrica().replace(/\s+/g, ' ')
+
 // El ítem `test-desiderata`, aislado hasta el siguiente encabezado, con el
 // mismo recorte que `item5DeLaRubrica`: es el único sitio donde se le dice al
 // juez qué mira en los tests que la tarea ACABA de escribir.
@@ -218,6 +225,40 @@ describe('quién puede qué', () => {
     // otro punto y otro sujeto antes de este slice, así que un match flojo
     // contra el fichero entero no detectaría que esta frase se borre.
     expect(punto3DelImplementador()).toMatch(/rules speak about boundaries/i)
+  })
+
+  it('el patrón de entrega se mide dentro de patrones: el ítem 5 pregunta si es EL patrón que la convención prescribe', () => {
+    // §3.10 del handoff, y lo que su propia rúbrica llama «el check que un
+    // verificador que solo mira la implementación deja pasar»: el patrón puede
+    // estar bien ejecutado y ser coherente consigo mismo y aun así no ser el
+    // que el repo prescribe para ESTE tipo de cambio. Sin la pregunta dirigida
+    // el juez compara idiomas y la de la entrega no la abre nadie. Se exigen
+    // también las palabras del disparador —firma, constructor, contrato
+    // público— porque son las que le dicen dónde mirar en el diff.
+    const item = item5Normalizado()
+    expect(item).toMatch(/well executed and coherent with itself/i)
+    expect(item).toMatch(/expand-contract/)
+    expect(item).toMatch(/signature, a constructor or a public contract/i)
+  })
+
+  it('rollout no es un décimo ítem: la decisión del §3.6 queda fijada también para el patrón de entrega', () => {
+    // Misma regla que cerró `boundaries`: ítem propio sólo cuando el par
+    // sujeto+vara es nuevo. La vara del patrón de entrega son los mismos
+    // `Rules to obey:` que `patrones` ya abre, así que un encabezado propio no
+    // compraría vigilancia: duplicaría el `sin-vara` en todo repo que no
+    // escriba cómo entrega.
+    expect(VERDICT_RULES).not.toContain('rollout')
+    expect(reglasDelAgente()).not.toContain('rollout')
+  })
+
+  it('la vara del patrón de entrega es la misma a los dos lados: el implementador la lee antes de escribir', () => {
+    // La propiedad de e473c97 otra vez: el juez no es una sorpresa porque los
+    // dos miden con el mismo texto. Se busca la frase distintiva dentro del
+    // punto 3 aislado y con los espacios normalizados, no un match flojo
+    // contra el fichero entero.
+    const punto3 = punto3DelImplementador().replace(/\s+/g, ' ')
+    expect(punto3).toMatch(/how a change of this kind must reach production/i)
+    expect(punto3).toMatch(/expand-contract/)
   })
 
   it('test-desiderata es el noveno ítem, y va detrás de alcance', () => {
