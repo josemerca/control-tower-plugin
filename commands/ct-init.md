@@ -30,6 +30,17 @@ supongas cuál de las dos es. `--force` reemplaza igualmente; **nunca lo pases
 por tu cuenta**, y solo después de que el usuario confirme que esa sección no
 lleva trabajo suyo.
 
+El scaffolder crea también `.agent/conventions.md` — la vara del repo: los
+documentos de reglas del código, que `ct-step` pega en el brief de cada tarea.
+**Este es el momento de confirmación humana**: enumérale al usuario los
+candidatos que veas al explorar el repo (`AGENTS.md`, `CONTRIBUTING`,
+`docs/conventions/`…), y escribe en el fichero SOLO lo que el usuario
+confirme — no lo rellenes por tu cuenta, y si no confirma nada, déjalo con su
+placeholder: la ausencia se mide (`sin-vara`), no se rellena. No es
+`.agent/conventions-ack.md` (eso son acuses de señales de colisión de
+protocolo del loop, ver más abajo); este fichero declara cómo se escribe
+código en este repo.
+
 Al `.gitignore` se le añaden **dos** líneas, las dos idempotentes: `.worktrees/` (los worktrees de slice viven dentro del checkout, y sin esa línea un `git add -A` se traga un árbol de trabajo entero) y `.agent/SLICE.md` (el estado de una sesión despachada, que es estado vivo y local, nunca producto — ver F22 en `commands/ct-next.md`).
 
 En `.agent/STATE.md`, en cambio, **limítate a describir el bootstrap**:

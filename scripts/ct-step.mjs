@@ -60,6 +60,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
 import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS } from './run-machine.js'
 import { extractTasks } from './plan-tasks.js'
+import { CONVENTIONS_FILE, seccionDeVara } from './vara.js'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage, findingLocation,
   IMPLEMENTER_TOOLS, JUDGE_TOOLS, PACKAGE_SECTIONS,
@@ -364,6 +365,18 @@ function escribirBrief() {
       ['--with-plan-context', planPath, String(run.task), brief], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   } catch (e) {
     die(`no se pudo extraer el brief de la tarea ${run.task}: ${String(e.stderr || e.message).trim()}`, EXIT.PRECONDITION)
+  }
+  // §3.3: la vara del repo cruza el embudo AQUÍ, leída directo del disco y sin
+  // ningún agente en medio. Su ausencia no avisa: es el estado normal de casi
+  // todo repo hoy, y el juez lo mide como `sin-vara`, no como un error.
+  try {
+    const ruta = join(repoRoot, CONVENTIONS_FILE)
+    if (existsSync(ruta)) {
+      const seccion = seccionDeVara(readFileSync(ruta, 'utf8'))
+      if (seccion) appendFileSync(brief, seccion)
+    }
+  } catch (e) {
+    err(`aviso: ${CONVENTIONS_FILE} existe y no se ha podido leer (${String(e.message).trim()}): el brief sale sin la vara del repo.`)
   }
   return brief
 }

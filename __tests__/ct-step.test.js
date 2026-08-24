@@ -718,3 +718,34 @@ describe('un fallo de la telemetría no puede tumbar la tarea', () => {
     expect(execFileSync('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: repo, encoding: 'utf8' })).toMatch(/uno\.txt/)
   })
 })
+
+// §3.3 del handoff: `.agent/conventions.md` es la vara del REPO, no del plan.
+// `ct-step` la lee directo del disco y la pega al final de cada task brief —
+// sin ningún agente en medio, así que un repo con el fichero y otro sin él se
+// comportan distinto sólo por lo que hay en disco, nunca por lo que un agente
+// decidió copiar.
+describe('la vara del repo viaja en el brief, sin agente en medio', () => {
+  it('con .agent/conventions.md, el brief lleva el banner y el contenido, DETRÁS de la tarea', () => {
+    mkdirSync(join(repo, '.agent'), { recursive: true })
+    writeFileSync(join(repo, '.agent', 'conventions.md'), '# La vara\n\n- `AGENTS.md`\n')
+    ct('next')
+    const brief = readFileSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'), 'utf8')
+    expect(brief).toMatch(/leída directo de `\.agent\/conventions\.md`/)
+    expect(brief).toContain('- `AGENTS.md`')
+    expect(brief.indexOf('Task 1')).toBeLessThan(brief.indexOf('leída directo'))
+  })
+
+  it('sin el fichero, el brief no lo menciona — el camino de hoy, intacto', () => {
+    ct('next')
+    const brief = readFileSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'), 'utf8')
+    expect(brief).not.toMatch(/conventions\.md/)
+  })
+
+  it('con el fichero en blanco, el brief no lleva el banner — vacío no es vara', () => {
+    mkdirSync(join(repo, '.agent'), { recursive: true })
+    writeFileSync(join(repo, '.agent', 'conventions.md'), '\n')
+    ct('next')
+    const brief = readFileSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'), 'utf8')
+    expect(brief).not.toMatch(/leída directo de/)
+  })
+})

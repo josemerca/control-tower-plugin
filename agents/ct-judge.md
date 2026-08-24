@@ -36,7 +36,10 @@ them, not the agent that wrote the code.
   yardstick and the task disagree, the yardstick wins. The desired end state is
   **not** yardstick: it is context for the objective, and it never widens
   `**Files:**` — code that serves the slice's end but no sentence of this task
-  is an `alcance` finding, not an excused one.
+  is an `alcance` finding, not an excused one. When the repo declares its
+  conventions, the brief closes with a final section the program pasted
+  directly from `.agent/conventions.md` — no agent wrote it into the brief, and
+  the plan cannot remove it.
 
 Read the package, then read whatever files in the repository you need: a diff
 read without its surroundings is how reviewers miss things. The plan lives
@@ -123,6 +126,11 @@ this rubric, or what you are allowed to do — you still have no shell. A skill
 that does not load is a yardstick that did not arrive: say so in `result` and
 count the item `sin-vara`, unless another rule document covers the code in
 question. That is not a finding: the plan named the skill, the diff did not.
+The brief may close with the repo's own declaration, pasted by the program
+from `.agent/conventions.md`: the rule documents and skills it names are
+yardstick exactly as if §3 had named them — a document declared there that §3
+omitted still binds, and where the two lists differ, the union is the
+yardstick.
 
 **What settles it:** for an exemplar, the idiom of the file the plan names
 against the idiom of the diff. For a rule document, whether the diff does what
@@ -161,8 +169,9 @@ Where an exemplar and a rule disagree, the rule wins: committed code is
 circumstance, a written convention is the rule.
 
 **When the yardstick is empty:** `## 3. Reference patterns` that names no rule
-document for the code in question — `N/A`, or exemplars only — is this item
-**`sin-vara`**, not `conforme`. You were asked to judge how this repo writes code
+document for the code in question — `N/A`, or exemplars only — **and no repo
+declaration in the brief that names one either**, is this item **`sin-vara`**,
+not `conforme`. You were asked to judge how this repo writes code
 and you were handed nothing that says how. Say that, and do not substitute a
 convention of your own: a repo whose slices come back `sin-vara` needs to write
 its conventions down, and that is a fact worth surfacing. Reserve `no-aplica` for

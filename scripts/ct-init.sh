@@ -51,6 +51,39 @@ else
   echo "STATE.md ya existe, no se pisa — pero no declara el campo \`blocked\`, así que se lee como NO bloqueado. Si el trabajo de este repo se queda alguna vez bloqueado, añádelo a mano al frontmatter en vez de explicarlo dentro de \`next_action\`: blocked: {reason: \"por qué no se puede continuar\", unblock: \"qué haría falta\"} — el hook de SessionStart lo anuncia y suspende el next_action en toda sesión nueva."
 fi
 
+# .agent/conventions.md (§3.3, docs/prompt-juez-lo-que-queda.md): las
+# convenciones son una propiedad del REPO, no del epic — antes se re-derivaban
+# en el §3 de cada plan de slice, y nada garantizaba que el slice 14 citara las
+# mismas rutas que el slice 3. Se siembra aquí, una única vez por repo, con el
+# mismo idiom que STATE.md arriba: crea si no existe, no se pisa si existe. La
+# confirmación humana es el momento en que alguien corre `/ct-init` —no se
+# añade una cuarta puerta a las tres del producto— y `ct-step` la lee directo
+# de este fichero en cada task brief, sin ningún agente en medio.
+CONVENTIONS_MD="$TARGET/.agent/conventions.md"
+if [ ! -f "$CONVENTIONS_MD" ]; then
+  cat > "$CONVENTIONS_MD" <<'EOF'
+# La vara de este repo — los documentos de reglas del código
+
+<!-- Lo lee ct-step DIRECTO y lo pega en el brief de cada tarea: el
+     implementador escribe con esto delante y el juez bloquea citándolo.
+     Es una propiedad del REPO, no de ningún epic: se declara UNA vez aquí,
+     no en el §3 de cada plan de slice.
+     OJO: no es .agent/conventions-ack.md (acuses de señales de colisión de
+     protocolo del loop) — este fichero declara CÓMO se escribe código aquí. -->
+
+Rules to obey (una ruta por línea, entre backticks; tiene que poder leerse):
+
+- (ninguna declarada todavía — sustituye esta línea al declarar la primera)
+
+Skills (nombre de skill, no ruta):
+
+- (ninguna)
+EOF
+  echo "creado $CONVENTIONS_MD"
+else
+  echo "conventions.md ya existe, no se pisa"
+fi
+
 GITIGNORE="$TARGET/.gitignore"
 touch "$GITIGNORE"
 # Normaliza un salto de línea final ANTES de tocar nada más: si el fichero ya

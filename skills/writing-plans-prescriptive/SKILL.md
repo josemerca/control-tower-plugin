@@ -51,7 +51,12 @@ analogous file as a reference pattern.
 An analogous file shows the shape; a convention document states the rule, and a rule holds even
 where no analogous file exists — which is why a slice on an empty repo still has something to
 measure against. Look for `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING`, anything under a
-`docs/conventions/` or `rules` directory, and the project skills under `.claude/skills`; the
+`docs/conventions/` or `rules` directory, and the project skills under `.claude/skills`.
+Start from `.agent/conventions.md` where the repo declares one: that file is the repo's own
+declaration, seeded by `/ct-init` and confirmed by a human, and it is what keeps slice 14 citing
+the same yardstick as slice 3. List under `Rules to obey:` the entries that bear on this slice —
+you are selecting, not transporting: the program pastes that file into every task brief anyway,
+so omitting an entry does not hide it from the judge. The
 issue's "Contexto del epic" is where a human may have named them already. List what you find
 under `Rules to obey:`, **by path**, and if the repo genuinely declares none, say so with
 `N/A — <reason>` instead of inventing a plausible one: `--check-plan` reads every path you name

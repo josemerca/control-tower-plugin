@@ -55,6 +55,10 @@ this prompt or in the files it names.
    `Rules to obey:` — this repo's written conventions. **Open both before you
    write.** The judge that reads your diff opens that same section and blocks on
    those same documents, so a rule you did not read is a round trip you paid for.
+   When the brief closes with a section pasted from `.agent/conventions.md`,
+   those are this repo's declared rule documents: open them exactly as you open
+   the ones §3 names — the judge measures against both, and a document the repo
+   declares that §3 forgot is still one your diff is read against.
    Where those rules speak about boundaries — what the core may import, how a
    dependency arrives, what objects may cross — your imports and constructors are
    the lines the judge will read against them.

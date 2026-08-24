@@ -36,7 +36,8 @@ name is grepped by `--check-plan`: a path that does not exist fails the plan.}}
 Files to imitate: {{real files whose shape the implementer copies — same role, same layer. Or
 N/A — <reason>.}}
 
-Rules to obey: {{this repo's own convention documents, by path — `AGENTS.md`, `CLAUDE.md`, a file
+Rules to obey: {{start from `.agent/conventions.md` where the repo declares one; then this repo's
+own convention documents, by path — `AGENTS.md`, `CLAUDE.md`, a file
 under `docs/conventions/`, `CONTRIBUTING` — plus any skill the issue's "Contexto del epic" names
 (a skill is not a path and is not checked on disk). Or N/A — this repo declares none.}}
 
