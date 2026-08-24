@@ -50,6 +50,23 @@ describe('readFrozenDecisions', () => {
   it('la cabecera se exporta con el literal correcto', () => {
     expect(FROZEN_DECISIONS_HEADING).toBe('## Decisiones congeladas')
   })
+  // DeepSeek #1 — data loss: una línea con DOS marcadores no debe borrar el
+  // texto entre ellos. Se recorta SOLO el sufijo final; el marcador interior
+  // sobrevive y B2 lo avisa (no es un fallo mudo).
+  it('línea con dos marcadores → recorta solo el último, no pierde texto, y avisa', () => {
+    const spec = '## Decisiones congeladas\n- **D-1** — iOS 17 (fijada *(Procedencia: anterior)*) y re-confirmada *(Procedencia: hablada.)*\n\n## 9. Slices\n'
+    const r = readFrozenDecisions(spec)
+    expect(r.content).toContain('y re-confirmada') // NO se pierde el texto intermedio
+    expect(r.content).not.toContain('hablada.)*')  // el sufijo final sí se recorta
+    expect(r.warnings.join('\n')).toMatch(/Procedencia/) // el marcador interior superviviente se avisa
+  })
+  // DeepSeek #2 — falso positivo: la palabra "Procedencia" en prosa, sin
+  // marcador, NO es un fallo de limpieza y no debe avisar.
+  it('la palabra "Procedencia" en prosa (sin marcador) no dispara aviso', () => {
+    const r = readFrozenDecisions('## Decisiones congeladas\n- **D-1** — revisar la Procedencia en el acta.\n\n## 9. Slices\n')
+    expect(r.content).toContain('revisar la Procedencia en el acta.')
+    expect(r.warnings).toEqual([]) // sin marcador, sin aviso
+  })
 })
 
 describe('buildIssueBody — decisiones congeladas', () => {

@@ -224,13 +224,16 @@ export function readSpecSection(specMd, heading, opts = {}) {
     // recorte solo afecta a lo que se proyecta al cuerpo.
     out = content.split('\n').map((l) => l.replace(opts.strip, '')).join('\n')
     // B2: la limpieza es best-effort sobre un formato externo. Si tras recortar
-    // sobrevive la etiqueta (p.ej. "Procedencia"), NO se calla: se proyecta el
+    // SOBREVIVE un MARCADOR (sufijo en otra línea, o un segundo marcador
+    // interior que el recorte templado no toca), NO se calla: se proyecta el
     // texto igual, pero con un aviso que nombra cada línea que sigue sucia. "No
     // poder comprobar NO es estar limpio" (scope.js): el fallo tiene que verse.
-    if (opts.stripLabel) {
+    // Se comprueba el MARCADOR (opts.survives), no la palabra suelta —
+    // "Procedencia" en prosa legítima no es un fallo (DeepSeek #2).
+    if (opts.survives) {
       for (const l of out.split('\n')) {
-        if (l.includes(opts.stripLabel)) {
-          warnings.push(`aviso: en la sección "${heading}" del spec, esta línea conserva "${opts.stripLabel}" tras limpiar el sufijo y por eso viaja tal cual al cuerpo de los issues: "${l}". Revisa que el sufijo siga el formato "*(Procedencia: …)*" de la plantilla (en una sola línea), o quítalo a mano.`)
+        if (opts.survives.test(l)) {
+          warnings.push(`aviso: en la sección "${heading}" del spec, esta línea conserva un marcador "${opts.stripLabel}" tras limpiar el sufijo y por eso viaja tal cual al cuerpo de los issues: "${l}". Revisa que cada decisión lleve como mucho un sufijo "*(Procedencia: …)*", en una sola línea, o quítalo a mano.`)
         }
       }
     }
@@ -250,16 +253,27 @@ export function readEpicContext(specMd) {
 // línea, con formato verificado contra docs/loop/loop.body.html. Es meta para
 // quien CONGELA (hablada | deducida | propuesta), no para quien EJECUTA: al
 // agente le da igual el origen — la decisión le vincula igual —, así que se
-// quita al proyectar. No es un parser: solo recorta el sufijo. `[^\n]*?` (no
-// `.*?`) para no cruzar saltos de línea: si el sufijo se envolvió a dos líneas,
-// no casa, y la limpieza lo delata por B2 en vez de partir el markdown.
-const PROCEDENCIA_SUFFIX_RE = /\s*\*\(Procedencia:[^\n]*?\)\*\s*$/i
+// quita al proyectar. No es un parser: solo recorta el sufijo. `[^\n]` (no `.`)
+// para no cruzar saltos de línea: si el sufijo se envolvió a dos líneas, no
+// casa, y la limpieza lo delata por B2 en vez de partir el markdown. Y el
+// contenido está TEMPLADO con `(?!\*\(Procedencia:)` para no cruzar un SEGUNDO
+// marcador: sin eso, una línea con dos marcadores casaba desde el primero hasta
+// el `)*` final y borraba en silencio todo lo de en medio (DeepSeek #1). Así se
+// recorta solo el sufijo final; el marcador interior sobrevive y B2 lo avisa.
+const PROCEDENCIA_SUFFIX_RE = /\s*\*\(Procedencia:(?:(?!\*\(Procedencia:)[^\n])*?\)\*\s*$/i
+
+// PROCEDENCIA_MARKER_RE: detecta un marcador de procedencia SUPERVIVIENTE tras
+// el recorte (para el aviso B2). Mira el MARCADOR —un paréntesis de apertura
+// seguido de "Procedencia:"— y no la palabra suelta: "Procedencia" en prosa
+// legítima ("revisar la Procedencia en el acta") no es un fallo de limpieza
+// (DeepSeek #2). Case-insensitive como el recorte; cubre `*(`, `_(` y `(`.
+const PROCEDENCIA_MARKER_RE = /\(Procedencia:/i
 
 // readFrozenDecisions: espejo de readEpicContext, los dos sobre readSpecSection.
-// La ÚNICA diferencia es el strip de la procedencia (y su aviso observable si el
-// recorte no la pilla, B2).
+// La ÚNICA diferencia es el strip de la procedencia (y su aviso observable si
+// sobrevive un marcador tras el recorte, B2).
 export function readFrozenDecisions(specMd) {
-  return readSpecSection(specMd, FROZEN_DECISIONS_HEADING, { noun: 'decisiones congeladas', strip: PROCEDENCIA_SUFFIX_RE, stripLabel: 'Procedencia' })
+  return readSpecSection(specMd, FROZEN_DECISIONS_HEADING, { noun: 'decisiones congeladas', strip: PROCEDENCIA_SUFFIX_RE, survives: PROCEDENCIA_MARKER_RE, stripLabel: 'Procedencia' })
 }
 
 // gatesOf: la resolución de gates de un slice, en un solo sitio. La llaman
