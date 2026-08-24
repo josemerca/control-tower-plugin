@@ -144,3 +144,54 @@ describe('el gate "e2e" se anuncia por stderr, y nombra la columna correcta', ()
     expect(r.stderr).not.toContain('"e2e"')
   })
 })
+
+// ============================================================================
+// Review de la adición 2: `redundant`/`waived`/`inertWaivers` también
+// atribuían el gate "e2e" al `Tipo` ("que su Tipo ... implica/ya implica/no
+// implica ese gate"), que es FALSO exactamente por el mismo motivo que
+// "added" — `e2e` no vive en TYPE_GATES, nunca lo implica ningún Tipo: lo
+// implica la fila, vía la columna "E2E". El caso más grave (finding 1): con
+// `Gate: e2e` MÁS recorridos reales (fila legítima, no aborta — los aborts de
+// la columna E2E exigen CERO recorridos), un `--dry-run` real imprimía a la
+// vez el aviso correcto de "added"/"implied" y el genérico de "redundant",
+// que decía "su Tipo ya implica" el gate: dos afirmaciones sobre el MISMO
+// gate que se contradecían tres líneas aparte.
+// ============================================================================
+describe('review adición 2 — redundant/waived/inertWaivers también nombran "E2E", no "Tipo"', () => {
+  it('Gate: e2e + recorridos reales: no aborta, y "redundante" ya no contradice al aviso de arriba', () => {
+    const r = groom('e2e', 'curl -i :9115/metrics responde 200')
+    expect(r.status).toBe(0)
+    // El aviso "el gate ya viene de la fila" (el mismo que dispara con sólo
+    // recorridos) sigue presente...
+    expect(r.stderr).toMatch(/columna "E2E"/)
+    // ...y "redundante" ya no dice que lo implica el Tipo: las dos líneas que
+    // mencionan "e2e" están de acuerdo en que la fuente es la fila/columna
+    // E2E, ninguna nombra "Tipo" como causa.
+    expect(r.stderr).toMatch(/redundante/)
+    expect(r.stderr).not.toMatch(/Tipo\s*"?backend"?\s*ya implica/)
+    const e2eLines = r.stderr.split('\n').filter((l) => l.includes('"e2e"'))
+    expect(e2eLines.length).toBeGreaterThanOrEqual(2)
+    for (const line of e2eLines) expect(line).toMatch(/columna "E2E"/)
+    const plan = JSON.parse(r.stdout)
+    expect(plan.issues[0].labels).toContain('gate:e2e')
+  })
+
+  it('Gate: !e2e + recorridos reales: la renuncia nombra "E2E" y dice la consecuencia sin rodeos', () => {
+    const r = groom('!e2e', 'curl -i :9115/metrics responde 200')
+    expect(r.status).toBe(0)
+    expect(r.stderr).toMatch(/RENUNCIA/)
+    expect(r.stderr).toMatch(/columna "E2E"/)
+    expect(r.stderr).not.toMatch(/implica su Tipo/)
+    expect(r.stderr).toMatch(/no se le pedirán al agente|NO se le pedirán al agente/)
+    const plan = JSON.parse(r.stdout)
+    expect(plan.issues[0].labels).not.toContain('gate:e2e')
+  })
+
+  it('Gate: !e2e + sin recorridos: la renuncia inerte nombra "E2E", no "Tipo"', () => {
+    const r = groom('!e2e', 'no')
+    expect(r.status).toBe(0)
+    expect(r.stderr).toMatch(/no había nada que quitar/)
+    expect(r.stderr).toMatch(/columna "E2E"/)
+    expect(r.stderr).not.toMatch(/su Tipo .* no implica ese gate/)
+  })
+})

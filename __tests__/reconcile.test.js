@@ -321,6 +321,58 @@ describe('diffIssue — compara título, milestone, enlace-al-spec (ancla), labe
     expect(d.duplicateMachineSections).toEqual([])
     expect(hasDrift(d)).toBe(false)
   })
+
+  // Task 4 (review, finding 3): la lógica de `e2eDiffers` no tenía ningún
+  // test propio — sólo se parecía, sin probarlo, al `descripcionDiffers` ya
+  // cubierto arriba. Se cubre aquí con el MISMO arnés (`existingWith`,
+  // `diffIssue` directo), siguiendo el patrón exacto de "## Descripción"
+  // (duplicado) y de las tres ramas de estado de esa misma sección
+  // (divergente, ausente-cuando-el-spec-la-pide, silencio real en los dos
+  // lados) — no se inventa ningún harness nuevo.
+  it('"## E2E" duplicado → aparece en duplicateSections pero NO en duplicateMachineSections, hasDrift NO lo cuenta', () => {
+    const dup = existingWith({
+      body: [
+        SPEC_LINK, '',
+        '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-2.1', '',
+        '## Dependencias', '- merge-after #1', '',
+        '## E2E', '- curl -i :9115/metrics responde 200', '',
+        '## E2E', '- copia pegada por error', '',
+        '## Out of scope / Protected', '- 🚫 schema §6', '',
+        '<!-- ct-order:2 -->',
+      ].join('\n'),
+    })
+    const d = diffIssue(dup, { ...WANTED_ISSUE, e2eContent: '- curl -i :9115/metrics responde 200' }, 'Epic', ALL_PREFIXES)
+    expect(d.duplicateSections).toContain('E2E')
+    expect(d.duplicateMachineSections).toEqual([])
+    expect(hasDrift(d)).toBe(false)
+  })
+  it('"## E2E" con contenido distinto del spec → e2eDiffers true (no cuenta para hasDrift)', () => {
+    const withE2e = existingWith({
+      body: [
+        SPEC_LINK, '',
+        '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-2.1', '',
+        '## Dependencias', '- merge-after #1', '',
+        '## E2E', '- curl -i :9115/metrics responde 200', '',
+        '## Out of scope / Protected', '- 🚫 schema §6', '',
+        '<!-- ct-order:2 -->',
+      ].join('\n'),
+    })
+    const d = diffIssue(withE2e, { ...WANTED_ISSUE, e2eContent: '- otro recorrido distinto' }, 'Epic', ALL_PREFIXES)
+    expect(d.e2eDiffers).toBe(true)
+    expect(hasDrift(d)).toBe(false) // como Gates: nota, nunca cuenta para el exit code
+  })
+  it('"## E2E" ausente en el issue cuando el spec SÍ pide recorridos → e2eDiffers true', () => {
+    const d = diffIssue(existingWith({}), { ...WANTED_ISSUE, e2eContent: '- curl -i :9115/metrics responde 200' }, 'Epic', ALL_PREFIXES)
+    expect(d.e2eDiffers).toBe(true)
+  })
+  it('sin "## E2E" en ninguno de los dos lados → e2eDiffers false (acuerdo real: este slice no tiene recorridos)', () => {
+    // A diferencia de Gates (siempre emitida, así que su ausencia SIEMPRE
+    // diverge), "## E2E" sólo se emite con contenido — null en los dos
+    // lados es el caso normal (6 de cada 8 filas en mo-monitoring v1), no
+    // una divergencia.
+    const d = diffIssue(existingWith({}), WANTED_ISSUE, 'Epic', ALL_PREFIXES) // WANTED_ISSUE no trae e2eContent
+    expect(d.e2eDiffers).toBe(false)
+  })
 })
 
 describe('hasDrift — título/milestone/enlace-al-spec/labels/deps/ac/duplicados-machine cuentan; closed/prosa/strayDeps NUNCA', () => {

@@ -508,6 +508,30 @@ function e2eAddedAdvisory(n) {
   return `aviso: el slice #${n} lleva el gate "e2e" porque su fila declara recorridos en la columna "E2E" (no en "Gate": ese gate no se declara ahí, se DERIVA) — se dice en voz alta porque cambia lo que hay que comprobar antes de mergear: el issue llevará la label "gate:e2e", el agente despachado recibirá la instrucción, y quien revise el PR tiene que cerrarlo`
 }
 
+// e2eRedundantAdvisory / e2eWaivedAdvisory / e2eInertWaiverAdvisory (review de
+// la adición 2, finding 1 y 2): los mismos "es deliberado (para eso está la
+// columna Gate)" / "que implica su Tipo" / "su Tipo no implica ese gate" son
+// FALSOS para `e2e` en `redundant`/`waived`/`inertWaivers`, exactamente por el
+// motivo que ya cerró `added` — y en el caso de `redundant`, la review
+// encontró que una fila con `Gate: e2e` MÁS recorridos reales imprime a la
+// vez `e2eAddedAdvisory` (correcta) y el mensaje genérico de `redundant`
+// (que dice "su Tipo ya implica" el gate): dos afirmaciones contradictorias
+// sobre el MISMO gate, tres líneas de stderr aparte. Ninguna de las tres
+// clasificaciones depende del `Tipo` para `e2e` — dependen de si la fila
+// declara recorridos en "E2E", así que los tres textos nombran esa columna.
+function e2eRedundantAdvisory(n, gateCell) {
+  return `aviso: el slice #${n} declara el gate "e2e" en la columna "Gate" (celda "Gate": "${gateCell}"), pero su fila YA lo lleva porque declara recorridos en la columna "E2E" — es redundante, no un error: el resultado es el mismo con la celda "Gate" vacía`
+}
+function e2eWaivedAdvisory(n, gateCell) {
+  // A diferencia del mensaje genérico de `waived`, este SÍ dice la
+  // consecuencia sin rodeos (pedido explícito de la review): la fila trae
+  // recorridos de verdad y la renuncia se los lleva por delante igual.
+  return `aviso: el slice #${n} RENUNCIA al gate "e2e" con "!e2e" en la columna "Gate" (celda "Gate": "${gateCell}"), pero su fila declara recorridos en la columna "E2E" — la renuncia se aplica igual: esos recorridos NO se le pedirán al agente, "gate:e2e" no aparecerá como label del issue, y nadie los atravesará antes de mergear. Si no era eso lo que querías, quita el "!" de esa celda`
+}
+function e2eInertWaiverAdvisory(n) {
+  return `aviso: el slice #${n} renuncia al gate "e2e" con "!e2e" en la columna "Gate", pero su fila no declara recorridos en la columna "E2E": la renuncia no hace nada (no había nada que quitar). Se dice para que no te quedes con la idea de haber retirado un gate que nunca estuvo`
+}
+
 for (const s of report.slices) {
   const g = resolveGates(s.type, s.gate, s.e2e)
   const typeRef = s.type && !isNoValueCell(s.type) ? `"${s.type}"` : '(sin Tipo)'
@@ -522,12 +546,15 @@ for (const s of report.slices) {
   // anunciar el mismo gate dos veces si alguna vez dejara de serlo.
   if (g.implied.includes('e2e') && !g.added.includes('e2e')) console.error(e2eAddedAdvisory(s.n))
   for (const gate of g.waived) {
+    if (gate === 'e2e') { console.error(e2eWaivedAdvisory(s.n, s.gate)); continue }
     console.error(`aviso: el slice #${s.n} RENUNCIA al gate "${gate}" que implica su Tipo ${typeRef} (celda "Gate": "${s.gate}") — ese gate NO se le pedirá al agente, no aparecerá como label del issue y nadie lo comprobará antes de mergear. Si no era eso lo que querías, quita el "!" de esa celda`)
   }
   for (const gate of g.inertWaivers) {
+    if (gate === 'e2e') { console.error(e2eInertWaiverAdvisory(s.n)); continue }
     console.error(`aviso: el slice #${s.n} renuncia al gate "${gate}", pero su Tipo ${typeRef} no implica ese gate: la renuncia no hace nada (no había nada que quitar). Se dice para que no te quedes con la idea de haber retirado un gate que nunca estuvo`)
   }
   for (const gate of g.redundant) {
+    if (gate === 'e2e') { console.error(e2eRedundantAdvisory(s.n, s.gate)); continue }
     console.error(`aviso: el slice #${s.n} declara el gate "${gate}", que su Tipo ${typeRef} ya implica — es redundante, no un error: el resultado es el mismo con la celda "Gate" vacía`)
   }
 }
