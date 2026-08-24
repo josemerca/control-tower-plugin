@@ -219,6 +219,19 @@ describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive 
     expect(s).toMatch(/a test travels as two things/i)
   })
 
+  it('cierra con la lista de pasos, y valida por tarea antes de seguir', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    expect(s).toContain('## The steps, in order')
+    expect(s).toMatch(/one todo per step/i)
+    expect(s).toMatch(/One task at a time: write it, then run `--check-plan`/)
+  })
+
+  it('la skill y su template tienen presupuesto: crecer obliga a recortar', () => {
+    const bytes = (f) => Buffer.byteLength(read('writing-plans-prescriptive', f))
+    expect(bytes('SKILL.md')).toBeLessThanOrEqual(16314)
+    expect(bytes('plan-template.md')).toBeLessThanOrEqual(6377)
+  })
+
   it('el template no pide el estado final completo y sus huecos nombran los roles', () => {
     const t = read('writing-plans-prescriptive', 'plan-template.md')
     expect(t).not.toMatch(/the complete final state/i)
