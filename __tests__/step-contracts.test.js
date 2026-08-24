@@ -14,9 +14,59 @@ import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage, findingLocation,
   VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS, VERDICT_RULES,
   PACKAGE_SECTIONS, RUBRIC_OUTCOMES,
+  readSliceVerdict, outcomeOfSliceVerdict, sliceVerdictCommitMessage,
+  SLICE_VERDICT_RULES, SLICE_VERDICT_SCHEMA, SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS,
 } from '../scripts/step-contracts.js'
+import { findClosingKeywords } from '../scripts/closing-keywords.js'
 
 const AGENTE_JUEZ = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-judge.md')
+const AGENTE_JUEZ_DE_SLICE = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-slice-judge.md')
+
+// La línea `tools:` del frontmatter del juez de SLICE — mismo patrón que
+// `toolsDelAgente()` para ct-judge.md, sobre el fichero propio de §3.7-B.
+const toolsDelJuezDeSlice = () => {
+  const m = /^tools:\s*(.+)$/m.exec(readFileSync(AGENTE_JUEZ_DE_SLICE, 'utf8'))
+  return m ? m[1].trim() : null
+}
+
+// Los encabezados de la rúbrica del juez de slice — "### 1. `estado-final` —
+// ..." — en el orden en que el agente los recorre. Mismo patrón que
+// `reglasDelAgente()`, parametrizado por fichero porque ahora hay DOS agentes
+// con esta misma forma de rúbrica.
+const reglasDeAgente = (fichero) => {
+  const texto = readFileSync(fichero, 'utf8')
+  const regex = /^### \d+\.\s+`([a-z-]+)`/gm
+  const reglas = []
+  let m
+  while ((m = regex.exec(texto)) !== null) reglas.push(m[1])
+  return reglas
+}
+
+// El bloque ```json de "What you write" del juez de slice — mismo patrón que
+// `esquemaDelAgente()`, parametrizado por fichero.
+const esquemaDeAgente = (fichero) => {
+  const texto = readFileSync(fichero, 'utf8')
+  const m = /## What you write[\s\S]*?```json\n([\s\S]*?)```/.exec(texto)
+  return m ? m[1] : ''
+}
+
+// Los encabezados del paquete de revisión que cita "What you are given" del
+// juez de slice. Mismo patrón que `seccionesDelPaquete()`, sobre el párrafo
+// "The slice review package." en vez de "The review package.".
+const seccionesDelPaqueteDeSlice = () => {
+  const texto = readFileSync(AGENTE_JUEZ_DE_SLICE, 'utf8')
+  const parrafo = /- \*\*The slice review package\.\*\*([\s\S]*?)\n- \*\*The plan/.exec(texto)
+  if (!parrafo) return []
+  const normalizado = parrafo[1].replace(/\s+/g, ' ')
+  const regex = /`## ([^`]+)`/g
+  const secciones = []
+  let m
+  while ((m = regex.exec(normalizado)) !== null) {
+    const seccion = m[1].trim()
+    if (!secciones.includes(seccion)) secciones.push(seccion)
+  }
+  return secciones
+}
 // La línea `tools:` del frontmatter, que es la que decide de verdad qué puede
 // hacer el juez. La constante del módulo es una copia suya.
 const toolsDelAgente = () => {
@@ -366,6 +416,112 @@ describe('quién puede qué', () => {
     // sigue recibiendo instrucciones para leer una sección que no existe, y
     // nada se entera salvo este test.
     expect(PACKAGE_SECTIONS).toEqual(seccionesDelPaquete())
+  })
+})
+
+// ---------------------------------------------------------------------------
+// EL JUEZ DE SLICE (§3.7-B del handoff): material propio,
+// `agents/ct-slice-judge.md`, con su propia rúbrica de DOS ítems. Mismos
+// patrones de test que ya atan al juez de tarea, aplicados al fichero nuevo.
+// ---------------------------------------------------------------------------
+describe('el juez de slice (§3.7-B)', () => {
+  it('SLICE_VERDICT_RULES son los dos encabezados de la rúbrica de ct-slice-judge.md', () => {
+    expect(SLICE_VERDICT_RULES).toEqual(reglasDeAgente(AGENTE_JUEZ_DE_SLICE))
+    expect(SLICE_VERDICT_RULES).toEqual(['estado-final', 'coherencia'])
+  })
+
+  it('el juez de slice no tiene shell ni Edit', () => {
+    expect(toolsDelJuezDeSlice()).not.toMatch(/Bash|Edit/)
+    expect(SLICE_JUDGE_TOOLS).not.toMatch(/Bash|Edit/)
+  })
+
+  it('SLICE_JUDGE_TOOLS no puede divergir del agente que se despacha', () => {
+    expect(SLICE_JUDGE_TOOLS).toBe(toolsDelJuezDeSlice())
+  })
+
+  it('el juez de slice puede escribir su veredicto: es el canal por el que contesta', () => {
+    expect(toolsDelJuezDeSlice()).toMatch(/Write/)
+  })
+
+  it('el bloque ```json de ct-slice-judge.md enseña rubric, outcome, evidence y path', () => {
+    const esquema = esquemaDeAgente(AGENTE_JUEZ_DE_SLICE)
+    expect(esquema).toMatch(/"rubric"/)
+    expect(esquema).toMatch(/"outcome"/)
+    expect(esquema).toMatch(/"evidence"/)
+    expect(esquema).toMatch(/"path"/)
+  })
+
+  it('SLICE_PACKAGE_SECTIONS no puede divergir de los encabezados que la rúbrica cita por su nombre', () => {
+    expect(SLICE_PACKAGE_SECTIONS).toEqual(seccionesDelPaqueteDeSlice())
+  })
+
+  it('el esquema del recorrido de slice no duplica los identificadores: los toma de SLICE_VERDICT_RULES', () => {
+    expect(SLICE_VERDICT_SCHEMA.properties.rubric.items.properties.rule.enum).toBe(SLICE_VERDICT_RULES)
+  })
+
+  it('el esquema de slice pide el recorrido entero: dos ítems, ni uno más ni uno menos', () => {
+    expect(SLICE_VERDICT_SCHEMA.properties.rubric.minItems).toBe(2)
+    expect(SLICE_VERDICT_SCHEMA.properties.rubric.maxItems).toBe(2)
+  })
+
+  const recorridoDeSlice = () => SLICE_VERDICT_RULES.map((rule) => ({ rule, result: `mirado: ${rule}`, outcome: 'conforme' }))
+
+  it('readSliceVerdict acepta un recorrido de dos ítems válido', () => {
+    const r = readSliceVerdict({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [] })
+    expect(r.verdict).toEqual({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [] })
+  })
+
+  it('readSliceVerdict descarta un veredicto con una regla de TAREA (p. ej. "alcance")', () => {
+    const r = readSliceVerdict({
+      ruling: 'FAIL',
+      rubric: recorridoDeSlice(),
+      findings: [{ rule: 'alcance', severity: 'high', what: 'x', path: 'y', evidence: 'z' }],
+    })
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/regla desconocida/)
+  })
+
+  it('readSliceVerdict descarta un PASS con un hallazgo high, igual que el veredicto de tarea', () => {
+    const r = readSliceVerdict({
+      ruling: 'PASS',
+      rubric: recorridoDeSlice(),
+      findings: [{ rule: 'coherencia', severity: 'high', what: 'x', path: 'y', evidence: 'z' }],
+    })
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/contradice la rúbrica/)
+  })
+
+  it('readSliceVerdict descarta un recorrido incompleto: la rúbrica son 2 ítems', () => {
+    const r = readSliceVerdict({ ruling: 'PASS', rubric: [recorridoDeSlice()[0]], findings: [] })
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toMatch(/coherencia/)
+    expect(r.why).toContain('2 ítems')
+  })
+
+  it('readVerdict (el de TAREA) sigue exigiendo el recorrido de nueve: no hay regresión', () => {
+    const completo = VERDICT_RULES.map((rule) => ({ rule, result: 'ok', outcome: 'conforme' }))
+    expect(readVerdict({ ruling: 'PASS', rubric: completo, findings: [] }).verdict).toBeDefined()
+    // El mismo recorrido de DOS ítems no basta para un veredicto de TAREA.
+    expect(readVerdict({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [] }).verdict).toBeUndefined()
+  })
+
+  it('outcomeOfSliceVerdict: FAIL es siempre failed', () => {
+    expect(outcomeOfSliceVerdict({ ruling: 'FAIL', findings: [] })).toBe('failed')
+  })
+
+  it('outcomeOfSliceVerdict: PASS con un medium sigue siendo done — no hay vuelta pagada', () => {
+    expect(outcomeOfSliceVerdict({ ruling: 'PASS', findings: [{ severity: 'medium' }] })).toBe('done')
+  })
+
+  it('outcomeOfSliceVerdict: PASS limpio es done', () => {
+    expect(outcomeOfSliceVerdict({ ruling: 'PASS', findings: [] })).toBe('done')
+  })
+
+  it('sliceVerdictCommitMessage lleva el issue, Co-Authored-By, y ninguna closing keyword', () => {
+    const msg = sliceVerdictCommitMessage({ issue: 42, tasksTotal: 3 })
+    expect(msg).toContain('(#42)')
+    expect(msg).toContain('Co-Authored-By: Claude <noreply@anthropic.com>')
+    expect(findClosingKeywords(msg)).toEqual([])
   })
 })
 

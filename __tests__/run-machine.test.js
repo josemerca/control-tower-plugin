@@ -19,6 +19,9 @@ const DESCRITOS = new Set([
   'controls/done', 'controls/failed', 'controls/indeterminate',
   'judge/done', 'judge/failed', 'judge/corrections-ordered', 'judge/discarded',
   'commit/done', 'commit/failed',
+  // §3.7: los dos pasos que corren tras la última tarea comiteada.
+  'global/done', 'global/failed', 'global/indeterminate',
+  'slice-judge/done', 'slice-judge/failed', 'slice-judge/discarded',
   // over-budget lo entiende cualquier paso.
   ...PASOS.map((p) => `${p}/over-budget`),
 ])
@@ -134,13 +137,58 @@ describe('commit', () => {
     expect(state).toBe(RUN_STATES.OPEN)
   })
 
-  it('done en la última tarea cierra en delivered', () => {
-    const { state } = after(enCommit({ task: 3, tasksTotal: 3 }), OUTCOMES.DONE)
-    expect(state).toBe(RUN_STATES.DELIVERED)
+  it('done en la última tarea NO entrega: abre la fase global con los reintentos a cero', () => {
+    // §3.7: tras el último commit el run ya no cierra en delivered — falta
+    // correr la punta a punta (global) y juzgar el slice entero (slice-judge).
+    const { run: r, state } = after(enCommit({ task: 3, tasksTotal: 3 }), OUTCOMES.DONE)
+    expect(state).toBe(RUN_STATES.OPEN)
+    expect(r.step).toBe(STEPS.GLOBAL)
+    expect([r.controlRetries, r.judgeRetries, r.correctionRetries]).toEqual([0, 0, 0])
+    // Los descartes y el dinero son de la slice entera: no se tocan aquí.
+    expect(r.discards).toBe(0)
   })
 
   it('failed cierra en blocked-commit sin reintentar', () => {
     expect(after(enCommit(), OUTCOMES.FAILED).state).toBe(RUN_STATES.BLOCKED_COMMIT)
+  })
+})
+
+describe('global (§3.7-A: la punta a punta del plan la corre el programa)', () => {
+  const enGlobal = (over) => run({ step: STEPS.GLOBAL, ...over })
+
+  it('done → slice-judge', () => {
+    expect(after(enGlobal(), OUTCOMES.DONE).run.step).toBe(STEPS.SLICE_JUDGE)
+  })
+
+  it('failed cierra blocked-global A LA PRIMERA, sin reintentar', () => {
+    // Todo está comiteado: reintentar mide el mismo árbol y repite el coste
+    // sin cambiar nada.
+    expect(after(enGlobal(), OUTCOMES.FAILED).state).toBe(RUN_STATES.BLOCKED_GLOBAL)
+  })
+
+  it('indeterminate cierra blocked-global igual que failed', () => {
+    expect(after(enGlobal(), OUTCOMES.INDETERMINATE).state).toBe(RUN_STATES.BLOCKED_GLOBAL)
+  })
+})
+
+describe('slice-judge (§3.7-B: la coherencia entre tareas sí tiene juez)', () => {
+  const enJuezDeSlice = (over) => run({ step: STEPS.SLICE_JUDGE, ...over })
+
+  it('done cierra en delivered', () => {
+    expect(after(enJuezDeSlice(), OUTCOMES.DONE).state).toBe(RUN_STATES.DELIVERED)
+  })
+
+  it('failed cierra blocked-slice-judge sin reintentos ni corrections-ordered', () => {
+    // Aquí no queda un implementador con trabajo stageado al que devolver:
+    // todo es commit. Un FAIL cierra el run.
+    expect(after(enJuezDeSlice(), OUTCOMES.FAILED).state).toBe(RUN_STATES.BLOCKED_SLICE_JUDGE)
+  })
+
+  it('discarded vuelve a slice-judge con un descarte más, sin gastar reintento', () => {
+    const { run: r, state } = after(enJuezDeSlice({ discards: 2 }), OUTCOMES.DISCARDED)
+    expect(state).toBe(RUN_STATES.OPEN)
+    expect(r.step).toBe(STEPS.SLICE_JUDGE)
+    expect(r.discards).toBe(3)
   })
 })
 

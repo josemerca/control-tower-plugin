@@ -130,6 +130,8 @@ ct-step report informe.json      # valida las rutas, las stagea, transiciona
 ct-step controls                 # ejecuta los comandos de **Verification:** y MIDE
 ct-step verdict veredicto.json   # valida contra el esquema, transiciona
 ct-step commit                   # valida el mensaje y comitea
+ct-step global                   # tras la última tarea: corre ## 8. Global verification
+ct-step slice-verdict v.json     # el juicio del slice ENTERO (ct-slice-judge, sin Bash)
 ```
 
 Lo que cambia respecto de hoy, en una línea por propiedad:
@@ -142,6 +144,8 @@ Lo que cambia respecto de hoy, en una línea por propiedad:
 | Qué puede ejecutar el juez | `code-reviewer.md` despacha un `general-purpose`: tiene `Bash` | nada: `agents/ct-judge.md` se declara sin `Bash` |
 | Qué devuelve el juez | prosa | un JSON validado contra un esquema; lo que no cumple se descarta |
 | Quién comitea | el implementador | el programa, y valida su propio mensaje contra las closing keywords |
+| Quién ejecuta `## 8. Global verification` | nadie — el plan la declaraba y ningún programa la corría | `ct-step global`, tras la última tarea; en rojo no se abre la pull request (exit `11`/`12`) |
+| Quién juzga el slice ENTERO | nadie — el juicio era por tarea | `agents/ct-slice-judge.md` (sin `Bash`): el fin del slice y la coherencia entre tareas, con veredicto que viaja en su propio commit |
 
 **Es el camino por defecto desde `0.36.0`**: el kickoff que compone `/ct-next`
 manda conducir la implementación consultando `ct-step` (y prohíbe SDD como

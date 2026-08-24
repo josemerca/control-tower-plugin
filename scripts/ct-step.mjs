@@ -64,6 +64,8 @@ import { CONVENTIONS_FILE, seccionDeVara } from './vara.js'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage, findingLocation,
   IMPLEMENTER_TOOLS, JUDGE_TOOLS, PACKAGE_SECTIONS,
+  readSliceVerdict, outcomeOfSliceVerdict, sliceVerdictCommitMessage,
+  SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS,
 } from './step-contracts.js'
 import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, metricsRepoRelPath } from './run-metrics.js'
 
@@ -81,6 +83,12 @@ const EXIT = {
   PRECONDITION: 8,        // entorno: no es un worktree de slice, falta el plan
   WRONG_STEP: 9,          // se pidió un paso que no es el que toca
   UNNAMED: 10,            // excepción que el programa no sabe nombrar
+  // §3.7-A: la Global verification en rojo o inmedible cierra el run A LA
+  // PRIMERA (sin reintentos — todo está comiteado). Códigos propios y no los
+  // de controls (4/5): la acción siguiente no es la de una tarea con trabajo
+  // stageado que corregir, es "no abras la pull request".
+  GLOBAL_RED: 11,
+  GLOBAL_UNMEASURED: 12,
 }
 
 const MAX_DISCARDS = 6
@@ -106,13 +114,15 @@ const USAGE = `uso: ct-step <verbo> [args] --plan <fichero> --issue <n>
   controls                  ejecuta los comandos de **Verification:** de la tarea
   verdict <fichero.json>    el veredicto del juez: ruling + recorrido de la rúbrica + findings
   commit                    comitea la tarea con el mensaje que compone el plugin
+  global                    ejecuta los comandos de ## 8. Global verification, tras la última tarea
+  slice-verdict <fichero.json>  el veredicto del juez de SLICE: ruling + recorrido + findings
 
 La secuencia la decide run-machine.js: un verbo que no sea el paso que toca sale
 por 9 y dice cuál es. El estado vive en .agent/run-<issue>.json.`
 
 const verbo = process.argv[2]
 if (!verbo || verbo.startsWith('--')) die(USAGE, EXIT.USAGE)
-if (!['next', 'report', 'controls', 'verdict', 'commit'].includes(verbo)) {
+if (!['next', 'report', 'controls', 'verdict', 'commit', 'global', 'slice-verdict'].includes(verbo)) {
   die(`verbo desconocido: ${verbo}\n\n${USAGE}`, EXIT.USAGE)
 }
 
@@ -152,7 +162,7 @@ try {
 } catch (e) {
   die(`no se puede leer el plan ${planPath}: ${e.message}`, EXIT.PRECONDITION)
 }
-const { tasks, problems } = extractTasks(planText)
+const { tasks, problems, global: globalVerification } = extractTasks(planText)
 if (problems.length) {
   for (const p of problems) err(`plan no ejecutable: ${p.detail}`)
   process.exit(EXIT.PLAN_NOT_EXECUTABLE)
@@ -180,7 +190,7 @@ if (existsSync(stateFile)) {
   // cualquier verbo que transicione es el error de secuencia de siempre.
   if (run.closed === RUN_STATES.DELIVERED) {
     if (verbo === 'next') {
-      out(`run delivered: las ${run.tasksTotal} tareas del issue ${issue} están comiteadas con veredicto. No queda paso — abre la pull request y libera con dispatch-check --release.`)
+      out(`run delivered: las ${run.tasksTotal} tareas del issue ${issue} están comiteadas con veredicto, la Global verification en verde y el slice juzgado. No queda paso — abre la pull request y libera con dispatch-check --release.`)
       process.exit(EXIT.OK)
     }
     die(`el run del issue ${issue} ya está entregado: no queda paso que dar`, EXIT.WRONG_STEP)
@@ -192,8 +202,14 @@ if (existsSync(stateFile)) {
   if (hechos === null) {
     die(`el estado dice baseSha ${run.baseSha}, que no existe en este worktree. Borra ${stateFile} si el run es de otra rama.`, EXIT.PRECONDITION)
   }
-  if (hechos !== run.task - 1) {
-    die(`el estado y git no cuentan lo mismo: el fichero va por la tarea ${run.task} (o sea ${run.task - 1} commits) y desde ${run.baseSha.slice(0, 7)} hay ${hechos}. No se sigue a ciegas.`, EXIT.PRECONDITION)
+  // En `global`/`slice-judge` las `tasksTotal` tareas YA están comiteadas —
+  // `run.task` se queda en la última y no en `tasksTotal + 1`, así que la
+  // cuenta que toca no es `run.task - 1` sino `tasksTotal` commits enteros.
+  // Sin esta rama, cada verbo de las fases nuevas (proceso nuevo, sin estado
+  // en memoria) muere aquí antes de llegar a ejecutar nada.
+  const esperados = (run.step === STEPS.GLOBAL || run.step === STEPS.SLICE_JUDGE) ? run.tasksTotal : run.task - 1
+  if (hechos !== esperados) {
+    die(`el estado y git no cuentan lo mismo: el fichero espera ${esperados} commit(s) (tarea ${run.task}, paso ${run.step}) y desde ${run.baseSha.slice(0, 7)} hay ${hechos}. No se sigue a ciegas.`, EXIT.PRECONDITION)
   }
 } else {
   if ((git(['diff', '--cached', '--name-only']) || '').trim()) {
@@ -263,9 +279,13 @@ const ACTOR = (git(['config', 'user.email'], { allowFail: true }) || '').trim() 
 const METRICS_REL = metricsRepoRelPath(issue)
 
 function medir(step, measures) {
+  // `global` y `slice-judge` no son de ninguna tarea: un `task: 3` en esa fila
+  // sería un hueco leído como una afirmación (la misma doctrina que ya impide
+  // rellenar con `null` disfrazado de cero en el resto de este fichero).
+  const esDeSlice = step === 'global' || step === 'slice-judge'
   const linea = metricLine(metricRow({
     repo: repoSlug, epic: epicDelSlice, issue, plan: planPath, plan_sha256: PLAN_SHA,
-    task: run.task, task_name: tarea()?.name ?? null, tasks_total: run.tasksTotal,
+    task: esDeSlice ? null : run.task, task_name: esDeSlice ? null : (tarea()?.name ?? null), tasks_total: run.tasksTotal,
     step, attempt: intento(), plugin_version: PLUGIN_VERSION, actor: ACTOR,
   }, measures, { now: new Date().toISOString() }))
   // Los dos destinos se intentan por separado: que el disco de la cuenta esté
@@ -284,7 +304,10 @@ function medir(step, measures) {
 // LA GUARDIA DEL PASO. Es lo que convierte la secuencia en mecanismo: pedir un
 // paso que no toca no se corrige con un aviso, se rechaza.
 // ---------------------------------------------------------------------------
-const VERBO_DE = { report: STEPS.IMPLEMENT, controls: STEPS.CONTROLS, verdict: STEPS.JUDGE, commit: STEPS.COMMIT }
+const VERBO_DE = {
+  report: STEPS.IMPLEMENT, controls: STEPS.CONTROLS, verdict: STEPS.JUDGE, commit: STEPS.COMMIT,
+  global: STEPS.GLOBAL, 'slice-verdict': STEPS.SLICE_JUDGE,
+}
 function exigirPaso(v) {
   if (run.step !== VERBO_DE[v]) {
     die(`"${v}" no es el paso que toca: el run está en "${run.step}" (tarea ${run.task}/${run.tasksTotal}). Pregunta con "ct-step next".`, EXIT.WRONG_STEP)
@@ -296,7 +319,13 @@ function exigirPaso(v) {
 // ---------------------------------------------------------------------------
 function verboNext() {
   const t = tarea()
-  out(`tarea ${run.task}/${run.tasksTotal} — ${t.name}`)
+  // §3.7: `global` y `slice-judge` corren DESPUÉS de la última tarea — no hay
+  // "tarea N/M" que anunciar, sino el slice entero con sus tareas ya comiteadas.
+  if (run.step === STEPS.GLOBAL || run.step === STEPS.SLICE_JUDGE) {
+    out(`slice del issue ${issue} — las ${run.tasksTotal} tareas comiteadas`)
+  } else {
+    out(`tarea ${run.task}/${run.tasksTotal} — ${t.name}`)
+  }
   out(`paso: ${run.step} (intento ${intento()})`)
   out('')
   switch (run.step) {
@@ -352,6 +381,33 @@ function verboNext() {
         out(`Lo que dijo el implementador de esta tarea, por si va en la pull request: ${run.lastSummary}`)
       }
       break
+    // §3.7-A: la punta a punta del plan, tras el último commit. La ejecuta el
+    // PROGRAMA — nunca un agente que se autoevalúe.
+    case STEPS.GLOBAL:
+      out('EJECUTA LA GLOBAL VERIFICATION DEL PLAN (no la corre ningún agente, la corre el programa):')
+      if (globalVerification.commands.length) {
+        for (const c of globalVerification.commands) out(`  $ ${c}`)
+      } else {
+        out('  el plan declara N/A: ct-step global lo registra y avanza sin ejecutar nada.')
+      }
+      out('')
+      out(`Ejecútalo con:  ct-step global --plan ${planPath} --issue ${issue}`)
+      break
+    // §3.7-B: la coherencia entre tareas, y si juntas entregan el fin del
+    // slice — lo que ningún juez de tarea mira.
+    case STEPS.SLICE_JUDGE: {
+      const paquete = escribirPaqueteDeSlice()
+      const veredicto = join(workDir, 'slice-verdict.json')
+      out(`DESPACHA EL JUEZ DE SLICE (subagente ct-slice-judge — declarado SIN Bash: ${SLICE_JUDGE_TOOLS}) con:`)
+      out(`  - el paquete de revisión del slice: ${paquete}`)
+      out(`  - el plan: ${planPath}`)
+      out(`  - el log de la Global verification, YA en verde, por si lo quiere: ${run.lastGlobalLog ?? '(N/A declarado)'}`)
+      out(`  - los veredictos de cada tarea, ya comiteados: docs/superpowers/verdicts/issue-${issue}-task-*.json`)
+      out(`  - que escriba su veredicto en: ${veredicto}`)
+      out('')
+      out(`Cuando vuelva:  ct-step slice-verdict ${veredicto} --plan ${planPath} --issue ${issue}`)
+      break
+    }
     default:
       die(`el estado tiene un paso que esta versión no conoce: ${run.step}`, EXIT.UNNAMED)
   }
@@ -399,6 +455,25 @@ function escribirPaquete() {
     '', `## ${SECCION_FILES}`, git(['diff', '--cached', '--stat']) || '',
     '', `## ${SECCION_RUTAS}`, rutas,
     '', `## ${SECCION_DIFF}`, git(['diff', '--cached', '-U10']) || '',
+  ].join('\n'))
+  return paquete
+}
+
+// El paquete del SLICE entero sale de un RANGO DE COMMITS y no del índice: a
+// diferencia de una tarea, aquí todo está ya comiteado — no hay nada stageado
+// que juzgar, y el "índice" de la última tarea comiteada está vacío. `##
+// Commits` es la pieza que el paquete por tarea no tiene ni necesita (una
+// tarea es UN commit sin historia propia que mostrar): la secuencia importa
+// para juzgar `coherencia` — una tarea posterior deshaciendo la anterior sólo
+// se ve en el orden de los commits, no en el diff acumulado por sí solo.
+function escribirPaqueteDeSlice() {
+  const paquete = join(workDir, 'slice-review.diff')
+  const [SECCION_COMMITS, SECCION_FILES, SECCION_DIFF] = SLICE_PACKAGE_SECTIONS
+  writeFileSync(paquete, [
+    `# Slice review package: issue #${issue} — ${run.tasksTotal} tasks committed since ${run.baseSha.slice(0, 7)}`,
+    '', `## ${SECCION_COMMITS}`, git(['log', '--reverse', '--format=%h %s', `${run.baseSha}..HEAD`]) || '',
+    '', `## ${SECCION_FILES}`, git(['diff', '--stat', run.baseSha, 'HEAD']) || '',
+    '', `## ${SECCION_DIFF}`, git(['diff', '-U10', run.baseSha, 'HEAD']) || '',
   ].join('\n'))
   return paquete
 }
@@ -659,6 +734,93 @@ function ejecutarControl(comando) {
   }
 }
 
+// §3.7-A: la punta a punta del plan, ejecutada POR EL PROGRAMA tras la última
+// tarea comiteada. Misma maquinaria que los comandos de `controls`
+// (`ejecutarControl`: exit code manda, `unmeasured` es una clase distinta de
+// rojo), pero sin las comprobaciones de índice — aquí no hay nada stageado:
+// el sujeto es el árbol comiteado entero. Un §8 declarado "N/A" llega aquí
+// como lista vacía de comandos (plan-tasks.js acepta el N/A con la misma
+// tolerancia que el de **Tests:** de una tarea — la razón se pide en la
+// plantilla, no la valida ningún programa), se registra y se avanza:
+// exigirle un comando sería el guard imposible de F14 aplicado a §8.
+function verboGlobal() {
+  const arranque = Date.now()
+  if (!globalVerification.commands.length) {
+    medir('global', { outcome: OUTCOMES.DONE, global_log: null, commands: 0, duration_ms: Date.now() - arranque })
+    out('global: done (el plan declara N/A — no hay punta a punta que correr)')
+    return OUTCOMES.DONE
+  }
+  const log = join(workDir, 'global-verification.log')
+  const lineas = []
+  let resultado = OUTCOMES.DONE
+  for (const comando of globalVerification.commands) {
+    const medido = ejecutarControl(comando)
+    lineas.push(`$ ${comando}`, medido.output ?? '', `-> exit ${medido.code}`, '')
+    if (medido.code === 'unmeasured') { resultado = OUTCOMES.INDETERMINATE; break }
+    if (medido.code !== 0) { resultado = OUTCOMES.FAILED; break }
+  }
+  writeFileSync(log, lineas.join('\n'))
+  medir('global', { outcome: resultado, global_log: log, commands: globalVerification.commands.length, duration_ms: Date.now() - arranque })
+  // `lastGlobalLog` es lo que `next` le enseña al juez de slice: la prueba de
+  // que la punta a punta ya corrió, para que no la re-derive del diff.
+  run = { ...run, lastGlobalLog: log }
+  out(`global: ${resultado} (log en ${log})`)
+  return resultado
+}
+
+// §3.7-B: el veredicto del slice entero. A diferencia del de tarea, un PASS
+// no espera a ningún `commit` — la última tarea ya está comiteada, así que el
+// veredicto estrena su propio commit aquí mismo, con la telemetría de las dos
+// fases nuevas dentro (las filas de `global` y `slice-judge` se escriben
+// después del último commit de tarea, y sin este add no viajarían nunca).
+// Un FAIL no deja veredicto trackeado, igual que en el juez de tarea: solo
+// viaja el que aprueba — el FAIL cierra el run y lo lee el humano en la
+// carpeta del run.
+function verboSliceVerdict() {
+  const { valor, why: porLeer } = leerJson(process.argv[3], 'del veredicto de slice')
+  const { verdict, why } = porLeer ? { why: porLeer } : readSliceVerdict(valor)
+  if (!verdict) {
+    medir('slice-judge', { outcome: 'discarded', why })
+    out(`veredicto de slice descartado: ${why}`)
+    return OUTCOMES.DISCARDED
+  }
+  const outcome = outcomeOfSliceVerdict(verdict)
+  medir('slice-judge', { outcome, review_package: join(workDir, 'slice-review.diff'), ...verdictMeasures(verdict) })
+  if (verdict.ruling === 'PASS') {
+    const ruta = join('docs', 'superpowers', 'verdicts', `issue-${issue}-slice.json`)
+    mkdirSync(join(repoRoot, 'docs', 'superpowers', 'verdicts'), { recursive: true })
+    writeFileSync(join(repoRoot, ruta), JSON.stringify({ issue, tasks_total: run.tasksTotal, verdict }, null, 2) + '\n')
+    // Los dos `add` con `allowFail` por la misma doctrina que en `verdict` y
+    // `commit`: la evidencia que no puede viajar se avisa, nunca bloquea una
+    // entrega cuyo trabajo ya está comiteado entero.
+    if (git(['add', '--', ruta], { allowFail: true }) === null) {
+      err(`aviso: el veredicto del slice se escribió en ${ruta} pero NO se pudo stagear, así que no viajará en la pull request (¿la ruta está gitignoreada en este repo?). La entrega sigue.`)
+    }
+    if (existsSync(join(repoRoot, METRICS_REL)) && git(['add', '--', METRICS_REL], { allowFail: true }) === null) {
+      err(`aviso: no se pudo stagear la telemetría (${METRICS_REL}) — el veredicto del slice viaja sin ella. ¿La ruta está gitignoreada en este repo?`)
+    }
+    if ((git(['diff', '--cached', '--name-only']) || '').trim()) {
+      let mensaje = null
+      try {
+        mensaje = sliceVerdictCommitMessage({ issue, tasksTotal: run.tasksTotal })
+      } catch (e) {
+        err(`aviso: ${String(e.message)} — el veredicto del slice se queda sin commitear. La entrega sigue.`)
+      }
+      if (mensaje !== null) {
+        if (git(['commit', '-m', mensaje], { allowFail: true }) === null) {
+          err('aviso: no se pudo commitear el veredicto del slice — la entrega no depende de la evidencia, pero revisa el índice antes de abrir la pull request.')
+        } else {
+          out(`veredicto del slice comiteado: ${headSha().slice(0, 7)}`)
+        }
+      }
+    } else {
+      err('aviso: nada que commitear del veredicto del slice (¿las dos rutas gitignoreadas?) — la entrega sigue.')
+    }
+  }
+  out(`veredicto de slice ${verdict.ruling} con ${verdict.findings.length} hallazgo(s) → ${outcome}`)
+  return outcome
+}
+
 function verboVerdict() {
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del veredicto')
   const { verdict, why } = porLeer ? { why: porLeer } : readVerdict(valor)
@@ -756,7 +918,10 @@ try {
   if (verbo === 'next') verboNext()
 
   exigirPaso(verbo)
-  const outcome = { report: verboReport, controls: verboControls, verdict: verboVerdict, commit: verboCommit }[verbo]()
+  const outcome = {
+    report: verboReport, controls: verboControls, verdict: verboVerdict, commit: verboCommit,
+    global: verboGlobal, 'slice-verdict': verboSliceVerdict,
+  }[verbo]()
 
   if (run.discards >= MAX_DISCARDS && outcome === OUTCOMES.DISCARDED) {
     guardar()
@@ -791,7 +956,7 @@ try {
 function codigoDe(estado, paso, outcome) {
   switch (estado) {
     case RUN_STATES.DELIVERED:
-      out('todas las tareas comiteadas con veredicto PASA: la rama está lista para la pull request.')
+      out('las tareas comiteadas, la Global verification en verde y el slice con veredicto PASS: la rama está lista para la pull request.')
       return EXIT.OK
     case RUN_STATES.BLOCKED_COMMIT: return EXIT.PRECONDITION
     case RUN_STATES.BLOCKED_CONTROLS:
@@ -800,6 +965,14 @@ function codigoDe(estado, paso, outcome) {
       // El veto del juez y "no hubo veredicto" cierran por el mismo sitio y
       // significan cosas distintas: uno es un juicio y el otro su ausencia.
       return outcome === OUTCOMES.DISCARDED ? EXIT.NO_VERDICT : EXIT.VETOED
+    // §3.7-A: el mismo par que controls (rojo / inmedible), con códigos
+    // propios porque la acción siguiente es otra — no hay tarea que corregir,
+    // hay una pull request que NO se abre.
+    case RUN_STATES.BLOCKED_GLOBAL:
+      return outcome === OUTCOMES.INDETERMINATE ? EXIT.GLOBAL_UNMEASURED : EXIT.GLOBAL_RED
+    // §3.7-B: el veto del juez de slice es un veto, el mismo código que el del
+    // juez de tarea — el descarte nunca cierra por aquí (vuelve a preguntar).
+    case RUN_STATES.BLOCKED_SLICE_JUDGE: return EXIT.VETOED
     case RUN_STATES.ABORTED_BUDGET: return EXIT.UNNAMED // aquí nadie mide dinero
     default: return EXIT.UNNAMED
   }

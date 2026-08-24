@@ -53,7 +53,7 @@ const VALID_PLAN = [
   'npm test',
   F,
   '## 8. Global verification',
-  'npm test en verde.',
+  'N/A — fixture.',
   '## 9. Assumptions',
   'Ninguna.',
   '',
@@ -103,7 +103,7 @@ const CABECERA = (titulo) => [
 
 const COLA = [
   '## 8. Global verification',
-  'npm test en verde.',
+  'N/A — fixture.',
   '## 9. Assumptions',
   'Ninguna.',
   '',
@@ -530,7 +530,7 @@ describe('los comandos de **Verification:** van en un bloque, no en la frase', (
     '**Tests:** add tests/math.test.js',
     ...verificacion,
     '## 8. Global verification',
-    'npm test en verde.',
+    'N/A — fixture.',
     '## 9. Assumptions',
     'Ninguna.',
     '',
@@ -619,6 +619,30 @@ describe('los comandos de **Verification:** van en un bloque, no en la frase', (
         '## 8. Global verification',
       ].join('\n'))
     expect(rulesOf(plan).map((v) => v.detail.match(/tarea (\d+)/)[1])).toEqual(['1', '2'])
+  })
+
+  // §3.7-A del handoff: el mismo par de reglas (bloque / predicado), aplicado
+  // a "## 8. Global verification" en vez de a **Verification:** de una tarea.
+  // Las dos salen por `verification` en el gate, igual que las de tarea.
+  const buenaVerificacion = ['**Verification:** en verde.', F + 'bash', 'npm test   # exit 0', F]
+  const conGlobal = (bloqueGlobal) => planCon(buenaVerificacion)
+    .replace('## 8. Global verification\nN/A — fixture.', bloqueGlobal)
+
+  it('§8 en prosa (no "N/A") es violación de "verification"', () => {
+    const plan = conGlobal('## 8. Global verification\nQue todo siga en verde.')
+    expect(rulesOf(plan)).toHaveLength(1)
+    expect(rulesOf(plan)[0].detail).toMatch(/no ejecuta prosa/)
+  })
+
+  it('§8 con su bloque de comandos es válida', () => {
+    const plan = conGlobal(['## 8. Global verification', '', F + 'bash', 'npm run build && npm test', F].join('\n'))
+    expect(rulesOf(plan)).toEqual([])
+  })
+
+  it('§8 cuyo último tramo es `grep -c` es violación de predicado', () => {
+    const plan = conGlobal(['## 8. Global verification', '', F + 'bash', "grep -c 'algo' AGENTS.md", F].join('\n'))
+    expect(rulesOf(plan)).toHaveLength(1)
+    expect(rulesOf(plan)[0].detail).toMatch(/no puede afirmar lo que el control dice medir/)
   })
 })
 

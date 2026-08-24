@@ -345,6 +345,10 @@ describe('la telemetría de un paso real', () => {
     'test -f uno.txt',
     F,
     '',
+    '## 8. Global verification',
+    '',
+    'N/A — fixture de telemetría.',
+    '',
   ].join('\n')
 
   let repo, casa

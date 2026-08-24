@@ -19,6 +19,17 @@
 // su cuenta— mientras que los descartes y el dinero acumulan durante toda la
 // slice.
 //
+// §3.7 del handoff (docs/prompt-juez-lo-que-queda.md) añade los dos pasos que
+// cierran sus dos agujeros: `## 8. Global verification` nunca la ejecutaba
+// nadie (`controls` sólo mide el bloque POR TAREA) y el slice entero nunca
+// tenía juez (`ct-judge` juzga una tarea; la coherencia entre las tres no la
+// miraba nadie). Los cuatro pasos de antes pasan a SEIS: tras la última tarea
+// comiteada, `commit` ya no cierra el run — abre `global` (el programa corre
+// la punta a punta) y, en verde, `slice-judge` (el juicio del slice entero).
+// Los dos van SIN reintento propio: todo está comiteado, así que reintentar
+// mide el mismo árbol y repite el coste sin cambiar nada — el mismo
+// razonamiento que ya cierra `indeterminate` a la primera en `controls`.
+//
 // PURO: ni un import, ni una lectura, ni un reloj. Es lo que permite testear la
 // tabla entera —incluidos los pares imposibles— sin tocar disco ni lanzar un
 // proceso.
@@ -29,6 +40,8 @@ export const STEPS = Object.freeze({
   CONTROLS: 'controls',
   JUDGE: 'judge',
   COMMIT: 'commit',
+  GLOBAL: 'global',
+  SLICE_JUDGE: 'slice-judge',
 })
 
 export const OUTCOMES = Object.freeze({
@@ -46,6 +59,8 @@ export const RUN_STATES = Object.freeze({
   BLOCKED_CONTROLS: 'blocked-controls',
   BLOCKED_JUDGE: 'blocked-judge',
   BLOCKED_COMMIT: 'blocked-commit',
+  BLOCKED_GLOBAL: 'blocked-global',
+  BLOCKED_SLICE_JUDGE: 'blocked-slice-judge',
   ABORTED_BUDGET: 'aborted-budget',
 })
 
@@ -104,6 +119,8 @@ export function after(run, outcome, budgets = DEFAULT_BUDGETS) {
     case STEPS.CONTROLS: return trasLosControles(run, outcome, budgets)
     case STEPS.JUDGE: return trasElJuez(run, outcome, budgets)
     case STEPS.COMMIT: return trasElCommit(run, outcome)
+    case STEPS.GLOBAL: return trasLaGlobal(run, outcome)
+    case STEPS.SLICE_JUDGE: return trasElJuezDeSlice(run, outcome)
     default: return imposible(run, outcome)
   }
 }
@@ -179,11 +196,56 @@ function trasElCommit(run, outcome) {
             judgeRetries: 0,
             correctionRetries: 0,
           })
-        : cerrado(run, RUN_STATES.DELIVERED)
+        // La última tarea comiteada NO entrega el run: §3.7 abre aquí la fase
+        // GLOBAL, con los tres contadores a cero (la fase estrena su cuenta,
+        // como cada tarea). `delivered` pasa a significar tareas comiteadas +
+        // punta a punta verde + slice juzgado, no sólo lo primero.
+        : abierto(run, { step: STEPS.GLOBAL, controlRetries: 0, judgeRetries: 0, correctionRetries: 0 })
     // Un commit que falla no se reintenta: si git dice que no, es el índice o
     // el mensaje, y ninguna de las dos cosas se arregla volviendo a implementar.
     case OUTCOMES.FAILED:
       return cerrado(run, RUN_STATES.BLOCKED_COMMIT)
+    default:
+      return imposible(run, outcome)
+  }
+}
+
+// LA GLOBAL VERIFICATION (§3.7-A). `ct-step global` ejecuta el bloque de "##
+// 8. Global verification" del plan, con la misma maquinaria que `controls`:
+// exit code manda, `unmeasured` es una clase distinta de rojo. Sin reintento
+// propio: todo está comiteado, así que reintentar mide el mismo árbol y repite
+// el coste sin cambiar nada — el mismo argumento que ya cierra `indeterminate`
+// a la primera en `trasLosControles`.
+function trasLaGlobal(run, outcome) {
+  switch (outcome) {
+    case OUTCOMES.DONE:
+      return abierto(run, { step: STEPS.SLICE_JUDGE })
+    case OUTCOMES.FAILED:
+      return cerrado(run, RUN_STATES.BLOCKED_GLOBAL)
+    case OUTCOMES.INDETERMINATE:
+      return cerrado(run, RUN_STATES.BLOCKED_GLOBAL)
+    default:
+      return imposible(run, outcome)
+  }
+}
+
+// EL JUICIO DEL SLICE ENTERO (§3.7-B). `agents/ct-slice-judge.md` juzga los
+// dos ítems que ningún juez de tarea mira: si las tres tareas juntas entregan
+// el `### Desired end state` del plan, y si son coherentes entre sí. Sin
+// presupuesto de veto propio y sin `corrections-ordered`: aquí no queda un
+// implementador con trabajo stageado al que devolver — todo es commit, así
+// que un FAIL cierra el run (`blocked-slice-judge`) y un PASS con hallazgos
+// medium/low entrega igual, viajando en el veredicto para quien revise la PR.
+// `discarded` sí vuelve a preguntar sin gastar reintento, igual que el juez de
+// tarea: un veredicto ilegible no es un veto.
+function trasElJuezDeSlice(run, outcome) {
+  switch (outcome) {
+    case OUTCOMES.DONE:
+      return cerrado(run, RUN_STATES.DELIVERED)
+    case OUTCOMES.FAILED:
+      return cerrado(run, RUN_STATES.BLOCKED_SLICE_JUDGE)
+    case OUTCOMES.DISCARDED:
+      return abierto(run, { step: STEPS.SLICE_JUDGE, discards: run.discards + 1 })
     default:
       return imposible(run, outcome)
   }

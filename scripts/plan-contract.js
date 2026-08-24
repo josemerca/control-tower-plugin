@@ -275,7 +275,17 @@ export function validatePlan(markdown, { readFile } = {}) {
   // medir — el control invertido de jjponz/rust-monitoring#10, que atravesó
   // justamente esta puerta). Las dos salen por `verification` porque para quien
   // arregla el plan son el mismo trabajo: hacer que la vara mida.
-  const VERIFICATION_RULES = ['verification-block', 'verification-predicate']
+  //
+  // §3.7-A del handoff añade el mismo par para "## 8. Global verification":
+  // `global-verification-block` (prosa donde nadie ejecuta) y
+  // `global-verification-predicate` (mide al revés). Un contrato que aceptara
+  // un §8 que su propio ejecutor (`ct-step global`, en plan-tasks.js) no sabe
+  // leer no sería un contrato — la misma frase que ya justifica que esta lista
+  // se lea de `extractTasks().problems` en vez de reinventar el parseo aquí.
+  const VERIFICATION_RULES = [
+    'verification-block', 'verification-predicate',
+    'global-verification-block', 'global-verification-predicate',
+  ]
   for (const problema of extractTasks(markdown).problems) {
     if (!VERIFICATION_RULES.includes(problema.rule)) continue
     push('verification', problema.detail)
