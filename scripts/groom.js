@@ -469,7 +469,7 @@ export function renderAcContent(ac) {
   return (ac && ac.length) ? ac.map((a) => `- ${a}`).join('\n') : '- (rellenar desde el spec)'
 }
 
-export function buildIssueBody(slice, specRef, epicContext = null) {
+export function buildIssueBody(slice, specRef, epicContext = null, frozenDecisions = null) {
   const lines = []
   lines.push(renderSpecLink(slice, specRef))
   lines.push('')
@@ -498,6 +498,15 @@ export function buildIssueBody(slice, specRef, epicContext = null) {
   if (epicContext) {
     lines.push(EPIC_CONTEXT_HEADING)
     lines.push(epicContext)
+    lines.push('')
+  }
+  // Decisiones congeladas: mismo trato que el contexto del epic (del spec,
+  // reconciliada) y por eso emitida aquí mismo, justo detrás. Sección propia
+  // —no dentro de "## Contexto del epic"— y solo si hay contenido. Con esto el
+  // orden del cuerpo pasa a ser epic → decisiones → heredado → criterios.
+  if (frozenDecisions) {
+    lines.push(FROZEN_DECISIONS_HEADING)
+    lines.push(frozenDecisions)
     lines.push('')
   }
   lines.push(INHERITED_CONTEXT_HEADING)
@@ -547,13 +556,18 @@ function findDuplicateOrders(slices) {
   return [...dupes].sort((a, b) => a - b)
 }
 
-export function groomPlan(slices, { milestone, specRef, epicContext = null, epicContextReason = null }) {
+export function groomPlan(slices, { milestone, specRef, epicContext = null, epicContextReason = null, frozenDecisions = null, frozenDecisionsReason = null }) {
   // epicContextUnknown (I1): "no he podido leer un texto válido" NO es "el
   // epic no tiene contexto". Sin esta distinción, `epicContext: null` viajaba
   // igual en los dos casos y buildReconcileBody lo leía siempre como "retira
   // la sección". Es lo único que reconcile.js necesita saber del motivo: el
   // resto del detalle vive en el aviso, que ya lo ha impreso el wrapper.
   const epicContextUnknown = epicContextReason === EPIC_CONTEXT_REASONS.MALFORMED
+  // frozenDecisionsUnknown (espejo de epicContextUnknown): "no se pudo leer un
+  // texto válido" NO es "el epic no tiene decisiones". Sin esta distinción,
+  // frozenDecisions: null viajaría igual en los dos casos y buildReconcileBody
+  // lo leería siempre como "retira la sección".
+  const frozenDecisionsUnknown = frozenDecisionsReason === EPIC_CONTEXT_REASONS.MALFORMED
   const dupes = findDuplicateOrders(slices)
   if (dupes.length) {
     throw new Error(`groomPlan: orden(es) de slice duplicado(s) en la tabla §9: ${dupes.join(', ')}`)
@@ -563,7 +577,7 @@ export function groomPlan(slices, { milestone, specRef, epicContext = null, epic
     issues: slices.map((s) => ({
       order: s.n,
       title: buildIssueTitle(s),
-      body: buildIssueBody(s, specRef, epicContext),
+      body: buildIssueBody(s, specRef, epicContext, frozenDecisions),
       labels: buildLabels(s),
       deps: s.deps,
       // F5: además del body ya renderizado (arriba), el plan lleva los
@@ -590,6 +604,12 @@ export function groomPlan(slices, { milestone, specRef, epicContext = null, epic
       // la lectura del spec.
       epicContext,
       epicContextUnknown,
+      // Las decisiones viajan en el plan, no solo dentro del body ya
+      // renderizado, por el mismo motivo que epicContext: para que comparar
+      // este slice contra un issue existente no obligue a re-parsear el cuerpo
+      // recién generado, y para que el JSON del --dry-run las muestre.
+      frozenDecisions,
+      frozenDecisionsUnknown,
     })),
   }
 }

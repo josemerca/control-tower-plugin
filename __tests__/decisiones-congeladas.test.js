@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { readFrozenDecisions, FROZEN_DECISIONS_HEADING } from '../scripts/groom.js'
+import { readFrozenDecisions, FROZEN_DECISIONS_HEADING, buildIssueBody, groomPlan } from '../scripts/groom.js'
+import { extractOrder, extractAc, extractDepsInSection, extractStrayDeps } from '../scripts/gh-issue-map.js'
+
+const SLICE = { n: 1, name: 'login', type: 'backend', entrega: '', gate: '', deps: [], ac: ['AC-1.1'], protected: '', area: [], touches: [] }
+const SPEC_REF = { path: 'spec.md', heading: null, url: null, reason: 'sin publicar' }
 
 // Formato LITERAL de _TEMPLATE-execution-spec.md, verificado contra
 // docs/loop/loop.body.html: la cita del usuario va DENTRO del paréntesis.
@@ -44,5 +48,60 @@ describe('readFrozenDecisions', () => {
   })
   it('la cabecera se exporta con el literal correcto', () => {
     expect(FROZEN_DECISIONS_HEADING).toBe('## Decisiones congeladas')
+  })
+})
+
+describe('buildIssueBody — decisiones congeladas', () => {
+  it('emite la sección cuando hay contenido', () => {
+    const body = buildIssueBody(SLICE, SPEC_REF, null, '- **D-1** — iOS 17.')
+    expect(body).toContain('## Decisiones congeladas')
+    expect(body).toContain('- **D-1** — iOS 17.')
+  })
+  it('no emite la sección cuando no hay contenido', () => {
+    const body = buildIssueBody(SLICE, SPEC_REF, null, null)
+    expect(body).not.toContain('## Decisiones congeladas')
+  })
+  it('coloca decisiones tras el contexto del epic y antes del heredado', () => {
+    const body = buildIssueBody(SLICE, SPEC_REF, 'contexto común', '- **D-1** — x.')
+    expect(body.indexOf('## Contexto del epic')).toBeLessThan(body.indexOf('## Decisiones congeladas'))
+    expect(body.indexOf('## Decisiones congeladas')).toBeLessThan(body.indexOf('## Contexto heredado'))
+  })
+})
+
+describe('groomPlan — decisiones congeladas viajan en el plan', () => {
+  it('cada issue lleva frozenDecisions y frozenDecisionsUnknown', () => {
+    const plan = groomPlan([SLICE], { milestone: 'Epic', specRef: SPEC_REF, frozenDecisions: '- **D-1** — iOS 17.' })
+    expect(plan.issues[0].frozenDecisions).toBe('- **D-1** — iOS 17.')
+    expect(plan.issues[0].frozenDecisionsUnknown).toBe(false)
+    expect(plan.issues[0].body).toContain('## Decisiones congeladas')
+  })
+  it('reason malformada → frozenDecisionsUnknown true (no es "no tiene")', () => {
+    const plan = groomPlan([SLICE], { milestone: 'Epic', specRef: SPEC_REF, frozenDecisions: null, frozenDecisionsReason: 'malformada' })
+    expect(plan.issues[0].frozenDecisionsUnknown).toBe(true)
+  })
+})
+
+describe('buildIssueBody — decisiones con contenido hostil no rompe los extractores (I2/P1)', () => {
+  // La prosa mete EL PEOR caso para cada extractor: un ct-order con su cierre
+  // "-->" (que una regex laxa casaría), un merge-after, un AC y un closes.
+  const HOSTILE = '- **D-1** — respeta el marcador ct-order:99 -->, no toques merge-after #7, mira AC-1.1 y closes #3.'
+  it('extractOrder devuelve el orden REAL del slice, no el ct-order:99 --> de la prosa (P1)', () => {
+    const body = buildIssueBody(SLICE, SPEC_REF, null, HOSTILE) // SLICE.n === 1
+    expect(extractOrder(body)).toBe(1) // solo casa la LÍNEA "<!-- ct-order:1 -->" del final; NO el 99 con --> de la prosa
+  })
+  it('extractAc no se traga el AC-1.1 metido en la prosa de la decisión', () => {
+    const body = buildIssueBody(SLICE, SPEC_REF, null, HOSTILE)
+    expect(extractAc(body)).toEqual(SLICE.ac) // lee la sección de AC, no la de decisiones
+  })
+  it('extractDepsInSection lee SOLO "## Dependencias", ajena al merge-after de la prosa', () => {
+    const body = buildIssueBody(SLICE, SPEC_REF, null, HOSTILE)
+    expect(extractDepsInSection(body).deps).toEqual([]) // devuelve {deps, malformed}; SLICE no tiene deps y el #7 hostil vive fuera de esa sección
+  })
+  it('extractStrayDeps SÍ recoge el merge-after #7 de la prosa — ruido conocido y aceptado, no un fallo', () => {
+    const body = buildIssueBody(SLICE, SPEC_REF, null, HOSTILE)
+    // Documenta la limitación honestamente (spec §7): un merge-after en prosa
+    // produce un stray dep. NO mueve el exit code (es nota, no divergencia
+    // máquina). Aquí se fija el comportamiento REAL, no uno aspiracional.
+    expect(extractStrayDeps(body, [])).toContain(7)
   })
 })
