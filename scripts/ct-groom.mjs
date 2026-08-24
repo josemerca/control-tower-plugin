@@ -612,6 +612,7 @@ function bodyDriftCategories(diff, bodyResult) {
   if ((diff.deps.missing.length || diff.deps.extra.length) && !bodyResult.unresolvedDeps) cats.push('dependencias')
   if ((diff.ac.missing.length || diff.ac.extra.length) && !bodyResult.unresolvedAc) cats.push('criterios de aceptación')
   if (diff.epicContextDiffers && !bodyResult.unresolvedEpicContext) cats.push('contexto del epic')
+  if (diff.frozenDecisionsDiffers && !bodyResult.unresolvedFrozenDecisions) cats.push('decisiones congeladas')
   return cats
 }
 
@@ -633,6 +634,20 @@ const EPIC_CONTEXT_SURRENDERS = {
   // la zona de la sesión coordinadora, así que tampoco de saber si esa copia
   // cae dentro. Lo único que se sabe es que no se puede tocar con seguridad.
   'zona-sin-fin': 'no se puede saber dónde termina "## Contexto heredado" en este body: su cabecera está, pero "## Acceptance criteria" —la cabecera que la sigue siempre, y que marca el final de esa zona— no aparece exactamente una vez. Sin ese límite no se distingue qué hay por detrás que sea del issue y qué escribió la sesión coordinadora, así que esta sección no se reescribe ni se retira. Restaura (o desduplica) "## Acceptance criteria" y vuelve a correr',
+}
+
+// FROZEN_DECISIONS_SURRENDERS: por qué buildReconcileBody no pudo reescribir
+// "## Decisiones congeladas". Espejo de EPIC_CONTEXT_SURRENDERS, con las mismas
+// anclas ("## Contexto heredado" o, en su defecto, "## Acceptance criteria").
+// Se reporta como nota: y NUNCA mueve el exit code.
+const FROZEN_DECISIONS_SURRENDERS = {
+  'sin-ancla': 'no existe la sección en el issue, y tampoco ninguna de las dos cabeceras que sirven de ancla para ponerla en su sitio ("## Contexto heredado" o, en su defecto, "## Acceptance criteria"); añade a mano una de ellas y vuelve a correr',
+  'ancla-duplicada': 'no existe la sección en el issue y su ancla ("## Acceptance criteria") aparece más de una vez, así que insertarla ahí podría escribir dentro de texto ajeno; deja una sola copia del ancla y vuelve a correr',
+  duplicada: 'aparece más de una vez en el body y no hay forma de saber cuál copia es la del plugin — una puede ser texto pegado dentro de "## Contexto heredado", que no se toca nunca; deja una sola copia y vuelve a correr',
+  'seccion-sin-cerrar': 'la sección del issue tiene una valla de código (```) o un comentario HTML (<!--) SIN CERRAR, así que no se sabe dónde termina: reescribirla se llevaría por delante todo lo que venga detrás en el cuerpo. Cierra el delimitador en el issue y vuelve a correr',
+  'texto-sin-cerrar': 'el texto que trae el spec tiene una valla de código (```) o un comentario HTML (<!--) SIN CERRAR, y escribirlo en el cuerpo dejaría el issue en ese mismo estado. Ciérralo en el spec y vuelve a correr',
+  'en-heredado': 'el spec ya no trae decisiones congeladas, y la única copia de esta sección en el body queda por detrás de la cabecera "## Contexto heredado", dentro de la zona que pertenece a la sesión coordinadora y que no se toca nunca. No se retira nada; si esa copia sobra, quítala tú',
+  'zona-sin-fin': 'no se puede saber dónde termina "## Contexto heredado" en este body: su cabecera está, pero "## Acceptance criteria" —la cabecera que la sigue siempre— no aparece exactamente una vez. Sin ese límite esta sección no se reescribe ni se retira. Restaura (o desduplica) "## Acceptance criteria" y vuelve a correr',
 }
 
 // describeGaps (review round 3, Critical 2): nombra qué categorías, DE LAS
@@ -941,6 +956,9 @@ if (typeof repo === 'string') {
     // sí. Solo se dice cuando de verdad había algo que escribir.
     if (bodyResult.unresolvedEpicContext && diff.epicContextDiffers) {
       console.error(`nota: slice #${diff.order} (issue #${found.number}) — --reconcile NO ha reescrito la sección "${EPIC_CONTEXT_HEADING}": ${EPIC_CONTEXT_SURRENDERS[bodyResult.unresolvedEpicContext]} (no cuenta para el exit code)`)
+    }
+    if (bodyResult.unresolvedFrozenDecisions && diff.frozenDecisionsDiffers) {
+      console.error(`nota: slice #${diff.order} (issue #${found.number}) — --reconcile NO ha reescrito la sección "${FROZEN_DECISIONS_HEADING}": ${FROZEN_DECISIONS_SURRENDERS[bodyResult.unresolvedFrozenDecisions]} (no cuenta para el exit code)`)
     }
     if (hasDrift(diff)) anyUnresolvedDrift = true
     if (hasReconcileGap(gaps)) anyReconcileGapRemains = true

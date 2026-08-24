@@ -43,3 +43,49 @@ describe('diffIssue — frozenDecisionsDiffers', () => {
     expect(rep).not.toContain('divergencia:')
   })
 })
+
+describe('buildReconcileBody — decisiones congeladas', () => {
+  it('inserta la sección en un issue que no la tenía, antes del heredado', () => {
+    const existing = buildIssueBody(SLICE, SPEC_REF, null, null)
+    const res = buildReconcileBody(existing, wanted('- **D-1** — iOS 17.'))
+    expect(res.body).toContain('## Decisiones congeladas')
+    expect(res.body).toContain('iOS 17')
+    expect(res.body.indexOf('## Decisiones congeladas')).toBeLessThan(res.body.indexOf('## Contexto heredado'))
+  })
+  it('reescribe la sección cuando el spec cambia, Y SOLO ella (I3.5)', () => {
+    const existing = buildIssueBody(SLICE, SPEC_REF, null, '- **D-1** — iOS 16.')
+    const res = buildReconcileBody(existing, wanted('- **D-1** — iOS 17.'))
+    expect(res.body).toContain('iOS 17')
+    expect(res.body).not.toContain('iOS 16')
+    // "solo ella": todo lo que NO es la sección de decisiones queda idéntico.
+    const strip = (b) => b.replace(/## Decisiones congeladas\n[\s\S]*?(?=\n## |\n<!-- ct-order)/, '## Decisiones congeladas\n<X>')
+    expect(strip(res.body)).toBe(strip(existing))
+  })
+  it('retira la sección cuando el spec ya no la trae', () => {
+    const existing = buildIssueBody(SLICE, SPEC_REF, null, '- **D-1** — iOS 17.')
+    const res = buildReconcileBody(existing, wanted(null))
+    expect(res.body).not.toContain('## Decisiones congeladas')
+  })
+  it('NO retira la sección cuando el motivo es malformada (unknown)', () => {
+    const existing = buildIssueBody(SLICE, SPEC_REF, null, '- **D-1** — iOS 17.')
+    const res = buildReconcileBody(existing, wanted(null, { frozenDecisionsReason: 'malformada' }))
+    expect(res.body).toBe(null) // nada cambió: unknown no autoriza a retirar
+  })
+  it('al insertar epic y decisiones en un issue viejo, el orden es epic → decisiones → heredado', () => {
+    const existing = buildIssueBody(SLICE, SPEC_REF, null, null)
+    const res = buildReconcileBody(existing, wanted('- **D-1** — x.', { epicContext: 'contexto común' }))
+    expect(res.body.indexOf('## Contexto del epic')).toBeLessThan(res.body.indexOf('## Decisiones congeladas'))
+    expect(res.body.indexOf('## Decisiones congeladas')).toBeLessThan(res.body.indexOf('## Contexto heredado'))
+  })
+  it('se RINDE (marca sin-ancla) cuando no hay ni heredado ni AC donde anclar (I3.6)', () => {
+    // Body sin "## Contexto heredado" ni "## Acceptance criteria": no hay dónde
+    // anclar la inserción. La propiedad que se fija es que las decisiones NO se
+    // escriben a ciegas: se marca 'sin-ancla'. (El body puede cambiar por otros
+    // bloques de reconcile —aquí el enlace al spec—; lo que importa es que las
+    // decisiones se rindieron en vez de inventar una posición.)
+    const sinAncla = 'algo de texto\n\n<!-- ct-order:1 -->'
+    const res = buildReconcileBody(sinAncla, wanted('- **D-1** — iOS 17.'))
+    expect(res.unresolvedFrozenDecisions).toBe('sin-ancla')
+    expect(res.body || '').not.toContain('## Decisiones congeladas') // no se escribió a ciegas
+  })
+})
