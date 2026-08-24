@@ -6,7 +6,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { makeSpecDir, specUrl } from './fixtures/spec-repo.js'
 import { REAL_FAILING_TABLE, REAL_DEP_TABLE, REAL_TABLE_WITH_HASH_FIXED } from './fixtures/slices-real-tables.js'
-import { buildIssueBody, EPIC_CONTEXT_HEADING } from '../scripts/groom.js'
+import { buildIssueBody, EPIC_CONTEXT_HEADING, FROZEN_DECISIONS_HEADING } from '../scripts/groom.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-groom.mjs')
 
@@ -1324,13 +1324,15 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
       { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[MATCHING]]), FAKE_GH_LABELS_LIST: PLAN_LABELS_EXIST }) })
     expect(res.status).toBe(0)
-    // F26: ONE_SLICE_SPEC no trae "## Contexto del epic", así que desde T3
-    // el stderr ya no está vacío por ese motivo — ortogonal a la divergencia
-    // que este test vigila. Se comprueba que ESA es la única línea (nada de
-    // "difiere"/"falta la label"/etc.), en vez de exigir vacío a secas.
+    // F26/decisiones: ONE_SLICE_SPEC no trae "## Contexto del epic" NI
+    // "## Decisiones congeladas", así que el stderr trae los dos avisos de
+    // ausencia de sección — ambos ortogonales a la divergencia que este test
+    // vigila. Se comprueba que SOLO están esos dos (nada de "difiere"/"falta
+    // la label"/etc.), en vez de exigir vacío a secas.
     const stderrLines = res.stderr.split('\n').filter(Boolean)
-    expect(stderrLines).toHaveLength(1)
-    expect(stderrLines[0]).toContain(EPIC_CONTEXT_HEADING)
+    expect(stderrLines).toHaveLength(2)
+    expect(stderrLines.join('\n')).toContain(EPIC_CONTEXT_HEADING)
+    expect(stderrLines.join('\n')).toContain(FROZEN_DECISIONS_HEADING)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1351,11 +1353,13 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
     // F6: este fixture (issue CERRADO, sin ninguna label status:) es también
     // la prueba de que el recordatorio de status:backlog no persigue a un
     // epic ya terminado: un issue cerrado no está pendiente de promoción.
-    // F26: mismo caso que el test anterior — ONE_SLICE_SPEC no trae
-    // "## Contexto del epic", así que el stderr trae ese aviso y nada más.
+    // F26/decisiones: mismo caso que el test anterior — ONE_SLICE_SPEC no trae
+    // ni "## Contexto del epic" ni "## Decisiones congeladas", así que el
+    // stderr trae esos dos avisos y nada más.
     const stderrLines = res.stderr.split('\n').filter(Boolean)
-    expect(stderrLines).toHaveLength(1)
-    expect(stderrLines[0]).toContain(EPIC_CONTEXT_HEADING)
+    expect(stderrLines).toHaveLength(2)
+    expect(stderrLines.join('\n')).toContain(EPIC_CONTEXT_HEADING)
+    expect(stderrLines.join('\n')).toContain(FROZEN_DECISIONS_HEADING)
     rmSync(dir, { recursive: true, force: true })
   })
 

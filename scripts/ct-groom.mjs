@@ -16,7 +16,7 @@ import { readFileSync, realpathSync } from 'node:fs'
 import { resolve as resolvePath, relative as relativePath } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { analyzeSlicesTable, isNoValueCell } from './slices.js'
-import { groomPlan, readEpicContext, EPIC_CONTEXT_HEADING, analyzeSpecFreeze, HYPOTHESIS_REASONS } from './groom.js'
+import { groomPlan, readEpicContext, readFrozenDecisions, EPIC_CONTEXT_HEADING, FROZEN_DECISIONS_HEADING, analyzeSpecFreeze, HYPOTHESIS_REASONS } from './groom.js'
 // F10: de "la ruta que me pasaron en argv + --section" a una URL absoluta
 // verificada contra GitHub (o a una referencia honesta sin enlace, diciendo
 // por qué). Ver scripts/spec-link.js para las tres decisiones que toma y por
@@ -517,6 +517,12 @@ for (const w of specLinkWarnings) console.error(w)
 const { content: epicContext, reason: epicContextReason, warnings: epicContextWarnings } = readEpicContext(specMd)
 for (const w of epicContextWarnings) console.error(w)
 
+// Decisiones congeladas: mismo tratamiento que el contexto del epic — se lee
+// del spec por su cabecera y sus avisos se imprimen aquí, sin abortar nunca (un
+// spec sin la sección es válido; el remedio va dentro del aviso).
+const { content: frozenDecisions, reason: frozenDecisionsReason, warnings: frozenDecisionsWarnings } = readFrozenDecisions(specMd)
+for (const w of frozenDecisionsWarnings) console.error(w)
+
 const slices = report.slices
 // groomPlan lanza si hay órdenes de slice duplicados en la tabla §9 (T14/W-A):
 // se captura aquí y se reporta con la misma convención que el resto de errores
@@ -525,7 +531,7 @@ const slices = report.slices
 // stack trace crudo de una excepción sin capturar.
 let plan
 try {
-  plan = groomPlan(slices, { milestone, specRef, epicContext, epicContextReason })
+  plan = groomPlan(slices, { milestone, specRef, epicContext, epicContextReason, frozenDecisions, frozenDecisionsReason })
 } catch (e) {
   console.error(e.message)
   process.exit(2)
