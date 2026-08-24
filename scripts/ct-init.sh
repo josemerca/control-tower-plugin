@@ -1192,6 +1192,29 @@ else
   echo "añadida sección del contrato de slices (contrato /ct-groom v$SLICES_CONTRACT_VERSION) a $AGENTS_MD"
 fi
 
+# §3.12 (docs/prompt-juez-lo-que-queda.md): `reference-paths` prueba que lo que
+# §3 citó EXISTE, pero nada probaba que se citara TODO lo relevante — un
+# `docs/conventions/` que sí está en el repo pasaba el validador limpio por
+# omisión. Este barrido es determinista y offline y su único producto es una
+# LISTA: no escribe en .agent/conventions.md, no declara nada y no añade
+# ninguna puerta humana — la confirmación es la que ya existe, la persona que
+# está corriendo /ct-init. Va por STDOUT y no por stderr a propósito: no es una
+# alarma sobre un conflicto, es material para una decisión, igual que las
+# líneas de "creado ...". (Y hay un test que exige que la segunda corrida no
+# escriba ningún "aviso" por stderr.)
+VARA_STATUS=0
+VARA_OUT=''
+if command -v node >/dev/null 2>&1; then
+  VARA_OUT="$(node "$HERE/scripts/detect-vara.mjs" "$TARGET" 2>/dev/null)" || VARA_STATUS=$?
+else
+  VARA_STATUS=127
+fi
+if [ "$VARA_STATUS" -ne 0 ]; then
+  echo "no se ha podido barrer este repo en busca de candidatos a la vara (.agent/conventions.md): la comprobación necesita \`node\` y no se ha podido ejecutar (estado $VARA_STATUS). NO lo leas como \"este repo no tiene convenciones escritas\": no se ha mirado." >&2
+elif [ -n "$VARA_OUT" ]; then
+  printf '%s\n' "$VARA_OUT"
+fi
+
 # F11, parte B: hasta ahora ct-init bootstrapeaba ENCIMA de las convenciones
 # que el repo ya tuviera, sin enterarse. El caso real (menoplus): el repo ya
 # traía `scripts/dispatch-check.sh` con su línea en AGENTS.md mandando
