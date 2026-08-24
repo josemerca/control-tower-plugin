@@ -27,9 +27,31 @@
 // distinguirlas: una tabla con huecos que se lea como «este slice no tuvo
 // review» cuando lo que pasó es que la lectura falló sería un dato inventado
 // entrando por la puerta de atrás en un pre-registro que prohíbe justamente eso.
+//
+// LEE ADEMÁS LA TELEMETRÍA DEL JUEZ que la propia slice dejó commiteada en
+// docs/superpowers/metrics/issue-<n>.jsonl. Desde 1422c67 cada veredicto emite
+// `rubric_sin_vara` (cuántos ítems de la rúbrica se recorrieron sin el insumo
+// con el que medirlos) y `findings_by_rule`, y hasta ahora NO LOS LEÍA NADIE:
+// la columna existía en disco y la pregunta que motivó todo aquello —«¿está
+// llegando la vara?»— se contestaba abriendo ficheros jsonl a mano (§3.4 del
+// handoff docs/prompt-juez-lo-que-queda.md).
+//
+// Se lee de GitHub y no del disco, como todo lo demás de este comando: no hay
+// checkout que suponer, y un directorio ausente en el cwd equivocado saldría
+// como «cero sin-vara», que es el cero inventado que este fichero prohíbe.
+//
+// Y LAS DOS LECTURAS TIENEN DISTINTO PESO. El LISTADO del directorio que falla
+// NO baja el exit a 1: la causa casi siempre es que ese repo no tiene
+// telemetría (todo epic anterior a 1422c67), y un exit 1 permanente en esos
+// epics enseña a ignorar el exit code, que es justo la señal que la regla «el 1
+// nunca se degrada a 0» protege. Lo que se paga a cambio es no imprimir NI UN
+// NÚMERO en ese caso y decir en voz alta que no se sabe. Un FICHERO que el
+// listado sí nombraba y no se pudo leer, en cambio, es una cosecha incompleta
+// de verdad: motivo y exit 1.
 import { execFileSync } from 'node:child_process'
 import { harvestSlice, formatDuration, closingPrNumbers } from './harvest.js'
 import { parseRepoSlug } from './dispatch.js'
+import { aggregateVerdictMeasures, METRICS_REPO_DIR, metricsRepoRelPath } from './run-metrics.js'
 
 // `arg()` endurecido: el MISMO de ct-next.mjs/ct-groom.mjs/ct-status.mjs,
 // palabra por palabra y por el mismo motivo medido — un flag colgante no puede
@@ -151,8 +173,52 @@ for (const issue of issues) {
 
 filas.sort((a, b) => (a.issue ?? 0) - (b.issue ?? 0))
 
+// El listado del directorio: UNA llamada que decide qué hay. La ausencia de un
+// fichero se deduce de un listado que sí se leyó, nunca de interpretar el
+// stderr de un 404 — este repo no parsea códigos HTTP en ningún sitio y no
+// empieza aquí.
+//
+// Los issue-N.jsonl que no son de este milestone se ignoran sin decir nada: el
+// directorio acumula TODOS los epics del repo y nombrarlos sería ruido en cada
+// cosecha. (La API de contenidos lista hasta 1000 entradas por directorio; por
+// encima de eso un slice con fichero se leería como «sin telemetría». Está
+// dicho aquí y no resuelto: mil slices en un repo están muy lejos.)
+let dirTelemetria = { status: 'ok', why: null }
+const ficherosTelemetria = new Set()
+try {
+  const entradas = JSON.parse(gh(['api', `repos/${repo}/contents/${METRICS_REPO_DIR}`]))
+  if (!Array.isArray(entradas)) throw new Error('la respuesta no es un listado de directorio')
+  for (const e of entradas) if (e && e.type === 'file' && typeof e.name === 'string') ficherosTelemetria.add(e.name)
+} catch (e) {
+  dirTelemetria = { status: 'no-leido', why: e.message }
+}
+
+// Enum CERRADO, por el mismo motivo que RUBRIC_OUTCOMES: `sin-fichero` (nadie
+// midió) y `no-leido` (no se sabe) no son la misma cosa y ninguna de las dos es
+// un cero.
+const SIN_CUENTAS = { rows: null, malformed: null, verdicts: null, measured: null, legacy: null, rubricSinVara: null, findingsByRule: null }
+
+function telemetriaDe(n) {
+  if (dirTelemetria.status === 'no-leido' || n === null || n === undefined) {
+    return { status: dirTelemetria.status === 'no-leido' ? 'no-leido' : 'sin-fichero', path: null, ...SIN_CUENTAS }
+  }
+  const rel = metricsRepoRelPath(n)
+  if (!ficherosTelemetria.has(rel.slice(METRICS_REPO_DIR.length + 1))) {
+    return { status: 'sin-fichero', path: null, ...SIN_CUENTAS }
+  }
+  try {
+    const texto = gh(['api', `repos/${repo}/contents/${rel}`, '-H', 'Accept: application/vnd.github.raw'])
+    return { status: 'ok', path: rel, ...aggregateVerdictMeasures(texto) }
+  } catch (e) {
+    motivos.push(`no se pudo leer la telemetría ${rel} (issue #${n}): ${e.message}`)
+    return { status: 'no-leido', path: rel, ...SIN_CUENTAS }
+  }
+}
+
+for (const f of filas) f.telemetry = telemetriaDe(f.issue)
+
 if (comoJson) {
-  console.log(JSON.stringify({ repo, milestone, filas, motivos }, null, 2))
+  console.log(JSON.stringify({ repo, milestone, filas, motivos, telemetry: { dir: METRICS_REPO_DIR, status: dirTelemetria.status, why: dirTelemetria.why } }, null, 2))
 } else {
   console.log(`# Cosecha — ${milestone}`)
   console.log(`# repo: ${repo} · slices: ${filas.length}`)
@@ -188,6 +254,42 @@ if (comoJson) {
   if (filas.some((f) => f.mergeSource === 'issue-closed')) {
     console.log('')
     console.log('`*` release→merge medido contra el cierre del issue, no contra el merge de un PR.')
+  }
+  console.log('')
+  console.log('## Telemetría del juez — sólo lo que el repo trae escrito')
+  console.log('')
+  if (dirTelemetria.status === 'no-leido') {
+    console.log(`no se pudo listar \`${METRICS_REPO_DIR}\` en ${repo} (${dirTelemetria.why}). Puede que este repo no tenga telemetría del juez o que la lectura fallara: **no se cuenta nada**, y el hueco NO es un cero.`)
+  } else {
+    console.log('| Issue | Slice | Veredictos | sin-vara | Hallazgos por regla |')
+    console.log('|---|---|---|---|---|')
+    for (const f of filas) {
+      const t = f.telemetry
+      let veredictos = '—'
+      let sinVara = '—'
+      let porRegla = '—'
+      if (t.status === 'sin-fichero') porRegla = '(sin telemetría)'
+      else if (t.status === 'no-leido') porRegla = '(no se pudo leer)'
+      else {
+        veredictos = t.legacy > 0 ? `${t.verdicts} (${t.legacy} sin columna)` : String(t.verdicts)
+        // measured === 0 imprime «—» y JAMÁS «0»: ningún veredicto de este slice
+        // traía la columna, así que un cero afirmaría una medida que no se hizo.
+        sinVara = t.measured > 0 ? String(t.rubricSinVara) : '—'
+        const entradas = Object.entries(t.findingsByRule).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        porRegla = t.verdicts === 0 ? '(sin veredictos)' : (entradas.length ? entradas.map(([r, n]) => `${r} ${n}`).join(' · ') : '(ninguno)')
+      }
+      console.log(`| #${f.issue} | ${f.title ?? '—'} | ${veredictos} | ${sinVara} | ${porRegla} |`)
+    }
+    console.log('')
+    if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.verdicts > 0 && f.telemetry.measured === 0)) {
+      console.log('`—` en `sin-vara`: ningún veredicto de ese slice traía la columna (telemetría anterior a `rubric_sin_vara`). No es un cero.')
+    }
+    if (filas.some((f) => f.telemetry.status === 'sin-fichero')) {
+      console.log(`\`(sin telemetría)\`: el repo no trae \`${METRICS_REPO_DIR}/issue-<n>.jsonl\` para ese slice. Nadie midió — no es un cero.`)
+    }
+    for (const f of filas.filter((x) => x.telemetry.status === 'ok' && x.telemetry.malformed > 0)) {
+      console.log(`\`${f.telemetry.path}\`: ${f.telemetry.malformed} línea(s) ilegibles, no se cuentan (el resto sí).`)
+    }
   }
 }
 

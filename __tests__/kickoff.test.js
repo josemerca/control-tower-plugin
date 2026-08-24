@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { renderKickoff, buildStateSeed, ACCOUNT_MAP, ADDENDA } from '../scripts/kickoff.js'
+import { readFileSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { renderKickoff, buildStateSeed, ACCOUNT_MAP, ADDENDA, SENAL_AUSENTE } from '../scripts/kickoff.js'
 import { parseState } from '../scripts/state.js'
 import { resolveAccount, resolveAccountLegacy, validateAccountMap } from '../scripts/dispatch.js'
 
@@ -19,7 +22,7 @@ const otrosAddenda = (tipo) =>
 describe('renderKickoff', () => {
   it('backend: lleva su addendum y ninguno de los otros', () => {
     const k = renderKickoff(SLICE, { repo: 'o/r' })
-    expect(k).toContain('subagent-driven-development')
+    expect(k).toContain('ct-step')
     // F22: el fichero de estado de un agente de slice es `.agent/SLICE.md`.
     // El kickoff SOLO lo recibe un agente de slice, así que nombrar aquí el
     // `.agent/STATE.md` de la coordinadora era mandarlo al fichero trackeado
@@ -89,6 +92,23 @@ describe('buildStateSeed', () => {
     expect(meta.github_issue).toBe(7)
     expect(meta.branch).toBe('feat/7')
   })
+  // D-4 — el epic viaja sembrado en el estado del slice, no preguntado a gh en
+  // cada run: lo lee la telemetría de ct-run, que agrega por epic.
+  it('siembra el epic que trae el slice', () => {
+    const { meta } = parseState(buildStateSeed({ ...SLICE, epic: '12' }, { branch: 'feat/7', base: 'main' }))
+    expect(meta.epic).toBe('12')
+  })
+
+  it('un slice sin milestone DECLARA la ausencia, no la deja vacía', () => {
+    // Misma regla que impidió que ct-next asumiera `main` en silencio cuando no
+    // conocía la base: un hueco en una métrica se lee como un cero, y un cero
+    // es una afirmación.
+    for (const sinEpic of [{ ...SLICE }, { ...SLICE, epic: null }, { ...SLICE, epic: '' }]) {
+      const { meta } = parseState(buildStateSeed(sinEpic, { branch: 'feat/7', base: 'main' }))
+      expect(meta.epic).toBe('(sin milestone)')
+    }
+  })
+
   it('handles issue: null → github_issue: null', () => {
     const sliceNoIssue = { ...SLICE, issue: null }
     const seed = buildStateSeed(sliceNoIssue, { branch: 'feat/7', base: 'main' })
@@ -228,11 +248,14 @@ describe('buildStateSeed / renderKickoff — issue vs. orden §9 (D4, defecto 4)
 // con el ISSUE como spec—, y (c) las dos prohibiciones que la costura 3 del
 // fork ya impone pero que no pueden depender de que el agente llegue a leerla.
 describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan primero, prohibiciones)', () => {
-  const OPTS = { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs' }
+  const OPTS = { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs', ctStepPath: '/x/ct-step.mjs' }
 
   it('cita los skills PROPIOS (control-tower-loop:*) y ninguna referencia al namespace superpowers:', () => {
     const k = renderKickoff(SLICE, OPTS)
-    expect(k).toContain('control-tower-loop:subagent-driven-development')
+    // D-4 tomada en este fork: la conducción es de ct-step, y el kickoff ya
+    // no manda a subagent-driven-development — lo prohíbe explícitamente.
+    expect(k).toContain('/x/ct-step.mjs')
+    expect(k).not.toMatch(/sigue control-tower-loop:subagent-driven-development/)
     expect(k).toContain('control-tower-loop:writing-plans-prescriptive')
     expect(k).toContain('--check-plan')
     // Con dos puntos a propósito: `docs/superpowers/plans/` (la ruta-convención
@@ -246,11 +269,11 @@ describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan pri
     expect(k).toMatch(/issue como spec/i)
     expect(k).toContain('docs/superpowers/plans/')
     // El orden en el texto ES el orden de ejecución: el plan (writing-plans)
-    // tiene que aparecer ANTES de seguir con subagent-driven-development —
-    // SDD arranca en su rombo "Have implementation plan?" y la respuesta
-    // tiene que ser sí.
+    // tiene que aparecer ANTES de la conducción por ct-step — la máquina
+    // arranca sobre un plan commiteado (`--plan` es su primer argumento) y
+    // sin plan no hay run.
     expect(k.indexOf('control-tower-loop:writing-plans-prescriptive'))
-      .toBeLessThan(k.indexOf('control-tower-loop:subagent-driven-development'))
+      .toBeLessThan(k.indexOf('/x/ct-step.mjs'))
   })
 
   // F-jjponz-4 — el kickoff avisa del recorte antes de que el agente escriba
@@ -267,5 +290,67 @@ describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan pri
     expect(k).toMatch(/NO crees worktrees/)
     // La razón de la prohibición del worktree viaja con ella: ya está en uno.
     expect(k).toMatch(/ya estás en/i)
+  })
+})
+
+// Slice 10 — la señal en el despacho. El campo `senal:` se siembra SIEMPRE
+// (con el texto verbatim del issue, o con SENAL_AUSENTE — la ausencia se
+// declara, no se omite, mismo criterio que gates:/blocked:), porque su lector
+// es ct-step, que lo pega como primera sección del paquete del juez de slice
+// sin ningún agente en medio. La línea del kickoff, en cambio, es
+// CONDICIONAL: solo sale con señal declarada — "ninguna exigencia que el spec
+// le haga al agente puede depender de que el agente lea el spec", y con
+// exención o sin declaración no hay nada que exigir (el silencio cuando no
+// hay nada que decir es lo que mantiene útiles a las líneas que sí salen).
+describe('la señal en el despacho (Slice 10)', () => {
+  const OPTS = { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs', ctStepPath: '/x/ct-step.mjs' }
+
+  it('buildStateSeed siembra senal: con el texto del issue, verbatim', () => {
+    const seed = buildStateSeed({ ...SLICE, senal: 'métrica `backfill_progress` con label `estado`' }, { branch: 'feat/7', base: 'main' })
+    const { meta } = parseState(seed)
+    expect(meta.senal).toBe('métrica `backfill_progress` con label `estado`')
+  })
+
+  it('buildStateSeed declara la ausencia con SENAL_AUSENTE cuando el issue no trae sección', () => {
+    for (const sinSenal of [{ ...SLICE }, { ...SLICE, senal: null }, { ...SLICE, senal: '' }, { ...SLICE, senal: '  ' }]) {
+      const { meta } = parseState(buildStateSeed(sinSenal, { branch: 'feat/7', base: 'main' }))
+      expect(meta.senal).toBe(SENAL_AUSENTE)
+    }
+    // La constante abre con "(sin señal declarada" — es el prefijo con el que
+    // la rúbrica del juez de slice reconoce el estado sin-vara.
+    expect(SENAL_AUSENTE.startsWith('(sin señal declarada')).toBe(true)
+  })
+
+  it('la apertura que la rúbrica del juez de slice cita es un prefijo real de SENAL_AUSENTE', () => {
+    // Hallazgo low del juez del Slice 10: el cruce era unidireccional — el
+    // test de arriba vigila la constante, pero la CITA del agente («it opens
+    // with `(sin señal declarada`») no estaba atada a ella, así que editar esa
+    // frase en agents/ct-slice-judge.md rompería el reconocimiento de sin-vara
+    // sin que ningún test lo notara. Se lee del fichero real, como todas las
+    // ataduras agente↔constante de step-contracts.test.js.
+    const agente = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-slice-judge.md'), 'utf8')
+    const cita = /opens with\s+`([^`]+)`/.exec(agente)
+    expect(cita).not.toBeNull()
+    expect(SENAL_AUSENTE.startsWith(cita[1])).toBe(true)
+  })
+
+  it('la exención razonada viaja al SLICE.md tal cual (N/A — razón)', () => {
+    const { meta } = parseState(buildStateSeed({ ...SLICE, senal: 'N/A — pantalla sin telemetría nueva que prometer' }, { branch: 'feat/7', base: 'main' }))
+    expect(meta.senal).toBe('N/A — pantalla sin telemetría nueva que prometer')
+  })
+
+  it('renderKickoff nombra la señal cuando el issue la declara', () => {
+    const k = renderKickoff({ ...SLICE, senal: 'métrica x' }, OPTS)
+    expect(k).toContain('Este slice declara una SEÑAL DE OBSERVABILIDAD (sección "## Señal de observabilidad" del issue): lo que esa señal promete tiene que emitirlo el código de PRODUCCIÓN de este slice, instrumentado como ya instrumenta este repo y sin labels de cardinalidad ilimitada — el juez del slice entero lo comprueba contra el diff acumulado antes del PR.')
+    // Tras la línea de "Lee también las secciones…" — la zona de "qué leer
+    // del issue", antes del primer acto.
+    expect(k.indexOf('Lee también las secciones')).toBeLessThan(k.indexOf('SEÑAL DE OBSERVABILIDAD'))
+  })
+
+  it('renderKickoff calla con exención y calla sin declaración', () => {
+    expect(renderKickoff({ ...SLICE, senal: 'N/A — sin telemetría nueva' }, OPTS)).not.toContain('SEÑAL DE OBSERVABILIDAD')
+    expect(renderKickoff(SLICE, OPTS)).not.toContain('SEÑAL DE OBSERVABILIDAD')
+    expect(renderKickoff({ ...SLICE, senal: '–' }, OPTS)).not.toContain('SEÑAL DE OBSERVABILIDAD')
   })
 })

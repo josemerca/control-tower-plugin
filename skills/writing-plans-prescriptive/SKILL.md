@@ -45,7 +45,26 @@ stop — never guess through a blocker.
 ## What carries a code block — and what does not
 
 Before writing any task, read the actual files this slice will touch and at least one
-analogous file as a reference pattern. Then every code block you write declares its **role** on
+analogous file as a reference pattern.
+
+**And find this repo's written yardstick, because `## 3. Reference patterns` carries both.**
+An analogous file shows the shape; a convention document states the rule, and a rule holds even
+where no analogous file exists — which is why a slice on an empty repo still has something to
+measure against. Look for `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING`, anything under a
+`docs/conventions/` or `rules` directory, and the project skills under `.claude/skills`.
+Start from `.agent/conventions.md` where the repo declares one: that file is the repo's own
+declaration, seeded by `/ct-init` and confirmed by a human, and it is what keeps slice 14 citing
+the same yardstick as slice 3. List under `Rules to obey:` the entries that bear on this slice —
+you are selecting, not transporting: the program pastes that file into every task brief anyway,
+so omitting an entry does not hide it from the judge. The
+issue's "Contexto del epic" is where a human may have named them already. List what you find
+under `Rules to obey:`, **by path**, and if the repo genuinely declares none, say so with
+`N/A — <reason>` instead of inventing a plausible one: `--check-plan` reads every path you name
+there and fails the plan on one that does not exist. This section is what the judge opens to
+decide whether the diff honours this repo's conventions, so a path you cited from memory leaves
+the implementer and the judge both measuring against a file that is not there.
+
+Then every code block you write declares its **role** on
 the line right above it. The validator enforces the labels and their budgets:
 
 | Label above the block | What goes inside | Budget |
@@ -122,8 +141,15 @@ over the test file: that one is allowed, and it goes through the literality chec
 in the repo. Verify each claim against the repo before writing it: a real plan dictated the line
 "the analysis is the ONLY code that runs git" while the same plan created a fixture helper that
 also ran git, and the false line shipped. Same rule for `**Verification:**`: run the command
-first, then write the output you saw. A `grep -c` that "should print 2" and prints 3 is a task
-whose verification cannot pass.
+first, then write down what you saw, and put the command in the block — not in the sentence.
+And write it as a **predicate**, because the program that runs your block scores it by exit code
+and reads nothing else: a claim left in the `# expected:` comment while the exit code says
+something different is a control that cannot work. A real plan shipped
+`git diff HEAD -- AGENTS.md | grep -c 'marker'   # expected: 0` past this gate and past a human
+one; `grep -c` exits 0 when it finds at least one match and 1 when it finds none, so that
+control could only go green in the case it existed to forbid, and no implementation could ever
+pass it. Wrap the claim: `test "$(git diff HEAD -- AGENTS.md | grep -c 'marker')" -eq 0`.
+`--check-plan` now rejects the commands it can prove cannot measure their own claim.
 
 **Cite the files your slice rewrites, normally.** `--check-plan` reads the working tree (you
 have not implemented anything yet) and `--release` reads the **base of the branch** — the same
@@ -143,7 +169,12 @@ Tasks live under `## 7. Tasks` as `### Task N — <name>`, numbered from 1 with 
 line `No code — <reason>` for a task that is configuration in prose or documentation),
 `**TDD:**` (the failing test first, with its literal name and assertion, or
 `No TDD — <reason>`), `**Tests:**` (added / deliberately removed, named one by one), and
-`**Verification:**` (exact commands, already run, and their output).
+`**Verification:**` (exact commands, already run, and their output) — **the commands go in a
+fenced block right after the marker, one per line, each one a predicate**, because the thing
+that runs them is a program and it reads only their exit code. Prose in line reads fine and
+executes never, and a command that prints its answer instead of returning it measures nothing:
+`--check-plan` fails a task whose `**Verification:**` has no command block, and one whose
+commands cannot measure what they claim.
 
 No placeholders and no open decisions anywhere: not `TBD`, not "add error handling", not
 "similar to Task 3", and no reference to a symbol no task defines. What you must not leave open

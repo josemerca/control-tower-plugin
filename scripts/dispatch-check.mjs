@@ -28,6 +28,7 @@ import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 import { parseStrictInt } from './argnum.js'
 import { NEVER_IN_A_SLICE_PR, SLICE_REL_PATH } from './state-paths.js'
 import { checkPlans } from './plan-contract.js'
+import { deliveredRun } from './run-machine.js'
 
 // ============================================================================
 // Finding 4 (auditoría de interrupción/staleness): dos cambios en este
@@ -532,6 +533,17 @@ if (release) {
   })
   if (!planCheck.ok) {
     dieErr(`no se libera #${issue}: ${planCheck.message} El issue sigue en status:in-progress: no se ha movido nada.`, planCheck.code)
+  }
+  // El gate del run (exit 7), DESPUÉS del plan (exit 6) a propósito: sin plan
+  // válido ningún run pudo existir, así que su mensaje debe ganar. El kickoff
+  // manda conducir la implementación con ct-step, pero un prompt no es un
+  // gate: esto lo es. `deliveredRun` (run-machine.js) lee lo que ct-step
+  // persistió al cerrar bien; el fichero es local del worktree (gitignoreado
+  // por ct-init), igual que el claim vive en labels — se comprueba donde está.
+  const runRaw = (() => { try { return readFileSync(join('.agent', `run-${issue}.json`), 'utf8') } catch { return null } })()
+  const runGate = deliveredRun(runRaw, issue)
+  if (!runGate.ok) {
+    dieErr(`no se libera #${issue}: ${runGate.why} El issue sigue en status:in-progress: no se ha movido nada.`, 7)
   }
   if (!dryRun && !fx) {
     const result = setStatus(issue, 'status:in-progress', 'status:in-review')
