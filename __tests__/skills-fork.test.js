@@ -203,10 +203,33 @@ describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive 
     expect(s).not.toMatch(/complete final content/i)
   })
 
+  it('describe el brief que ct-step entrega de verdad, con la vara del plan', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    const ctStep = readFileSync(join(ROOT, 'scripts', 'ct-step.mjs'), 'utf8')
+    expect(ctStep).toContain('--with-plan-context')
+    expect(s).toContain('--with-plan-context')
+    expect(s).toContain('## 2. Closed decisions')
+    expect(s).toContain('## 3. Reference patterns')
+    expect(s).not.toMatch(/extracts that task and nothing more/i)
+  })
+
   it('dice que la configuración va en prosa y que un test va por nombre y aserción', () => {
     const s = read('writing-plans-prescriptive', 'SKILL.md')
-    expect(s).toMatch(/configuration/i)
-    expect(s).toMatch(/never appears as a block/i)
+    expect(s).toMatch(/configuration travels as prose/i)
+    expect(s).toMatch(/a test travels as two things/i)
+  })
+
+  it('cierra con la lista de pasos, y valida por tarea antes de seguir', () => {
+    const s = read('writing-plans-prescriptive', 'SKILL.md')
+    expect(s).toContain('## The steps, in order')
+    expect(s).toMatch(/one todo per step/i)
+    expect(s).toMatch(/One task at a time: write it, then run `--check-plan`/)
+  })
+
+  it('la skill y su template tienen presupuesto: crecer obliga a recortar', () => {
+    const bytes = (f) => Buffer.byteLength(read('writing-plans-prescriptive', f))
+    expect(bytes('SKILL.md')).toBeLessThanOrEqual(16314)
+    expect(bytes('plan-template.md')).toBeLessThanOrEqual(6377)
   })
 
   it('el template no pide el estado final completo y sus huecos nombran los roles', () => {

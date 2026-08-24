@@ -699,6 +699,26 @@ export function buildCmuxSendKeyArgv({ workspace, key = 'Enter' }) {
   return ['send-key', '--workspace', workspace, key]
 }
 
+// EL NOMBRE DE LA SESIÓN DE UN SLICE, en un solo sitio.
+//
+// Era una plantilla suelta dentro del bucle de despacho de ct-next.mjs, y con
+// un consumidor no pasaba nada. Ahora hay DOS: quien crea la workspace
+// (`buildCmuxArgv({ name })`) y quien la busca para mandarle una línea — el
+// reenvío de la línea de arranque, y desde esta ronda el vigilante del `-OK`,
+// que corre en OTRO PROCESO y no puede heredar la variable.
+//
+// Y buscarla es por igualdad exacta del título (`w.title === name`): no hay
+// identificador estable que cmux nos devuelva al crearla y podamos guardar, así
+// que el nombre ES el handle. Un espacio de más en una de las dos copias hace
+// que el vigilante no encuentre nunca la sesión — se apaga en su primer sondeo
+// diciendo que ya no existe (exit 4), o sea que el go de esa persona no se
+// entrega y el mensaje culpa a la sesión en vez de al desajuste. Es el mismo
+// desacople que este repo ya pagó tres veces (JUDGE_TOOLS, VERDICT_RULES,
+// PACKAGE_SECTIONS).
+export function cmuxSessionName({ repoName, issue, sliceName }) {
+  return `${repoName} · #${issue} ${sliceName}`
+}
+
 // ============================================================================
 // F20/H2 — EL CAMINO FELIZ NO RECOGÍA NADA.
 //
