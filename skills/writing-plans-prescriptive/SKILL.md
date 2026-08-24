@@ -97,11 +97,13 @@ Three things never get a block:
 - **A test file** — see below.
 - **Configuration** — see below.
 
-Blocks live **inside a `### Task N` section, nowhere else**.
-`subagent-driven-development` hands each implementer its **task brief** (`scripts/task-brief
-PLAN_FILE N`), which extracts that task and nothing more, so a block written in
-`## 5. Interfaces` never reaches the subagent that needs it. Name signatures in prose there, and
-put the block in the task.
+Blocks live **inside a `### Task N` section**, because the task is what travels. `ct-step` hands
+each implementer its **task brief** (`scripts/task-brief --with-plan-context PLAN_FILE N`): the
+task, preceded by `### Desired end state`, `### Out of scope`, `## 2. Closed decisions` and
+`## 3. Reference patterns`. Those last three are the **yardstick** — where they contradict the
+task, they win — so a decision you close in §2 and a rule you cite in §3 do reach the
+implementer. The rest of the plan stays behind, `## 5. Interfaces` included: name signatures in
+prose there and put the block in the task that creates the file.
 
 Never quote from memory — the validator greps the repo and refuses citations that do not
 match. A `Current state` citation must be a **contiguous** tramo, byte for byte: no ellipsis, no
