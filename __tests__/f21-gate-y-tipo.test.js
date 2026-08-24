@@ -36,6 +36,7 @@ import { analyzeSlicesTable } from '../scripts/slices.js'
 import { buildLabels, buildIssueBody, groomPlan } from '../scripts/groom.js'
 import { mapGhIssue } from '../scripts/gh-issue-map.js'
 import { GATES, TYPE_GATES, resolveGates, gatesForType, gatesFromLabels, GATE_LABEL_NONE } from '../scripts/gates.js'
+import { GO_TOKEN } from '../scripts/go-response.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const groomScript = join(here, '..', 'scripts', 'ct-groom.mjs')
@@ -488,5 +489,33 @@ describe('F21 — el contrato §9 documenta los gates y la invariante', () => {
     expect(agents).toMatch(/fuera de la tabla[^\n]*no llega al agente/i)
     expect(agents).not.toMatch(/§9/)
     rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// EL TOKEN DEL GO, ATADO A LOS DOS TEXTOS QUE LO EXPLICAN.
+//
+// Desde que un programa lee la respuesta del gate `plan` (scripts/go-response.js
+// + scripts/ct-watch-go.mjs), el token dejó de ser prosa: `-OK` exacto arranca
+// el trabajo y cualquier otra cosa no. O sea que los dos textos del gate —el que
+// lee el AGENTE y el que lee el HUMANO— tienen que nombrar el token de verdad.
+//
+// Sin este test el fallo es el peor posible y silencioso: se renombra el token
+// en el código, los textos siguen diciendo lo de antes, la persona escribe lo
+// que le dijeron, y el trabajo no arranca nunca sin que nada falle.
+// ---------------------------------------------------------------------------
+describe('el token del go viaja en los dos textos del gate `plan`', () => {
+  it('el kickoff del agente lo nombra', () => {
+    expect(GATES.plan.kickoff).toContain(GO_TOKEN)
+  })
+
+  it('el texto del issue lo nombra, que es el que lee quien tiene que escribirlo', () => {
+    expect(GATES.plan.issue).toContain(GO_TOKEN)
+  })
+
+  it('y el kickoff dice que NO sondee el issue él: eso es del vigilante', () => {
+    // Un agente que se pusiera a mirar el issue por su cuenta estaría vigilando
+    // su propio gate, que es justo lo que este reparto evita.
+    expect(GATES.plan.kickoff).toMatch(/no sondees/i)
   })
 })
