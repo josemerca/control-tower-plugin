@@ -44,6 +44,15 @@
 // hay forma de crear uno "de paso" desde un spec.
 // ============================================================================
 
+// splitEscapedCommas / NO_VALUE_MARKERS se importan de cells.js —y no de
+// slices.js— para que gates.js pueda trocear una celda sin arrastrar el
+// parser entero: gates.js tiene que poder usarse desde kickoff.js, que no
+// depende de slices.js y no debe empezar a hacerlo. Ver la cabecera de
+// cells.js para la razón completa. splitEscapedCommas se usa aquí porque la
+// columna E2E se trocea EXACTAMENTE igual que `Acepta`, y por el mismo
+// motivo: un recorrido lleva comas casi siempre.
+import { splitEscapedCommas, NO_VALUE_MARKERS } from './cells.js'
+
 // GATE_LABEL_PREFIX / GATE_LABEL_NONE: el canal por el que el gate SOBREVIVE.
 // Un kickoff es efímero (se pierde con el contexto de su sesión); una label de
 // GitHub no. `/ct-next` reconstruye el slice que despacha a partir del ISSUE
@@ -89,6 +98,20 @@ export const GATES = {
     // un eje técnico; la renuncia por fila es `!plan`, ruidosa como todas.
     kickoff: 'GATE HUMANO `plan` (implicado por defecto en TODO slice, salvo renuncia `!plan` en el spec): con el plan del slice escrito, validado con --check-plan y commiteado, publícalo como comentario del issue y PARA — no implementes nada hasta que un humano conteste `-OK` en un comentario de ese issue. Un vigilante que lanzó la coordinadora lo está mirando y te teclea la línea cuando llegue, así que PARAR de verdad es lo correcto: no sondees tú el issue ni te des el gate por cumplido. No lo cierras tú: lo cierra quien revisa el plan.',
     issue: '**`plan`** — antes de implementar, un humano tiene que revisar el PLAN del slice: el agente lo publica como comentario de este issue y se detiene. Para darle el go, contesta con un comentario que sea exactamente `-OK` (sin nada más: cualquier otra cosa no arranca nada, a propósito) y el trabajo sigue solo. Quien lo vigila es un proceso que la coordinadora lanzó al despachar y que espera unas horas: si contestas mucho más tarde puede haber caducado, y entonces hay que empujar la sesión a mano. El agente no puede darlo por cumplido.',
+  },
+  e2e: {
+    // El único gate cuyo CONTENIDO viaja en una columna propia: los otros tres
+    // son un token que se explica solo, y éste necesita decir QUÉ atravesar.
+    // Por eso el texto manda al agente a la sección del issue en vez de
+    // describir un recorrido: el recorrido lo escribió un humano al congelar y
+    // no se puede reproducir aquí sin duplicarlo.
+    //
+    // Y por eso el kickoff nombra AGENTS.md: el guion viaja congelado desde el
+    // spec, pero CÓMO se levanta este repo no lo puede saber el plugin — lo
+    // declara el repo destino. Sin esa sección, el resultado es "no se pudo
+    // comprobar", nunca un rojo y nunca una travesía improvisada.
+    kickoff: 'GATE HUMANO `e2e` (lo pide el spec para ESTE slice, en la columna `E2E` de su fila): antes de abrir el PR, atraviesa los recorridos que trae la sección `## E2E` de tu issue — ésos y sólo ésos, no añadas ni quites ninguno. Cómo se levanta este repo lo dice la sección `## Cómo se atraviesa este repo (e2e)` de `AGENTS.md`: si no está rellenada, el veredicto es `no-verificado` con ese motivo, NUNCA rojo y nunca inventarse cómo arrancarlo. Escribe el informe en `docs/superpowers/e2e/<issue>.md` con el comando literal y su salida real por cada recorrido, commitéalo, y pégalo como comentario del PR. Si algún recorrido sale ROJO, PARA sin liberar. No lo cierras tú: lo cierra quien revisa.',
+    issue: '**`e2e`** — este slice declara recorridos en la columna `E2E` de su fila: el PR debe traer el informe de haberlos atravesado (`docs/superpowers/e2e/<issue>.md`, commiteado y pegado como comentario) con el comando y su salida por cada uno. Un recorrido en rojo impide el `--release`; uno que no se pudo comprobar libera, pero lo dice. El agente no puede darlo por cumplido.',
   },
 }
 
@@ -146,12 +169,17 @@ function cleanGateToken(raw) {
   return cleaned.startsWith(`${GATE_LABEL_PREFIX}`) ? cleaned.slice(GATE_LABEL_PREFIX.length).trim() : cleaned
 }
 
-// NO_VALUE_MARKERS: el mismo conjunto que slices.js. Se repite aquí (en vez de
-// importarlo) porque `isNoValueCell` de slices.js es la puerta de entrada a
-// TODO el parseo de la tabla, y gates.js tiene que poder usarse desde
-// kickoff.js —que no depende de slices.js y no debe empezar a hacerlo— sin
-// arrastrar el parser entero. Son seis caracteres y un test los fija.
-const NO_VALUE = new Set(['-', '–', '—', '―', '−', '--', ''])
+// NO_VALUE: la lista de caracteres viene de cells.js (el mismo conjunto que
+// usa slices.js), y aquí se AÑADE la cadena vacía `''` a propósito, sin
+// unificar los dos conjuntos. La razón es que "sin valor" significa cosas
+// distintas en cada sitio: slices.js necesita distinguir "celda vacía"
+// (columna sin rellenar todavía, F1) de "celda con un guion" (relleno
+// explícito de "nada"), así que NO_VALUE_MARKERS no incluye `''`. gates.js no
+// tiene esa distinción que hacer — una celda `Gate` vacía y una con "–"
+// significan exactamente lo mismo aquí: "no he declarado nada" — así que
+// tratarlas igual no pierde información en este archivo. Unificar los dos
+// conjuntos cambiaría en silencio cómo clasifica slices.js una celda vacía.
+const NO_VALUE = new Set([...NO_VALUE_MARKERS, ''])
 
 // parseGateCell: celda `Gate` cruda -> { add, waive, unknown }.
 //
@@ -189,6 +217,37 @@ export function parseGateCell(cell) {
   return { add, waive, unknown }
 }
 
+// E2E_NONE_TOKENS: la declaración POSITIVA de que este slice no tiene nada que
+// atravesar. Existe por lo mismo que GATE_LABEL_NONE (arriba): sin ella, una
+// celda vacía significaría a la vez "se pensó y no hay" y "nadie rellenó la
+// columna", y con lo segundo la feature queda inerte sin que nadie se entere.
+// La diferencia con GATE_LABEL_NONE es que aquélla la DERIVA el plugin y ésta
+// no se puede derivar: sólo lo sabe quien escribe el spec.
+export const E2E_NONE_TOKENS = new Set(['no', 'n/a'])
+
+// resolveE2e: celda cruda -> { runs, declared, none, contradiction }.
+//
+// LA COMPARACIÓN DEL TOKEN ES SOBRE LA CELDA ENTERA, NUNCA POR PREFIJO. Un
+// recorrido perfectamente legítimo puede empezar por "no" ("no se puede
+// acceder a /metrics sin levantar el server"), y leerlo como el token
+// convertiría una declaración de trabajo en una renuncia — en silencio, que es
+// la peor forma. Es el mismo criterio que state.js aplica al campo `blocked`
+// ("sobre la cadena ENTERA, nunca por prefijo") y por el mismo motivo.
+//
+// UN MARCADOR DE "SIN VALOR" NO ES UN `no`. "–" significa "no he declarado
+// nada aquí" — el significado que parseGateCell ya le da, y que aquí NO se
+// reinterpreta: se toma literal y produce `declared: false`, que es lo que
+// /ct-groom convierte en abort. Reinterpretarlo como "no aplica" devolvería la
+// ambigüedad que este token existe para quitar.
+export function resolveE2e(cell) {
+  const raw = String(cell ?? '').trim()
+  if (NO_VALUE.has(cleanGateToken(raw))) return { runs: [], declared: false, none: false, contradiction: false }
+  const pieces = splitEscapedCommas(raw).map((x) => x.trim()).filter(Boolean)
+  const none = pieces.some((p) => E2E_NONE_TOKENS.has(cleanGateToken(p)))
+  const runs = pieces.filter((p) => !E2E_NONE_TOKENS.has(cleanGateToken(p)))
+  return { runs, declared: true, none, contradiction: none && runs.length > 0 }
+}
+
 // resolveGates: los dos ejes, resueltos en un solo sitio. Devuelve, además del
 // conjunto final, TODO lo que /ct-groom necesita para hablar en voz alta —
 // porque el encargo no es solo "que se pueda declarar", es "que el sistema lo
@@ -204,9 +263,16 @@ export function parseGateCell(cell) {
 //                  nada; callarlas dejaría al autor creyendo que quitó algo)
 //   - unknown      tokens fuera del vocabulario (los rechaza ct-groom.mjs)
 //   - contradictions  el mismo gate pedido y renunciado en la misma celda
-export function resolveGates(type, cell) {
+export function resolveGates(type, cell, e2eCell) {
   const { add, waive, unknown } = parseGateCell(cell)
-  const implied = gatesForType(type)
+  // El gate `e2e` NO sale de la columna `Gate`: se DERIVA de que la columna
+  // `E2E` traiga algún recorrido. Escrito a mano habría dos sitios diciendo lo
+  // mismo, y dos sitios divergen; derivado, no hay forma de pedir un e2e sin
+  // decir qué atravesar. Que `e2e` esté igualmente en el vocabulario GATES no
+  // es contradictorio: está para poder RECHAZAR un `Gate: e2e` escrito a mano
+  // (ct-groom.mjs) y para tener sus dos textos, no para producirlo.
+  const derived = resolveE2e(e2eCell).runs.length > 0 ? ['e2e'] : []
+  const implied = [...gatesForType(type), ...derived]
   const contradictions = inGateOrder(add.filter((g) => waive.includes(g)))
   // Una contradicción NO se resuelve aquí eligiendo un ganador: ct-groom.mjs
   // aborta con ella. Se deja fuera del conjunto final por seguridad de la
