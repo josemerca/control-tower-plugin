@@ -180,9 +180,11 @@ if (problems.length) {
   process.exit(EXIT.PLAN_NOT_EXECUTABLE)
 }
 
-// Los pasos que son de la SLICE y no de ninguna tarea. A nivel de módulo
-// porque no es sólo del cruce de commits de abajo: el mismo concepto lo
-// necesita la telemetría, y escrito dos veces divergiría.
+// Los pasos que son de la SLICE y no de ninguna tarea. Una sola lista y no dos:
+// la usan el cruce de commits (abajo) y la telemetría (`medir`), y cuando el
+// mismo concepto estaba escrito dos veces la segunda copia se quedó atrás al
+// llegar `e2e` — con el resultado de que cada fila de e2e se le atribuía a la
+// última tarea del plan.
 const PASOS_DE_SLICE = [STEPS.GLOBAL, STEPS.SLICE_JUDGE, STEPS.E2E]
 
 // ---------------------------------------------------------------------------
@@ -333,10 +335,12 @@ const ACTOR = (git(['config', 'user.email'], { allowFail: true }) || '').trim() 
 const METRICS_REL = metricsRepoRelPath(issue)
 
 function medir(step, measures) {
-  // `global` y `slice-judge` no son de ninguna tarea: un `task: 3` en esa fila
-  // sería un hueco leído como una afirmación (la misma doctrina que ya impide
-  // rellenar con `null` disfrazado de cero en el resto de este fichero).
-  const esDeSlice = step === 'global' || step === 'slice-judge'
+  // `global`, `slice-judge` y `e2e` no son de ninguna tarea: un `task: 3` en esa
+  // fila sería un hueco leído como una afirmación (la misma doctrina que ya
+  // impide rellenar con `null` disfrazado de cero en el resto de este fichero).
+  // En esos pasos `run.task` se queda clavado en la última tarea, así que
+  // atribuirle el coste sería una afirmación falsa, no un dato de más.
+  const esDeSlice = PASOS_DE_SLICE.includes(step)
   const linea = metricLine(metricRow({
     repo: repoSlug, epic: epicDelSlice, issue, plan: planPath, plan_sha256: PLAN_SHA,
     task: esDeSlice ? null : run.task, task_name: esDeSlice ? null : (tarea()?.name ?? null), tasks_total: run.tasksTotal,
@@ -358,6 +362,12 @@ function medir(step, measures) {
 // LA GUARDIA DEL PASO. Es lo que convierte la secuencia en mecanismo: pedir un
 // paso que no toca no se corrige con un aviso, se rechaza.
 // ---------------------------------------------------------------------------
+// El verbo `slice-verdict` no se llama igual que su paso (`slice-judge`), al
+// revés que `global`/`global` y `e2e`/`e2e`: el paso nombra a QUIEN juzga (el
+// juez de slice, como `judge`) y el verbo nombra lo que la sesión ENTREGA (un
+// fichero de veredicto, como `verdict`). Las dos familias ya existían con esos
+// nombres y renombrar cualquiera de los dos rompería estado en vuelo, así que
+// se deja la asimetría dicha en vez de arreglada.
 const VERBO_DE = {
   report: STEPS.IMPLEMENT, controls: STEPS.CONTROLS, verdict: STEPS.JUDGE, commit: STEPS.COMMIT,
   global: STEPS.GLOBAL, 'slice-verdict': STEPS.SLICE_JUDGE, e2e: STEPS.E2E,
