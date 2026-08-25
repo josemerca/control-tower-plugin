@@ -54,7 +54,7 @@
 //   (`agents/ct-judge.md`, declarado sin `Bash`), no porque un flag se lo quite.
 // ============================================================================
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, writeSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, writeSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -577,6 +577,46 @@ function escribirPaqueteDeSlice() {
   return paquete
 }
 
+// EL PAQUETE ES DE UN SOLO USO: lo gasta el veredicto que lo lee.
+//
+// Hallazgo ALTO del review de la PR #36, reproducido con un ataque real. La
+// guarda del slice 3 (el `existsSync` de los dos verbos de veredicto) cubría el
+// intento 1 y dejaba abierto el 2: intento 1 por el flujo real → FAIL del juez;
+// intento 2, el implementador cambia el fichero y el conductor encadena
+// report→controls→verdict SIN volver a `next`. La guarda pasaba —el `.diff` del
+// intento 1 seguía en disco—, el PASS entraba, y se comiteaba código que ningún
+// juez había visto, con la fila de telemetría apuntando a un paquete que existe
+// y es EL EQUIVOCADO. Peor que el fallo que el slice 3 arregló: aquél era
+// ruidoso (una fila nombrando un fichero inexistente, detectable con `test -f`)
+// y éste es MUDO — indistinguible de un juicio legítimo en el JSONL. Y la
+// confesión que salvó la corrida de campo (el juez declarando que no encontraba
+// el paquete) queda desarmada: en el caso rancio el juez SÍ encuentra un
+// paquete, no tiene Bash y no puede saber que es viejo.
+//
+// El insumo se CONSUME, y con una regla que sale de run-machine.js y no de una
+// lista de casos: el paquete vale exactamente mientras el paso siga siendo el
+// del juez. Todo veredicto ACEPTADO (PASS, FAIL y el PASS que ordena
+// correcciones) saca el run de `judge`, así que su paquete ya no le sirve a
+// nadie: se gasta. Un DESCARTE deja el paso donde estaba —se le vuelve a
+// preguntar al juez— así que ahí NO se llama a esto: el reintento por JSON
+// ilegible tiene que poder repreguntar con el mismo insumo, sin obligar a
+// regenerarlo. Y el intento 2 del ataque se topa con la ausencia y se descarta,
+// que es lo que la guarda del slice 3 quería hacer y no llegaba a hacer.
+//
+// Lo que NO puede pasar es que esto tumbe el run: el veredicto ya está medido y,
+// si aprobó, escrito y stageado. Un fallo aquí se avisa y sigue — el criterio de
+// este fichero para toda operación auxiliar (los `git add` del veredicto y de la
+// telemetría, el `git commit` del veredicto de slice y el del informe de e2e,
+// todos con `allowFail` y su aviso). El aviso es RUIDOSO a propósito: un paquete
+// que sobrevive a su veredicto reabre exactamente la ventana que esto cierra.
+function consumirPaquete(paquete) {
+  try {
+    unlinkSync(paquete)
+  } catch (e) {
+    err(`aviso: el veredicto se midió pero NO se pudo consumir el paquete de revisión (${paquete}): ${String(e.message).trim()}. El paso sigue, pero ese fichero ya no corresponde a ningún juicio pendiente: vuelve a "ct-step next" antes de despachar al juez otra vez, porque un paquete que sobrevive a su veredicto es el que deja pasar un juicio rancio.`)
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Los verbos que transicionan
 // ---------------------------------------------------------------------------
@@ -882,7 +922,7 @@ function verboSliceVerdict() {
   // fichero en disco el juez de slice no tuvo diff acumulado que juzgar.
   const paquete = join(workDir, 'slice-review.diff')
   if (!existsSync(paquete)) {
-    const why = `el paquete de revisión del slice no existe (${paquete}): el juez de slice juzgó a ciegas — vuelve a "ct-step next", que es el único paso que lo genera`
+    const why = `el paquete de revisión del slice no existe (${paquete}): el juez de slice juzgó a ciegas — vuelve a "ct-step next", que es el único paso que lo genera. El paquete es de UN SOLO USO: lo consume el veredicto que lo lee, así que tras un veredicto aceptado hay que volver a pasar por next antes de despachar al juez de slice otra vez`
     medir('slice-judge', { outcome: 'discarded', why })
     out(`veredicto de slice descartado: ${why}`)
     return OUTCOMES.DISCARDED
@@ -896,6 +936,13 @@ function verboSliceVerdict() {
   }
   const outcome = outcomeOfSliceVerdict(verdict)
   medir('slice-judge', { outcome, review_package: paquete, ...verdictMeasures(verdict) })
+  // Aquí y no más abajo: DESPUÉS de medir (la fila nombra el paquete que el juez
+  // de slice leyó, y se escribe mientras eso sigue siendo cierto) y ANTES de la
+  // rama del PASS, que escribe, stagea y COMITEA. Cualquiera de esos writes
+  // puede lanzar —`mkdirSync`/`writeFileSync` sobre un árbol de sólo lectura— y
+  // subir hasta el catch del despacho: dejar el consumo detrás de ellos abriría
+  // una ventana en la que un veredicto ya emitido no gastó su insumo.
+  consumirPaquete(paquete)
   if (verdict.ruling === 'PASS') {
     const ruta = join('docs', 'superpowers', 'verdicts', `issue-${issue}-slice.json`)
     mkdirSync(join(repoRoot, 'docs', 'superpowers', 'verdicts'), { recursive: true })
@@ -964,7 +1011,7 @@ function verboVerdict() {
   // conductor que se saltó un paso. La causa manda sobre el síntoma.
   const paquete = join(workDir, `task-${run.task}-review.diff`)
   if (!existsSync(paquete)) {
-    const why = `el paquete de revisión no existe (${paquete}): el juez juzgó a ciegas — vuelve a "ct-step next", que es el único paso que lo genera`
+    const why = `el paquete de revisión no existe (${paquete}): el juez juzgó a ciegas — vuelve a "ct-step next", que es el único paso que lo genera. El paquete es de UN SOLO USO: lo consume el veredicto que lo lee, así que tras un FAIL (o cualquier veredicto aceptado) hay que volver a pasar por next antes de despachar al juez otra vez`
     // La fila lleva `outcome` y `why`, y ninguna medida más: exactamente la
     // forma de los otros descartes de este fichero. Sin `ruling` —para
     // `aggregateVerdictMeasures` una fila con `ruling` ES un veredicto, y esto
@@ -986,6 +1033,13 @@ function verboVerdict() {
   const outcome = outcomeOfVerdict(verdict)
   const graves = verdict.findings.filter((f) => f.severity !== 'low')
   medir('judge', { outcome, review_package: paquete, ...verdictMeasures(verdict) })
+  // El consumo va AQUÍ por lo mismo que en el gemelo de slice: la fila que
+  // nombra el paquete se escribe primero, y todo lo que viene después
+  // —`mkdirSync`, `writeFileSync` y el `git add` del veredicto que viaja en el
+  // commit de la tarea— puede fallar sin que eso convierta el veredicto en no
+  // emitido. Ninguna de esas rutas toca el paquete (los `add` son por ruta,
+  // nunca `-A`), así que consumirlo antes no puede colarse en ningún commit.
+  consumirPaquete(paquete)
   run = {
     ...run,
     lastVerdict: verdict,

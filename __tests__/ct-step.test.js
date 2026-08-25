@@ -644,6 +644,121 @@ describe('un veredicto emitido sin paquete de revisión no es un veredicto', () 
   })
 })
 
+// Slice 6 de los apuntes de Capde — el hallazgo ALTO del review de la PR #36,
+// reproducido con un ataque real. La guarda del slice 3 cubría el intento 1 y
+// dejaba abierto el 2: con el `.diff` del intento 1 todavía en disco, un PASS
+// emitido sobre el diff VIEJO entraba, y la fila de telemetría apuntaba a un
+// paquete que existe y es el equivocado — un fallo mudo, peor que el ruidoso
+// que el slice 3 arregló. El insumo pasa a consumirse: lo gasta el veredicto
+// que lo lee. La regla sale de run-machine.js — el paquete vale mientras el
+// paso siga siendo el del juez, así que un veredicto ACEPTADO (que siempre
+// cambia de paso) lo consume y un DESCARTE (que no lo cambia) no.
+describe('el paquete de revisión es de un solo uso: lo consume el veredicto que lo lee', () => {
+  const paqueteDeTarea = (n = 1) => join(repo, '.agent', 'run-7', `task-${n}-review.diff`)
+  const paqueteDeSlice = () => join(repo, '.agent', 'run-7', 'slice-review.diff')
+
+  it('EL ATAQUE: tras un FAIL, encadenar report→controls→verdict sin next se DESCARTA', () => {
+    // INTENTO 1, por el flujo real: `next` genera el paquete y el juez VETA.
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    const r1 = juzgar(veredicto('FAIL', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }]))
+    expect(r1.stdout).toMatch(/veredicto FAIL/)
+    expect(estado().step).toBe('implement')      // el veto devuelve la tarea
+    expect(estado().judgeRetries).toBe(1)
+    // El veredicto se llevó su insumo. Ésta es la línea que estaba ROJA antes
+    // del arreglo, y con ella todo lo que sigue.
+    expect(existsSync(paqueteDeTarea())).toBe(false)
+
+    // INTENTO 2: el implementador cambia el fichero y el conductor encadena
+    // report→controls→verdict SIN volver a `next` — el ataque, literal.
+    writeFileSync(join(repo, 'uno.txt'), 'uno, ahora arreglado\n')
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    const r2 = ct('verdict', veredicto('PASS'))
+    expect(r2.status).toBe(0)                    // descarte, no cierre
+    expect(r2.stdout).toMatch(/veredicto descartado: el paquete de revisión no existe/)
+    expect(r2.stdout).toContain('El paquete es de UN SOLO USO')
+    expect(estado().step).toBe('judge')          // NO avanza: se vuelve a preguntar
+    expect(estado().discards).toBe(1)
+    expect(commits()).toBe(1)                    // el PASS rancio no comitea nada
+    expect(existsSync(join(repo, 'docs', 'superpowers', 'verdicts', 'issue-7-task-1.json'))).toBe(false)
+
+    // La TELEMETRÍA, que es la capa donde el fallo era mudo: dos filas de juez,
+    // y la del intento 2 no afirma ningún paquete.
+    const filas = readFileSync(join(repo, '.telemetria', 'control-tower', 'log', 'ct-step.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l))
+    const juez = filas.filter((f) => f.step === 'judge')
+    expect(juez).toHaveLength(2)
+    expect(juez[0].ruling).toBe('FAIL')          // el intento 1 sí juzgó, y sobre su diff
+    expect(juez[1].outcome).toBe('discarded')
+    expect(juez[1].ruling).toBeUndefined()
+    expect(juez[1].review_package).toBeUndefined()
+
+    // Y el camino honesto sigue abierto: `next` regenera el paquete del índice
+    // NUEVO, el juez lo ve, y el PASS entra.
+    const r3 = juzgar(veredicto('PASS'))
+    expect(r3.stdout).toMatch(/veredicto PASS/)
+    expect(estado().step).toBe('commit')
+    expect(ct('commit').status).toBe(0)
+    expect(commits()).toBe(2)
+  })
+
+  it('el DESCARTE no consume: el reintento por JSON ilegible juzga el MISMO .diff, sin volver a next', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    const antes = readFileSync(paqueteDeTarea(), 'utf8')
+
+    const r1 = ct('verdict', crudo('esto no es json'))
+    expect(r1.stdout).toMatch(/veredicto descartado: no se pudo leer/)
+    expect(estado().step).toBe('judge')
+    expect(estado().discards).toBe(1)
+    expect(existsSync(paqueteDeTarea())).toBe(true)
+    expect(readFileSync(paqueteDeTarea(), 'utf8')).toBe(antes)   // byte a byte: el mismo insumo
+
+    // Se le repregunta al juez SIN pasar por `next`, que es legítimo: el paso no
+    // ha cambiado y el paquete que iba a juzgar sigue siendo el bueno.
+    const r2 = ct('verdict', veredicto('PASS'))
+    expect(r2.stdout).toMatch(/veredicto PASS/)
+    expect(estado().step).toBe('commit')
+    expect(existsSync(paqueteDeTarea())).toBe(false)             // aceptado: ahora sí se gasta
+  })
+
+  it('el camino feliz no cambia: cada tarea vuelve por next, y su paquete se gasta al aprobarla', () => {
+    expect(tareaOk('uno.txt').status).toBe(0)
+    expect(existsSync(paqueteDeTarea(1))).toBe(false)
+    expect(estado().task).toBe(2)
+    expect(tareaOk('dos.txt').status).toBe(0)
+    expect(existsSync(paqueteDeTarea(2))).toBe(false)
+    expect(commits()).toBe(3)
+  })
+
+  it('EL GEMELO DE SLICE: el descarte conserva el paquete y el veredicto aceptado lo gasta', () => {
+    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('global')
+    ct('next')
+    const antes = readFileSync(paqueteDeSlice(), 'utf8')
+
+    expect(ct('slice-verdict', crudo('ni json ni nada')).stdout).toMatch(/veredicto de slice descartado/)
+    expect(estado().step).toBe('slice-judge')
+    expect(existsSync(paqueteDeSlice())).toBe(true)
+    expect(readFileSync(paqueteDeSlice(), 'utf8')).toBe(antes)
+
+    // Repreguntado sin `next` (legítimo: el paso no cambió) y aceptado: entrega
+    // y se lleva su insumo.
+    const r = ct('slice-verdict', veredictoDeSlice('PASS'))
+    expect(r.status).toBe(0)
+    expect(estado().closed).toBe('delivered')
+    expect(existsSync(paqueteDeSlice())).toBe(false)
+  })
+
+  it('EL GEMELO DE SLICE: un FAIL también gasta el paquete — también es un veredicto leído', () => {
+    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('global')
+    const r = juzgarSlice(veredictoDeSlice('FAIL', [{ severity: 'high', what: 'la tarea 2 deshace la 1', path: 'uno.txt', line: 1 }]))
+    expect(r.status).toBe(1)                       // el veto de slice cierra el run
+    expect(existsSync(paqueteDeSlice())).toBe(false)
+  })
+})
+
 describe('el plan y el entorno', () => {
   it('un plan cuya verificación es prosa sale por 6, y ni siquiera dice qué despachar', () => {
     writeFileSync(join(repo, 'plan.md'), PLAN.replace(/```bash\ntest -f uno\.txt\n```/, ''))
