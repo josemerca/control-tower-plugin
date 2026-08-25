@@ -4,6 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { E2E_REQUIRED_BY_VERDICT } from '../scripts/step-contracts.js'
 
 const STEP = new URL('../scripts/ct-step.mjs', import.meta.url).pathname
 const A = 'el server escucha en 9115 por defecto y en el puerto indicado si se pasa'
@@ -219,15 +220,23 @@ describe('ct-step e2e', () => {
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 
-  it('`next` en el paso e2e dice qué se espera y cita el esquema', () => {
+  it('`next` en el paso e2e dice qué se espera y cita el esquema ENTERO (incluidos los campos por veredicto)', () => {
     const dir = worktreeEnE2e()
     try {
       const r = step(dir, ['next'])
       expect(r.status).toBe(0)
       expect(r.stdout).toMatch(/e2e/)
       expect(r.stdout).toContain(A)
-      expect(r.stdout).toMatch(/AGENTS\.md/)
+      // La sección de AGENTS.md se nombra, no se alude (§3.3 del diseño).
+      expect(r.stdout).toContain('## Cómo se atraviesa este repo (e2e)')
       expect(r.stdout).toMatch(/E2E_SCHEMA/)
+      // El contrato condicional, que es el que `readE2eReport` exige de verdad:
+      // anunciar sólo "run y verdict" costaba una vuelta de DISCARDED por
+      // slice. Se comprueba contra la MISMA tabla que valida, no contra una
+      // lista tecleada aquí — dos copias divergen.
+      for (const [veredicto, campos] of Object.entries(E2E_REQUIRED_BY_VERDICT)) {
+        expect(r.stdout, veredicto).toContain(`${veredicto}: ${campos.join(', ')}`)
+      }
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 

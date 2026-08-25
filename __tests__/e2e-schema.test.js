@@ -91,6 +91,46 @@ describe('readE2eReport', () => {
     }
   })
 
+  // §8.1 del diseño: la evidencia de un e2e es falsificable, y su ÚNICA
+  // mitigación declarada es que el comando sea REPRODUCIBLE por un humano
+  // ("una salida inventada se cae en cuanto alguien la pega"). Un verde que
+  // documenta el `curl` pero no cómo se puso el sistema en pie NO es
+  // reproducible: la mitigación se evaporaba justo en el camino que importa.
+  it('un verde sin `brought_up` → DISCARDED (sin cómo se levantó, la evidencia no es reproducible)', () => {
+    const sin = { ...verde(A) }
+    delete sin.brought_up
+    const r = readE2eReport({ runs: [sin] }, [A])
+    expect(r.outcome).toBe(OUTCOMES.DISCARDED)
+    expect(r.why).toContain('brought_up')
+  })
+
+  it('un rojo sin `brought_up` → DISCARDED, por el mismo motivo', () => {
+    const sin = { ...rojo(A) }
+    delete sin.brought_up
+    // DISCARDED y no FAILED: sin los campos que lo sostienen, la entrada no
+    // entra en `buenos`, así que no hay ningún rojo que pueda ganarle al mal
+    // formado. Es el mismo trato que ya recibía un rojo sin `expected`.
+    expect(readE2eReport({ runs: [sin] }, [A]).outcome).toBe(OUTCOMES.DISCARDED)
+  })
+
+  // Y NO se exige en no-verificado, que no es una excepción caprichosa: el
+  // motivo típico de ese veredicto es precisamente que no se pudo levantar.
+  it('un no-verificado sin `brought_up` sigue siendo válido', () => {
+    expect(readE2eReport({ runs: [sinVerificar(A)] }, [A]).outcome).toBe(OUTCOMES.DONE)
+  })
+
+  // Dos celdas idénticas son el MISMO recorrido. Sin deduplicar, `find`
+  // devolvía la misma entrada para las dos y `buenos` la duplicaba —y con ella
+  // el apartado del markdown que viaja en la pull request—, mientras que
+  // mandar dos entradas iguales hacía caer la segunda en "una entrada que esta
+  // slice no declara": el informe no tenía ninguna forma correcta de
+  // escribirse.
+  it('el mismo recorrido declarado dos veces se colapsa: una entrada basta, y no se duplica en `runs`', () => {
+    const r = readE2eReport({ runs: [verde(A)] }, [A, A])
+    expect(r.outcome).toBe(OUTCOMES.DONE)
+    expect(r.runs).toHaveLength(1)
+  })
+
   it('EL ROJO GANA AL MAL FORMADO', () => {
     // Un rojo dice algo del PRODUCTO; un formato roto, del informe. Emitiendo
     // el descarte primero, el agente arreglaría el formato, reintentaría y sólo

@@ -166,9 +166,42 @@ export const REPORT_SCHEMA = Object.freeze({
 
 export const E2E_VERDICTS = ['verde', 'rojo', 'no-verificado']
 
+// E2E_REQUIRED_BY_VERDICT: lo que cada veredicto exige ADEMÁS de `run` y
+// `verdict`. Vive aquí, exportado y en un solo sitio, porque lo consumen DOS:
+// `readE2eReport` (más abajo, que valida contra esta tabla) y
+// `ct-step.mjs#verboNext` (que se lo dice al agente antes de que escriba el
+// informe). Hasta la review final de rama sólo existía dentro de las ramas de
+// `readE2eReport`, y `next` anunciaba únicamente `run` y `verdict`: el
+// programa instruía al agente con un contrato que él mismo rechazaba, y cada
+// slice pagaba al menos una vuelta de DISCARDED — que además sale del
+// presupuesto de descartes de la slice entera (MAX_DISCARDS).
+//
+// `brought_up` es obligatorio en `verde` y en `rojo` (§8.1 del diseño). La
+// evidencia de un informe de e2e es falsificable y el diseño lo dice; su ÚNICA
+// mitigación es que el comando sea REPRODUCIBLE por un humano ("una salida
+// inventada se cae en cuanto alguien la pega"). Un verde que documenta el
+// `curl` pero no cómo se puso el sistema en pie NO es reproducible, así que la
+// mitigación se evaporaba justo en el camino que importa. En `no-verificado`
+// no se exige, y no es una excepción caprichosa: el motivo típico de ese
+// veredicto es precisamente que no se pudo levantar.
+export const E2E_REQUIRED_BY_VERDICT = Object.freeze({
+  verde: Object.freeze(['brought_up', 'evidence']),
+  rojo: Object.freeze(['brought_up', 'expected', 'actual', 'repro', 'refuted_by']),
+  // El formato de `blocked` (state.js), no el campo: "por qué" y "qué haría
+  // falta". Sin las dos, un no-verificado es un encogimiento de hombros que
+  // libera el slice sin dejar a nadie sabiendo qué arreglar.
+  'no-verificado': Object.freeze(['reason', 'unblock']),
+})
+
 // E2E_SCHEMA: lo que se le pide al agente que atraviesa. Declarativo y
 // exportado por el mismo motivo que VERDICT_SCHEMA: el prompt lo cita, y dos
 // copias a mano de la misma forma divergen (pasó con JUDGE_TOOLS).
+//
+// `required` es lo que lleva TODA entrada; lo condicional viaja en
+// `requiredByVerdict` (la misma constante de arriba, no una copia) porque el
+// validador es a mano y una tabla se lee mejor que un `if/then/else` de JSON
+// Schema. Que esté DENTRO del esquema importa: quien lo cite —el prompt, el
+// `next`— se lleva el contrato entero, no la mitad incondicional.
 export const E2E_SCHEMA = Object.freeze({
   type: 'object',
   additionalProperties: false,
@@ -180,6 +213,7 @@ export const E2E_SCHEMA = Object.freeze({
         type: 'object',
         additionalProperties: false,
         required: ['run', 'verdict'],
+        requiredByVerdict: E2E_REQUIRED_BY_VERDICT,
         properties: {
           run: { type: 'string' },
           verdict: { enum: E2E_VERDICTS },
@@ -339,8 +373,24 @@ export function readReport(structured) {
 // LO QUE NO COMPRUEBA: que la salida sea real. Ver la cabecera del test.
 const colapsa = (s) => String(s || '').replace(/\s+/g, ' ').trim()
 
+// nombraCampo: el nombre del campo tal cual va en el JSON, con la aclaración
+// que hace falta cuando el nombre solo no basta. `evidence` es el único caso:
+// una lista vacía —o con pares a los que les falta el comando o la salida— es
+// tan insuficiente como no ponerla, y decir sólo "falta `evidence`" mandaría a
+// un agente que YA la puso a mirar dónde no está el problema.
+const nombraCampo = (campo) => (campo === 'evidence' ? '`evidence` (al menos un par comando/salida, los dos con texto)' : `\`${campo}\``)
+const tieneEvidencia = (e) => (Array.isArray(e.evidence) ? e.evidence.filter((x) => x && esTexto(x.command) && esTexto(x.output)) : []).length > 0
+
 export function readE2eReport(structured, declaredRuns) {
-  const declared = (declaredRuns || []).map(colapsa).filter(Boolean)
+  // Los recorridos declarados se DEDUPLICAN. Dos celdas idénticas son el mismo
+  // recorrido, y sin esto el informe no tenía ninguna forma correcta de
+  // escribirse: `find` devolvía la MISMA entrada para las dos, `buenos` la
+  // duplicaba (y con ella el apartado en docs/superpowers/e2e/<issue>.md),
+  // mientras que mandar dos entradas iguales hacía que la segunda cayera en
+  // "una entrada que esta slice no declara". Un recorrido repetido no es una
+  // contradicción que haya que rechazar —es una redundancia—, así que se
+  // colapsa en vez de abortar el paso.
+  const declared = [...new Set((declaredRuns || []).map(colapsa).filter(Boolean))]
   if (!structured || typeof structured !== 'object' || Array.isArray(structured)) {
     return { outcome: OUTCOMES.DISCARDED, why: 'el agente no devolvió structured_output' }
   }
@@ -358,29 +408,23 @@ export function readE2eReport(structured, declaredRuns) {
       problemas.push(`el recorrido "${run}" trae un veredicto desconocido: ${JSON.stringify(e.verdict)}`)
       continue
     }
-    if (e.verdict === 'verde') {
-      const ev = Array.isArray(e.evidence) ? e.evidence.filter((x) => x && esTexto(x.command) && esTexto(x.output)) : []
-      if (!ev.length) {
-        problemas.push(`el recorrido "${run}" se declara verde sin evidencia: hace falta al menos un par comando/salida`)
-        continue
-      }
-    }
-    if (e.verdict === 'no-verificado' && !(esTexto(e.reason) && esTexto(e.unblock))) {
-      // El formato de `blocked` (state.js), no el campo: "por qué" y "qué haría
-      // falta". Sin las dos, un no-verificado es un encogimiento de hombros que
-      // libera el slice sin dejar a nadie sabiendo qué arreglar.
-      problemas.push(`el recorrido "${run}" se declara no-verificado sin \`reason\` y \`unblock\``)
-      continue
-    }
-    // Mismo trato que `verde` (evidencia) y `no-verificado` (reason/unblock):
-    // un rojo es lo que bloquea la entrega, y sin los cuatro campos que la
-    // rúbrica del agente exige (`expected`, `actual`, `repro`, `refuted_by`)
-    // no hay con qué contrastarlo. Sin esta rama, un rojo a medias colaba
-    // "undefined" literal en `docs/superpowers/e2e/<issue>.md` — un artefacto
-    // de la pull request — porque `escribirInformeE2e` (ct-step.mjs) confía
-    // en que lo que llega aquí ya está validado y no vuelve a comprobar nada.
-    if (e.verdict === 'rojo' && !(esTexto(e.expected) && esTexto(e.actual) && esTexto(e.repro) && esTexto(e.refuted_by))) {
-      problemas.push(`el recorrido "${run}" se declara rojo sin los cuatro campos que lo sostienen (\`expected\`, \`actual\`, \`repro\`, \`refuted_by\`)`)
+    // Los tres veredictos se validan contra UNA tabla (E2E_REQUIRED_BY_VERDICT,
+    // arriba), no contra tres ramas escritas a mano — es la misma tabla que
+    // `ct-step next` le enseña al agente antes de escribir el informe, así que
+    // no pueden divergir. Sin ella divergieron: `next` anunciaba `run y
+    // verdict` y aquí se exigía además la evidencia, el motivo o los cuatro
+    // campos del rojo.
+    //
+    // Por qué cada veredicto exige lo suyo: un verde sin evidencia (ni cómo se
+    // levantó) es una afirmación sin nada detrás; un no-verificado sin `reason`
+    // y `unblock` es un encogimiento de hombros que libera el slice sin dejar a
+    // nadie sabiendo qué arreglar; y un rojo a medias colaba "undefined"
+    // literal en `docs/superpowers/e2e/<issue>.md` —un artefacto de la pull
+    // request— porque `escribirInformeE2e` (ct-step.mjs) confía en que lo que
+    // llega aquí ya está validado y no vuelve a comprobar nada.
+    const faltan = E2E_REQUIRED_BY_VERDICT[e.verdict].filter((campo) => (campo === 'evidence' ? !tieneEvidencia(e) : !esTexto(e[campo])))
+    if (faltan.length) {
+      problemas.push(`el recorrido "${run}" se declara ${e.verdict} sin ${faltan.map(nombraCampo).join(', ')}: ese veredicto no se sostiene sin eso. Añádelo al informe y vuelve a cerrar el paso con "ct-step e2e"`)
       continue
     }
     buenos.push(e)

@@ -378,8 +378,23 @@ function verboNext() {
       out('ATRAVIESA LA SLICE DE PUNTA A PUNTA (todas las tareas están comiteadas):')
       for (const r of run.e2eRuns) out(`  - ${r}`)
       out('')
-      out('El entorno para levantarla está en AGENTS.md ("Levantar" y "Listo cuando" de cada recorrido).')
-      out(`Escribe el informe cumpliendo E2E_SCHEMA (scripts/step-contracts.js: cada recorrido lleva ${E2E_SCHEMA.properties.runs.items.required.join(' y ')}) y ciérralo con:`)
+      // La sección se NOMBRA, no se alude. `GATES.e2e.kickoff` ya la nombra, y
+      // el §3.3 del diseño insiste en nombrarla también cuando falta ("con el
+      // nombre de la sección que falta. No se adivina"): éste es justo el
+      // momento en que el agente la necesita, y "está en AGENTS.md" lo manda a
+      // buscarla entre las de build/test/lint.
+      out('El entorno para levantarla está en la sección "## Cómo se atraviesa este repo (e2e)" de AGENTS.md ("Levantar" y "Listo cuando" de cada recorrido). Si esa sección no está rellenada, el veredicto es `no-verificado` con ese motivo: nunca rojo, y nunca inventarse cómo arrancarlo.')
+      // El contrato se dice ENTERO, y salido del mismo módulo que lo valida
+      // (E2E_SCHEMA/E2E_REQUIRED_BY_VERDICT, step-contracts.js). Anunciar sólo
+      // `run` y `verdict` —lo incondicional— era instruir al agente con un
+      // contrato que este mismo programa rechaza: costaba al menos una vuelta
+      // de DISCARDED por slice, y los descartes salen del presupuesto de la
+      // slice entera.
+      out(`Escribe el informe cumpliendo E2E_SCHEMA (scripts/step-contracts.js): cada recorrido lleva ${E2E_SCHEMA.properties.runs.items.required.join(' y ')}, y además, según su veredicto:`)
+      for (const [veredicto, campos] of Object.entries(E2E_SCHEMA.properties.runs.items.requiredByVerdict)) {
+        out(`  - ${veredicto}: ${campos.join(', ')}`)
+      }
+      out('Ciérralo con:')
       out(`  ct-step e2e <fichero.json> --plan ${planPath} --issue ${issue}`)
       break
     default:

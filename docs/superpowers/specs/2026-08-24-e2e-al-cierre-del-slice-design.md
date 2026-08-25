@@ -434,9 +434,25 @@ afirme verde lo que no se pudo correr.
 ```
 
 Lo que `readE2eReport` exige: una entrada por recorrido sembrado (ni una menos
-ni una de más), `run` **idéntico** al sembrado, `verdict` de los tres,
-`evidence` con al menos un par comando/salida si es `verde`, y `reason` +
-`unblock` si es `no-verificado` (el formato de `blocked`, no el campo — §5).
+ni una de más — dos celdas idénticas son el mismo recorrido y se colapsan en
+una), `run` **idéntico** al sembrado, `verdict` de los tres, y lo que ese
+veredicto pida, en una tabla (`E2E_REQUIRED_BY_VERDICT`) que es la MISMA que
+`ct-step next` le enseña al agente antes de que escriba el informe:
+
+| Veredicto | Además de `run` y `verdict` |
+|---|---|
+| `verde` | `brought_up`, `evidence` (al menos un par comando/salida) |
+| `rojo` | `brought_up`, `expected`, `actual`, `repro`, `refuted_by` |
+| `no-verificado` | `reason` + `unblock` (el formato de `blocked`, no el campo — §5) |
+
+**`brought_up` es obligatorio en `verde` y en `rojo`, y eso corrige una
+contradicción de este documento con su propio §8.1.** La versión anterior lo
+dejaba opcional, y el §8.1 defiende la feature entera con «se exige el comando
+**reproducible** por el humano: una salida inventada se cae en cuanto alguien
+la pega». Un verde que documenta el `curl` pero no cómo se puso el sistema en
+pie no es reproducible — la única mitigación declarada se evaporaba justo en el
+camino que importa. En `no-verificado` no se exige, y no es capricho: el motivo
+típico de ese veredicto es precisamente que no se pudo levantar.
 
 - Devuelve un `OUTCOME`, no un booleano: `DONE` si todo verde o
   verde+no-verificado, `FAILED` si algún rojo, `DISCARDED` si el JSON no se
