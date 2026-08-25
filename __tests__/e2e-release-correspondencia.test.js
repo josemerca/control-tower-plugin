@@ -76,7 +76,7 @@ const planDeUnaTarea = (issue = 9) => [
 // el caso feliz) de "me han dado closed: undefined a propósito" (→ se omite
 // la clave del JSON, que es como luce un run que ct-step nunca cerró).
 function repo(opts = {}) {
-  const { e2eRuns = [A], contaminaEstado = false } = opts
+  const { e2eRuns = [A], contaminaEstado = false, e2eResults } = opts
   const closed = 'closed' in opts ? opts.closed : 'delivered'
   const dir = mkdtempSync(join(tmpdir(), 'ct-rel-corr-'))
   const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' })
@@ -100,6 +100,10 @@ function repo(opts = {}) {
     e2eRuns,
   }
   if (closed !== undefined) run.closed = closed
+  // `e2eResults` sólo se escribe si el test lo pide: un run de una versión
+  // anterior a la review final de rama no lo lleva, y esa ausencia también hay
+  // que poder probarla.
+  if (e2eResults !== undefined) run.e2eResults = e2eResults
   writeFileSync(join(dir, '.agent', 'run-9.json'), JSON.stringify(run, null, 2))
   return dir
 }
@@ -184,6 +188,47 @@ describe('--release: correspondencia entre el run y el issue', () => {
     const dir = repo({ e2eRuns: [], contaminaEstado: true })
     try {
       expect(release(dir, { body: cuerpo([A]) }).status).toBe(5)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  // ==========================================================================
+  // LOS *NO-VERIFICADOS*, DICHOS (review final de rama, Importante 3).
+  //
+  // Hasta esta ronda el run persistía sólo los NOMBRES de los recorridos, así
+  // que esta puerta no distinguía un slice verde de otro cuyos recorridos
+  // fueron todos "no-verificado" — y tres textos (run-machine.js#trasElE2e,
+  // gates.js#GATES.e2e.issue y el §3.7 del diseño) prometían que --release "lo
+  // dice". Es el estado que libera un slice SIN haberlo verificado: que sea
+  // silencioso en la puerta es lo contrario de "un límite dicho es operable".
+  // ==========================================================================
+  it('un recorrido "no-verificado" en el run entregado → libera, y el aviso lo nombra con su motivo', () => {
+    const dir = repo({ e2eResults: [{ run: A, verdict: 'no-verificado', reason: 'el docker de staging no arranca en esta máquina' }] })
+    try {
+      const r = release(dir, { body: cuerpo([A]) })
+      expect(r.status).toBe(0)
+      expect(r.stdout).toMatch(/released #9/)
+      expect(r.stderr).toMatch(/aviso:/)
+      expect(r.stderr).toContain(A)
+      expect(r.stderr).toContain('el docker de staging no arranca en esta máquina')
+      expect(r.stderr).toMatch(/NO se pudieron comprobar/)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('todos los recorridos en verde → libera sin ningún aviso de no-verificado', () => {
+    const dir = repo({ e2eResults: [{ run: A, verdict: 'verde' }] })
+    try {
+      const r = release(dir, { body: cuerpo([A]) })
+      expect(r.status).toBe(0)
+      expect(r.stderr).not.toMatch(/NO se pudieron comprobar/)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('un run sin `e2eResults` (versión anterior) → libera y no se inventa ningún veredicto', () => {
+    const dir = repo()
+    try {
+      const r = release(dir, { body: cuerpo([A]) })
+      expect(r.status).toBe(0)
+      expect(r.stderr).not.toMatch(/NO se pudieron comprobar/)
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 

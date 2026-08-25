@@ -824,7 +824,30 @@ function verboE2e() {
     return outcome
   }
   escribirInformeE2e(runs)
-  for (const r of runs) out(`${r.verdict === 'verde' ? 'verde' : r.verdict}: ${r.run}`)
+  // El veredicto de cada recorrido se PERSISTE en el run. Hasta la review
+  // final de rama, `run-<issue>.json` guardaba sólo los NOMBRES (`e2eRuns`,
+  // los sembrados), así que la puerta 8 de `dispatch-check --release` no podía
+  // distinguir un slice verde de otro cuyos recorridos fueron todos
+  // "no-verificado" — y tres textos (este fichero, gates.js#GATES.e2e.issue y
+  // el §3.7 del diseño) prometían que --release "lo dice". *No-verificado* es
+  // el estado que libera un slice SIN haberlo verificado: que sea silencioso
+  // en la puerta es lo contrario de la doctrina de esta rama, "un límite dicho
+  // es operable".
+  //
+  // La forma es la mínima que sostiene ese aviso: recorrido -> veredicto, más
+  // el `reason` cuando lo hay (sólo el *no-verificado* lo lleva). Ni la
+  // evidencia ni los cuatro campos del rojo: eso ya está entero en
+  // `docs/superpowers/e2e/<issue>.md`, que sí viaja en la pull request.
+  // `deliveredRun` no se entera de nada: lee `issue` y `closed`, y un campo
+  // más en el JSON no le cambia ninguna respuesta.
+  run = {
+    ...run,
+    // `reason` sólo cuando lo hay: `readE2eReport` ya ha exigido que sea texto
+    // no vacío en el único veredicto que lo lleva (*no-verificado*), así que
+    // aquí basta con mirar si está.
+    e2eResults: runs.map((r) => (r.reason ? { run: r.run, verdict: r.verdict, reason: r.reason } : { run: r.run, verdict: r.verdict })),
+  }
+  for (const r of runs) out(`${r.verdict}: ${r.run}`)
   return outcome
 }
 

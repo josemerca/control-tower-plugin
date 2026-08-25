@@ -139,6 +139,32 @@ describe('ct-step e2e', () => {
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 
+  // El veredicto de cada recorrido se PERSISTE (review final de rama): sin él,
+  // la puerta 8 de `dispatch-check --release` no puede distinguir un slice
+  // verde de otro cuyos recorridos fueron todos "no-verificado" — y tres
+  // textos prometían que --release "lo dice". La forma es la mínima que
+  // sostiene ese aviso: recorrido -> veredicto, más `reason` donde lo hay.
+  it('el run persiste el veredicto de cada recorrido, con su motivo cuando es no-verificado', () => {
+    const dir = worktreeEnE2e()
+    try {
+      const SIN_VERIFICAR = { runs: [{ run: A, verdict: 'no-verificado', reason: 'la sección de AGENTS.md está sin rellenar', unblock: 'rellenar "Levantar" y "Listo cuando"' }] }
+      const r = step(dir, ['e2e', informe(dir, SIN_VERIFICAR)])
+      expect(r.status).toBe(0) // el no-verificado ENTREGA
+      const run = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))
+      expect(run.closed).toBe('delivered')
+      expect(run.e2eResults).toEqual([{ run: A, verdict: 'no-verificado', reason: 'la sección de AGENTS.md está sin rellenar' }])
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('en verde, el veredicto persistido no lleva `reason` (no hay motivo que dar)', () => {
+    const dir = worktreeEnE2e()
+    try {
+      expect(step(dir, ['e2e', informe(dir, VERDE)]).status).toBe(0)
+      const run = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))
+      expect(run.e2eResults).toEqual([{ run: A, verdict: 'verde' }])
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
   it('en rojo: exit 7, run blocked-e2e, NO delivered, y el informe STAGEADO pero NO comiteado', () => {
     const dir = worktreeEnE2e()
     try {

@@ -584,13 +584,13 @@ if (release) {
     dieErr(`no se libera #${issue}: no se ha podido leer el cuerpo del issue (\`gh issue view --json body\` falló) — no se afirma que no declare recorridos, solo que no se ha podido comprobar. Reintenta cuando \`gh\` responda; el issue sigue en status:in-progress: no se ha movido nada.`, 8)
   }
   const recorridos = extractE2eRuns(bodyRaw)
+  // `deliveredRun` devuelve {ok, why}, no el run parseado — se relee aquí, de
+  // forma que no pueda LANZAR ante un fichero corrupto: un JSON inválido se
+  // trata como "cero recorridos declarados" (fail hacia el exit 8, no hacia un
+  // crash: un gate que revienta no es un gate).
+  let run = null
+  try { run = JSON.parse(runRaw) } catch { run = null }
   if (recorridos.length) {
-    // `deliveredRun` devuelve {ok, why}, no el run parseado — se relee aquí,
-    // de forma que no pueda LANZAR ante un fichero corrupto: un JSON inválido
-    // se trata como "cero recorridos declarados" (fail hacia el exit 8, no
-    // hacia un crash: un gate que revienta no es un gate).
-    let run = null
-    try { run = JSON.parse(runRaw) } catch { run = null }
     const declarados = new Set(Array.isArray(run?.e2eRuns) ? run.e2eRuns : [])
     const faltan = recorridos.filter((r) => !declarados.has(r))
     if (faltan.length) {
@@ -606,6 +606,29 @@ if (release) {
     if (labels.includes('gate:e2e')) {
       errLine(`aviso: #${issue} lleva la label gate:e2e pero su cuerpo no declara ninguna sección "${E2E_HEADING}" — no hay recorridos que verificar, así que se libera igual, pero conviene revisar si la sección se perdió al editar el issue a mano.`)
     }
+  }
+  // LOS *NO-VERIFICADOS*, DICHOS. Es el estado que libera un slice SIN haberlo
+  // comprobado —un docker que no arranca, una credencial caducada, la sección
+  // de AGENTS.md sin rellenar—, y entrega a propósito: retenerlo dejaría el
+  // slice en status:in-progress ocupando `area:`/`touches:` y una plaza de
+  // `--cap` sin nadie trabajando, el modo de fallo que F13 y F18 quitaron. Lo
+  // que no puede ser es que además sea SILENCIOSO: tres textos de esta rama
+  // (run-machine.js#trasElE2e, gates.js#GATES.e2e.issue y el §3.7 del diseño)
+  // prometen que --release "lo dice", y hasta la review final de rama no lo
+  // decía nadie — el run sólo persistía los NOMBRES de los recorridos, así que
+  // esta puerta no distinguía un slice verde de otro con todos sus recorridos
+  // sin verificar. `ct-step` persiste ahora el veredicto de cada uno
+  // (`e2eResults`), y aquí se leen.
+  //
+  // Va DESPUÉS de la puerta de correspondencia y ANTES de mutar: si el release
+  // no va a ocurrir, este aviso sería ruido sobre una decisión que ya se tomó.
+  // Se lee del run (no del issue) porque el veredicto es del run: el issue no
+  // dice nada sobre cómo fue la travesía. Y no gatea nada — es diagnóstico por
+  // stderr, la doctrina de siempre: stdout es el producto, stderr el porqué.
+  const sinVerificar = (Array.isArray(run?.e2eResults) ? run.e2eResults : []).filter((r) => r && r.verdict === 'no-verificado')
+  if (sinVerificar.length) {
+    const detalle = sinVerificar.map((r) => `"${r.run}" (${r.reason || 'sin motivo declarado en el informe'})`).join('; ')
+    errLine(`aviso: #${issue} se libera con ${sinVerificar.length} recorrido(s) que NO se pudieron comprobar: ${detalle}. Un "no-verificado" entrega a propósito (retener el slice por un entorno caído lo dejaría ocupando area:/touches: y una plaza de --cap sin nadie trabajando), pero libera SIN haber verificado eso: léelo antes de mergear. Si el motivo es del entorno, el arreglo va en la sección "## Cómo se atraviesa este repo (e2e)" de AGENTS.md, no en relajar la puerta. El informe completo está en docs/superpowers/e2e/${issue}.md.`)
   }
   if (!dryRun && !fx) {
     const result = setStatus(issue, 'status:in-progress', 'status:in-review')
