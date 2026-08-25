@@ -1,7 +1,7 @@
 // Lógica pura de grooming: de Slice[] (T1) a un plan de operaciones GitHub.
 import { isNoValueCell } from './slices.js'
 import { resolveGates, resolveE2e, gateLabels, renderGatesIssueContent } from './gates.js'
-import { locateSection, unterminatedDelimiter, normalizeToLF } from './gh-issue-map.js'
+import { locateSection, unterminatedDelimiter, normalizeToLF, E2E_HEADING } from './gh-issue-map.js'
 
 // GATES_HEADING (F21): la sección de gates del cuerpo del issue. Constante
 // exportada porque la nombran TRES sitios (este fichero al escribirla,
@@ -9,11 +9,15 @@ import { locateSection, unterminatedDelimiter, normalizeToLF } from './gh-issue-
 // tres sitios es una cabecera que acaba divergiendo en uno.
 export const GATES_HEADING = '## Gates'
 
-// E2E_HEADING: la sección de recorridos del cuerpo del issue. Constante
-// exportada por el mismo motivo que GATES_HEADING: la nombran quien la escribe
-// (buildIssueBody), quien detecta divergencia (reconcile.js) y quien la lee en
-// la puerta del release (dispatch-check.mjs). Tres consumidores, una fuente.
-export const E2E_HEADING = '## E2E'
+// E2E_HEADING (TAREA 9): ya NO se define aquí — vive en gh-issue-map.js,
+// junto a AC_HEADING_FORMS/DEPS_HEADING, porque ese fichero es quien ya
+// centraliza las cabeceras compartidas entre quien las ESCRIBE
+// (buildIssueBody, en este fichero) y quien las LEE (mapGhIssue, el
+// dispatcher real). Definirla aquí e importarla desde allí habría cerrado
+// un ciclo groom.js<->gh-issue-map.js por una constante de texto; se
+// importa y se RE-EXPORTA para que reconcile.js y sus tests, que la piden
+// `from './groom.js'`, no tengan que cambiar su import.
+export { E2E_HEADING }
 
 // renderE2eContent: los recorridos, uno por línea y VERBATIM. Verbatim porque
 // la puerta del release exige que el título de cada entrada del informe cite el

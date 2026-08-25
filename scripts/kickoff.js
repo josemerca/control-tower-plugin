@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { renderState } from './state.js'
-import { resolveGatesForAgent, renderGateKickoffLines } from './gates.js'
+import { resolveGatesForAgent, renderGateKickoffLines, resolveE2e } from './gates.js'
 // F22: el kickoff SOLO lo recibe un agente de slice, así que aquí no hay
 // ambigüedad que resolver — su fichero de estado es siempre `.agent/SLICE.md`.
 // Se importa la constante en vez de escribir la cadena a mano para que el día
@@ -197,6 +197,24 @@ function baseRefOf(base) {
     : 'la rama base de la que salió este worktree'
 }
 
+// resolveE2eRunsForAgent — TAREA 9: los recorridos, resueltos con el MISMO
+// criterio de dos fuentes que `resolveGatesForAgent` (justo arriba, F21) usa
+// para los gates: `mapGhIssue` (gh-issue-map.js) ya reconstruye el slice
+// desde el ISSUE — el dispatcher (/ct-next) no abre el spec — y allí extrae
+// la sección "## E2E" del body a un array, `slice.e2eRuns`. Cuando ese campo
+// está definido (el camino real de despacho) se usa tal cual; solo se cae a
+// `resolveE2e(slice.e2e).runs` —la celda cruda de la tabla §9, con comas
+// escapadas— cuando NO lo está, que es el camino de /ct-groom (lee el spec
+// directamente) o de un slice de test construido a mano.
+//
+// El resultado es SIEMPRE un array, nunca `undefined`: un slice sin
+// recorridos da `[]`, el mismo criterio que `blocked: null` en state.js — un
+// campo ausente sería indistinguible de una versión del plugin que todavía
+// no supiera rellenarlo.
+function resolveE2eRunsForAgent(slice) {
+  return slice.e2eRuns !== undefined ? slice.e2eRuns : resolveE2e(slice.e2e).runs
+}
+
 export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, base }) {
   const addendum = ADDENDA[slice.type] || ''
   // F21 — LOS GATES, POR FIN SEPARADOS DEL TIPO. `resolveGatesForAgent` (ver
@@ -206,6 +224,18 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, base
   // del bloque de cierre del PR, no al final: son la condición para que ese
   // cierre pueda ocurrir.
   const gateLines = renderGateKickoffLines(resolveGatesForAgent(slice))
+  // TAREA 9 — los recorridos, NOMBRADOS literalmente. `gateLines` ya dice
+  // "atraviesa los recorridos que trae la sección ## E2E de tu issue"
+  // (gates.js#GATES.e2e), así que aquí NO se repite esa prosa: solo se
+  // listan los recorridos tal cual y se los ata al comando que cierra el
+  // paso (`ct-step e2e`, que es el que ct-step.mjs espera — ver
+  // ct-step.mjs:221 y el brief de esta tarea). Cuando no hay ninguno, esta
+  // línea no se añade — ni una sección vacía ni un "no aplica": el .filter(Boolean)
+  // de más abajo la descarta.
+  const e2eRuns = resolveE2eRunsForAgent(slice)
+  const e2eLine = e2eRuns.length
+    ? `Recorridos e2e de este slice (ejecútalos tal cual, ni uno más ni uno menos): ${e2eRuns.map((r) => `"${r}"`).join('; ')}. Al terminarlos, cierra el paso con \`ct-step e2e\` — es el comando que registra el veredicto, no una descripción.`
+    : ''
   return [
     `Estás implementando UN slice (${slice.name}) del repo ${repo}, issue ${issueRefOf(slice)}${orderSuffixOf(slice)}.`,
     // F32 — las dos prohibiciones nuevas viven AQUÍ y no solo en los skills
@@ -260,6 +290,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, base
     `Con el plan commiteado y el gate 'plan' con OK humano, la implementación NO la conduces con subagent-driven-development ni con su ledger: la secuencia la dicta la máquina. Pregunta el paso con \`node ${ctStepPath} next --plan docs/superpowers/plans/<el-plan-que-commiteaste>.md --issue ${slice.n}\` y obedece LITERALMENTE lo que imprima en cada paso (donde diga \`ct-step\`, es \`node ${ctStepPath}\`): despacha el implementador como subagente con la rúbrica y el brief que te indique, luego \`ct-step report\`, \`ct-step controls\`, despacha el juez como subagente ct-judge (declarado sin Bash), \`ct-step verdict\` y \`ct-step commit\` — comitea ct-step, nunca tú ni el implementador. Vuelve a \`next\` tras cada paso hasta "run delivered".`,
     addendum,
     ...gateLines,
+    e2eLine,
     // W-C: el claim (status:ready → status:in-progress) lo hace /ct-next en
     // código, ANTES de crear este worktree — no por el prompt. El release
     // (in-progress → in-review) SÍ se deja aquí a propósito (decisión ya
@@ -383,6 +414,24 @@ export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
       // verdad por accidente; el gate ejecutable son las labels `gate:` del
       // issue.
       gates: renderStateGates(resolveGatesForAgent(slice)),
+      // e2e (TAREA 9) — los recorridos que declara la columna E2E del spec. A
+      // diferencia de `gates` (texto legible, y de la que su propio comentario
+      // de arriba avisa que "ningún código del plugin decide nada con este
+      // campo") ESTE campo SÍ lo lee un programa: `ct-step` lo necesita
+      // porque no habla con GitHub — lee esta semilla y lo pasa como
+      // `e2eRuns` a `newRun` (ct-step.mjs:221). Por eso es una LISTA y no una
+      // frase: un programa no analiza prosa.
+      //
+      // Y por eso mismo `dispatch-check --release` NO se fía de él: este
+      // fichero es agent-reachable (lo puede editar el propio agente
+      // despachado). La semilla es el canal de trabajo; la prueba de verdad
+      // se hace contra el issue (Tarea 10).
+      //
+      // Resuelto con `resolveE2eRunsForAgent` (arriba), que prefiere
+      // `slice.e2eRuns` — lo que trae el ISSUE, vía mapGhIssue — y solo cae a
+      // la celda cruda del spec cuando el slice no vino de un issue. Ausente
+      // o vacío da `[]`, nunca `undefined`.
+      e2e: resolveE2eRunsForAgent(slice),
       status: 'not_started',
       branch,
       base,
