@@ -332,9 +332,28 @@ if (!report.tableFound) {
     hardErrors.push(`${contradictoryGateRows.length} fila(s) de la tabla §9 piden y renuncian al MISMO gate en la columna "Gate" (ejemplo, slice #${first.n}: "${first.token}" y "!${first.token}") — no se elige un ganador en silencio sobre un gate humano: deja solo uno de los dos y vuelve a intentarlo`)
   }
 
-  // Las cuatro condiciones de abort de la columna E2E. Todas comparten forma
+  // Las CINCO condiciones de abort de la columna E2E. Todas comparten forma
   // con las dos de `Gate` (arriba) y con el mismo criterio: /ct-groom valida
   // TODO antes de escribir nada, y --dry-run comprueba exactamente lo mismo.
+  //
+  // La quinta (`e2eWaivedWithRunsRows`) llegó con la review final de rama, y
+  // corrige un juicio anterior de esa misma review que era FALSO. Se había
+  // dado por bueno que `Gate: !e2e` sobre una fila con recorridos era una
+  // configuración legítima que bastaba con avisar en voz alta
+  // (`e2eWaivedAdvisory`, ya borrado) porque "renunciaba al trabajo".
+  // Ejecutada la cadena entera con esa celda, no renuncia a NADA mecánico: la
+  // sección `## E2E` se sigue emitiendo en el issue (groom.js#buildIssueBody
+  // mira los recorridos, no los gates), el kickoff los sigue nombrando,
+  // /ct-next los sigue sembrando en `.agent/SLICE.md`, `ct-step` sigue
+  // entrando en `STEPS.E2E` y `--release` sigue exigiendo la
+  // correspondencia. Lo ÚNICO que se pierde es la label — o sea, la señal
+  // para el humano.
+  //
+  // Una renuncia que no renuncia a nada es una contradicción entre dos celdas
+  // de la misma fila, que es exactamente lo que las otras cuatro se niegan a
+  // resolver en silencio. Y no deja al autor sin salida: la forma de decir
+  // "este slice no tiene e2e" YA EXISTE y es la celda — se escribe `no`. Así
+  // que `!e2e` es redundante en el mejor caso y falso en el peor.
   //
   // Review round 2 (finding 2): las tres primeras versiones de estos mensajes
   // sólo nombraban la fila ("slice #N"), nunca lo que había escrito en la
@@ -350,6 +369,7 @@ if (!report.tableFound) {
   const e2eUndeclaredRows = []
   const e2eContradictoryRows = []
   const e2eGateWithoutRunsRows = []
+  const e2eWaivedWithRunsRows = []
   for (const s of report.slices) {
     const r = resolveE2e(s.e2e)
     // Sólo se exige decisión si la COLUMNA existe: un spec anterior a esta
@@ -359,6 +379,7 @@ if (!report.tableFound) {
     if (report.e2eColumnPresent && !r.declared) e2eUndeclaredRows.push({ n: s.n, cell: s.e2e })
     if (r.contradiction) e2eContradictoryRows.push({ n: s.n, cell: s.e2e })
     if (parseGateCell(s.gate).add.includes('e2e') && r.runs.length === 0) e2eGateWithoutRunsRows.push({ n: s.n, none: r.none, gateCell: s.gate, e2eCell: s.e2e })
+    if (parseGateCell(s.gate).waive.includes('e2e') && r.runs.length > 0) e2eWaivedWithRunsRows.push({ n: s.n, gateCell: s.gate, e2eCell: s.e2e })
   }
   if (e2eUndeclaredRows.length) {
     const first = e2eUndeclaredRows[0]
@@ -371,6 +392,10 @@ if (!report.tableFound) {
   if (e2eGateWithoutRunsRows.length) {
     const first = e2eGateWithoutRunsRows[0]
     hardErrors.push(`${e2eGateWithoutRunsRows.length} fila(s) de la tabla §9 declaran el gate "e2e" en la columna "Gate" pero su celda "E2E" ${first.none ? 'dice "no"' : 'está sin declarar'} (ejemplo, slice #${first.n}: Gate=${quoteCell(first.gateCell)}, E2E=${quoteCell(first.e2eCell)}) — nadie sabría qué atravesar. El gate "e2e" no se escribe a mano: se DERIVA de que la columna "E2E" traiga un recorrido. Quita el "e2e" de la columna "Gate" y escribe el recorrido en "E2E"`)
+  }
+  if (e2eWaivedWithRunsRows.length) {
+    const first = e2eWaivedWithRunsRows[0]
+    hardErrors.push(`${e2eWaivedWithRunsRows.length} fila(s) de la tabla §9 renuncian al gate "e2e" en la columna "Gate" pero su celda "E2E" declara recorridos (ejemplo, slice #${first.n}: Gate=${quoteCell(first.gateCell)}, E2E=${quoteCell(first.e2eCell)}) — esa renuncia no renuncia a nada: la sección "## E2E" del issue se emite igual, el kickoff nombra los recorridos igual, /ct-next los siembra igual en ".agent/SLICE.md", "ct-step" sigue exigiendo el paso "e2e" para entregar el run y "dispatch-check --release" sigue exigiendo la correspondencia. Lo único que se pierde es la label "gate:e2e", o sea la señal para quien revisa. Para retirar el e2e de esa fila escribe "no" en su celda "E2E": el gate se DERIVA de esa celda y no se puede renunciar desde la columna "Gate". Quita el "!e2e" de "Gate"`)
   }
 
   if (report.invalidDepRefs.length) {
@@ -508,25 +533,32 @@ function e2eAddedAdvisory(n) {
   return `aviso: el slice #${n} lleva el gate "e2e" porque su fila declara recorridos en la columna "E2E" (no en "Gate": ese gate no se declara ahí, se DERIVA) — se dice en voz alta porque cambia lo que hay que comprobar antes de mergear: el issue llevará la label "gate:e2e", el agente despachado recibirá la instrucción, y quien revise el PR tiene que cerrarlo`
 }
 
-// e2eRedundantAdvisory / e2eWaivedAdvisory / e2eInertWaiverAdvisory (review de
-// la adición 2, finding 1 y 2): los mismos "es deliberado (para eso está la
-// columna Gate)" / "que implica su Tipo" / "su Tipo no implica ese gate" son
-// FALSOS para `e2e` en `redundant`/`waived`/`inertWaivers`, exactamente por el
-// motivo que ya cerró `added` — y en el caso de `redundant`, la review
-// encontró que una fila con `Gate: e2e` MÁS recorridos reales imprime a la
-// vez `e2eAddedAdvisory` (correcta) y el mensaje genérico de `redundant`
-// (que dice "su Tipo ya implica" el gate): dos afirmaciones contradictorias
-// sobre el MISMO gate, tres líneas de stderr aparte. Ninguna de las tres
-// clasificaciones depende del `Tipo` para `e2e` — dependen de si la fila
-// declara recorridos en "E2E", así que los tres textos nombran esa columna.
+// e2eRedundantAdvisory / e2eInertWaiverAdvisory (review de la adición 2,
+// finding 1 y 2): los mismos "es deliberado (para eso está la columna Gate)" /
+// "su Tipo no implica ese gate" son FALSOS para `e2e` en
+// `redundant`/`inertWaivers`, exactamente por el motivo que ya cerró `added` —
+// y en el caso de `redundant`, la review encontró que una fila con `Gate: e2e`
+// MÁS recorridos reales imprime a la vez `e2eAddedAdvisory` (correcta) y el
+// mensaje genérico de `redundant` (que dice "su Tipo ya implica" el gate): dos
+// afirmaciones contradictorias sobre el MISMO gate, tres líneas de stderr
+// aparte. Ninguna de las dos clasificaciones depende del `Tipo` para `e2e` —
+// dependen de si la fila declara recorridos en "E2E", así que los dos textos
+// nombran esa columna.
+//
+// Había un tercero, `e2eWaivedAdvisory`, para `g.waived`. Se borró con el
+// quinto abort (arriba): `waived` sólo contiene `e2e` cuando la fila declara
+// recorridos —es la definición de `waived`: renuncia a algo IMPLICADO, y `e2e`
+// sólo se implica con recorridos— y ese caso ya no llega hasta aquí, porque
+// aborta. Aparte de inalcanzable, su texto afirmaba dos cosas falsas ("esos
+// recorridos NO se le pedirán al agente" y "nadie los atravesará antes de
+// mergear"): la renuncia no quitaba el trabajo, sólo la label.
+//
+// `e2eInertWaiverAdvisory` SÍ sobrevive, y no por inercia: `inertWaivers` es
+// la renuncia a un gate NO implicado, o sea `!e2e` sobre una fila SIN
+// recorridos (celda "no", o columna ausente). Eso no aborta —no hay ninguna
+// contradicción: no había e2e que quitar— y su texto ya decía exactamente eso.
 function e2eRedundantAdvisory(n, gateCell) {
   return `aviso: el slice #${n} declara el gate "e2e" (celda "Gate": "${gateCell}"), pero su fila YA lo lleva porque declara recorridos en la columna "E2E" — es redundante, no un error: el resultado es el mismo con la celda "Gate" vacía`
-}
-function e2eWaivedAdvisory(n, gateCell) {
-  // A diferencia del mensaje genérico de `waived`, este SÍ dice la
-  // consecuencia sin rodeos (pedido explícito de la review): la fila trae
-  // recorridos de verdad y la renuncia se los lleva por delante igual.
-  return `aviso: el slice #${n} RENUNCIA al gate "e2e" (celda "Gate": "${gateCell}"), pero su fila declara recorridos en la columna "E2E" — la renuncia se aplica igual: esos recorridos NO se le pedirán al agente, "gate:e2e" no aparecerá como label del issue, y nadie los atravesará antes de mergear. Si no era eso lo que querías, quita el "!" de esa celda`
 }
 function e2eInertWaiverAdvisory(n) {
   return `aviso: el slice #${n} renuncia al gate "e2e" con "!e2e" en la columna "Gate", pero su fila no declara recorridos en la columna "E2E": la renuncia no hace nada (no había nada que quitar). Se dice para que no te quedes con la idea de haber retirado un gate que nunca estuvo`
@@ -545,8 +577,11 @@ for (const s of report.slices) {
   // pase de los hardErrors (ver arriba), pero se comprueba igual para no
   // anunciar el mismo gate dos veces si alguna vez dejara de serlo.
   if (g.implied.includes('e2e') && !g.added.includes('e2e')) console.error(e2eAddedAdvisory(s.n))
+  // `e2e` no puede aparecer aquí: `waived` implica recorridos declarados, y esa
+  // fila aborta antes de llegar (quinto abort). Sin rama especial, entonces —
+  // el mensaje genérico habla del `Tipo`, y para `e2e` sería falso, pero no hay
+  // ninguna corrida que lo alcance.
   for (const gate of g.waived) {
-    if (gate === 'e2e') { console.error(e2eWaivedAdvisory(s.n, s.gate)); continue }
     console.error(`aviso: el slice #${s.n} RENUNCIA al gate "${gate}" que implica su Tipo ${typeRef} (celda "Gate": "${s.gate}") — ese gate NO se le pedirá al agente, no aparecerá como label del issue y nadie lo comprobará antes de mergear. Si no era eso lo que querías, quita el "!" de esa celda`)
   }
   for (const gate of g.inertWaivers) {
@@ -705,6 +740,7 @@ function bodyDriftCategories(diff, bodyResult) {
   if ((diff.deps.missing.length || diff.deps.extra.length) && !bodyResult.unresolvedDeps) cats.push('dependencias')
   if ((diff.ac.missing.length || diff.ac.extra.length) && !bodyResult.unresolvedAc) cats.push('criterios de aceptación')
   if (diff.epicContextDiffers && !bodyResult.unresolvedEpicContext) cats.push('contexto del epic')
+  if (diff.e2eDiffers && !bodyResult.unresolvedE2e) cats.push('recorridos de e2e')
   return cats
 }
 
@@ -738,7 +774,7 @@ const EPIC_CONTEXT_SURRENDERS = {
 // esta misma divergencia salía 0 en silencio bajo --reconcile.
 //
 // GAP_REASONS (review final de rama, C2): el motivo exacto lo decide
-// buildReconcileBody (`unresolvedReasons`), no este fichero. Antes había una
+// buildReconcileBody (`unresolvedReasons`/`unresolvedE2e`), no este fichero. Antes había una
 // sola frase por categoría —"no se encontró la sección"— que era cierta para
 // el caso original y dejó de serlo en cuanto aparecieron los otros dos: una
 // sección DUPLICADA sí se encuentra (el problema es que hay dos y ninguna se
@@ -758,12 +794,28 @@ const GAP_REASONS = {
     'ancla-en-heredado': 'no existe la sección "## Dependencias" y la única "## Out of scope / Protected" del body está DENTRO de "## Contexto heredado", así que anclar la inserción ahí escribiría dentro del texto de la sesión coordinadora',
     'zona-sin-fin': 'no se puede saber dónde termina "## Contexto heredado" en este body: su cabecera está, pero "## Acceptance criteria" —la cabecera que la sigue siempre, y que marca el final de esa zona— no aparece exactamente una vez. Sin ese límite no se distingue qué hay por detrás que sea del issue y qué escribió la sesión coordinadora, así que no se escribe nada ahí. Restaura (o desduplica) "## Acceptance criteria" y vuelve a correr',
   },
+  // La sección "## E2E" se rinde por las mismas causas que "## Dependencias"
+  // (mismo ancla de inserción, misma zona prohibida), así que el vocabulario de
+  // motivos es el mismo. Lo que cambia es la CONSECUENCIA que se nombra: de
+  // esta sección salen los recorridos que /ct-next siembra y los que --release
+  // exige, así que "no se pudo escribir" significa que el slice va a atravesar
+  // otra cosa (o nada), no un desajuste cosmético.
+  e2e: {
+    'sin-seccion': 'no se encontró la sección "## E2E" en el body y tampoco "## Out of scope / Protected", que es el único ancla seguro para insertarla',
+    duplicada: 'la sección "## E2E" aparece más de una vez y no hay forma de saber cuál copia es la del plugin — puede ser texto pegado dentro de "## Contexto heredado"',
+    'sin-ancla': 'no existe la sección "## E2E" y tampoco "## Out of scope / Protected", que es el único ancla seguro para insertarla',
+    'ancla-duplicada': 'no existe la sección "## E2E" y su ancla ("## Out of scope / Protected") aparece más de una vez, así que insertarla ahí podría escribir dentro de texto ajeno',
+    'en-heredado': 'la única "## E2E" del body está DENTRO de "## Contexto heredado" — es texto pegado por la sesión coordinadora, que no se toca nunca. Tampoco se añade una segunda copia más abajo: /ct-next y --release leen la PRIMERA, o sea la de ella. Saca ese bloque de la sección heredada (o quítale la cabecera) y vuelve a correr',
+    'ancla-en-heredado': 'no existe la sección "## E2E" y la única "## Out of scope / Protected" del body está DENTRO de "## Contexto heredado", así que anclar la inserción ahí escribiría dentro del texto de la sesión coordinadora',
+    'zona-sin-fin': 'no se puede saber dónde termina "## Contexto heredado" en este body: su cabecera está, pero "## Acceptance criteria" —la cabecera que la sigue siempre, y que marca el final de esa zona— no aparece exactamente una vez. Sin ese límite no se distingue qué hay por detrás que sea del issue y qué escribió la sesión coordinadora, así que no se escribe nada ahí. Restaura (o desduplica) "## Acceptance criteria" y vuelve a correr',
+  },
 }
 function describeGaps(gaps, bodyResult) {
   const reasons = bodyResult.unresolvedReasons || {}
   const parts = []
   if (gaps.ac) parts.push(`criterios de aceptación (${GAP_REASONS.ac[reasons.ac] ?? GAP_REASONS.ac['sin-seccion']})`)
   if (gaps.deps) parts.push(`dependencias (${GAP_REASONS.deps[reasons.deps] ?? GAP_REASONS.deps['sin-seccion']})`)
+  if (gaps.e2e) parts.push(`recorridos de e2e (${GAP_REASONS.e2e[bodyResult.unresolvedE2e] ?? GAP_REASONS.e2e['sin-seccion']})`)
   if (gaps.duplicates) parts.push('secciones duplicadas (## Dependencias/## Acceptance criteria — --reconcile no decide cuál copia es la correcta: une o borra la sobrante a mano)')
   return parts.join(' y ')
 }

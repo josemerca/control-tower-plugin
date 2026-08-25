@@ -1,5 +1,5 @@
 // ============================================================================
-// Las cuatro condiciones de abort de la columna E2E. Las cuatro son la misma
+// Las CINCO condiciones de abort de la columna E2E. Las cinco son la misma
 // familia: el spec dice dos cosas incompatibles sobre la MISMA fila, y no se
 // elige un ganador en silencio.
 //
@@ -101,6 +101,25 @@ describe('aborts de la columna E2E', () => {
     expect(r.stderr).toMatch(/e2e/)
   })
 
+  // El quinto abort (review final de rama). Antes de ella esto era un AVISO,
+  // sobre la premisa —falsa, verificada ejecutando la cadena— de que la
+  // renuncia se llevaba por delante el trabajo. No se lleva nada: la sección
+  // "## E2E" se emite igual, /ct-next siembra igual, ct-step exige igual el
+  // paso y --release exige igual la correspondencia. Lo único que la renuncia
+  // quita es la label, o sea la señal para el humano — y una renuncia que no
+  // renuncia a nada es la misma contradicción entre dos celdas que los otros
+  // cuatro aborts se niegan a resolver en silencio.
+  it('Gate: !e2e sobre una fila con recorridos aborta, y manda a la celda "E2E"', () => {
+    const r = groom('!e2e', 'curl -i :9115/metrics responde 200')
+    expect(r.status).toBe(2)
+    expect(r.stderr).toMatch(/#1/)
+    expect(r.stderr).toMatch(/celda "E2E" declara recorridos/)
+    // El remedio es la celda, no la columna "Gate": el gate se DERIVA de ahí.
+    expect(r.stderr).toMatch(/escribe "no" en su celda "E2E"/)
+    // Y aborta ANTES de imprimir el plan, como los otros cuatro.
+    expect(r.stdout.trim()).toBe('')
+  })
+
   it('celda `no` sin nada más NO aborta', () => {
     const r = groom('–', 'no')
     expect(r.status).toBe(0)
@@ -123,7 +142,7 @@ describe('aborts de la columna E2E', () => {
 //
 // Y tiene que nombrar la columna correcta: el mensaje genérico de "added"
 // dice "es deliberado (para eso está la columna Gate)", que aquí es FALSO —
-// declarar "e2e" a mano en "Gate" es uno de los cuatro aborts de arriba. Un
+// declarar "e2e" a mano en "Gate" es uno de los cinco aborts de arriba. Un
 // aviso que manda al autor a la columna equivocada es peor que ninguno.
 // ============================================================================
 describe('el gate "e2e" se anuncia por stderr, y nombra la columna correcta', () => {
@@ -146,7 +165,7 @@ describe('el gate "e2e" se anuncia por stderr, y nombra la columna correcta', ()
 })
 
 // ============================================================================
-// Review de la adición 2: `redundant`/`waived`/`inertWaivers` también
+// Review de la adición 2: `redundant`/`inertWaivers` también
 // atribuían el gate "e2e" al `Tipo` ("que su Tipo ... implica/ya implica/no
 // implica ese gate"), que es FALSO exactamente por el mismo motivo que
 // "added" — `e2e` no vive en TYPE_GATES, nunca lo implica ningún Tipo: lo
@@ -157,7 +176,9 @@ describe('el gate "e2e" se anuncia por stderr, y nombra la columna correcta', ()
 // que decía "su Tipo ya implica" el gate: dos afirmaciones sobre el MISMO
 // gate que se contradecían tres líneas aparte.
 // ============================================================================
-describe('review adición 2 — redundant/waived/inertWaivers también nombran "E2E", no "Tipo"', () => {
+// (`waived` ya no tiene caso: con recorridos declarados, `!e2e` aborta — ver
+// el quinto abort de arriba —, y sin ellos la renuncia cae en `inertWaivers`.)
+describe('review adición 2 — redundant/inertWaivers también nombran "E2E", no "Tipo"', () => {
   it('Gate: e2e + recorridos reales: no aborta, y "redundante" ya no contradice al aviso de arriba', () => {
     const r = groom('e2e', 'curl -i :9115/metrics responde 200')
     expect(r.status).toBe(0)
@@ -174,17 +195,6 @@ describe('review adición 2 — redundant/waived/inertWaivers también nombran "
     for (const line of e2eLines) expect(line).toMatch(/columna "E2E"/)
     const plan = JSON.parse(r.stdout)
     expect(plan.issues[0].labels).toContain('gate:e2e')
-  })
-
-  it('Gate: !e2e + recorridos reales: la renuncia nombra "E2E" y dice la consecuencia sin rodeos', () => {
-    const r = groom('!e2e', 'curl -i :9115/metrics responde 200')
-    expect(r.status).toBe(0)
-    expect(r.stderr).toMatch(/RENUNCIA/)
-    expect(r.stderr).toMatch(/columna "E2E"/)
-    expect(r.stderr).not.toMatch(/implica su Tipo/)
-    expect(r.stderr).toMatch(/no se le pedirán al agente|NO se le pedirán al agente/)
-    const plan = JSON.parse(r.stdout)
-    expect(plan.issues[0].labels).not.toContain('gate:e2e')
   })
 
   it('Gate: !e2e + sin recorridos: la renuncia inerte nombra "E2E", no "Tipo"', () => {

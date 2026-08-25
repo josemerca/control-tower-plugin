@@ -380,14 +380,30 @@ afirme verde lo que no se pudo correr.
   `## Gates`, «este slice no tiene e2e» no es una afirmación que quien abre el
   PR necesite leer — la ausencia de la sección ya lo dice, y emitirla vacía en
   el 75% de los issues es ruido.
-- **Aborta** (sin escribir nada), nombrando la fila, en cuatro casos: la
+- **Aborta** (sin escribir nada), nombrando la fila, en cinco casos: la
   columna `E2E` existe y una celda está sin declarar (§2.2); la celda dice `no`
-  y además trae un recorrido; `Gate` trae el token `e2e` y la celda dice `no`; y
-  `Gate` trae `e2e` con la celda sin declarar. Los cuatro son la misma familia:
-  el spec dice dos cosas incompatibles sobre la misma fila.
+  y además trae un recorrido; `Gate` trae el token `e2e` y la celda dice `no`;
+  `Gate` trae `e2e` con la celda sin declarar; y `Gate` trae `!e2e` sobre una
+  fila que sí declara recorridos. Los cinco son la misma familia: el spec dice
+  dos cosas incompatibles sobre la misma fila.
+  El quinto se añadió en la review final de rama, corrigiendo un juicio
+  anterior de esa misma review que lo había dejado como aviso: `!e2e` **no
+  renuncia a nada mecánico**. La sección `## E2E` se emite igual, el kickoff los
+  nombra igual, `/ct-next` los siembra igual, `ct-step` sigue exigiendo el paso
+  y `--release` sigue exigiendo la correspondencia; lo único que la renuncia
+  quita es la label, o sea la señal para el humano. Y la forma de decir «este
+  slice no tiene e2e» ya existe y es la celda: se escribe `no`.
 - `--dry-run` valida exactamente lo mismo.
 - `--reconcile` detecta divergencia de la sección `## E2E` como ya hace con las
-  demás, y **no la aplica** sin el flag.
+  demás, y **no la aplica** sin el flag. Con el flag **sí la reescribe** (o la
+  inserta, o la retira), y la divergencia **cuenta para el exit code** — al
+  revés que `## Gates`. El motivo lo fija la review final de rama: el camino de
+  adopción de toda la feature es "epic ya groomeado + columna `E2E` nueva +
+  `--reconcile`", y sin escribir la sección ese camino producía un issue con la
+  label `gate:e2e` y sin recorridos, que es el estado divergente que el §4.6
+  describe como "alguien editó el issue a mano". El derecho de edición humana
+  que protege a Descripción/Protegido no aplica: el §3.3 exige que el recorrido
+  no sea editable sin pasar por la Puerta 1.
 
 ### 4.4 El kickoff y la semilla
 
