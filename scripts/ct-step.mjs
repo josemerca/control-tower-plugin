@@ -180,6 +180,11 @@ if (problems.length) {
   process.exit(EXIT.PLAN_NOT_EXECUTABLE)
 }
 
+// Los pasos que son de la SLICE y no de ninguna tarea. A nivel de módulo
+// porque no es sólo del cruce de commits de abajo: el mismo concepto lo
+// necesita la telemetría, y escrito dos veces divergiría.
+const PASOS_DE_SLICE = [STEPS.GLOBAL, STEPS.SLICE_JUDGE, STEPS.E2E]
+
 // ---------------------------------------------------------------------------
 // El estado del run
 // ---------------------------------------------------------------------------
@@ -220,8 +225,21 @@ if (existsSync(stateFile)) {
   // enteros. Son pasos de la SLICE, no de una tarea. Sin esta rama, cada verbo
   // de esas fases (proceso nuevo, sin estado en memoria) muere aquí en
   // PRECONDITION antes de llegar a ejecutar nada.
-  const PASOS_DE_SLICE = [STEPS.GLOBAL, STEPS.SLICE_JUDGE, STEPS.E2E]
-  const esperados = PASOS_DE_SLICE.includes(run.step) ? run.tasksTotal : run.task - 1
+  //
+  // Y `tasksTotal` a secas NO basta: los pasos de slice también comitean. El
+  // veredicto de slice estrena commit propio al aprobar (`verboSliceVerdict`),
+  // así que al llegar a `e2e` —proceso nuevo, el fichero releído— hay
+  // `tasksTotal + 1` commits desde `baseSha` y la cuenta fija tumbaba TODOS los
+  // verbos con PRECONDITION: ningún slice con recorridos podía cerrar, el run
+  // no llegaba nunca a DELIVERED y `dispatch-check --release` lo rechazaba con
+  // el 7 para siempre. Este fichero ya tenía escrito ese mismo razonamiento
+  // para el commit SIGUIENTE (ver `comprometerInformeE2e`, que por eso comitea
+  // sólo en DELIVERED); nadie lo aplicó al que se le puso delante. Por eso los
+  // commits de slice se CUENTAN en el estado (`sliceCommits`) en vez de darlos
+  // por cero: `|| 0` cubre los runs escritos antes de que el campo existiera.
+  const esperados = PASOS_DE_SLICE.includes(run.step)
+    ? run.tasksTotal + (run.sliceCommits || 0)
+    : run.task - 1
   if (hechos !== esperados) {
     die(`el estado y git no cuentan lo mismo: el fichero espera ${esperados} commit(s) (tarea ${run.task}, paso ${run.step}) y desde ${run.baseSha.slice(0, 7)} hay ${hechos}. No se sigue a ciegas.`, EXIT.PRECONDITION)
   }
@@ -881,6 +899,16 @@ function verboSliceVerdict() {
         if (git(['commit', '-m', mensaje], { allowFail: true }) === null) {
           err('aviso: no se pudo commitear el veredicto del slice — la entrega no depende de la evidencia, pero revisa el índice antes de abrir la pull request.')
         } else {
+          // Se cuenta el commit en el ESTADO, y sólo cuando de verdad ocurrió.
+          // El paso siguiente (`e2e`) es otro proceso: relee el fichero y cruza
+          // los commits contra `tasksTotal + sliceCommits` (ver la carga del
+          // estado). Sin este incremento el cruce daba uno de menos y el run se
+          // quedaba atascado en PRECONDITION para siempre. Y va DENTRO del
+          // `else` porque si las dos rutas de evidencia están gitignoreadas no
+          // hay commit: contarlo entonces desajustaría la cuenta en la otra
+          // dirección. Mismo patrón in situ que `lastGlobalLog` en `verboGlobal`
+          // — `guardar()` lo persiste al final del despacho.
+          run = { ...run, sliceCommits: (run.sliceCommits || 0) + 1 }
           out(`veredicto del slice comiteado: ${headSha().slice(0, 7)}`)
         }
       }
