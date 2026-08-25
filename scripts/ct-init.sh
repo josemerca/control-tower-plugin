@@ -394,7 +394,23 @@ SLICES_HEADING_LEGACY='## Formato de la tabla §9 (contrato con /ct-groom)'
 # bloque, la sección `## Cómo se atraviesa este repo (e2e)` de AGENTS.md: el
 # kickoff del gate `e2e` (gates.js) manda al agente a esa sección exacta para
 # saber CÓMO se levanta este repo, y sin ella no hay ninguna.
-SLICES_CONTRACT_VERSION=20
+#
+# El contrato sube de 20 a 21 por una aclaración de texto, no por una
+# funcionalidad nueva: el bullet `E2E` nombra ahora los DOS tokens que valen
+# como "no aplica" (`no` y `n/a`, los que acepta E2E_NONE_TOKENS), donde antes
+# solo nombraba uno. Un pase anterior aplicó ese cambio dentro del bloque
+# sembrado pero registró un SEGUNDO hash de v20 en vez de subir el número,
+# razonando que una aclaración de texto no es un cambio de contrato. Esa
+# razón queda contradicha por la doctrina de este mismo comentario más
+# arriba: el número no mide el tamaño del cambio, mide si el texto que tiene
+# el repo es el que shippea el plugin, y es la ÚNICA palanca que hace que un
+# contrato corregido llegue a un repo ya bootstrapeado. Con el número parado
+# en 20, un repo sembrado con el primer bloque v20 tiene `found_version -eq
+# SLICES_CONTRACT_VERSION` y `block_status=pristine`: la corrida normal
+# imprime "contrato v20, al día" y ni `--update-slices-contract` entra en la
+# rama de "el contenido no es el mío". No hay ningún camino por el que ese
+# repo reciba la aclaración del segundo token.
+SLICES_CONTRACT_VERSION=21
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -460,6 +476,7 @@ bb8e3298fe9b587b929ab58fbf96f76909463a1cea292fa110878d4ba293f38e  v16, 540 líne
 388f8a82528e7402e45a3384094c7ab43b18d6fdfb5652affa4e9b6b6c2b2dc4  v19, 567 líneas — tarea 5 de "e2e al cierre del slice" (la columna E2E y el gate `e2e` entran en el contrato; v19 nunca publicado, la rama se mergeó como v20)
 b0eb79ab8fd89f83ce7159e9c2a9c32812ee35b76ad6f4c78c2829c9d9891c0b  v20, 585 líneas — merge de las dos ramas anteriores (las columnas Señal y E2E conviven en el mismo bloque)
 530e94eca9e7a0ab676f64a82a97f895ca5c9549478dc9f222f5fcffe8586878  v20, 586 líneas — review del merge (el bullet E2E nombra los DOS tokens de "no aplica": `no` y `n/a`, los que acepta E2E_NONE_TOKENS). Mismo v20: es una aclaración del texto, no un cambio de contrato
+86a73c49d2b8ed904f5aaddb86b71536b160a17dfa281b2886729ea82fba9221  v21, 586 líneas — la aclaración de los DOS tokens de "no aplica" sube de número: el v20 la dejó sin bump y ningún repo bootstrapeado con el v20 anterior podía recibirla
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -467,7 +484,7 @@ b0eb79ab8fd89f83ce7159e9c2a9c32812ee35b76ad6f4c78c2829c9d9891c0b  v20, 585 líne
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 20 -->
+<!-- ct-init:slices-contract-version: 21 -->
 ## Formato de la tabla de slices (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -1047,7 +1064,7 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   mergear, no sólo para los gates: si lo compruebas a mano, que el resultado
   mande.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v20). Si el plugin trae una
+<sub>Esta sección la mantiene `/ct-init` (contrato v21). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>

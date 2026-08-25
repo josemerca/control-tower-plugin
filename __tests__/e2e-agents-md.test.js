@@ -70,9 +70,14 @@ describe('la sección de travesía en AGENTS.md', () => {
   // columnas necesita un número propio, y es éste. Lo que el test clava sigue
   // siendo lo mismo — que el bloque sembrado documenta la columna E2E y que su
   // versión es la que declara el script, no un número tecleado dos veces.
-  it('el contrato de la tabla de slices va por la v20 y documenta la columna E2E', () => {
+  //
+  // v21: la aclaración de los DOS tokens de "no aplica" (`no` y `n/a`) subió
+  // de número — un pase anterior la dejó en v20 sin bump y ningún repo
+  // bootstrapeado con ese v20 podía recibirla. El test sigue clavando lo
+  // mismo, ahora contra v21.
+  it('el contrato de la tabla de slices va por la v21 y documenta la columna E2E', () => {
     const { agents } = initIn(null)
-    expect(agents).toMatch(/contrato.*v20|v20/)
+    expect(agents).toMatch(/contrato.*v21|v21/)
     expect(agents).toContain('E2E')
   })
 })
