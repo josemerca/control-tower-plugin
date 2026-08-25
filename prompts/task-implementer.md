@@ -29,6 +29,14 @@ this prompt or in the files it names.
      It cannot know there is a program behind you that will run the task's own
      verification the moment you return. Take the cycle from the skill and the
      execution scope from the section below.
+   - **Three properties of a new test the judge blocks on.** Deterministic (no
+     real clock, no network, no unseeded randomness, no sleep standing in for
+     synchronisation), isolated (it neither needs nor leaves state another test
+     depends on), and verifying real behaviour — the assertion is on what the
+     production code does, never on a mock's call count or a value the test
+     itself defined. The skill's `testing-anti-patterns.md` reference is where
+     the rest of them live, and it is the same text the judge opens: a new test
+     that breaks one of the three is a `high` finding and the task comes back.
 2. Read the task brief at the path you were given. It opens with `### Desired
    end state` — the end state of the whole slice, so you know what your task
    serves — and then the plan's yardstick: `### Out of scope`, `## 2. Closed
@@ -47,6 +55,18 @@ this prompt or in the files it names.
    `Rules to obey:` — this repo's written conventions. **Open both before you
    write.** The judge that reads your diff opens that same section and blocks on
    those same documents, so a rule you did not read is a round trip you paid for.
+   When the brief closes with a section pasted from `.agent/conventions.md`,
+   those are this repo's declared rule documents: open them exactly as you open
+   the ones §3 names — the judge measures against both, and a document the repo
+   declares that §3 forgot is still one your diff is read against.
+   Where those rules speak about boundaries — what the core may import, how a
+   dependency arrives, what objects may cross — your imports and constructors are
+   the lines the judge will read against them.
+   And where they say how a change of this kind must reach production —
+   expand-contract, a second action beside the old one, the new behaviour gated
+   inside the method — that shape is not yours to pick either: a signature, a
+   constructor or a public contract you change is what the judge reads against
+   those sentences.
 4. Write the smallest code that makes the task true. The brief carries contracts
    and signatures, not bodies. Bodies are written with the compiler in front of
    you, not recalled from memory — so read the code you are extending before you

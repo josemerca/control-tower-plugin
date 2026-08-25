@@ -15,11 +15,30 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { deliveredRun } from '../scripts/run-machine.js'
-import { VERDICT_RULES } from '../scripts/step-contracts.js'
+import { VERDICT_RULES, SLICE_VERDICT_RULES } from '../scripts/step-contracts.js'
+// Slice 10: renderState siembra el SLICE.md de los tests de señal por el
+// mismo camino que buildStateSeed (pliega/entrecomilla los valores largos —
+// la razón de que ct-step lea `senal:` con parseStateSafe y no con regex), y
+// SENAL_AUSENTE es la constante única con la que declara la ausencia el
+// paquete del juez de slice.
+import { renderState } from '../scripts/state.js'
+import { SENAL_AUSENTE } from '../scripts/kickoff.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(here, '..', 'scripts', 'ct-step.mjs')
 const F = '```'
+
+// El §8 va aparte para que los tests de la fase global puedan sustituirlo de
+// una pieza. Desde §3.7-A el plan sin "## 8. Global verification" ejecutable
+// no es ejecutable (exit 6), así que TODO fixture la declara.
+const GLOBAL_VERIFICATION = [
+  '## 8. Global verification',
+  '',
+  F + 'bash',
+  'test -f uno.txt && test -f dos.txt',
+  F,
+  '',
+].join('\n')
 
 const PLAN = [
   '# #7 — dos tareas de mentira',
@@ -50,6 +69,7 @@ const PLAN = [
   'test -f dos.txt',
   F,
   '',
+  GLOBAL_VERIFICATION,
 ].join('\n')
 
 let repo
@@ -107,6 +127,17 @@ const crudo = (texto, nombre = 'crudo.json') => {
   writeFileSync(p, texto)
   return p
 }
+// El veredicto del juez de SLICE (§3.7-B): el recorrido se compone desde
+// SLICE_VERDICT_RULES (map), nunca una lista a mano, por el mismo motivo que
+// `recorridoCompleto` — que el fixture no se quede atrás si la rúbrica cambia
+// de tamaño (Slice 10 la subió de dos a tres ítems sin tocar estas líneas).
+const recorridoDeSlice = () => SLICE_VERDICT_RULES.map((rule) => ({ rule, result: `mirado en el test: ${rule}`, outcome: 'conforme' }))
+const veredictoDeSlice = (ruling, findings = [], nombre = 'slice-verdict.json') => {
+  const p = join(repo, nombre)
+  const conRegla = findings.map((f) => ({ rule: 'coherencia', evidence: 'la línea que lo prueba', ...f }))
+  writeFileSync(p, JSON.stringify({ ruling, rubric: recorridoDeSlice(), findings: conRegla }))
+  return p
+}
 
 const log = () => execFileSync('git', ['log', '--oneline'], { cwd: repo, encoding: 'utf8' })
 const commits = () => log().trim().split('\n').filter(Boolean).length
@@ -118,6 +149,14 @@ const tareaOk = (fichero) => {
   ct('controls')
   ct('verdict', veredicto('PASS'))
   return ct('commit')
+}
+// El slice entero por el camino feliz: las dos tareas, la Global verification
+// y el juicio del slice (§3.7).
+const sliceOk = () => {
+  tareaOk('uno.txt')
+  tareaOk('dos.txt')
+  ct('global')
+  return ct('slice-verdict', veredictoDeSlice('PASS'))
 }
 
 beforeEach(() => { repo = montarRepo() })
@@ -154,8 +193,8 @@ describe('next: la sesión pregunta y el oráculo contesta', () => {
   it('cuando el juez devolvió la tarea, next se lo dice al implementador', () => {
     ct('report', informe(['uno.txt']))
     ct('controls')
-    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'está mal', where: 'uno.txt:1' }]))
-    expect(ct('next').stdout).toMatch(/El juez devolvió esta tarea[\s\S]*está mal/)
+    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'está mal', path: 'uno.txt', line: 1 }]))
+    expect(ct('next').stdout).toMatch(/El juez devolvió esta tarea[\s\S]*uno\.txt:1: está mal/)
   })
 })
 
@@ -167,8 +206,11 @@ describe('la guardia del paso', () => {
     ['commit', 'implement'],
     ['controls', 'implement'],
     ['verdict', 'implement'],
+    ['global', 'implement'],
+    ['slice-verdict', 'implement'],
   ])('pedir "%s" estando en "%s" se RECHAZA con 9, y dice cuál toca', (verbo, paso) => {
-    const r = verbo === 'verdict' ? ct('verdict', veredicto('PASS')) : ct(verbo)
+    const conJson = { verdict: () => ct('verdict', veredicto('PASS')), 'slice-verdict': () => ct('slice-verdict', veredictoDeSlice('PASS')) }
+    const r = conJson[verbo] ? conJson[verbo]() : ct(verbo)
     expect(r.status).toBe(9)
     expect(r.stderr).toMatch(new RegExp(`el run está en "${paso}"`))
     expect(r.stderr).toMatch(/ct-step next/)
@@ -194,11 +236,21 @@ describe('el camino feliz', () => {
     tareaOk('uno.txt')
     const r = tareaOk('dos.txt')
     expect(r.status).toBe(0)
-    expect(r.stdout).toMatch(/run delivered/)
-    expect(r.stdout).toMatch(/lista para la pull request/)
+    // §3.7: el último commit ya NO entrega — abre la fase global.
+    expect(r.stdout).toMatch(/paso global/)
     expect(commits()).toBe(3)
     expect(log()).toMatch(/la primera \(#7, tarea 1\/2\)/)
     expect(log()).toMatch(/la segunda \(#7, tarea 2\/2\)/)
+  })
+
+  it('el slice entero: tareas + global + juicio del slice, y entrega', () => {
+    const r = sliceOk()
+    expect(r.status).toBe(0)
+    expect(r.stdout).toMatch(/run delivered/)
+    expect(r.stdout).toMatch(/lista para la pull request/)
+    // 1 base + 2 tareas + 1 del veredicto de slice, que estrena commit propio.
+    expect(commits()).toBe(4)
+    expect(log()).toMatch(/Veredicto del slice entero \(#7\)/)
   })
 
   it('sólo entra en el commit lo que el implementador declaró', () => {
@@ -223,7 +275,7 @@ describe('el camino feliz', () => {
 })
 
 describe('el veto no deja rastro que deshacer', () => {
-  const veta = () => ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'mal', where: 'uno.txt:1' }]))
+  const veta = () => ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }]))
 
   it('tres vetos agotan el presupuesto, salen por 1 y NO comitean', () => {
     for (let i = 0; i < 3; i++) {
@@ -236,7 +288,7 @@ describe('el veto no deja rastro que deshacer', () => {
   })
 
   it('un PASS con hallazgos medios corrige y luego entrega igual', () => {
-    const queja = () => ct('verdict', veredicto('PASS', [{ severity: 'medium', what: 'falta un caso', where: 'uno.txt:1' }]))
+    const queja = () => ct('verdict', veredicto('PASS', [{ severity: 'medium', what: 'falta un caso', path: 'uno.txt', line: 1 }]))
     for (let i = 0; i < 3; i++) {
       ct('report', informe(['uno.txt']))
       ct('controls')
@@ -441,7 +493,7 @@ describe('el veredicto que no se puede leer no es un veredicto', () => {
 
   it('un PASS con hallazgo grave se descarta: se contradice a sí mismo', () => {
     preparar()
-    const r = ct('verdict', veredicto('PASS', [{ severity: 'high', what: 'mal', where: 'uno.txt:1' }]))
+    const r = ct('verdict', veredicto('PASS', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }]))
     expect(r.stdout).toMatch(/contradice la rúbrica/)
   })
 
@@ -568,7 +620,7 @@ describe('el veredicto viaja en la pull request', () => {
   it('un FAIL no deja veredicto trackeado: solo viaja el que aprueba', () => {
     ct('report', informe(['uno.txt']))
     ct('controls')
-    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'mal', where: 'uno.txt:1' }]))
+    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }]))
     expect(existsSync(join(repo, 'docs', 'superpowers', 'verdicts', 'issue-7-task-1.json'))).toBe(false)
   })
 })
@@ -578,15 +630,13 @@ describe('el veredicto viaja en la pull request', () => {
 // dispatch-check --release) lo acepta o explica por qué no.
 describe('el cierre bueno se persiste, y el gate del release lo lee', () => {
   it('run delivered → closed: "delivered" en el fichero, y deliveredRun lo acepta', () => {
-    tareaOk('uno.txt')
-    tareaOk('dos.txt')
+    sliceOk()
     expect(estado().closed).toBe('delivered')
     expect(deliveredRun(readFileSync(join(repo, '.agent', 'run-7.json'), 'utf8'), 7)).toEqual({ ok: true })
   })
 
   it('sobre un run entregado, next dice "ya está" y los verbos que transicionan salen por 9', () => {
-    tareaOk('uno.txt')
-    tareaOk('dos.txt')
+    sliceOk()
     const n = ct('next')
     expect(n.status).toBe(0)
     expect(n.stdout).toMatch(/run delivered/)
@@ -601,6 +651,15 @@ describe('el cierre bueno se persiste, y el gate del release lo lee', () => {
     const parcial = deliveredRun(readFileSync(join(repo, '.agent', 'run-7.json'), 'utf8'), 7)
     expect(parcial.ok).toBe(false)
     expect(parcial.why).toMatch(/no está entregado/)
+  })
+
+  it('las dos tareas comiteadas SIN global ni juicio de slice tampoco es entregado', () => {
+    // §3.7: "delivered" pasa a significar tareas + punta a punta verde +
+    // slice juzgado. Este es el caso que antes cerraba y ya no.
+    tareaOk('uno.txt')
+    tareaOk('dos.txt')
+    const parcial = deliveredRun(readFileSync(join(repo, '.agent', 'run-7.json'), 'utf8'), 7)
+    expect(parcial.ok).toBe(false)
   })
 })
 
@@ -649,7 +708,7 @@ describe('lo que el implementador avisa, y la telemetría, no se quedan donde na
   it('Paso 5: las filas del intento que el juez vetó viajan también — el coste de las vueltas es el dato', () => {
     ct('report', informe(['uno.txt']))
     ct('controls')
-    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'no', where: 'uno.txt:1' }]))
+    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'no', path: 'uno.txt', line: 1 }]))
     ct('report', informe(['uno.txt']))
     ct('controls')
     ct('verdict', veredicto('PASS'))
@@ -716,5 +775,242 @@ describe('un fallo de la telemetría no puede tumbar la tarea', () => {
     expect(r.status).toBe(0)
     expect(commits()).toBe(3)
     expect(execFileSync('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: repo, encoding: 'utf8' })).toMatch(/uno\.txt/)
+  })
+
+  it('si el veredicto de slice PASS no puede commitearse, la entrega sigue igual', () => {
+    // La misma doctrina que los dos de arriba, aplicada a la fase nueva: con
+    // docs/superpowers/ entero ignorado, ni el veredicto del slice ni la
+    // telemetría se pueden stagear — no hay commit del veredicto, pero el run
+    // entrega: la evidencia que no viaja avisa, nunca bloquea un slice cuyo
+    // trabajo ya está comiteado entero.
+    writeFileSync(join(repo, '.gitignore'), 'docs/superpowers/\n')
+    execFileSync('git', ['add', '--', '.gitignore'], { cwd: repo })
+    execFileSync('git', ['commit', '-q', '-m', 'ignora la evidencia'], { cwd: repo })
+    tareaOk('uno.txt')
+    tareaOk('dos.txt')
+    ct('global')
+    const r = ct('slice-verdict', veredictoDeSlice('PASS'))
+    expect(r.status).toBe(0)
+    expect(r.stdout).toMatch(/run delivered/)
+    expect(r.stderr).toMatch(/nada que commitear del veredicto del slice/)
+    expect(estado().closed).toBe('delivered')
+    // 1 base + 1 gitignore + 2 tareas, y NINGÚN commit de veredicto.
+    expect(commits()).toBe(4)
+    expect(log()).not.toMatch(/Veredicto del slice entero/)
+  })
+})
+
+// §3.3 del handoff: `.agent/conventions.md` es la vara del REPO, no del plan.
+// `ct-step` la lee directo del disco y la pega al final de cada task brief —
+// sin ningún agente en medio, así que un repo con el fichero y otro sin él se
+// comportan distinto sólo por lo que hay en disco, nunca por lo que un agente
+// decidió copiar.
+describe('la vara del repo viaja en el brief, sin agente en medio', () => {
+  it('con .agent/conventions.md, el brief lleva el banner y el contenido, DETRÁS de la tarea', () => {
+    mkdirSync(join(repo, '.agent'), { recursive: true })
+    writeFileSync(join(repo, '.agent', 'conventions.md'), '# La vara\n\n- `AGENTS.md`\n')
+    ct('next')
+    const brief = readFileSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'), 'utf8')
+    expect(brief).toMatch(/leída directo de `\.agent\/conventions\.md`/)
+    expect(brief).toContain('- `AGENTS.md`')
+    expect(brief.indexOf('Task 1')).toBeLessThan(brief.indexOf('leída directo'))
+  })
+
+  it('sin el fichero, el brief no lo menciona — el camino de hoy, intacto', () => {
+    ct('next')
+    const brief = readFileSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'), 'utf8')
+    expect(brief).not.toMatch(/conventions\.md/)
+  })
+
+  it('con el fichero en blanco, el brief no lleva el banner — vacío no es vara', () => {
+    mkdirSync(join(repo, '.agent'), { recursive: true })
+    writeFileSync(join(repo, '.agent', 'conventions.md'), '\n')
+    ct('next')
+    const brief = readFileSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'), 'utf8')
+    expect(brief).not.toMatch(/leída directo de/)
+  })
+})
+
+// §3.7-A del handoff: `## 8. Global verification` la ejecuta el PROGRAMA, tras
+// la última tarea comiteada. Hasta este slice no la corría nadie: `controls`
+// sólo mide el bloque **Verification:** de cada tarea.
+describe('la Global verification la corre el programa (§3.7-A)', () => {
+  const dosTareas = () => { tareaOk('uno.txt'); tareaOk('dos.txt') }
+
+  it('tras el último commit, next anuncia la fase global con los comandos del §8', () => {
+    dosTareas()
+    const r = ct('next')
+    expect(r.status).toBe(0)
+    expect(r.stdout).toMatch(/las 2 tareas comiteadas/)
+    expect(r.stdout).toMatch(/GLOBAL VERIFICATION/)
+    expect(r.stdout).toMatch(/test -f uno\.txt && test -f dos\.txt/)
+  })
+
+  it('en verde avanza a slice-judge y deja el log en la carpeta del run', () => {
+    dosTareas()
+    const r = ct('global')
+    expect(r.status).toBe(0)
+    expect(r.stdout).toMatch(/global: done/)
+    expect(estado().step).toBe('slice-judge')
+    expect(readFileSync(estado().lastGlobalLog, 'utf8')).toMatch(/test -f uno\.txt && test -f dos\.txt/)
+  })
+
+  it('un comando en rojo cierra el run A LA PRIMERA por 11: todo está comiteado y no hay a quién devolvérselo', () => {
+    writeFileSync(join(repo, 'plan.md'), PLAN.replace('test -f uno.txt && test -f dos.txt', 'test -f no-existe.txt'))
+    dosTareas()
+    const r = ct('global')
+    expect(r.status).toBe(11)
+    expect(commits()).toBe(3)   // nada se descomitea: el rojo es para el humano
+  })
+
+  it('un comando que no se pudo MEDIR cierra por 12, que no es el mismo rojo', () => {
+    writeFileSync(join(repo, 'plan.md'), PLAN.replace('test -f uno.txt && test -f dos.txt', 'comando-que-no-existe-en-esta-maquina'))
+    dosTareas()
+    expect(ct('global').status).toBe(12)
+  })
+
+  it('con "N/A — <razón>" registra y avanza sin ejecutar nada', () => {
+    writeFileSync(join(repo, 'plan.md'), PLAN.replace(GLOBAL_VERIFICATION, '## 8. Global verification\n\nN/A — fixture sin punta a punta.\n'))
+    dosTareas()
+    const r = ct('global')
+    expect(r.status).toBe(0)
+    expect(r.stdout).toMatch(/N\/A/)
+    expect(estado().step).toBe('slice-judge')
+    expect(estado().lastGlobalLog ?? null).toBeNull()
+  })
+
+  it('un plan SIN §8 ejecutable sale por 6 antes de dar un solo paso', () => {
+    writeFileSync(join(repo, 'plan.md'), PLAN.replace(GLOBAL_VERIFICATION, '## 8. Global verification\n\nQue todo siga en verde.\n'))
+    const r = ct('next')
+    expect(r.status).toBe(6)
+    expect(r.stderr).toMatch(/no ejecuta prosa/)
+  })
+})
+
+// §3.7-B del handoff: el slice entero tiene juez. Los dos ítems que ningún
+// juez de tarea mira — si las tareas juntas entregan el fin del slice, y si
+// son coherentes entre sí.
+describe('el juicio del slice entero (§3.7-B)', () => {
+  const enJuezDeSlice = () => { tareaOk('uno.txt'); tareaOk('dos.txt'); ct('global') }
+
+  it('next despacha ct-slice-judge con el paquete del RANGO de commits', () => {
+    enJuezDeSlice()
+    const r = ct('next')
+    expect(r.status).toBe(0)
+    expect(r.stdout).toMatch(/ct-slice-judge/)
+    expect(r.stdout).toMatch(/SIN Bash/)
+    const paquete = readFileSync(join(repo, '.agent', 'run-7', 'slice-review.diff'), 'utf8')
+    // La secuencia de commits es la pieza que el paquete por tarea no tiene:
+    // `coherencia` sólo se ve en el orden.
+    expect(paquete).toMatch(/## Commits/)
+    expect(paquete.indexOf('la primera (#7, tarea 1/2)')).toBeLessThan(paquete.indexOf('la segunda (#7, tarea 2/2)'))
+    expect(paquete).toMatch(/## Files changed/)
+    expect(paquete).toMatch(/## Diff/)
+  })
+
+  it('un PASS entrega el run y el veredicto viaja en su PROPIO commit', () => {
+    enJuezDeSlice()
+    const r = ct('slice-verdict', veredictoDeSlice('PASS'))
+    expect(r.status).toBe(0)
+    expect(r.stdout).toMatch(/run delivered/)
+    expect(estado().closed).toBe('delivered')
+    expect(commits()).toBe(4)
+    const files = execFileSync('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: repo, encoding: 'utf8' })
+    expect(files).toMatch(/issue-7-slice\.json/)
+    const guardado = JSON.parse(readFileSync(join(repo, 'docs', 'superpowers', 'verdicts', 'issue-7-slice.json'), 'utf8'))
+    expect(guardado.verdict.ruling).toBe('PASS')
+    expect(guardado.tasks_total).toBe(2)
+  })
+
+  it('un PASS con hallazgos medium entrega igual: no queda implementador al que devolver', () => {
+    enJuezDeSlice()
+    const r = ct('slice-verdict', veredictoDeSlice('PASS', [{ severity: 'medium', what: 'andamiaje sin retirar', path: 'uno.txt', line: 1 }]))
+    expect(r.status).toBe(0)
+    expect(estado().closed).toBe('delivered')
+    // El hallazgo viaja DENTRO del veredicto commiteado, para quien revise la PR.
+    const guardado = JSON.parse(execFileSync('git', ['show', 'HEAD:docs/superpowers/verdicts/issue-7-slice.json'], { cwd: repo, encoding: 'utf8' }))
+    expect(guardado.verdict.findings).toHaveLength(1)
+  })
+
+  it('un FAIL cierra el run por 1 y NO deja veredicto trackeado: solo viaja el que aprueba', () => {
+    enJuezDeSlice()
+    const r = ct('slice-verdict', veredictoDeSlice('FAIL', [{ severity: 'high', what: 'la tarea 2 deshace la 1', path: 'uno.txt', line: 1 }]))
+    expect(r.status).toBe(1)
+    expect(commits()).toBe(3)
+    expect(existsSync(join(repo, 'docs', 'superpowers', 'verdicts', 'issue-7-slice.json'))).toBe(false)
+  })
+
+  it('un veredicto con regla de TAREA se descarta y se vuelve a preguntar', () => {
+    enJuezDeSlice()
+    const p = join(repo, 'sv.json')
+    writeFileSync(p, JSON.stringify({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [{ rule: 'alcance', severity: 'low', what: 'x', path: 'y', evidence: 'z' }] }))
+    const r = ct('slice-verdict', p)
+    expect(r.stdout).toMatch(/descartado/)
+    expect(estado().step).toBe('slice-judge')
+    expect(estado().discards).toBe(1)
+  })
+
+  it('las filas de global y slice-judge no son de ninguna tarea, y viajan en el commit del veredicto', () => {
+    enJuezDeSlice()
+    ct('slice-verdict', veredictoDeSlice('PASS'))
+    const commiteado = execFileSync('git', ['show', 'HEAD:docs/superpowers/metrics/issue-7.jsonl'], { cwd: repo, encoding: 'utf8' })
+    const filas = commiteado.trim().split('\n').map((l) => JSON.parse(l))
+    const global = filas.find((f) => f.step === 'global')
+    expect(global.task).toBeNull()
+    expect(global.task_name).toBeNull()
+    const juez = filas.find((f) => f.step === 'slice-judge')
+    expect(juez.task).toBeNull()
+    expect(juez.ruling).toBe('PASS')
+  })
+
+  // Slice 10 — la señal cruza el embudo en el paquete: ct-step la lee del
+  // campo `senal:` del SLICE.md (disco, sin agente en medio — la doctrina del
+  // §3.3) y la pega como PRIMERA sección `## Señal`, delante del diff -U10
+  // donde quedaría enterrada. El fallback SENAL_AUSENTE cubre un SLICE.md
+  // sembrado por un plugin anterior a la columna.
+  const sembrarSenalEnSliceMd = (senal) => {
+    const g = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    // Por el MISMO camino que buildStateSeed (renderState): es lo que hace
+    // que un valor largo llegue plegado/entrecomillado por YAML, como en un
+    // despacho real.
+    writeFileSync(join(repo, '.agent', 'SLICE.md'), renderState({ meta: { issue: 7, epic: 12, senal }, body: '# slice de mentira' }))
+    g('add', '.agent/SLICE.md')
+    g('commit', '-q', '-m', 'siembra la senal del slice')
+  }
+
+  it('el paquete de slice abre con "## Señal" y lleva el texto del campo senal: del SLICE.md', () => {
+    sembrarSenalEnSliceMd('métrica `backfill_progress` con label `estado`')
+    enJuezDeSlice()
+    ct('next')
+    const paquete = readFileSync(join(repo, '.agent', 'run-7', 'slice-review.diff'), 'utf8')
+    expect(paquete).toMatch(/## Señal/)
+    expect(paquete).toContain('métrica `backfill_progress` con label `estado`')
+    // Primera: antes de Commits/Files changed/Diff.
+    expect(paquete.indexOf('## Señal')).toBeLessThan(paquete.indexOf('## Commits'))
+  })
+
+  it('sin campo senal: en el SLICE.md, la sección declara la ausencia con SENAL_AUSENTE', () => {
+    // El fixture de montarRepo siembra un SLICE.md SIN campo senal — el caso
+    // de un plugin anterior a la columna.
+    enJuezDeSlice()
+    ct('next')
+    const paquete = readFileSync(join(repo, '.agent', 'run-7', 'slice-review.diff'), 'utf8')
+    expect(paquete).toMatch(/## Señal/)
+    expect(paquete).toContain(SENAL_AUSENTE)
+    expect(paquete.indexOf('## Señal')).toBeLessThan(paquete.indexOf('## Commits'))
+  })
+
+  it('una señal larga (plegada por YAML) llega entera al paquete', () => {
+    // > 100 caracteres en una sola pieza: renderState (yaml.stringify) la
+    // pliega en varias líneas del frontmatter — una regex de línea única (la
+    // de `epic:`) la truncaría y la vara del ítem llegaría a medias sin que
+    // nadie lo viera. Esta es la razón de parseStateSafe.
+    const larga = 'métrica `harvest_rows_total` con label `estado` acotado a los valores enumerados del contrato, emitida por el worker de cosecha en cada lote confirmado'
+    expect(larga.length).toBeGreaterThan(100)
+    sembrarSenalEnSliceMd(larga)
+    enJuezDeSlice()
+    ct('next')
+    const paquete = readFileSync(join(repo, '.agent', 'run-7', 'slice-review.diff'), 'utf8')
+    expect(paquete).toContain(larga)
   })
 })

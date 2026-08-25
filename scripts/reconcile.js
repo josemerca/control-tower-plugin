@@ -97,7 +97,7 @@ import {
 // como número de issue — un --reconcile con la copia vieja habría reescrito
 // el formato nuevo de vuelta al viejo, reintroduciendo el enlace falso en
 // cada corrida).
-import { renderDepsContent, renderAcContent, GATES_HEADING, E2E_HEADING, EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING } from './groom.js'
+import { renderDepsContent, renderAcContent, GATES_HEADING, E2E_HEADING, EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING, SENAL_HEADING } from './groom.js'
 
 // ownedLabelsOnly: el spec solo es autoridad sobre un prefijo (`type:`,
 // `area:`, `touches:`) SI la tabla §9 trae la columna que lo alimenta
@@ -328,6 +328,27 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
     descripcionDiffers = currentDescripcion.trim() !== wantedDescripcion.trim()
   }
 
+  // Señal (Slice 10): espejo EXACTO de Descripción — tres estados, incluido
+  // el acuerdo null/null (ninguno de los dos lados tiene sección = silencio
+  // real, nunca divergencia). La autoridad en runtime es EL ISSUE, como los
+  // gates ("se lee del issue, no del spec"): la señal que obedece el juez de
+  // slice es la que el issue tenía al despachar. Por eso esta comparación
+  // solo alimenta una `nota:` (ver formatDrift) y NUNCA entra en hasDrift,
+  // reconcileGaps ni buildReconcileBody — la maquinaria de splice es la mitad
+  // EXPERIMENTAL que cinco rondas de review decidieron no engordar. Un epic
+  // viejo sin la sección solo diverge si el spec de hoy declara señal, y aún
+  // así nota:, nunca bloqueo.
+  const currentSenal = extractSectionContent(body, SENAL_HEADING)
+  const wantedSenal = wantedIssue.senal ?? null
+  let senalDiffers
+  if (currentSenal === null && wantedSenal === null) {
+    senalDiffers = false // acuerdo: ninguno de los dos lados tiene sección
+  } else if (currentSenal === null || wantedSenal === null) {
+    senalDiffers = true // un lado tiene sección, el otro no
+  } else {
+    senalDiffers = currentSenal.trim() !== wantedSenal.trim()
+  }
+
   // Contexto del epic: mismo criterio de tres estados que Descripción — null
   // en ambos lados es acuerdo (silencio real), null en uno solo es
   // divergencia, y sólo se compara el texto cuando los dos lados tienen
@@ -432,6 +453,7 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
     deps,
     ac,
     descripcionDiffers,
+    senalDiffers,
     epicContextDiffers,
     protectedDiffers,
     gatesDiffers,
@@ -565,6 +587,11 @@ export function formatDrift(diff) {
     lines.push(`divergencia: ${head}: la sección "## ${section}" aparece más de una vez en el body — el dispatcher no reconstruye la intención de un humano a partir de "la primera" ni de "la unión": revisa y une o elimina la copia sobrante a mano`)
   }
   if (diff.descripcionDiffers) lines.push(`nota: ${head}: la sección "## Descripción" difiere del spec (prosa — no cuenta para el exit code; --reconcile no la reescribe)`)
+  // Slice 10: la señal, como Descripción, solo se anota. La media frase de
+  // "la que obedece el juez" existe para que quien lea la nota sepa POR QUÉ
+  // no se reescribe: en runtime la autoridad es el issue del despacho, no el
+  // spec de hoy — el mismo contrato que los gates.
+  if (diff.senalDiffers) lines.push(`nota: ${head}: la sección "${SENAL_HEADING}" difiere del spec (no cuenta para el exit code; --reconcile no la reescribe — la señal que obedece el juez de slice es la que el issue tenía al despachar, igual que los gates)`)
   // Task 4 dejó esta nota sin decir quién reescribe la sección, a propósito:
   // en aquel commit "con --reconcile se reescribe desde el spec" todavía era
   // falso (buildReconcileBody no la tocaba). Task 5 lo hizo cierto.

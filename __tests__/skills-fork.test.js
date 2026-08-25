@@ -228,8 +228,8 @@ describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive 
 
   it('la skill y su template tienen presupuesto: crecer obliga a recortar', () => {
     const bytes = (f) => Buffer.byteLength(read('writing-plans-prescriptive', f))
-    expect(bytes('SKILL.md')).toBeLessThanOrEqual(15876)
-    expect(bytes('plan-template.md')).toBeLessThanOrEqual(5788)
+    expect(bytes('SKILL.md')).toBeLessThanOrEqual(16314)
+    expect(bytes('plan-template.md')).toBeLessThanOrEqual(6377)
   })
 
   it('el template no pide el estado final completo y sus huecos nombran los roles', () => {

@@ -65,9 +65,14 @@ describe('la sección de travesía en AGENTS.md', () => {
     expect(after.match(/## Cómo se atraviesa este repo \(e2e\)/g)).toHaveLength(1)
   })
 
-  it('el contrato de la tabla de slices va por la v19 y documenta la columna E2E', () => {
+  // v20 y no v19: `Señal` y `E2E` llegaron en paralelo y las dos reclamaron el
+  // v19. El v19 se publicó con el bloque de `Señal`; el bloque que trae las dos
+  // columnas necesita un número propio, y es éste. Lo que el test clava sigue
+  // siendo lo mismo — que el bloque sembrado documenta la columna E2E y que su
+  // versión es la que declara el script, no un número tecleado dos veces.
+  it('el contrato de la tabla de slices va por la v20 y documenta la columna E2E', () => {
     const { agents } = initIn(null)
-    expect(agents).toMatch(/contrato.*v19|v19/)
+    expect(agents).toMatch(/contrato.*v20|v20/)
     expect(agents).toContain('E2E')
   })
 })

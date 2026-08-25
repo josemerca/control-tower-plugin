@@ -446,3 +446,75 @@ describe('la vara tiene que poder medir lo que dice medir (verification-predicat
     expect(extractTasks(EJECUTABLE).problems).toEqual([])
   })
 })
+
+// ---------------------------------------------------------------------------
+// §3.7-A DEL HANDOFF — "## 8. Global verification" TAMBIÉN TIENE QUE SER
+// EJECUTABLE. `ct-step` no ejecutaba ni una línea de esta sección; esto es lo
+// que la vuelve una lista de comandos, con la misma vara que ya mide el bloque
+// por tarea.
+// ---------------------------------------------------------------------------
+describe('la Global verification es del programa (§3.7-A)', () => {
+  const conTareaY = (bloqueGlobal) => [
+    '### Task 1 — una tarea',
+    '**Objective:** algo.',
+    '**Files:** `a.js` (modify)',
+    '**TDD:** No TDD — fixture.',
+    '**Tests:** N/A — fixture.',
+    '**Verification:** ok.',
+    F + 'bash',
+    'npm test',
+    F,
+    '',
+    ...bloqueGlobal,
+    '',
+  ].join('\n')
+
+  it('extrae los comandos del primer fence de §8, con prosa antes y después', () => {
+    const plan = conTareaY([
+      '## 8. Global verification',
+      '',
+      'Con todo comiteado, desde la raíz:',
+      '',
+      F + 'bash',
+      'npm run build && npm test',
+      F,
+      '',
+      'Para el gate humano: revisa que la UI siga igual.',
+    ])
+    const { global, problems } = extractTasks(plan)
+    expect(global.commands).toEqual(['npm run build && npm test'])
+    expect(problems.filter((p) => p.rule.startsWith('global-verification'))).toEqual([])
+  })
+
+  it('"N/A — <razón>" deja el global sin comandos y sin problema', () => {
+    const plan = conTareaY(['## 8. Global verification', '', 'N/A — no hay punta a punta que correr.'])
+    const { global, problems } = extractTasks(plan)
+    expect(global.commands).toEqual([])
+    expect(problems.filter((p) => p.rule.startsWith('global-verification'))).toEqual([])
+  })
+
+  it('§8 en prosa, sin bloque de comandos, es un problema', () => {
+    const plan = conTareaY(['## 8. Global verification', '', 'Que todo siga en verde.'])
+    const { global, problems } = extractTasks(plan)
+    expect(global.commands).toEqual([])
+    expect(problems.map((p) => p.rule)).toContain('global-verification-block')
+  })
+
+  it('un plan sin "## 8." trae el mismo problema', () => {
+    const plan = conTareaY([])
+    const { global, problems } = extractTasks(plan)
+    expect(global.commands).toEqual([])
+    expect(problems.map((p) => p.rule)).toContain('global-verification-block')
+  })
+
+  it('§8 cuyo último tramo es `wc -l` es un problema de predicado, igual que en una tarea', () => {
+    const plan = conTareaY(['## 8. Global verification', '', F + 'bash', 'wc -l AGENTS.md', F])
+    const { problems } = extractTasks(plan)
+    expect(problems.map((p) => p.rule)).toContain('global-verification-predicate')
+  })
+
+  it('el fixture real extrae el único comando de su Global verification', () => {
+    const { global } = extractTasks(EJECUTABLE)
+    expect(global.commands).toEqual(['npm run build && npm test && npm run lint   # exit 0'])
+  })
+})

@@ -184,7 +184,9 @@ describe('analyzeSlicesTable — contrato enriquecido (F1)', () => {
 `
     const r = analyzeSlicesTable(spec)
     expect(r.missingRequiredColumns).toEqual([])
-    expect(r.missingOptionalColumns.sort()).toEqual(['Acepta', 'Protegido', 'Tipo', 'Toca', 'Área'].sort())
+    // Slice 10: "Señal" también es opcional-con-consecuencia y esta tabla no
+    // la trae — entra en la lista igual que las demás.
+    expect(r.missingOptionalColumns.sort()).toEqual(['Acepta', 'Protegido', 'Señal', 'Tipo', 'Toca', 'Área'].sort())
     expect(r.slices).toHaveLength(1)
   })
 
@@ -1241,5 +1243,47 @@ describe('analyzeSlicesTable — "Acepta": coma escapada (\\,) NO trocea el crit
 | 3 | c | backend | x | #1 (tras el merge), #2 | – | – |
 `
     expect(analyzeSlicesTable(spec).slices[2].deps).toEqual([1, 2])
+  })
+})
+
+// Slice 10 — la columna `Señal`: la señal de observabilidad que el slice
+// promete. Como `Gate`, el parser entrega la celda CRUDA (trimmed) sin
+// resolver nada: distinguir "señal declarada" de "exención razonada
+// N/A — <razón>" de "no declarada" es cosa de groom.js#parseSenalCell — este
+// parser no sabe de señales, igual que no sabe de gates ni de labels. A
+// diferencia de `Gate`, la ausencia de la columna SÍ entra en
+// missingOptionalColumns: su consecuencia es medible (el juez de slice mide
+// su ítem `observabilidad` como sin-vara en todo el epic).
+describe('analyzeSlicesTable — columna Señal (Slice 10)', () => {
+  const SPEC_SENAL = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate | Señal |
+|---|-------|------|---------|-----|--------|-----------|------|------|------|-------|
+| 1 | modelo | backend | tabla | – | AC-1.1 | schema | api | db | – | – |
+| 2 | barra | backend | backfill | #1 | AC-2.1 | – | api | db | – | métrica \`backfill_progress\` con label \`estado\` |
+| 3 | pantalla | ui | alta | #2 | AC-3.1 | – | api | app | – | N/A — pantalla sin telemetría nueva que prometer |
+`
+  it('la celda cruda llega en slice.senal, sin resolver', () => {
+    const r = analyzeSlicesTable(SPEC_SENAL)
+    expect(r.missingOptionalColumns).not.toContain('Señal')
+    // La celda llega VERBATIM (solo trim): el marcador de "sin valor" y la
+    // exención N/A llegan tal cual — la clasificación vive en groom.js.
+    expect(r.slices[0].senal).toBe('–')
+    expect(r.slices[1].senal).toBe('métrica `backfill_progress` con label `estado`')
+    expect(r.slices[2].senal).toBe('N/A — pantalla sin telemetría nueva que prometer')
+  })
+  it('la grafía "Senal" sin tilde resuelve a la misma columna', () => {
+    const spec = `## 9. Slices
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Senal |
+|---|---|---|---|---|---|---|---|
+| 1 | x | backend | y | – | – | – | métrica viva |
+`
+    const r = analyzeSlicesTable(spec)
+    expect(r.missingOptionalColumns).not.toContain('Señal')
+    expect(r.slices[0].senal).toBe('métrica viva')
+  })
+  it('sin columna Señal, entra en missingOptionalColumns y los slices llevan senal vacío', () => {
+    const r = analyzeSlicesTable(SPEC_AREA_TOCA)
+    expect(r.missingOptionalColumns).toContain('Señal')
+    for (const s of r.slices) expect(s.senal).toBe('')
   })
 })

@@ -22,7 +22,7 @@ import { OUTCOMES } from './run-machine.js'
 
 export const SEVERITIES = ['high', 'medium', 'low']
 
-// Las ocho reglas de la rúbrica del juez, en el orden en que la recorre (la
+// Las nueve reglas de la rúbrica del juez, en el orden en que la recorre (la
 // rúbrica en sí se escribe en una tarea posterior de este mismo plan; aquí
 // sólo se fija el vocabulario). Enum CERRADO, y no por la validación por la
 // validación: la telemetría cuenta hallazgos por regla (`findings_by_rule` en
@@ -31,10 +31,71 @@ export const SEVERITIES = ['high', 'medium', 'low']
 // descarta un `ruling` inventado — el descarte no es un error, es "vuelve a
 // preguntar": un hallazgo que no encaja en ninguna regla es un hallazgo que el
 // juez no ha sabido justificar.
+//
+// El noveno entra DETRÁS de `alcance` y no intercalado entre los ítems de
+// test: el orden de este array ES el orden en que el juez recorre la rúbrica
+// —`reglasDelAgente()` lo ata encabezado a encabezado en
+// step-contracts.test.js—, así que meterlo en medio renumera seis encabezados
+// de `ct-judge.md` sin cambiar nada que se pueda medir.
+//
+// `test-desiderata` juzga los tests NUEVOS de la tarea como instrumento
+// (determinista, aislado, y que verifique comportamiento real) y bloquea sólo
+// con esas tres; lo demás avisa en `low` y nunca en `medium`, porque un
+// `medium` compra una vuelta pagada al implementador sobre una tarea cuya
+// suite ya está verde. Es el único ítem cuya vara NO la pone el plan: las tres
+// son propiedades de un test, no gusto del repo, así que no puede volver
+// `sin-vara` — un noveno ítem que en un repo sin convenciones saliera siempre
+// sin vara inflaría justo la columna (`rubric_sin_vara`) que se añadió para
+// medir si la vara llega. Los tests PREEXISTENTES debilitados siguen siendo de
+// `manipulacion-tests`: un assert relajado en un test que ya existía es UN
+// defecto y no dos, y duplicarlo falsearía `findings_by_rule`.
 export const VERDICT_RULES = [
   'objetivo', 'asercion-tdd', 'contrato', 'decisiones-cerradas',
   'patrones', 'manipulacion-tests', 'fixture-theater', 'alcance',
+  'test-desiderata',
 ]
+
+// La rúbrica del juez de SLICE (§3.7-B del handoff
+// docs/prompt-juez-lo-que-queda.md), TRES ítems y no nueve — el argumento es el
+// mismo que ya cerró `boundaries` y `rollout` como absorbidos: todo lo que se
+// añade compite por la atención del juez, y `agents/ct-slice-judge.md` no
+// hereda ninguno de los nueve de `ct-judge.md` (ésos son por-tarea: marcadores,
+// brief, paquete stageado de UNA tarea; aquí el sujeto es el slice entero, ya
+// comiteado). Los dos primeros son exactamente los dos agujeros que §3.7
+// nombra:
+//
+//   `estado-final`  — si las tareas juntas entregan el `### Desired end
+//     state` del plan. Nadie lo miraba: el juez de tarea tiene ese mismo
+//     texto en el brief y una línea que dice explícitamente que NO es su
+//     vara (decisión cerrada del §4 del handoff, que este ítem no reabre).
+//   `coherencia`    — si una tarea posterior deshace lo que estableció una
+//     anterior, o si las tres dejan andamiaje de un estado intermedio que
+//     alguna debía retirar. `ct-judge` juzga UNA tarea; esto no lo miraba
+//     nadie.
+//
+// `observabilidad` (Slice 10, §3.9) es el tercero, y entra DETRÁS — el mismo
+// argumento con el que `test-desiderata` entró noveno en VERDICT_RULES: el
+// orden del array ES el orden del recorrido, los encabezados de la rúbrica
+// están atados por test, e intercalarlo renumeraría sin medir nada. Mide las
+// tres comprobaciones del §3.9 sobre la SEÑAL que la slice declaró (sección
+// `## Señal` del paquete, pegada por el programa desde el SLICE.md del
+// despacho) contra el diff ACUMULADO: que lo prometido lo emita código de
+// producción, con la instrumentación que EL REPO ya usa, sin labels de
+// cardinalidad ilimitada. Vive AQUÍ y no en `ct-judge` por tres razones
+// cerradas: (a) el sujeto es la señal DE LA SLICE — una tarea puede
+// legítimamente no emitirla porque la emite la siguiente, y el único diff con
+// el sujeto completo es el acumulado, que solo ve este juez; (b) el argumento
+// del §3.6: todo ítem compite por la atención, y `ct-judge` ya recorre 9 por
+// CADA tarea y reintento mientras aquí son 3 una vez por slice; (c) es donde
+// lo tiene `agentic-skills` (su ítem 9 juzga la slice entera). No se absorbe
+// en `estado-final` porque mide OTRA fuente (la señal declarada, no el
+// `### Desired end state`) con su propio `no-aplica`/`sin-vara`, y la
+// telemetría necesita contarlo por regla.
+//
+// Mismo enum CERRADO que VERDICT_RULES, y por el mismo motivo: la telemetría
+// cuenta hallazgos por regla, y una regla inventada por este juez ensuciaría
+// esa cuenta igual que ensuciaría la del juez de tarea.
+export const SLICE_VERDICT_RULES = ['estado-final', 'coherencia', 'observabilidad']
 
 // Lo que un ítem del recorrido pudo hacer. El recorrido ya distinguía "no se
 // miró" de "se miró", pero dentro de "se miró" seguía habiendo dos cosas que
@@ -63,12 +124,12 @@ export const RUBRIC_OUTCOMES = ['conforme', 'no-aplica', 'sin-vara']
 // severidad es lo que separa un veto de un refunfuño, y el resto de la prosa
 // del juez no la lee ningún programa.
 //
-// Cada hallazgo lleva además su REGLA: cuál de las ocho de la rúbrica incumple.
+// Cada hallazgo lleva además su REGLA: cuál de las nueve de la rúbrica incumple.
 // Antes de esto un hallazgo decía severidad, qué y dónde, pero no POR QUÉ es un
 // hallazgo — y sin eso, la telemetría no puede contar cuántos vetos vienen de
 // cada regla, que es justo el dato que dice si la rúbrica está bien calibrada.
 //
-// Y `rubric` es el paseo por los ocho ítems, cada uno exactamente una vez con
+// Y `rubric` es el paseo por los nueve ítems, cada uno exactamente una vez con
 // lo que dio. La rúbrica ya lo pedía, pero lo pedía en PROSA y para la
 // respuesta conversacional del subagente, que nadie captura: lo que se validaba
 // y se persistía era sólo `{ruling, findings}`. Medido en
@@ -84,8 +145,8 @@ export const RUBRIC_OUTCOMES = ['conforme', 'no-aplica', 'sin-vara']
 //
 // Y cada hallazgo lleva `evidence`: la CITA literal que lo sostiene — la frase
 // del plan que se incumple, o la línea del diff que lo prueba. No es `what`
-// (que narra el defecto) ni `where` (que ubica): es el texto que alguien puede
-// contrastar sin abrir nada. La rúbrica ya exigía citar antes de bloquear
+// (que narra el defecto) ni `path`/`line` (que ubican): es el texto que alguien
+// puede contrastar sin abrir nada. La rúbrica ya exigía citar antes de bloquear
 // ("evidence before blocking"), pero lo exigía en PROSA, en un fichero de
 // doscientas cuarenta líneas donde compite con ocho ítems que hay que recorrer
 // de verdad. Un campo obligatorio del esquema no se olvida; una frase sí. Y se
@@ -94,9 +155,33 @@ export const RUBRIC_OUTCOMES = ['conforme', 'no-aplica', 'sin-vara']
 // una vuelta pagada sin decirle qué mirar.
 //
 // El enum del ítem es el MISMO array VERDICT_RULES, no una copia: dos listas de
-// ocho identificadores divergen al primer renombrado, que es el desacople que
+// nueve identificadores divergen al primer renombrado, que es el desacople que
 // este módulo ya pagó con JUDGE_TOOLS.
-export const VERDICT_SCHEMA = Object.freeze({
+//
+// Y la ubicación son DOS campos, `path` y `line`, y no la cadena `"path:line"`
+// que llevaba hasta aquí. Lo que impedía la cadena es agregar: la telemetría
+// cuenta hallazgos por regla (`findings_by_rule`) y no puede contarlos por
+// fichero, porque partir por el último `:` una cadena que escribió un modelo es
+// adivinar — un `C:\` de Windows, un `a.js:10-14`, un `src/a.js` sin línea y un
+// `toda la clase Foo` son la misma cadena para el programa. Es el §3.13 del
+// handoff, y es la forma que ya tiene el `Finding` de `agentic-skills`.
+//
+// `path` es obligatorio y `line` NO, y la asimetría es deliberada: un hallazgo
+// del fichero entero (un import que sobra en todo el módulo, un fichero que no
+// debería existir) no tiene línea que citar, y exigírsela al juez sólo compra
+// dos cosas malas — un número inventado, o un descarte más de los seis que
+// matan el run (§3.2). Ausente y `null` son lo mismo. Lo que sí se rechaza es
+// una línea que no se puede leer como número: `"12"` y `12` no se agregan
+// igual, y tolerar la cadena hoy es telemetría sucia mañana.
+// FACTORY, no un objeto suelto: el juez de slice valida contra el MISMO
+// esquema con otra rúbrica dentro (§3.7-B), y dos copias a mano de esta forma
+// divergerían al primer campo añadido — el mismo desacople que ya sufrieron
+// JUDGE_TOOLS y VERDICT_RULES. `rules` decide sólo el enum de `rule` y la
+// cardinalidad del recorrido; el resto de la forma —`ruling`, `outcome`,
+// `evidence`, la ubicación en dos campos— es la misma para un veredicto de
+// tarea y uno de slice: es el mismo esquema de RESPUESTA, no una rúbrica
+// distinta por dentro.
+const schemaFor = (rules) => ({
   type: 'object',
   additionalProperties: false,
   required: ['ruling', 'rubric', 'findings'],
@@ -104,14 +189,14 @@ export const VERDICT_SCHEMA = Object.freeze({
     ruling: { type: 'string', enum: ['PASS', 'FAIL'] },
     rubric: {
       type: 'array',
-      minItems: VERDICT_RULES.length,
-      maxItems: VERDICT_RULES.length,
+      minItems: rules.length,
+      maxItems: rules.length,
       items: {
         type: 'object',
         additionalProperties: false,
         required: ['rule', 'result', 'outcome'],
         properties: {
-          rule: { type: 'string', enum: VERDICT_RULES },
+          rule: { type: 'string', enum: rules },
           result: { type: 'string' },
           outcome: { type: 'string', enum: RUBRIC_OUTCOMES },
         },
@@ -122,18 +207,23 @@ export const VERDICT_SCHEMA = Object.freeze({
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['rule', 'severity', 'what', 'where', 'evidence'],
+        required: ['rule', 'severity', 'what', 'path', 'evidence'],
         properties: {
-          rule: { type: 'string', enum: VERDICT_RULES },
+          rule: { type: 'string', enum: rules },
           severity: { type: 'string', enum: SEVERITIES },
           what: { type: 'string' },
-          where: { type: 'string' },
+          path: { type: 'string' },
+          line: { type: ['integer', 'null'], minimum: 1 },
           evidence: { type: 'string' },
         },
       },
     },
   },
 })
+
+export const VERDICT_SCHEMA = Object.freeze(schemaFor(VERDICT_RULES))
+// El esquema del veredicto de SLICE: misma forma, la rúbrica de dos ítems.
+export const SLICE_VERDICT_SCHEMA = Object.freeze(schemaFor(SLICE_VERDICT_RULES))
 
 // El informe del implementador también lleva esquema, y el spec no lo pedía.
 // La razón es la misma que hizo falta un `plan-tasks.js`: el programa necesita
@@ -258,12 +348,28 @@ export const IMPLEMENTER_TOOLS = 'Read, Write, Edit, Grep, Glob, Bash, Skill'
 // parte: `ct-step commit` comitea las rutas que declaró el IMPLEMENTADOR, no lo
 // que haya en el árbol.
 //
+// `Skill` SÍ, y por la misma razón por la que la tiene el implementador: la
+// rúbrica le manda ejercerla. Desde `e473c97`, el `Rules to obey:` de `## 3.
+// Reference patterns` admite declarar una skill como vara secundaria, y el ítem
+// `patrones` manda abrirla («any skill named there — open them and read the
+// rules»). Pero un nombre de skill (`backend-engineering:backend-best-practices`)
+// no es una ruta: `Read` no lo abre, y `plan-contract.js` tampoco lo comprueba en
+// disco A PROPÓSITO. Sin esta herramienta la vara secundaria era inalcanzable, y
+// en silencio: el juez contestaría `conforme` sobre un documento que nunca pudo
+// abrir, que es justo el agujero que `sin-vara` existe para cerrar. Es el defecto
+// §3.1 de `docs/prompt-juez-lo-que-queda.md`, y es lo que hace `agentic-skills`
+// en su `slice_verifier_judge.py`: TOOLS = ("Read", "Grep", "Glob", "Skill").
+//
+// No debilita el «sin shell»: `Skill` carga instrucciones, no ejecuta procesos.
+// Lo que el juez no puede hacer sigue decidiéndolo la ausencia de `Bash` en la
+// declaración del agente.
+//
 // Esta constante es una COPIA del frontmatter de `agents/ct-judge.md`, y quien
 // las ata es `step-contracts.test.js`: se duplica porque este módulo es puro y
 // no lee disco, no porque dé igual que divergan. Divergieron una vez, y el
 // resultado fue que `ct-step next` anunciaba unas herramientas que no eran las
 // del juez que se iba a despachar.
-export const JUDGE_TOOLS = 'Read, Grep, Glob, Write'
+export const JUDGE_TOOLS = 'Read, Grep, Glob, Write, Skill'
 
 // Los tres encabezados del paquete de revisión que escribe `escribirPaquete`
 // en `scripts/ct-step.mjs`, en el orden en que aparecen en el fichero. La
@@ -277,11 +383,43 @@ export const JUDGE_TOOLS = 'Read, Grep, Glob, Write'
 // contestando como si la hubiera leído.
 export const PACKAGE_SECTIONS = ['Files changed', 'Rutas tocadas', 'Diff']
 
+// El juez de SLICE (§3.7-B, `agents/ct-slice-judge.md`), SIN `Skill`: sus dos
+// ítems miden contra el plan (comiteado) y el diff acumulado de la slice
+// entera, y ninguno de los dos carga una rúbrica de skill — a diferencia de
+// `patrones`/`test-desiderata` en el juez de tarea, aquí no hay vara de repo
+// que abrir. Menos herramientas, menos deriva: dárselas «por si acaso» sería
+// la misma indirección que ya se quitó del `kind` de `REPORT_SCHEMA`.
+//
+// Copia del frontmatter de `agents/ct-slice-judge.md`, atada por
+// `step-contracts.test.js` con el mismo criterio que `JUDGE_TOOLS`: este
+// módulo es puro y no lee disco, así que lo que impide que las dos diverjan
+// es el test, no el código.
+export const SLICE_JUDGE_TOOLS = 'Read, Grep, Glob, Write'
+
+// Los cuatro encabezados del paquete de SLICE que escribe `escribirPaqueteDeSlice`
+// en `scripts/ct-step.mjs`: la señal de observabilidad que el issue del slice
+// declaró (Slice 10 — PRIMERA porque es la vara del ítem `observabilidad`:
+// detrás del diff `-U10` quedaría enterrada), el registro de commits de la
+// slice (que no existe en el paquete por tarea, porque una tarea es UN commit
+// sin historia propia que mostrar), el resumen de ficheros tocados y el diff
+// acumulado desde la base. Mismo cruce que `PACKAGE_SECTIONS`: la rúbrica de
+// `agents/ct-slice-judge.md` los cita por su nombre, y sin este test un
+// encabezado renombrado deja al juez señalando una sección que no existe — el
+// test que los ata obliga a que paquete y agente cambien en la MISMA tarea.
+export const SLICE_PACKAGE_SECTIONS = ['Señal', 'Commits', 'Files changed', 'Diff']
+
 const esTexto = (v) => typeof v === 'string' && v.trim() !== ''
 
 // Validación a mano y no con una librería de esquemas: el spec exige cero
 // dependencias nuevas, y lo que hay que comprobar cabe en veinte líneas.
-export function readVerdict(structured) {
+//
+// `rules` es el segundo parámetro, no un módulo aparte: el veredicto de tarea
+// y el de slice comparten TODA esta validación —esquema, cardinalidad,
+// coherencia PASS/high— y sólo difieren en qué enum de `rule` aceptan y
+// cuántos pasos exige el recorrido. Parametrizar es lo que evita una segunda
+// función que copiara estas veinte líneas y divergiera en el primer arreglo
+// que se aplicara a una sola de las dos.
+export function readVerdict(structured, rules = VERDICT_RULES) {
   if (!structured || typeof structured !== 'object') return { why: 'el juez no devolvió structured_output' }
   const { ruling, rubric, findings } = structured
   if (ruling !== 'PASS' && ruling !== 'FAIL') return { why: `ruling desconocido: ${JSON.stringify(ruling)}` }
@@ -289,7 +427,14 @@ export function readVerdict(structured) {
   for (const [i, f] of findings.entries()) {
     if (!f || typeof f !== 'object') return { why: `el hallazgo ${i} no es un objeto` }
     if (!SEVERITIES.includes(f.severity)) return { why: `el hallazgo ${i} tiene una severidad desconocida: ${JSON.stringify(f.severity)}` }
-    if (!esTexto(f.what) || !esTexto(f.where)) return { why: `el hallazgo ${i} no dice qué o dónde` }
+    if (!esTexto(f.what) || !esTexto(f.path)) return { why: `el hallazgo ${i} no dice qué o dónde: hacen falta 'what' y 'path'` }
+    // `line` es opcional y `null` vale: un hallazgo del fichero entero no tiene
+    // línea, y exigirla sería pedir un número inventado o gastar un descarte de
+    // los seis que matan el run. Lo que no vale es una línea que no es un
+    // número: la cadena `"12"` pasa el `typeof` y rompe cualquier agregación.
+    if (f.line !== undefined && f.line !== null && !(Number.isInteger(f.line) && f.line > 0)) {
+      return { why: `el hallazgo ${i} trae una línea que no es un número: ${JSON.stringify(f.line)} — un entero, o null (u omitida) si el hallazgo es del fichero entero` }
+    }
     // La cita, con el mismo trato que el qué y el dónde: sin ella el hallazgo
     // no se puede contrastar, y un veto que no se puede contrastar es el veto
     // defensivo que la calibración de la rúbrica existe para impedir.
@@ -297,20 +442,20 @@ export function readVerdict(structured) {
     // La regla es el enum CERRADO: no se asume ninguna por defecto, porque una
     // regla inventada por el juez ensuciaría el conteo por regla de la
     // telemetría tanto como un `rule` ausente.
-    if (!VERDICT_RULES.includes(f.rule)) return { why: `el hallazgo ${i} incumple una regla desconocida: ${JSON.stringify(f.rule)}` }
+    if (!rules.includes(f.rule)) return { why: `el hallazgo ${i} incumple una regla desconocida: ${JSON.stringify(f.rule)}` }
   }
   // El recorrido de la rúbrica, con el mismo criterio que el `rule` de un
   // hallazgo: enum CERRADO y descarte, no interpretación. Aquí el descarte
-  // cubre además la CARDINALIDAD, que en un hallazgo no aplica — la rúbrica son
-  // ocho ítems y se contestan los ocho, así que un recorrido corto, uno con un
+  // cubre además la CARDINALIDAD, que en un hallazgo no aplica — la rúbrica se
+  // recorre entera y se contesta entera, así que un recorrido corto, uno con un
   // ítem repetido y uno con un identificador que nadie reconoce son el mismo
   // fallo: un veredicto del que no se puede afirmar que la rúbrica se recorrió.
   if (!Array.isArray(rubric)) return { why: 'el veredicto no trae el recorrido de la rúbrica' }
   const recorridos = []
   for (const [i, paso] of rubric.entries()) {
     if (!paso || typeof paso !== 'object') return { why: `el paso ${i} del recorrido no es un objeto` }
-    if (!VERDICT_RULES.includes(paso.rule)) return { why: `el recorrido nombra un ítem desconocido de la rúbrica: ${JSON.stringify(paso.rule)}` }
-    // Un ítem nombrado sin resultado son los ocho identificadores sin nada
+    if (!rules.includes(paso.rule)) return { why: `el recorrido nombra un ítem desconocido de la rúbrica: ${JSON.stringify(paso.rule)}` }
+    // Un ítem nombrado sin resultado son los identificadores sin nada
     // detrás: el mismo PASS vacío de rust-monitoring#10, sólo más largo.
     if (!esTexto(paso.result)) return { why: `el ítem ${paso.rule} del recorrido no dice lo que dio` }
     // El resultado en prosa dice lo que dio; `outcome` dice de qué CLASE fue,
@@ -320,8 +465,11 @@ export function readVerdict(structured) {
     if (recorridos.includes(paso.rule)) return { why: `el recorrido repite el ítem ${paso.rule} de la rúbrica` }
     recorridos.push(paso.rule)
   }
-  const sinRecorrer = VERDICT_RULES.filter((regla) => !recorridos.includes(regla))
-  if (sinRecorrer.length) return { why: `el recorrido no pasa por ${sinRecorrer.join(', ')}: la rúbrica son ocho ítems y se contestan los ocho` }
+  const sinRecorrer = rules.filter((regla) => !recorridos.includes(regla))
+  // El número sale del array y no de la prosa: el noveno ítem dejó obsoleto de
+  // golpe un "ocho" escrito a mano, y este `why` es el texto que el juez lee
+  // para volver a contestar tras un descarte.
+  if (sinRecorrer.length) return { why: `el recorrido no pasa por ${sinRecorrer.join(', ')}: la rúbrica son ${rules.length} ítems y se contestan los ${rules.length}` }
   // La coherencia que el original comprueba en el propio agregado: un PASA con
   // un hallazgo grave se contradice a sí mismo. No se "interpreta" hacia el
   // lado prudente — se descarta y se vuelve a preguntar, porque un juez que no
@@ -332,6 +480,14 @@ export function readVerdict(structured) {
   return { verdict: { ruling, rubric, findings } }
 }
 
+// El veredicto del SLICE entero (§3.7-B): misma validación, la rúbrica de
+// `agents/ct-slice-judge.md`. Una función con nombre propio y no una llamada
+// suelta a `readVerdict(x, SLICE_VERDICT_RULES)` en cada sitio que lo usa: es
+// lo que hace que `ct-step.mjs` no tenga que importar `SLICE_VERDICT_RULES`
+// sólo para pasarla, y lo que deja un único punto donde "leer un veredicto de
+// slice" significa una cosa.
+export const readSliceVerdict = (structured) => readVerdict(structured, SLICE_VERDICT_RULES)
+
 // De veredicto a resultado de la tabla. Las tres salidas son las tres que
 // `run-machine.js` sabe atender desde el paso `judge`.
 export function outcomeOfVerdict(verdict) {
@@ -339,6 +495,29 @@ export function outcomeOfVerdict(verdict) {
   // Un PASA con hallazgos que no son de severidad baja no bloquea, pero tampoco
   // se ignora: vuelve al implementador con presupuesto propio.
   return verdict.findings.some((f) => f.severity !== 'low') ? 'corrections-ordered' : 'done'
+}
+
+// De veredicto de SLICE a resultado de la tabla — sólo DOS salidas, las que
+// `trasElJuezDeSlice` sabe atender. `PASS` es SIEMPRE `done`, con hallazgos o
+// sin ellos: a diferencia de una tarea, aquí no queda ningún implementador con
+// trabajo stageado al que devolver — el slice entero ya está comiteado, tarea
+// a tarea. Un medium no compra una vuelta pagada que no hay a quién cobrarle:
+// viaja DENTRO del veredicto que este mismo verbo comitea, y lo lee quien
+// revisa la pull request — una puerta que YA existe, no una cuarta.
+export function outcomeOfSliceVerdict(verdict) {
+  return verdict.ruling === 'FAIL' ? 'failed' : 'done'
+}
+
+// `path:line` a partir de los dos campos, en UN solo sitio. El hallazgo los
+// lleva separados para que un programa pueda agrupar por fichero, pero quien
+// lee el aviso de corrección quiere la ubicación de una pieza. Vive aquí,
+// pegado al esquema, para que el próximo lector no invente su propia
+// recomposición: dos formatos de la misma ubicación es la divergencia que este
+// módulo ya pagó con JUDGE_TOOLS. Sin línea imprime sólo el fichero, que es
+// exactamente lo que ese hallazgo dice.
+export function findingLocation(finding) {
+  const { path, line } = finding || {}
+  return line === undefined || line === null ? String(path ?? '') : `${path}:${line}`
 }
 
 export function readReport(structured) {
@@ -483,4 +662,26 @@ export function commitMessage({ issue, task, tasksTotal, name }) {
 // leyéndose igual.
 function sanear(name) {
   return String(name || 'tarea sin nombre').replace(/#(\d+)/g, 'issue $1').trim()
+}
+
+// El veredicto de SLICE no tiene tarea de la que colgar: el de tarea viaja
+// DENTRO del commit de su tarea, y el del slice entero se comitea después de
+// la última — así que estrena su propio commit, con el mismo precedente
+// exacto que el resto de este módulo ya obedece: comitea el PROGRAMA, y el
+// programa se mira su propio mensaje porque `commit-keyword-guard` no ve un
+// `git commit` que no lanzó una sesión.
+export function sliceVerdictCommitMessage({ issue, tasksTotal }) {
+  const titulo = `Veredicto del slice entero (#${issue})`
+  const cuerpo = [
+    '',
+    `Las ${tasksTotal} tareas comiteadas, la Global verification en verde y el slice juzgado de una vez por ct-slice-judge.`,
+    '',
+    'Co-Authored-By: Claude <noreply@anthropic.com>',
+  ].join('\n')
+  const mensaje = titulo + '\n' + cuerpo
+  const keywords = findClosingKeywords(mensaje)
+  if (keywords.length) {
+    throw new Error(`el mensaje de commit del veredicto de slice contiene una closing keyword (${keywords.map((k) => `${k.keyword} ${k.ref}`).join(', ')}) y cerraría un issue sin que nadie lo haya decidido`)
+  }
+  return mensaje
 }

@@ -8,7 +8,7 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 
 | | |
 |---|---|
-| Versión | `0.41.0` · contrato de la tabla de slices `v19` |
+| Versión | `0.41.0` · contrato de la tabla de slices `v20` |
 | Comandos | `/ct-init` · `/ct-groom` · `/ct-next` · `/ct-status` |
 | Puertas humanas | 3 por epic — congelación, `status:ready`, merge — más el gate `plan` en cada slice (renunciable por fila con `!plan`) y el gate `e2e` cuando la fila declara recorridos en la columna `E2E` (derivado, no se escribe a mano) |
 | Skills | 11 forkados de superpowers 6.0.3 + 1 propio (`writing-plans-prescriptive`) |
@@ -130,6 +130,8 @@ ct-step report informe.json      # valida las rutas, las stagea, transiciona
 ct-step controls                 # ejecuta los comandos de **Verification:** y MIDE
 ct-step verdict veredicto.json   # valida contra el esquema, transiciona
 ct-step commit                   # valida el mensaje y comitea
+ct-step global                   # tras la última tarea: corre ## 8. Global verification
+ct-step slice-verdict v.json     # el juicio del slice ENTERO (ct-slice-judge, sin Bash)
 ct-step e2e informe.json         # SOLO si el slice declara recorridos: valida, escribe el informe y comitea
 ```
 
@@ -143,6 +145,8 @@ Lo que cambia respecto de hoy, en una línea por propiedad:
 | Qué puede ejecutar el juez | `code-reviewer.md` despacha un `general-purpose`: tiene `Bash` | nada: `agents/ct-judge.md` se declara sin `Bash` |
 | Qué devuelve el juez | prosa | un JSON validado contra un esquema; lo que no cumple se descarta |
 | Quién comitea | el implementador | el programa, y valida su propio mensaje contra las closing keywords |
+| Quién ejecuta `## 8. Global verification` | nadie — el plan la declaraba y ningún programa la corría | `ct-step global`, tras la última tarea; en rojo no se abre la pull request (exit `11`/`12`) |
+| Quién juzga el slice ENTERO | nadie — el juicio era por tarea | `agents/ct-slice-judge.md` (sin `Bash`): el fin del slice y la coherencia entre tareas, con veredicto que viaja en su propio commit |
 
 **Es el camino por defecto desde `0.36.0`**: el kickoff que compone `/ct-next`
 manda conducir la implementación consultando `ct-step` (y prohíbe SDD como

@@ -48,12 +48,16 @@ stop there: a blocker travels as that field, which is the one thing a guess cann
 `## 3. Reference patterns` carries this repo's yardstick in two lists, and step 2 of the list at the
 end of this skill is where you go and read them. An analogous file shows the shape; a convention
 document states the rule, and a rule holds even where no analogous file exists — which is why a
-slice on an empty repo still has something to measure against. Look for `AGENTS.md`, `CLAUDE.md`,
-`CONTRIBUTING`, a `docs/conventions/` directory and the project skills; the issue's "Contexto del
-epic" may have named them already. List what you find under `Rules to obey:`, **by path**, and if
-the repo declares none, say so with `N/A — <reason>` rather than inventing a plausible one: a path
-that is not in the repo fails the plan. This section is what the judge opens to decide whether the
-diff honours this repo's conventions, so a path cited from memory leaves implementer and judge
+slice on an empty repo still has something to measure against. Start from `.agent/conventions.md`
+where the repo declares one: that file is the repo's own declaration, seeded by `/ct-init` and
+confirmed by a human, and it is what keeps slice 14 citing the same yardstick as slice 3. Then look
+for `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING`, a `docs/conventions/` directory and the project
+skills; the issue's "Contexto del epic" may have named them already. List under `Rules to obey:`,
+**by path**, the entries that bear on this slice — you are selecting, not transporting: the program
+pastes that file into every task brief anyway, so omitting an entry does not hide it from the judge.
+If the repo declares none, say so with `N/A — <reason>` rather than inventing a plausible one: a
+path that is not in the repo fails the plan. This section is what the judge opens to decide whether
+the diff honours this repo's conventions, so a path cited from memory leaves implementer and judge
 measuring against a file that is not there.
 
 Then every code block you write declares its **role** on

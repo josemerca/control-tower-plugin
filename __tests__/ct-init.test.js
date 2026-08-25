@@ -321,7 +321,7 @@ describe('ct-init.sh', () => {
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     const table = extractWorkedExample(agents)
-    expect(table).toContain('| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate |')
+    expect(table).toContain('| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate | Señal |')
     const specDir = mkdtempSync(join(tmpdir(), 'ct-example-'))
     const specPath = join(specDir, 'spec.md')
     // El envoltorio (hipótesis + cabecera de sección) lo pone el TEST, no el
@@ -348,8 +348,40 @@ describe('ct-init.sh', () => {
     expect(plan.issues[1].labels).toContain('gate:visual') // declarado, contra su Tipo
     expect(plan.issues[2].labels).toContain('gate:visual') // implícito, por Tipo: ui
     expect(plan.issues[0].labels).toContain('gate:plan') // F-jjponz-2: el defecto universal, también en el ejemplo
+    // Slice 10: el ejemplo DEMUESTRA la columna Señal en sus tres formas —
+    // la fila 2 declara su señal (sección en el body, verbatim), la fila 3 se
+    // exime con razón (N/A — <razón>, también al body), y la fila 1 no
+    // declara nada (sin sección). Calcado de los asserts de gate: si alguien
+    // cambiara el ejemplo por uno que no ejercita los tres caminos, esto se
+    // entera.
+    expect(plan.issues[1].body).toContain('## Señal de observabilidad')
+    expect(plan.issues[1].body).toContain('métrica `backfill_progress` con label `estado`')
+    expect(plan.issues[2].body).toContain('N/A — pantalla sin telemetría nueva que prometer')
+    expect(plan.issues[0].body).not.toContain('## Señal de observabilidad')
     rmSync(dir, { recursive: true, force: true })
     rmSync(specDir, { recursive: true, force: true })
+  })
+
+  // Slice 10 — el contrato (v19, hoy v20 tras converger con la columna E2E)
+  // documenta la columna Señal: qué es, cómo se
+  // exime (`N/A — <razón>`, y que sin razón aborta), a dónde llega (sección
+  // del body → SLICE.md → paquete del juez de slice → ítem observabilidad) y
+  // que una celda sin valor se mide como sin-vara en la telemetría del epic.
+  // Un v18 no puede deducir ninguna de esas cosas.
+  it('el contrato documenta la columna Señal: la exención N/A — <razón>, a dónde llega y que sin valor es sin-vara', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    expect(agents).toContain('**Señal** *(opcional)*')
+    expect(agents).toContain('N/A — <razón>')
+    expect(agents).toMatch(/exención sin razón|exención SIN razón/i)
+    expect(agents).toContain('## Señal de observabilidad')
+    expect(agents).toContain('.agent/SLICE.md')
+    expect(agents).toContain('`observabilidad`')
+    expect(agents).toContain('`sin-vara`')
+    // La línea de marcadores de "sin valor" nombra también a Señal.
+    expect(agents).toContain('Marcadores de "sin valor" (`Dep`/`Acepta`/`Protegido`/`Área`/`Toca`/`Gate`/`Señal`):')
+    rmSync(dir, { recursive: true, force: true })
   })
 
   // Control de los cinco tests siguientes: el contrato ANTERIOR (fixture
@@ -656,8 +688,18 @@ describe('ct-init.sh', () => {
     const historical = historicalContractBlocks()
     // Control: si esto no reconstruye varias versiones, el test no prueba nada.
     expect(historical.length).toBeGreaterThanOrEqual(9)
-    const current = historical.find((h) => sha256(h.block) === sha256(extractBlock(seedFreshAgentsMd())))
-    expect(current).toBeDefined() // el bloque de hoy también sale del historial
+    // El control de "la reconstrucción llega hasta hoy" tolera un bump del
+    // contrato todavía SIN comitear (el flujo de ct-step comitea después del
+    // juez, así que el árbol de trabajo va por delante del historial durante
+    // el propio slice que sube la versión): si el bloque del árbol no está
+    // aún en ningún commit, lo que se exige en su lugar es que su hash ya
+    // esté registrado en SLICES_PRISTINE_HASHES — el mismo trato del árbol
+    // de trabajo que ya aplica "no registra hashes de bloques que no
+    // existieron nunca" (known.add del bloque del árbol). En cuanto el bump
+    // se comitea, la rama estricta vuelve a regir sola.
+    const bloqueDeHoy = extractBlock(seedFreshAgentsMd())
+    const current = historical.find((h) => sha256(h.block) === sha256(bloqueDeHoy))
+    if (!current) expect(initScriptSrc).toContain(sha256(bloqueDeHoy))
     for (const { block, commit } of historical) {
       const dir = mkdtempSync(join(tmpdir(), 'ct-'))
       const before = `# AGENTS.md\n\n## Gotchas\n- notas de ${commit}\n\n${block}\n## Después\n- intocable\n`

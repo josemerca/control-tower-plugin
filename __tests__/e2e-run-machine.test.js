@@ -1,6 +1,8 @@
 // ============================================================================
-// El paso e2e en la tabla. TERMINAL, no por tarea: se entra al comitear la
-// ÚLTIMA tarea, y sólo si el run declara recorridos.
+// El paso e2e en la tabla. TERMINAL, no por tarea: es el ÚLTIMO paso de la
+// cola que arranca al comitear la última tarea (commit → global → slice-judge
+// → e2e), y el único condicional de esa cola — sólo se entra si el run declara
+// recorridos.
 //
 // Por qué terminal y no por tarea: el e2e verifica lo que la SLICE entrega, y
 // una tarea es un commit — pedirle a la tarea 2 de 5 que atraviese un flujo de
@@ -19,16 +21,30 @@ const enCommitDeLaUltima = (e2eRuns) => ({
   step: STEPS.COMMIT,
 })
 
+// trasLaColaDeSlice: comitear la última tarea ya NO decide la entrega — desde
+// la fase §3.7 (GLOBAL + SLICE_JUDGE) hay dos pasos de slice entre ese commit
+// y el cierre, y el e2e va DETRÁS de los dos: es el último de la cola y el
+// único condicional. Este helper recorre la cola entera para que cada test
+// mida la transición que le toca y no el orden de la cola, que se prueba en
+// los tests de la fase global.
+const trasLaColaDeSlice = (e2eRuns) => {
+  const trasCommit = after(enCommitDeLaUltima(e2eRuns), OUTCOMES.DONE)
+  const trasGlobal = after(trasCommit.run, OUTCOMES.DONE)
+  return after(trasGlobal.run, OUTCOMES.DONE)
+}
+
 describe('la entrada al paso e2e', () => {
-  it('sin recorridos, la última tarea cierra en DELIVERED como hasta ahora', () => {
-    const r = after(enCommitDeLaUltima([]), OUTCOMES.DONE)
+  it('sin recorridos, la cola de slice cierra en DELIVERED sin pasar por e2e', () => {
+    const r = trasLaColaDeSlice([])
     expect(r.state).toBe(RUN_STATES.DELIVERED)
   })
 
-  it('con recorridos, la última tarea abre el paso e2e', () => {
-    const r = after(enCommitDeLaUltima(['el server escucha en 9115']), OUTCOMES.DONE)
+  it('con recorridos, el final de la cola de slice abre el paso e2e', () => {
+    const r = trasLaColaDeSlice(['el server escucha en 9115'])
     expect(r.state).toBe(RUN_STATES.OPEN)
     expect(r.run.step).toBe(STEPS.E2E)
+    // `task` NO avanza: el e2e es de la SLICE, no de una tarea tercera que no
+    // existe — la misma invariante que ct-step comprueba al cargar el estado.
     expect(r.run.task).toBe(2)
   })
 
@@ -52,7 +68,7 @@ describe('la entrada al paso e2e', () => {
 })
 
 describe('las transiciones del paso e2e', () => {
-  const enE2e = () => after(enCommitDeLaUltima(['un recorrido']), OUTCOMES.DONE).run
+  const enE2e = () => trasLaColaDeSlice(['un recorrido']).run
 
   it('DONE cierra en DELIVERED', () => {
     expect(after(enE2e(), OUTCOMES.DONE).state).toBe(RUN_STATES.DELIVERED)

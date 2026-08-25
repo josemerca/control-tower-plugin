@@ -355,11 +355,91 @@ const NOT_A_PREDICATE = [
 ]
 
 // ============================================================================
+// `## 8. Global verification` ES DEL PROGRAMA, NO DE PROSA (§3.7-A del handoff
+// docs/prompt-juez-lo-que-queda.md).
+//
+// El plan declara la validación de punta a punta para cuando todas las tareas
+// estén comiteadas, y hasta este slice ningún programa la ejecutaba: `ct-step
+// controls` sólo mide el bloque **Verification:** DE CADA TAREA — cero
+// referencias a §8 en todo el fichero. Es la misma trampa del §2.5 que ya
+// cerró `verification-block` para las tareas —prosa no es ejecutable— y el
+// mismo remedio: los comandos van en un bloque cercado, con el escape
+// declarable "N/A — <razón>" para el slice que de verdad no tiene punta a
+// punta que correr (documentación, configuración pura). Exigir un comando a
+// ese slice sería el guard imposible de F14 otra vez, sólo que aplicado a §8.
+//
+// A diferencia del bloque por tarea, aquí SÍ se admite prosa antes Y DESPUÉS
+// del fence: §8 lleva también el "qué mirar" para el gate humano `visual`
+// (arrancar los servidores, abrir la URL, comprobar tres cosas a ojo), y esa
+// prosa no es el objeto de esta regla — sólo el bloque de comandos lo es. Por
+// eso la búsqueda del fence no exige que sea el primero tras el encabezado
+// (como sí exige `commandsAfter` para **Verification:**): recorre todo el
+// tramo de §8 y se queda con el PRIMERO que abre.
+//
+// Reusa `lastPipelineStage` y `NOT_A_PREDICATE`: la vara que impide que un
+// control mida al revés es la misma para el bloque por tarea y para el bloque
+// de §8 — el `grep -c` invertido de rust-monitoring#10 es el mismo defecto
+// aquí que allí.
+// ============================================================================
+const GLOBAL_HEADING = /^## 8\. Global verification\b/
+const GLOBAL_NA = /^N\/A\b/i
+
+function extractGlobal(lines, push) {
+  const desde = lines.findIndex((l) => l.structural && GLOBAL_HEADING.test(l.line))
+  if (desde === -1) {
+    push(0, 'global-verification-block', 'el plan no declara "## 8. Global verification": la validación de punta a punta no puede ejecutarla un programa que no sabe dónde buscarla.')
+    return { commands: [] }
+  }
+  let hasta = lines.findIndex((l, i) => i > desde && l.structural && /^## /.test(l.line))
+  if (hasta === -1) hasta = lines.length
+  const cuerpo = lines.slice(desde + 1, hasta)
+
+  // El escape: "N/A — <razón>" como primera línea no vacía del tramo declara
+  // que este slice no tiene punta a punta que correr, y no es un problema.
+  const primeraNoVacia = cuerpo.find((l) => l.structural && l.line.trim() !== '')
+  if (primeraNoVacia && GLOBAL_NA.test(primeraNoVacia.line.trim())) return { commands: [] }
+
+  const abre = cuerpo.findIndex((l) => l.fence && l.opens)
+  let comandos = null
+  if (abre !== -1) {
+    comandos = []
+    for (let j = abre + 1; j < cuerpo.length; j++) {
+      if (cuerpo[j].fence) break
+      const t = cuerpo[j].line.trim()
+      if (t === '' || t.startsWith('#')) continue
+      comandos.push(t)
+    }
+    // Cercado sin cerrar: no hay bloque que valga, igual que en `commandsAfter`.
+    if (!cuerpo.slice(abre + 1).some((l) => l.fence)) comandos = null
+  }
+
+  if (comandos === null || comandos.length === 0) {
+    push(0, 'global-verification-block', 'la "## 8. Global verification" del plan declara la validación de punta a punta en prosa, y un programa no ejecuta prosa. Los comandos van en un bloque cercado bajo "## 8. Global verification", o la línea exacta "N/A — <razón>".')
+    return { commands: [] }
+  }
+
+  for (const comando of comandos) {
+    const tramo = lastPipelineStage(comando)
+    if (!tramo || !tramo.stage) continue
+    const words = tramo.stage.split(/\s+/).filter(Boolean)
+    const roto = NOT_A_PREDICATE.find((r) => r.matches(words, tramo.piped))
+    if (roto) {
+      push(0, 'global-verification-predicate', `la "## 8. Global verification" verifica con \`${comando}\`, y su código de salida no puede afirmar lo que el control dice medir: ${roto.why}`)
+    }
+  }
+
+  return { commands: comandos }
+}
+
+// ============================================================================
 // LA ENTRADA PÚBLICA
 //
-// Devuelve `{ tasks, problems }`. `problems` no está vacío cuando el plan no es
-// ejecutable, y su presencia es lo que el conductor traduce a su código de
-// salida 6: "arregla el plan", que no es lo mismo que "el trabajo está mal".
+// Devuelve `{ tasks, problems, global }`. `problems` no está vacío cuando el
+// plan no es ejecutable, y su presencia es lo que el conductor traduce a su
+// código de salida 6: "arregla el plan", que no es lo mismo que "el trabajo
+// está mal". `global` es lo que hay que ejecutar tras la última tarea
+// comiteada (§3.7-A): `{ commands }`, vacío cuando §8 declara "N/A" o cuando
+// el plan no la trae ejecutable (y entonces hay un `problem` que lo explica).
 // ============================================================================
 export function extractTasks(markdown) {
   const lines = annotate(markdown)
@@ -469,5 +549,12 @@ export function extractTasks(markdown) {
 
   if (!tasks.length) push(0, 'tasks', 'el plan no declara ninguna tarea ("### Task N — ...").')
 
-  return { tasks, problems }
+  // La extracción de §8 corre sobre `lines` COMPLETO, no sobre el `cuerpo` de
+  // ninguna tarea: sin tareas siguientes, el §8 de un plan real cae dentro del
+  // tramo de la ÚLTIMA tarea (es inocuo para el bucle de arriba, que sólo
+  // reacciona a marcadores), pero aquí hace falta el fichero entero para
+  // encontrar su propio encabezado "## 8.".
+  const global = extractGlobal(lines, push)
+
+  return { tasks, problems, global }
 }

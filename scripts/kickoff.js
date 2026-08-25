@@ -8,8 +8,23 @@ import { resolveGatesForAgent, renderGateKickoffLines, resolveE2e } from './gate
 // que ese path cambie no queden mensajes mandando al agente a un fichero que
 // ya no es el suyo (que es exactamente el defecto que esta ronda arregla).
 import { SLICE_REL_PATH } from './state-paths.js'
-import { EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING } from './groom.js'
+// parseSenalCell (Slice 10): el MISMO clasificador que usa el groom — un solo
+// discriminador de "señal declarada / exención / nada" para groom, kickoff y
+// (en prosa) la rúbrica del juez de slice, que no pueda divergir entre quien
+// valida la celda y quien anuncia la línea.
+import { EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING, parseSenalCell } from './groom.js'
 import { NO_MILESTONE_KEY } from './gh-issue-map.js'
+
+// SENAL_AUSENTE (Slice 10): el valor del campo `senal:` cuando el issue no
+// trae la sección "## Señal de observabilidad" — la ausencia se DECLARA, no
+// se omite (mismo criterio que `gates:`/`blocked:`: un campo que solo existe
+// cuando hay algo es un campo que nadie escribe cuando le hace falta). Es UNA
+// constante única, importada también por ct-step.mjs (el otro escritor: el
+// fallback del paquete del juez cuando el SLICE.md fue sembrado por un plugin
+// anterior a la columna), para que los dos escritores no diverjan. Su
+// apertura "(sin señal declarada" es literalmente lo que la rúbrica de
+// ct-slice-judge reconoce como sin-vara.
+export const SENAL_AUSENTE = '(sin señal declarada — el issue no trae la sección "## Señal de observabilidad"; el juez de slice mide su ítem observabilidad como sin-vara)'
 
 // ACCOUNT_MAP — qué CLAUDE_CONFIG_DIR (qué cuenta de Claude) recibe el agente
 // que se despacha para un repo.
@@ -272,6 +287,17 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, base
     // heredada). Sin ella, un agente que no encuentra lo que se le acaba de
     // nombrar lo busca fuera del issue, que es justo lo que no puede hacer.
     `Lee también las secciones "${EPIC_CONTEXT_HEADING}" y "${INHERITED_CONTEXT_HEADING}" del issue: traen lo que el spec y los slices ya mergeados condicionan sobre este trabajo y que no cabe en los criterios de aceptación. Si alguna está vacía o no aparece, no hay nada que heredar — no lo busques fuera del issue.`,
+    // Slice 10 — la señal, NOMBRADA cuando el issue la declara: "ninguna
+    // exigencia que el spec le haga al agente puede depender de que el agente
+    // lea el spec" — sin esta línea, el juez de slice exigiría lo que al
+    // implementador nadie nombró. Condicional como las líneas de gate: con
+    // exención razonada o sin declaración, NINGUNA línea (nada que exigir; el
+    // silencio cuando no hay nada que decir es lo que mantiene útiles a las
+    // líneas que sí salen). El discriminador es parseSenalCell, el MISMO del
+    // groom — no una segunda lectura de la celda que pueda divergir.
+    parseSenalCell(slice.senal || '').kind === 'senal'
+      ? 'Este slice declara una SEÑAL DE OBSERVABILIDAD (sección "## Señal de observabilidad" del issue): lo que esa señal promete tiene que emitirlo el código de PRODUCCIÓN de este slice, instrumentado como ya instrumenta este repo y sin labels de cardinalidad ilimitada — el juez del slice entero lo comprueba contra el diff acumulado antes del PR.'
+      : '',
     // F32 — el modelo de dos niveles (§4.3 del handoff): nivel epic = CT,
     // nivel slice = los skills FORKADOS en este plugin (control-tower-loop:*,
     // ver skills/FORK.md) — nunca el namespace superpowers:, que la tarea 6
@@ -287,7 +313,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, base
     // absoluta desde ct-next.mjs, por el mismo motivo que `dispatchCheckPath`
     // (el token ${CLAUDE_PLUGIN_ROOT} no existe en un prompt de texto plano).
     `Primer acto, con el baseline verde: escribe el plan del slice con control-tower-loop:writing-plans-prescriptive usando el issue como spec (sus AC, "Protegido" y "Contexto del epic" son la entrada que la skill pide). SOLO bloques esenciales, cada uno con su etiqueta de rol: contratos, call sites y el tramo que cambia — los cuerpos de los módulos y los ficheros de test los escribe el implementador con TDD, y la configuración se describe en prosa. Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${slice.n}-<slug>.md, valídalo con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --check-plan\` hasta exit 0, y commitéalo: viaja en el PR, y el --release del final se negará (exit 6) sin un plan válido commiteado.`,
-    `Con el plan commiteado y el gate 'plan' con OK humano, la implementación NO la conduces con subagent-driven-development ni con su ledger: la secuencia la dicta la máquina. Pregunta el paso con \`node ${ctStepPath} next --plan docs/superpowers/plans/<el-plan-que-commiteaste>.md --issue ${slice.n}\` y obedece LITERALMENTE lo que imprima en cada paso (donde diga \`ct-step\`, es \`node ${ctStepPath}\`): despacha el implementador como subagente con la rúbrica y el brief que te indique, luego \`ct-step report\`, \`ct-step controls\`, despacha el juez como subagente ct-judge (declarado sin Bash), \`ct-step verdict\` y \`ct-step commit\` — comitea ct-step, nunca tú ni el implementador. Vuelve a \`next\` tras cada paso hasta "run delivered".`,
+    `Con el plan commiteado y el gate 'plan' con OK humano, la implementación NO la conduces con subagent-driven-development ni con su ledger: la secuencia la dicta la máquina. Pregunta el paso con \`node ${ctStepPath} next --plan docs/superpowers/plans/<el-plan-que-commiteaste>.md --issue ${slice.n}\` y obedece LITERALMENTE lo que imprima en cada paso (donde diga \`ct-step\`, es \`node ${ctStepPath}\`): despacha el implementador como subagente con la rúbrica y el brief que te indique, luego \`ct-step report\`, \`ct-step controls\`, despacha el juez como subagente ct-judge (declarado sin Bash), \`ct-step verdict\` y \`ct-step commit\` — comitea ct-step, nunca tú ni el implementador. Tras el commit de la última tarea quedan dos pasos más, que \`next\` también dicta: \`ct-step global\` (la Global verification del plan la ejecuta el programa, no un agente) y el juicio del slice entero — despacha ct-slice-judge como subagente (declarado sin Bash) y entrega su JSON con \`ct-step slice-verdict\`. Vuelve a \`next\` tras cada paso hasta "run delivered".`,
     addendum,
     ...gateLines,
     e2eLine,
@@ -371,6 +397,15 @@ function renderStateGates(gates) {
   return `${list.join(', ')} — GATES HUMANOS pendientes: los cierra quien revisa el PR, NO tú. Detalle en la sección "## Gates" del issue.`
 }
 
+// renderStateSenal (Slice 10): el valor del campo `senal:` — el texto de la
+// sección del issue, verbatim (señal o exención `N/A — <razón>`, tal cual: el
+// lector distingue la exención solo por su prefijo), o SENAL_AUSENTE cuando
+// el issue no declara nada. Nunca un hueco: la ausencia se declara, no se
+// omite — ver el comentario de SENAL_AUSENTE.
+function renderStateSenal(senal) {
+  return (senal || '').trim() || SENAL_AUSENTE
+}
+
 export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
   const issueNum = slice.issue != null ? parseInt(String(slice.issue).replace('#', ''), 10) : null
   return renderState({
@@ -414,6 +449,15 @@ export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
       // verdad por accidente; el gate ejecutable son las labels `gate:` del
       // issue.
       gates: renderStateGates(resolveGatesForAgent(slice)),
+      // senal (Slice 10) — MISMO ARGUMENTO QUE `gates` (F21): lo que tiene
+      // que sobrevivir a una re-hidratación es un CAMPO, no una frase dentro
+      // de un prompt que se pierde con el contexto de su sesión. Se siembra
+      // SIEMPRE (texto verbatim del issue, o SENAL_AUSENTE — la ausencia se
+      // declara, no se omite). Sus lectores: ct-step, que lo pega como
+      // primera sección del paquete del juez de slice —leído del disco, sin
+      // agente en medio, la doctrina del §3.3— y el propio agente al
+      // re-hidratarse.
+      senal: renderStateSenal(slice.senal),
       // e2e (TAREA 9) — los recorridos que declara la columna E2E del spec. A
       // diferencia de `gates` (texto legible, y de la que su propio comentario
       // de arriba avisa que "ningún código del plugin decide nada con este

@@ -891,3 +891,73 @@ describe('buildReconcileBody — la sección "## E2E"', () => {
     expect(unresolvedE2e).toBe('duplicada')
   })
 })
+
+// Slice 10 — la señal en la reconciliación: comparación sí/no como `nota:`,
+// el precedente EXACTO de Descripción/Protegido. La autoridad en runtime es
+// EL ISSUE (como los gates: la señal que obedece el juez de slice es la que
+// el issue tenía al despachar), y la maquinaria de splice es la mitad
+// EXPERIMENTAL que cinco rondas de review decidieron no engordar — así que
+// `senalDiffers` no entra en hasDrift, ni en reconcileGaps, ni
+// buildReconcileBody la escribe o retira jamás.
+describe('la señal en la reconciliación (Slice 10)', () => {
+  const SENAL_SECTION = '## Señal de observabilidad'
+  const bodyConSenal = (texto) =>
+    existingWith({}).body.replace('## Dependencias', `${SENAL_SECTION}\n${texto}\n\n## Dependencias`)
+
+  it('senalDiffers: acuerdo cuando ninguno de los dos lados tiene sección', () => {
+    // WANTED_ISSUE no trae `senal` (→ null) y el body de existingWith tampoco
+    // trae la sección: silencio real en ambos lados, nunca divergencia — el
+    // mismo acuerdo null/null de descripcionDiffers.
+    const d = diffIssue(existingWith({}), WANTED_ISSUE, 'Epic', ALL_PREFIXES)
+    expect(d.senalDiffers).toBe(false)
+  })
+
+  it('senalDiffers: un lado con sección y el otro sin ella difiere; texto distinto difiere', () => {
+    // Issue con sección, spec sin señal → difiere.
+    const conSeccion = existingWith({ body: bodyConSenal('métrica x') })
+    expect(diffIssue(conSeccion, WANTED_ISSUE, 'Epic', ALL_PREFIXES).senalDiffers).toBe(true)
+    // Issue sin sección, spec con señal → difiere.
+    expect(diffIssue(existingWith({}), { ...WANTED_ISSUE, senal: 'métrica x' }, 'Epic', ALL_PREFIXES).senalDiffers).toBe(true)
+    // Ambos con texto, distinto → difiere; igual (módulo trim) → acuerdo.
+    expect(diffIssue(conSeccion, { ...WANTED_ISSUE, senal: 'métrica y' }, 'Epic', ALL_PREFIXES).senalDiffers).toBe(true)
+    expect(diffIssue(conSeccion, { ...WANTED_ISSUE, senal: '  métrica x  ' }, 'Epic', ALL_PREFIXES).senalDiffers).toBe(false)
+  })
+
+  it('la divergencia de señal sale como nota: y no cuenta para hasDrift ni para reconcileGaps', () => {
+    // La única divergencia del diff es la señal: todo lo demás coincide.
+    const d = diffIssue(existingWith({ body: bodyConSenal('métrica x') }), WANTED_ISSUE, 'Epic', ALL_PREFIXES)
+    expect(d.senalDiffers).toBe(true)
+    expect(hasDrift(d)).toBe(false)
+    const lines = formatDrift(d)
+    // Este fixture (sin sección "## Gates") arrastra además la nota de gates,
+    // preexistente y ortogonal — lo que se clava aquí es que la señal sale
+    // como nota: (verbatim) y que NINGUNA línea es divergencia:.
+    expect(lines).toContain('nota: slice #2 (issue #42): la sección "## Señal de observabilidad" difiere del spec (no cuenta para el exit code; --reconcile no la reescribe — la señal que obedece el juez de slice es la que el issue tenía al despachar, igual que los gates)')
+    expect(lines.every((l) => l.startsWith('nota:'))).toBe(true)
+    const gaps = reconcileGaps(d, { body: null, unresolvedAc: false, unresolvedDeps: false })
+    // `e2e: false` entró en la forma de reconcileGaps con la columna E2E (que
+    // SÍ se reescribe y SÍ cuenta para el exit code): aquí sólo diverge la
+    // señal, así que ninguna de las cuatro casillas se enciende.
+    expect(gaps).toEqual({ ac: false, deps: false, e2e: false, duplicates: false })
+    expect(hasReconcileGap(gaps)).toBe(false)
+  })
+
+  it('buildReconcileBody no escribe ni retira la sección de señal aunque diverja', () => {
+    const SLICE_S = { n: 2, name: 'refresh', type: 'backend', entrega: 'flujo de refresco', deps: [1], ac: ['AC-2.1'], protected: 'schema §6', senal: 'métrica `x` con label `y`' }
+    const SPEC_OPTS = { path: 'spec.md', heading: '9. Slices', url: 'https://github.com/o/r/blob/main/spec.md#9-slices', reason: null }
+    const WANTED = { deps: [1], ac: ['AC-2.1'], specLink: '> Slice `#2` del epic. Spec: [spec.md § 9. Slices](https://github.com/o/r/blob/main/spec.md#9-slices)' }
+    // Caso A: el body TIENE la sección, el spec ya no declara señal, y hay una
+    // divergencia real de AC que fuerza un splice — la sección sobrevive
+    // verbatim al body reescrito.
+    const generado = buildIssueBody(SLICE_S, SPEC_OPTS)
+    const rA = buildReconcileBody(generado, { ...WANTED, ac: ['AC-2.1', 'AC-2.2'] })
+    expect(rA.body).not.toBeNull()
+    expect(extractSectionContent(rA.body, SENAL_SECTION)).toBe('métrica `x` con label `y`')
+    // Caso B: el body NO tiene la sección y el spec sí declara señal — el
+    // splice de AC no la inserta.
+    const sinSenal = buildIssueBody({ ...SLICE_S, senal: '' }, SPEC_OPTS)
+    const rB = buildReconcileBody(sinSenal, { ...WANTED, ac: ['AC-2.1', 'AC-2.2'], senal: 'métrica nueva' })
+    expect(rB.body).not.toBeNull()
+    expect(rB.body).not.toContain(SENAL_SECTION)
+  })
+})

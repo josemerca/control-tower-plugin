@@ -51,6 +51,39 @@ else
   echo "STATE.md ya existe, no se pisa — pero no declara el campo \`blocked\`, así que se lee como NO bloqueado. Si el trabajo de este repo se queda alguna vez bloqueado, añádelo a mano al frontmatter en vez de explicarlo dentro de \`next_action\`: blocked: {reason: \"por qué no se puede continuar\", unblock: \"qué haría falta\"} — el hook de SessionStart lo anuncia y suspende el next_action en toda sesión nueva."
 fi
 
+# .agent/conventions.md (§3.3, docs/prompt-juez-lo-que-queda.md): las
+# convenciones son una propiedad del REPO, no del epic — antes se re-derivaban
+# en el §3 de cada plan de slice, y nada garantizaba que el slice 14 citara las
+# mismas rutas que el slice 3. Se siembra aquí, una única vez por repo, con el
+# mismo idiom que STATE.md arriba: crea si no existe, no se pisa si existe. La
+# confirmación humana es el momento en que alguien corre `/ct-init` —no se
+# añade una cuarta puerta a las tres del producto— y `ct-step` la lee directo
+# de este fichero en cada task brief, sin ningún agente en medio.
+CONVENTIONS_MD="$TARGET/.agent/conventions.md"
+if [ ! -f "$CONVENTIONS_MD" ]; then
+  cat > "$CONVENTIONS_MD" <<'EOF'
+# La vara de este repo — los documentos de reglas del código
+
+<!-- Lo lee ct-step DIRECTO y lo pega en el brief de cada tarea: el
+     implementador escribe con esto delante y el juez bloquea citándolo.
+     Es una propiedad del REPO, no de ningún epic: se declara UNA vez aquí,
+     no en el §3 de cada plan de slice.
+     OJO: no es .agent/conventions-ack.md (acuses de señales de colisión de
+     protocolo del loop) — este fichero declara CÓMO se escribe código aquí. -->
+
+Rules to obey (una ruta por línea, entre backticks; tiene que poder leerse):
+
+- (ninguna declarada todavía — sustituye esta línea al declarar la primera)
+
+Skills (nombre de skill, no ruta):
+
+- (ninguna)
+EOF
+  echo "creado $CONVENTIONS_MD"
+else
+  echo "conventions.md ya existe, no se pisa"
+fi
+
 GITIGNORE="$TARGET/.gitignore"
 touch "$GITIGNORE"
 # Normaliza un salto de línea final ANTES de tocar nada más: si el fichero ya
@@ -331,20 +364,37 @@ SLICES_HEADING_LEGACY='## Formato de la tabla §9 (contrato con /ct-groom)'
 # ser el primer token y el parser no reconoce el commit). Un repo con el v13
 # se queda creyendo que esos dos casos SÍ están cubiertos, hasta que este
 # número suba.
-# El contrato sube de 18 a 19 por la tarea 5 de la feature "e2e al cierre del
-# slice". El gate `e2e` (gates.js#GATES) y la columna `E2E` que lo deriva
-# (gates.js#resolveE2e, slices.js#iE2e) llevaban ya en el código de rondas
-# anteriores de esta misma feature, pero el contrato v18 no los nombraba: un
-# repo bootstrapeado con el v18 no podía deducir que existe una columna `E2E`
+#
+# El contrato sube de 18 a 20 de una sola vez, porque DOS columnas distintas
+# entraron en paralelo y las dos reclamaban el v19: la `Señal` (rama
+# juez-lo-que-queda, ya en main) y la `E2E` (rama e2e-al-cierre-del-slice).
+# El v19 quedó publicado con el bloque de la `Señal`; este bloque trae las
+# dos, así que necesita un número propio. Los dos motivos siguen vigentes y
+# se conservan enteros — documentan defectos distintos:
+#
+# Slice 10 (juez-lo-que-queda), el v19: el v18 no puede deducir que la
+# columna `Señal` existe (la señal de observabilidad que el slice promete, y
+# que el juez de slice mide contra el diff acumulado con su ítem
+# `observabilidad`), ni que una exención se escribe `N/A — <razón>` (y que sin
+# razón el groom aborta), ni que una celda sin valor se mide como `sin-vara`
+# en la telemetría del epic. Un repo con el v18 declararía señales en prosa
+# del spec —invisibles para el agente y para el juez— o no las declararía
+# nunca, sin saber que la cuenta de sin-vara lo está midiendo.
+#
+# Tarea 5 de "e2e al cierre del slice", el v20: el gate `e2e`
+# (gates.js#GATES) y la columna `E2E` que lo deriva (gates.js#resolveE2e,
+# slices.js#iE2e) llevaban ya en el código de rondas anteriores de esa misma
+# feature, pero ni el v18 ni el v19 los nombraban: un repo bootstrapeado con
+# cualquiera de los dos no podía deducir que existe una columna `E2E`
 # opcional, que si la tabla la trae CADA fila tiene que decidir (un guion no
 # basta — significa "sin declarar", y con la columna presente eso aborta),
 # que el token para "nada que atravesar" es `no`, ni que el gate `e2e` no se
 # escribe a mano en `Gate`: se DERIVA de que `E2E` traiga algún recorrido.
-# El v19 dice las cuatro cosas. La misma tarea siembra además, fuera de este
+# El v20 dice las cuatro cosas. La misma tarea siembra además, fuera de este
 # bloque, la sección `## Cómo se atraviesa este repo (e2e)` de AGENTS.md: el
 # kickoff del gate `e2e` (gates.js) manda al agente a esa sección exacta para
 # saber CÓMO se levanta este repo, y sin ella no hay ninguna.
-SLICES_CONTRACT_VERSION=19
+SLICES_CONTRACT_VERSION=20
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -406,7 +456,9 @@ f1e9f868952d34a80bc7d15b50c0fce99cf375ebd3b1a76a37c6fdfa7b83e035  v12, 505 líne
 bb8e3298fe9b587b929ab58fbf96f76909463a1cea292fa110878d4ba293f38e  v16, 540 líneas — F30 (la sección deja de llamarse "tabla §9" y pasa a "tabla de slices": el número era un fósil, groom localiza la tabla por sus columnas Slice+Dep y --section está obsoleto)
 4d6eebf4ea94b7197879d30293dc4719d82399b7feeb7711829c28a1dcaa7f1c  v17, 543 líneas — F-jjponz-1 (el gate `plan` entra en el vocabulario: revisión humana del plan del slice antes de implementar, siempre opt-in)
 9a45d3acdc0d5a776affb390ba890b90b86d77e2a5712626a839a93d7462bfba  v18, 544 líneas — F-jjponz-2 (el gate `plan` pasa a estar implicado por defecto en TODO slice; renuncia por fila con `!plan`)
-388f8a82528e7402e45a3384094c7ab43b18d6fdfb5652affa4e9b6b6c2b2dc4  v19, 567 líneas — tarea 5 de "e2e al cierre del slice" (la columna E2E y el gate `e2e` entran en el contrato)
+9cdc355576fd1e7bbf69771a8c597c236f33ba31e37c32d998d3282a76e20f77  v19, 562 líneas — Slice 10 juez-lo-que-queda (la columna Señal: la señal de observabilidad por slice, con exención razonada N/A — <razón>)
+388f8a82528e7402e45a3384094c7ab43b18d6fdfb5652affa4e9b6b6c2b2dc4  v19, 567 líneas — tarea 5 de "e2e al cierre del slice" (la columna E2E y el gate `e2e` entran en el contrato; v19 nunca publicado, la rama se mergeó como v20)
+b0eb79ab8fd89f83ce7159e9c2a9c32812ee35b76ad6f4c78c2829c9d9891c0b  v20, 585 líneas — merge de las dos ramas anteriores (las columnas Señal y E2E conviven en el mismo bloque)
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -414,14 +466,14 @@ bb8e3298fe9b587b929ab58fbf96f76909463a1cea292fa110878d4ba293f38e  v16, 540 líne
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 19 -->
+<!-- ct-init:slices-contract-version: 20 -->
 ## Formato de la tabla de slices (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
 copiable tal cual:
 
-| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate |
-|---|-------|------|---------|-----|--------|-----------|------|------|------|
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate | Señal |
+|---|-------|------|---------|-----|--------|-----------|------|------|------|-------|
 
 > **Lo que escribas fuera de la tabla de slices no llega al agente.** El agente que
 > implementa un slice no recibe el spec: recibe un prompt de arranque y el
@@ -531,6 +583,22 @@ copiable tal cual:
   `Área`. El alcance real de ese "global" está más abajo, en "Qué hace
   `/ct-next` con esto": es global **al flujo de issues de este repo**, que no
   es lo mismo que global al repo.
+- **Señal** *(opcional)*: la SEÑAL DE OBSERVABILIDAD que este slice
+  promete — qué métrica, log o evento tiene que emitir su código de
+  producción (p.ej. "métrica `backfill_progress` con label `estado`").
+  Texto libre de una sola pieza, como `Protegido`: la coma no separa
+  nada. Llega como sección `## Señal de observabilidad` del cuerpo del
+  issue, viaja al `.agent/SLICE.md` del worktree en el despacho, y el
+  JUEZ DE SLICE la mide contra el diff acumulado (ítem `observabilidad`):
+  que lo prometido lo emita código de producción, instrumentado como ya
+  instrumenta este repo, sin labels de cardinalidad ilimitada. Si el
+  slice no tiene nada observable que prometer, se declara la EXENCIÓN
+  RAZONADA: `N/A — <razón>` (el mismo idioma que la Global verification
+  de un plan). Una exención SIN razón **aborta**: una exención que nadie
+  puede leer es una señal sin declarar disfrazada de decisión. Celda
+  vacía o con marcador de "sin valor" significa *no lo he pensado* — no
+  es una exención: el juez lo mide como `sin-vara`, y esa cuenta viaja en
+  la telemetría del epic.
 - **E2E** *(opcional)*: qué recorridos hay que atravesar antes de mergear este
   slice, separados por coma → sección `## E2E` del cuerpo del issue, uno por
   línea (mismo criterio de escape que `Acepta`: una coma dentro de un
@@ -547,7 +615,7 @@ copiable tal cual:
   Si ningún slice del epic necesita e2e, la salida es no añadir la columna en
   absoluto — así ninguna fila tiene que decidir nada.
 
-Marcadores de "sin valor" (`Dep`/`Acepta`/`Protegido`/`Área`/`Toca`/`Gate`):
+Marcadores de "sin valor" (`Dep`/`Acepta`/`Protegido`/`Área`/`Toca`/`Gate`/`Señal`):
 `–` `-` `—` `―` `−` `--` o celda vacía — cualquier variante de guion vale.
 `E2E` usa el mismo conjunto de marcadores, con la salvedad de arriba: solo son
 inocuos cuando la columna no está presente.
@@ -627,15 +695,17 @@ medias"— asusta y lleva a limpiar a mano cosas que no hay que limpiar.
 
 Ejemplo que parsea tal cual (verificado con `ct-groom.mjs --dry-run`):
 
-| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate |
-|---|-------|------|---------|-----|--------|-----------|------|------|------|
-| 1 | modelo | backend | tabla `medicamentos` | – | AC-1.1 | schema | medicacion | db, migration | – |
-| 2 | barra | backend | backfill con progreso visible | #1 | AC-2.1 | – | medicacion | db, migration | visual |
-| 3 | pantalla | ui | pantalla de alta | #2 | AC-3.1 | – | medicacion | app | – |
+| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate | Señal |
+|---|-------|------|---------|-----|--------|-----------|------|------|------|-------|
+| 1 | modelo | backend | tabla `medicamentos` | – | AC-1.1 | schema | medicacion | db, migration | – | – |
+| 2 | barra | backend | backfill con progreso visible | #1 | AC-2.1 | – | medicacion | db, migration | visual | métrica `backfill_progress` con label `estado` |
+| 3 | pantalla | ui | pantalla de alta | #2 | AC-3.1 | – | medicacion | app | – | N/A — pantalla sin telemetría nueva que prometer |
 
 (La fila 2 es el caso que la columna `Gate` existe para cubrir: es `backend`
 por dentro y lo más visible del epic por fuera. La fila 3 no declara nada y
-recibe su gate `visual` igualmente, por ser `Tipo: ui`.)
+recibe su gate `visual` igualmente, por ser `Tipo: ui`. La fila 2 declara
+además su señal de observabilidad y la fila 3 se exime con razón — con la
+fila 1, las tres formas de la columna `Señal` en un mismo ejemplo.)
 
 **Arreglar la tabla y volver a groomear NO arregla los issues ya creados.**
 Re-ejecutar `/ct-groom` no los duplica (los reconoce por su marcador
@@ -975,7 +1045,7 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   mergear, no sólo para los gates: si lo compruebas a mano, que el resultado
   mande.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v19). Si el plugin trae una
+<sub>Esta sección la mantiene `/ct-init` (contrato v20). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>
@@ -1281,6 +1351,29 @@ else
     emit_e2e_howto >> "$AGENTS_MD"
   fi
   echo "añadida sección de travesía e2e a $AGENTS_MD"
+fi
+
+# §3.12 (docs/prompt-juez-lo-que-queda.md): `reference-paths` prueba que lo que
+# §3 citó EXISTE, pero nada probaba que se citara TODO lo relevante — un
+# `docs/conventions/` que sí está en el repo pasaba el validador limpio por
+# omisión. Este barrido es determinista y offline y su único producto es una
+# LISTA: no escribe en .agent/conventions.md, no declara nada y no añade
+# ninguna puerta humana — la confirmación es la que ya existe, la persona que
+# está corriendo /ct-init. Va por STDOUT y no por stderr a propósito: no es una
+# alarma sobre un conflicto, es material para una decisión, igual que las
+# líneas de "creado ...". (Y hay un test que exige que la segunda corrida no
+# escriba ningún "aviso" por stderr.)
+VARA_STATUS=0
+VARA_OUT=''
+if command -v node >/dev/null 2>&1; then
+  VARA_OUT="$(node "$HERE/scripts/detect-vara.mjs" "$TARGET" 2>/dev/null)" || VARA_STATUS=$?
+else
+  VARA_STATUS=127
+fi
+if [ "$VARA_STATUS" -ne 0 ]; then
+  echo "no se ha podido barrer este repo en busca de candidatos a la vara (.agent/conventions.md): la comprobación necesita \`node\` y no se ha podido ejecutar (estado $VARA_STATUS). NO lo leas como \"este repo no tiene convenciones escritas\": no se ha mirado." >&2
+elif [ -n "$VARA_OUT" ]; then
+  printf '%s\n' "$VARA_OUT"
 fi
 
 # F11, parte B: hasta ahora ct-init bootstrapeaba ENCIMA de las convenciones

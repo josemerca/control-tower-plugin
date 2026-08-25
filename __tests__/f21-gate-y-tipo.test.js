@@ -476,7 +476,7 @@ describe('F21 — el contrato §9 documenta los gates y la invariante', () => {
     expect(agents).toContain('**Gate**')
     expect(agents).toContain('`!visual`')
     // Tarea 5 de "e2e al cierre del slice" cerró la deuda temporal que este
-    // test llevaba: el contrato v19 ya documenta `e2e` (columna `E2E` +
+    // test llevaba: el contrato v20 ya documenta `e2e` (columna `E2E` +
     // gate derivado), así que el guardián vuelve a cubrir el vocabulario
     // ENTERO, sin excepción.
     for (const g of Object.keys(GATES)) expect(agents, g).toContain(`\`${g}\``)

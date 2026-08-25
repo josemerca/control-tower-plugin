@@ -259,8 +259,16 @@ describe('ct-step e2e', () => {
   //
   // Con el trabajo stageado y sin comitear, la cuenta cuadra (`task: 1`, cero
   // commits desde base), el commit ocurre de verdad, y la transición que se
-  // prueba es la que interesa: última tarea comiteada + `e2eRuns` vacío cierra
-  // en DELIVERED sin pasar por `e2e`.
+  // prueba es la que interesa: última tarea comiteada + `e2eRuns` vacío NO
+  // pasa por `e2e`.
+  //
+  // Lo que este test afirmaba antes —que ahí mismo el run cerraba en
+  // DELIVERED— dejó de ser cierto al converger con la fase GLOBAL/SLICE_JUDGE
+  // (§3.7), que se metió entre el último commit y la entrega. La propiedad de
+  // ESTA feature no cambia y es la que se sigue clavando: sin recorridos, el
+  // paso `e2e` no aparece en ningún punto de la cola, ni en el estado ni en lo
+  // que `next` pide. El cierre en DELIVERED lo prueban los tests de la fase
+  // global, que es de quien es ahora.
   it('sin recorridos, el run no entra nunca en e2e (y `next` no lo pide)', () => {
     const dir = worktreeEnE2e({ e2eRuns: [], comiteaLaTarea: false })
     try {
@@ -270,11 +278,11 @@ describe('ct-step e2e', () => {
       expect(r.status).toBe(0)
       const after = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))
       expect(after.step).not.toBe('e2e')
-      expect(after.closed).toBe('delivered')
-      // Y `next` tampoco lo pide: un run entregado no tiene paso siguiente.
+      expect(after.step).toBe('global')
+      // Y `next` tampoco lo pide: pide la global verification, no una travesía.
       const n = step(dir, ['next'])
       expect(n.status).toBe(0)
-      expect(n.stdout).toMatch(/run delivered/)
+      expect(n.stdout).toMatch(/GLOBAL VERIFICATION/)
       expect(n.stdout).not.toMatch(/e2e/)
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })

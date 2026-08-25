@@ -29,6 +29,20 @@ Regla de honestidad del §6 del pre-registro, heredada de la lección del FDR 0,
 
 Por el mismo motivo `type` y `gate` viajan **dentro de cada fila**, también en `--json`: si la familia no viaja con el dato, el agregado deshonesto es el camino de menor resistencia para quien lea la cosecha.
 
+## La telemetría del juez, por slice
+
+Además del coste, la cosecha lee lo que la propia slice dejó commiteado en `docs/superpowers/metrics/issue-<n>.jsonl` y saca, **por slice**, cuántos ítems de la rúbrica volvieron **`sin-vara`** (el juez tenía sujeto que mirar y no tenía con qué medirlo) y **cuántos hallazgos hubo por regla**. Hasta ahora esa columna viajaba en la pull request y **no la leía nadie**: el número existía en disco y había que abrir los `jsonl` a mano.
+
+Se lee de GitHub, como todo lo demás: no hay checkout que suponer.
+
+**Tres cosas que este bloque nunca hace pasar por un cero:**
+
+- **`(sin telemetría)`** — ese slice no tiene fichero: nadie midió.
+- **`—` en `sin-vara`** — el slice tiene fichero, pero ningún veredicto traía la columna (telemetría anterior a `rubric_sin_vara`). La celda enseña además cuántos veredictos son «sin columna».
+- **no se pudo listar el directorio** — no se imprime ni un número, y se dice. **No baja el exit a `1`**: la causa casi siempre es que ese repo no tiene telemetría, y un `1` permanente en esos epics enseñaría a ignorar el exit code. Un **fichero** que el listado sí nombraba y no se pudo leer sí es una cosecha incompleta: motivo y exit `1`.
+
+Las líneas ilegibles de un `jsonl` se cuentan y se dicen; no tiran el fichero ni cambian el exit — una fila corrupta de hace tres semanas no se arregla repitiendo el comando.
+
 ## Los códigos de salida
 
 | Código | Significa | Qué hacer |
@@ -43,5 +57,6 @@ Por el mismo motivo `type` y `gate` viajan **dentro de cada fila**, también en 
 
 - **`*` en `release→merge`** marca que esa celda se midió contra el **cierre del issue** y no contra el merge de un PR. Va en la propia celda, no en una nota al pie: una nota al pie no viaja cuando alguien copia la tabla.
 - **Dos PRs cerrando un mismo issue** se dice en voz alta como motivo (y baja el exit a `1`) en vez de elegir uno en silencio.
-- **`--json`** emite `{repo, milestone, filas, motivos}` con los segundos en crudo, para pegarlo en el desenlace del epic sin traducir.
+- **`--json`** emite `{repo, milestone, filas, motivos, telemetry}` con los segundos en crudo, para pegarlo en el desenlace del epic sin traducir. La quinta clave es la lectura del DIRECTORIO de telemetría (`{dir, status: ok|no-leido, why}`), distinta del `telemetry` que cada fila lleva dentro.
+- **`--json`** lleva la telemetría de cada slice DENTRO de su fila (`telemetry.status`: `ok` / `sin-fichero` / `no-leido`), por el mismo motivo por el que `type` y `gate` viajan dentro.
 - El formato de duración (`1m03`, `2h06m17`, `9h41m23`) es el mismo con el que se escribió a mano el desenlace del despacho 1, para poder comparar tabla cosechada y tabla escrita sin convertir nada.

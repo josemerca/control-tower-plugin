@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractAc, extractDeps, extractOrder, extractSpecLink, normalizeSpecLink, specTarget, locateSection, countHeadingLines, detectLineEnding, normalizeToLF, mapGhIssue, filterMergedIssues, buildOrderIndex, buildDispatchInput, AC_HEADING_FORMS, NO_MILESTONE_KEY, epicKeyOf, extractDepsInSection, extractStrayDeps, extractE2eRuns } from '../scripts/gh-issue-map.js'
+import { extractAc, extractDeps, extractOrder, extractSpecLink, normalizeSpecLink, specTarget, locateSection, countHeadingLines, detectLineEnding, normalizeToLF, mapGhIssue, filterMergedIssues, buildOrderIndex, buildDispatchInput, AC_HEADING_FORMS, NO_MILESTONE_KEY, epicKeyOf, extractDepsInSection, extractStrayDeps, extractE2eRuns, extractSenal, SENAL_HEADING } from '../scripts/gh-issue-map.js'
 import { selectNext } from '../scripts/dispatch.js'
 import { buildIssueBody } from '../scripts/groom.js'
 
@@ -1492,5 +1492,45 @@ describe('specTarget', () => {
     expect(specTarget(undefined)).toBeNull()
     expect(specTarget('')).toBeNull()
     expect(specTarget('> Slice `#1` del epic. Spec: ')).toBeNull()
+  })
+})
+
+// Slice 10 — extractSenal: la sección "## Señal de observabilidad" del body,
+// section-scoped con extractSectionContent y primera aparición gana — misma
+// postura que extractAc. Es el primer eslabón del canal programa-de-punta-a-
+// punta (issue → SLICE.md → paquete del juez de slice): ningún agente decide
+// copiar la señal en ningún punto.
+describe('extractSenal — la señal del body (Slice 10)', () => {
+  it('lee el contenido de "## Señal de observabilidad" y lo devuelve verbatim', () => {
+    const body = '## Señal de observabilidad\nmétrica `backfill_progress` con label `estado`\n\n## Dependencias\n- merge-after #1'
+    expect(extractSenal(body)).toBe('métrica `backfill_progress` con label `estado`')
+    // La exención razonada también viaja verbatim — el consumidor la
+    // distingue solo por su prefijo N/A.
+    const exenta = `${SENAL_HEADING}\nN/A — pantalla sin telemetría nueva\n\n## Gates\nx`
+    expect(extractSenal(exenta)).toBe('N/A — pantalla sin telemetría nueva')
+  })
+  it('sin sección devuelve null; sección vacía cuenta como ausente en mapGhIssue', () => {
+    expect(extractSenal('body sin esa sección')).toBe(null)
+    expect(extractSenal('')).toBe(null)
+    // Sección presente pero vacía: extractSenal devuelve '' (contenido
+    // trimmed) y mapGhIssue lo colapsa a null — contenido vacío = ausente.
+    const vacia = `${SENAL_HEADING}\n\n## Dependencias\n- merge-after #1\n\n<!-- ct-order:7 -->`
+    const mapped = mapGhIssue({ number: 9, title: '#9 x', labels: [], body: vacia })
+    expect(mapped.senal).toBe(null)
+  })
+  it('mapGhIssue expone senal junto a ac y gates', () => {
+    const body = [
+      '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-1', '',
+      '## Señal de observabilidad', 'métrica x', '',
+      '## Dependencias', '- merge-after #1', '',
+      '<!-- ct-order:7 -->',
+    ].join('\n')
+    const mapped = mapGhIssue({ number: 9, title: '#9 x', labels: [{ name: 'gate:visual' }], body })
+    expect(mapped.senal).toBe('métrica x')
+    expect(mapped.ac).toEqual(['AC-1'])
+    expect(mapped.gates).toEqual(['visual'])
+    // Sin sección → null, no undefined: la ausencia es un valor declarado.
+    const sinSenal = mapGhIssue({ number: 9, title: '#9 x', labels: [], body: '' })
+    expect(sinSenal.senal).toBe(null)
   })
 })

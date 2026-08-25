@@ -36,7 +36,8 @@ name is grepped by `--check-plan`: a path that is not in the repo fails the plan
 Files to imitate: {{real files whose shape the implementer copies — same role, same layer. Or
 N/A — <reason>.}}
 
-Rules to obey: {{this repo's own convention documents, by path — `AGENTS.md`, `CLAUDE.md`, a file
+Rules to obey: {{start from `.agent/conventions.md` where the repo declares one; then this repo's
+own convention documents, by path — `AGENTS.md`, `CLAUDE.md`, a file
 under `docs/conventions/`, `CONTRIBUTING` — plus any skill the issue's "Contexto del epic" names
 (a skill is not a path and is not checked on disk). Or N/A — this repo declares none.}}
 
@@ -134,7 +135,16 @@ commands it can prove cannot measure their own claim.}}
 
 ## 8. Global verification
 
-{{End-to-end validation once every task is committed: commands, what to look at.}}
+{{End-to-end validation once every task is committed. A program runs it (`ct-step global`,
+after the last commit), so the commands go in a fenced block — each one a predicate, exit 0,
+same rules as a task's **Verification:** block. Prose before and after the block is welcome:
+what to start, what to look at with human eyes. A slice with no end-to-end to run
+(documentation, pure configuration) declares it with the exact line `N/A — <reason>` instead
+of a block; `--check-plan` rejects a §8 that is only prose.}}
+
+```bash
+{{command}}   # {{expected: exit 0 — a predicate, as in every task}}
+```
 
 ## 9. Assumptions
 
