@@ -139,6 +139,16 @@ const veredictoDeSlice = (ruling, findings = [], nombre = 'slice-verdict.json') 
   return p
 }
 
+// Slice 3 — `next` es el ÚNICO verbo que escribe el paquete que el juez juzga
+// (`escribirPaquete` / `escribirPaqueteDeSlice` en ct-step.mjs), y desde este
+// slice `verdict` sin paquete en disco se DESCARTA. Un run de verdad pasa
+// siempre por `next` antes de despachar al juez —lo manda el kickoff: "vuelve a
+// next tras cada paso"—, así que estos tests lo hacen también: pedir el
+// veredicto es, por definición, haber preguntado antes. Los dos helpers
+// existen para que el paso no se olvide en el sitio veintiuno.
+const juzgar = (...args) => { ct('next'); return ct('verdict', ...args) }
+const juzgarSlice = (...args) => { ct('next'); return ct('slice-verdict', ...args) }
+
 const log = () => execFileSync('git', ['log', '--oneline'], { cwd: repo, encoding: 'utf8' })
 const commits = () => log().trim().split('\n').filter(Boolean).length
 const estado = () => JSON.parse(readFileSync(join(repo, '.agent', 'run-7.json'), 'utf8'))
@@ -147,7 +157,7 @@ const estado = () => JSON.parse(readFileSync(join(repo, '.agent', 'run-7.json'),
 const tareaOk = (fichero) => {
   ct('report', informe([fichero]))
   ct('controls')
-  ct('verdict', veredicto('PASS'))
+  juzgar(veredicto('PASS'))
   return ct('commit')
 }
 // El slice entero por el camino feliz: las dos tareas, la Global verification
@@ -156,7 +166,7 @@ const sliceOk = () => {
   tareaOk('uno.txt')
   tareaOk('dos.txt')
   ct('global')
-  return ct('slice-verdict', veredictoDeSlice('PASS'))
+  return juzgarSlice(veredictoDeSlice('PASS'))
 }
 
 beforeEach(() => { repo = montarRepo() })
@@ -193,7 +203,7 @@ describe('next: la sesión pregunta y el oráculo contesta', () => {
   it('cuando el juez devolvió la tarea, next se lo dice al implementador', () => {
     ct('report', informe(['uno.txt']))
     ct('controls')
-    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'está mal', path: 'uno.txt', line: 1 }]))
+    juzgar(veredicto('FAIL', [{ severity: 'high', what: 'está mal', path: 'uno.txt', line: 1 }]))
     expect(ct('next').stdout).toMatch(/El juez devolvió esta tarea[\s\S]*uno\.txt:1: está mal/)
   })
 })
@@ -275,7 +285,7 @@ describe('el camino feliz', () => {
 })
 
 describe('el veto no deja rastro que deshacer', () => {
-  const veta = () => ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }]))
+  const veta = () => juzgar(veredicto('FAIL', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }]))
 
   it('tres vetos agotan el presupuesto, salen por 1 y NO comitean', () => {
     for (let i = 0; i < 3; i++) {
@@ -288,7 +298,7 @@ describe('el veto no deja rastro que deshacer', () => {
   })
 
   it('un PASS con hallazgos medios corrige y luego entrega igual', () => {
-    const queja = () => ct('verdict', veredicto('PASS', [{ severity: 'medium', what: 'falta un caso', path: 'uno.txt', line: 1 }]))
+    const queja = () => juzgar(veredicto('PASS', [{ severity: 'medium', what: 'falta un caso', path: 'uno.txt', line: 1 }]))
     for (let i = 0; i < 3; i++) {
       ct('report', informe(['uno.txt']))
       ct('controls')
@@ -480,7 +490,7 @@ describe('el veredicto que no se puede leer no es un veredicto', () => {
 
   it('un JSON que no parsea es un DESCARTE, no un error de uso', () => {
     preparar()
-    const r = ct('verdict', crudo('esto no es json'))
+    const r = juzgar(crudo('esto no es json'))
     expect(r.stdout).toMatch(/veredicto descartado/)
     expect(estado().discards).toBe(1)
     expect(estado().step).toBe('judge')      // se le vuelve a preguntar
@@ -488,21 +498,90 @@ describe('el veredicto que no se puede leer no es un veredicto', () => {
 
   it('un ruling inventado se descarta', () => {
     preparar()
-    expect(ct('verdict', veredicto('QUIZÁS')).stdout).toMatch(/ruling desconocido/)
+    expect(juzgar(veredicto('QUIZÁS')).stdout).toMatch(/ruling desconocido/)
   })
 
   it('un PASS con hallazgo grave se descarta: se contradice a sí mismo', () => {
     preparar()
-    const r = ct('verdict', veredicto('PASS', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }]))
+    const r = juzgar(veredicto('PASS', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }]))
     expect(r.stdout).toMatch(/contradice la rúbrica/)
   })
 
   it('descartar sin parar se corta con 3 en vez de seguir preguntando', () => {
     preparar()
     let r
-    for (let i = 0; i < 7; i++) r = ct('verdict', crudo('nada'))
+    for (let i = 0; i < 7; i++) r = juzgar(crudo('nada'))
     expect(r.status).toBe(3)
     expect(r.stderr).toMatch(/descartes en este run/)
+  })
+})
+
+// Slice 3 de los apuntes de Capde. En una corrida real un agente encadenó
+// report→controls→verdict sin volver a pasar por `next`, que es el ÚNICO paso
+// que genera el paquete que el juez juzga: el juez juzgó a ciegas y su PASS
+// sólo no entró porque él mismo declaró que no encontraba el paquete. Sin esa
+// confesión, el PASS entraba y la fila de telemetría quedaba apuntando a un
+// fichero inexistente. Un paso que exige un insumo y no comprueba que llegó
+// delega su garantía en la honestidad del agente.
+describe('un veredicto emitido sin paquete de revisión no es un veredicto', () => {
+  it('verdict sin el .diff en disco descarta, no avanza el paso, y lo mide como discarded', () => {
+    // El modo de fallo exacto, sin trucos: se llega a `verdict` SIN pasar por
+    // `next`. No se borra nada — el fichero no existe porque nadie lo generó.
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    expect(existsSync(join(repo, '.agent', 'run-7', 'task-1-review.diff'))).toBe(false)
+
+    const r = ct('verdict', veredicto('PASS'))
+    expect(r.status).toBe(0)                 // descarte, no cierre: se vuelve a preguntar
+    expect(r.stdout).toMatch(/veredicto descartado: el paquete de revisión no existe/)
+    expect(r.stdout).toContain('el juez juzgó a ciegas')
+    expect(r.stdout).toContain('vuelve a "ct-step next"')
+    expect(estado().step).toBe('judge')      // NO avanza el paso
+    expect(estado().discards).toBe(1)        // y cuenta para MAX_DISCARDS
+    expect(commits()).toBe(1)                // el PASS a ciegas no comitea nada
+    expect(existsSync(join(repo, 'docs', 'superpowers', 'verdicts', 'issue-7-task-1.json'))).toBe(false)
+
+    // RESERVA 3 de la revisión: la FILA del descarte, no sólo el descarte. La
+    // telemetría es la capa que dejó ver el hueco (una fila de juez nombrando
+    // un .diff inexistente), así que es la que tiene que fijarlo.
+    const filas = readFileSync(join(repo, '.telemetria', 'control-tower', 'log', 'ct-step.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l))
+    const juez = filas.filter((f) => f.step === 'judge')
+    expect(juez).toHaveLength(1)
+    expect(juez[0].outcome).toBe('discarded')
+    expect(juez[0].why).toMatch(/paquete de revisión no existe/)
+    // Un descarte NO es un veredicto: sin `ruling`, aggregateVerdictMeasures no
+    // lo cuenta como tal (run-metrics.js), y sin `review_package` la fila no
+    // afirma un fichero que no existe.
+    expect(juez[0].ruling).toBeUndefined()
+    expect(juez[0].review_package).toBeUndefined()
+  })
+
+  it('slice-verdict sin el slice-review.diff en disco descarta, no avanza el paso, y lo mide como discarded', () => {
+    // Las dos tareas comiteadas y la Global verification en verde, pero sin
+    // volver a `next`: `escribirPaqueteDeSlice` no ha corrido nunca.
+    tareaOk('uno.txt')
+    tareaOk('dos.txt')
+    ct('global')
+    expect(existsSync(join(repo, '.agent', 'run-7', 'slice-review.diff'))).toBe(false)
+
+    const r = ct('slice-verdict', veredictoDeSlice('PASS'))
+    expect(r.status).toBe(0)
+    expect(r.stdout).toMatch(/veredicto de slice descartado: el paquete de revisión del slice no existe/)
+    expect(r.stdout).toContain('vuelve a "ct-step next"')
+    expect(estado().step).toBe('slice-judge')
+    expect(estado().discards).toBe(1)
+    expect(estado().closed ?? null).toBeNull()   // un run no ENTREGA a ciegas
+    expect(commits()).toBe(3)                    // 1 base + 2 tareas: ningún commit de veredicto
+    expect(existsSync(join(repo, 'docs', 'superpowers', 'verdicts', 'issue-7-slice.json'))).toBe(false)
+
+    const filas = readFileSync(join(repo, '.telemetria', 'control-tower', 'log', 'ct-step.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l))
+    const juez = filas.filter((f) => f.step === 'slice-judge')
+    expect(juez).toHaveLength(1)
+    expect(juez[0].outcome).toBe('discarded')
+    expect(juez[0].why).toMatch(/paquete de revisión del slice no existe/)
+    expect(juez[0].ruling).toBeUndefined()
   })
 })
 
@@ -586,7 +665,7 @@ describe('el índice no acumula entre intentos', () => {
     // índice, así que el dos.txt del intento 1 no queda stageado a escondidas.
     ct('report', informe(['uno.txt']))
     expect(ct('controls').stdout).toMatch(/controles: done/)
-    ct('verdict', veredicto('PASS'))
+    juzgar(veredicto('PASS'))
     expect(ct('commit').status).toBe(0)
     const files = execFileSync('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: repo, encoding: 'utf8' })
     expect(files).toMatch(/uno\.txt/)
@@ -620,7 +699,7 @@ describe('el veredicto viaja en la pull request', () => {
   it('un FAIL no deja veredicto trackeado: solo viaja el que aprueba', () => {
     ct('report', informe(['uno.txt']))
     ct('controls')
-    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }]))
+    juzgar(veredicto('FAIL', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }]))
     expect(existsSync(join(repo, 'docs', 'superpowers', 'verdicts', 'issue-7-task-1.json'))).toBe(false)
   })
 })
@@ -680,7 +759,7 @@ describe('lo que el implementador avisa, y la telemetría, no se quedan donde na
   it('Paso 4: `next` lo repite en el paso de commit, que es cuando la sesión escribe la pull request', () => {
     ct('report', informe(['uno.txt'], 'report.json', 'la decisión de la tarea 2 deja el lockfile sin hacer valer'))
     ct('controls')
-    ct('verdict', veredicto('PASS'))
+    juzgar(veredicto('PASS'))
     const r = ct('next')
     expect(r.stdout).toMatch(/paso: commit/)
     expect(r.stdout).toMatch(/lockfile sin hacer valer/)
@@ -708,10 +787,10 @@ describe('lo que el implementador avisa, y la telemetría, no se quedan donde na
   it('Paso 5: las filas del intento que el juez vetó viajan también — el coste de las vueltas es el dato', () => {
     ct('report', informe(['uno.txt']))
     ct('controls')
-    ct('verdict', veredicto('FAIL', [{ severity: 'high', what: 'no', path: 'uno.txt', line: 1 }]))
+    juzgar(veredicto('FAIL', [{ severity: 'high', what: 'no', path: 'uno.txt', line: 1 }]))
     ct('report', informe(['uno.txt']))
     ct('controls')
-    ct('verdict', veredicto('PASS'))
+    juzgar(veredicto('PASS'))
     ct('commit')
     const commiteado = execFileSync('git', ['show', 'HEAD:docs/superpowers/metrics/issue-7.jsonl'], { cwd: repo, encoding: 'utf8' })
     const filas = commiteado.trim().split('\n').map((l) => JSON.parse(l))
@@ -789,7 +868,7 @@ describe('un fallo de la telemetría no puede tumbar la tarea', () => {
     tareaOk('uno.txt')
     tareaOk('dos.txt')
     ct('global')
-    const r = ct('slice-verdict', veredictoDeSlice('PASS'))
+    const r = juzgarSlice(veredictoDeSlice('PASS'))
     expect(r.status).toBe(0)
     expect(r.stdout).toMatch(/run delivered/)
     expect(r.stderr).toMatch(/nada que commitear del veredicto del slice/)
@@ -910,7 +989,7 @@ describe('el juicio del slice entero (§3.7-B)', () => {
 
   it('un PASS entrega el run y el veredicto viaja en su PROPIO commit', () => {
     enJuezDeSlice()
-    const r = ct('slice-verdict', veredictoDeSlice('PASS'))
+    const r = juzgarSlice(veredictoDeSlice('PASS'))
     expect(r.status).toBe(0)
     expect(r.stdout).toMatch(/run delivered/)
     expect(estado().closed).toBe('delivered')
@@ -924,7 +1003,7 @@ describe('el juicio del slice entero (§3.7-B)', () => {
 
   it('un PASS con hallazgos medium entrega igual: no queda implementador al que devolver', () => {
     enJuezDeSlice()
-    const r = ct('slice-verdict', veredictoDeSlice('PASS', [{ severity: 'medium', what: 'andamiaje sin retirar', path: 'uno.txt', line: 1 }]))
+    const r = juzgarSlice(veredictoDeSlice('PASS', [{ severity: 'medium', what: 'andamiaje sin retirar', path: 'uno.txt', line: 1 }]))
     expect(r.status).toBe(0)
     expect(estado().closed).toBe('delivered')
     // El hallazgo viaja DENTRO del veredicto commiteado, para quien revise la PR.
@@ -934,7 +1013,7 @@ describe('el juicio del slice entero (§3.7-B)', () => {
 
   it('un FAIL cierra el run por 1 y NO deja veredicto trackeado: solo viaja el que aprueba', () => {
     enJuezDeSlice()
-    const r = ct('slice-verdict', veredictoDeSlice('FAIL', [{ severity: 'high', what: 'la tarea 2 deshace la 1', path: 'uno.txt', line: 1 }]))
+    const r = juzgarSlice(veredictoDeSlice('FAIL', [{ severity: 'high', what: 'la tarea 2 deshace la 1', path: 'uno.txt', line: 1 }]))
     expect(r.status).toBe(1)
     expect(commits()).toBe(3)
     expect(existsSync(join(repo, 'docs', 'superpowers', 'verdicts', 'issue-7-slice.json'))).toBe(false)
@@ -944,7 +1023,7 @@ describe('el juicio del slice entero (§3.7-B)', () => {
     enJuezDeSlice()
     const p = join(repo, 'sv.json')
     writeFileSync(p, JSON.stringify({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [{ rule: 'alcance', severity: 'low', what: 'x', path: 'y', evidence: 'z' }] }))
-    const r = ct('slice-verdict', p)
+    const r = juzgarSlice(p)
     expect(r.stdout).toMatch(/descartado/)
     expect(estado().step).toBe('slice-judge')
     expect(estado().discards).toBe(1)
@@ -952,7 +1031,7 @@ describe('el juicio del slice entero (§3.7-B)', () => {
 
   it('las filas de global y slice-judge no son de ninguna tarea, y viajan en el commit del veredicto', () => {
     enJuezDeSlice()
-    ct('slice-verdict', veredictoDeSlice('PASS'))
+    juzgarSlice(veredictoDeSlice('PASS'))
     const commiteado = execFileSync('git', ['show', 'HEAD:docs/superpowers/metrics/issue-7.jsonl'], { cwd: repo, encoding: 'utf8' })
     const filas = commiteado.trim().split('\n').map((l) => JSON.parse(l))
     const global = filas.find((f) => f.step === 'global')

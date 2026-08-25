@@ -805,6 +805,17 @@ function verboGlobal() {
 // viaja el que aprueba — el FAIL cierra el run y lo lee el humano en la
 // carpeta del run.
 function verboSliceVerdict() {
+  // EL INSUMO ANTES QUE EL VEREDICTO, y por el mismo motivo que en
+  // `verboVerdict` (ver el comentario largo de ahí, que es donde está el caso
+  // de campo): `escribirPaqueteDeSlice` lo invoca SÓLO `next`, así que sin el
+  // fichero en disco el juez de slice no tuvo diff acumulado que juzgar.
+  const paquete = join(workDir, 'slice-review.diff')
+  if (!existsSync(paquete)) {
+    const why = `el paquete de revisión del slice no existe (${paquete}): el juez de slice juzgó a ciegas — vuelve a "ct-step next", que es el único paso que lo genera`
+    medir('slice-judge', { outcome: 'discarded', why })
+    out(`veredicto de slice descartado: ${why}`)
+    return OUTCOMES.DISCARDED
+  }
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del veredicto de slice')
   const { verdict, why } = porLeer ? { why: porLeer } : readSliceVerdict(valor)
   if (!verdict) {
@@ -813,7 +824,7 @@ function verboSliceVerdict() {
     return OUTCOMES.DISCARDED
   }
   const outcome = outcomeOfSliceVerdict(verdict)
-  medir('slice-judge', { outcome, review_package: join(workDir, 'slice-review.diff'), ...verdictMeasures(verdict) })
+  medir('slice-judge', { outcome, review_package: paquete, ...verdictMeasures(verdict) })
   if (verdict.ruling === 'PASS') {
     const ruta = join('docs', 'superpowers', 'verdicts', `issue-${issue}-slice.json`)
     mkdirSync(join(repoRoot, 'docs', 'superpowers', 'verdicts'), { recursive: true })
@@ -850,6 +861,40 @@ function verboSliceVerdict() {
 }
 
 function verboVerdict() {
+  // EL INSUMO ANTES QUE EL VEREDICTO. `next` es el ÚNICO verbo que escribe el
+  // paquete de revisión (`escribirPaquete`, arriba; se invoca sólo en el caso
+  // JUDGE de `verboNext`), así que si no está en disco el juez no tuvo qué
+  // juzgar: juzgó a ciegas. Medido en campo — un agente encadenó
+  // report→controls→verdict sin volver a pasar por `next`, y aquel PASS sólo no
+  // entró porque el propio juez confesó que no encontraba el paquete. Sin esa
+  // confesión, el PASS entraba y la fila de telemetría quedaba nombrando un
+  // fichero inexistente. Un paso que exige un insumo y no comprueba que llegó
+  // delega su garantía en la honestidad del agente, que es justo lo que este
+  // pipeline no hace en ningún otro sitio (los controles no se creen al
+  // implementador; el commit no lo hace el implementador; el índice se verifica
+  // en vez de suponerse).
+  //
+  // Y va ANTES de `leerJson` a propósito. Con las dos cosas mal —paquete
+  // ausente y JSON ilegible— la fila que hay que escribir es la del paquete:
+  // volver a preguntarle al juez arregla un JSON roto, pero no hace aparecer un
+  // paquete que nadie generó, así que medir "no se pudo leer el veredicto"
+  // mandaría al loop a gastarse los seis descartes contestando al problema que
+  // no era, y la telemetría contaría un juez que escribe mal en vez de un
+  // conductor que se saltó un paso. La causa manda sobre el síntoma.
+  const paquete = join(workDir, `task-${run.task}-review.diff`)
+  if (!existsSync(paquete)) {
+    const why = `el paquete de revisión no existe (${paquete}): el juez juzgó a ciegas — vuelve a "ct-step next", que es el único paso que lo genera`
+    // La fila lleva `outcome` y `why`, y ninguna medida más: exactamente la
+    // forma de los otros descartes de este fichero. Sin `ruling` —para
+    // `aggregateVerdictMeasures` una fila con `ruling` ES un veredicto, y esto
+    // es su ausencia: contarla inflaría el denominador de `rubric_sin_vara`— y
+    // sin `review_package`, porque nombrar en la telemetría el fichero que
+    // falta es escribir precisamente la fila que apunta a un inexistente que
+    // esta guarda existe para no dejar entrar.
+    medir('judge', { outcome: 'discarded', why })
+    out(`veredicto descartado: ${why}`)
+    return OUTCOMES.DISCARDED
+  }
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del veredicto')
   const { verdict, why } = porLeer ? { why: porLeer } : readVerdict(valor)
   if (!verdict) {
@@ -859,7 +904,7 @@ function verboVerdict() {
   }
   const outcome = outcomeOfVerdict(verdict)
   const graves = verdict.findings.filter((f) => f.severity !== 'low')
-  medir('judge', { outcome, review_package: join(workDir, `task-${run.task}-review.diff`), ...verdictMeasures(verdict) })
+  medir('judge', { outcome, review_package: paquete, ...verdictMeasures(verdict) })
   run = {
     ...run,
     lastVerdict: verdict,
