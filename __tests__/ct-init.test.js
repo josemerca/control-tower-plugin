@@ -134,6 +134,29 @@ function historicalContractBlocks() {
   return blocks
 }
 
+// BLOQUES_HUERFANOS: bloques que ct-init emitió de verdad y que NINGÚN commit
+// alcanzable desde HEAD reproduce, porque la PR que los llevaba aterrizó como
+// squash. El caso: la PR #27 traía dos bumps (743fe3f v16→v17 y a11fd76
+// v17→v18) y el squash 529d2f4 dejó main saltando de v16 a v18, con el bloque
+// v17 publicado en el ref de la PR y por tanto instalable. Su hash está
+// registrado en SLICES_PRISTINE_HASHES y tiene que seguir estándolo: es lo
+// único que permite a un repo con el v17 intacto actualizarse sin --force
+// (comprobado en el test del camino de upgrade, más abajo). El fixture es la
+// evidencia durable: un ref de una rama obsoleta puede desaparecer, el
+// fichero no.
+const BLOQUES_HUERFANOS = [
+  { fixture: 'slices-contract-v17.md', commit: '743fe3f' },
+]
+const orphanContractBlocks = () =>
+  BLOQUES_HUERFANOS.map(({ fixture, commit }) => {
+    const block = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', fixture), 'utf8')
+    return { block, commit, hash: sha256(block) }
+  })
+// contractBlocksEverEmitted: la historia alcanzable MÁS los huérfanos. Es la
+// respuesta a "¿qué bloques llegó a emitir ct-init?", que es la pregunta que
+// hacen los dos tests de autovigilancia — no "¿qué bloques hay en main?".
+const contractBlocksEverEmitted = () => [...historicalContractBlocks(), ...orphanContractBlocks()]
+
 // seedFreshAgentsMd: corre ct-init.sh en un dir vacío y devuelve el AGENTS.md
 // que siembra — el bloque de HOY, tal cual sale del script (no leído de su
 // fuente), que es contra lo que se validan tanto el registro de hashes como el
@@ -342,6 +365,40 @@ describe('ct-init.sh', () => {
     expect(agents).toContain('`sin-vara`')
     // La línea de marcadores de "sin valor" nombra también a Señal.
     expect(agents).toContain('Marcadores de "sin valor" (`Dep`/`Acepta`/`Protegido`/`Área`/`Toca`/`Gate`/`Señal`):')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // Slice 4 (apuntes de Capde) — el contrato v19 describía la columna pero no
+  // decía cuándo vale algo, y en una corrida real la señal declarada era una
+  // paráfrasis de los criterios de aceptación: el ítem `observabilidad` del juez
+  // midió lo que `estado-final` ya había medido. La frase vive en DOS sitios (el
+  // contrato que llega verbatim al AGENTS.md del repo usuario y el comando que
+  // lee quien groomea) y este test es lo que impide que uno de los dos se quede
+  // atrás.
+  it('el contrato dice que la señal no es un criterio de aceptación más, y ct-groom.md dice lo mismo', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    // La frase, en una sola línea (el bullet va envuelto a ~72 columnas: si el
+    // reflow la partiera, este assert es lo que lo caza).
+    expect(agents).toMatch(/no es un criterio de aceptación más/i)
+    // Y lo que la frase promete: producción frente a lo funcional, y el ítem que
+    // se queda sin medir nada nuevo cuando la señal repite un AC.
+    expect(agents).toMatch(/EN PRODUCCIÓN/)
+    expect(agents).toContain('`estado-final`')
+    expect(agents).toContain('`observabilidad`')
+    // Control: el contrato ANTERIOR no decía nada de esto — este test no pasa
+    // por una coincidencia de prosa que ya estuviera ahí.
+    const anterior = contractBlocksEverEmitted().find(({ block }) =>
+      block.includes(`<!-- ct-init:slices-contract-version: ${CONTRACT_VERSION - 1} -->`)
+    )
+    expect(anterior.block).not.toMatch(/no es un criterio de aceptación más/i)
+    expect(anterior.block).not.toContain('`estado-final`')
+    // El otro documento que enseña la columna no puede quedarse atrás: quien
+    // groomea lee commands/ct-groom.md, no el AGENTS.md del repo destino.
+    const groom = readFileSync(join(root, 'commands', 'ct-groom.md'), 'utf8')
+    expect(groom).toMatch(/no es un criterio de aceptación más/i)
+    expect(groom).toContain('`estado-final`')
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -637,7 +694,7 @@ describe('ct-init.sh', () => {
   // "v1"), y SLICES_PRISTINE_HASHES solo registraba dos de esos nueve.
   // ==========================================================================
   it('TODO bloque que ct-init emitió alguna vez, intacto, se actualiza con --update-slices-contract sin --force y sin acusar a nadie', () => {
-    const historical = historicalContractBlocks()
+    const historical = contractBlocksEverEmitted()
     // Control: si esto no reconstruye varias versiones, el test no prueba nada.
     expect(historical.length).toBeGreaterThanOrEqual(9)
     // El control de "la reconstrucción llega hasta hoy" tolera un bump del
@@ -667,6 +724,32 @@ describe('ct-init.sh', () => {
       expect(agents.split(MARKER_OPEN).length - 1, commit).toBe(1)
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  // RESERVA 2 del for_developers: el camino que recorre un repo real cuando se
+  // publica un bump — bloque de la versión anterior INTACTO, `--update-slices-contract`
+  // sin `--force`. El bucle de arriba ya lo pisa, pero no exige que el bloque
+  // vN-1 esté en la historia: si un squash volviera a esconderlo (que es cómo se
+  // perdió el v17), el bucle seguiría verde sin cubrir este camino. Sin números
+  // hardcodeados: sube solo con CONTRACT_VERSION.
+  it('un repo con el bloque de la versión ANTERIOR intacto sube al contrato actual sin --force', () => {
+    const anterior = contractBlocksEverEmitted().find(({ block }) =>
+      block.includes(`<!-- ct-init:slices-contract-version: ${CONTRACT_VERSION - 1} -->`)
+    )
+    expect(anterior, `no hay ningún bloque v${CONTRACT_VERSION - 1} ni en la historia ni en BLOQUES_HUERFANOS`).toBeDefined()
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    const before = `# AGENTS.md\n\n## Gotchas\n- mías\n\n${anterior.block}\n## Después\n- intocable\n`
+    writeFileSync(join(dir, 'AGENTS.md'), before)
+    const res = spawnSync('bash', [script, dir, '--update-slices-contract'], { encoding: 'utf8' })
+    expect(res.status, res.stderr).toBe(0)
+    expect(res.stdout).toMatch(new RegExp(`contrato v${CONTRACT_VERSION - 1} → v${CONTRACT_VERSION}`))
+    expect(res.stderr).not.toMatch(/editad|no coincide|--force/i)
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    expect(agents).toMatch(versionLineRe())
+    expect(agents).toContain('- mías')
+    expect(agents).toContain('- intocable')
+    expect(agents.split(MARKER_OPEN).length - 1).toBe(1)
+    rmSync(dir, { recursive: true, force: true })
   })
 
   it('sin poder calcular el sha256 (ni shasum ni sha256sum) NO se acusa a nadie: se dice que no se ha podido comprobar, y no se toca nada', () => {
@@ -847,8 +930,8 @@ describe('ct-init.sh', () => {
   // Este cierra el hueco: la fuente de verdad no es la memoria de nadie, es el
   // historial de git. Entre los dos cubren todo — este, lo commiteado; el de
   // arriba, el árbol de trabajo todavía sin commitear.
-  it('todo bloque que ct-init emitió alguna vez en la historia está registrado en SLICES_PRISTINE_HASHES', () => {
-    const historical = historicalContractBlocks()
+  it('todo bloque que ct-init emitió alguna vez está registrado en SLICES_PRISTINE_HASHES', () => {
+    const historical = contractBlocksEverEmitted()
     expect(historical.length).toBeGreaterThanOrEqual(9) // control: se reconstruyó de verdad
     const missing = historical
       .filter(({ hash }) => !initScriptSrc.includes(hash))
@@ -881,7 +964,7 @@ describe('ct-init.sh', () => {
       .filter(Boolean)
       .map((m) => m[1])
     expect(registered.length).toBeGreaterThanOrEqual(9)
-    const known = new Set(historicalContractBlocks().map((h) => h.hash))
+    const known = new Set(contractBlocksEverEmitted().map((h) => h.hash))
     known.add(sha256(extractBlock(seedFreshAgentsMd()))) // el árbol de trabajo
     expect(registered.filter((h) => !known.has(h))).toEqual([])
   })

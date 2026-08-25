@@ -373,7 +373,15 @@ SLICES_HEADING_LEGACY='## Formato de la tabla §9 (contrato con /ct-groom)'
 # en la telemetría del epic. Un repo con el v18 declararía señales en prosa
 # del spec —invisibles para el agente y para el juez— o no las declararía
 # nunca, sin saber que la cuenta de sin-vara lo está midiendo.
-SLICES_CONTRACT_VERSION=19
+#
+# Slice 4 (apuntes de Capde) sube de 19 a 20: el v19 describe la columna
+# `Señal` pero no dice cuándo vale algo. Un repo con el v19 puede declarar
+# como señal una paráfrasis de un criterio de aceptación —el modo de fallo
+# observado en una corrida real— y entonces el ítem `observabilidad` del juez
+# de slice mide lo que `estado-final` ya midió: la columna se rellena, el
+# juez la puntúa, y nadie aprende nada de lo que va a pasar en producción.
+# El v20 lo dice: la señal no es un criterio de aceptación más.
+SLICES_CONTRACT_VERSION=20
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -403,6 +411,16 @@ SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 #     versión-publicada ↔ contenido del bloque no existe.
 # La lista se deriva del historial (ver el test "todo bloque que ct-init emitió
 # alguna vez está registrado"), no de memoria.
+#
+# Un bloque puede existir de verdad y NO estar en la historia de main: la PR
+# #27 traía DOS bumps (v16→v17 en 743fe3f y v17→v18 en a11fd76) y aterrizó
+# como squash (529d2f4), así que el bloque v17 —publicado en el ref desde el
+# que se abrió la PR, y por tanto instalable— no lo reproduce ningún commit
+# alcanzable. Su entrada de aquí sigue siendo correcta y necesaria: es lo
+# único que permite a un repo con el v17 intacto actualizarse sin --force.
+# Los bloques en esa situación viven como fixture en __tests__/fixtures/ y se
+# declaran en BLOQUES_HUERFANOS (__tests__/ct-init.test.js), que es lo que
+# los tests de autovigilancia unen al historial de git.
 #
 # Formato: un hash por línea, seguido de la procedencia (solo el primer campo
 # se compara). Al cambiar el bloque hay que AÑADIR el hash nuevo — nunca
@@ -436,6 +454,7 @@ bb8e3298fe9b587b929ab58fbf96f76909463a1cea292fa110878d4ba293f38e  v16, 540 líne
 4d6eebf4ea94b7197879d30293dc4719d82399b7feeb7711829c28a1dcaa7f1c  v17, 543 líneas — F-jjponz-1 (el gate `plan` entra en el vocabulario: revisión humana del plan del slice antes de implementar, siempre opt-in)
 9a45d3acdc0d5a776affb390ba890b90b86d77e2a5712626a839a93d7462bfba  v18, 544 líneas — F-jjponz-2 (el gate `plan` pasa a estar implicado por defecto en TODO slice; renuncia por fila con `!plan`)
 9cdc355576fd1e7bbf69771a8c597c236f33ba31e37c32d998d3282a76e20f77  v19, 562 líneas — Slice 10 juez-lo-que-queda (la columna Señal: la señal de observabilidad por slice, con exención razonada N/A — <razón>)
+40440bc510e0832695cbd73bc5912cb5bba8c16d89cb0cde0249b64b043dbafe  v20, 575 líneas — Slice 4 apuntes de Capde (la señal no es un criterio de aceptación más: promete lo que se verá en producción, que los criterios funcionales no cubren)
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -443,7 +462,7 @@ bb8e3298fe9b587b929ab58fbf96f76909463a1cea292fa110878d4ba293f38e  v16, 540 líne
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 19 -->
+<!-- ct-init:slices-contract-version: 20 -->
 ## Formato de la tabla de slices (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -557,6 +576,19 @@ copiable tal cual:
 - **Señal** *(opcional)*: la SEÑAL DE OBSERVABILIDAD que este slice
   promete — qué métrica, log o evento tiene que emitir su código de
   producción (p.ej. "métrica `backfill_progress` con label `estado`").
+
+  NO ES UN CRITERIO DE ACEPTACIÓN MÁS. Los criterios de `Acepta` son
+  funcionales: dicen qué tiene que hacer el código para que el slice
+  esté hecho, y el juez ya los mide en su ítem `estado-final`. La
+  señal promete otra cosa: QUÉ SE VA A VER EN PRODUCCIÓN cuando el
+  slice esté desplegado — la métrica, el log o el evento por el que
+  alguien sabrá, sin leer el diff, si esto está funcionando. Una señal
+  que repite un criterio de aceptación con otras palabras deja al ítem
+  `observabilidad` midiendo lo que `estado-final` ya midió: no añade
+  ninguna información. Regla práctica: si lo que escribes se puede
+  comprobar corriendo los tests, es un criterio de aceptación, no una
+  señal.
+
   Texto libre de una sola pieza, como `Protegido`: la coma no separa
   nada. Llega como sección `## Señal de observabilidad` del cuerpo del
   issue, viaja al `.agent/SLICE.md` del worktree en el despacho, y el
@@ -999,7 +1031,7 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   mergear, no sólo para los gates: si lo compruebas a mano, que el resultado
   mande.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v19). Si el plugin trae una
+<sub>Esta sección la mantiene `/ct-init` (contrato v20). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>
