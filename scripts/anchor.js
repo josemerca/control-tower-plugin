@@ -98,7 +98,7 @@ const ENTITY_RE = /&(#x?[0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);/g
 // dentro de una palabra — la restricción "intraword" de CommonMark para el
 // guion bajo es justo lo que hace que "__init__.py" siga siendo literal
 // mientras "__negrita__" es énfasis. Es la misma distinción que
-// slices.js#PAIRED_UNDERSCORE_RE hace para los tokens de label, por el mismo
+// cells.js#PAIRED_UNDERSCORE_RE hace para los tokens de label, por el mismo
 // motivo (`_layout.tsx`, `__init__.py` son nombres de fichero corrientes).
 const UNDERSCORE_EMPHASIS_RE = /(^|[^\p{L}\p{N}_])(_{1,3})(?!\s)([\s\S]+?)(?<!\s)\2(?![\p{L}\p{N}_])/gu
 

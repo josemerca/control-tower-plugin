@@ -40,8 +40,18 @@ export const STEPS = Object.freeze({
   CONTROLS: 'controls',
   JUDGE: 'judge',
   COMMIT: 'commit',
+  // GLOBAL / SLICE_JUDGE (§3.7) y E2E son los tres pasos que NO son por tarea:
+  // se entra en ellos al comitear la última, y cierran la SLICE, no una tarea.
   GLOBAL: 'global',
   SLICE_JUDGE: 'slice-judge',
+  // E2E — el último de esa cola, y el único condicional: sólo se entra si la
+  // slice declara recorridos. Va aquí y no colgado de `controls` porque
+  // `controls` mide lo que el PLAN prometió contra el árbol, por tarea, y esto
+  // atraviesa lo que el SPEC declaró contra el sistema levantado, por slice.
+  // Colgarlo de controls obligaría a que cada tarea arrastrara un e2e que no le
+  // toca, o a un controls especial en la última — una rama de la tabla que no
+  // describe ningún estado real.
+  E2E: 'e2e',
 })
 
 export const OUTCOMES = Object.freeze({
@@ -61,6 +71,9 @@ export const RUN_STATES = Object.freeze({
   BLOCKED_COMMIT: 'blocked-commit',
   BLOCKED_GLOBAL: 'blocked-global',
   BLOCKED_SLICE_JUDGE: 'blocked-slice-judge',
+  // Mismo sitio y misma forma que sus hermanos: un cierre en fallo del que
+  // sale una persona, no un reintento.
+  BLOCKED_E2E: 'blocked-e2e',
   ABORTED_BUDGET: 'aborted-budget',
 })
 
@@ -71,11 +84,17 @@ export const DEFAULT_BUDGETS = Object.freeze({
 })
 
 // El run recién nacido: tarea 1, paso implement, todos los contadores a cero.
-export function newRun({ plan, issue, baseSha, tasksTotal }) {
+export function newRun({ plan, issue, baseSha, tasksTotal, e2eRuns }) {
   return freeze({
     plan, issue, baseSha,
     task: 1,
     tasksTotal,
+    // e2eRuns — los recorridos que la columna E2E del spec declara para esta
+    // slice, sembrados por /ct-next en .agent/SLICE.md (ct-step no habla con
+    // GitHub). Lista vacía y no `undefined` a propósito: `[]` significa "esta
+    // slice no tiene e2e" y es un dato, mientras que `undefined` no se
+    // distingue de "una versión vieja escribió este run".
+    e2eRuns: Array.isArray(e2eRuns) ? [...e2eRuns] : [],
     step: STEPS.IMPLEMENT,
     controlRetries: 0,
     judgeRetries: 0,
@@ -121,6 +140,7 @@ export function after(run, outcome, budgets = DEFAULT_BUDGETS) {
     case STEPS.COMMIT: return trasElCommit(run, outcome)
     case STEPS.GLOBAL: return trasLaGlobal(run, outcome)
     case STEPS.SLICE_JUDGE: return trasElJuezDeSlice(run, outcome)
+    case STEPS.E2E: return trasElE2e(run, outcome)
     default: return imposible(run, outcome)
   }
 }
@@ -200,6 +220,12 @@ function trasElCommit(run, outcome) {
         // GLOBAL, con los tres contadores a cero (la fase estrena su cuenta,
         // como cada tarea). `delivered` pasa a significar tareas comiteadas +
         // punta a punta verde + slice juzgado, no sólo lo primero.
+        //
+        // `task` NO avanza en ninguno de los pasos de esa cola final (GLOBAL,
+        // SLICE_JUDGE y, si el spec declaró recorridos, E2E): son pasos de la
+        // SLICE, no de una tarea sexta que no existe. (Ojo: eso rompe la
+        // invariante `commits === task - 1` que ct-step comprueba al cargar el
+        // estado — ver Task 8.)
         : abierto(run, { step: STEPS.GLOBAL, controlRetries: 0, judgeRetries: 0, correctionRetries: 0 })
     // Un commit que falla no se reintenta: si git dice que no, es el índice o
     // el mensaje, y ninguna de las dos cosas se arregla volviendo a implementar.
@@ -240,12 +266,45 @@ function trasLaGlobal(run, outcome) {
 // tarea: un veredicto ilegible no es un veto.
 function trasElJuezDeSlice(run, outcome) {
   switch (outcome) {
+    // Juzgada la slice, sólo queda atravesarla — y sólo si el spec declaró
+    // recorridos. El e2e va DESPUÉS del juez, y no antes, por dos razones: su
+    // diseño lo fija como paso TERMINAL (su DONE y su INDETERMINATE cierran en
+    // DELIVERED, no encadenan con nada), y el juez de slice no tiene shell a
+    // propósito — juzga el diff acumulado, no el sistema levantado, así que no
+    // gana nada esperando al informe del e2e. Sin recorridos, el juez cierra el
+    // run como hasta ahora.
     case OUTCOMES.DONE:
-      return cerrado(run, RUN_STATES.DELIVERED)
+      return (run.e2eRuns || []).length
+        ? abierto(run, { step: STEPS.E2E })
+        : cerrado(run, RUN_STATES.DELIVERED)
     case OUTCOMES.FAILED:
       return cerrado(run, RUN_STATES.BLOCKED_SLICE_JUDGE)
     case OUTCOMES.DISCARDED:
       return abierto(run, { step: STEPS.SLICE_JUDGE, discards: run.discards + 1 })
+    default:
+      return imposible(run, outcome)
+  }
+}
+
+function trasElE2e(run, outcome) {
+  switch (outcome) {
+    case OUTCOMES.DONE:
+      return cerrado(run, RUN_STATES.DELIVERED)
+    // El no-verificado ENTREGA. No es indulgencia: si retuviera el run, un
+    // docker que no arranca o una credencial caducada dejaría el slice en
+    // status:in-progress ocupando `area:`/`touches:` y una plaza de `--cap` sin
+    // nadie trabajando — el modo de fallo que F13 y F18 se dedicaron a quitar.
+    // Lo que no pasa nunca es que se afirme verde: el motivo viaja en el
+    // informe y `--release` lo imprime.
+    case OUTCOMES.INDETERMINATE:
+      return cerrado(run, RUN_STATES.DELIVERED)
+    case OUTCOMES.FAILED:
+      return cerrado(run, RUN_STATES.BLOCKED_E2E)
+    // Un informe que no se puede leer no gasta reintento: no se tocó el código
+    // ni el entorno. Mismo trato que en `implement`, y con el mismo respaldo —
+    // el tope de descartes de la slice.
+    case OUTCOMES.DISCARDED:
+      return abierto(run, { step: STEPS.E2E, discards: run.discards + 1 })
     default:
       return imposible(run, outcome)
   }

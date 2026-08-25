@@ -102,7 +102,7 @@ describe('inlineText — el texto que GitHub pinta dentro del <h2>, no el markdo
   })
   // OJO: esta era una suposición mía, y GitHub la desmintió. Yo daba por
   // hecho que "__init__.py" se conservaba entero (es lo que hace
-  // slices.js#PAIRED_UNDERSCORE_RE con los tokens de label, y por buenas
+  // cells.js#PAIRED_UNDERSCORE_RE con los tokens de label, y por buenas
   // razones). El HTML real dice otra cosa: "__init__.py y _layout.tsx"
   // produce `id="initpy-y-_layouttsx"` — el "__init__" SÍ es énfasis fuerte
   // para CommonMark (el "__" de cierre va seguido de un punto, que es

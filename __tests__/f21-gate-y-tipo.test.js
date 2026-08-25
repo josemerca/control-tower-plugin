@@ -83,8 +83,11 @@ describe('F21 — vocabulario de gates', () => {
     // humano; el resto son recordatorios técnicos. `plan` (F-jjponz-1) es el
     // primer gate AÑADIDO por la vía que la doctrina de gates.js reserva para
     // eso: acto deliberado, con su texto de kickoff y de issue (ver
-    // gate-plan.test.js). Ningún Tipo lo implica.
-    expect(Object.keys(GATES).sort()).toEqual(['apply', 'plan', 'visual'])
+    // gate-plan.test.js). Ningún Tipo lo implica. `e2e` (feature "e2e al
+    // cierre del slice") es el segundo: también deliberado, con sus dos
+    // textos, y tampoco lo implica ningún Tipo — se DERIVA de la columna E2E
+    // (ver gates.js#resolveGates), nunca de `Tipo`.
+    expect(Object.keys(GATES).sort()).toEqual(['apply', 'e2e', 'plan', 'visual'])
     expect(TYPE_GATES.ui).toEqual(['visual'])
     expect(TYPE_GATES.infra).toEqual(['apply'])
     // F-jjponz-2: `plan` está implicado en TODO slice (gatesForType lo añade
@@ -472,6 +475,10 @@ describe('F21 — el contrato §9 documenta los gates y la invariante', () => {
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     expect(agents).toContain('**Gate**')
     expect(agents).toContain('`!visual`')
+    // Tarea 5 de "e2e al cierre del slice" cerró la deuda temporal que este
+    // test llevaba: el contrato v20 ya documenta `e2e` (columna `E2E` +
+    // gate derivado), así que el guardián vuelve a cubrir el vocabulario
+    // ENTERO, sin excepción.
     for (const g of Object.keys(GATES)) expect(agents, g).toContain(`\`${g}\``)
     expect(agents).toContain('gate:none')
     rmSync(dir, { recursive: true, force: true })

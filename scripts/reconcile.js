@@ -97,7 +97,7 @@ import {
 // como número de issue — un --reconcile con la copia vieja habría reescrito
 // el formato nuevo de vuelta al viejo, reintroduciendo el enlace falso en
 // cada corrida).
-import { renderDepsContent, renderAcContent, GATES_HEADING, EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING, SENAL_HEADING } from './groom.js'
+import { renderDepsContent, renderAcContent, GATES_HEADING, E2E_HEADING, EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING, SENAL_HEADING } from './groom.js'
 
 // ownedLabelsOnly: el spec solo es autoridad sobre un prefijo (`type:`,
 // `area:`, `touches:`) SI la tabla §9 trae la columna que lo alimenta
@@ -217,6 +217,21 @@ const DUPLICATE_CHECKS = [
   // `ownedLabelPrefixes`, ver ct-groom.mjs) es lo que hace que una divergencia
   // de gate REAL no pase desapercibida.
   { headings: GATES_HEADING, label: 'Gates', machine: false },
+  // La sección "## E2E" NO es "no machine" por el motivo de Gates —esa frase
+  // era falsa y la review final de rama la corrige—: sí la parsea código
+  // (gh-issue-map.js#extractE2eRuns, que usan /ct-next para sembrar el worktree
+  // y `dispatch-check --release` para su puerta del exit 8), y como todo lector
+  // de secciones, lee la PRIMERA aparición.
+  //
+  // Aun así el DUPLICADO se queda fuera de `machine`, y ahora por una razón que
+  // se sostiene sola: desde esta ronda la divergencia de contenido ya cuenta
+  // (hasDrift), y --reconcile se niega a escribir sobre una sección duplicada
+  // marcándolo como gap (`unresolvedE2e: 'duplicada'`) — o sea que un duplicado
+  // que cambie lo que el slice atraviesa YA mueve el exit code por esas dos
+  // vías. Lo que queda —dos copias cuya PRIMERA coincide con el spec— no cambia
+  // nada para nadie: /ct-next siembra los recorridos correctos. Se avisa, que
+  // es lo que merece.
+  { headings: E2E_HEADING, label: 'E2E', machine: false },
   { headings: '## Out of scope / Protected', label: 'Out of scope / Protected', machine: false },
   // Las dos secciones de contexto duplicadas son cosméticas: ninguna máquina
   // decide nada con ellas. Se avisa —un duplicado suele ser un merge mal
@@ -377,6 +392,41 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
   const currentGates = extractSectionContent(body, GATES_HEADING)
   const gatesDiffers = currentGates === null || currentGates.trim() !== (wantedIssue.gatesContent || '').trim()
 
+  // E2E: el estado de TRES valores de Descripción/Contexto del epic, no el de
+  // Gates/Protegido — porque, a diferencia de esas dos, la sección NO se emite
+  // siempre (ver groom.js#buildIssueBody: sólo si hay recorridos). `null` en
+  // los dos lados es acuerdo real (este slice no tiene recorridos, y el issue
+  // no trae la sección), no divergencia; tratarlo como Gates trataría "ningún
+  // slice con e2e:no" como divergiendo siempre.
+  //
+  // Y a diferencia de Gates, esta divergencia SÍ cuenta para el exit code
+  // (hasDrift) y --reconcile SÍ la reescribe (buildReconcileBody). Hasta la
+  // review final de rama era al revés, y eso dejaba inerte la feature entera
+  // por el camino de adopción más natural que tiene: un epic ya groomeado, más
+  // la columna `E2E` nueva, más `--reconcile`. La label `gate:e2e` sí se
+  // añadía (la cubre el prefijo `gate:` de ownedLabelPrefixes), la sección no
+  // — o sea, un issue con la label y sin recorridos: /ct-next sembraba `[]`, el
+  // agente no atravesaba nada, y `--release` liberaba con un aviso por stderr.
+  // La herramienta fabricaba exactamente el estado divergente que el §4.6 del
+  // diseño describe como "alguien editó el issue a mano".
+  //
+  // El argumento por el que Descripción/Protegido NO se reconcilian —el
+  // derecho de un humano a editar SU issue— no vale aquí, y es justo al revés:
+  // el §3.3 del diseño dice que el recorrido no puede ser editable sin pasar
+  // por la Puerta 1 (por eso vive en el spec congelado y no en AGENTS.md). Una
+  // sección `## E2E` editada a mano en el issue es precisamente lo que hay que
+  // devolver a lo que dice el spec.
+  const currentE2e = extractSectionContent(body, E2E_HEADING)
+  const wantedE2e = wantedIssue.e2eContent ?? null
+  let e2eDiffers
+  if (currentE2e === null && wantedE2e === null) {
+    e2eDiffers = false
+  } else if (currentE2e === null || wantedE2e === null) {
+    e2eDiffers = true
+  } else {
+    e2eDiffers = currentE2e.trim() !== wantedE2e.trim()
+  }
+
   const duplicates = DUPLICATE_CHECKS.filter((c) => countHeadingLines(body, c.headings) > 1)
   const duplicateSections = duplicates.map((c) => c.label)
   const duplicateMachineSections = duplicates.filter((c) => c.machine).map((c) => c.label)
@@ -407,6 +457,7 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
     epicContextDiffers,
     protectedDiffers,
     gatesDiffers,
+    e2eDiffers,
     duplicateSections,
     duplicateMachineSections,
     strayDeps,
@@ -414,7 +465,10 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
 }
 
 // hasDrift: cuenta título/milestone/enlace-al-spec (la línea entera, desde
-// F10)/labels/deps/ac, y las secciones DUPLICADAS que cambian lo que el
+// F10)/labels/deps/ac, la sección `## E2E` (review final de rama: ver el
+// bloque de `e2eDiffers` en diffIssue — sin ella el `--reconcile` de un epic
+// ya groomeado dejaba la feature inerte y ni siquiera cambiaba el exit code), y
+// las secciones DUPLICADAS que cambian lo que el
 // dispatcher hace (AC/Dependencias — review round 4, importante 5). `closed`,
 // Descripción/Protegido (duplicados o divergentes), el contexto del epic y
 // `strayDeps` NUNCA cuentan, y el motivo NO es el mismo para todos —
@@ -445,6 +499,7 @@ export function hasDrift(diff) {
     diff.labels.missing.length || diff.labels.extra.length ||
     diff.deps.missing.length || diff.deps.extra.length ||
     diff.ac.missing.length || diff.ac.extra.length ||
+    diff.e2eDiffers ||
     diff.duplicateMachineSections.length,
   )
 }
@@ -484,11 +539,17 @@ export function reconcileGaps(diff, bodyResult) {
   return {
     ac: Boolean((diff.ac.missing.length || diff.ac.extra.length) && bodyResult.unresolvedAc),
     deps: Boolean((diff.deps.missing.length || diff.deps.extra.length) && bodyResult.unresolvedDeps),
+    // Mismo criterio que ac/deps, y por el mismo motivo: esta divergencia
+    // cuenta para el exit code (hasDrift), así que si --reconcile no ha podido
+    // escribirla, queda pendiente y hay que decirlo. Sin esta línea, un
+    // `--reconcile` sobre un body en el que la sección no se puede tocar con
+    // seguridad salía 0 dejando el issue sin recorridos.
+    e2e: Boolean(diff.e2eDiffers && bodyResult.unresolvedE2e),
     duplicates: Boolean((diff.duplicateMachineSections || []).length),
   }
 }
 export function hasReconcileGap(gaps) {
-  return Boolean(gaps.ac || gaps.deps || gaps.duplicates)
+  return Boolean(gaps.ac || gaps.deps || gaps.e2e || gaps.duplicates)
 }
 
 // formatDrift: una línea humana por campo. Título/milestone/enlace-al-spec/
@@ -549,6 +610,12 @@ export function formatDrift(diff) {
   // esta nota sepa dónde mirar si de verdad le preocupa un gate — sin esa
   // frase, "no cuenta para el exit code" se lee como "los gates no importan".
   if (diff.gatesDiffers) lines.push(`nota: ${head}: la sección "${GATES_HEADING}" difiere del spec (no cuenta para el exit code; --reconcile no la reescribe). El gate que obedece el dispatcher son las labels "gate:" de este issue, que sí se comparan arriba — si un issue es anterior a los gates, esta sección le falta entera y basta con re-groomear su body a mano`)
+  // A diferencia de la nota de Gates, de al lado, ésta es una DIVERGENCIA: la
+  // sección es el único sitio que dice QUÉ atravesar, y de ella comen /ct-next
+  // (la semilla del worktree) y `--release` (la puerta del exit 8). Un issue
+  // con la label y sin la sección es un slice que no atraviesa nada — ver el
+  // bloque de `e2eDiffers` en diffIssue.
+  if (diff.e2eDiffers) lines.push(`divergencia: ${head}: la sección "${E2E_HEADING}" difiere del spec — de ella salen los recorridos que /ct-next siembra en el worktree y los que "dispatch-check --release" exige haber atravesado, así que un issue sin ella (o con otra cosa) no atraviesa lo que el spec pide; con --reconcile se reescribe desde el spec`)
   for (const section of diff.duplicateSections || []) {
     if ((diff.duplicateMachineSections || []).includes(section)) continue // ya reportada arriba como divergencia:
     // Sólo la primera se COMPARA (locateSection siempre devuelve esa), y
@@ -588,11 +655,12 @@ export function buildReconcileEditArgs(diff) {
 }
 
 // buildReconcileBody: --reconcile SÍ reescribe el enlace al spec, AC/
-// Dependencias y el contexto del epic — no Descripción, Protegido, ni el
-// contexto heredado (ver diffIssue). "De quién es el texto" NO es lo que
-// distingue a estas dos listas: el spec posee las CUATRO primeras por
-// igual — el enlace deriva de la ruta del propio spec (F10); AC/Dependencias
-// de la tabla §9; el contexto del epic, de la sección homónima que trae el
+// Dependencias, la sección "## E2E" y el contexto del epic — no Descripción,
+// Protegido, ni el contexto heredado (ver diffIssue). "De quién es el texto" NO
+// es lo que distingue a estas dos listas: el spec posee las CINCO primeras por
+// igual — el enlace deriva de la ruta del propio spec (F10); AC/Dependencias y
+// los recorridos de "## E2E", de la tabla §9; el contexto del epic, de la
+// sección homónima que trae el
 // propio spec (groom.js#readEpicContext); y Descripción/Protegido de las
 // columnas Entrega/Protegido de esa misma tabla (renderDescripcion/
 // renderProtectedLine, groom.js — ver también el comentario de diffIssue más
@@ -636,7 +704,7 @@ export function buildReconcileEditArgs(diff) {
 // reconvierte a CRLF antes de devolverlo (`detectLineEnding`), para no
 // dejar un body con finales de línea mezclados (review round 4, menor).
 //
-// Devuelve `{ body, unresolvedAc, unresolvedDeps, unresolvedReasons, unresolvedEpicContext }`:
+// Devuelve `{ body, unresolvedAc, unresolvedDeps, unresolvedReasons, unresolvedEpicContext, unresolvedE2e }`:
 // `body` es el body spliceado (en el mismo final de línea que el original), o
 // `null` si nada necesitaba cambiar. `unresolvedAc`/`unresolvedDeps` son
 // ciertos cuando el diff SÍ pedía un cambio pero no se pudo aplicar sin
@@ -653,6 +721,14 @@ export function buildReconcileEditArgs(diff) {
 //     "merge-after #N" repetido. Ahora, sin un ancla segura, se RIÈNDE
 //     igual que AC: no inserta nada, marca `unresolvedDeps`, dejando que
 //     la maquinaria de gaps lo reporte y cuente para el exit code.
+//
+// `unresolvedE2e` es una CADENA con el motivo (o `null`), del mismo vocabulario
+// que `unresolvedReasons.deps`: la sección "## E2E" se rinde por las mismas
+// causas que "## Dependencias" y con los mismos remedios. A diferencia de
+// `unresolvedEpicContext`, ésta SÍ entra en `reconcileGaps` y sí mueve el exit
+// code — la divergencia cuenta (hasDrift), así que rendirse sin contar dejaría
+// a `--reconcile` saliendo 0 sobre un issue que sigue sin recorridos: el mismo
+// agujero que la review round 5 cerró para los duplicados.
 //
 // `unresolvedEpicContext` es distinto de esos dos: es una CADENA con el
 // motivo (o `null` si no hubo ninguno), y NO entra en `reconcileGaps` ni
@@ -678,6 +754,7 @@ export function buildReconcileBody(existingBody, wantedIssue) {
   let unresolvedAc = false
   let unresolvedDeps = false
   let unresolvedEpicContext = null
+  let unresolvedE2e = null
   const unresolvedReasons = { ac: null, deps: null }
 
   // zonaHeredada: el rango del body que pertenece a la sesión coordinadora.
@@ -895,6 +972,71 @@ export function buildReconcileBody(existingBody, wantedIssue) {
     }
   }
 
+  // La sección "## E2E" (review final de rama). Se reescribe, se inserta o se
+  // retira, con la misma mecánica de tres estados que "## Dependencias" —
+  // incluida su rendición cuando la única copia cae en la zona de la
+  // coordinadora, y por el MISMO motivo de posición: el ancla de inserción
+  // ("## Out of scope / Protected") va por DETRÁS, así que insertar una copia
+  // propia dejaría a todo el que lee "la primera aparición"
+  // (gh-issue-map.js#extractE2eRuns, que usan /ct-next y `--release`) leyendo
+  // la de ella para siempre.
+  //
+  // Por qué esta sección sí se reescribe y Descripción/Protegido no: no es "de
+  // quién es el texto" (el spec posee las tres), es el derecho de edición
+  // después de crear el issue. Aquéllas son prosa que un humano edita de forma
+  // legítima; el recorrido de e2e no puede ser editable sin pasar por la Puerta
+  // 1 (§3.3 del diseño) — vive en el spec congelado justo para eso. Editarlo a
+  // mano en el issue es la divergencia que hay que deshacer, no trabajo que
+  // proteger.
+  //
+  // Las posiciones se localizan sobre el body YA actualizado por los splices de
+  // arriba, no sobre el original.
+  const currentE2eBody = extractSectionContent(body, E2E_HEADING)
+  const wantedE2eContent = wantedIssue.e2eContent ?? null
+  const e2eDiffers = (currentE2eBody === null && wantedE2eContent === null)
+    ? false
+    : (currentE2eBody === null || wantedE2eContent === null)
+      ? true
+      : currentE2eBody.trim() !== wantedE2eContent.trim()
+  if (e2eDiffers) {
+    const e2e = seccionSpliceable(E2E_HEADING)
+    if (e2e.ambigua) {
+      unresolvedE2e = 'duplicada'
+    } else if (e2e.motivo === 'en-heredado' || e2e.motivo === 'zona-sin-fin') {
+      unresolvedE2e = e2e.motivo
+    } else if (wantedE2eContent && e2e.loc) {
+      body = body.slice(0, e2e.loc.headingEnd) + wantedE2eContent + '\n' + body.slice(e2e.loc.contentEnd)
+      changed = true
+    } else if (wantedE2eContent && !e2e.loc) {
+      // Sección ausente (el caso de adopción: un epic groomeado antes de que la
+      // columna existiera) y el spec ahora sí trae recorridos: se inserta
+      // ENTERA justo antes de "## Out of scope / Protected", que es la posición
+      // que le da buildIssueBody (groom.js) y el único ancla inequívoca — la
+      // misma que usa "## Dependencias", con las mismas cuatro rendiciones.
+      const ancla = seccionSpliceable('## Out of scope / Protected')
+      if (ancla.loc) {
+        body = body.slice(0, ancla.loc.headingStart) + `${E2E_HEADING}\n${wantedE2eContent}\n\n` + body.slice(ancla.loc.headingStart)
+        changed = true
+      } else {
+        unresolvedE2e = {
+          duplicada: 'ancla-duplicada',
+          'sin-seccion': 'sin-ancla',
+          'en-heredado': 'ancla-en-heredado',
+          'zona-sin-fin': 'zona-sin-fin',
+        }[ancla.motivo]
+      }
+    } else if (!wantedE2eContent && e2e.loc) {
+      // El spec ya no declara recorridos para este slice (la celda pasó a
+      // "no"): la sección se retira ENTERA, cabecera incluida. Dejarla sería
+      // dejar al agente atravesando un recorrido que el spec ya retiró. Se
+      // recorta un '\n' del final del primer trozo para no dejar dos líneas en
+      // blanco en la costura, igual que al retirar "## Dependencias".
+      const before = body.slice(0, e2e.loc.headingStart).replace(/\n$/, '')
+      body = before + body.slice(e2e.loc.contentEnd)
+      changed = true
+    }
+  }
+
   // Contexto del epic. Es prosa, y aun así se reescribe — al contrario que
   // Descripción y Protegido, que no. Lo que las distingue: aquéllas son prosa
   // que un humano edita de forma rutinaria y legítima en un issue suelto; ésta
@@ -1019,7 +1161,7 @@ export function buildReconcileBody(existingBody, wantedIssue) {
     }
   }
 
-  if (!changed) return { body: null, unresolvedAc, unresolvedDeps, unresolvedReasons, unresolvedEpicContext }
+  if (!changed) return { body: null, unresolvedAc, unresolvedDeps, unresolvedReasons, unresolvedEpicContext, unresolvedE2e }
   const finalBody = eol === '\r\n' ? body.replace(/\n/g, '\r\n') : body
-  return { body: finalBody, unresolvedAc, unresolvedDeps, unresolvedReasons, unresolvedEpicContext }
+  return { body: finalBody, unresolvedAc, unresolvedDeps, unresolvedReasons, unresolvedEpicContext, unresolvedE2e }
 }

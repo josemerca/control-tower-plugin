@@ -74,7 +74,12 @@ const PLAN = [
 
 let repo
 
-function montarRepo() {
+// `e2e` siembra los recorridos en el SLICE.md, que es de donde ct-step los lee
+// al crear el run (no hay `gh` en este programa). Se escribe con `renderState`
+// y no a mano por el mismo motivo por el que se escribe así el de la señal: el
+// que parsea es un YAML de verdad, y un recorrido es una frase con comas y dos
+// puntos dentro.
+function montarRepo({ e2e = null } = {}) {
   const d = mkdtempSync(join(tmpdir(), 'ct-step-'))
   const g = (...a) => execFileSync('git', a, { cwd: d, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   g('init', '-q', '-b', 'main')
@@ -82,7 +87,9 @@ function montarRepo() {
   g('config', 'user.name', 'T')
   g('config', 'commit.gpgsign', 'false')
   mkdirSync(join(d, '.agent'), { recursive: true })
-  writeFileSync(join(d, '.agent', 'SLICE.md'), '---\nissue: 7\nepic: 12\n---\n\n# slice de mentira\n')
+  writeFileSync(join(d, '.agent', 'SLICE.md'), e2e
+    ? renderState({ meta: { issue: 7, epic: 12, e2e }, body: '# slice de mentira' })
+    : '---\nissue: 7\nepic: 12\n---\n\n# slice de mentira\n')
   writeFileSync(join(d, 'plan.md'), PLAN)
   g('add', '-A')
   g('commit', '-q', '-m', 'base del slice')
@@ -281,6 +288,58 @@ describe('el camino feliz', () => {
     const r = ct('report', crudo(JSON.stringify({ paths: ['/etc/passwd'], summary: 'ups' })))
     expect(r.stdout).toMatch(/informe descartado.*fuera del worktree/)
     expect(estado().discards).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// LA COLA ENTERA CON RECORRIDOS. Ningún fichero la recorría: éste nunca ponía
+// `e2e` en el SLICE.md (así que el commit de la última tarea cerraba en la rama
+// sin travesía) y __tests__/e2e-ct-step.test.js siembra el run ya parado en
+// `e2e` con exactamente `tasksTotal` commits, sin pasar por `slice-verdict`.
+// En el hueco entre los dos cabía el defecto: el veredicto de slice estrena
+// commit propio, el proceso siguiente relee el fichero y la cuenta de commits
+// no cuadraba — TODO slice con recorridos moría en PRECONDITION (exit 8) sin
+// llegar nunca a DELIVERED, y `dispatch-check --release` lo rechazaba con el 7
+// para siempre.
+// ---------------------------------------------------------------------------
+describe('la cola completa: commit → global → slice-verdict → e2e → DELIVERED', () => {
+  const RECORRIDO = 'levantado con el example, curl -i :9115/metrics responde 200'
+  const informeE2e = (nombre = 'e2e.json') => {
+    const p = join(repo, nombre)
+    writeFileSync(p, JSON.stringify({
+      runs: [{
+        run: RECORRIDO, verdict: 'verde', brought_up: 'cargo run --example serve',
+        evidence: [{ command: 'curl -sS -o /dev/null -w \'%{http_code}\' localhost:9115/metrics', output: '200' }],
+      }],
+    }))
+    return p
+  }
+
+  beforeEach(() => {
+    rmSync(repo, { recursive: true, force: true })
+    repo = montarRepo({ e2e: [RECORRIDO] })
+  })
+
+  it('un slice con recorridos atraviesa el e2e y ENTREGA', () => {
+    expect(sliceOk().status).toBe(0)
+    // El veredicto de slice no entrega aquí: abre el paso e2e.
+    expect(estado().step).toBe('e2e')
+    expect(estado().closed).toBeUndefined()
+    // Preguntar ya no muere en PRECONDITION: es el síntoma exacto del defecto.
+    const n = ct('next')
+    expect(n.status).toBe(0)
+    expect(n.stdout).toContain(RECORRIDO)
+
+    const r = ct('e2e', informeE2e())
+    expect(r.status).toBe(0)
+    expect(estado().closed).toBe('delivered')
+    expect(deliveredRun(readFileSync(join(repo, '.agent', 'run-7.json'), 'utf8'), 7)).toEqual({ ok: true })
+    // 1 base + 2 tareas + veredicto de slice + informe de e2e.
+    expect(commits()).toBe(5)
+    expect(log()).toMatch(/informe de e2e del issue #7/)
+    // Y el commit del veredicto de slice quedó CONTADO: es lo que permite que
+    // el proceso siguiente cruce los commits sin descuadrarse.
+    expect(estado().sliceCommits).toBe(1)
   })
 })
 

@@ -199,21 +199,34 @@ export function declaradasEn(contenido) {
 // una regla de estilo del repo. Sin descontarla, `pareceEsqueleto` vería
 // sobrada sustancia y jamás marcaría el AGENTS.md recién creado — que es
 // justo el caso que motiva esta función.
-const SLICES_MARKER_OPEN = '<!-- ct-init:slices-contract -->'
-const SLICES_MARKER_CLOSE = '<!-- /ct-init:slices-contract -->'
+//
+// Y el mismo razonamiento, palabra por palabra, vale para el SEGUNDO bloque
+// que `ct-init.sh` inyecta desde la feature del e2e al cierre del slice: la
+// sección "Cómo se atraviesa este repo (e2e)". Se siembra como PLANTILLA con
+// sus campos vacíos (`Levantar:`, `Listo cuando:`…), que son media docena de
+// líneas con sustancia formal y cero contenido real — sin descontarla, el
+// AGENTS.md recién creado dejaría de parecer esqueleto por culpa de unos
+// campos que nadie ha rellenado todavía. Tampoco es una convención de código:
+// es cómo se levanta el repo, que es lo que consume el paso `e2e` de
+// `ct-step`.
+const CT_INIT_BLOCKS = [
+  ['<!-- ct-init:slices-contract -->', '<!-- /ct-init:slices-contract -->'],
+  ['<!-- ct-init:e2e-howto -->', '<!-- /ct-init:e2e-howto -->'],
+]
 
-function sinBloqueDeContratoDeSlices(contenido) {
+function sinBloquesDeCtInit(contenido) {
   const lineas = String(contenido ?? '').split('\n')
   const out = []
-  let dentro = false
+  let cierreEsperado = null
   for (const raw of lineas) {
     const linea = raw.replace(/\r$/, '')
-    if (!dentro && linea === SLICES_MARKER_OPEN) { dentro = true; continue }
-    if (dentro) {
-      if (linea === SLICES_MARKER_CLOSE) dentro = false
+    if (cierreEsperado === null) {
+      const bloque = CT_INIT_BLOCKS.find(([abre]) => linea === abre)
+      if (bloque) { cierreEsperado = bloque[1]; continue }
+      out.push(raw)
       continue
     }
-    out.push(raw)
+    if (linea === cierreEsperado) cierreEsperado = null
   }
   return out.join('\n')
 }
@@ -233,7 +246,7 @@ function sinBloqueDeContratoDeSlices(contenido) {
 // líneas internas no empiezan por `<!--` ni acaban en `-->`) — aceptado: es
 // una aproximación, no una prueba formal.
 export function pareceEsqueleto(contenido) {
-  const lineas = sinBloqueDeContratoDeSlices(contenido).split('\n')
+  const lineas = sinBloquesDeCtInit(contenido).split('\n')
   let sustancia = 0
   for (const linea of lineas) {
     const t = linea.trim()

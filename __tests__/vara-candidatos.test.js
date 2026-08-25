@@ -191,7 +191,7 @@ describe('pareceEsqueleto', () => {
   // añade siempre la sección del contrato de slices (cientos de líneas de
   // prosa). Este test corre `ct-init.sh` de verdad y mide sobre su salida,
   // para que una regresión en el descuento del bloque del contrato (ver
-  // `sinBloqueDeContratoDeSlices` en scripts/vara.js) se note aquí.
+  // `sinBloquesDeCtInit` en scripts/vara.js) se note aquí.
   it('el AGENTS.md que ct-init.sh deja REALMENTE en disco es esqueleto, pese a que el propio script le añade el contrato de slices', () => {
     const dir = tmp()
     execFileSync('bash', [initScript, dir], { encoding: 'utf8' })

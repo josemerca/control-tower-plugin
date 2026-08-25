@@ -1,10 +1,11 @@
 // La tabla que decide el paso siguiente (scripts/run-machine.js).
 //
-// Este fichero es EXHAUSTIVO a propósito: recorre los 24 pares (paso,
-// resultado) que existen y comprueba, uno a uno, o bien a dónde va el run, o
-// bien que la transición LANZA. La razón es que el valor entero del diseño está
-// en que la secuencia no la decida un modelo: una tabla con un hueco no es una
-// tabla, es una tabla y una decisión implícita tomada por omisión.
+// Este fichero es EXHAUSTIVO a propósito: recorre los 42 pares (paso,
+// resultado) que existen — 7 pasos x 6 resultados — y comprueba, uno a uno, o
+// bien a dónde va el run, o bien que la transición LANZA. La razón es que el
+// valor entero del diseño está en que la secuencia no la decida un modelo: una
+// tabla con un hueco no es una tabla, es una tabla y una decisión implícita
+// tomada por omisión.
 import { describe, it, expect } from 'vitest'
 import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS } from '../scripts/run-machine.js'
 
@@ -22,6 +23,8 @@ const DESCRITOS = new Set([
   // §3.7: los dos pasos que corren tras la última tarea comiteada.
   'global/done', 'global/failed', 'global/indeterminate',
   'slice-judge/done', 'slice-judge/failed', 'slice-judge/discarded',
+  // El e2e cierra la cola, y sólo si la slice declara recorridos.
+  'e2e/done', 'e2e/failed', 'e2e/indeterminate', 'e2e/discarded',
   // over-budget lo entiende cualquier paso.
   ...PASOS.map((p) => `${p}/over-budget`),
 ])

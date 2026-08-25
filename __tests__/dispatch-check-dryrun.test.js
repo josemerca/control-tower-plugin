@@ -162,7 +162,12 @@ describe('dispatch-check --dry-run', () => {
   it('--release → exit 0 e imprime la transición in-progress → in-review', () => {
     const dir = mkReleaseDryRunRepo()
     try {
-      const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO })
+      // Task 10 (F-e2e): --release ahora lee el cuerpo del issue por `gh`
+      // incluso en --dry-run (es una LECTURA, no la mutación que --dry-run
+      // evita) — sin el PATH al stub, este `gh` real fallaría contra un repo
+      // 'o/r' que no existe. FAKE_GH_VIEW_BODY sin fijar → body vacío → sin
+      // sección "## E2E" → nada que cruzar, el camino feliz de este test.
+      const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}` } })
       expect(out).toMatch(/released #9.*in-review/)
     } catch (e) {
       throw new Error(`no debería fallar: ${e.status} ${(e.stdout || '') + (e.stderr || '')}`)
@@ -304,7 +309,9 @@ describe('dispatch-check — T11 fix round 3 (--settle-ms/CT_CLAIM_SETTLE_MS rec
 
   it('sin --settle-ms ni CT_CLAIM_SETTLE_MS → no le afecta (camino normal)', () => {
     const dir = mkReleaseDryRunRepo()
-    const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO })
+    // Task 10 (F-e2e): --release lee el body del issue por `gh` — necesita el
+    // stub aquí igual que el test de arriba, o pega contra el 'o/r' real.
+    const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}` } })
     expect(out).toMatch(/released #9.*in-review/)
     rmSync(dir, { recursive: true, force: true })
   })
@@ -577,8 +584,10 @@ describe('dispatch-check — T11 hook CT_CLAIM_PRECLAIM_DELAY_MS', () => {
   // ni siquiera un valor claramente inválido lo afecta.
   it('--release con CT_CLAIM_PRECLAIM_DELAY_MS malformado en el entorno → --release procede igual, no le afecta', () => {
     const dir = mkReleaseDryRunRepo()
+    // Task 10 (F-e2e): idem — el stub de `gh` hace falta para la lectura del
+    // body del issue, no solo para el escenario de mutación.
     const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'],
-      { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_PRECLAIM_DELAY_MS: 'not-a-number' } })
+      { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}`, CT_CLAIM_PRECLAIM_DELAY_MS: 'not-a-number' } })
     expect(out).toMatch(/released #9.*in-review/)
     rmSync(dir, { recursive: true, force: true })
   })
@@ -670,7 +679,10 @@ function mkStaleMainRepo({ issue = 9, sliceMd } = {}) {
   return { dir, cutSha }
 }
 
-const releaseStale = (dir) => spawnSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8' })
+// --release lee el body del issue por gh incluso en --dry-run; sin el PATH al stub, el gh
+// real fallaría contra un repo o/r que no existe. FAKE_GH_VIEW_BODY sin fijar → body vacío
+// → sin sección "## E2E" → nada que cruzar.
+const releaseStale = (dir) => spawnSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}` } })
 
 describe('dispatch-check --release — la base del diff es el corte real (slice 2, apuntes de Capde)', () => {
   it('con base_sha: presente el diff sale contra ese commit aunque main local esté por detrás', () => {

@@ -177,6 +177,17 @@ function main() {
       process.exitCode = 0
       return
     }
+    // FAKE_GH_VIEW_BODY (TAREA 10) — el camino de `--json body`, que es el
+    // que usa la puerta F-e2e de `dispatch-check.mjs --release` para leer el
+    // cuerpo del issue y cruzarlo contra el run entregado. Va aparte del de
+    // labels y del de comments por la misma razón que ellos: misma
+    // subcomando, pregunta distinta — sin separarla, la puerta F-e2e
+    // recibiría la lista de labels y nunca encontraría un body que parsear.
+    if (joined.includes('--json body')) {
+      process.stdout.write(process.env.FAKE_GH_VIEW_BODY ?? '')
+      process.exitCode = 0
+      return
+    }
     process.stdout.write(process.env.FAKE_GH_VIEW_LABELS || '[]')
     process.exitCode = 0
     return

@@ -321,13 +321,68 @@ describe('diffIssue — compara título, milestone, enlace-al-spec (ancla), labe
     expect(d.duplicateMachineSections).toEqual([])
     expect(hasDrift(d)).toBe(false)
   })
+
+  // Task 4 (review, finding 3): la lógica de `e2eDiffers` no tenía ningún
+  // test propio — sólo se parecía, sin probarlo, al `descripcionDiffers` ya
+  // cubierto arriba. Se cubre aquí con el MISMO arnés (`existingWith`,
+  // `diffIssue` directo), siguiendo el patrón exacto de "## Descripción"
+  // (duplicado) y de las tres ramas de estado de esa misma sección
+  // (divergente, ausente-cuando-el-spec-la-pide, silencio real en los dos
+  // lados) — no se inventa ningún harness nuevo.
+  it('"## E2E" duplicado → aparece en duplicateSections pero NO en duplicateMachineSections, hasDrift NO lo cuenta', () => {
+    const dup = existingWith({
+      body: [
+        SPEC_LINK, '',
+        '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-2.1', '',
+        '## Dependencias', '- merge-after #1', '',
+        '## E2E', '- curl -i :9115/metrics responde 200', '',
+        '## E2E', '- copia pegada por error', '',
+        '## Out of scope / Protected', '- 🚫 schema §6', '',
+        '<!-- ct-order:2 -->',
+      ].join('\n'),
+    })
+    const d = diffIssue(dup, { ...WANTED_ISSUE, e2eContent: '- curl -i :9115/metrics responde 200' }, 'Epic', ALL_PREFIXES)
+    expect(d.duplicateSections).toContain('E2E')
+    expect(d.duplicateMachineSections).toEqual([])
+    expect(hasDrift(d)).toBe(false)
+  })
+  it('"## E2E" con contenido distinto del spec → e2eDiffers true, y SÍ cuenta para hasDrift', () => {
+    const withE2e = existingWith({
+      body: [
+        SPEC_LINK, '',
+        '## Acceptance criteria (EARS, 1:1 con tests)', '- AC-2.1', '',
+        '## Dependencias', '- merge-after #1', '',
+        '## E2E', '- curl -i :9115/metrics responde 200', '',
+        '## Out of scope / Protected', '- 🚫 schema §6', '',
+        '<!-- ct-order:2 -->',
+      ].join('\n'),
+    })
+    const d = diffIssue(withE2e, { ...WANTED_ISSUE, e2eContent: '- otro recorrido distinto' }, 'Epic', ALL_PREFIXES)
+    expect(d.e2eDiffers).toBe(true)
+    // Review final de rama: al revés que Gates. De esta sección salen los
+    // recorridos que /ct-next siembra y los que --release exige, así que un
+    // issue que no los tenga es un slice que no atraviesa lo que el spec pide.
+    expect(hasDrift(d)).toBe(true)
+  })
+  it('"## E2E" ausente en el issue cuando el spec SÍ pide recorridos → e2eDiffers true', () => {
+    const d = diffIssue(existingWith({}), { ...WANTED_ISSUE, e2eContent: '- curl -i :9115/metrics responde 200' }, 'Epic', ALL_PREFIXES)
+    expect(d.e2eDiffers).toBe(true)
+  })
+  it('sin "## E2E" en ninguno de los dos lados → e2eDiffers false (acuerdo real: este slice no tiene recorridos)', () => {
+    // A diferencia de Gates (siempre emitida, así que su ausencia SIEMPRE
+    // diverge), "## E2E" sólo se emite con contenido — null en los dos
+    // lados es el caso normal (6 de cada 8 filas en mo-monitoring v1), no
+    // una divergencia.
+    const d = diffIssue(existingWith({}), WANTED_ISSUE, 'Epic', ALL_PREFIXES) // WANTED_ISSUE no trae e2eContent
+    expect(d.e2eDiffers).toBe(false)
+  })
 })
 
 describe('hasDrift — título/milestone/enlace-al-spec/labels/deps/ac/duplicados-machine cuentan; closed/prosa/strayDeps NUNCA', () => {
   const CLEAN = {
     order: 1, issueNumber: 1, closed: false, title: null, milestone: null, specLink: null,
     labels: { missing: [], extra: [] }, deps: { missing: [], extra: [] }, ac: { missing: [], extra: [] },
-    descripcionDiffers: false, protectedDiffers: false, duplicateSections: [], duplicateMachineSections: [], strayDeps: [],
+    descripcionDiffers: false, protectedDiffers: false, e2eDiffers: false, duplicateSections: [], duplicateMachineSections: [], strayDeps: [],
   }
   it('sin ninguna divergencia → false, aunque esté cerrado', () => {
     expect(hasDrift({ ...CLEAN, closed: true })).toBe(false)
@@ -355,6 +410,9 @@ describe('hasDrift — título/milestone/enlace-al-spec/labels/deps/ac/duplicado
   })
   it('strayDeps no vacío → NUNCA cuenta (--reconcile no puede tocarlo con seguridad)', () => {
     expect(hasDrift({ ...CLEAN, strayDeps: [9] })).toBe(false)
+  })
+  it('e2eDiffers → SÍ cuenta (el recorrido no es prosa: lo obedecen /ct-next y --release)', () => {
+    expect(hasDrift({ ...CLEAN, e2eDiffers: true })).toBe(true)
   })
 })
 
@@ -450,9 +508,25 @@ describe('buildReconcileEditArgs — título/milestone/labels vía flags de `gh 
 
 describe('reconcileGaps / hasReconcileGap — divergencia real que --reconcile no pudo aplicar', () => {
   const DIFF_CLEAN = { ac: { missing: [], extra: [] }, deps: { missing: [], extra: [] }, duplicateMachineSections: [] }
-  it('sin divergencia de ac/deps → sin gap, aunque bodyResult marque unresolved (no debería pasar, pero no basta por sí solo)', () => {
-    const gaps = reconcileGaps(DIFF_CLEAN, { body: null, unresolvedAc: true, unresolvedDeps: true })
-    expect(gaps).toEqual({ ac: false, deps: false, duplicates: false })
+  it('sin divergencia de ac/deps/e2e → sin gap, aunque bodyResult marque unresolved (no debería pasar, pero no basta por sí solo)', () => {
+    const gaps = reconcileGaps(DIFF_CLEAN, { body: null, unresolvedAc: true, unresolvedDeps: true, unresolvedE2e: 'duplicada' })
+    expect(gaps).toEqual({ ac: false, deps: false, e2e: false, duplicates: false })
+    expect(hasReconcileGap(gaps)).toBe(false)
+  })
+  // La sección "## E2E" cuenta para hasDrift, así que rendirse al escribirla
+  // tiene que contar también para el exit code de --reconcile: sin esto, un
+  // body en el que la sección no se puede tocar con seguridad salía 0 dejando
+  // al issue sin los recorridos que el spec pide.
+  it('"## E2E" diverge Y no se pudo escribir → gap.e2e = true', () => {
+    const diff = { ...DIFF_CLEAN, e2eDiffers: true }
+    const gaps = reconcileGaps(diff, { body: null, unresolvedAc: false, unresolvedDeps: false, unresolvedE2e: 'duplicada' })
+    expect(gaps.e2e).toBe(true)
+    expect(hasReconcileGap(gaps)).toBe(true)
+  })
+  it('"## E2E" diverge pero SÍ se pudo escribir → sin gap', () => {
+    const diff = { ...DIFF_CLEAN, e2eDiffers: true }
+    const gaps = reconcileGaps(diff, { body: null, unresolvedAc: false, unresolvedDeps: false, unresolvedE2e: null })
+    expect(gaps.e2e).toBe(false)
     expect(hasReconcileGap(gaps)).toBe(false)
   })
   it('AC diverge Y no se pudo localizar la sección → gap.ac = true', () => {
@@ -510,6 +584,7 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
     const r = buildReconcileBody(GENERATED, WANTED_BASE)
     expect(r).toEqual({
       body: null,
+      unresolvedE2e: null,
       unresolvedAc: false,
       unresolvedDeps: false,
       unresolvedReasons: { ac: null, deps: null },
@@ -746,6 +821,77 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
   })
 })
 
+// ============================================================================
+// La sección "## E2E" bajo --reconcile (review final de rama, Importante 1).
+//
+// El camino de adopción natural de toda la feature es: un epic ya groomeado,
+// más la columna `E2E` nueva en el spec, más `--reconcile`. Hasta esta ronda
+// ese camino añadía la label `gate:e2e` (la cubre el prefijo `gate:` de
+// `ownedLabelPrefixes`) y NO la sección — o sea, un issue con la label y sin
+// recorridos: /ct-next sembraba `[]`, el agente no atravesaba nada, y
+// `--release` liberaba con un aviso por stderr. La herramienta fabricaba el
+// mismo estado divergente que el §4.6 del diseño describe como "alguien editó
+// el issue a mano".
+//
+// Se reescribe, a diferencia de Descripción/Protegido, porque lo que las
+// protege a aquéllas —el derecho de un humano a editar SU issue— aquí es justo
+// lo contrario: el §3.3 dice que el recorrido no puede ser editable sin pasar
+// por la Puerta 1.
+// ============================================================================
+describe('buildReconcileBody — la sección "## E2E"', () => {
+  const SLICE = { n: 2, name: 'refresh', type: 'backend', entrega: 'flujo de refresco', deps: [1], ac: ['AC-2.1'], protected: 'schema §6' }
+  const SPEC_OPTS = { path: 'spec.md', heading: '9. Slices', url: 'https://github.com/o/r/blob/main/spec.md#9-slices', reason: null }
+  const SIN_E2E = buildIssueBody(SLICE, SPEC_OPTS)
+  const CON_E2E = buildIssueBody({ ...SLICE, e2e: 'curl -i :9115/metrics responde 200' }, SPEC_OPTS)
+  const WANTED_BASE = { deps: [1], ac: ['AC-2.1'], specLink: '> Slice `#2` del epic. Spec: [spec.md § 9. Slices](https://github.com/o/r/blob/main/spec.md#9-slices)' }
+  const RECORRIDO = '- curl -i :9115/metrics responde 200'
+
+  it('el issue no tiene la sección y el spec ahora pide recorridos → se inserta entera, justo antes de "## Out of scope / Protected"', () => {
+    const { body, unresolvedE2e } = buildReconcileBody(SIN_E2E, { ...WANTED_BASE, e2eContent: RECORRIDO })
+    expect(unresolvedE2e).toBeNull()
+    expect(extractSectionContent(body, '## E2E')).toBe(RECORRIDO)
+    expect(body.indexOf('## E2E')).toBeLessThan(body.indexOf('## Out of scope / Protected'))
+    expect(body.indexOf('## Gates')).toBeLessThan(body.indexOf('## E2E'))
+    // Nada más se ha tocado: el marcador del dispatcher sigue ahí y los AC no
+    // se han movido.
+    expect(body).toContain('<!-- ct-order:2 -->')
+    expect(extractAc(body)).toEqual(['AC-2.1'])
+  })
+
+  it('el issue tiene otra cosa en la sección → se reemplaza SOLO su contenido', () => {
+    const editado = CON_E2E.replace(RECORRIDO, '- un recorrido que alguien escribió a mano')
+    const { body } = buildReconcileBody(editado, { ...WANTED_BASE, e2eContent: RECORRIDO })
+    expect(extractSectionContent(body, '## E2E')).toBe(RECORRIDO)
+    expect(body).not.toContain('un recorrido que alguien escribió a mano')
+    expect(body).toContain('<!-- ct-order:2 -->')
+  })
+
+  it('el spec ya no declara recorridos (la celda pasó a "no") → la sección se retira ENTERA', () => {
+    const { body } = buildReconcileBody(CON_E2E, WANTED_BASE) // sin e2eContent
+    expect(body).not.toContain('## E2E')
+    expect(body).toContain('## Out of scope / Protected')
+    expect(body).toContain('<!-- ct-order:2 -->')
+    expect(body).not.toMatch(/\n\n\n/) // la costura no deja dos líneas en blanco
+  })
+
+  it('los dos lados de acuerdo (ni el issue ni el spec traen recorridos) → body: null', () => {
+    expect(buildReconcileBody(SIN_E2E, WANTED_BASE).body).toBeNull()
+  })
+
+  it('hay que insertarla pero el ancla "## Out of scope / Protected" no se localiza → se rinde en voz alta, no inventa una posición', () => {
+    const sinAncla = SIN_E2E.replace('## Out of scope / Protected', '## Fuera de alcance (renombrada a mano)')
+    const { body, unresolvedE2e } = buildReconcileBody(sinAncla, { ...WANTED_BASE, e2eContent: RECORRIDO })
+    expect(unresolvedE2e).toBe('sin-ancla')
+    expect(body).toBeNull() // no había nada más que aplicar, y esto no se aplicó
+  })
+
+  it('la sección aparece dos veces → no se escribe en ninguna (una puede ser texto pegado en "## Contexto heredado")', () => {
+    const duplicada = CON_E2E.replace('## Out of scope / Protected', '## E2E\n- copia pegada por error\n\n## Out of scope / Protected')
+    const { unresolvedE2e } = buildReconcileBody(duplicada, { ...WANTED_BASE, e2eContent: '- otro recorrido' })
+    expect(unresolvedE2e).toBe('duplicada')
+  })
+})
+
 // Slice 10 — la señal en la reconciliación: comparación sí/no como `nota:`,
 // el precedente EXACTO de Descripción/Protegido. La autoridad en runtime es
 // EL ISSUE (como los gates: la señal que obedece el juez de slice es la que
@@ -789,7 +935,10 @@ describe('la señal en la reconciliación (Slice 10)', () => {
     expect(lines).toContain('nota: slice #2 (issue #42): la sección "## Señal de observabilidad" difiere del spec (no cuenta para el exit code; --reconcile no la reescribe — la señal que obedece el juez de slice es la que el issue tenía al despachar, igual que los gates)')
     expect(lines.every((l) => l.startsWith('nota:'))).toBe(true)
     const gaps = reconcileGaps(d, { body: null, unresolvedAc: false, unresolvedDeps: false })
-    expect(gaps).toEqual({ ac: false, deps: false, duplicates: false })
+    // `e2e: false` entró en la forma de reconcileGaps con la columna E2E (que
+    // SÍ se reescribe y SÍ cuenta para el exit code): aquí sólo diverge la
+    // señal, así que ninguna de las cuatro casillas se enciende.
+    expect(gaps).toEqual({ ac: false, deps: false, e2e: false, duplicates: false })
     expect(hasReconcileGap(gaps)).toBe(false)
   })
 
