@@ -3,6 +3,7 @@ import { spawnSync, execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { envDelGo } from './fixtures/go-gate.js'
 
 const SCRIPT = new URL('../scripts/dispatch-check.mjs', import.meta.url).pathname
 const FAKE_GH = new URL('./fixtures/fake-gh-bin', import.meta.url).pathname
@@ -108,7 +109,10 @@ function repo(opts = {}) {
   return dir
 }
 
-function release(dir, { body, viewFail = false, labels } = {}) {
+// `go` (F38): el gate `plan` de la puerta 9 va CERRADO por defecto en este
+// fichero, porque lo que aquí se prueba es la correspondencia del e2e y no el
+// go. Los tests del go están en f38-el-go-del-gate-plan.test.js.
+function release(dir, { body, viewFail = false, labels, go = true } = {}) {
   const log = join(dir, 'gh-argv.log')
   const r = spawnSync(process.execPath, [SCRIPT, '9', '--repo', 'o/r', '--release'], {
     cwd: dir, encoding: 'utf8',
@@ -119,6 +123,7 @@ function release(dir, { body, viewFail = false, labels } = {}) {
       ...(body !== undefined ? { FAKE_GH_VIEW_BODY: body } : {}),
       ...(viewFail ? { FAKE_GH_VIEW_FAIL: '1' } : {}),
       FAKE_GH_VIEW_LABELS: JSON.stringify(labels || ['status:in-progress', 'gate:plan', 'gate:e2e']),
+      ...(go ? envDelGo({ repo: 'o/r', issue: 9 }) : {}),
     },
   })
   return { ...r, argv: existsSync(log) ? readFileSync(log, 'utf8') : '' }
