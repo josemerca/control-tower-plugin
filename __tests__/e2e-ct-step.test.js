@@ -11,7 +11,13 @@ const A = 'el server escucha en 9115 por defecto y en el puerto indicado si se p
 
 // Un worktree de slice con UNA tarea ya comiteada y el run parado en `e2e`.
 // La tarea comiteada importa: ct-step cruza los commits reales con el estado.
-function worktreeEnE2e({ tasksTotal = 1, e2eRuns = [A] } = {}) {
+//
+// `comiteaLaTarea: false` deja el trabajo STAGEADO en vez de comiteado: cero
+// commits desde `baseSha`, que es la cuenta que el paso `commit` exige
+// (`task - 1`, con `task: 1`). Es la única forma de ejercitar el paso `commit`
+// de verdad con este fixture — ver el test "sin recorridos…", que durante toda
+// la rama murió en PRECONDITION sin que nadie se enterara.
+function worktreeEnE2e({ tasksTotal = 1, e2eRuns = [A], comiteaLaTarea = true } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ct-step-e2e-'))
   const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' })
   git('init', '-q', '-b', 'main')
@@ -23,7 +29,8 @@ function worktreeEnE2e({ tasksTotal = 1, e2eRuns = [A] } = {}) {
   writeFileSync(join(dir, 'docs', 'superpowers', 'plans', 'plan.md'), planDeUnaTarea())
   mkdirSync(join(dir, '.agent'), { recursive: true })
   writeFileSync(join(dir, '.agent', 'SLICE.md'), '---\nissue: 4\n---\n')
-  git('add', '-A'); git('commit', '-qm', 'tarea 1')
+  git('add', '-A')
+  if (comiteaLaTarea) git('commit', '-qm', 'tarea 1')
   writeFileSync(join(dir, '.agent', 'run-4.json'), JSON.stringify({
     plan: 'docs/superpowers/plans/plan.md', issue: 4, baseSha,
     task: tasksTotal, tasksTotal, e2eRuns, step: 'e2e',
@@ -240,14 +247,35 @@ describe('ct-step e2e', () => {
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 
+  // Este test PASABA por el motivo equivocado, y la review final de rama lo
+  // reprodujo: con la tarea ya comiteada, `ct-step commit` moría en
+  // PRECONDITION (exit 8, "el estado y git no cuentan lo mismo") porque fuera
+  // del paso `e2e` la invariante exige `commits === task - 1` y aquí había uno
+  // de más. `run-4.json` no se reescribía nunca, así que `after.step` era el
+  // 'commit' que el propio test acababa de escribir y la aserción era
+  // trivialmente cierta sobre un fichero que nadie había tocado. El exit code
+  // no se comprobaba, y la segunda mitad del título ("y `next` no lo pide") no
+  // se ejercitaba en absoluto.
+  //
+  // Con el trabajo stageado y sin comitear, la cuenta cuadra (`task: 1`, cero
+  // commits desde base), el commit ocurre de verdad, y la transición que se
+  // prueba es la que interesa: última tarea comiteada + `e2eRuns` vacío cierra
+  // en DELIVERED sin pasar por `e2e`.
   it('sin recorridos, el run no entra nunca en e2e (y `next` no lo pide)', () => {
-    const dir = worktreeEnE2e({ e2eRuns: [] })
+    const dir = worktreeEnE2e({ e2eRuns: [], comiteaLaTarea: false })
     try {
       const run = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))
       writeFileSync(join(dir, '.agent', 'run-4.json'), JSON.stringify({ ...run, step: 'commit' }))
       const r = step(dir, ['commit'])
+      expect(r.status).toBe(0)
       const after = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))
       expect(after.step).not.toBe('e2e')
+      expect(after.closed).toBe('delivered')
+      // Y `next` tampoco lo pide: un run entregado no tiene paso siguiente.
+      const n = step(dir, ['next'])
+      expect(n.status).toBe(0)
+      expect(n.stdout).toMatch(/run delivered/)
+      expect(n.stdout).not.toMatch(/e2e/)
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 

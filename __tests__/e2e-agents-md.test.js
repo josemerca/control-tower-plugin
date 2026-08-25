@@ -31,7 +31,7 @@ function initIn(existingAgents) {
 }
 
 describe('la sección de travesía en AGENTS.md', () => {
-  it('se siembra con sus cinco campos y el plazo por defecto', () => {
+  it('se siembra con sus seis campos y el plazo por defecto', () => {
     const { agents } = initIn(null)
     expect(agents).toContain('## Cómo se atraviesa este repo (e2e)')
     for (const f of ['Levantar:', 'Listo cuando:', 'Plazo:', 'Tirar:', 'Herramientas:', 'Fuera de límites:']) {
