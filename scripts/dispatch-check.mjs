@@ -29,6 +29,7 @@ import { parseStrictInt } from './argnum.js'
 import { NEVER_IN_A_SLICE_PR, SLICE_REL_PATH } from './state-paths.js'
 import { checkPlans } from './plan-contract.js'
 import { deliveredRun } from './run-machine.js'
+import { extractE2eRuns, E2E_HEADING } from './gh-issue-map.js'
 
 // ============================================================================
 // Finding 4 (auditoría de interrupción/staleness): dos cambios en este
@@ -544,6 +545,62 @@ if (release) {
   const runGate = deliveredRun(runRaw, issue)
   if (!runGate.ok) {
     dieErr(`no se libera #${issue}: ${runGate.why} El issue sigue en status:in-progress: no se ha movido nada.`, 7)
+  }
+  // F-e2e — LA CORRESPONDENCIA. La máquina de ct-step ya impide entregar un run
+  // sin pasar el e2e (run-machine.js), así que esto NO vuelve a verificar la
+  // travesía: verifica que el run entregado hable de los MISMOS recorridos que
+  // el issue declara.
+  //
+  // Existe porque el run lee sus recorridos de `.agent/SLICE.md`, que es
+  // agent-reachable — este mismo fichero ya desconfía de su `base:` por eso. Un
+  // agente que vaciara ese campo tendría un run "entregado" sin haber
+  // atravesado nada, y la puerta del 7 lo dejaría pasar. Aquí se cruza contra el
+  // ISSUE, que es la fuente que el agente no controla.
+  //
+  // Y se lee la SECCIÓN `## E2E` (E2E_HEADING/extractE2eRuns, TAREA 9,
+  // gh-issue-map.js — la MISMA función que usa /ct-next para sembrar el
+  // worktree: un solo parseo, para que un exit 8 nunca sea por una discrepancia
+  // de lectura entre los dos lados), no la label `gate:e2e`: las dos pueden
+  // discrepar si alguien edita el issue a mano, y manda la sección porque es la
+  // única que dice QUÉ atravesar. Label sin sección no describe trabajo (se
+  // libera, con aviso); sección sin label sí (se exige igual).
+  const bodyRaw = (() => {
+    try {
+      return gh(['issue', 'view', String(issue), '--repo', repo, '--json', 'body', '-q', '.body'])
+    } catch {
+      return null
+    }
+  })()
+  if (bodyRaw === null) {
+    // "no se ha podido comprobar" — NUNCA "no hay recorridos". Este repo no
+    // afirma limpio lo que no pudo mirar (misma doctrina que los exit 5/6 de
+    // arriba): un issue con recorridos reales cuyo body no se pudo leer no es
+    // indistinguible de uno sin ninguno.
+    dieErr(`no se libera #${issue}: no se ha podido leer el cuerpo del issue (\`gh issue view --json body\` falló) — no se afirma que no declare recorridos, solo que no se ha podido comprobar. Reintenta cuando \`gh\` responda; el issue sigue en status:in-progress: no se ha movido nada.`, 8)
+  }
+  const recorridos = extractE2eRuns(bodyRaw)
+  if (recorridos.length) {
+    // `deliveredRun` devuelve {ok, why}, no el run parseado — se relee aquí,
+    // de forma que no pueda LANZAR ante un fichero corrupto: un JSON inválido
+    // se trata como "cero recorridos declarados" (fail hacia el exit 8, no
+    // hacia un crash: un gate que revienta no es un gate).
+    let run = null
+    try { run = JSON.parse(runRaw) } catch { run = null }
+    const declarados = new Set(Array.isArray(run?.e2eRuns) ? run.e2eRuns : [])
+    const faltan = recorridos.filter((r) => !declarados.has(r))
+    if (faltan.length) {
+      dieErr(`no se libera #${issue}: el issue declara en "${E2E_HEADING}" ${recorridos.length} recorrido(s), y el run entregado NO cubre ${faltan.length} de ellos: ${faltan.map((r) => `"${r}"`).join(', ')}. El run lee sus recorridos de .agent/SLICE.md, que es agent-reachable — esta puerta cruza contra el ISSUE, que el agente no controla. Completa esos recorridos con ct-step (paso "e2e") y reintenta. El issue sigue en status:in-progress: no se ha movido nada.`, 8)
+    }
+  } else {
+    // Sección ausente o vacía: la label es la única señal que queda para
+    // decidir si avisar. Si no se puede leer (gh caído), no se avisa —
+    // el aviso es cortesía, no gate, así que no vale la pena bloquear NI
+    // fallar ruidosamente por él.
+    let labels = []
+    try { labels = labelsOf(issue) } catch { labels = [] }
+    if (labels.includes('gate:e2e')) {
+      errLine(`aviso: #${issue} lleva la label gate:e2e pero su cuerpo no declara ninguna sección "${E2E_HEADING}" — no hay recorridos que verificar, así que se libera igual, pero conviene revisar si la sección se perdió al editar el issue a mano.`)
+    }
   }
   if (!dryRun && !fx) {
     const result = setStatus(issue, 'status:in-progress', 'status:in-review')

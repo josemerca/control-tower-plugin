@@ -741,8 +741,13 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     git('add', '-A')
     git('commit', '-qm', 'work')
     seedRun(wt, 1)
+    // Task 10 (F-e2e): --release lee el body del issue por `gh` incluso tras
+    // pasar las puertas de arriba — sin el stub en PATH, este `gh` real
+    // fallaría contra un repo 'o/r' que no existe. Sin FAKE_GH_VIEW_BODY, el
+    // stub responde vacío: sin sección "## E2E" que cruzar, camino feliz.
     const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
       cwd: wt, encoding: 'utf8',
+      env: { ...process.env, PATH: `${join(fixturesDir, 'fake-gh-bin')}:${process.env.PATH}` },
     })
     expect(r.status).toBe(0)
     rmSync(dir, { recursive: true, force: true })
@@ -817,8 +822,11 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     git('add', '-A')
     git('commit', '-qm', 'work')
     seedRun(wt, 1)
+    // Task 10 (F-e2e): idem al test de arriba — el stub hace falta para la
+    // lectura del body, no solo para el escenario de mutación.
     const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
       cwd: wt, encoding: 'utf8',
+      env: { ...process.env, PATH: `${join(fixturesDir, 'fake-gh-bin')}:${process.env.PATH}` },
     })
     expect(r.status).toBe(0)
     rmSync(dir, { recursive: true, force: true })

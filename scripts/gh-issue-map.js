@@ -568,7 +568,11 @@ export const E2E_HEADING = '## E2E'
 // ausencia es indistinguible de "cero recorridos", y las dos dan `[]`, nunca
 // `undefined`: un slice sin e2e tiene que decir "sin e2e" con un dato, no
 // con un campo que falta.
-function extractE2eRuns(body) {
+// Exportada (Task 10): `dispatch-check.mjs#--release` la reutiliza para la
+// puerta F-e2e (exit 8) — la misma función que usa `/ct-next` para sembrar
+// el worktree, así que las dos lecturas de la sección "## E2E" nunca pueden
+// discrepar entre sí por un parseo distinto.
+export function extractE2eRuns(body) {
   const section = extractSectionContent(body, E2E_HEADING)
   if (section == null) return []
   return section.split('\n')
