@@ -430,6 +430,41 @@ export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
       status: 'not_started',
       branch,
       base,
+      // ------------------------------------------------------------------
+      // `base_sha` (slice 1 de los apuntes de Capde) — EL SHA DEL CORTE, EN
+      // UN CAMPO QUE NADIE REESCRIBE.
+      //
+      // Es el SHA exacto al que apuntaba `origin/<base>` cuando ct-next cortó
+      // este worktree (`git rev-parse --verify --quiet origin/<base>^{commit}`,
+      // ct-next.mjs:1676, justo después del fetch que demuestra que la ref
+      // existe). Recibe el MISMO valor que `last_commit` aquí abajo, y aun así
+      // tiene que ser un campo aparte: `last_commit` es del guard de cierre de
+      // turno y el agente lo SOBREESCRIBE en cada commit de trabajo — por
+      // diseño, ver state.js ("`last_commit` se entiende como el último commit
+      // DE TRABAJO"). O sea que el único rastro del corte que hoy se siembra
+      // desaparece del fichero en el primer commit del slice.
+      //
+      // `base_sha` no lo reescribe NADIE después del despacho: ningún verbo de
+      // ct-step, ningún hook, y el mensaje del guard de cierre que le pide al
+      // agente refrescar su estado enumera los campos a tocar (you_are_here,
+      // next_action, tasks[], last_commit) sin nombrarlo (state.js:617).
+      //
+      // Y `base` no sirve para esto: `base` es un NOMBRE DE RAMA (`develop`,
+      // nunca `origin/develop` ni un sha) porque de ahí sale el `--base` de
+      // `gh pr create`. Resolver ese nombre más tarde, dentro del worktree,
+      // apunta a la copia LOCAL de la rama — que es exactamente lo que midió
+      // el diff de `dispatch-check --release` en la corrida del slice 10, con
+      // el `main` local 7 commits por detrás de su remoto.
+      //
+      // LA AUSENCIA SE OMITE, no se declara vacía: si ct-next no pudo resolver
+      // `origin/<base>` a un sha (ct-next.mjs:1679) el campo no aparece en el
+      // YAML y quien lo lea cae a su propio fallback. Es una asimetría
+      // deliberada con `last_commit`, que sí se siembra `""`: a `last_commit`
+      // lo lee `describeStopRelation`, que ya distingue el vacío ("unset",
+      // callar) de un valor; a `base_sha` lo leerá un regex sobre el TEXTO del
+      // fichero, y un campo presente con el valor vacío es un campo que afirma
+      // tener un valor. El campo que no está no engaña a nadie.
+      ...(baseSha ? { base_sha: baseSha } : {}),
       // F22: el sha de la base, NO el nombre de la rama. Con el campo vacío
       // —lo que se sembraba hasta ahora— `describeStopRelation` devuelve
       // `unset` y `classifyStopState` sale en silencio: el hook `Stop` que

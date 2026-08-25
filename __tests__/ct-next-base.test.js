@@ -303,6 +303,26 @@ describe('ct-next — la base sale del remoto, no de la copia local (Paso 1)', (
     expect(sliceMd).not.toMatch(/origin\/develop/)
   })
 
+  it('el SLICE.md sembrado lleva `base_sha:` con el sha de `origin/<base>` — el corte real, en un campo que nadie reescribe', () => {
+    // El stub de git devuelve `deadbeef…` para cualquier `rev-parse --verify
+    // --quiet origin/<algo>^{commit}`, que es el mismo valor que ya recibe
+    // `last_commit`. Lo que fija este test no es el valor: es el CABLEADO —
+    // que el sha que ct-next resuelve del REMOTO antes de cortar el worktree
+    // llega hasta el campo del fichero que el agente no va a pisar.
+    const repoRoot = makeRepoRoot()
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GH_COUNTER_FILE: join(repoRoot, 'gh-list-count'),
+      FAKE_GH_DEFAULT_BRANCH: 'develop',
+    })
+    expect(r.code).toBe(0)
+    const sliceMd = readFileSync(join(repoRoot, '.worktrees', '42', '.agent', 'SLICE.md'), 'utf8')
+    expect(sliceMd).toMatch(/^base_sha: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef$/m)
+    // Y el otro consumidor del corte sigue viendo un nombre de rama.
+    expect(sliceMd).toMatch(/^base: develop$/m)
+  })
+
   it('la base ausente del checkout local ya NO es un error: el worktree sale del remoto igualmente', () => {
     // Esta es la inversion deliberada del comportamiento anterior. Antes esto
     // era exit 1 con "existe en origin pero no en tu checkout local"; ahora el
