@@ -281,6 +281,11 @@ obediencia es estructural, no un aviso — `ct-step` rechaza con **9** cualquier
 verbo que no sea el paso que toca, así que el e2e no se puede saltar ni
 adelantar.
 
+> **Nota editorial (2026-08-25).** Tras el merge con la rama `Señal`, la cola
+> real interpone `global` y `slice-judge` entre el commit de la última tarea y
+> la bifurcación de arriba; la cola vigente vive en el README y en
+> `scripts/run-machine.js`.
+
 ### 3.5 El verbo, y quién redacta la evidencia
 
 ```

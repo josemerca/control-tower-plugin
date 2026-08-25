@@ -6,6 +6,10 @@
 
 **Architecture:** Una columna `E2E` en la tabla §9 declara el recorrido por fila (o el token `no`); `slices.js` la parsea como una celda cruda más, `gates.js` deriva de ella el gate `e2e`, y `groom.js` la proyecta a una sección `## E2E` del issue. La travesía es **un paso terminal de la máquina de estados de `ct-step`** (`STEPS.E2E`, tras el commit de la última tarea), así que sin pasarla el run no llega a `DELIVERED` y la puerta que `--release` ya tiene lo cubre. El entorno lo declara el repo destino en `AGENTS.md`; el recorrido viaja congelado desde el spec.
 
+> **Nota editorial (2026-08-25).** Tras el merge con la rama `Señal`, la cola
+> real interpone `global` y `slice-judge` entre el commit de la última tarea y
+> el paso `e2e`; la cola vigente vive en el README y en `scripts/run-machine.js`.
+
 **Tech Stack:** Node ≥ 24 (ESM), vitest, `gh` CLI, bash (`ct-init.sh`).
 
 **Spec:** `docs/superpowers/specs/2026-08-24-e2e-al-cierre-del-slice-design.md`
