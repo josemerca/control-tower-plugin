@@ -164,10 +164,14 @@ están en
 
 **El verbo `e2e` es TERMINAL, y condicional.** Se pregunta con `ct-step next`
 igual que cualquier otro paso, pero solo aparece en la secuencia de un slice
-cuya fila de la tabla declaró recorridos en la columna `E2E` — un slice sin
-ellos entrega tras el commit de su última tarea, sin pasar nunca por `e2e`. El
-que sí los declara comita todas sus tareas y **entonces**, y solo entonces,
-`ct-step next` pide atravesar los recorridos que el issue lista en `## E2E`;
+cuya fila de la tabla declaró recorridos en la columna `E2E`. Tras el commit de
+la última tarea la cola es la misma para todos los slices — `ct-step global`
+(la `## 8. Global verification`) y `ct-step slice-verdict` (el juicio del slice
+entero) —, y es ahí donde se bifurca: un slice **sin** recorridos entrega en ese
+veredicto, sin pasar nunca por `e2e`. El que sí los declara pasa por esos dos
+pasos y **entonces**, y solo entonces, `ct-step next` pide atravesar los
+recorridos que el issue lista en `## E2E` — el `e2e` es el ÚLTIMO paso de la
+cola, nunca uno intercalado entre las tareas;
 el informe (comando literal + salida real de cada uno) se valida contra
 `ct-step e2e informe.json`, se escribe en `docs/superpowers/e2e/<issue>.md`, se
 stagea y se comitea — ese commit es lo que cierra el run. Si algún recorrido

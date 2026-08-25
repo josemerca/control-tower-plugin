@@ -459,6 +459,7 @@ bb8e3298fe9b587b929ab58fbf96f76909463a1cea292fa110878d4ba293f38e  v16, 540 líne
 9cdc355576fd1e7bbf69771a8c597c236f33ba31e37c32d998d3282a76e20f77  v19, 562 líneas — Slice 10 juez-lo-que-queda (la columna Señal: la señal de observabilidad por slice, con exención razonada N/A — <razón>)
 388f8a82528e7402e45a3384094c7ab43b18d6fdfb5652affa4e9b6b6c2b2dc4  v19, 567 líneas — tarea 5 de "e2e al cierre del slice" (la columna E2E y el gate `e2e` entran en el contrato; v19 nunca publicado, la rama se mergeó como v20)
 b0eb79ab8fd89f83ce7159e9c2a9c32812ee35b76ad6f4c78c2829c9d9891c0b  v20, 585 líneas — merge de las dos ramas anteriores (las columnas Señal y E2E conviven en el mismo bloque)
+530e94eca9e7a0ab676f64a82a97f895ca5c9549478dc9f222f5fcffe8586878  v20, 586 líneas — review del merge (el bullet E2E nombra los DOS tokens de "no aplica": `no` y `n/a`, los que acepta E2E_NONE_TOKENS). Mismo v20: es una aclaración del texto, no un cambio de contrato
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -610,7 +611,8 @@ copiable tal cual:
   columna `E2E` significa lo mismo de siempre —"no he declarado nada aquí"—
   pero aquí eso **aborta**: con la columna presente, "nadie lo pensó" no es
   una opción válida por fila. Para decir de verdad "este slice no tiene nada
-  que atravesar", escribe el token **`no`**. Declarar un recorrido real Y
+  que atravesar", escribe el token **`no`** (o **`n/a`**, que vale igual: los
+  dos son el mismo "se pensó y no hay"). Declarar un recorrido real Y
   `no` en la misma celda también aborta: no se elige un ganador en silencio.
   Si ningún slice del epic necesita e2e, la salida es no añadir la columna en
   absoluto — así ninguna fila tiene que decidir nada.
