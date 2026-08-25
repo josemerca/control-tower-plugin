@@ -217,11 +217,20 @@ const DUPLICATE_CHECKS = [
   // `ownedLabelPrefixes`, ver ct-groom.mjs) es lo que hace que una divergencia
   // de gate REAL no pase desapercibida.
   { headings: GATES_HEADING, label: 'Gates', machine: false },
-  // La sección "## E2E" es igual de "no machine" que Gates y por el mismo
-  // motivo: ningún código del dispatcher la parsea — la lee el AGENTE
-  // despachado como instrucción en lenguaje natural (ver gates.js#GATES.e2e),
-  // y el canal que sí obedece la máquina es la label "gate:e2e" (ya cubierta
-  // por `labels`, arriba). Un duplicado aquí es cosmético.
+  // La sección "## E2E" NO es "no machine" por el motivo de Gates —esa frase
+  // era falsa y la review final de rama la corrige—: sí la parsea código
+  // (gh-issue-map.js#extractE2eRuns, que usan /ct-next para sembrar el worktree
+  // y `dispatch-check --release` para su puerta del exit 8), y como todo lector
+  // de secciones, lee la PRIMERA aparición.
+  //
+  // Aun así el DUPLICADO se queda fuera de `machine`, y ahora por una razón que
+  // se sostiene sola: desde esta ronda la divergencia de contenido ya cuenta
+  // (hasDrift), y --reconcile se niega a escribir sobre una sección duplicada
+  // marcándolo como gap (`unresolvedE2e: 'duplicada'`) — o sea que un duplicado
+  // que cambie lo que el slice atraviesa YA mueve el exit code por esas dos
+  // vías. Lo que queda —dos copias cuya PRIMERA coincide con el spec— no cambia
+  // nada para nadie: /ct-next siembra los recorridos correctos. Se avisa, que
+  // es lo que merece.
   { headings: E2E_HEADING, label: 'E2E', machine: false },
   { headings: '## Out of scope / Protected', label: 'Out of scope / Protected', machine: false },
   // Las dos secciones de contexto duplicadas son cosméticas: ninguna máquina
@@ -620,10 +629,11 @@ export function buildReconcileEditArgs(diff) {
 
 // buildReconcileBody: --reconcile SÍ reescribe el enlace al spec, AC/
 // Dependencias, la sección "## E2E" y el contexto del epic — no Descripción,
-// Protegido, ni el contexto heredado (ver diffIssue). "De quién es el texto" NO es lo que
-// distingue a estas dos listas: el spec posee las CUATRO primeras por
-// igual — el enlace deriva de la ruta del propio spec (F10); AC/Dependencias
-// de la tabla §9; el contexto del epic, de la sección homónima que trae el
+// Protegido, ni el contexto heredado (ver diffIssue). "De quién es el texto" NO
+// es lo que distingue a estas dos listas: el spec posee las CINCO primeras por
+// igual — el enlace deriva de la ruta del propio spec (F10); AC/Dependencias y
+// los recorridos de "## E2E", de la tabla §9; el contexto del epic, de la
+// sección homónima que trae el
 // propio spec (groom.js#readEpicContext); y Descripción/Protegido de las
 // columnas Entrega/Protegido de esa misma tabla (renderDescripcion/
 // renderProtectedLine, groom.js — ver también el comentario de diffIssue más
