@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
@@ -623,5 +623,107 @@ describe('dispatch-check — enumeración de issues abiertos sin --limit fijo (r
     expect(log).toMatch(/--paginate/)
     expect(log).not.toMatch(/--limit/)
     expect(log).toMatch(/state=open/)
+  })
+})
+
+// ============================================================================
+// Slice 2 (apuntes de Capde) — la base del diff de --release es el corte real.
+//
+// La geometría de la corrida del slice 10: el worktree se cortó de
+// origin/main en el commit S; la copia LOCAL de main se quedó 7 commits
+// atrás; y el plan citaba un fichero que existe en S pero no en esa main
+// rancia — el gate del plan (F-jjponz-3 lee las citas en la BASE) lo acusó de
+// "cita inventada". Aquí se reproduce con 1 commit de retraso (misma clase de
+// fallo): `citado.txt` nace en el commit del corte, el plan lo cita, y `main`
+// local se rebobina con `git branch -f` (legal: el checkout está en feat/9).
+function mkStaleMainRepo({ issue = 9, sliceMd } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'ct-release-stale-'))
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+  git('init', '-q', '-b', 'main')
+  git('config', 'user.email', 'test@test')
+  git('config', 'user.name', 'test')
+  writeFileSync(join(dir, 'f.txt'), 'base\n')
+  git('add', '-A')
+  git('commit', '-qm', 'main vieja')
+  const oldMain = git('rev-parse', 'HEAD').trim()
+  writeFileSync(join(dir, 'citado.txt'), 'texto del corte\n')
+  git('add', '-A')
+  git('commit', '-qm', 'main avanza (los 7 commits de la corrida real)')
+  const cutSha = git('rev-parse', 'HEAD').trim()
+  git('checkout', '-qb', `feat/${issue}`) // el corte del worktree: origin/<base> en S
+  const plan = minimalPlanFor(issue)
+    .replace('Final text (work.txt):', 'Current state (citado.txt):')
+    .replace(`${FENCE}\ntrabajo\n${FENCE}`, `${FENCE}\ntexto del corte\n${FENCE}`)
+  mkdirSync(join(dir, 'docs', 'superpowers', 'plans'), { recursive: true })
+  writeFileSync(join(dir, 'docs', 'superpowers', 'plans', `2026-08-12-issue-${issue}-work.md`), plan)
+  writeFileSync(join(dir, 'work.txt'), 'trabajo\n')
+  git('add', '-A')
+  git('commit', '-qm', 'work')
+  git('branch', '-f', 'main', oldMain) // la main LOCAL se queda ATRÁS del corte
+  // Semilla y run sin commitear, como los deja el despacho real.
+  mkdirSync(join(dir, '.agent'), { recursive: true })
+  writeFileSync(join(dir, '.agent', 'SLICE.md'), sliceMd(cutSha))
+  writeFileSync(join(dir, '.agent', `run-${issue}.json`), JSON.stringify({
+    plan: `docs/superpowers/plans/2026-08-12-issue-${issue}-work.md`,
+    issue, task: 1, tasksTotal: 1, step: 'commit', closed: 'delivered',
+  }))
+  return { dir, cutSha }
+}
+
+const releaseStale = (dir) => spawnSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8' })
+
+describe('dispatch-check --release — la base del diff es el corte real (slice 2, apuntes de Capde)', () => {
+  it('con base_sha: presente el diff sale contra ese commit aunque main local esté por detrás', () => {
+    const { dir } = mkStaleMainRepo({ sliceMd: (cut) => `---\ntask: slice\nbase: main\nbase_sha: ${cut}\n---\n# s\n` })
+    const r = releaseStale(dir)
+    // Sin el fix esto salía 6: `base:` resolvía la main LOCAL (rancia), la
+    // cita de citado.txt no existía ahí, y el plan quedaba acusado de citar
+    // un fichero inventado — el caso exacto de la corrida del slice 10.
+    expect(r.status).toBe(0)
+    expect(r.stdout).toMatch(/released #9.*in-review/)
+    expect(r.stderr).not.toContain('no existe en la base')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('semilla sin base_sha: se comporta como hoy — cae a `base:` y mide la copia local, con su defecto incluido', () => {
+    const { dir } = mkStaleMainRepo({ sliceMd: () => `---\ntask: slice\nbase: main\n---\n# s\n` })
+    const r = releaseStale(dir)
+    // El comportamiento de HOY para semillas anteriores al slice 1,
+    // conservado a propósito (for_developers: la cadena queda intacta). Si
+    // esto empieza a salir 0, alguien tocó el fallback — justo lo que este
+    // slice promete NO hacer.
+    expect(r.status).toBe(6)
+    expect(r.stderr).toContain('citado.txt')
+    expect(r.stderr).toContain('no existe en la base')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('base_sha: presente pero no resoluble (repo podado / semilla corrupta) cae a `base:`, no se niega', () => {
+    const { dir } = mkStaleMainRepo({ sliceMd: () => `---\ntask: slice\nbase: main\nbase_sha: ${'a'.repeat(40)}\n---\n# s\n` })
+    const r = releaseStale(dir)
+    // Distingue fallback de negación: si sliceBaseRef devolviera el sha SIN
+    // verificarlo, el rev-parse de los consumidores fallaría y esto saldría
+    // 5 ("no se pudo resolver"). El fallback correcto sale 6 por la MISMA
+    // razón que el test de arriba: mide la main local y acusa la cita.
+    expect(r.status).toBe(6)
+    expect(r.stderr).toContain('citado.txt')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('un `base:` con pinta de SHA (40 hex) avisa por stderr — una sola vez y sin abortar — de que rompe gh pr create y de que el diff ya usa base_sha:', () => {
+    // La barandilla contra el arreglo espontáneo de la corrida real: el
+    // agente metió un SHA en `base:` para "arreglar" el diff. El diff
+    // funciona igual (un sha resuelve — por eso NO se aborta), pero
+    // `gh pr create --base` exige un nombre de rama y fallará al cerrar.
+    const { dir } = mkStaleMainRepo({ sliceMd: (cut) => `---\ntask: slice\nbase: ${cut}\nbase_sha: ${cut}\n---\n# s\n` })
+    const r = releaseStale(dir)
+    expect(r.status).toBe(0) // avisa, no aborta
+    expect(r.stdout).toMatch(/released #9.*in-review/)
+    expect(r.stderr).toContain('gh pr create')
+    expect(r.stderr).toContain('base_sha:')
+    // --release consulta la base DOS veces (limpieza F22 + plan F-jjponz-1);
+    // el aviso sale UNA.
+    expect(r.stderr.match(/AVISO:/g)).toHaveLength(1)
+    rmSync(dir, { recursive: true, force: true })
   })
 })

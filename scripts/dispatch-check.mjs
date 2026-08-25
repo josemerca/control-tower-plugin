@@ -364,16 +364,72 @@ function setStatus(issue, from, to) {
 // se ve. Esto mueve el caso normal de la retina del humano al loop; no lo
 // vuelve hermético.
 // ============================================================================
+// Slice 2 (apuntes de Capde) — LA BASE DEL DIFF ES EL CORTE REAL, NO LA COPIA
+// LOCAL. Una versión anterior de este comentario afirmaba que `base:` "es la
+// referencia real desde la que se cortó este worktree". Es falso desde
+// c3af34c, y esa mentira ya costó una corrida: `base:` es el NOMBRE DE RAMA
+// del PR (`main`, `develop` — de ahí sale el `--base` de `gh pr create` al
+// cerrar el slice), y el worktree se corta de `origin/<base>`. Resolver ese
+// nombre aquí dentro apunta a la copia LOCAL de la rama, que puede llevar
+// días sin fetch: en la corrida del slice 10 estaba 7 commits por detrás de
+// origin/main y el gate del plan acusó de "cita inventada" un fichero que
+// llevaba todo ese tiempo en el remoto.
+//
+// El corte real viaja en `base_sha:` (kickoff.js lo siembra desde el slice 1:
+// el sha de `origin/<base>` en el momento del corte, en un campo que ningún
+// verbo ni hook reescribe; ausente —nunca vacío— si no resolvió). Por eso se
+// PREFIERE, verificado con `rev-parse --verify --quiet <sha>^{commit}` — el
+// sufijo `^{commit}` no es decorativo: sin él, `--verify` da por bueno
+// CUALQUIER 40-hex bien formado aunque el objeto no exista en el repo
+// (comprobado contra git real). Si el campo no está (semillas anteriores al
+// slice 1) o el sha no resuelve (repo podado, semilla corrupta), se cae a la
+// cadena de siempre, INTACTA: `base:` → origin/HEAD → origin/main → main →
+// master.
+//
+// La verificación del sha vive AQUÍ y no en los dos consumidores a propósito:
+// ellos también hacen rev-parse de lo que esta función devuelve, pero su
+// fallo es `known:false` → --release SE NIEGA (exit 5/6) — lo correcto para
+// una ref que debía resolver. Un `base_sha:` que no resuelve no debe negar
+// nada: debe caer al fallback, y eso solo puede decidirse ANTES de elegir qué
+// devolver. El rev-parse de los consumidores se queda: sigue cubriendo la
+// cadena de fallback y es el que ancla el caso "base === HEAD".
+const RE_40HEX = /^[0-9a-f]{40}$/i
+// --release consulta la base DOS veces (limpieza F22 + plan F-jjponz-1); el
+// aviso de abajo sale UNA por proceso, no una por consulta.
+let avisoBaseEsShaEmitido = false
 function sliceBaseRef() {
-  // El `base` de la semilla es la respuesta correcta: es la referencia real
-  // desde la que se cortó este worktree, `--base` incluido. La cadena de
-  // fallback cubre los worktrees del esquema anterior (sin SLICE.md).
   try {
-    const m = readFileSync(join(process.cwd(), SLICE_REL_PATH), 'utf8').match(/^base:[ \t]*(.+)$/m)
-    if (m) {
-      const v = m[1].trim().replace(/^['"]|['"]$/g, '')
-      if (v) return v
+    const seed = readFileSync(join(process.cwd(), SLICE_REL_PATH), 'utf8')
+    const b = seed.match(/^base:[ \t]*(.+)$/m)
+    const base = b ? b[1].trim().replace(/^['"]|['"]$/g, '') : ''
+    // Barandilla contra el arreglo espontáneo observado en la corrida real:
+    // un agente que "arregla" el diff metiendo un SHA en `base:`. El diff
+    // sale igual (un sha resuelve como cualquier ref), así que NO se aborta —
+    // la avería está en el OTRO consumidor del campo: `gh pr create --base`
+    // exige un nombre de rama y fallará al cerrar el slice. Aviso por stderr
+    // (diagnóstico, no producto — el reparto de F16/H2 de arriba).
+    if (RE_40HEX.test(base) && !avisoBaseEsShaEmitido) {
+      avisoBaseEsShaEmitido = true
+      errLine(`AVISO: el campo \`base:\` de ${SLICE_REL_PATH} es un SHA (${base.slice(0, 12)}…), no un nombre de rama. Eso ROMPE el \`gh pr create --base\` del cierre del slice (exige un nombre de rama), y no arregla el diff: para medir contra el corte real ya existe \`base_sha:\`, que este check prefiere solo. Devuelve \`base:\` al nombre de la rama del PR (p. ej. \`main\`).`)
     }
+    const s = seed.match(/^base_sha:[ \t]*(.+)$/m)
+    if (s) {
+      const sha = s[1].trim().replace(/^['"]|['"]$/g, '')
+      // Solo un 40-hex: `base_sha:` es un SHA sembrado, nunca un nombre de
+      // ref. Aceptar `HEAD~1` o `main` aquí dejaría que una semilla
+      // reescrita (SLICE.md es agent-reachable — la trampa (c) de F22, más
+      // abajo) moviera la base del diff a una ref que controla el propio
+      // agente. No es una frontera de seguridad (un sha válido también se
+      // puede escribir a mano; el caso base===HEAD lo siguen cazando los
+      // consumidores), es el contrato del campo.
+      if (RE_40HEX.test(sha)) {
+        try {
+          execFileSync('git', ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`], { stdio: 'ignore' })
+          return sha
+        } catch { /* el commit no está en este repo (podado / semilla corrupta): al fallback */ }
+      }
+    }
+    if (base) return base
   } catch { /* sin SLICE.md: worktree del esquema anterior, o cwd que no es el worktree */ }
   for (const ref of ['origin/HEAD', 'origin/main', 'main', 'master']) {
     try {
@@ -412,7 +468,7 @@ function sliceBaseRef() {
 function stateFilesIntroducedByBranch() {
   const base = sliceBaseRef()
   if (!base) {
-    return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
+    return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base_sha:`/`base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
   }
   let baseSha, headSha
   try {
@@ -446,7 +502,7 @@ function stateFilesIntroducedByBranch() {
 function branchIntroducedFiles() {
   const base = sliceBaseRef()
   if (!base) {
-    return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
+    return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base_sha:`/`base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
   }
   let baseSha, headSha
   try {
