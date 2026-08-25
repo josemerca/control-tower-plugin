@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { extractAc, extractDeps, extractOrder, extractSpecLink, normalizeSpecLink, specTarget, locateSection, countHeadingLines, detectLineEnding, normalizeToLF, mapGhIssue, filterMergedIssues, buildOrderIndex, buildDispatchInput, AC_HEADING_FORMS, NO_MILESTONE_KEY, epicKeyOf, extractDepsInSection, extractStrayDeps, extractSenal, SENAL_HEADING } from '../scripts/gh-issue-map.js'
+import { extractAc, extractDeps, extractOrder, extractSpecLink, normalizeSpecLink, specTarget, locateSection, countHeadingLines, detectLineEnding, normalizeToLF, mapGhIssue, filterMergedIssues, buildOrderIndex, buildDispatchInput, AC_HEADING_FORMS, NO_MILESTONE_KEY, epicKeyOf, extractDepsInSection, extractStrayDeps, extractE2eRuns, extractSenal, SENAL_HEADING } from '../scripts/gh-issue-map.js'
 import { selectNext } from '../scripts/dispatch.js'
 import { buildIssueBody } from '../scripts/groom.js'
 
@@ -92,6 +92,26 @@ describe('extractAc', () => {
   it('bloque AC es la última sección del body (sin encabezado siguiente) → también se extrae', () => {
     const body = '## Acceptance criteria (EARS, 1:1 con tests)\n- AC-1 único'
     expect(extractAc(body)).toEqual(['AC-1 único'])
+  })
+})
+
+// extractE2eRuns tenía cobertura del caso único y del caso vacío (vía los
+// tests de la cadena completa y de dispatch-check --release), pero ninguno
+// con MÁS de un recorrido leído de un body real — el propio split/trim/filter
+// no tenía un test que lo obligara a partir más de una línea.
+describe('extractE2eRuns', () => {
+  it('sin sección "## E2E" → []', () => {
+    expect(extractE2eRuns('cualquier body sin esa sección')).toEqual([])
+    expect(extractE2eRuns('')).toEqual([])
+    expect(extractE2eRuns(null)).toEqual([])
+  })
+  it('con varios recorridos → uno por línea, en orden, verbatim', () => {
+    const body = '## Acceptance criteria\n- un criterio\n\n## E2E\n- curl -i :9115/metrics responde 200\n- el server escucha en 9115\n- el example compila con cargo build --examples\n\n## Dependencias\n- merge-after #1'
+    expect(extractE2eRuns(body)).toEqual([
+      'curl -i :9115/metrics responde 200',
+      'el server escucha en 9115',
+      'el example compila con cargo build --examples',
+    ])
   })
 })
 

@@ -146,6 +146,44 @@ function seedFreshAgentsMd() {
   return agents
 }
 
+// E2E_MARKER_OPEN/CLOSE + E2E_BLOCK: la tarea 5 de "e2e al cierre del slice"
+// añadió una SEGUNDA sección que ct-init siembra (la de travesía), que se
+// añade SIEMPRE que falte, sin importar en qué estado esté la sección del
+// contrato de slices. Muchos de los tests de abajo escriben un AGENTS.md que
+// solo trae el contrato (para probar SU lógica en aislamiento) y comprueban
+// con `toBe` que el fichero queda byte a byte igual — una asunción cierta
+// hasta que existió la sección de travesía. Ahora esos fixtures reciben
+// también esa sección (correcto: un repo bootstrapeado antes de esta tarea
+// también la recibe en su próxima corrida), así que sus aserciones tienen
+// que contar con el bloque añadido. E2E_BLOCK se calcula UNA vez ejecutando
+// el script (nunca copiado a mano), para que un cambio futuro en el texto no
+// haga divergir esta constante en silencio.
+const E2E_MARKER_OPEN = '<!-- ct-init:e2e-howto -->'
+const E2E_MARKER_CLOSE = '<!-- /ct-init:e2e-howto -->'
+function extractE2eBlock(agentsMd) {
+  const lines = agentsMd.split('\n')
+  const start = lines.indexOf(E2E_MARKER_OPEN)
+  const end = lines.indexOf(E2E_MARKER_CLOSE)
+  if (start === -1 || end === -1) return null
+  return lines.slice(start, end + 1).join('\n') + '\n'
+}
+const E2E_BLOCK = extractE2eBlock(seedFreshAgentsMd())
+
+// withE2eAppended: reproduce EXACTAMENTE lo que hace ct-init.sh al añadir la
+// sección de travesía a un AGENTS.md que no la trae todavía — asegura un
+// salto de línea final, añade una línea en blanco, y pega el bloque. `crlf`
+// hace lo mismo que `file_is_crlf`/`replace_slices_block` del script: si el
+// fichero de partida usa CRLF, la línea en blanco y el bloque se escriben
+// con los mismos saltos.
+function withE2eAppended(before, { crlf = false } = {}) {
+  let out = before
+  const nl = crlf ? '\r\n' : '\n'
+  if (out.length && !out.endsWith(nl)) out += nl
+  out += nl
+  out += crlf ? E2E_BLOCK.replace(/\n/g, '\r\n') : E2E_BLOCK
+  return out
+}
+
 function extractWorkedExample(agentsMd) {
   const lines = agentsMd.split('\n')
   const startIdx = lines.findIndex((l) => l.includes('Ejemplo que parsea tal cual'))
@@ -324,7 +362,8 @@ describe('ct-init.sh', () => {
     rmSync(specDir, { recursive: true, force: true })
   })
 
-  // Slice 10 — el contrato v19 documenta la columna Señal: qué es, cómo se
+  // Slice 10 — el contrato (v19, hoy v20 tras converger con la columna E2E)
+  // documenta la columna Señal: qué es, cómo se
   // exime (`N/A — <razón>`, y que sin razón aborta), a dónde llega (sección
   // del body → SLICE.md → paquete del juez de slice → ítem observabilidad) y
   // que una celda sin valor se mide como sin-vara en la telemetría del epic.
@@ -475,7 +514,9 @@ describe('ct-init.sh', () => {
     writeFileSync(join(dir, 'AGENTS.md'), customSection)
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    expect(agents).toBe(customSection) // ni una letra tocada
+    // El contrato editado no se toca ni una letra; la sección de travesía SÍ
+    // se añade (le faltaba, igual que a cualquier AGENTS.md que no la trae).
+    expect(agents).toBe(withE2eAppended(customSection))
     const occurrences = agents.split('<!-- ct-init:slices-contract -->').length - 1
     expect(occurrences).toBe(1) // no duplicada
     rmSync(dir, { recursive: true, force: true })
@@ -501,7 +542,10 @@ describe('ct-init.sh', () => {
     writeFileSync(join(dir, 'AGENTS.md'), orphan)
     const output = execFileSync('bash', ['-c', `bash '${script}' '${dir}' 2>&1`], { encoding: 'utf8' })
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    expect(agents).toBe(orphan) // ni una letra tocada
+    // El rastro parcial del contrato no se toca ni una letra; la sección de
+    // travesía SÍ se añade — es independiente de en qué estado esté el
+    // contrato.
+    expect(agents).toBe(withE2eAppended(orphan))
     const headingOccurrences = agents.split('## Formato de la tabla §9').length - 1
     expect(headingOccurrences).toBe(1) // no duplicado
     expect(output.toLowerCase()).toMatch(/aviso|warning/)
@@ -521,7 +565,9 @@ describe('ct-init.sh', () => {
     writeFileSync(join(dir, 'AGENTS.md'), orphan)
     const output = execFileSync('bash', ['-c', `bash '${script}' '${dir}' 2>&1`], { encoding: 'utf8' })
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    expect(agents).toBe(orphan) // ni una letra tocada
+    // Mismo motivo que en el caso de la apertura borrada: el contrato no se
+    // toca, pero la sección de travesía se añade porque le faltaba.
+    expect(agents).toBe(withE2eAppended(orphan))
     const headingOccurrences = agents.split('## Formato de la tabla §9').length - 1
     expect(headingOccurrences).toBe(1) // no duplicado
     expect(output.toLowerCase()).toMatch(/aviso|warning/)
@@ -566,7 +612,9 @@ describe('ct-init.sh', () => {
     expect(res.stderr).toMatch(/v1/)
     expect(res.stderr).toMatch(new RegExp(`v${CONTRACT_VERSION}`))
     expect(res.stderr).toContain('--update-slices-contract')
-    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(before) // ni una letra
+    // El contrato v1 no se toca ni una letra; la sección de travesía sí se
+    // añade, porque este AGENTS.md no la traía.
+    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(withE2eAppended(before))
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -731,7 +779,9 @@ describe('ct-init.sh', () => {
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     expect(agents.split(MARKER_OPEN).length - 1).toBe(1) // no una segunda copia
     expect(agents.split('## Formato de la tabla §9').length - 1).toBe(1)
-    expect(agents).toBe(crlf) // no se ha tocado nada
+    // El contrato no se toca; la sección de travesía sí se añade (con los
+    // mismos saltos CRLF, para no dejar el fichero a medias entre formatos).
+    expect(agents).toBe(withE2eAppended(crlf, { crlf: true }))
     // Y se da el aviso que le tocaba dar (antes se lo saltaba entero).
     expect(res.stderr).toMatch(/es del contrato v1/)
     rmSync(dir, { recursive: true, force: true })
@@ -812,7 +862,10 @@ describe('ct-init.sh', () => {
     writeFileSync(join(dir, 'AGENTS.md'), before)
     const res = spawnSync('bash', [script, dir, '--force'], { encoding: 'utf8' })
     expect(res.status).toBe(0)
-    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(before)
+    // El contrato v1 no se toca (--force sin --update-slices-contract no
+    // hace nada sobre él); la sección de travesía sí se añade, porque
+    // faltaba y es independiente de estos dos flags.
+    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(withE2eAppended(before))
     rmSync(dir, { recursive: true, force: true })
   })
 

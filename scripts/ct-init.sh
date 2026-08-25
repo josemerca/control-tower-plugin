@@ -365,7 +365,14 @@ SLICES_HEADING_LEGACY='## Formato de la tabla §9 (contrato con /ct-groom)'
 # se queda creyendo que esos dos casos SÍ están cubiertos, hasta que este
 # número suba.
 #
-# Slice 10 (juez-lo-que-queda) sube de 18 a 19: el v18 no puede deducir que la
+# El contrato sube de 18 a 20 de una sola vez, porque DOS columnas distintas
+# entraron en paralelo y las dos reclamaban el v19: la `Señal` (rama
+# juez-lo-que-queda, ya en main) y la `E2E` (rama e2e-al-cierre-del-slice).
+# El v19 quedó publicado con el bloque de la `Señal`; este bloque trae las
+# dos, así que necesita un número propio. Los dos motivos siguen vigentes y
+# se conservan enteros — documentan defectos distintos:
+#
+# Slice 10 (juez-lo-que-queda), el v19: el v18 no puede deducir que la
 # columna `Señal` existe (la señal de observabilidad que el slice promete, y
 # que el juez de slice mide contra el diff acumulado con su ítem
 # `observabilidad`), ni que una exención se escribe `N/A — <razón>` (y que sin
@@ -373,7 +380,37 @@ SLICES_HEADING_LEGACY='## Formato de la tabla §9 (contrato con /ct-groom)'
 # en la telemetría del epic. Un repo con el v18 declararía señales en prosa
 # del spec —invisibles para el agente y para el juez— o no las declararía
 # nunca, sin saber que la cuenta de sin-vara lo está midiendo.
-SLICES_CONTRACT_VERSION=19
+#
+# Tarea 5 de "e2e al cierre del slice", el v20: el gate `e2e`
+# (gates.js#GATES) y la columna `E2E` que lo deriva (gates.js#resolveE2e,
+# slices.js#iE2e) llevaban ya en el código de rondas anteriores de esa misma
+# feature, pero ni el v18 ni el v19 los nombraban: un repo bootstrapeado con
+# cualquiera de los dos no podía deducir que existe una columna `E2E`
+# opcional, que si la tabla la trae CADA fila tiene que decidir (un guion no
+# basta — significa "sin declarar", y con la columna presente eso aborta),
+# que el token para "nada que atravesar" es `no`, ni que el gate `e2e` no se
+# escribe a mano en `Gate`: se DERIVA de que `E2E` traiga algún recorrido.
+# El v20 dice las cuatro cosas. La misma tarea siembra además, fuera de este
+# bloque, la sección `## Cómo se atraviesa este repo (e2e)` de AGENTS.md: el
+# kickoff del gate `e2e` (gates.js) manda al agente a esa sección exacta para
+# saber CÓMO se levanta este repo, y sin ella no hay ninguna.
+#
+# El contrato sube de 20 a 21 por una aclaración de texto, no por una
+# funcionalidad nueva: el bullet `E2E` nombra ahora los DOS tokens que valen
+# como "no aplica" (`no` y `n/a`, los que acepta E2E_NONE_TOKENS), donde antes
+# solo nombraba uno. Un pase anterior aplicó ese cambio dentro del bloque
+# sembrado pero registró un SEGUNDO hash de v20 en vez de subir el número,
+# razonando que una aclaración de texto no es un cambio de contrato. Esa
+# razón queda contradicha por la doctrina de este mismo comentario más
+# arriba: el número no mide el tamaño del cambio, mide si el texto que tiene
+# el repo es el que shippea el plugin, y es la ÚNICA palanca que hace que un
+# contrato corregido llegue a un repo ya bootstrapeado. Con el número parado
+# en 20, un repo sembrado con el primer bloque v20 tiene `found_version -eq
+# SLICES_CONTRACT_VERSION` y `block_status=pristine`: la corrida normal
+# imprime "contrato v20, al día" y ni `--update-slices-contract` entra en la
+# rama de "el contenido no es el mío". No hay ningún camino por el que ese
+# repo reciba la aclaración del segundo token.
+SLICES_CONTRACT_VERSION=21
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -436,6 +473,10 @@ bb8e3298fe9b587b929ab58fbf96f76909463a1cea292fa110878d4ba293f38e  v16, 540 líne
 4d6eebf4ea94b7197879d30293dc4719d82399b7feeb7711829c28a1dcaa7f1c  v17, 543 líneas — F-jjponz-1 (el gate `plan` entra en el vocabulario: revisión humana del plan del slice antes de implementar, siempre opt-in)
 9a45d3acdc0d5a776affb390ba890b90b86d77e2a5712626a839a93d7462bfba  v18, 544 líneas — F-jjponz-2 (el gate `plan` pasa a estar implicado por defecto en TODO slice; renuncia por fila con `!plan`)
 9cdc355576fd1e7bbf69771a8c597c236f33ba31e37c32d998d3282a76e20f77  v19, 562 líneas — Slice 10 juez-lo-que-queda (la columna Señal: la señal de observabilidad por slice, con exención razonada N/A — <razón>)
+388f8a82528e7402e45a3384094c7ab43b18d6fdfb5652affa4e9b6b6c2b2dc4  v19, 567 líneas — tarea 5 de "e2e al cierre del slice" (la columna E2E y el gate `e2e` entran en el contrato; v19 nunca publicado, la rama se mergeó como v20)
+b0eb79ab8fd89f83ce7159e9c2a9c32812ee35b76ad6f4c78c2829c9d9891c0b  v20, 585 líneas — merge de las dos ramas anteriores (las columnas Señal y E2E conviven en el mismo bloque)
+530e94eca9e7a0ab676f64a82a97f895ca5c9549478dc9f222f5fcffe8586878  v20, 586 líneas — review del merge (el bullet E2E nombra los DOS tokens de "no aplica": `no` y `n/a`, los que acepta E2E_NONE_TOKENS). Mismo v20: es una aclaración del texto, no un cambio de contrato
+86a73c49d2b8ed904f5aaddb86b71536b160a17dfa281b2886729ea82fba9221  v21, 586 líneas — la aclaración de los DOS tokens de "no aplica" sube de número: el v20 la dejó sin bump y ningún repo bootstrapeado con el v20 anterior podía recibirla
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -443,7 +484,7 @@ bb8e3298fe9b587b929ab58fbf96f76909463a1cea292fa110878d4ba293f38e  v16, 540 líne
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 19 -->
+<!-- ct-init:slices-contract-version: 21 -->
 ## Formato de la tabla de slices (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -493,6 +534,12 @@ copiable tal cual:
     agente lo publica como comentario del issue y se detiene hasta el OK.
     Está implicado **por defecto en todos los slices**, venga el `Tipo` que
     venga; se renuncia por fila con `!plan` (y la renuncia se anuncia).
+  - `e2e` — antes de mergear, alguien atraviesa los recorridos que el slice
+    declaró en su columna `E2E` (ver más abajo) y deja el informe en el PR.
+    A diferencia de los otros tres, **`e2e` no se escribe en esta columna**:
+    se DERIVA de que la fila traiga algún recorrido en `E2E`. Escribir
+    `Gate: e2e` a mano **aborta** — el sitio donde se pide un e2e es la
+    columna `E2E`, nunca ésta.
 
   **No hace falta escribir nada en el caso normal**: `Tipo: ui` implica
   `visual`, `Tipo: infra` implica `apply`, y **todo slice** lleva `plan` de
@@ -570,9 +617,27 @@ copiable tal cual:
   vacía o con marcador de "sin valor" significa *no lo he pensado* — no
   es una exención: el juez lo mide como `sin-vara`, y esa cuenta viaja en
   la telemetría del epic.
+- **E2E** *(opcional)*: qué recorridos hay que atravesar antes de mergear este
+  slice, separados por coma → sección `## E2E` del cuerpo del issue, uno por
+  línea (mismo criterio de escape que `Acepta`: una coma dentro de un
+  recorrido se escribe `\,`). Declarar aquí algo **deriva** el gate `` `e2e` ``
+  (ver `Gate`, arriba) — no lo escribas también en `Gate`.
+
+  **Si la tabla TIENE esta columna, cada fila tiene que decidir.** Un guion
+  (o cualquier otro marcador de "sin valor") en una fila de una tabla CON
+  columna `E2E` significa lo mismo de siempre —"no he declarado nada aquí"—
+  pero aquí eso **aborta**: con la columna presente, "nadie lo pensó" no es
+  una opción válida por fila. Para decir de verdad "este slice no tiene nada
+  que atravesar", escribe el token **`no`** (o **`n/a`**, que vale igual: los
+  dos son el mismo "se pensó y no hay"). Declarar un recorrido real Y
+  `no` en la misma celda también aborta: no se elige un ganador en silencio.
+  Si ningún slice del epic necesita e2e, la salida es no añadir la columna en
+  absoluto — así ninguna fila tiene que decidir nada.
 
 Marcadores de "sin valor" (`Dep`/`Acepta`/`Protegido`/`Área`/`Toca`/`Gate`/`Señal`):
 `–` `-` `—` `―` `−` `--` o celda vacía — cualquier variante de guion vale.
+`E2E` usa el mismo conjunto de marcadores, con la salvedad de arriba: solo son
+inocuos cuando la columna no está presente.
 
 ### Lo que crea `/ct-groom` NO es despachable todavía
 
@@ -999,11 +1064,35 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   mergear, no sólo para los gates: si lo compruebas a mano, que el resultado
   mande.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v19). Si el plugin trae una
+<sub>Esta sección la mantiene `/ct-init` (contrato v21). Si el plugin trae una
 versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
 `bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
 solo la reemplaza si no la has editado a mano.</sub>
 <!-- /ct-init:slices-contract -->
+EOF
+}
+
+# emit_e2e_howto: el cuerpo de la sección de travesía, en un solo sitio —
+# mismo motivo que emit_slices_contract de arriba. Sin versión ni hash
+# pristine (ver el comentario junto a E2E_MARKER_OPEN, más abajo, donde se
+# usa): esto es una PLANTILLA, no un contrato del plugin.
+emit_e2e_howto() {
+  cat <<'EOF'
+<!-- ct-init:e2e-howto -->
+## Cómo se atraviesa este repo (e2e)
+
+<!-- Rellena esto UNA vez. Lo lee el agente de un slice cuya fila declara
+     recorridos en la columna E2E de la tabla de slices. Si está sin
+     rellenar, el agente marca sus recorridos como "no-verificado" y NO se
+     inventa cómo levantar el repo. -->
+
+- Levantar:
+- Listo cuando:
+- Plazo:              (opcional; por defecto 60 segundos)
+- Tirar:
+- Herramientas:
+- Fuera de límites:
+<!-- /ct-init:e2e-howto -->
 EOF
 }
 
@@ -1064,6 +1153,21 @@ slices_block_is_crlf() {
     f && line != $0 { crlf = 1 }
     f && line == cm { exit }
     END { exit !crlf }
+  ' "$1"
+}
+
+# file_is_crlf: mismo criterio que slices_block_is_crlf pero sobre el fichero
+# ENTERO en vez de un bloque acotado por marcadores — lo usa la siembra de la
+# sección e2e (que no tiene bloque previo del que partir: la primera vez que
+# se añade no hay nada que leer entre sus propios marcadores todavía). Basta
+# con la primera línea con `\r`: un AGENTS.md no mezcla estilos de salto de
+# línea a medio fichero salvo que algo ya lo haya corrompido, caso que este
+# script no pretende arreglar.
+file_is_crlf() {
+  awk '
+    { line = $0; sub(/\r$/, "", line) }
+    line != $0 { found = 1; exit }
+    END { exit !found }
   ' "$1"
 }
 
@@ -1218,6 +1322,54 @@ else
   echo >> "$AGENTS_MD"
   emit_slices_contract >> "$AGENTS_MD"
   echo "añadida sección del contrato de slices (contrato /ct-groom v$SLICES_CONTRACT_VERSION) a $AGENTS_MD"
+fi
+
+# Sección "Cómo se atraviesa este repo (e2e)" — tarea 5 de "e2e al cierre del
+# slice". El gate `e2e` (gates.js) manda al agente despachado a leer AQUÍ,
+# por su heading exacto, cómo se levanta este repo: el plugin gobierna repos
+# ajenos y no tiene forma de saberlo (en una librería Rust puede ser `cargo
+# run --example` y un puerto; en una app con staging, un navegador y unas
+# flags). Lo declara el dueño del repo, igual que ya declara build/test/lint
+# en las secciones de arriba — por eso se siembra VACÍA, como plantilla.
+#
+# Reutiliza el idiom del bloque del contrato de arriba (marcador HTML
+# greppable, `has_line` tolerante a CRLF) pero, A PROPÓSITO, NO lleva ni
+# número de versión ni hash en SLICES_PRISTINE_HASHES. Esos dos existen para
+# resolver la misma pregunta en el bloque de arriba: "¿ha tocado el usuario
+# algo que se supone que no debía tocar?" — y ahí un hash que no coincide es
+# la señal correcta de alarma. Aquí la pregunta no tiene sentido: esta
+# sección es una PLANTILLA que el usuario TIENE que rellenar, así que
+# detectar "el texto cambió" detectaría el uso correcto y lo trataría como
+# manipulación — el plugin dejaría de reconocerla justo cuando está bien
+# usada. Mismo mecanismo, propósito opuesto: aquí basta la regla simple de
+# "si el marcador de apertura ya está, no se toca nada", sin versión que
+# subir ni contenido que comparar.
+E2E_MARKER_OPEN='<!-- ct-init:e2e-howto -->'
+E2E_MARKER_CLOSE='<!-- /ct-init:e2e-howto -->'
+
+if has_line "$E2E_MARKER_OPEN" "$AGENTS_MD"; then
+  echo "sección de travesía e2e ya está en $AGENTS_MD, no se duplica"
+else
+  # Igual que replace_slices_block: si el AGENTS.md ya es CRLF, TODO lo que se
+  # añade (el salto de más, la línea en blanco, y el bloque) se escribe con
+  # los mismos saltos — nada de dejar el fichero con la mitad en un formato y
+  # la mitad en otro.
+  e2e_crlf=0
+  if [ -s "$AGENTS_MD" ] && file_is_crlf "$AGENTS_MD"; then e2e_crlf=1; fi
+  newline() { if [ "$e2e_crlf" -eq 1 ]; then printf '\r\n' >> "$AGENTS_MD"; else echo >> "$AGENTS_MD"; fi; }
+  # Mismo idiom que las dos siembras de arriba: asegurar el salto de línea
+  # final ANTES de `>>`, para no fusionar esta sección con la última línea de
+  # lo que el usuario (o la siembra anterior de esta misma corrida) ya tenía.
+  if [ -s "$AGENTS_MD" ] && [ "$(tail -c1 "$AGENTS_MD" | wc -l)" -eq 0 ]; then
+    newline
+  fi
+  newline
+  if [ "$e2e_crlf" -eq 1 ]; then
+    emit_e2e_howto | awk '{ printf "%s\r\n", $0 }' >> "$AGENTS_MD"
+  else
+    emit_e2e_howto >> "$AGENTS_MD"
+  fi
+  echo "añadida sección de travesía e2e a $AGENTS_MD"
 fi
 
 # §3.12 (docs/prompt-juez-lo-que-queda.md): `reference-paths` prueba que lo que

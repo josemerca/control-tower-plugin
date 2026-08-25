@@ -5,6 +5,13 @@
 // issue tenía que inventarse un ancla a partir de `--section` ("#9"), que no
 // existe en GitHub. Ahora el reporte incluye el encabezado real y su ancla.
 import { headingAbove } from './anchor.js'
+// isNoValueCell/splitEscapedCommas/stripPairedUnderscore viven en cells.js
+// (no aquí) para que gates.js pueda trocear una celda sin importar este
+// parser entero — ver la cabecera de cells.js. Se reexportan isNoValueCell y
+// splitEscapedCommas para que groom.js/ct-groom.mjs sigan importándolos
+// desde './slices.js' sin cambiar una línea.
+import { isNoValueCell, splitEscapedCommas, stripPairedUnderscore } from './cells.js'
+export { isNoValueCell, splitEscapedCommas }
 const DEP_RE = /#(\d+)/g
 // PLAIN_INT_RE: el `#` de cada fila debe ser un entero a secas ("1", "23"),
 // nunca "S1" (letra de prefijo humano), "**1**" (negrita markdown) ni "1a"
@@ -14,7 +21,7 @@ const DEP_RE = /#(\d+)/g
 // este regex, cualquier "#" que no sea dígitos puros se reporta como fila
 // no-parseable en vez de perderse. A propósito NO se aplica ninguna
 // tolerancia de marcado inline aquí (a diferencia de Área/Toca, ver
-// EMPHASIS_CHARS_RE/cleanEmphasis más abajo): el enunciado original de esta
+// EMPHASIS_CHARS_RE/cleanEmphasis, en cells.js): el enunciado original de esta
 // feature pide explícitamente que "**1**" sea rechazado y el autor tenga
 // que escribir "1" a secas, así que "#" no perdona negrita/backticks.
 const PLAIN_INT_RE = /^\d+$/
@@ -29,126 +36,9 @@ const HEADING_RE = /^#{1,6}\s/
 // SEPARATOR_RE: la fila "|---|---|" de una tabla markdown.
 const SEPARATOR_RE = /^\s*\|[\s:|-]+\|\s*$/
 
-// NO_VALUE_MARKERS: valores de celda que significan "vacío"/"sin valor" —
-// guion (-), en dash (–, U+2013) y em dash (—, U+2014) son variantes
-// tipográficas razonables de la misma intención que un editor de texto
-// (Word, Notion, un móvil con autocorrección…) puede sustituir sin que el
-// autor lo note. CRITICAL de la review de F1: la tabla REAL que originó
-// esta feature usa DELIBERADAMENTE un em dash en la fila S1 para "sin
-// dependencias" — reconocer solo "–"/"-" significa que arreglar la columna
-// "#" (como pide nuestro propio mensaje de error) hace que esa misma celda,
-// que siempre significó "sin dependencias" correctamente, dispare el abort
-// de "Dep malformado" pidiéndole al autor que escriba "#N" para una celda
-// que no necesita ninguna referencia. Un solo criterio de "vacío",
-// compartido entre Dep/Acepta/Área/Toca (antes cada campo repetía su propia
-// comparación `!== '–' && !== '-'`, con el mismo hueco cuatro veces).
-// NBSP alrededor del carácter (p.ej. copiado de un editor que lo inserta
-// automáticamente) ya lo elimina `String#trim()` de forma nativa —
-// verificado (`' — '.trim() === '—'`) — así que no hace falta
-// tratarlo aparte aquí.
-const NO_VALUE_MARKERS = new Set(['-', '–', '—', '―', '−', '--'])
-// isNoValueCell corre `cleanEmphasis` ANTES de comparar (review round 2,
-// punto c): envolver el marcador en marcado inline ("`–`", "**–**") es la
-// MISMA forma que el CRITICAL del em dash — un autor que ya demostró
-// envolver valores en negrita/backticks (F1: "**S1**") envuelve igual de
-// fácil el marcador de "nada". Sin este strip, `isNoValueCell` comparaba la
-// celda cruda contra el Set y "`–`"/"**–**" no matcheaban nada, así que el
-// autor recibía "si no hay dependencias, escribe –" por haber escrito
-// exactamente eso, solo que envuelto. También se amplía el propio conjunto:
-// el signo menos matemático (−, U+2212) y el doble-guion ("--") son
-// salidas plausibles de autocorrección, igual que el em dash.
-// Exportada (además de usarse internamente arriba): groom.js#buildIssueBody
-// la necesita para tratar "Protegido" con el mismo criterio de "sin valor"
-// que ya usan Dep/Acepta/Área/Toca — ver el fix correspondiente en groom.js.
-export function isNoValueCell(trimmedCell) {
-  return NO_VALUE_MARKERS.has(cleanEmphasis(trimmedCell))
-}
-
 function splitRow(line) {
   // "| a | b |" -> ["a","b"] (quita bordes y trim)
   return line.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map((c) => c.trim())
-}
-
-// EMPHASIS_CHARS_RE / PAIRED_UNDERSCORE_RE / cleanEmphasis (review round 4
-// — segunda mitad del rediseño de la round 3, no un parche encima): la
-// round 3 ya invirtió el enfoque de backtick/asterisco (quitarlos siempre,
-// sin intentar detectar "pares que envuelven"), pero para guion bajo
-// conservó `^_+`/`_+$` — una eliminación ASIMÉTRICA que no distingue un PAR
-// de énfasis real (`_x_`, `__x__`, el cierre es la MISMA cadena que la
-// apertura) de un guion bajo inicial o final SIN pareja. Y eso es
-// exactamente cómo empiezan "_layout.tsx"/"_app.tsx" (Expo Router, Next.js)
-// o "__init__.py" (Python), y cómo puede terminar "trailing_" — nombres de
-// fichero de lo más normales en una columna "Toca". El token ES la clave de
-// colisión de claim.js#tokensOf (comparación exacta): corromper
-// "_layout.tsx" en "layout.tsx" produce colisiones falsas entre slices que
-// no colisionan de verdad.
-//
-// PAIRED_UNDERSCORE_RE exige que el cierre sea la MISMA cadena que la
-// apertura (backreference `\1`) — verificado explícitamente carácter por
-// carácter contra la matriz completa antes de escribir el fix:
-// "_layout.tsx"/"_app.tsx"/"__init__.py"/"trailing_" NO matchean (no
-// terminan en guion bajo, o no tienen pareja simétrica) y quedan intactos;
-// "_x_"/"__x__" SÍ matchean y se reducen a "x".
-const PAIRED_UNDERSCORE_RE = /^(_{1,3})(.+?)\1$/
-function stripPairedUnderscore(s) {
-  const m = PAIRED_UNDERSCORE_RE.exec(s)
-  return m ? m[2] : s
-}
-// EMPHASIS_CHARS_RE: backtick/asterisco no tienen ningún significado
-// legítimo dentro de un token de label — se quitan sin condición.
-const EMPHASIS_CHARS_RE = /[`*]/g
-// cleanEmphasis: limpieza para valores de UNA SOLA celda sin estructura de
-// lista (Dep/Acepta/Entrega, vía isNoValueCell) — no hay split por comas de
-// por medio, así que quitar backtick/asterisco de toda la celda y el par
-// de guion bajo (si lo hay) es seguro y no corrompe nada.
-function cleanEmphasis(raw) {
-  const trimmed = raw.trim()
-  const withoutPairedUnderscore = stripPairedUnderscore(trimmed)
-  return withoutPairedUnderscore.replace(EMPHASIS_CHARS_RE, '').trim()
-}
-
-// splitEscapedCommas (F6, importante 3): divide una celda por comas que NO
-// vengan escapadas con una barra invertida (`\,`), y devuelve cada trozo con
-// esos escapes ya resueltos a una coma literal.
-//
-// El problema que cierra: "Acepta" se troceaba con un `String#split(',')` a
-// secas, así que una coma DENTRO de un criterio lo partía en dos en silencio
-// — y la cabecera que este mismo pipeline genera para esa sección es
-// literalmente "Acceptance criteria (EARS, 1:1 con tests)": la forma EARS
-// ("Cuando <disparador>, el sistema debe <respuesta>") lleva coma casi
-// siempre. No era un caso raro: era la forma natural de rellenar la columna,
-// y el autor solo lo descubría leyendo el issue ya creado.
-//
-// Se aplica SOLO a "Acepta" (comprobado columna por columna): "Protegido" no
-// se trocea por comas en absoluto, "Dep" extrae sus referencias con una regex
-// `#N` (una coma dentro no cambia nada), y "Área"/"Toca" sí se trocean pero
-// sus valores son tokens de label de los que `normalizeToken` descarta la
-// coma igualmente — un escape ahí prometería algo que la normalización
-// deshace acto seguido.
-//
-// Una barra invertida que NO precede a una coma se conserva tal cual (p.ej.
-// una ruta de Windows en un criterio): solo la secuencia exacta `\,` es un
-// escape.
-export function splitEscapedCommas(cell) {
-  const parts = []
-  let current = ''
-  const src = cell || ''
-  for (let i = 0; i < src.length; i++) {
-    const ch = src[i]
-    if (ch === '\\' && src[i + 1] === ',') {
-      current += ','
-      i++
-      continue
-    }
-    if (ch === ',') {
-      parts.push(current)
-      current = ''
-      continue
-    }
-    current += ch
-  }
-  parts.push(current)
-  return parts
 }
 
 // ALNUM_RE: una letra o dígito unicode — el criterio de "esto ya no es
@@ -343,6 +233,12 @@ export function analyzeSlicesTable(specMd) {
       missingRequiredColumns: [],
       missingOptionalColumns: [],
       gateColumnPresent: false,
+      // e2eColumnPresent: mismo motivo que gateColumnPresent, y no derivable
+      // de las celdas — una columna presente con todo "–" es indistinguible
+      // de una columna ausente si solo se miran los valores. Lo consume el
+      // paso siguiente de esta feature para decidir si exige una decisión de
+      // e2e por fila.
+      e2eColumnPresent: false,
       totalDataRows: 0,
       rowsAfterGap: [],
       skippedRows: [],
@@ -388,8 +284,24 @@ export function analyzeSlicesTable(specMd) {
         // Mismo trato de tilde que Área/Area (el autor humano teclea las dos
         // grafías); ninguna de las dos es substring de otra cabecera ni al
         // revés — verificado contra #/slice/tipo/entrega/dep/acepta/protegido/
-        // área/area/toca/gate.
-        iSenal = colAny('señal', 'senal')
+        // área/area/toca/gate/e2e.
+        iSenal = colAny('señal', 'senal'),
+        // iE2e: la columna que declara QUÉ se atraviesa en este slice, separada
+        // de `Acepta` a propósito. La primera versión del diseño marcaba
+        // criterios DENTRO de `Acepta` con un prefijo `[e2e]`, y se cayó al
+        // aplicarla al caso real: de los cuatro `Acepta` del slice #5 de
+        // mo-monitoring, el 1 y el 2 hablan de la respuesta del mismo router y
+        // ningún criterio los separa. Dos personas congelando el mismo spec
+        // marcarían cosas distintas — y esa marca era la única barrera contra
+        // que el agente se inventara un flujo. Con una columna propia no se
+        // clasifica a posteriori un texto que ya existía: se decide al
+        // escribir, y en qué columna se escribe ES la decisión.
+        //
+        // No colisiona con ninguna cabecera existente (misma comprobación que
+        // F21 dejó anotada para `gate`): "e2e" no es substring de
+        // #/slice/tipo/entrega/dep/acepta/protegido/área/toca/gate/señal/senal,
+        // ni ninguna de esas lo es de "e2e".
+        iE2e = col('e2e')
 
   const missingRequiredColumns = []
   if (iN === -1) missingRequiredColumns.push('#')
@@ -429,6 +341,13 @@ export function analyzeSlicesTable(specMd) {
   // insatisfacibles y los repetidos sin novedad. Lo que sí se expone es el
   // hecho crudo (`gateColumnPresent`), porque ct-groom.mjs lo necesita para
   // decidir si el spec tiene alguna opinión sobre las labels `gate:`.
+  //
+  // "E2E" tampoco entra en missingOptionalColumns, por el MISMO motivo que
+  // "Gate" (arriba): cada entrada de esa lista produce un aviso con la
+  // CONSECUENCIA de que falte la columna, y la consecuencia de que falte
+  // "E2E" es que ningún slice del epic tiene e2e — que es exactamente el
+  // comportamiento anterior a esta ronda. Avisarlo en todos los repos que no
+  // usan la feature es ruido puro.
 
   const slices = []
   const skippedRows = []
@@ -580,6 +499,11 @@ export function analyzeSlicesTable(specMd) {
       // exención sin razón, nada) vive entera en groom.js#parseSenalCell:
       // este parser no sabe de señales, su trabajo es entregar celdas fiables.
       senal: (cells[iSenal] || '').trim(),
+      // e2e: la celda CRUDA, sin resolver — mismo contrato que `gate`, y por
+      // el mismo motivo. Los tres estados de esta celda (recorridos / el token
+      // `no` / no declarado) los resuelve gates.js#resolveE2e; este parser no
+      // sabe de e2e igual que no sabe de gates.
+      e2e: (cells[iE2e] || '').trim(),
       deps,
       ac,
       protected: (cells[iProt] || '').trim(),
@@ -620,6 +544,10 @@ export function analyzeSlicesTable(specMd) {
     // por qué, arriba). ct-groom.mjs lo usa para decidir si el spec es
     // autoridad sobre las labels `gate:` de un issue ya existente.
     gateColumnPresent: iGate !== -1,
+    // e2eColumnPresent: mismo motivo que gateColumnPresent (ver el early
+    // return de más arriba) — no se puede derivar de las celdas, porque una
+    // columna presente con todo "–" es indistinguible de una columna ausente.
+    e2eColumnPresent: iE2e !== -1,
     totalDataRows,
     rowsAfterGap,
     skippedRows,
