@@ -1257,7 +1257,6 @@ fi
 # subir ni contenido que comparar.
 E2E_MARKER_OPEN='<!-- ct-init:e2e-howto -->'
 E2E_MARKER_CLOSE='<!-- /ct-init:e2e-howto -->'
-E2E_HEADING='## Cómo se atraviesa este repo (e2e)'
 
 if has_line "$E2E_MARKER_OPEN" "$AGENTS_MD"; then
   echo "sección de travesía e2e ya está en $AGENTS_MD, no se duplica"

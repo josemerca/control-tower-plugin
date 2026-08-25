@@ -567,9 +567,19 @@ describe (se exige igual). La asimetría va en la dirección prudente.
 | `scripts/ct-init.sh` | La sección de `AGENTS.md`; contrato de tabla a v19 |
 | `commands/ct-groom.md` · `ct-next.md` · `ct-step.md` · `README.md` | Documentar, incluido el límite de §8.1 |
 
-**Cero ficheros nuevos.** Cada pieza cae en el módulo que ya hace ese trabajo: la
-columna en el parser de la tabla, el paso en la tabla de la máquina, el esquema
-en la familia de esquemas de paso, el verbo en el oráculo.
+**Un solo fichero nuevo, y por una razón que no estaba en esta lista.** Cada
+pieza cae en el módulo que ya hace ese trabajo: la columna en el parser de la
+tabla, el paso en la tabla de la máquina, el esquema en la familia de esquemas
+de paso, el verbo en el oráculo. La excepción es `scripts/cells.js`, que
+apareció al implementar: los primitivos de celda (`splitEscapedCommas`,
+`isNoValueCell` y lo que arrastran) vivían dentro del parser completo
+(`slices.js`), y `gates.js` los necesita para trocear la celda `E2E`.
+Importarlos de `slices.js` habría hecho permanente un acoplamiento que
+`gates.js` ya documentaba como concesión, y —peor— habría metido el parser
+entero de la tabla en la cadena de imports de `kickoff.js`, que importa
+`gates.js` y hoy no depende de él. No es una pieza nueva de la feature: es la
+parte de `slices.js` que ya se consumía desde fuera, puesta donde se puede
+consumir sin arrastrar el resto. `cells.js` no importa nada, a propósito.
 
 **Y `skills/finishing-a-development-branch/SKILL.md` NO se toca**, al contrario
 de lo que decía la versión anterior de este diseño. Esa skill dejó de conducir

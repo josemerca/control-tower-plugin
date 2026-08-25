@@ -8,7 +8,7 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 
 | | |
 |---|---|
-| Versión | `0.36.1` · contrato de la tabla de slices `v18` |
+| Versión | `0.41.0` · contrato de la tabla de slices `v19` |
 | Comandos | `/ct-init` · `/ct-groom` · `/ct-next` · `/ct-status` |
 | Puertas humanas | 3 por epic — congelación, `status:ready`, merge — más el gate `plan` en cada slice (renunciable por fila con `!plan`) y el gate `e2e` cuando la fila declara recorridos en la columna `E2E` (derivado, no se escribe a mano) |
 | Skills | 11 forkados de superpowers 6.0.3 + 1 propio (`writing-plans-prescriptive`) |
