@@ -520,13 +520,13 @@ function e2eAddedAdvisory(n) {
 // clasificaciones depende del `Tipo` para `e2e` — dependen de si la fila
 // declara recorridos en "E2E", así que los tres textos nombran esa columna.
 function e2eRedundantAdvisory(n, gateCell) {
-  return `aviso: el slice #${n} declara el gate "e2e" en la columna "Gate" (celda "Gate": "${gateCell}"), pero su fila YA lo lleva porque declara recorridos en la columna "E2E" — es redundante, no un error: el resultado es el mismo con la celda "Gate" vacía`
+  return `aviso: el slice #${n} declara el gate "e2e" (celda "Gate": "${gateCell}"), pero su fila YA lo lleva porque declara recorridos en la columna "E2E" — es redundante, no un error: el resultado es el mismo con la celda "Gate" vacía`
 }
 function e2eWaivedAdvisory(n, gateCell) {
   // A diferencia del mensaje genérico de `waived`, este SÍ dice la
   // consecuencia sin rodeos (pedido explícito de la review): la fila trae
   // recorridos de verdad y la renuncia se los lleva por delante igual.
-  return `aviso: el slice #${n} RENUNCIA al gate "e2e" con "!e2e" en la columna "Gate" (celda "Gate": "${gateCell}"), pero su fila declara recorridos en la columna "E2E" — la renuncia se aplica igual: esos recorridos NO se le pedirán al agente, "gate:e2e" no aparecerá como label del issue, y nadie los atravesará antes de mergear. Si no era eso lo que querías, quita el "!" de esa celda`
+  return `aviso: el slice #${n} RENUNCIA al gate "e2e" (celda "Gate": "${gateCell}"), pero su fila declara recorridos en la columna "E2E" — la renuncia se aplica igual: esos recorridos NO se le pedirán al agente, "gate:e2e" no aparecerá como label del issue, y nadie los atravesará antes de mergear. Si no era eso lo que querías, quita el "!" de esa celda`
 }
 function e2eInertWaiverAdvisory(n) {
   return `aviso: el slice #${n} renuncia al gate "e2e" con "!e2e" en la columna "Gate", pero su fila no declara recorridos en la columna "E2E": la renuncia no hace nada (no había nada que quitar). Se dice para que no te quedes con la idea de haber retirado un gate que nunca estuvo`

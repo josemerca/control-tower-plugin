@@ -48,6 +48,23 @@ A dónde llega cada gate resuelto: label **`gate:<token>`** del issue (o **`gate
 
 `/ct-groom` traduce cada valor en labels `area:<x>`/`touches:<y>` sobre el issue — son las mismas que `claim.js#tokensOf` y `dispatch.js#SERIALIZING_TOUCHES` usan para detectar colisión y forzar serialización. Si un slice no declara `Área`/`Toca` (o el spec ni siquiera trae esas columnas), no se emite ninguna label de ese tipo y la maquinaria de colisión/serialización queda inerte para ese slice, igual que antes.
 
+### `E2E` — los recorridos de punta a punta, y el gate que se DERIVA de ellos
+
+`E2E` *(opcional)* declara qué recorridos de punta a punta tiene que atravesar el agente antes de abrir el PR de ese slice — el criterio con el que se decide si un slice lo necesita es "¿hace falta el sistema en pie?": no todos los llevan, y forzar uno por slice produciría relleno que nadie lee (medido a mano sobre un epic real de 8 slices aplicando ese criterio: sólo 2 lo necesitaban). Cada celda solo puede estar en uno de **tres estados**, sobre la celda ENTERA y nunca por prefijo (un recorrido legítimo puede empezar por "no": "no se puede acceder a /metrics sin levantar el server"):
+
+- **con recorrido(s)** — uno o varios, separados por coma (misma regla de escape que `Acepta`: `\,` para una coma dentro del propio recorrido, nunca separando dos). Cada uno se copia **verbatim** a la sección `## E2E` del issue: es la instrucción textual que recibe el agente, así que aquí no hay parafraseo posible;
+- **el token `no`** (o `n/a`) — declaración POSITIVA de que este slice no tiene nada que atravesar. A diferencia de `Dep`/`Acepta`/`Protegido`/`Área`/`Toca`, aquí un guion NO significa esto: significa el tercer estado, de abajo;
+- **sin declarar** — celda vacía o con cualquier marcador de "sin valor" (`–`, `-`, `—`, `−`, `--`). Sólo es un estado válido si la tabla **no tiene columna `E2E`** en absoluto: un spec anterior a esta ronda no la tiene, y ahí "sin declarar" es lo correcto en todas sus filas. Si la columna SÍ está presente en la cabecera, cada fila tiene que decidir — ver el primer abort, abajo.
+
+El gate humano `e2e` **no se escribe en la columna `Gate`**: se DERIVA de que `E2E` traiga al menos un recorrido, exactamente por lo que ya vale para `visual`/`apply` en sentido inverso — dos sitios pueden decir lo mismo y divergir, y aquí no hay forma de pedir un `e2e` sin decir QUÉ atravesar. Escribir `Gate: e2e` a mano es tolerado solo cuando la fila también trae recorridos reales (avisa como redundante, no aborta: el resultado es idéntico con la celda `Gate` vacía); `Gate: !e2e` renuncia al gate igual que a cualquier otro — y si la fila trae recorridos de verdad, la renuncia se los lleva por delante, así que `/ct-groom` dice la consecuencia sin rodeos por stderr. A dónde llega el gate resuelto: label `gate:e2e`, sección `## E2E` del cuerpo del issue (justo después de `## Gates`), línea explícita en el kickoff, y campo `e2e` de `.agent/SLICE.md` que siembra `/ct-next`.
+
+**Los cuatro aborts de esta columna**, todos con la misma forma que los de `Gate` (arriba: se validan TODOS antes de tocar GitHub, `--dry-run` incluido, y citan la celda literal, nunca solo el número de fila):
+
+1. **Columna presente y celda sin declarar.** La tabla TIENE columna `E2E`, así que cada fila decide: recorrido, o `no`. Un guion aquí no distingue "se pensó y no hay" de "nadie rellenó la columna" — la ambigüedad que el token `no` existe para quitar.
+2. **Contradicción en la misma celda.** `no` Y un recorrido a la vez (`no, curl -i :9115/metrics`) no elige un ganador en silencio: dejas uno de los dos.
+3. **`Gate: e2e` con la celda `E2E` diciendo `no`.** Nadie sabría qué atravesar — el gate no se escribe a mano justamente por esto.
+4. **`Gate: e2e` sin columna `E2E` en la tabla.** El mismo motivo que el abort 3, probado en solitario para que el abort 1 (que sólo aplica con la columna presente) no lo enmascare: sin la columna, no hay ningún recorrido que la fila pueda estar declarando.
+
 ### `## Contexto del epic` — sección opcional del spec, fuera de la tabla
 
 Además de la tabla, el spec admite una sección opcional **`## Contexto del epic`** (fuera de la tabla, en cualquier punto del fichero — se localiza **por el texto de su cabecera, no por su número de sección**, mismo criterio con el que la tabla §9 se localiza por sus columnas `Slice`+`Dep`: los números de sección de un spec se mueven en cuanto alguien inserta algo por delante). Su contenido se copia **idéntico al cuerpo de todos los issues del epic**, y `--reconcile` lo mantiene al día si el spec cambia (ver "Re-ejecutar no converge solo", más abajo).

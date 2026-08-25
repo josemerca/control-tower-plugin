@@ -564,6 +564,11 @@ if (release) {
   // discrepar si alguien edita el issue a mano, y manda la sección porque es la
   // única que dice QUÉ atravesar. Label sin sección no describe trabajo (se
   // libera, con aviso); sección sin label sí (se exige igual).
+  // Sin `&& !fx` aquí: el fixture de `CT_CLAIM_FIXTURE` modela la forma del
+  // claim (candLabels/openIssues/readback), no el cuerpo del issue — no hay
+  // dato de fixture que cruzar, así que esta lectura siempre va a `gh` de
+  // verdad. Deliberado, no un descuido: no lo "arregles" añadiendo `fx` sin
+  // ensanchar antes la forma del fixture.
   const bodyRaw = (() => {
     try {
       return gh(['issue', 'view', String(issue), '--repo', repo, '--json', 'body', '-q', '.body'])

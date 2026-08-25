@@ -104,7 +104,7 @@ function repo(opts = {}) {
   return dir
 }
 
-function release(dir, { body, viewFail = false } = {}) {
+function release(dir, { body, viewFail = false, labels } = {}) {
   const log = join(dir, 'gh-argv.log')
   const r = spawnSync(process.execPath, [SCRIPT, '9', '--repo', 'o/r', '--release'], {
     cwd: dir, encoding: 'utf8',
@@ -114,7 +114,7 @@ function release(dir, { body, viewFail = false } = {}) {
       FAKE_GH_ARGV_LOG_FILE: log,
       ...(body !== undefined ? { FAKE_GH_VIEW_BODY: body } : {}),
       ...(viewFail ? { FAKE_GH_VIEW_FAIL: '1' } : {}),
-      FAKE_GH_VIEW_LABELS: JSON.stringify(['status:in-progress', 'gate:plan', 'gate:e2e']),
+      FAKE_GH_VIEW_LABELS: JSON.stringify(labels || ['status:in-progress', 'gate:plan', 'gate:e2e']),
     },
   })
   return { ...r, argv: existsSync(log) ? readFileSync(log, 'utf8') : '' }
@@ -165,6 +165,18 @@ describe('--release: correspondencia entre el run y el issue', () => {
       const r = release(dir, { body: cuerpo([]) })
       expect(r.status).toBe(0)
       expect(r.stderr).toMatch(/aviso:/)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  // Las dos anteriores comparten la MISMA fixture de labels (siempre trae
+  // "gate:e2e"), así que "sin label Y sin sección" nunca se ejercitaba solo
+  // — el caso realmente silencioso: nada que verificar y nada que avisar.
+  it('sin label gate:e2e y sin sección → libera, sin aviso', () => {
+    const dir = repo({ e2eRuns: [] })
+    try {
+      const r = release(dir, { body: cuerpo([]), labels: ['status:in-progress', 'gate:plan'] })
+      expect(r.status).toBe(0)
+      expect(r.stderr).not.toMatch(/aviso:/)
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 

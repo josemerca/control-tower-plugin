@@ -48,7 +48,7 @@ describe('columna E2E', () => {
 
   it('la columna ausente NO produce aviso de columna opcional', () => {
     const res = analyzeSlicesTable(table('', ''))
-    expect(res.missingOptionalColumns || []).not.toContain('E2E')
+    expect(res.missingOptionalColumns).not.toContain('E2E')
   })
 
   // e2eColumnPresent: expuesto porque NO es derivable de las celdas (una

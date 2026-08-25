@@ -60,7 +60,14 @@ var LOOP_ARTIFACT_PATTERNS = [
   // escritura a propósito: al revés, el primer slice que la produzca sale rojo
   // por un fichero del loop y quien lea el gate no podrá distinguir si el rojo
   // lo puso el agente o la maquinaria.
-  "docs/superpowers/metrics/**"
+  "docs/superpowers/metrics/**",
+  // `ct-step e2e` ESCRIBE aquí el informe de la travesía y lo stagea, así que
+  // viaja en el commit de la slice. Directorio PROPIO y no el «Registro de
+  // cierre» del spec a propósito: esa exención (specs/**, arriba) es el agujero
+  // por el que, en el incidente del despacho 1, un agente metió parte de su
+  // autorización falsa — y meter por ahí justo la evidencia de que algo se
+  // verificó es la peor combinación posible. Aquí no escribe nadie más.
+  "docs/superpowers/e2e/**"
 ];
 function normalizePath(p) {
   return String(p || "").replace(/^\.\//, "").replace(/^\/+/, "");

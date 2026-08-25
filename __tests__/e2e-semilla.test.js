@@ -38,9 +38,15 @@ describe('la semilla lleva los recorridos', () => {
 // Propiedad end-to-end (T9, el brief la pide explícitamente): la cadena
 // entera "celda del spec -> sección del issue -> .agent/SLICE.md ->
 // newRun({e2eRuns})" no tenía ningún test que la recorriera de un tirón.
-// Cualquiera de sus cuatro tramos (resolveE2e, buildIssueBody/mapGhIssue,
-// buildStateSeed, ct-step#newRun) puede renombrar su campo sin que ningún
-// test de unidad se entere — este es el que sí lo notaría.
+// Cualquiera de sus tres primeros tramos (resolveE2e, buildIssueBody/
+// mapGhIssue, buildStateSeed) puede renombrar su campo sin que ningún test de
+// unidad se entere — este es el que sí lo notaría.
+//
+// EL CUARTO TRAMO, OJO: el test de abajo llama a `newRun` DIRECTAMENTE con
+// `e2eRuns: meta.e2e` — comprueba que `newRun` acepta y guarda ese parámetro,
+// no que `ct-step.mjs` (línea 221, `newRun({ ..., e2eRuns: sliceMeta.e2e })`)
+// siga leyendo el campo correcto de `sliceMeta`. Un renombrado de ESA línea no
+// lo detectaría este test: haría falta ejecutar el binario, no la función.
 describe('cadena completa: celda del spec -> sección del issue -> SLICE.md -> newRun (T9, propiedad end-to-end)', () => {
   it('un recorrido con coma escapada en el spec sobrevive el viaje entero hasta run.e2eRuns', () => {
     // 1. La celda cruda del spec, con una coma ESCAPADA dentro del propio

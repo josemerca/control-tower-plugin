@@ -389,8 +389,16 @@ export function readE2eReport(structured, declaredRuns) {
     if (!vistos.has(e)) problemas.push(`el informe trae una entrada que esta slice no declara: "${colapsa(e && e.run)}"`)
   }
   // EL ROJO GANA AL MAL FORMADO: ver el test homónimo.
+  //
+  // `why` se OMITE aquí cuando no hay problemas — no se pone a `null` — para
+  // no divergir de `readVerdict`/`readReport`, que en su camino feliz tampoco
+  // llevan la clave `why`. Poner `null` explícito habría sido un tercer valor
+  // sin motivo: el llamante (`ct-step.mjs#verboE2e`) ya normaliza con
+  // `why || null`, así que omitirla no cambia ningún comportamiento.
   if (buenos.some((e) => e.verdict === 'rojo')) {
-    return { outcome: OUTCOMES.FAILED, runs: buenos, why: problemas.length ? problemas.join('; ') : null }
+    return problemas.length
+      ? { outcome: OUTCOMES.FAILED, runs: buenos, why: problemas.join('; ') }
+      : { outcome: OUTCOMES.FAILED, runs: buenos }
   }
   if (problemas.length) return { outcome: OUTCOMES.DISCARDED, why: problemas.join('; ') }
   return { outcome: OUTCOMES.DONE, runs: buenos }
