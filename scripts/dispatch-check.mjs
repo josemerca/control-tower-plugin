@@ -394,10 +394,75 @@ function setStatus(issue, from, to) {
 // nada: debe caer al fallback, y eso solo puede decidirse ANTES de elegir qué
 // devolver. El rev-parse de los consumidores se queda: sigue cubriendo la
 // cadena de fallback y es el que ancla el caso "base === HEAD".
+// RE_40HEX ya NO es la barandilla de `base:` (slice 9a, más abajo): su único
+// consumidor es el contrato del campo `base_sha:`, que SÍ es un 40-hex
+// sembrado por kickoff.js y nunca un nombre de ref — ver su comentario en el
+// cuerpo de sliceBaseRef.
 const RE_40HEX = /^[0-9a-f]{40}$/i
 // --release consulta la base DOS veces (limpieza F22 + plan F-jjponz-1); el
-// aviso de abajo sale UNA por proceso, no una por consulta.
+// aviso de más abajo sale UNA por proceso, no una por consulta.
 let avisoBaseEsShaEmitido = false
+// El SEGUNDO candado, y es de COSTE, no de ruido: `avisoBaseEsShaEmitido`
+// solo se levanta cuando el aviso SE EMITE, así que en el caso normal
+// (`base:` es una rama de verdad y no hay nada que avisar) se queda en false
+// para siempre y la sonda de `baseNoEsUnaRama` se pagaría OTRA VEZ en la
+// segunda consulta. Con esto, la sonda se paga una vez por valor de `base:`
+// por proceso — y `base:` sale del mismo fichero en las dos consultas.
+let baseFormaProbada = null
+
+// ============================================================================
+// Slice 9(a) — LA BARANDILLA DEJA DE CONTAR CARACTERES.
+//
+// La versión del slice 2 exigía los 40 hex. Un agente que "arregle" el campo
+// con `git rev-parse --short HEAD` mete 7-12 hex: rompe `gh pr create --base`
+// EXACTAMENTE igual (exige un nombre de rama), pero el diff sale bien (git
+// resuelve el sha corto como cualquier otra ref) y la barandilla callaba. Un
+// tag, un `HEAD~1` o un `origin/main` en ese campo rompen lo mismo y también
+// callaban.
+//
+// La distinción real no es la longitud, es la NATURALEZA del valor: `base:` es
+// el nombre de rama del que sale el `--base` de `gh pr create`. Así que se
+// pregunta lo que importa, en este orden (que además es el orden más BARATO —
+// el caso normal cuesta UN rev-parse):
+//
+//   1. ¿existe `refs/heads/<base>`?           → es una rama local: CALLA.
+//   2. ¿existe `refs/remotes/origin/<base>`?  → es una rama del remoto que
+//      este clon nunca ha checkouteado (base `develop` en un clon que solo
+//      tiene `main`): es un nombre de rama LEGÍTIMO, CALLA. Esta sonda es
+//      defensiva y no es la que salva ese caso: `develop^{commit}` tampoco
+//      resuelve una rama solo-remota (git busca `refs/remotes/develop`, no
+//      `refs/remotes/origin/develop`), así que el paso 4 ya callaría. Lo que
+//      la sonda añade es decir la verdad en el camino, en vez de callar por
+//      no haber encontrado nada. El remoto se llama `origin` a pelo porque
+//      todo el dispatcher ya lo hace: el worktree se corta de
+//      `origin/<base>` (ct-next.mjs:3506) y la cadena de fallback de aquí
+//      abajo nombra `origin/HEAD` y `origin/main`.
+//   3. ¿resuelve `<base>^{commit}`?           → no es una rama y SÍ es un
+//      commit: sha (completo o corto), tag, `HEAD`, `origin/main`… → AVISA.
+//   4. si tampoco resuelve → CALLA. No es una rama ni un commit: esa avería
+//      la nombran ya los dos consumidores con su propia voz y su propio exit
+//      ("no se pudo resolver `<base>` o HEAD a un commit", exit 5/6), que es
+//      más preciso que este aviso. Duplicarla aquí sería ruido.
+//
+// Prefijar `refs/heads/`/`refs/remotes/origin/` no es decorativo: hace que el
+// argumento no pueda empezar por `-` y ser leído por git como una opción.
+// Cualquier fallo (git ausente, cwd fuera de un repo, .git ilegible) se lee
+// como "no lo pude comprobar" y CALLA: esto es un diagnóstico, nunca aborta
+// nada — el reparto de F16/H2.
+// ============================================================================
+function refResuelve(ref) {
+  try {
+    execFileSync('git', ['rev-parse', '--verify', '--quiet', ref], { stdio: 'ignore' })
+    return true
+  } catch { return false }
+}
+
+function baseNoEsUnaRama(base) {
+  if (refResuelve(`refs/heads/${base}`)) return false
+  if (refResuelve(`refs/remotes/origin/${base}`)) return false
+  return refResuelve(`${base}^{commit}`)
+}
+
 function sliceBaseRef() {
   try {
     const seed = readFileSync(join(process.cwd(), SLICE_REL_PATH), 'utf8')
@@ -409,9 +474,13 @@ function sliceBaseRef() {
     // la avería está en el OTRO consumidor del campo: `gh pr create --base`
     // exige un nombre de rama y fallará al cerrar el slice. Aviso por stderr
     // (diagnóstico, no producto — el reparto de F16/H2 de arriba).
-    if (RE_40HEX.test(base) && !avisoBaseEsShaEmitido) {
-      avisoBaseEsShaEmitido = true
-      errLine(`AVISO: el campo \`base:\` de ${SLICE_REL_PATH} es un SHA (${base.slice(0, 12)}…), no un nombre de rama. Eso ROMPE el \`gh pr create --base\` del cierre del slice (exige un nombre de rama), y no arregla el diff: para medir contra el corte real ya existe \`base_sha:\`, que este check prefiere solo. Devuelve \`base:\` al nombre de la rama del PR (p. ej. \`main\`).`)
+    if (base && !avisoBaseEsShaEmitido && baseFormaProbada !== base) {
+      baseFormaProbada = base
+      if (baseNoEsUnaRama(base)) {
+        avisoBaseEsShaEmitido = true
+        const visible = base.length > 40 ? `${base.slice(0, 40)}…` : base
+        errLine(`AVISO: el campo \`base:\` de ${SLICE_REL_PATH} (\`${visible}\`) NO es un nombre de rama: no existe ni como \`refs/heads/\` ni como \`refs/remotes/origin/\`, y sin embargo resuelve a un commit — un SHA (completo o abreviado), un tag, o una ref como \`origin/main\`. Eso ROMPE el \`gh pr create --base\` del cierre del slice (exige un nombre de rama), y no arregla el diff: para medir contra el corte real ya existe \`base_sha:\`, que este check prefiere solo. Devuelve \`base:\` al nombre de la rama del PR (p. ej. \`main\`).`)
+      }
     }
     const s = seed.match(/^base_sha:[ \t]*(.+)$/m)
     if (s) {

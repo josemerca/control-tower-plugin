@@ -739,3 +739,47 @@ describe('dispatch-check --release — la base del diff es el corte real (slice 
     rmSync(dir, { recursive: true, force: true })
   })
 })
+
+// Slice 9(a) — la barandilla mira la NATURALEZA de `base:`, no su longitud.
+// El slice 2 exigía 40 hex; un `git rev-parse --short HEAD` metía 7-12 y
+// rompía `gh pr create --base` igual, en silencio.
+describe('dispatch-check --release — la barandilla de `base:` no cuenta caracteres (slice 9)', () => {
+  it('un `base:` con un SHA CORTO (10 hex) avisa igual que el de 40', () => {
+    const { dir } = mkStaleMainRepo({ sliceMd: (cut) => `---\ntask: slice\nbase: ${cut.slice(0, 10)}\nbase_sha: ${cut}\n---\n# s\n` })
+    const r = releaseStale(dir)
+    expect(r.status).toBe(0)               // avisa, no aborta (igual que el de 40)
+    expect(r.stderr).toContain('gh pr create')
+    expect(r.stderr).toContain('base_sha:')
+    expect(r.stderr.match(/AVISO:/g)).toHaveLength(1)   // dos consultas, un aviso
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('`base: main` — una rama de verdad de este clon — NO avisa', () => {
+    const { dir } = mkStaleMainRepo({ sliceMd: (cut) => `---\ntask: slice\nbase: main\nbase_sha: ${cut}\n---\n# s\n` })
+    const r = releaseStale(dir)
+    expect(r.status).toBe(0)
+    expect(r.stderr).not.toContain('AVISO:')  // `AVISO:` sale UNA sola vez en todo dispatch-check
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('una rama que solo existe en `refs/remotes/origin/` (nunca checkouteada aquí) NO avisa', () => {
+    // El falso positivo que la sonda de refs/remotes existe para evitar: un
+    // clon que solo tiene `main` en local y despacha con --base develop. El
+    // ref remoto se fabrica con `update-ref` (no hace falta remote ni red:
+    // un ref es un fichero).
+    const { dir, cutSha } = mkStaleMainRepo({ sliceMd: (cut) => `---\ntask: slice\nbase: develop\nbase_sha: ${cut}\n---\n# s\n` })
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/develop', cutSha], { cwd: dir })
+    const r = releaseStale(dir)
+    expect(r.status).toBe(0)
+    expect(r.stderr).not.toContain('AVISO:')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('un `base:` que no es rama NI resuelve a un commit (un typo) NO avisa: esa avería tiene otra voz', () => {
+    const { dir } = mkStaleMainRepo({ sliceMd: (cut) => `---\ntask: slice\nbase: mian\nbase_sha: ${cut}\n---\n# s\n` })
+    const r = releaseStale(dir)
+    expect(r.status).toBe(0)
+    expect(r.stderr).not.toContain('AVISO:')
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
