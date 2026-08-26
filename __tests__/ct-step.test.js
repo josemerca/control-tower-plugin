@@ -9,13 +9,14 @@
 // declarado, un veto no deja rastro) no existen si git es un doble.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { spawnSync, execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, cpSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { deliveredRun } from '../scripts/run-machine.js'
 import { VERDICT_RULES, SLICE_VERDICT_RULES } from '../scripts/step-contracts.js'
+import { CONVENTIONS_FILES } from '../scripts/vara-ct.js'
 // Slice 10: renderState siembra el SLICE.md de los tests de señal por el
 // mismo camino que buildStateSeed (pliega/entrecomilla los valores largos —
 // la razón de que ct-step lea `senal:` con parseStateSafe y no con regex), y
@@ -26,6 +27,7 @@ import { SENAL_AUSENTE } from '../scripts/kickoff.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(here, '..', 'scripts', 'ct-step.mjs')
+const PLUGIN_ROOT_TEST = join(dirname(fileURLToPath(import.meta.url)), '..')
 const F = '```'
 
 // El §8 va aparte para que los tests de la fase global puedan sustituirlo de
@@ -887,6 +889,70 @@ describe('la vara del repo viaja en el brief, sin agente en medio', () => {
     ct('next')
     const brief = readFileSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'), 'utf8')
     expect(brief).not.toMatch(/leída directo de/)
+  })
+})
+
+// La vara la dicta ct (docs/superpowers/specs/2026-08-26-la-vara-la-dicta-ct-design.md).
+// La vara de ct viaja SIEMPRE, va DELANTE de la del repo —su cabecera fija la
+// precedencia y hay que leerla antes de que llegue la vara sobre la que decide— y
+// que falte es una instalación rota, no un estado del repo: se aborta.
+describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
+  const briefDeLaUno = () => readFileSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'), 'utf8')
+
+  it('el brief termina con los cuatro documentos, DETRÁS de la tarea', () => {
+    ct('next')
+    const brief = briefDeLaUno()
+    expect(brief).toMatch(/\*\*La vara de ct\*\*/)
+    for (const nombre of CONVENTIONS_FILES) {
+      expect(brief).toContain(`## Vara de ct: conventions/${nombre}`)
+    }
+    expect(brief.indexOf('Task 1')).toBeLessThan(brief.indexOf('La vara de ct'))
+  })
+
+  it('pega el contenido real de los documentos, no un resumen', () => {
+    ct('next')
+    const codeMd = readFileSync(join(PLUGIN_ROOT_TEST, 'conventions', 'code.md'), 'utf8')
+    expect(briefDeLaUno()).toContain(codeMd.trim())
+  })
+
+  it('con declaración del repo, la de ct va PRIMERO', () => {
+    mkdirSync(join(repo, '.agent'), { recursive: true })
+    writeFileSync(join(repo, '.agent', 'conventions.md'), '# La vara del repo\n\n- `AGENTS.md`\n')
+    ct('next')
+    const brief = briefDeLaUno()
+    expect(brief.indexOf('La vara de ct')).toBeLessThan(brief.indexOf('leída directo de `.agent/conventions.md`'))
+  })
+
+  it('sin declaración del repo, la de ct viaja igual: son dos varas independientes', () => {
+    ct('next')
+    const brief = briefDeLaUno()
+    expect(brief).toContain('## Vara de ct: conventions/code.md')
+    expect(brief).not.toMatch(/leída directo de `\.agent\/conventions\.md`/)
+  })
+
+  it('sin el directorio de la vara, aborta nombrando lo que falta y no entrega brief', () => {
+    // Un plugin FALSO: se copian `scripts/` y `skills/` y se omite `conventions/`,
+    // que es exactamente el estado de una instalación rota. `PLUGIN_ROOT` sale de
+    // la ubicación del propio script, así que copiarlo es la única forma de moverlo.
+    const fake = mkdtempSync(join(tmpdir(), 'ct-plugin-roto-'))
+    cpSync(join(PLUGIN_ROOT_TEST, 'scripts'), join(fake, 'scripts'), { recursive: true })
+    cpSync(join(PLUGIN_ROOT_TEST, 'skills'), join(fake, 'skills'), { recursive: true })
+    // `scripts/state.js` importa el paquete npm `yaml`. Copiado fuera del repo
+    // (aquí, bajo tmpdir()), la resolución de módulos ESM no encuentra
+    // `node_modules/yaml` subiendo directorios y el proceso muere con
+    // MODULE_NOT_FOUND (exit 1) antes de llegar a la comprobación de la vara.
+    // El mismo problema ya lo resuelve `ct-next-claim.test.js` con un symlink
+    // a `node_modules` en vez de copiar el repo entero.
+    symlinkSync(join(PLUGIN_ROOT_TEST, 'node_modules'), join(fake, 'node_modules'), 'dir')
+    const r = spawnSync('node', [join(fake, 'scripts', 'ct-step.mjs'), 'next', '--plan', 'plan.md', '--issue', '7'], {
+      cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, CLAUDE_CONFIG_DIR: join(repo, '.telemetria') },
+    })
+    expect(r.status).toBe(8)
+    expect(r.stderr).toMatch(/code\.md/)
+    expect(r.stderr).toMatch(/instalación/)
+    expect(existsSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'))).toBe(false)
+    rmSync(fake, { recursive: true, force: true })
   })
 })
 
