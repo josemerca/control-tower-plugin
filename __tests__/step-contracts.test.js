@@ -573,6 +573,58 @@ describe('el juez de slice (§3.7-B)', () => {
     expect(msg).toContain('Co-Authored-By: Claude <noreply@anthropic.com>')
     expect(findClosingKeywords(msg)).toEqual([])
   })
+
+  // El ítem `observabilidad` aislado — misma regex con la que vara.test.js
+  // aísla el ítem 5 del juez de tarea: el encabezado exacto hasta el siguiente
+  // `###` o `##` (aquí, `## What you do not judge`).
+  const itemObservabilidad = () => {
+    const texto = readFileSync(AGENTE_JUEZ_DE_SLICE, 'utf8')
+    const m = /^### 3\. `observabilidad`[\s\S]*?(?=^### |^## )/m.exec(texto)
+    return m ? m[0] : ''
+  }
+
+  // El hallazgo MEDIO del review de la PR #36: la frase del contrato la leía un
+  // humano en el groom y nadie más. Esto ata la mitad que faltaba — el criterio
+  // se mide en tiempo de juicio, y con las palabras del contrato.
+  it('el ítem observabilidad mide la señal redundante con la regla del contrato', () => {
+    const item = itemObservabilidad()
+    expect(item).not.toBe('')
+    const norm = item.replace(/\s+/g, ' ')
+    expect(norm).toContain('se puede comprobar corriendo los tests, es un criterio de aceptación, no una señal')
+    expect(norm).toContain('`señal redundante`')
+    // Las dos condiciones del disparo, las dos dentro del ítem: el test del
+    // diff acumulado, y que la celda no nombre nada que se lea en producción.
+    expect(norm).toMatch(/test of the accumulated diff/)
+    expect(norm).toMatch(/no metric, no log line, no event/)
+  })
+
+  // El número que el ítem promete tiene que cuadrar con lo que lista. Si alguien
+  // añade un cuarto check bloqueante, este test cae y le obliga a actualizar la
+  // promesa — que es lo que no pasó con «three checks» cuando entró la frase.
+  it('el ítem promete tres checks y lista tres: el smell no es un cuarto bullet', () => {
+    const item = itemObservabilidad()
+    expect(item.match(/^- \*\*/gm)).toHaveLength(3)
+    const norm = item.replace(/\s+/g, ' ')
+    expect(norm).toContain('three checks, and only these three')
+    expect(norm).toContain('one smell')
+  })
+
+  // El vocabulario NO crece: es un finding, no un outcome nuevo. Un `low` que
+  // se convirtiera en «redundante» rompería el enum cerrado del esquema y con
+  // él `rubric_sin_vara`, que es lo único que hoy dice si hubo vara.
+  it('la señal redundante es un finding, no un outcome nuevo: el ítem sigue conforme', () => {
+    expect(itemObservabilidad().replace(/\s+/g, ' ')).toContain('still `conforme`')
+    expect(SLICE_VERDICT_SCHEMA.properties.rubric.items.properties.outcome.enum).toBe(RUBRIC_OUTCOMES)
+    for (const valor of RUBRIC_OUTCOMES) expect(itemObservabilidad()).toContain(valor)
+  })
+
+  // La calibración de severidades del ítem nombra el caso: un juez que sólo lea
+  // ese párrafo no puede convertirlo en un veto ni en un round trip pagado.
+  it('la severidad del smell vive también en «Severity, decided here»', () => {
+    const sev = /\*\*Severity, decided here:\*\*[\s\S]*?(?=\n\n)/.exec(itemObservabilidad())
+    expect(sev).not.toBeNull()
+    expect(sev[0].replace(/\s+/g, ' ')).toContain('restated an acceptance criterion is `low`')
+  })
 })
 
 describe('el veredicto', () => {

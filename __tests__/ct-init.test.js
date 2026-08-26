@@ -438,6 +438,42 @@ describe('ct-init.sh', () => {
     const groom = readFileSync(join(root, 'commands', 'ct-groom.md'), 'utf8')
     expect(groom).toMatch(/no es un criterio de aceptación más/i)
     expect(groom).toContain('`estado-final`')
+    // Slice 7: y el JUEZ mide con la MISMA regla, con las mismas palabras. El
+    // hueco del Slice 4 fue justo éste: la frase entró en los dos documentos y
+    // `git diff main...HEAD -- agents/` salió vacío, así que una señal calcada
+    // de los AC seguía satisfaciendo los tres checks del ítem. Normalizado
+    // porque el bullet del contrato va envuelto a ~72 columnas.
+    const norm = (s) => s.replace(/\s+/g, ' ')
+    const REGLA = 'se puede comprobar corriendo los tests, es un criterio de aceptación, no una señal'
+    expect(norm(agents)).toContain(REGLA)
+    expect(norm(groom)).toContain(REGLA)
+    const juez = readFileSync(join(root, 'agents', 'ct-slice-judge.md'), 'utf8')
+    expect(norm(juez)).toContain(REGLA)
+    // El token con el que la telemetría/`grep` distingue este low de los demás
+    // lows del ítem, en los dos textos que lo prometen.
+    expect(norm(juez)).toContain('`señal redundante`')
+    expect(norm(groom)).toContain('`señal redundante`')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // Slice 7: el ítem `observabilidad` cita la regla del contrato entre « », y
+  // esa cita tiene que ser LITERAL. Mismo patrón que kickoff.test.js usa con
+  // «it opens with `(sin señal declarada`»: se extrae la cita DEL FICHERO DEL
+  // AGENTE y se comprueba contra la fuente, para que el criterio del groom y el
+  // criterio del juicio no puedan derivar cada uno por su lado.
+  it('la cita del juez de slice es literalmente la regla del contrato', () => {
+    const norm = (s) => s.replace(/\s+/g, ' ')
+    const juez = readFileSync(join(root, 'agents', 'ct-slice-judge.md'), 'utf8')
+    const cita = /«([^»]+)»/.exec(juez)
+    expect(cita).not.toBeNull()
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const bloque = extractBlock(readFileSync(join(dir, 'AGENTS.md'), 'utf8'))
+    // Las DOS normalizadas: la cita del agente va envuelta a ~73 columnas y el
+    // bullet del contrato a ~72, así que ninguna de las dos contiene a la otra
+    // sin colapsar los saltos de línea. (Verificado: sin normalizar `cita[1]`,
+    // este test falla.)
+    expect(norm(bloque)).toContain(norm(cita[1]))
     rmSync(dir, { recursive: true, force: true })
   })
 
