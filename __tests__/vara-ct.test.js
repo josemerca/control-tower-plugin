@@ -165,3 +165,99 @@ describe('la vara del repo sigue en pie', () => {
     expect(typeof vara.seccionDeVara).toBe('function')
   })
 })
+
+describe('el ítem `patrones` mide las dos varas', () => {
+  const item = () => {
+    const texto = readFileSync(join(root, 'agents', 'ct-judge.md'), 'utf8')
+    return /^### 5\. `patrones`[\s\S]*?(?=^### |^## )/m.exec(texto)[0]
+  }
+
+  it('nombra las dos: la de ct y la declaración del repo', () => {
+    expect(item()).toContain('conventions/')
+    expect(item()).toContain('.agent/conventions.md')
+  })
+
+  it('dice que la precedencia se mide regla a regla, no por tema', () => {
+    expect(item()).toMatch(/rule by rule/i)
+  })
+
+  it('dice que una regla del repo de la que ct no habla obliga: no anula al repo', () => {
+    expect(item()).toMatch(/binds/i)
+  })
+
+  it('declara que ya no puede salir `sin-vara`, en vez de ofrecerlo como salida', () => {
+    // El texto TIENE que nombrar `sin-vara` para decir que no aplica aquí, así
+    // que un `not.toContain` sería siempre rojo. Lo que se mide es la frase.
+    expect(item()).toMatch(/never `sin-vara`/)
+    expect(item()).not.toMatch(/count the item `sin-vara`/)
+  })
+
+  it('conserva `no-aplica` para un diff sin código que comparar', () => {
+    expect(item()).toContain('no-aplica')
+  })
+
+  it('nombra los cuatro documentos y manda citar regla y ruta', () => {
+    for (const nombre of CONVENTIONS_FILES) expect(item()).toContain(nombre)
+    expect(item()).toContain('evidence')
+  })
+
+  it('cierra el agujero del módulo viejo con la misma frase que el documento', () => {
+    expect(item()).toContain('a new concept is a new module')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Ties: la lista no puede divergir de los textos que la enseñan.
+// ---------------------------------------------------------------------------
+describe('los textos que enseñan la vara de ct la nombran', () => {
+  const leer = (...partes) => readFileSync(join(root, ...partes), 'utf8')
+
+  it('scripts/ct-step.mjs es quien la lee del disco', () => {
+    expect(leer('scripts', 'ct-step.mjs')).toContain('vara-ct.js')
+  })
+
+  it('scripts/kickoff.js la nombra en el primer acto del slice', () => {
+    expect(leer('scripts', 'kickoff.js')).toContain(CONVENTIONS_DIR)
+  })
+
+  it('prompts/task-implementer.md la nombra', () => {
+    expect(leer('prompts', 'task-implementer.md')).toContain(`${CONVENTIONS_DIR}/`)
+  })
+
+  it('skills/writing-plans-prescriptive/SKILL.md la nombra', () => {
+    expect(leer('skills', 'writing-plans-prescriptive', 'SKILL.md')).toContain(`${CONVENTIONS_DIR}/`)
+  })
+
+  it('agents/ct-judge.md la nombra DENTRO del ítem `patrones`', () => {
+    const texto = leer('agents', 'ct-judge.md')
+    const m = /^### 5\. `patrones`[\s\S]*?(?=^### |^## )/m.exec(texto)
+    expect(m).not.toBeNull()
+    expect(m[0]).toContain(`${CONVENTIONS_DIR}/`)
+  })
+})
+
+describe('el implementador y el juez leen el mismo texto', () => {
+  const leerDos = () => [
+    readFileSync(join(root, 'prompts', 'task-implementer.md'), 'utf8'),
+    readFileSync(join(root, 'agents', 'ct-judge.md'), 'utf8'),
+  ]
+
+  it('los dos nombran los cuatro documentos de ct', () => {
+    for (const texto of leerDos()) {
+      for (const nombre of CONVENTIONS_FILES) expect(texto).toContain(nombre)
+    }
+  })
+
+  it('los dos siguen nombrando la declaración del repo: son dos varas', () => {
+    for (const texto of leerDos()) expect(texto).toContain('.agent/conventions.md')
+  })
+
+  it('los dos llevan ENTERA la frase que cierra la exención del módulo viejo', () => {
+    // Sin cortarla por un salto de línea: es carga estructural, la cita
+    // `conventions/architecture.md` con esas palabras, y una de las dos rúbricas
+    // que la parta deja al implementador y al juez leyendo cosas distintas.
+    for (const texto of leerDos()) {
+      expect(texto).toContain('a new concept is a new module and is born conforming')
+    }
+  })
+})

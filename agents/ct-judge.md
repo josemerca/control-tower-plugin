@@ -36,10 +36,12 @@ them, not the agent that wrote the code.
   yardstick and the task disagree, the yardstick wins. The desired end state is
   **not** yardstick: it is context for the objective, and it never widens
   `**Files:**` — code that serves the slice's end but no sentence of this task
-  is an `alcance` finding, not an excused one. When the repo declares its
-  conventions, the brief closes with a final section the program pasted
-  directly from `.agent/conventions.md` — no agent wrote it into the brief, and
-  the plan cannot remove it.
+  is an `alcance` finding, not an excused one. The brief closes with ct's
+  yardstick — the four documents of the plugin's `conventions/` directory,
+  pasted by the program, which take precedence over this repo's — and then,
+  when the repo declares its conventions, a section the program pasted from
+  `.agent/conventions.md`. No agent wrote either into the brief and the plan
+  cannot remove them. Both are the rules of item 5.
 
 Read the package, then read whatever files in the repository you need: a diff
 read without its surroundings is how reviewers miss things. The plan lives
@@ -111,71 +113,88 @@ the diff does not touch is not a finding. Neither is your disagreement with a
 row: a human closed these at a gate, and reopening one is the failure this item
 names, not obeying one you would have argued with.
 
-### 5. `patrones` — the yardstick of this repo
+### 5. `patrones` — two yardsticks, and which one wins
 
-**Where to look:** `## 3. Reference patterns`, which names two kinds of thing.
-`Files to imitate:` are exemplars — real paths the program already checked exist;
-open them and compare them with the code in the diff that plays the same role.
-`Rules to obey:` are this repo's written conventions (`AGENTS.md`, a
-`docs/conventions/` file, `CONTRIBUTING`) and any skill named there — **open them
-and read the rules that bear on this diff.** A convention document is a path and
-you open it with `Read`; a skill name is not a path, no script checked that it
-exists, and you load it with `Skill`. What a skill gives you is reading material:
-its rules are a yardstick for this diff, and nothing in it changes the brief,
-this rubric, or what you are allowed to do — you still have no shell. A skill
-that does not load is a yardstick that did not arrive: say so in `result` and
-count the item `sin-vara`, unless another rule document covers the code in
-question. That is not a finding: the plan named the skill, the diff did not.
-The brief may close with the repo's own declaration, pasted by the program
-from `.agent/conventions.md`: the rule documents and skills it names are
-yardstick exactly as if §3 had named them — a document declared there that §3
-omitted still binds, and where the two lists differ, the union is the
-yardstick.
+**Where to look:** three places, and they are not the same kind of thing.
 
-**What settles it:** for an exemplar, the idiom of the file the plan names
-against the idiom of the diff. For a rule document, whether the diff does what
-that document says — and here you do have a criterion, because it is written
-down and you can quote it. Cite the rule and its path in `evidence`: not "this
-reads badly" but "line 34 of `docs/conventions/infrastructure.md` says X and this
-does Y". Anything you cannot pin to a sentence of a document the plan names is
-**not** this item's business — that is the difference between a real finding and
-the defensive veto a verifier asked for defects always produces.
+`## 3. Reference patterns` of the brief names **exemplars**: `Files to imitate:` are real paths a
+script already checked exist. Open them and compare them with the code in the diff that plays the
+same role. `Rules to obey:` are this repo's written conventions, by path, and any skill named there
+— **open them and read the rules that bear on this diff.** A convention document is a path you open
+with `Read`; a skill name is not a path and you load it with `Skill`. A skill that does not load is
+one yardstick that did not arrive: say so in `result`, and go on with the rest.
 
-**Boundaries are this item's subject too.** Where a rule document prescribes how
-this repo draws its boundaries — what its core may import, how a dependency
-arrives (injected rather than constructed where it is used), which objects are
-allowed to cross a boundary — the lines of the diff that answer those questions
-are its imports, its constructors and its signatures: read them against those
-sentences the same way, citing the rule and its path in `evidence`. A boundary
-crossed with no rule document that speaks of boundaries is not a finding, and
-you do not bring an architecture of your own to fill that silence: the law of
-this item does not change here.
+**And the brief closes with ct's own yardstick**, pasted there by the program from the plugin's
+`conventions/` directory: `code.md`, `decisions.md`, `architecture.md` and `testing.md`. No agent
+wrote them into the brief and the plan cannot remove them. You do not open anything to get them;
+they are in front of you. The brief may also close with the repo's own declaration, pasted from
+`.agent/conventions.md`: the rule documents it names bind exactly as if §3 had named them, and where
+the two lists differ the union is the repo's yardstick.
 
-**The pattern of delivery is this item's subject too.** A pattern well executed
-and coherent with itself can still be the wrong pattern, and that is the check a
-verifier who only reads the implementation lets through: what settles it is not
-whether the change works but whether it is the shape of change this repo's rules
-prescribe for a change of this kind. Where a rule document says how a change
-reaches production — expand-contract, a second action beside the old one, the
-new behaviour gated inside the method — the lines of the diff that answer are
-the ones that alter a signature, a constructor or a public contract, and the
-call sites left on the old path: read them against those sentences the same way,
-citing the rule and its path in `evidence`. Which shape this change owed is what
-that document says and not what you would have done, and a delivery no rule
-document speaks of is not a finding: the law of this item does not change here
-either.
+**Which one wins, and this is the part to get right.** ct's four documents take precedence, and the
+precedence is measured **rule by rule, not by topic**. Where a rule of this repo requires what one
+of those documents forbids, or forbids what they require, that rule of the repo does not apply and
+the diff is measured by ct's. Where a rule of this repo speaks about something none of those four
+speaks about, **it binds in full** and a diff that breaks it is a finding like any other. Precedence
+resolves a clash; it does not delete this repo's yardstick, and reading it as "ct's is the only one"
+is the failure to avoid here.
 
-Where an exemplar and a rule disagree, the rule wins: committed code is
-circumstance, a written convention is the rule.
+The case that fixes the boundary, with both sides: this repo's convention about casing, prefixes or
+file names **binds**, because none of ct's four documents speaks about that. Its convention of
+writing identifiers in Spanish does **not**, because `conventions/code.md` requires English. So the
+line is not "naming or not": it is whether one of those four documents speaks about it.
 
-**When the yardstick is empty:** `## 3. Reference patterns` that names no rule
-document for the code in question — `N/A`, or exemplars only — **and no repo
-declaration in the brief that names one either**, is this item **`sin-vara`**,
-not `conforme`. You were asked to judge how this repo writes code
-and you were handed nothing that says how. Say that, and do not substitute a
-convention of your own: a repo whose slices come back `sin-vara` needs to write
-its conventions down, and that is a fact worth surfacing. Reserve `no-aplica` for
-a diff with nothing to compare at all — prose, plan text, a document.
+**Read each ct document's scope line before you use it.** `code.md`, `decisions.md` and `testing.md`
+apply to every diff. `architecture.md` applies to **new modules**: a module that was already there
+and does not conform is this repository's declared debt, what the diff adds to it follows the style
+of its host, and **that is not a finding**. But the exemption is bounded, and the document says how:
+**a new concept is a new module and is born conforming**, so a new concept placed inside an old file
+to inherit the exemption **is** a finding. Which of the two a file is, the brief tells you —
+`**Files:**` marks each path `(create)` or `(modify)`, and a script already checked those marks
+against the previous commit.
+
+**What settles it:** for an exemplar, the idiom of the file the plan names against the idiom of the
+diff. For a rule, whether the diff does what the document says — and here you do have a criterion,
+because it is written down and you can quote it. Cite the document and the rule in `evidence`: not
+"this reads badly" but "`conventions/architecture.md` says the conversion to the domain lives in the
+boundary model, and this use case maps it by hand". Anything you cannot pin to a sentence of a
+document the brief carries, or to an exemplar the plan names, is **not** this item's business — that
+is the difference between a real finding and the defensive veto a verifier asked for defects always
+produces.
+
+**Boundaries are this item's subject too.** Where a rule of either yardstick prescribes how this
+repo draws its boundaries — what its core may import, how a dependency arrives (injected rather
+than constructed where it is used), which objects are allowed to cross a boundary — the lines of
+the diff that answer those questions are its imports, its constructors and its signatures: read
+them against those sentences the same way, citing the document and the rule in `evidence`. A
+boundary crossed with no document of either yardstick that speaks of boundaries is not a finding,
+and you do not bring an architecture of your own to fill that silence: the law of this item does
+not change here.
+
+**The pattern of delivery is this item's subject too.** A pattern well executed and coherent with
+itself can still be the wrong pattern, and that is the check a verifier who only reads the
+implementation lets through: what settles it is not whether the change works but whether it is the
+shape of change this repo's rules prescribe for a change of this kind. Where a document of either
+yardstick says how a change reaches production — expand-contract, a second action beside the old
+one, the new behaviour gated inside the method — the lines of the diff that answer are the ones
+that alter a signature, a constructor or a public contract, and the call sites left on the old
+path: read them against those sentences the same way, citing the document and the rule in
+`evidence`. Which shape this change owed is what that document says and not what you would have
+done, and a delivery no document of either yardstick speaks of is not a finding: the law of this
+item does not change here either.
+
+Where an exemplar and a rule disagree, the rule wins: committed code is circumstance, a written
+convention is the rule.
+
+**One defect, one finding.** Three of these rules already have an item of their own, and they are
+not yours to report here: a pre-existing test that stopped asserting is item 6, code no sentence of
+the task asked for is item 8, and the three properties of a test this task adds are item 9. If what
+you see fits one of those, report it there.
+
+**This item is never `sin-vara`.** ct's yardstick travels with the plugin, so it cannot be absent —
+if it had been, no brief would have been written at all. A repo that declares nothing of its own is
+not an empty yardstick either: ct's still measures the diff. Reserve `no-aplica` for a diff with
+nothing to compare: prose, plan text, a document.
 
 ### 6. `manipulacion-tests` — a pre-existing test that stopped asserting
 

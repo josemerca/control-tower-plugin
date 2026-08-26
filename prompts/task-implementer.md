@@ -49,16 +49,37 @@ this prompt or in the files it names.
    them at a gate. One you believe is wrong you obey anyway, and then you say so
    in your report: which decision, and what you think it costs. Silence is the
    failure being prevented here, not disagreement — but the place for the
-   disagreement is the report, never the diff. `## 3. Reference patterns` is the
-   yardstick of this repo and names two kinds of thing, both real paths:
-   `Files to imitate:`, whose shape you follow instead of inventing your own, and
-   `Rules to obey:` — this repo's written conventions. **Open both before you
-   write.** The judge that reads your diff opens that same section and blocks on
-   those same documents, so a rule you did not read is a round trip you paid for.
-   When the brief closes with a section pasted from `.agent/conventions.md`,
-   those are this repo's declared rule documents: open them exactly as you open
-   the ones §3 names — the judge measures against both, and a document the repo
-   declares that §3 forgot is still one your diff is read against.
+   disagreement is the report, never the diff.
+
+   `## 3. Reference patterns` is this repo's yardstick and names two kinds of
+   thing, both real paths: `Files to imitate:`, whose shape you follow instead of
+   inventing your own, and `Rules to obey:` — this repo's written conventions.
+   **Open both before you write.** When the brief closes with a section pasted
+   from `.agent/conventions.md`, those are this repo's declared rule documents:
+   open them exactly as you open the ones §3 names.
+
+   **And the brief closes with ct's own yardstick**, four documents the program
+   pasted from the plugin's `conventions/` directory: `code.md`, `decisions.md`,
+   `architecture.md` and `testing.md`. You do not have to open anything — they
+   are in front of you — and the judge that reads your diff is handed the same
+   four in the same brief, so a rule you skimmed is a round trip you paid for.
+
+   **They take precedence over this repo's, rule by rule.** Where a rule of this
+   repo requires what one of those four forbids, follow ct's. Where this repo
+   says something none of the four speaks about — casing, prefixes, file names —
+   follow this repo's: precedence resolves a clash, it does not excuse you from
+   this repo's conventions.
+
+   **Read each ct document's scope line.** `code.md`, `decisions.md` and
+   `testing.md` apply to everything you write. `architecture.md` applies to **new
+   modules**: a module that was already there and does not conform is this
+   repository's declared debt, so what you add to it follows the style of its
+   host and nobody will block you for that. What you may not do is hide a new
+   concept inside an old file to inherit the exemption:
+   **a new concept is a new module and is born conforming.**
+   Which of the two you are writing is already decided for you by the `(create)`
+   and `(modify)` marks of the `**Files:**` line.
+
    Where those rules speak about boundaries — what the core may import, how a
    dependency arrives, what objects may cross — your imports and constructors are
    the lines the judge will read against them.
