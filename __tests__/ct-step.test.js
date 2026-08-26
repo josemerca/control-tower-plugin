@@ -370,6 +370,21 @@ describe('la cola completa: commit → global → slice-verdict → e2e → DELI
     // el proceso siguiente cruce los commits sin descuadrarse.
     expect(estado().sliceCommits).toBe(1)
   })
+
+  it('un `git add` antes del e2e no entra en el commit del informe (slice 12)', () => {
+    sliceOk()
+    writeFileSync(join(repo, 'colado.txt'), 'nadie ha visto esto\n')
+    execFileSync('git', ['add', 'colado.txt'], { cwd: repo })
+    const r = ct('e2e', informeE2e())
+    expect(r.status).toBe(0)                      // el informe es válido: entrega
+    expect(estado().closed).toBe('delivered')
+    expect(r.stderr).toMatch(/ajenas a la maquinaria \(colado\.txt\)/)
+    expect(execFileSync('git', ['log', '--oneline', '--', 'colado.txt'], { cwd: repo, encoding: 'utf8' }).trim()).toBe('')
+    expect(log()).not.toMatch(/informe de e2e del issue #7/)
+    // El informe queda STAGEADO, como en el camino rojo: espera a quien lo comitee.
+    expect(execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: repo, encoding: 'utf8' }))
+      .toMatch(/docs\/superpowers\/e2e\/7\.md/)
+  })
 })
 
 describe('el veto no deja rastro que deshacer', () => {
@@ -1004,6 +1019,124 @@ describe('el veredicto se ata al paquete: el token content-addressed que el juez
   })
 })
 
+// Slice 12 — LA TERCERA VENTANA. Las dos igualdades del slice 11 miden el
+// instante del veredicto; del veredicto ACEPTADO al `commit` quedaba un hueco en
+// el que un `git add` metía código no revisado en el commit, con la fila de
+// telemetría afirmando el review_token del código que sí se revisó. Ahora el
+// veredicto aceptado SELLA el árbol del índice y `commit` exige encontrarlo igual.
+describe('lo que se comitea es lo que se aprobó: el sello del índice', () => {
+  it('EL ATAQUE: código re-stageado DESPUÉS del veredicto aceptado no entra en el commit', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    expect(juzgar(veredicto('PASS')).stdout).toMatch(/veredicto PASS/)
+    expect(estado().step).toBe('commit')
+    // LA TERCERA VENTANA: el veredicto ya está aceptado y su paquete consumido.
+    writeFileSync(join(repo, 'uno.txt'), 'uno, cambiado DESPUÉS del veredicto aceptado\n')
+    execFileSync('git', ['add', 'uno.txt'], { cwd: repo })
+    const r = ct('commit')
+    expect(r.status).toBe(8)
+    expect(r.stderr).toMatch(/el índice ya no es el que el juez aprobó/)
+    expect(commits()).toBe(1)                    // no se comitea NADA
+    expect(estado().step).toBe('commit')         // el run no avanza ni retrocede
+    expect(estado().task).toBe(1)
+    // Y sigue sin haber fila de `commit`: este fallo no la estrena.
+    expect(filasDeJuez('commit')).toHaveLength(0)
+  })
+
+  it('el mensaje trae el comando que devuelve el índice aprobado, y ese comando lo devuelve', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    juzgar(veredicto('PASS'))
+    writeFileSync(join(repo, 'uno.txt'), 'otra versión\n')
+    execFileSync('git', ['add', 'uno.txt'], { cwd: repo })
+    // El sha del mensaje sin acotar la longitud a 40: un repo con
+    // `extensions.objectFormat = sha256` da ids de 64, y el mecanismo es
+    // indiferente (compara cadenas). Lo que se fija es que el mensaje lleve EL
+    // sello, entero y sin truncar, porque hay que teclearlo.
+    const m = /git read-tree ([0-9a-f]+)/.exec(ct('commit').stderr)
+    expect(m).not.toBeNull()
+    expect(m[1]).toBe(estado().sealedTree)
+    execFileSync('git', ['read-tree', m[1]], { cwd: repo })
+    expect(ct('commit').status).toBe(0)
+    // Lo comiteado es lo que el juez leyó...
+    expect(execFileSync('git', ['show', 'HEAD:uno.txt'], { cwd: repo, encoding: 'utf8' })).toBe('uno\n')
+    // ...y el worktree conserva el trabajo que se colgó después: no se pierde.
+    expect(readFileSync(join(repo, 'uno.txt'), 'utf8')).toBe('otra versión\n')
+  })
+
+  it('el sello es el árbol del ÍNDICE al aceptar el veredicto, con el artefacto de la maquinaria dentro', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    juzgar(veredicto('PASS'))
+    // Medido desde fuera: el sello es exactamente el árbol del índice de ahora.
+    const arbol = execFileSync('git', ['write-tree'], { cwd: repo, encoding: 'utf8' }).trim()
+    expect(estado().sealedTree).toBe(arbol)
+    // Y el veredicto que viaja está DENTRO de ese árbol: sellar antes de su
+    // `git add` haría fallar todos los commits.
+    expect(execFileSync('git', ['ls-tree', '-r', '--name-only', arbol], { cwd: repo, encoding: 'utf8' }))
+      .toMatch(/docs\/superpowers\/verdicts\/issue-7-task-1\.json/)
+    expect(ct('commit').status).toBe(0)
+  })
+
+  it('un veredicto FORJADO y stageado en el hueco no viaja en la pull request', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    juzgar(veredicto('PASS'))
+    const rutaV = join(repo, 'docs', 'superpowers', 'verdicts', 'issue-7-task-1.json')
+    writeFileSync(rutaV, JSON.stringify({ issue: 7, task: 1, verdict: { ruling: 'PASS', findings: ['FORJADO'] } }))
+    execFileSync('git', ['add', '--', 'docs/superpowers/verdicts/issue-7-task-1.json'], { cwd: repo })
+    const r = ct('commit')
+    expect(r.status).toBe(8)
+    expect(r.stderr).toMatch(/el índice ya no es el que el juez aprobó/)
+    expect(commits()).toBe(1)
+  })
+
+  it('el camino feliz no cambia: el veredicto SIGUE viajando dentro del commit de su tarea', () => {
+    expect(tareaOk('uno.txt').status).toBe(0)
+    const enElCommit = execFileSync('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: repo, encoding: 'utf8' })
+    expect(enElCommit).toMatch(/docs\/superpowers\/verdicts\/issue-7-task-1\.json/)   // criterio de cierre de F37
+    expect(enElCommit).toMatch(/docs\/superpowers\/metrics\/issue-7\.jsonl/)
+    expect(enElCommit).toMatch(/uno\.txt/)
+    expect(estado().sealedTree).toMatch(/^[0-9a-f]{40,64}$/)   // sha1 o sha256: da igual
+    // Y la segunda tarea también, con su artefacto nuevo y la telemetría ya trackeada.
+    expect(tareaOk('dos.txt').status).toBe(0)
+    expect(commits()).toBe(3)
+    expect(execFileSync('git', ['show', 'HEAD:docs/superpowers/verdicts/issue-7-task-2.json'], { cwd: repo, encoding: 'utf8' }))
+      .toMatch(/"ruling": "PASS"/)
+  })
+
+  it('EL GEMELO DEL SLICE: código stageado antes del veredicto de slice no entra en su commit', () => {
+    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('global')
+    writeFileSync(join(repo, 'colado.txt'), 'nadie ha visto esto\n')
+    execFileSync('git', ['add', 'colado.txt'], { cwd: repo })
+    const r = juzgarSlice(veredictoDeSlice('PASS'))
+    expect(r.status).toBe(0)                      // el veredicto es válido: entrega
+    expect(estado().closed).toBe('delivered')
+    expect(r.stderr).toMatch(/ajenas a la maquinaria \(colado\.txt\)/)
+    expect(commits()).toBe(3)                     // base + 2 tareas: NINGÚN commit de veredicto
+    expect(log()).not.toMatch(/Veredicto del slice entero/)
+    expect(execFileSync('git', ['log', '--oneline', '--', 'colado.txt'], { cwd: repo, encoding: 'utf8' }).trim()).toBe('')
+    expect(estado().sliceCommits ?? 0).toBe(0)    // el commit que no ocurrió no se cuenta
+    // La evidencia se queda STAGEADA: sacar lo ajeno y comitearla es una línea.
+    expect(execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: repo, encoding: 'utf8' }))
+      .toMatch(/docs\/superpowers\/verdicts\/issue-7-slice\.json/)
+  })
+
+  it('un run sin sello en el estado no comitea: la ausencia no es un modo sin barandilla', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    juzgar(veredicto('PASS'))
+    // El run de una versión anterior del plugin: el campo no está. Se simula
+    // BORRÁNDOLO, que es también el atajo que un conductor con Bash tendría.
+    const s = estado(); delete s.sealedTree
+    writeFileSync(join(repo, '.agent', 'run-7.json'), JSON.stringify(s, null, 2) + '\n')
+    const r = ct('commit')
+    expect(r.status).toBe(8)
+    expect(r.stderr).toMatch(/no trae el sello del índice/)
+    expect(commits()).toBe(1)
+  })
+})
+
 describe('el plan y el entorno', () => {
   it('un plan cuya verificación es prosa sale por 6, y ni siquiera dice qué despachar', () => {
     writeFileSync(join(repo, 'plan.md'), PLAN.replace(/```bash\ntest -f uno\.txt\n```/, ''))
@@ -1476,7 +1609,7 @@ describe('el juicio del slice entero (§3.7-B)', () => {
     g('commit', '-q', '-m', 'siembra la senal del slice')
   }
 
-  it('el paquete de slice abre con "## Señal" y lleva el texto del campo senal: del SLICE.md', () => {
+  it('el paquete de slice trae "## Señal" como PRIMERA sección, con el texto del campo senal: del SLICE.md', () => {
     sembrarSenalEnSliceMd('métrica `backfill_progress` con label `estado`')
     enJuezDeSlice()
     ct('next')

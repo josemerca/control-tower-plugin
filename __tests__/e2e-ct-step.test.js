@@ -273,7 +273,12 @@ describe('ct-step e2e', () => {
     const dir = worktreeEnE2e({ e2eRuns: [], comiteaLaTarea: false })
     try {
       const run = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))
-      writeFileSync(join(dir, '.agent', 'run-4.json'), JSON.stringify({ ...run, step: 'commit' }))
+      // Slice 12: `commit` exige el sello que el veredicto deja al aceptarse, y
+      // este fixture siembra el estado a mano — así que también siembra el sello.
+      // Es el árbol del índice de AHORA, que es lo que ese commit se va a llevar:
+      // lo mismo que `verboVerdict` sella tras stagear el veredicto.
+      const sealedTree = execFileSync('git', ['write-tree'], { cwd: dir, encoding: 'utf8' }).trim()
+      writeFileSync(join(dir, '.agent', 'run-4.json'), JSON.stringify({ ...run, step: 'commit', sealedTree }))
       const r = step(dir, ['commit'])
       expect(r.status).toBe(0)
       const after = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))

@@ -928,6 +928,23 @@ describe('el veredicto', () => {
     expect(VERDICT_SCHEMA.required).toContain('review_token')
     expect(SLICE_VERDICT_SCHEMA.required).toContain('review_token')
   })
+
+  it('la FORMA del token la declara UNA constante: el pattern del esquema y el validador no divergen', () => {
+    // Se comprueba por COMPORTAMIENTO y no comparando la constante consigo misma:
+    // para cada muestra, lo que el `pattern` del esquema acepta es exactamente lo
+    // que `readVerdict` acepta. Si una de las dos copias se cambiara —la más
+    // probable, poner el pattern en minúsculas— la muestra en mayúsculas las
+    // separa y esto cae.
+    const pattern = VERDICT_SCHEMA.properties.review_token.pattern
+    expect(SLICE_VERDICT_SCHEMA.properties.review_token.pattern).toBe(pattern)
+    const re = new RegExp(pattern)
+    for (const muestra of ['a'.repeat(64), 'A'.repeat(64), 'aB3'.repeat(21) + 'f', 'a'.repeat(63),
+                           'a'.repeat(65), 'z'.repeat(64), '', `${'a'.repeat(64)}\n`, ` ${'a'.repeat(64)}`]) {
+      const loDiceElEsquema = re.test(muestra)
+      const loDiceElValidador = readVerdict({ ruling: 'PASS', rubric: recorridoCompleto(), findings: [], review_token: muestra }).verdict !== undefined
+      expect(loDiceElValidador, JSON.stringify(muestra)).toBe(loDiceElEsquema)
+    }
+  })
 })
 
 describe('de veredicto a resultado de la tabla', () => {

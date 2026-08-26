@@ -549,6 +549,27 @@ function escribirBrief() {
 const diffDeTarea = () => git(['diff', '--cached', '-U10']) || ''
 const diffDeSlice = () => git(['diff', '-U10', run.baseSha, 'HEAD']) || ''
 
+// EL ÁRBOL DEL ÍNDICE — la identidad de lo que se va a comitear, y git ya la
+// tiene: `write-tree` escribe el árbol del índice y devuelve su sha. Dos índices
+// con el mismo contenido dan el mismo árbol, así que comparar dos shas es
+// comparar los dos índices entero a entero —rutas, contenidos y modos— sin
+// depender de HEAD ni de cómo se formatee un diff.
+//
+// Y NO un sha256 del diff como el token del paquete, aunque para comparar
+// valdría igual: el árbol además se puede DEVOLVER. `git read-tree <sha>` pone
+// ese índice de vuelta sin tocar el worktree, así que el mensaje del fallo puede
+// llevar el comando exacto que repara el estado — y aquí eso no es un lujo: el
+// ataque típico SOBREESCRIBE una ruta que ya estaba en alcance (`git add
+// uno.txt`), y entonces el contenido que el juez aprobó no está en ningún sitio
+// del que el conductor pueda sacarlo a mano. Un hash de un diff no repara nada.
+//
+// El objeto que escribe queda sin referenciar hasta que el commit lo usa; un
+// `git gc --prune=now` DENTRO de la ventana se lo llevaría y el `read-tree` del
+// mensaje fallaría (la comprobación no: ésa sólo compara dos shas). No se
+// referencia a propósito: un ref por tarea se vería en `git for-each-ref` y
+// podría acabar empujado.
+const arbolDelIndice = () => git(['write-tree']).trim()
+
 // El paquete sale del ÍNDICE y no de un rango de commits: el implementador no
 // comitea, así que lo que hay que juzgar todavía no es un commit.
 function escribirPaquete() {
@@ -819,6 +840,29 @@ function verboControls() {
 // el índice sea lo declarado, y esto lo VERIFICA en vez de suponerlo.
 const stagedPaths = () => (git(['diff', '--cached', '--name-only']) || '').split('\n').map((l) => l.trim()).filter(Boolean)
 
+// LO AJENO EN EL ÍNDICE: lo stageado que NO lo puso este programa.
+//
+// Los tres `git commit` de la maquinaria —la tarea, el veredicto del slice y el
+// informe de e2e— van SIN pathspec, así que se llevan el índice entero: lo que
+// el conductor stagee antes de llamarlos viaja dentro sin que ningún juez lo
+// haya visto. Reproducido en los dos últimos (`git add colado.txt` antes de
+// `slice-verdict` y antes de `e2e`: en los dos casos `colado.txt` acabó
+// comiteado, y el run entregó igual).
+//
+// Para esos dos basta la PERTENENCIA: en sus pasos el índice tiene que estar
+// vacío salvo por las rutas que el programa acaba de stagear, y el programa
+// REESCRIBE sus artefactos justo antes de stagearlos, así que una edición ajena
+// del fichero no sobrevive. Del trabajo del implementador no se puede decir eso
+// — por eso el commit de tarea lleva sello (`arbolDelIndice`) y no pertenencia:
+// ahí el ataque sobreescribe una ruta que SÍ es del alcance.
+const ajenoEnElIndice = (nuestras) => {
+  // `stagedPaths` devuelve rutas de git (siempre con `/`) y las nuestras se
+  // construyen con `join`, que en Windows daría `\`. Normalizar es una línea y
+  // evita que la guarda salte SIEMPRE en la plataforma en la que nadie mira.
+  const mias = nuestras.map((p) => p.replace(/\\/g, '/'))
+  return stagedPaths().filter((p) => !mias.includes(p))
+}
+
 // El alcance de la tarea lo decide el PLAN, no el implementador: esta
 // comprobación cruza el ÍNDICE (lo que de verdad se va a commitear)
 // contra `t.files` (lo que la tarea declara en **Files:**). Una ruta a un lado y
@@ -1052,7 +1096,30 @@ function verboSliceVerdict() {
     if (existsSync(join(repoRoot, METRICS_REL)) && git(['add', '--', METRICS_REL], { allowFail: true }) === null) {
       err(`aviso: no se pudo stagear la telemetría (${METRICS_REL}) — el veredicto del slice viaja sin ella. ¿La ruta está gitignoreada en este repo?`)
     }
-    if ((git(['diff', '--cached', '--name-only']) || '').trim()) {
+    // Y NO SE COMITEA EL ÍNDICE A CIEGAS. Este `git commit` va sin pathspec, así
+    // que se lleva TODO lo stageado: si el conductor dejó código en el índice
+    // antes de llamar a `slice-verdict`, entraba en el commit del veredicto del
+    // slice sin que nadie lo hubiera juzgado — y no lo cazaba nada, porque el
+    // paquete de slice mide `baseSha..HEAD` y el índice no sale en ese diff.
+    // Medido: `git add colado.txt` antes de este verbo y `colado.txt` acabó
+    // dentro de "Veredicto del slice entero (#7)", con el run entregando.
+    //
+    // Basta la PERTENENCIA (ver `ajenoEnElIndice`): aquí el índice tiene que
+    // traer sólo las dos rutas que las líneas de arriba acaban de stagear.
+    //
+    // Y el trato es el de la evidencia que no puede viajar, no el de un veto: el
+    // veredicto del slice es VÁLIDO —es de `baseSha..HEAD`, que esto no cambia— y
+    // el trabajo del slice está comiteado entero. Devolver FAILED cerraría el run
+    // en `blocked-slice-judge`, que sale por el código del VETO (1) y diría que el
+    // juez rechazó el slice: sería mentir sobre el juicio para castigar un índice
+    // sucio. Así que se avisa, no se comitea, y la entrega sigue — las dos rutas
+    // se quedan STAGEADAS, así que sacar lo ajeno y comitearlas a mano es una
+    // línea. Misma doctrina que el `else` de más abajo ("nada que commitear del
+    // veredicto del slice ... la entrega sigue") y que los tres `allowFail`.
+    const ajeno = ajenoEnElIndice([ruta, METRICS_REL])
+    if (ajeno.length) {
+      err(`aviso: el índice traía ${ajeno.length} ruta(s) ajenas a la maquinaria (${ajeno.join(', ')}) y este commit se las llevaría dentro sin que ningún juez las haya visto — NO se comitea el veredicto del slice. La entrega sigue: el trabajo del slice ya está comiteado entero. El veredicto está escrito y STAGEADO en ${ruta}: saca lo ajeno del índice ("git restore --staged ${ajeno[0]}", que no toca tu worktree) y comitéalo a mano antes de abrir la pull request.`)
+    } else if ((git(['diff', '--cached', '--name-only']) || '').trim()) {
       let mensaje = null
       try {
         mensaje = sliceVerdictCommitMessage({ issue, tasksTotal: run.tasksTotal })
@@ -1200,12 +1267,68 @@ function verboVerdict() {
     } else {
       out(`veredicto guardado y stageado: ${ruta}`)
     }
+    // EL SELLO DEL ÍNDICE — la TERCERA igualdad (slice 12).
+    //
+    // Las dos del slice 11 atan el veredicto al paquete y el paquete al código, y
+    // las dos miden EL INSTANTE de este verbo. Después quedaba una ventana: entre
+    // este PASS y `ct-step commit` el conductor podía re-stagear código y `commit`
+    // no volvía a mirar nada — entraba código que ningún juez vio, con la fila de
+    // telemetría afirmando el `review_token` del código que SÍ se revisó.
+    // Reproducido CON el fix del slice 11 puesto (el `medium` de aquel juez): un
+    // `git add uno.txt` aquí y la tarea se comiteaba con la versión nueva.
+    //
+    // Va AQUÍ: DESPUÉS del `git add`. Lo que `commit` va a comitear es el índice
+    // CON el artefacto que la maquinaria acaba de poner encima del corte
+    // revisado, así que eso es lo que hay que sellar; sellar antes del add sería
+    // sellar un índice que ya no existe y haría fallar TODOS los commits — la
+    // misma trampa de orden que el comentario de `diffDeTarea` documenta para el
+    // token. De rebote, el artefacto queda dentro del sello: un veredicto forjado
+    // y stageado en el hueco tampoco entra (medido: hoy entra).
+    //
+    // Sólo en el PASS, y no hace falta limpiarlo en los otros caminos: al paso
+    // COMMIT sólo se llega desde un PASS —`done` y `corrections-ordered` con el
+    // presupuesto agotado, las dos ramas de `run-machine.js#trasElJuez`, y las dos
+    // salen de `ruling === 'PASS'`—, así que el sello que `commit` lee es SIEMPRE
+    // el del veredicto inmediatamente anterior y nunca uno rancio de tres
+    // intentos atrás. Un FAIL vuelve a implementar o cierra el run; un descarte
+    // vuelve a preguntar.
+    run = { ...run, sealedTree: arbolDelIndice() }
   }
   out(`veredicto ${verdict.ruling} con ${verdict.findings.length} hallazgo(s) → ${outcome}`)
   return outcome
 }
 
 function verboCommit() {
+  // LO QUE SE COMITEA ES LO QUE SE APROBÓ, y se comprueba antes que nada.
+  //
+  // La tercera igualdad (ver el sello en `verboVerdict`): el índice de ahora tiene
+  // que ser el MISMO que la maquinaria selló al aceptar el veredicto. Va delante
+  // del mensaje y del "no hay nada stageado" porque esas dos preguntan si git
+  // PUEDE comitear y ésta pregunta si DEBE: un mensaje mal compuesto se arregla
+  // arreglando el plan, y un commit con código no revisado dentro no se arregla
+  // nunca, porque ya está en la rama. Y va antes del `git add` de la telemetría
+  // por necesidad: ese add cambia el índice.
+  //
+  // SIN fila de telemetría, como los otros dos fallos de este verbo: el paso
+  // `commit` no tiene fila —decisión anterior, fijada por el test "no hay fila de
+  // commit": la llevaba dentro del commit siguiente, así que la de la última tarea
+  // no viajaba nunca— y estrenar una sólo para el fallo rompería esa propiedad y
+  // metería en el JSONL una forma que `run-metrics.js` no agrega. Mudo no se
+  // queda: sale por stderr, el exit es 8, y el run se queda parado en `commit`
+  // con el sello escrito en el fichero de estado, que es lo que hay que leer para
+  // arreglarlo.
+  if (typeof run.sealedTree !== 'string') {
+    err(`el estado no trae el sello del índice (sealedTree) que el veredicto de esta tarea tenía que dejar: o este run venía de una versión del plugin anterior a esta comprobación —se quedó parado en "commit" mientras se actualizaba—, o alguien editó ${stateFile}. Sin sello no se puede afirmar que lo stageado sea lo que el juez aprobó, y este programa no comitea lo que no puede afirmar. Compruébalo tú y comitea a mano (el veredicto está en docs/superpowers/verdicts/issue-${issue}-task-${run.task}.json), o arranca el run de nuevo: lo que no hay es un modo sin barandilla que se active BORRANDO un campo.`)
+    return OUTCOMES.FAILED
+  }
+  const arbolDeAhora = arbolDelIndice()
+  if (arbolDeAhora !== run.sealedTree) {
+    err(`el índice ya no es el que el juez aprobó: al aceptar el veredicto quedó sellado el árbol ${run.sealedTree} y el del índice de ahora es ${arbolDeAhora}. Algo lo cambió DESPUÉS del veredicto, así que este commit se llevaría dentro código que ningún juez ha visto, con el veredicto de otro código viajando al lado. NO se comitea nada.
+  - para devolver el índice aprobado, tal cual y sin tocar tu worktree:  git read-tree ${run.sealedTree}
+    y repite "ct-step commit". Lo que hayas stageado después sigue en los ficheros: no se pierde, deja de estar stageado.
+  - si ese código TIENE que entrar, no entra por aquí: desde "commit" no hay vuelta al juez en este run. Sácalo del índice, comitea la tarea aprobada, y que ese trabajo entre por la tarea siguiente o por otro slice.`)
+    return OUTCOMES.FAILED
+  }
   const t = tarea()
   let mensaje
   try {
@@ -1363,6 +1486,16 @@ function comprometerInformeE2e() {
 Generado por ct-step tras el paso e2e de la slice. No cierra el issue.
 
 Co-Authored-By: Claude <noreply@anthropic.com>`
+  // El MISMO cuidado que en el veredicto del slice y por el mismo motivo: este
+  // `git commit` tampoco lleva pathspec. Medido igual (`git add colado.txt` antes
+  // de `ct-step e2e` y el fichero acabó dentro del commit del informe). Va antes
+  // de la guarda de las closing keywords porque primero se decide QUÉ entra en el
+  // repo y después cómo se rotula.
+  const ajeno = ajenoEnElIndice([ruta])
+  if (ajeno.length) {
+    err(`aviso: el índice traía ${ajeno.length} ruta(s) ajenas a la maquinaria (${ajeno.join(', ')}) y este commit se las llevaría dentro sin que ningún juez las haya visto — el informe de e2e (${ruta}) queda STAGEADO y sin comitear. Saca lo ajeno del índice ("git restore --staged ${ajeno[0]}", que no toca tu worktree) y comitéalo a mano antes de abrir la pull request.`)
+    return
+  }
   const keywords = findClosingKeywords(mensaje)
   if (keywords.length) {
     err(`aviso: el mensaje del commit del informe de e2e contiene una closing keyword (${keywords.map((k) => `${k.keyword} ${k.ref}`).join(', ')}) y cerraría el issue sin que nadie lo haya decidido — NO se comitea. El informe (${ruta}) queda stageado.`)

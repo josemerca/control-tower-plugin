@@ -178,6 +178,25 @@ export const RUBRIC_OUTCOMES = ['conforme', 'no-aplica', 'sin-vara']
 // matan el run (§3.2). Ausente y `null` son lo mismo. Lo que sí se rechaza es
 // una línea que no se puede leer como número: `"12"` y `12` no se agregan
 // igual, y tolerar la cadena hoy es telemetría sucia mañana.
+// LA FORMA DEL TOKEN, en una constante y no tecleada dos veces. El `pattern` del
+// esquema es lo que el objeto DICE de sí mismo —y es el bloque que la rúbrica le
+// enseña al juez— y el regex de `readVerdict` es lo que de verdad se aplica: dos
+// copias a mano de la misma forma son documentación que puede mentir sin que nada
+// se ponga rojo. El resto de campos de `schemaFor` ya derivan de una constante
+// compartida (`enum: rules`, `enum: SEVERITIES`, `enum: RUBRIC_OUTCOMES`)
+// exactamente por esto, y el slice 11 exportó REVIEW_TOKEN_LABEL para que la
+// ETIQUETA no divergiera; la FORMA se quedó fuera de ese criterio.
+//
+// Vive aquí arriba, lejos del bloque del token, por una razón mecánica:
+// VERDICT_SCHEMA se construye al CARGAR el módulo, así que un `const` declarado
+// más abajo daría ReferenceError por la zona muerta.
+//
+// La tercera copia de la forma —la de RE_REVIEW_TOKEN, en el bloque del token— NO
+// es una divergencia y no se toca: allí es sólo minúsculas a propósito (es lo que
+// `reviewToken` produce) y va dentro de una línea con etiqueta y captura.
+const REVIEW_TOKEN_PATTERN = '^[0-9a-fA-F]{64}$'
+const RE_REVIEW_TOKEN_FORM = new RegExp(REVIEW_TOKEN_PATTERN)
+
 // FACTORY, no un objeto suelto: el juez de slice valida contra el MISMO
 // esquema con otra rúbrica dentro (§3.7-B), y dos copias a mano de esta forma
 // divergerían al primer campo añadido — el mismo desacople que ya sufrieron
@@ -197,7 +216,7 @@ const schemaFor = (rules) => ({
     // que la rúbrica del juez le enseña: un campo obligatorio que el juez no
     // ve descarta todos los veredictos de la corrida sin que ninguno sea culpa
     // suya. Se admiten mayúsculas (ver readVerdict) y se normaliza al leer.
-    review_token: { type: 'string', pattern: '^[0-9a-fA-F]{64}$' },
+    review_token: { type: 'string', pattern: REVIEW_TOKEN_PATTERN },
     rubric: {
       type: 'array',
       minItems: rules.length,
@@ -567,7 +586,7 @@ export function readVerdict(structured, rules = VERDICT_RULES) {
   // que no pase nada». Lo que este módulo NO puede decidir es si el token es
   // EL DEL PAQUETE: eso exige leer el paquete y volver a medir el corte, y lo
   // hace ct-step.mjs (`tokenVigente`).
-  if (typeof token !== 'string' || !/^[0-9a-fA-F]{64}$/.test(token)) {
+  if (typeof token !== 'string' || !RE_REVIEW_TOKEN_FORM.test(token)) {
     return { why: `el veredicto no copia el "${REVIEW_TOKEN_LABEL}" del paquete de revisión: es el sha256 (64 hex) de la línea con la que abre el paquete que se te dio a juzgar, y va tal cual en el campo "review_token" — sin él no se puede afirmar que este veredicto sea sobre ESE código` }
   }
   return { verdict: { ruling, rubric, findings, review_token: token.toLowerCase() } }
