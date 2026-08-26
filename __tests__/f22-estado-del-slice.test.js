@@ -32,7 +32,6 @@ import { parseState } from '../scripts/state.js'
 // F22, Step 4: montaje reusado de __tests__/ct-next-launch-verification.test.js
 // — dirs de cuenta + stubs de cmux/claude, e higiene de limpieza de directorios
 // temporales que puede colgar de un SIGKILL a un nieto huérfano.
-import { ACCOUNT_ENV } from './fixtures/hermetic-env.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
 import { envDelGo } from './fixtures/go-gate.js'
 
@@ -256,7 +255,7 @@ describe('F22 — el seed no toca el fichero de la coordinadora', () => {
 // Este es el test que impide que la verificación de efecto se degrade a
 // decoración: hace falta una corrida REAL de ct-next.mjs (--dry-run no crea
 // worktree ni siembra nada), montada sobre __tests__/ct-next-launch-
-// verification.test.js — mismos stubs de gh/cmux/claude, mismo ACCOUNT_ENV,
+// verification.test.js — mismos stubs de gh/cmux/claude,
 // misma limpieza best-effort.
 //
 // La diferencia con ese montaje es deliberada: aquí NO se usa fake-git-bin.
@@ -349,8 +348,7 @@ function runGateTest(repoRoot) {
     encoding: 'utf8',
     env: {
       ...process.env,
-      ...ACCOUNT_ENV,
-      PATH: realGitFakeRestPath,
+            PATH: realGitFakeRestPath,
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue1], []]),
       FAKE_GH_COUNTER_FILE: counterFile,
       FAKE_GH_ARGV_LOG_FILE: argvLog,
@@ -510,7 +508,7 @@ describe('F22 — los mensajes nombran el fichero que se leyó', () => {
 //
 // Montaje calcado de __tests__/ct-next-staleness.test.js (runReal vía
 // spawnSync, fakePath con fake-git-bin/fake-gh-bin/fake-cmux-bin,
-// ACCOUNT_ENV, rmSyncBestEffort) — con una diferencia deliberada: aquí se
+// rmSyncBestEffort) — con una diferencia deliberada: aquí se
 // capturan stdout y stderr POR SEPARADO, porque la aserción central es que el
 // motivo de la coordinadora no se filtre a NINGUNO de los dos canales, no
 // solo a la mezcla de ambos.
@@ -525,7 +523,7 @@ const blockedFakePath = [
 function runBlockedCheck(args, envOverrides = {}) {
   const r = spawnSync('node', [ctNextScript, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, ...ACCOUNT_ENV, PATH: blockedFakePath, ...envOverrides },
+    env: { ...process.env, PATH: blockedFakePath, ...envOverrides },
   })
   return { code: r.status, stdout: r.stdout || '', stderr: r.stderr || '' }
 }

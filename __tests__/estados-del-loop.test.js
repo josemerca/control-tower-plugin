@@ -27,7 +27,6 @@ import { fileURLToPath } from 'node:url'
 import { detectCollisions, holdingStatusOf, CLAIM_HOLDING_STATUSES } from '../scripts/claim.js'
 import { collectInFlight, collectTokenHolders, planDispatch } from '../scripts/dispatch.js'
 import { closedNotCompleted, buildDispatchInput } from '../scripts/gh-issue-map.js'
-import { ACCOUNT_ENV } from './fixtures/hermetic-env.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -46,7 +45,7 @@ const fakePath = [
 const QUIET = ['ignore', 'pipe', 'pipe']
 
 function runNext(args, env = {}) {
-  const r = spawnSync('node', [ctNext, ...args], { encoding: 'utf8', stdio: QUIET, env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...env } })
+  const r = spawnSync('node', [ctNext, ...args], { encoding: 'utf8', stdio: QUIET, env: { ...process.env, PATH: fakePath, ...env } })
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
 }
 function runCheck(args, env = {}) {
