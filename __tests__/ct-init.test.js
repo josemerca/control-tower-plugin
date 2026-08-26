@@ -150,12 +150,120 @@ const BLOQUES_HUERFANOS = [
 const orphanContractBlocks = () =>
   BLOQUES_HUERFANOS.map(({ fixture, commit }) => {
     const block = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', fixture), 'utf8')
-    return { block, commit, hash: sha256(block) }
+    return { block, commit, fixture, hash: sha256(block) }
   })
 // contractBlocksEverEmitted: la historia alcanzable MÁS los huérfanos. Es la
 // respuesta a "¿qué bloques llegó a emitir ct-init?", que es la pregunta que
 // hacen los dos tests de autovigilancia — no "¿qué bloques hay en main?".
 const contractBlocksEverEmitted = () => [...historicalContractBlocks(), ...orphanContractBlocks()]
+
+// ---------------------------------------------------------------------------
+// Slice 8 (hallazgo BAJO del review de la PR #36) — PROCEDENCIA de los
+// huérfanos. El slice 4 arregló el test del ledger con BLOQUES_HUERFANOS, y con
+// ello la autovigilancia pasó de "git lo prueba" a "git O un fichero de este
+// mismo commit lo prueba": el par (entrada del ledger, fixture) se validaba
+// contra sí mismo, porque el fixture es editable en el MISMO commit que
+// registra su hash. No es forjable —nadie fabrica un fichero con un sha256
+// elegido— pero sí DEGRADABLE: un bloque que ct-init nunca publicó podía
+// entrar en la lista pristine sin que ningún test lo notara, y a partir de ahí
+// `--update-slices-contract` lo aceptaría sin --force.
+//
+// Lo que ataba el caso del v17 no era el fixture: era que su hash ya estaba en
+// main OCHO DÍAS antes de que el fixture existiera. Eso es evidencia
+// INDEPENDIENTE, y es lo que se exige aquí para todo huérfano, presente y
+// futuro.
+//
+// La comprobación, en una frase: el commit que metió el hash en el ledger NO
+// contenía todavía el fixture. Deliberadamente NO se data el fixture ni se
+// comparan ancestros:
+//   - datar la adición y mirar su commit padre se rompe con merges (`^` es
+//     `^1`), con un fixture borrado y re-añadido, y con un renombrado;
+//   - exigir `merge-base --is-ancestor <testigo> <commit-del-fixture>` no caza
+//     NINGÚN caso que el paso de abajo no cace ya, y se pondría rojo cuando la
+//     entrada del ledger llega por una rama y el fixture por otra (la carrera
+//     de números v19/v20/v21/v22 de este repo, dos veces).
+// Esta forma, en cambio, es MONÓTONA (un testigo válido lo sigue siendo tras
+// cualquier merge futuro) y tolera que el árbol de trabajo vaya por delante de
+// la historia, que es el estado normal a mitad de un slice.
+//
+// Lo que esto NO hace, dicho para que nadie lo sobrevenda: un atacante con DOS
+// commits (1º el hash, 2º el fixture) pasa esta comprobación. Lo que cierra el
+// agujero es el PAR de tests — en ese commit 1º el hash está registrado sin
+// respaldo, y el test "no registra hashes de bloques que no existieron nunca"
+// está ROJO. Sobre una historia con la suite verde en cada commit, una entrada
+// pristine falsa es imposible: hace falta pasar por un commit rojo.
+const RUTA_LEDGER = 'scripts/ct-init.sh'
+const RUTA_FIXTURES = '__tests__/fixtures'
+
+// procedenciaDeHuerfano: devuelve null si la procedencia está probada, o el
+// MOTIVO (string) si no. El repo es un PARÁMETRO —no el `git()` de arriba, que
+// tiene `root` fijo— justo para que el test negativo pueda correr esta misma
+// función contra un repo de juguete construido con `git init`, en vez de
+// reimplementarla (un test negativo que reimplementa lo que juzga no juzga
+// nada).
+function procedenciaDeHuerfano({ cwd, fixture, hash }) {
+  const g = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  const existeEn = (rev, ruta) => spawnSync('git', ['cat-file', '-e', `${rev}:${ruta}`], { cwd }).status === 0
+  const rutaFixture = `${RUTA_FIXTURES}/${fixture}`
+  // Control anti-tautología: si estas rutas relativas dejaran de existir (un
+  // día que se mueva el directorio de fixtures o el script), el `cat-file -e`
+  // de abajo fallaría SIEMPRE y la comprobación pasaría a estar vacía en
+  // silencio — exactamente el modo de fallo que este slice viene a cerrar.
+  if (!existsSync(join(cwd, RUTA_LEDGER))) return `no existe ${RUTA_LEDGER} en ${cwd}`
+  if (!existsSync(join(cwd, rutaFixture))) return `no existe ${rutaFixture} en ${cwd}`
+  // El commit que introdujo el hash en el ledger. `git log` sin revisión =
+  // alcanzable desde HEAD, que es la única base durable: el campo `commit` de
+  // BLOQUES_HUERFANOS es decorativo y su SHA (743fe3f) NO es alcanzable —
+  // usarlo como ref funciona en esta máquina y se rompe en un clon limpio.
+  // Cronológico inverso, así que el más antiguo es el último.
+  const testigos = g(['log', '--format=%H', `-S${hash}`, '--', RUTA_LEDGER]).trim().split('\n').filter(Boolean)
+  if (testigos.length === 0) {
+    return (
+      `${fixture}: el hash ${hash.slice(0, 12)}… no entró en ${RUTA_LEDGER} en ningún commit ` +
+      `alcanzable desde HEAD. La entrada del ledger no tiene procedencia: o solo existe en el ` +
+      `árbol de trabajo, o el bloque nunca lo emitió ct-init`
+    )
+  }
+  const testigo = testigos[testigos.length - 1]
+  if (existeEn(testigo, rutaFixture)) {
+    return (
+      `${fixture}: el commit que metió el hash en el ledger (${testigo.slice(0, 7)}) YA traía ` +
+      `${rutaFixture}. El par (entrada, fixture) se valida contra sí mismo: no hay evidencia ` +
+      `independiente de que ct-init emitiera ese bloque`
+    )
+  }
+  return null
+}
+
+// exigirHistorialCompleto: la MISMA postura que historicalContractBlocks() —
+// sin historial NO se salta en silencio, porque "no se sabe" no es "está bien"
+// (es el tercer estado que ct-init.sh ya distingue cuando no puede calcular el
+// sha256). Dos formas de no tenerlo, y solo una la detecta `rev-list`:
+//   - sin .git: el tarball de npm empaqueta __tests__/ pero nunca .git, así
+//     que `rev-list` falla;
+//   - clon shallow: `rev-list` NO falla, devuelve menos commits, y el testigo
+//     queda por debajo del injerto. Sin esta rama el test diría "el hash no
+//     entró nunca en el ledger", ACUSANDO DE FORJA A UN LEDGER CORRECTO.
+// Este fichero ya exigía historial completo desde F9 (los dos controles
+// `toBeGreaterThanOrEqual(9)` fallan con --depth 1): no es un requisito nuevo.
+function exigirHistorialCompleto() {
+  try {
+    git(['rev-list', '-1', 'HEAD'])
+  } catch (err) {
+    throw new Error(
+      'la comprobación de procedencia de BLOQUES_HUERFANOS necesita el historial de git del ' +
+        'plugin (busca en él el commit que metió cada hash en el ledger). ' +
+        `No se ha podido leer: ${err.message}`
+    )
+  }
+  if (git(['rev-parse', '--is-shallow-repository']).trim() === 'true') {
+    throw new Error(
+      'la comprobación de procedencia de BLOQUES_HUERFANOS no se puede hacer en un clon shallow: ' +
+        'el commit que metió el hash en el ledger puede quedar por debajo del injerto, y el test ' +
+        'acusaría de forja a un ledger correcto. Corre `git fetch --unshallow`.'
+    )
+  }
+}
 
 // seedFreshAgentsMd: corre ct-init.sh en un dir vacío y devuelve el AGENTS.md
 // que siembra — el bloque de HOY, tal cual sale del script (no leído de su
@@ -1056,6 +1164,97 @@ describe('ct-init.sh', () => {
     const known = new Set(contractBlocksEverEmitted().map((h) => h.hash))
     known.add(sha256(extractBlock(seedFreshAgentsMd()))) // el árbol de trabajo
     expect(registered.filter((h) => !known.has(h))).toEqual([])
+  })
+
+  // Slice 8 — el test que ata BLOQUES_HUERFANOS a la historia. Sin él, añadir
+  // una entrada al ledger y su fixture en el mismo commit deja la suite verde,
+  // y un bloque que ct-init nunca publicó pasa a ser "pristine" para siempre.
+  it('todo huérfano de BLOQUES_HUERFANOS tiene procedencia: su hash ya estaba en el ledger de un commit que NO traía su fixture', () => {
+    exigirHistorialCompleto()
+    const huerfanos = orphanContractBlocks()
+    // Control: si la lista está vacía este test no prueba nada. Hoy hay uno
+    // (el v17 de la PR #27, escondido por el squash 529d2f4). Si algún día se
+    // vacía a propósito, este assert es el sitio donde decirlo.
+    expect(huerfanos.length).toBeGreaterThanOrEqual(1)
+    const sinProcedencia = huerfanos
+      .map(({ fixture, hash }) => procedenciaDeHuerfano({ cwd: root, fixture, hash }))
+      .filter(Boolean)
+    expect(
+      sinProcedencia,
+      'Un huérfano de BLOQUES_HUERFANOS solo vale si su hash es evidencia INDEPENDIENTE del ' +
+        'fixture: tiene que haber entrado en SLICES_PRISTINE_HASHES en un commit que todavía no ' +
+        'contenía el fixture. Si no, el par se valida contra sí mismo y un bloque que ct-init ' +
+        'nunca emitió puede colarse como pristine.'
+    ).toEqual([])
+    // Y el fixture tiene que hashear a la entrada que dice tener (si no, el
+    // testigo prueba la procedencia de OTRO hash). Es lo que el test "no
+    // registra hashes de bloques que no existieron nunca" da por hecho.
+    for (const { hash, fixture } of huerfanos) {
+      expect(initScriptSrc, `${fixture}: su sha256 no está en SLICES_PRISTINE_HASHES`).toContain(hash)
+    }
+  })
+
+  it('la comprobación de procedencia caza el par forjado: entrada del ledger y fixture en el MISMO commit', () => {
+    // No-tautología. La comprobación de arriba pasa en verde sobre este repo;
+    // eso por sí solo no demuestra que sea capaz de ponerse roja. Se corre la
+    // MISMA función (no una reimplementación) sobre repos de juguete con la
+    // historia fabricada a propósito.
+    const HASH = 'a'.repeat(64) // no es el sha256 de nada: aquí lo único que se juzga es la HISTORIA
+    const FIXTURE = 'bloque-inventado.md'
+    const escenarios = []
+    const construir = (guion) => {
+      const dir = mkdtempSync(join(tmpdir(), 'proc-'))
+      escenarios.push(dir)
+      const g = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' })
+      // `-b main` explícito: sin él `git init` usa el init.defaultBranch de la
+      // máquina (mismo motivo que en f22-estado-del-slice.test.js).
+      g('init', '-q', '-b', 'main', '.')
+      g('config', 'user.email', 'test@test')
+      g('config', 'user.name', 'test')
+      mkdirSync(join(dir, 'scripts'), { recursive: true })
+      mkdirSync(join(dir, RUTA_FIXTURES), { recursive: true })
+      const ledger = (conHash) =>
+        writeFileSync(join(dir, RUTA_LEDGER), `SLICES_PRISTINE_HASHES='\n${conHash ? `${HASH}  vX, 1 línea\n` : ''}'\n`)
+      const fixture = () => writeFileSync(join(dir, RUTA_FIXTURES, FIXTURE), 'bloque\n')
+      ledger(false)
+      g('add', '-A')
+      g('commit', '-qm', 'base')
+      guion({ g, ledger, fixture })
+      return dir
+    }
+    const juzgar = (dir) => procedenciaDeHuerfano({ cwd: dir, fixture: FIXTURE, hash: HASH })
+
+    // (1) CONTROL POSITIVO: el orden legítimo (el del v17) — la entrada
+    // primero, el fixture después. Sin esto, un rojo de los de abajo no
+    // significaría nada: podría ser que los repos de juguete siempre fallen.
+    const bueno = construir(({ g, ledger, fixture }) => {
+      ledger(true); g('add', '-A'); g('commit', '-qm', 'entrada en el ledger')
+      fixture(); g('add', '-A'); g('commit', '-qm', 'el fixture, después')
+    })
+    expect(juzgar(bueno)).toBeNull()
+
+    // (2) EL CASO DEL REVIEW: los dos en el mismo commit.
+    const mismoCommit = construir(({ g, ledger, fixture }) => {
+      ledger(true); fixture(); g('add', '-A'); g('commit', '-qm', 'entrada + fixture juntos')
+    })
+    expect(juzgar(mismoCommit)).toMatch(/se valida contra sí mismo/)
+
+    // (3) La variante que también hay que cazar: el fixture primero y la
+    // entrada después. El testigo del hash ya trae el fixture ⇒ mismo motivo.
+    const fixturePrimero = construir(({ g, ledger, fixture }) => {
+      fixture(); g('add', '-A'); g('commit', '-qm', 'el fixture primero')
+      ledger(true); g('add', '-A'); g('commit', '-qm', 'la entrada, después')
+    })
+    expect(juzgar(fixturePrimero)).toMatch(/se valida contra sí mismo/)
+
+    // (4) La entrada solo en el árbol de trabajo, sin comitear: no hay testigo
+    // de nada. Mensaje DISTINTO al de (2)/(3), porque el remedio es distinto.
+    const soloArbol = construir(({ ledger, fixture }) => {
+      ledger(true); fixture() // deliberadamente sin `git commit`
+    })
+    expect(juzgar(soloArbol)).toMatch(/no entró en scripts\/ct-init\.sh en ningún commit/)
+
+    for (const dir of escenarios) rmSync(dir, { recursive: true, force: true })
   })
 
   // Finding 6 de la review final: ct-next.mjs escribe cada worktree de slice
