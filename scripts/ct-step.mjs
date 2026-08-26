@@ -67,6 +67,7 @@ import {
   IMPLEMENTER_TOOLS, JUDGE_TOOLS, PACKAGE_SECTIONS,
   readSliceVerdict, outcomeOfSliceVerdict, sliceVerdictCommitMessage,
   SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS,
+  REVIEW_TOKEN_LABEL, reviewToken, reviewTokenLine, reviewTokenOf,
 } from './step-contracts.js'
 import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, metricsRepoRelPath } from './run-metrics.js'
 // Slice 10: parseStateSafe lee el campo `senal:` del SLICE.md (ver
@@ -428,6 +429,11 @@ function verboNext() {
       out(`  - el brief de la tarea: ${join(workDir, `task-${run.task}-brief.md`)}`)
       out(`  - los logs de los controles, YA en verde, por si los quiere: ${run.lastControlsLog ?? '(ninguno)'}`)
       out(`  - que escriba su veredicto en: ${veredicto}`)
+      // El token NO se imprime, sólo se dice de dónde se copia (D13): el sitio
+      // del que sale es el paquete que el juez lee, y poner el valor en la
+      // salida del conductor invita a parchear un veredicto en vez de
+      // redespachar al juez.
+      out(`  - y que COPIE en su veredicto, campo "review_token", el "${REVIEW_TOKEN_LABEL}:" con el que abre ese paquete: es lo que hace comprobable que su veredicto es sobre ESE código`)
       out('')
       out(`Cuando vuelva:  ct-step verdict ${veredicto} --plan ${planPath} --issue ${issue}`)
       out('No le pases la SALIDA de los controles: un lint sucio no debe ensuciarle el criterio.')
@@ -468,6 +474,7 @@ function verboNext() {
       out(`  - el log de la Global verification, YA en verde, por si lo quiere: ${run.lastGlobalLog ?? '(N/A declarado)'}`)
       out(`  - los veredictos de cada tarea, ya comiteados: docs/superpowers/verdicts/issue-${issue}-task-*.json`)
       out(`  - que escriba su veredicto en: ${veredicto}`)
+      out(`  - y que COPIE en su veredicto, campo "review_token", el "${REVIEW_TOKEN_LABEL}:" con el que abre ese paquete`)
       out('')
       out(`Cuando vuelva:  ct-step slice-verdict ${veredicto} --plan ${planPath} --issue ${issue}`)
       break
@@ -528,6 +535,20 @@ function escribirBrief() {
   return brief
 }
 
+// LOS DOS DIFFS, cada uno en una expresión y no en dos. Los llaman el escritor
+// del paquete y el verbo que comprueba el token, y si divergieran en un flag
+// (`-U10`, el `|| ''` de un diff vacío) el síntoma sería un token que nunca
+// coincide: todo veredicto descartado, seis descartes, run muerto — y ninguna
+// pista de por qué. Es el mismo motivo por el que PACKAGE_SECTIONS es una
+// constante y no una cadena tecleada dos veces.
+//
+// El de la tarea sale del ÍNDICE, que es la superficie exacta que el juez ve y
+// que `commit` se lleva: una edición sin stagear no llega al commit, así que no
+// tiene por qué invalidar el juicio. El del slice sale del RANGO, porque a esas
+// alturas todo está comiteado (ver `escribirPaqueteDeSlice`).
+const diffDeTarea = () => git(['diff', '--cached', '-U10']) || ''
+const diffDeSlice = () => git(['diff', '-U10', run.baseSha, 'HEAD']) || ''
+
 // El paquete sale del ÍNDICE y no de un rango de commits: el implementador no
 // comitea, así que lo que hay que juzgar todavía no es un commit.
 function escribirPaquete() {
@@ -541,11 +562,17 @@ function escribirPaquete() {
   // el juicio: lo desactivaba. No se vuelva a añadir.
   const rutas = (run.lastPaths || []).map((p) => `- ${p}`).join('\n') || '(ninguna)'
   const [SECCION_FILES, SECCION_RUTAS, SECCION_DIFF] = PACKAGE_SECTIONS
+  const diff = diffDeTarea()
   writeFileSync(paquete, [
     `# Review package: task ${run.task}/${run.tasksTotal} of issue #${issue} (staged, not yet committed)`,
+    // La CABECERA lleva el token: el sha256 de exactamente el diff que va
+    // debajo. Segunda línea y no una sección `##`, para no tocar
+    // PACKAGE_SECTIONS (que la rúbrica cita encabezado a encabezado) ni el
+    // orden que el slice 10 decidió para el paquete de slice.
+    reviewTokenLine(reviewToken(diff)),
     '', `## ${SECCION_FILES}`, git(['diff', '--cached', '--stat']) || '',
     '', `## ${SECCION_RUTAS}`, rutas,
-    '', `## ${SECCION_DIFF}`, git(['diff', '--cached', '-U10']) || '',
+    '', `## ${SECCION_DIFF}`, diff,
   ].join('\n'))
   return paquete
 }
@@ -560,6 +587,7 @@ function escribirPaquete() {
 function escribirPaqueteDeSlice() {
   const paquete = join(workDir, 'slice-review.diff')
   const [SECCION_SENAL, SECCION_COMMITS, SECCION_FILES, SECCION_DIFF] = SLICE_PACKAGE_SECTIONS
+  const diff = diffDeSlice()
   // Slice 10: la señal cruza el embudo AQUÍ, leída del disco (el campo
   // `senal:` que el despacho sembró en el SLICE.md) y sin agente en medio —
   // la misma doctrina del §3.3 con la que la vara del repo viaja en el brief.
@@ -569,12 +597,54 @@ function escribirPaqueteDeSlice() {
   // se omite, y su texto es exactamente lo que la rúbrica lee como sin-vara.
   writeFileSync(paquete, [
     `# Slice review package: issue #${issue} — ${run.tasksTotal} tasks committed since ${run.baseSha.slice(0, 7)}`,
+    reviewTokenLine(reviewToken(diff)),
     '', `## ${SECCION_SENAL}`, senalDelSlice ?? SENAL_AUSENTE,
     '', `## ${SECCION_COMMITS}`, git(['log', '--reverse', '--format=%h %s', `${run.baseSha}..HEAD`]) || '',
     '', `## ${SECCION_FILES}`, git(['diff', '--stat', run.baseSha, 'HEAD']) || '',
-    '', `## ${SECCION_DIFF}`, git(['diff', '-U10', run.baseSha, 'HEAD']) || '',
+    '', `## ${SECCION_DIFF}`, diff,
   ].join('\n'))
   return paquete
+}
+
+// ---------------------------------------------------------------------------
+// EL PAQUETE SIGUE DESCRIBIENDO EL CORTE QUE CAPTURÓ, y el veredicto es DE ESE
+// paquete. Las dos comprobaciones que atan el producto al insumo (slice 11);
+// ver step-contracts.js#REVIEW_TOKEN_LABEL para las dos vías que cierran.
+//
+// Una función y no dos copias en los dos verbos: lo único que cambia entre la
+// tarea y el slice es QUÉ diff se recomputa, y eso entra por parámetro. La
+// alternativa —el mismo razonamiento escrito dos veces— es el desacople que
+// este fichero ya pagó con la lista de PASOS_DE_SLICE.
+// ---------------------------------------------------------------------------
+function tokenVigente(paquete, diffAhora) {
+  let texto
+  try {
+    texto = readFileSync(paquete, 'utf8')
+  } catch (e) {
+    return { why: `el paquete de revisión existe y no se puede leer (${paquete}): ${String(e.message).trim()} — vuelve a "ct-step next", que es el único paso que lo genera, y REDESPACHA al juez` }
+  }
+  const declarado = reviewTokenOf(texto)
+  if (declarado === null) {
+    // Un paquete sin la línea: lo escribió una versión del plugin anterior a
+    // este campo (un run en vuelo cuando se actualizó el plugin), o alguien lo
+    // editó. Un descarte lo cura en una vuelta —`next` lo regenera con su
+    // token— y no hay camino de vuelta al paquete sin token: tolerarlo sería
+    // un modo «sin barandilla» que se activa BORRANDO una línea, que es
+    // exactamente lo que este arreglo quita del repertorio.
+    return { why: `el paquete de revisión (${paquete}) no declara su "${REVIEW_TOKEN_LABEL}": lo escribió una versión anterior del plugin, o se editó a mano. Vuelve a "ct-step next", que lo regenera con su token, y REDESPACHA al juez` }
+  }
+  const ahora = reviewToken(diffAhora)
+  if (declarado !== ahora) {
+    return { why: `el paquete de revisión ya no describe el código de ahora: declara el token ${declarado.slice(0, 12)}… y el del corte recién medido es ${ahora.slice(0, 12)}… — el código cambió DESPUÉS de generarse el paquete, así que el juez juzgó otro diff. Vuelve a "ct-step next" y REDESPACHA al juez: repreguntarle con este paquete no arregla nada` }
+  }
+  return { token: declarado }
+}
+
+// El veredicto trae el token DE ESTE paquete. `verdict.review_token` ya viene
+// validado en forma y en minúsculas por `readVerdict`, así que aquí sólo se
+// compara.
+function whyTokenAjeno(delVeredicto, delPaquete) {
+  return `el veredicto no es de este paquete: copia el token ${String(delVeredicto).slice(0, 12)}… y el paquete declara ${delPaquete.slice(0, 12)}… — es el veredicto de OTRO juicio, sobre un diff que ya no es el que hay delante. No hace falta volver a "ct-step next" (el paquete de disco es el bueno): REDESPACHA al juez con él`
 }
 
 // EL PAQUETE ES DE UN SOLO USO: lo gasta el veredicto que lo lee.
@@ -609,6 +679,15 @@ function escribirPaqueteDeSlice() {
 // telemetría, el `git commit` del veredicto de slice y el del informe de e2e,
 // todos con `allowFail` y su aviso). El aviso es RUIDOSO a propósito: un paquete
 // que sobrevive a su veredicto reabre exactamente la ventana que esto cierra.
+//
+// SLICE 11 — Y EL DESCARTE SIGUE SIN CONSUMIR, ahora por una propiedad y no por
+// una asunción. La justificación de arriba («el reintento juzga el mismo diff»)
+// era una afirmación sobre la conducta del agente; desde el token del paquete es
+// comprobable en el momento de usarlo: si el corte cambió, `tokenVigente` lo
+// descarta antes de leer el veredicto. Conservar el paquete tras un descarte
+// deja de ser un hueco —lo que sobrevive es un insumo que se AUTOVERIFICA— y
+// sigue comprando lo que compraba: repreguntarle al juez por un JSON ilegible
+// sin obligar a regenerar nada.
 function consumirPaquete(paquete) {
   try {
     unlinkSync(paquete)
@@ -922,9 +1001,20 @@ function verboSliceVerdict() {
   // fichero en disco el juez de slice no tuvo diff acumulado que juzgar.
   const paquete = join(workDir, 'slice-review.diff')
   if (!existsSync(paquete)) {
-    const why = `el paquete de revisión del slice no existe (${paquete}): el juez de slice juzgó a ciegas — vuelve a "ct-step next", que es el único paso que lo genera. El paquete es de UN SOLO USO: lo consume el veredicto que lo lee, así que tras un veredicto aceptado hay que volver a pasar por next antes de despachar al juez de slice otra vez`
+    const why = `el paquete de revisión del slice no existe (${paquete}): el juez de slice juzgó a ciegas — vuelve a "ct-step next", que es el único paso que lo genera, y REDESPACHA al juez de slice. El paquete es de UN SOLO USO: lo consume el veredicto que lo lee, así que tras un veredicto aceptado hay que volver a pasar por next antes de despachar al juez de slice otra vez`
     medir('slice-judge', { outcome: 'discarded', why })
     out(`veredicto de slice descartado: ${why}`)
+    return OUTCOMES.DISCARDED
+  }
+  // Mismo par de comprobaciones que en `verboVerdict`, con el diff del RANGO
+  // en vez del del índice (ver `diffDeSlice`). Aquí el token cubre lo que la
+  // invariante de commits del estado NO cubre: un commit AÑADIDO en el hueco
+  // ya muere en el cruce `hechos !== esperados` de la carga del estado, pero un
+  // `--amend` deja la cuenta igual y el contenido distinto.
+  const { token, why: porElPaquete } = tokenVigente(paquete, diffDeSlice())
+  if (porElPaquete) {
+    medir('slice-judge', { outcome: 'discarded', why: porElPaquete })
+    out(`veredicto de slice descartado: ${porElPaquete}`)
     return OUTCOMES.DISCARDED
   }
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del veredicto de slice')
@@ -934,8 +1024,14 @@ function verboSliceVerdict() {
     out(`veredicto de slice descartado: ${why}`)
     return OUTCOMES.DISCARDED
   }
+  if (verdict.review_token !== token) {
+    const porAjeno = whyTokenAjeno(verdict.review_token, token)
+    medir('slice-judge', { outcome: 'discarded', why: porAjeno })
+    out(`veredicto de slice descartado: ${porAjeno}`)
+    return OUTCOMES.DISCARDED
+  }
   const outcome = outcomeOfSliceVerdict(verdict)
-  medir('slice-judge', { outcome, review_package: paquete, ...verdictMeasures(verdict) })
+  medir('slice-judge', { outcome, review_package: paquete, review_token: token, ...verdictMeasures(verdict) })
   // Aquí y no más abajo: DESPUÉS de medir (la fila nombra el paquete que el juez
   // de slice leyó, y se escribe mientras eso sigue siendo cierto) y ANTES de la
   // rama del PASS, que escribe, stagea y COMITEA. Cualquiera de esos writes
@@ -1011,7 +1107,7 @@ function verboVerdict() {
   // conductor que se saltó un paso. La causa manda sobre el síntoma.
   const paquete = join(workDir, `task-${run.task}-review.diff`)
   if (!existsSync(paquete)) {
-    const why = `el paquete de revisión no existe (${paquete}): el juez juzgó a ciegas — vuelve a "ct-step next", que es el único paso que lo genera. El paquete es de UN SOLO USO: lo consume el veredicto que lo lee, así que tras un FAIL (o cualquier veredicto aceptado) hay que volver a pasar por next antes de despachar al juez otra vez`
+    const why = `el paquete de revisión no existe (${paquete}): el juez juzgó a ciegas — vuelve a "ct-step next", que es el único paso que lo genera, y REDESPACHA al juez con el paquete nuevo. El paquete es de UN SOLO USO: lo consume el veredicto que lo lee, así que tras un FAIL (o cualquier veredicto aceptado) hay que volver a pasar por next antes de despachar al juez otra vez — y volver a next SIN redespachar al juez deja un veredicto de otro diff, que este verbo también rechaza`
     // La fila lleva `outcome` y `why`, y ninguna medida más: exactamente la
     // forma de los otros descartes de este fichero. Sin `ruling` —para
     // `aggregateVerdictMeasures` una fila con `ruling` ES un veredicto, y esto
@@ -1023,6 +1119,22 @@ function verboVerdict() {
     out(`veredicto descartado: ${why}`)
     return OUTCOMES.DISCARDED
   }
+  // EL INSUMO SIGUE SIENDO EL CORTE DE AHORA, y va ANTES de `leerJson` por el
+  // mismo motivo que la guarda de existencia: con las dos cosas mal, la fila
+  // que hay que escribir es la del paquete. Repreguntarle al juez arregla un
+  // JSON roto y NO hace que el código vuelva a ser el que él juzgó, así que
+  // medir "no se pudo leer el veredicto" mandaría al loop a gastar descartes
+  // contestando al problema que no era. La causa manda sobre el síntoma.
+  const { token, why: porElPaquete } = tokenVigente(paquete, diffDeTarea())
+  if (porElPaquete) {
+    // Misma forma que los otros descartes: `outcome` y `why`, ninguna medida
+    // más. Sin `review_package` ni `review_token`, porque nombrar en la fila
+    // el insumo de un juicio que no se acepta es escribir la afirmación que
+    // esta guarda existe para no dejar entrar.
+    medir('judge', { outcome: 'discarded', why: porElPaquete })
+    out(`veredicto descartado: ${porElPaquete}`)
+    return OUTCOMES.DISCARDED
+  }
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del veredicto')
   const { verdict, why } = porLeer ? { why: porLeer } : readVerdict(valor)
   if (!verdict) {
@@ -1030,9 +1142,23 @@ function verboVerdict() {
     out(`veredicto descartado: ${why}`)
     return OUTCOMES.DISCARDED
   }
+  // EL PRODUCTO ES DE ESTE INSUMO. Aquí muere el veredicto reciclado: el del
+  // juicio anterior trae el token del paquete anterior.
+  if (verdict.review_token !== token) {
+    const porAjeno = whyTokenAjeno(verdict.review_token, token)
+    medir('judge', { outcome: 'discarded', why: porAjeno })
+    out(`veredicto descartado: ${porAjeno}`)
+    return OUTCOMES.DISCARDED
+  }
   const outcome = outcomeOfVerdict(verdict)
   const graves = verdict.findings.filter((f) => f.severity !== 'low')
-  medir('judge', { outcome, review_package: paquete, ...verdictMeasures(verdict) })
+  // `review_token` al lado de `review_package`: la ruta del insumo y su
+  // IDENTIDAD. La ruta ya no vale para comprobar nada (el paquete se consume
+  // dos líneas más abajo), y el token dice de qué código fue este juicio — que
+  // es justo lo que en las dos vías era indistinguible en el JSONL. No se
+  // deriva de `verdictMeasures` porque no es una medida del juicio: es la del
+  // insumo, y va donde ya vive la del insumo.
+  medir('judge', { outcome, review_package: paquete, review_token: token, ...verdictMeasures(verdict) })
   // El consumo va AQUÍ por lo mismo que en el gemelo de slice: la fila que
   // nombra el paquete se escribe primero, y todo lo que viene después
   // —`mkdirSync`, `writeFileSync` y el `git add` del veredicto que viaja en el

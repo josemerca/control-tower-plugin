@@ -13,6 +13,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
 
 import { deliveredRun } from '../scripts/run-machine.js'
 import { VERDICT_RULES, SLICE_VERDICT_RULES } from '../scripts/step-contracts.js'
@@ -146,6 +147,34 @@ const veredictoDeSlice = (ruling, findings = [], nombre = 'slice-verdict.json') 
   return p
 }
 
+const log = () => execFileSync('git', ['log', '--oneline'], { cwd: repo, encoding: 'utf8' })
+const commits = () => log().trim().split('\n').filter(Boolean).length
+const estado = () => JSON.parse(readFileSync(join(repo, '.agent', 'run-7.json'), 'utf8'))
+
+const paqueteDeTarea = (n = estado().task) => join(repo, '.agent', 'run-7', `task-${n}-review.diff`)
+const paqueteDeSlice = () => join(repo, '.agent', 'run-7', 'slice-review.diff')
+const filasDeJuez = (paso = 'judge') => readFileSync(join(repo, '.telemetria', 'control-tower', 'log', 'ct-step.jsonl'), 'utf8')
+  .trim().split('\n').map((l) => JSON.parse(l)).filter((f) => f.step === paso)
+
+// Slice 11 — el juez COPIA de la cabecera del paquete la línea `Review token:`
+// al campo `review_token` de su veredicto. El fixture hace exactamente eso, y
+// por eso SELLA DESPUÉS de `next`: cuando `veredicto(...)` escribe el fichero,
+// el paquete todavía no existe (`escribirPaquete` sólo corre en `next`). Un
+// fichero que no es JSON (`crudo`) se deja intacto — es el reintento por JSON
+// ilegible, que tiene que seguir descartándose por ESA razón y no por el token.
+const tokenDelPaquete = (ruta) => {
+  const m = /^Review token: ([0-9a-f]{64})$/m.exec(readFileSync(ruta, 'utf8'))
+  return m ? m[1] : null
+}
+const sellar = (json, paquete) => {
+  const token = existsSync(paquete) ? tokenDelPaquete(paquete) : null
+  if (token === null) return json
+  let v
+  try { v = JSON.parse(readFileSync(json, 'utf8')) } catch { return json }
+  writeFileSync(json, JSON.stringify({ ...v, review_token: token }))
+  return json
+}
+
 // Slice 3 — `next` es el ÚNICO verbo que escribe el paquete que el juez juzga
 // (`escribirPaquete` / `escribirPaqueteDeSlice` en ct-step.mjs), y desde este
 // slice `verdict` sin paquete en disco se DESCARTA. Un run de verdad pasa
@@ -153,12 +182,12 @@ const veredictoDeSlice = (ruling, findings = [], nombre = 'slice-verdict.json') 
 // next tras cada paso"—, así que estos tests lo hacen también: pedir el
 // veredicto es, por definición, haber preguntado antes. Los dos helpers
 // existen para que el paso no se olvide en el sitio veintiuno.
-const juzgar = (...args) => { ct('next'); return ct('verdict', ...args) }
-const juzgarSlice = (...args) => { ct('next'); return ct('slice-verdict', ...args) }
-
-const log = () => execFileSync('git', ['log', '--oneline'], { cwd: repo, encoding: 'utf8' })
-const commits = () => log().trim().split('\n').filter(Boolean).length
-const estado = () => JSON.parse(readFileSync(join(repo, '.agent', 'run-7.json'), 'utf8'))
+//
+// Slice 11: y ahora también sellan el veredicto con el token del paquete que
+// `next` acaba de escribir — un juez honesto copia esa línea, y estos helpers
+// son ese juez.
+const juzgar = (...args) => { ct('next'); sellar(args[0], paqueteDeTarea()); return ct('verdict', ...args) }
+const juzgarSlice = (...args) => { ct('next'); sellar(args[0], paqueteDeSlice()); return ct('slice-verdict', ...args) }
 
 // Una tarea entera por el camino feliz.
 const tareaOk = (fichero) => {
@@ -654,8 +683,8 @@ describe('un veredicto emitido sin paquete de revisión no es un veredicto', () 
 // paso siga siendo el del juez, así que un veredicto ACEPTADO (que siempre
 // cambia de paso) lo consume y un DESCARTE (que no lo cambia) no.
 describe('el paquete de revisión es de un solo uso: lo consume el veredicto que lo lee', () => {
-  const paqueteDeTarea = (n = 1) => join(repo, '.agent', 'run-7', `task-${n}-review.diff`)
-  const paqueteDeSlice = () => join(repo, '.agent', 'run-7', 'slice-review.diff')
+  // `paqueteDeTarea`/`paqueteDeSlice` viven ahora a nivel de módulo (Slice 11,
+  // firma compatible: mismo valor por defecto para la tarea 1).
 
   it('EL ATAQUE: tras un FAIL, encadenar report→controls→verdict sin next se DESCARTA', () => {
     // INTENTO 1, por el flujo real: `next` genera el paquete y el juez VETA.
@@ -717,8 +746,10 @@ describe('el paquete de revisión es de un solo uso: lo consume el veredicto que
     expect(readFileSync(paqueteDeTarea(), 'utf8')).toBe(antes)   // byte a byte: el mismo insumo
 
     // Se le repregunta al juez SIN pasar por `next`, que es legítimo: el paso no
-    // ha cambiado y el paquete que iba a juzgar sigue siendo el bueno.
-    const r2 = ct('verdict', veredicto('PASS'))
+    // ha cambiado y el paquete que iba a juzgar sigue siendo el bueno. Y como
+    // el paquete sigue siendo el mismo, el juez honesto copia el MISMO token
+    // (Slice 11): por eso se sella aquí y no antes de escribirlo.
+    const r2 = ct('verdict', sellar(veredicto('PASS'), paqueteDeTarea()))
     expect(r2.stdout).toMatch(/veredicto PASS/)
     expect(estado().step).toBe('commit')
     expect(existsSync(paqueteDeTarea())).toBe(false)             // aceptado: ahora sí se gasta
@@ -744,8 +775,8 @@ describe('el paquete de revisión es de un solo uso: lo consume el veredicto que
     expect(readFileSync(paqueteDeSlice(), 'utf8')).toBe(antes)
 
     // Repreguntado sin `next` (legítimo: el paso no cambió) y aceptado: entrega
-    // y se lleva su insumo.
-    const r = ct('slice-verdict', veredictoDeSlice('PASS'))
+    // y se lleva su insumo. Sellado con el token del MISMO paquete (Slice 11).
+    const r = ct('slice-verdict', sellar(veredictoDeSlice('PASS'), paqueteDeSlice()))
     expect(r.status).toBe(0)
     expect(estado().closed).toBe('delivered')
     expect(existsSync(paqueteDeSlice())).toBe(false)
@@ -756,6 +787,220 @@ describe('el paquete de revisión es de un solo uso: lo consume el veredicto que
     const r = juzgarSlice(veredictoDeSlice('FAIL', [{ severity: 'high', what: 'la tarea 2 deshace la 1', path: 'uno.txt', line: 1 }]))
     expect(r.status).toBe(1)                       // el veto de slice cierra el run
     expect(existsSync(paqueteDeSlice())).toBe(false)
+  })
+})
+
+// Slice 11 de los apuntes de Capde — las dos vías que quedaban abiertas después
+// de hacer el paquete de un solo uso, las dos MUDAS en la telemetría y
+// reproducidas contra el HEAD anterior a este arreglo. El insumo se ataba; el
+// producto no: nada ligaba el verdict.json al paquete. El paquete declara ahora
+// en su cabecera el sha256 del diff que capturó, el juez lo copia, y el verbo
+// exige que coincidan el del veredicto, el del paquete y el recomputado del
+// corte de ese instante.
+describe('el veredicto se ata al paquete: el token content-addressed que el juez copia', () => {
+  it('el paquete declara el sha256 del diff staged que captura, y el veredicto que lo copia entra', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    const token = tokenDelPaquete(paqueteDeTarea())
+    expect(token).toMatch(/^[0-9a-f]{64}$/)
+    // CONTENT-ADDRESSED, y aquí se fija QUÉ se hashea: el diff staged crudo,
+    // que es byte a byte lo que va en la sección `## Diff`.
+    const diff = execFileSync('git', ['diff', '--cached', '-U10'], { cwd: repo, encoding: 'utf8' })
+    expect(token).toBe(createHash('sha256').update(diff, 'utf8').digest('hex'))
+    expect(readFileSync(paqueteDeTarea(), 'utf8').split('\n')[1]).toBe(`Review token: ${token}`)
+
+    expect(ct('verdict', sellar(veredicto('PASS'), paqueteDeTarea())).stdout).toMatch(/veredicto PASS/)
+    expect(estado().step).toBe('commit')
+    expect(ct('commit').status).toBe(0)
+    // El token viaja en el veredicto de la pull request y en su fila.
+    const guardado = JSON.parse(execFileSync('git', ['show', 'HEAD:docs/superpowers/verdicts/issue-7-task-1.json'], { cwd: repo, encoding: 'utf8' }))
+    expect(guardado.verdict.review_token).toBe(token)
+    expect(filasDeJuez().at(-1).review_token).toBe(token)
+    expect(filasDeJuez().at(-1).ruling).toBe('PASS')
+  })
+
+  it('EL ATAQUE (a): el veredicto de un juicio anterior no cuela por volver sólo a next', () => {
+    // JUICIO 1, legítimo, sobre el código A: un PASS con hallazgo medium es un
+    // veredicto ACEPTADO que devuelve la tarea al implementador, y deja el
+    // fichero del veredicto en disco (misma ruta en todos los intentos).
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    const v = veredicto('PASS', [{ severity: 'medium', what: 'falta un caso', path: 'uno.txt', line: 1 }])
+    expect(juzgar(v).stdout).toMatch(/veredicto PASS/)
+    expect(estado().step).toBe('implement')
+
+    // El implementador cambia el código y el conductor obedece SÓLO la mitad
+    // del mensaje: vuelve a `next` (que regenera el paquete del índice nuevo) y
+    // NO redespacha al juez — entrega otra vez el fichero del juicio 1.
+    writeFileSync(join(repo, 'uno.txt'), 'uno, una versión que ningún juez ha visto\n')
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    const r = ct('verdict', v)
+    expect(r.status).toBe(0)                     // descarte, no cierre
+    expect(r.stdout).toMatch(/veredicto descartado: el veredicto no es de este paquete/)
+    expect(r.stdout).toContain('REDESPACHA al juez')
+    expect(estado().step).toBe('judge')          // NO avanza
+    expect(estado().discards).toBe(1)            // y cuenta para MAX_DISCARDS
+    expect(commits()).toBe(1)                    // el veredicto reciclado no comitea nada
+
+    // La TELEMETRÍA, que es donde el fallo era mudo: la fila del reciclado no
+    // afirma juicio ni insumo.
+    const juez = filasDeJuez()
+    expect(juez).toHaveLength(2)
+    expect(juez[1].outcome).toBe('discarded')
+    expect(juez[1].ruling).toBeUndefined()
+    expect(juez[1].review_package).toBeUndefined()
+    expect(juez[1].review_token).toBeUndefined()
+
+    // Y el camino honesto sigue abierto: se redespacha al juez, que copia el
+    // token del paquete NUEVO.
+    expect(juzgar(veredicto('PASS')).stdout).toMatch(/veredicto PASS/)
+    expect(estado().step).toBe('commit')
+  })
+
+  it('EL ATAQUE (b): el código cambiado en el hueco del descarte no cuela con el paquete viejo', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    expect(ct('verdict', crudo('esto no es json')).stdout).toMatch(/veredicto descartado: no se pudo leer/)
+    expect(existsSync(paqueteDeTarea())).toBe(true)   // el descarte sigue sin consumir
+
+    // EL HUECO: el implementador toca el fichero y lo RE-STAGEA. El `git add`
+    // es la mitad que importa — `ct-step commit` comitea el ÍNDICE, así que una
+    // edición sin stagear no llega al commit y no invalida ningún juicio.
+    writeFileSync(join(repo, 'uno.txt'), 'uno, código que ningún juez ha visto\n')
+    execFileSync('git', ['add', 'uno.txt'], { cwd: repo })
+
+    // El juez copia HONESTAMENTE el token del paquete que se le dio: es el del
+    // código viejo, y eso es todo lo que hace falta para que no entre.
+    const r = ct('verdict', sellar(veredicto('PASS'), paqueteDeTarea()))
+    expect(r.status).toBe(0)
+    expect(r.stdout).toMatch(/veredicto descartado: el paquete de revisión ya no describe el código de ahora/)
+    expect(estado().step).toBe('judge')
+    expect(estado().discards).toBe(2)
+    expect(commits()).toBe(1)
+    expect(existsSync(join(repo, 'docs', 'superpowers', 'verdicts', 'issue-7-task-1.json'))).toBe(false)
+    const juez = filasDeJuez()
+    expect(juez).toHaveLength(2)
+    expect(juez[1].review_package).toBeUndefined()
+
+    // El camino honesto: `next` regenera el paquete del índice de AHORA y el
+    // PASS entra sobre el código que de verdad se va a comitear.
+    expect(juzgar(veredicto('PASS')).stdout).toMatch(/veredicto PASS/)
+    expect(estado().step).toBe('commit')
+  })
+
+  it('con el paquete rancio Y el JSON ilegible, la fila cuenta el paquete: la causa manda sobre el síntoma', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    writeFileSync(join(repo, 'uno.txt'), 'otra cosa\n')
+    execFileSync('git', ['add', 'uno.txt'], { cwd: repo })
+    const r = ct('verdict', crudo('esto tampoco es json'))
+    expect(r.stdout).toMatch(/ya no describe el código de ahora/)
+    expect(r.stdout).not.toMatch(/no se pudo leer/)
+    expect(filasDeJuez()[0].why).toMatch(/ya no describe el código de ahora/)
+  })
+
+  it('el reintento legítimo por JSON ilegible sigue entrando sin pasar por next', () => {
+    // El mismo insumo, el mismo corte: el token coincide y no hay round trip
+    // de más. Es la propiedad que hace que NO consumir en el descarte siga
+    // valiendo la pena.
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    const antes = readFileSync(paqueteDeTarea(), 'utf8')
+    expect(ct('verdict', crudo('nada de json')).stdout).toMatch(/descartado/)
+    expect(readFileSync(paqueteDeTarea(), 'utf8')).toBe(antes)
+    const r = ct('verdict', sellar(veredicto('PASS'), paqueteDeTarea()))
+    expect(r.stdout).toMatch(/veredicto PASS/)
+    expect(estado().discards).toBe(1)             // el reintento no gastó un segundo descarte
+    expect(existsSync(paqueteDeTarea())).toBe(false)
+  })
+
+  it('un veredicto sin review_token se descarta, y el motivo nombra la línea de la que se copia', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    const r = ct('verdict', veredicto('PASS'))    // nadie lo sella: el juez no copió el token
+    expect(r.status).toBe(0)
+    expect(r.stdout).toMatch(/veredicto descartado: el veredicto no copia el "Review token"/)
+    expect(r.stdout).toContain('review_token')
+    expect(estado().step).toBe('judge')
+    expect(estado().discards).toBe(1)
+  })
+
+  it('un juez que NUNCA copia el token no cuela nada y para por 3: atascado se ve, mudo no', () => {
+    // El riesgo principal del diseño, fijado como propiedad: el pipeline se
+    // detiene con el exit de "no hay veredicto de fiar" y el motivo escrito en
+    // seis filas, no se queda colgado ni deja pasar nada.
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    let r
+    for (let i = 0; i < 7; i++) { ct('next'); r = ct('verdict', veredicto('PASS')) }
+    expect(r.status).toBe(3)
+    expect(r.stderr).toMatch(/descartes en este run/)
+    expect(commits()).toBe(1)
+    expect(filasDeJuez().every((f) => f.outcome === 'discarded')).toBe(true)
+  })
+
+  it('un paquete sin la línea del token (plugin anterior, o editado) se descarta y manda a next', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    const sinCabecera = readFileSync(paqueteDeTarea(), 'utf8').split('\n').filter((l) => !l.startsWith('Review token: ')).join('\n')
+    writeFileSync(paqueteDeTarea(), sinCabecera)
+    const r = ct('verdict', veredicto('PASS'))
+    expect(r.stdout).toMatch(/no declara su "Review token"/)
+    expect(estado().step).toBe('judge')
+    expect(estado().discards).toBe(1)
+    // Y se cura en una vuelta: `next` lo regenera CON token.
+    expect(juzgar(veredicto('PASS')).stdout).toMatch(/veredicto PASS/)
+  })
+
+  it('EL GEMELO DE SLICE: el token sale del diff del RANGO y viaja en el veredicto comiteado', () => {
+    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('global')
+    ct('next')
+    const token = tokenDelPaquete(paqueteDeSlice())
+    const diff = execFileSync('git', ['diff', '-U10', estado().baseSha, 'HEAD'], { cwd: repo, encoding: 'utf8' })
+    expect(token).toBe(createHash('sha256').update(diff, 'utf8').digest('hex'))
+    const r = ct('slice-verdict', sellar(veredictoDeSlice('PASS'), paqueteDeSlice()))
+    expect(r.status).toBe(0)
+    expect(estado().closed).toBe('delivered')
+    const guardado = JSON.parse(execFileSync('git', ['show', 'HEAD:docs/superpowers/verdicts/issue-7-slice.json'], { cwd: repo, encoding: 'utf8' }))
+    expect(guardado.verdict.review_token).toBe(token)
+    expect(filasDeJuez('slice-judge').at(-1).review_token).toBe(token)
+  })
+
+  it('EL GEMELO DE SLICE: un veredicto de slice con el token de otro paquete no entrega el run', () => {
+    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('global')
+    ct('next')
+    const p = join(repo, 'sv.json')
+    writeFileSync(p, JSON.stringify({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [], review_token: 'f'.repeat(64) }))
+    const r = ct('slice-verdict', p)
+    expect(r.stdout).toMatch(/veredicto de slice descartado: el veredicto no es de este paquete/)
+    expect(estado().step).toBe('slice-judge')
+    expect(estado().discards).toBe(1)
+    expect(estado().closed ?? null).toBeNull()
+    expect(existsSync(join(repo, 'docs', 'superpowers', 'verdicts', 'issue-7-slice.json'))).toBe(false)
+  })
+
+  it('EL GEMELO DE SLICE: un commit REESCRITO en el hueco del descarte invalida el paquete', () => {
+    // La variante de (b) que la invariante de commits del estado NO caza: un
+    // `--amend` deja la cuenta igual (`hechos === esperados`) y el contenido
+    // distinto. Sin el token, esto entra.
+    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('global')
+    ct('next')
+    expect(ct('slice-verdict', crudo('ni json ni nada')).stdout).toMatch(/descartado/)
+    writeFileSync(join(repo, 'dos.txt'), 'dos, reescrito después del juicio\n')
+    execFileSync('git', ['add', 'dos.txt'], { cwd: repo })
+    execFileSync('git', ['commit', '-q', '--amend', '--no-edit'], { cwd: repo })
+    const r = ct('slice-verdict', sellar(veredictoDeSlice('PASS'), paqueteDeSlice()))
+    expect(r.stdout).toMatch(/ya no describe el código de ahora/)
+    expect(estado().closed ?? null).toBeNull()
+    expect(estado().step).toBe('slice-judge')
   })
 })
 

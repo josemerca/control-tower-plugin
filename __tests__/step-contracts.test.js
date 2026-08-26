@@ -10,12 +10,14 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage, findingLocation,
   VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS, VERDICT_RULES,
   PACKAGE_SECTIONS, RUBRIC_OUTCOMES,
   readSliceVerdict, outcomeOfSliceVerdict, sliceVerdictCommitMessage,
   SLICE_VERDICT_RULES, SLICE_VERDICT_SCHEMA, SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS,
+  REVIEW_TOKEN_LABEL, reviewToken, reviewTokenLine, reviewTokenOf,
 } from '../scripts/step-contracts.js'
 import { findClosingKeywords } from '../scripts/closing-keywords.js'
 
@@ -173,6 +175,11 @@ const esquemaDelAgente = () => {
 // esquema tampoco duplica la lista: dos copias de los identificadores
 // divergen, y el test que las ataba dejaría de mirarlos todos.
 const recorridoCompleto = () => VERDICT_RULES.map((rule) => ({ rule, result: 'sin hallazgos', outcome: 'conforme' }))
+
+// Slice 11 — a estos tests no les importa CUÁL token trae el veredicto, sólo
+// que readVerdict lo exige y lo conserva: un hex de 64 cualquiera basta, y no
+// se teclea dos veces por el mismo motivo que recorridoCompleto no se teclea.
+const TOKEN = 'a'.repeat(64)
 
 // Los encabezados del paquete de revisión que cita el párrafo "The review
 // package." de "What you are given" — el único sitio de la rúbrica que habla
@@ -409,6 +416,17 @@ describe('quién puede qué', () => {
     for (const valor of RUBRIC_OUTCOMES) expect(texto).toContain(valor)
   })
 
+  // Slice 11 — el campo obligatorio tiene que estar en lo que el juez lee: un
+  // campo que sólo vive en el validador descarta la corrida entera sin que
+  // ninguno de los veredictos sea culpa del juez.
+  it('el bloque json de ct-judge.md enseña review_token: un campo que sólo vive en el validador descarta la corrida entera', () => {
+    expect(esquemaDelAgente()).toMatch(/"review_token"/)
+  })
+
+  it('la rúbrica del juez dice de DÓNDE se copia el token, con la etiqueta exacta del paquete', () => {
+    expect(readFileSync(AGENTE_JUEZ, 'utf8')).toContain(`${REVIEW_TOKEN_LABEL}:`)
+  })
+
   it('PACKAGE_SECTIONS no puede divergir de los encabezados que la rúbrica cita por su nombre', () => {
     // El mismo fallo que ya tuvieron JUDGE_TOOLS y VERDICT_RULES, con un
     // agravante: aquí ni siquiera hay un esquema que descarte nada. Si
@@ -485,6 +503,11 @@ describe('el juez de slice (§3.7-B)', () => {
     expect(esquema).toMatch(/"path"/)
   })
 
+  it('el bloque json de ct-slice-judge.md enseña review_token, y su rúbrica nombra la etiqueta', () => {
+    expect(esquemaDeAgente(AGENTE_JUEZ_DE_SLICE)).toMatch(/"review_token"/)
+    expect(readFileSync(AGENTE_JUEZ_DE_SLICE, 'utf8')).toContain(`${REVIEW_TOKEN_LABEL}:`)
+  })
+
   it('SLICE_PACKAGE_SECTIONS abre con Señal y no puede divergir de la rúbrica', () => {
     expect(SLICE_PACKAGE_SECTIONS).toEqual(seccionesDelPaqueteDeSlice())
     // Slice 10: `Señal` PRIMERA, porque es la vara del ítem `observabilidad`
@@ -507,8 +530,14 @@ describe('el juez de slice (§3.7-B)', () => {
   const recorridoDeSlice = () => SLICE_VERDICT_RULES.map((rule) => ({ rule, result: `mirado: ${rule}`, outcome: 'conforme' }))
 
   it('readSliceVerdict acepta un recorrido de dos ítems válido', () => {
-    const r = readSliceVerdict({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [] })
-    expect(r.verdict).toEqual({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [] })
+    const r = readSliceVerdict({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [], review_token: TOKEN })
+    expect(r.verdict).toEqual({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [], review_token: TOKEN })
+  })
+
+  // Slice 11: mismo campo, mismo validador — `readSliceVerdict` es
+  // `readVerdict` con otra rúbrica dentro, así que el token se exige igual.
+  it('el juez de slice valida el mismo campo, con el mismo readVerdict', () => {
+    expect(readSliceVerdict({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [] }).verdict).toBeUndefined()
   })
 
   it('readSliceVerdict descarta un veredicto con una regla de TAREA (p. ej. "alcance")', () => {
@@ -550,7 +579,7 @@ describe('el juez de slice (§3.7-B)', () => {
 
   it('readVerdict (el de TAREA) sigue exigiendo el recorrido de nueve: no hay regresión', () => {
     const completo = VERDICT_RULES.map((rule) => ({ rule, result: 'ok', outcome: 'conforme' }))
-    expect(readVerdict({ ruling: 'PASS', rubric: completo, findings: [] }).verdict).toBeDefined()
+    expect(readVerdict({ ruling: 'PASS', rubric: completo, findings: [], review_token: TOKEN }).verdict).toBeDefined()
     // El mismo recorrido de DOS ítems no basta para un veredicto de TAREA.
     expect(readVerdict({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [] }).verdict).toBeUndefined()
   })
@@ -628,10 +657,10 @@ describe('el juez de slice (§3.7-B)', () => {
 })
 
 describe('el veredicto', () => {
-  const v = (ruling, findings = [], rubric = recorridoCompleto()) => readVerdict({ ruling, rubric, findings })
+  const v = (ruling, findings = [], rubric = recorridoCompleto()) => readVerdict({ ruling, rubric, findings, review_token: TOKEN })
 
   it('un PASA limpio se lee y vale', () => {
-    expect(v('PASS').verdict).toEqual({ ruling: 'PASS', rubric: recorridoCompleto(), findings: [] })
+    expect(v('PASS').verdict).toEqual({ ruling: 'PASS', rubric: recorridoCompleto(), findings: [], review_token: TOKEN })
   })
 
   it.each([
@@ -844,6 +873,61 @@ describe('el veredicto', () => {
     expect(r.verdict).toBeUndefined()
     expect(r.why).toMatch(/línea que no es un número/)
   })
+
+  // -------------------------------------------------------------------------
+  // Slice 11 — EL TOKEN DEL PAQUETE. El insumo se ataba (slice 6: un paquete
+  // consumido no se puede reutilizar); esto ata el otro sentido: nada ligaba
+  // el verdict.json AL paquete. El paquete declara en su cabecera el sha256
+  // del diff que capturó; el juez lo copia en `review_token`; y `readVerdict`
+  // exige que el campo llegue con forma de sha256 — quién decide si es EL DEL
+  // PAQUETE es ct-step.mjs, que es quien tiene git delante.
+  // -------------------------------------------------------------------------
+  it('el token del paquete es el sha256 del diff que captura, y su línea la escribe el módulo', () => {
+    const diff = 'diff --git a/uno.txt b/uno.txt\n@@ -0,0 +1 @@\n+uno\n'
+    expect(reviewToken(diff)).toBe(createHash('sha256').update(diff, 'utf8').digest('hex'))
+    expect(reviewTokenLine(reviewToken(diff))).toBe(`${REVIEW_TOKEN_LABEL}: ${reviewToken(diff)}`)
+  })
+
+  it('el lector del token no puede divergir del escritor: los dos salen de REVIEW_TOKEN_LABEL', () => {
+    const t = reviewToken('lo que sea')
+    expect(reviewTokenOf(`# Review package\n${reviewTokenLine(t)}\n\n## Diff\n`)).toBe(t)
+  })
+
+  it('un paquete sin la línea, o con algo que no es un sha256, no declara ningún token', () => {
+    expect(reviewTokenOf('# Review package\n\n## Diff\n')).toBeNull()
+    expect(reviewTokenOf('Review token: no-soy-un-sha\n')).toBeNull()
+    expect(reviewTokenOf(`Review token: ${'a'.repeat(63)}\n`)).toBeNull()
+    expect(reviewTokenOf(null)).toBeNull()
+  })
+
+  it('readVerdict exige el review_token, y el motivo nombra la línea de la que se copia', () => {
+    const r = readVerdict({ ruling: 'PASS', rubric: recorridoCompleto(), findings: [] })
+    expect(r.verdict).toBeUndefined()
+    expect(r.why).toContain(REVIEW_TOKEN_LABEL)
+    expect(r.why).toContain('review_token')
+  })
+
+  it('un review_token que no es un sha256 de 64 hex se descarta', () => {
+    for (const malo of ['12', 'a'.repeat(63), 'z'.repeat(64), 123, null, undefined]) {
+      expect(readVerdict({ ruling: 'PASS', rubric: recorridoCompleto(), findings: [], review_token: malo }).verdict).toBeUndefined()
+    }
+  })
+
+  it('un review_token en mayúsculas se acepta y se guarda en minúsculas: copiar un hex no es teclear un permiso', () => {
+    // El precedente es matchesGo: el token se compara en minúsculas para que un
+    // reformateo no cueste un descarte con el veredicto correcto dentro.
+    const r = readVerdict({ ruling: 'PASS', rubric: recorridoCompleto(), findings: [], review_token: 'A'.repeat(64) })
+    expect(r.verdict.review_token).toBe('a'.repeat(64))
+  })
+
+  it('el review_token viaja DENTRO del veredicto validado: es lo que se comitea y lo que se compara', () => {
+    expect(v('PASS').verdict.review_token).toBe(TOKEN)
+  })
+
+  it('review_token está en VERDICT_SCHEMA.required, no sólo en el validador', () => {
+    expect(VERDICT_SCHEMA.required).toContain('review_token')
+    expect(SLICE_VERDICT_SCHEMA.required).toContain('review_token')
+  })
 })
 
 describe('de veredicto a resultado de la tabla', () => {
@@ -926,6 +1010,7 @@ describe('los esquemas declarados, atados a lo que valida de verdad', () => {
     ruling: 'FAIL',
     rubric: recorridoCompleto(),
     findings: [{ rule: 'contrato', severity: 'high', what: 'x', path: 'y', evidence: 'z' }],
+    review_token: TOKEN,
   })
 
   it.each(REPORT_SCHEMA.required)('readReport exige "%s", como declara REPORT_SCHEMA.required', (campo) => {
