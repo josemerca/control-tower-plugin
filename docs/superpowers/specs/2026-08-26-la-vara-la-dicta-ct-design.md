@@ -1,10 +1,10 @@
-# La vara la dicta ct — las convenciones viajan con el plugin, no con el repo
+# La vara la dicta ct — el plugin trae la suya, y la suya siempre gana
 
-> Cierra la mitad que `2026-08-21-la-vara-del-repo-en-el-plan-design.md` dejó
-> abierta, y la cierra **al revés** de como aquélla la planteaba. Aquélla
-> construyó el transporte para que la vara del repo destino llegara al
-> implementador y al juez. Esto retira la vara del repo y pone en su sitio la de
-> ct.
+> Completa `2026-08-21-la-vara-del-repo-en-el-plan-design.md`. Aquélla construyó
+> el transporte para que la vara del repo destino llegara al implementador y al
+> juez; funciona, y se queda. Lo que faltaba es lo que se transportaba, porque
+> `/ct-init` siembra la declaración vacía. Esto pone a ct a traer la suya puesta,
+> y a ganar donde las dos hablen de lo mismo.
 >
 > El problema que cierra: **los slices entregan calidad irregular porque en la
 > práctica nadie mide contra nada.** El transporte funciona; lo que no llega es
@@ -44,18 +44,39 @@ veces, un test que asserta sobre un doble o andamiaje de trabajo que nadie pidi�
 El `patrones` maniatado que aquel diseño desató sigue sin nada que citar, porque
 lo que le falta ya no es permiso: es contenido.
 
-## 2. La decisión: ct dicta cómo se programa
+## 2. La decisión: ct trae su vara, y la suya siempre gana
 
-**Las convenciones dejan de ser una propiedad del repo destino y pasan a ser una
-propiedad del plugin.** No un suelo que la vara del repo pueda completar ni una
-vara secundaria que ceda en caso de contradicción: la única vara de reglas. Una
-convención del repo que la contradiga no aplica.
+**ct empaqueta sus propias convenciones de código, y tienen preferencia
+absoluta.** La declaración del repo destino (`.agent/conventions.md`, y el
+`Rules to obey:` de §3 que la selecciona) **se queda y sigue obligando**: son dos
+varas, no una, y la del repo cubre todo aquello de lo que la de ct no habla.
+
+**La precedencia se mide por regla, no por tema.** Que ct gane no significa que
+la vara del repo se anule: significa que donde una regla del repo manda hacer
+algo que uno de los documentos de ct prohíbe, o prohíbe algo que exigen, no
+aplica. Donde una regla del repo dice algo de lo que ninguno de ellos habla,
+obliga entera.
+
+El caso que fija la frontera, porque es el que se malinterpreta en las dos
+direcciones: la convención de mayúsculas, prefijos o nombres de fichero de un
+repo **obliga**, porque ningún documento de ct habla de eso. Su convención de
+escribir identificadores en castellano **no**, porque `conventions/code.md` exige
+inglés. Y ct sí reclama trozos concretos del naming —el idioma de los
+identificadores, que un caso de uso no lleve coletilla, que un adaptador se llame
+como su implementación—, así que la frontera no es «naming sí o no»: es si un
+documento de ct habla de eso o no habla.
 
 Lo que esto compra es que el estado `sin-vara` **deja de poder ocurrir** en el
-ítem `patrones`. La vara viaja con el plugin, así que no hay repo sin ella, no
-hay declaración que se quede vacía y no hay nada que un humano tenga que
-escribir antes de que el mecanismo mida. El argumento de F14 se queda sin sujeto:
-no se está exigiendo una vara que el repo no tiene, se está trayendo puesta.
+ítem `patrones`. La vara de ct viaja con el plugin, así que no hay repo sin
+vara y no hay nada que un humano tenga que escribir antes de que el mecanismo
+mida. El argumento de F14 se queda sin sujeto: no se está exigiendo una vara que
+el repo no tiene, se está trayendo puesta.
+
+**Consecuencia aceptada:** con `patrones` incapaz de salir `sin-vara`, se pierde
+la cifra que decía «este repo no ha escrito sus convenciones». Se acepta porque
+ese número medía la ausencia de la única vara que había; ahora la vara nunca
+falta, y lo que el repo declare o no es una elección suya y no un agujero del
+mecanismo.
 
 El origen del contenido es `docs/conventions/` de `alcaptar/agentic-skills`, un
 corpus que ya está escrito, ya se aplica y ya tiene su propia meta-convención
@@ -66,26 +87,35 @@ verdad en Python.
 ## 3. Cómo cruza el embudo
 
 `ct-step` sólo puede leer dos cosas: el plan y ficheros del disco. La vara del
-repo cruzaba por la segunda, leída de `.agent/conventions.md`. La vara de ct cruza
-por la misma puerta, cambiando de dónde se lee: `PLUGIN_ROOT` ya existe en
-`scripts/ct-step.mjs`, así que el programa puede leer un fichero del propio
-plugin sin inventar ningún transporte.
+repo ya cruza por la segunda, leída de `.agent/conventions.md`. La de ct cruza por
+la misma puerta cambiando de dónde se lee: `PLUGIN_ROOT` ya existe en
+`scripts/ct-step.mjs`, así que el programa puede leer un fichero del propio plugin
+sin inventar ningún transporte.
 
 ```
-conventions/*.md  (en el plugin)
-   │
-   ├─ kickoff.js nombra sus rutas en el primer acto del slice
-   │     ▼
-   │  el que escribe el plan  (writing-plans-prescriptive)
-   │
-   └─ ct-step.mjs las lee con PLUGIN_ROOT y las pega VERBATIM
-      al final del task brief — ningún agente lo escribe ahí
+conventions/*.md  (en el plugin)          .agent/conventions.md  (en el repo)
+   │                                              │
+   ├─ kickoff.js nombra sus rutas                  │
+   │  en el primer acto del slice                  │
+   │     ▼                                         │
+   │  el que escribe el plan ──── selecciona ──────┤
+   │  (writing-plans-prescriptive)   en §3         │
+   │                                               │
+   └─ ct-step.mjs las pega VERBATIM ───────────────┘
+      al final del task brief, ct PRIMERO
+      — ningún agente escribe ahí
          ▼
       task brief
          │
          ├──► implementador  (lo tiene delante antes de escribir)
          └──► juez           (lee ese mismo brief antes de bloquear)
 ```
+
+**Dos módulos, dos sujetos.** `scripts/vara.js` se queda entero como está,
+transportando la declaración del repo; la vara de ct entra en `scripts/vara-ct.js`
+y `ct-step` compone las dos. Meterlas en el mismo fichero lo dejaría llevando tres
+cosas —la vara de ct, la declaración del repo y el barrido de candidatos—, que es
+la mezcla que `knowledge-composition` existe para evitar.
 
 **El task brief es un fichero en disco**, `.agent/run-<issue>/task-N-brief.md` en el
 worktree del slice, que `ct-step` compone a partir del plan ya commiteado: cuatro
@@ -99,17 +129,22 @@ que no se pueda perder: `offload-deterministic` en el vocabulario de `ai-pattern
 Por qué el que planifica también la recibe está en §7, y no es un extra: sin eso el
 mecanismo se cierra en falso.
 
-### 3.1 El fallo cambia de doctrina, y es lo más importante de este apartado
+### 3.1 Las dos varas fallan distinto, y eso es deliberado
 
-Hoy, si `.agent/conventions.md` falta, es un estado benigno: el brief sale sin
-vara, `ct-step` avisa por stderr y el juez lo mide `sin-vara`. Cuando la vara
-viaja con el plugin, faltar ya no significa «este repo no escribió sus
-convenciones» sino **instalación rota**.
+Que falte `.agent/conventions.md` **sigue siendo un estado benigno**: el brief sale
+sin la parte del repo, `ct-step` avisa por stderr y no pasa nada más. Es el estado
+normal de casi todo repo y no se toca.
 
-Así que ahí `ct-step` **aborta** en vez de avisar. Un brief sin la vara produciría
-un implementador y un juez midiendo con nada, y eso es exactamente la desviación
-silenciosa (`silent-misalignment`) que todo este mecanismo existe para cerrar: en
+Que falte uno de los cuatro de `conventions/` **no lo es**: no significa «este repo
+no escribió sus convenciones» sino **instalación rota del plugin**. Ahí `ct-step`
+**aborta** en vez de avisar, porque un brief sin la vara de ct produce un
+implementador y un juez midiendo con nada, y eso es exactamente la desviación
+silenciosa (`silent-misalignment`) que este mecanismo existe para cerrar: en
 silencio, un ítem sin vara no se distingue de un ítem conforme.
+
+La asimetría es la que corresponde a quién posee cada fichero. Lo que el repo
+declara es suyo y puede no declarar nada; lo que el plugin trae es una promesa del
+plugin, y no cumplirla es un fallo suyo.
 
 ## 4. El reparto: cuatro ficheros, no uno
 
@@ -152,6 +187,22 @@ empaqueta). La vara
 se cita desde esos dos documentos: en castellano quedaría en otro idioma que la
 rúbrica que la invoca, y contradiría su propia regla de escribir el código en
 inglés.
+
+### 5.0 Dónde vive la regla de precedencia
+
+**No en los cuatro documentos**, y no en cada uno: sería la misma regla escrita
+cuatro veces, que es exactamente lo que `conventions/decisions.md` prohíbe.
+
+Vive en **la cabecera del bloque que pega el programa** (`seccionDeVara`, en
+`scripts/vara-ct.js`), y ahí por un motivo que no es de comodidad: el programa es
+el único que sabe que las dos varas están viajando juntas en ese brief, y esa
+cabecera es lo único del bloque que ningún agente puede quitar. El texto dice la
+regla por-regla de §2 y trae el caso del naming como ejemplo trabajado, para que
+el juez tenga delante los dos lados —uno que obliga y uno que no— en vez de una
+consigna que sólo apunta en una dirección.
+
+El bloque de ct va **antes** que el del repo en el brief: la cabecera que fija la
+precedencia se lee antes de que llegue la vara sobre la que decide.
 
 ### 5.1 `conventions/code.md`
 
@@ -362,27 +413,52 @@ Alcance: **todo diff**.
 | La meta-convención sobre cómo se escribe una convención | La leen las personas que editan estos cuatro ficheros, no el implementador ni el juez. Si hace falta, va a `docs/`, no a `conventions/` |
 | Dónde vive el porqué de una decisión | Decidido fuera: la regla se queda en cero prosa y no dice adónde va el porqué |
 
-## 6. Qué se retira
+## 6. Qué se toca, y qué no
+
+Esta es la parte que la primera versión de este diseño se equivocó por completo:
+proponía retirar la vara del repo entera. Con la precedencia de §2, casi nada de
+aquello hace falta.
+
+### 6.1 Se queda como está
+
+| Pieza | Por qué |
+|---|---|
+| Siembra de `.agent/conventions.md` en `scripts/ct-init.sh` | El repo sigue teniendo declaración propia, y sigue siendo suya |
+| `scripts/vara.js` entero | Sigue siendo el transporte de la declaración del repo, con el mismo sujeto que ya tenía |
+| `scripts/detect-vara.mjs` y el barrido de candidatos | Sigue habiendo algo que un humano declara, así que sigue habiendo candidatos que proponerle |
+| `Rules to obey:` de `## 3. Reference patterns` | Sigue seleccionando la vara del repo por slice |
+| `scripts/plan-contract.js`, regla `reference-paths` y su mensaje | §3 sigue siendo una vara de reglas: la del repo |
+| `commands/ct-init.md` | El ritual de confirmación de la declaración del repo sigue teniendo sujeto |
+| `scripts/conventions.js` y `conventions-io.js` | Otro sujeto —colisiones de protocolo del loop—, con su propio `.agent/conventions-ack.md`. Nunca estuvieron en cuestión |
+| Los nueve `VERDICT_RULES` | Este diseño no añade ítem a la rúbrica: cambia contra qué mide `patrones` |
+
+### 6.2 Se crea
+
+| Pieza | Qué es |
+|---|---|
+| `conventions/{code,decisions,architecture,testing}.md` | La vara de ct (§5) |
+| `scripts/vara-ct.js` | Su transporte: la lista, qué falta, y la sección que se pega con la cabecera de precedencia |
+
+### 6.3 Se modifica
 
 | Pieza | Qué le pasa |
 |---|---|
-| Siembra de `.agent/conventions.md` en `scripts/ct-init.sh` | Fuera, sin sustituto. La primera versión de este diseño ponía ahí un aviso; se retiró al ver que avisaba de un deadlock que §7 elimina. Un anuncio sobre el que nadie decide nada es ruido, y el sitio donde se decide si una migración cabe en un slice es el gate `plan`, que ya existe |
-| `scripts/detect-vara.mjs` y la mitad de candidatos de `scripts/vara.js` | Fuera enteros, con `__tests__/vara-candidatos.test.js`. El barrido existía para proponer candidatos a un humano que ya no tiene nada que declarar |
-| La mitad de transporte de `scripts/vara.js` | Se queda, cambiando de sujeto: `CONVENTIONS_FILE` deja de ser una ruta relativa al repo y pasa a ser la del plugin, la rama de «no hay vara» de `seccionDeVara` desaparece, y el encabezado que se pega deja de decir «la vara del REPO» |
-| `Rules to obey:` de `## 3. Reference patterns` | Fuera, en `plan-template.md` y en `SKILL.md`. §3 se queda sólo con `Files to imitate:`, que no son reglas sino código real de este repo cuyo idiom se copia |
-| Regla `reference-paths` de `scripts/plan-contract.js` | **Se queda**, comprobando que las rutas que §3 cita existen. Lo que cambia es su mensaje de fallo, que hoy dice «§3 es la vara con la que el implementador escribe y el juez bloquea»: eso deja de ser verdad en cuanto §3 son sólo ejemplares |
-| Ítem `patrones` de `agents/ct-judge.md` | Reescrito: deja de medir la unión de dos varas y mide los ejemplares de §3 más la vara de ct que trae el brief. Pierde el outcome `sin-vara`, que ya no puede ocurrir, y conserva `no-aplica` para un diff sin código que comparar |
-| `prompts/task-implementer.md`, punto 3 | Reescrito simétricamente, para que el que escribe y el que bloquea lean el mismo texto |
-| `scripts/kickoff.js` | Gana las rutas de los cuatro ficheros en el primer acto del slice, junto a las que ya calcula (`dispatchCheckPath`, `ctStepPath`) |
-| `skills/writing-plans-prescriptive/SKILL.md` | Además de perder el `Rules to obey:`, gana la orden de leer la vara **antes** de escribir el plan. Ver §7 |
-| `scripts/conventions.js` y `scripts/conventions-io.js` | **Intactos.** Son otro sujeto —colisiones de protocolo entre el loop y el repo destino: claim, worktrees, fichero de estado—, con su propio `.agent/conventions-ack.md`. La trampa de nombre ya está documentada en la cabecera de los dos ficheros y sigue valiendo |
+| `scripts/ct-step.mjs` | `escribirBrief` pega **las dos** varas, la de ct primero, y aborta si falta alguno de los cuatro |
+| `scripts/kickoff.js` y `scripts/ct-next.mjs` | El primer acto del slice nombra las rutas de la vara de ct, para que el plan se escriba con ella delante (§7) |
+| `skills/writing-plans-prescriptive/SKILL.md` | Gana la orden de leer la vara de ct antes de escribir el plan, y de que su §3 selecciona la del repo, que es otra cosa |
+| Ítem `patrones` de `agents/ct-judge.md` | Mide contra las dos varas con la precedencia de §2. Pierde el outcome `sin-vara`, que ya no puede ocurrir, y conserva `no-aplica` |
+| `prompts/task-implementer.md`, punto 3 | Lo mismo, para que el que escribe y el que bloquea lean el mismo texto |
 
 ## 7. La vara llega al que planifica, no sólo al que escribe
 
+De las dos varas, la del repo **ya llega** al que planifica: la skill le manda
+arrancar de `.agent/conventions.md` y seleccionar en §3. La de ct es la que no, y
+este apartado va de ella.
+
 `scripts/kickoff.js` manda escribir el plan del slice con
 `writing-plans-prescriptive` como **primer acto**, antes de que `ct-step` entre en
-el ciclo. Si la vara sólo se pegara en el task brief, el plan se escribiría sin
-ella:
+el ciclo. Si la vara de ct sólo se pegara en el task brief, el plan se escribiría
+sin ella:
 
 ```
 kickoff  →  plan (sin vara)  →  --check-plan  →  gate `plan`  →  ct-step  →  brief (con vara)
@@ -432,4 +508,11 @@ que sea el fichero que le toque, y eso lo decide el azar, no el trabajo.
   siendo material de después.
 - **No migra ningún repo a hexagonal.** Lo viejo es deuda declarada por regla
   (§5.3), no por omisión: lo nuevo nace conforme y lo que ya estaba se queda.
+- **No retira la vara del repo destino, ni la subordina en bloque.** Sigue
+  obligando en todo aquello de lo que la de ct no habla, y la precedencia se mide
+  regla a regla (§2).
+- **No declara los temas de cada documento como una lista mantenida.** La
+  frontera se lee de lo que cada documento dice, no de un índice al lado que
+  habría que actualizar cada vez que un documento crezca — y que, desactualizado,
+  daría permiso a lo que la regla prohíbe.
 - **No trae `git-workflow.md` ni la meta-convención.** Ver §5.5.
