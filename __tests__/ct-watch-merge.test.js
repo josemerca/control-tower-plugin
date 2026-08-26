@@ -179,6 +179,37 @@ describe('lo que no puede tumbar la vigilancia', () => {
     expect(r.stdout).toMatch(/No se ha perdido trabajo/)
   })
 
+  // -------------------------------------------------------------------------
+  // EL TEST QUE FALTABA, y que habría cazado el hallazgo de la revisión
+  // adversarial sobre la #37.
+  //
+  // `custom_title` y `current_directory` son nombres de campo OBSERVADOS contra
+  // la versión de cmux instalada; no hay garantía de esquema. Con la lectura
+  // cruda que este vigilante tenía, un renombrado de ese campo hacía que ninguna
+  // entrada casara, se devolvía «cmux contestó y no está», y el mensaje de error
+  // —que desde la ronda anterior NOMBRA LA REGLA y le dice a la persona qué hizo
+  // mal— se convertía en una acusación específica, segura y FALSA. La mejora de
+  // honestidad del mensaje empeoró el modo de fallo, que es lo que lo hacía
+  // difícil de ver.
+  //
+  // `ct-next.mjs` ya se había peleado con esto (D5, hallazgo B). Lo que ahora
+  // comparten los tres consumidores es la conclusión de esa pelea: un campo cuyo
+  // esquema no reconocemos degrada a NO CONCLUYENTE, jamás a "verificado que no
+  // está".
+  // -------------------------------------------------------------------------
+  it('si cmux renombra el campo del directorio, NO acusa: degrada a no concluyente', () => {
+    // El stub responde con entradas de verdad, pero sin `current_directory`.
+    const r = correr(conMerge({ FAKE_CMUX_CWD_FIELD_RENAMED: '1' }), { timeoutMs: 500, pollMs: 40 })
+    // Sale por PLAZO (nunca puede entregar), no por el exit 1 de «no está»: la
+    // diferencia es que sigue intentándolo en vez de culpar a nadie.
+    expect(r.status).toBe(3)
+    expect(r.stdout).toMatch(/no se pudo consultar cmux/)
+    expect(r.stdout).toMatch(/se reintenta la entrega/)
+    // Y lo que NO puede aparecer: la acusación.
+    expect(r.stdout).not.toMatch(/La regla que no se cumplió/)
+    expect(r.stdout).not.toMatch(/no existe ninguna workspace/)
+  })
+
   it('si el merge llega y justo entonces no se puede preguntar a cmux, NO se abandona', () => {
     // El hallazgo que ct-watch-go pagó con una revisión adversarial: «cmux
     // contestó que no está» y «no se pudo preguntar» no significan lo mismo, y

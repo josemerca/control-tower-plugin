@@ -118,10 +118,9 @@
 // ============================================================================
 
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, openSync, writeSync, closeSync } from 'node:fs'
-import { dirname } from 'node:path'
 import { buildCmuxSendArgv, buildCmuxSendKeyArgv } from './dispatch.js'
-import { parseStrictInt } from './argnum.js'
+import { findWorkspaceByCwd } from './cmux.js'
+import { arg, sleep, plazo, abrirLog } from './watch-common.js'
 
 // 60 segundos de tick y 48 horas de plazo. Los dos números son distintos de los
 // del vigilante del `-OK` (30 s / 8 h) porque el evento es distinto: aquél cubre
@@ -135,61 +134,19 @@ const DEFAULT_TIMEOUT_MS = 48 * 60 * 60 * 1000
 const GH_TIMEOUT_MS = 30_000
 const CMUX_TIMEOUT_MS = 10_000
 
-const arg = (nombre) => {
-  const i = process.argv.indexOf(nombre)
-  return i === -1 ? null : process.argv[i + 1] ?? null
-}
-
-const issue = arg('--issue')
-const repo = arg('--repo')
-const coordinatorCwd = arg('--coordinator-cwd')
-const logPath = arg('--log')
+const issue = arg(process.argv, '--issue')
+const repo = arg(process.argv, '--repo')
+const coordinatorCwd = arg(process.argv, '--coordinator-cwd')
+const logPath = arg(process.argv, '--log')
 if (!issue || !repo || !coordinatorCwd) {
   process.stderr.write('uso: ct-watch-merge.mjs --issue N --repo owner/name --coordinator-cwd <ruta del checkout principal> [--log <ruta>]\n')
   process.exit(2)
 }
 
 const branch = `feat/${issue}`
-
-// El log, si se pide. Que no se pueda abrir NO impide vigilar: perder el rastro
-// es peor que no tenerlo, pero mucho menos malo que perder el aviso.
-let logFd = null
-if (logPath) {
-  try {
-    mkdirSync(dirname(logPath), { recursive: true })
-    logFd = openSync(logPath, 'a')
-  } catch (e) {
-    process.stderr.write(`aviso: no se pudo abrir el log ${logPath} (${e.message}) — se vigila igual, sin rastro en disco\n`)
-  }
-}
-const log = (msg) => {
-  const linea = `${new Date().toISOString()} ${msg}\n`
-  if (logFd !== null) { try { writeSync(logFd, linea) } catch { /* el rastro se pierde, la vigilancia no */ } }
-  process.stdout.write(linea)
-}
-const terminar = (codigo) => {
-  if (logFd !== null) { try { closeSync(logFd) } catch { /* ya está */ } }
-  process.exit(codigo)
-}
-
-// Los dos plazos se pueden ajustar por entorno, con el mismo criterio que
-// CT_WATCH_GO_POLL_MS: un valor que no se entiende ABORTA en vez de caer al
-// defecto en silencio, porque un plazo mal escrito cambia lo que este proceso
-// significa y no querrías descubrirlo dos días después.
-function plazo(nombre, defecto) {
-  const raw = process.env[nombre]
-  if (raw == null || raw === '') return defecto
-  const v = parseStrictInt(raw)
-  if (v == null || v <= 0) {
-    process.stderr.write(`${nombre} inválido: "${raw}" — debe ser un número de milisegundos mayor que 0.\n`)
-    process.exit(2)
-  }
-  return v
-}
+const { log, terminar } = abrirLog(logPath)
 const pollMs = plazo('CT_WATCH_MERGE_POLL_MS', DEFAULT_POLL_MS)
 const timeoutMs = plazo('CT_WATCH_MERGE_TIMEOUT_MS', DEFAULT_TIMEOUT_MS)
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 // ¿Hay un PR MERGEADO cuya rama sea la del slice? Devuelve el PR, `null` si no
 // hay ninguno, o `undefined` si no se pudo preguntar — las tres son cosas
@@ -222,34 +179,23 @@ function leerPrMergeado() {
   }
 }
 
-// Devuelve `{ consultado, ref }`. La distinción entre "cmux contestó y la
-// coordinadora NO está" (`consultado: true, ref: null`) y "no se pudo preguntar"
-// (`consultado: false`) es la que ct-next.mjs sostiene con tanto cuidado en
-// `queryAllCmuxWorkspaces`, y la que una revisión adversarial pilló tirada en el
-// camino de entrega de ct-watch-go: un timeout de cmux en el tick en que llega
-// el evento mataba la vigilancia en el único instante que importaba, y encima
-// diagnosticaba "no se encontró la sesión" cuando la sesión estaba ahí.
+// La búsqueda vive en scripts/cmux.js, que es el ÚNICO sitio del repo que lee
+// `custom_title`/`current_directory` y el único que sabe que esos nombres de
+// campo no son un esquema garantizado. Antes se leía aquí a pelo, y eso tenía
+// una consecuencia concreta que cazó una revisión adversarial: si cmux renombra
+// ese campo, ninguna entrada casa, esto devolvía "cmux contestó y no está", y el
+// mensaje de abajo —que desde la ronda anterior NOMBRA LA REGLA y le dice a la
+// persona qué hizo mal— se convertía en una acusación específica, segura y
+// falsa. La mejora de honestidad del mensaje empeoró el modo de fallo.
 //
-// Se compara `current_directory`, no `custom_title`: ver la cabecera.
-function consultarCoordinadora() {
-  try {
-    const windows = JSON.parse(execFileSync('cmux', ['list-windows', '--json'], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: CMUX_TIMEOUT_MS, killSignal: 'SIGKILL',
-    }))
-    for (const w of Array.isArray(windows) ? windows : []) {
-      if (!w?.id) continue
-      const parsed = JSON.parse(execFileSync('cmux', ['workspace', 'list', '--window', w.id, '--json'], {
-        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: CMUX_TIMEOUT_MS, killSignal: 'SIGKILL',
-      }))
-      for (const ws of Array.isArray(parsed?.workspaces) ? parsed.workspaces : []) {
-        if (ws?.current_directory === coordinatorCwd && typeof ws.ref === 'string') return { consultado: true, ref: ws.ref }
-      }
-    }
-    return { consultado: true, ref: null }
-  } catch (e) {
-    log(`aviso: no se pudo consultar cmux (${String(e.message).trim()})`)
-    return { consultado: false, ref: null }
-  }
+// `findWorkspaceByCwd` traduce eso a `consultado: false` (no se pudo saber), que
+// es la rama que ya existía aquí para el caso de "cmux no responde" y que
+// reintenta en el próximo tick. O sea que la guarda no añade un camino nuevo:
+// mete el cambio de esquema por el camino correcto de los que ya había.
+const consultarCoordinadora = () => {
+  const r = findWorkspaceByCwd(coordinatorCwd, { timeoutMs: CMUX_TIMEOUT_MS })
+  if (!r.consultado) log('aviso: no se pudo consultar cmux (o su respuesta no trae el campo del directorio que este plugin sabe leer)')
+  return r
 }
 
 // La línea que se teclea en la coordinadora. Nombra el PR, el slice y LOS DOS
