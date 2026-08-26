@@ -61,8 +61,12 @@ de segunda mano:
 - `scripts/ct-init.sh` — el contrato de la tabla de slices, v16;
 - `skills/state-template/STATE.template.md`;
 - `hooks/hooks.json`;
-- la plantilla v2 del execution spec, que hoy vive en menoplus
-  (`docs/superpowers/specs/_TEMPLATE-execution-spec.md`).
+- `templates/_TEMPLATE-execution-spec.md` — la plantilla del execution spec.
+  Ya viaja con el plugin: `ct-init` la siembra en
+  `docs/superpowers/specs/_TEMPLATE-execution-spec.md` del repo destino, que es
+  donde `skills/brainstorming/SKILL.md` la busca. Antes vivía suelta en
+  menoplus, y el paso 8 del brainstorming se quedaba sin fuente en cualquier
+  otro repo.
 
 **Al cambiar cualquiera de esas fuentes, este documento queda desactualizado y
 nada lo comprueba.** No hay test que lo vigile; es un documento, no código.

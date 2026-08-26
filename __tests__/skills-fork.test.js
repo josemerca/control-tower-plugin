@@ -102,6 +102,15 @@ describe('costura 1 — brainstorming termina en execution spec + congelación, 
     for (const p of ['hablada', 'deducida', 'propuesta']) expect(s).toContain(p)
   })
 
+  // La plantilla del execution spec ya viaja con el plugin y `ct-init` la
+  // siembra en una ruta CONOCIDA. Mientras la skill decia solo «the repo's
+  // `_TEMPLATE-execution-spec.md`», sin ruta, quien ejecutaba el paso 8 tenia
+  // que adivinar donde estaba — y en un repo donde nadie la habia copiado a
+  // mano, no estaba en ninguna parte.
+  it('nombra la ruta concreta de la plantilla que siembra ct-init', () => {
+    expect(skill()).toContain('docs/superpowers/specs/_TEMPLATE-execution-spec.md')
+  })
+
   it('el terminal antiguo (invocar writing-plans) ya no está', () => {
     // Frágil y DECLARADO, no arreglado: la costura 6 se endureció ampliando
     // 'superpowers:' a /superpowers/i, pero aquí ese mismo ensanche choca con
