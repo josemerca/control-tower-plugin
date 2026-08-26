@@ -38,12 +38,17 @@ export const CONVENTIONS_FILES = ['code.md', 'decisions.md', 'architecture.md', 
 // faltasDeVara: los nombres de `CONVENTIONS_FILES` que no llegan o llegan en
 // blanco. Un documento vacío no es media vara: pone al implementador y al juez a
 // medir con nada, y en silencio eso no se distingue de un ítem conforme.
+//
+// Es el ÚNICO predicado de "la vara está completa": lo consultan tanto el
+// llamador, para decidir si aborta, como `seccionDeVaraDeCt`, para negarse a
+// componer. Total frente a cualquier entrada: lo que no sea una lista de
+// documentos con contenido de texto es una falta, no una excepción.
 export function faltasDeVara(documentos) {
   const porNombre = new Map()
-  for (const d of documentos ?? []) porNombre.set(d?.nombre, d?.contenido)
+  for (const d of Array.isArray(documentos) ? documentos : []) porNombre.set(d?.nombre, d?.contenido)
   return CONVENTIONS_FILES.filter((nombre) => {
     const contenido = porNombre.get(nombre)
-    return contenido == null || String(contenido).trim() === ''
+    return typeof contenido !== 'string' || contenido.trim() === ''
   })
 }
 
@@ -81,6 +86,19 @@ const CABECERA = [
 // que poder citar: un hallazgo de ese ítem exige regla + ruta, y sin la ruta
 // delante la cita se convierte en "esto se lee mal".
 export function seccionDeVaraDeCt(documentos) {
+  // Total o explícita, como pide `conventions/architecture.md`: con la vara
+  // incompleta esta función NO devuelve una sección a medias, lanza. Una cabecera
+  // que anuncia cuatro documentos sin traerlos es una promesa vacía en el prompt
+  // de un agente, y en silencio no se distingue de una vara que sí llegó.
+  const faltas = faltasDeVara(documentos)
+  if (faltas.length) {
+    throw new Error(
+      `seccionDeVaraDeCt: no se puede componer la vara de ct sin ${faltas.join(', ')}. ` +
+        'Quien llama pregunta antes por `faltasDeVara` y decide qué hacer: esta función no compone ' +
+        'una cabecera que prometa documentos que no trae.'
+    )
+  }
+
   const orden = new Map(CONVENTIONS_FILES.map((n, i) => [n, i]))
   const ordenados = [...(documentos ?? [])]
     .filter((d) => orden.has(d?.nombre))

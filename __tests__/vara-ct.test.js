@@ -54,6 +54,23 @@ describe('faltasDeVara', () => {
   it('sin nada recibido, faltan los cuatro', () => {
     expect(faltasDeVara([])).toEqual([...CONVENTIONS_FILES])
   })
+
+  it('lo que no es una lista de documentos es una falta, no una excepción', () => {
+    expect(faltasDeVara({})).toEqual([...CONVENTIONS_FILES])
+    expect(faltasDeVara(5)).toEqual([...CONVENTIONS_FILES])
+    expect(faltasDeVara(undefined)).toEqual([...CONVENTIONS_FILES])
+  })
+
+  it('un contenido que no es texto es una falta, no una excepción', () => {
+    const documentos = docs('# x\nregla\n')
+    documentos[3] = { nombre: documentos[3].nombre, contenido: 42 }
+    expect(faltasDeVara(documentos)).toEqual(['testing.md'])
+  })
+
+  it('un elemento nulo dentro de la lista no rompe la cuenta', () => {
+    expect(faltasDeVara([null, { nombre: 'code.md', contenido: 'x' }]))
+      .toEqual(['decisions.md', 'architecture.md', 'testing.md'])
+  })
 })
 
 describe('seccionDeVaraDeCt', () => {
@@ -83,6 +100,32 @@ describe('seccionDeVaraDeCt', () => {
   it('respeta el orden declarado', () => {
     const posiciones = CONVENTIONS_FILES.map((n) => seccion.indexOf(`conventions/${n}`))
     expect(posiciones).toEqual([...posiciones].sort((a, b) => a - b))
+  })
+})
+
+// Lo que este bloque protege no es un caso raro: es que una cabecera que anuncia
+// cuatro documentos sin traerlos acabaría en el prompt de un agente, diciéndole
+// que tiene una vara que no tiene.
+describe('seccionDeVaraDeCt se niega a componer media promesa', () => {
+  it('con la lista vacía, lanza en vez de devolver sólo la cabecera', () => {
+    expect(() => seccionDeVaraDeCt([])).toThrow(/no se puede componer la vara de ct/)
+  })
+
+  it('con sólo nombres desconocidos, lanza: no son documentos de la vara', () => {
+    expect(() => seccionDeVaraDeCt([{ nombre: 'otro.md', contenido: 'x' }]))
+      .toThrow(/no se puede componer la vara de ct/)
+  })
+
+  it('con un documento en blanco, lanza y nombra el que falta', () => {
+    const documentos = docs('# x\nregla\n')
+    documentos[2] = { nombre: documentos[2].nombre, contenido: '   ' }
+    expect(() => seccionDeVaraDeCt(documentos)).toThrow(/architecture\.md/)
+  })
+
+  it('con un contenido que no es texto, lanza en vez de reventar por dentro', () => {
+    const documentos = docs('# x\nregla\n')
+    documentos[0] = { nombre: documentos[0].nombre, contenido: null }
+    expect(() => seccionDeVaraDeCt(documentos)).toThrow(/code\.md/)
   })
 })
 
