@@ -84,6 +84,33 @@ else
   echo "conventions.md ya existe, no se pisa"
 fi
 
+# La plantilla del execution spec. El flujo tras este bootstrap es
+# brainstorming -> design doc -> execution spec, y skills/brainstorming/SKILL.md
+# manda escribir el spec «from the repo's `_TEMPLATE-execution-spec.md`»: sin
+# esto, ese paso se queda sin fuente y el spec hay que escribirlo adivinando sus
+# secciones.
+#
+# Destino `docs/superpowers/specs/` porque es la carpeta que el plugin YA
+# declara como casa del spec en codigo que corre — LOOP_ARTIFACT_PATTERNS
+# (scripts/scope.js) exime `docs/superpowers/specs/**` justamente porque «el
+# skill de brainstorming escribe aqui el design doc y el execution spec». Es
+# tambien la ruta que documenta docs/loop/README.md.
+#
+# NO se anade al .gitignore, a diferencia de .agent/SLICE.md: la plantilla es
+# un artefacto del repo que la skill lee, y se commitea.
+SPEC_TEMPLATE_DIR="$TARGET/docs/superpowers/specs"
+SPEC_TEMPLATE="$SPEC_TEMPLATE_DIR/_TEMPLATE-execution-spec.md"
+if [ ! -f "$SPEC_TEMPLATE" ]; then
+  mkdir -p "$SPEC_TEMPLATE_DIR"
+  cp "$HERE/templates/_TEMPLATE-execution-spec.md" "$SPEC_TEMPLATE"
+  echo "creado $SPEC_TEMPLATE"
+else
+  # Misma doctrina que STATE.md y que la seccion del contrato en AGENTS.md: una
+  # plantilla ya presente puede llevar ediciones del repo (secciones propias,
+  # invariantes suyos) y un scaffolder no las pisa por su cuenta.
+  echo "_TEMPLATE-execution-spec.md ya existe, no se pisa"
+fi
+
 GITIGNORE="$TARGET/.gitignore"
 touch "$GITIGNORE"
 # Normaliza un salto de línea final ANTES de tocar nada más: si el fichero ya

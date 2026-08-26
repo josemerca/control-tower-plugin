@@ -28,7 +28,7 @@ You MUST create a task for each of these items and complete them in order:
 5. **Present design** — in sections scaled to their complexity, get user approval after each section
 6. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and commit. It becomes the `Handoff origen:` of the execution spec — after the freeze it is history, nobody edits it.
 7. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
-8. **Write the execution spec** — `docs/superpowers/specs/YYYY-MM-DD-<topic>-execution.md` from the repo's `_TEMPLATE-execution-spec.md`, estado DRAFT. Every frozen decision carries its provenance: `hablada` / `deducida` / `propuesta` (see below)
+8. **Write the execution spec** — `docs/superpowers/specs/YYYY-MM-DD-<topic>-execution.md` from the repo's `docs/superpowers/specs/_TEMPLATE-execution-spec.md` (seeded by `/ct-init`), estado DRAFT. Every frozen decision carries its provenance: `hablada` / `deducida` / `propuesta` (see below)
 9. **Request the freeze (congelación)** — present the 15-line summary and STOP. The user's OK mutates `DRAFT → CONGELADA`. Without it there is no groom.
 
 ## Process Flow
@@ -123,7 +123,7 @@ After writing the spec document, look at it with fresh eyes:
 Fix any issues inline. No need to re-review — just fix and move on.
 
 **Execution Spec:**
-After the self-review passes, write the execution spec: `docs/superpowers/specs/YYYY-MM-DD-<topic>-execution.md`, created from the repo's `_TEMPLATE-execution-spec.md`, estado `DRAFT`. The design doc you just committed is its `Handoff origen:`.
+After the self-review passes, write the execution spec: `docs/superpowers/specs/YYYY-MM-DD-<topic>-execution.md`, created from the repo's `docs/superpowers/specs/_TEMPLATE-execution-spec.md` (seeded by `/ct-init`; if it is missing, the repo was never bootstrapped — say so instead of inventing the sections), estado `DRAFT`. The design doc you just committed is its `Handoff origen:`.
 
 - The spec records the join AND its compressed inputs: what the executor needs and cannot derive.
 - **Provenance per frozen decision** (D-1, D-2…): `hablada` (with the user's phrase when possible), `deducida` (follows from something hablada), or `propuesta` (yours). **A `propuesta` is never frozen** — ask the user, or park it under «Decisiones aparcadas». Gaps are not filled in: they are asked or parked.
