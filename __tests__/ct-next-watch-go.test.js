@@ -22,7 +22,8 @@ import { fileURLToPath } from 'node:url'
 import { ACCOUNT_ENV } from './fixtures/hermetic-env.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
 import { cmuxSessionName } from '../scripts/dispatch.js'
-import { GO_TOKEN } from '../scripts/go-response.js'
+import { GO_TOKEN, goCommitment } from '../scripts/go-response.js'
+import { goPath } from '../scripts/go-registry.js'
 
 const AQUI = dirname(fileURLToPath(import.meta.url))
 const script = join(AQUI, '..', 'scripts', 'ct-next.mjs')
@@ -34,6 +35,7 @@ const fakePath = [
   join(fixturesDir, 'fake-gh-bin'),
   join(fixturesDir, 'fake-cmux-bin'),
   join(fixturesDir, 'fake-claude-bin'),
+  join(fixturesDir, 'fake-osascript-bin'),
   process.env.PATH,
 ].join(':')
 
@@ -162,11 +164,19 @@ describe('el vigilante no puede tumbar el despacho', () => {
     expect(await esperarArgv(join(repoRoot, 'watch-go-argv.log'), 600)).toBe(null)
   })
 
-  it('si el log no se puede ni calcular, se avisa y el slice sigue lanzado', () => {
+  it('si no se sabe dónde vive el estado de la coordinadora, se avisa y el slice sigue lanzado', () => {
     // El trabajo ya está en marcha cuando esto corre. No poder vigilar el go
     // significa volver al modo de antes —empujar la sesión a mano—, no perder
     // el slice. Misma regla que el `git add` de la telemetría en ct-step: el
     // termómetro no es parte del motor.
+    //
+    // F38 — CON `HOME` Y `CLAUDE_CONFIG_DIR` VACÍOS, LO PRIMERO QUE FALLA YA NO
+    // ES EL LOG: es el REGISTRO DEL GO, que sin una ruta absoluta se niega a
+    // escribir (go-registry.js) en vez de dejar el compromiso en el cwd, donde
+    // nadie lo leería. Se asertan las dos mitades del aviso a propósito: antes
+    // este test sólo miraba el exit code, así que habría seguido verde con el
+    // aviso hablando de otra cosa — que es exactamente lo que pasó al construir
+    // esta ronda.
     const repoRoot = repoRootNuevo()
     const r = despachar(repoRoot, issueCon([{ name: 'status:ready' }]), {
       CLAUDE_CONFIG_DIR: '',
@@ -174,6 +184,14 @@ describe('el vigilante no puede tumbar el despacho', () => {
     })
     expect(r.code).toBe(0)
     expect(r.out).toMatch(/lanzado #90/)
+    expect(r.out).toMatch(/no se ha lanzado el vigilante/)
+    expect(r.out).toMatch(/no se ha podido registrar el go/)
+    // El remedio, nombrado: sin registro la puerta 9 se negará, y hay un comando
+    // para salir de ahí.
+    expect(r.out).toMatch(/ct-go\.mjs --issue 90 --repo o\/r/)
+    // Y no se anuncia ningún vigilante lanzado: sin compromiso registrado, un go
+    // que arrancara el trabajo no se podría honrar al liberar.
+    expect(r.out).not.toMatch(/vigilante del .* lanzado \(pid/)
   })
 
   // -------------------------------------------------------------------------
@@ -191,5 +209,90 @@ describe('el vigilante no puede tumbar el despacho', () => {
     expect(r.out).toMatch(/no se encontró ninguna sesión con el nombre/)
     expect(r.out).not.toMatch(/la sesión arranca sola/)
     expect(await esperarArgv(join(repoRoot, 'watch-go-argv.log'), 600)).toBe(null)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// F38 — EL NONCE DEL GO SALE POR LA PANTALLA Y POR NINGÚN OTRO SITIO.
+//
+// Es la propiedad entera de la ronda: el agente no puede FABRICAR el go porque
+// el nonce no está en su contexto, ni en el issue, ni en su worktree, ni en el
+// argv de un proceso que él puede leer con `ps`, ni en el log del vigilante. Lo
+// que viaja a todos esos sitios es el sha256. Si un cambio futuro filtrara el
+// nonce al argv, esta ronda dejaría de valer para nada Y NADA MÁS FALLARÍA — de
+// ahí que estos tests miren dónde NO está.
+// ---------------------------------------------------------------------------
+describe('el nonce del go: dónde aparece y dónde no', () => {
+  const nonceDe = (out) => (out.match(/-OK ([0-9a-f]{8})/) || [])[1]
+
+  it('se dicta por pantalla, y al vigilante le llega sólo su sha256', async () => {
+    const repoRoot = repoRootNuevo()
+    const r = despachar(repoRoot, issueCon([{ name: 'status:ready' }]))
+    expect(r.code).toBe(0)
+
+    const nonce = nonceDe(r.out)
+    expect(nonce).toMatch(/^[0-9a-f]{8}$/)
+    expect(r.out).toContain(`GO de #90: contesta exactamente \`${GO_TOKEN} ${nonce}\``)
+
+    const argv = (await esperarArgv(join(repoRoot, 'watch-go-argv.log')))[0]
+    const hash = argv[argv.indexOf('--go-hash') + 1]
+    // El hash es EL del nonce dictado: si divergieran, la persona tecleraría el
+    // permiso correcto y no arrancaría nada.
+    expect(hash).toBe(goCommitment(nonce))
+    // Y el nonce NO está en el argv, que es lo que `ps` enseña al agente.
+    expect(argv.join(' ')).not.toContain(nonce)
+  })
+
+  it('el compromiso queda registrado fuera del repo, y sin el nonce dentro', () => {
+    const repoRoot = repoRootNuevo()
+    const configDir = join(repoRoot, 'claude-config')
+    const r = despachar(repoRoot, issueCon([{ name: 'status:ready' }]))
+    const nonce = nonceDe(r.out)
+
+    const ruta = goPath({ repo: 'o/r', issue: 90, configDir })
+    // Fuera del repo a propósito: en GitHub todo lo escribe el agente, que tiene
+    // `gh`; un compromiso en una label lo convertiría en un juego de una jugada.
+    expect(ruta.startsWith(configDir)).toBe(true)
+    const dato = JSON.parse(readFileSync(ruta, 'utf8'))
+    expect(dato.commitment).toBe(goCommitment(nonce))
+    expect(readFileSync(ruta, 'utf8')).not.toContain(nonce)
+  })
+
+  it('con CT_GO_CHANNEL=notify el nonce no pasa por stdout: no entra en el contexto de NINGÚN agente', () => {
+    const repoRoot = repoRootNuevo()
+    const log = join(repoRoot, 'osascript.log')
+    const r = despachar(repoRoot, issueCon([{ name: 'status:ready' }]), {
+      CT_GO_CHANNEL: 'notify',
+      FAKE_OSASCRIPT_LOG: log,
+    })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/enviado por notificación del sistema/)
+    expect(r.out).not.toMatch(/-OK [0-9a-f]{8}/)
+    // El go sí va en la notificación, y en un ARGUMENTO aparte: nada se
+    // interpola dentro del AppleScript, así que no hay nada que escapar.
+    const llamada = JSON.parse(readFileSync(log, 'utf8').trim().split('\n')[0])
+    expect(llamada[llamada.length - 1]).toMatch(new RegExp(`^\\${GO_TOKEN} [0-9a-f]{8}$`))
+  })
+
+  it('si la notificación falla, cae a pantalla DICIÉNDOLO — callarse dejaría el gate sin go', () => {
+    const repoRoot = repoRootNuevo()
+    const r = despachar(repoRoot, issueCon([{ name: 'status:ready' }]), {
+      CT_GO_CHANNEL: 'notify',
+      FAKE_OSASCRIPT_FAIL: '1',
+    })
+    expect(r.code).toBe(0)
+    expect(r.out).toMatch(/la notificación del go de #90 falló/)
+    // Y avisa de la consecuencia real: el nonce SÍ acaba en este contexto.
+    expect(r.out).toMatch(/SÍ entra en el contexto de esta sesión/)
+    expect(r.out).toMatch(/-OK [0-9a-f]{8}/)
+  })
+
+  it('sin gate `plan` no se registra ningún go: no hay nada que autorizar', () => {
+    const repoRoot = repoRootNuevo()
+    const configDir = join(repoRoot, 'claude-config')
+    const r = despachar(repoRoot, issueCon([{ name: 'status:ready' }, { name: 'gate:none' }]))
+    expect(r.code).toBe(0)
+    expect(r.out).not.toMatch(/GO de #90/)
+    expect(existsSync(goPath({ repo: 'o/r', issue: 90, configDir }))).toBe(false)
   })
 })

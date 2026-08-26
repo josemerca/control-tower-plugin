@@ -165,6 +165,15 @@ function main() {
     // POSTERIOR sí lo hay y entonces empuja. Con un payload fijo sólo se puede
     // probar uno de los dos.
     if (joined.includes('--json comments')) {
+      // FAKE_GH_VIEW_COMMENTS_FAIL (F38): falla SÓLO la lectura de comentarios,
+      // no la de labels ni la del body. Con FAKE_GH_VIEW_FAIL (que tumba todo
+      // `issue view`) no se puede probar la puerta 9 del `--release`: la puerta
+      // 8, que lee el body, gana antes y el test mediría otra cosa.
+      if (process.env.FAKE_GH_VIEW_COMMENTS_FAIL) {
+        console.error('fake-gh: issue view --json comments failed (simulado)')
+        process.exitCode = 1
+        return
+      }
       const seq = process.env.FAKE_GH_VIEW_COMMENTS_SEQUENCE
         ? JSON.parse(process.env.FAKE_GH_VIEW_COMMENTS_SEQUENCE)
         : null

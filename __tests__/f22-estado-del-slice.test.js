@@ -34,6 +34,7 @@ import { parseState } from '../scripts/state.js'
 // temporales que puede colgar de un SIGKILL a un nieto huérfano.
 import { ACCOUNT_ENV } from './fixtures/hermetic-env.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
+import { envDelGo } from './fixtures/go-gate.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const stopHook = join(here, '..', 'dist', 'stop.js')
@@ -747,7 +748,7 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     // stub responde vacío: sin sección "## E2E" que cruzar, camino feliz.
     const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
       cwd: wt, encoding: 'utf8',
-      env: { ...process.env, PATH: `${join(fixturesDir, 'fake-gh-bin')}:${process.env.PATH}` },
+      env: { ...process.env, PATH: `${join(fixturesDir, 'fake-gh-bin')}:${process.env.PATH}`, ...envDelGo({ repo: 'o/r', issue: 1 }) },
     })
     expect(r.status).toBe(0)
     rmSync(dir, { recursive: true, force: true })
@@ -826,7 +827,7 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     // lectura del body, no solo para el escenario de mutación.
     const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
       cwd: wt, encoding: 'utf8',
-      env: { ...process.env, PATH: `${join(fixturesDir, 'fake-gh-bin')}:${process.env.PATH}` },
+      env: { ...process.env, PATH: `${join(fixturesDir, 'fake-gh-bin')}:${process.env.PATH}`, ...envDelGo({ repo: 'o/r', issue: 1 }) },
     })
     expect(r.status).toBe(0)
     rmSync(dir, { recursive: true, force: true })

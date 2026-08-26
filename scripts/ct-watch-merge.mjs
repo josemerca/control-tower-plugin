@@ -21,14 +21,41 @@
 // no existe durante todo lo que dure la implementación.
 //
 // CÓMO LOCALIZA A LA COORDINADORA: POR SU DIRECTORIO, NO POR SU NOMBRE. El
-// vigilante del `-OK` busca la sesión del slice por su TÍTULO, porque quien lo
-// lanza (`/ct-next`) acaba de crearla y sabe cómo la llamó. Aquí no hay nada
-// equivalente: nadie de este plugin creó la sesión coordinadora ni sabe cómo la
-// tituló su dueño. Lo que sí es una propiedad conocida y estable es DÓNDE corre
-// —el checkout principal, el mismo del que `git worktree list --porcelain`
-// devuelve la primera entrada— así que se compara contra `current_directory`. El
-// efecto práctico es que no hay ningún nombre de sesión que configurar en ningún
-// sitio, ni que se pueda desincronizar de la realidad al renombrar una ventana.
+// vigilante del `-OK` busca la sesión del slice por su TÍTULO, y puede porque
+// ese título lo CALCULA el propio loop: `dispatch.js#cmuxSessionName` es una
+// función pura que `/ct-next` llama para crear la workspace y que el vigilante
+// llama para encontrarla. Una derivación, dos consumidores. Y encima `/ct-next`
+// verifica con su centinela que esa sesión arrancó de verdad antes de lanzar
+// nada.
+//
+// Aquí no hay nada de eso, y no por haber elegido peor: PORQUE NO HAY NADA QUE
+// ELEGIR. A la sesión coordinadora no la crea el loop — la abre una persona en
+// la ventana que le apetezca. No hay título que derivar, ni creación que
+// verificar, ni garantía sobre la que apoyarse. La única propiedad observable
+// que queda es DÓNDE corre —el checkout principal, el mismo del que
+// `git worktree list --porcelain` devuelve la primera entrada— así que se
+// compara contra `current_directory`.
+//
+// LA PRECONDICIÓN QUE ESO IMPONE, Y QUE ES UNA REGLA DE USO, NO UN DETALLE: la
+// sesión coordinadora tiene que ser una workspace de cmux abierta EN EL CHECKOUT
+// PRINCIPAL del repo que coordina. Si la tienes abierta en otro sitio, este
+// proceso no la encuentra y el aviso se pierde.
+//
+// Medido en campo el 2026-08-26 con el PR #16 de jjponz/rust-monitoring: el
+// merge se vio 34 segundos después de ocurrir, y no hubo a quién decírselo
+// porque la ventana de quien coordinaba estaba abierta en OTRO repo. El
+// vigilante hizo lo correcto y lo dijo; la regla no estaba escrita en ninguna
+// parte, que es el defecto de verdad de aquel episodio.
+//
+// POR QUÉ SE ACEPTA LA REGLA EN VEZ DE HACER LA DIRECCIÓN ROBUSTA. La
+// alternativa es que la coordinadora se REGISTRE —que al hidratarse apunte en
+// algún sitio cuál es su workspace de cmux— y que esto lea ese registro en vez
+// de inferir. Es la mitad simétrica de lo que el loop ya hace con los slices, y
+// se descartó a propósito: sería una pieza nueva de estado, con su caducidad y
+// su «¿sigue vivo eso?», construida para UN solo consumidor. Decisión tomada:
+// se mantiene la inferencia y se escribe la regla. Si algún día hay un segundo
+// consumidor que necesite alcanzar a la coordinadora, el registro es lo que hay
+// que construir, y entonces este bloque es el que sobra.
 //
 // LÍMITE HEREDADO, DICHO SIN ADORNOS: para ENTREGAR la línea se usa el camino
 // frágil de este plugin (`cmux send` + `send-key`), y no hay centinela que
@@ -44,12 +71,30 @@
 // Aquél se apaga en cuanto cmux contesta que la sesión del slice no existe, y
 // hace bien: sin esa sesión no hay nada que vigilar, y un proceso vivo
 // vigilándola parecería que el gate sigue cubierto. Aquí la ausencia de la
-// coordinadora no significa lo mismo. Cerrar su ventana es lo NORMAL —te vas a
-// dormir, o a otra cosa, y el merge llega después— y es justo el caso que este
-// vigilante existe para cubrir. Apagarse entonces sería apagarse siempre en el
-// escenario que motiva todo esto. Lo que sí se hace es no fingir: si el merge se
-// ve y no hay a quién entregárselo, se dice y se sale con 1. Se pierde el aviso;
-// no se disfraza de entregado.
+// coordinadora no significa lo mismo, porque no es evidencia de que el trabajo
+// haya terminado: el merge puede seguir llegando.
+//
+// LO QUE ESA DIVERGENCIA COMPRA, Y LO QUE NO — y la distinción es la corrección
+// de una frase que este bloque decía antes y que el episodio del 2026-08-26
+// desmintió. Compra sobrevivir a una ausencia MIENTRAS ESPERA: cierras la
+// ventana, la vuelves a abrir, y la vigilancia sigue en pie. NO compra una
+// ausencia EN EL INSTANTE DE ENTREGAR: si en ese tick no hay coordinadora, el
+// aviso se pierde y punto. Este bloque afirmaba cubrir «te vas a dormir y el
+// merge llega después», y eso sólo es cierto si la ventana está donde toca
+// cuando el merge llega — o sea, no era una cobertura, era la misma
+// precondición dicha como si fuera una garantía.
+//
+// EL AVISO PERDIDO NO ES UN AGUJERO, y ésta es la razón de fondo por la que la
+// regla se acepta: `/ct-next` ya cruza en CADA corrida los issues mergeados
+// contra `.worktrees/` y `git branch --list 'feat/*'` y emite `cosecha
+// pendiente:` con los comandos exactos (F20, dispatch.js#collectFinishedResidue).
+// Así que este vigilante no aporta conocimiento que no exista: aporta el
+// MOMENTO. Cuando falla, se degrada exactamente al modo de antes —te enteras en
+// el siguiente `/ct-next`—, no a que nadie se entere nunca.
+//
+// Lo que sí se hace es no fingir: si el merge se ve y no hay a quién
+// entregárselo, se dice, se nombra la regla que no se cumplió, y se sale con 1.
+// Se pierde el aviso; no se disfraza de entregado.
 //
 // LO QUE DELIBERADAMENTE NO TIENE, heredado de ct-watch-go y por sus motivos:
 //
@@ -261,7 +306,14 @@ for (;;) {
       terminar(0)
     }
     if (consultado) {
-      log(`ERROR: el merge de ${branch} se vio, pero cmux dice que no existe ninguna sesión en ${coordinatorCwd}, así que no hay a quién entregárselo. Recoge la cosecha del #${issue} a mano.`)
+      // Se nombra LA REGLA, no sólo el hecho. El mensaje anterior decía «no
+      // existe ninguna sesión en <cwd>», que es verdad y no sirve: quien lo lee
+      // no puede deducir de ahí qué tenía que haber hecho distinto. Y se dice
+      // que la cosecha se sigue detectando sola, para que un aviso perdido no se
+      // lea como trabajo perdido.
+      log(`ERROR: el merge de ${branch} se vio, pero cmux dice que no existe ninguna workspace cuyo directorio sea ${coordinatorCwd}, así que no hay a quién entregárselo.`)
+      log(`La regla que no se cumplió: la sesión coordinadora tiene que ser una workspace de cmux abierta EN ${coordinatorCwd} — este vigilante la localiza por su directorio porque no hay ningún nombre de sesión que el loop pueda derivar (a ella no la crea el loop, la abres tú).`)
+      log(`No se ha perdido trabajo: el próximo \`/ct-next\` en ese checkout emitirá \`cosecha pendiente:\` para el #${issue} con los comandos exactos. Lo que se ha perdido es enterarte ahora.`)
       terminar(1)
     }
     // No se pudo PREGUNTAR por la coordinadora. De eso no se sigue nada, y menos

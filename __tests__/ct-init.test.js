@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, symlinkSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -37,6 +37,46 @@ const MARKER_CLOSE = '<!-- /ct-init:slices-contract -->'
 // de "hashes registrados" (más abajo) lo comprueba, así que este fichero no
 // puede derivar sin que la suite se entere.
 const V1_BLOCK = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'slices-contract-v1.md'), 'utf8')
+
+// ---------------------------------------------------------------------------
+// LOS BLOQUES QUE EL SQUASH SE LLEVÓ. `historicalContractBlocks()` reconstruye
+// desde `git rev-list HEAD`, y esa fuente de verdad tiene un agujero que no
+// tenía cuando se escribió: **una PR mergeada con squash no deja en main sus
+// commits intermedios**. Si una rama subió el contrato dos veces antes de
+// aterrizar, la variante de en medio existió —se pushó, y cualquiera pudo
+// bootstrapear un repo clonando ese ref, que es literalmente cómo se instala un
+// plugin de Claude Code— pero desde main no hay forma de verla.
+//
+// El caso real, que es el que dejó este fichero en rojo durante dos merges: la
+// PR #27 (rama `jjponz/prescriptive-plans`) subió el contrato a **v17** en
+// `ac48fa3` (12-ago, Juanjo) y a v18 después; se mergeó con SQUASH en `529d2f4`,
+// así que main pasó de v16 a v18 de un salto y el bloque v17 no es alcanzable
+// desde HEAD. Su hash SÍ está registrado en SLICES_PRISTINE_HASHES, y debe
+// estarlo: sin él, un repo sembrado con esa variante y jamás tocado recibe "no
+// coincide con ninguna versión conocida" y no puede actualizarse sin `--force`
+// — la acusación falsa contra la que existe F9. Durante esa ronda se
+// bootstrapearon repos de verdad (repo-pulse, 7 slices).
+//
+// LA FORMA DE LA SOLUCIÓN, y por qué no basta con anotar la procedencia en un
+// comentario: un comentario se cree, no se comprueba. El bloque se guarda como
+// fixture, byte a byte, igual que ya se guardan los de v1/v4/v5/v6/v7, y el
+// guardián de "hashes que no corresponden a ningún bloque real" pasa a aceptar
+// los que un fixture JUSTIFICA. Con eso el guardián no se debilita nada: para
+// justificar un hash hay que producir un contenido que hashee a él, que es
+// exactamente lo que un hash garantiza que no se puede inventar.
+const SQUASHED_BLOCK_FIXTURES = ['slices-contract-v17.md']
+// Los que ya existían antes de esto y los usan otros tests de este fichero:
+// bloques históricos SÍ alcanzables desde main, guardados para poder probar la
+// migración desde cada uno. Se nombran aquí sólo para que el inventario del
+// directorio no acuse a un fichero que sí tiene dueño.
+const FIXTURES_DE_OTROS_TESTS = [
+  'slices-contract-v1.md', 'slices-contract-v4.md', 'slices-contract-v5.md',
+  'slices-contract-v6.md', 'slices-contract-v7.md',
+]
+const squashedBlocks = () => SQUASHED_BLOCK_FIXTURES.map((f) => ({
+  fixture: f,
+  block: readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', f), 'utf8'),
+}))
 const initScriptSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-init.sh'), 'utf8')
 // CONTRACT_VERSION: la versión del contrato se LEE del propio ct-init.sh, no
 // se repite a mano en cada aserción. F11 la subió de 2 a 3 y hubo que tocar
@@ -925,9 +965,13 @@ describe('ct-init.sh', () => {
   })
 
   it('SLICES_PRISTINE_HASHES no registra hashes de bloques que no existieron nunca', () => {
-    // La otra dirección: un hash inventado (o el de una rama que no llegó a
-    // main) hace que ct-init reemplace en silencio algo que no reconoce de
-    // verdad. Todo hash registrado tiene que corresponder a un bloque real.
+    // La otra dirección: un hash INVENTADO hace que ct-init reemplace en
+    // silencio algo que no reconoce de verdad. Todo hash registrado tiene que
+    // corresponder a un bloque real, y "real" tiene tres fuentes posibles: la
+    // historia de main, el árbol de trabajo, y los bloques que un merge con
+    // squash borró de la historia pero que se pushearon y viven aquí como
+    // fixture (ver SQUASHED_BLOCK_FIXTURES arriba). Las tres son contenido: en
+    // ninguna se cree a un comentario.
     const registered = initScriptSrc
       .split('\n')
       .map((l) => l.trim().match(/^([0-9a-f]{64})\b/))
@@ -936,7 +980,45 @@ describe('ct-init.sh', () => {
     expect(registered.length).toBeGreaterThanOrEqual(9)
     const known = new Set(historicalContractBlocks().map((h) => h.hash))
     known.add(sha256(extractBlock(seedFreshAgentsMd()))) // el árbol de trabajo
-    expect(registered.filter((h) => !known.has(h))).toEqual([])
+    for (const { block } of squashedBlocks()) known.add(sha256(block))
+    expect(
+      registered.filter((h) => !known.has(h)),
+      'Hashes registrados que no corresponden a NINGÚN bloque conocido. Si es un ' +
+        'bloque que existió en una rama y el squash del merge se lo llevó de main, ' +
+        'guárdalo byte a byte en __tests__/fixtures/slices-contract-vN.md y añade el ' +
+        'fichero a SQUASHED_BLOCK_FIXTURES: un comentario de procedencia se cree, un ' +
+        'fichero que hashea al hash registrado se comprueba. Si no existió, bórralo ' +
+        'de SLICES_PRISTINE_HASHES: mientras esté, ct-init da por intacto (y por tanto ' +
+        'reemplazable sin avisar) un bloque que no reconoce de verdad.'
+    ).toEqual([])
+  })
+
+  // El otro lado del fixture: si el fichero deriva un byte, deja de hashear al
+  // hash registrado y ya no justifica nada — así que el guardián de arriba
+  // volvería a acusar a ese hash de inventado, culpando al sitio equivocado.
+  // Este test señala la causa de verdad.
+  it('cada bloque guardado por squash sigue hasheando a su hash registrado', () => {
+    for (const { fixture, block } of squashedBlocks()) {
+      const h = sha256(block)
+      expect(
+        initScriptSrc.includes(h),
+        `El fixture ${fixture} ya no corresponde a ningún hash de ` +
+          `SLICES_PRISTINE_HASHES (hashea a ${h}). O ha derivado —y entonces ya no es ` +
+          `el bloque que se pusheó, que es TODO su valor— o su hash se ha borrado del ` +
+          `registro.`
+      ).toBe(true)
+    }
+  })
+
+  // Y que no sobren: un fixture sin hash registrado sería un bloque guardado
+  // "por si acaso" que ct-init no reconoce, o sea la mitad de un arreglo. El
+  // test de arriba lo cubre por hash; este cubre el inventario del directorio,
+  // para que añadir un fichero y olvidar la lista no pase inadvertido.
+  it('no hay fixtures de contrato guardados por squash fuera de la lista', () => {
+    const dir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
+    const enDisco = readdirSync(dir).filter((f) => /^slices-contract-v\d+\.md$/.test(f))
+    const usados = new Set([...SQUASHED_BLOCK_FIXTURES, ...FIXTURES_DE_OTROS_TESTS])
+    expect(enDisco.filter((f) => !usados.has(f))).toEqual([])
   })
 
   // Finding 6 de la review final: ct-next.mjs escribe cada worktree de slice

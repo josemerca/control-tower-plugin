@@ -16,6 +16,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { envDelGo } from './fixtures/go-gate.js'
 
 const SCRIPT = fileURLToPath(new URL('../scripts/dispatch-check.mjs', import.meta.url))
 const FAKE_GH = fileURLToPath(new URL('./fixtures/fake-gh-bin', import.meta.url))
@@ -118,6 +119,11 @@ function release(dir, { args = [], env = {} } = {}) {
       PATH: `${FAKE_GH}:${process.env.PATH}`,
       FAKE_GH_VIEW_BODY: CUERPO,
       FAKE_GH_VIEW_LABELS: JSON.stringify(['status:in-progress', 'gate:plan']),
+      // El gate `plan` con su nonce (F38): sin un compromiso registrado y un
+      // comentario que lo satisfaga, `--release` se niega con exit 9 mucho antes
+      // de llegar al lanzamiento del vigilante. No es el objeto de este fichero,
+      // así que se usa la fixture compartida en vez de recrear el registro.
+      ...envDelGo({ repo: 'o/r', issue: 9 }),
       CT_WATCH_MERGE_BIN: RECORDER,
       FAKE_WATCH_MERGE_LOG: watchLog,
       ...env,
@@ -178,6 +184,22 @@ describe('--release lanza el vigilante del merge', () => {
       }))
       const r = release(dir)
       expect(r.status).toBe(7)
+      expect(r.stdout + r.stderr).not.toMatch(/vigilante del merge/)
+      expect(await esperarArgv(r.watchLog, 600)).toBe(null)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('un release retenido por el gate del go (exit 9) tampoco lanza nada', async () => {
+    // La puerta más nueva de la escalera (F38): sin un `-OK <nonce>` en el issue
+    // el release se niega. Va aquí y no solo en los tests de F38 porque lo que
+    // este fichero fija es "el vigilante nace SI Y SOLO SI el slice se entregó
+    // de verdad", y esa propiedad tiene que valer contra CADA puerta, no contra
+    // las que existían el día que se escribió. Un vigilante lanzado aquí
+    // sondearía 48 h un PR que nadie ha abierto.
+    const dir = repo()
+    try {
+      const r = release(dir, { env: envDelGo({ repo: 'o/r', issue: 9, dado: false }) })
+      expect(r.status).toBe(9)
       expect(r.stdout + r.stderr).not.toMatch(/vigilante del merge/)
       expect(await esperarArgv(r.watchLog, 600)).toBe(null)
     } finally { rmSync(dir, { recursive: true, force: true }) }

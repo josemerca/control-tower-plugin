@@ -8,9 +8,9 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 
 | | |
 |---|---|
-| Versión | `0.42.0` · contrato de la tabla de slices `v21` |
+| Versión | `0.43.0` · contrato de la tabla de slices `v21` |
 | Comandos | `/ct-init` · `/ct-groom` · `/ct-next` · `/ct-status` |
-| Puertas humanas | 3 por epic — congelación, `status:ready`, merge — más el gate `plan` en cada slice (renunciable por fila con `!plan`) y el gate `e2e` cuando la fila declara recorridos en la columna `E2E` (derivado, no se escribe a mano) |
+| Puertas humanas | 3 por epic — congelación, `status:ready`, merge — más el gate `plan` en cada slice (renunciable por fila con `!plan`; su go es `-OK <nonce>` y `--release` se niega sin él) y el gate `e2e` cuando la fila declara recorridos en la columna `E2E` (derivado, no se escribe a mano) |
 | Skills | 11 forkados de superpowers 6.0.3 + 1 propio (`writing-plans-prescriptive`) |
 | Requisitos | Node ≥ 24 · `gh` autenticado · `cmux` · git worktrees |
 | Licencia | [MIT](LICENSE) |
@@ -64,7 +64,7 @@ Hay **dos sesiones vivas por repo, con papeles opuestos**: la *coordinadora*, en
 | **2 · `status:ready`** | Los issues ya existen | `/ct-groom` los crea en `status:backlog`, nunca en `ready`. Que un slice esté escrito no significa que se deba empezar ahora. |
 | **3 · Merge** | El PR está abierto y el claim liberado | El loop **escribe y enseña** los gates (`visual`, `apply`) pero no impide mergear con uno sin cerrar. Y el merge es lo único que libera los tokens de área y satisface las dependencias. |
 
-La Puerta 3 sigue siendo tuya, pero ya no hace falta que además la anuncies: al entregar, `--release` deja un vigilante desprendido (`scripts/ct-watch-merge.mjs`) sondeando el PR de la rama del slice, y en cuanto lo ve mergeado avisa a la coordinadora de que su cosecha está pendiente. No borra nada — el aviso es la automatización; recoger el worktree sigue siendo una decisión.
+La Puerta 3 sigue siendo tuya, pero ya no hace falta que además la anuncies: al entregar, `--release` deja un vigilante desprendido (`scripts/ct-watch-merge.mjs`) sondeando el PR de la rama del slice, y en cuanto lo ve mergeado avisa a la coordinadora de que su cosecha está pendiente. No borra nada — el aviso es la automatización; recoger el worktree sigue siendo una decisión. **Exige una cosa de ti:** que la sesión coordinadora sea una workspace de cmux abierta en el checkout principal del repo, porque es por ahí por donde el vigilante la encuentra (a ella no la crea el loop, así que no hay ningún nombre que derivar). Si no lo está, el aviso se pierde y te enteras en el siguiente `/ct-next`, que sigue detectando la cosecha pendiente él solo.
 
 ### El modelo de dos niveles
 
@@ -292,7 +292,8 @@ Escritos aquí porque un límite dicho es operable y uno implícito no.
 
 - **El claim no es atómico.** El lock con el que se reclama un issue son labels de GitHub, sin compare-and-swap. Está **reproducido y verificado**, no sospechado, que dos dispatchers lanzados casi a la vez pueden reclamar el mismo token y arrancar los dos. La mitigación es operativa: **no lances dos `/ct-next` a la vez contra el mismo repo.**
 - **Nada vigila los claims entre invocaciones.** El claim es una label, sin heartbeat. Y la evidencia de vida es local a la máquina, así que nunca se afirma «abandonado», sólo «aquí no hay ni rastro».
-- **Los gates se enseñan, no se imponen.** El loop no impide mergear con un gate sin cerrar.
+- **Los gates se enseñan, no se imponen — salvo `plan`.** El loop no impide mergear con un gate sin cerrar. La excepción es el gate `plan`: desde F38 su go es `-OK <nonce>` (un nonce por despacho, sorteado al despachar y dictado sólo por la pantalla de quien despacha) y `dispatch-check --release` se niega con **exit 9** sin él, así que un slice cuyo plan nadie revisó no llega a `in-review`.
+- **El go del gate `plan` no es criptografía: agente y coordinadora corren con el mismo uid.** El nonce cierra la falsificación *fácil* —el agente ya no puede escribir su propio permiso con un `gh issue comment`, que es lo que hacía y con una traza indistinguible de la legítima— pero un agente decidido puede tocar el estado privado de la coordinadora, que es la misma línea detrás de la que ya están todos los demás gates: ninguno sobrevive a un agente que reescribe el plugin que lo juzga. Y por defecto el nonce sale por `stdout`, o sea que protege del agente **implementador** y no de la coordinadora (con `CT_GO_CHANNEL=notify` no entra en el contexto de ninguno). El cierre completo exige un verificador que no corra bajo ese uid —CI, u otra identidad—: nombrado y sin construir.
 - **El informe de `e2e` es falsificable.** Nada impide que un agente invente el `stdout` de un comando que nunca corrió: el informe se valida en la FORMA (los campos que la rúbrica exige por cada recorrido), nunca en la verdad de lo que dice haber visto. Lo único que lo acota es que el comando declarado tenga que ser reproducible — una salida inventada se cae en cuanto alguien la pega y la corre de verdad.
 - **No hay transacción en el groom.** Superada la validación, un fallo de red deja creado lo anterior. No hay rollback y no se finge que lo haya: de un abort a mitad se sale volviendo a correr, no limpiando a mano.
 - **`--reconcile` es experimental** y lo avisa cada vez. La mitad de *detección* (que nunca escribe) está mejor entendida que la mitad de *aplicación*.

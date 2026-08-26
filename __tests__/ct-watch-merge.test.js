@@ -150,7 +150,33 @@ describe('lo que no puede tumbar la vigilancia', () => {
     const r = correr(conMerge())
     expect(r.status).toBe(1)
     expect(r.stdout).toMatch(/cmux dice que no existe/)
-    expect(r.stdout).toMatch(/a mano/)
+  })
+
+  // -------------------------------------------------------------------------
+  // Este caso ocurrió en campo (2026-08-26, PR #16 de jjponz/rust-monitoring) y
+  // el defecto no fue del vigilante: hizo lo correcto y lo dijo. El defecto fue
+  // que su mensaje nombraba el HECHO ("no hay ninguna sesión en <cwd>") y no la
+  // REGLA, así que quien lo leyó no podía deducir qué tenía que haber hecho
+  // distinto — y encima parecía que se había perdido trabajo, cuando el residuo
+  // lo sigue detectando `/ct-next` solo.
+  //
+  // Es el mismo criterio que sostiene ct-next-honest-messages.test.js: un
+  // mensaje que describe correctamente un estado sin decir qué hacer con él es
+  // la mitad de un diagnóstico.
+  // -------------------------------------------------------------------------
+  it('cuando no la encuentra, nombra la REGLA y dice que no se ha perdido trabajo', () => {
+    writeFileSync(stateFile, JSON.stringify([]))
+    const r = correr(conMerge())
+    expect(r.status).toBe(1)
+    // La regla: la coordinadora vive en el checkout principal, y el directorio
+    // concreto tiene que aparecer para que sea accionable.
+    expect(r.stdout).toMatch(/coordinadora tiene que ser una workspace de cmux abierta EN/)
+    expect(r.stdout).toContain(dir)
+    // Y por qué es por directorio y no por nombre: a ella no la crea el loop.
+    expect(r.stdout).toMatch(/no la crea el loop/)
+    // La red de seguridad, dicha: el aviso se pierde, el trabajo no.
+    expect(r.stdout).toMatch(/cosecha pendiente/)
+    expect(r.stdout).toMatch(/No se ha perdido trabajo/)
   })
 
   it('si el merge llega y justo entonces no se puede preguntar a cmux, NO se abandona', () => {

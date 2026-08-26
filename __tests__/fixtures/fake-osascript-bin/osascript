@@ -1,0 +1,14 @@
+#!/usr/bin/env node
+// Stub de `osascript` para el canal `CT_GO_CHANNEL=notify` (F38): registra su
+// argv y no muestra nada. Sin él, un test de ese canal lanzaría una
+// notificación de verdad en la máquina de quien corre la suite — y, peor, un
+// entorno sin GUI lo haría fallar y el test mediría el camino de caída.
+// FAKE_OSASCRIPT_FAIL simula justo ese entorno, que es el otro caso a probar.
+import { appendFileSync } from 'node:fs'
+if (process.env.FAKE_OSASCRIPT_LOG) {
+  appendFileSync(process.env.FAKE_OSASCRIPT_LOG, JSON.stringify(process.argv.slice(2)) + '\n')
+}
+if (process.env.FAKE_OSASCRIPT_FAIL) {
+  process.stderr.write('fake-osascript: no hay GUI (simulado)\n')
+  process.exitCode = 1
+}
