@@ -45,31 +45,21 @@ stop there: a blocker travels as that field, which is the one thing a guess cann
 
 ## What a code block carries
 
-`## 3. Reference patterns` carries this repo's yardstick in two lists, and step 2 of the list at the
-end of this skill is where you go and read them. An analogous file shows the shape; a convention
-document states the rule, and a rule holds even where no analogous file exists. Start from
-`.agent/conventions.md` where the repo declares one: that file is the repo's own declaration,
-seeded by `/ct-init` and confirmed by a human, and it is what keeps slice 14 citing the same
-yardstick as slice 3. Then look for `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING`, a `docs/conventions/`
-directory and the project skills; the issue's "Contexto del epic" may have named them already. List
-under `Rules to obey:`, **by path**, the entries that bear on this slice — you are selecting, not
-transporting: the program pastes that file into every task brief anyway, so omitting an entry does
-not hide it from the judge. If the repo declares none, say so with `N/A — <reason>` rather than
-inventing a plausible one: a path that is not in the repo fails the plan.
+`## 3. Reference patterns` carries this repo's yardstick in two lists. An analogous file shows the
+shape; a convention document states the rule, and a rule holds even where no analogous file exists.
+Start from `.agent/conventions.md` where the repo declares one: that file is the repo's own
+declaration, and it is what keeps slice 14 citing the same yardstick as slice 3. Then look for
+`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING`, a `docs/conventions/` directory and the project skills;
+the issue's "Contexto del epic" may have named them already. List under `Rules to obey:`, **by
+path**, the entries that bear on this slice — you are selecting, not transporting: the program
+pastes that file into every task brief anyway, so omitting an entry does not hide it from the judge.
+If the repo declares none, say so with `N/A — <reason>`: a path that is not in the repo fails the plan.
 
 **There is a second yardstick, and it is not in this section: ct's own.** The four documents of
-`conventions/`, whose absolute path the kickoff gives you. Read them before you write the plan.
-They travel with the plugin, the program pastes them into every task brief, and **they take
-precedence over this repo's** — measured rule by rule, not by topic: where a rule of this repo
-requires what one of them forbids, that rule does not apply, and where this repo speaks about
-something none of them speaks about, it binds in full. So this section still selects the repo's
-rules; what changes is that a plan contradicting ct's produces tasks the judge will block.
-
-One of them bears directly on how you split the work. `conventions/architecture.md` applies to
-**new modules**: a module that was already there and does not conform is the repo's declared debt,
-what gets added to it follows the style of its host, and that is not a finding — but a new concept
-is a new module and is born conforming. Which of the two a piece of work is, is what you decide
-when you write `**Files:**` and mark each path `(create)` or `(modify)`.
+`conventions/`, whose absolute path the kickoff gives you, and which **take precedence over this
+repo's**. Read them before you write the plan — the program pastes them into every task brief, so a
+plan that contradicts them produces tasks the judge blocks. How the two resolve against each other,
+and what it means for splitting `**Files:**` between `(create)` and `(modify)`, is in your kickoff.
 
 Then every code block you write declares its **role** on
 the line right above it. The validator enforces the labels and their budgets:

@@ -340,7 +340,14 @@ describe('el primer acto nombra la vara de ct', () => {
     expect(k.indexOf('/plugin/conventions')).toBeLessThan(k.indexOf('Con el plan commiteado'))
   })
 
-  it('dice que tiene preferencia sobre las convenciones del repo', () => {
-    expect(renderKickoff(SLICE, OPTS_CON_VARA)).toMatch(/preferencia/i)
+  it('enuncia la precedencia con SUS DOS LADOS: es el único sitio donde la lee quien planifica', () => {
+    // `SKILL.md` ya no la enuncia (el presupuesto de la skill obligó a recortar
+    // la tercera copia), así que este texto es el único que llega a quien escribe
+    // el plan. Un enunciado que sólo dijera "gana ct" le haría anular las
+    // convenciones del repo que ct no toca, que es el fallo contrario.
+    const k = renderKickoff(SLICE, OPTS_CON_VARA)
+    expect(k).toMatch(/preferencia/i)
+    expect(k).toMatch(/regla a regla/i)
+    expect(k).toMatch(/obliga entera/i)
   })
 })
