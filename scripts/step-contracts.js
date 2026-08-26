@@ -19,6 +19,11 @@
 
 import { findClosingKeywords } from './closing-keywords.js'
 import { OUTCOMES } from './run-machine.js'
+// `node:crypto` no rompe el «módulo PURO» de la cabecera, y el precedente está
+// escrito en go-response.js: `createHash` es una función determinista de su
+// argumento —sin disco, sin red y sin reloj—, «lo mismo que un String.trim más
+// caro».
+import { createHash } from 'node:crypto'
 
 export const SEVERITIES = ['high', 'medium', 'low']
 
@@ -173,6 +178,25 @@ export const RUBRIC_OUTCOMES = ['conforme', 'no-aplica', 'sin-vara']
 // matan el run (§3.2). Ausente y `null` son lo mismo. Lo que sí se rechaza es
 // una línea que no se puede leer como número: `"12"` y `12` no se agregan
 // igual, y tolerar la cadena hoy es telemetría sucia mañana.
+// LA FORMA DEL TOKEN, en una constante y no tecleada dos veces. El `pattern` del
+// esquema es lo que el objeto DICE de sí mismo —y es el bloque que la rúbrica le
+// enseña al juez— y el regex de `readVerdict` es lo que de verdad se aplica: dos
+// copias a mano de la misma forma son documentación que puede mentir sin que nada
+// se ponga rojo. El resto de campos de `schemaFor` ya derivan de una constante
+// compartida (`enum: rules`, `enum: SEVERITIES`, `enum: RUBRIC_OUTCOMES`)
+// exactamente por esto, y el slice 11 exportó REVIEW_TOKEN_LABEL para que la
+// ETIQUETA no divergiera; la FORMA se quedó fuera de ese criterio.
+//
+// Vive aquí arriba, lejos del bloque del token, por una razón mecánica:
+// VERDICT_SCHEMA se construye al CARGAR el módulo, así que un `const` declarado
+// más abajo daría ReferenceError por la zona muerta.
+//
+// La tercera copia de la forma —la de RE_REVIEW_TOKEN, en el bloque del token— NO
+// es una divergencia y no se toca: allí es sólo minúsculas a propósito (es lo que
+// `reviewToken` produce) y va dentro de una línea con etiqueta y captura.
+const REVIEW_TOKEN_PATTERN = '^[0-9a-fA-F]{64}$'
+const RE_REVIEW_TOKEN_FORM = new RegExp(REVIEW_TOKEN_PATTERN)
+
 // FACTORY, no un objeto suelto: el juez de slice valida contra el MISMO
 // esquema con otra rúbrica dentro (§3.7-B), y dos copias a mano de esta forma
 // divergerían al primer campo añadido — el mismo desacople que ya sufrieron
@@ -184,9 +208,15 @@ export const RUBRIC_OUTCOMES = ['conforme', 'no-aplica', 'sin-vara']
 const schemaFor = (rules) => ({
   type: 'object',
   additionalProperties: false,
-  required: ['ruling', 'rubric', 'findings'],
+  required: ['ruling', 'rubric', 'review_token', 'findings'],
   properties: {
     ruling: { type: 'string', enum: ['PASS', 'FAIL'] },
+    // El token que el paquete de revisión declara en su cabecera, copiado. Va
+    // en el esquema y no sólo en el validador porque este objeto es el bloque
+    // que la rúbrica del juez le enseña: un campo obligatorio que el juez no
+    // ve descarta todos los veredictos de la corrida sin que ninguno sea culpa
+    // suya. Se admiten mayúsculas (ver readVerdict) y se normaliza al leer.
+    review_token: { type: 'string', pattern: REVIEW_TOKEN_PATTERN },
     rubric: {
       type: 'array',
       minItems: rules.length,
@@ -408,6 +438,72 @@ export const SLICE_JUDGE_TOOLS = 'Read, Grep, Glob, Write'
 // test que los ata obliga a que paquete y agente cambien en la MISMA tarea.
 export const SLICE_PACKAGE_SECTIONS = ['Señal', 'Commits', 'Files changed', 'Diff']
 
+// ---------------------------------------------------------------------------
+// EL TOKEN DEL PAQUETE — el paquete ata su PRODUCTO, no sólo su insumo.
+//
+// EL DEFECTO QUE CIERRA. El slice 6 hizo el paquete de un solo uso, así que un
+// veredicto no puede volver a gastar un insumo ya gastado. Lo que seguía sin
+// atar nada es el otro sentido: NADA ligaba el `verdict.json` al paquete.
+// Reproducido en dos vías, las dos MUDAS en la telemetría:
+//
+//   (a) el veredicto RECICLADO. Tras un veredicto aceptado que devuelve la
+//       tarea, el mensaje manda volver a `next` — y no dice «y redespacha al
+//       juez». Obedeciendo esa mitad, `next` regenera el paquete y el fichero
+//       del juicio ANTERIOR (misma ruta: `task-<N>-verdict.json`) se acepta.
+//       Medido: tres filas de juez indistinguibles, `correctionRetries`
+//       agotado, y la tarea COMITEADA con el veredicto de otro diff dentro.
+//   (b) el HUECO DEL DESCARTE. El descarte por JSON ilegible no consume el
+//       paquete —bien: el reintento tiene que poder repreguntar— y eso se
+//       justificaba con «el reintento juzga el mismo diff», que es una
+//       asunción sobre la conducta del agente. Si el índice cambia en ese
+//       hueco, el `PASS` siguiente entra sobre código no revisado.
+//
+// LA FORMA. El paquete declara en su cabecera el sha256 del DIFF QUE CAPTURÓ;
+// el juez lo copia en `review_token`; el verbo del veredicto exige que
+// coincidan el del veredicto, el del paquete y el recomputado del corte de ese
+// instante. (a) muere porque un veredicto reciclado trae el token de otro
+// paquete; (b) muere porque el código cambiado no reproduce el sha capturado.
+//
+// CONTENT-ADDRESSED Y NO UN NONCE SORTEADO, y la diferencia con el nonce del
+// `go` (go-response.js) es la razón: aquél es SECRETO y no adivinable, y su
+// propiedad es que el agente no pueda fabricar el permiso. Éste es público y
+// derivable —está en el fichero que el juez lee, y cualquiera con shell lo
+// recomputa—, así que NO autentica al juez: ata el veredicto a un estado del
+// código. Un nonce aleatorio cerraría (a) y no (b) (en el hueco el paquete no
+// se regenera, así que el nonce sigue valiendo), y además castigaría al
+// obediente: un veredicto reemitido sobre un paquete regenerado con el MISMO
+// diff se descartaría por traer el nonce viejo. Con el contenido como
+// dirección, «no cambió el código» y «vale el veredicto» son la misma frase.
+//
+// La ETIQUETA se exporta y el lector se construye con ella: quien escribe la
+// línea (`escribirPaquete`), quien la lee (`reviewTokenOf`), las dos rúbricas
+// que se la citan al juez y los tests son cuatro copias de la misma cadena, y
+// eso es exactamente lo que ya divergió con JUDGE_TOOLS, VERDICT_RULES y
+// PACKAGE_SECTIONS. Aquí el fallo sería mudo por partida doble: el juez copia
+// de una línea que no existe, y todo veredicto se descarta.
+// ---------------------------------------------------------------------------
+export const REVIEW_TOKEN_LABEL = 'Review token'
+
+// El token: sha256 hex del texto del diff. Función del ARGUMENTO y de nada
+// más — quien decide QUÉ diff es el sujeto es ct-step.mjs, que es quien tiene
+// git delante.
+export const reviewToken = (diff) => createHash('sha256').update(String(diff ?? ''), 'utf8').digest('hex')
+
+// La línea, en una sola función: la pantalla que se la dicta al juez (la
+// rúbrica) y el matcher que la reconoce no pueden divergir en un espacio.
+export const reviewTokenLine = (token) => `${REVIEW_TOKEN_LABEL}: ${token}`
+
+// La RegExp se construye con la etiqueta y no se teclea: la etiqueta no lleva
+// metacaracteres, así que interpolarla es seguro y ata el lector al escritor.
+// Minúsculas y 64 exactos: es lo que `reviewToken` produce, y un paquete cuya
+// línea no cumpla eso NO declara ningún token (null), que es lo que el verbo
+// trata como «paquete de una versión anterior o editado a mano».
+const RE_REVIEW_TOKEN = new RegExp(`^${REVIEW_TOKEN_LABEL}: ([0-9a-f]{64})$`, 'm')
+export function reviewTokenOf(textoDelPaquete) {
+  const m = RE_REVIEW_TOKEN.exec(String(textoDelPaquete ?? ''))
+  return m ? m[1] : null
+}
+
 const esTexto = (v) => typeof v === 'string' && v.trim() !== ''
 
 // Validación a mano y no con una librería de esquemas: el spec exige cero
@@ -421,7 +517,7 @@ const esTexto = (v) => typeof v === 'string' && v.trim() !== ''
 // que se aplicara a una sola de las dos.
 export function readVerdict(structured, rules = VERDICT_RULES) {
   if (!structured || typeof structured !== 'object') return { why: 'el juez no devolvió structured_output' }
-  const { ruling, rubric, findings } = structured
+  const { ruling, rubric, findings, review_token: token } = structured
   if (ruling !== 'PASS' && ruling !== 'FAIL') return { why: `ruling desconocido: ${JSON.stringify(ruling)}` }
   if (!Array.isArray(findings)) return { why: 'findings no es una lista' }
   for (const [i, f] of findings.entries()) {
@@ -477,7 +573,23 @@ export function readVerdict(structured, rules = VERDICT_RULES) {
   if (ruling === 'PASS' && findings.some((f) => f.severity === 'high')) {
     return { why: 'un PASS con un hallazgo de severidad high contradice la rúbrica: un hallazgo grave es FAIL' }
   }
-  return { verdict: { ruling, rubric, findings } }
+  // EL TOKEN DEL PAQUETE, copiado — y LA ÚLTIMA de las comprobaciones a
+  // propósito. Las de arriba deciden si esto es un veredicto; ésta decide de
+  // QUÉ es. Un recorrido incompleto o un ruling inventado tienen que seguir
+  // leyendo el `why` de su propio defecto: es el texto con el que el juez
+  // vuelve a contestar, y adelantarla lo mandaría a arreglar el campo
+  // equivocado.
+  //
+  // Se acepta en mayúsculas y se devuelve en minúsculas, con el precedente
+  // literal de `matchesGo`: quien copia un hex de 64 caracteres puede
+  // reformatearlo, y «el peor rato de todos es teclear el permiso correcto y
+  // que no pase nada». Lo que este módulo NO puede decidir es si el token es
+  // EL DEL PAQUETE: eso exige leer el paquete y volver a medir el corte, y lo
+  // hace ct-step.mjs (`tokenVigente`).
+  if (typeof token !== 'string' || !RE_REVIEW_TOKEN_FORM.test(token)) {
+    return { why: `el veredicto no copia el "${REVIEW_TOKEN_LABEL}" del paquete de revisión: es el sha256 (64 hex) de la línea con la que abre el paquete que se te dio a juzgar, y va tal cual en el campo "review_token" — sin él no se puede afirmar que este veredicto sea sobre ESE código` }
+  }
+  return { verdict: { ruling, rubric, findings, review_token: token.toLowerCase() } }
 }
 
 // El veredicto del SLICE entero (§3.7-B): misma validación, la rúbrica de

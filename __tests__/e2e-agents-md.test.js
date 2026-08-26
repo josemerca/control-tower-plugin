@@ -20,6 +20,11 @@ import { join } from 'node:path'
 
 const INIT = new URL('../scripts/ct-init.sh', import.meta.url).pathname
 
+// La versión del contrato se LEE del propio ct-init.sh (misma doctrina y misma
+// razón que en ct-init.test.js): el número tecleado aquí a mano se quedó atrás
+// en el primer bump ajeno a esta feature.
+const CONTRACT_VERSION = Number(readFileSync(INIT, 'utf8').match(/^SLICES_CONTRACT_VERSION=(\d+)$/m)[1])
+
 function initIn(existingAgents) {
   const dir = mkdtempSync(join(tmpdir(), 'ct-init-e2e-'))
   spawnSync('git', ['init', '-q', dir], { encoding: 'utf8' })
@@ -75,9 +80,9 @@ describe('la sección de travesía en AGENTS.md', () => {
   // de número — un pase anterior la dejó en v20 sin bump y ningún repo
   // bootstrapeado con ese v20 podía recibirla. El test sigue clavando lo
   // mismo, ahora contra v21.
-  it('el contrato de la tabla de slices va por la v21 y documenta la columna E2E', () => {
+  it('el contrato de la tabla de slices va por la versión que declara el script y documenta la columna E2E', () => {
     const { agents } = initIn(null)
-    expect(agents).toMatch(/contrato.*v21|v21/)
+    expect(agents).toContain(`<!-- ct-init:slices-contract-version: ${CONTRACT_VERSION} -->`)
     expect(agents).toContain('E2E')
   })
 })

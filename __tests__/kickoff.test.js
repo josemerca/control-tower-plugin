@@ -140,6 +140,47 @@ describe('buildStateSeed', () => {
   })
 })
 
+// Slice 1 (apuntes de Capde) — `base_sha`: el SHA del corte, en un campo que
+// nadie sobreescribe. El sha ya llegaba a `buildStateSeed` (ct-next lo resuelve
+// de `origin/<base>` antes de cortar el worktree) pero solo se volcaba en
+// `last_commit`, que el agente pisa en su primer commit de trabajo: el único
+// rastro del corte desaparecía del fichero, y el diff de release acabó midiendo
+// contra la copia LOCAL de la rama base (corrida del slice 10, main 7 commits
+// por detrás).
+describe('buildStateSeed — base_sha, el sha del corte que nadie sobreescribe (slice 1)', () => {
+  const CORTE = 'c3af34c0dead0000beef0000cafe0000feed1234'
+
+  it('la semilla lleva base_sha: = SHA de origin/<base> en el corte', () => {
+    const seed = buildStateSeed(SLICE, { branch: 'feat/7', base: 'main', baseSha: CORTE })
+    // En el TEXTO y en su propia línea, no solo tras parsear: su consumidor
+    // (dispatch-check, slice 2) lo leerá con un regex sobre el fichero.
+    expect(seed).toMatch(new RegExp(`^base_sha: ${CORTE}$`, 'm'))
+    expect(parseState(seed).meta.base_sha).toBe(CORTE)
+  })
+
+  it('sin SHA resoluble, el campo no aparece', () => {
+    // Las dos formas en que ct-next entrega "no lo pude resolver": el
+    // argumento ausente (default de la firma) y la cadena vacía explícita
+    // (`resolvedBaseSha` tras el catch de ct-next.mjs:1679).
+    for (const opts of [{ branch: 'feat/7', base: 'main' }, { branch: 'feat/7', base: 'main', baseSha: '' }]) {
+      const seed = buildStateSeed(SLICE, opts)
+      expect(seed).not.toMatch(/^base_sha:/m) // nunca `base_sha: ""`
+      expect(Object.prototype.hasOwnProperty.call(parseState(seed).meta, 'base_sha')).toBe(false)
+    }
+  })
+
+  it('`last_commit` no cambia: mismo sha cuando hay, y `""` cuando no — la asimetría es deliberada', () => {
+    expect(parseState(buildStateSeed(SLICE, { branch: 'feat/7', base: 'main', baseSha: CORTE })).meta.last_commit).toBe(CORTE)
+    expect(parseState(buildStateSeed(SLICE, { branch: 'feat/7', base: 'main' })).meta.last_commit).toBe('')
+  })
+
+  it('`base:` sigue siendo el nombre de la rama, nunca el sha: de ahí sale el `--base` de `gh pr create`', () => {
+    const { meta } = parseState(buildStateSeed(SLICE, { branch: 'feat/7', base: 'develop', baseSha: CORTE }))
+    expect(meta.base).toBe('develop')
+    expect(meta.base).not.toBe(meta.base_sha)
+  })
+})
+
 // F3: `Tipo` (columna §9 del spec) decide qué addendum recibe el agente
 // despachado — ct-groom.mjs necesita el conjunto de valores reconocidos
 // para avisar cuando el spec trae un `Tipo` que no matchea ninguna key de

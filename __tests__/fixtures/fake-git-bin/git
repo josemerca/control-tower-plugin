@@ -95,6 +95,22 @@ function main() {
     process.exit(0)
   }
 
+  // `git rev-parse --verify --quiet HEAD^{commit}` con cwd = el worktree recién
+  // creado (slice 9b): el corte real. El valor es DISTINTO del `deadbeef…` que
+  // devuelve la rama genérica de abajo para `origin/<base>^{commit}`, y esa
+  // diferencia es justo lo que permite a un test distinguir "el sha medido en
+  // el worktree" de "el sha resuelto antes del bucle" — con el mismo valor para
+  // los dos, el cableado sería intestable. Va ANTES de la rama genérica para
+  // que FAKE_GIT_BASE_NOT_LOCAL (que hace fallar cualquier ref sin prefijo
+  // `origin/`) no lo alcance por accidente: son dos escenarios sin relación.
+  // FAKE_GIT_WORKTREE_HEAD_FAIL simula el rev-parse roto en un worktree que
+  // git acaba de crear (el caso de degradación).
+  if (argv[0] === 'rev-parse' && argv[1] === '--verify' && argv[2] === '--quiet' && argv[3] === 'HEAD^{commit}') {
+    if (process.env.FAKE_GIT_WORKTREE_HEAD_FAIL) process.exit(1)
+    process.stdout.write(`${process.env.FAKE_GIT_WORKTREE_HEAD || 'cafebabecafebabecafebabecafebabecafebabe'}\n`)
+    process.exit(0)
+  }
+
   if (argv[0] === 'rev-parse' && argv[1] === '--verify' && argv[2] === '--quiet') {
     const ref = argv[3] || ''
     const isRemoteRef = ref.startsWith('origin/')
@@ -222,6 +238,15 @@ function main() {
       writeFileSync(wt, '')
       process.exit(0)
     }
+    // Éxito normal: el git real DEJA el worktree checkouteado en disco (el
+    // directorio existe, con HEAD apuntando a la rama nueva) — necesario a
+    // partir de slice 9(b), que hace `cwd: <wt>` para medir `HEAD^{commit}`
+    // ANTES de que ct-next.mjs cree `${wt}/.agent` (lo que hasta ahora era lo
+    // único que garantizaba que el directorio existiera bajo este stub). Sin
+    // este mkdir, ese rev-parse fallaría con ENOENT por un cwd inexistente —
+    // un artefacto del stub, no del git real que simula.
+    const wt = argv[argv.indexOf('-b') + 2]
+    mkdirSync(wt, { recursive: true })
     process.exit(0)
   }
 

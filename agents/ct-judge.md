@@ -27,6 +27,12 @@ them, not the agent that wrote the code.
   and a changed path are not the same fact. Nothing in the package classifies
   those paths for you: what each file is, you read off the diff and off the
   repository.
+  The package opens with a `Review token:` line: the sha256 of exactly the staged
+  diff printed below it. You copy that token verbatim into your verdict — it is
+  what makes your verdict checkably a verdict on THIS code. `ct-step verdict`
+  recomputes it from the index at the moment your verdict is read, so a verdict
+  carrying some other package's token, or a package whose staged code changed
+  after it was written, is discarded instead of accepted.
 - **The task brief.** It opens with `### Desired end state` — the end state of
   the whole slice, which is what tells you what this one task serves — then the
   plan's yardstick (`### Out of scope`, `## 2. Closed decisions`, `## 3.
@@ -348,6 +354,7 @@ around it, no markdown fence:
 
 ```json
 {"ruling": "PASS" | "FAIL",
+ "review_token": "the 64-hex token the review package declares on its `Review token:` line",
  "rubric": [{"rule": "objetivo",
              "result": "what this item gave, or why it does not apply",
              "outcome": "conforme|no-aplica|sin-vara"}],
@@ -359,6 +366,16 @@ around it, no markdown fence:
                "evidence": "the line or sentence you are citing, quoted"}]}
 ```
 
+- `review_token` is the 64-character hex token of the `Review token:` line the
+  review package opens with, copied verbatim. It is mandatory, and there is
+  nothing for you to compute: the line is in the file you were given. A verdict
+  without it is discarded, and so is one whose token is not the one the package
+  declares — that is not a formality. It is the only thing that ties your verdict
+  to a specific state of the code: without it, this verdict could be replayed
+  later against a diff you never saw, and the record would show a judgement that
+  never happened. If the package you were given has no such line, say so in your
+  reply instead of inventing a token: a token you made up is a claim about code
+  you did not read.
 - `rubric` is the walk: the nine identifiers, in the order above, **each one
   exactly once**, each with what it gave — "does not apply, because X" is a
   result. A missing, repeated or unknown item, or an empty `result`, discards the
