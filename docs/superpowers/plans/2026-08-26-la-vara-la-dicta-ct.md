@@ -669,36 +669,6 @@ describe('la cabecera fija la precedencia, con sus dos lados', () => {
   })
 })
 
-// ---------------------------------------------------------------------------
-// Ties: la lista no puede divergir de los textos que la enseñan.
-// ---------------------------------------------------------------------------
-describe('los textos que enseñan la vara de ct la nombran', () => {
-  const leer = (...partes) => readFileSync(join(root, ...partes), 'utf8')
-
-  it('scripts/ct-step.mjs es quien la lee del disco', () => {
-    expect(leer('scripts', 'ct-step.mjs')).toContain('vara-ct.js')
-  })
-
-  it('scripts/kickoff.js la nombra en el primer acto del slice', () => {
-    expect(leer('scripts', 'kickoff.js')).toContain(CONVENTIONS_DIR)
-  })
-
-  it('prompts/task-implementer.md la nombra', () => {
-    expect(leer('prompts', 'task-implementer.md')).toContain(`${CONVENTIONS_DIR}/`)
-  })
-
-  it('skills/writing-plans-prescriptive/SKILL.md la nombra', () => {
-    expect(leer('skills', 'writing-plans-prescriptive', 'SKILL.md')).toContain(`${CONVENTIONS_DIR}/`)
-  })
-
-  it('agents/ct-judge.md la nombra DENTRO del ítem `patrones`', () => {
-    const texto = leer('agents', 'ct-judge.md')
-    const m = /^### 5\. `patrones`[\s\S]*?(?=^### |^## )/m.exec(texto)
-    expect(m).not.toBeNull()
-    expect(m[0]).toContain(`${CONVENTIONS_DIR}/`)
-  })
-})
-
 describe('la vara del repo sigue en pie', () => {
   it('scripts/vara.js sigue transportando `.agent/conventions.md`', async () => {
     const vara = await import('../scripts/vara.js')
@@ -711,7 +681,7 @@ describe('la vara del repo sigue en pie', () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run __tests__/vara-ct.test.js`
-Expected: FAIL — `Cannot find module '../scripts/vara-ct.js'`. Los cinco ties de `ct-step.mjs`, `kickoff.js`, `task-implementer.md` y `SKILL.md` también fallarán y los arreglan las tareas 3, 4 y 5: deja esos rojos y sigue.
+Expected: FAIL — `Cannot find module '../scripts/vara-ct.js'`.
 
 - [ ] **Step 3: Crea `scripts/vara-ct.js`**
 
@@ -815,8 +785,8 @@ export function seccionDeVaraDeCt(documentos) {
 
 - [ ] **Step 4: Run test to verify the module's own tests pass**
 
-Run: `npx vitest run __tests__/vara-ct.test.js -t 'CONVENTIONS_FILES'`, luego `-t 'faltasDeVara'`, `-t 'seccionDeVaraDeCt'`, `-t 'la cabecera fija'`, `-t 'la vara del repo sigue'`
-Expected: PASS en los cinco. Los ties siguen rojos hasta las tareas 3, 4 y 5.
+Run: `npx vitest run __tests__/vara-ct.test.js`
+Expected: PASS, el fichero entero. Esta tarea no deja ningún test rojo: los ties que atan la constante a los textos que la enseñan viven en la Task 5, que es la que cierra el conjunto de esos textos.
 
 - [ ] **Step 5: Commit**
 
@@ -922,16 +892,17 @@ import { CONVENTIONS_FILE, seccionDeVara } from './vara.js'
 import { CONVENTIONS_DIR, CONVENTIONS_FILES, faltasDeVara, seccionDeVaraDeCt } from './vara-ct.js'
 ```
 
-- [ ] **Step 4: Añade la vara de ct dentro de `escribirBrief`, ANTES del bloque de la del repo**
+- [ ] **Step 4: Añade la vara de ct dentro de `escribirBrief`, en dos mitades**
 
-Justo después del `try/catch` del `execFileSync` de `task-brief` y **antes** del comentario `// §3.3: la vara del repo cruza el embudo AQUÍ`, inserta:
+**La lectura y la comprobación van al PRINCIPIO de la función, antes del `execFileSync` de `task-brief`.** Es una comprobación de integridad del plugin: no depende del brief, y hacerla después dejaría en disco un brief a medio construir que el test comprueba que no existe. Justo detrás de `const brief = join(workDir, ...)`, inserta:
 
 ```js
-  // La vara de CT: viaja siempre, va primero, y su ausencia NO es un estado del
-  // repo sino una instalación rota del plugin — de ahí que se aborte en vez de
-  // avisar, que es lo contrario de lo que se hace con la del repo justo debajo.
+  // La vara de CT, comprobada ANTES de construir nada: su ausencia NO es un
+  // estado del repo sino una instalación rota del plugin, de ahí que se aborte
+  // en vez de avisar — lo contrario de lo que se hace con la del repo más abajo.
   // Un brief sin ella deja al implementador y al juez midiendo con nada, y en
-  // silencio eso no se distingue de un ítem conforme.
+  // silencio eso no se distingue de un ítem conforme. Y se comprueba antes de
+  // llamar a `task-brief` para no dejar en disco un brief que nadie va a usar.
   const deCt = CONVENTIONS_FILES.map((nombre) => {
     try {
       return { nombre, contenido: readFileSync(join(PLUGIN_ROOT, CONVENTIONS_DIR, nombre), 'utf8') }
@@ -943,6 +914,11 @@ Justo después del `try/catch` del `execFileSync` de `task-brief` y **antes** de
   if (faltas.length) {
     die(`la vara de ct no se puede leer: falta o está vacío ${faltas.join(', ')} en ${join(PLUGIN_ROOT, CONVENTIONS_DIR)}. Es una instalación del plugin incompleta, no una propiedad de este repo: sin esos documentos el implementador escribe y el juez bloquea sin nada contra qué medir, y eso no se distingue en silencio de un diff conforme. Reinstala el plugin.`, EXIT.PRECONDITION)
   }
+```
+
+**Y el pegado va después**, justo detrás del `try/catch` del `execFileSync` de `task-brief` y **antes** del comentario `// §3.3: la vara del repo cruza el embudo AQUÍ`, para que la de ct quede delante de la del repo en el fichero:
+
+```js
   appendFileSync(brief, seccionDeVaraDeCt(deCt))
 ```
 
@@ -1152,6 +1128,36 @@ describe('el ítem `patrones` mide las dos varas', () => {
 
   it('cierra el agujero del módulo viejo con la misma frase que el documento', () => {
     expect(item()).toContain('a new concept is a new module')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Ties: la lista no puede divergir de los textos que la enseñan.
+// ---------------------------------------------------------------------------
+describe('los textos que enseñan la vara de ct la nombran', () => {
+  const leer = (...partes) => readFileSync(join(root, ...partes), 'utf8')
+
+  it('scripts/ct-step.mjs es quien la lee del disco', () => {
+    expect(leer('scripts', 'ct-step.mjs')).toContain('vara-ct.js')
+  })
+
+  it('scripts/kickoff.js la nombra en el primer acto del slice', () => {
+    expect(leer('scripts', 'kickoff.js')).toContain(CONVENTIONS_DIR)
+  })
+
+  it('prompts/task-implementer.md la nombra', () => {
+    expect(leer('prompts', 'task-implementer.md')).toContain(`${CONVENTIONS_DIR}/`)
+  })
+
+  it('skills/writing-plans-prescriptive/SKILL.md la nombra', () => {
+    expect(leer('skills', 'writing-plans-prescriptive', 'SKILL.md')).toContain(`${CONVENTIONS_DIR}/`)
+  })
+
+  it('agents/ct-judge.md la nombra DENTRO del ítem `patrones`', () => {
+    const texto = leer('agents', 'ct-judge.md')
+    const m = /^### 5\. `patrones`[\s\S]*?(?=^### |^## )/m.exec(texto)
+    expect(m).not.toBeNull()
+    expect(m[0]).toContain(`${CONVENTIONS_DIR}/`)
   })
 })
 
