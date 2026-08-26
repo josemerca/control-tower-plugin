@@ -38,8 +38,19 @@ describe('los documentos de conventions/', () => {
   })
 
   it('ninguno repite una regla que ya posee un ítem de la rúbrica', () => {
+    // Cada grupo es un ítem de la rúbrica del juez que YA posee esa regla. Que
+    // uno de estos documentos la repita es un defecto real: `decisions.md`
+    // prohíbe escribir una regla dos veces, y el recuento por severidad del
+    // veredicto se infla cuando dos ítems cazan el mismo defecto.
     const todo = Object.keys(ALCANCES).map(leer).join('\n')
-    expect(todo).not.toMatch(/skip|xfail/i)
-    expect(todo).not.toMatch(/call count/i)
+    for (const [item, terminos] of Object.entries({
+      'manipulacion-tests': [/skip/i, /xfail/i, /pre-existing test/i, /flaky/i],
+      'test-desiderata': [/deterministic/i, /\bisolated\b/i, /call count/i, /real behaviou?r/i],
+      alcance: [/no sentence of the task/i, /speculative/i, /scaffolding/i],
+    })) {
+      for (const t of terminos) {
+        expect(todo, `${item} ya posee esta regla: ${t}`).not.toMatch(t)
+      }
+    }
   })
 })

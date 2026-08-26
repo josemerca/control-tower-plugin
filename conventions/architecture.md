@@ -6,7 +6,11 @@ A module that was already there and does not conform is the repository's
 **declared debt**: what you add to it follows the style of its host, and that is
 not a finding — half a migration reads worse than none.
 
-The hole that exemption opens is closed in the same breath, because otherwise the cheapest way to dodge this document is to write new code inside an old file: **a new concept is a new module and is born conforming.** Sheltering under the host's style covers only what genuinely extends what was already there; placing a new concept inside an old file to inherit the exemption **is** a finding.
+The hole that exemption opens is closed in the same breath, because otherwise the
+cheapest way to dodge this document is to write new code inside an old file:
+**a new concept is a new module and is born conforming.** Sheltering under the
+host's style covers only what genuinely extends what was already there; placing
+a new concept inside an old file to inherit the exemption **is** a finding.
 
 ## The three layers, and the direction of dependencies
 
