@@ -8,7 +8,7 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 
 | | |
 |---|---|
-| Versión | `0.42.0` · contrato de la tabla de slices `v21` |
+| Versión | `0.43.0` · contrato de la tabla de slices `v21` |
 | Comandos | `/ct-init` · `/ct-groom` · `/ct-next` · `/ct-status` |
 | Puertas humanas | 3 por epic — congelación, `status:ready`, merge — más el gate `plan` en cada slice (renunciable por fila con `!plan`; su go es `-OK <nonce>` y `--release` se niega sin él) y el gate `e2e` cuando la fila declara recorridos en la columna `E2E` (derivado, no se escribe a mano) |
 | Skills | 11 forkados de superpowers 6.0.3 + 1 propio (`writing-plans-prescriptive`) |
@@ -63,6 +63,8 @@ Hay **dos sesiones vivas por repo, con papeles opuestos**: la *coordinadora*, en
 | **1 · Congelación** | El spec está escrito, en `DRAFT` | Nace de una frase real: *«yo no me suelo leer los specs»*. Si el humano no lee el spec, quien lo escribe podría cerrar decisiones con firma ajena. Se presentan **15 líneas** —hipótesis, cada decisión con su procedencia, anti-scope— y se para. El OK muta `DRAFT → CONGELADA`. **Sin congelación no hay groom.** |
 | **2 · `status:ready`** | Los issues ya existen | `/ct-groom` los crea en `status:backlog`, nunca en `ready`. Que un slice esté escrito no significa que se deba empezar ahora. |
 | **3 · Merge** | El PR está abierto y el claim liberado | El loop **escribe y enseña** los gates (`visual`, `apply`) pero no impide mergear con uno sin cerrar. Y el merge es lo único que libera los tokens de área y satisface las dependencias. |
+
+La Puerta 3 sigue siendo tuya, pero ya no hace falta que además la anuncies: al entregar, `--release` deja un vigilante desprendido (`scripts/ct-watch-merge.mjs`) sondeando el PR de la rama del slice, y en cuanto lo ve mergeado avisa a la coordinadora de que su cosecha está pendiente. No borra nada — el aviso es la automatización; recoger el worktree sigue siendo una decisión. **Exige una cosa de ti:** que la sesión coordinadora sea una workspace de cmux abierta en el checkout principal del repo, porque es por ahí por donde el vigilante la encuentra (a ella no la crea el loop, así que no hay ningún nombre que derivar). Si no lo está, el aviso se pierde y te enteras en el siguiente `/ct-next`, que sigue detectando la cosecha pendiente él solo.
 
 ### El modelo de dos niveles
 

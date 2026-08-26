@@ -514,6 +514,40 @@ function main() {
     return
   }
 
+  // `gh pr list --repo <r> --head feat/<n> --state merged --json number,mergedAt`
+  // (ct-watch-merge.mjs): la única pregunta del vigilante del merge. La rama de
+  // un slice es determinista (`feat/<n>`), así que "¿está mergeado?" no
+  // necesita ninguna heurística — sale de `gh` directamente.
+  //
+  // FAKE_GH_PR_LIST es el payload fijo (default: `[]`, ningún PR mergeado, que
+  // es el estado en el que el vigilante empieza a esperar).
+  // FAKE_GH_PR_LIST_SEQUENCE es una lista de payloads, uno por llamada, con
+  // contador propio en FAKE_GH_PR_LIST_COUNTER_FILE — necesaria para el caso
+  // que importa de verdad: los primeros sondeos no ven nada y uno posterior sí,
+  // que es cómo se ve un merge en el mundo real. La última entrada se repite
+  // cuando la secuencia se agota, para que el vigilante pueda seguir sondeando
+  // sin que el stub se quede sin respuestas.
+  // FAKE_GH_PR_LIST_FAIL simula que la lectura falla (red caída, token
+  // caducado, un 502): lo que este stub tiene que poder ejercer es que un fallo
+  // transitorio NO se lea como "no está mergeado" de forma permanente.
+  if (argv[0] === 'pr' && argv[1] === 'list') {
+    if (process.env.FAKE_GH_PR_LIST_FAIL) {
+      console.error('fake-gh: pr list failed (simulado)')
+      process.exitCode = 1
+      return
+    }
+    if (process.env.FAKE_GH_PR_LIST_SEQUENCE) {
+      const seq = JSON.parse(process.env.FAKE_GH_PR_LIST_SEQUENCE)
+      const i = nextCallIndex(process.env.FAKE_GH_PR_LIST_COUNTER_FILE)
+      process.stdout.write(JSON.stringify(seq[Math.min(i, seq.length - 1)] ?? []))
+      process.exitCode = 0
+      return
+    }
+    process.stdout.write(process.env.FAKE_GH_PR_LIST || '[]')
+    process.exitCode = 0
+    return
+  }
+
   console.error(`fake-gh: comando no soportado en el stub: ${joined}`)
   process.exitCode = 1
 }

@@ -20,10 +20,11 @@
 // real (test-and-set vía `git refs`, ya validado en el experimento CAS de T9)
 // — hasta que eso aterrice, esta es la garantía real: ninguna bajo
 // concurrencia, sí bajo uso secuencial disciplinado.
-import { execFileSync } from 'node:child_process'
-import { writeSync, statSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { execFileSync, spawn } from 'node:child_process'
+import { writeSync, statSync, readFileSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { detectCollisions, claimLost } from './claim.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 import { parseStrictInt } from './argnum.js'
@@ -31,9 +32,12 @@ import { NEVER_IN_A_SLICE_PR, SLICE_REL_PATH } from './state-paths.js'
 import { checkPlans } from './plan-contract.js'
 import { deliveredRun } from './run-machine.js'
 import { extractE2eRuns, E2E_HEADING } from './gh-issue-map.js'
+import { controlTowerLogDir } from './run-metrics.js'
 import { matchesGo, GO_TOKEN } from './go-response.js'
 import { readGoCommitment } from './go-registry.js'
 import { gatesFromLabels } from './gates.js'
+
+const ctWatchMergePath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch-merge.mjs')
 
 // ============================================================================
 // Finding 4 (auditoría de interrupción/staleness): dos cambios en este
@@ -514,6 +518,72 @@ if (checkPlan) {
   dieOut(result.message, 0)
 }
 
+// ============================================================================
+// EL VIGILANTE DEL MERGE — para que la cosecha no espere a un recado.
+//
+// La Puerta 3 del loop es humana (cerrar los gates y mergear) y hasta esta ronda
+// mergear no producía NINGUNA señal mecánica. El PR se mergeaba, el issue se
+// cerraba, y `.worktrees/<n>` + `feat/<n>` se quedaban en disco con su `claude`
+// vivo —trece horas en el caso que dio origen a F20— hasta que la misma persona
+// que había mergeado iba a la ventana de la coordinadora a decírselo. El evento
+// existía en GitHub; lo que disparaba la cosecha era un recado.
+//
+// SE LANZA AQUÍ, Y NO EN `/ct-next`, porque este es el instante EXACTO en que
+// existe un PR abierto esperando un merge humano. Lanzarlo en el despacho —junto
+// al vigilante del `-OK`, que es donde primero se pensó— pondría un proceso a
+// preguntar por un PR que todavía no existe durante toda la implementación.
+//
+// SE LANZA DESPRENDIDO (`detached` + `unref`) porque tiene que sobrevivir a que
+// esta invocación termine, y a que se cierre la sesión del slice: el caso que
+// motiva todo esto es un PR que se mergea horas o días después de abrirse.
+//
+// NO ROMPE EL RELEASE, y esto es la regla, no una cortesía: va DESPUÉS de que el
+// issue ya esté en `status:in-review`, y cualquier fallo aquí se AVISA y sigue.
+// El trabajo ya está entregado; no poder vigilar el merge significa volver al
+// modo de antes —avisar a mano—, no perder la entrega. Es el mismo criterio que
+// el `git add` de la telemetría en ct-step: el termómetro no es parte del motor.
+// Por eso hay además un manejador de `error`: un fallo ASÍNCRONO de `spawn`
+// (EAGAIN, EMFILE) no lo ve el `try/catch`, y sin manejador sería un `'error'`
+// sin atender que tumbaría este script — convirtiendo un release CONSUMADO en un
+// exit distinto de 0, o sea en la peor mentira posible en este fichero.
+//
+// EL CWD DE LA COORDINADORA SALE DE `localSliceArtifacts`, no de `process.cwd()`.
+// Este script se invoca desde dentro del worktree del slice, así que el cwd es
+// `.worktrees/<n>`; la coordinadora vive en el checkout PRINCIPAL, que es lo que
+// esa función ya sabe sacar de `git worktree list --porcelain`. Si no se ha
+// podido mirar, NO se inventa una ruta: se avisa y no se lanza nada. Un
+// vigilante apuntando a un directorio equivocado no encontraría nunca a quién
+// entregarle el aviso, y encima lo anunciaría como lanzado.
+//
+// CT_WATCH_MERGE_BIN sigue el patrón de CT_WATCH_GO_BIN: no cambia NINGUNA
+// decisión, sólo qué programa se lanza. Existe para que los tests puedan
+// comprobar que el vigilante se lanza con los argumentos correctos sin poner un
+// proceso real a sondear GitHub durante 48 horas.
+// ============================================================================
+function lanzarVigilanteDelMerge(n) {
+  const aviso = (por) => errLine(`aviso: no se ha lanzado el vigilante del merge de #${n} (${por}) — el slice está entregado y el issue está en status:in-review, pero cuando mergees su PR tendrás que recoger la cosecha a mano (o avisar a la coordinadora).`)
+  try {
+    const disco = localSliceArtifacts(n)
+    if (!disco.known) return aviso('no se ha podido averiguar cuál es el checkout principal, así que no se sabe dónde buscar la sesión coordinadora')
+    const bin = process.env.CT_WATCH_MERGE_BIN || ctWatchMergePath
+    // `spawn(process.execPath, [bin, …])` con un `bin` que no existe NO falla:
+    // el ejecutable es siempre `node`, así que el proceso nace, muere al
+    // instante con un error de módulo, y sin esta comprobación se anunciaría
+    // «vigilante lanzado» con un pid que ya no existe. Misma guarda, y mismo
+    // motivo, que en ct-next.mjs#lanzarVigilanteDelGo.
+    if (!existsSync(bin)) return aviso(`el programa del vigilante no existe: ${bin}`)
+    const logPath = join(controlTowerLogDir({ configDir: process.env.CLAUDE_CONFIG_DIR || null, home: homedir() }), `watch-merge-${n}.log`)
+    const hijo = spawn(process.execPath, [
+      bin, '--issue', String(n), '--repo', repo, '--coordinator-cwd', disco.mainRoot, '--log', logPath,
+    ], { detached: true, stdio: 'ignore' })
+    hijo.on('error', (e) => aviso(`fallo al arrancarlo: ${e.message}`))
+    hijo.unref()
+    outLine(`vigilante del merge de #${n} lanzado (pid ${hijo.pid}) — cuando mergees el PR, la coordinadora se enterará sola. Log: ${logPath}`)
+  } catch (e) {
+    aviso(e.message)
+  }
+}
+
 if (release) {
   const check = stateFilesIntroducedByBranch()
   if (!check.known) {
@@ -738,6 +808,12 @@ if (release) {
       // contrato ensanchado de arriba, sin cambios.
       dieErr(`no se pudo liberar #${issue} a in-review: ${result.error.message}. Sigue en status:in-progress; reintenta el --release.`, 1)
     }
+    // DENTRO del `!dryRun && !fx`, y eso es la decisión: con `--dry-run` no se
+    // ha movido nada, así que no hay ningún PR cuyo merge esperar, y lanzar el
+    // vigilante ahí convertiría una corrida en seco en un proceso de 48 horas.
+    // Con `fx` (CT_CLAIM_FIXTURE) tampoco: el fixture modela la forma del claim,
+    // no un repo real donde haya nada que cosechar.
+    lanzarVigilanteDelMerge(issue)
   }
   dieOut(`released #${issue} → in-review`, 0)
 }
