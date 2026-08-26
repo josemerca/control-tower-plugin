@@ -1176,6 +1176,15 @@ describe('el implementador y el juez leen el mismo texto', () => {
   it('los dos siguen nombrando la declaración del repo: son dos varas', () => {
     for (const texto of leerDos()) expect(texto).toContain('.agent/conventions.md')
   })
+
+  it('los dos llevan ENTERA la frase que cierra la exención del módulo viejo', () => {
+    // Sin cortarla por un salto de línea: es carga estructural, la cita
+    // `conventions/architecture.md` con esas palabras, y una de las dos rúbricas
+    // que la parta deja al implementador y al juez leyendo cosas distintas.
+    for (const texto of leerDos()) {
+      expect(texto).toContain('a new concept is a new module and is born conforming')
+    }
+  })
 })
 ```
 
@@ -1299,10 +1308,10 @@ Sustituye el punto 3 entero por:
    modules**: a module that was already there and does not conform is this
    repository's declared debt, so what you add to it follows the style of its
    host and nobody will block you for that. What you may not do is hide a new
-   concept inside an old file to inherit the exemption — **a new concept is a new
-   module and is born conforming** — and which of the two you are writing is
-   already decided for you by the `(create)` and `(modify)` marks of the
-   `**Files:**` line.
+   concept inside an old file to inherit the exemption:
+   **a new concept is a new module and is born conforming.**
+   Which of the two you are writing is already decided for you by the `(create)`
+   and `(modify)` marks of the `**Files:**` line.
 
    Where those rules speak about boundaries — what the core may import, how a
    dependency arrives, what objects may cross — your imports and constructors are
