@@ -20,9 +20,13 @@ a missing test.
 ## Code is written in English
 
 File and module names, types, functions, methods, variables, parameters,
-constants, vocabulary members, errors, test names, and the messages a person
-reads. The one exception is a value fixed by an external contract, which keeps
-the spelling that contract gives it.
+constants, vocabulary members, errors, test names, and diagnostic or log
+messages. The one exception is a value fixed by an external contract, which
+keeps the spelling that contract gives it.
+
+**This does not cover text an end user reads.** Product copy, labels, and any
+message surfaced in a user-facing interface are not this document's business:
+their language is the product's decision, not this rule's.
 
 ## No free function at module level: every function hangs off a type
 

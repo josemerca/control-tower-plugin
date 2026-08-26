@@ -57,9 +57,11 @@ If the repo declares none, say so with `N/A — <reason>`: a path that is not in
 
 **There is a second yardstick, and it is not in this section: ct's own.** The four documents of
 `conventions/`, whose absolute path the kickoff gives you, and which **take precedence over this
-repo's**. Read them before you write the plan — the program pastes them into every task brief, so a
-plan that contradicts them produces tasks the judge blocks. How the two resolve against each other,
-and what it means for splitting `**Files:**` between `(create)` and `(modify)`, is in your kickoff.
+repo's, rule by rule, not by topic**: where a rule of this repo requires what one of those four
+forbids, or forbids what they require, ct's wins; where this repo says something none of the four
+speaks about, this repo's rule binds in full. Read them before you write the plan — the program
+pastes them into every task brief, so a plan that contradicts them produces tasks the judge blocks.
+What it means for splitting `**Files:**` between `(create)` and `(modify)` is in your kickoff.
 
 Then every code block you write declares its **role** on
 the line right above it. The validator enforces the labels and their budgets:
@@ -230,8 +232,9 @@ to hold for Task 1 and easy to lose by Task 6; step 5 is what keeps them in view
 
 1. Read `.agent/SLICE.md` and the issue: acceptance criteria, "Out of scope / Protected",
    "Contexto del epic", "Contexto heredado", "Dependencias".
-2. Read the files this slice touches, one analogous file, and this repo's convention
-   documents — §3 names all three by path, and `--check-plan` reads every path you name.
+2. Read the files this slice touches, one analogous file, this repo's convention documents, and
+   the four documents of `conventions/` — §3 names the first three by path, and `--check-plan`
+   reads every path you name; the fourth is ct's own yardstick, at the path your kickoff gave you.
 3. Copy `plan-template.md`, next to this skill, and save it straight away as
    `docs/superpowers/plans/YYYY-MM-DD-issue-<n>-<slug>.md`, where `<n>` is `github_issue` in
    `.agent/SLICE.md`. The `issue-<n>-` segment is how the release gate finds the plan — keep it.

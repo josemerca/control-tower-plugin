@@ -412,6 +412,7 @@ Alcance: **todo diff**.
 | El flujo de trabajo: ramas, commits, pull requests, merge | No es del implementador, que no toca `git`: lo conduce el loop |
 | La meta-convención sobre cómo se escribe una convención | La leen las personas que editan estos cuatro ficheros, no el implementador ni el juez. Si hace falta, va a `docs/`, no a `conventions/` |
 | Dónde vive el porqué de una decisión | Decidido fuera: la regla se queda en cero prosa y no dice adónde va el porqué |
+| «Nada de andamiaje especulativo» | Ya la posee el ítem `alcance` de la rúbrica del juez: código que ninguna frase de la tarea pide. Repetirla en `code.md` duplicaría el mismo hallazgo entre dos ítems, y un test lo prohíbe expresamente |
 
 ## 6. Qué se toca, y qué no
 

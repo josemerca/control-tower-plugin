@@ -237,7 +237,14 @@ describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive 
 
   it('la skill y su template tienen presupuesto: crecer obliga a recortar', () => {
     const bytes = (f) => Buffer.byteLength(read('writing-plans-prescriptive', f))
-    expect(bytes('SKILL.md')).toBeLessThanOrEqual(16314)
+    // Tope subido de 16314 a 16604: paga restituir, dentro de SKILL.md, la
+    // regla de precedencia con sus dos direcciones para quien escribe el plan.
+    // Esa regla no tiene otra copia durable — el kickoff se entrega una vez,
+    // en un prompt, y no es un fichero que el agente pueda reabrir después—,
+    // así que el sitio donde vivir es este. El tope sigue siendo un trinquete:
+    // la siguiente subida necesita su propio motivo escrito aquí, no vale por
+    // precedente.
+    expect(bytes('SKILL.md')).toBeLessThanOrEqual(16604)
     expect(bytes('plan-template.md')).toBeLessThanOrEqual(6377)
   })
 

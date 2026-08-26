@@ -64,8 +64,9 @@ this prompt or in the files it names.
    are in front of you — and the judge that reads your diff is handed the same
    four in the same brief, so a rule you skimmed is a round trip you paid for.
 
-   **They take precedence over this repo's, rule by rule.** Where a rule of this
-   repo requires what one of those four forbids, follow ct's. Where this repo
+   **They take precedence over this repo's, and the precedence is measured rule
+   by rule, not by topic.** Where a rule of this repo requires what one of those
+   four forbids, or forbids what they require, follow ct's. Where this repo
    says something none of the four speaks about — casing, prefixes, file names —
    follow this repo's: precedence resolves a clash, it does not excuse you from
    this repo's conventions.

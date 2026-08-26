@@ -75,6 +75,14 @@ const CABECERA = [
   '> prefijos o nombres de fichero de este repo **obliga**, porque ninguno de estos',
   '> documentos habla de eso. Su convención de escribir los identificadores en',
   '> castellano **no**, porque `conventions/code.md` exige inglés.',
+  '>',
+  '> Una convención del repo no tiene por qué estar escrita: puede estar',
+  '> automatizada en una herramienta propia —un linter que exige algo, por',
+  '> ejemplo— que la verificación de la tarea ejecuta **antes** de que nadie',
+  '> juzgue el diff. Esa regla **obliga de todas formas**, aunque uno de estos',
+  '> documentos diga otra cosa: seguir a ct y dejar la verificación en rojo no es',
+  '> una salida. Un choque real de ese tipo se **declara en el informe**, no se',
+  '> resuelve dejando la tarea en rojo.',
   '',
 ]
 

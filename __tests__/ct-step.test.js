@@ -195,6 +195,9 @@ describe('next: la sesión pregunta y el oráculo contesta', () => {
     ct('controls')
     const r = ct('next')
     expect(r.stdout).toMatch(/DESPACHA EL JUEZ .*ct-judge.*SIN Bash/)
+    // La propiedad "implementador y juez leen el mismo texto" cuelga de esta
+    // línea: el despacho del juez nombra el brief, o el juez nunca lo abre.
+    expect(r.stdout).toMatch(/el brief de la tarea: .*task-1-brief\.md/)
     const paquete = join(repo, '.agent', 'run-7', 'task-1-review.diff')
     expect(readFileSync(paquete, 'utf8')).toMatch(/\+uno/)
   })

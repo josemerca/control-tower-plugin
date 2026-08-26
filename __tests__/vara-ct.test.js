@@ -150,12 +150,60 @@ describe('la cabecera fija la precedencia, con sus dos lados', () => {
     expect(cabecera()).toMatch(/obliga entera/i)
   })
 
+  it('dice las dos direcciones del choque: el repo exige lo que ct prohíbe, y el repo prohíbe lo que ct exige', () => {
+    // Normalizado: cada línea de CABECERA lleva su propio `> ` de cita, así
+    // que una frase partida entre dos elementos del array no es un match de
+    // un regex sin quitar antes esos prefijos.
+    const normalizado = cabecera().replace(/^>\s?/gm, '').replace(/\s+/g, ' ')
+    expect(normalizado).toMatch(/manda hacer algo que uno de estos documentos prohíbe/i)
+    expect(normalizado).toMatch(/prohíbe algo que exigen/i)
+  })
+
   it('trae el caso del naming con sus dos lados, que es lo que hace operativa la regla', () => {
     const c = cabecera()
     expect(c).toMatch(/mayúsculas/i)
     expect(c).toContain('castellano')
     expect(c).toContain('conventions/code.md')
   })
+})
+
+// ---------------------------------------------------------------------------
+// La misma regla, en los DOS textos en inglés: el juez y el implementador. No
+// se comparan cadenas contra la cabecera de arriba —está en castellano, éstos
+// en inglés— sino que se exige que cada uno cargue, con sus propias palabras,
+// las cuatro afirmaciones que la sostienen. Tabla recorrida en bucle, con el
+// mensaje de fallo diciendo qué afirmación falta en qué fichero: mismo patrón
+// que `__tests__/conventions-vara.test.js`, el test
+// 'ninguno repite una regla que ya posee un ítem de la rúbrica'.
+// ---------------------------------------------------------------------------
+describe('la precedencia le llega entera a los dos textos en inglés', () => {
+  const FICHEROS = {
+    'agents/ct-judge.md': join(root, 'agents', 'ct-judge.md'),
+    'prompts/task-implementer.md': join(root, 'prompts', 'task-implementer.md'),
+  }
+
+  // Cada afirmación es o bien un patrón único válido para los dos ficheros, o
+  // un mapa fichero → patrón cuando cada uno la dice con palabras distintas.
+  const AFIRMACIONES = {
+    'ct tiene preferencia': /take precedence/i,
+    'se mide regla a regla, no por tema': /rule by rule, not by topic/i,
+    'las dos direcciones del choque: exige lo que ct prohíbe, y prohíbe lo que ct exige':
+      /forbids, or forbids what they require/i,
+    'la vara del repo no se anula donde ct no habla': {
+      'agents/ct-judge.md': /it binds in full|does not delete this repo's yardstick/i,
+      'prompts/task-implementer.md': /does not excuse you from this repo's conventions/i,
+    },
+  }
+
+  for (const [nombreFichero, ruta] of Object.entries(FICHEROS)) {
+    const texto = readFileSync(ruta, 'utf8').replace(/\s+/g, ' ')
+    for (const [afirmacion, patron] of Object.entries(AFIRMACIONES)) {
+      const regex = patron instanceof RegExp ? patron : patron[nombreFichero]
+      it(`${nombreFichero} dice: ${afirmacion}`, () => {
+        expect(texto, `${nombreFichero} no dice: ${afirmacion}`).toMatch(regex)
+      })
+    }
+  }
 })
 
 describe('la vara del repo sigue en pie', () => {
