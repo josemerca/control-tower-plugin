@@ -13,6 +13,7 @@ import { GO_TOKEN, newGoNonce, goCommitment, goBody } from './go-response.js'
 import { writeGoCommitment } from './go-registry.js'
 import { emitGoNonce } from './go-channel.js'
 import { controlTowerLogDir } from './run-metrics.js'
+import { listCmuxWorkspaces, CMUX_QUERY_TIMEOUT_MS } from './cmux.js'
 import { shQuote } from './shquote.js'
 import {
   buildLauncherScript, buildTypedCommand, parseSentinel, sameDir,
@@ -518,14 +519,18 @@ const has = (f) => process.argv.includes(f)
 // fallida no es evidencia de ausencia, y afirmar staleness con un tercio de
 // la evidencia sin comprobar sería exactamente el tipo de aserción no
 // verificada que esta tarea pide dejar de hacer.
-const CMUX_QUERY_TIMEOUT_MS = 5000
 // queryAllCmuxWorkspaces: consulta de solo lectura compartida por finding 2
 // (staleness: ¿hay una sesión viva para un issue en vuelo?) y finding 3
 // (¿la sesión que ACABAMOS de lanzar está de verdad en el directorio que le
-// pedimos? — ver verifyCmuxLaunch, más abajo). Devuelve un array de
-// `{title, cwd}` por CADA workspace, en TODAS las ventanas, o `null` si la
-// consulta inicial (`list-windows`) no se pudo completar en absoluto (cmux
-// no instalado, daemon caído, timeout).
+// pedimos? — ver verifyCmuxLaunch, más abajo).
+//
+// EL RECORRIDO Y SU GUARDA DE ESQUEMA VIVEN AHORA EN scripts/cmux.js, y lo que
+// queda aquí es lo que sí es de ct-next: la guarda del fixture. Se extrajo
+// porque la misma consulta estaba copiada en los dos vigilantes SIN la guarda —
+// tres copias y sólo ésta bien—, así que el comentario largo que explicaba por
+// qué `custom_title`/`current_directory` no son un esquema garantizado está en
+// ese módulo, que es el único sitio que los lee. Aquí no se ha relajado nada:
+// devuelve exactamente lo mismo, `{title, cwd, cwdKnown, ref}` o `null`.
 function queryAllCmuxWorkspaces() {
   // CT_NEXT_FIXTURE (`fx`) promete NUNCA tocar nada real — ver el comentario
   // de cabecera de esa variable, más arriba en este fichero ("no se decide
@@ -540,87 +545,11 @@ function queryAllCmuxWorkspaces() {
   // a invocar el `cmux` DE VERDAD de la máquina que corra los tests. En
   // modo fixture, la consulta se trata como "no concluyente" — igual que
   // cuando cmux no está disponible — nunca como "no hay sesión".
+  //
+  // NO se delega en cmux.js: ese módulo no sabe de fixtures, y no debe. La
+  // guarda tiene que estar ANTES de la llamada, no dentro de ella.
   if (fx) return null
-  try {
-    const windowsRaw = execFileSync('cmux', ['list-windows', '--json'], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: CMUX_QUERY_TIMEOUT_MS, killSignal: 'SIGKILL',
-    })
-    const windows = JSON.parse(windowsRaw)
-    const out = []
-    // IMPORTANTE (revisión externa): `custom_title`/`current_directory` son
-    // los nombres de campo observados contra la versión de cmux instalada
-    // en la máquina de desarrollo — no hay ninguna garantía de versión ni
-    // de esquema. Si el nombre real cambiara, CADA `ws.custom_title` sería
-    // `undefined`, fallaría el `typeof === 'string'` de más abajo, y el
-    // resultado se filtraría en silencio a un array vacío — indistinguible,
-    // antes de este cambio, de "cmux respondió y de verdad no hay ninguna
-    // sesión". Eso degradaba CADA staleness-check a un falso "abandonado" y
-    // CADA verificación de lanzamiento a un falso "not-found", ambos
-    // ruidosos. `sawAnyWorkspaceEntry`/`sawAnyRecognizedTitle` distinguen
-    // las dos causas de "cero resultados": si hubo entradas de verdad
-    // (`parsed.workspaces` no vacío) pero NINGUNA tenía el campo esperado,
-    // es mucho más probable un cambio de esquema que "cero sesiones de
-    // verdad" — se trata como NO CONCLUYENTE. Si nunca hubo ninguna entrada
-    // en ninguna ventana (el caso normal y esperado de "no hay nada
-    // abierto"), sigue siendo un `[]` con toda confianza.
-    //
-    // D5, hallazgo B — la guarda de arriba cubría `custom_title` y NADA
-    // MÁS: `current_directory` se leía a pelo (`ws.current_directory ??
-    // null`) y luego se comparaba con igualdad ESTRICTA contra el worktree
-    // esperado. Si cmux renombrara SOLO ese campo (el título seguiría
-    // reconociéndose, así que `sawAnyRecognizedTitle` no salvaría nada),
-    // cada `cwd` sería `null`, `null !== <worktree>` y CADA lanzamiento
-    // correcto se clasificaría como 'wrong-cwd' — es decir, exactamente la
-    // falsa alarma que la guarda de `custom_title` existe para evitar, y
-    // además con consecuencia de exit code: desde que 'wrong-cwd' dejó de
-    // contar como lanzado, un repo entero pasaría de exit 0 a exit 3 sin
-    // que nada estuviera mal.
-    //
-    // Arreglo, aplicado a los DOS campos y no a uno: un campo cuyo esquema
-    // no reconocemos degrada a NO CONCLUYENTE, nunca a "verificado que está
-    // mal". Para el cwd la degradación es POR ENTRADA (`cwdKnown`), no
-    // global como la del título: así también se comporta bien ante una
-    // flota mixta (unas entradas con el campo, otras sin él), y ante una
-    // sesión que legítimamente no expone directorio. `verifyCmuxLaunch`
-    // (más abajo) traduce `cwdKnown: false` a un estado propio
-    // ('cwd-unknown'), jamás a 'wrong-cwd'.
-    let sawAnyWorkspaceEntry = false
-    let sawAnyRecognizedTitle = false
-    for (const w of (Array.isArray(windows) ? windows : [])) {
-      if (!w || !w.id) continue
-      try {
-        const wsRaw = execFileSync('cmux', ['workspace', 'list', '--window', w.id, '--json'], {
-          encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: CMUX_QUERY_TIMEOUT_MS, killSignal: 'SIGKILL',
-        })
-        const parsed = JSON.parse(wsRaw)
-        const workspaces = Array.isArray(parsed.workspaces) ? parsed.workspaces : []
-        for (const ws of workspaces) {
-          sawAnyWorkspaceEntry = true
-          if (ws && typeof ws.custom_title === 'string') {
-            sawAnyRecognizedTitle = true
-            const cwdKnown = typeof ws.current_directory === 'string'
-            // F20/H1: `ref` (p.ej. "workspace:97") es el handle que acepta
-            // `cmux send --workspace`. Se degrada a `null` con el MISMO
-            // criterio que el cwd —por entrada, nunca global— porque su
-            // ausencia no invalida nada de lo que ya se sabía: solo significa
-            // que a ESA sesión no se le puede reenviar la línea, y quien lo
-            // necesite tiene que poder decirlo en vez de mandar un `send` a
-            // `undefined`.
-            const ref = typeof ws.ref === 'string' && ws.ref.length > 0 ? ws.ref : null
-            out.push({ title: ws.custom_title, cwd: cwdKnown ? ws.current_directory : null, cwdKnown, ref })
-          }
-        }
-      } catch {
-        // Una ventana concreta que no se pueda consultar no invalida las
-        // demás — se sigue con el resto; solo una consulta INICIAL fallida
-        // (list-windows) marca el resultado global como no concluyente.
-      }
-    }
-    if (sawAnyWorkspaceEntry && !sawAnyRecognizedTitle) return null
-    return out
-  } catch {
-    return null // cmux no instalado, daemon caído, o timeout: no concluyente.
-  }
+  return listCmuxWorkspaces({ timeoutMs: CMUX_QUERY_TIMEOUT_MS })
 }
 
 function queryCmuxWorkspaceTitles() {

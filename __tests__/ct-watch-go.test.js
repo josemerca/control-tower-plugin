@@ -195,6 +195,29 @@ describe('lo que no puede tumbar la vigilancia', () => {
     expect(Date.now() - antes).toBeLessThan(20_000)
   })
 
+  // -------------------------------------------------------------------------
+  // EL MISMO FALLO QUE LA REVISIÓN ADVERSARIAL DE LA #37 encontró en el
+  // vigilante del merge, y que este fichero arrastraba desde antes: el recorrido
+  // de cmux se leía a pelo. `custom_title` es un nombre de campo OBSERVADO, sin
+  // garantía de esquema; si cmux lo renombrara, ninguna entrada casaría, se
+  // devolvía «cmux contestó y la sesión no está», y este vigilante se APAGABA con
+  // exit 4 declarando muerta una sesión que estaba ahí delante — tirando el go de
+  // la persona que lo había dado.
+  //
+  // Aquí duele más que en el del merge: allí se pierde un aviso que /ct-next
+  // vuelve a calcular; aquí se pierde el permiso de un humano y el slice se queda
+  // parado sin que nadie lo sepa. `ct-next.mjs` ya lo había resuelto (D5,
+  // hallazgo B) y desde esta ronda los tres consumidores comparten esa guarda.
+  // -------------------------------------------------------------------------
+  it('si cmux renombra el campo del título, NO declara muerta la sesión', () => {
+    const r = correr({ FAKE_CMUX_SCHEMA_MISMATCH: '1' }, { timeoutMs: 400, pollMs: 40 })
+    // Por plazo (exit 3), NO por el exit 4 de «la sesión ya no existe»: la
+    // vigilancia sigue en pie en vez de suicidarse con un diagnóstico falso.
+    expect(r.status).toBe(3)
+    expect(r.stdout).toMatch(/no se pudo consultar cmux/)
+    expect(r.stdout).not.toMatch(/ya no existe/)
+  })
+
   it('pero si no se pudo PREGUNTAR por la sesión, sigue esperando', () => {
     // La distinción que ct-next.mjs sostiene con tanto cuidado: "cmux contestó
     // que no está" y "no se pudo preguntar" no significan lo mismo, y de la
