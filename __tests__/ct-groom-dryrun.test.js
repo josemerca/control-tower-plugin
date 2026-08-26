@@ -6,7 +6,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { makeSpecDir, specUrl } from './fixtures/spec-repo.js'
 import { REAL_FAILING_TABLE, REAL_DEP_TABLE, REAL_TABLE_WITH_HASH_FIXED } from './fixtures/slices-real-tables.js'
-import { buildIssueBody, EPIC_CONTEXT_HEADING } from '../scripts/groom.js'
+import { buildIssueBody, EPIC_CONTEXT_HEADING, LOOP_STATUS_LABELS } from '../scripts/groom.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-groom.mjs')
 
@@ -1254,7 +1254,13 @@ const ONE_SLICE_SPEC = `## Hipótesis\n\nApuesta del fixture.\n\n## 9. Slices
 // F21: `gate:none` se une al plan (una label de gate por issue, siempre —
 // ver gates.js#GATE_LABEL_NONE). Sin ella aquí, el mundo dejaría de ser
 // coherente y el groom diría, con razón, que se crearía una label nueva.
-const PLAN_LABELS_EXIST = JSON.stringify([[{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:plan' }, { name: 'status:backlog' }]])
+// El vocabulario `status:` entero se une al conjunto que el repo tiene que
+// TENER (groom.js#LOOP_STATUS_LABELS): un issue nace en `status:backlog`, pero
+// las otras tres se escriben más tarde con `--add-label`, que no puede crearlas.
+// Sin ellas aquí el mundo dejaría de ser coherente y el groom diría, con razón,
+// que se crearían tres labels nuevas. Se derivan de la constante, no se copian:
+// una lista a mano divergiría en cuanto alguien tocara el vocabulario.
+const PLAN_LABELS_EXIST = JSON.stringify([[{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:plan' }, ...LOOP_STATUS_LABELS.map((name) => ({ name }))]])
 
 // SPEC_REF_OK: la referencia al spec que ct-groom.mjs resuelve para un spec
 // llamado "spec.md" dentro de un directorio de makeSpecDir (repo git con
@@ -1304,7 +1310,12 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
       expect(err).toMatch(/"#1 login"/)
       expect(err).toMatch(/falta la label "area:api"/)
       expect(err).toMatch(/falta la label "touches:db"/)
-      expect(err).not.toMatch(/status:in-progress/) // fuera del namespace que el spec compara
+      // Acotado a las líneas de DIVERGENCIA, que es lo que este test defiende:
+      // `status:in-progress` es una label del issue que el spec no posee, y
+      // reportarla como "extra" sería el bug. El nombre aparece ahora,
+      // legítimamente, en la línea del vocabulario `status:` que /ct-groom crea
+      // para que el claim pueda escribirlo después (groom.js#LOOP_STATUS_LABELS).
+      expect(err).not.toMatch(/divergencia.*status:in-progress/)
     }
     expect(threw).toBe(true)
     rmSync(dir, { recursive: true, force: true })

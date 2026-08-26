@@ -2,6 +2,7 @@
 import { isNoValueCell } from './slices.js'
 import { resolveGates, resolveE2e, gateLabels, renderGatesIssueContent } from './gates.js'
 import { locateSection, unterminatedDelimiter, normalizeToLF, SENAL_HEADING, E2E_HEADING } from './gh-issue-map.js'
+import { STATUS_LADDER } from './harvest.js'
 
 // SENAL_HEADING (Slice 10) nace en gh-issue-map.js (capa inferior: este
 // fichero ya importa de allí y mapGhIssue también la necesita — aquí crearía
@@ -244,6 +245,34 @@ export function gatesOf(slice) {
 export function buildIssueTitle(slice) {
   return `#${slice.n} ${slice.name}`.trim()
 }
+
+// LOOP_STATUS_LABELS — el vocabulario `status:` que el loop ESCRIBE, y que por
+// tanto tiene que EXISTIR en el repo antes de que alguien lo escriba.
+//
+// No es lo mismo que "las labels que buildLabels aplica". Un issue nace con UNA
+// (`status:backlog`, más abajo); las otras tres se escriben DESPUÉS, y ninguna
+// de esas escrituras puede crearlas: `gh issue edit --add-label` resuelve
+// nombre -> id para la mutación GraphQL `addLabelsToLabelable`, que toma ids. Un
+// nombre inexistente resuelve a `null` y el comando falla (verificado contra la
+// API). Los tres call sites que lo sufrían:
+//   - el paso humano de promoción a `status:ready` que el contrato de AGENTS.md
+//     manda ejecutar tras el groom;
+//   - el claim (`status:in-progress`), dispatch-check.mjs#setStatus, que muere
+//     en dieErr(…, 3) — y /ct-next reporta «fallo de infraestructura, reintenta
+//     más tarde», consejo que nunca puede funcionar contra una label ausente;
+//   - la entrega (`status:in-review`) y las vueltas atrás.
+//
+// Se DERIVA de STATUS_LADDER (harvest.js), la escalera que ya era la fuente de
+// verdad del vocabulario: dos listas del mismo vocabulario divergen en cuanto
+// alguien toca una sola.
+//
+// SON CUATRO, NO SIETE, a propósito. `status:blocked`, `status:paused` y
+// `status:rejected` aparecen en comentarios y docs pero el plugin no las escribe
+// nunca: gh-issue-map.js las trata como «labels custom» que no gatean nada, y
+// dispatch-check.mjs documenta por qué `status:rejected` se descartó como
+// diseño. Crearlas sería sembrar en el repo del usuario vocabulario que este
+// plugin decidió no tener.
+export const LOOP_STATUS_LABELS = STATUS_LADDER.map((s) => `status:${s}`)
 
 export function buildLabels(slice) {
   const labels = []
