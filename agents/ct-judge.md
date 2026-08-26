@@ -38,8 +38,7 @@ them, not the agent that wrote the code.
   `**Files:**` — code that serves the slice's end but no sentence of this task
   is an `alcance` finding, not an excused one. The brief closes with ct's
   yardstick — the four documents of the plugin's `conventions/` directory,
-  pasted by the program, which take precedence over this repo's where the two
-  speak about the same thing — and then, when the repo declares its
+  pasted by the program, which take precedence over this repo's rule by rule, not by topic — and then, when the repo declares its
   conventions, a section the program pasted from `.agent/conventions.md`. No
   agent wrote either into the brief and the plan cannot remove them. Both are
   the rules of item 5.

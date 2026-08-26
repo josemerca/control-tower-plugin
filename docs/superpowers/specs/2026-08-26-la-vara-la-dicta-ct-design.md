@@ -217,7 +217,7 @@ Alcance: **todo diff**.
   es casi siempre un test que falta.
 - **El código va en inglés**: ficheros, módulos, tipos, funciones, métodos,
   variables, parámetros, constantes, miembros de vocabulario, errores, nombres de
-  test y los mensajes que ve una persona. Excepción: un dato que es parte de un
+  test y los mensajes de diagnóstico y de log —no el texto que ve un usuario final, cuyo idioma lo fija el producto—. Excepción: un dato que es parte de un
   contrato externo y viene fijado por él.
 - **Ninguna función suelta a nivel de módulo: toda función cuelga de un tipo.** Lo
   que era un puñado de funciones privadas más constantes sueltas es casi siempre
@@ -242,7 +242,7 @@ Alcance: **todo diff**.
   existir; uno solo lo hace imposible.** Cuando una bandera dice lo mismo que la
   no-vacuidad de un dato, la bandera se retira y se deriva: así una ejecución que
   muera a medias no puede reanudar afirmando algo que no tiene.
-- **Nada de andamiaje especulativo**: lo mínimo para lo que hay delante.
+- («Nada de andamiaje especulativo» se quedó fuera a propósito: ver §5.5.)
 
 ### 5.2 `conventions/decisions.md`
 
