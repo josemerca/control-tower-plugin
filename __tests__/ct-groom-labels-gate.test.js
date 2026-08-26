@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { LOOP_STATUS_LABELS } from '../scripts/groom.js'
 import { spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -108,7 +109,11 @@ describe('ct-groom — labels: distingue las que ya existían de las que crea (F
       // F21: el plan produce además `gate:none` (una label de gate por issue,
       // siempre) — sin ella en el repo, esta corrida SÍ tendría una label nueva
       // que crear y el test dejaría de probar el caso "no hay nada que decir".
-      FAKE_GH_LABELS_LIST: JSON.stringify([[{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:plan' }, { name: 'status:backlog' }]]),
+      // Mismo criterio que la nota de F21 sobre `gate:none`: el vocabulario
+      // `status:` entero (groom.js#LOOP_STATUS_LABELS) forma parte de lo que el
+      // repo tiene que TENER, así que sin él aquí esta corrida SÍ tendría labels
+      // nuevas que crear y el test dejaría de probar el caso "no hay nada que decir".
+      FAKE_GH_LABELS_LIST: JSON.stringify([[{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:plan' }, ...LOOP_STATUS_LABELS.map((name) => ({ name }))]]),
       FAKE_GH_ARGV_LOG_FILE: argvLog,
     })
     expect(res.status).toBe(0)

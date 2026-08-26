@@ -19,7 +19,7 @@ import { analyzeSlicesTable, isNoValueCell } from './slices.js'
 // parseSenalCell (Slice 10): el MISMO clasificador con el que groom.js decide
 // qué renderiza — aquí se usa para abortar ANTES de cualquier render o
 // mutación cuando una fila declara una exención sin razón.
-import { groomPlan, readEpicContext, EPIC_CONTEXT_HEADING, analyzeSpecFreeze, HYPOTHESIS_REASONS, parseSenalCell } from './groom.js'
+import { groomPlan, readEpicContext, EPIC_CONTEXT_HEADING, analyzeSpecFreeze, HYPOTHESIS_REASONS, parseSenalCell, LOOP_STATUS_LABELS } from './groom.js'
 // F10: de "la ruta que me pasaron en argv + --section" a una URL absoluta
 // verificada contra GitHub (o a una referencia honesta sin enlace, diciendo
 // por qué). Ver scripts/spec-link.js para las tres decisiones que toma y por
@@ -1149,7 +1149,15 @@ if (typeof repo === 'string') {
 // igual que el reporte de divergencia). `newLabels` cae a "todas" cuando no
 // hay --repo con el que consultar: sin repo no se puede afirmar que ninguna
 // exista.
-const wantedLabels = [...new Set(plan.issues.flatMap((i) => i.labels))]
+// Las labels que este repo tiene que TENER: las que los issues llevan, más el
+// vocabulario `status:` completo (LOOP_STATUS_LABELS). Lo segundo no es un
+// añadido cosmético: un issue nace en `status:backlog` y las otras tres del
+// vocabulario se escriben más tarde con `gh issue edit --add-label`, que NO
+// puede crearlas (resuelve nombre -> id; un nombre ausente resuelve a null y
+// falla). Sin esto, en un repo recién bootstrapeado el primer paso posterior al
+// groom —la promoción humana a `status:ready`— reventaba, y el claim detrás
+// moría con exit 3 diciendo «reintenta más tarde». Ver groom.js#LOOP_STATUS_LABELS.
+const wantedLabels = [...new Set([...plan.issues.flatMap((i) => i.labels), ...LOOP_STATUS_LABELS])]
 const reusedLabels = existingLabelNames ? wantedLabels.filter((l) => existingLabelNames.has(l)) : []
 const newLabels = existingLabelNames ? wantedLabels.filter((l) => !existingLabelNames.has(l)) : wantedLabels
 const LABEL_VOCAB_HINT = `revisa si alguna es un sinónimo de una que ya existe (\`gh label list --repo ${typeof repo === 'string' ? repo : '<owner/repo>'}\`): la detección de colisión (area:/touches:) solo funciona si todos los specs del repo usan el MISMO vocabulario`
