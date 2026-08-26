@@ -335,9 +335,13 @@ describe('el primer acto nombra la vara de ct', () => {
     expect(k).toContain('/plugin/conventions')
   })
 
-  it('la orden está en el tramo del plan, no perdida al final', () => {
+  it('la orden cae ANTES de la entrada que manda escribir el plan', () => {
+    // El ancla es esa entrada y no la siguiente: leer la vara después de haber
+    // escrito el plan no sirve de nada, así que un ancla más laxa dejaría pasar
+    // justo la regresión que este test existe para cazar.
     const k = renderKickoff(SLICE, OPTS_CON_VARA)
-    expect(k.indexOf('/plugin/conventions')).toBeLessThan(k.indexOf('Con el plan commiteado'))
+    expect(k.indexOf('/plugin/conventions')).toBeGreaterThan(-1)
+    expect(k.indexOf('/plugin/conventions')).toBeLessThan(k.indexOf('Primer acto'))
   })
 
   it('enuncia la precedencia con SUS DOS LADOS: es el único sitio donde la lee quien planifica', () => {
