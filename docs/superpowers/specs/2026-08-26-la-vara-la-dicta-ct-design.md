@@ -73,19 +73,31 @@ plugin sin inventar ningún transporte.
 
 ```
 conventions/*.md  (en el plugin)
-   │  ct-step.mjs lo lee con PLUGIN_ROOT y lo pega VERBATIM
-   │  al final del task brief — ningún agente lo escribe ahí
-   ▼
-task brief
    │
-   ├──► implementador  (lo tiene delante antes de escribir)
-   └──► juez           (lee ese mismo brief antes de bloquear)
+   ├─ kickoff.js nombra sus rutas en el primer acto del slice
+   │     ▼
+   │  el que escribe el plan  (writing-plans-prescriptive)
+   │
+   └─ ct-step.mjs las lee con PLUGIN_ROOT y las pega VERBATIM
+      al final del task brief — ningún agente lo escribe ahí
+         ▼
+      task brief
+         │
+         ├──► implementador  (lo tiene delante antes de escribir)
+         └──► juez           (lee ese mismo brief antes de bloquear)
 ```
 
-Que sea el programa quien lo pegue, y no un agente quien lo cargue, es lo que
-hace que la vara no se pueda perder: `offload-deterministic` en el vocabulario de
-`ai-patterns`. Y que el implementador y el juez lean **el mismo texto literal** es
-lo que hace que el juez no sea una sorpresa.
+**El task brief es un fichero en disco**, `.agent/run-<issue>/task-N-brief.md` en el
+worktree del slice, que `ct-step` compone a partir del plan ya commiteado: cuatro
+secciones del plan y detrás la tarea. Y es el mismo fichero para los dos —el
+implementador lo abre por su ruta, y `ct-step.mjs` despacha al juez con él entre
+sus insumos—, así que pegar la vara al final la entrega a los dos con texto
+literal idéntico.
+
+Que sea el programa quien la pegue, y no un agente quien la cargue, es lo que hace
+que no se pueda perder: `offload-deterministic` en el vocabulario de `ai-patterns`.
+Por qué el que planifica también la recibe está en §7, y no es un extra: sin eso el
+mecanismo se cierra en falso.
 
 ### 3.1 El fallo cambia de doctrina, y es lo más importante de este apartado
 
@@ -143,6 +155,8 @@ inglés.
 
 ### 5.1 `conventions/code.md`
 
+Alcance: **todo diff**.
+
 - **Cero prosa en el código: ni comentarios ni docstrings.** Si un trozo de
   código no se entiende sin un párrafo al lado, el arreglo es el código —nombres
   que digan lo que hacen, funciones pequeñas con una responsabilidad, tipos que
@@ -181,6 +195,8 @@ inglés.
 
 ### 5.2 `conventions/decisions.md`
 
+Alcance: **todo diff**.
+
 Una regla de negocio se escribe **una vez**, y la primera copia ya es el fallo: no
 hay umbral que la autorice, porque lo que se rompe no es la limpieza, es la
 coherencia. Dos trozos parecidos que divergen dejan código feo; dos sitios que
@@ -214,6 +230,22 @@ decisión, y no hay herramienta que las empareje por su forma. El único sitio d
 se puede cazar es cuando alguien escribe la segunda.
 
 ### 5.3 `conventions/architecture.md`
+
+Alcance: **los módulos nuevos**. Un módulo que ya existía y no cumple es **deuda
+declarada del repo**: lo que se le añada sigue el estilo de su anfitrión, y eso
+**no es hallazgo** —media migración se lee peor que ninguna—.
+
+Y el agujero que esa exención abre se cierra en la misma frase, porque si no la
+forma más barata de esquivar la vara es escribir lo nuevo dentro de un fichero
+viejo: **un concepto nuevo es un módulo nuevo y nace cumpliendo.** Ampararse en el
+estilo anfitrión vale sólo para lo que de verdad extiende lo que ya había;
+colocar un concepto nuevo dentro de un fichero viejo para heredar la exención
+**sí es hallazgo**.
+
+Quien decide de qué lado cae cada cosa no es el implementador: es el plan, con su
+línea `**Files:**` y sus marcas `(create)` / `(modify)` —que el control de alcance
+comprueba contra el commit anterior—. Por eso §7 le da la vara al que planifica: es
+donde este agujero se abriría.
 
 Hexagonal entera, con el flujo de dependencias hacia dentro: infraestructura
 conoce aplicación y dominio, aplicación conoce dominio, dominio no conoce a nadie.
@@ -299,6 +331,8 @@ fuera:
 
 ### 5.4 `conventions/testing.md`
 
+Alcance: **todo diff**.
+
 - **Cero prosa aquí también**: el nombre del test es la frase, y dice qué se
   garantiza, no qué método se llama.
 - **Los objetos los construye un mother**, con escenarios con nombre, no el propio
@@ -332,33 +366,56 @@ fuera:
 
 | Pieza | Qué le pasa |
 |---|---|
-| Siembra de `.agent/conventions.md` en `scripts/ct-init.sh` | Fuera. En su lugar, `/ct-init` **anuncia** contra qué se va a medir este repo: es el momento en que hay un humano delante y antes de que corra ningún slice |
+| Siembra de `.agent/conventions.md` en `scripts/ct-init.sh` | Fuera, sin sustituto. La primera versión de este diseño ponía ahí un aviso; se retiró al ver que avisaba de un deadlock que §7 elimina. Un anuncio sobre el que nadie decide nada es ruido, y el sitio donde se decide si una migración cabe en un slice es el gate `plan`, que ya existe |
 | `scripts/detect-vara.mjs` y la mitad de candidatos de `scripts/vara.js` | Fuera enteros, con `__tests__/vara-candidatos.test.js`. El barrido existía para proponer candidatos a un humano que ya no tiene nada que declarar |
 | La mitad de transporte de `scripts/vara.js` | Se queda, cambiando de sujeto: `CONVENTIONS_FILE` deja de ser una ruta relativa al repo y pasa a ser la del plugin, la rama de «no hay vara» de `seccionDeVara` desaparece, y el encabezado que se pega deja de decir «la vara del REPO» |
 | `Rules to obey:` de `## 3. Reference patterns` | Fuera, en `plan-template.md` y en `SKILL.md`. §3 se queda sólo con `Files to imitate:`, que no son reglas sino código real de este repo cuyo idiom se copia |
 | Regla `reference-paths` de `scripts/plan-contract.js` | **Se queda**, comprobando que las rutas que §3 cita existen. Lo que cambia es su mensaje de fallo, que hoy dice «§3 es la vara con la que el implementador escribe y el juez bloquea»: eso deja de ser verdad en cuanto §3 son sólo ejemplares |
 | Ítem `patrones` de `agents/ct-judge.md` | Reescrito: deja de medir la unión de dos varas y mide los ejemplares de §3 más la vara de ct que trae el brief. Pierde el outcome `sin-vara`, que ya no puede ocurrir, y conserva `no-aplica` para un diff sin código que comparar |
 | `prompts/task-implementer.md`, punto 3 | Reescrito simétricamente, para que el que escribe y el que bloquea lean el mismo texto |
+| `scripts/kickoff.js` | Gana las rutas de los cuatro ficheros en el primer acto del slice, junto a las que ya calcula (`dispatchCheckPath`, `ctStepPath`) |
+| `skills/writing-plans-prescriptive/SKILL.md` | Además de perder el `Rules to obey:`, gana la orden de leer la vara **antes** de escribir el plan. Ver §7 |
 | `scripts/conventions.js` y `scripts/conventions-io.js` | **Intactos.** Son otro sujeto —colisiones de protocolo entre el loop y el repo destino: claim, worktrees, fichero de estado—, con su propio `.agent/conventions-ack.md`. La trampa de nombre ya está documentada en la cabecera de los dos ficheros y sigue valiendo |
 
-## 7. La consecuencia asumida: ct sólo puede gobernar repos hexagonales
+## 7. La vara llega al que planifica, no sólo al que escribe
 
-Con hexagonal entera en la vara, un repo que no está construido así incurre desde
-la primera tarea. `run-machine.js` da `judgeRetries: 2`, así que cada tarea quema
-tres llamadas al implementador y el run cierra en `VETOED`. No es un bucle
-infinito, pero el slice no aterriza.
+`scripts/kickoff.js` manda escribir el plan del slice con
+`writing-plans-prescriptive` como **primer acto**, antes de que `ct-step` entre en
+el ciclo. Si la vara sólo se pegara en el task brief, el plan se escribiría sin
+ella:
 
-**Este mismo repo es el primer caso.** `control-tower-plugin` es Node con
-`scripts/*.js` planos —`vara.js`, `conventions.js`, `plan-contract.js`—, sin capas,
-sin puertos y con funciones sueltas a nivel de módulo: incumple `code.md` y
-`architecture.md` enteros. O migra, o ct no puede correr sobre sí mismo.
+```
+kickoff  →  plan (sin vara)  →  --check-plan  →  gate `plan`  →  ct-step  →  brief (con vara)
+```
 
-Se declara aquí en vez de resolverse porque es una decisión de producto tomada a
-sabiendas, no un efecto que se pueda mitigar sin deshacer la decisión: una vara
-con excepción para repos planos es una vara que cualquier repo puede declararse
-exento de cumplir. El sitio donde esto se avisa es `/ct-init`, que es la puerta
-que ya existe y el único momento del ciclo con un humano delante antes de que
-corra un slice.
+Y entonces el implementador queda encajonado entre dos vetos. Si obedece la línea
+`**Files:**` del plan, el juez le bloquea la forma; si construye la forma que la
+vara pide, el control de alcance le veta por tocar rutas que el plan no declaró.
+`run-machine.js` da `judgeRetries: 2`, así que son tres llamadas y un run cerrado
+en `VETOED` — y el fallo no sería del repo, sería de haber metido la vara un paso
+demasiado abajo.
+
+Así que **son tres consumidores, no dos**: el que planifica, el que escribe y el
+que bloquea. Es la propiedad que el diseño del 21 de agosto ya valoraba —que la
+vara del que escribe y la del que bloquea sean el mismo texto— extendida un paso
+antes, y sin ella el mecanismo se cierra en falso.
+
+Con la vara delante, el plan nombra módulos nuevos donde la vara pide módulos
+nuevos, decide qué es `(create)` y qué es `(modify)`, y el humano lo ve en el gate
+`plan` que ya existe. El juez mide entonces contra algo que el plan ya perseguía,
+que es lo que hace que no sea una sorpresa.
+
+### 7.1 Por qué esto no obliga a migrar el repo entero
+
+Porque el alcance de `architecture.md` son los módulos nuevos (§5.3). Un repo plano
+no incurre por ser plano: incurre si escribe **nuevo** sin la vara. Lo que ya
+estaba es deuda declarada y no produce hallazgo, así que no hay migración que un
+slice tenga que arrastrar para poder aterrizar.
+
+La consecuencia aceptada es que un repo así **no acaba de migrar solo**: convive
+con dos formas, la vieja congelada y la nueva conforme. Se acepta porque la
+alternativa —migrar al tocar— hace que el tamaño de un slice dependa de lo viejo
+que sea el fichero que le toque, y eso lo decide el azar, no el trabajo.
 
 ## 8. Lo que esto NO hace
 
@@ -367,11 +424,12 @@ corra un slice.
   plan, no un gate sobre los que hay.
 - **No añade un ítem a la rúbrica.** El ítem que hace falta ya existe: `patrones`.
   Lo que cambia es contra qué mide.
-- **No añade una cuarta puerta humana.** `/ct-init` anuncia; el gate `plan` y el
-  merge siguen donde estaban.
+- **No añade una cuarta puerta humana, ni un anuncio nuevo en `/ct-init`.** El
+  gate `plan` es donde se ve el tamaño de lo que un slice va a construir, y sigue
+  donde estaba.
 - **No toca el ítem de observabilidad ni el de patrón de entrega.** El segundo ya
   vive dentro de `patrones` desde el diseño del 21 de agosto; el primero sigue
   siendo material de después.
-- **No migra este repo a hexagonal.** Es el trabajo que §7 declara pendiente, y es
-  un epic propio.
+- **No migra ningún repo a hexagonal.** Lo viejo es deuda declarada por regla
+  (§5.3), no por omisión: lo nuevo nace conforme y lo que ya estaba se queda.
 - **No trae `git-workflow.md` ni la meta-convención.** Ver §5.5.
