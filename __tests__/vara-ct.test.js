@@ -172,8 +172,8 @@ describe('el ítem `patrones` mide las dos varas', () => {
     return /^### 5\. `patrones`[\s\S]*?(?=^### |^## )/m.exec(texto)[0]
   }
 
-  it('nombra las dos: la de ct y la declaración del repo', () => {
-    expect(item()).toContain('conventions/')
+  it('nombra las dos varas, y la de ct por su directorio del plugin', () => {
+    expect(item()).toContain("plugin's `conventions/` directory")
     expect(item()).toContain('.agent/conventions.md')
   })
 
@@ -181,8 +181,13 @@ describe('el ítem `patrones` mide las dos varas', () => {
     expect(item()).toMatch(/rule by rule/i)
   })
 
-  it('dice que una regla del repo de la que ct no habla obliga: no anula al repo', () => {
-    expect(item()).toMatch(/binds/i)
+  it('dice que una regla del repo de la que ct no habla OBLIGA: no anula al repo', () => {
+    // La frase distintiva, no la palabra: `binds` sola aparecía ya en el texto
+    // anterior y hoy aparece tres veces en el ítem, así que un /binds/i deja
+    // pasar justo el borrado que este test existe para cazar — y lo que se
+    // borraría es la regla que sostiene el epic entero.
+    expect(item()).toContain('it binds in full')
+    expect(item()).toContain("does not delete this repo's yardstick")
   })
 
   it('declara que ya no puede salir `sin-vara`, en vez de ofrecerlo como salida', () => {

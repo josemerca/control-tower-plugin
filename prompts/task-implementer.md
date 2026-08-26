@@ -80,7 +80,7 @@ this prompt or in the files it names.
    Which of the two you are writing is already decided for you by the `(create)`
    and `(modify)` marks of the `**Files:**` line.
 
-   Where those rules speak about boundaries — what the core may import, how a
+   Where either yardstick's rules speak about boundaries — what the core may import, how a
    dependency arrives, what objects may cross — your imports and constructors are
    the lines the judge will read against them.
    And where they say how a change of this kind must reach production —
