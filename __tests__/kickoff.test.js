@@ -315,3 +315,32 @@ describe('la señal en el despacho (Slice 10)', () => {
     expect(renderKickoff({ ...SLICE, senal: '–' }, OPTS)).not.toContain('SEÑAL DE OBSERVABILIDAD')
   })
 })
+
+// La vara la dicta ct (docs/superpowers/specs/2026-08-26-la-vara-la-dicta-ct-design.md, §7):
+// el brief se construye DESPUÉS del plan, así que pegar la vara de ct sólo ahí
+// deja al implementador entre dos vetos — obedecer `**Files:**` y que el juez le
+// bloquee la forma, o construir la forma y que el control de alcance le vete por
+// tocar rutas que el plan no declaró. Son tres consumidores, no dos. (La del
+// REPO ya llegaba: la skill manda arrancar de `.agent/conventions.md`.)
+describe('el primer acto nombra la vara de ct', () => {
+  const OPTS_CON_VARA = {
+    repo: 'o/r',
+    dispatchCheckPath: '/x/dispatch-check.mjs',
+    ctStepPath: '/x/ct-step.mjs',
+    conventionsDir: '/plugin/conventions',
+  }
+
+  it('manda leerla, y la nombra por su ruta absoluta', () => {
+    const k = renderKickoff(SLICE, OPTS_CON_VARA)
+    expect(k).toContain('/plugin/conventions')
+  })
+
+  it('la orden está en el tramo del plan, no perdida al final', () => {
+    const k = renderKickoff(SLICE, OPTS_CON_VARA)
+    expect(k.indexOf('/plugin/conventions')).toBeLessThan(k.indexOf('Con el plan commiteado'))
+  })
+
+  it('dice que tiene preferencia sobre las convenciones del repo', () => {
+    expect(renderKickoff(SLICE, OPTS_CON_VARA)).toMatch(/preferencia/i)
+  })
+})

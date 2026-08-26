@@ -29,6 +29,7 @@ import {
 import { cargarIssues } from './loop-issues.js'
 import { detectConventions, formatFindings } from './conventions.js'
 import { readRepoDocs, readAck, ACK_PATH } from './conventions-io.js'
+import { CONVENTIONS_DIR } from './vara-ct.js'
 import { assessLocalLiveness } from './liveness.js'
 
 // W-C: dispatch-check.mjs implementa el protocolo de claim completo (colisión
@@ -46,6 +47,10 @@ const dispatchCheckPath = join(dirname(fileURLToPath(import.meta.url)), 'dispatc
 // real, nunca el token ${CLAUDE_PLUGIN_ROOT} (que en un prompt de texto plano
 // no lo sustituye nadie).
 const ctStepPath = join(dirname(fileURLToPath(import.meta.url)), 'ct-step.mjs')
+// La misma resolución que sus dos hermanas, y por el mismo motivo: el kickoff es
+// texto plano y el token ${CLAUDE_PLUGIN_ROOT} no existe ahí. El agente que
+// escribe el plan tiene que poder abrir estos cuatro documentos por su ruta.
+const conventionsDir = join(dirname(fileURLToPath(import.meta.url)), '..', CONVENTIONS_DIR)
 // El vigilante del `-OK`: se lanza desprendido tras despachar un slice con gate
 // `plan`. Ver lanzarVigilanteDelGo.
 const ctWatchGoPath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch-go.mjs')
@@ -2359,7 +2364,7 @@ for (let idx = 0; idx < selected.length; idx++) {
     // sabe contra qué rama salió su worktree, `gh pr create` lo apunta a la
     // rama por defecto del repo — con `--base <otra-rama>`, un diff que no es
     // el suyo.
-    kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath, ctStepPath, base: resolvedBase })
+    kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath, ctStepPath, conventionsDir, base: resolvedBase })
     stateSeed = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase, baseSha: resolvedBaseSha })
   } catch (e) {
     failSlice(idx, `no se pudo renderizar el kickoff/SLICE.md de #${s.n}: ${e.message}. El agente se lanzaría sin prompt utilizable — antes, esto solo se descubría en el run real.`)

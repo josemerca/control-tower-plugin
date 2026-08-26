@@ -146,7 +146,7 @@ function resolveE2eRunsForAgent(slice) {
   return slice.e2eRuns !== undefined ? slice.e2eRuns : resolveE2e(slice.e2e).runs
 }
 
-export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, base }) {
+export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conventionsDir, base }) {
   const addendum = ADDENDA[slice.type] || ''
   // F21 — LOS GATES, POR FIN SEPARADOS DEL TIPO. `resolveGatesForAgent` (ver
   // gates.js) prefiere lo que DECLARA el issue (sus labels `gate:`, que es lo
@@ -228,6 +228,14 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, base
     // su propia cabecera pedía. `ctStepPath` llega resuelto como ruta
     // absoluta desde ct-next.mjs, por el mismo motivo que `dispatchCheckPath`
     // (el token ${CLAUDE_PLUGIN_ROOT} no existe en un prompt de texto plano).
+    // §7 del diseño: el plan se escribe ANTES de que ct-step exista en el ciclo,
+    // así que si la vara de ct sólo se pegara en el task brief el plan saldría
+    // sin ella — y un plan que la ignora deja al implementador entre el veto del
+    // juez y el del control de alcance. Aquí es donde alcanza al que planifica.
+    // La del REPO ya le llegaba: la skill le manda arrancar de
+    // `.agent/conventions.md` y seleccionar en §3.
+    `Antes de escribir el plan, LEE la vara de ct: los cuatro documentos de ${conventionsDir} (code.md, decisions.md, architecture.md, testing.md). El programa se los pega al implementador y al juez en cada tarea, así que un plan que no las respete produce tareas que el juez va a bloquear. TIENEN PREFERENCIA sobre las convenciones de este repo, y la preferencia se mide regla a regla: donde una regla del repo manda lo que uno de esos documentos prohíbe, no aplica; donde el repo habla de algo de lo que ninguno habla —mayúsculas, prefijos, nombres de fichero—, obliga entera y la sigues. La vara del repo no desaparece: la sigues seleccionando en el \`Rules to obey:\` de §3 como hasta ahora.`,
+    `Y una de ellas decide cómo reparten trabajo tus tareas: \`architecture.md\` rige los MÓDULOS NUEVOS. Un módulo que ya existía y no cumple es deuda declarada del repo —lo que le añadas sigue el estilo de su anfitrión y eso no es hallazgo—, pero un concepto nuevo es un módulo nuevo y nace cumpliendo. De qué lado cae cada cosa lo decides tú al repartir \`**Files:**\` entre \`(create)\` y \`(modify)\`.`,
     `Primer acto, con el baseline verde: escribe el plan del slice con control-tower-loop:writing-plans-prescriptive usando el issue como spec (sus AC, "Protegido" y "Contexto del epic" son la entrada que la skill pide). SOLO bloques esenciales, cada uno con su etiqueta de rol: contratos, call sites y el tramo que cambia — los cuerpos de los módulos y los ficheros de test los escribe el implementador con TDD, y la configuración se describe en prosa. Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${slice.n}-<slug>.md, valídalo con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --check-plan\` hasta exit 0, y commitéalo: viaja en el PR, y el --release del final se negará (exit 6) sin un plan válido commiteado.`,
     `Con el plan commiteado y el gate 'plan' con OK humano, la implementación NO la conduces con subagent-driven-development ni con su ledger: la secuencia la dicta la máquina. Pregunta el paso con \`node ${ctStepPath} next --plan docs/superpowers/plans/<el-plan-que-commiteaste>.md --issue ${slice.n}\` y obedece LITERALMENTE lo que imprima en cada paso (donde diga \`ct-step\`, es \`node ${ctStepPath}\`): despacha el implementador como subagente con la rúbrica y el brief que te indique, luego \`ct-step report\`, \`ct-step controls\`, despacha el juez como subagente ct-judge (declarado sin Bash), \`ct-step verdict\` y \`ct-step commit\` — comitea ct-step, nunca tú ni el implementador. Tras el commit de la última tarea quedan dos pasos más, que \`next\` también dicta: \`ct-step global\` (la Global verification del plan la ejecuta el programa, no un agente) y el juicio del slice entero — despacha ct-slice-judge como subagente (declarado sin Bash) y entrega su JSON con \`ct-step slice-verdict\`. Vuelve a \`next\` tras cada paso hasta "run delivered".`,
     addendum,
