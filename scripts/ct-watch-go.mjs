@@ -89,8 +89,25 @@ const issue = arg('--issue')
 const repo = arg('--repo')
 const sesion = arg('--session')
 const logPath = arg('--log')
+// EL COMPROMISO ENTRA POR ARGV, Y EL NONCE NO ENTRA NUNCA (F38). Este proceso
+// corre desprendido y su argv lo enseña `ps` a cualquier proceso del mismo uid
+// —el agente incluido—, igual que su log es un fichero legible. Así que lo que
+// viaja hasta aquí es el sha256 del go, que a quien lo lee no le sirve de nada:
+// el nonce sólo existe en la pantalla de quien despachó y en la cabeza de quien
+// lo teclea.
+//
+// SIN COMPROMISO NO SE VIGILA. Se sale con 2 en vez de caer al `-OK` desnudo de
+// ayer: un vigilante que reconociera el token fijo sería una puerta que se abre
+// OMITIENDO un argumento, y el agente que quisiera saltarse el gate sólo tendría
+// que relanzar el vigilante él. Un vigilante que no arranca lo nota la persona
+// que espera —va a mirar—; uno que arranca con la puerta vieja no lo nota nadie.
+const goHash = (arg('--go-hash') || '').trim().toLowerCase()
 if (!issue || !repo || !sesion) {
-  process.stderr.write('uso: ct-watch-go.mjs --issue N --repo owner/name --session "<título de la workspace>" [--log <ruta>]\n')
+  process.stderr.write('uso: ct-watch-go.mjs --issue N --repo owner/name --session "<título de la workspace>" --go-hash <sha256 del go> [--log <ruta>]\n')
+  process.exit(2)
+}
+if (!/^[0-9a-f]{64}$/.test(goHash)) {
+  process.stderr.write(`--go-hash inválido o ausente${goHash ? `: "${goHash}"` : ''} — debe ser el sha256 hex (64 caracteres) del go de ESTE despacho, el que /ct-next registró al lanzar. Sin él este vigilante no sabría qué reconocer, y NO cae al \`${GO_TOKEN}\` sin nonce a propósito: esa puerta la abriría el propio agente.\n`)
   process.exit(2)
 }
 
@@ -189,7 +206,7 @@ function consultarSesion() {
 // mandarlo aparte, medido en F20/H1.
 const LINEA = `El humano ha respondido ${GO_TOKEN} en el issue #${issue}: el gate \`plan\` queda cerrado. Continúa con ct-step next.`
 
-log(`vigilando el ${GO_TOKEN} de ${repo}#${issue} para la sesión "${sesion}" — tick ${pollMs} ms, plazo ${timeoutMs} ms`)
+log(`vigilando el ${GO_TOKEN} de ${repo}#${issue} para la sesión "${sesion}" — tick ${pollMs} ms, plazo ${timeoutMs} ms, go ${goHash.slice(0, 12)}…`)
 
 // ---------------------------------------------------------------------------
 // LA FOTO INICIAL. La ventana son los comentarios que YA ESTABAN (ver
@@ -215,7 +232,7 @@ log(`foto inicial: ${previos.size} comentario(s) ya presentes, que no cuentan co
 
 for (;;) {
   const comentarios = leerComentarios()
-  if (comentarios && hasGo(comentarios, previos)) {
+  if (comentarios && hasGo(comentarios, previos, goHash)) {
     log(`${GO_TOKEN} visto en ${repo}#${issue}`)
     const { consultado, ref } = consultarSesion()
     if (ref) {
@@ -275,7 +292,7 @@ for (;;) {
     terminar(4)
   }
   if (Date.now() >= limite) {
-    log(`plazo agotado sin ver ningún ${GO_TOKEN} en ${repo}#${issue}. La sesión sigue parada en el gate: dale el go en el issue y empújala a mano, o vuelve a lanzar este vigilante.`)
+    log(`plazo agotado sin ver ningún ${GO_TOKEN} válido en ${repo}#${issue}. La sesión sigue parada en el gate: dale el go en el issue y empújala a mano, o vuelve a lanzar este vigilante.`)
     terminar(3)
   }
   await sleep(Math.min(pollMs, Math.max(0, limite - Date.now())))

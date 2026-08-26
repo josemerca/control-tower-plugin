@@ -64,11 +64,19 @@ export default defineConfig({
     // La grabadora, además de no sondear nada, apunta su argv cuando el test le
     // da un FAKE_WATCH_GO_LOG — así el mismo doble sirve para no hacer daño y
     // para comprobar que el lanzamiento ocurre con los argumentos correctos.
+    // CT_WATCH_MERGE_BIN — lo mismo para el vigilante del MERGE, que
+    // `dispatch-check --release` lanza desprendido. `--release` se ejercita en
+    // muchos más tests que los que hablan de él (todos los de la
+    // correspondencia del e2e, los de dry-run, los de truncado), así que sin
+    // esto cada uno dejaría un proceso sondeando GitHub cada minuto durante 48
+    // horas. Es exactamente el defecto que CT_WATCH_GO_BIN vino a cerrar; que
+    // esté aquí y no en cada test es el punto.
     env: {
       // `fileURLToPath` y no `.pathname`: con el checkout bajo una ruta con
       // espacios o no-ASCII, `.pathname` viene percent-encoded y apuntaría a un
       // fichero que no existe. Es lo que usan los otros 56 ficheros del repo.
       CT_WATCH_GO_BIN: fileURLToPath(new URL('./__tests__/fixtures/fake-watch-go-bin/recorder.mjs', import.meta.url)),
+      CT_WATCH_MERGE_BIN: fileURLToPath(new URL('./__tests__/fixtures/fake-watch-merge-bin/recorder.mjs', import.meta.url)),
     },
   },
 })

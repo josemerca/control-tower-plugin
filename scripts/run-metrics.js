@@ -108,8 +108,17 @@ export const planSha256 = (texto) => createHash('sha256').update(String(texto ??
 // él sería indepurable— y las dos cosas van al mismo sitio por el mismo motivo.
 // Se extrae en vez de duplicar el `join`, y `metricsPath` sigue siendo quien
 // decide la extensión de LO SUYO.
-export function controlTowerLogDir({ configDir = null, home = null } = {}) {
-  return join(configDir || join(home || homedir(), '.claude'), 'control-tower', 'log')
+export function controlTowerDir({ configDir = null, home = null } = {}) {
+  return join(configDir || join(home || homedir(), '.claude'), 'control-tower')
+}
+
+// `log/` es UN inquilino de la carpeta, no la carpeta. Desde F38 hay un segundo
+// que no es un rastro sino ESTADO —el compromiso del go (go-registry.js)—, y
+// mezclarlo con los logs haría que «borra el log, que ocupa» dejara sin liberar
+// un slice en vuelo. Se separa en el nivel de arriba, y por eso el `join` de la
+// raíz se extrae en vez de duplicarse.
+export function controlTowerLogDir(opts = {}) {
+  return join(controlTowerDir(opts), 'log')
 }
 
 export function metricsPath(concepto, { configDir = null, home = null } = {}) {

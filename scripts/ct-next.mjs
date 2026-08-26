@@ -9,7 +9,9 @@ import { planDispatch, resolveAccount, resolveAccountLegacy, validateAccountMap,
 import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
 import { parseStrictInt } from './argnum.js'
 import { resolveGatesForAgent } from './gates.js'
-import { GO_TOKEN } from './go-response.js'
+import { GO_TOKEN, newGoNonce, goCommitment, goBody } from './go-response.js'
+import { writeGoCommitment } from './go-registry.js'
+import { emitGoNonce } from './go-channel.js'
 import { controlTowerLogDir } from './run-metrics.js'
 import { shQuote } from './shquote.js'
 import {
@@ -802,13 +804,28 @@ function lanzarVigilanteDelGo(slice, sessionName) {
     // comando corrió»— con una evidencia todavía más débil: aquí lo único
     // comprobado sería que `node` existe.
     if (!existsSync(bin)) return aviso(`el programa del vigilante no existe: ${bin}`)
+    // EL NONCE SE SORTEA AQUÍ Y EN NINGÚN OTRO SITIO (F38). Este es el único
+    // proceso del loop que corre en la sesión de quien despacha, así que es el
+    // único que puede entregarle el nonce sin escribirlo en un sitio que el
+    // agente lea. Se registra ANTES de lanzar el vigilante: si el registro falla
+    // no se vigila nada, porque un vigilante sin compromiso registrado sería un
+    // go que arranca el trabajo y que `--release` no podrá honrar después.
+    const nonce = newGoNonce(randomBytes(4))
+    const goHash = goCommitment(nonce)
+    const ctHome = { configDir: process.env.CLAUDE_CONFIG_DIR || null, home: homedir() }
+    try {
+      writeGoCommitment({ repo, issue: slice.n, commitment: goHash, ...ctHome })
+    } catch (e) {
+      return aviso(`no se ha podido registrar el go de este despacho (${e.message}) — sin registro, \`dispatch-check --release\` se negará (exit 9) porque no podrá comprobar el go. Registra uno con \`node <plugin>/scripts/ct-go.mjs --issue ${slice.n} --repo ${repo} --session ${JSON.stringify(sessionName)}\` y dale el go que imprima`)
+    }
     const logPath = join(controlTowerLogDir({ configDir: process.env.CLAUDE_CONFIG_DIR || null, home: homedir() }), `watch-go-${slice.n}.log`)
     const hijo = spawn(process.execPath, [
-      bin, '--issue', String(slice.n), '--repo', repo, '--session', sessionName, '--log', logPath,
+      bin, '--issue', String(slice.n), '--repo', repo, '--session', sessionName, '--go-hash', goHash, '--log', logPath,
     ], { detached: true, stdio: 'ignore' })
     hijo.on('error', (e) => aviso(`fallo al arrancarlo: ${e.message}`))
     hijo.unref()
-    console.log(`  vigilante del ${GO_TOKEN} de #${slice.n} lanzado (pid ${hijo.pid}) — cuando contestes ${GO_TOKEN} en el issue, la sesión arranca sola. Log: ${logPath}`)
+    console.log(`  vigilante del ${GO_TOKEN} de #${slice.n} lanzado (pid ${hijo.pid}) — cuando contestes el go en el issue, la sesión arranca sola. Log: ${logPath}`)
+    emitGoNonce(slice.n, nonce)
   } catch (e) {
     aviso(e.message)
   }

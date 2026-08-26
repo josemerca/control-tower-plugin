@@ -16,7 +16,14 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { GO_TOKEN } from '../scripts/go-response.js'
+import { GO_TOKEN, goBody, goCommitment, newGoNonce } from '../scripts/go-response.js'
+
+// F38 — el go que este vigilante reconoce es `-OK <nonce>`, con el nonce de SU
+// despacho. Lo que le llega por argv es el sha256 (`--go-hash`): su argv lo
+// enseña `ps` a cualquier proceso del mismo uid, el agente incluido.
+const NONCE = newGoNonce(Buffer.from([0x3f, 0x9a, 0x1c, 0x04]))
+const GO_HASH = goCommitment(NONCE)
+const GO = goBody(NONCE)
 
 const AQUI = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(AQUI, '..', 'scripts', 'ct-watch-go.mjs')
@@ -41,6 +48,7 @@ function correr(env = {}, { timeoutMs = 800, pollMs = 40 } = {}) {
   try {
     const stdout = execFileSync(process.execPath, [
       SCRIPT, '--issue', '5', '--repo', 'jjponz/repo-pulse', '--session', SESION,
+      '--go-hash', env.CT_TEST_GO_HASH ?? GO_HASH,
     ], {
       encoding: 'utf8',
       timeout: 30_000,
@@ -79,7 +87,7 @@ let secuencias = 0
 const conGo = (extra = {}) => ({
   FAKE_GH_VIEW_COMMENTS_SEQUENCE: JSON.stringify([
     { comments: [] },
-    { comments: [comentario(GO_TOKEN)] },
+    { comments: [comentario(GO)] },
   ]),
   FAKE_GH_VIEW_COMMENTS_COUNTER_FILE: join(dir, `contador-${++secuencias}`),
   ...extra,
@@ -114,7 +122,7 @@ describe('el vigilante no entrega lo que no es un go', () => {
     // El modo de fallo asimétrico: «-OK pero cambia el nombre» tiene que dejar
     // el trabajo parado, porque arrancarlo es justo lo que esa persona frenaba.
     const r = correr({
-      FAKE_GH_VIEW_COMMENTS: JSON.stringify({ comments: [comentario(`${GO_TOKEN} pero cambia el nombre`)] }),
+      FAKE_GH_VIEW_COMMENTS: JSON.stringify({ comments: [comentario(`${GO} pero cambia el nombre`)] }),
     })
     expect(r.status).toBe(3)
     expect(r.stdout).toMatch(/plazo agotado/)
@@ -126,7 +134,7 @@ describe('el vigilante no entrega lo que no es un go', () => {
     // ese go y el gate se saltaría en silencio. El payload es FIJO, así que el
     // `-OK` está ya en la foto inicial que el vigilante saca antes de buscar.
     const r = correr({
-      FAKE_GH_VIEW_COMMENTS: JSON.stringify({ comments: [comentario(GO_TOKEN, 'IC_heredado')] }),
+      FAKE_GH_VIEW_COMMENTS: JSON.stringify({ comments: [comentario(GO, 'IC_heredado')] }),
     })
     expect(r.status).toBe(3)
     expect(r.stdout).toMatch(/1 comentario\(s\) ya presentes/)

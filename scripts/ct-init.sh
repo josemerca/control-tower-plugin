@@ -456,17 +456,18 @@ SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 #     MISMO bloque bajo versiones distintas. La correspondencia
 #     versión-publicada ↔ contenido del bloque no existe.
 # La lista se deriva del historial (ver el test "todo bloque que ct-init emitió
-# alguna vez está registrado"), no de memoria.
+# alguna vez en la historia está registrado"), no de memoria.
 #
-# Un bloque puede existir de verdad y NO estar en la historia de main: la PR
-# #27 traía DOS bumps (v16→v17 en 743fe3f y v17→v18 en a11fd76) y aterrizó
-# como squash (529d2f4), así que el bloque v17 —publicado en el ref desde el
-# que se abrió la PR, y por tanto instalable— no lo reproduce ningún commit
-# alcanzable. Su entrada de aquí sigue siendo correcta y necesaria: es lo
-# único que permite a un repo con el v17 intacto actualizarse sin --force.
-# Los bloques en esa situación viven como fixture en __tests__/fixtures/ y se
-# declaran en BLOQUES_HUERFANOS (__tests__/ct-init.test.js), que es lo que
-# los tests de autovigilancia unen al historial de git.
+# Un bloque puede existir de verdad y NO estar en la historia de main, porque su
+# PR aterrizó como squash — el caso del v17, contado en su propia línea más
+# abajo. Los bloques en esa situación viven byte a byte como fixture en
+# __tests__/fixtures/ y se declaran en SQUASHED_BLOCK_FIXTURES
+# (__tests__/ct-init.test.js), que es lo que los tests de autovigilancia unen al
+# historial de git. Y no basta con contarlo aquí: un comentario se cree, no se
+# comprueba. Lo que sostiene esa entrada son TRES tests sobre el fixture —que
+# hashea al hash registrado, que no hay fixtures fuera de la lista, y que el
+# hash entró en este fichero en un commit que todavía no traía el fixture (su
+# procedencia, o sea que no lo inventó quien añadió el fichero).
 #
 # Formato: un hash por línea, seguido de la procedencia (solo el primer campo
 # se compara). Al cambiar el bloque hay que AÑADIR el hash nuevo — nunca
@@ -497,7 +498,7 @@ f1e9f868952d34a80bc7d15b50c0fce99cf375ebd3b1a76a37c6fdfa7b83e035  v12, 505 líne
 3896ed5610c6967510d6ad0ef83a18ef5eb6244a2015fd9af3b813bc8ba177b0  v14, 534 líneas — F27 (la puerta es propiedad de la sesión con el plugin cargado, no sólo del repo; con -C/cd a otro repo juzga el repo equivocado, no es ciega, y sus invocaciones envueltas sí lo son)
 82a0391f7bffdd86a9b6506fa8db5c8866003129e2065b28a5e3bbe228a1a400  v15, 540 líneas — F28 (la puerta cubre lo que ejecuta Claude por su tool Bash, nunca lo que teclea el humano: ni su terminal ni el prefijo ! de la propia sesión)
 bb8e3298fe9b587b929ab58fbf96f76909463a1cea292fa110878d4ba293f38e  v16, 540 líneas — F30 (la sección deja de llamarse "tabla §9" y pasa a "tabla de slices": el número era un fósil, groom localiza la tabla por sus columnas Slice+Dep y --section está obsoleto)
-4d6eebf4ea94b7197879d30293dc4719d82399b7feeb7711829c28a1dcaa7f1c  v17, 543 líneas — F-jjponz-1 (el gate `plan` entra en el vocabulario: revisión humana del plan del slice antes de implementar, siempre opt-in)
+4d6eebf4ea94b7197879d30293dc4719d82399b7feeb7711829c28a1dcaa7f1c  v17, 543 líneas — F-jjponz-1 (el gate `plan` entra en el vocabulario: revisión humana del plan del slice antes de implementar, siempre opt-in). NO ALCANZABLE DESDE main: la PR #27 se mergeó con squash (529d2f4, v16 -> v18 de un salto) y se llevó el commit que emitía este bloque (ac48fa3, rama jjponz/prescriptive-plans). Se pusheó, así que hay repos bootstrapeados con él; se guarda byte a byte en __tests__/fixtures/slices-contract-v17.md, que es lo que justifica este hash ante el guardián
 9a45d3acdc0d5a776affb390ba890b90b86d77e2a5712626a839a93d7462bfba  v18, 544 líneas — F-jjponz-2 (el gate `plan` pasa a estar implicado por defecto en TODO slice; renuncia por fila con `!plan`)
 9cdc355576fd1e7bbf69771a8c597c236f33ba31e37c32d998d3282a76e20f77  v19, 562 líneas — Slice 10 juez-lo-que-queda (la columna Señal: la señal de observabilidad por slice, con exención razonada N/A — <razón>)
 388f8a82528e7402e45a3384094c7ab43b18d6fdfb5652affa4e9b6b6c2b2dc4  v19, 567 líneas — tarea 5 de "e2e al cierre del slice" (la columna E2E y el gate `e2e` entran en el contrato; v19 nunca publicado, la rama se mergeó como v20)

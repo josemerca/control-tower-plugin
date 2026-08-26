@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, symlinkSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -37,6 +37,46 @@ const MARKER_CLOSE = '<!-- /ct-init:slices-contract -->'
 // de "hashes registrados" (más abajo) lo comprueba, así que este fichero no
 // puede derivar sin que la suite se entere.
 const V1_BLOCK = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'slices-contract-v1.md'), 'utf8')
+
+// ---------------------------------------------------------------------------
+// LOS BLOQUES QUE EL SQUASH SE LLEVÓ. `historicalContractBlocks()` reconstruye
+// desde `git rev-list HEAD`, y esa fuente de verdad tiene un agujero que no
+// tenía cuando se escribió: **una PR mergeada con squash no deja en main sus
+// commits intermedios**. Si una rama subió el contrato dos veces antes de
+// aterrizar, la variante de en medio existió —se pushó, y cualquiera pudo
+// bootstrapear un repo clonando ese ref, que es literalmente cómo se instala un
+// plugin de Claude Code— pero desde main no hay forma de verla.
+//
+// El caso real, que es el que dejó este fichero en rojo durante dos merges: la
+// PR #27 (rama `jjponz/prescriptive-plans`) subió el contrato a **v17** en
+// `ac48fa3` (12-ago, Juanjo) y a v18 después; se mergeó con SQUASH en `529d2f4`,
+// así que main pasó de v16 a v18 de un salto y el bloque v17 no es alcanzable
+// desde HEAD. Su hash SÍ está registrado en SLICES_PRISTINE_HASHES, y debe
+// estarlo: sin él, un repo sembrado con esa variante y jamás tocado recibe "no
+// coincide con ninguna versión conocida" y no puede actualizarse sin `--force`
+// — la acusación falsa contra la que existe F9. Durante esa ronda se
+// bootstrapearon repos de verdad (repo-pulse, 7 slices).
+//
+// LA FORMA DE LA SOLUCIÓN, y por qué no basta con anotar la procedencia en un
+// comentario: un comentario se cree, no se comprueba. El bloque se guarda como
+// fixture, byte a byte, igual que ya se guardan los de v1/v4/v5/v6/v7, y el
+// guardián de "hashes que no corresponden a ningún bloque real" pasa a aceptar
+// los que un fixture JUSTIFICA. Con eso el guardián no se debilita nada: para
+// justificar un hash hay que producir un contenido que hashee a él, que es
+// exactamente lo que un hash garantiza que no se puede inventar.
+const SQUASHED_BLOCK_FIXTURES = ['slices-contract-v17.md']
+// Los que ya existían antes de esto y los usan otros tests de este fichero:
+// bloques históricos SÍ alcanzables desde main, guardados para poder probar la
+// migración desde cada uno. Se nombran aquí sólo para que el inventario del
+// directorio no acuse a un fichero que sí tiene dueño.
+const FIXTURES_DE_OTROS_TESTS = [
+  'slices-contract-v1.md', 'slices-contract-v4.md', 'slices-contract-v5.md',
+  'slices-contract-v6.md', 'slices-contract-v7.md',
+]
+const squashedBlocks = () => SQUASHED_BLOCK_FIXTURES.map((f) => ({
+  fixture: f,
+  block: readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', f), 'utf8'),
+}))
 const initScriptSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-init.sh'), 'utf8')
 // CONTRACT_VERSION: la versión del contrato se LEE del propio ct-init.sh, no
 // se repite a mano en cada aserción. F11 la subió de 2 a 3 y hubo que tocar
@@ -134,44 +174,36 @@ function historicalContractBlocks() {
   return blocks
 }
 
-// BLOQUES_HUERFANOS: bloques que ct-init emitió de verdad y que NINGÚN commit
-// alcanzable desde HEAD reproduce, porque la PR que los llevaba aterrizó como
-// squash. El caso: la PR #27 traía dos bumps (743fe3f v16→v17 y a11fd76
-// v17→v18) y el squash 529d2f4 dejó main saltando de v16 a v18, con el bloque
-// v17 publicado en el ref de la PR y por tanto instalable. Su hash está
-// registrado en SLICES_PRISTINE_HASHES y tiene que seguir estándolo: es lo
-// único que permite a un repo con el v17 intacto actualizarse sin --force
-// (comprobado en el test del camino de upgrade, más abajo). El fixture es la
-// evidencia durable: un ref de una rama obsoleta puede desaparecer, el
-// fichero no.
-const BLOQUES_HUERFANOS = [
-  { fixture: 'slices-contract-v17.md', commit: '743fe3f' },
+// bloquesEmitidos: la historia alcanzable MÁS los bloques que el squash se
+// llevó (SQUASHED_BLOCK_FIXTURES, arriba). Es la respuesta a "¿qué llegó a
+// EMITIR ct-init?", que no es "¿qué hay en main?": la preguntan el camino de
+// upgrade y el del bloque vN-1, y las dos veces la respuesta correcta incluye
+// el v17. Deriva de la lista de arriba — no hay una segunda lista de bloques
+// escondidos, y la procedencia de cada uno la prueba su propio test más abajo.
+// `commit` es el nombre del FIXTURE a propósito: para un bloque que ningún
+// commit alcanzable reproduce, la etiqueta honesta es el fichero que lo
+// guarda, no un sha que no se puede resolver en un clon limpio.
+const bloquesEmitidos = () => [
+  ...historicalContractBlocks(),
+  ...squashedBlocks().map(({ fixture, block }) => ({ block, fixture, commit: fixture, hash: sha256(block) })),
 ]
-const orphanContractBlocks = () =>
-  BLOQUES_HUERFANOS.map(({ fixture, commit }) => {
-    const block = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', fixture), 'utf8')
-    return { block, commit, fixture, hash: sha256(block) }
-  })
-// contractBlocksEverEmitted: la historia alcanzable MÁS los huérfanos. Es la
-// respuesta a "¿qué bloques llegó a emitir ct-init?", que es la pregunta que
-// hacen los dos tests de autovigilancia — no "¿qué bloques hay en main?".
-const contractBlocksEverEmitted = () => [...historicalContractBlocks(), ...orphanContractBlocks()]
 
 // ---------------------------------------------------------------------------
 // Slice 8 (hallazgo BAJO del review de la PR #36) — PROCEDENCIA de los
-// huérfanos. El slice 4 arregló el test del ledger con BLOQUES_HUERFANOS, y con
-// ello la autovigilancia pasó de "git lo prueba" a "git O un fichero de este
-// mismo commit lo prueba": el par (entrada del ledger, fixture) se validaba
-// contra sí mismo, porque el fixture es editable en el MISMO commit que
-// registra su hash. No es forjable —nadie fabrica un fichero con un sha256
-// elegido— pero sí DEGRADABLE: un bloque que ct-init nunca publicó podía
-// entrar en la lista pristine sin que ningún test lo notara, y a partir de ahí
+// bloques guardados por squash. El slice 4 arregló el test del ledger con
+// SQUASHED_BLOCK_FIXTURES, y con ello la autovigilancia pasó de "git lo
+// prueba" a "git O un fichero de este mismo commit lo prueba": el par
+// (entrada del ledger, fixture) se validaba contra sí mismo, porque el
+// fixture es editable en el MISMO commit que registra su hash. No es
+// forjable —nadie fabrica un fichero con un sha256 elegido— pero sí
+// DEGRADABLE: un bloque que ct-init nunca publicó podía entrar en la lista
+// pristine sin que ningún test lo notara, y a partir de ahí
 // `--update-slices-contract` lo aceptaría sin --force.
 //
 // Lo que ataba el caso del v17 no era el fixture: era que su hash ya estaba en
 // main OCHO DÍAS antes de que el fixture existiera. Eso es evidencia
-// INDEPENDIENTE, y es lo que se exige aquí para todo huérfano, presente y
-// futuro.
+// INDEPENDIENTE, y es lo que se exige aquí para todo fixture de la lista,
+// presente y futuro.
 //
 // La comprobación, en una frase: el commit que metió el hash en el ledger NO
 // contenía todavía el fixture. Deliberadamente NO se data el fixture ni se
@@ -192,16 +224,24 @@ const contractBlocksEverEmitted = () => [...historicalContractBlocks(), ...orpha
 // respaldo, y el test "no registra hashes de bloques que no existieron nunca"
 // está ROJO. Sobre una historia con la suite verde en cada commit, una entrada
 // pristine falsa es imposible: hace falta pasar por un commit rojo.
+//
+// Este test NO duplica los dos guardianes del fixture, que prueban otra cosa:
+// el suyo prueba que el bloque EXISTE (el fichero hashea al hash registrado);
+// el de aquí, que no lo INVENTÓ quien añadió el fichero. Y no basta con anotar
+// la procedencia en el comentario del ledger —el de la línea del v17 la
+// cuenta— por la misma razón que su propio mensaje da para el fixture: un
+// comentario se cree, no se comprueba. Los dos dicen lo mismo; solo uno se
+// pone rojo.
 const RUTA_LEDGER = 'scripts/ct-init.sh'
 const RUTA_FIXTURES = '__tests__/fixtures'
 
-// procedenciaDeHuerfano: devuelve null si la procedencia está probada, o el
+// procedenciaDelBloqueGuardado: devuelve null si la procedencia está probada, o el
 // MOTIVO (string) si no. El repo es un PARÁMETRO —no el `git()` de arriba, que
 // tiene `root` fijo— justo para que el test negativo pueda correr esta misma
 // función contra un repo de juguete construido con `git init`, en vez de
 // reimplementarla (un test negativo que reimplementa lo que juzga no juzga
 // nada).
-function procedenciaDeHuerfano({ cwd, fixture, hash }) {
+function procedenciaDelBloqueGuardado({ cwd, fixture, hash }) {
   const g = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
   const existeEn = (rev, ruta) => spawnSync('git', ['cat-file', '-e', `${rev}:${ruta}`], { cwd }).status === 0
   const rutaFixture = `${RUTA_FIXTURES}/${fixture}`
@@ -212,9 +252,11 @@ function procedenciaDeHuerfano({ cwd, fixture, hash }) {
   if (!existsSync(join(cwd, RUTA_LEDGER))) return `no existe ${RUTA_LEDGER} en ${cwd}`
   if (!existsSync(join(cwd, rutaFixture))) return `no existe ${rutaFixture} en ${cwd}`
   // El commit que introdujo el hash en el ledger. `git log` sin revisión =
-  // alcanzable desde HEAD, que es la única base durable: el campo `commit` de
-  // BLOQUES_HUERFANOS es decorativo y su SHA (743fe3f) NO es alcanzable —
-  // usarlo como ref funciona en esta máquina y se rompe en un clon limpio.
+  // alcanzable desde HEAD, que es la única base durable. Es también el motivo
+  // de que SQUASHED_BLOCK_FIXTURES sea una lista de NOMBRES DE FICHERO y no de
+  // pares (fichero, commit): los shas que la prosa del ledger cita para el v17
+  // (743fe3f, ac48fa3) NO son alcanzables desde HEAD — usarlos como ref
+  // funciona en esta máquina y se rompe en un clon limpio.
   // Cronológico inverso, así que el más antiguo es el último.
   const testigos = g(['log', '--format=%H', `-S${hash}`, '--', RUTA_LEDGER]).trim().split('\n').filter(Boolean)
   if (testigos.length === 0) {
@@ -251,14 +293,14 @@ function exigirHistorialCompleto() {
     git(['rev-list', '-1', 'HEAD'])
   } catch (err) {
     throw new Error(
-      'la comprobación de procedencia de BLOQUES_HUERFANOS necesita el historial de git del ' +
+      'la comprobación de procedencia de SQUASHED_BLOCK_FIXTURES necesita el historial de git del ' +
         'plugin (busca en él el commit que metió cada hash en el ledger). ' +
         `No se ha podido leer: ${err.message}`
     )
   }
   if (git(['rev-parse', '--is-shallow-repository']).trim() === 'true') {
     throw new Error(
-      'la comprobación de procedencia de BLOQUES_HUERFANOS no se puede hacer en un clon shallow: ' +
+      'la comprobación de procedencia de SQUASHED_BLOCK_FIXTURES no se puede hacer en un clon shallow: ' +
         'el commit que metió el hash en el ledger puede quedar por debajo del injerto, y el test ' +
         'acusaría de forja a un ledger correcto. Corre `git fetch --unshallow`.'
     )
@@ -536,7 +578,7 @@ describe('ct-init.sh', () => {
     expect(agents).toContain('`observabilidad`')
     // Control: el contrato ANTERIOR no decía nada de esto — este test no pasa
     // por una coincidencia de prosa que ya estuviera ahí.
-    const anterior = contractBlocksEverEmitted().find(({ block }) =>
+    const anterior = bloquesEmitidos().find(({ block }) =>
       block.includes(`<!-- ct-init:slices-contract-version: ${CONTRACT_VERSION - 1} -->`)
     )
     expect(anterior.block).not.toMatch(/no es un criterio de aceptación más/i)
@@ -886,7 +928,7 @@ describe('ct-init.sh', () => {
   // "v1"), y SLICES_PRISTINE_HASHES solo registraba dos de esos nueve.
   // ==========================================================================
   it('TODO bloque que ct-init emitió alguna vez, intacto, se actualiza con --update-slices-contract sin --force y sin acusar a nadie', () => {
-    const historical = contractBlocksEverEmitted()
+    const historical = bloquesEmitidos()
     // Control: si esto no reconstruye varias versiones, el test no prueba nada.
     expect(historical.length).toBeGreaterThanOrEqual(9)
     // El control de "la reconstrucción llega hasta hoy" tolera un bump del
@@ -925,10 +967,10 @@ describe('ct-init.sh', () => {
   // perdió el v17), el bucle seguiría verde sin cubrir este camino. Sin números
   // hardcodeados: sube solo con CONTRACT_VERSION.
   it('un repo con el bloque de la versión ANTERIOR intacto sube al contrato actual sin --force', () => {
-    const anterior = contractBlocksEverEmitted().find(({ block }) =>
+    const anterior = bloquesEmitidos().find(({ block }) =>
       block.includes(`<!-- ct-init:slices-contract-version: ${CONTRACT_VERSION - 1} -->`)
     )
-    expect(anterior, `no hay ningún bloque v${CONTRACT_VERSION - 1} ni en la historia ni en BLOQUES_HUERFANOS`).toBeDefined()
+    expect(anterior, `no hay ningún bloque v${CONTRACT_VERSION - 1} ni en la historia ni en SQUASHED_BLOCK_FIXTURES`).toBeDefined()
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     const before = `# AGENTS.md\n\n## Gotchas\n- mías\n\n${anterior.block}\n## Después\n- intocable\n`
     writeFileSync(join(dir, 'AGENTS.md'), before)
@@ -1127,8 +1169,12 @@ describe('ct-init.sh', () => {
   // Este cierra el hueco: la fuente de verdad no es la memoria de nadie, es el
   // historial de git. Entre los dos cubren todo — este, lo commiteado; el de
   // arriba, el árbol de trabajo todavía sin commitear.
-  it('todo bloque que ct-init emitió alguna vez está registrado en SLICES_PRISTINE_HASHES', () => {
-    const historical = contractBlocksEverEmitted()
+  // Lo que este NO cubre, a propósito: los bloques que el squash borró de la
+  // historia. De esos se ocupa "cada bloque guardado por squash sigue hasheando
+  // a su hash registrado", que es el guardián específico y da mejor mensaje.
+  // Meterlos aquí lo convertiría en un duplicado suyo.
+  it('todo bloque que ct-init emitió alguna vez en la historia está registrado en SLICES_PRISTINE_HASHES', () => {
+    const historical = historicalContractBlocks()
     expect(historical.length).toBeGreaterThanOrEqual(9) // control: se reconstruyó de verdad
     const missing = historical
       .filter(({ hash }) => !initScriptSrc.includes(hash))
@@ -1152,46 +1198,87 @@ describe('ct-init.sh', () => {
   })
 
   it('SLICES_PRISTINE_HASHES no registra hashes de bloques que no existieron nunca', () => {
-    // La otra dirección: un hash inventado (o el de una rama que no llegó a
-    // main) hace que ct-init reemplace en silencio algo que no reconoce de
-    // verdad. Todo hash registrado tiene que corresponder a un bloque real.
+    // La otra dirección: un hash INVENTADO hace que ct-init reemplace en
+    // silencio algo que no reconoce de verdad. Todo hash registrado tiene que
+    // corresponder a un bloque real, y "real" tiene tres fuentes posibles: la
+    // historia de main, el árbol de trabajo, y los bloques que un merge con
+    // squash borró de la historia pero que se pushearon y viven aquí como
+    // fixture (ver SQUASHED_BLOCK_FIXTURES arriba). Las tres son contenido: en
+    // ninguna se cree a un comentario.
     const registered = initScriptSrc
       .split('\n')
       .map((l) => l.trim().match(/^([0-9a-f]{64})\b/))
       .filter(Boolean)
       .map((m) => m[1])
     expect(registered.length).toBeGreaterThanOrEqual(9)
-    const known = new Set(contractBlocksEverEmitted().map((h) => h.hash))
+    const known = new Set(historicalContractBlocks().map((h) => h.hash))
     known.add(sha256(extractBlock(seedFreshAgentsMd()))) // el árbol de trabajo
-    expect(registered.filter((h) => !known.has(h))).toEqual([])
+    for (const { block } of squashedBlocks()) known.add(sha256(block))
+    expect(
+      registered.filter((h) => !known.has(h)),
+      'Hashes registrados que no corresponden a NINGÚN bloque conocido. Si es un ' +
+        'bloque que existió en una rama y el squash del merge se lo llevó de main, ' +
+        'guárdalo byte a byte en __tests__/fixtures/slices-contract-vN.md y añade el ' +
+        'fichero a SQUASHED_BLOCK_FIXTURES: un comentario de procedencia se cree, un ' +
+        'fichero que hashea al hash registrado se comprueba. Si no existió, bórralo ' +
+        'de SLICES_PRISTINE_HASHES: mientras esté, ct-init da por intacto (y por tanto ' +
+        'reemplazable sin avisar) un bloque que no reconoce de verdad.'
+    ).toEqual([])
   })
 
-  // Slice 8 — el test que ata BLOQUES_HUERFANOS a la historia. Sin él, añadir
-  // una entrada al ledger y su fixture en el mismo commit deja la suite verde,
-  // y un bloque que ct-init nunca publicó pasa a ser "pristine" para siempre.
-  it('todo huérfano de BLOQUES_HUERFANOS tiene procedencia: su hash ya estaba en el ledger de un commit que NO traía su fixture', () => {
+  // El otro lado del fixture: si el fichero deriva un byte, deja de hashear al
+  // hash registrado y ya no justifica nada — así que el guardián de arriba
+  // volvería a acusar a ese hash de inventado, culpando al sitio equivocado.
+  // Este test señala la causa de verdad.
+  it('cada bloque guardado por squash sigue hasheando a su hash registrado', () => {
+    for (const { fixture, block } of squashedBlocks()) {
+      const h = sha256(block)
+      expect(
+        initScriptSrc.includes(h),
+        `El fixture ${fixture} ya no corresponde a ningún hash de ` +
+          `SLICES_PRISTINE_HASHES (hashea a ${h}). O ha derivado —y entonces ya no es ` +
+          `el bloque que se pusheó, que es TODO su valor— o su hash se ha borrado del ` +
+          `registro.`
+      ).toBe(true)
+    }
+  })
+
+  // Y que no sobren: un fixture sin hash registrado sería un bloque guardado
+  // "por si acaso" que ct-init no reconoce, o sea la mitad de un arreglo. El
+  // test de arriba lo cubre por hash; este cubre el inventario del directorio,
+  // para que añadir un fichero y olvidar la lista no pase inadvertido.
+  it('no hay fixtures de contrato guardados por squash fuera de la lista', () => {
+    const dir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
+    const enDisco = readdirSync(dir).filter((f) => /^slices-contract-v\d+\.md$/.test(f))
+    const usados = new Set([...SQUASHED_BLOCK_FIXTURES, ...FIXTURES_DE_OTROS_TESTS])
+    expect(enDisco.filter((f) => !usados.has(f))).toEqual([])
+  })
+
+  // Slice 8 — el test que ata SQUASHED_BLOCK_FIXTURES a la historia. Sin él,
+  // añadir una entrada al ledger y su fixture en el mismo commit deja la suite
+  // verde, y un bloque que ct-init nunca publicó pasa a ser "pristine" para
+  // siempre. El hash NO se declara a mano: sale del sha256 del propio fichero,
+  // que es la única forma de que el testigo que se busca en el ledger sea el
+  // del bloque que el fixture guarda de verdad. Que ese hash esté registrado lo
+  // exige el guardián de al lado ("cada bloque guardado por squash sigue
+  // hasheando a su hash registrado"), y por eso aquí no se repite.
+  it('todo fixture de SQUASHED_BLOCK_FIXTURES tiene procedencia: su hash ya estaba en el ledger de un commit que NO traía el fichero', () => {
     exigirHistorialCompleto()
-    const huerfanos = orphanContractBlocks()
+    const guardados = squashedBlocks().map(({ fixture, block }) => ({ fixture, hash: sha256(block) }))
     // Control: si la lista está vacía este test no prueba nada. Hoy hay uno
     // (el v17 de la PR #27, escondido por el squash 529d2f4). Si algún día se
     // vacía a propósito, este assert es el sitio donde decirlo.
-    expect(huerfanos.length).toBeGreaterThanOrEqual(1)
-    const sinProcedencia = huerfanos
-      .map(({ fixture, hash }) => procedenciaDeHuerfano({ cwd: root, fixture, hash }))
+    expect(guardados.length).toBeGreaterThanOrEqual(1)
+    const sinProcedencia = guardados
+      .map(({ fixture, hash }) => procedenciaDelBloqueGuardado({ cwd: root, fixture, hash }))
       .filter(Boolean)
     expect(
       sinProcedencia,
-      'Un huérfano de BLOQUES_HUERFANOS solo vale si su hash es evidencia INDEPENDIENTE del ' +
-        'fixture: tiene que haber entrado en SLICES_PRISTINE_HASHES en un commit que todavía no ' +
+      'Un fixture de SQUASHED_BLOCK_FIXTURES solo vale si su hash es evidencia INDEPENDIENTE del ' +
+        'fichero: tiene que haber entrado en SLICES_PRISTINE_HASHES en un commit que todavía no ' +
         'contenía el fixture. Si no, el par se valida contra sí mismo y un bloque que ct-init ' +
         'nunca emitió puede colarse como pristine.'
     ).toEqual([])
-    // Y el fixture tiene que hashear a la entrada que dice tener (si no, el
-    // testigo prueba la procedencia de OTRO hash). Es lo que el test "no
-    // registra hashes de bloques que no existieron nunca" da por hecho.
-    for (const { hash, fixture } of huerfanos) {
-      expect(initScriptSrc, `${fixture}: su sha256 no está en SLICES_PRISTINE_HASHES`).toContain(hash)
-    }
   })
 
   it('la comprobación de procedencia caza el par forjado: entrada del ledger y fixture en el MISMO commit', () => {
@@ -1222,7 +1309,7 @@ describe('ct-init.sh', () => {
       guion({ g, ledger, fixture })
       return dir
     }
-    const juzgar = (dir) => procedenciaDeHuerfano({ cwd: dir, fixture: FIXTURE, hash: HASH })
+    const juzgar = (dir) => procedenciaDelBloqueGuardado({ cwd: dir, fixture: FIXTURE, hash: HASH })
 
     // (1) CONTROL POSITIVO: el orden legítimo (el del v17) — la entrada
     // primero, el fixture después. Sin esto, un rojo de los de abajo no

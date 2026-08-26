@@ -20,9 +20,11 @@
 // real (test-and-set vía `git refs`, ya validado en el experimento CAS de T9)
 // — hasta que eso aterrice, esta es la garantía real: ninguna bajo
 // concurrencia, sí bajo uso secuencial disciplinado.
-import { execFileSync } from 'node:child_process'
-import { writeSync, statSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { execFileSync, spawn } from 'node:child_process'
+import { writeSync, statSync, readFileSync, existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { detectCollisions, claimLost } from './claim.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 import { parseStrictInt } from './argnum.js'
@@ -30,6 +32,12 @@ import { NEVER_IN_A_SLICE_PR, SLICE_REL_PATH } from './state-paths.js'
 import { checkPlans } from './plan-contract.js'
 import { deliveredRun } from './run-machine.js'
 import { extractE2eRuns, E2E_HEADING } from './gh-issue-map.js'
+import { controlTowerLogDir } from './run-metrics.js'
+import { matchesGo, GO_TOKEN } from './go-response.js'
+import { readGoCommitment } from './go-registry.js'
+import { gatesFromLabels } from './gates.js'
+
+const ctWatchMergePath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch-merge.mjs')
 
 // ============================================================================
 // Finding 4 (auditoría de interrupción/staleness): dos cambios en este
@@ -90,6 +98,12 @@ import { extractE2eRuns, E2E_HEADING } from './gh-issue-map.js'
 //       `--release` (que se niega SIN mutar nada: el issue sigue en
 //       status:in-progress) y de `--check-plan` (modo read-only para que el
 //       agente valide ANTES de commitear). Igual que el 5, nunca lo ve
+//       classifyClaimOutcome.
+//   9 = NUEVO (F38) — el gate `plan` de este slice NO está cerrado por un
+//       humano: no hay ningún comentario con el go de ESTE despacho
+//       (`-OK <nonce>`), o el go de este despacho no está registrado, o no se
+//       ha podido comprobar. Sale sólo de `--release`, que se niega sin mutar
+//       nada. Igual que el 5, el 6, el 7 y el 8, nunca lo ve
 //       classifyClaimOutcome.
 // El texto que este fichero imprime NO cambia de contenido (los mismos
 // detalles, incluido el comando manual de `--release`/revert) — solo deja
@@ -629,6 +643,72 @@ if (checkPlan) {
   dieOut(result.message, 0)
 }
 
+// ============================================================================
+// EL VIGILANTE DEL MERGE — para que la cosecha no espere a un recado.
+//
+// La Puerta 3 del loop es humana (cerrar los gates y mergear) y hasta esta ronda
+// mergear no producía NINGUNA señal mecánica. El PR se mergeaba, el issue se
+// cerraba, y `.worktrees/<n>` + `feat/<n>` se quedaban en disco con su `claude`
+// vivo —trece horas en el caso que dio origen a F20— hasta que la misma persona
+// que había mergeado iba a la ventana de la coordinadora a decírselo. El evento
+// existía en GitHub; lo que disparaba la cosecha era un recado.
+//
+// SE LANZA AQUÍ, Y NO EN `/ct-next`, porque este es el instante EXACTO en que
+// existe un PR abierto esperando un merge humano. Lanzarlo en el despacho —junto
+// al vigilante del `-OK`, que es donde primero se pensó— pondría un proceso a
+// preguntar por un PR que todavía no existe durante toda la implementación.
+//
+// SE LANZA DESPRENDIDO (`detached` + `unref`) porque tiene que sobrevivir a que
+// esta invocación termine, y a que se cierre la sesión del slice: el caso que
+// motiva todo esto es un PR que se mergea horas o días después de abrirse.
+//
+// NO ROMPE EL RELEASE, y esto es la regla, no una cortesía: va DESPUÉS de que el
+// issue ya esté en `status:in-review`, y cualquier fallo aquí se AVISA y sigue.
+// El trabajo ya está entregado; no poder vigilar el merge significa volver al
+// modo de antes —avisar a mano—, no perder la entrega. Es el mismo criterio que
+// el `git add` de la telemetría en ct-step: el termómetro no es parte del motor.
+// Por eso hay además un manejador de `error`: un fallo ASÍNCRONO de `spawn`
+// (EAGAIN, EMFILE) no lo ve el `try/catch`, y sin manejador sería un `'error'`
+// sin atender que tumbaría este script — convirtiendo un release CONSUMADO en un
+// exit distinto de 0, o sea en la peor mentira posible en este fichero.
+//
+// EL CWD DE LA COORDINADORA SALE DE `localSliceArtifacts`, no de `process.cwd()`.
+// Este script se invoca desde dentro del worktree del slice, así que el cwd es
+// `.worktrees/<n>`; la coordinadora vive en el checkout PRINCIPAL, que es lo que
+// esa función ya sabe sacar de `git worktree list --porcelain`. Si no se ha
+// podido mirar, NO se inventa una ruta: se avisa y no se lanza nada. Un
+// vigilante apuntando a un directorio equivocado no encontraría nunca a quién
+// entregarle el aviso, y encima lo anunciaría como lanzado.
+//
+// CT_WATCH_MERGE_BIN sigue el patrón de CT_WATCH_GO_BIN: no cambia NINGUNA
+// decisión, sólo qué programa se lanza. Existe para que los tests puedan
+// comprobar que el vigilante se lanza con los argumentos correctos sin poner un
+// proceso real a sondear GitHub durante 48 horas.
+// ============================================================================
+function lanzarVigilanteDelMerge(n) {
+  const aviso = (por) => errLine(`aviso: no se ha lanzado el vigilante del merge de #${n} (${por}) — el slice está entregado y el issue está en status:in-review, pero cuando mergees su PR tendrás que recoger la cosecha a mano (o avisar a la coordinadora).`)
+  try {
+    const disco = localSliceArtifacts(n)
+    if (!disco.known) return aviso('no se ha podido averiguar cuál es el checkout principal, así que no se sabe dónde buscar la sesión coordinadora')
+    const bin = process.env.CT_WATCH_MERGE_BIN || ctWatchMergePath
+    // `spawn(process.execPath, [bin, …])` con un `bin` que no existe NO falla:
+    // el ejecutable es siempre `node`, así que el proceso nace, muere al
+    // instante con un error de módulo, y sin esta comprobación se anunciaría
+    // «vigilante lanzado» con un pid que ya no existe. Misma guarda, y mismo
+    // motivo, que en ct-next.mjs#lanzarVigilanteDelGo.
+    if (!existsSync(bin)) return aviso(`el programa del vigilante no existe: ${bin}`)
+    const logPath = join(controlTowerLogDir({ configDir: process.env.CLAUDE_CONFIG_DIR || null, home: homedir() }), `watch-merge-${n}.log`)
+    const hijo = spawn(process.execPath, [
+      bin, '--issue', String(n), '--repo', repo, '--coordinator-cwd', disco.mainRoot, '--log', logPath,
+    ], { detached: true, stdio: 'ignore' })
+    hijo.on('error', (e) => aviso(`fallo al arrancarlo: ${e.message}`))
+    hijo.unref()
+    outLine(`vigilante del merge de #${n} lanzado (pid ${hijo.pid}) — cuando mergees el PR, la coordinadora se enterará sola. Log: ${logPath}`)
+  } catch (e) {
+    aviso(e.message)
+  }
+}
+
 if (release) {
   const check = stateFilesIntroducedByBranch()
   if (!check.known) {
@@ -732,6 +812,95 @@ if (release) {
       errLine(`aviso: #${issue} lleva la label gate:e2e pero su cuerpo no declara ninguna sección "${E2E_HEADING}" — no hay recorridos que verificar, así que se libera igual, pero conviene revisar si la sección se perdió al editar el issue a mano.`)
     }
   }
+  // ==========================================================================
+  // F38 — LA PUERTA DEL GO: EL GATE `plan` NO SE CIERRA SOLO.
+  //
+  // EL DEFECTO QUE CIERRA. Desde la #32, contestar `-OK` en el issue arranca la
+  // sesión: le dio consecuencia mecánica a un comentario de GitHub. Y el agente
+  // tiene `gh`. Su propio límite lo decía (commands/ct-next.md): «no impide que
+  // el propio agente escriba `-OK` en su propio issue». Con el gate `plan`
+  // implicado por defecto en TODO slice (gates.js#gatesForType), el resultado
+  // era una puerta que el gateado podía abrir, dejando además el REGISTRO de una
+  // revisión humana que no ocurrió. Aquí se cierran las dos mitades: el go
+  // lleva un nonce que el agente no puede adivinar (go-response.js), y ES UN
+  // REQUISITO para liberar — antes no lo era para nada: un agente podía ignorar
+  // el gate entero y entregar igual, porque el kickoff que lo manda parar es un
+  // prompt y no un gate.
+  //
+  // POR QUÉ ESTA PUERTA VA LA ÚLTIMA, y no junto a la del plan (exit 6). El
+  // orden de esta escalera es «qué mensaje debe ganar», y un go que falta
+  // significa cosas distintas según lo demás: con el run a medias, preguntar por
+  // el go es ruido sobre un slice que aún no ha terminado; con TODO en verde —el
+  // plan válido, las tareas comiteadas, la Global en verde, el e2e cubierto— un
+  // go que falta ya no es un «todavía no», es trabajo entero hecho sin permiso.
+  // Ahí es cuando este mensaje tiene que ganar, y ahí es donde está.
+  //
+  // Y VA ANTES DEL AVISO DE LOS *NO-VERIFICADOS* por lo mismo que ese aviso va
+  // antes de mutar: si el release no va a ocurrir, es ruido sobre una decisión
+  // que ya se tomó.
+  //
+  // LAS TRES FORMAS DE NO PODER AFIRMARLO, y ninguna libera: sin compromiso
+  // registrado, con el registro ilegible, o sin poder leer los comentarios. Es
+  // la doctrina de los exit 5/6/8 de arriba: este fichero no afirma limpio lo
+  // que no ha podido mirar. La renuncia `!plan` de la fila SÍ libera, porque
+  // entonces no hay gate que cerrar — y se lee de las labels, que es donde la
+  // renuncia sobrevive al kickoff.
+  // ==========================================================================
+  const ctHome = { configDir: process.env.CLAUDE_CONFIG_DIR || null, home: homedir() }
+  const registro = readGoCommitment({ repo, issue, ...ctHome })
+  if (registro.error) {
+    dieErr(`no se libera #${issue}: el go de este despacho está registrado en ${registro.path} y NO se ha podido leer (${registro.error}). No se afirma que falte el go, sólo que no se ha podido comprobar. Arréglalo (permisos, o el contenido del fichero) o reemite uno con \`node <plugin>/scripts/ct-go.mjs --issue ${issue} --repo ${repo}\`. El issue sigue en status:in-progress: no se ha movido nada.`, 9)
+  }
+  if (registro.missing) {
+    // Sin registro, la única forma de saber si este slice DEBÍA tener gate
+    // `plan` son sus labels. Un fallo de lectura aquí no libera: sería la misma
+    // afirmación sin haber mirado.
+    let labels = null
+    try { labels = labelsOf(issue) } catch (e) {
+      dieErr(`no se libera #${issue}: el go de este despacho no está registrado (${registro.path} no existe) y tampoco se han podido leer las labels del issue (${e.message}) para saber si este slice lleva el gate \`plan\`. No se afirma que no lo lleve. Reintenta cuando \`gh\` responda. El issue sigue en status:in-progress: no se ha movido nada.`, 9)
+    }
+    // `gatesFromLabels` devuelve {gates, declared}: `declared` distingue «este
+    // issue dice que no tiene gate `plan`» de «este issue no dice nada de sus
+    // gates» (es anterior a que los gates existieran, o está hecho a mano). Sólo
+    // la PRIMERA libera. La segunda no es una renuncia, es un silencio, y un
+    // silencio no cierra un gate — además de ser el camino que abriría un agente
+    // borrándose las labels. Se arregla con un comando y no rompe nada en vuelo.
+    const declaracion = gatesFromLabels(labels)
+    if (!declaracion.declared || declaracion.gates.includes('plan')) {
+      const porque = declaracion.declared
+        ? 'este slice lleva el gate `plan`'
+        : 'las labels de este issue no declaran NINGÚN gate (ni `gate:none`), así que no se puede afirmar que renuncie al `plan` —silencio no es renuncia—'
+      dieErr(`no se libera #${issue}: ${porque} y el go de este despacho NO ESTÁ REGISTRADO (${registro.path} no existe), así que no hay nada contra lo que comprobar el \`${GO_TOKEN}\` del issue. Pasa cuando el slice se despachó con una versión anterior a la que trajo el nonce, o cuando ese fichero se borró. Reemite el go con \`node <plugin>/scripts/ct-go.mjs --issue ${issue} --repo ${repo}\`, pide que lo contesten en el issue y vuelve a liberar. El issue sigue en status:in-progress: no se ha movido nada.`, 9)
+    }
+  } else {
+    // MISMA LECTURA QUE EL VIGILANTE (`--json comments` a secas, y `.comments`
+    // parseado aquí), no un `-q` distinto: dos formas de pedir lo mismo son dos
+    // formas de que un día una de ellas devuelva otra cosa. Es la razón por la
+    // que la puerta del e2e reutiliza `extractE2eRuns` en vez de reparsear.
+    let comentarios = null
+    try {
+      const parsed = JSON.parse(gh(['issue', 'view', String(issue), '--repo', repo, '--json', 'comments']))
+      comentarios = Array.isArray(parsed?.comments) ? parsed.comments : null
+    } catch {
+      comentarios = null
+    }
+    if (!Array.isArray(comentarios)) {
+      dieErr(`no se libera #${issue}: no se han podido leer los comentarios del issue (\`gh issue view --json comments\`), así que no se ha podido comprobar el go del gate \`plan\` — no se afirma que falte. Reintenta cuando \`gh\` responda. El issue sigue en status:in-progress: no se ha movido nada.`, 9)
+    }
+    // SIN VENTANA a propósito, al contrario que el vigilante: aquí vale
+    // cualquier comentario del issue, porque el nonce ya hace el trabajo que
+    // allí hacía la foto de ids — un go de un despacho anterior tiene otro
+    // nonce y no encaja por construcción.
+    const go = comentarios.find((c) => matchesGo(c?.body, registro.commitment))
+    if (!go) {
+      dieErr(`no se libera #${issue}: el gate \`plan\` no está cerrado — ningún comentario de este issue trae el go de este despacho. Lo cierra una persona contestando \`${GO_TOKEN} <nonce>\` con el nonce que /ct-next imprimió al despachar (no está en tu contexto, ni en el issue, ni en tu worktree: es de quien revisa el plan, a propósito). Si se ha perdido, quien despachó lo reemite con \`node <plugin>/scripts/ct-go.mjs --issue ${issue} --repo ${repo}\`. El issue sigue en status:in-progress: no se ha movido nada.`, 9)
+    }
+    // QUIÉN lo dio, por stderr: el registro de quién autorizó vale más impreso
+    // que guardado, y es la única señal que delataría un go dado por la propia
+    // identidad con la que corre el agente.
+    errLine(`gate \`plan\` cerrado: go de este despacho dado por ${go?.author?.login ? `@${go.author.login}` : 'un autor que gh no ha devuelto'}${go?.createdAt ? ` el ${go.createdAt}` : ''}.`)
+  }
+
   // LOS *NO-VERIFICADOS*, DICHOS. Es el estado que libera un slice SIN haberlo
   // comprobado —un docker que no arranca, una credencial caducada, la sección
   // de AGENTS.md sin rellenar—, y entrega a propósito: retenerlo dejaría el
@@ -764,6 +933,12 @@ if (release) {
       // contrato ensanchado de arriba, sin cambios.
       dieErr(`no se pudo liberar #${issue} a in-review: ${result.error.message}. Sigue en status:in-progress; reintenta el --release.`, 1)
     }
+    // DENTRO del `!dryRun && !fx`, y eso es la decisión: con `--dry-run` no se
+    // ha movido nada, así que no hay ningún PR cuyo merge esperar, y lanzar el
+    // vigilante ahí convertiría una corrida en seco en un proceso de 48 horas.
+    // Con `fx` (CT_CLAIM_FIXTURE) tampoco: el fixture modela la forma del claim,
+    // no un repo real donde haya nada que cosechar.
+    lanzarVigilanteDelMerge(issue)
   }
   dieOut(`released #${issue} → in-review`, 0)
 }
