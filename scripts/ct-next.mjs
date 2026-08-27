@@ -29,7 +29,7 @@ import {
 import { cargarIssues } from './loop-issues.js'
 import { detectConventions, formatFindings } from './conventions.js'
 import { readRepoDocs, readAck, ACK_PATH } from './conventions-io.js'
-import { CONVENTIONS_DIR } from './vara-ct.js'
+import { PluginYardstick } from './plugin-yardstick.js'
 import { assessLocalLiveness } from './liveness.js'
 
 // W-C: dispatch-check.mjs implementa el protocolo de claim completo (colisión
@@ -50,7 +50,7 @@ const ctStepPath = join(dirname(fileURLToPath(import.meta.url)), 'ct-step.mjs')
 // La misma resolución que sus dos hermanas, y por el mismo motivo: el kickoff es
 // texto plano y el token ${CLAUDE_PLUGIN_ROOT} no existe ahí. El agente que
 // escribe el plan tiene que poder abrir estos cuatro documentos por su ruta.
-const conventionsDir = join(dirname(fileURLToPath(import.meta.url)), '..', CONVENTIONS_DIR)
+const conventionsDir = join(dirname(fileURLToPath(import.meta.url)), '..', PluginYardstick.DIRECTORY)
 // El vigilante del `-OK`: se lanza desprendido tras despachar un slice con gate
 // `plan`. Ver lanzarVigilanteDelGo.
 const ctWatchGoPath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch-go.mjs')

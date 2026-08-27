@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url'
 
 import { deliveredRun } from '../scripts/run-machine.js'
 import { VERDICT_RULES, SLICE_VERDICT_RULES } from '../scripts/step-contracts.js'
-import { CONVENTIONS_FILES } from '../scripts/vara-ct.js'
+import { PluginYardstick } from '../scripts/plugin-yardstick.js'
 // Slice 10: renderState siembra el SLICE.md de los tests de señal por el
 // mismo camino que buildStateSeed (pliega/entrecomilla los valores largos —
 // la razón de que ct-step lea `senal:` con parseStateSafe y no con regex), y
@@ -906,7 +906,7 @@ describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
     ct('next')
     const brief = briefDeLaUno()
     expect(brief).toMatch(/\*\*La vara de ct\*\*/)
-    for (const nombre of CONVENTIONS_FILES) {
+    for (const nombre of PluginYardstick.FILES) {
       expect(brief).toContain(`## Vara de ct: conventions/${nombre}`)
     }
     expect(brief.indexOf('Task 1')).toBeLessThan(brief.indexOf('La vara de ct'))

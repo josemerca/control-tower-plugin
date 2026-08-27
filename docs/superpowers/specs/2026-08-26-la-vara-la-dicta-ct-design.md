@@ -179,6 +179,24 @@ conventions/testing.md` en vez de una línea de un monolito, y cada fichero se
 corrige sin releer los otros. Cuando el plan traiga un campo legible por un
 programa, la selección se añade sin rehacer el contenido.
 
+### 4.2 La lista de ficheros se declara, y no se barre del disco
+
+`PluginYardstick.FILES` (`scripts/plugin-yardstick.js`) es una lista fija de
+cuatro nombres, no el resultado de recorrer el directorio `conventions/` del
+plugin. La alternativa —tratar como vara cualquier `.md` que aparezca ahí—
+parece más simple y es la que falla en silencio: un fichero borrado por
+accidente, o movido a un subdirectorio en un refactor, reduciría la vara sin
+que nada lo note, porque un directorio con tres ficheros donde antes había
+cuatro no se distingue de un directorio que siempre tuvo tres.
+
+Declarada, el borrado deja de ser invisible: falta un nombre que la lista
+promete, y eso es lo que `PluginYardstick.missingDocuments` —y, tras él,
+`composeSection`— convierte en un fallo que aborta en vez de en una vara más
+corta que nadie pidió. `__tests__/plugin-yardstick.test.js` ata la lista al
+directorio en las dos direcciones —todo lo declarado existe en disco, y todo
+`.md` que hay en disco está declarado— para que la lista no pueda quedarse
+atrás del directorio que describe.
+
 ## 5. Qué dicen los cuatro
 
 El idioma es **inglés**, como todo el corpus del plugin que llega a un agente

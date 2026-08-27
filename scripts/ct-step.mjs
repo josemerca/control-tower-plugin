@@ -61,7 +61,7 @@ import { dirname, join } from 'node:path'
 import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS } from './run-machine.js'
 import { extractTasks } from './plan-tasks.js'
 import { CONVENTIONS_FILE, seccionDeVara } from './vara.js'
-import { CONVENTIONS_DIR, CONVENTIONS_FILES, faltasDeVara, seccionDeVaraDeCt } from './vara-ct.js'
+import { PluginYardstick } from './plugin-yardstick.js'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage, findingLocation,
   readE2eReport, E2E_SCHEMA,
@@ -514,16 +514,16 @@ function escribirBrief() {
   // Un brief sin ella deja al implementador y al juez midiendo con nada, y en
   // silencio eso no se distingue de un ítem conforme. Y se comprueba antes de
   // llamar a `task-brief` para no dejar en disco un brief que nadie va a usar.
-  const deCt = CONVENTIONS_FILES.map((nombre) => {
+  const deCt = PluginYardstick.FILES.map((nombre) => {
     try {
-      return { nombre, contenido: readFileSync(join(PLUGIN_ROOT, CONVENTIONS_DIR, nombre), 'utf8') }
+      return { name: nombre, content: readFileSync(join(PLUGIN_ROOT, PluginYardstick.DIRECTORY, nombre), 'utf8') }
     } catch {
-      return { nombre, contenido: null }
+      return { name: nombre, content: null }
     }
   })
-  const faltas = faltasDeVara(deCt)
+  const faltas = PluginYardstick.missingDocuments(deCt)
   if (faltas.length) {
-    die(`la vara de ct no se puede leer: falta o está vacío ${faltas.join(', ')} en ${join(PLUGIN_ROOT, CONVENTIONS_DIR)}. Es una instalación del plugin incompleta, no una propiedad de este repo: sin esos documentos el implementador escribe y el juez bloquea sin nada contra qué medir, y eso no se distingue en silencio de un diff conforme. Reinstala el plugin.`, EXIT.PRECONDITION)
+    die(`la vara de ct no se puede leer: falta o está vacío ${faltas.join(', ')} en ${join(PLUGIN_ROOT, PluginYardstick.DIRECTORY)}. Es una instalación del plugin incompleta, no una propiedad de este repo: sin esos documentos el implementador escribe y el juez bloquea sin nada contra qué medir, y eso no se distingue en silencio de un diff conforme. Reinstala el plugin.`, EXIT.PRECONDITION)
   }
   try {
     execFileSync(join(PLUGIN_ROOT, 'skills', 'subagent-driven-development', 'scripts', 'task-brief'),
@@ -531,7 +531,7 @@ function escribirBrief() {
   } catch (e) {
     die(`no se pudo extraer el brief de la tarea ${run.task}: ${String(e.stderr || e.message).trim()}`, EXIT.PRECONDITION)
   }
-  appendFileSync(brief, seccionDeVaraDeCt(deCt))
+  appendFileSync(brief, PluginYardstick.composeSection(deCt))
   // §3.3: la vara del repo cruza el embudo AQUÍ, leída directo del disco y sin
   // ningún agente en medio. Su ausencia no avisa: es el estado normal de casi
   // todo repo hoy, y el juez lo mide como `sin-vara`, no como un error.
