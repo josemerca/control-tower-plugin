@@ -57,6 +57,31 @@ so the test says which case it is about without reading the arguments.
 - **A test that launches a real subprocess is marked as such**, so a fast subset
   exists. The marker shortens the loop, not what is required.
 
+## An assertion is not finished until it has been seen to fail for the reason its name gives
+
+Break by hand the one thing the assertion says it protects — remove the sentence,
+invert the condition, delete the line — run it, confirm it turns red, and restore it.
+
+This is not the red phase of the cycle. The red phase proves a test fails when the
+behaviour is missing. This proves a test fails when the concrete thing its name
+promises is broken. They part where it matters: a test can pass its red phase and
+still be weaker than its own name, because it goes green with the protection
+removed and the rest of the text untouched.
+
+It bites hardest on an assertion over a document or a piece of text, where the
+subject is one sentence among many others, and on an assertion that matches loose —
+a substring, a word that also shows up elsewhere, a count of elements — when the
+distinctive sentence was there to use instead.
+
+When the two do not agree, fix it: if the name says a rule declares something and
+the assertion is satisfied by something that is not the declaration, either the
+name changes or the assertion changes — and it is almost always the assertion that
+is wrong, because the name says what the test actually meant to protect.
+
+Whoever writes the assertion runs it. Whoever judges the diff has nothing to run it
+with, so applies this by reading: ask whether that assertion could fail for the
+reason its name gives, and if it could not, that is the finding.
+
 ## Antipatterns
 
 - A test named after the method it calls.
@@ -69,3 +94,4 @@ so the test says which case it is about without reading the arguments.
 - A doubled value.
 - A test of the domain reachable from the application layer.
 - A test that launches a real subprocess without its marker.
+- An assertion that stays green once the one thing it names has been broken by hand.

@@ -96,3 +96,41 @@ describe('code.md distingue estilo (exento en módulo viejo) de defecto (nunca e
   }
 })
 
+describe('testing.md separa "visto fallar por su motivo" de la fase roja del ciclo, y declara la asimetría de quién puede correrla', () => {
+  const clausula = () =>
+    /## An assertion is not finished until it has been seen to fail for the reason its name gives[\s\S]*?(?=\n## )/
+      .exec(leer('testing.md'))[0]
+      .replace(/\s+/g, ' ')
+
+  const AFIRMACIONES = {
+    'declara explícitamente que no es la fase roja del ciclo':
+      () => expect(clausula(), 'testing.md no dice "This is not the red phase of the cycle"').toContain('This is not the red phase of the cycle'),
+    'separa la fase roja (falta el comportamiento) de esto (se rompe lo concreto que el nombre nombra)':
+      () =>
+        expect(
+          clausula(),
+          'testing.md no distingue "the behaviour is missing" de "the concrete thing its name promises is broken"'
+        ).toContain('This proves a test fails when the concrete thing its name promises is broken.'),
+    'dice qué se arregla cuando el nombre promete más de lo que la aserción puede fallar':
+      () =>
+        expect(
+          clausula(),
+          'testing.md no dice que casi siempre lo que está mal es la aserción, no el nombre'
+        ).toContain('it is almost always the assertion that'),
+    'declara que quien escribe la aserción la corre':
+      () => expect(clausula(), 'testing.md no dice "Whoever writes the assertion runs it"').toContain('Whoever writes the assertion runs it'),
+    'declara que quien juzga no tiene con qué correrla y la aplica leyendo':
+      () =>
+        expect(
+          clausula(),
+          'testing.md no dice que quien juzga el diff no tiene con qué correr nada y lo aplica leyendo'
+        ).toContain('Whoever judges the diff has nothing to run it'),
+  }
+
+  for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
+    it(`testing.md ${afirmacion}`, () => {
+      comprobar()
+    })
+  }
+})
+
