@@ -6,7 +6,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { makeSpecDir, specUrl } from './fixtures/spec-repo.js'
 import { REAL_FAILING_TABLE, REAL_DEP_TABLE, REAL_TABLE_WITH_HASH_FIXED } from './fixtures/slices-real-tables.js'
-import { buildIssueBody, EPIC_CONTEXT_HEADING, LOOP_STATUS_LABELS } from '../scripts/groom.js'
+import { buildIssueBody, EPIC_CONTEXT_HEADING, FROZEN_DECISIONS_HEADING, LOOP_STATUS_LABELS } from '../scripts/groom.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-groom.mjs')
 
@@ -1335,15 +1335,15 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
     const res = spawnSync('node', [script, spec, '--repo', 'o/r', '--milestone', 'Epic', '--dry-run'],
       { encoding: 'utf8', env: fakeEnv({ FAKE_GH_LIST_SEQUENCE: JSON.stringify([[MATCHING]]), FAKE_GH_LABELS_LIST: PLAN_LABELS_EXIST }) })
     expect(res.status).toBe(0)
-    // F26: ONE_SLICE_SPEC no trae "## Contexto del epic", así que desde T3
-    // el stderr ya no está vacío por ese motivo — ortogonal a la divergencia
-    // que este test vigila. Slice 10: tampoco trae columna "Señal", así que
-    // desde entonces hay una segunda línea de aviso (también ortogonal). Se
-    // comprueba que ESAS son las únicas líneas (nada de "difiere"/"falta la
-    // label"/etc.), en vez de exigir vacío a secas.
+    // F26 + Slice 10 + decisiones: ONE_SLICE_SPEC no trae "## Contexto del
+    // epic", ni "## Decisiones congeladas", ni columna "Señal", así que el
+    // stderr trae los TRES avisos de ausencia — todos ortogonales a la
+    // divergencia que este test vigila. Se comprueba que SOLO están esos tres
+    // (nada de "difiere"/"falta la label"/etc.), en vez de exigir vacío a secas.
     const stderrLines = res.stderr.split('\n').filter(Boolean)
-    expect(stderrLines).toHaveLength(2)
+    expect(stderrLines).toHaveLength(3)
     expect(stderrLines.some((l) => l.includes(EPIC_CONTEXT_HEADING))).toBe(true)
+    expect(stderrLines.some((l) => l.includes(FROZEN_DECISIONS_HEADING))).toBe(true)
     expect(stderrLines.some((l) => l.includes('no tiene columna "Señal"'))).toBe(true)
     rmSync(dir, { recursive: true, force: true })
   })
@@ -1365,12 +1365,14 @@ describe('ct-groom --dry-run — detecta divergencia de un issue ya existente (F
     // F6: este fixture (issue CERRADO, sin ninguna label status:) es también
     // la prueba de que el recordatorio de status:backlog no persigue a un
     // epic ya terminado: un issue cerrado no está pendiente de promoción.
-    // F26: mismo caso que el test anterior — ONE_SLICE_SPEC no trae
-    // "## Contexto del epic" (ni, desde Slice 10, columna "Señal"), así que
-    // el stderr trae esos dos avisos y nada más.
+    // F26 + Slice 10 + decisiones: mismo caso que el test anterior —
+    // ONE_SLICE_SPEC no trae ni "## Contexto del epic", ni "## Decisiones
+    // congeladas", ni columna "Señal", así que el stderr trae esos tres avisos
+    // y nada más.
     const stderrLines = res.stderr.split('\n').filter(Boolean)
-    expect(stderrLines).toHaveLength(2)
+    expect(stderrLines).toHaveLength(3)
     expect(stderrLines.some((l) => l.includes(EPIC_CONTEXT_HEADING))).toBe(true)
+    expect(stderrLines.some((l) => l.includes(FROZEN_DECISIONS_HEADING))).toBe(true)
     expect(stderrLines.some((l) => l.includes('no tiene columna "Señal"'))).toBe(true)
     rmSync(dir, { recursive: true, force: true })
   })

@@ -725,7 +725,14 @@ export function extractStrayDeps(body, sectionDeps) {
 // asigna GitHub al crear el issue (no se controla), el orden lo decide el
 // spec. Ver buildOrderIndex/buildDispatchInput más abajo para la traducción.
 export function extractOrder(body) {
-  const m = (body || '').match(/ct-order:(\d+)/)
+  // Anclado al marcador REAL y ENTERO: una línea que sea exactamente
+  // "<!-- ct-order:N -->" (apertura <!-- + cierre -->, con /m para línea a
+  // línea). No basta exigir solo "-->": una decisión congelada que escriba
+  // "ct-order:99 -->" en su prosa lo burlaría. Sin este ancla, cualquier texto
+  // por DELANTE del marcador real (p.ej. una sección "## Decisiones congeladas"
+  // que hable de ct-order) se leería como el orden del issue, colisionaría en
+  // buildOrderIndex y sacaría el epic entero del despacho.
+  const m = (body || '').match(/^<!--\s*ct-order:(\d+)\s*-->\s*$/m)
   return m ? parseInt(m[1], 10) : null
 }
 

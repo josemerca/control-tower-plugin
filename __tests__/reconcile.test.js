@@ -589,6 +589,7 @@ describe('buildReconcileBody — splice quirúrgico de enlace-al-spec/AC/Depende
       unresolvedDeps: false,
       unresolvedReasons: { ac: null, deps: null },
       unresolvedEpicContext: null,
+      unresolvedFrozenDecisions: null,
     })
   })
 

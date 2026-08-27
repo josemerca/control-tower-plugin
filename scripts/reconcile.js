@@ -97,7 +97,7 @@ import {
 // como número de issue — un --reconcile con la copia vieja habría reescrito
 // el formato nuevo de vuelta al viejo, reintroduciendo el enlace falso en
 // cada corrida).
-import { renderDepsContent, renderAcContent, GATES_HEADING, E2E_HEADING, EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING, SENAL_HEADING } from './groom.js'
+import { renderDepsContent, renderAcContent, GATES_HEADING, E2E_HEADING, EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING, FROZEN_DECISIONS_HEADING, SENAL_HEADING } from './groom.js'
 
 // ownedLabelsOnly: el spec solo es autoridad sobre un prefijo (`type:`,
 // `area:`, `touches:`) SI la tabla §9 trae la columna que lo alimenta
@@ -239,6 +239,9 @@ const DUPLICATE_CHECKS = [
   // exit code a esto entrenaría a ignorar el resto del informe.
   { headings: EPIC_CONTEXT_HEADING, label: 'Contexto del epic', machine: false },
   { headings: INHERITED_CONTEXT_HEADING, label: 'Contexto heredado', machine: false },
+  // Decisiones congeladas: como el contexto del epic, un duplicado es
+  // cosmético (ninguna máquina decide nada con ellas) — se avisa, no cuenta.
+  { headings: FROZEN_DECISIONS_HEADING, label: 'Decisiones congeladas', machine: false },
 ]
 
 // diffIssue: compara un issue EXISTENTE de verdad (la forma cruda de `gh api
@@ -376,6 +379,22 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
     epicContextDiffers = currentEpicContext.trim() !== wantedEpicContext.trim()
   }
 
+  // Decisiones congeladas: mismo criterio que epicContextDiffers, incluida la
+  // rama `frozenDecisionsUnknown` (el spec trae la sección pero no se pudo leer
+  // un texto válido — no es divergencia, es no tener con qué comparar).
+  const currentFrozenDecisions = extractSectionContent(body, FROZEN_DECISIONS_HEADING)
+  const wantedFrozenDecisions = wantedIssue.frozenDecisions ?? null
+  let frozenDecisionsDiffers
+  if (wantedIssue.frozenDecisionsUnknown) {
+    frozenDecisionsDiffers = false
+  } else if (currentFrozenDecisions === null && wantedFrozenDecisions === null) {
+    frozenDecisionsDiffers = false
+  } else if (currentFrozenDecisions === null || wantedFrozenDecisions === null) {
+    frozenDecisionsDiffers = true
+  } else {
+    frozenDecisionsDiffers = currentFrozenDecisions.trim() !== wantedFrozenDecisions.trim()
+  }
+
   // Protegido: SIEMPRE debería existir (buildIssueBody la emite
   // incondicionalmente) — si la cabecera falta del todo en el issue
   // existente (un humano la borró a mano), se trata como divergencia.
@@ -455,6 +474,7 @@ export function diffIssue(existing, wantedIssue, wantedMilestone, ownedLabelPref
     descripcionDiffers,
     senalDiffers,
     epicContextDiffers,
+    frozenDecisionsDiffers,
     protectedDiffers,
     gatesDiffers,
     e2eDiffers,
@@ -605,6 +625,7 @@ export function formatDrift(diff) {
   // no puede prometer la reescritura — dice qué es lo normal y de dónde sale
   // la excepción, que es exactamente lo que sabe.
   if (diff.epicContextDiffers) lines.push(`nota: ${head}: la sección "${EPIC_CONTEXT_HEADING}" difiere del spec (no cuenta para el exit code; con --reconcile se reescribe desde el spec salvo que el body no deje hacerlo con seguridad, en cuyo caso se dice aquí mismo con otra nota y el motivo). La sección "${INHERITED_CONTEXT_HEADING}" de al lado no se toca nunca`)
+  if (diff.frozenDecisionsDiffers) lines.push(`nota: ${head}: la sección "${FROZEN_DECISIONS_HEADING}" difiere del spec (no cuenta para el exit code; con --reconcile se reescribe desde el spec salvo que el body no deje hacerlo con seguridad, en cuyo caso se dice aquí mismo con otra nota y el motivo)`)
   if (diff.protectedDiffers) lines.push(`nota: ${head}: la sección "## Out of scope / Protected" difiere del spec (prosa — no cuenta para el exit code; --reconcile no la reescribe)`)
   // F21: se nombra la label como el canal que SÍ cuenta, para que quien lea
   // esta nota sepa dónde mirar si de verdad le preocupa un gate — sin esa
@@ -754,6 +775,7 @@ export function buildReconcileBody(existingBody, wantedIssue) {
   let unresolvedAc = false
   let unresolvedDeps = false
   let unresolvedEpicContext = null
+  let unresolvedFrozenDecisions = null
   let unresolvedE2e = null
   const unresolvedReasons = { ac: null, deps: null }
 
@@ -1161,7 +1183,73 @@ export function buildReconcileBody(existingBody, wantedIssue) {
     }
   }
 
-  if (!changed) return { body: null, unresolvedAc, unresolvedDeps, unresolvedReasons, unresolvedEpicContext, unresolvedE2e }
+  // Decisiones congeladas. Mismo trato exacto que "## Contexto del epic": del
+  // spec, se reescribe (es texto del epic, no prosa que un humano edite en un
+  // issue suelto). Va DESPUÉS del bloque del epic a propósito: las dos se
+  // insertan ancladas en "## Contexto heredado", así que correr esta segunda
+  // deja el orden epic → decisiones → heredado que fija buildIssueBody. Las
+  // posiciones se localizan sobre el body YA actualizado por los splices de
+  // arriba.
+  const currentFrozen = extractSectionContent(body, FROZEN_DECISIONS_HEADING)
+  const wantedFrozen = wantedIssue.frozenDecisions ?? null
+  const frozenDiffers = wantedIssue.frozenDecisionsUnknown
+    ? false
+    : (currentFrozen === null && wantedFrozen === null)
+      ? false
+      : (currentFrozen === null || wantedFrozen === null)
+        ? true
+        : currentFrozen.trim() !== wantedFrozen.trim()
+  if (frozenDiffers) {
+    const frozen = seccionSpliceable(FROZEN_DECISIONS_HEADING)
+    const frozenLoc = frozen.loc
+    // Defensa en el consumidor (igual que en el contexto del epic): un
+    // delimitador sin cerrar dentro de la sección haría que el splice borrara
+    // hasta el final del body. Se mira la sección y también el texto nuevo.
+    const seccionAbierta = frozenLoc ? unterminatedDelimiter(frozenLoc.content) : null
+    const textoAbierto = wantedFrozen ? unterminatedDelimiter(wantedFrozen) : null
+    if (seccionAbierta || textoAbierto) {
+      unresolvedFrozenDecisions = seccionAbierta ? 'seccion-sin-cerrar' : 'texto-sin-cerrar'
+    } else if (frozen.ambigua) {
+      unresolvedFrozenDecisions = 'duplicada'
+    } else if (wantedFrozen && frozenLoc) {
+      body = body.slice(0, frozenLoc.headingEnd) + wantedFrozen + '\n' + body.slice(frozenLoc.contentEnd)
+      changed = true
+    } else if (wantedFrozen && !frozenLoc) {
+      // Sección ausente y el spec sí la trae: se inserta entera. Ancla
+      // preferente "## Contexto heredado" (para respetar epic → decisiones →
+      // heredado), con "## Acceptance criteria" de respaldo — igual que el
+      // contexto del epic. Como este bloque corre DESPUÉS del suyo, si el epic
+      // se acaba de insertar la sección aterriza entre el epic y la heredada.
+      // No se usa seccionSpliceable para la heredada, por el mismo motivo que
+      // allí: su cabecera es el primer carácter de la zona que esa función
+      // descarta.
+      const heredadaUnica = countHeadingLines(body, INHERITED_CONTEXT_HEADING) === 1
+        ? locateSection(body, INHERITED_CONTEXT_HEADING)
+        : null
+      const ancla = heredadaUnica ? { loc: heredadaUnica, ambigua: false } : seccionSpliceable(AC_HEADING_FORMS)
+      if (ancla.loc) {
+        body = body.slice(0, ancla.loc.headingStart) + `${FROZEN_DECISIONS_HEADING}\n${wantedFrozen}\n\n` + body.slice(ancla.loc.headingStart)
+        changed = true
+      } else {
+        unresolvedFrozenDecisions = ancla.ambigua ? 'ancla-duplicada' : 'sin-ancla'
+      }
+    } else if (!wantedFrozen && frozenLoc) {
+      // El spec ya no trae decisiones: la sección se retira entera, cabecera
+      // incluida. Se recorta un '\n' del final del primer trozo para no dejar
+      // dos líneas en blanco en la costura, igual que al retirar el epic.
+      const before = body.slice(0, frozenLoc.headingStart).replace(/\n$/, '')
+      body = before + body.slice(frozenLoc.contentEnd)
+      changed = true
+    } else {
+      // `!wantedFrozen && !frozenLoc` y aun así `frozenDiffers`: la única copia
+      // cae en la zona de la coordinadora (extractSectionContent la leyó) y el
+      // spec ya no trae decisiones. No se toca (no es texto del plugin) y se
+      // dice, o el caller reportaría como retirada una sección que sigue ahí.
+      unresolvedFrozenDecisions = frozen.motivo
+    }
+  }
+
+  if (!changed) return { body: null, unresolvedAc, unresolvedDeps, unresolvedReasons, unresolvedEpicContext, unresolvedFrozenDecisions, unresolvedE2e }
   const finalBody = eol === '\r\n' ? body.replace(/\n/g, '\r\n') : body
-  return { body: finalBody, unresolvedAc, unresolvedDeps, unresolvedReasons, unresolvedEpicContext, unresolvedE2e }
+  return { body: finalBody, unresolvedAc, unresolvedDeps, unresolvedReasons, unresolvedEpicContext, unresolvedFrozenDecisions, unresolvedE2e }
 }
