@@ -332,6 +332,7 @@ describe('el primer acto nombra la vara de ct', () => {
 
   it('manda leerla, y la nombra por su ruta absoluta', () => {
     const k = renderKickoff(SLICE, OPTS_CON_VARA)
+    expect(k).toMatch(/LEE la vara de ct/)
     expect(k).toContain('/plugin/conventions')
   })
 

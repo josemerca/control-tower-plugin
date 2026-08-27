@@ -244,8 +244,14 @@ describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive 
     // así que el sitio donde vivir es este. El tope sigue siendo un trinquete:
     // la siguiente subida necesita su propio motivo escrito aquí, no vale por
     // precedente.
-    expect(bytes('SKILL.md')).toBeLessThanOrEqual(16604)
-    expect(bytes('plan-template.md')).toBeLessThanOrEqual(6377)
+    expect(
+      bytes('SKILL.md'),
+      'SKILL.md se ha pasado del tope: recorta dentro del mismo apartado, o sube el tope escribiendo aquí mismo el motivo de la subida — no vale por precedente.'
+    ).toBeLessThanOrEqual(16604)
+    expect(
+      bytes('plan-template.md'),
+      'plan-template.md se ha pasado del tope: recorta dentro del mismo apartado, o sube el tope escribiendo aquí mismo el motivo de la subida — no vale por precedente.'
+    ).toBeLessThanOrEqual(6377)
   })
 
   it('el template no pide el estado final completo y sus huecos nombran los roles', () => {

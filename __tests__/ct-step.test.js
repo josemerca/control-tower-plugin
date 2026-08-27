@@ -938,24 +938,27 @@ describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
     // que es exactamente el estado de una instalación rota. `PLUGIN_ROOT` sale de
     // la ubicación del propio script, así que copiarlo es la única forma de moverlo.
     const fake = mkdtempSync(join(tmpdir(), 'ct-plugin-roto-'))
-    cpSync(join(PLUGIN_ROOT_TEST, 'scripts'), join(fake, 'scripts'), { recursive: true })
-    cpSync(join(PLUGIN_ROOT_TEST, 'skills'), join(fake, 'skills'), { recursive: true })
-    // `scripts/state.js` importa el paquete npm `yaml`. Copiado fuera del repo
-    // (aquí, bajo tmpdir()), la resolución de módulos ESM no encuentra
-    // `node_modules/yaml` subiendo directorios y el proceso muere con
-    // MODULE_NOT_FOUND (exit 1) antes de llegar a la comprobación de la vara.
-    // El mismo problema ya lo resuelve `ct-next-claim.test.js` con un symlink
-    // a `node_modules` en vez de copiar el repo entero.
-    symlinkSync(join(PLUGIN_ROOT_TEST, 'node_modules'), join(fake, 'node_modules'), 'dir')
-    const r = spawnSync('node', [join(fake, 'scripts', 'ct-step.mjs'), 'next', '--plan', 'plan.md', '--issue', '7'], {
-      cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, CLAUDE_CONFIG_DIR: join(repo, '.telemetria') },
-    })
-    expect(r.status).toBe(8)
-    expect(r.stderr).toMatch(/code\.md/)
-    expect(r.stderr).toMatch(/instalación/)
-    expect(existsSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'))).toBe(false)
-    rmSync(fake, { recursive: true, force: true })
+    try {
+      cpSync(join(PLUGIN_ROOT_TEST, 'scripts'), join(fake, 'scripts'), { recursive: true })
+      cpSync(join(PLUGIN_ROOT_TEST, 'skills'), join(fake, 'skills'), { recursive: true })
+      // `scripts/state.js` importa el paquete npm `yaml`. Copiado fuera del repo
+      // (aquí, bajo tmpdir()), la resolución de módulos ESM no encuentra
+      // `node_modules/yaml` subiendo directorios y el proceso muere con
+      // MODULE_NOT_FOUND (exit 1) antes de llegar a la comprobación de la vara.
+      // El mismo problema ya lo resuelve `ct-next-claim.test.js` con un symlink
+      // a `node_modules` en vez de copiar el repo entero.
+      symlinkSync(join(PLUGIN_ROOT_TEST, 'node_modules'), join(fake, 'node_modules'), 'dir')
+      const r = spawnSync('node', [join(fake, 'scripts', 'ct-step.mjs'), 'next', '--plan', 'plan.md', '--issue', '7'], {
+        cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, CLAUDE_CONFIG_DIR: join(repo, '.telemetria') },
+      })
+      expect(r.status).toBe(8)
+      expect(r.stderr).toMatch(/code\.md/)
+      expect(r.stderr).toMatch(/instalación/)
+      expect(existsSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'))).toBe(false)
+    } finally {
+      rmSync(fake, { recursive: true, force: true })
+    }
   })
 })
 
