@@ -58,3 +58,41 @@ describe('los documentos de conventions/', () => {
     }
   })
 })
+
+describe('code.md distingue estilo (exento en módulo viejo) de defecto (nunca exento)', () => {
+  const clausula = () =>
+    /A module that was already there[\s\S]*?(?=\n## )/.exec(leer('code.md'))[0].replace(/\s+/g, ' ')
+
+  const REGLAS_DE_DEFECTO = [
+    /raw map returned as the value of logic/,
+    /closed vocabulary collapsed into a loose string or a boolean/,
+    /two fields that have to agree instead of one that makes the wrong state impossible/,
+    /an error named for where it happens instead of what happens/,
+  ]
+
+  const AFIRMACIONES = {
+    'acota la deuda a lo que es estilo, no la declara general':
+      () => expect(clausula()).toContain("the debt is only as wide as this document's **style** rules"),
+    'enumera las tres reglas de estilo exentas: prosa, idioma de los identificadores, función colgada de un tipo':
+      () =>
+        expect(clausula()).toContain(
+          'no prose, the language its identifiers are written in, and that every function hangs off a type'
+        ),
+    'declara que las reglas de defecto NO tienen la exención':
+      () => expect(clausula()).toContain("This document's **defect** rules carry no such exemption"),
+    'nombra al menos dos de las cuatro reglas de defecto, para que la declaración tenga sujeto':
+      () => {
+        const nombradas = REGLAS_DE_DEFECTO.filter((regla) => regla.test(clausula())).length
+        expect(nombradas, 'code.md nombra menos de dos reglas de defecto sin exención').toBeGreaterThanOrEqual(2)
+      },
+    'dice que las reglas de defecto rigen en un módulo viejo igual que en uno nuevo':
+      () => expect(clausula()).toContain('those bind on every diff, in a module born today and one that was already there alike'),
+  }
+
+  for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
+    it(`code.md ${afirmacion}`, () => {
+      comprobar()
+    })
+  }
+})
+
