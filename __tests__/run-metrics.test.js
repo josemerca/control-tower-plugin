@@ -439,10 +439,10 @@ describe('el agregado de lo que el juez dejó escrito (§3.4)', () => {
 // ---------------------------------------------------------------------------
 // MEDIDA 2: si la vara llegó al brief, y cuánto pesó. `briefVaraCtMeasures` es
 // PURA (no lee disco: recibe el contenido ya leído) y cuenta cabeceras
-// `## Vara de ct: conventions/` — exactamente lo que `seccionDeVaraDeCt`
-// (scripts/vara-ct.js) escribe por documento — en vez de comparar contra
-// `CONVENTIONS_FILES.length`, para que un quinto documento de mañana también
-// cuente sin tocar esta función.
+// `## Vara de ct: conventions/` — exactamente lo que `PluginYardstick.composeSection`
+// (scripts/plugin-yardstick.js) escribe por documento — en vez de comparar
+// contra `PluginYardstick.FILES.length`, para que un quinto documento de
+// mañana también cuente sin tocar esta función.
 // ---------------------------------------------------------------------------
 describe('briefVaraCtMeasures — cuántos documentos trae el brief y cuánto pesa', () => {
   const brief = (docs) => [
