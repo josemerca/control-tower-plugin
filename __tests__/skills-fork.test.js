@@ -270,10 +270,29 @@ describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive 
     // El trinquete no se afloja: el tope va al tamaño EXACTO del fichero
     // mergeado, sin holgura, y la siguiente subida necesita su propio motivo
     // escrito aquí — tampoco vale por precedente de este merge.
+    //
+    // Tope subido de 16616 a 17207 al cerrar los huecos que midió el run del
+    // slice #7 de rust-monitoring. Y aquí se paga además una deuda de la subida
+    // anterior: este trinquete se estaba midiendo SIEMPRE contra el tope previo
+    // y nunca contra el primero, que es la forma de ceder por acumulación sin
+    // que ninguna subida parezca grande. El acumulado desde el primer tope
+    // (16.314) son +893 bytes, un 5,5 %, y queda escrito para que la próxima
+    // subida tenga que mirarlo.
+    //
+    // Lo que compran los 591 bytes de esta subida es una regla que ningún otro
+    // sitio puede llevar: **ningún control puede clavar el número de tests de la
+    // suite entera**. Se midió en el #7 — el plan clavaba «52 passed» en cuatro
+    // controles, el juez exigió un test más, y el número caducado hubo que
+    // corregirlo en siete sitios; con el total clavado no quedaba hueco para
+    // conducir en rojo las dos ramas que `conventions/testing.md` exige, así que
+    // se entregaron sin aserción. Vive aquí porque quien escribe los controles
+    // es este skill: el juez sólo puede declarar el choque cuando ya está
+    // escrito, y `plan-contract.js` sólo puede rechazarlo cuando ya se escribió.
+    // Prevenirlo es lo único que ahorra la vuelta entera.
     expect(
       bytes('SKILL.md'),
       'SKILL.md se ha pasado del tope: recorta dentro del mismo apartado, o sube el tope escribiendo aquí mismo el motivo de la subida — no vale por precedente.'
-    ).toBeLessThanOrEqual(16616)
+    ).toBeLessThanOrEqual(17207)
     expect(
       bytes('plan-template.md'),
       'plan-template.md se ha pasado del tope: recorta dentro del mismo apartado, o sube el tope escribiendo aquí mismo el motivo de la subida — no vale por precedente.'

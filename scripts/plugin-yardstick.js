@@ -1,7 +1,7 @@
 export class PluginYardstick {
   static DIRECTORY = 'conventions'
 
-  static FILES = ['code.md', 'decisions.md', 'architecture.md', 'testing.md']
+  static FILES = ['defects.md', 'style.md', 'decisions.md', 'architecture.md', 'testing.md']
 
   static #PRECEDENCE_HEADER = [
     '',
@@ -20,7 +20,7 @@ export class PluginYardstick {
     '> El caso que fija la frontera, con sus dos lados: la convención de mayúsculas,',
     '> prefijos o nombres de fichero de este repo **obliga**, porque ninguno de estos',
     '> documentos habla de eso. Su convención de escribir los identificadores en',
-    '> castellano **no**, porque `conventions/code.md` exige inglés.',
+    '> castellano **no**, porque `conventions/style.md` exige inglés.',
     '>',
     '> Una convención del repo no tiene por qué estar escrita: puede estar',
     '> automatizada en una herramienta propia —un linter que exige algo, por',

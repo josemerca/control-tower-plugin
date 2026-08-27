@@ -198,7 +198,8 @@ try {
 // un cero.
 const SIN_CUENTAS = {
   rows: null, malformed: null, verdicts: null, measured: null, legacy: null, rubricSinVara: null, findingsByRule: null,
-  measuredPatronesVaraCt: null, legacyPatronesVaraCt: null, patronesVaraCt: null,
+  measuredVaraCtDocs: null, legacyVaraCtDocs: null, varaCtDocs: null,
+  measuredFindingsVaraCt: null, legacyFindingsVaraCt: null, findingsVaraCt: null,
   // Los del agregador HERMANO (aggregateBriefMeasures, run-metrics.js): si la
   // vara de ct llegó al brief del paso `implement`, y cuánto pesó. Nombres
   // propios (`brief*`) y no `measured`/`legacy` a secas: ya están ocupados por
@@ -273,20 +274,26 @@ if (comoJson) {
   if (dirTelemetria.status === 'no-leido') {
     console.log(`no se pudo listar \`${METRICS_REPO_DIR}\` en ${repo} (${dirTelemetria.why}). Puede que este repo no tenga telemetría del juez o que la lectura fallara: **no se cuenta nada**, y el hueco NO es un cero.`)
   } else {
-    console.log('| Issue | Slice | Veredictos | sin-vara | Hallazgos por regla | patrones-ct | brief |')
+    console.log('| Issue | Slice | Veredictos | sin-vara | Hallazgos por regla | vara ct | brief |')
     console.log('|---|---|---|---|---|---|---|')
     for (const f of filas) {
       const t = f.telemetry
       let veredictos = '—'
       let sinVara = '—'
       let porRegla = '—'
-      // De qué vara salió un hallazgo de `patrones`: cuántos, de los que ya
-      // cuenta `Hallazgos por regla`, citan la vara DE CT. El complemento —los
-      // de `patrones` que citan la del repo, o no citan nada— no viaja en su
-      // propia columna: se deriva restando de la cifra de `patrones` de al
-      // lado, que ya está en la tabla. Dos columnas que tienen que sumar lo
-      // mismo son dos sitios que pueden divergir.
-      let patronesCt = '—'
+      // LA VARA DE CT, en sus dos mitades y una sola columna: cuántos de sus
+      // documentos llegaron a citarse en el recorrido de la rúbrica, y cuántos
+      // hallazgos los citan. Combinadas como el `N docs · MB` del brief, porque
+      // son dos números de la misma medida y una columna por cada uno ensancharía
+      // la tabla sin añadir una pregunta.
+      //
+      // Se leen JUNTAS y en ese orden: `5 docs` con `0 hallazgos` slice tras
+      // slice es el caso que hay que vigilar —o el código conformaba, o la vara
+      // se está nombrando de adorno—, y esa lectura es imposible con una sola
+      // cifra. Sustituye a `patrones-ct`, que sólo miraba hallazgos del ítem
+      // `patrones` y por eso no vio los dos que el slice #7 archivó en
+      // `decisiones-cerradas`.
+      let varaCt = '—'
       // Si la vara de ct llegó al brief del paso `implement`, y cuánto pesó —
       // sumado sobre TODOS los intentos de `implement` que el slice dejó
       // escritos. Combinado en una sola columna, como el `#pr +a/-d Nf` de la
@@ -301,9 +308,15 @@ if (comoJson) {
         sinVara = t.measured > 0 ? String(t.rubricSinVara) : '—'
         const entradas = Object.entries(t.findingsByRule).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         porRegla = t.verdicts === 0 ? '(sin veredictos)' : (entradas.length ? entradas.map(([r, n]) => `${r} ${n}`).join(' · ') : '(ninguno)')
-        // Misma regla que `sin-vara`: measuredPatronesVaraCt === 0 imprime «—»,
-        // nunca «0» — ningún veredicto de este slice traía la columna.
-        patronesCt = t.measuredPatronesVaraCt > 0 ? String(t.patronesVaraCt) : '—'
+        // Misma regla que `sin-vara`: measured* === 0 imprime «—», nunca «0» —
+        // ningún veredicto de este slice traía la columna. Se exigen las DOS
+        // medidas para imprimir la celda: media celda con la otra mitad en
+        // blanco invitaría a leer el hueco como un cero, que es justo lo que
+        // esta regla existe para impedir.
+        if (t.measuredVaraCtDocs > 0 && t.measuredFindingsVaraCt > 0) {
+          varaCt = `${t.varaCtDocs} docs · ${t.findingsVaraCt} hallazgos`
+          if (t.legacyVaraCtDocs > 0) varaCt += ` (${t.legacyVaraCtDocs} sin columna)`
+        }
         // Misma regla otra vez: briefMeasured === 0 imprime «—» — ningún
         // intento de `implement` de este slice traía las dos columnas, así
         // que un cero afirmaría un brief sin vara que nadie pudo medir.
@@ -312,14 +325,14 @@ if (comoJson) {
           if (t.briefLegacy > 0) brief += ` (${t.briefLegacy} sin columna)`
         }
       }
-      console.log(`| #${f.issue} | ${f.title ?? '—'} | ${veredictos} | ${sinVara} | ${porRegla} | ${patronesCt} | ${brief} |`)
+      console.log(`| #${f.issue} | ${f.title ?? '—'} | ${veredictos} | ${sinVara} | ${porRegla} | ${varaCt} | ${brief} |`)
     }
     console.log('')
     if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.verdicts > 0 && f.telemetry.measured === 0)) {
       console.log('`—` en `sin-vara`: ningún veredicto de ese slice traía la columna (telemetría anterior a `rubric_sin_vara`). No es un cero.')
     }
-    if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.verdicts > 0 && f.telemetry.measuredPatronesVaraCt === 0)) {
-      console.log('`—` en `patrones-ct`: ningún veredicto de ese slice traía la columna `findings_patrones_vara_ct` (telemetría anterior a esta medida). No es un cero.')
+    if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.verdicts > 0 && (f.telemetry.measuredVaraCtDocs === 0 || f.telemetry.measuredFindingsVaraCt === 0))) {
+      console.log('`—` en `vara ct`: ningún veredicto de ese slice traía las columnas `rubric_vara_ct_docs`/`findings_vara_ct` (telemetría anterior a esta medida, o de la columna `findings_patrones_vara_ct` que sustituyeron). No es un cero.')
     }
     if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.briefAttempts > 0 && f.telemetry.briefMeasured === 0)) {
       console.log('`—` en `brief`: ningún intento de `implement` de ese slice traía `brief_vara_ct_docs`/`brief_bytes` (telemetría anterior a esta medida, o el brief no se pudo leer en su momento). No es un cero.')

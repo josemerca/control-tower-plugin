@@ -56,10 +56,10 @@ path**, the entries that bear on this slice — you are selecting, not transport
 pastes that file into every task brief anyway, so omitting an entry does not hide it from the judge.
 If the repo declares none, say so with `N/A — <reason>`: a path that is not in the repo fails the plan.
 
-**There is a second yardstick, and it is not in this section: ct's own.** The four documents of
+**There is a second yardstick, and it is not in this section: ct's own.** The five documents of
 the plugin's `conventions/` directory, whose absolute path the kickoff gives you, and which **take precedence over this
-repo's, rule by rule, not by topic**: where a rule of this repo requires what one of those four
-forbids, or forbids what they require, ct's wins; where this repo says something none of the four
+repo's, rule by rule, not by topic**: where a rule of this repo requires what one of those five
+forbids, or forbids what they require, ct's wins; where this repo says something none of the five
 speaks about, this repo's rule binds in full. Read them before you write the plan — the program
 pastes them into every task brief, so a plan that contradicts them produces tasks the judge blocks.
 What it means for splitting `**Files:**` between `(create)` and `(modify)` is in your kickoff.
@@ -172,6 +172,14 @@ line `No code — <reason>` for a task that is configuration in prose or documen
 fenced block right after the marker, one per line, each one a predicate**, for the reason the
 section above gives.
 
+**No control may pin the number of tests in the whole suite.** A `grep -c '52 passed'` is a proxy
+for what you actually want, and it breaks the moment the judge legitimately demands one more
+assertion: the stale number then has to be corrected in every later task that repeated it. Worse,
+it forbids what `conventions/testing.md` requires — with the total nailed shut there is no room for
+the assertion that document asks you to drive red, so a branch ships untested to keep a control
+green. Count the task's own tests instead, by module name, and `--check-plan` rejects the suite
+total.
+
 Every name in the plan resolves: a value where a `TBD` would go, the concrete handling instead
 of "add error handling", the decision spelled out instead of "similar to Task 3", and a task
 that defines each symbol the plan mentions. **Decisions are closed here; bodies are written
@@ -234,7 +242,7 @@ to hold for Task 1 and easy to lose by Task 6; step 5 is what keeps them in view
 1. Read `.agent/SLICE.md` and the issue: acceptance criteria, "Out of scope / Protected",
    "Contexto del epic", "Contexto heredado", "Dependencias".
 2. Read the files this slice touches, one analogous file, this repo's convention documents, and
-   the four documents of `conventions/` — §3 names the first three by path, and `--check-plan`
+   the five documents of `conventions/` — §3 names the first three by path, and `--check-plan`
    reads every path you name; the fourth is ct's own yardstick, at the path your kickoff gave you.
 3. Copy `plan-template.md`, next to this skill, and save it straight away as
    `docs/superpowers/plans/YYYY-MM-DD-issue-<n>-<slug>.md`, where `<n>` is `github_issue` in

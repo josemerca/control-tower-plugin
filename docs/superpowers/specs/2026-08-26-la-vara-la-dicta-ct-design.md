@@ -15,6 +15,13 @@
 
 ## 1. El problema, medido
 
+> **Corregido por §9.2.** La consecuencia que esta sección declara observada —el
+> ítem `patrones` sin veredicto slice tras slice— **no se reproduce** en
+> `jjponz/rust-monitoring`, donde `rubric_sin_vara` ya era 0 antes de la vara
+> porque el juez se apoyaba en `AGENTS.md`. Lo que sigue se conserva tal cual se
+> escribió, con su premisa incluida, porque es el argumento con el que se decidió
+> todo lo demás; lo que la medición dijo está en §9.
+
 El mecanismo del 21 de agosto quedó completo y correcto: `.agent/conventions.md`
 lo siembra `scripts/ct-init.sh`, lo confirma el humano que corre `/ct-init`,
 `ct-step.mjs` lo lee del disco y lo pega verbatim al final de cada task brief, el
@@ -146,7 +153,7 @@ La asimetría es la que corresponde a quién posee cada fichero. Lo que el repo
 declara es suyo y puede no declarar nada; lo que el plugin trae es una promesa del
 plugin, y no cumplirla es un fallo suyo.
 
-## 4. El reparto: cuatro ficheros, no uno
+## 4. El reparto: varios ficheros, no uno
 
 Un documento único sería todo o nada: se carga entero o no se carga
 (`knowledge-composition`). Y con la vara pegada en cada brief eso significa que
@@ -163,7 +170,7 @@ El reparto es por lo que mide cada fichero, no por tamaño:
 | `conventions/architecture.md` | Dónde vive cada cosa y qué puede conocer a qué |
 | `conventions/testing.md` | Qué fija un test y contra qué asserta |
 
-### 4.1 Hoy viajan los cuatro, y el selector es deuda declarada
+### 4.1 Hoy viajan todos, y el selector es deuda declarada
 
 El reparto no se acompaña de selección. **No hay hoy ningún campo del plan que le
 permita a un programa decidir qué parte de la vara debe una tarea**, y el que más
@@ -207,7 +214,7 @@ vaciado. Por eso `__tests__/conventions-vara.test.js` comprueba, para cada uno
 de los cuatro, que la cabecera declara su alcance y que trae más de veinte
 líneas con sustancia, no sólo títulos.
 
-## 5. Qué dicen los cuatro
+## 5. Qué dicen (y §9.3 los pasa a cinco)
 
 El idioma es **inglés**, como todo el corpus del plugin que llega a un agente
 (`prompts/task-implementer.md`, `agents/ct-judge.md` y las skills que
@@ -232,7 +239,7 @@ consigna que sólo apunta en una dirección.
 El bloque de ct va **antes** que el del repo en el brief: la cabecera que fija la
 precedencia se lee antes de que llegue la vara sobre la que decide.
 
-### 5.1 `conventions/code.md`
+### 5.1 `conventions/code.md` — partido en §9.3 en `defects.md` y `style.md`
 
 Alcance: **todo diff**. Un módulo que ya existía y no cumple es **deuda
 declarada** sólo para lo que este documento llama estilo: cero prosa, el
@@ -579,3 +586,146 @@ todo diff, así que tampoco ahí hay migración que un slice tenga que arrastrar
   habría que actualizar cada vez que un documento crezca — y que, desactualizado,
   daría permiso a lo que la regla prohíbe.
 - **No trae `git-workflow.md` ni la meta-convención.** Ver §5.5.
+
+---
+
+## 9. La primera corrida, y los seis huecos que midió
+
+El slice #7 de `jjponz/rust-monitoring` (logging JSON, cinco tareas y un
+reintento, pull request 18) es la primera corrida con la vara puesta. Lo que
+midió obliga a corregir cosas de este mismo documento, así que van aquí y no en
+un anexo.
+
+### 9.1 Lo que funcionó, con número
+
+El transporte, entero: `brief_vara_ct_docs = 4` en los **seis** briefs, entre
+35,6 y 39,3 KB cada uno. El juez no sólo los recibió — los cita por su nombre y
+razona documento a documento, tres o cuatro de los cuatro por tarea. `patrones`
+salió `conforme` en las cinco tareas y `rubric_sin_vara` fue 0 en todas.
+
+### 9.2 La premisa de §1 no se reproduce en ese repo
+
+`rubric_sin_vara` **ya era 0 antes de la vara**: `[0,0,0,0]` en el slice #5 y
+`[0,0,0,0,0,0,0]` en el #6. En ese repo el ítem `patrones` nunca volvía sin
+veredicto, porque el juez se apoyaba en `AGENTS.md` — y el propio veredicto lo
+dice: «Vara leída: `AGENTS.md`, el design doc, `ci.yml`». La consecuencia que §1
+declara observada («el único ítem de calidad sale sin veredicto slice tras
+slice») no es lo que ese repo enseña.
+
+Y el antes/después es **nulo en todas las columnas de salida**: el #6 y el #7 son
+idénticos hasta en `findings_total`, `[0,0,0,1,0,0,0]` los dos. Sólo se movió la
+columna de entrada.
+
+Lo único atribuible: `main` tiene **funciones sueltas en cinco ficheros de
+producción** y los siete módulos nuevos no tienen ninguna, con cero comentarios
+en 589 líneas. Es una de las tres reglas de estilo, y es todo lo que se puede
+demostrar. Lo demás no es atribuible porque el repo ya venía conforme: un solo
+comentario en todo `src/`, y puerto más adaptador (`MetricRepository`) desde
+antes del slice, que es de donde el #7 copió `LogOriginSource`.
+
+**Consecuencia para la próxima prueba:** hace falta un repo con comentarios y
+funciones sueltas. Contra `rust-monitoring` no se puede medir el efecto de esta
+vara, sólo su llegada.
+
+### 9.3 `code.md` se parte en `defects.md` y `style.md`
+
+El único defecto real del slice lo cazó el juez —un evento con `message` que
+salía escondido bajo `{app}_data`— y **no citó `code.md` para ello**. La causa
+está en el diff: `EventFields` guarda el mensaje como texto y usa la cadena vacía
+para decir «no hay mensaje», que es exactamente el defecto «dos campos que tienen
+que concordar» del §5.1. El arreglo embudó la pregunta y dejó la representación
+intacta: un evento sin mensaje sigue emitiendo `"message":""`.
+
+Por qué se escapó: el juez **sí** leyó el documento, y extrajo sus tres reglas de
+estilo. Las cuatro de defecto no se preguntaron. El documento se titula por el
+estilo, abre con la cláusula de deuda —que habla de estilo— y pone las reglas de
+estilo primero; las de defecto eran la minoría de un documento sobre otra cosa.
+Es `selective-hearing` de los ai-patterns, cuyo diagnóstico es explícito: **no se
+arregla prompteando**, ni con mayúsculas ni con negritas. El arreglo es
+estructural, y es `knowledge-composition`: un documento cuyo único asunto son
+esas cuatro reglas no puede tener su asunto filtrado como ruido, porque no hay
+nada más dentro que leer.
+
+Así que la vara pasa a **cinco documentos**, y `defects.md` viaja **primero**: la
+exención se lee después de la regla que no la admite, nunca antes.
+
+`defects.md` cierra además el hueco que el juez usó para dar por bueno el mapa
+crudo: la frontera de serialización es **el último paso antes del cable, y es uno
+solo**, así que un módulo que recibe un mapa y todavía decide algo con él comete
+el defecto por cerca del cable que esté. Y nombra el valor centinela —la cadena
+vacía para «no hay mensaje», el cero para «nunca pasó»— como el segundo campo
+disfrazado del primero.
+
+### 9.4 La telemetría medía dónde se archivó el hallazgo, no qué lo produjo
+
+`findings_patrones_vara_ct` sólo miraba hallazgos del ítem `patrones`, con el
+argumento de que es el único que mide contra las varas. El run lo refutó: la vara
+de ct salió citada **dos veces bajo `decisiones-cerradas`**, y la regla de
+mutación de `testing.md` se contestó bajo `test-desiderata`. Un hallazgo que la
+vara produjo y se archivó en otro ítem era invisible.
+
+Se sustituye por dos columnas que separan lo que aquélla mezclaba:
+
+| columna | pregunta |
+|---|---|
+| `rubric_vara_ct_docs` | cuántos documentos llegaron a usarse, sobre el `result` de **todos** los ítems — «la leyeron» |
+| `findings_vara_ct` | cuántos hallazgos los citan, en **cualquier** regla — «cazó algo» |
+
+Se leen juntas y en ese orden: `5 docs · 0 hallazgos` slice tras slice es el caso
+a vigilar, y con una sola cifra «conformaba» y «se nombró de adorno» son el mismo
+número.
+
+### 9.5 Un control de ct peleando contra una convención de ct
+
+El plan clavaba «52 tests verdes» en cuatro controles. El juez exigió con razón
+un test más, y el número caducado hubo que corregirlo en siete sitios del plan
+—dos briefs se generaron con el valor viejo—. El daño mayor no es ése: con el
+total clavado no quedaba hueco para conducir en rojo lo que `testing.md` exige, y
+`record_error` y la rama sin mensaje **se entregaron sin un solo test** para que
+un control siguiera verde.
+
+La precedencia de §2 arbitra la vara del repo contra la de ct. No previó que las
+dos en conflicto fuesen las dos de ct: su propio control contra su propia
+convención. Se cierra en tres sitios, cada uno con lo que sólo él puede hacer:
+
+- **`writing-plans-prescriptive`** — ningún control puede clavar el total de
+  tests de la suite. Es el único sitio que lo previene, porque es quien los
+  escribe.
+- **`plan-contract.js`** — lo rechaza, medido sobre el literal (`52 passed`,
+  `7 passing`), que es la forma que imprimen cargo, pytest, jest y mocha. Un
+  recuento acotado al módulo de la tarea no la tiene, y es la alternativa que el
+  mensaje ofrece.
+- **`ct-judge.md`** — un choque así se **declara** y no se cuenta como hallazgo,
+  igual que el choque con el linter del repo: el implementador no podía
+  satisfacer los dos, y el defecto está en el plan, que no es lo que se juzga.
+
+### 9.6 El go mal formado dejaba al humano a ciegas
+
+En el issue #7: `-OK` pelado a las 10:50, silencio, y el go bueno a las 10:58. El
+silencio es deliberado y no se toca —el gate sigue abriéndose sólo con el token
+exacto, porque un token reconocido de más arrancaría lo que se quería frenar—,
+pero `go-response.js` daba por hecho la otra mitad: «un token que no se reconoce
+te deja esperando, y lo notas: vas a mirar». Miró, y no tenía nada que mirar: el
+formato está en el CUERPO del issue y quien contesta está leyendo el comentario
+del plan.
+
+El vigilante publica ahora el formato **una vez por vigilancia** cuando ve un
+comentario nuevo que empieza por el token y no es un go — el token en minúsculas
+incluido, que es justo el error que hay que explicar. No cita lo que se escribió:
+un intento puede llevar un nonce mal tecleado, y repetirlo publicaría casi todo
+el permiso. Y el gate `plan` manda además al agente no publicar `<nonce>` como si
+fuera el formato entero, que es de donde salía la confusión.
+
+### 9.7 Lo que esta ronda NO arregla
+
+- **El selector de qué parte de la vara viaja.** Ya tiene precio medido: ~220 KB
+  en seis briefs para producir cero citas en hallazgos. Sigue siendo deuda
+  declarada de §4.1.
+- **`architecture.md`** se queda entera. En ese repo no se pudo probar ni a favor
+  ni en contra: sus módulos nuevos son valores de dominio y su puerto con
+  adaptador ya venía de `main`.
+- **El trinquete de `SKILL.md`** cede otra vez, de 16.616 a 17.207. Se paga
+  además la deuda de la subida anterior: se medía siempre contra el tope previo y
+  nunca contra el primero, que es cómo un trinquete cede por acumulación sin que
+  ninguna subida parezca grande. El acumulado desde 16.314 son +893 bytes, un
+  5,5 %, y queda escrito para que la próxima subida tenga que mirarlo.

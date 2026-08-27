@@ -58,34 +58,38 @@ this prompt or in the files it names.
    from `.agent/conventions.md`, those are this repo's declared rule documents:
    open them exactly as you open the ones §3 names.
 
-   **And the brief closes with ct's own yardstick**, four documents the program
-   pasted from the plugin's `conventions/` directory: `code.md`, `decisions.md`,
-   `architecture.md` and `testing.md`. You do not have to open anything — they
-   are in front of you — and the judge that reads your diff is handed the same
-   four in the same brief, so a rule you skimmed is a round trip you paid for.
+   **And the brief closes with ct's own yardstick**, five documents the program
+   pasted from the plugin's `conventions/` directory: `defects.md`, `style.md`,
+   `decisions.md`, `architecture.md` and `testing.md`. You do not have to open
+   anything — they are in front of you — and the judge that reads your diff is
+   handed the same five in the same brief, so a rule you skimmed is a round trip
+   you paid for.
 
    **They take precedence over this repo's, and the precedence is measured rule
    by rule, not by topic.** Where a rule of this repo requires what one of those
-   four forbids, or forbids what they require, follow ct's. Where this repo
-   says something none of the four speaks about — casing, prefixes, file names —
+   five forbids, or forbids what they require, follow ct's. Where this repo
+   says something none of the five speaks about — casing, prefixes, file names —
    follow this repo's: precedence resolves a clash, it does not excuse you from
    this repo's conventions.
 
-   **Read each ct document's scope line.** `decisions.md` and `testing.md` apply
-   to everything you write, with no exemption. `code.md` also applies to
-   everything you write, but a module that was already there and does not
-   conform bends only where it calls the rule style: no prose, the language of
-   identifiers, every function hanging off a type. What you add there follows
-   the style of that host and nobody will block you for that. What `code.md`
-   calls a defect — a raw map returned by logic, a closed vocabulary collapsed
-   into a loose string or a boolean, two fields that have to agree, an error
-   named for where it happens — gets no such exemption and binds in that module
-   exactly as in a new one. `architecture.md` applies to **new modules**: a
+   **Read each ct document's scope line.** `defects.md`, `decisions.md` and
+   `testing.md` apply to everything you write, with no exemption — and the four
+   rules of `defects.md` are the ones a diff introduces while reading
+   beautifully, so they are the ones to check against your own code before you
+   commit it: a value that classifies something held as a loose string or a
+   boolean, a raw map handed to a module that still decides with it, two fields
+   that have to agree — a sentinel value like the empty string for "no message"
+   counts — and an error named for where it happens. The judge answers those
+   four one by one. `style.md` also applies to everything you write, but a module
+   that was already there and does not conform bends on its three rules: no
+   prose, the language of identifiers, every function hanging off a type. What
+   you add there follows the style of that host and nobody will block you for
+   that. `architecture.md` applies to **new modules**: a
    module that was already there and does not conform is this repository's
    declared debt, so what you add to it follows the style of its host and
    nobody will block you for that. Both documents close the same hole the same
    way: what you may not do is hide a new concept inside an old file to inherit
-   either exemption:
+   either exemption, and neither exemption ever reaches `defects.md`:
    **a new concept is a new module and is born conforming.**
    Which of the two you are writing is already decided for you by the `(create)`
    and `(modify)` marks of the `**Files:**` line.

@@ -129,6 +129,21 @@ function main() {
     return
   }
 
+  // `issue comment` — lo usa el vigilante del `-OK` para explicar el formato
+  // cuando alguien intenta dar el go y su comentario no lo abre. El cuerpo va
+  // al registro de argv (FAKE_GH_ARGV_LOG_FILE), que es donde el test lo lee:
+  // lo que hay que poder comprobar es que ese cuerpo NO lleva el nonce.
+  if (argv[0] === 'issue' && argv[1] === 'comment') {
+    if (process.env.FAKE_GH_ISSUE_COMMENT_FAIL) {
+      console.error('fake-gh: issue comment failed (simulado)')
+      process.exitCode = 1
+      return
+    }
+    process.stdout.write('https://github.com/o/r/issues/5#issuecomment-1\n')
+    process.exitCode = 0
+    return
+  }
+
   if (argv[0] === 'issue' && argv[1] === 'view') {
     // FAKE_GH_VIEW_FAIL (D2, finding 3): simula que `labelsOf()` (la lectura
     // de labels del propio candidato en dispatch-check.mjs) falla — auth

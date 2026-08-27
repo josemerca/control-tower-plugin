@@ -181,6 +181,22 @@ export function citaVaraDeCt(evidence) {
   return typeof evidence === 'string' && CITA_VARA_DE_CT.test(evidence)
 }
 
+// QUÉ documentos de la vara cita un texto, no cuántas veces. Con la misma
+// forma de ruta que `citaVaraDeCt` y su mismo lookbehind, sobre una copia con
+// `g` — el flag no se le pone al regex compartido porque un regex global
+// arrastra `lastIndex` entre llamadas y el siguiente `test()` empezaría a
+// mentir desde la mitad de la cadena.
+//
+// Devuelve nombres únicos: el juez puede citar `conventions/style.md` cinco
+// veces en el mismo párrafo, y eso sigue siendo UN documento leído. Lo que la
+// columna tiene que contestar es cuántos de los cinco llegaron a usarse.
+const CITAS_VARA_DE_CT = new RegExp(CITA_VARA_DE_CT.source, 'g')
+
+export function documentosDeLaVaraDeCt(texto) {
+  if (typeof texto !== 'string') return []
+  return [...new Set(texto.match(CITAS_VARA_DE_CT) || [])]
+}
+
 // El conteo por severidad del veredicto, que es lo que permite leer "cuántos
 // vetos" sin volver a cargar los hallazgos.
 //
@@ -208,15 +224,35 @@ export function verdictMeasures(verdict) {
     // exactamente lo que no se podía ver leyendo los veredictos de
     // rust-monitoring a mano.
     rubric_sin_vara: (verdict?.rubric || []).filter((paso) => paso.outcome === 'sin-vara').length,
-    // De qué vara salió un hallazgo de `patrones` — el ÚNICO ítem que mide
-    // contra las varas. Un hallazgo de `contrato` o `alcance` no es "de la vara
-    // del repo" por no citar nada: es de otro ítem y no tiene nada que ver aquí,
-    // así que contar sobre TODOS los hallazgos mediría una cosa distinta de la
-    // que este campo promete. Un solo campo, no dos: el complemento —los de
-    // `patrones` que NO citan a ct— se deriva restando de
-    // `findings_by_rule.patrones`, que ya existe; dos columnas que tienen que
-    // sumar lo mismo son dos sitios que pueden divergir.
-    findings_patrones_vara_ct: findings.filter((f) => f.rule === 'patrones' && citaVaraDeCt(f.evidence)).length,
+    // DOS columnas, y son dos preguntas OPUESTAS que la anterior mezclaba en
+    // una. `findings_patrones_vara_ct` —la que estas dos sustituyen— sólo miraba
+    // hallazgos del ítem `patrones`, con el argumento de que es el único que
+    // mide contra las varas. El run del slice #7 de rust-monitoring lo refutó
+    // midiendo: la vara de ct apareció citada dos veces bajo
+    // `decisiones-cerradas`, y la regla de mutación de `conventions/testing.md`
+    // se contestó bajo `test-desiderata`. Un hallazgo que la vara produjo pero
+    // que se archivó en otro ítem era INVISIBLE, así que la columna medía dónde
+    // se archivó el hallazgo y no qué lo produjo.
+    //
+    //   `rubric_vara_ct_docs` — CUÁNTOS de los documentos llegaron a usarse,
+    //     contados sobre el `result` de TODOS los ítems. Es "la leyeron". Con
+    //     los cinco documentos de hoy el techo es 5, y un número por debajo dice
+    //     cuál sobra o cuál no se está mirando. Este es el hueco que costó el
+    //     #7: `conventions/code.md` se citó por sus reglas de estilo y ninguna
+    //     de sus cuatro reglas de defecto se preguntó, lo que llevó a partirlo
+    //     en `style.md` y `defects.md` — con la columna vieja eso no se veía.
+    //   `findings_vara_ct`     — cuántos hallazgos la citan, en CUALQUIER regla.
+    //     Es "cazó algo", y es la única prueba de que la vara paga su transporte.
+    //
+    // Van las dos porque separan lo que no se podía separar: "la leyeron y no
+    // cazó nada" puede ser un diff que conformaba o un juez que la nombró de
+    // adorno, y con un solo número las dos lecturas son la misma cifra. No son
+    // dos columnas que tengan que sumar lo mismo —el reproche que hundió a la
+    // anterior—: miden el insumo y el efecto.
+    rubric_vara_ct_docs: [...new Set(
+      (verdict?.rubric || []).flatMap((paso) => documentosDeLaVaraDeCt(paso?.result))
+    )].length,
+    findings_vara_ct: findings.filter((f) => citaVaraDeCt(f.evidence)).length,
   }
 }
 
@@ -263,14 +299,22 @@ export function aggregateVerdictMeasures(texto) {
   let measured = 0
   let legacy = 0
   let sinVara = 0
-  // Contadores GEMELOS a `measured`/`legacy`, pero de `findings_patrones_vara_ct`
-  // y no de `rubric_sin_vara`: son medidas distintas, cada una con su propia
-  // fecha de nacimiento en la telemetría, así que una fila puede traer la una y
-  // no la otra. Fundirlos en los mismos contadores confundiría "esta fila es
-  // vieja para la medida A" con "lo es para la medida B".
-  let measuredPatronesVaraCt = 0
-  let legacyPatronesVaraCt = 0
-  let patronesVaraCt = 0
+  // Contadores GEMELOS a `measured`/`legacy`, pero de las dos columnas de la
+  // vara de ct y no de `rubric_sin_vara`: son medidas distintas, cada una con su
+  // propia fecha de nacimiento en la telemetría, así que una fila puede traer la
+  // una y no la otra. Fundirlos en los mismos contadores confundiría "esta fila
+  // es vieja para la medida A" con "lo es para la medida B".
+  //
+  // Un par por columna y no uno compartido, por lo mismo: `rubric_vara_ct_docs`
+  // y `findings_vara_ct` nacen hoy juntas, pero la que sustituyeron
+  // (`findings_patrones_vara_ct`) demostró que una columna se retira y la otra
+  // se queda. Compartir contadores obligaría a desenredarlos ese día.
+  let measuredVaraCtDocs = 0
+  let legacyVaraCtDocs = 0
+  let varaCtDocs = 0
+  let measuredFindingsVaraCt = 0
+  let legacyFindingsVaraCt = 0
+  let findingsVaraCt = 0
   const findingsByRule = {}
   for (const linea of String(texto ?? '').split('\n')) {
     if (linea.trim() === '') continue
@@ -287,8 +331,10 @@ export function aggregateVerdictMeasures(texto) {
     verdicts += 1
     const n = fila.rubric_sin_vara
     if (Number.isInteger(n) && n >= 0) { measured += 1; sinVara += n } else { legacy += 1 }
-    const p = fila.findings_patrones_vara_ct
-    if (Number.isInteger(p) && p >= 0) { measuredPatronesVaraCt += 1; patronesVaraCt += p } else { legacyPatronesVaraCt += 1 }
+    const d = fila.rubric_vara_ct_docs
+    if (Number.isInteger(d) && d >= 0) { measuredVaraCtDocs += 1; varaCtDocs += d } else { legacyVaraCtDocs += 1 }
+    const h = fila.findings_vara_ct
+    if (Number.isInteger(h) && h >= 0) { measuredFindingsVaraCt += 1; findingsVaraCt += h } else { legacyFindingsVaraCt += 1 }
     const porRegla = fila.findings_by_rule
     if (porRegla && typeof porRegla === 'object' && !Array.isArray(porRegla)) {
       for (const [regla, cuantos] of Object.entries(porRegla)) {
@@ -298,14 +344,16 @@ export function aggregateVerdictMeasures(texto) {
   }
   return {
     rows, malformed, verdicts, measured, legacy, rubricSinVara: measured ? sinVara : null, findingsByRule,
-    measuredPatronesVaraCt, legacyPatronesVaraCt,
-    patronesVaraCt: measuredPatronesVaraCt ? patronesVaraCt : null,
+    measuredVaraCtDocs, legacyVaraCtDocs,
+    varaCtDocs: measuredVaraCtDocs ? varaCtDocs : null,
+    measuredFindingsVaraCt, legacyFindingsVaraCt,
+    findingsVaraCt: measuredFindingsVaraCt ? findingsVaraCt : null,
   }
 }
 
 // ---------------------------------------------------------------------------
-// SI LA VARA LLEGÓ, Y CUÁNTO PESÓ. Hoy `ct-step.mjs` aborta si los cuatro
-// documentos de `conventions/` faltan del PLUGIN, pero nada comprobaba que el
+// SI LA VARA LLEGÓ, Y CUÁNTO PESÓ. Hoy `ct-step.mjs` aborta si los documentos
+// de `conventions/` faltan del PLUGIN, pero nada comprobaba que el
 // brief de una tarea se los hubiera LLEVADO: si alguien toca `escribirBrief` y
 // rompe el pegado, todo sigue en verde y el juez mide en silencio sólo contra
 // la vara del repo. Este es el mecanismo que cierra esa desviación silenciosa.
@@ -318,10 +366,11 @@ export function aggregateVerdictMeasures(texto) {
 // afirmaría un brief sin vara, y lo que habría pasado es que no se pudo mirar.
 //
 // Cuenta cabeceras, no bytes de una lista: `## Vara de ct: conventions/` es
-// exactamente lo que `seccionDeVaraDeCt` (scripts/vara-ct.js) escribe por cada
-// documento, y contarlas —en vez de comparar contra `CONVENTIONS_FILES.length`—
-// es lo que deja que un quinto documento de mañana, o uno renombrado, se siga
-// contando sin tocar esta función.
+// exactamente lo que `PluginYardstick.composeSection`
+// (scripts/plugin-yardstick.js) escribe por cada documento, y contarlas —en vez
+// de comparar contra `PluginYardstick.FILES.length`— es lo que dejó que el
+// quinto documento (`defects.md`, al partir `code.md`) se contara sin tocar esta
+// función. Y así se comprobó: no hubo que tocarla.
 export function briefVaraCtMeasures(contenidoBrief) {
   const texto = String(contenidoBrief ?? '')
   const docs = (texto.match(/^## Vara de ct: conventions\//gm) || []).length
