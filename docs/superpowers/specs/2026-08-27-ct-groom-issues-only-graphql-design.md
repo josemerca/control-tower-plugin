@@ -86,12 +86,59 @@ conserva como red de seguridad (inocua: GraphQL no trae PRs).
 
 - `GROOM_ISSUES_QUERY` (en `gh-issues.js`): query GraphQL, `states:[OPEN,CLOSED]`,
   campos `number title body state milestone{title} labels(first:50){nodes{name}}`,
-  con `pageInfo{hasNextPage endCursor}` y `$endCursor` para `--paginate`.
+  con `pageInfo{hasNextPage endCursor}`. **`$endCursor` se declara PRIMERO** en la
+  lista de variables:
+
+  ```graphql
+  query($endCursor: String, $owner: String!, $name: String!) {
+    repository(owner: $owner, name: $name) {
+      issues(first: 100, after: $endCursor, states: [OPEN, CLOSED]) {
+        nodes { number title body state milestone { title } labels(first: 50) { nodes { name } } }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+  ```
+
+  Las variables GraphQL se pasan por NOMBRE, no por posición, así que en teoría el
+  orden es indiferente; se pone `$endCursor` primero de todos modos porque es la
+  forma del ejemplo canónico de `gh` y elimina cualquier duda. Lo que **no** es
+  opcional: la variable ha de llamarse exactamente `endCursor` y el `pageInfo` ha
+  de estar presente, o `gh api graphql --paginate` devuelve **solo la primera
+  página en silencio**. Esa es la trampa real, y la red que la caza es el test
+  multipágina del `fake-gh` (§ plan, Slice 3), no la inspección visual.
+
 - `normalizeGraphqlIssues(pages)` (puro): aplana las páginas de `--slurp` y
   devuelve los issues en la **forma REST** que el resto ya espera (`state` en
-  minúsculas, `labels` → `[{name}]`, `milestone` → `{title}|null`).
+  minúsculas, `labels` → `[{name}]`, `milestone` → `{title}|null`). Defensivo ante
+  la forma de la respuesta vacía: `page?.data?.repository?.issues?.nodes` con
+  guarda `Array.isArray`, porque el envoltorio exacto de una respuesta sin issues
+  (`[]` vs `[{data:{…nodes:[]}}]` vs `[{}]`) depende de `gh` y se confirma con una
+  comprobación manual contra un repo real (§ plan, Slice 1 / verificación).
+
 - `ct-groom.mjs` llama a `gh api graphql --paginate --slurp` con esa query y pasa
   el resultado por `normalizeGraphqlIssues` (+ `realIssuesOnly` de red).
+
+### 5.1 El buffer: claim de medida, no juicio filosófico
+
+«No se sube `maxBuffer`» es un **claim de medida**, no una postura: el fix baja el
+payload (fuera los PRs y los campos REST no usados), así que 20 MiB, que antes se
+quedaba corto con issues+PRs, ahora sobra para el mismo repo. `GH_MAX_BUFFER` es
+un **límite de seguridad** compartido por todas las llamadas `gh()`, no una
+feature. El riesgo de desborde no desaparece: se **mueve** de «PRs + bodies de
+issues» a «bodies de issues solos a gran escala». Si algún día los bodies
+legítimos de los issues de un repo superan 20 MiB, eso es un problema de diseño
+aparte (paginar y procesar por páginas sin acumular), no algo que se tape subiendo
+el número. El comentario del código debe decir esto explícitamente, no dejar al
+implementador adivinando la intención.
+
+### 5.2 Dependencia: versión de `gh`
+
+`gh api graphql --paginate` con paginación por cursor requiere un `gh`
+razonablemente reciente (≥ 2.30). El repo ya exige `gh` autenticado; esto entra en
+la misma categoría que el chequeo de versión de Node de `ct-init.sh`. Se documenta
+como dependencia; un `gh` demasiado viejo haría `--paginate` un no-op silencioso
+(otra cara del mismo fallo de «solo la primera página»).
 
 ## 6. Lo que esta ronda NO hace
 
