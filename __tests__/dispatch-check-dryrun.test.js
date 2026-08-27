@@ -1,9 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { envDelGo } from './fixtures/go-gate.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'dispatch-check.mjs')
 // Stub de `gh` para los tests de manejo de errores (review round 1, Critical
@@ -162,7 +163,12 @@ describe('dispatch-check --dry-run', () => {
   it('--release → exit 0 e imprime la transición in-progress → in-review', () => {
     const dir = mkReleaseDryRunRepo()
     try {
-      const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO })
+      // Task 10 (F-e2e): --release ahora lee el cuerpo del issue por `gh`
+      // incluso en --dry-run (es una LECTURA, no la mutación que --dry-run
+      // evita) — sin el PATH al stub, este `gh` real fallaría contra un repo
+      // 'o/r' que no existe. FAKE_GH_VIEW_BODY sin fijar → body vacío → sin
+      // sección "## E2E" → nada que cruzar, el camino feliz de este test.
+      const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}`, ...envDelGo({ repo: 'o/r', issue: 9 }) } })
       expect(out).toMatch(/released #9.*in-review/)
     } catch (e) {
       throw new Error(`no debería fallar: ${e.status} ${(e.stdout || '') + (e.stderr || '')}`)
@@ -304,7 +310,9 @@ describe('dispatch-check — T11 fix round 3 (--settle-ms/CT_CLAIM_SETTLE_MS rec
 
   it('sin --settle-ms ni CT_CLAIM_SETTLE_MS → no le afecta (camino normal)', () => {
     const dir = mkReleaseDryRunRepo()
-    const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO })
+    // Task 10 (F-e2e): --release lee el body del issue por `gh` — necesita el
+    // stub aquí igual que el test de arriba, o pega contra el 'o/r' real.
+    const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}`, ...envDelGo({ repo: 'o/r', issue: 9 }) } })
     expect(out).toMatch(/released #9.*in-review/)
     rmSync(dir, { recursive: true, force: true })
   })
@@ -416,6 +424,9 @@ describe('dispatch-check — fix review round 1 (Critical 2: fallos de gh() no d
     const dir = mkReleaseDryRunRepo(19)
     const r = runReal(['19', '--repo', 'o/r', '--release'], {
       FAKE_GH_EDIT_FAIL_SUBSTR: '--add-label status:in-review',
+      // F38: la puerta 9 va antes de la mutación, así que este test necesita el
+      // gate `plan` cerrado para llegar hasta el `gh edit` que quiere ver fallar.
+      ...envDelGo({ repo: 'o/r', issue: 19 }),
     }, dir)
     rmSync(dir, { recursive: true, force: true })
     expect(r.code).toBe(1)
@@ -577,8 +588,10 @@ describe('dispatch-check — T11 hook CT_CLAIM_PRECLAIM_DELAY_MS', () => {
   // ni siquiera un valor claramente inválido lo afecta.
   it('--release con CT_CLAIM_PRECLAIM_DELAY_MS malformado en el entorno → --release procede igual, no le afecta', () => {
     const dir = mkReleaseDryRunRepo()
+    // Task 10 (F-e2e): idem — el stub de `gh` hace falta para la lectura del
+    // body del issue, no solo para el escenario de mutación.
     const out = execFileSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'],
-      { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, CT_CLAIM_PRECLAIM_DELAY_MS: 'not-a-number' } })
+      { cwd: dir, encoding: 'utf8', stdio: QUIET_STDIO, env: { ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}`, CT_CLAIM_PRECLAIM_DELAY_MS: 'not-a-number', ...envDelGo({ repo: 'o/r', issue: 9 }) } })
     expect(out).toMatch(/released #9.*in-review/)
     rmSync(dir, { recursive: true, force: true })
   })
@@ -623,5 +636,164 @@ describe('dispatch-check — enumeración de issues abiertos sin --limit fijo (r
     expect(log).toMatch(/--paginate/)
     expect(log).not.toMatch(/--limit/)
     expect(log).toMatch(/state=open/)
+  })
+})
+
+// ============================================================================
+// Slice 2 (apuntes de Capde) — la base del diff de --release es el corte real.
+//
+// La geometría de la corrida del slice 10: el worktree se cortó de
+// origin/main en el commit S; la copia LOCAL de main se quedó 7 commits
+// atrás; y el plan citaba un fichero que existe en S pero no en esa main
+// rancia — el gate del plan (F-jjponz-3 lee las citas en la BASE) lo acusó de
+// "cita inventada". Aquí se reproduce con 1 commit de retraso (misma clase de
+// fallo): `citado.txt` nace en el commit del corte, el plan lo cita, y `main`
+// local se rebobina con `git branch -f` (legal: el checkout está en feat/9).
+function mkStaleMainRepo({ issue = 9, sliceMd } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'ct-release-stale-'))
+  const git = (...args) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' })
+  git('init', '-q', '-b', 'main')
+  git('config', 'user.email', 'test@test')
+  git('config', 'user.name', 'test')
+  writeFileSync(join(dir, 'f.txt'), 'base\n')
+  git('add', '-A')
+  git('commit', '-qm', 'main vieja')
+  const oldMain = git('rev-parse', 'HEAD').trim()
+  writeFileSync(join(dir, 'citado.txt'), 'texto del corte\n')
+  git('add', '-A')
+  git('commit', '-qm', 'main avanza (los 7 commits de la corrida real)')
+  const cutSha = git('rev-parse', 'HEAD').trim()
+  git('checkout', '-qb', `feat/${issue}`) // el corte del worktree: origin/<base> en S
+  const plan = minimalPlanFor(issue)
+    .replace('Final text (work.txt):', 'Current state (citado.txt):')
+    .replace(`${FENCE}\ntrabajo\n${FENCE}`, `${FENCE}\ntexto del corte\n${FENCE}`)
+  mkdirSync(join(dir, 'docs', 'superpowers', 'plans'), { recursive: true })
+  writeFileSync(join(dir, 'docs', 'superpowers', 'plans', `2026-08-12-issue-${issue}-work.md`), plan)
+  writeFileSync(join(dir, 'work.txt'), 'trabajo\n')
+  git('add', '-A')
+  git('commit', '-qm', 'work')
+  git('branch', '-f', 'main', oldMain) // la main LOCAL se queda ATRÁS del corte
+  // Semilla y run sin commitear, como los deja el despacho real.
+  mkdirSync(join(dir, '.agent'), { recursive: true })
+  writeFileSync(join(dir, '.agent', 'SLICE.md'), sliceMd(cutSha))
+  writeFileSync(join(dir, '.agent', `run-${issue}.json`), JSON.stringify({
+    plan: `docs/superpowers/plans/2026-08-12-issue-${issue}-work.md`,
+    issue, task: 1, tasksTotal: 1, step: 'commit', closed: 'delivered',
+  }))
+  return { dir, cutSha }
+}
+
+// --release lee el body del issue por gh incluso en --dry-run; sin el PATH al stub, el gh
+// real fallaría contra un repo o/r que no existe. FAKE_GH_VIEW_BODY sin fijar → body vacío
+// → sin sección "## E2E" → nada que cruzar.
+//
+// `envDelGo` (F38): desde el nonce del go, `--release` tiene una puerta más —el
+// gate `plan` no se cierra sin un `-OK <nonce>` registrado— y sin satisfacerla
+// TODO esto saldría 9 antes de llegar a lo que estos tests miden, que es de
+// dónde sale la base del diff y qué avisa la barandilla de `base:`. La puerta 9
+// no es el objeto de esta prueba: se cubre en f38-el-go-del-gate-plan.test.js.
+// Se usa el fixture compartido y no una copia porque su propia cabecera lo pide
+// («el día que el formato del registro cambie, un fixture compartido rompe una
+// vez y en un sitio»), y es lo que ya hacen los demás tests de `--release` de
+// este fichero y los de f22.
+const releaseStale = (dir) => spawnSync('node', [script, '9', '--repo', 'o/r', '--release', '--dry-run'], { cwd: dir, encoding: 'utf8', env: { ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}`, ...envDelGo({ repo: 'o/r', issue: 9 }) } })
+
+describe('dispatch-check --release — la base del diff es el corte real (slice 2, apuntes de Capde)', () => {
+  it('con base_sha: presente el diff sale contra ese commit aunque main local esté por detrás', () => {
+    const { dir } = mkStaleMainRepo({ sliceMd: (cut) => `---\ntask: slice\nbase: main\nbase_sha: ${cut}\n---\n# s\n` })
+    const r = releaseStale(dir)
+    // Sin el fix esto salía 6: `base:` resolvía la main LOCAL (rancia), la
+    // cita de citado.txt no existía ahí, y el plan quedaba acusado de citar
+    // un fichero inventado — el caso exacto de la corrida del slice 10.
+    expect(r.status).toBe(0)
+    expect(r.stdout).toMatch(/released #9.*in-review/)
+    expect(r.stderr).not.toContain('no existe en la base')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('semilla sin base_sha: se comporta como hoy — cae a `base:` y mide la copia local, con su defecto incluido', () => {
+    const { dir } = mkStaleMainRepo({ sliceMd: () => `---\ntask: slice\nbase: main\n---\n# s\n` })
+    const r = releaseStale(dir)
+    // El comportamiento de HOY para semillas anteriores al slice 1,
+    // conservado a propósito (for_developers: la cadena queda intacta). Si
+    // esto empieza a salir 0, alguien tocó el fallback — justo lo que este
+    // slice promete NO hacer.
+    expect(r.status).toBe(6)
+    expect(r.stderr).toContain('citado.txt')
+    expect(r.stderr).toContain('no existe en la base')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('base_sha: presente pero no resoluble (repo podado / semilla corrupta) cae a `base:`, no se niega', () => {
+    const { dir } = mkStaleMainRepo({ sliceMd: () => `---\ntask: slice\nbase: main\nbase_sha: ${'a'.repeat(40)}\n---\n# s\n` })
+    const r = releaseStale(dir)
+    // Distingue fallback de negación: si sliceBaseRef devolviera el sha SIN
+    // verificarlo, el rev-parse de los consumidores fallaría y esto saldría
+    // 5 ("no se pudo resolver"). El fallback correcto sale 6 por la MISMA
+    // razón que el test de arriba: mide la main local y acusa la cita.
+    expect(r.status).toBe(6)
+    expect(r.stderr).toContain('citado.txt')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('un `base:` con pinta de SHA (40 hex) avisa por stderr — una sola vez y sin abortar — de que rompe gh pr create y de que el diff ya usa base_sha:', () => {
+    // La barandilla contra el arreglo espontáneo de la corrida real: el
+    // agente metió un SHA en `base:` para "arreglar" el diff. El diff
+    // funciona igual (un sha resuelve — por eso NO se aborta), pero
+    // `gh pr create --base` exige un nombre de rama y fallará al cerrar.
+    const { dir } = mkStaleMainRepo({ sliceMd: (cut) => `---\ntask: slice\nbase: ${cut}\nbase_sha: ${cut}\n---\n# s\n` })
+    const r = releaseStale(dir)
+    expect(r.status).toBe(0) // avisa, no aborta
+    expect(r.stdout).toMatch(/released #9.*in-review/)
+    expect(r.stderr).toContain('gh pr create')
+    expect(r.stderr).toContain('base_sha:')
+    // --release consulta la base DOS veces (limpieza F22 + plan F-jjponz-1);
+    // el aviso sale UNA.
+    expect(r.stderr.match(/AVISO:/g)).toHaveLength(1)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// Slice 9(a) — la barandilla mira la NATURALEZA de `base:`, no su longitud.
+// El slice 2 exigía 40 hex; un `git rev-parse --short HEAD` metía 7-12 y
+// rompía `gh pr create --base` igual, en silencio.
+describe('dispatch-check --release — la barandilla de `base:` no cuenta caracteres (slice 9)', () => {
+  it('un `base:` con un SHA CORTO (10 hex) avisa igual que el de 40', () => {
+    const { dir } = mkStaleMainRepo({ sliceMd: (cut) => `---\ntask: slice\nbase: ${cut.slice(0, 10)}\nbase_sha: ${cut}\n---\n# s\n` })
+    const r = releaseStale(dir)
+    expect(r.status).toBe(0)               // avisa, no aborta (igual que el de 40)
+    expect(r.stderr).toContain('gh pr create')
+    expect(r.stderr).toContain('base_sha:')
+    expect(r.stderr.match(/AVISO:/g)).toHaveLength(1)   // dos consultas, un aviso
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('`base: main` — una rama de verdad de este clon — NO avisa', () => {
+    const { dir } = mkStaleMainRepo({ sliceMd: (cut) => `---\ntask: slice\nbase: main\nbase_sha: ${cut}\n---\n# s\n` })
+    const r = releaseStale(dir)
+    expect(r.status).toBe(0)
+    expect(r.stderr).not.toContain('AVISO:')  // `AVISO:` sale UNA sola vez en todo dispatch-check
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('una rama que solo existe en `refs/remotes/origin/` (nunca checkouteada aquí) NO avisa', () => {
+    // El falso positivo que la sonda de refs/remotes existe para evitar: un
+    // clon que solo tiene `main` en local y despacha con --base develop. El
+    // ref remoto se fabrica con `update-ref` (no hace falta remote ni red:
+    // un ref es un fichero).
+    const { dir, cutSha } = mkStaleMainRepo({ sliceMd: (cut) => `---\ntask: slice\nbase: develop\nbase_sha: ${cut}\n---\n# s\n` })
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/develop', cutSha], { cwd: dir })
+    const r = releaseStale(dir)
+    expect(r.status).toBe(0)
+    expect(r.stderr).not.toContain('AVISO:')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('un `base:` que no es rama NI resuelve a un commit (un typo) NO avisa: esa avería tiene otra voz', () => {
+    const { dir } = mkStaleMainRepo({ sliceMd: (cut) => `---\ntask: slice\nbase: mian\nbase_sha: ${cut}\n---\n# s\n` })
+    const r = releaseStale(dir)
+    expect(r.status).toBe(0)
+    expect(r.stderr).not.toContain('AVISO:')
+    rmSync(dir, { recursive: true, force: true })
   })
 })

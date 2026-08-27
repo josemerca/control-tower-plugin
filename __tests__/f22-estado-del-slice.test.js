@@ -32,8 +32,8 @@ import { parseState } from '../scripts/state.js'
 // F22, Step 4: montaje reusado de __tests__/ct-next-launch-verification.test.js
 // — dirs de cuenta + stubs de cmux/claude, e higiene de limpieza de directorios
 // temporales que puede colgar de un SIGKILL a un nieto huérfano.
-import { ACCOUNT_ENV } from './fixtures/hermetic-env.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
+import { envDelGo } from './fixtures/go-gate.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const stopHook = join(here, '..', 'dist', 'stop.js')
@@ -255,7 +255,7 @@ describe('F22 — el seed no toca el fichero de la coordinadora', () => {
 // Este es el test que impide que la verificación de efecto se degrade a
 // decoración: hace falta una corrida REAL de ct-next.mjs (--dry-run no crea
 // worktree ni siembra nada), montada sobre __tests__/ct-next-launch-
-// verification.test.js — mismos stubs de gh/cmux/claude, mismo ACCOUNT_ENV,
+// verification.test.js — mismos stubs de gh/cmux/claude,
 // misma limpieza best-effort.
 //
 // La diferencia con ese montaje es deliberada: aquí NO se usa fake-git-bin.
@@ -348,8 +348,7 @@ function runGateTest(repoRoot) {
     encoding: 'utf8',
     env: {
       ...process.env,
-      ...ACCOUNT_ENV,
-      PATH: realGitFakeRestPath,
+            PATH: realGitFakeRestPath,
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue1], []]),
       FAKE_GH_COUNTER_FILE: counterFile,
       FAKE_GH_ARGV_LOG_FILE: argvLog,
@@ -509,7 +508,7 @@ describe('F22 — los mensajes nombran el fichero que se leyó', () => {
 //
 // Montaje calcado de __tests__/ct-next-staleness.test.js (runReal vía
 // spawnSync, fakePath con fake-git-bin/fake-gh-bin/fake-cmux-bin,
-// ACCOUNT_ENV, rmSyncBestEffort) — con una diferencia deliberada: aquí se
+// rmSyncBestEffort) — con una diferencia deliberada: aquí se
 // capturan stdout y stderr POR SEPARADO, porque la aserción central es que el
 // motivo de la coordinadora no se filtre a NINGUNO de los dos canales, no
 // solo a la mezcla de ambos.
@@ -524,7 +523,7 @@ const blockedFakePath = [
 function runBlockedCheck(args, envOverrides = {}) {
   const r = spawnSync('node', [ctNextScript, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, ...ACCOUNT_ENV, PATH: blockedFakePath, ...envOverrides },
+    env: { ...process.env, PATH: blockedFakePath, ...envOverrides },
   })
   return { code: r.status, stdout: r.stdout || '', stderr: r.stderr || '' }
 }
@@ -741,8 +740,13 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     git('add', '-A')
     git('commit', '-qm', 'work')
     seedRun(wt, 1)
+    // Task 10 (F-e2e): --release lee el body del issue por `gh` incluso tras
+    // pasar las puertas de arriba — sin el stub en PATH, este `gh` real
+    // fallaría contra un repo 'o/r' que no existe. Sin FAKE_GH_VIEW_BODY, el
+    // stub responde vacío: sin sección "## E2E" que cruzar, camino feliz.
     const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
       cwd: wt, encoding: 'utf8',
+      env: { ...process.env, PATH: `${join(fixturesDir, 'fake-gh-bin')}:${process.env.PATH}`, ...envDelGo({ repo: 'o/r', issue: 1 }) },
     })
     expect(r.status).toBe(0)
     rmSync(dir, { recursive: true, force: true })
@@ -817,8 +821,11 @@ describe('F22 — --release se niega si la rama lleva un fichero de estado', () 
     git('add', '-A')
     git('commit', '-qm', 'work')
     seedRun(wt, 1)
+    // Task 10 (F-e2e): idem al test de arriba — el stub hace falta para la
+    // lectura del body, no solo para el escenario de mutación.
     const r = spawnSync('node', [dispatchCheck, '1', '--repo', 'o/r', '--release', '--dry-run'], {
       cwd: wt, encoding: 'utf8',
+      env: { ...process.env, PATH: `${join(fixturesDir, 'fake-gh-bin')}:${process.env.PATH}`, ...envDelGo({ repo: 'o/r', issue: 1 }) },
     })
     expect(r.status).toBe(0)
     rmSync(dir, { recursive: true, force: true })

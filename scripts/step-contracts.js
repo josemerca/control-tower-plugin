@@ -18,6 +18,12 @@
 // ============================================================================
 
 import { findClosingKeywords } from './closing-keywords.js'
+import { OUTCOMES } from './run-machine.js'
+// `node:crypto` no rompe el «módulo PURO» de la cabecera, y el precedente está
+// escrito en go-response.js: `createHash` es una función determinista de su
+// argumento —sin disco, sin red y sin reloj—, «lo mismo que un String.trim más
+// caro».
+import { createHash } from 'node:crypto'
 
 export const SEVERITIES = ['high', 'medium', 'low']
 
@@ -172,6 +178,25 @@ export const RUBRIC_OUTCOMES = ['conforme', 'no-aplica', 'sin-vara']
 // matan el run (§3.2). Ausente y `null` son lo mismo. Lo que sí se rechaza es
 // una línea que no se puede leer como número: `"12"` y `12` no se agregan
 // igual, y tolerar la cadena hoy es telemetría sucia mañana.
+// LA FORMA DEL TOKEN, en una constante y no tecleada dos veces. El `pattern` del
+// esquema es lo que el objeto DICE de sí mismo —y es el bloque que la rúbrica le
+// enseña al juez— y el regex de `readVerdict` es lo que de verdad se aplica: dos
+// copias a mano de la misma forma son documentación que puede mentir sin que nada
+// se ponga rojo. El resto de campos de `schemaFor` ya derivan de una constante
+// compartida (`enum: rules`, `enum: SEVERITIES`, `enum: RUBRIC_OUTCOMES`)
+// exactamente por esto, y el slice 11 exportó REVIEW_TOKEN_LABEL para que la
+// ETIQUETA no divergiera; la FORMA se quedó fuera de ese criterio.
+//
+// Vive aquí arriba, lejos del bloque del token, por una razón mecánica:
+// VERDICT_SCHEMA se construye al CARGAR el módulo, así que un `const` declarado
+// más abajo daría ReferenceError por la zona muerta.
+//
+// La tercera copia de la forma —la de RE_REVIEW_TOKEN, en el bloque del token— NO
+// es una divergencia y no se toca: allí es sólo minúsculas a propósito (es lo que
+// `reviewToken` produce) y va dentro de una línea con etiqueta y captura.
+const REVIEW_TOKEN_PATTERN = '^[0-9a-fA-F]{64}$'
+const RE_REVIEW_TOKEN_FORM = new RegExp(REVIEW_TOKEN_PATTERN)
+
 // FACTORY, no un objeto suelto: el juez de slice valida contra el MISMO
 // esquema con otra rúbrica dentro (§3.7-B), y dos copias a mano de esta forma
 // divergerían al primer campo añadido — el mismo desacople que ya sufrieron
@@ -183,9 +208,15 @@ export const RUBRIC_OUTCOMES = ['conforme', 'no-aplica', 'sin-vara']
 const schemaFor = (rules) => ({
   type: 'object',
   additionalProperties: false,
-  required: ['ruling', 'rubric', 'findings'],
+  required: ['ruling', 'rubric', 'review_token', 'findings'],
   properties: {
     ruling: { type: 'string', enum: ['PASS', 'FAIL'] },
+    // El token que el paquete de revisión declara en su cabecera, copiado. Va
+    // en el esquema y no sólo en el validador porque este objeto es el bloque
+    // que la rúbrica del juez le enseña: un campo obligatorio que el juez no
+    // ve descarta todos los veredictos de la corrida sin que ninguno sea culpa
+    // suya. Se admiten mayúsculas (ver readVerdict) y se normaliza al leer.
+    review_token: { type: 'string', pattern: REVIEW_TOKEN_PATTERN },
     rubric: {
       type: 'array',
       minItems: rules.length,
@@ -250,6 +281,81 @@ export const REPORT_SCHEMA = Object.freeze({
       items: { type: 'string' },
     },
     summary: { type: 'string' },
+  },
+})
+
+export const E2E_VERDICTS = ['verde', 'rojo', 'no-verificado']
+
+// E2E_REQUIRED_BY_VERDICT: lo que cada veredicto exige ADEMÁS de `run` y
+// `verdict`. Vive aquí, exportado y en un solo sitio, porque lo consumen DOS:
+// `readE2eReport` (más abajo, que valida contra esta tabla) y
+// `ct-step.mjs#verboNext` (que se lo dice al agente antes de que escriba el
+// informe). Hasta la review final de rama sólo existía dentro de las ramas de
+// `readE2eReport`, y `next` anunciaba únicamente `run` y `verdict`: el
+// programa instruía al agente con un contrato que él mismo rechazaba, y cada
+// slice pagaba al menos una vuelta de DISCARDED — que además sale del
+// presupuesto de descartes de la slice entera (MAX_DISCARDS).
+//
+// `brought_up` es obligatorio en `verde` y en `rojo` (§8.1 del diseño). La
+// evidencia de un informe de e2e es falsificable y el diseño lo dice; su ÚNICA
+// mitigación es que el comando sea REPRODUCIBLE por un humano ("una salida
+// inventada se cae en cuanto alguien la pega"). Un verde que documenta el
+// `curl` pero no cómo se puso el sistema en pie NO es reproducible, así que la
+// mitigación se evaporaba justo en el camino que importa. En `no-verificado`
+// no se exige, y no es una excepción caprichosa: el motivo típico de ese
+// veredicto es precisamente que no se pudo levantar.
+export const E2E_REQUIRED_BY_VERDICT = Object.freeze({
+  verde: Object.freeze(['brought_up', 'evidence']),
+  rojo: Object.freeze(['brought_up', 'expected', 'actual', 'repro', 'refuted_by']),
+  // El formato de `blocked` (state.js), no el campo: "por qué" y "qué haría
+  // falta". Sin las dos, un no-verificado es un encogimiento de hombros que
+  // libera el slice sin dejar a nadie sabiendo qué arreglar.
+  'no-verificado': Object.freeze(['reason', 'unblock']),
+})
+
+// E2E_SCHEMA: lo que se le pide al agente que atraviesa. Declarativo y
+// exportado por el mismo motivo que VERDICT_SCHEMA: el prompt lo cita, y dos
+// copias a mano de la misma forma divergen (pasó con JUDGE_TOOLS).
+//
+// `required` es lo que lleva TODA entrada; lo condicional viaja en
+// `requiredByVerdict` (la misma constante de arriba, no una copia) porque el
+// validador es a mano y una tabla se lee mejor que un `if/then/else` de JSON
+// Schema. Que esté DENTRO del esquema importa: quien lo cite —el prompt, el
+// `next`— se lleva el contrato entero, no la mitad incondicional.
+export const E2E_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['runs'],
+  properties: {
+    runs: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['run', 'verdict'],
+        requiredByVerdict: E2E_REQUIRED_BY_VERDICT,
+        properties: {
+          run: { type: 'string' },
+          verdict: { enum: E2E_VERDICTS },
+          brought_up: { type: 'string' },
+          evidence: {
+            type: 'array',
+            items: {
+              type: 'object',
+              additionalProperties: false,
+              required: ['command', 'output'],
+              properties: { command: { type: 'string' }, output: { type: 'string' } },
+            },
+          },
+          expected: { type: 'string' },
+          actual: { type: 'string' },
+          repro: { type: 'string' },
+          refuted_by: { type: 'string' },
+          reason: { type: 'string' },
+          unblock: { type: 'string' },
+        },
+      },
+    },
   },
 })
 
@@ -332,6 +438,72 @@ export const SLICE_JUDGE_TOOLS = 'Read, Grep, Glob, Write'
 // test que los ata obliga a que paquete y agente cambien en la MISMA tarea.
 export const SLICE_PACKAGE_SECTIONS = ['Señal', 'Commits', 'Files changed', 'Diff']
 
+// ---------------------------------------------------------------------------
+// EL TOKEN DEL PAQUETE — el paquete ata su PRODUCTO, no sólo su insumo.
+//
+// EL DEFECTO QUE CIERRA. El slice 6 hizo el paquete de un solo uso, así que un
+// veredicto no puede volver a gastar un insumo ya gastado. Lo que seguía sin
+// atar nada es el otro sentido: NADA ligaba el `verdict.json` al paquete.
+// Reproducido en dos vías, las dos MUDAS en la telemetría:
+//
+//   (a) el veredicto RECICLADO. Tras un veredicto aceptado que devuelve la
+//       tarea, el mensaje manda volver a `next` — y no dice «y redespacha al
+//       juez». Obedeciendo esa mitad, `next` regenera el paquete y el fichero
+//       del juicio ANTERIOR (misma ruta: `task-<N>-verdict.json`) se acepta.
+//       Medido: tres filas de juez indistinguibles, `correctionRetries`
+//       agotado, y la tarea COMITEADA con el veredicto de otro diff dentro.
+//   (b) el HUECO DEL DESCARTE. El descarte por JSON ilegible no consume el
+//       paquete —bien: el reintento tiene que poder repreguntar— y eso se
+//       justificaba con «el reintento juzga el mismo diff», que es una
+//       asunción sobre la conducta del agente. Si el índice cambia en ese
+//       hueco, el `PASS` siguiente entra sobre código no revisado.
+//
+// LA FORMA. El paquete declara en su cabecera el sha256 del DIFF QUE CAPTURÓ;
+// el juez lo copia en `review_token`; el verbo del veredicto exige que
+// coincidan el del veredicto, el del paquete y el recomputado del corte de ese
+// instante. (a) muere porque un veredicto reciclado trae el token de otro
+// paquete; (b) muere porque el código cambiado no reproduce el sha capturado.
+//
+// CONTENT-ADDRESSED Y NO UN NONCE SORTEADO, y la diferencia con el nonce del
+// `go` (go-response.js) es la razón: aquél es SECRETO y no adivinable, y su
+// propiedad es que el agente no pueda fabricar el permiso. Éste es público y
+// derivable —está en el fichero que el juez lee, y cualquiera con shell lo
+// recomputa—, así que NO autentica al juez: ata el veredicto a un estado del
+// código. Un nonce aleatorio cerraría (a) y no (b) (en el hueco el paquete no
+// se regenera, así que el nonce sigue valiendo), y además castigaría al
+// obediente: un veredicto reemitido sobre un paquete regenerado con el MISMO
+// diff se descartaría por traer el nonce viejo. Con el contenido como
+// dirección, «no cambió el código» y «vale el veredicto» son la misma frase.
+//
+// La ETIQUETA se exporta y el lector se construye con ella: quien escribe la
+// línea (`escribirPaquete`), quien la lee (`reviewTokenOf`), las dos rúbricas
+// que se la citan al juez y los tests son cuatro copias de la misma cadena, y
+// eso es exactamente lo que ya divergió con JUDGE_TOOLS, VERDICT_RULES y
+// PACKAGE_SECTIONS. Aquí el fallo sería mudo por partida doble: el juez copia
+// de una línea que no existe, y todo veredicto se descarta.
+// ---------------------------------------------------------------------------
+export const REVIEW_TOKEN_LABEL = 'Review token'
+
+// El token: sha256 hex del texto del diff. Función del ARGUMENTO y de nada
+// más — quien decide QUÉ diff es el sujeto es ct-step.mjs, que es quien tiene
+// git delante.
+export const reviewToken = (diff) => createHash('sha256').update(String(diff ?? ''), 'utf8').digest('hex')
+
+// La línea, en una sola función: la pantalla que se la dicta al juez (la
+// rúbrica) y el matcher que la reconoce no pueden divergir en un espacio.
+export const reviewTokenLine = (token) => `${REVIEW_TOKEN_LABEL}: ${token}`
+
+// La RegExp se construye con la etiqueta y no se teclea: la etiqueta no lleva
+// metacaracteres, así que interpolarla es seguro y ata el lector al escritor.
+// Minúsculas y 64 exactos: es lo que `reviewToken` produce, y un paquete cuya
+// línea no cumpla eso NO declara ningún token (null), que es lo que el verbo
+// trata como «paquete de una versión anterior o editado a mano».
+const RE_REVIEW_TOKEN = new RegExp(`^${REVIEW_TOKEN_LABEL}: ([0-9a-f]{64})$`, 'm')
+export function reviewTokenOf(textoDelPaquete) {
+  const m = RE_REVIEW_TOKEN.exec(String(textoDelPaquete ?? ''))
+  return m ? m[1] : null
+}
+
 const esTexto = (v) => typeof v === 'string' && v.trim() !== ''
 
 // Validación a mano y no con una librería de esquemas: el spec exige cero
@@ -345,7 +517,7 @@ const esTexto = (v) => typeof v === 'string' && v.trim() !== ''
 // que se aplicara a una sola de las dos.
 export function readVerdict(structured, rules = VERDICT_RULES) {
   if (!structured || typeof structured !== 'object') return { why: 'el juez no devolvió structured_output' }
-  const { ruling, rubric, findings } = structured
+  const { ruling, rubric, findings, review_token: token } = structured
   if (ruling !== 'PASS' && ruling !== 'FAIL') return { why: `ruling desconocido: ${JSON.stringify(ruling)}` }
   if (!Array.isArray(findings)) return { why: 'findings no es una lista' }
   for (const [i, f] of findings.entries()) {
@@ -401,7 +573,23 @@ export function readVerdict(structured, rules = VERDICT_RULES) {
   if (ruling === 'PASS' && findings.some((f) => f.severity === 'high')) {
     return { why: 'un PASS con un hallazgo de severidad high contradice la rúbrica: un hallazgo grave es FAIL' }
   }
-  return { verdict: { ruling, rubric, findings } }
+  // EL TOKEN DEL PAQUETE, copiado — y LA ÚLTIMA de las comprobaciones a
+  // propósito. Las de arriba deciden si esto es un veredicto; ésta decide de
+  // QUÉ es. Un recorrido incompleto o un ruling inventado tienen que seguir
+  // leyendo el `why` de su propio defecto: es el texto con el que el juez
+  // vuelve a contestar, y adelantarla lo mandaría a arreglar el campo
+  // equivocado.
+  //
+  // Se acepta en mayúsculas y se devuelve en minúsculas, con el precedente
+  // literal de `matchesGo`: quien copia un hex de 64 caracteres puede
+  // reformatearlo, y «el peor rato de todos es teclear el permiso correcto y
+  // que no pase nada». Lo que este módulo NO puede decidir es si el token es
+  // EL DEL PAQUETE: eso exige leer el paquete y volver a medir el corte, y lo
+  // hace ct-step.mjs (`tokenVigente`).
+  if (typeof token !== 'string' || !RE_REVIEW_TOKEN_FORM.test(token)) {
+    return { why: `el veredicto no copia el "${REVIEW_TOKEN_LABEL}" del paquete de revisión: es el sha256 (64 hex) de la línea con la que abre el paquete que se te dio a juzgar, y va tal cual en el campo "review_token" — sin él no se puede afirmar que este veredicto sea sobre ESE código` }
+  }
+  return { verdict: { ruling, rubric, findings, review_token: token.toLowerCase() } }
 }
 
 // El veredicto del SLICE entero (§3.7-B): misma validación, la rúbrica de
@@ -461,6 +649,94 @@ export function readReport(structured) {
   const repetidas = [...new Set(paths.filter((ruta, i, todas) => todas.indexOf(ruta) !== i))]
   if (repetidas.length) return { why: `el informe declara la misma ruta más de una vez: ${repetidas.join(', ')}` }
   return { report: { paths, summary } }
+}
+
+// readE2eReport: el informe -> un OUTCOME. Validación a mano y no con una
+// librería de esquemas, igual que readVerdict y por lo mismo: el spec exige
+// cero dependencias nuevas y lo que hay que comprobar cabe aquí.
+//
+// LA COMPARACIÓN DE `run` ES IDÉNTICA, sólo colapsando espacios. El recorrido
+// llega al agente verbatim desde la celda del spec precisamente para que esto
+// sea posible; normalizar más (minúsculas, quitar puntuación) haría pasar por
+// "el mismo recorrido" dos textos que un humano escribió distintos, y ese
+// título es la única prueba de que se atravesó lo que se pidió y no otra cosa.
+//
+// LO QUE NO COMPRUEBA: que la salida sea real. Ver la cabecera del test.
+const colapsa = (s) => String(s || '').replace(/\s+/g, ' ').trim()
+
+// nombraCampo: el nombre del campo tal cual va en el JSON, con la aclaración
+// que hace falta cuando el nombre solo no basta. `evidence` es el único caso:
+// una lista vacía —o con pares a los que les falta el comando o la salida— es
+// tan insuficiente como no ponerla, y decir sólo "falta `evidence`" mandaría a
+// un agente que YA la puso a mirar dónde no está el problema.
+const nombraCampo = (campo) => (campo === 'evidence' ? '`evidence` (al menos un par comando/salida, los dos con texto)' : `\`${campo}\``)
+const tieneEvidencia = (e) => (Array.isArray(e.evidence) ? e.evidence.filter((x) => x && esTexto(x.command) && esTexto(x.output)) : []).length > 0
+
+export function readE2eReport(structured, declaredRuns) {
+  // Los recorridos declarados se DEDUPLICAN. Dos celdas idénticas son el mismo
+  // recorrido, y sin esto el informe no tenía ninguna forma correcta de
+  // escribirse: `find` devolvía la MISMA entrada para las dos, `buenos` la
+  // duplicaba (y con ella el apartado en docs/superpowers/e2e/<issue>.md),
+  // mientras que mandar dos entradas iguales hacía que la segunda cayera en
+  // "una entrada que esta slice no declara". Un recorrido repetido no es una
+  // contradicción que haya que rechazar —es una redundancia—, así que se
+  // colapsa en vez de abortar el paso.
+  const declared = [...new Set((declaredRuns || []).map(colapsa).filter(Boolean))]
+  if (!structured || typeof structured !== 'object' || Array.isArray(structured)) {
+    return { outcome: OUTCOMES.DISCARDED, why: 'el agente no devolvió structured_output' }
+  }
+  if (!Array.isArray(structured.runs)) {
+    return { outcome: OUTCOMES.DISCARDED, why: '`runs` no es una lista' }
+  }
+  const problemas = []
+  const buenos = []
+  const vistos = new Set()
+  for (const run of declared) {
+    const e = structured.runs.find((x) => x && colapsa(x.run) === run)
+    if (!e) { problemas.push(`falta la entrada del recorrido "${run}"`); continue }
+    vistos.add(e)
+    if (!E2E_VERDICTS.includes(e.verdict)) {
+      problemas.push(`el recorrido "${run}" trae un veredicto desconocido: ${JSON.stringify(e.verdict)}`)
+      continue
+    }
+    // Los tres veredictos se validan contra UNA tabla (E2E_REQUIRED_BY_VERDICT,
+    // arriba), no contra tres ramas escritas a mano — es la misma tabla que
+    // `ct-step next` le enseña al agente antes de escribir el informe, así que
+    // no pueden divergir. Sin ella divergieron: `next` anunciaba `run y
+    // verdict` y aquí se exigía además la evidencia, el motivo o los cuatro
+    // campos del rojo.
+    //
+    // Por qué cada veredicto exige lo suyo: un verde sin evidencia (ni cómo se
+    // levantó) es una afirmación sin nada detrás; un no-verificado sin `reason`
+    // y `unblock` es un encogimiento de hombros que libera el slice sin dejar a
+    // nadie sabiendo qué arreglar; y un rojo a medias colaba "undefined"
+    // literal en `docs/superpowers/e2e/<issue>.md` —un artefacto de la pull
+    // request— porque `escribirInformeE2e` (ct-step.mjs) confía en que lo que
+    // llega aquí ya está validado y no vuelve a comprobar nada.
+    const faltan = E2E_REQUIRED_BY_VERDICT[e.verdict].filter((campo) => (campo === 'evidence' ? !tieneEvidencia(e) : !esTexto(e[campo])))
+    if (faltan.length) {
+      problemas.push(`el recorrido "${run}" se declara ${e.verdict} sin ${faltan.map(nombraCampo).join(', ')}: ese veredicto no se sostiene sin eso. Añádelo al informe y vuelve a cerrar el paso con "ct-step e2e"`)
+      continue
+    }
+    buenos.push(e)
+  }
+  for (const e of structured.runs) {
+    if (!vistos.has(e)) problemas.push(`el informe trae una entrada que esta slice no declara: "${colapsa(e && e.run)}"`)
+  }
+  // EL ROJO GANA AL MAL FORMADO: ver el test homónimo.
+  //
+  // `why` se OMITE aquí cuando no hay problemas — no se pone a `null` — para
+  // no divergir de `readVerdict`/`readReport`, que en su camino feliz tampoco
+  // llevan la clave `why`. Poner `null` explícito habría sido un tercer valor
+  // sin motivo: el llamante (`ct-step.mjs#verboE2e`) ya normaliza con
+  // `why || null`, así que omitirla no cambia ningún comportamiento.
+  if (buenos.some((e) => e.verdict === 'rojo')) {
+    return problemas.length
+      ? { outcome: OUTCOMES.FAILED, runs: buenos, why: problemas.join('; ') }
+      : { outcome: OUTCOMES.FAILED, runs: buenos }
+  }
+  if (problemas.length) return { outcome: OUTCOMES.DISCARDED, why: problemas.join('; ') }
+  return { outcome: OUTCOMES.DONE, runs: buenos }
 }
 
 // ============================================================================

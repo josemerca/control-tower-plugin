@@ -165,6 +165,15 @@ function main() {
     // POSTERIOR sí lo hay y entonces empuja. Con un payload fijo sólo se puede
     // probar uno de los dos.
     if (joined.includes('--json comments')) {
+      // FAKE_GH_VIEW_COMMENTS_FAIL (F38): falla SÓLO la lectura de comentarios,
+      // no la de labels ni la del body. Con FAKE_GH_VIEW_FAIL (que tumba todo
+      // `issue view`) no se puede probar la puerta 9 del `--release`: la puerta
+      // 8, que lee el body, gana antes y el test mediría otra cosa.
+      if (process.env.FAKE_GH_VIEW_COMMENTS_FAIL) {
+        console.error('fake-gh: issue view --json comments failed (simulado)')
+        process.exitCode = 1
+        return
+      }
       const seq = process.env.FAKE_GH_VIEW_COMMENTS_SEQUENCE
         ? JSON.parse(process.env.FAKE_GH_VIEW_COMMENTS_SEQUENCE)
         : null
@@ -174,6 +183,17 @@ function main() {
       } else {
         process.stdout.write(process.env.FAKE_GH_VIEW_COMMENTS || '{"comments":[]}')
       }
+      process.exitCode = 0
+      return
+    }
+    // FAKE_GH_VIEW_BODY (TAREA 10) — el camino de `--json body`, que es el
+    // que usa la puerta F-e2e de `dispatch-check.mjs --release` para leer el
+    // cuerpo del issue y cruzarlo contra el run entregado. Va aparte del de
+    // labels y del de comments por la misma razón que ellos: misma
+    // subcomando, pregunta distinta — sin separarla, la puerta F-e2e
+    // recibiría la lista de labels y nunca encontraría un body que parsear.
+    if (joined.includes('--json body')) {
+      process.stdout.write(process.env.FAKE_GH_VIEW_BODY ?? '')
       process.exitCode = 0
       return
     }
@@ -490,6 +510,40 @@ function main() {
       return
     }
     process.stdout.write(`${process.env.FAKE_GH_DEFAULT_BRANCH ?? 'main'}\n`)
+    process.exitCode = 0
+    return
+  }
+
+  // `gh pr list --repo <r> --head feat/<n> --state merged --json number,mergedAt`
+  // (ct-watch-merge.mjs): la única pregunta del vigilante del merge. La rama de
+  // un slice es determinista (`feat/<n>`), así que "¿está mergeado?" no
+  // necesita ninguna heurística — sale de `gh` directamente.
+  //
+  // FAKE_GH_PR_LIST es el payload fijo (default: `[]`, ningún PR mergeado, que
+  // es el estado en el que el vigilante empieza a esperar).
+  // FAKE_GH_PR_LIST_SEQUENCE es una lista de payloads, uno por llamada, con
+  // contador propio en FAKE_GH_PR_LIST_COUNTER_FILE — necesaria para el caso
+  // que importa de verdad: los primeros sondeos no ven nada y uno posterior sí,
+  // que es cómo se ve un merge en el mundo real. La última entrada se repite
+  // cuando la secuencia se agota, para que el vigilante pueda seguir sondeando
+  // sin que el stub se quede sin respuestas.
+  // FAKE_GH_PR_LIST_FAIL simula que la lectura falla (red caída, token
+  // caducado, un 502): lo que este stub tiene que poder ejercer es que un fallo
+  // transitorio NO se lea como "no está mergeado" de forma permanente.
+  if (argv[0] === 'pr' && argv[1] === 'list') {
+    if (process.env.FAKE_GH_PR_LIST_FAIL) {
+      console.error('fake-gh: pr list failed (simulado)')
+      process.exitCode = 1
+      return
+    }
+    if (process.env.FAKE_GH_PR_LIST_SEQUENCE) {
+      const seq = JSON.parse(process.env.FAKE_GH_PR_LIST_SEQUENCE)
+      const i = nextCallIndex(process.env.FAKE_GH_PR_LIST_COUNTER_FILE)
+      process.stdout.write(JSON.stringify(seq[Math.min(i, seq.length - 1)] ?? []))
+      process.exitCode = 0
+      return
+    }
+    process.stdout.write(process.env.FAKE_GH_PR_LIST || '[]')
     process.exitCode = 0
     return
   }

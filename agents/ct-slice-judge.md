@@ -24,6 +24,13 @@ agent, and not you.
   the slice and the last commit; `## Diff` is the accumulated diff of every
   task, `-U10`. This is the whole slice at once — not the staged change of one
   task, because none of it is staged any more: it is all committed.
+  The package opens with a `Review token:` line: the sha256 of exactly the
+  accumulated diff printed below it. You copy that token verbatim into your
+  verdict — it is what makes your verdict checkably a verdict on THIS slice.
+  `ct-step slice-verdict` recomputes it from the commit range at the moment your
+  verdict is read, so a verdict carrying some other package's token, or a package
+  whose commits were rewritten after it was written, is discarded instead of
+  accepted.
 - **The plan.** The same file every task's brief was cut from, but here you
   read the whole thing: `### Desired end state` under `## 1. Context and
   goal`, `## 2. Closed decisions`, and every `### Task N` of `## 7. Tasks` with
@@ -100,7 +107,8 @@ from the dispatch state with no agent in the middle — against the
 accumulated `## Diff`, and against the repository itself for how this
 repo already instruments.
 
-**What settles it:** three checks, and only these three.
+**What settles it:** three checks, and only these three — and then one
+smell, after them, that settles nothing and never blocks.
 
 - **Production code emits it.** What the signal promises — the metric,
   the log line, the event — must be produced by production lines of the
@@ -117,12 +125,49 @@ repo already instruments.
   unbounded identifier — a user id, a request id, a timestamp, free text —
   is high cardinality. Cite the diff line that adds it.
 
+**And one smell, which settles nothing.** The groom contract states the
+rule for whoever fills the cell — «si lo que escribes se puede comprobar
+corriendo los tests, es un criterio de aceptación, no una señal» — and
+this is the only place it ever gets read back. Two things have to hold
+together for the smell: what the signal promises is already verified by a
+test of the accumulated diff — it comes true by running the tests, with
+nothing deployed — **and** the cell names nothing that outlives that run:
+no metric, no log line, no event anyone reads in production after the
+merge. Then the cell restated an acceptance criterion, and this item
+spent its turn on what `estado-final` had already measured. Report it
+`low`: `what` begins with `señal redundante` and names both halves — what
+the signal promises, and the test that already verifies it — and
+`evidence` quotes that test. The item is still `conforme`: the signal was
+measured, and the three checks above are what measured it.
+
+**What this finding is about is the signal AS A DECLARATION** — a
+sentence written at groom time that was already redundant before the
+first commit — and never the code. You are not reopening the acceptance
+criteria, you are not reporting `estado-final` a second time, and nothing
+in this finding says the slice delivered less than it promised.
+
+**Neither half alone is the smell.** A cell that names a metric, a log
+line or an event is not this smell even when the diff adds a test over
+the emission: instrumentation under test is instrumentation you can
+trust, and the first check above is about production lines, which a test
+on top of them does not take away. And a cell that names nothing to be
+read in production is THIS finding, not the first check's `high`: that
+`high` is for a signal that names a metric, a log line or an event its
+production lines never emit, and one defect is one finding. A promise you
+cannot pin to a test of this diff is not a smell at all — that is a
+signal doing its job. And there is nothing to smell where no signal was
+promised: a reasoned exemption and a section that declares nothing are
+settled below, as `no-aplica` and as `sin-vara`, and neither of them
+carries this finding.
+
 **Severity, decided here:** a declared signal that no production line of
 the diff emits is the slice not delivering its observable promise —
 `high`, and one high means FAIL. An unbounded label is `high` too, with
 the diff line quoted. The wrong library is `medium`: a real defect that
 does not make the slice wrong, travelling in the verdict for whoever
-reviews the pull request. Everything else this item sees is `low`.
+reviews the pull request. A signal that restated an acceptance criterion
+is `low` — the smell above, and never more than that. Everything else
+this item sees is `low` too.
 
 **When it does not apply:** a section that reads `N/A — <razón>` is a
 reasoned exemption a human approved at groom time: `no-aplica`, quoting
@@ -178,6 +223,7 @@ prose around it, no markdown fence:
 
 ```json
 {"ruling": "PASS" | "FAIL",
+ "review_token": "the 64-hex token the slice review package declares on its `Review token:` line",
  "rubric": [{"rule": "estado-final",
              "result": "what this item gave, or why it does not apply",
              "outcome": "conforme|no-aplica|sin-vara"}],
@@ -189,6 +235,12 @@ prose around it, no markdown fence:
                "evidence": "the line or sentence you are citing, quoted"}]}
 ```
 
+- `review_token` is the 64-character hex token of the `Review token:` line the
+  slice review package opens with, copied verbatim. It is mandatory, and there is
+  nothing for you to compute: the line is in the file you were given. A verdict
+  without it is discarded, and so is one whose token is not the one the package
+  declares: it is the only thing that ties your verdict to a specific state of
+  the slice, and this verdict is the last gate before the pull request opens.
 - `rubric` is the walk: the three identifiers, in the order above, **each one
   exactly once**, each with what it gave — "does not apply, because X" is a
   result. A missing, repeated or unknown item, or an empty `result`, discards

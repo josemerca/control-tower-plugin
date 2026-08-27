@@ -8,9 +8,9 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 
 | | |
 |---|---|
-| Versión | `0.40.0` · contrato de la tabla de slices `v19` |
+| Versión | `0.45.0` · contrato de la tabla de slices `v21` |
 | Comandos | `/ct-init` · `/ct-groom` · `/ct-next` · `/ct-status` |
-| Puertas humanas | 3 por epic — congelación, `status:ready`, merge — más el gate `plan` en cada slice (renunciable por fila con `!plan`) |
+| Puertas humanas | 3 por epic — congelación, `status:ready`, merge — más el gate `plan` en cada slice (renunciable por fila con `!plan`; su go es `-OK <nonce>` y `--release` se niega sin él) y el gate `e2e` cuando la fila declara recorridos en la columna `E2E` (derivado, no se escribe a mano) |
 | Skills | 11 forkados de superpowers 6.0.3 + 1 propio (`writing-plans-prescriptive`) |
 | Requisitos | Node ≥ 24 · `gh` autenticado · `cmux` · git worktrees |
 | Licencia | [MIT](LICENSE) |
@@ -63,6 +63,8 @@ Hay **dos sesiones vivas por repo, con papeles opuestos**: la *coordinadora*, en
 | **1 · Congelación** | El spec está escrito, en `DRAFT` | Nace de una frase real: *«yo no me suelo leer los specs»*. Si el humano no lee el spec, quien lo escribe podría cerrar decisiones con firma ajena. Se presentan **15 líneas** —hipótesis, cada decisión con su procedencia, anti-scope— y se para. El OK muta `DRAFT → CONGELADA`. **Sin congelación no hay groom.** |
 | **2 · `status:ready`** | Los issues ya existen | `/ct-groom` los crea en `status:backlog`, nunca en `ready`. Que un slice esté escrito no significa que se deba empezar ahora. |
 | **3 · Merge** | El PR está abierto y el claim liberado | El loop **escribe y enseña** los gates (`visual`, `apply`) pero no impide mergear con uno sin cerrar. Y el merge es lo único que libera los tokens de área y satisface las dependencias. |
+
+La Puerta 3 sigue siendo tuya, pero ya no hace falta que además la anuncies: al entregar, `--release` deja un vigilante desprendido (`scripts/ct-watch-merge.mjs`) sondeando el PR de la rama del slice, y en cuanto lo ve mergeado avisa a la coordinadora de que su cosecha está pendiente. No borra nada — el aviso es la automatización; recoger el worktree sigue siendo una decisión. **Exige una cosa de ti:** que la sesión coordinadora sea una workspace de cmux abierta en el checkout principal del repo, porque es por ahí por donde el vigilante la encuentra (a ella no la crea el loop, así que no hay ningún nombre que derivar). Si no lo está, el aviso se pierde y te enteras en el siguiente `/ct-next`, que sigue detectando la cosecha pendiente él solo.
 
 ### El modelo de dos niveles
 
@@ -132,6 +134,7 @@ ct-step verdict veredicto.json   # valida contra el esquema, transiciona
 ct-step commit                   # valida el mensaje y comitea
 ct-step global                   # tras la última tarea: corre ## 8. Global verification
 ct-step slice-verdict v.json     # el juicio del slice ENTERO (ct-slice-judge, sin Bash)
+ct-step e2e informe.json         # SOLO si el slice declara recorridos: valida, escribe el informe y comitea
 ```
 
 Lo que cambia respecto de hoy, en una línea por propiedad:
@@ -161,6 +164,25 @@ El diseño, lo que se midió para tomarlo y lo que la primera corrida real ense�
 están en
 [`docs/superpowers/specs/2026-08-18-el-conductor-como-programa-design.md`](docs/superpowers/specs/2026-08-18-el-conductor-como-programa-design.md).
 
+**El verbo `e2e` es TERMINAL, y condicional.** Se pregunta con `ct-step next`
+igual que cualquier otro paso, pero solo aparece en la secuencia de un slice
+cuya fila de la tabla declaró recorridos en la columna `E2E`. Tras el commit de
+la última tarea la cola es la misma para todos los slices — `ct-step global`
+(la `## 8. Global verification`) y `ct-step slice-verdict` (el juicio del slice
+entero) —, y es ahí donde se bifurca: un slice **sin** recorridos entrega en ese
+veredicto, sin pasar nunca por `e2e`. El que sí los declara pasa por esos dos
+pasos y **entonces**, y solo entonces, `ct-step next` pide atravesar los
+recorridos que el issue lista en `## E2E` — el `e2e` es el ÚLTIMO paso de la
+cola, nunca uno intercalado entre las tareas;
+el informe (comando literal + salida real de cada uno) se valida contra
+`ct-step e2e informe.json`, se escribe en `docs/superpowers/e2e/<issue>.md`, se
+stagea y se comitea — ese commit es lo que cierra el run. Si algún recorrido
+sale rojo, `ct-step` sale con su propio **exit `7`** (`E2E_RED` en el `EXIT` de
+`scripts/ct-step.mjs` — un número de salida propio del binario, sin relación
+con el exit `7` de `dispatch-check --release` de más arriba, que es un
+programa distinto con su propia numeración) y el run se queda bloqueado hasta
+que se corrija: no hay forma de liberar un slice con un recorrido en rojo.
+
 ## El estado de un slice es una label
 
 No hay base de datos. El estado son las labels del issue, y el timeline de GitHub registra cada transición con su timestamp — así sobrevive a un `/clear`, a un redespacho y a otra máquina.
@@ -171,6 +193,7 @@ stateDiagram-v2
     [*] --> backlog: /ct-groom
     backlog --> ready: humano
     ready --> in_progress: claim (dispatch-check)
+    in_progress --> in_progress: ct-step e2e · si declara recorridos
     in_progress --> in_review: --release
     in_review --> cerrado: merge (closing keyword)
     in_review --> in_progress: --reopen · PR rechazado
@@ -212,7 +235,7 @@ El principio que ordena todo el diseño:
 
 El plan del slice tiene contrato mecánico (`scripts/plan-contract.js`), y desde F-jjponz-4 ese contrato acota **qué** puede llevar un bloque de código: cada uno declara su rol —`Current state` (el tramo que cambia, comprobado verbatim contra el repo), `Contract` (tipos, firmas, errores tipados, constantes no deducibles), `Call site` (cómo queda la llamada en el consumidor) o `Final text` (documentación)— con su presupuesto de líneas. Los cuerpos de los módulos y los ficheros de test **no van en el plan**: los escribe el implementador con TDD, y la configuración se describe en prosa. El motivo es el gate `plan`: un plan de 74k caracteres que no cabe en un comentario del issue no se revisa, se hojea — y lo que viaja sin revisar son defectos.
 
-### Las 4 reglas de celda de la tabla de slices
+### Las 5 reglas de celda de la tabla de slices
 
 Van en la plantilla del spec y no en el contrato, porque **las juzga un humano al congelar, no un parser**:
 
@@ -220,6 +243,7 @@ Van en la plantilla del spec y no en el contrato, porque **las juzga un humano a
 2. **`Acepta` = postcondiciones, no acciones.** «El token caducado deja la sesión en login», no «se refresca el token».
 3. **`Gate` = residuo de los `Acepta`.** Lo observable que *no* puede tener test 1:1 es exactamente donde entra el humano.
 4. **`Dep` declara interfaz.** *La más importante.* La `Entrega` de una fila con `Dep` nombra **qué consume** de la anterior. Un `Dep` que sólo dice `#2` es un solape sin declarar, y el solape sin declarar es lo que hace que las reviews se rechacen.
+5. **`E2E` = ¿hace falta el sistema en pie?** Columna opcional, tres estados por celda: uno o varios recorridos (coma-separados, `\,` para una coma dentro del propio recorrido), el token `no` (o `n/a` — declaración positiva de que no hay nada que atravesar), o sin declarar (sólo válido si la tabla no tiene esta columna en absoluto). El gate `e2e` no se escribe en `Gate`: se DERIVA de que esta columna traiga algún recorrido — no todos los slices lo necesitan, y forzar uno por fila produce relleno que nadie lee.
 
 ## Desarrollo
 
@@ -268,7 +292,9 @@ Escritos aquí porque un límite dicho es operable y uno implícito no.
 
 - **El claim no es atómico.** El lock con el que se reclama un issue son labels de GitHub, sin compare-and-swap. Está **reproducido y verificado**, no sospechado, que dos dispatchers lanzados casi a la vez pueden reclamar el mismo token y arrancar los dos. La mitigación es operativa: **no lances dos `/ct-next` a la vez contra el mismo repo.**
 - **Nada vigila los claims entre invocaciones.** El claim es una label, sin heartbeat. Y la evidencia de vida es local a la máquina, así que nunca se afirma «abandonado», sólo «aquí no hay ni rastro».
-- **Los gates se enseñan, no se imponen.** El loop no impide mergear con un gate sin cerrar.
+- **Los gates se enseñan, no se imponen — salvo `plan`.** El loop no impide mergear con un gate sin cerrar. La excepción es el gate `plan`: desde F38 su go es `-OK <nonce>` (un nonce por despacho, sorteado al despachar y dictado sólo por la pantalla de quien despacha) y `dispatch-check --release` se niega con **exit 9** sin él, así que un slice cuyo plan nadie revisó no llega a `in-review`.
+- **El go del gate `plan` no es criptografía: agente y coordinadora corren con el mismo uid.** El nonce cierra la falsificación *fácil* —el agente ya no puede escribir su propio permiso con un `gh issue comment`, que es lo que hacía y con una traza indistinguible de la legítima— pero un agente decidido puede tocar el estado privado de la coordinadora, que es la misma línea detrás de la que ya están todos los demás gates: ninguno sobrevive a un agente que reescribe el plugin que lo juzga. Y por defecto el nonce sale por `stdout`, o sea que protege del agente **implementador** y no de la coordinadora (con `CT_GO_CHANNEL=notify` no entra en el contexto de ninguno). El cierre completo exige un verificador que no corra bajo ese uid —CI, u otra identidad—: nombrado y sin construir.
+- **El informe de `e2e` es falsificable.** Nada impide que un agente invente el `stdout` de un comando que nunca corrió: el informe se valida en la FORMA (los campos que la rúbrica exige por cada recorrido), nunca en la verdad de lo que dice haber visto. Lo único que lo acota es que el comando declarado tenga que ser reproducible — una salida inventada se cae en cuanto alguien la pega y la corre de verdad.
 - **No hay transacción en el groom.** Superada la validación, un fallo de red deja creado lo anterior. No hay rollback y no se finge que lo haya: de un abort a mitad se sale volviendo a correr, no limpiando a mano.
 - **`--reconcile` es experimental** y lo avisa cada vez. La mitad de *detección* (que nunca escribe) está mejor entendida que la mitad de *aplicación*.
 - **La medida está pre-registrada, no cosechada.** El timeline de GitHub ya registra cada transición con su timestamp: media instrumentación existe sin recoger.

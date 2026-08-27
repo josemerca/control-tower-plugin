@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url'
 // cmux/claude en PATH) — ver fixtures/hermetic-env.js. Los tests de este
 // fichero que ejercen la AUSENCIA de un binario fijan su propio PATH, que
 // gana sobre este (los overrides se esparcen después).
-import { ACCOUNT_ENV, hermeticEnv } from './fixtures/hermetic-env.js'
+import {hermeticEnv} from './fixtures/hermetic-env.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -70,7 +70,7 @@ function run(args, envOverrides = {}) {
 function runReal(args, envOverrides = {}) {
   const r = spawnSync(process.execPath, [script, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides },
+    env: { ...process.env, PATH: fakePath, ...envOverrides },
   })
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
 }
@@ -166,117 +166,11 @@ describe('ct-next --cap: parseo estricto (D4, defecto 2)', () => {
 // ---------------------------------------------------------------------------
 // Defecto 1 — mapa de cuentas, con voz
 // ---------------------------------------------------------------------------
-describe('ct-next — cuenta resuelta, siempre dicha en voz alta (D4, defecto 1)', () => {
-  it('repo que casa una regla → dice la cuenta Y la regla, sin avisos', () => {
-    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE_ONE_READY })
-    expect(r.code).toBe(0)
-    expect(r.out).toMatch(/cuenta resuelta: .*\.claude-personal \(personal\) — por la regla "\*\/menoplus"/)
-    expect(r.out).not.toMatch(/POR DEFECTO/)
-  })
-
-  it('repo de la org mercadona → cuenta de TRABAJO (antes caía en la personal, en silencio)', () => {
-    const r = run(['--repo', 'mercadona/algun-tool-interno', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE_ONE_READY })
-    expect(r.code).toBe(0)
-    expect(r.out).toMatch(/cuenta resuelta: .*\.claude-work \(trabajo\)/)
-    expect(r.out).toMatch(/CLAUDE_CONFIG_DIR=\S*\.claude-work/)
-  })
-
-  it('el cambio de cuenta respecto del mapa anterior NUNCA pasa callado', () => {
-    const r = run(['--repo', 'mercadona/algun-tool-interno', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE_ONE_READY })
-    expect(r.out).toMatch(/aviso: CAMBIO DE CUENTA/)
-    expect(r.out).toMatch(/se despachaba antes con \S*\.claude-personal/)
-    expect(r.out).toMatch(/ahora se despacha con \S*\.claude-work/)
-  })
-
-  it('repo que no casa ningún patrón → dice que es el DEFAULT, cuál es, y cómo arreglarlo', () => {
-    const r = run(['--repo', 'desconocido/lo-que-sea', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE_ONE_READY })
-    expect(r.code).toBe(0)
-    expect(r.out).toMatch(/aviso: ningún patrón de ACCOUNT_MAP casa/)
-    expect(r.out).toMatch(/cuenta POR DEFECTO/)
-    expect(r.out).toMatch(/desconocido\/\*/) // la sugerencia concreta de arreglo
-  })
-
-  // F16/H2: desde que los avisos salen por STDERR y el plan por STDOUT, este
-  // test NO puede seguir usando `run()` — concatenar `stdout + stderr` ordena
-  // por STREAM, no por tiempo, así que el aviso caería siempre después del
-  // plan y el test fallaría contra un código perfectamente correcto (y, peor,
-  // pasaría si algún día se emitiera al revés). La única forma honesta de
-  // afirmar "esta línea salió antes que aquella" con dos streams distintos es
-  // mandarlos AL MISMO descriptor y leer la transcripción — el mismo patrón
-  // que ya usaba `combinedOutputOf` en ct-next-dryrun.test.js.
-  it('el aviso se imprime ANTES del plan del slice, no después (requisito: "antes de lanzar nada")', () => {
-    const logDir = makeTmp('ct-next-orden-')
-    const logPath = join(logDir, 'combined.log')
-    const fd = openSync(logPath, 'w')
-    try {
-      spawnSync(process.execPath, [script, '--repo', 'desconocido/lo-que-sea', '--cap', '1', '--dry-run'], {
-        stdio: ['ignore', fd, fd],
-        env: { ...process.env, ...hermeticEnv(), CT_NEXT_FIXTURE: FIXTURE_ONE_READY },
-      })
-    } finally {
-      closeSync(fd)
-    }
-    const out = readFileSync(logPath, 'utf8')
-    const avisoAt = out.indexOf('cuenta POR DEFECTO')
-    const planAt = out.indexOf('=== slice #42')
-    // Ambos índices tienen que existir de verdad: sin esto, un -1 (aviso
-    // ausente) "pasaría" el toBeLessThan por casualidad — el test sería
-    // verde contra el código sin arreglar, que es justo el que no lo imprime.
-    expect(avisoAt).toBeGreaterThan(-1)
-    expect(planAt).toBeGreaterThan(-1)
-    expect(avisoAt).toBeLessThan(planAt)
-  })
-})
-
-describe('ct-next — ACCOUNT_MAP malformado se detecta AL ARRANCAR (D4, defecto 1)', () => {
-  // Se copia el árbol de scripts a un temporal y se estropea SOLO la copia de
-  // kickoff.js: el mapa vive en código, así que no hay forma de inyectar uno
-  // malo por env sin abrir una puerta de configuración que producción no debe
-  // tener. Mismo patrón de copia que ya usa ct-next-claim.test.js.
-  const SIBLINGS = ctNextSiblings(scriptsDir).concat(['dispatch-check.mjs'])
-
-  // El temporal va DENTRO del proyecto (no en tmpdir) a propósito, igual que
-  // en ct-next-claim.test.js: `state.js` importa el paquete `yaml`, y la
-  // resolución de módulos de Node sube por el árbol de directorios buscando
-  // node_modules — desde /tmp no encontraría ninguno y el test mediría un
-  // ERR_MODULE_NOT_FOUND en vez del exit code del mapa malformado.
-  function copyScriptsWithMap(mapSource) {
-    const dir = mkdtempSync(join(projectRoot, 'tmp-ct-next-badmap-'))
-    dirs.push(dir)
-    for (const f of SIBLINGS) cpSync(join(scriptsDir, f), join(dir, f))
-    const kickoff = readFileSync(join(dir, 'kickoff.js'), 'utf8')
-    const patched = kickoff.replace(/export const ACCOUNT_MAP = \{[\s\S]*?\n\}/, mapSource)
-    expect(patched).not.toBe(kickoff) // el reemplazo tiene que haber ocurrido de verdad
-    writeFileSync(join(dir, 'kickoff.js'), patched)
-    return join(dir, 'ct-next.mjs')
-  }
-
-  it('un patrón sin owner (el formato viejo) → exit 2 al arrancar, sin listar issues ni tocar nada', () => {
-    const copied = copyScriptsWithMap('export const ACCOUNT_MAP = {\n  personal: [\'menoplus\'],\n  work: [],\n  personalDir,\n  workDir,\n}')
-    const r = spawnSync('node', [copied, '--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], {
-      encoding: 'utf8', env: { ...process.env, ...ACCOUNT_ENV, CT_NEXT_FIXTURE: FIXTURE_ONE_READY },
-    })
-    const out = (r.stdout || '') + (r.stderr || '')
-    expect(r.status).toBe(2)
-    expect(out).toMatch(/ACCOUNT_MAP .*está mal formado/)
-    expect(out).toMatch(/personal\[0\]/)
-    expect(out).not.toMatch(/seleccionados para esta tanda/)
-  })
-
-  it('un patrón vacío → exit 2 (el caso literal del encargo)', () => {
-    const copied = copyScriptsWithMap('export const ACCOUNT_MAP = {\n  personal: [\'*/menoplus\', \'\'],\n  work: [],\n  personalDir,\n  workDir,\n}')
-    const r = spawnSync('node', [copied, '--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], {
-      encoding: 'utf8', env: { ...process.env, ...ACCOUNT_ENV, CT_NEXT_FIXTURE: FIXTURE_ONE_READY },
-    })
-    expect(r.status).toBe(2)
-    expect(((r.stdout || '') + (r.stderr || ''))).toMatch(/personal\[1\]/)
-  })
-})
 
 // ---------------------------------------------------------------------------
 // Defecto 3 — precondiciones del run real
 // ---------------------------------------------------------------------------
-describe('ct-next --dry-run — precondiciones de binarios y cuenta (D4, defecto 3)', () => {
+describe('ct-next --dry-run — precondiciones de binarios (D4, defecto 3)', () => {
   // PATH sin cmux Y sin el PATH real: con --dry-run + fixture, ct-next.mjs no
   // lanza NINGÚN subproceso, así que un PATH vacío es seguro y, sobre todo,
   // no puede encontrar el cmux de verdad de la máquina.
@@ -302,43 +196,17 @@ describe('ct-next --dry-run — precondiciones de binarios y cuenta (D4, defecto
     expect(r.out).toMatch(/terminó con exit 0 A PESAR de \d+ aviso/)
   })
 
-  it('el CLAUDE_CONFIG_DIR resuelto no existe en disco → FALLO DURO (exit 1) antes de lanzar nada', () => {
-    const gone = join(makeTmp('ct-next-nodir-'), 'no-existe')
-    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], {
-      CT_NEXT_FIXTURE: FIXTURE_ONE_READY,
-      CT_ACCOUNT_PERSONAL_DIR: gone,
-    })
-    expect(r.code).toBe(1)
-    expect(r.out).toMatch(/NO existe en disco/)
-    expect(r.out).toContain(gone)
-  })
 
-  it('el CLAUDE_CONFIG_DIR existe pero es un FICHERO → también falla duro (un existsSync a secas lo dejaría pasar)', () => {
-    const asFile = join(makeTmp('ct-next-filedir-'), 'soy-un-fichero')
-    writeFileSync(asFile, '')
-    const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], {
-      CT_NEXT_FIXTURE: FIXTURE_ONE_READY,
-      CT_ACCOUNT_PERSONAL_DIR: asFile,
-    })
-    expect(r.code).toBe(1)
-    expect(r.out).toMatch(/como directorio/)
-  })
 
-  it('CT_ACCOUNT_WORK_DIR reapunta la cuenta de trabajo (y se valida igual)', () => {
-    const workDir = makeTmp('ct-next-work-')
-    const r = run(['--repo', 'mercadona/algo', '--cap', '1', '--dry-run'], {
-      CT_NEXT_FIXTURE: FIXTURE_ONE_READY,
-      CT_ACCOUNT_WORK_DIR: workDir,
-    })
-    expect(r.code).toBe(0)
-    expect(r.out).toContain(`CLAUDE_CONFIG_DIR=${workDir}`)
-  })
 
   it('con todo en su sitio, el dry-run dice explícitamente qué comprobó', () => {
     const r = run(['--repo', 'menoplus-app/menoplus', '--cap', '1', '--dry-run'], { CT_NEXT_FIXTURE: FIXTURE_ONE_READY })
     expect(r.code).toBe(0)
     expect(r.out).toMatch(/cmux: \S+ \(encontrado en PATH; no se ejecuta/)
-    expect(r.out).toMatch(/CLAUDE_CONFIG_DIR: \S+ \(existe en disco\)/)
+    // F35: aquí se comprobaba también el CLAUDE_CONFIG_DIR de la cuenta
+    // resuelta. Sin cuentas, el único preflight que queda de este par es el
+    // del binario del agente.
+    expect(r.out).toMatch(/claude: \S+ \(encontrado en el PATH de este proceso\)/)
   })
 
   it('en modo fixture, el destino se marca como NO COMPROBADO en vez de darse por libre', () => {

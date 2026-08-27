@@ -1,71 +1,33 @@
-// Entorno HERMÉTICO para los tests que invocan ct-next.mjs (D4).
+// Entorno HERMÉTICO para los tests que invocan ct-next.mjs.
 //
-// El bloque de precondiciones de D4 (ver ct-next.mjs) comprueba cosas del
-// ENTORNO REAL de la máquina: que `cmux` y `claude` estén en el PATH y que el
-// CLAUDE_CONFIG_DIR resuelto exista en disco. Sin esto, la suite entera
-// pasaría a depender del $HOME y del PATH de quien la corra: verificado por
-// construcción — con `HOME=<vacío>`, 19 tests PREEXISTENTES de
-// ct-next-dryrun.test.js (que no tienen nada que ver con D4) fallaban con
-// `expected 1 to be +0` porque el preflight abortaba al no encontrar
-// ~/.claude-personal.
+// El preflight de ct-next comprueba cosas del ENTORNO REAL de la máquina: que
+// `cmux` y el binario del agente estén en el PATH. Sin estos stubs la suite
+// dependería de lo que tenga instalado quien la corre — y, peor, un test podría
+// lanzar un workspace de cmux DE VERDAD (ya pasó una vez en este proyecto).
 //
-// La solución NO es relajar la comprobación (ese es justo el arreglo), sino
-// darle a los tests un entorno propio y determinista:
-//   - dos directorios de cuenta de verdad, bajo tmpdir, creados aquí;
-//   - stubs de `cmux` y `claude` en el PATH, por delante de los binarios
-//     reales de la máquina.
-// Los tests que quieren ejercer la AUSENCIA de un binario siguen fijando su
-// propio PATH (ver ct-next-preconditions.test.js) — nunca omitiendo el stub
-// y confiando en que el binario real no esté, que es como un agente anterior
-// de este proyecto acabó lanzando un workspace de cmux de verdad.
+// Los tests que quieren ejercer la AUSENCIA de un binario fijan su propio PATH
+// (ver ct-next-preconditions.test.js) — nunca omitiendo el stub y confiando en
+// que el binario real no esté.
 //
-// Los nombres de los directorios terminan en `.claude-personal`/
-// `.claude-work` a propósito: varias aserciones preexistentes comprueban que
-// el mapa de cuentas resuelve a una ruta que "parece" la cuenta correcta
-// (`/\.claude-personal/`), y esas aserciones tienen que seguir significando
-// lo mismo.
-import { mkdirSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join, dirname } from 'node:path'
+// F35: aquí vivían además dos directorios de cuenta (TEST_PERSONAL_DIR /
+// TEST_WORK_DIR) y el ACCOUNT_ENV que los inyectaba, porque el preflight
+// exigía que el CLAUDE_CONFIG_DIR resuelto existiera en disco. Al irse la
+// resolución de cuenta se fueron con ella: no queda nada que apuntar.
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-
-const root = join(tmpdir(), 'ct-loop-test-accounts')
-export const TEST_PERSONAL_DIR = join(root, '.claude-personal')
-export const TEST_WORK_DIR = join(root, '.claude-work')
-mkdirSync(TEST_PERSONAL_DIR, { recursive: true })
-mkdirSync(TEST_WORK_DIR, { recursive: true })
 
 const fixturesDir = dirname(fileURLToPath(import.meta.url))
 
 // Stubs de binarios que el preflight solo BUSCA en el PATH (statSync +
-// accessSync), nunca ejecuta. Van también aquí para que los tests que no
-// fijan PATH no dependan de que la máquina tenga `cmux`/`claude` instalados.
+// accessSync), nunca ejecuta.
 export const FAKE_BIN_DIRS = [
   join(fixturesDir, 'fake-cmux-bin'),
   join(fixturesDir, 'fake-claude-bin'),
 ]
 
-// F29 — el binario del agente se fija a `claude` EN LOS TESTS, y es una
-// decisión del entorno hermético, no del código: el stub que hay en el PATH se
-// llama `claude` (fake-claude-bin/claude), así que pedirle a la suite entera
-// que busque `claude-personal` la haría depender de que la máquina tenga
-// instalados los wrappers reales — exactamente lo que este fichero existe para
-// evitar. El defecto de verdad (`claude-personal` / `claude-work`) y el hecho
-// de que la CUENTA lo elija se comprueban aparte, en
-// f29-binario-de-cuenta.test.js, sin PATH de por medio.
-export const ACCOUNT_ENV = {
-  CT_ACCOUNT_PERSONAL_DIR: TEST_PERSONAL_DIR,
-  CT_ACCOUNT_WORK_DIR: TEST_WORK_DIR,
-  CT_AGENT_BIN_PERSONAL: 'claude',
-  CT_AGENT_BIN_WORK: 'claude',
-}
-
-// hermeticEnv: base de entorno para cualquier invocación de ct-next.mjs en
-// los tests. `pathPrefix` son los directorios de stubs que ese test ya
-// quisiera poner delante (git/gh/cmux).
+// hermeticEnv: base de entorno para cualquier invocación de ct-next.mjs en los
+// tests. `pathPrefix` son los directorios de stubs que ese test ya quisiera
+// poner delante (git/gh/cmux).
 export function hermeticEnv(pathPrefix = []) {
-  return {
-    ...ACCOUNT_ENV,
-    PATH: [...pathPrefix, ...FAKE_BIN_DIRS, process.env.PATH].join(':'),
-  }
+  return { PATH: [...pathPrefix, ...FAKE_BIN_DIRS, process.env.PATH].join(':') }
 }

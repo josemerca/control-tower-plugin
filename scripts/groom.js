@@ -1,7 +1,8 @@
 // Lógica pura de grooming: de Slice[] (T1) a un plan de operaciones GitHub.
 import { isNoValueCell } from './slices.js'
-import { resolveGates, gateLabels, renderGatesIssueContent } from './gates.js'
-import { locateSection, unterminatedDelimiter, normalizeToLF, SENAL_HEADING } from './gh-issue-map.js'
+import { resolveGates, resolveE2e, gateLabels, renderGatesIssueContent } from './gates.js'
+import { locateSection, unterminatedDelimiter, normalizeToLF, SENAL_HEADING, E2E_HEADING } from './gh-issue-map.js'
+import { STATUS_LADDER } from './harvest.js'
 
 // SENAL_HEADING (Slice 10) nace en gh-issue-map.js (capa inferior: este
 // fichero ya importa de allí y mapGhIssue también la necesita — aquí crearía
@@ -15,6 +16,25 @@ export { SENAL_HEADING }
 // reconcile.js al compararla, y sus tests) y una cabecera escrita a mano en
 // tres sitios es una cabecera que acaba divergiendo en uno.
 export const GATES_HEADING = '## Gates'
+
+// E2E_HEADING (TAREA 9): ya NO se define aquí — vive en gh-issue-map.js,
+// junto a AC_HEADING_FORMS/DEPS_HEADING, porque ese fichero es quien ya
+// centraliza las cabeceras compartidas entre quien las ESCRIBE
+// (buildIssueBody, en este fichero) y quien las LEE (mapGhIssue, el
+// dispatcher real). Definirla aquí e importarla desde allí habría cerrado
+// un ciclo groom.js<->gh-issue-map.js por una constante de texto; se
+// importa y se RE-EXPORTA para que reconcile.js y sus tests, que la piden
+// `from './groom.js'`, no tengan que cambiar su import.
+export { E2E_HEADING }
+
+// renderE2eContent: los recorridos, uno por línea y VERBATIM. Verbatim porque
+// la puerta del release exige que el título de cada entrada del informe cite el
+// recorrido tal cual: si esta función reformateara (capitalizar, quitar un
+// punto final), el agente citaría lo que ve y la comparación fallaría por un
+// carácter que nadie escribió.
+export function renderE2eContent(slice) {
+  return resolveE2e(slice.e2e).runs.map((r) => `- ${r}`).join('\n')
+}
 
 // Las DOS secciones de contexto del cuerpo de un issue, con dueños distintos
 // y por eso con reglas distintas:
@@ -288,7 +308,7 @@ export function readFrozenDecisions(specMd) {
 // pasarse el resultado, para que ninguna de las dos pueda quedarse con una
 // resolución vieja si mañana cambia la forma del slice.
 export function gatesOf(slice) {
-  return resolveGates(slice.type, slice.gate)
+  return resolveGates(slice.type, slice.gate, slice.e2e)
 }
 
 // F3: el título viene de `slice.name` (columna "Slice" del spec §9), no de
@@ -302,6 +322,34 @@ export function gatesOf(slice) {
 export function buildIssueTitle(slice) {
   return `#${slice.n} ${slice.name}`.trim()
 }
+
+// LOOP_STATUS_LABELS — el vocabulario `status:` que el loop ESCRIBE, y que por
+// tanto tiene que EXISTIR en el repo antes de que alguien lo escriba.
+//
+// No es lo mismo que "las labels que buildLabels aplica". Un issue nace con UNA
+// (`status:backlog`, más abajo); las otras tres se escriben DESPUÉS, y ninguna
+// de esas escrituras puede crearlas: `gh issue edit --add-label` resuelve
+// nombre -> id para la mutación GraphQL `addLabelsToLabelable`, que toma ids. Un
+// nombre inexistente resuelve a `null` y el comando falla (verificado contra la
+// API). Los tres call sites que lo sufrían:
+//   - el paso humano de promoción a `status:ready` que el contrato de AGENTS.md
+//     manda ejecutar tras el groom;
+//   - el claim (`status:in-progress`), dispatch-check.mjs#setStatus, que muere
+//     en dieErr(…, 3) — y /ct-next reporta «fallo de infraestructura, reintenta
+//     más tarde», consejo que nunca puede funcionar contra una label ausente;
+//   - la entrega (`status:in-review`) y las vueltas atrás.
+//
+// Se DERIVA de STATUS_LADDER (harvest.js), la escalera que ya era la fuente de
+// verdad del vocabulario: dos listas del mismo vocabulario divergen en cuanto
+// alguien toca una sola.
+//
+// SON CUATRO, NO SIETE, a propósito. `status:blocked`, `status:paused` y
+// `status:rejected` aparecen en comentarios y docs pero el plugin no las escribe
+// nunca: gh-issue-map.js las trata como «labels custom» que no gatean nada, y
+// dispatch-check.mjs documenta por qué `status:rejected` se descartó como
+// diseño. Crearlas sería sembrar en el repo del usuario vocabulario que este
+// plugin decidió no tener.
+export const LOOP_STATUS_LABELS = STATUS_LADDER.map((s) => `status:${s}`)
 
 export function buildLabels(slice) {
   const labels = []
@@ -615,6 +663,18 @@ export function buildIssueBody(slice, specRef, epicContext = null, frozenDecisio
   lines.push(GATES_HEADING)
   lines.push(renderGatesContent(slice))
   lines.push('')
+  // La sección se emite SÓLO si hay recorridos — a diferencia de "## Gates",
+  // que se emite siempre. El motivo de aquélla ("«este slice no tiene gates»
+  // es una afirmación que un humano que abre el PR necesita poder leer") no
+  // aplica aquí: la ausencia de la sección ya lo dice, y emitirla vacía en las
+  // tres cuartas partes de los issues es ruido. Medido en mo-monitoring v1:
+  // 6 de 8 filas no tienen recorrido.
+  const e2eContent = renderE2eContent(slice)
+  if (e2eContent) {
+    lines.push(E2E_HEADING)
+    lines.push(e2eContent)
+    lines.push('')
+  }
   lines.push('## Out of scope / Protected')
   lines.push(renderProtectedLine(slice))
   lines.push('')
@@ -686,6 +746,12 @@ export function groomPlan(slices, { milestone, specRef, epicContext = null, epic
       // la resolución de cabeza.
       gates: gatesOf(s).gates,
       gatesContent: renderGatesContent(s),
+      // e2eContent (a diferencia de gatesContent): `null` cuando no hay
+      // recorridos, no `''` — reconcile.js#diffIssue necesita distinguir "esta
+      // sección no debería existir" (null en los dos lados es acuerdo) de
+      // "existe pero está vacía", igual que ya hace con `descripcion`. Ver
+      // buildIssueBody: la sección misma sólo se escribe si hay contenido.
+      e2eContent: renderE2eContent(s) || null,
       // El texto del epic viaja en el plan, no sólo dentro del body ya
       // renderizado, por el mismo motivo que ac/descripcion/protectedLine:
       // para que comparar este slice contra un issue existente no obligue a

@@ -26,7 +26,6 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { mkdtempSync as mkdtemp2, readFileSync, rmSync } from 'node:fs'
-import { ACCOUNT_ENV } from './fixtures/hermetic-env.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
 import { closedWithLiveStatus, buildDispatchInput } from '../scripts/gh-issue-map.js'
 import {
@@ -58,7 +57,7 @@ function runReal(args, envOverrides = {}) {
   dirs.push(dirname(counter))
   const r = spawnSync('node', [script, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, FAKE_GH_COUNTER_FILE: counter, ...envOverrides },
+    env: { ...process.env, PATH: fakePath, FAKE_GH_COUNTER_FILE: counter, ...envOverrides },
   })
   return { code: r.status, out: (r.stdout || '') + (r.stderr || ''), err: r.stderr || '', stdout: r.stdout || '' }
 }

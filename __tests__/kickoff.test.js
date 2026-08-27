@@ -2,9 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { renderKickoff, buildStateSeed, ACCOUNT_MAP, ADDENDA, SENAL_AUSENTE } from '../scripts/kickoff.js'
+import { renderKickoff, buildStateSeed, ADDENDA, SENAL_AUSENTE } from '../scripts/kickoff.js'
 import { parseState } from '../scripts/state.js'
-import { resolveAccount, resolveAccountLegacy, validateAccountMap } from '../scripts/dispatch.js'
 
 const SLICE = { n: 7, name: 'refresh token', type: 'backend', ac: ['AC-7.1'], deps: [1], issue: '#7' }
 
@@ -141,6 +140,47 @@ describe('buildStateSeed', () => {
   })
 })
 
+// Slice 1 (apuntes de Capde) — `base_sha`: el SHA del corte, en un campo que
+// nadie sobreescribe. El sha ya llegaba a `buildStateSeed` (ct-next lo resuelve
+// de `origin/<base>` antes de cortar el worktree) pero solo se volcaba en
+// `last_commit`, que el agente pisa en su primer commit de trabajo: el único
+// rastro del corte desaparecía del fichero, y el diff de release acabó midiendo
+// contra la copia LOCAL de la rama base (corrida del slice 10, main 7 commits
+// por detrás).
+describe('buildStateSeed — base_sha, el sha del corte que nadie sobreescribe (slice 1)', () => {
+  const CORTE = 'c3af34c0dead0000beef0000cafe0000feed1234'
+
+  it('la semilla lleva base_sha: = SHA de origin/<base> en el corte', () => {
+    const seed = buildStateSeed(SLICE, { branch: 'feat/7', base: 'main', baseSha: CORTE })
+    // En el TEXTO y en su propia línea, no solo tras parsear: su consumidor
+    // (dispatch-check, slice 2) lo leerá con un regex sobre el fichero.
+    expect(seed).toMatch(new RegExp(`^base_sha: ${CORTE}$`, 'm'))
+    expect(parseState(seed).meta.base_sha).toBe(CORTE)
+  })
+
+  it('sin SHA resoluble, el campo no aparece', () => {
+    // Las dos formas en que ct-next entrega "no lo pude resolver": el
+    // argumento ausente (default de la firma) y la cadena vacía explícita
+    // (`resolvedBaseSha` tras el catch de ct-next.mjs:1679).
+    for (const opts of [{ branch: 'feat/7', base: 'main' }, { branch: 'feat/7', base: 'main', baseSha: '' }]) {
+      const seed = buildStateSeed(SLICE, opts)
+      expect(seed).not.toMatch(/^base_sha:/m) // nunca `base_sha: ""`
+      expect(Object.prototype.hasOwnProperty.call(parseState(seed).meta, 'base_sha')).toBe(false)
+    }
+  })
+
+  it('`last_commit` no cambia: mismo sha cuando hay, y `""` cuando no — la asimetría es deliberada', () => {
+    expect(parseState(buildStateSeed(SLICE, { branch: 'feat/7', base: 'main', baseSha: CORTE })).meta.last_commit).toBe(CORTE)
+    expect(parseState(buildStateSeed(SLICE, { branch: 'feat/7', base: 'main' })).meta.last_commit).toBe('')
+  })
+
+  it('`base:` sigue siendo el nombre de la rama, nunca el sha: de ahí sale el `--base` de `gh pr create`', () => {
+    const { meta } = parseState(buildStateSeed(SLICE, { branch: 'feat/7', base: 'develop', baseSha: CORTE }))
+    expect(meta.base).toBe('develop')
+    expect(meta.base).not.toBe(meta.base_sha)
+  })
+})
+
 // F3: `Tipo` (columna §9 del spec) decide qué addendum recibe el agente
 // despachado — ct-groom.mjs necesita el conjunto de valores reconocidos
 // para avisar cuando el spec trae un `Tipo` que no matchea ninguna key de
@@ -154,44 +194,6 @@ describe('ADDENDA', () => {
   })
 })
 
-describe('ACCOUNT_MAP', () => {
-  it('tiene personal/work y dirs', () => {
-    expect(ACCOUNT_MAP.personal.some((p) => p.endsWith('/menoplus'))).toBe(true)
-    expect(ACCOUNT_MAP.personalDir).toMatch(/claude-personal/)
-    expect(ACCOUNT_MAP.workDir).toMatch(/claude-work/)
-  })
-
-  // D4, defecto 1: el mapa REAL (no uno de laboratorio) tiene que pasar su
-  // propia validación — si no, ct-next.mjs abortaría con exit 2 en CADA
-  // corrida, y eso solo se descubriría al ejecutarlo.
-  it('el mapa por defecto es válido según validateAccountMap', () => {
-    expect(validateAccountMap(ACCOUNT_MAP)).toEqual([])
-  })
-
-  // El caso concreto que motivó todo el defecto 1, fijado end-to-end contra
-  // el mapa REAL: con el mapa anterior, este repo se despachaba con la cuenta
-  // PERSONAL (`mercadona` no podía casar nunca porque el owner se descartaba
-  // antes de llegar al matcher).
-  it('un repo cualquiera de la org mercadona va a la cuenta de TRABAJO', () => {
-    const r = resolveAccount('mercadona/algun-tool-interno', ACCOUNT_MAP)
-    expect(r.dir).toBe(ACCOUNT_MAP.workDir)
-    expect(r.matched).toBe(true)
-  })
-
-  it('los repos personales conocidos siguen yendo a la cuenta personal', () => {
-    for (const slug of ['menoplus-app/menoplus', 'josemerca/control-tower', 'josemerca/control-tower-plugin']) {
-      expect(resolveAccount(slug, ACCOUNT_MAP).dir).toBe(ACCOUNT_MAP.personalDir)
-    }
-  })
-
-  // La `legacy` existe solo para poder ANUNCIAR una reclasificación; si
-  // alguien la borra sin borrar también el aviso de ct-next.mjs, ese aviso
-  // deja de existir en silencio.
-  it('conserva las listas legacy para poder detectar reclasificaciones de cuenta', () => {
-    expect(ACCOUNT_MAP.legacy.work).toContain('mercadona')
-    expect(resolveAccountLegacy('mercadona/algun-tool-interno', ACCOUNT_MAP).dir).toBe(ACCOUNT_MAP.personalDir)
-  })
-})
 
 // D4, defecto 4: el número de ISSUE y el número de ORDEN §9 son dos espacios
 // de identificadores distintos. El STATE.md sembrado llamaba "slice #N" al

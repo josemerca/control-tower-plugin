@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { renderState } from './state.js'
-import { resolveGatesForAgent, renderGateKickoffLines } from './gates.js'
+import { resolveGatesForAgent, renderGateKickoffLines, resolveE2e } from './gates.js'
 // F22: el kickoff SOLO lo recibe un agente de slice, así que aquí no hay
 // ambigüedad que resolver — su fichero de estado es siempre `.agent/SLICE.md`.
 // Se importa la constante en vez de escribir la cadena a mano para que el día
@@ -26,104 +26,20 @@ import { NO_MILESTONE_KEY } from './gh-issue-map.js'
 // ct-slice-judge reconoce como sin-vara.
 export const SENAL_AUSENTE = '(sin señal declarada — el issue no trae la sección "## Señal de observabilidad"; el juez de slice mide su ítem observabilidad como sin-vara)'
 
-// ACCOUNT_MAP — qué CLAUDE_CONFIG_DIR (qué cuenta de Claude) recibe el agente
-// que se despacha para un repo.
+// AGENT_BIN — el nombre del ejecutable del agente que se teclea en la sesión
+// de cmux. UNO, sin cuentas: F35 se llevó ACCOUNT_MAP y toda la resolución de
+// «qué cuenta hace qué», así que el agente arranca con la configuración
+// ambiente de quien lanza.
 //
-// FORMA DE LOS PATRONES (D4, defecto 1 — la lógica de matching vive en
-// dispatch.js#matchesAccountPattern, con el porqué del cambio documentado
-// allí): cada patrón es `<owner>/<repo>` — SIEMPRE las dos mitades, nunca un
-// nombre suelto. Cada mitad puede ser:
-//   - un literal exacto            `mercadona`, `control-tower`
-//   - `*`                          cualquier owner / cualquier repo
-//   - un prefijo con `*` al final  `mo.*` casa `mo.foo`, NO casa `momento`
-// Un `*` en cualquier otra posición es un patrón malformado y ct-next.mjs
-// aborta al arrancar (exit 2) en vez de interpretarlo a medias.
-//
-// La versión anterior de este mapa (`personal: ['menoplus','munger',
-// 'control-tower']`, `work: ['mo.','mercadona']`) casaba por PREFIJO DE
-// NOMBRE con el owner ya descartado, con tres consecuencias verificadas:
-// `mercadona/algun-tool-interno` acababa en la cuenta PERSONAL, la entrada
-// `'mercadona'` no podía casar jamás, y `control-tower` casaba también
-// `control-tower-de-otro`. Ahora el owner cuenta.
-//
-// CT_ACCOUNT_PERSONAL_DIR / CT_ACCOUNT_WORK_DIR: override explícito de los
-// dos directorios, para máquinas donde las cuentas de Claude no viven bajo
-// $HOME (y para que los tests no dependan del $HOME de quien los corre). No
-// es un modo de prueba encubierto: no cambia NINGUNA decisión, solo a qué
-// ruta apunta la cuenta ya elegida, y ct-next.mjs comprueba que la ruta
-// resultante exista en disco antes de lanzar nada.
-const personalDir = process.env.CT_ACCOUNT_PERSONAL_DIR || join(homedir(), '.claude-personal')
-const workDir = process.env.CT_ACCOUNT_WORK_DIR || join(homedir(), '.claude-work')
-
-// ============================================================================
-// F29 — EL BINARIO QUE SE TECLEA YA NO PUEDE SER `claude` A SECAS.
-//
-// `--env CLAUDE_CONFIG_DIR=…` (dispatch.js#buildCmuxArgv) se añadió en T10
-// precisamente para que el selector de cuenta no colgara la sesión: el
-// comentario de allí dice, medido contra el sandbox real, que sin esa opción
-// la sesión «se queda colgada en el selector interactivo de cuenta […]
-// esperando un humano tecleando 1/2 en /dev/tty». Ese arreglo asumía un
-// selector que MIRA la variable antes de preguntar.
-//
-// Medido de nuevo en esta máquina, contra el `.zshrc` real: la función
-// `claude()` del usuario pregunta SIEMPRE, sin mirar `CLAUDE_CONFIG_DIR`, y
-// además la PISA con su propio `export`. Un shell de login la resuelve antes
-// que a ningún PATH, así que el binario nunca llega a ejecutarse:
-//
-//   $ zsh -lic 'claude --version' </dev/null
-//     ¿Qué cuenta de Claude?  1) Personal  2) Mercadona
-//     Opción no válida
-//
-// Con un pty de verdad no sale ni ese error: se queda parada en el `read`. Y
-// lo peor es cómo se ve desde fuera — el centinela de arranque se escribe
-// ANTES de invocar al agente (a propósito: mide que la orden corrió, no que
-// el agente acabara) y `command -v claude` devuelve 0 para una función. O
-// sea: `/ct-next` diría «lanzado», con exit 0, sobre un agente que está
-// esperando una tecla que nadie va a pulsar. Es la clase de fallo de F19 por
-// una puerta que F19 no midió.
-//
-// La salida es no teclear un nombre que el usuario pueda haber envuelto, sino
-// el WRAPPER NO INTERACTIVO de la cuenta ya resuelta. Los dos existen en esta
-// máquina, son simétricos y fijan el config dir ellos mismos:
-//
-//   ~/.local/bin/claude-personal → export CLAUDE_CONFIG_DIR=…/.claude-personal
-//   ~/.local/bin/claude-work     → export CLAUDE_CONFIG_DIR=…/.claude-work
-//
-// Que el wrapper exporte la variable NO vuelve inerte el `--env` de cmux ni
-// el mapa: es el mapa el que elige CUÁL de los dos wrappers se teclea, así
-// que las dos vías dicen lo mismo. Clavar `claude-personal` para todo repo sí
-// lo habría vuelto inerte — un repo de `mercadona/*` habría arrancado con la
-// cuenta personal mientras ct-next.mjs imprimía `cuenta resuelta: … (trabajo)`.
-// Ese es exactamente el defecto que D4 vino a corregir, y no se reintroduce
-// por comodidad.
-//
-// CT_AGENT_BIN_PERSONAL / CT_AGENT_BIN_WORK: mismo criterio que
-// CT_ACCOUNT_*_DIR — override explícito para una máquina cuyos wrappers se
-// llamen de otra forma (o que no los tenga y quiera volver a `claude` a
-// secas), y para que los tests no dependan de lo que haya instalado quien los
-// corre. No cambia NINGUNA decisión: solo el nombre que se teclea para la
-// cuenta que el mapa ya eligió.
-// ============================================================================
-const personalBin = process.env.CT_AGENT_BIN_PERSONAL || 'claude-personal'
-const workBin = process.env.CT_AGENT_BIN_WORK || 'claude-work'
-
-export const ACCOUNT_MAP = {
-  personal: ['josemerca/*', '*/menoplus', '*/munger'],
-  work: ['mercadona/*', '*/mo.*'],
-  personalDir,
-  workDir,
-  personalBin,
-  workBin,
-  // legacy: las listas EXACTAS del mapa viejo, conservadas solo para poder
-  // detectar y anunciar una reclasificación de cuenta provocada por el
-  // arreglo (ver dispatch.js#resolveAccountLegacy y el aviso que imprime
-  // ct-next.mjs). Borrables juntas en cuanto ese aviso deje de aparecer en
-  // las corridas reales.
-  legacy: {
-    personal: ['menoplus', 'munger', 'control-tower'],
-    work: ['mo.', 'mercadona'],
-  },
-}
+// El override existe por lo que documentaba F29, y sigue siendo cierto: en el
+// .zshrc real de la máquina `claude` era una FUNCIÓN de shell interactiva
+// («¿Qué cuenta? 1/2») y un shell de login resuelve la función antes que
+// cualquier PATH — el agente se quedaba colgado en el `read` para siempre
+// mientras /ct-next lo daba por LANZADO (el centinela se escribe antes de
+// invocar al agente, y `command -v` devuelve 0 para una función). Si eso pasa,
+// la salida es apuntar CT_AGENT_BIN a un wrapper no interactivo; no volver a
+// meter un mapa de cuentas.
+export const AGENT_BIN = process.env.CT_AGENT_BIN || 'claude'
 
 // Exportado (F3): ct-groom.mjs necesita el conjunto de valores de `Tipo`
 // reconocidos para avisar cuando el spec trae un valor que no matchea
@@ -212,6 +128,24 @@ function baseRefOf(base) {
     : 'la rama base de la que salió este worktree'
 }
 
+// resolveE2eRunsForAgent — TAREA 9: los recorridos, resueltos con el MISMO
+// criterio de dos fuentes que `resolveGatesForAgent` (justo arriba, F21) usa
+// para los gates: `mapGhIssue` (gh-issue-map.js) ya reconstruye el slice
+// desde el ISSUE — el dispatcher (/ct-next) no abre el spec — y allí extrae
+// la sección "## E2E" del body a un array, `slice.e2eRuns`. Cuando ese campo
+// está definido (el camino real de despacho) se usa tal cual; solo se cae a
+// `resolveE2e(slice.e2e).runs` —la celda cruda de la tabla §9, con comas
+// escapadas— cuando NO lo está, que es el camino de /ct-groom (lee el spec
+// directamente) o de un slice de test construido a mano.
+//
+// El resultado es SIEMPRE un array, nunca `undefined`: un slice sin
+// recorridos da `[]`, el mismo criterio que `blocked: null` en state.js — un
+// campo ausente sería indistinguible de una versión del plugin que todavía
+// no supiera rellenarlo.
+function resolveE2eRunsForAgent(slice) {
+  return slice.e2eRuns !== undefined ? slice.e2eRuns : resolveE2e(slice.e2e).runs
+}
+
 export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, base }) {
   const addendum = ADDENDA[slice.type] || ''
   // F21 — LOS GATES, POR FIN SEPARADOS DEL TIPO. `resolveGatesForAgent` (ver
@@ -221,6 +155,18 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, base
   // del bloque de cierre del PR, no al final: son la condición para que ese
   // cierre pueda ocurrir.
   const gateLines = renderGateKickoffLines(resolveGatesForAgent(slice))
+  // TAREA 9 — los recorridos, NOMBRADOS literalmente. `gateLines` ya dice
+  // "atraviesa los recorridos que trae la sección ## E2E de tu issue"
+  // (gates.js#GATES.e2e), así que aquí NO se repite esa prosa: solo se
+  // listan los recorridos tal cual y se los ata al comando que cierra el
+  // paso (`ct-step e2e`, que es el que ct-step.mjs espera — ver
+  // ct-step.mjs:221 y el brief de esta tarea). Cuando no hay ninguno, esta
+  // línea no se añade — ni una sección vacía ni un "no aplica": el .filter(Boolean)
+  // de más abajo la descarta.
+  const e2eRuns = resolveE2eRunsForAgent(slice)
+  const e2eLine = e2eRuns.length
+    ? `Recorridos e2e de este slice (ejecútalos tal cual, ni uno más ni uno menos): ${e2eRuns.map((r) => `"${r}"`).join('; ')}. Al terminarlos, cierra el paso con \`ct-step e2e\` — es el comando que registra el veredicto, no una descripción.`
+    : ''
   return [
     `Estás implementando UN slice (${slice.name}) del repo ${repo}, issue ${issueRefOf(slice)}${orderSuffixOf(slice)}.`,
     // F32 — las dos prohibiciones nuevas viven AQUÍ y no solo en los skills
@@ -287,6 +233,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, base
     `Con el plan commiteado y el gate 'plan' con OK humano, la implementación NO la conduces con subagent-driven-development ni con su ledger: la secuencia la dicta la máquina. Pregunta el paso con \`node ${ctStepPath} next --plan docs/superpowers/plans/<el-plan-que-commiteaste>.md --issue ${slice.n}\` y obedece LITERALMENTE lo que imprima en cada paso (donde diga \`ct-step\`, es \`node ${ctStepPath}\`): despacha el implementador como subagente con la rúbrica y el brief que te indique, luego \`ct-step report\`, \`ct-step controls\`, despacha el juez como subagente ct-judge (declarado sin Bash), \`ct-step verdict\` y \`ct-step commit\` — comitea ct-step, nunca tú ni el implementador. Tras el commit de la última tarea quedan dos pasos más, que \`next\` también dicta: \`ct-step global\` (la Global verification del plan la ejecuta el programa, no un agente) y el juicio del slice entero — despacha ct-slice-judge como subagente (declarado sin Bash) y entrega su JSON con \`ct-step slice-verdict\`. Vuelve a \`next\` tras cada paso hasta "run delivered".`,
     addendum,
     ...gateLines,
+    e2eLine,
     // W-C: el claim (status:ready → status:in-progress) lo hace /ct-next en
     // código, ANTES de crear este worktree — no por el prompt. El release
     // (in-progress → in-review) SÍ se deja aquí a propósito (decisión ya
@@ -428,9 +375,62 @@ export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
       // agente en medio, la doctrina del §3.3— y el propio agente al
       // re-hidratarse.
       senal: renderStateSenal(slice.senal),
+      // e2e (TAREA 9) — los recorridos que declara la columna E2E del spec. A
+      // diferencia de `gates` (texto legible, y de la que su propio comentario
+      // de arriba avisa que "ningún código del plugin decide nada con este
+      // campo") ESTE campo SÍ lo lee un programa: `ct-step` lo necesita
+      // porque no habla con GitHub — lee esta semilla y lo pasa como
+      // `e2eRuns` a `newRun` (ct-step.mjs:221). Por eso es una LISTA y no una
+      // frase: un programa no analiza prosa.
+      //
+      // Y por eso mismo `dispatch-check --release` NO se fía de él: este
+      // fichero es agent-reachable (lo puede editar el propio agente
+      // despachado). La semilla es el canal de trabajo; la prueba de verdad
+      // se hace contra el issue (Tarea 10).
+      //
+      // Resuelto con `resolveE2eRunsForAgent` (arriba), que prefiere
+      // `slice.e2eRuns` — lo que trae el ISSUE, vía mapGhIssue — y solo cae a
+      // la celda cruda del spec cuando el slice no vino de un issue. Ausente
+      // o vacío da `[]`, nunca `undefined`.
+      e2e: resolveE2eRunsForAgent(slice),
       status: 'not_started',
       branch,
       base,
+      // ------------------------------------------------------------------
+      // `base_sha` (slice 1 de los apuntes de Capde) — EL SHA DEL CORTE, EN
+      // UN CAMPO QUE NADIE REESCRIBE.
+      //
+      // Es el SHA exacto al que apuntaba `origin/<base>` cuando ct-next cortó
+      // este worktree (`git rev-parse --verify --quiet origin/<base>^{commit}`,
+      // ct-next.mjs:1676, justo después del fetch que demuestra que la ref
+      // existe). Recibe el MISMO valor que `last_commit` aquí abajo, y aun así
+      // tiene que ser un campo aparte: `last_commit` es del guard de cierre de
+      // turno y el agente lo SOBREESCRIBE en cada commit de trabajo — por
+      // diseño, ver state.js ("`last_commit` se entiende como el último commit
+      // DE TRABAJO"). O sea que el único rastro del corte que hoy se siembra
+      // desaparece del fichero en el primer commit del slice.
+      //
+      // `base_sha` no lo reescribe NADIE después del despacho: ningún verbo de
+      // ct-step, ningún hook, y el mensaje del guard de cierre que le pide al
+      // agente refrescar su estado enumera los campos a tocar (you_are_here,
+      // next_action, tasks[], last_commit) sin nombrarlo (state.js:617).
+      //
+      // Y `base` no sirve para esto: `base` es un NOMBRE DE RAMA (`develop`,
+      // nunca `origin/develop` ni un sha) porque de ahí sale el `--base` de
+      // `gh pr create`. Resolver ese nombre más tarde, dentro del worktree,
+      // apunta a la copia LOCAL de la rama — que es exactamente lo que midió
+      // el diff de `dispatch-check --release` en la corrida del slice 10, con
+      // el `main` local 7 commits por detrás de su remoto.
+      //
+      // LA AUSENCIA SE OMITE, no se declara vacía: si ct-next no pudo resolver
+      // `origin/<base>` a un sha (ct-next.mjs:1679) el campo no aparece en el
+      // YAML y quien lo lea cae a su propio fallback. Es una asimetría
+      // deliberada con `last_commit`, que sí se siembra `""`: a `last_commit`
+      // lo lee `describeStopRelation`, que ya distingue el vacío ("unset",
+      // callar) de un valor; a `base_sha` lo leerá un regex sobre el TEXTO del
+      // fichero, y un campo presente con el valor vacío es un campo que afirma
+      // tener un valor. El campo que no está no engaña a nadie.
+      ...(baseSha ? { base_sha: baseSha } : {}),
       // F22: el sha de la base, NO el nombre de la rama. Con el campo vacío
       // —lo que se sembraba hasta ahora— `describeStopRelation` devuelve
       // `unset` y `classifyStopState` sale en silencio: el hook `Stop` que

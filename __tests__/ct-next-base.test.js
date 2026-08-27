@@ -16,7 +16,6 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 // D4: entorno hermético (dirs de cuenta + stubs de cmux/claude) — ver fixtures/hermetic-env.js
-import { ACCOUNT_ENV } from './fixtures/hermetic-env.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
 
 const script = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-next.mjs')
@@ -31,7 +30,7 @@ const fakePath = [
 ].join(':')
 
 function runReal(args, envOverrides = {}) {
-  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, ...ACCOUNT_ENV, PATH: fakePath, ...envOverrides } })
+  const r = spawnSync('node', [script, ...args], { encoding: 'utf8', env: { ...process.env, PATH: fakePath, ...envOverrides } })
   return { code: r.status, out: (r.stdout || '') + (r.stderr || '') }
 }
 
@@ -301,6 +300,54 @@ describe('ct-next — la base sale del remoto, no de la copia local (Paso 1)', (
     const sliceMd = readFileSync(join(repoRoot, '.worktrees', '42', '.agent', 'SLICE.md'), 'utf8')
     expect(sliceMd).toMatch(/^base: develop$/m)
     expect(sliceMd).not.toMatch(/origin\/develop/)
+  })
+
+  it('el `base_sha:` sembrado es el HEAD del worktree recién creado — el corte real, no el sha resuelto antes del bucle (slice 9)', () => {
+    // Slice 1 cableó el sha del corte hasta la semilla; slice 9(b) lo mide
+    // donde de verdad se corta. El stub devuelve `deadbeef…` para
+    // `origin/<base>^{commit}` (la resolución previa al bucle) y `cafebabe…`
+    // para el `HEAD^{commit}` del worktree: si la semilla trae `cafebabe…`, el
+    // valor que se siembra es el que se midió DESPUÉS del `git worktree add`.
+    // `last_commit` viaja con él a propósito (mismo argumento de
+    // buildStateSeed, y el mismo hecho: de dónde salió esta rama).
+    const repoRoot = makeRepoRoot()
+    const gitLog = join(repoRoot, 'git-log')
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GH_COUNTER_FILE: join(repoRoot, 'gh-list-count'),
+      FAKE_GIT_LOG_FILE: gitLog,
+      FAKE_GH_DEFAULT_BRANCH: 'develop',
+    })
+    expect(r.code).toBe(0)
+    const sliceMd = readFileSync(join(repoRoot, '.worktrees', '42', '.agent', 'SLICE.md'), 'utf8')
+    expect(sliceMd).toMatch(/^base_sha: cafebabecafebabecafebabecafebabecafebabe$/m)
+    expect(sliceMd).toMatch(/^last_commit: cafebabecafebabecafebabecafebabecafebabe$/m)
+    expect(sliceMd).not.toContain('deadbeef')
+    // Y el otro consumidor del corte sigue viendo un nombre de rama.
+    expect(sliceMd).toMatch(/^base: develop$/m)
+    // El orden importa más que el valor: se mide DESPUÉS de cortar. Con la
+    // medición antes del bucle, esta línea no existiría después del add.
+    const log = readFileSync(gitLog, 'utf8')
+    expect(log).toMatch(/^rev-parse --verify --quiet HEAD\^\{commit\}$/m)
+    expect(log.indexOf('worktree add')).toBeLessThan(log.indexOf('rev-parse --verify --quiet HEAD^{commit}'))
+  })
+
+  it('si el `rev-parse HEAD` del worktree falla, la semilla cae al sha resuelto antes del bucle y se avisa — no se omite el campo', () => {
+    const repoRoot = makeRepoRoot()
+    const r = runReal(['--repo', 'o/r', '--cap', '1'], {
+      FAKE_GIT_TOPLEVEL: repoRoot,
+      FAKE_GIT_WORKTREE_HEAD_FAIL: '1',
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[openIssue42], []]),
+      FAKE_GH_COUNTER_FILE: join(repoRoot, 'gh-list-count'),
+      FAKE_GH_DEFAULT_BRANCH: 'develop',
+    })
+    expect(r.code).toBe(0)                       // degrada, no aborta: el slice se lanza
+    expect(r.out).toMatch(/lanzado #42/)
+    expect(r.out).toMatch(/no se pudo medir el corte real/)
+    const sliceMd = readFileSync(join(repoRoot, '.worktrees', '42', '.agent', 'SLICE.md'), 'utf8')
+    expect(sliceMd).toMatch(/^base_sha: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef$/m)
+    expect(sliceMd).toMatch(/^last_commit: deadbeefdeadbeefdeadbeefdeadbeefdeadbeef$/m)
   })
 
   it('la base ausente del checkout local ya NO es un error: el worktree sale del remoto igualmente', () => {

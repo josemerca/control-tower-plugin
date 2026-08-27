@@ -20,15 +20,24 @@
 // real (test-and-set vía `git refs`, ya validado en el experimento CAS de T9)
 // — hasta que eso aterrice, esta es la garantía real: ninguna bajo
 // concurrencia, sí bajo uso secuencial disciplinado.
-import { execFileSync } from 'node:child_process'
-import { writeSync, statSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { execFileSync, spawn } from 'node:child_process'
+import { writeSync, statSync, readFileSync, existsSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { detectCollisions, claimLost } from './claim.js'
 import { flattenIssuePages, realIssuesOnly } from './gh-issues.js'
 import { parseStrictInt } from './argnum.js'
 import { NEVER_IN_A_SLICE_PR, SLICE_REL_PATH } from './state-paths.js'
 import { checkPlans } from './plan-contract.js'
 import { deliveredRun } from './run-machine.js'
+import { extractE2eRuns, E2E_HEADING } from './gh-issue-map.js'
+import { controlTowerLogDir } from './run-metrics.js'
+import { matchesGo, GO_TOKEN } from './go-response.js'
+import { readGoCommitment } from './go-registry.js'
+import { gatesFromLabels } from './gates.js'
+
+const ctWatchMergePath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch-merge.mjs')
 
 // ============================================================================
 // Finding 4 (auditoría de interrupción/staleness): dos cambios en este
@@ -89,6 +98,12 @@ import { deliveredRun } from './run-machine.js'
 //       `--release` (que se niega SIN mutar nada: el issue sigue en
 //       status:in-progress) y de `--check-plan` (modo read-only para que el
 //       agente valide ANTES de commitear). Igual que el 5, nunca lo ve
+//       classifyClaimOutcome.
+//   9 = NUEVO (F38) — el gate `plan` de este slice NO está cerrado por un
+//       humano: no hay ningún comentario con el go de ESTE despacho
+//       (`-OK <nonce>`), o el go de este despacho no está registrado, o no se
+//       ha podido comprobar. Sale sólo de `--release`, que se niega sin mutar
+//       nada. Igual que el 5, el 6, el 7 y el 8, nunca lo ve
 //       classifyClaimOutcome.
 // El texto que este fichero imprime NO cambia de contenido (los mismos
 // detalles, incluido el comando manual de `--release`/revert) — solo deja
@@ -364,16 +379,141 @@ function setStatus(issue, from, to) {
 // se ve. Esto mueve el caso normal de la retina del humano al loop; no lo
 // vuelve hermético.
 // ============================================================================
-function sliceBaseRef() {
-  // El `base` de la semilla es la respuesta correcta: es la referencia real
-  // desde la que se cortó este worktree, `--base` incluido. La cadena de
-  // fallback cubre los worktrees del esquema anterior (sin SLICE.md).
+// Slice 2 (apuntes de Capde) — LA BASE DEL DIFF ES EL CORTE REAL, NO LA COPIA
+// LOCAL. Una versión anterior de este comentario afirmaba que `base:` "es la
+// referencia real desde la que se cortó este worktree". Es falso desde
+// c3af34c, y esa mentira ya costó una corrida: `base:` es el NOMBRE DE RAMA
+// del PR (`main`, `develop` — de ahí sale el `--base` de `gh pr create` al
+// cerrar el slice), y el worktree se corta de `origin/<base>`. Resolver ese
+// nombre aquí dentro apunta a la copia LOCAL de la rama, que puede llevar
+// días sin fetch: en la corrida del slice 10 estaba 7 commits por detrás de
+// origin/main y el gate del plan acusó de "cita inventada" un fichero que
+// llevaba todo ese tiempo en el remoto.
+//
+// El corte real viaja en `base_sha:` (kickoff.js lo siembra desde el slice 1:
+// el sha de `origin/<base>` en el momento del corte, en un campo que ningún
+// verbo ni hook reescribe; ausente —nunca vacío— si no resolvió). Por eso se
+// PREFIERE, verificado con `rev-parse --verify --quiet <sha>^{commit}` — el
+// sufijo `^{commit}` no es decorativo: sin él, `--verify` da por bueno
+// CUALQUIER 40-hex bien formado aunque el objeto no exista en el repo
+// (comprobado contra git real). Si el campo no está (semillas anteriores al
+// slice 1) o el sha no resuelve (repo podado, semilla corrupta), se cae a la
+// cadena de siempre, INTACTA: `base:` → origin/HEAD → origin/main → main →
+// master.
+//
+// La verificación del sha vive AQUÍ y no en los dos consumidores a propósito:
+// ellos también hacen rev-parse de lo que esta función devuelve, pero su
+// fallo es `known:false` → --release SE NIEGA (exit 5/6) — lo correcto para
+// una ref que debía resolver. Un `base_sha:` que no resuelve no debe negar
+// nada: debe caer al fallback, y eso solo puede decidirse ANTES de elegir qué
+// devolver. El rev-parse de los consumidores se queda: sigue cubriendo la
+// cadena de fallback y es el que ancla el caso "base === HEAD".
+// RE_40HEX ya NO es la barandilla de `base:` (slice 9a, más abajo): su único
+// consumidor es el contrato del campo `base_sha:`, que SÍ es un 40-hex
+// sembrado por kickoff.js y nunca un nombre de ref — ver su comentario en el
+// cuerpo de sliceBaseRef.
+const RE_40HEX = /^[0-9a-f]{40}$/i
+// --release consulta la base DOS veces (limpieza F22 + plan F-jjponz-1); el
+// aviso de más abajo sale UNA por proceso, no una por consulta.
+let avisoBaseEsShaEmitido = false
+// El SEGUNDO candado, y es de COSTE, no de ruido: `avisoBaseEsShaEmitido`
+// solo se levanta cuando el aviso SE EMITE, así que en el caso normal
+// (`base:` es una rama de verdad y no hay nada que avisar) se queda en false
+// para siempre y la sonda de `baseNoEsUnaRama` se pagaría OTRA VEZ en la
+// segunda consulta. Con esto, la sonda se paga una vez por valor de `base:`
+// por proceso — y `base:` sale del mismo fichero en las dos consultas.
+let baseFormaProbada = null
+
+// ============================================================================
+// Slice 9(a) — LA BARANDILLA DEJA DE CONTAR CARACTERES.
+//
+// La versión del slice 2 exigía los 40 hex. Un agente que "arregle" el campo
+// con `git rev-parse --short HEAD` mete 7-12 hex: rompe `gh pr create --base`
+// EXACTAMENTE igual (exige un nombre de rama), pero el diff sale bien (git
+// resuelve el sha corto como cualquier otra ref) y la barandilla callaba. Un
+// tag, un `HEAD~1` o un `origin/main` en ese campo rompen lo mismo y también
+// callaban.
+//
+// La distinción real no es la longitud, es la NATURALEZA del valor: `base:` es
+// el nombre de rama del que sale el `--base` de `gh pr create`. Así que se
+// pregunta lo que importa, en este orden (que además es el orden más BARATO —
+// el caso normal cuesta UN rev-parse):
+//
+//   1. ¿existe `refs/heads/<base>`?           → es una rama local: CALLA.
+//   2. ¿existe `refs/remotes/origin/<base>`?  → es una rama del remoto que
+//      este clon nunca ha checkouteado (base `develop` en un clon que solo
+//      tiene `main`): es un nombre de rama LEGÍTIMO, CALLA. Esta sonda es
+//      defensiva y no es la que salva ese caso: `develop^{commit}` tampoco
+//      resuelve una rama solo-remota (git busca `refs/remotes/develop`, no
+//      `refs/remotes/origin/develop`), así que el paso 4 ya callaría. Lo que
+//      la sonda añade es decir la verdad en el camino, en vez de callar por
+//      no haber encontrado nada. El remoto se llama `origin` a pelo porque
+//      todo el dispatcher ya lo hace: el worktree se corta de
+//      `origin/<base>` (ct-next.mjs:3506) y la cadena de fallback de aquí
+//      abajo nombra `origin/HEAD` y `origin/main`.
+//   3. ¿resuelve `<base>^{commit}`?           → no es una rama y SÍ es un
+//      commit: sha (completo o corto), tag, `HEAD`, `origin/main`… → AVISA.
+//   4. si tampoco resuelve → CALLA. No es una rama ni un commit: esa avería
+//      la nombran ya los dos consumidores con su propia voz y su propio exit
+//      ("no se pudo resolver `<base>` o HEAD a un commit", exit 5/6), que es
+//      más preciso que este aviso. Duplicarla aquí sería ruido.
+//
+// Prefijar `refs/heads/`/`refs/remotes/origin/` no es decorativo: hace que el
+// argumento no pueda empezar por `-` y ser leído por git como una opción.
+// Cualquier fallo (git ausente, cwd fuera de un repo, .git ilegible) se lee
+// como "no lo pude comprobar" y CALLA: esto es un diagnóstico, nunca aborta
+// nada — el reparto de F16/H2.
+// ============================================================================
+function refResuelve(ref) {
   try {
-    const m = readFileSync(join(process.cwd(), SLICE_REL_PATH), 'utf8').match(/^base:[ \t]*(.+)$/m)
-    if (m) {
-      const v = m[1].trim().replace(/^['"]|['"]$/g, '')
-      if (v) return v
+    execFileSync('git', ['rev-parse', '--verify', '--quiet', ref], { stdio: 'ignore' })
+    return true
+  } catch { return false }
+}
+
+function baseNoEsUnaRama(base) {
+  if (refResuelve(`refs/heads/${base}`)) return false
+  if (refResuelve(`refs/remotes/origin/${base}`)) return false
+  return refResuelve(`${base}^{commit}`)
+}
+
+function sliceBaseRef() {
+  try {
+    const seed = readFileSync(join(process.cwd(), SLICE_REL_PATH), 'utf8')
+    const b = seed.match(/^base:[ \t]*(.+)$/m)
+    const base = b ? b[1].trim().replace(/^['"]|['"]$/g, '') : ''
+    // Barandilla contra el arreglo espontáneo observado en la corrida real:
+    // un agente que "arregla" el diff metiendo un SHA en `base:`. El diff
+    // sale igual (un sha resuelve como cualquier ref), así que NO se aborta —
+    // la avería está en el OTRO consumidor del campo: `gh pr create --base`
+    // exige un nombre de rama y fallará al cerrar el slice. Aviso por stderr
+    // (diagnóstico, no producto — el reparto de F16/H2 de arriba).
+    if (base && !avisoBaseEsShaEmitido && baseFormaProbada !== base) {
+      baseFormaProbada = base
+      if (baseNoEsUnaRama(base)) {
+        avisoBaseEsShaEmitido = true
+        const visible = base.length > 40 ? `${base.slice(0, 40)}…` : base
+        errLine(`AVISO: el campo \`base:\` de ${SLICE_REL_PATH} (\`${visible}\`) NO es un nombre de rama: no existe ni como \`refs/heads/\` ni como \`refs/remotes/origin/\`, y sin embargo resuelve a un commit — un SHA (completo o abreviado), un tag, o una ref como \`origin/main\`. Eso ROMPE el \`gh pr create --base\` del cierre del slice (exige un nombre de rama), y no arregla el diff: para medir contra el corte real ya existe \`base_sha:\`, que este check prefiere solo. Devuelve \`base:\` al nombre de la rama del PR (p. ej. \`main\`).`)
+      }
     }
+    const s = seed.match(/^base_sha:[ \t]*(.+)$/m)
+    if (s) {
+      const sha = s[1].trim().replace(/^['"]|['"]$/g, '')
+      // Solo un 40-hex: `base_sha:` es un SHA sembrado, nunca un nombre de
+      // ref. Aceptar `HEAD~1` o `main` aquí dejaría que una semilla
+      // reescrita (SLICE.md es agent-reachable — la trampa (c) de F22, más
+      // abajo) moviera la base del diff a una ref que controla el propio
+      // agente. No es una frontera de seguridad (un sha válido también se
+      // puede escribir a mano; el caso base===HEAD lo siguen cazando los
+      // consumidores), es el contrato del campo.
+      if (RE_40HEX.test(sha)) {
+        try {
+          execFileSync('git', ['rev-parse', '--verify', '--quiet', `${sha}^{commit}`], { stdio: 'ignore' })
+          return sha
+        } catch { /* el commit no está en este repo (podado / semilla corrupta): al fallback */ }
+      }
+    }
+    if (base) return base
   } catch { /* sin SLICE.md: worktree del esquema anterior, o cwd que no es el worktree */ }
   for (const ref of ['origin/HEAD', 'origin/main', 'main', 'master']) {
     try {
@@ -412,7 +552,7 @@ function sliceBaseRef() {
 function stateFilesIntroducedByBranch() {
   const base = sliceBaseRef()
   if (!base) {
-    return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
+    return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base_sha:`/`base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
   }
   let baseSha, headSha
   try {
@@ -446,7 +586,7 @@ function stateFilesIntroducedByBranch() {
 function branchIntroducedFiles() {
   const base = sliceBaseRef()
   if (!base) {
-    return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
+    return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base_sha:`/`base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
   }
   let baseSha, headSha
   try {
@@ -503,6 +643,72 @@ if (checkPlan) {
   dieOut(result.message, 0)
 }
 
+// ============================================================================
+// EL VIGILANTE DEL MERGE — para que la cosecha no espere a un recado.
+//
+// La Puerta 3 del loop es humana (cerrar los gates y mergear) y hasta esta ronda
+// mergear no producía NINGUNA señal mecánica. El PR se mergeaba, el issue se
+// cerraba, y `.worktrees/<n>` + `feat/<n>` se quedaban en disco con su `claude`
+// vivo —trece horas en el caso que dio origen a F20— hasta que la misma persona
+// que había mergeado iba a la ventana de la coordinadora a decírselo. El evento
+// existía en GitHub; lo que disparaba la cosecha era un recado.
+//
+// SE LANZA AQUÍ, Y NO EN `/ct-next`, porque este es el instante EXACTO en que
+// existe un PR abierto esperando un merge humano. Lanzarlo en el despacho —junto
+// al vigilante del `-OK`, que es donde primero se pensó— pondría un proceso a
+// preguntar por un PR que todavía no existe durante toda la implementación.
+//
+// SE LANZA DESPRENDIDO (`detached` + `unref`) porque tiene que sobrevivir a que
+// esta invocación termine, y a que se cierre la sesión del slice: el caso que
+// motiva todo esto es un PR que se mergea horas o días después de abrirse.
+//
+// NO ROMPE EL RELEASE, y esto es la regla, no una cortesía: va DESPUÉS de que el
+// issue ya esté en `status:in-review`, y cualquier fallo aquí se AVISA y sigue.
+// El trabajo ya está entregado; no poder vigilar el merge significa volver al
+// modo de antes —avisar a mano—, no perder la entrega. Es el mismo criterio que
+// el `git add` de la telemetría en ct-step: el termómetro no es parte del motor.
+// Por eso hay además un manejador de `error`: un fallo ASÍNCRONO de `spawn`
+// (EAGAIN, EMFILE) no lo ve el `try/catch`, y sin manejador sería un `'error'`
+// sin atender que tumbaría este script — convirtiendo un release CONSUMADO en un
+// exit distinto de 0, o sea en la peor mentira posible en este fichero.
+//
+// EL CWD DE LA COORDINADORA SALE DE `localSliceArtifacts`, no de `process.cwd()`.
+// Este script se invoca desde dentro del worktree del slice, así que el cwd es
+// `.worktrees/<n>`; la coordinadora vive en el checkout PRINCIPAL, que es lo que
+// esa función ya sabe sacar de `git worktree list --porcelain`. Si no se ha
+// podido mirar, NO se inventa una ruta: se avisa y no se lanza nada. Un
+// vigilante apuntando a un directorio equivocado no encontraría nunca a quién
+// entregarle el aviso, y encima lo anunciaría como lanzado.
+//
+// CT_WATCH_MERGE_BIN sigue el patrón de CT_WATCH_GO_BIN: no cambia NINGUNA
+// decisión, sólo qué programa se lanza. Existe para que los tests puedan
+// comprobar que el vigilante se lanza con los argumentos correctos sin poner un
+// proceso real a sondear GitHub durante 48 horas.
+// ============================================================================
+function lanzarVigilanteDelMerge(n) {
+  const aviso = (por) => errLine(`aviso: no se ha lanzado el vigilante del merge de #${n} (${por}) — el slice está entregado y el issue está en status:in-review, pero cuando mergees su PR tendrás que recoger la cosecha a mano (o avisar a la coordinadora).`)
+  try {
+    const disco = localSliceArtifacts(n)
+    if (!disco.known) return aviso('no se ha podido averiguar cuál es el checkout principal, así que no se sabe dónde buscar la sesión coordinadora')
+    const bin = process.env.CT_WATCH_MERGE_BIN || ctWatchMergePath
+    // `spawn(process.execPath, [bin, …])` con un `bin` que no existe NO falla:
+    // el ejecutable es siempre `node`, así que el proceso nace, muere al
+    // instante con un error de módulo, y sin esta comprobación se anunciaría
+    // «vigilante lanzado» con un pid que ya no existe. Misma guarda, y mismo
+    // motivo, que en ct-next.mjs#lanzarVigilanteDelGo.
+    if (!existsSync(bin)) return aviso(`el programa del vigilante no existe: ${bin}`)
+    const logPath = join(controlTowerLogDir({ configDir: process.env.CLAUDE_CONFIG_DIR || null, home: homedir() }), `watch-merge-${n}.log`)
+    const hijo = spawn(process.execPath, [
+      bin, '--issue', String(n), '--repo', repo, '--coordinator-cwd', disco.mainRoot, '--log', logPath,
+    ], { detached: true, stdio: 'ignore' })
+    hijo.on('error', (e) => aviso(`fallo al arrancarlo: ${e.message}`))
+    hijo.unref()
+    outLine(`vigilante del merge de #${n} lanzado (pid ${hijo.pid}) — cuando mergees el PR, la coordinadora se enterará sola. Log: ${logPath}`)
+  } catch (e) {
+    aviso(e.message)
+  }
+}
+
 if (release) {
   const check = stateFilesIntroducedByBranch()
   if (!check.known) {
@@ -545,6 +751,179 @@ if (release) {
   if (!runGate.ok) {
     dieErr(`no se libera #${issue}: ${runGate.why} El issue sigue en status:in-progress: no se ha movido nada.`, 7)
   }
+  // F-e2e — LA CORRESPONDENCIA. La máquina de ct-step ya impide entregar un run
+  // sin pasar el e2e (run-machine.js), así que esto NO vuelve a verificar la
+  // travesía: verifica que el run entregado hable de los MISMOS recorridos que
+  // el issue declara.
+  //
+  // Existe porque el run lee sus recorridos de `.agent/SLICE.md`, que es
+  // agent-reachable — este mismo fichero ya desconfía de su `base:` por eso. Un
+  // agente que vaciara ese campo tendría un run "entregado" sin haber
+  // atravesado nada, y la puerta del 7 lo dejaría pasar. Aquí se cruza contra el
+  // ISSUE, que es la fuente que el agente no controla.
+  //
+  // Y se lee la SECCIÓN `## E2E` (E2E_HEADING/extractE2eRuns, TAREA 9,
+  // gh-issue-map.js — la MISMA función que usa /ct-next para sembrar el
+  // worktree: un solo parseo, para que un exit 8 nunca sea por una discrepancia
+  // de lectura entre los dos lados), no la label `gate:e2e`: las dos pueden
+  // discrepar si alguien edita el issue a mano, y manda la sección porque es la
+  // única que dice QUÉ atravesar. Label sin sección no describe trabajo (se
+  // libera, con aviso); sección sin label sí (se exige igual).
+  // Sin `&& !fx` aquí: el fixture de `CT_CLAIM_FIXTURE` modela la forma del
+  // claim (candLabels/openIssues/readback), no el cuerpo del issue — no hay
+  // dato de fixture que cruzar, así que esta lectura siempre va a `gh` de
+  // verdad. Deliberado, no un descuido: no lo "arregles" añadiendo `fx` sin
+  // ensanchar antes la forma del fixture.
+  const bodyRaw = (() => {
+    try {
+      return gh(['issue', 'view', String(issue), '--repo', repo, '--json', 'body', '-q', '.body'])
+    } catch {
+      return null
+    }
+  })()
+  if (bodyRaw === null) {
+    // "no se ha podido comprobar" — NUNCA "no hay recorridos". Este repo no
+    // afirma limpio lo que no pudo mirar (misma doctrina que los exit 5/6 de
+    // arriba): un issue con recorridos reales cuyo body no se pudo leer no es
+    // indistinguible de uno sin ninguno.
+    dieErr(`no se libera #${issue}: no se ha podido leer el cuerpo del issue (\`gh issue view --json body\` falló) — no se afirma que no declare recorridos, solo que no se ha podido comprobar. Reintenta cuando \`gh\` responda; el issue sigue en status:in-progress: no se ha movido nada.`, 8)
+  }
+  const recorridos = extractE2eRuns(bodyRaw)
+  // `deliveredRun` devuelve {ok, why}, no el run parseado — se relee aquí, de
+  // forma que no pueda LANZAR ante un fichero corrupto: un JSON inválido se
+  // trata como "cero recorridos declarados" (fail hacia el exit 8, no hacia un
+  // crash: un gate que revienta no es un gate).
+  let run = null
+  try { run = JSON.parse(runRaw) } catch { run = null }
+  if (recorridos.length) {
+    const declarados = new Set(Array.isArray(run?.e2eRuns) ? run.e2eRuns : [])
+    const faltan = recorridos.filter((r) => !declarados.has(r))
+    if (faltan.length) {
+      dieErr(`no se libera #${issue}: el issue declara en "${E2E_HEADING}" ${recorridos.length} recorrido(s), y el run entregado NO cubre ${faltan.length} de ellos: ${faltan.map((r) => `"${r}"`).join(', ')}. El run lee sus recorridos de .agent/SLICE.md, que es agent-reachable — esta puerta cruza contra el ISSUE, que el agente no controla. Completa esos recorridos con ct-step (paso "e2e") y reintenta. El issue sigue en status:in-progress: no se ha movido nada.`, 8)
+    }
+  } else {
+    // Sección ausente o vacía: la label es la única señal que queda para
+    // decidir si avisar. Si no se puede leer (gh caído), no se avisa —
+    // el aviso es cortesía, no gate, así que no vale la pena bloquear NI
+    // fallar ruidosamente por él.
+    let labels = []
+    try { labels = labelsOf(issue) } catch { labels = [] }
+    if (labels.includes('gate:e2e')) {
+      errLine(`aviso: #${issue} lleva la label gate:e2e pero su cuerpo no declara ninguna sección "${E2E_HEADING}" — no hay recorridos que verificar, así que se libera igual, pero conviene revisar si la sección se perdió al editar el issue a mano.`)
+    }
+  }
+  // ==========================================================================
+  // F38 — LA PUERTA DEL GO: EL GATE `plan` NO SE CIERRA SOLO.
+  //
+  // EL DEFECTO QUE CIERRA. Desde la #32, contestar `-OK` en el issue arranca la
+  // sesión: le dio consecuencia mecánica a un comentario de GitHub. Y el agente
+  // tiene `gh`. Su propio límite lo decía (commands/ct-next.md): «no impide que
+  // el propio agente escriba `-OK` en su propio issue». Con el gate `plan`
+  // implicado por defecto en TODO slice (gates.js#gatesForType), el resultado
+  // era una puerta que el gateado podía abrir, dejando además el REGISTRO de una
+  // revisión humana que no ocurrió. Aquí se cierran las dos mitades: el go
+  // lleva un nonce que el agente no puede adivinar (go-response.js), y ES UN
+  // REQUISITO para liberar — antes no lo era para nada: un agente podía ignorar
+  // el gate entero y entregar igual, porque el kickoff que lo manda parar es un
+  // prompt y no un gate.
+  //
+  // POR QUÉ ESTA PUERTA VA LA ÚLTIMA, y no junto a la del plan (exit 6). El
+  // orden de esta escalera es «qué mensaje debe ganar», y un go que falta
+  // significa cosas distintas según lo demás: con el run a medias, preguntar por
+  // el go es ruido sobre un slice que aún no ha terminado; con TODO en verde —el
+  // plan válido, las tareas comiteadas, la Global en verde, el e2e cubierto— un
+  // go que falta ya no es un «todavía no», es trabajo entero hecho sin permiso.
+  // Ahí es cuando este mensaje tiene que ganar, y ahí es donde está.
+  //
+  // Y VA ANTES DEL AVISO DE LOS *NO-VERIFICADOS* por lo mismo que ese aviso va
+  // antes de mutar: si el release no va a ocurrir, es ruido sobre una decisión
+  // que ya se tomó.
+  //
+  // LAS TRES FORMAS DE NO PODER AFIRMARLO, y ninguna libera: sin compromiso
+  // registrado, con el registro ilegible, o sin poder leer los comentarios. Es
+  // la doctrina de los exit 5/6/8 de arriba: este fichero no afirma limpio lo
+  // que no ha podido mirar. La renuncia `!plan` de la fila SÍ libera, porque
+  // entonces no hay gate que cerrar — y se lee de las labels, que es donde la
+  // renuncia sobrevive al kickoff.
+  // ==========================================================================
+  const ctHome = { configDir: process.env.CLAUDE_CONFIG_DIR || null, home: homedir() }
+  const registro = readGoCommitment({ repo, issue, ...ctHome })
+  if (registro.error) {
+    dieErr(`no se libera #${issue}: el go de este despacho está registrado en ${registro.path} y NO se ha podido leer (${registro.error}). No se afirma que falte el go, sólo que no se ha podido comprobar. Arréglalo (permisos, o el contenido del fichero) o reemite uno con \`node <plugin>/scripts/ct-go.mjs --issue ${issue} --repo ${repo}\`. El issue sigue en status:in-progress: no se ha movido nada.`, 9)
+  }
+  if (registro.missing) {
+    // Sin registro, la única forma de saber si este slice DEBÍA tener gate
+    // `plan` son sus labels. Un fallo de lectura aquí no libera: sería la misma
+    // afirmación sin haber mirado.
+    let labels = null
+    try { labels = labelsOf(issue) } catch (e) {
+      dieErr(`no se libera #${issue}: el go de este despacho no está registrado (${registro.path} no existe) y tampoco se han podido leer las labels del issue (${e.message}) para saber si este slice lleva el gate \`plan\`. No se afirma que no lo lleve. Reintenta cuando \`gh\` responda. El issue sigue en status:in-progress: no se ha movido nada.`, 9)
+    }
+    // `gatesFromLabels` devuelve {gates, declared}: `declared` distingue «este
+    // issue dice que no tiene gate `plan`» de «este issue no dice nada de sus
+    // gates» (es anterior a que los gates existieran, o está hecho a mano). Sólo
+    // la PRIMERA libera. La segunda no es una renuncia, es un silencio, y un
+    // silencio no cierra un gate — además de ser el camino que abriría un agente
+    // borrándose las labels. Se arregla con un comando y no rompe nada en vuelo.
+    const declaracion = gatesFromLabels(labels)
+    if (!declaracion.declared || declaracion.gates.includes('plan')) {
+      const porque = declaracion.declared
+        ? 'este slice lleva el gate `plan`'
+        : 'las labels de este issue no declaran NINGÚN gate (ni `gate:none`), así que no se puede afirmar que renuncie al `plan` —silencio no es renuncia—'
+      dieErr(`no se libera #${issue}: ${porque} y el go de este despacho NO ESTÁ REGISTRADO (${registro.path} no existe), así que no hay nada contra lo que comprobar el \`${GO_TOKEN}\` del issue. Pasa cuando el slice se despachó con una versión anterior a la que trajo el nonce, o cuando ese fichero se borró. Reemite el go con \`node <plugin>/scripts/ct-go.mjs --issue ${issue} --repo ${repo}\`, pide que lo contesten en el issue y vuelve a liberar. El issue sigue en status:in-progress: no se ha movido nada.`, 9)
+    }
+  } else {
+    // MISMA LECTURA QUE EL VIGILANTE (`--json comments` a secas, y `.comments`
+    // parseado aquí), no un `-q` distinto: dos formas de pedir lo mismo son dos
+    // formas de que un día una de ellas devuelva otra cosa. Es la razón por la
+    // que la puerta del e2e reutiliza `extractE2eRuns` en vez de reparsear.
+    let comentarios = null
+    try {
+      const parsed = JSON.parse(gh(['issue', 'view', String(issue), '--repo', repo, '--json', 'comments']))
+      comentarios = Array.isArray(parsed?.comments) ? parsed.comments : null
+    } catch {
+      comentarios = null
+    }
+    if (!Array.isArray(comentarios)) {
+      dieErr(`no se libera #${issue}: no se han podido leer los comentarios del issue (\`gh issue view --json comments\`), así que no se ha podido comprobar el go del gate \`plan\` — no se afirma que falte. Reintenta cuando \`gh\` responda. El issue sigue en status:in-progress: no se ha movido nada.`, 9)
+    }
+    // SIN VENTANA a propósito, al contrario que el vigilante: aquí vale
+    // cualquier comentario del issue, porque el nonce ya hace el trabajo que
+    // allí hacía la foto de ids — un go de un despacho anterior tiene otro
+    // nonce y no encaja por construcción.
+    const go = comentarios.find((c) => matchesGo(c?.body, registro.commitment))
+    if (!go) {
+      dieErr(`no se libera #${issue}: el gate \`plan\` no está cerrado — ningún comentario de este issue trae el go de este despacho. Lo cierra una persona contestando \`${GO_TOKEN} <nonce>\` con el nonce que /ct-next imprimió al despachar (no está en tu contexto, ni en el issue, ni en tu worktree: es de quien revisa el plan, a propósito). Si se ha perdido, quien despachó lo reemite con \`node <plugin>/scripts/ct-go.mjs --issue ${issue} --repo ${repo}\`. El issue sigue en status:in-progress: no se ha movido nada.`, 9)
+    }
+    // QUIÉN lo dio, por stderr: el registro de quién autorizó vale más impreso
+    // que guardado, y es la única señal que delataría un go dado por la propia
+    // identidad con la que corre el agente.
+    errLine(`gate \`plan\` cerrado: go de este despacho dado por ${go?.author?.login ? `@${go.author.login}` : 'un autor que gh no ha devuelto'}${go?.createdAt ? ` el ${go.createdAt}` : ''}.`)
+  }
+
+  // LOS *NO-VERIFICADOS*, DICHOS. Es el estado que libera un slice SIN haberlo
+  // comprobado —un docker que no arranca, una credencial caducada, la sección
+  // de AGENTS.md sin rellenar—, y entrega a propósito: retenerlo dejaría el
+  // slice en status:in-progress ocupando `area:`/`touches:` y una plaza de
+  // `--cap` sin nadie trabajando, el modo de fallo que F13 y F18 quitaron. Lo
+  // que no puede ser es que además sea SILENCIOSO: tres textos de esta rama
+  // (run-machine.js#trasElE2e, gates.js#GATES.e2e.issue y el §3.7 del diseño)
+  // prometen que --release "lo dice", y hasta la review final de rama no lo
+  // decía nadie — el run sólo persistía los NOMBRES de los recorridos, así que
+  // esta puerta no distinguía un slice verde de otro con todos sus recorridos
+  // sin verificar. `ct-step` persiste ahora el veredicto de cada uno
+  // (`e2eResults`), y aquí se leen.
+  //
+  // Va DESPUÉS de la puerta de correspondencia y ANTES de mutar: si el release
+  // no va a ocurrir, este aviso sería ruido sobre una decisión que ya se tomó.
+  // Se lee del run (no del issue) porque el veredicto es del run: el issue no
+  // dice nada sobre cómo fue la travesía. Y no gatea nada — es diagnóstico por
+  // stderr, la doctrina de siempre: stdout es el producto, stderr el porqué.
+  const sinVerificar = (Array.isArray(run?.e2eResults) ? run.e2eResults : []).filter((r) => r && r.verdict === 'no-verificado')
+  if (sinVerificar.length) {
+    const detalle = sinVerificar.map((r) => `"${r.run}" (${r.reason || 'sin motivo declarado en el informe'})`).join('; ')
+    errLine(`aviso: #${issue} se libera con ${sinVerificar.length} recorrido(s) que NO se pudieron comprobar: ${detalle}. Un "no-verificado" entrega a propósito (retener el slice por un entorno caído lo dejaría ocupando area:/touches: y una plaza de --cap sin nadie trabajando), pero libera SIN haber verificado eso: léelo antes de mergear. Si el motivo es del entorno, el arreglo va en la sección "## Cómo se atraviesa este repo (e2e)" de AGENTS.md, no en relajar la puerta. El informe completo está en docs/superpowers/e2e/${issue}.md.`)
+  }
   if (!dryRun && !fx) {
     const result = setStatus(issue, 'status:in-progress', 'status:in-review')
     if (!result.ok) {
@@ -554,6 +933,12 @@ if (release) {
       // contrato ensanchado de arriba, sin cambios.
       dieErr(`no se pudo liberar #${issue} a in-review: ${result.error.message}. Sigue en status:in-progress; reintenta el --release.`, 1)
     }
+    // DENTRO del `!dryRun && !fx`, y eso es la decisión: con `--dry-run` no se
+    // ha movido nada, así que no hay ningún PR cuyo merge esperar, y lanzar el
+    // vigilante ahí convertiría una corrida en seco en un proceso de 48 horas.
+    // Con `fx` (CT_CLAIM_FIXTURE) tampoco: el fixture modela la forma del claim,
+    // no un repo real donde haya nada que cosechar.
+    lanzarVigilanteDelMerge(issue)
   }
   dieOut(`released #${issue} → in-review`, 0)
 }

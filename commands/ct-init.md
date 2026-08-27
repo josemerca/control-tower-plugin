@@ -1,5 +1,5 @@
 ---
-description: Bootstrap de un repo para el loop Control Tower (.agent/STATE.md + AGENTS.md)
+description: Bootstrap de un repo para el loop Control Tower (.agent/STATE.md + AGENTS.md + plantilla del execution spec)
 ---
 Corre el scaffolder sobre el repo actual y confirma qué creó:
 ```
@@ -47,6 +47,20 @@ acuses de señales de colisión de protocolo del loop, ver más abajo); este
 fichero declara cómo se escribe código en este repo.
 
 Al `.gitignore` se le añaden **dos** líneas, las dos idempotentes: `.worktrees/` (los worktrees de slice viven dentro del checkout, y sin esa línea un `git add -A` se traga un árbol de trabajo entero) y `.agent/SLICE.md` (el estado de una sesión despachada, que es estado vivo y local, nunca producto — ver F22 en `commands/ct-next.md`).
+
+El scaffolder siembra además `docs/superpowers/specs/_TEMPLATE-execution-spec.md`,
+la plantilla del execution spec — la que el skill de brainstorming necesita en el
+paso 8, y que hasta ahora no viajaba con el plugin. Es idempotente: si ya existe,
+no se pisa (puede llevar secciones propias del repo). **No** se añade al
+`.gitignore`: es un artefacto del repo que la skill lee, y se commitea. La ruta
+no es decorativa — es la que `LOOP_ARTIFACT_PATTERNS` (`scripts/scope.js`) exime
+del scope gate precisamente porque el brainstorming escribe ahí el design doc y
+el execution spec. Cuidado al editarla con dos cosas que el propio `/ct-groom`
+castiga y que no se ven leyendo: escribir el marcador de clarificación literal
+(con su corchete) en cualquier parte del fichero, comentarios incluidos, tumba el
+groom con exit 2 (`analyzeSpecFreeze` grepea todo el fichero); y cualquier
+comentario HTML **dentro** de `## Contexto del epic` viaja verbatim al cuerpo de
+todos los issues del epic (`readEpicContext` no lo descarta).
 
 En `.agent/STATE.md`, en cambio, **limítate a describir el bootstrap**:
 

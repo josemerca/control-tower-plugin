@@ -119,7 +119,13 @@ describe('ct-groom (corrida real) — detecta divergencia por defecto, no la apl
     expect(res.stderr).toMatch(/"#1 login"/)
     expect(res.stderr).toMatch(/falta la label "area:api"/)
     expect(res.stderr).toMatch(/falta la label "touches:db"/)
-    expect(res.stderr).not.toMatch(/status:in-progress/) // label ajena al namespace que el spec compara
+    // Lo que este test defiende es que el REPORTE DE DIVERGENCIA no menciona
+    // `status:in-progress`: es una label del issue que el spec no posee, y
+    // reportarla como "extra" sería el bug. La aserción se acota a las líneas de
+    // divergencia porque el nombre aparece ahora, legítimamente, en otra línea de
+    // stderr: la del vocabulario `status:` que /ct-groom crea para que el claim
+    // pueda escribirlo después (groom.js#LOOP_STATUS_LABELS).
+    expect(res.stderr).not.toMatch(/divergencia.*status:in-progress/)
     expect(res.stdout).toMatch(/ya existe \(#501\), no se duplica/) // el mensaje de idempotencia de siempre sigue ahí
     const log = existsSync(argvLog) ? readFileSync(argvLog, 'utf8') : ''
     expect(log).not.toMatch(/issue edit/) // sin --reconcile, jamás se muta el issue

@@ -5,12 +5,15 @@ import { fileURLToPath } from 'node:url'
 import { tmpdir, homedir } from 'node:os'
 import { randomBytes } from 'node:crypto'
 import { dirname, join, isAbsolute, delimiter as pathDelimiter } from 'node:path'
-import { planDispatch, resolveAccount, resolveAccountLegacy, validateAccountMap, parseRepoSlug, buildCmuxArgv, buildCmuxSendArgv, buildCmuxSendKeyArgv, cmuxSessionName, collectFinishedResidue, formatFinishedResidueWarning } from './dispatch.js'
-import { renderKickoff, buildStateSeed, ACCOUNT_MAP } from './kickoff.js'
+import { planDispatch, parseRepoSlug, buildCmuxArgv, buildCmuxSendArgv, buildCmuxSendKeyArgv, cmuxSessionName, collectFinishedResidue, formatFinishedResidueWarning } from './dispatch.js'
+import { renderKickoff, buildStateSeed, AGENT_BIN } from './kickoff.js'
 import { parseStrictInt } from './argnum.js'
 import { resolveGatesForAgent } from './gates.js'
-import { GO_TOKEN } from './go-response.js'
+import { GO_TOKEN, newGoNonce, goCommitment, goBody } from './go-response.js'
+import { writeGoCommitment } from './go-registry.js'
+import { emitGoNonce } from './go-channel.js'
 import { controlTowerLogDir } from './run-metrics.js'
+import { listCmuxWorkspaces, CMUX_QUERY_TIMEOUT_MS } from './cmux.js'
 import { shQuote } from './shquote.js'
 import {
   buildLauncherScript, buildTypedCommand, parseSentinel, sameDir,
@@ -516,14 +519,18 @@ const has = (f) => process.argv.includes(f)
 // fallida no es evidencia de ausencia, y afirmar staleness con un tercio de
 // la evidencia sin comprobar sería exactamente el tipo de aserción no
 // verificada que esta tarea pide dejar de hacer.
-const CMUX_QUERY_TIMEOUT_MS = 5000
 // queryAllCmuxWorkspaces: consulta de solo lectura compartida por finding 2
 // (staleness: ¿hay una sesión viva para un issue en vuelo?) y finding 3
 // (¿la sesión que ACABAMOS de lanzar está de verdad en el directorio que le
-// pedimos? — ver verifyCmuxLaunch, más abajo). Devuelve un array de
-// `{title, cwd}` por CADA workspace, en TODAS las ventanas, o `null` si la
-// consulta inicial (`list-windows`) no se pudo completar en absoluto (cmux
-// no instalado, daemon caído, timeout).
+// pedimos? — ver verifyCmuxLaunch, más abajo).
+//
+// EL RECORRIDO Y SU GUARDA DE ESQUEMA VIVEN AHORA EN scripts/cmux.js, y lo que
+// queda aquí es lo que sí es de ct-next: la guarda del fixture. Se extrajo
+// porque la misma consulta estaba copiada en los dos vigilantes SIN la guarda —
+// tres copias y sólo ésta bien—, así que el comentario largo que explicaba por
+// qué `custom_title`/`current_directory` no son un esquema garantizado está en
+// ese módulo, que es el único sitio que los lee. Aquí no se ha relajado nada:
+// devuelve exactamente lo mismo, `{title, cwd, cwdKnown, ref}` o `null`.
 function queryAllCmuxWorkspaces() {
   // CT_NEXT_FIXTURE (`fx`) promete NUNCA tocar nada real — ver el comentario
   // de cabecera de esa variable, más arriba en este fichero ("no se decide
@@ -538,87 +545,11 @@ function queryAllCmuxWorkspaces() {
   // a invocar el `cmux` DE VERDAD de la máquina que corra los tests. En
   // modo fixture, la consulta se trata como "no concluyente" — igual que
   // cuando cmux no está disponible — nunca como "no hay sesión".
+  //
+  // NO se delega en cmux.js: ese módulo no sabe de fixtures, y no debe. La
+  // guarda tiene que estar ANTES de la llamada, no dentro de ella.
   if (fx) return null
-  try {
-    const windowsRaw = execFileSync('cmux', ['list-windows', '--json'], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: CMUX_QUERY_TIMEOUT_MS, killSignal: 'SIGKILL',
-    })
-    const windows = JSON.parse(windowsRaw)
-    const out = []
-    // IMPORTANTE (revisión externa): `custom_title`/`current_directory` son
-    // los nombres de campo observados contra la versión de cmux instalada
-    // en la máquina de desarrollo — no hay ninguna garantía de versión ni
-    // de esquema. Si el nombre real cambiara, CADA `ws.custom_title` sería
-    // `undefined`, fallaría el `typeof === 'string'` de más abajo, y el
-    // resultado se filtraría en silencio a un array vacío — indistinguible,
-    // antes de este cambio, de "cmux respondió y de verdad no hay ninguna
-    // sesión". Eso degradaba CADA staleness-check a un falso "abandonado" y
-    // CADA verificación de lanzamiento a un falso "not-found", ambos
-    // ruidosos. `sawAnyWorkspaceEntry`/`sawAnyRecognizedTitle` distinguen
-    // las dos causas de "cero resultados": si hubo entradas de verdad
-    // (`parsed.workspaces` no vacío) pero NINGUNA tenía el campo esperado,
-    // es mucho más probable un cambio de esquema que "cero sesiones de
-    // verdad" — se trata como NO CONCLUYENTE. Si nunca hubo ninguna entrada
-    // en ninguna ventana (el caso normal y esperado de "no hay nada
-    // abierto"), sigue siendo un `[]` con toda confianza.
-    //
-    // D5, hallazgo B — la guarda de arriba cubría `custom_title` y NADA
-    // MÁS: `current_directory` se leía a pelo (`ws.current_directory ??
-    // null`) y luego se comparaba con igualdad ESTRICTA contra el worktree
-    // esperado. Si cmux renombrara SOLO ese campo (el título seguiría
-    // reconociéndose, así que `sawAnyRecognizedTitle` no salvaría nada),
-    // cada `cwd` sería `null`, `null !== <worktree>` y CADA lanzamiento
-    // correcto se clasificaría como 'wrong-cwd' — es decir, exactamente la
-    // falsa alarma que la guarda de `custom_title` existe para evitar, y
-    // además con consecuencia de exit code: desde que 'wrong-cwd' dejó de
-    // contar como lanzado, un repo entero pasaría de exit 0 a exit 3 sin
-    // que nada estuviera mal.
-    //
-    // Arreglo, aplicado a los DOS campos y no a uno: un campo cuyo esquema
-    // no reconocemos degrada a NO CONCLUYENTE, nunca a "verificado que está
-    // mal". Para el cwd la degradación es POR ENTRADA (`cwdKnown`), no
-    // global como la del título: así también se comporta bien ante una
-    // flota mixta (unas entradas con el campo, otras sin él), y ante una
-    // sesión que legítimamente no expone directorio. `verifyCmuxLaunch`
-    // (más abajo) traduce `cwdKnown: false` a un estado propio
-    // ('cwd-unknown'), jamás a 'wrong-cwd'.
-    let sawAnyWorkspaceEntry = false
-    let sawAnyRecognizedTitle = false
-    for (const w of (Array.isArray(windows) ? windows : [])) {
-      if (!w || !w.id) continue
-      try {
-        const wsRaw = execFileSync('cmux', ['workspace', 'list', '--window', w.id, '--json'], {
-          encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: CMUX_QUERY_TIMEOUT_MS, killSignal: 'SIGKILL',
-        })
-        const parsed = JSON.parse(wsRaw)
-        const workspaces = Array.isArray(parsed.workspaces) ? parsed.workspaces : []
-        for (const ws of workspaces) {
-          sawAnyWorkspaceEntry = true
-          if (ws && typeof ws.custom_title === 'string') {
-            sawAnyRecognizedTitle = true
-            const cwdKnown = typeof ws.current_directory === 'string'
-            // F20/H1: `ref` (p.ej. "workspace:97") es el handle que acepta
-            // `cmux send --workspace`. Se degrada a `null` con el MISMO
-            // criterio que el cwd —por entrada, nunca global— porque su
-            // ausencia no invalida nada de lo que ya se sabía: solo significa
-            // que a ESA sesión no se le puede reenviar la línea, y quien lo
-            // necesite tiene que poder decirlo en vez de mandar un `send` a
-            // `undefined`.
-            const ref = typeof ws.ref === 'string' && ws.ref.length > 0 ? ws.ref : null
-            out.push({ title: ws.custom_title, cwd: cwdKnown ? ws.current_directory : null, cwdKnown, ref })
-          }
-        }
-      } catch {
-        // Una ventana concreta que no se pueda consultar no invalida las
-        // demás — se sigue con el resto; solo una consulta INICIAL fallida
-        // (list-windows) marca el resultado global como no concluyente.
-      }
-    }
-    if (sawAnyWorkspaceEntry && !sawAnyRecognizedTitle) return null
-    return out
-  } catch {
-    return null // cmux no instalado, daemon caído, o timeout: no concluyente.
-  }
+  return listCmuxWorkspaces({ timeoutMs: CMUX_QUERY_TIMEOUT_MS })
 }
 
 function queryCmuxWorkspaceTitles() {
@@ -802,13 +733,28 @@ function lanzarVigilanteDelGo(slice, sessionName) {
     // comando corrió»— con una evidencia todavía más débil: aquí lo único
     // comprobado sería que `node` existe.
     if (!existsSync(bin)) return aviso(`el programa del vigilante no existe: ${bin}`)
+    // EL NONCE SE SORTEA AQUÍ Y EN NINGÚN OTRO SITIO (F38). Este es el único
+    // proceso del loop que corre en la sesión de quien despacha, así que es el
+    // único que puede entregarle el nonce sin escribirlo en un sitio que el
+    // agente lea. Se registra ANTES de lanzar el vigilante: si el registro falla
+    // no se vigila nada, porque un vigilante sin compromiso registrado sería un
+    // go que arranca el trabajo y que `--release` no podrá honrar después.
+    const nonce = newGoNonce(randomBytes(4))
+    const goHash = goCommitment(nonce)
+    const ctHome = { configDir: process.env.CLAUDE_CONFIG_DIR || null, home: homedir() }
+    try {
+      writeGoCommitment({ repo, issue: slice.n, commitment: goHash, ...ctHome })
+    } catch (e) {
+      return aviso(`no se ha podido registrar el go de este despacho (${e.message}) — sin registro, \`dispatch-check --release\` se negará (exit 9) porque no podrá comprobar el go. Registra uno con \`node <plugin>/scripts/ct-go.mjs --issue ${slice.n} --repo ${repo} --session ${JSON.stringify(sessionName)}\` y dale el go que imprima`)
+    }
     const logPath = join(controlTowerLogDir({ configDir: process.env.CLAUDE_CONFIG_DIR || null, home: homedir() }), `watch-go-${slice.n}.log`)
     const hijo = spawn(process.execPath, [
-      bin, '--issue', String(slice.n), '--repo', repo, '--session', sessionName, '--log', logPath,
+      bin, '--issue', String(slice.n), '--repo', repo, '--session', sessionName, '--go-hash', goHash, '--log', logPath,
     ], { detached: true, stdio: 'ignore' })
     hijo.on('error', (e) => aviso(`fallo al arrancarlo: ${e.message}`))
     hijo.unref()
-    console.log(`  vigilante del ${GO_TOKEN} de #${slice.n} lanzado (pid ${hijo.pid}) — cuando contestes ${GO_TOKEN} en el issue, la sesión arranca sola. Log: ${logPath}`)
+    console.log(`  vigilante del ${GO_TOKEN} de #${slice.n} lanzado (pid ${hijo.pid}) — cuando contestes el go en el issue, la sesión arranca sola. Log: ${logPath}`)
+    emitGoNonce(slice.n, nonce)
   } catch (e) {
     aviso(e.message)
   }
@@ -1408,48 +1354,13 @@ process.on('exit', (code) => {
   }
 })
 
-// ============================================================================
-// D4, defecto 1 — resolución de cuenta, con voz.
-//
-// Se hace AQUÍ, al arrancar: antes de listar issues, antes de reclamar nada
-// y antes de crear ningún worktree. Un mapa mal formado o un directorio de
-// cuenta inexistente son cosas que se saben sin tocar la red — descubrirlas
-// cuando ya se han lanzado tres agentes (cada uno con su claim escrito en
-// GitHub) es exactamente el modo de fallo que este bloque cierra.
-const accountMapErrors = validateAccountMap(ACCOUNT_MAP)
-if (accountMapErrors.length) {
-  console.error(`ACCOUNT_MAP (scripts/kickoff.js) está mal formado — ct-next.mjs no continúa: con un mapa roto, la cuenta de Claude con la que se lanzaría cada agente es indeterminada.\n  - ${accountMapErrors.join('\n  - ')}\nFormato de patrón: <owner>/<repo>, con cada mitad literal, "*", o un prefijo terminado en "*".`)
-  process.exit(2)
-}
-
-const account = resolveAccount(repo, ACCOUNT_MAP)
-const configDir = account.dir
-// F29 — el binario sale de la MISMA resolución que el config dir, y se dice
-// en la misma línea a propósito: son las dos mitades de «con qué cuenta se
-// despacha», y verlas juntas es lo que permite cazar una discrepancia entre
-// lo que el mapa eligió y lo que el wrapper va a exportar.
-const agentBin = account.bin
-const accountLabel = account.account === 'work' ? 'trabajo' : 'personal'
-if (account.matched) {
-  console.log(`cuenta resuelta: ${configDir} (${accountLabel}) — por la regla "${account.pattern}" de ACCOUNT_MAP. Binario del agente: ${agentBin}.`)
-} else {
-  // Requisito explícito: el fallback tiene que TENER VOZ. Antes, un repo que
-  // no casaba con ningún patrón acababa en la cuenta personal sin que nada
-  // lo dijera — el caso de `mercadona/algun-tool-interno`: código de
-  // trabajo, con contexto de trabajo, bajo la cuenta personal, en silencio.
-  warn(`ningún patrón de ACCOUNT_MAP casa con "${repo}" — se usa la cuenta POR DEFECTO: ${configDir} (${accountLabel}). Si este repo es de trabajo, añade un patrón (p.ej. "${parseRepoSlug(repo).owner}/*") a ACCOUNT_MAP.work en scripts/kickoff.js antes de lanzar nada; el agente se despachará con la cuenta personal hasta entonces.`)
-}
-if (account.conflictPattern) {
-  warn(`"${repo}" casa a la vez con "${account.pattern}" (work) y con "${account.conflictPattern}" (personal) en ACCOUNT_MAP — gana la cuenta de TRABAJO (${configDir}) por ser el error más caro al revés, pero el mapa es ambiguo: quita o estrecha uno de los dos patrones.`)
-}
-// Reclasificación respecto del mapa viejo (requisito explícito: "si al
-// arreglarlo un repo que hoy funciona pasa a la otra cuenta, eso no puede
-// pasar callado"). Solo habla cuando el DIRECTORIO cambia — no cuando lo
-// único que cambia es la regla por la que se llegó al mismo sitio.
-const legacyAccount = resolveAccountLegacy(repo, ACCOUNT_MAP)
-if (legacyAccount && legacyAccount.dir !== configDir) {
-  warn(`CAMBIO DE CUENTA respecto del mapa anterior: "${repo}" se despachaba antes con ${legacyAccount.dir} (${legacyAccount.account === 'work' ? 'trabajo' : 'personal'}${legacyAccount.matched ? '' : ', por defecto'}) y ahora se despacha con ${configDir} (${accountLabel})${account.matched ? `, por la regla "${account.pattern}"` : ', por defecto'}. El matching por owner (D4) es el arreglo deliberado — pero si esperabas la cuenta de antes, revísalo AHORA: el agente arrancará con otra sesión de Claude, otro historial y otra autenticación.`)
-}
+// F35 — aquí se resolvía la CUENTA de Claude (ACCOUNT_MAP -> CLAUDE_CONFIG_DIR
+// + binario del wrapper), con su validación del mapa al arrancar y cuatro
+// avisos: cuenta resuelta, fallback sin patrón, conflicto entre patrones y
+// reclasificación respecto del mapa viejo. Todo fuera: el loop ya no evalúa
+// qué cuenta hace qué. Queda UN nombre de ejecutable, que es lo único que el
+// launcher necesita para su `command -v` (ver launch-sentinel.js).
+const agentBin = AGENT_BIN
 
 // findInPath: ¿existe un ejecutable con este nombre en el PATH de ESTE
 // proceso? Se resuelve LEYENDO el filesystem (existsSync + X_OK), nunca
@@ -2310,7 +2221,7 @@ const repoName = repo.split('/')[1]
 //             arregle algo antes: número de slice no utilizable, worktree o
 //             rama ya ocupados, `cmux` ausente del PATH (lo ejecuta ESTE
 //             proceso, así que su ausencia es un fallo seguro), el
-//             CLAUDE_CONFIG_DIR resuelto no existe en disco, o el kickoff no
+//             el kickoff no
 //             se renderiza.
 //   - aviso → lo que NO podemos afirmar con certeza desde aquí. `claude` es
 //             el caso claro: no lo ejecuta este proceso sino el shell de
@@ -2415,22 +2326,6 @@ if (claudePath) {
   warn(`\`${agentBin}\` no aparece en el PATH de ESTE proceso. No es concluyente — quien lo ejecuta de verdad es el shell de login que abre cmux, con su propio PATH (y puede ser incluso una función de shell, invisible desde aquí) — pero si tampoco está allí, cada sesión lanzada morirá nada más arrancar, con el claim ya puesto y sin agente. Compruébalo a mano antes de fiarte de un "lanzado".`)
 }
 
-// CLAUDE_CONFIG_DIR resuelto: tiene que existir EN DISCO. Si no existe, la
-// sesión arranca con una configuración de Claude vacía (sin autenticar,
-// onboarding desde cero) en vez de con la cuenta que el mapa eligió — y eso
-// se descubriría con el claim ya escrito y el worktree ya creado.
-// `isDirectory()`, no solo `existsSync`: una RUTA que existe pero es un
-// fichero (o un enlace a uno) pasaría un existsSync y fallaría igual de tarde
-// que si no existiera — y con un error mucho menos legible.
-const configDirIsDir = (() => {
-  try { return statSync(configDir).isDirectory() } catch { return false }
-})()
-if (configDirIsDir) {
-  console.log(`CLAUDE_CONFIG_DIR: ${configDir} (existe en disco).`)
-} else {
-  preflightFailures.push(`el CLAUDE_CONFIG_DIR resuelto para la cuenta ${accountLabel} NO existe en disco como directorio: ${configDir}. Cada agente se lanzaría con una configuración de Claude vacía (sin autenticar) en vez de con esa cuenta. Crea el directorio, corrige ACCOUNT_MAP (scripts/kickoff.js), o apunta CT_ACCOUNT_${account.account === 'work' ? 'WORK' : 'PERSONAL'}_DIR al directorio correcto.`)
-}
-
 // Plan por slice + comprobación de que su destino está libre. Se construye
 // TODO aquí (rama, worktree, kickoff, seed, argv de cmux) para que un fallo
 // de renderizado del kickoff se vea como una precondición fallida — con su
@@ -2439,7 +2334,7 @@ if (configDirIsDir) {
 // slice): la lista es la misma para todos.
 const registeredWorktrees = registeredWorktreePaths()
 // D5, hallazgo H: cuántos de los fallos acumulados hasta aquí son de TANDA
-// (no de un slice concreto) — `cmux` ausente del PATH y el CLAUDE_CONFIG_DIR
+// (no de un slice concreto) — `cmux` ausente del PATH y el binario del agente
 // inexistente. Se distinguen en el resumen final porque su remedio y su
 // alcance son distintos: no hay "arregla este slice", afectan a todos.
 const batchLevelFailureCount = preflightFailures.length
@@ -2532,14 +2427,14 @@ for (let idx = 0; idx < selected.length; idx++) {
     continue
   }
   const command = buildTypedCommand(launcherPath, shQuote)
-  // CLAUDE_CONFIG_DIR viaja como --env de cmux, NUNCA como env local del
+  // El entorno del pty lo fija cmux vía --env, NUNCA el env local del
   // proceso `cmux` cliente (ver dispatch.js#buildCmuxArgv): `cmux` es un
   // cliente que habla con un daemon ya en marcha por socket Unix, y es el
   // daemon —no este proceso— quien crea el pty real. Un env var puesto en
   // el `execFileSync('cmux', ...)` local muere con ese proceso cliente sin
   // llegar nunca al pty; verificado en vivo contra el sandbox (T10): sin
   // --env, la sesión se queda colgada en el selector interactivo de cuenta.
-  const cmuxArgv = buildCmuxArgv({ name, cwd: wt, command, env: { CLAUDE_CONFIG_DIR: configDir } })
+  const cmuxArgv = buildCmuxArgv({ name, cwd: wt, command })
 
   // Destino libre. Este es el caso que el encargo nombra explícitamente: si
   // `feat/<n>` ya existe, el run real moría A MITAD, con el claim YA puesto.
@@ -2585,7 +2480,7 @@ for (let idx = 0; idx < selected.length; idx++) {
   // Verificado por construcción con la consulta de rama rota: un --dry-run
   // sin fixture imprimía "modo fixture" y salía 0.
   const destinationCheck = fx ? 'fixture' : (branchExists === 'unknown' ? 'unknown' : 'checked')
-  plans.push({ s, selIdx: idx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck, launchDir, launcherPath, sentinelPath, launcherScript, typedCommand: command })
+  plans.push({ s, selIdx: idx, branch, wt, name, kickoff, stateSeed, sliceForKickoff, cmuxArgv, destinationCheck, launchDir, launcherPath, sentinelPath, launcherScript, typedCommand: command })
 }
 
 // ============================================================================
@@ -3210,7 +3105,7 @@ let launchedCount = 0
 const unverifiedLaunches = []
 
 for (let idx = 0; idx < plans.length; idx++) {
-  const { s, selIdx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck, launchDir, launcherPath, sentinelPath, launcherScript, typedCommand } = plans[idx]
+  const { s, selIdx, branch, wt, name, kickoff, stateSeed, sliceForKickoff, cmuxArgv, destinationCheck, launchDir, launcherPath, sentinelPath, launcherScript, typedCommand } = plans[idx]
 
   if (dryRun) {
     console.log(`\n=== slice #${s.n} (${s.name}) ===`)
@@ -3257,8 +3152,8 @@ for (let idx = 0; idx < plans.length; idx++) {
       // redirigido stdout a un fichero no lo tiene "arriba" en ningún sitio.
       console.log(`destino: ${wt} / rama ${branch} — SIN CONFIRMAR: la consulta a git se intentó y FALLÓ (el detalle y el comando manual están en el aviso correspondiente, por stderr), así que no se puede afirmar que estén libres. Esto NO es modo fixture: la corrida real hará exactamente esta misma comprobación, y si vuelve a fallar tampoco lo sabrá.`)
     }
-    console.log(`CLAUDE_CONFIG_DIR=${configDir}`)
     console.log(`git worktree add -b ${branch} ${wt} origin/${resolvedBase}`)
+    // slice 9b: en --dry-run no hay worktree, así que este seed lleva el sha resuelto antes del bucle; la corrida real lo remide en el worktree
     console.log(`seed ${wt}/${SLICE_REL_PATH}:\n${stateSeed}`)
     // D4, defecto 3: el kickoff, en PROSA. La línea `cmux ...` de abajo lo
     // lleva dentro, pero doblemente escapado (comillas POSIX + el
@@ -3541,9 +3436,48 @@ for (let idx = 0; idx < plans.length; idx++) {
   if (!ignored.ok) {
     cleanupOrphanedWorktree(s, wt, branch, `no se pudo garantizar que ${SLICE_REL_PATH} quede fuera de git (${ignored.why}). NO se siembra: un estado de slice que git puede ver acaba dentro del PR y de ahí a main.`)
   }
+  // ==========================================================================
+  // Slice 9(b) — EL CORTE SE MIDE DONDE SE CORTÓ, NO ANTES.
+  //
+  // `resolvedBaseSha` se resuelve UNA vez antes del bucle (tras el fetch) y el
+  // worktree se corta AQUÍ. Con `--cap N` y otra sesión fetcheando el mismo
+  // repo entre medias, `origin/<base>` puede haberse movido en ese hueco: el
+  // sha resuelto antes ya no sería el corte, y `base_sha:` —el campo que
+  // existe precisamente para ser el punto fijo del diff— señalaría a un commit
+  // que esta rama no tiene por debajo. La consecuencia observable es leve (los
+  // diffs de --release usan `base...HEAD`, o sea merge-base; solo
+  // `readFileAtBase` mira el punto fijo, y daría un "no existe en la base"
+  // espurio — la misma clase de fallo que el slice 2 arregla, mucho más rara).
+  //
+  // El HEAD del worktree recién creado no tiene ese hueco por construcción:
+  // `git worktree add -b <branch> <wt> origin/<base>` (arriba) crea la rama EN
+  // el commit al que `origin/<base>` apuntaba en ESE instante, y ya nada la
+  // mueve — el agente todavía no existe. Es estrictamente mejor y no más caro:
+  // un rev-parse más, y en el caso normal devuelve el mismo sha.
+  //
+  // Alimenta a los DOS campos que salían de `resolvedBaseSha` (`base_sha` y
+  // `last_commit`): los dos quieren la misma cosa —el punto del que salió esta
+  // rama— y `buildStateSeed` los sirve del mismo argumento.
+  //
+  // Si el rev-parse falla (muy raro en un worktree que git acaba de crear:
+  // .git ilegible, disco lleno, el timeout) NO se aborta y NO se omite el
+  // campo: se cae al sha de antes del bucle, que es el comportamiento anterior
+  // a este cambio. Degradar al valor de ayer es aceptable; sembrar un hueco
+  // donde había un sha razonable, no. La omisión sigue reservada al caso en
+  // que no hay NINGÚN sha, que es el del aviso de la resolución de arriba.
+  // ==========================================================================
+  let seedToWrite = stateSeed
+  try {
+    const cutSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], {
+      cwd: wt, encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
+    }).trim()
+    if (cutSha) seedToWrite = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase, baseSha: cutSha })
+  } catch (e) {
+    console.error(`aviso: no se pudo medir el corte real en el worktree de #${s.n} (\`git rev-parse HEAD\` en ${wt} falló: ${e.message}). La semilla se siembra con el sha que se resolvió de "origin/${resolvedBase}" antes de la tanda${resolvedBaseSha ? ` (${resolvedBaseSha.slice(0, 12)}…)` : ', que tampoco se pudo resolver: irá sin `base_sha` y con `last_commit` vacío'} — el comportamiento anterior a esta mejora: puede ser el corte, o puede haberse quedado atrás si algo movió origin/${resolvedBase} entre medias.`)
+  }
   try {
     mkdirSync(`${wt}/.agent`, { recursive: true })
-    writeFileSync(`${wt}/${SLICE_REL_PATH}`, stateSeed)
+    writeFileSync(`${wt}/${SLICE_REL_PATH}`, seedToWrite)
   } catch (e) {
     cleanupOrphanedWorktree(s, wt, branch, `no se pudo sembrar ${SLICE_REL_PATH}: ${e.message}`)
   }
@@ -3695,7 +3629,7 @@ for (let idx = 0; idx < plans.length; idx++) {
   //                 Se elige lo recuperable. Lo que NO se hace, y era todo el
   //                 hallazgo, es llamarlo "lanzado" y salir con 0.
   if (sentinel.status === 'no-claude') {
-    cleanupOrphanedWorktree(s, wt, branch, `el comando SÍ llegó a ejecutarse en la sesión de cmux (el centinela de arranque está escrito en ${sentinelPath}), pero \`${agentBin}\` NO resuelve en ese shell de login — \`command -v ${agentBin}\` falló DENTRO de la propia sesión. El agente no va a arrancar: la línea siguiente muere con "command not found", igual que si no se hubiera lanzado nada. Esto no lo puede ver el preflight de ct-next.mjs, que solo mira el PATH de ESTE proceso; el que cuenta es el del shell que abre cmux (donde \`${agentBin}\` puede ser además un alias o una función). Arregla el PATH de tu shell de login —o instala \`${agentBin}\` (es el wrapper no interactivo de la cuenta ${accountLabel}; ver ACCOUNT_MAP en scripts/kickoff.js y el override CT_AGENT_BIN_${account.account === 'work' ? 'WORK' : 'PERSONAL'})— y reintenta`)
+    cleanupOrphanedWorktree(s, wt, branch, `el comando SÍ llegó a ejecutarse en la sesión de cmux (el centinela de arranque está escrito en ${sentinelPath}), pero \`${agentBin}\` NO resuelve en ese shell de login — \`command -v ${agentBin}\` falló DENTRO de la propia sesión. El agente no va a arrancar: la línea siguiente muere con "command not found", igual que si no se hubiera lanzado nada. Esto no lo puede ver el preflight de ct-next.mjs, que solo mira el PATH de ESTE proceso; el que cuenta es el del shell que abre cmux (donde \`${agentBin}\` puede ser además un alias o una función). Arregla el PATH de tu shell de login —o apunta CT_AGENT_BIN a un ejecutable que sí resuelva ahí— y reintenta`)
   }
   if (sentinel.status === 'wrong-cwd') {
     console.error(`ATENCIÓN: el comando de #${s.n} SÍ se ejecutó (el centinela de arranque está escrito), pero el shell que lo ejecutó estaba en "${sentinel.cwd}", NO en ${wt}. El dato sale del \`$PWD\` del propio shell, no de lo que cmux diga de su ventana: hay un agente arrancando sobre un directorio que no es el worktree de este slice, así que puede estar tocando otro repo. NO se cuenta como lanzado con éxito, y NO se borra nada: revisa esa sesión antes.`)
@@ -3733,7 +3667,7 @@ for (let idx = 0; idx < plans.length; idx++) {
   // del vigilante— es justo lo que cmux acaba de negar.
   const lanzadosAntesDeVerificar = launchedCount
   if (launchCheck.status === 'confirmed') {
-    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — verificado: la sesión cmux está corriendo en ese directorio, y el comando llegó a ejecutarse de verdad (centinela de arranque escrito por el propio shell, con $PWD=${sentinel.cwd} y \`claude\` resoluble).${reenvio}`)
+    console.log(`lanzado #${s.n} en ${wt} — verificado: la sesión cmux está corriendo en ese directorio, y el comando llegó a ejecutarse de verdad (centinela de arranque escrito por el propio shell, con $PWD=${sentinel.cwd} y \`claude\` resoluble).${reenvio}`)
     launchedCount++
   } else if (launchCheck.status === 'wrong-cwd') {
     // D5, hallazgo A: además del ATENCIÓN, se APUNTA el slice en
@@ -3753,7 +3687,7 @@ for (let idx = 0; idx < plans.length; idx++) {
     // legible, no porque esté en otro sitio. Cuenta como lanzado (mismo
     // criterio de "beneficio de la duda ante una consulta incompleta" que
     // 'unverifiable'), pero el mensaje no afirma "verificado".
-    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — la sesión de cmux con el título esperado EXISTE, pero cmux no expuso un directorio legible para ella (¿esquema/versión distinta de la esperada?), así que NO se pudo comprobar que esté corriendo en ${wt}. Eso sí: el comando llegó a ejecutarse (centinela de arranque escrito) y su propio $PWD era ${sentinel.cwd}, que es el worktree esperado — así que lo que falta es el dato de cmux, no la evidencia del arranque.${reenvio}`)
+    console.log(`lanzado #${s.n} en ${wt} — la sesión de cmux con el título esperado EXISTE, pero cmux no expuso un directorio legible para ella (¿esquema/versión distinta de la esperada?), así que NO se pudo comprobar que esté corriendo en ${wt}. Eso sí: el comando llegó a ejecutarse (centinela de arranque escrito) y su propio $PWD era ${sentinel.cwd}, que es el worktree esperado — así que lo que falta es el dato de cmux, no la evidencia del arranque.${reenvio}`)
     launchedCount++
   } else {
     // F19/H1: este camino ya no es el "beneficio de la duda" que era. Antes,
@@ -3761,7 +3695,7 @@ for (let idx = 0; idx < plans.length; idx++) {
     // se contaba igual; ahora el centinela ya ha dicho, por su cuenta y sin
     // preguntarle nada a cmux, que el comando corrió en el sitio correcto.
     // Lo único que se ignora es en qué ventana.
-    console.log(`lanzado #${s.n} en ${wt} (cuenta ${configDir}) — no se pudo verificar la sesión de cmux (la consulta falló: ¿daemon caído?), pero el comando SÍ llegó a ejecutarse: el centinela de arranque está escrito, con $PWD=${sentinel.cwd} y \`claude\` resoluble en ese shell. Lo que no se sabe es en qué ventana de cmux quedó.${reenvio}`)
+    console.log(`lanzado #${s.n} en ${wt} — no se pudo verificar la sesión de cmux (la consulta falló: ¿daemon caído?), pero el comando SÍ llegó a ejecutarse: el centinela de arranque está escrito, con $PWD=${sentinel.cwd} y \`claude\` resoluble en ese shell. Lo que no se sabe es en qué ventana de cmux quedó.${reenvio}`)
     launchedCount++
   }
   // finding 1: el slice se lanzó completo — ya no hay claim "en la ventana
@@ -3825,7 +3759,7 @@ if (!dryRun) {
   //       parar y avisar a un humano, no reintentar a ciegas. D4 AMPLÍA este
   //       código, deliberadamente y sin inventar uno nuevo, a las
   //       PRECONDICIONES no cumplidas (worktree/rama ya ocupados, `cmux`
-  //       ausente del PATH, CLAUDE_CONFIG_DIR inexistente, kickoff que no
+  //       ausente del PATH, kickoff que no
   //       renderiza, slice sin número utilizable) — en --dry-run y en la
   //       corrida real por igual: encajan exactamente en la semántica que ya
   //       tenía ("algo requiere que un humano lo arregle, reintentar a ciegas
@@ -3833,7 +3767,7 @@ if (!dryRun) {
   //       resuelven solas con el tiempo. La diferencia con antes es CUÁNDO se
   //       detectan: ahora antes de escribir ningún claim, no a mitad de tanda.
   //   2 = error de uso o de CONFIGURACIÓN ESTÁTICA: flags mal puestos, y (D4)
-  //       un ACCOUNT_MAP malformado en scripts/kickoff.js — ambos se conocen
+  //       un kickoff que no renderiza — ambos se conocen
   //       sin tocar red ni disco, antes de decidir nada.
   //   3 = la tanda se seleccionó (selected.length > 0) pero terminó
   //       de procesarse con CERO lanzamientos, y nada se rompió NI QUEDÓ A

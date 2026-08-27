@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, existsSync, readFileSync, writeFileSync, rmSync, mkdirSync, symlinkSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -37,6 +37,46 @@ const MARKER_CLOSE = '<!-- /ct-init:slices-contract -->'
 // de "hashes registrados" (más abajo) lo comprueba, así que este fichero no
 // puede derivar sin que la suite se entere.
 const V1_BLOCK = readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'slices-contract-v1.md'), 'utf8')
+
+// ---------------------------------------------------------------------------
+// LOS BLOQUES QUE EL SQUASH SE LLEVÓ. `historicalContractBlocks()` reconstruye
+// desde `git rev-list HEAD`, y esa fuente de verdad tiene un agujero que no
+// tenía cuando se escribió: **una PR mergeada con squash no deja en main sus
+// commits intermedios**. Si una rama subió el contrato dos veces antes de
+// aterrizar, la variante de en medio existió —se pushó, y cualquiera pudo
+// bootstrapear un repo clonando ese ref, que es literalmente cómo se instala un
+// plugin de Claude Code— pero desde main no hay forma de verla.
+//
+// El caso real, que es el que dejó este fichero en rojo durante dos merges: la
+// PR #27 (rama `jjponz/prescriptive-plans`) subió el contrato a **v17** en
+// `ac48fa3` (12-ago, Juanjo) y a v18 después; se mergeó con SQUASH en `529d2f4`,
+// así que main pasó de v16 a v18 de un salto y el bloque v17 no es alcanzable
+// desde HEAD. Su hash SÍ está registrado en SLICES_PRISTINE_HASHES, y debe
+// estarlo: sin él, un repo sembrado con esa variante y jamás tocado recibe "no
+// coincide con ninguna versión conocida" y no puede actualizarse sin `--force`
+// — la acusación falsa contra la que existe F9. Durante esa ronda se
+// bootstrapearon repos de verdad (repo-pulse, 7 slices).
+//
+// LA FORMA DE LA SOLUCIÓN, y por qué no basta con anotar la procedencia en un
+// comentario: un comentario se cree, no se comprueba. El bloque se guarda como
+// fixture, byte a byte, igual que ya se guardan los de v1/v4/v5/v6/v7, y el
+// guardián de "hashes que no corresponden a ningún bloque real" pasa a aceptar
+// los que un fixture JUSTIFICA. Con eso el guardián no se debilita nada: para
+// justificar un hash hay que producir un contenido que hashee a él, que es
+// exactamente lo que un hash garantiza que no se puede inventar.
+const SQUASHED_BLOCK_FIXTURES = ['slices-contract-v17.md']
+// Los que ya existían antes de esto y los usan otros tests de este fichero:
+// bloques históricos SÍ alcanzables desde main, guardados para poder probar la
+// migración desde cada uno. Se nombran aquí sólo para que el inventario del
+// directorio no acuse a un fichero que sí tiene dueño.
+const FIXTURES_DE_OTROS_TESTS = [
+  'slices-contract-v1.md', 'slices-contract-v4.md', 'slices-contract-v5.md',
+  'slices-contract-v6.md', 'slices-contract-v7.md',
+]
+const squashedBlocks = () => SQUASHED_BLOCK_FIXTURES.map((f) => ({
+  fixture: f,
+  block: readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', f), 'utf8'),
+}))
 const initScriptSrc = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-init.sh'), 'utf8')
 // CONTRACT_VERSION: la versión del contrato se LEE del propio ct-init.sh, no
 // se repite a mano en cada aserción. F11 la subió de 2 a 3 y hubo que tocar
@@ -134,6 +174,139 @@ function historicalContractBlocks() {
   return blocks
 }
 
+// bloquesEmitidos: la historia alcanzable MÁS los bloques que el squash se
+// llevó (SQUASHED_BLOCK_FIXTURES, arriba). Es la respuesta a "¿qué llegó a
+// EMITIR ct-init?", que no es "¿qué hay en main?": la preguntan el camino de
+// upgrade y el del bloque vN-1, y las dos veces la respuesta correcta incluye
+// el v17. Deriva de la lista de arriba — no hay una segunda lista de bloques
+// escondidos, y la procedencia de cada uno la prueba su propio test más abajo.
+// `commit` es el nombre del FIXTURE a propósito: para un bloque que ningún
+// commit alcanzable reproduce, la etiqueta honesta es el fichero que lo
+// guarda, no un sha que no se puede resolver en un clon limpio.
+const bloquesEmitidos = () => [
+  ...historicalContractBlocks(),
+  ...squashedBlocks().map(({ fixture, block }) => ({ block, fixture, commit: fixture, hash: sha256(block) })),
+]
+
+// ---------------------------------------------------------------------------
+// Slice 8 (hallazgo BAJO del review de la PR #36) — PROCEDENCIA de los
+// bloques guardados por squash. El slice 4 arregló el test del ledger con
+// SQUASHED_BLOCK_FIXTURES, y con ello la autovigilancia pasó de "git lo
+// prueba" a "git O un fichero de este mismo commit lo prueba": el par
+// (entrada del ledger, fixture) se validaba contra sí mismo, porque el
+// fixture es editable en el MISMO commit que registra su hash. No es
+// forjable —nadie fabrica un fichero con un sha256 elegido— pero sí
+// DEGRADABLE: un bloque que ct-init nunca publicó podía entrar en la lista
+// pristine sin que ningún test lo notara, y a partir de ahí
+// `--update-slices-contract` lo aceptaría sin --force.
+//
+// Lo que ataba el caso del v17 no era el fixture: era que su hash ya estaba en
+// main OCHO DÍAS antes de que el fixture existiera. Eso es evidencia
+// INDEPENDIENTE, y es lo que se exige aquí para todo fixture de la lista,
+// presente y futuro.
+//
+// La comprobación, en una frase: el commit que metió el hash en el ledger NO
+// contenía todavía el fixture. Deliberadamente NO se data el fixture ni se
+// comparan ancestros:
+//   - datar la adición y mirar su commit padre se rompe con merges (`^` es
+//     `^1`), con un fixture borrado y re-añadido, y con un renombrado;
+//   - exigir `merge-base --is-ancestor <testigo> <commit-del-fixture>` no caza
+//     NINGÚN caso que el paso de abajo no cace ya, y se pondría rojo cuando la
+//     entrada del ledger llega por una rama y el fixture por otra (la carrera
+//     de números v19/v20/v21/v22 de este repo, dos veces).
+// Esta forma, en cambio, es MONÓTONA (un testigo válido lo sigue siendo tras
+// cualquier merge futuro) y tolera que el árbol de trabajo vaya por delante de
+// la historia, que es el estado normal a mitad de un slice.
+//
+// Lo que esto NO hace, dicho para que nadie lo sobrevenda: un atacante con DOS
+// commits (1º el hash, 2º el fixture) pasa esta comprobación. Lo que cierra el
+// agujero es el PAR de tests — en ese commit 1º el hash está registrado sin
+// respaldo, y el test "no registra hashes de bloques que no existieron nunca"
+// está ROJO. Sobre una historia con la suite verde en cada commit, una entrada
+// pristine falsa es imposible: hace falta pasar por un commit rojo.
+//
+// Este test NO duplica los dos guardianes del fixture, que prueban otra cosa:
+// el suyo prueba que el bloque EXISTE (el fichero hashea al hash registrado);
+// el de aquí, que no lo INVENTÓ quien añadió el fichero. Y no basta con anotar
+// la procedencia en el comentario del ledger —el de la línea del v17 la
+// cuenta— por la misma razón que su propio mensaje da para el fixture: un
+// comentario se cree, no se comprueba. Los dos dicen lo mismo; solo uno se
+// pone rojo.
+const RUTA_LEDGER = 'scripts/ct-init.sh'
+const RUTA_FIXTURES = '__tests__/fixtures'
+
+// procedenciaDelBloqueGuardado: devuelve null si la procedencia está probada, o el
+// MOTIVO (string) si no. El repo es un PARÁMETRO —no el `git()` de arriba, que
+// tiene `root` fijo— justo para que el test negativo pueda correr esta misma
+// función contra un repo de juguete construido con `git init`, en vez de
+// reimplementarla (un test negativo que reimplementa lo que juzga no juzga
+// nada).
+function procedenciaDelBloqueGuardado({ cwd, fixture, hash }) {
+  const g = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+  const existeEn = (rev, ruta) => spawnSync('git', ['cat-file', '-e', `${rev}:${ruta}`], { cwd }).status === 0
+  const rutaFixture = `${RUTA_FIXTURES}/${fixture}`
+  // Control anti-tautología: si estas rutas relativas dejaran de existir (un
+  // día que se mueva el directorio de fixtures o el script), el `cat-file -e`
+  // de abajo fallaría SIEMPRE y la comprobación pasaría a estar vacía en
+  // silencio — exactamente el modo de fallo que este slice viene a cerrar.
+  if (!existsSync(join(cwd, RUTA_LEDGER))) return `no existe ${RUTA_LEDGER} en ${cwd}`
+  if (!existsSync(join(cwd, rutaFixture))) return `no existe ${rutaFixture} en ${cwd}`
+  // El commit que introdujo el hash en el ledger. `git log` sin revisión =
+  // alcanzable desde HEAD, que es la única base durable. Es también el motivo
+  // de que SQUASHED_BLOCK_FIXTURES sea una lista de NOMBRES DE FICHERO y no de
+  // pares (fichero, commit): los shas que la prosa del ledger cita para el v17
+  // (743fe3f, ac48fa3) NO son alcanzables desde HEAD — usarlos como ref
+  // funciona en esta máquina y se rompe en un clon limpio.
+  // Cronológico inverso, así que el más antiguo es el último.
+  const testigos = g(['log', '--format=%H', `-S${hash}`, '--', RUTA_LEDGER]).trim().split('\n').filter(Boolean)
+  if (testigos.length === 0) {
+    return (
+      `${fixture}: el hash ${hash.slice(0, 12)}… no entró en ${RUTA_LEDGER} en ningún commit ` +
+      `alcanzable desde HEAD. La entrada del ledger no tiene procedencia: o solo existe en el ` +
+      `árbol de trabajo, o el bloque nunca lo emitió ct-init`
+    )
+  }
+  const testigo = testigos[testigos.length - 1]
+  if (existeEn(testigo, rutaFixture)) {
+    return (
+      `${fixture}: el commit que metió el hash en el ledger (${testigo.slice(0, 7)}) YA traía ` +
+      `${rutaFixture}. El par (entrada, fixture) se valida contra sí mismo: no hay evidencia ` +
+      `independiente de que ct-init emitiera ese bloque`
+    )
+  }
+  return null
+}
+
+// exigirHistorialCompleto: la MISMA postura que historicalContractBlocks() —
+// sin historial NO se salta en silencio, porque "no se sabe" no es "está bien"
+// (es el tercer estado que ct-init.sh ya distingue cuando no puede calcular el
+// sha256). Dos formas de no tenerlo, y solo una la detecta `rev-list`:
+//   - sin .git: el tarball de npm empaqueta __tests__/ pero nunca .git, así
+//     que `rev-list` falla;
+//   - clon shallow: `rev-list` NO falla, devuelve menos commits, y el testigo
+//     queda por debajo del injerto. Sin esta rama el test diría "el hash no
+//     entró nunca en el ledger", ACUSANDO DE FORJA A UN LEDGER CORRECTO.
+// Este fichero ya exigía historial completo desde F9 (los dos controles
+// `toBeGreaterThanOrEqual(9)` fallan con --depth 1): no es un requisito nuevo.
+function exigirHistorialCompleto() {
+  try {
+    git(['rev-list', '-1', 'HEAD'])
+  } catch (err) {
+    throw new Error(
+      'la comprobación de procedencia de SQUASHED_BLOCK_FIXTURES necesita el historial de git del ' +
+        'plugin (busca en él el commit que metió cada hash en el ledger). ' +
+        `No se ha podido leer: ${err.message}`
+    )
+  }
+  if (git(['rev-parse', '--is-shallow-repository']).trim() === 'true') {
+    throw new Error(
+      'la comprobación de procedencia de SQUASHED_BLOCK_FIXTURES no se puede hacer en un clon shallow: ' +
+        'el commit que metió el hash en el ledger puede quedar por debajo del injerto, y el test ' +
+        'acusaría de forja a un ledger correcto. Corre `git fetch --unshallow`.'
+    )
+  }
+}
+
 // seedFreshAgentsMd: corre ct-init.sh en un dir vacío y devuelve el AGENTS.md
 // que siembra — el bloque de HOY, tal cual sale del script (no leído de su
 // fuente), que es contra lo que se validan tanto el registro de hashes como el
@@ -144,6 +317,44 @@ function seedFreshAgentsMd() {
   const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
   rmSync(dir, { recursive: true, force: true })
   return agents
+}
+
+// E2E_MARKER_OPEN/CLOSE + E2E_BLOCK: la tarea 5 de "e2e al cierre del slice"
+// añadió una SEGUNDA sección que ct-init siembra (la de travesía), que se
+// añade SIEMPRE que falte, sin importar en qué estado esté la sección del
+// contrato de slices. Muchos de los tests de abajo escriben un AGENTS.md que
+// solo trae el contrato (para probar SU lógica en aislamiento) y comprueban
+// con `toBe` que el fichero queda byte a byte igual — una asunción cierta
+// hasta que existió la sección de travesía. Ahora esos fixtures reciben
+// también esa sección (correcto: un repo bootstrapeado antes de esta tarea
+// también la recibe en su próxima corrida), así que sus aserciones tienen
+// que contar con el bloque añadido. E2E_BLOCK se calcula UNA vez ejecutando
+// el script (nunca copiado a mano), para que un cambio futuro en el texto no
+// haga divergir esta constante en silencio.
+const E2E_MARKER_OPEN = '<!-- ct-init:e2e-howto -->'
+const E2E_MARKER_CLOSE = '<!-- /ct-init:e2e-howto -->'
+function extractE2eBlock(agentsMd) {
+  const lines = agentsMd.split('\n')
+  const start = lines.indexOf(E2E_MARKER_OPEN)
+  const end = lines.indexOf(E2E_MARKER_CLOSE)
+  if (start === -1 || end === -1) return null
+  return lines.slice(start, end + 1).join('\n') + '\n'
+}
+const E2E_BLOCK = extractE2eBlock(seedFreshAgentsMd())
+
+// withE2eAppended: reproduce EXACTAMENTE lo que hace ct-init.sh al añadir la
+// sección de travesía a un AGENTS.md que no la trae todavía — asegura un
+// salto de línea final, añade una línea en blanco, y pega el bloque. `crlf`
+// hace lo mismo que `file_is_crlf`/`replace_slices_block` del script: si el
+// fichero de partida usa CRLF, la línea en blanco y el bloque se escriben
+// con los mismos saltos.
+function withE2eAppended(before, { crlf = false } = {}) {
+  let out = before
+  const nl = crlf ? '\r\n' : '\n'
+  if (out.length && !out.endsWith(nl)) out += nl
+  out += nl
+  out += crlf ? E2E_BLOCK.replace(/\n/g, '\r\n') : E2E_BLOCK
+  return out
 }
 
 function extractWorkedExample(agentsMd) {
@@ -324,7 +535,8 @@ describe('ct-init.sh', () => {
     rmSync(specDir, { recursive: true, force: true })
   })
 
-  // Slice 10 — el contrato v19 documenta la columna Señal: qué es, cómo se
+  // Slice 10 — el contrato (v19, hoy v20 tras converger con la columna E2E)
+  // documenta la columna Señal: qué es, cómo se
   // exime (`N/A — <razón>`, y que sin razón aborta), a dónde llega (sección
   // del body → SLICE.md → paquete del juez de slice → ítem observabilidad) y
   // que una celda sin valor se mide como sin-vara en la telemetría del epic.
@@ -342,6 +554,76 @@ describe('ct-init.sh', () => {
     expect(agents).toContain('`sin-vara`')
     // La línea de marcadores de "sin valor" nombra también a Señal.
     expect(agents).toContain('Marcadores de "sin valor" (`Dep`/`Acepta`/`Protegido`/`Área`/`Toca`/`Gate`/`Señal`):')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // Slice 4 (apuntes de Capde) — el contrato v19 describía la columna pero no
+  // decía cuándo vale algo, y en una corrida real la señal declarada era una
+  // paráfrasis de los criterios de aceptación: el ítem `observabilidad` del juez
+  // midió lo que `estado-final` ya había medido. La frase vive en DOS sitios (el
+  // contrato que llega verbatim al AGENTS.md del repo usuario y el comando que
+  // lee quien groomea) y este test es lo que impide que uno de los dos se quede
+  // atrás.
+  it('el contrato dice que la señal no es un criterio de aceptación más, y ct-groom.md dice lo mismo', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    // La frase, en una sola línea (el bullet va envuelto a ~72 columnas: si el
+    // reflow la partiera, este assert es lo que lo caza).
+    expect(agents).toMatch(/no es un criterio de aceptación más/i)
+    // Y lo que la frase promete: producción frente a lo funcional, y el ítem que
+    // se queda sin medir nada nuevo cuando la señal repite un AC.
+    expect(agents).toMatch(/EN PRODUCCIÓN/)
+    expect(agents).toContain('`estado-final`')
+    expect(agents).toContain('`observabilidad`')
+    // Control: el contrato ANTERIOR no decía nada de esto — este test no pasa
+    // por una coincidencia de prosa que ya estuviera ahí.
+    const anterior = bloquesEmitidos().find(({ block }) =>
+      block.includes(`<!-- ct-init:slices-contract-version: ${CONTRACT_VERSION - 1} -->`)
+    )
+    expect(anterior.block).not.toMatch(/no es un criterio de aceptación más/i)
+    expect(anterior.block).not.toContain('`estado-final`')
+    // El otro documento que enseña la columna no puede quedarse atrás: quien
+    // groomea lee commands/ct-groom.md, no el AGENTS.md del repo destino.
+    const groom = readFileSync(join(root, 'commands', 'ct-groom.md'), 'utf8')
+    expect(groom).toMatch(/no es un criterio de aceptación más/i)
+    expect(groom).toContain('`estado-final`')
+    // Slice 7: y el JUEZ mide con la MISMA regla, con las mismas palabras. El
+    // hueco del Slice 4 fue justo éste: la frase entró en los dos documentos y
+    // `git diff main...HEAD -- agents/` salió vacío, así que una señal calcada
+    // de los AC seguía satisfaciendo los tres checks del ítem. Normalizado
+    // porque el bullet del contrato va envuelto a ~72 columnas.
+    const norm = (s) => s.replace(/\s+/g, ' ')
+    const REGLA = 'se puede comprobar corriendo los tests, es un criterio de aceptación, no una señal'
+    expect(norm(agents)).toContain(REGLA)
+    expect(norm(groom)).toContain(REGLA)
+    const juez = readFileSync(join(root, 'agents', 'ct-slice-judge.md'), 'utf8')
+    expect(norm(juez)).toContain(REGLA)
+    // El token con el que la telemetría/`grep` distingue este low de los demás
+    // lows del ítem, en los dos textos que lo prometen.
+    expect(norm(juez)).toContain('`señal redundante`')
+    expect(norm(groom)).toContain('`señal redundante`')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // Slice 7: el ítem `observabilidad` cita la regla del contrato entre « », y
+  // esa cita tiene que ser LITERAL. Mismo patrón que kickoff.test.js usa con
+  // «it opens with `(sin señal declarada`»: se extrae la cita DEL FICHERO DEL
+  // AGENTE y se comprueba contra la fuente, para que el criterio del groom y el
+  // criterio del juicio no puedan derivar cada uno por su lado.
+  it('la cita del juez de slice es literalmente la regla del contrato', () => {
+    const norm = (s) => s.replace(/\s+/g, ' ')
+    const juez = readFileSync(join(root, 'agents', 'ct-slice-judge.md'), 'utf8')
+    const cita = /«([^»]+)»/.exec(juez)
+    expect(cita).not.toBeNull()
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const bloque = extractBlock(readFileSync(join(dir, 'AGENTS.md'), 'utf8'))
+    // Las DOS normalizadas: la cita del agente va envuelta a ~73 columnas y el
+    // bullet del contrato a ~72, así que ninguna de las dos contiene a la otra
+    // sin colapsar los saltos de línea. (Verificado: sin normalizar `cita[1]`,
+    // este test falla.)
+    expect(norm(bloque)).toContain(norm(cita[1]))
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -475,7 +757,9 @@ describe('ct-init.sh', () => {
     writeFileSync(join(dir, 'AGENTS.md'), customSection)
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    expect(agents).toBe(customSection) // ni una letra tocada
+    // El contrato editado no se toca ni una letra; la sección de travesía SÍ
+    // se añade (le faltaba, igual que a cualquier AGENTS.md que no la trae).
+    expect(agents).toBe(withE2eAppended(customSection))
     const occurrences = agents.split('<!-- ct-init:slices-contract -->').length - 1
     expect(occurrences).toBe(1) // no duplicada
     rmSync(dir, { recursive: true, force: true })
@@ -501,7 +785,10 @@ describe('ct-init.sh', () => {
     writeFileSync(join(dir, 'AGENTS.md'), orphan)
     const output = execFileSync('bash', ['-c', `bash '${script}' '${dir}' 2>&1`], { encoding: 'utf8' })
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    expect(agents).toBe(orphan) // ni una letra tocada
+    // El rastro parcial del contrato no se toca ni una letra; la sección de
+    // travesía SÍ se añade — es independiente de en qué estado esté el
+    // contrato.
+    expect(agents).toBe(withE2eAppended(orphan))
     const headingOccurrences = agents.split('## Formato de la tabla §9').length - 1
     expect(headingOccurrences).toBe(1) // no duplicado
     expect(output.toLowerCase()).toMatch(/aviso|warning/)
@@ -521,7 +808,9 @@ describe('ct-init.sh', () => {
     writeFileSync(join(dir, 'AGENTS.md'), orphan)
     const output = execFileSync('bash', ['-c', `bash '${script}' '${dir}' 2>&1`], { encoding: 'utf8' })
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    expect(agents).toBe(orphan) // ni una letra tocada
+    // Mismo motivo que en el caso de la apertura borrada: el contrato no se
+    // toca, pero la sección de travesía se añade porque le faltaba.
+    expect(agents).toBe(withE2eAppended(orphan))
     const headingOccurrences = agents.split('## Formato de la tabla §9').length - 1
     expect(headingOccurrences).toBe(1) // no duplicado
     expect(output.toLowerCase()).toMatch(/aviso|warning/)
@@ -566,7 +855,9 @@ describe('ct-init.sh', () => {
     expect(res.stderr).toMatch(/v1/)
     expect(res.stderr).toMatch(new RegExp(`v${CONTRACT_VERSION}`))
     expect(res.stderr).toContain('--update-slices-contract')
-    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(before) // ni una letra
+    // El contrato v1 no se toca ni una letra; la sección de travesía sí se
+    // añade, porque este AGENTS.md no la traía.
+    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(withE2eAppended(before))
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -637,7 +928,7 @@ describe('ct-init.sh', () => {
   // "v1"), y SLICES_PRISTINE_HASHES solo registraba dos de esos nueve.
   // ==========================================================================
   it('TODO bloque que ct-init emitió alguna vez, intacto, se actualiza con --update-slices-contract sin --force y sin acusar a nadie', () => {
-    const historical = historicalContractBlocks()
+    const historical = bloquesEmitidos()
     // Control: si esto no reconstruye varias versiones, el test no prueba nada.
     expect(historical.length).toBeGreaterThanOrEqual(9)
     // El control de "la reconstrucción llega hasta hoy" tolera un bump del
@@ -667,6 +958,32 @@ describe('ct-init.sh', () => {
       expect(agents.split(MARKER_OPEN).length - 1, commit).toBe(1)
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+
+  // RESERVA 2 del for_developers: el camino que recorre un repo real cuando se
+  // publica un bump — bloque de la versión anterior INTACTO, `--update-slices-contract`
+  // sin `--force`. El bucle de arriba ya lo pisa, pero no exige que el bloque
+  // vN-1 esté en la historia: si un squash volviera a esconderlo (que es cómo se
+  // perdió el v17), el bucle seguiría verde sin cubrir este camino. Sin números
+  // hardcodeados: sube solo con CONTRACT_VERSION.
+  it('un repo con el bloque de la versión ANTERIOR intacto sube al contrato actual sin --force', () => {
+    const anterior = bloquesEmitidos().find(({ block }) =>
+      block.includes(`<!-- ct-init:slices-contract-version: ${CONTRACT_VERSION - 1} -->`)
+    )
+    expect(anterior, `no hay ningún bloque v${CONTRACT_VERSION - 1} ni en la historia ni en SQUASHED_BLOCK_FIXTURES`).toBeDefined()
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    const before = `# AGENTS.md\n\n## Gotchas\n- mías\n\n${anterior.block}\n## Después\n- intocable\n`
+    writeFileSync(join(dir, 'AGENTS.md'), before)
+    const res = spawnSync('bash', [script, dir, '--update-slices-contract'], { encoding: 'utf8' })
+    expect(res.status, res.stderr).toBe(0)
+    expect(res.stdout).toMatch(new RegExp(`contrato v${CONTRACT_VERSION - 1} → v${CONTRACT_VERSION}`))
+    expect(res.stderr).not.toMatch(/editad|no coincide|--force/i)
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    expect(agents).toMatch(versionLineRe())
+    expect(agents).toContain('- mías')
+    expect(agents).toContain('- intocable')
+    expect(agents.split(MARKER_OPEN).length - 1).toBe(1)
+    rmSync(dir, { recursive: true, force: true })
   })
 
   it('sin poder calcular el sha256 (ni shasum ni sha256sum) NO se acusa a nadie: se dice que no se ha podido comprobar, y no se toca nada', () => {
@@ -731,7 +1048,9 @@ describe('ct-init.sh', () => {
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     expect(agents.split(MARKER_OPEN).length - 1).toBe(1) // no una segunda copia
     expect(agents.split('## Formato de la tabla §9').length - 1).toBe(1)
-    expect(agents).toBe(crlf) // no se ha tocado nada
+    // El contrato no se toca; la sección de travesía sí se añade (con los
+    // mismos saltos CRLF, para no dejar el fichero a medias entre formatos).
+    expect(agents).toBe(withE2eAppended(crlf, { crlf: true }))
     // Y se da el aviso que le tocaba dar (antes se lo saltaba entero).
     expect(res.stderr).toMatch(/es del contrato v1/)
     rmSync(dir, { recursive: true, force: true })
@@ -812,7 +1131,10 @@ describe('ct-init.sh', () => {
     writeFileSync(join(dir, 'AGENTS.md'), before)
     const res = spawnSync('bash', [script, dir, '--force'], { encoding: 'utf8' })
     expect(res.status).toBe(0)
-    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(before)
+    // El contrato v1 no se toca (--force sin --update-slices-contract no
+    // hace nada sobre él); la sección de travesía sí se añade, porque
+    // faltaba y es independiente de estos dos flags.
+    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(withE2eAppended(before))
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -847,6 +1169,10 @@ describe('ct-init.sh', () => {
   // Este cierra el hueco: la fuente de verdad no es la memoria de nadie, es el
   // historial de git. Entre los dos cubren todo — este, lo commiteado; el de
   // arriba, el árbol de trabajo todavía sin commitear.
+  // Lo que este NO cubre, a propósito: los bloques que el squash borró de la
+  // historia. De esos se ocupa "cada bloque guardado por squash sigue hasheando
+  // a su hash registrado", que es el guardián específico y da mejor mensaje.
+  // Meterlos aquí lo convertiría en un duplicado suyo.
   it('todo bloque que ct-init emitió alguna vez en la historia está registrado en SLICES_PRISTINE_HASHES', () => {
     const historical = historicalContractBlocks()
     expect(historical.length).toBeGreaterThanOrEqual(9) // control: se reconstruyó de verdad
@@ -872,9 +1198,13 @@ describe('ct-init.sh', () => {
   })
 
   it('SLICES_PRISTINE_HASHES no registra hashes de bloques que no existieron nunca', () => {
-    // La otra dirección: un hash inventado (o el de una rama que no llegó a
-    // main) hace que ct-init reemplace en silencio algo que no reconoce de
-    // verdad. Todo hash registrado tiene que corresponder a un bloque real.
+    // La otra dirección: un hash INVENTADO hace que ct-init reemplace en
+    // silencio algo que no reconoce de verdad. Todo hash registrado tiene que
+    // corresponder a un bloque real, y "real" tiene tres fuentes posibles: la
+    // historia de main, el árbol de trabajo, y los bloques que un merge con
+    // squash borró de la historia pero que se pushearon y viven aquí como
+    // fixture (ver SQUASHED_BLOCK_FIXTURES arriba). Las tres son contenido: en
+    // ninguna se cree a un comentario.
     const registered = initScriptSrc
       .split('\n')
       .map((l) => l.trim().match(/^([0-9a-f]{64})\b/))
@@ -883,7 +1213,135 @@ describe('ct-init.sh', () => {
     expect(registered.length).toBeGreaterThanOrEqual(9)
     const known = new Set(historicalContractBlocks().map((h) => h.hash))
     known.add(sha256(extractBlock(seedFreshAgentsMd()))) // el árbol de trabajo
-    expect(registered.filter((h) => !known.has(h))).toEqual([])
+    for (const { block } of squashedBlocks()) known.add(sha256(block))
+    expect(
+      registered.filter((h) => !known.has(h)),
+      'Hashes registrados que no corresponden a NINGÚN bloque conocido. Si es un ' +
+        'bloque que existió en una rama y el squash del merge se lo llevó de main, ' +
+        'guárdalo byte a byte en __tests__/fixtures/slices-contract-vN.md y añade el ' +
+        'fichero a SQUASHED_BLOCK_FIXTURES: un comentario de procedencia se cree, un ' +
+        'fichero que hashea al hash registrado se comprueba. Si no existió, bórralo ' +
+        'de SLICES_PRISTINE_HASHES: mientras esté, ct-init da por intacto (y por tanto ' +
+        'reemplazable sin avisar) un bloque que no reconoce de verdad.'
+    ).toEqual([])
+  })
+
+  // El otro lado del fixture: si el fichero deriva un byte, deja de hashear al
+  // hash registrado y ya no justifica nada — así que el guardián de arriba
+  // volvería a acusar a ese hash de inventado, culpando al sitio equivocado.
+  // Este test señala la causa de verdad.
+  it('cada bloque guardado por squash sigue hasheando a su hash registrado', () => {
+    for (const { fixture, block } of squashedBlocks()) {
+      const h = sha256(block)
+      expect(
+        initScriptSrc.includes(h),
+        `El fixture ${fixture} ya no corresponde a ningún hash de ` +
+          `SLICES_PRISTINE_HASHES (hashea a ${h}). O ha derivado —y entonces ya no es ` +
+          `el bloque que se pusheó, que es TODO su valor— o su hash se ha borrado del ` +
+          `registro.`
+      ).toBe(true)
+    }
+  })
+
+  // Y que no sobren: un fixture sin hash registrado sería un bloque guardado
+  // "por si acaso" que ct-init no reconoce, o sea la mitad de un arreglo. El
+  // test de arriba lo cubre por hash; este cubre el inventario del directorio,
+  // para que añadir un fichero y olvidar la lista no pase inadvertido.
+  it('no hay fixtures de contrato guardados por squash fuera de la lista', () => {
+    const dir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures')
+    const enDisco = readdirSync(dir).filter((f) => /^slices-contract-v\d+\.md$/.test(f))
+    const usados = new Set([...SQUASHED_BLOCK_FIXTURES, ...FIXTURES_DE_OTROS_TESTS])
+    expect(enDisco.filter((f) => !usados.has(f))).toEqual([])
+  })
+
+  // Slice 8 — el test que ata SQUASHED_BLOCK_FIXTURES a la historia. Sin él,
+  // añadir una entrada al ledger y su fixture en el mismo commit deja la suite
+  // verde, y un bloque que ct-init nunca publicó pasa a ser "pristine" para
+  // siempre. El hash NO se declara a mano: sale del sha256 del propio fichero,
+  // que es la única forma de que el testigo que se busca en el ledger sea el
+  // del bloque que el fixture guarda de verdad. Que ese hash esté registrado lo
+  // exige el guardián de al lado ("cada bloque guardado por squash sigue
+  // hasheando a su hash registrado"), y por eso aquí no se repite.
+  it('todo fixture de SQUASHED_BLOCK_FIXTURES tiene procedencia: su hash ya estaba en el ledger de un commit que NO traía el fichero', () => {
+    exigirHistorialCompleto()
+    const guardados = squashedBlocks().map(({ fixture, block }) => ({ fixture, hash: sha256(block) }))
+    // Control: si la lista está vacía este test no prueba nada. Hoy hay uno
+    // (el v17 de la PR #27, escondido por el squash 529d2f4). Si algún día se
+    // vacía a propósito, este assert es el sitio donde decirlo.
+    expect(guardados.length).toBeGreaterThanOrEqual(1)
+    const sinProcedencia = guardados
+      .map(({ fixture, hash }) => procedenciaDelBloqueGuardado({ cwd: root, fixture, hash }))
+      .filter(Boolean)
+    expect(
+      sinProcedencia,
+      'Un fixture de SQUASHED_BLOCK_FIXTURES solo vale si su hash es evidencia INDEPENDIENTE del ' +
+        'fichero: tiene que haber entrado en SLICES_PRISTINE_HASHES en un commit que todavía no ' +
+        'contenía el fixture. Si no, el par se valida contra sí mismo y un bloque que ct-init ' +
+        'nunca emitió puede colarse como pristine.'
+    ).toEqual([])
+  })
+
+  it('la comprobación de procedencia caza el par forjado: entrada del ledger y fixture en el MISMO commit', () => {
+    // No-tautología. La comprobación de arriba pasa en verde sobre este repo;
+    // eso por sí solo no demuestra que sea capaz de ponerse roja. Se corre la
+    // MISMA función (no una reimplementación) sobre repos de juguete con la
+    // historia fabricada a propósito.
+    const HASH = 'a'.repeat(64) // no es el sha256 de nada: aquí lo único que se juzga es la HISTORIA
+    const FIXTURE = 'bloque-inventado.md'
+    const escenarios = []
+    const construir = (guion) => {
+      const dir = mkdtempSync(join(tmpdir(), 'proc-'))
+      escenarios.push(dir)
+      const g = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' })
+      // `-b main` explícito: sin él `git init` usa el init.defaultBranch de la
+      // máquina (mismo motivo que en f22-estado-del-slice.test.js).
+      g('init', '-q', '-b', 'main', '.')
+      g('config', 'user.email', 'test@test')
+      g('config', 'user.name', 'test')
+      mkdirSync(join(dir, 'scripts'), { recursive: true })
+      mkdirSync(join(dir, RUTA_FIXTURES), { recursive: true })
+      const ledger = (conHash) =>
+        writeFileSync(join(dir, RUTA_LEDGER), `SLICES_PRISTINE_HASHES='\n${conHash ? `${HASH}  vX, 1 línea\n` : ''}'\n`)
+      const fixture = () => writeFileSync(join(dir, RUTA_FIXTURES, FIXTURE), 'bloque\n')
+      ledger(false)
+      g('add', '-A')
+      g('commit', '-qm', 'base')
+      guion({ g, ledger, fixture })
+      return dir
+    }
+    const juzgar = (dir) => procedenciaDelBloqueGuardado({ cwd: dir, fixture: FIXTURE, hash: HASH })
+
+    // (1) CONTROL POSITIVO: el orden legítimo (el del v17) — la entrada
+    // primero, el fixture después. Sin esto, un rojo de los de abajo no
+    // significaría nada: podría ser que los repos de juguete siempre fallen.
+    const bueno = construir(({ g, ledger, fixture }) => {
+      ledger(true); g('add', '-A'); g('commit', '-qm', 'entrada en el ledger')
+      fixture(); g('add', '-A'); g('commit', '-qm', 'el fixture, después')
+    })
+    expect(juzgar(bueno)).toBeNull()
+
+    // (2) EL CASO DEL REVIEW: los dos en el mismo commit.
+    const mismoCommit = construir(({ g, ledger, fixture }) => {
+      ledger(true); fixture(); g('add', '-A'); g('commit', '-qm', 'entrada + fixture juntos')
+    })
+    expect(juzgar(mismoCommit)).toMatch(/se valida contra sí mismo/)
+
+    // (3) La variante que también hay que cazar: el fixture primero y la
+    // entrada después. El testigo del hash ya trae el fixture ⇒ mismo motivo.
+    const fixturePrimero = construir(({ g, ledger, fixture }) => {
+      fixture(); g('add', '-A'); g('commit', '-qm', 'el fixture primero')
+      ledger(true); g('add', '-A'); g('commit', '-qm', 'la entrada, después')
+    })
+    expect(juzgar(fixturePrimero)).toMatch(/se valida contra sí mismo/)
+
+    // (4) La entrada solo en el árbol de trabajo, sin comitear: no hay testigo
+    // de nada. Mensaje DISTINTO al de (2)/(3), porque el remedio es distinto.
+    const soloArbol = construir(({ ledger, fixture }) => {
+      ledger(true); fixture() // deliberadamente sin `git commit`
+    })
+    expect(juzgar(soloArbol)).toMatch(/no entró en scripts\/ct-init\.sh en ningún commit/)
+
+    for (const dir of escenarios) rmSync(dir, { recursive: true, force: true })
   })
 
   // Finding 6 de la review final: ct-next.mjs escribe cada worktree de slice
@@ -959,6 +1417,79 @@ describe('ct-init.sh', () => {
     expect(lines).toContain('node_modules/')
     expect(lines).toContain('.worktrees/')
     expect(gi).not.toMatch(/node_modules\/\.worktrees\//) // nunca concatenadas en la misma línea
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // -------------------------------------------------------------------------
+  // La plantilla del execution spec. El flujo tras /ct-init es brainstorming →
+  // design doc → execution spec, y `skills/brainstorming/SKILL.md` (pasos 8 y
+  // §"After the self-review") manda escribir ese spec «from the repo's
+  // `_TEMPLATE-execution-spec.md`». Hasta aquí esa plantilla NO viajaba con el
+  // plugin: vivía suelta en un repo privado, así que el paso 8 se quedaba sin
+  // su fuente en cualquier repo recién bootstrapeado y el spec había que
+  // escribirlo adivinando sus secciones.
+  //
+  // El destino es `docs/superpowers/specs/` y no la raíz porque es la carpeta
+  // que el plugin YA declara como casa del spec en código que corre:
+  // LOOP_ARTIFACT_PATTERNS (scripts/scope.js) exime `docs/superpowers/specs/**`
+  // precisamente porque «el skill de brainstorming escribe aquí el design doc y
+  // el execution spec». La misma ruta que documenta docs/loop/README.md.
+  it('siembra la plantilla del execution spec en docs/superpowers/specs/', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    const out = execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const dest = join(dir, 'docs', 'superpowers', 'specs', '_TEMPLATE-execution-spec.md')
+    expect(existsSync(dest)).toBe(true)
+    expect(readFileSync(dest, 'utf8')).toBe(readFileSync(join(root, 'templates', '_TEMPLATE-execution-spec.md'), 'utf8'))
+    expect(out).toMatch(/creado .*_TEMPLATE-execution-spec\.md/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('idempotente: no pisa una plantilla de execution spec ya existente', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    const dest = join(dir, 'docs', 'superpowers', 'specs', '_TEMPLATE-execution-spec.md')
+    mkdirSync(dirname(dest), { recursive: true })
+    writeFileSync(dest, 'MIA, editada a mano\n')
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    expect(readFileSync(dest, 'utf8')).toBe('MIA, editada a mano\n')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // El test que de verdad importa: la plantilla que se siembra tiene que PASAR
+  // las puertas del propio /ct-groom. Las dos trampas que traía la versión que
+  // circulaba a mano las detecta esto y nada más:
+  //
+  //  1. `[NEEDS CLARIFICATION` escrito literal en su comentario didáctico.
+  //     analyzeSpecFreeze hace un includes() línea a línea sobre TODO el
+  //     fichero, sin descartar comentarios HTML (el descarte solo cubre el
+  //     cuerpo de la hipótesis), así que la plantilla se autoinvalidaba: exit 2
+  //     en cualquier spec que la copiara sin borrar ese bloque, estando
+  //     perfectamente congelado.
+  //  2. Un comentario multilínea DENTRO de `## Contexto del epic`.
+  //     readEpicContext no lo descarta, y esa sección se copia byte a byte al
+  //     cuerpo de todos los issues del epic: las instrucciones de la plantilla
+  //     acababan pegadas en los N issues.
+  it('la plantilla sembrada pasa las puertas de congelación de /ct-groom y su tabla parsea con el contrato vigente', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const md = readFileSync(join(dir, 'docs', 'superpowers', 'specs', '_TEMPLATE-execution-spec.md'), 'utf8')
+    const { analyzeSpecFreeze, readEpicContext } = await import('../scripts/groom.js')
+    const { analyzeSlicesTable } = await import('../scripts/slices.js')
+
+    const freeze = analyzeSpecFreeze(md)
+    expect(freeze.clarifications).toEqual([])
+    expect(freeze.hypothesis).toBe('ok')
+
+    expect(readEpicContext(md).content).not.toMatch(/<!--/)
+
+    const table = analyzeSlicesTable(md)
+    expect(table.tableFound).toBe(true)
+    expect(table.gateColumnPresent).toBe(true)
+    expect(table.missingRequiredColumns).toEqual([])
+    expect(table.invalidRows).toEqual([])
+    expect(table.malformedDepRows).toEqual([])
+    expect(table.invalidDepRefs).toEqual([])
+    expect(table.slices.map((s) => s.deps)).toEqual([[], [1]])
+
     rmSync(dir, { recursive: true, force: true })
   })
 })

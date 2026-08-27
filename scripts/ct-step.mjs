@@ -54,7 +54,7 @@
 //   (`agents/ct-judge.md`, declarado sin `Bash`), no porque un flag se lo quite.
 // ============================================================================
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, writeSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, writeSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -63,9 +63,11 @@ import { extractTasks } from './plan-tasks.js'
 import { CONVENTIONS_FILE, seccionDeVara } from './vara.js'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage, findingLocation,
+  readE2eReport, E2E_SCHEMA,
   IMPLEMENTER_TOOLS, JUDGE_TOOLS, PACKAGE_SECTIONS,
   readSliceVerdict, outcomeOfSliceVerdict, sliceVerdictCommitMessage,
   SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS,
+  REVIEW_TOKEN_LABEL, reviewToken, reviewTokenLine, reviewTokenOf,
 } from './step-contracts.js'
 import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, metricsRepoRelPath } from './run-metrics.js'
 // Slice 10: parseStateSafe lee el campo `senal:` del SLICE.md (ver
@@ -75,6 +77,8 @@ import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, metric
 // que no hay señal — importada, no copiada, para que no diverjan.
 import { parseStateSafe } from './state.js'
 import { SENAL_AUSENTE } from './kickoff.js'
+import { SLICE_REL_PATH } from './state-paths.js'
+import { findClosingKeywords } from './closing-keywords.js'
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -87,6 +91,7 @@ const EXIT = {
   CONTROLS_RED: 4,        // los controles siguen en rojo tras los reintentos
   CONTROLS_UNMEASURED: 5, // no se pudieron MEDIR
   PLAN_NOT_EXECUTABLE: 6, // el plan no declara comandos ejecutables
+  E2E_RED: 7,             // algún recorrido de e2e no se completa
   PRECONDITION: 8,        // entorno: no es un worktree de slice, falta el plan
   WRONG_STEP: 9,          // se pidió un paso que no es el que toca
   UNNAMED: 10,            // excepción que el programa no sabe nombrar
@@ -123,13 +128,14 @@ const USAGE = `uso: ct-step <verbo> [args] --plan <fichero> --issue <n>
   commit                    comitea la tarea con el mensaje que compone el plugin
   global                    ejecuta los comandos de ## 8. Global verification, tras la última tarea
   slice-verdict <fichero.json>  el veredicto del juez de SLICE: ruling + recorrido + findings
+  e2e <fichero.json>        el informe de la travesía de punta a punta de la slice
 
 La secuencia la decide run-machine.js: un verbo que no sea el paso que toca sale
 por 9 y dice cuál es. El estado vive en .agent/run-<issue>.json.`
 
 const verbo = process.argv[2]
 if (!verbo || verbo.startsWith('--')) die(USAGE, EXIT.USAGE)
-if (!['next', 'report', 'controls', 'verdict', 'commit', 'global', 'slice-verdict'].includes(verbo)) {
+if (!['next', 'report', 'controls', 'verdict', 'commit', 'global', 'slice-verdict', 'e2e'].includes(verbo)) {
   die(`verbo desconocido: ${verbo}\n\n${USAGE}`, EXIT.USAGE)
 }
 
@@ -175,6 +181,13 @@ if (problems.length) {
   process.exit(EXIT.PLAN_NOT_EXECUTABLE)
 }
 
+// Los pasos que son de la SLICE y no de ninguna tarea. Una sola lista y no dos:
+// la usan el cruce de commits (abajo) y la telemetría (`medir`), y cuando el
+// mismo concepto estaba escrito dos veces la segunda copia se quedó atrás al
+// llegar `e2e` — con el resultado de que cada fila de e2e se le atribuía a la
+// última tarea del plan.
+const PASOS_DE_SLICE = [STEPS.GLOBAL, STEPS.SLICE_JUDGE, STEPS.E2E]
+
 // ---------------------------------------------------------------------------
 // El estado del run
 // ---------------------------------------------------------------------------
@@ -209,12 +222,27 @@ if (existsSync(stateFile)) {
   if (hechos === null) {
     die(`el estado dice baseSha ${run.baseSha}, que no existe en este worktree. Borra ${stateFile} si el run es de otra rama.`, EXIT.PRECONDITION)
   }
-  // En `global`/`slice-judge` las `tasksTotal` tareas YA están comiteadas —
-  // `run.task` se queda en la última y no en `tasksTotal + 1`, así que la
-  // cuenta que toca no es `run.task - 1` sino `tasksTotal` commits enteros.
-  // Sin esta rama, cada verbo de las fases nuevas (proceso nuevo, sin estado
-  // en memoria) muere aquí antes de llegar a ejecutar nada.
-  const esperados = (run.step === STEPS.GLOBAL || run.step === STEPS.SLICE_JUDGE) ? run.tasksTotal : run.task - 1
+  // En `global`/`slice-judge`/`e2e` las `tasksTotal` tareas YA están
+  // comiteadas — `run.task` se queda en la última y no en `tasksTotal + 1`,
+  // así que la cuenta que toca no es `run.task - 1` sino `tasksTotal` commits
+  // enteros. Son pasos de la SLICE, no de una tarea. Sin esta rama, cada verbo
+  // de esas fases (proceso nuevo, sin estado en memoria) muere aquí en
+  // PRECONDITION antes de llegar a ejecutar nada.
+  //
+  // Y `tasksTotal` a secas NO basta: los pasos de slice también comitean. El
+  // veredicto de slice estrena commit propio al aprobar (`verboSliceVerdict`),
+  // así que al llegar a `e2e` —proceso nuevo, el fichero releído— hay
+  // `tasksTotal + 1` commits desde `baseSha` y la cuenta fija tumbaba TODOS los
+  // verbos con PRECONDITION: ningún slice con recorridos podía cerrar, el run
+  // no llegaba nunca a DELIVERED y `dispatch-check --release` lo rechazaba con
+  // el 7 para siempre. Este fichero ya tenía escrito ese mismo razonamiento
+  // para el commit SIGUIENTE (ver `comprometerInformeE2e`, que por eso comitea
+  // sólo en DELIVERED); nadie lo aplicó al que se le puso delante. Por eso los
+  // commits de slice se CUENTAN en el estado (`sliceCommits`) en vez de darlos
+  // por cero: `|| 0` cubre los runs escritos antes de que el campo existiera.
+  const esperados = PASOS_DE_SLICE.includes(run.step)
+    ? run.tasksTotal + (run.sliceCommits || 0)
+    : run.task - 1
   if (hechos !== esperados) {
     die(`el estado y git no cuentan lo mismo: el fichero espera ${esperados} commit(s) (tarea ${run.task}, paso ${run.step}) y desde ${run.baseSha.slice(0, 7)} hay ${hechos}. No se sigue a ciegas.`, EXIT.PRECONDITION)
   }
@@ -222,7 +250,16 @@ if (existsSync(stateFile)) {
   if ((git(['diff', '--cached', '--name-only']) || '').trim()) {
     die('el índice tiene cambios stageados y este run es nuevo. ct-step comitea el índice tarea a tarea: vacíalo (git reset) o comitéalo tú.', EXIT.PRECONDITION)
   }
-  run = newRun({ plan: planPath, issue, baseSha: headSha(), tasksTotal: tasks.length })
+  // e2eRuns — ct-step no habla con GitHub (ver run-machine.js#newRun), así que
+  // los recorridos que la columna E2E del spec declaró para esta slice sólo
+  // pueden llegar por el fichero que /ct-next sembró: .agent/SLICE.md. Se lee
+  // con el parser que ya existe para ese fichero (scripts/state.js) en vez de
+  // teclear otro YAML a mano — dos parsers del mismo frontmatter divergen
+  // igual que ya divergieron JUDGE_TOOLS y VERDICT_RULES antes de unificarse.
+  // Ausente o no-lista: `newRun` ya normaliza eso a `[]` ("sin e2e"), y no lo
+  // confunde con `undefined` ("versión vieja que no escribió el campo").
+  const { meta: sliceMeta } = parseStateSafe(readFileSync(join(repoRoot, SLICE_REL_PATH), 'utf8'))
+  run = newRun({ plan: planPath, issue, baseSha: headSha(), tasksTotal: tasks.length, e2eRuns: sliceMeta.e2e })
   writeFileSync(stateFile, JSON.stringify(run, null, 2) + '\n')
 }
 
@@ -299,10 +336,12 @@ const ACTOR = (git(['config', 'user.email'], { allowFail: true }) || '').trim() 
 const METRICS_REL = metricsRepoRelPath(issue)
 
 function medir(step, measures) {
-  // `global` y `slice-judge` no son de ninguna tarea: un `task: 3` en esa fila
-  // sería un hueco leído como una afirmación (la misma doctrina que ya impide
-  // rellenar con `null` disfrazado de cero en el resto de este fichero).
-  const esDeSlice = step === 'global' || step === 'slice-judge'
+  // `global`, `slice-judge` y `e2e` no son de ninguna tarea: un `task: 3` en esa
+  // fila sería un hueco leído como una afirmación (la misma doctrina que ya
+  // impide rellenar con `null` disfrazado de cero en el resto de este fichero).
+  // En esos pasos `run.task` se queda clavado en la última tarea, así que
+  // atribuirle el coste sería una afirmación falsa, no un dato de más.
+  const esDeSlice = PASOS_DE_SLICE.includes(step)
   const linea = metricLine(metricRow({
     repo: repoSlug, epic: epicDelSlice, issue, plan: planPath, plan_sha256: PLAN_SHA,
     task: esDeSlice ? null : run.task, task_name: esDeSlice ? null : (tarea()?.name ?? null), tasks_total: run.tasksTotal,
@@ -324,9 +363,15 @@ function medir(step, measures) {
 // LA GUARDIA DEL PASO. Es lo que convierte la secuencia en mecanismo: pedir un
 // paso que no toca no se corrige con un aviso, se rechaza.
 // ---------------------------------------------------------------------------
+// El verbo `slice-verdict` no se llama igual que su paso (`slice-judge`), al
+// revés que `global`/`global` y `e2e`/`e2e`: el paso nombra a QUIEN juzga (el
+// juez de slice, como `judge`) y el verbo nombra lo que la sesión ENTREGA (un
+// fichero de veredicto, como `verdict`). Las dos familias ya existían con esos
+// nombres y renombrar cualquiera de los dos rompería estado en vuelo, así que
+// se deja la asimetría dicha en vez de arreglada.
 const VERBO_DE = {
   report: STEPS.IMPLEMENT, controls: STEPS.CONTROLS, verdict: STEPS.JUDGE, commit: STEPS.COMMIT,
-  global: STEPS.GLOBAL, 'slice-verdict': STEPS.SLICE_JUDGE,
+  global: STEPS.GLOBAL, 'slice-verdict': STEPS.SLICE_JUDGE, e2e: STEPS.E2E,
 }
 function exigirPaso(v) {
   if (run.step !== VERBO_DE[v]) {
@@ -384,6 +429,11 @@ function verboNext() {
       out(`  - el brief de la tarea: ${join(workDir, `task-${run.task}-brief.md`)}`)
       out(`  - los logs de los controles, YA en verde, por si los quiere: ${run.lastControlsLog ?? '(ninguno)'}`)
       out(`  - que escriba su veredicto en: ${veredicto}`)
+      // El token NO se imprime, sólo se dice de dónde se copia (D13): el sitio
+      // del que sale es el paquete que el juez lee, y poner el valor en la
+      // salida del conductor invita a parchear un veredicto en vez de
+      // redespachar al juez.
+      out(`  - y que COPIE en su veredicto, campo "review_token", el "${REVIEW_TOKEN_LABEL}:" con el que abre ese paquete: es lo que hace comprobable que su veredicto es sobre ESE código`)
       out('')
       out(`Cuando vuelva:  ct-step verdict ${veredicto} --plan ${planPath} --issue ${issue}`)
       out('No le pases la SALIDA de los controles: un lint sucio no debe ensuciarle el criterio.')
@@ -424,10 +474,38 @@ function verboNext() {
       out(`  - el log de la Global verification, YA en verde, por si lo quiere: ${run.lastGlobalLog ?? '(N/A declarado)'}`)
       out(`  - los veredictos de cada tarea, ya comiteados: docs/superpowers/verdicts/issue-${issue}-task-*.json`)
       out(`  - que escriba su veredicto en: ${veredicto}`)
+      out(`  - y que COPIE en su veredicto, campo "review_token", el "${REVIEW_TOKEN_LABEL}:" con el que abre ese paquete`)
       out('')
       out(`Cuando vuelva:  ct-step slice-verdict ${veredicto} --plan ${planPath} --issue ${issue}`)
       break
     }
+    case STEPS.E2E:
+      // No hay brief ni paquete que escribir: aquí no se despacha un
+      // subagente de tarea, se atraviesa la slice entera con el entorno ya
+      // levantado por quien conduce. `AGENTS.md` es el sitio con el "Levantar"
+      // y el "Listo cuando" de cada recorrido — este verbo no los repite.
+      out('ATRAVIESA LA SLICE DE PUNTA A PUNTA (todas las tareas están comiteadas):')
+      for (const r of run.e2eRuns) out(`  - ${r}`)
+      out('')
+      // La sección se NOMBRA, no se alude. `GATES.e2e.kickoff` ya la nombra, y
+      // el §3.3 del diseño insiste en nombrarla también cuando falta ("con el
+      // nombre de la sección que falta. No se adivina"): éste es justo el
+      // momento en que el agente la necesita, y "está en AGENTS.md" lo manda a
+      // buscarla entre las de build/test/lint.
+      out('El entorno para levantarla está en la sección "## Cómo se atraviesa este repo (e2e)" de AGENTS.md ("Levantar" y "Listo cuando" de cada recorrido). Si esa sección no está rellenada, el veredicto es `no-verificado` con ese motivo: nunca rojo, y nunca inventarse cómo arrancarlo.')
+      // El contrato se dice ENTERO, y salido del mismo módulo que lo valida
+      // (E2E_SCHEMA/E2E_REQUIRED_BY_VERDICT, step-contracts.js). Anunciar sólo
+      // `run` y `verdict` —lo incondicional— era instruir al agente con un
+      // contrato que este mismo programa rechaza: costaba al menos una vuelta
+      // de DISCARDED por slice, y los descartes salen del presupuesto de la
+      // slice entera.
+      out(`Escribe el informe cumpliendo E2E_SCHEMA (scripts/step-contracts.js): cada recorrido lleva ${E2E_SCHEMA.properties.runs.items.required.join(' y ')}, y además, según su veredicto:`)
+      for (const [veredicto, campos] of Object.entries(E2E_SCHEMA.properties.runs.items.requiredByVerdict)) {
+        out(`  - ${veredicto}: ${campos.join(', ')}`)
+      }
+      out('Ciérralo con:')
+      out(`  ct-step e2e <fichero.json> --plan ${planPath} --issue ${issue}`)
+      break
     default:
       die(`el estado tiene un paso que esta versión no conoce: ${run.step}`, EXIT.UNNAMED)
   }
@@ -457,6 +535,41 @@ function escribirBrief() {
   return brief
 }
 
+// LOS DOS DIFFS, cada uno en una expresión y no en dos. Los llaman el escritor
+// del paquete y el verbo que comprueba el token, y si divergieran en un flag
+// (`-U10`, el `|| ''` de un diff vacío) el síntoma sería un token que nunca
+// coincide: todo veredicto descartado, seis descartes, run muerto — y ninguna
+// pista de por qué. Es el mismo motivo por el que PACKAGE_SECTIONS es una
+// constante y no una cadena tecleada dos veces.
+//
+// El de la tarea sale del ÍNDICE, que es la superficie exacta que el juez ve y
+// que `commit` se lleva: una edición sin stagear no llega al commit, así que no
+// tiene por qué invalidar el juicio. El del slice sale del RANGO, porque a esas
+// alturas todo está comiteado (ver `escribirPaqueteDeSlice`).
+const diffDeTarea = () => git(['diff', '--cached', '-U10']) || ''
+const diffDeSlice = () => git(['diff', '-U10', run.baseSha, 'HEAD']) || ''
+
+// EL ÁRBOL DEL ÍNDICE — la identidad de lo que se va a comitear, y git ya la
+// tiene: `write-tree` escribe el árbol del índice y devuelve su sha. Dos índices
+// con el mismo contenido dan el mismo árbol, así que comparar dos shas es
+// comparar los dos índices entero a entero —rutas, contenidos y modos— sin
+// depender de HEAD ni de cómo se formatee un diff.
+//
+// Y NO un sha256 del diff como el token del paquete, aunque para comparar
+// valdría igual: el árbol además se puede DEVOLVER. `git read-tree <sha>` pone
+// ese índice de vuelta sin tocar el worktree, así que el mensaje del fallo puede
+// llevar el comando exacto que repara el estado — y aquí eso no es un lujo: el
+// ataque típico SOBREESCRIBE una ruta que ya estaba en alcance (`git add
+// uno.txt`), y entonces el contenido que el juez aprobó no está en ningún sitio
+// del que el conductor pueda sacarlo a mano. Un hash de un diff no repara nada.
+//
+// El objeto que escribe queda sin referenciar hasta que el commit lo usa; un
+// `git gc --prune=now` DENTRO de la ventana se lo llevaría y el `read-tree` del
+// mensaje fallaría (la comprobación no: ésa sólo compara dos shas). No se
+// referencia a propósito: un ref por tarea se vería en `git for-each-ref` y
+// podría acabar empujado.
+const arbolDelIndice = () => git(['write-tree']).trim()
+
 // El paquete sale del ÍNDICE y no de un rango de commits: el implementador no
 // comitea, así que lo que hay que juzgar todavía no es un commit.
 function escribirPaquete() {
@@ -470,11 +583,17 @@ function escribirPaquete() {
   // el juicio: lo desactivaba. No se vuelva a añadir.
   const rutas = (run.lastPaths || []).map((p) => `- ${p}`).join('\n') || '(ninguna)'
   const [SECCION_FILES, SECCION_RUTAS, SECCION_DIFF] = PACKAGE_SECTIONS
+  const diff = diffDeTarea()
   writeFileSync(paquete, [
     `# Review package: task ${run.task}/${run.tasksTotal} of issue #${issue} (staged, not yet committed)`,
+    // La CABECERA lleva el token: el sha256 de exactamente el diff que va
+    // debajo. Segunda línea y no una sección `##`, para no tocar
+    // PACKAGE_SECTIONS (que la rúbrica cita encabezado a encabezado) ni el
+    // orden que el slice 10 decidió para el paquete de slice.
+    reviewTokenLine(reviewToken(diff)),
     '', `## ${SECCION_FILES}`, git(['diff', '--cached', '--stat']) || '',
     '', `## ${SECCION_RUTAS}`, rutas,
-    '', `## ${SECCION_DIFF}`, git(['diff', '--cached', '-U10']) || '',
+    '', `## ${SECCION_DIFF}`, diff,
   ].join('\n'))
   return paquete
 }
@@ -489,6 +608,7 @@ function escribirPaquete() {
 function escribirPaqueteDeSlice() {
   const paquete = join(workDir, 'slice-review.diff')
   const [SECCION_SENAL, SECCION_COMMITS, SECCION_FILES, SECCION_DIFF] = SLICE_PACKAGE_SECTIONS
+  const diff = diffDeSlice()
   // Slice 10: la señal cruza el embudo AQUÍ, leída del disco (el campo
   // `senal:` que el despacho sembró en el SLICE.md) y sin agente en medio —
   // la misma doctrina del §3.3 con la que la vara del repo viaja en el brief.
@@ -498,12 +618,103 @@ function escribirPaqueteDeSlice() {
   // se omite, y su texto es exactamente lo que la rúbrica lee como sin-vara.
   writeFileSync(paquete, [
     `# Slice review package: issue #${issue} — ${run.tasksTotal} tasks committed since ${run.baseSha.slice(0, 7)}`,
+    reviewTokenLine(reviewToken(diff)),
     '', `## ${SECCION_SENAL}`, senalDelSlice ?? SENAL_AUSENTE,
     '', `## ${SECCION_COMMITS}`, git(['log', '--reverse', '--format=%h %s', `${run.baseSha}..HEAD`]) || '',
     '', `## ${SECCION_FILES}`, git(['diff', '--stat', run.baseSha, 'HEAD']) || '',
-    '', `## ${SECCION_DIFF}`, git(['diff', '-U10', run.baseSha, 'HEAD']) || '',
+    '', `## ${SECCION_DIFF}`, diff,
   ].join('\n'))
   return paquete
+}
+
+// ---------------------------------------------------------------------------
+// EL PAQUETE SIGUE DESCRIBIENDO EL CORTE QUE CAPTURÓ, y el veredicto es DE ESE
+// paquete. Las dos comprobaciones que atan el producto al insumo (slice 11);
+// ver step-contracts.js#REVIEW_TOKEN_LABEL para las dos vías que cierran.
+//
+// Una función y no dos copias en los dos verbos: lo único que cambia entre la
+// tarea y el slice es QUÉ diff se recomputa, y eso entra por parámetro. La
+// alternativa —el mismo razonamiento escrito dos veces— es el desacople que
+// este fichero ya pagó con la lista de PASOS_DE_SLICE.
+// ---------------------------------------------------------------------------
+function tokenVigente(paquete, diffAhora) {
+  let texto
+  try {
+    texto = readFileSync(paquete, 'utf8')
+  } catch (e) {
+    return { why: `el paquete de revisión existe y no se puede leer (${paquete}): ${String(e.message).trim()} — vuelve a "ct-step next", que es el único paso que lo genera, y REDESPACHA al juez` }
+  }
+  const declarado = reviewTokenOf(texto)
+  if (declarado === null) {
+    // Un paquete sin la línea: lo escribió una versión del plugin anterior a
+    // este campo (un run en vuelo cuando se actualizó el plugin), o alguien lo
+    // editó. Un descarte lo cura en una vuelta —`next` lo regenera con su
+    // token— y no hay camino de vuelta al paquete sin token: tolerarlo sería
+    // un modo «sin barandilla» que se activa BORRANDO una línea, que es
+    // exactamente lo que este arreglo quita del repertorio.
+    return { why: `el paquete de revisión (${paquete}) no declara su "${REVIEW_TOKEN_LABEL}": lo escribió una versión anterior del plugin, o se editó a mano. Vuelve a "ct-step next", que lo regenera con su token, y REDESPACHA al juez` }
+  }
+  const ahora = reviewToken(diffAhora)
+  if (declarado !== ahora) {
+    return { why: `el paquete de revisión ya no describe el código de ahora: declara el token ${declarado.slice(0, 12)}… y el del corte recién medido es ${ahora.slice(0, 12)}… — el código cambió DESPUÉS de generarse el paquete, así que el juez juzgó otro diff. Vuelve a "ct-step next" y REDESPACHA al juez: repreguntarle con este paquete no arregla nada` }
+  }
+  return { token: declarado }
+}
+
+// El veredicto trae el token DE ESTE paquete. `verdict.review_token` ya viene
+// validado en forma y en minúsculas por `readVerdict`, así que aquí sólo se
+// compara.
+function whyTokenAjeno(delVeredicto, delPaquete) {
+  return `el veredicto no es de este paquete: copia el token ${String(delVeredicto).slice(0, 12)}… y el paquete declara ${delPaquete.slice(0, 12)}… — es el veredicto de OTRO juicio, sobre un diff que ya no es el que hay delante. No hace falta volver a "ct-step next" (el paquete de disco es el bueno): REDESPACHA al juez con él`
+}
+
+// EL PAQUETE ES DE UN SOLO USO: lo gasta el veredicto que lo lee.
+//
+// Hallazgo ALTO del review de la PR #36, reproducido con un ataque real. La
+// guarda del slice 3 (el `existsSync` de los dos verbos de veredicto) cubría el
+// intento 1 y dejaba abierto el 2: intento 1 por el flujo real → FAIL del juez;
+// intento 2, el implementador cambia el fichero y el conductor encadena
+// report→controls→verdict SIN volver a `next`. La guarda pasaba —el `.diff` del
+// intento 1 seguía en disco—, el PASS entraba, y se comiteaba código que ningún
+// juez había visto, con la fila de telemetría apuntando a un paquete que existe
+// y es EL EQUIVOCADO. Peor que el fallo que el slice 3 arregló: aquél era
+// ruidoso (una fila nombrando un fichero inexistente, detectable con `test -f`)
+// y éste es MUDO — indistinguible de un juicio legítimo en el JSONL. Y la
+// confesión que salvó la corrida de campo (el juez declarando que no encontraba
+// el paquete) queda desarmada: en el caso rancio el juez SÍ encuentra un
+// paquete, no tiene Bash y no puede saber que es viejo.
+//
+// El insumo se CONSUME, y con una regla que sale de run-machine.js y no de una
+// lista de casos: el paquete vale exactamente mientras el paso siga siendo el
+// del juez. Todo veredicto ACEPTADO (PASS, FAIL y el PASS que ordena
+// correcciones) saca el run de `judge`, así que su paquete ya no le sirve a
+// nadie: se gasta. Un DESCARTE deja el paso donde estaba —se le vuelve a
+// preguntar al juez— así que ahí NO se llama a esto: el reintento por JSON
+// ilegible tiene que poder repreguntar con el mismo insumo, sin obligar a
+// regenerarlo. Y el intento 2 del ataque se topa con la ausencia y se descarta,
+// que es lo que la guarda del slice 3 quería hacer y no llegaba a hacer.
+//
+// Lo que NO puede pasar es que esto tumbe el run: el veredicto ya está medido y,
+// si aprobó, escrito y stageado. Un fallo aquí se avisa y sigue — el criterio de
+// este fichero para toda operación auxiliar (los `git add` del veredicto y de la
+// telemetría, el `git commit` del veredicto de slice y el del informe de e2e,
+// todos con `allowFail` y su aviso). El aviso es RUIDOSO a propósito: un paquete
+// que sobrevive a su veredicto reabre exactamente la ventana que esto cierra.
+//
+// SLICE 11 — Y EL DESCARTE SIGUE SIN CONSUMIR, ahora por una propiedad y no por
+// una asunción. La justificación de arriba («el reintento juzga el mismo diff»)
+// era una afirmación sobre la conducta del agente; desde el token del paquete es
+// comprobable en el momento de usarlo: si el corte cambió, `tokenVigente` lo
+// descarta antes de leer el veredicto. Conservar el paquete tras un descarte
+// deja de ser un hueco —lo que sobrevive es un insumo que se AUTOVERIFICA— y
+// sigue comprando lo que compraba: repreguntarle al juez por un JSON ilegible
+// sin obligar a regenerar nada.
+function consumirPaquete(paquete) {
+  try {
+    unlinkSync(paquete)
+  } catch (e) {
+    err(`aviso: el veredicto se midió pero NO se pudo consumir el paquete de revisión (${paquete}): ${String(e.message).trim()}. El paso sigue, pero ese fichero ya no corresponde a ningún juicio pendiente: vuelve a "ct-step next" antes de despachar al juez otra vez, porque un paquete que sobrevive a su veredicto es el que deja pasar un juicio rancio.`)
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -628,6 +839,29 @@ function verboControls() {
 // al control. Es la segunda mitad del reset de `report`: aquel garantiza que
 // el índice sea lo declarado, y esto lo VERIFICA en vez de suponerlo.
 const stagedPaths = () => (git(['diff', '--cached', '--name-only']) || '').split('\n').map((l) => l.trim()).filter(Boolean)
+
+// LO AJENO EN EL ÍNDICE: lo stageado que NO lo puso este programa.
+//
+// Los tres `git commit` de la maquinaria —la tarea, el veredicto del slice y el
+// informe de e2e— van SIN pathspec, así que se llevan el índice entero: lo que
+// el conductor stagee antes de llamarlos viaja dentro sin que ningún juez lo
+// haya visto. Reproducido en los dos últimos (`git add colado.txt` antes de
+// `slice-verdict` y antes de `e2e`: en los dos casos `colado.txt` acabó
+// comiteado, y el run entregó igual).
+//
+// Para esos dos basta la PERTENENCIA: en sus pasos el índice tiene que estar
+// vacío salvo por las rutas que el programa acaba de stagear, y el programa
+// REESCRIBE sus artefactos justo antes de stagearlos, así que una edición ajena
+// del fichero no sobrevive. Del trabajo del implementador no se puede decir eso
+// — por eso el commit de tarea lleva sello (`arbolDelIndice`) y no pertenencia:
+// ahí el ataque sobreescribe una ruta que SÍ es del alcance.
+const ajenoEnElIndice = (nuestras) => {
+  // `stagedPaths` devuelve rutas de git (siempre con `/`) y las nuestras se
+  // construyen con `join`, que en Windows daría `\`. Normalizar es una línea y
+  // evita que la guarda salte SIEMPRE en la plataforma en la que nadie mira.
+  const mias = nuestras.map((p) => p.replace(/\\/g, '/'))
+  return stagedPaths().filter((p) => !mias.includes(p))
+}
 
 // El alcance de la tarea lo decide el PLAN, no el implementador: esta
 // comprobación cruza el ÍNDICE (lo que de verdad se va a commitear)
@@ -805,6 +1039,28 @@ function verboGlobal() {
 // viaja el que aprueba — el FAIL cierra el run y lo lee el humano en la
 // carpeta del run.
 function verboSliceVerdict() {
+  // EL INSUMO ANTES QUE EL VEREDICTO, y por el mismo motivo que en
+  // `verboVerdict` (ver el comentario largo de ahí, que es donde está el caso
+  // de campo): `escribirPaqueteDeSlice` lo invoca SÓLO `next`, así que sin el
+  // fichero en disco el juez de slice no tuvo diff acumulado que juzgar.
+  const paquete = join(workDir, 'slice-review.diff')
+  if (!existsSync(paquete)) {
+    const why = `el paquete de revisión del slice no existe (${paquete}): el juez de slice juzgó a ciegas — vuelve a "ct-step next", que es el único paso que lo genera, y REDESPACHA al juez de slice. El paquete es de UN SOLO USO: lo consume el veredicto que lo lee, así que tras un veredicto aceptado hay que volver a pasar por next antes de despachar al juez de slice otra vez`
+    medir('slice-judge', { outcome: 'discarded', why })
+    out(`veredicto de slice descartado: ${why}`)
+    return OUTCOMES.DISCARDED
+  }
+  // Mismo par de comprobaciones que en `verboVerdict`, con el diff del RANGO
+  // en vez del del índice (ver `diffDeSlice`). Aquí el token cubre lo que la
+  // invariante de commits del estado NO cubre: un commit AÑADIDO en el hueco
+  // ya muere en el cruce `hechos !== esperados` de la carga del estado, pero un
+  // `--amend` deja la cuenta igual y el contenido distinto.
+  const { token, why: porElPaquete } = tokenVigente(paquete, diffDeSlice())
+  if (porElPaquete) {
+    medir('slice-judge', { outcome: 'discarded', why: porElPaquete })
+    out(`veredicto de slice descartado: ${porElPaquete}`)
+    return OUTCOMES.DISCARDED
+  }
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del veredicto de slice')
   const { verdict, why } = porLeer ? { why: porLeer } : readSliceVerdict(valor)
   if (!verdict) {
@@ -812,8 +1068,21 @@ function verboSliceVerdict() {
     out(`veredicto de slice descartado: ${why}`)
     return OUTCOMES.DISCARDED
   }
+  if (verdict.review_token !== token) {
+    const porAjeno = whyTokenAjeno(verdict.review_token, token)
+    medir('slice-judge', { outcome: 'discarded', why: porAjeno })
+    out(`veredicto de slice descartado: ${porAjeno}`)
+    return OUTCOMES.DISCARDED
+  }
   const outcome = outcomeOfSliceVerdict(verdict)
-  medir('slice-judge', { outcome, review_package: join(workDir, 'slice-review.diff'), ...verdictMeasures(verdict) })
+  medir('slice-judge', { outcome, review_package: paquete, review_token: token, ...verdictMeasures(verdict) })
+  // Aquí y no más abajo: DESPUÉS de medir (la fila nombra el paquete que el juez
+  // de slice leyó, y se escribe mientras eso sigue siendo cierto) y ANTES de la
+  // rama del PASS, que escribe, stagea y COMITEA. Cualquiera de esos writes
+  // puede lanzar —`mkdirSync`/`writeFileSync` sobre un árbol de sólo lectura— y
+  // subir hasta el catch del despacho: dejar el consumo detrás de ellos abriría
+  // una ventana en la que un veredicto ya emitido no gastó su insumo.
+  consumirPaquete(paquete)
   if (verdict.ruling === 'PASS') {
     const ruta = join('docs', 'superpowers', 'verdicts', `issue-${issue}-slice.json`)
     mkdirSync(join(repoRoot, 'docs', 'superpowers', 'verdicts'), { recursive: true })
@@ -827,7 +1096,30 @@ function verboSliceVerdict() {
     if (existsSync(join(repoRoot, METRICS_REL)) && git(['add', '--', METRICS_REL], { allowFail: true }) === null) {
       err(`aviso: no se pudo stagear la telemetría (${METRICS_REL}) — el veredicto del slice viaja sin ella. ¿La ruta está gitignoreada en este repo?`)
     }
-    if ((git(['diff', '--cached', '--name-only']) || '').trim()) {
+    // Y NO SE COMITEA EL ÍNDICE A CIEGAS. Este `git commit` va sin pathspec, así
+    // que se lleva TODO lo stageado: si el conductor dejó código en el índice
+    // antes de llamar a `slice-verdict`, entraba en el commit del veredicto del
+    // slice sin que nadie lo hubiera juzgado — y no lo cazaba nada, porque el
+    // paquete de slice mide `baseSha..HEAD` y el índice no sale en ese diff.
+    // Medido: `git add colado.txt` antes de este verbo y `colado.txt` acabó
+    // dentro de "Veredicto del slice entero (#7)", con el run entregando.
+    //
+    // Basta la PERTENENCIA (ver `ajenoEnElIndice`): aquí el índice tiene que
+    // traer sólo las dos rutas que las líneas de arriba acaban de stagear.
+    //
+    // Y el trato es el de la evidencia que no puede viajar, no el de un veto: el
+    // veredicto del slice es VÁLIDO —es de `baseSha..HEAD`, que esto no cambia— y
+    // el trabajo del slice está comiteado entero. Devolver FAILED cerraría el run
+    // en `blocked-slice-judge`, que sale por el código del VETO (1) y diría que el
+    // juez rechazó el slice: sería mentir sobre el juicio para castigar un índice
+    // sucio. Así que se avisa, no se comitea, y la entrega sigue — las dos rutas
+    // se quedan STAGEADAS, así que sacar lo ajeno y comitearlas a mano es una
+    // línea. Misma doctrina que el `else` de más abajo ("nada que commitear del
+    // veredicto del slice ... la entrega sigue") y que los tres `allowFail`.
+    const ajeno = ajenoEnElIndice([ruta, METRICS_REL])
+    if (ajeno.length) {
+      err(`aviso: el índice traía ${ajeno.length} ruta(s) ajenas a la maquinaria (${ajeno.join(', ')}) y este commit se las llevaría dentro sin que ningún juez las haya visto — NO se comitea el veredicto del slice. La entrega sigue: el trabajo del slice ya está comiteado entero. El veredicto está escrito y STAGEADO en ${ruta}: saca lo ajeno del índice ("git restore --staged ${ajeno[0]}", que no toca tu worktree) y comitéalo a mano antes de abrir la pull request.`)
+    } else if ((git(['diff', '--cached', '--name-only']) || '').trim()) {
       let mensaje = null
       try {
         mensaje = sliceVerdictCommitMessage({ issue, tasksTotal: run.tasksTotal })
@@ -838,6 +1130,16 @@ function verboSliceVerdict() {
         if (git(['commit', '-m', mensaje], { allowFail: true }) === null) {
           err('aviso: no se pudo commitear el veredicto del slice — la entrega no depende de la evidencia, pero revisa el índice antes de abrir la pull request.')
         } else {
+          // Se cuenta el commit en el ESTADO, y sólo cuando de verdad ocurrió.
+          // El paso siguiente (`e2e`) es otro proceso: relee el fichero y cruza
+          // los commits contra `tasksTotal + sliceCommits` (ver la carga del
+          // estado). Sin este incremento el cruce daba uno de menos y el run se
+          // quedaba atascado en PRECONDITION para siempre. Y va DENTRO del
+          // `else` porque si las dos rutas de evidencia están gitignoreadas no
+          // hay commit: contarlo entonces desajustaría la cuenta en la otra
+          // dirección. Mismo patrón in situ que `lastGlobalLog` en `verboGlobal`
+          // — `guardar()` lo persiste al final del despacho.
+          run = { ...run, sliceCommits: (run.sliceCommits || 0) + 1 }
           out(`veredicto del slice comiteado: ${headSha().slice(0, 7)}`)
         }
       }
@@ -850,6 +1152,56 @@ function verboSliceVerdict() {
 }
 
 function verboVerdict() {
+  // EL INSUMO ANTES QUE EL VEREDICTO. `next` es el ÚNICO verbo que escribe el
+  // paquete de revisión (`escribirPaquete`, arriba; se invoca sólo en el caso
+  // JUDGE de `verboNext`), así que si no está en disco el juez no tuvo qué
+  // juzgar: juzgó a ciegas. Medido en campo — un agente encadenó
+  // report→controls→verdict sin volver a pasar por `next`, y aquel PASS sólo no
+  // entró porque el propio juez confesó que no encontraba el paquete. Sin esa
+  // confesión, el PASS entraba y la fila de telemetría quedaba nombrando un
+  // fichero inexistente. Un paso que exige un insumo y no comprueba que llegó
+  // delega su garantía en la honestidad del agente, que es justo lo que este
+  // pipeline no hace en ningún otro sitio (los controles no se creen al
+  // implementador; el commit no lo hace el implementador; el índice se verifica
+  // en vez de suponerse).
+  //
+  // Y va ANTES de `leerJson` a propósito. Con las dos cosas mal —paquete
+  // ausente y JSON ilegible— la fila que hay que escribir es la del paquete:
+  // volver a preguntarle al juez arregla un JSON roto, pero no hace aparecer un
+  // paquete que nadie generó, así que medir "no se pudo leer el veredicto"
+  // mandaría al loop a gastarse los seis descartes contestando al problema que
+  // no era, y la telemetría contaría un juez que escribe mal en vez de un
+  // conductor que se saltó un paso. La causa manda sobre el síntoma.
+  const paquete = join(workDir, `task-${run.task}-review.diff`)
+  if (!existsSync(paquete)) {
+    const why = `el paquete de revisión no existe (${paquete}): el juez juzgó a ciegas — vuelve a "ct-step next", que es el único paso que lo genera, y REDESPACHA al juez con el paquete nuevo. El paquete es de UN SOLO USO: lo consume el veredicto que lo lee, así que tras un FAIL (o cualquier veredicto aceptado) hay que volver a pasar por next antes de despachar al juez otra vez — y volver a next SIN redespachar al juez deja un veredicto de otro diff, que este verbo también rechaza`
+    // La fila lleva `outcome` y `why`, y ninguna medida más: exactamente la
+    // forma de los otros descartes de este fichero. Sin `ruling` —para
+    // `aggregateVerdictMeasures` una fila con `ruling` ES un veredicto, y esto
+    // es su ausencia: contarla inflaría el denominador de `rubric_sin_vara`— y
+    // sin `review_package`, porque nombrar en la telemetría el fichero que
+    // falta es escribir precisamente la fila que apunta a un inexistente que
+    // esta guarda existe para no dejar entrar.
+    medir('judge', { outcome: 'discarded', why })
+    out(`veredicto descartado: ${why}`)
+    return OUTCOMES.DISCARDED
+  }
+  // EL INSUMO SIGUE SIENDO EL CORTE DE AHORA, y va ANTES de `leerJson` por el
+  // mismo motivo que la guarda de existencia: con las dos cosas mal, la fila
+  // que hay que escribir es la del paquete. Repreguntarle al juez arregla un
+  // JSON roto y NO hace que el código vuelva a ser el que él juzgó, así que
+  // medir "no se pudo leer el veredicto" mandaría al loop a gastar descartes
+  // contestando al problema que no era. La causa manda sobre el síntoma.
+  const { token, why: porElPaquete } = tokenVigente(paquete, diffDeTarea())
+  if (porElPaquete) {
+    // Misma forma que los otros descartes: `outcome` y `why`, ninguna medida
+    // más. Sin `review_package` ni `review_token`, porque nombrar en la fila
+    // el insumo de un juicio que no se acepta es escribir la afirmación que
+    // esta guarda existe para no dejar entrar.
+    medir('judge', { outcome: 'discarded', why: porElPaquete })
+    out(`veredicto descartado: ${porElPaquete}`)
+    return OUTCOMES.DISCARDED
+  }
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del veredicto')
   const { verdict, why } = porLeer ? { why: porLeer } : readVerdict(valor)
   if (!verdict) {
@@ -857,9 +1209,30 @@ function verboVerdict() {
     out(`veredicto descartado: ${why}`)
     return OUTCOMES.DISCARDED
   }
+  // EL PRODUCTO ES DE ESTE INSUMO. Aquí muere el veredicto reciclado: el del
+  // juicio anterior trae el token del paquete anterior.
+  if (verdict.review_token !== token) {
+    const porAjeno = whyTokenAjeno(verdict.review_token, token)
+    medir('judge', { outcome: 'discarded', why: porAjeno })
+    out(`veredicto descartado: ${porAjeno}`)
+    return OUTCOMES.DISCARDED
+  }
   const outcome = outcomeOfVerdict(verdict)
   const graves = verdict.findings.filter((f) => f.severity !== 'low')
-  medir('judge', { outcome, review_package: join(workDir, `task-${run.task}-review.diff`), ...verdictMeasures(verdict) })
+  // `review_token` al lado de `review_package`: la ruta del insumo y su
+  // IDENTIDAD. La ruta ya no vale para comprobar nada (el paquete se consume
+  // dos líneas más abajo), y el token dice de qué código fue este juicio — que
+  // es justo lo que en las dos vías era indistinguible en el JSONL. No se
+  // deriva de `verdictMeasures` porque no es una medida del juicio: es la del
+  // insumo, y va donde ya vive la del insumo.
+  medir('judge', { outcome, review_package: paquete, review_token: token, ...verdictMeasures(verdict) })
+  // El consumo va AQUÍ por lo mismo que en el gemelo de slice: la fila que
+  // nombra el paquete se escribe primero, y todo lo que viene después
+  // —`mkdirSync`, `writeFileSync` y el `git add` del veredicto que viaja en el
+  // commit de la tarea— puede fallar sin que eso convierta el veredicto en no
+  // emitido. Ninguna de esas rutas toca el paquete (los `add` son por ruta,
+  // nunca `-A`), así que consumirlo antes no puede colarse en ningún commit.
+  consumirPaquete(paquete)
   run = {
     ...run,
     lastVerdict: verdict,
@@ -894,12 +1267,68 @@ function verboVerdict() {
     } else {
       out(`veredicto guardado y stageado: ${ruta}`)
     }
+    // EL SELLO DEL ÍNDICE — la TERCERA igualdad (slice 12).
+    //
+    // Las dos del slice 11 atan el veredicto al paquete y el paquete al código, y
+    // las dos miden EL INSTANTE de este verbo. Después quedaba una ventana: entre
+    // este PASS y `ct-step commit` el conductor podía re-stagear código y `commit`
+    // no volvía a mirar nada — entraba código que ningún juez vio, con la fila de
+    // telemetría afirmando el `review_token` del código que SÍ se revisó.
+    // Reproducido CON el fix del slice 11 puesto (el `medium` de aquel juez): un
+    // `git add uno.txt` aquí y la tarea se comiteaba con la versión nueva.
+    //
+    // Va AQUÍ: DESPUÉS del `git add`. Lo que `commit` va a comitear es el índice
+    // CON el artefacto que la maquinaria acaba de poner encima del corte
+    // revisado, así que eso es lo que hay que sellar; sellar antes del add sería
+    // sellar un índice que ya no existe y haría fallar TODOS los commits — la
+    // misma trampa de orden que el comentario de `diffDeTarea` documenta para el
+    // token. De rebote, el artefacto queda dentro del sello: un veredicto forjado
+    // y stageado en el hueco tampoco entra (medido: hoy entra).
+    //
+    // Sólo en el PASS, y no hace falta limpiarlo en los otros caminos: al paso
+    // COMMIT sólo se llega desde un PASS —`done` y `corrections-ordered` con el
+    // presupuesto agotado, las dos ramas de `run-machine.js#trasElJuez`, y las dos
+    // salen de `ruling === 'PASS'`—, así que el sello que `commit` lee es SIEMPRE
+    // el del veredicto inmediatamente anterior y nunca uno rancio de tres
+    // intentos atrás. Un FAIL vuelve a implementar o cierra el run; un descarte
+    // vuelve a preguntar.
+    run = { ...run, sealedTree: arbolDelIndice() }
   }
   out(`veredicto ${verdict.ruling} con ${verdict.findings.length} hallazgo(s) → ${outcome}`)
   return outcome
 }
 
 function verboCommit() {
+  // LO QUE SE COMITEA ES LO QUE SE APROBÓ, y se comprueba antes que nada.
+  //
+  // La tercera igualdad (ver el sello en `verboVerdict`): el índice de ahora tiene
+  // que ser el MISMO que la maquinaria selló al aceptar el veredicto. Va delante
+  // del mensaje y del "no hay nada stageado" porque esas dos preguntan si git
+  // PUEDE comitear y ésta pregunta si DEBE: un mensaje mal compuesto se arregla
+  // arreglando el plan, y un commit con código no revisado dentro no se arregla
+  // nunca, porque ya está en la rama. Y va antes del `git add` de la telemetría
+  // por necesidad: ese add cambia el índice.
+  //
+  // SIN fila de telemetría, como los otros dos fallos de este verbo: el paso
+  // `commit` no tiene fila —decisión anterior, fijada por el test "no hay fila de
+  // commit": la llevaba dentro del commit siguiente, así que la de la última tarea
+  // no viajaba nunca— y estrenar una sólo para el fallo rompería esa propiedad y
+  // metería en el JSONL una forma que `run-metrics.js` no agrega. Mudo no se
+  // queda: sale por stderr, el exit es 8, y el run se queda parado en `commit`
+  // con el sello escrito en el fichero de estado, que es lo que hay que leer para
+  // arreglarlo.
+  if (typeof run.sealedTree !== 'string') {
+    err(`el estado no trae el sello del índice (sealedTree) que el veredicto de esta tarea tenía que dejar: o este run venía de una versión del plugin anterior a esta comprobación —se quedó parado en "commit" mientras se actualizaba—, o alguien editó ${stateFile}. Sin sello no se puede afirmar que lo stageado sea lo que el juez aprobó, y este programa no comitea lo que no puede afirmar. Compruébalo tú y comitea a mano (el veredicto está en docs/superpowers/verdicts/issue-${issue}-task-${run.task}.json), o arranca el run de nuevo: lo que no hay es un modo sin barandilla que se active BORRANDO un campo.`)
+    return OUTCOMES.FAILED
+  }
+  const arbolDeAhora = arbolDelIndice()
+  if (arbolDeAhora !== run.sealedTree) {
+    err(`el índice ya no es el que el juez aprobó: al aceptar el veredicto quedó sellado el árbol ${run.sealedTree} y el del índice de ahora es ${arbolDeAhora}. Algo lo cambió DESPUÉS del veredicto, así que este commit se llevaría dentro código que ningún juez ha visto, con el veredicto de otro código viajando al lado. NO se comitea nada.
+  - para devolver el índice aprobado, tal cual y sin tocar tu worktree:  git read-tree ${run.sealedTree}
+    y repite "ct-step commit". Lo que hayas stageado después sigue en los ficheros: no se pierde, deja de estar stageado.
+  - si ese código TIENE que entrar, no entra por aquí: desde "commit" no hay vuelta al juez en este run. Sácalo del índice, comitea la tarea aprobada, y que ese trabajo entre por la tarea siguiente o por otro slice.`)
+    return OUTCOMES.FAILED
+  }
   const t = tarea()
   let mensaje
   try {
@@ -939,6 +1368,150 @@ function verboCommit() {
   return OUTCOMES.DONE
 }
 
+// El markdown lo escribe el PROGRAMA, no el agente que atraviesa la slice.
+// Mismo reparto que el commit ("comitea el programa, no el implementador"):
+// así no hay prosa que validar, no puede faltar un encabezado ni citarse mal
+// un recorrido, y lo que llega a la pull request es EXACTAMENTE lo que
+// `readE2eReport` aceptó — no una narración aparte que alguien podría
+// desalinear del JSON validado.
+function escribirInformeE2e(runs) {
+  const seccionDe = (r) => {
+    const lineas = [`## ${r.run}`, '', `**Veredicto:** ${r.verdict}`]
+    if (r.brought_up) lineas.push('', `**Cómo se levantó:** ${r.brought_up}`)
+    if (r.verdict === 'verde') {
+      lineas.push('', '**Evidencia:**', '')
+      for (const e of r.evidence || []) lineas.push(`- \`${e.command}\` → \`${e.output}\``)
+    } else if (r.verdict === 'rojo') {
+      lineas.push(
+        '',
+        `**Esperado:** ${r.expected}`,
+        `**Real:** ${r.actual}`,
+        `**Cómo reproducirlo:** ${r.repro}`,
+        `**Por qué no cuenta:** ${r.refuted_by}`,
+      )
+    } else {
+      lineas.push('', `**Motivo:** ${r.reason}`, `**Para desbloquear:** ${r.unblock}`)
+    }
+    return lineas.join('\n')
+  }
+  const md = [`# E2E — issue #${issue}`, ...runs.map(seccionDe), ''].join('\n\n')
+  const ruta = join('docs', 'superpowers', 'e2e', `${issue}.md`)
+  mkdirSync(join(repoRoot, 'docs', 'superpowers', 'e2e'), { recursive: true })
+  writeFileSync(join(repoRoot, ruta), md)
+  // `allowFail`, mismo motivo que el veredicto y la telemetría: un repo que
+  // gitignora `docs/` no puede dejar el run atascado por un `git add` que
+  // lanza. El informe queda escrito en el árbol aunque no viaje en el commit;
+  // lo que se pierde se avisa, no se calla.
+  if (git(['add', '--', ruta], { allowFail: true }) === null) {
+    err(`aviso: el informe de e2e se escribió en ${ruta} pero NO se pudo stagear, así que no viajará en la pull request (¿la ruta está gitignoreada en este repo?).`)
+  }
+  return ruta
+}
+
+function verboE2e() {
+  const { valor, why: porLeer } = leerJson(process.argv[3], 'del informe de e2e')
+  const { outcome, runs, why } = porLeer
+    ? { outcome: OUTCOMES.DISCARDED, why: porLeer }
+    : readE2eReport(valor, run.e2eRuns)
+  medir('e2e', {
+    outcome,
+    runs: runs ? runs.length : 0,
+    red: runs ? runs.filter((r) => r.verdict === 'rojo').length : 0,
+    unverified: runs ? runs.filter((r) => r.verdict === 'no-verificado').length : 0,
+    why: why || null,
+  })
+  if (outcome === OUTCOMES.DISCARDED) {
+    out(`informe de e2e descartado: ${why}`)
+    return outcome
+  }
+  escribirInformeE2e(runs)
+  // El veredicto de cada recorrido se PERSISTE en el run. Hasta la review
+  // final de rama, `run-<issue>.json` guardaba sólo los NOMBRES (`e2eRuns`,
+  // los sembrados), así que la puerta 8 de `dispatch-check --release` no podía
+  // distinguir un slice verde de otro cuyos recorridos fueron todos
+  // "no-verificado" — y tres textos (este fichero, gates.js#GATES.e2e.issue y
+  // el §3.7 del diseño) prometían que --release "lo dice". *No-verificado* es
+  // el estado que libera un slice SIN haberlo verificado: que sea silencioso
+  // en la puerta es lo contrario de la doctrina de esta rama, "un límite dicho
+  // es operable".
+  //
+  // La forma es la mínima que sostiene ese aviso: recorrido -> veredicto, más
+  // el `reason` cuando lo hay (sólo el *no-verificado* lo lleva). Ni la
+  // evidencia ni los cuatro campos del rojo: eso ya está entero en
+  // `docs/superpowers/e2e/<issue>.md`, que sí viaja en la pull request.
+  // `deliveredRun` no se entera de nada: lee `issue` y `closed`, y un campo
+  // más en el JSON no le cambia ninguna respuesta.
+  run = {
+    ...run,
+    // `reason` sólo cuando lo hay: `readE2eReport` ya ha exigido que sea texto
+    // no vacío en el único veredicto que lo lleva (*no-verificado*), así que
+    // aquí basta con mirar si está.
+    e2eResults: runs.map((r) => (r.reason ? { run: r.run, verdict: r.verdict, reason: r.reason } : { run: r.run, verdict: r.verdict })),
+  }
+  for (const r of runs) out(`${r.verdict}: ${r.run}`)
+  return outcome
+}
+
+// Comitea el informe de e2e que `escribirInformeE2e` dejó STAGEADO. No se hace
+// desde allí: comitear pertenece al momento en que se sabe si el run CIERRA,
+// no a cuando el fichero se escribe, y eso sólo se sabe después de aplicar la
+// transición. Por eso quien llama a esto es el despacho final, no `verboE2e`.
+//
+// SÓLO en DELIVERED (verde, o verde con algún no-verificado): en BLOCKED_E2E
+// (rojo) el run NO cierra, así que `.agent/run-<issue>.json` se vuelve a
+// cargar en el próximo intento — y ahí la invariante de commits compara
+// `hechos` contra `esperados` (`tasksTotal` en el paso `e2e`, ver la rama de
+// arriba). Un commit de más aquí haría `hechos > esperados` y tumbaría ESE
+// intento con PRECONDITION antes de que nadie llegara a arreglar el rojo. En
+// DELIVERED el run no se vuelve a cargar nunca (el guard `closed ===
+// DELIVERED` de la carga del estado contesta y sale ANTES del cruce de
+// commits), así que comitear ahí no rompe ninguna cuenta futura. El informe
+// del camino rojo se queda stageado a propósito: es la prueba de que está
+// esperando a quien arregle el fallo.
+function comprometerInformeE2e() {
+  const ruta = join('docs', 'superpowers', 'e2e', `${issue}.md`)
+  // No cierra el issue: es el informe de la travesía, no el trabajo que la
+  // cierra, así que el mensaje no lleva ninguna closing keyword — y se
+  // comprueba, con el mismo mecanismo que `commitMessage` (step-contracts.js),
+  // porque el hook `commit-keyword-guard` es un PreToolUse sobre la Bash de
+  // una SESIÓN: un `git commit` lanzado por este programa no pasa por esa
+  // puerta, así que si el programa no se mira el mensaje, nadie lo hace.
+  // Sin prefijo de conventional commits ("docs:", "feat:"): ésa es la
+  // convención de los commits HUMANOS de este propio repo (ver `git log`),
+  // no la de los que emite el programa dentro de una slice — `commitMessage`
+  // (step-contracts.js), que comitea cada tarea, tampoco lo usa. Mismo estilo
+  // que aquél: título descriptivo + cuerpo con el porqué + coautoría.
+  const mensaje = `informe de e2e del issue #${issue}
+
+Generado por ct-step tras el paso e2e de la slice. No cierra el issue.
+
+Co-Authored-By: Claude <noreply@anthropic.com>`
+  // El MISMO cuidado que en el veredicto del slice y por el mismo motivo: este
+  // `git commit` tampoco lleva pathspec. Medido igual (`git add colado.txt` antes
+  // de `ct-step e2e` y el fichero acabó dentro del commit del informe). Va antes
+  // de la guarda de las closing keywords porque primero se decide QUÉ entra en el
+  // repo y después cómo se rotula.
+  const ajeno = ajenoEnElIndice([ruta])
+  if (ajeno.length) {
+    err(`aviso: el índice traía ${ajeno.length} ruta(s) ajenas a la maquinaria (${ajeno.join(', ')}) y este commit se las llevaría dentro sin que ningún juez las haya visto — el informe de e2e (${ruta}) queda STAGEADO y sin comitear. Saca lo ajeno del índice ("git restore --staged ${ajeno[0]}", que no toca tu worktree) y comitéalo a mano antes de abrir la pull request.`)
+    return
+  }
+  const keywords = findClosingKeywords(mensaje)
+  if (keywords.length) {
+    err(`aviso: el mensaje del commit del informe de e2e contiene una closing keyword (${keywords.map((k) => `${k.keyword} ${k.ref}`).join(', ')}) y cerraría el issue sin que nadie lo haya decidido — NO se comitea. El informe (${ruta}) queda stageado.`)
+    return
+  }
+  // `allowFail`, mismo criterio que el resto de commits de artefactos de este
+  // programa (veredicto, telemetría): no comitear no puede tumbar un run ya
+  // ENTREGADO, así que se avisa y el fichero se queda stageado en vez de
+  // perderse.
+  if (git(['commit', '-m', mensaje], { allowFail: true }) === null) {
+    err(`aviso: el informe de e2e (${ruta}) quedó stageado pero NO se pudo comitear — revísalo a mano antes de abrir la pull request.`)
+    return
+  }
+  out(`informe de e2e comiteado: ${ruta}`)
+}
+
 // ---------------------------------------------------------------------------
 // Aplicar el resultado a la tabla, y decir qué toca ahora.
 // ---------------------------------------------------------------------------
@@ -948,7 +1521,7 @@ try {
   exigirPaso(verbo)
   const outcome = {
     report: verboReport, controls: verboControls, verdict: verboVerdict, commit: verboCommit,
-    global: verboGlobal, 'slice-verdict': verboSliceVerdict,
+    global: verboGlobal, 'slice-verdict': verboSliceVerdict, e2e: verboE2e,
   }[verbo]()
 
   if (run.discards >= MAX_DISCARDS && outcome === OUTCOMES.DISCARDED) {
@@ -965,6 +1538,14 @@ try {
   // ct-step del gate.
   if (transicion.state === RUN_STATES.DELIVERED) run = { ...run, closed: RUN_STATES.DELIVERED }
   guardar()
+
+  // El informe de e2e se comitea AQUÍ, tras persistir el estado y sólo si el
+  // verbo que se acaba de aplicar fue `e2e` y la transición cerró el run en
+  // DELIVERED — ver el comentario de `comprometerInformeE2e` para el porqué
+  // de esa condición exacta (y de por qué el camino rojo NO comitea nada).
+  if (verbo === 'e2e' && transicion.state === RUN_STATES.DELIVERED) {
+    comprometerInformeE2e()
+  }
 
   if (transicion.state === RUN_STATES.OPEN) {
     out('')
@@ -1001,6 +1582,7 @@ function codigoDe(estado, paso, outcome) {
     // §3.7-B: el veto del juez de slice es un veto, el mismo código que el del
     // juez de tarea — el descarte nunca cierra por aquí (vuelve a preguntar).
     case RUN_STATES.BLOCKED_SLICE_JUDGE: return EXIT.VETOED
+    case RUN_STATES.BLOCKED_E2E: return EXIT.E2E_RED
     case RUN_STATES.ABORTED_BUDGET: return EXIT.UNNAMED // aquí nadie mide dinero
     default: return EXIT.UNNAMED
   }

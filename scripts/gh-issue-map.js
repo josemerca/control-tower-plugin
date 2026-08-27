@@ -539,6 +539,49 @@ export function extractAc(body) {
     .filter((l) => l && l !== '(rellenar desde el spec)')
 }
 
+// E2E_HEADING (TAREA 9): la sección de recorridos del cuerpo del issue.
+// Vive AQUÍ, junto a sus hermanas AC_HEADING_FORMS/DEPS_HEADING (arriba), y
+// no en groom.js: este fichero ya es quien centraliza las cabeceras que
+// tanto ESCRIBE groom.js#buildIssueBody como LEE el dispatcher real
+// (mapGhIssue, más abajo) — la dependencia siempre corrió en esa dirección
+// (groom.js importa `locateSection`/`unterminatedDelimiter`/`normalizeToLF`
+// DE AQUÍ). Definirla en groom.js y re-importarla habría cerrado un ciclo
+// entre los dos módulos por una constante de texto; groom.js la importa de
+// vuelta y la re-exporta, para no mover el import de sus otros dos
+// consumidores (reconcile.js y los tests).
+export const E2E_HEADING = '## E2E'
+
+// extractE2eRuns (TAREA 9): los recorridos de la sección "## E2E" del issue,
+// con el MISMO patrón que extractAc — `extractSectionContent`
+// (locateSection por debajo), no un parser nuevo, y las líneas "- <recorrido>"
+// leídas VERBATIM (groom.js#renderE2eContent las escribió así a propósito,
+// para que el informe del gate pueda citarlas tal cual).
+//
+// El dispatcher (/ct-next) reconstruye el slice DESDE EL ISSUE — nunca abre
+// el spec — así que esta es la ÚNICA vía por la que `slice.e2eRuns` llega
+// poblado en el camino real de despacho; `resolveE2e(slice.e2e)` (gates.js)
+// sigue siendo el camino de /ct-groom, que sí tiene la celda cruda de la
+// tabla §9.
+//
+// `groom.js#buildIssueBody` omite la sección ENTERA cuando no hay ningún
+// recorrido (a diferencia de "## Gates", que siempre se emite) — así que su
+// ausencia es indistinguible de "cero recorridos", y las dos dan `[]`, nunca
+// `undefined`: un slice sin e2e tiene que decir "sin e2e" con un dato, no
+// con un campo que falta.
+// Exportada (Task 10): `dispatch-check.mjs#--release` la reutiliza para la
+// puerta F-e2e (exit 8) — la misma función que usa `/ct-next` para sembrar
+// el worktree, así que las dos lecturas de la sección "## E2E" nunca pueden
+// discrepar entre sí por un parseo distinto.
+export function extractE2eRuns(body) {
+  const section = extractSectionContent(body, E2E_HEADING)
+  if (section == null) return []
+  return section.split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.startsWith('- '))
+    .map((l) => l.slice(2).trim())
+    .filter(Boolean)
+}
+
 // extractDeps: lee TODAS las referencias `merge-after #N` de la cadena que
 // se le pase, sin anclarse a ninguna sección por sí misma — el ALCANCE (todo
 // el body, o solo el contenido de una sección) lo decide el llamador. Sigue
@@ -823,6 +866,10 @@ export function mapGhIssue(i) {
     // '' para que buildStateSeed (kickoff.js) pueda declarar la ausencia con
     // SENAL_AUSENTE sin distinguir dos formas de "nada".
     senal: extractSenal(body) || null,
+    // e2eRuns (TAREA 9): ver extractE2eRuns arriba. Es lo que
+    // kickoff.js#resolveE2eRunsForAgent consume para sembrar el campo `e2e`
+    // de .agent/SLICE.md y para nombrar los recorridos en el kickoff.
+    e2eRuns: extractE2eRuns(body),
     issue: `#${i.number}`,
   }
 }

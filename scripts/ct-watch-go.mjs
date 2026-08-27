@@ -62,11 +62,10 @@
 // ============================================================================
 
 import { execFileSync } from 'node:child_process'
-import { mkdirSync, openSync, writeSync, closeSync } from 'node:fs'
-import { dirname } from 'node:path'
 import { hasGo, commentIds, GO_TOKEN } from './go-response.js'
 import { buildCmuxSendArgv, buildCmuxSendKeyArgv } from './dispatch.js'
-import { parseStrictInt } from './argnum.js'
+import { findWorkspaceByTitle } from './cmux.js'
+import { arg, sleep, plazo, abrirLog } from './watch-common.js'
 
 // 30 segundos, el mismo tick con el que agentic-skills sondea a una persona. Y
 // 8 horas de plazo, que es su `person_wait_seconds`: el número sale de que el
@@ -80,59 +79,35 @@ const DEFAULT_TIMEOUT_MS = 8 * 60 * 60 * 1000
 const GH_TIMEOUT_MS = 30_000
 const CMUX_TIMEOUT_MS = 10_000
 
-const arg = (nombre) => {
-  const i = process.argv.indexOf(nombre)
-  return i === -1 ? null : process.argv[i + 1] ?? null
-}
-
-const issue = arg('--issue')
-const repo = arg('--repo')
-const sesion = arg('--session')
-const logPath = arg('--log')
+const issue = arg(process.argv, '--issue')
+const repo = arg(process.argv, '--repo')
+const sesion = arg(process.argv, '--session')
+const logPath = arg(process.argv, '--log')
+// EL COMPROMISO ENTRA POR ARGV, Y EL NONCE NO ENTRA NUNCA (F38). Este proceso
+// corre desprendido y su argv lo enseña `ps` a cualquier proceso del mismo uid
+// —el agente incluido—, igual que su log es un fichero legible. Así que lo que
+// viaja hasta aquí es el sha256 del go, que a quien lo lee no le sirve de nada:
+// el nonce sólo existe en la pantalla de quien despachó y en la cabeza de quien
+// lo teclea.
+//
+// SIN COMPROMISO NO SE VIGILA. Se sale con 2 en vez de caer al `-OK` desnudo de
+// ayer: un vigilante que reconociera el token fijo sería una puerta que se abre
+// OMITIENDO un argumento, y el agente que quisiera saltarse el gate sólo tendría
+// que relanzar el vigilante él. Un vigilante que no arranca lo nota la persona
+// que espera —va a mirar—; uno que arranca con la puerta vieja no lo nota nadie.
+const goHash = (arg(process.argv, '--go-hash') || '').trim().toLowerCase()
 if (!issue || !repo || !sesion) {
-  process.stderr.write('uso: ct-watch-go.mjs --issue N --repo owner/name --session "<título de la workspace>" [--log <ruta>]\n')
+  process.stderr.write('uso: ct-watch-go.mjs --issue N --repo owner/name --session "<título de la workspace>" --go-hash <sha256 del go> [--log <ruta>]\n')
+  process.exit(2)
+}
+if (!/^[0-9a-f]{64}$/.test(goHash)) {
+  process.stderr.write(`--go-hash inválido o ausente${goHash ? `: "${goHash}"` : ''} — debe ser el sha256 hex (64 caracteres) del go de ESTE despacho, el que /ct-next registró al lanzar. Sin él este vigilante no sabría qué reconocer, y NO cae al \`${GO_TOKEN}\` sin nonce a propósito: esa puerta la abriría el propio agente.\n`)
   process.exit(2)
 }
 
-// El log, si se pide. Que no se pueda abrir NO impide vigilar: perder el rastro
-// es peor que no tenerlo, pero mucho menos malo que perder el go.
-let logFd = null
-if (logPath) {
-  try {
-    mkdirSync(dirname(logPath), { recursive: true })
-    logFd = openSync(logPath, 'a')
-  } catch (e) {
-    process.stderr.write(`aviso: no se pudo abrir el log ${logPath} (${e.message}) — se vigila igual, sin rastro en disco\n`)
-  }
-}
-const log = (msg) => {
-  const linea = `${new Date().toISOString()} ${msg}\n`
-  if (logFd !== null) { try { writeSync(logFd, linea) } catch { /* el rastro se pierde, la vigilancia no */ } }
-  process.stdout.write(linea)
-}
-const terminar = (codigo) => {
-  if (logFd !== null) { try { closeSync(logFd) } catch { /* ya está */ } }
-  process.exit(codigo)
-}
-
-// Los dos plazos se pueden ajustar por entorno, con el mismo criterio que
-// CT_NEXT_LAUNCH_TIMEOUT_MS: un valor que no se entiende ABORTA en vez de caer
-// al defecto en silencio, porque un plazo mal escrito cambia lo que este
-// proceso significa y no querrías descubrirlo ocho horas después.
-function plazo(nombre, defecto) {
-  const raw = process.env[nombre]
-  if (raw == null || raw === '') return defecto
-  const v = parseStrictInt(raw)
-  if (v == null || v <= 0) {
-    process.stderr.write(`${nombre} inválido: "${raw}" — debe ser un número de milisegundos mayor que 0.\n`)
-    process.exit(2)
-  }
-  return v
-}
+const { log, terminar } = abrirLog(logPath)
 const pollMs = plazo('CT_WATCH_GO_POLL_MS', DEFAULT_POLL_MS)
 const timeoutMs = plazo('CT_WATCH_GO_TIMEOUT_MS', DEFAULT_TIMEOUT_MS)
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 function leerComentarios() {
   try {
@@ -164,32 +139,26 @@ function leerComentarios() {
 // vigilancia de ocho horas en el único instante que importaba, y encima
 // diagnosticaba "no se encontró la sesión" cuando la sesión estaba ahí. Lo cazó
 // una revisión adversarial.
+//
+// LA BÚSQUEDA VIVE EN scripts/cmux.js desde esta ronda, y con ella llega una
+// guarda que este fichero no tenía: si cmux renombrara `custom_title`, la
+// lectura cruda de antes no casaba con nada, devolvía `consultado: true, ref:
+// null` — «cmux contestó y la sesión no está»— y este vigilante se apagaba con
+// exit 4 declarando muerta una sesión que estaba ahí delante, tirando el go de
+// esa persona. `ct-next.mjs` ya se había peleado con esto (D5, hallazgo B) y su
+// conclusión es la que ahora aplica también aquí: un campo cuyo esquema no
+// reconocemos degrada a NO CONCLUYENTE, jamás a "verificado que no está".
 function consultarSesion() {
-  try {
-    const windows = JSON.parse(execFileSync('cmux', ['list-windows', '--json'], {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: CMUX_TIMEOUT_MS, killSignal: 'SIGKILL',
-    }))
-    for (const w of Array.isArray(windows) ? windows : []) {
-      if (!w?.id) continue
-      const parsed = JSON.parse(execFileSync('cmux', ['workspace', 'list', '--window', w.id, '--json'], {
-        encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: CMUX_TIMEOUT_MS, killSignal: 'SIGKILL',
-      }))
-      for (const ws of Array.isArray(parsed?.workspaces) ? parsed.workspaces : []) {
-        if (ws?.custom_title === sesion && typeof ws.ref === 'string') return { consultado: true, ref: ws.ref }
-      }
-    }
-    return { consultado: true, ref: null }
-  } catch (e) {
-    log(`aviso: no se pudo consultar cmux (${String(e.message).trim()})`)
-    return { consultado: false, ref: null }
-  }
+  const r = findWorkspaceByTitle(sesion, { timeoutMs: CMUX_TIMEOUT_MS })
+  if (!r.consultado) log('aviso: no se pudo consultar cmux (o su respuesta no trae el campo del título que este plugin sabe leer)')
+  return r
 }
 
 // La línea que se teclea en la sesión del slice. `send` no añade Enter: hay que
 // mandarlo aparte, medido en F20/H1.
 const LINEA = `El humano ha respondido ${GO_TOKEN} en el issue #${issue}: el gate \`plan\` queda cerrado. Continúa con ct-step next.`
 
-log(`vigilando el ${GO_TOKEN} de ${repo}#${issue} para la sesión "${sesion}" — tick ${pollMs} ms, plazo ${timeoutMs} ms`)
+log(`vigilando el ${GO_TOKEN} de ${repo}#${issue} para la sesión "${sesion}" — tick ${pollMs} ms, plazo ${timeoutMs} ms, go ${goHash.slice(0, 12)}…`)
 
 // ---------------------------------------------------------------------------
 // LA FOTO INICIAL. La ventana son los comentarios que YA ESTABAN (ver
@@ -215,7 +184,7 @@ log(`foto inicial: ${previos.size} comentario(s) ya presentes, que no cuentan co
 
 for (;;) {
   const comentarios = leerComentarios()
-  if (comentarios && hasGo(comentarios, previos)) {
+  if (comentarios && hasGo(comentarios, previos, goHash)) {
     log(`${GO_TOKEN} visto en ${repo}#${issue}`)
     const { consultado, ref } = consultarSesion()
     if (ref) {
@@ -275,7 +244,7 @@ for (;;) {
     terminar(4)
   }
   if (Date.now() >= limite) {
-    log(`plazo agotado sin ver ningún ${GO_TOKEN} en ${repo}#${issue}. La sesión sigue parada en el gate: dale el go en el issue y empújala a mano, o vuelve a lanzar este vigilante.`)
+    log(`plazo agotado sin ver ningún ${GO_TOKEN} válido en ${repo}#${issue}. La sesión sigue parada en el gate: dale el go en el issue y empújala a mano, o vuelve a lanzar este vigilante.`)
     terminar(3)
   }
   await sleep(Math.min(pollMs, Math.max(0, limite - Date.now())))
