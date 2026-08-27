@@ -69,7 +69,7 @@ import {
   readSliceVerdict, outcomeOfSliceVerdict, sliceVerdictCommitMessage,
   SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS,
 } from './step-contracts.js'
-import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, metricsRepoRelPath } from './run-metrics.js'
+import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, metricsRepoRelPath, briefVaraCtMeasures } from './run-metrics.js'
 // Slice 10: parseStateSafe lee el campo `senal:` del SLICE.md (ver
 // senalDelSlice, abajo, para por qué NO vale la regex de `epic:`), y
 // SENAL_AUSENTE es la constante ÚNICA con la que los dos escritores del canal
@@ -612,6 +612,25 @@ function leerJson(ruta, quien) {
   }
 }
 
+// Si la vara de ct llegó al brief, y cuánto pesó — medido sobre el BRIEF QUE HAY
+// EN DISCO, no sobre lo que `escribirBrief` pretendía escribir: esa función
+// corrió en una invocación ANTERIOR del proceso (la de `ct-step next`), así que
+// aquí no hay nada en memoria que arrastrar, y medir el artefacto que existe de
+// verdad es mejor instrumentación que medir una ruta de código. La ruta se
+// deriva IGUAL que en `escribirBrief`.
+//
+// Si el brief no se puede leer, los dos campos van a `null`, nunca a `0`: un
+// cero afirmaría un brief sin vara, y lo que ha pasado es que no se ha podido
+// mirar.
+function medidaDeBrief() {
+  try {
+    const brief = join(workDir, `task-${run.task}-brief.md`)
+    return briefVaraCtMeasures(readFileSync(brief, 'utf8'))
+  } catch {
+    return { brief_vara_ct_docs: null, brief_bytes: null }
+  }
+}
+
 function verboReport() {
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del informe')
   const { report, why } = porLeer ? { why: porLeer } : readReport(valor)
@@ -623,6 +642,7 @@ function verboReport() {
     paths: report ? report.paths.length : 0,
     why: report ? null : why,
     summary: report ? report.summary : null,
+    ...medidaDeBrief(),
   })
   if (!report) {
     out(`informe descartado: ${why}`)

@@ -15,7 +15,7 @@ import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   metricRow, metricLine, metricsPath, planSha256, verdictMeasures, IDENTITY_FIELDS, aggregateVerdictMeasures,
-  metricsRepoRelPath, METRICS_REPO_DIR, citaVaraDeCt,
+  metricsRepoRelPath, METRICS_REPO_DIR, citaVaraDeCt, briefVaraCtMeasures, aggregateBriefMeasures,
 } from '../scripts/run-metrics.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -437,6 +437,121 @@ describe('el agregado de lo que el juez dejó escrito (§3.4)', () => {
 })
 
 // ---------------------------------------------------------------------------
+// MEDIDA 2: si la vara llegó al brief, y cuánto pesó. `briefVaraCtMeasures` es
+// PURA (no lee disco: recibe el contenido ya leído) y cuenta cabeceras
+// `## Vara de ct: conventions/` — exactamente lo que `seccionDeVaraDeCt`
+// (scripts/vara-ct.js) escribe por documento — en vez de comparar contra
+// `CONVENTIONS_FILES.length`, para que un quinto documento de mañana también
+// cuente sin tocar esta función.
+// ---------------------------------------------------------------------------
+describe('briefVaraCtMeasures — cuántos documentos trae el brief y cuánto pesa', () => {
+  const brief = (docs) => [
+    '# Task 1',
+    '',
+    'texto de la tarea',
+    '',
+    ...docs.flatMap((d) => [`## Vara de ct: conventions/${d}`, '', 'cuerpo del documento', '']),
+  ].join('\n')
+
+  it('cuenta las cuatro cabeceras de hoy', () => {
+    const contenido = brief(['code.md', 'decisions.md', 'architecture.md', 'testing.md'])
+    expect(briefVaraCtMeasures(contenido).brief_vara_ct_docs).toBe(4)
+  })
+
+  it('no depende de los nombres de hoy: un quinto documento también se cuenta', () => {
+    const contenido = brief(['code.md', 'decisions.md', 'architecture.md', 'testing.md', 'naming.md'])
+    expect(briefVaraCtMeasures(contenido).brief_vara_ct_docs).toBe(5)
+  })
+
+  it('un brief sin ninguna cabecera cuenta cero, y es un cero real: sí se pudo medir', () => {
+    expect(briefVaraCtMeasures('# Task 1\n\nsin vara de ct por aquí\n').brief_vara_ct_docs).toBe(0)
+  })
+
+  it('pesa el brief en bytes, no en caracteres — UTF-8 de verdad', () => {
+    const conAcentos = '## Vara de ct: conventions/code.md\ncondición, año, ñ\n'
+    const { brief_bytes: bytes } = briefVaraCtMeasures(conAcentos)
+    expect(bytes).toBe(Buffer.byteLength(conAcentos, 'utf8'))
+    expect(bytes).toBeGreaterThan(conAcentos.length) // los acentos pesan más de 1 byte
+  })
+})
+
+describe('aggregateBriefMeasures — el lector de lo que el brief midió, hermano de aggregateVerdictMeasures', () => {
+  const intento = (measures) => metricLine(metricRow({ ...IDENT, step: 'implement' }, measures, { now: AHORA }))
+  const otroPaso = (step, measures) => metricLine(metricRow({ ...IDENT, step }, measures, { now: AHORA }))
+
+  it('suma docs y bytes de todos los intentos de implement del fichero', () => {
+    const texto = [
+      intento({ outcome: 'done', brief_vara_ct_docs: 4, brief_bytes: 500 }),
+      intento({ outcome: 'done', brief_vara_ct_docs: 4, brief_bytes: 520 }),
+    ].join('')
+    const r = aggregateBriefMeasures(texto)
+    expect(r.briefAttempts).toBe(2)
+    expect(r.briefMeasured).toBe(2)
+    expect(r.briefLegacy).toBe(0)
+    expect(r.briefVaraCtDocs).toBe(8)
+    expect(r.briefBytes).toBe(1020)
+  })
+
+  // ESTAS FILAS NO LLEVAN `ruling`: es justo por lo que aggregateVerdictMeasures
+  // las ignora por diseño (tolerancia nº3 de aquí arriba), y por lo que hace
+  // falta un agregador propio y no reutilizar aquél.
+  it('las filas de judge/controls/commit no entran en la cuenta de intentos de brief', () => {
+    const texto = [
+      otroPaso('judge', { ruling: 'PASS', rubric_sin_vara: 0 }),
+      otroPaso('controls', { outcome: 'done' }),
+      otroPaso('commit', { outcome: 'done' }),
+      intento({ outcome: 'done', brief_vara_ct_docs: 4, brief_bytes: 500 }),
+    ].join('')
+    expect(aggregateBriefMeasures(texto).briefAttempts).toBe(1)
+  })
+
+  // LA REGLA DEL FICHERO: una fila sin el campo (telemetría anterior a esta
+  // medida, o un intento en el que el brief no se pudo leer) NO cuenta como
+  // cero.
+  it('una fila anterior a la medida, o con el brief sin leer (null), cuenta como vieja y NO como cero', () => {
+    const texto = [
+      intento({ outcome: 'done', brief_vara_ct_docs: 4, brief_bytes: 500 }),
+      intento({ outcome: 'done' }), // esquema viejo: sin los dos campos
+      intento({ outcome: 'discarded', brief_vara_ct_docs: null, brief_bytes: null }), // brief no se pudo leer
+    ].join('')
+    const r = aggregateBriefMeasures(texto)
+    expect(r.briefAttempts).toBe(3)
+    expect(r.briefMeasured).toBe(1)
+    expect(r.briefLegacy).toBe(2)
+    expect(r.briefVaraCtDocs).toBe(4)
+  })
+
+  it('si ningún intento trae la columna, briefVaraCtDocs y briefBytes son null y no 0', () => {
+    const texto = [intento({ outcome: 'done' }), intento({ outcome: 'discarded' })].join('')
+    const r = aggregateBriefMeasures(texto)
+    expect(r.briefVaraCtDocs).toBeNull()
+    expect(r.briefBytes).toBeNull()
+    expect(r.briefLegacy).toBe(2)
+  })
+
+  it('un brief con cero documentos (roto de verdad) se suma como el cero que es: no se confunde con "sin medir"', () => {
+    const texto = intento({ outcome: 'done', brief_vara_ct_docs: 0, brief_bytes: 40 })
+    const r = aggregateBriefMeasures(texto)
+    expect(r.briefMeasured).toBe(1)
+    expect(r.briefVaraCtDocs).toBe(0)
+  })
+
+  it('un fichero vacío no revienta y no afirma nada', () => {
+    for (const vacio of ['', undefined]) {
+      expect(aggregateBriefMeasures(vacio)).toEqual({
+        briefAttempts: 0, briefMeasured: 0, briefLegacy: 0, briefVaraCtDocs: null, briefBytes: null,
+      })
+    }
+  })
+
+  it('una línea ilegible no revienta al agregador', () => {
+    const texto = [intento({ outcome: 'done', brief_vara_ct_docs: 4, brief_bytes: 500 }), '{no es json\n'].join('')
+    expect(() => aggregateBriefMeasures(texto)).not.toThrow()
+    expect(aggregateBriefMeasures(texto).briefAttempts).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // Y contra el oráculo de verdad: que las filas salen, y —lo que de verdad hay
 // que fijar— que NO salir no cambia lo que hace el paso. Un programa que muere
 // porque no pudo escribir su propia métrica ha convertido el termómetro en parte
@@ -520,5 +635,36 @@ describe('la telemetría de un paso real', () => {
     expect(r.stderr).toMatch(/no se pudo escribir la telemetría/)
     // La transición se guardó: la medida no decide nada.
     expect(JSON.parse(readFileSync(join(repo, '.agent', 'run-7.json'), 'utf8')).step).toBe('controls')
+  })
+
+  // MEDIDA 2 contra el oráculo de verdad: `ct-step next` escribe el brief REAL
+  // en disco (con la vara de ct del plugin pegada por `escribirBrief`), y
+  // `ct-step report` lo mide leyendo exactamente esa ruta.
+  it('si el brief llegó a disco, la fila cuenta sus documentos de vara de ct y su peso', () => {
+    const n = ct(casa, 'next')
+    expect(n.status).toBe(0)
+    const r = ct(casa, 'report', 'report.json')
+    expect(r.status).toBe(0)
+    const filas = readFileSync(join(casa, 'control-tower', 'log', 'ct-step.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l))
+    const f = filas[0]
+    // Los cuatro documentos de conventions/ del plugin, contados por cabecera:
+    // no por comparar contra CONVENTIONS_FILES.length.
+    expect(f.brief_vara_ct_docs).toBe(4)
+    expect(typeof f.brief_bytes).toBe('number')
+    expect(f.brief_bytes).toBeGreaterThan(0)
+  })
+
+  // Si nadie llamó a `next`, el brief no existe en disco: los dos campos van a
+  // `null`, nunca a `0` — un cero afirmaría un brief sin vara, y lo que pasó es
+  // que no se pudo mirar.
+  it('si el brief no se puede leer, los dos campos van a null, no a 0', () => {
+    const r = ct(casa, 'report', 'report.json')
+    expect(r.status).toBe(0)
+    const filas = readFileSync(join(casa, 'control-tower', 'log', 'ct-step.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l))
+    const f = filas[0]
+    expect(f.brief_vara_ct_docs).toBeNull()
+    expect(f.brief_bytes).toBeNull()
   })
 })
