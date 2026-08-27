@@ -24,13 +24,13 @@ describe('la semilla lleva los recorridos', () => {
   })
 
   it('el kickoff nombra los recorridos y manda cerrarlos con ct-step e2e', () => {
-    const k = renderKickoff(slice('curl -i :9115/metrics responde 200'), { repo: 'o/r', dispatchCheckPath: 'd.mjs', base: 'main' })
+    const k = renderKickoff(slice('curl -i :9115/metrics responde 200'), { repo: 'o/r', dispatchCheckPath: 'd.mjs', base: 'main' , conventionsDir: '/plugin/conventions' })
     expect(k).toContain('curl -i :9115/metrics responde 200')
     expect(k).toMatch(/ct-step e2e/)
   })
 
   it('sin recorridos, el kickoff no habla de e2e', () => {
-    const k = renderKickoff(slice('no'), { repo: 'o/r', dispatchCheckPath: 'd.mjs', base: 'main' })
+    const k = renderKickoff(slice('no'), { repo: 'o/r', dispatchCheckPath: 'd.mjs', base: 'main' , conventionsDir: '/plugin/conventions' })
     expect(k).not.toMatch(/ct-step e2e/)
   })
 })

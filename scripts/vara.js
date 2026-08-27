@@ -35,9 +35,10 @@ export const CONVENTIONS_FILE = '.agent/conventions.md'
 // `contenido` es lo que hay HOY en `.agent/conventions.md` (o null/undefined si
 // el llamador no llegó a leerlo). Una declaración en blanco (fichero vacío o
 // solo espacios) no es vara — es el mismo estado que "el fichero no existe": el
-// llamador no escribe nada al brief en ese caso, y el juez sigue midiendo ese
-// ítem `sin-vara` en vez de `conforme` (F14: la ausencia se mide, no se
-// rellena).
+// llamador no escribe nada al brief en ese caso, y el diff se mide sólo contra
+// la vara de ct (agents/ct-judge.md, ítem `patrones`: ese ítem nunca es
+// `sin-vara`, porque la de ct viaja con el plugin); la del repo, aquí, no
+// aporta nada (F14: la ausencia se mide, no se rellena).
 export function seccionDeVara(contenido) {
   if (contenido == null || contenido.trim() === '') return ''
   const cuerpo = contenido.endsWith('\n') ? contenido : `${contenido}\n`
@@ -286,8 +287,8 @@ export function formatCandidatos(candidatos, { omitidos = 0, truncated = false }
   if (hayEsqueleto) {
     out.push(
       '  Los marcados `[esqueleto: sólo encabezados]` no traen reglas todavía: declararlos hoy ' +
-        'pondría al juez a medir contra un documento vacío y a devolver `conforme` sin serlo. ' +
-        'La ausencia se mide (`sin-vara`), no se rellena.'
+        'es peor que no declararlos, porque le da al juez un documento vacío que SÍ cuenta como ' +
+        'vara del repo, en vez de dejar que el diff se mida sólo contra la de ct.'
     )
   }
   if (omitidos > 0) {

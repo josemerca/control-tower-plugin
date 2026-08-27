@@ -61,6 +61,7 @@ import { dirname, join } from 'node:path'
 import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS } from './run-machine.js'
 import { extractTasks } from './plan-tasks.js'
 import { CONVENTIONS_FILE, seccionDeVara } from './vara.js'
+import { PluginYardstick } from './plugin-yardstick.js'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage, findingLocation,
   readE2eReport, E2E_SCHEMA,
@@ -69,7 +70,7 @@ import {
   SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS,
   REVIEW_TOKEN_LABEL, reviewToken, reviewTokenLine, reviewTokenOf,
 } from './step-contracts.js'
-import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, metricsRepoRelPath } from './run-metrics.js'
+import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, metricsRepoRelPath, briefVaraCtMeasures } from './run-metrics.js'
 // Slice 10: parseStateSafe lee el campo `senal:` del SLICE.md (ver
 // senalDelSlice, abajo, para por qué NO vale la regex de `epic:`), y
 // SENAL_AUSENTE es la constante ÚNICA con la que los dos escritores del canal
@@ -514,12 +515,30 @@ function verboNext() {
 
 function escribirBrief() {
   const brief = join(workDir, `task-${run.task}-brief.md`)
+  // La vara de CT, comprobada ANTES de construir nada: su ausencia NO es un
+  // estado del repo sino una instalación rota del plugin, de ahí que se aborte
+  // en vez de avisar — lo contrario de lo que se hace con la del repo más abajo.
+  // Un brief sin ella deja al implementador y al juez midiendo con nada, y en
+  // silencio eso no se distingue de un ítem conforme. Y se comprueba antes de
+  // llamar a `task-brief` para no dejar en disco un brief que nadie va a usar.
+  const deCt = PluginYardstick.FILES.map((nombre) => {
+    try {
+      return { name: nombre, content: readFileSync(join(PLUGIN_ROOT, PluginYardstick.DIRECTORY, nombre), 'utf8') }
+    } catch {
+      return { name: nombre, content: null }
+    }
+  })
+  const faltas = PluginYardstick.missingDocuments(deCt)
+  if (faltas.length) {
+    die(`la vara de ct no se puede leer: falta o está vacío ${faltas.join(', ')} en ${join(PLUGIN_ROOT, PluginYardstick.DIRECTORY)}. Es una instalación del plugin incompleta, no una propiedad de este repo: sin esos documentos el implementador escribe y el juez bloquea sin nada contra qué medir, y eso no se distingue en silencio de un diff conforme. Reinstala el plugin.`, EXIT.PRECONDITION)
+  }
   try {
     execFileSync(join(PLUGIN_ROOT, 'skills', 'subagent-driven-development', 'scripts', 'task-brief'),
       ['--with-plan-context', planPath, String(run.task), brief], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   } catch (e) {
     die(`no se pudo extraer el brief de la tarea ${run.task}: ${String(e.stderr || e.message).trim()}`, EXIT.PRECONDITION)
   }
+  appendFileSync(brief, PluginYardstick.composeSection(deCt))
   // §3.3: la vara del repo cruza el embudo AQUÍ, leída directo del disco y sin
   // ningún agente en medio. Su ausencia no avisa: es el estado normal de casi
   // todo repo hoy, y el juez lo mide como `sin-vara`, no como un error.
@@ -733,6 +752,25 @@ function leerJson(ruta, quien) {
   }
 }
 
+// Si la vara de ct llegó al brief, y cuánto pesó — medido sobre el BRIEF QUE HAY
+// EN DISCO, no sobre lo que `escribirBrief` pretendía escribir: esa función
+// corrió en una invocación ANTERIOR del proceso (la de `ct-step next`), así que
+// aquí no hay nada en memoria que arrastrar, y medir el artefacto que existe de
+// verdad es mejor instrumentación que medir una ruta de código. La ruta se
+// deriva IGUAL que en `escribirBrief`.
+//
+// Si el brief no se puede leer, los dos campos van a `null`, nunca a `0`: un
+// cero afirmaría un brief sin vara, y lo que ha pasado es que no se ha podido
+// mirar.
+function medidaDeBrief() {
+  try {
+    const brief = join(workDir, `task-${run.task}-brief.md`)
+    return briefVaraCtMeasures(readFileSync(brief, 'utf8'))
+  } catch {
+    return { brief_vara_ct_docs: null, brief_bytes: null }
+  }
+}
+
 function verboReport() {
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del informe')
   const { report, why } = porLeer ? { why: porLeer } : readReport(valor)
@@ -744,6 +782,7 @@ function verboReport() {
     paths: report ? report.paths.length : 0,
     why: report ? null : why,
     summary: report ? report.summary : null,
+    ...medidaDeBrief(),
   })
   if (!report) {
     out(`informe descartado: ${why}`)

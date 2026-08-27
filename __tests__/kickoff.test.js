@@ -20,7 +20,7 @@ const otrosAddenda = (tipo) =>
 
 describe('renderKickoff', () => {
   it('backend: lleva su addendum y ninguno de los otros', () => {
-    const k = renderKickoff(SLICE, { repo: 'o/r' })
+    const k = renderKickoff(SLICE, { repo: 'o/r' , conventionsDir: '/plugin/conventions' })
     expect(k).toContain('ct-step')
     // F22: el fichero de estado de un agente de slice es `.agent/SLICE.md`.
     // El kickoff SOLO lo recibe un agente de slice, así que nombrar aquí el
@@ -31,19 +31,19 @@ describe('renderKickoff', () => {
     for (const otro of otrosAddenda('backend')) expect(k).not.toContain(otro)
   })
   it('ui: lleva su addendum y ninguno de los otros', () => {
-    const k = renderKickoff({ ...SLICE, type: 'ui' }, { repo: 'o/r' })
+    const k = renderKickoff({ ...SLICE, type: 'ui' }, { repo: 'o/r' , conventionsDir: '/plugin/conventions' })
     expect(k).toContain(ADDENDA.ui)
     expect(k.toLowerCase()).toMatch(/screenshot|design system/)
     for (const otro of otrosAddenda('ui')) expect(k).not.toContain(otro)
   })
   it('infra: lleva su addendum y ninguno de los otros', () => {
-    const k = renderKickoff({ ...SLICE, type: 'infra' }, { repo: 'o/r' })
+    const k = renderKickoff({ ...SLICE, type: 'infra' }, { repo: 'o/r' , conventionsDir: '/plugin/conventions' })
     expect(k).toContain(ADDENDA.infra)
     expect(k.toLowerCase()).toMatch(/dry-run.*plan primero/)
     for (const otro of otrosAddenda('infra')) expect(k).not.toContain(otro)
   })
   it('bugfix: lleva su addendum y ninguno de los otros', () => {
-    const k = renderKickoff({ ...SLICE, type: 'bugfix' }, { repo: 'o/r' })
+    const k = renderKickoff({ ...SLICE, type: 'bugfix' }, { repo: 'o/r' , conventionsDir: '/plugin/conventions' })
     expect(k).toContain(ADDENDA.bugfix)
     expect(k.toLowerCase()).toMatch(/reproduce-first.*test que falla/)
     for (const otro of otrosAddenda('bugfix')) expect(k).not.toContain(otro)
@@ -73,12 +73,12 @@ describe('renderKickoff — instrucción de --release (W-C, fix round 1: ruta re
   const FAKE_DISPATCH_CHECK_PATH = '/plugin/root/scripts/dispatch-check.mjs'
 
   it('incluye el comando literal de dispatch-check --release con la ruta ABSOLUTA real recibida, con issue y repo sustituidos', () => {
-    const k = renderKickoff({ ...SLICE, n: 42 }, { repo: 'o/r', dispatchCheckPath: FAKE_DISPATCH_CHECK_PATH })
+    const k = renderKickoff({ ...SLICE, n: 42 }, { repo: 'o/r', dispatchCheckPath: FAKE_DISPATCH_CHECK_PATH , conventionsDir: '/plugin/conventions' })
     expect(k).toContain(`node ${FAKE_DISPATCH_CHECK_PATH} 42 --repo o/r --release`)
   })
 
   it('NUNCA emite el token ${CLAUDE_PLUGIN_ROOT} sin expandir — no es una env var real del shell de la sesión del agente', () => {
-    const k = renderKickoff({ ...SLICE, n: 7 }, { repo: 'menoplus-app/menoplus', dispatchCheckPath: FAKE_DISPATCH_CHECK_PATH })
+    const k = renderKickoff({ ...SLICE, n: 7 }, { repo: 'menoplus-app/menoplus', dispatchCheckPath: FAKE_DISPATCH_CHECK_PATH , conventionsDir: '/plugin/conventions' })
     expect(k).not.toContain('CLAUDE_PLUGIN_ROOT')
   })
 })
@@ -127,7 +127,7 @@ describe('buildStateSeed', () => {
   })
 
   it('el kickoff le dice al agente cómo marcar un bloqueo, y que NO lo escriba en next_action', () => {
-    const k = renderKickoff(SLICE, { repo: 'o/r', dispatchCheckPath: '/x/d.mjs' })
+    const k = renderKickoff(SLICE, { repo: 'o/r', dispatchCheckPath: '/x/d.mjs' , conventionsDir: '/plugin/conventions' })
     expect(k).toMatch(/`blocked: \{reason:/)
     expect(k).toMatch(/NO en prosa dentro de next_action/)
   })
@@ -219,7 +219,7 @@ describe('buildStateSeed / renderKickoff — issue vs. orden §9 (D4, defecto 4)
     const { meta } = parseState(buildStateSeed({ ...S, order: 47 }, { branch: 'feat/47', base: 'main' }))
     expect(meta.you_are_here).toMatch(/issue #47/)
     expect(meta.you_are_here).not.toMatch(/§9/)
-    const k = renderKickoff({ ...S, order: 47 }, { repo: 'o/r', dispatchCheckPath: '/x/d.mjs' })
+    const k = renderKickoff({ ...S, order: 47 }, { repo: 'o/r', dispatchCheckPath: '/x/d.mjs' , conventionsDir: '/plugin/conventions' })
     expect(k.split('\n')[0]).not.toMatch(/§9/)
   })
 
@@ -230,13 +230,13 @@ describe('buildStateSeed / renderKickoff — issue vs. orden §9 (D4, defecto 4)
   })
 
   it('el kickoff distingue los dos números en la primera línea', () => {
-    const k = renderKickoff(S, { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs' })
+    const k = renderKickoff(S, { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs' , conventionsDir: '/plugin/conventions' })
     expect(k.split('\n')[0]).toMatch(/issue #47/)
     expect(k.split('\n')[0]).toMatch(/#3 de la tabla §9/)
   })
 
   it('sin `issue` pero con `n`, el kickoff NO llama "orden" al número de issue (era el bug simétrico)', () => {
-    const k = renderKickoff({ ...S, issue: null }, { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs' })
+    const k = renderKickoff({ ...S, issue: null }, { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs' , conventionsDir: '/plugin/conventions' })
     expect(k.split('\n')[0]).toMatch(/issue #47/)
     expect(k.split('\n')[0]).not.toMatch(/orden #47/)
   })
@@ -250,7 +250,7 @@ describe('buildStateSeed / renderKickoff — issue vs. orden §9 (D4, defecto 4)
 // con el ISSUE como spec—, y (c) las dos prohibiciones que la costura 3 del
 // fork ya impone pero que no pueden depender de que el agente llegue a leerla.
 describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan primero, prohibiciones)', () => {
-  const OPTS = { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs', ctStepPath: '/x/ct-step.mjs' }
+  const OPTS = { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs', ctStepPath: '/x/ct-step.mjs' , conventionsDir: '/plugin/conventions' }
 
   it('cita los skills PROPIOS (control-tower-loop:*) y ninguna referencia al namespace superpowers:', () => {
     const k = renderKickoff(SLICE, OPTS)
@@ -305,7 +305,7 @@ describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan pri
 // exención o sin declaración no hay nada que exigir (el silencio cuando no
 // hay nada que decir es lo que mantiene útiles a las líneas que sí salen).
 describe('la señal en el despacho (Slice 10)', () => {
-  const OPTS = { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs', ctStepPath: '/x/ct-step.mjs' }
+  const OPTS = { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs', ctStepPath: '/x/ct-step.mjs' , conventionsDir: '/plugin/conventions' }
 
   it('buildStateSeed siembra senal: con el texto del issue, verbatim', () => {
     const seed = buildStateSeed({ ...SLICE, senal: 'métrica `backfill_progress` con label `estado`' }, { branch: 'feat/7', base: 'main' })
@@ -354,5 +354,48 @@ describe('la señal en el despacho (Slice 10)', () => {
     expect(renderKickoff({ ...SLICE, senal: 'N/A — sin telemetría nueva' }, OPTS)).not.toContain('SEÑAL DE OBSERVABILIDAD')
     expect(renderKickoff(SLICE, OPTS)).not.toContain('SEÑAL DE OBSERVABILIDAD')
     expect(renderKickoff({ ...SLICE, senal: '–' }, OPTS)).not.toContain('SEÑAL DE OBSERVABILIDAD')
+  })
+})
+
+// La vara la dicta ct (docs/superpowers/specs/2026-08-26-la-vara-la-dicta-ct-design.md, §7):
+// el brief se construye DESPUÉS del plan, así que pegar la vara de ct sólo ahí
+// deja al implementador entre dos vetos — obedecer `**Files:**` y que el juez le
+// bloquee la forma, o construir la forma y que el control de alcance le vete por
+// tocar rutas que el plan no declaró. Son tres consumidores, no dos. (La del
+// REPO ya llegaba: la skill manda arrancar de `.agent/conventions.md`.)
+describe('el primer acto nombra la vara de ct', () => {
+  const OPTS_CON_VARA = {
+    repo: 'o/r',
+    dispatchCheckPath: '/x/dispatch-check.mjs',
+    ctStepPath: '/x/ct-step.mjs',
+    conventionsDir: '/plugin/conventions',
+  }
+
+  it('manda leerla, y la nombra por su ruta absoluta', () => {
+    const k = renderKickoff(SLICE, OPTS_CON_VARA)
+    expect(k).toMatch(/LEE la vara de ct/)
+    expect(k).toContain('/plugin/conventions')
+  })
+
+  it('la orden cae ANTES de la entrada que manda escribir el plan', () => {
+    // El ancla es esa entrada y no la siguiente: leer la vara después de haber
+    // escrito el plan no sirve de nada, así que un ancla más laxa dejaría pasar
+    // justo la regresión que este test existe para cazar.
+    const k = renderKickoff(SLICE, OPTS_CON_VARA)
+    expect(k.indexOf('/plugin/conventions')).toBeGreaterThan(-1)
+    expect(k.indexOf('/plugin/conventions')).toBeLessThan(k.indexOf('Primer acto'))
+  })
+
+  it('enuncia la precedencia con SUS DOS LADOS: es el único sitio donde la lee quien planifica', () => {
+    // `SKILL.md` ya no la enuncia (el presupuesto de la skill obligó a recortar
+    // la tercera copia), así que este texto es el único que llega a quien escribe
+    // el plan. Un enunciado que sólo dijera "gana ct" le haría anular las
+    // convenciones del repo que ct no toca, que es el fallo contrario.
+    const k = renderKickoff(SLICE, OPTS_CON_VARA)
+    expect(k).toMatch(/preferencia/i)
+    expect(k).toMatch(/regla a regla/i)
+    expect(k).toMatch(/no por tema/i)
+    expect(k).toMatch(/prohíbe lo que uno de esos documentos manda/i)
+    expect(k).toMatch(/obliga entera/i)
   })
 })

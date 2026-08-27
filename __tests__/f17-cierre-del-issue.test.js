@@ -53,7 +53,7 @@ function runNext(args, env = {}) {
 }
 
 const SLICE = { n: 42, order: 3, name: 'refresh token', type: 'backend', ac: ['AC-1'], deps: [], issue: '#42' }
-const OPTS = { repo: 'o/r', dispatchCheckPath: '/plugin/scripts/dispatch-check.mjs', base: 'main' }
+const OPTS = { repo: 'o/r', dispatchCheckPath: '/plugin/scripts/dispatch-check.mjs', base: 'main' , conventionsDir: '/plugin/conventions' }
 
 // ============================================================================
 // H1 — el kickoff tiene que pedir el `Closes #N`.
@@ -134,7 +134,7 @@ describe('F17/H1 — el kickoff nombra la rama base contra la que se abre el PR'
   })
 
   it('sin base, NO se inventa "main": se remite a la rama de la que salió el worktree', () => {
-    const k = renderKickoff(SLICE, { repo: 'o/r', dispatchCheckPath: '/x/d.mjs' })
+    const k = renderKickoff(SLICE, { repo: 'o/r', dispatchCheckPath: '/x/d.mjs' , conventionsDir: '/plugin/conventions' })
     expect(k).not.toMatch(/contra `main`/)
     expect(k).toMatch(/rama base de la que sali[óo] este worktree/i)
     // El `Closes` sigue estando: no depende de conocer la base.

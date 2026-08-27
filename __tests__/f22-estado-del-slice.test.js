@@ -486,7 +486,7 @@ describe('F22 — los mensajes nombran el fichero que se leyó', () => {
   it('el kickoff le dice al agente que use SLICE.md, en TODAS sus líneas', () => {
     const k = renderKickoff(
       { n: 7, name: 'un slice', type: 'backend', ac: ['AC-7.1'], issue: '#7' },
-      { repo: 'o/r', dispatchCheckPath: '/p/dispatch-check.mjs', base: 'main' },
+      { repo: 'o/r', dispatchCheckPath: '/p/dispatch-check.mjs', base: 'main', conventionsDir: '/plugin/conventions' },
     )
     // Ninguna línea nombra el fichero de la coordinadora: el kickoff SOLO lo
     // recibe un agente de slice, así que ahí no hay ambigüedad posible.

@@ -160,6 +160,27 @@ function normalizar(campo, valor) {
 
 export const metricLine = (fila) => JSON.stringify(fila) + '\n'
 
+// ¿Cita este `evidence` la vara de ct? Se mide con la FORMA de la ruta —
+// `conventions/<algo>.md`— y no con la lista de `CONVENTIONS_FILES` de hoy: el
+// mismo argumento por el que `findings_by_rule` no se cruza con el enum de
+// reglas de hoy. Un documento renombrado o uno quinto que se añada mañana
+// tiene que seguir contando en las filas viejas y en las nuevas.
+//
+// LA TRAMPA: `docs/conventions/code.md` también contiene la subcadena
+// `conventions/code.md`, y ES la vara DEL REPO, no la de ct — `docs/conventions/`
+// es justo el sitio típico donde vive `.agent/conventions.md` (ver
+// `conventions/decisions.md`). Un `includes('conventions/')` a secas contaría
+// esa cita como ct y mediría lo contrario de lo que promete. Por eso la ruta no
+// puede venir precedida de una barra (`/`) — que delata un directorio padre
+// como `docs/`— ni de un carácter de palabra (`code_conventions/x.md` tampoco es
+// la vara de ct). Un lookbehind negativo es la única forma de exigir "nada de
+// eso justo delante" sin capturar y descartar a mano.
+const CITA_VARA_DE_CT = /(?<![\w/])conventions\/[\w.-]+\.md/
+
+export function citaVaraDeCt(evidence) {
+  return typeof evidence === 'string' && CITA_VARA_DE_CT.test(evidence)
+}
+
 // El conteo por severidad del veredicto, que es lo que permite leer "cuántos
 // vetos" sin volver a cargar los hallazgos.
 //
@@ -187,6 +208,15 @@ export function verdictMeasures(verdict) {
     // exactamente lo que no se podía ver leyendo los veredictos de
     // rust-monitoring a mano.
     rubric_sin_vara: (verdict?.rubric || []).filter((paso) => paso.outcome === 'sin-vara').length,
+    // De qué vara salió un hallazgo de `patrones` — el ÚNICO ítem que mide
+    // contra las varas. Un hallazgo de `contrato` o `alcance` no es "de la vara
+    // del repo" por no citar nada: es de otro ítem y no tiene nada que ver aquí,
+    // así que contar sobre TODOS los hallazgos mediría una cosa distinta de la
+    // que este campo promete. Un solo campo, no dos: el complemento —los de
+    // `patrones` que NO citan a ct— se deriva restando de
+    // `findings_by_rule.patrones`, que ya existe; dos columnas que tienen que
+    // sumar lo mismo son dos sitios que pueden divergir.
+    findings_patrones_vara_ct: findings.filter((f) => f.rule === 'patrones' && citaVaraDeCt(f.evidence)).length,
   }
 }
 
@@ -233,6 +263,14 @@ export function aggregateVerdictMeasures(texto) {
   let measured = 0
   let legacy = 0
   let sinVara = 0
+  // Contadores GEMELOS a `measured`/`legacy`, pero de `findings_patrones_vara_ct`
+  // y no de `rubric_sin_vara`: son medidas distintas, cada una con su propia
+  // fecha de nacimiento en la telemetría, así que una fila puede traer la una y
+  // no la otra. Fundirlos en los mismos contadores confundiría "esta fila es
+  // vieja para la medida A" con "lo es para la medida B".
+  let measuredPatronesVaraCt = 0
+  let legacyPatronesVaraCt = 0
+  let patronesVaraCt = 0
   const findingsByRule = {}
   for (const linea of String(texto ?? '').split('\n')) {
     if (linea.trim() === '') continue
@@ -249,6 +287,8 @@ export function aggregateVerdictMeasures(texto) {
     verdicts += 1
     const n = fila.rubric_sin_vara
     if (Number.isInteger(n) && n >= 0) { measured += 1; sinVara += n } else { legacy += 1 }
+    const p = fila.findings_patrones_vara_ct
+    if (Number.isInteger(p) && p >= 0) { measuredPatronesVaraCt += 1; patronesVaraCt += p } else { legacyPatronesVaraCt += 1 }
     const porRegla = fila.findings_by_rule
     if (porRegla && typeof porRegla === 'object' && !Array.isArray(porRegla)) {
       for (const [regla, cuantos] of Object.entries(porRegla)) {
@@ -256,5 +296,83 @@ export function aggregateVerdictMeasures(texto) {
       }
     }
   }
-  return { rows, malformed, verdicts, measured, legacy, rubricSinVara: measured ? sinVara : null, findingsByRule }
+  return {
+    rows, malformed, verdicts, measured, legacy, rubricSinVara: measured ? sinVara : null, findingsByRule,
+    measuredPatronesVaraCt, legacyPatronesVaraCt,
+    patronesVaraCt: measuredPatronesVaraCt ? patronesVaraCt : null,
+  }
+}
+
+// ---------------------------------------------------------------------------
+// SI LA VARA LLEGÓ, Y CUÁNTO PESÓ. Hoy `ct-step.mjs` aborta si los cuatro
+// documentos de `conventions/` faltan del PLUGIN, pero nada comprobaba que el
+// brief de una tarea se los hubiera LLEVADO: si alguien toca `escribirBrief` y
+// rompe el pegado, todo sigue en verde y el juez mide en silencio sólo contra
+// la vara del repo. Este es el mecanismo que cierra esa desviación silenciosa.
+//
+// PURO A PROPÓSITO, como el resto del fichero: no lee disco. Cuenta sobre el
+// CONTENIDO que `ct-step.mjs` ya leyó del brief que hay en disco — la única
+// fuente de verdad, y no un dato arrastrado desde `escribirBrief` (que corre en
+// una invocación ANTERIOR del proceso, sin nada en memoria que pasar). Quien
+// decide `null` cuando el brief no se puede leer es `ct-step.mjs`: un cero aquí
+// afirmaría un brief sin vara, y lo que habría pasado es que no se pudo mirar.
+//
+// Cuenta cabeceras, no bytes de una lista: `## Vara de ct: conventions/` es
+// exactamente lo que `seccionDeVaraDeCt` (scripts/vara-ct.js) escribe por cada
+// documento, y contarlas —en vez de comparar contra `CONVENTIONS_FILES.length`—
+// es lo que deja que un quinto documento de mañana, o uno renombrado, se siga
+// contando sin tocar esta función.
+export function briefVaraCtMeasures(contenidoBrief) {
+  const texto = String(contenidoBrief ?? '')
+  const docs = (texto.match(/^## Vara de ct: conventions\//gm) || []).length
+  return { brief_vara_ct_docs: docs, brief_bytes: Buffer.byteLength(texto, 'utf8') }
+}
+
+// ---------------------------------------------------------------------------
+// EL LECTOR DE LO QUE `briefVaraCtMeasures` ESCRIBE en la fila del paso
+// `implement`. Es un agregador HERMANO de `aggregateVerdictMeasures`, no el
+// mismo: esas filas no llevan `ruling` —`ct-step.mjs` las escribe en
+// `verboReport`, antes de que exista ningún veredicto— así que el agregador de
+// veredictos las ignora por diseño (la tolerancia nº3 de aquí arriba) y no hay
+// que tocarlo. Sin un agregador propio, `brief_vara_ct_docs` y `brief_bytes`
+// habrían viajado en la pull request sin nadie que los leyera — el mismo
+// agujero que ya pagó `rubric_sin_vara` (§3.4 del handoff).
+//
+// MISMA REGLA DE `measured`/`legacy` que `rubric_sin_vara`, calcada: una fila
+// del paso `implement` sin los dos campos —telemetría anterior a esta medida,
+// o un intento en el que el brief no se pudo leer en su momento— NO cuenta como
+// cero. Se suma sólo lo medido, y si ningún intento trae la columna el agregado
+// es `null`.
+export function aggregateBriefMeasures(texto) {
+  let briefAttempts = 0
+  let briefMeasured = 0
+  let briefLegacy = 0
+  let docs = 0
+  let bytes = 0
+  for (const linea of String(texto ?? '').split('\n')) {
+    if (linea.trim() === '') continue
+    let fila
+    try {
+      fila = JSON.parse(linea)
+    } catch {
+      continue
+    }
+    if (fila === null || typeof fila !== 'object' || Array.isArray(fila)) continue
+    if (fila.step !== 'implement') continue
+    briefAttempts += 1
+    const d = fila.brief_vara_ct_docs
+    const b = fila.brief_bytes
+    if (Number.isInteger(d) && d >= 0 && Number.isInteger(b) && b >= 0) {
+      briefMeasured += 1
+      docs += d
+      bytes += b
+    } else {
+      briefLegacy += 1
+    }
+  }
+  return {
+    briefAttempts, briefMeasured, briefLegacy,
+    briefVaraCtDocs: briefMeasured ? docs : null,
+    briefBytes: briefMeasured ? bytes : null,
+  }
 }

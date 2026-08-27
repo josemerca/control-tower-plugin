@@ -51,7 +51,7 @@
 import { execFileSync } from 'node:child_process'
 import { harvestSlice, formatDuration, closingPrNumbers } from './harvest.js'
 import { parseRepoSlug } from './dispatch.js'
-import { aggregateVerdictMeasures, METRICS_REPO_DIR, metricsRepoRelPath } from './run-metrics.js'
+import { aggregateVerdictMeasures, aggregateBriefMeasures, METRICS_REPO_DIR, metricsRepoRelPath } from './run-metrics.js'
 
 // `arg()` endurecido: el MISMO de ct-next.mjs/ct-groom.mjs/ct-status.mjs,
 // palabra por palabra y por el mismo motivo medido — un flag colgante no puede
@@ -196,7 +196,16 @@ try {
 // Enum CERRADO, por el mismo motivo que RUBRIC_OUTCOMES: `sin-fichero` (nadie
 // midió) y `no-leido` (no se sabe) no son la misma cosa y ninguna de las dos es
 // un cero.
-const SIN_CUENTAS = { rows: null, malformed: null, verdicts: null, measured: null, legacy: null, rubricSinVara: null, findingsByRule: null }
+const SIN_CUENTAS = {
+  rows: null, malformed: null, verdicts: null, measured: null, legacy: null, rubricSinVara: null, findingsByRule: null,
+  measuredPatronesVaraCt: null, legacyPatronesVaraCt: null, patronesVaraCt: null,
+  // Los del agregador HERMANO (aggregateBriefMeasures, run-metrics.js): si la
+  // vara de ct llegó al brief del paso `implement`, y cuánto pesó. Nombres
+  // propios (`brief*`) y no `measured`/`legacy` a secas: ya están ocupados por
+  // los de arriba, y fundirlos confundiría dos medidas con fechas de
+  // nacimiento distintas en la telemetría.
+  briefAttempts: null, briefMeasured: null, briefLegacy: null, briefVaraCtDocs: null, briefBytes: null,
+}
 
 function telemetriaDe(n) {
   if (dirTelemetria.status === 'no-leido' || n === null || n === undefined) {
@@ -208,7 +217,10 @@ function telemetriaDe(n) {
   }
   try {
     const texto = gh(['api', `repos/${repo}/contents/${rel}`, '-H', 'Accept: application/vnd.github.raw'])
-    return { status: 'ok', path: rel, ...aggregateVerdictMeasures(texto) }
+    // Los dos agregadores leen el MISMO fichero (todos los pasos de la slice
+    // viajan juntos en docs/superpowers/metrics/issue-<n>.jsonl) y no
+    // colisionan: sus claves vienen prefijadas a propósito (ver SIN_CUENTAS).
+    return { status: 'ok', path: rel, ...aggregateVerdictMeasures(texto), ...aggregateBriefMeasures(texto) }
   } catch (e) {
     motivos.push(`no se pudo leer la telemetría ${rel} (issue #${n}): ${e.message}`)
     return { status: 'no-leido', path: rel, ...SIN_CUENTAS }
@@ -261,13 +273,25 @@ if (comoJson) {
   if (dirTelemetria.status === 'no-leido') {
     console.log(`no se pudo listar \`${METRICS_REPO_DIR}\` en ${repo} (${dirTelemetria.why}). Puede que este repo no tenga telemetría del juez o que la lectura fallara: **no se cuenta nada**, y el hueco NO es un cero.`)
   } else {
-    console.log('| Issue | Slice | Veredictos | sin-vara | Hallazgos por regla |')
-    console.log('|---|---|---|---|---|')
+    console.log('| Issue | Slice | Veredictos | sin-vara | Hallazgos por regla | patrones-ct | brief |')
+    console.log('|---|---|---|---|---|---|---|')
     for (const f of filas) {
       const t = f.telemetry
       let veredictos = '—'
       let sinVara = '—'
       let porRegla = '—'
+      // De qué vara salió un hallazgo de `patrones`: cuántos, de los que ya
+      // cuenta `Hallazgos por regla`, citan la vara DE CT. El complemento —los
+      // de `patrones` que citan la del repo, o no citan nada— no viaja en su
+      // propia columna: se deriva restando de la cifra de `patrones` de al
+      // lado, que ya está en la tabla. Dos columnas que tienen que sumar lo
+      // mismo son dos sitios que pueden divergir.
+      let patronesCt = '—'
+      // Si la vara de ct llegó al brief del paso `implement`, y cuánto pesó —
+      // sumado sobre TODOS los intentos de `implement` que el slice dejó
+      // escritos. Combinado en una sola columna, como el `#pr +a/-d Nf` de la
+      // tabla de coste de arriba: son dos números de la misma medida.
+      let brief = '—'
       if (t.status === 'sin-fichero') porRegla = '(sin telemetría)'
       else if (t.status === 'no-leido') porRegla = '(no se pudo leer)'
       else {
@@ -277,12 +301,28 @@ if (comoJson) {
         sinVara = t.measured > 0 ? String(t.rubricSinVara) : '—'
         const entradas = Object.entries(t.findingsByRule).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         porRegla = t.verdicts === 0 ? '(sin veredictos)' : (entradas.length ? entradas.map(([r, n]) => `${r} ${n}`).join(' · ') : '(ninguno)')
+        // Misma regla que `sin-vara`: measuredPatronesVaraCt === 0 imprime «—»,
+        // nunca «0» — ningún veredicto de este slice traía la columna.
+        patronesCt = t.measuredPatronesVaraCt > 0 ? String(t.patronesVaraCt) : '—'
+        // Misma regla otra vez: briefMeasured === 0 imprime «—» — ningún
+        // intento de `implement` de este slice traía las dos columnas, así
+        // que un cero afirmaría un brief sin vara que nadie pudo medir.
+        if (t.briefMeasured > 0) {
+          brief = `${t.briefVaraCtDocs} docs · ${t.briefBytes}B`
+          if (t.briefLegacy > 0) brief += ` (${t.briefLegacy} sin columna)`
+        }
       }
-      console.log(`| #${f.issue} | ${f.title ?? '—'} | ${veredictos} | ${sinVara} | ${porRegla} |`)
+      console.log(`| #${f.issue} | ${f.title ?? '—'} | ${veredictos} | ${sinVara} | ${porRegla} | ${patronesCt} | ${brief} |`)
     }
     console.log('')
     if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.verdicts > 0 && f.telemetry.measured === 0)) {
       console.log('`—` en `sin-vara`: ningún veredicto de ese slice traía la columna (telemetría anterior a `rubric_sin_vara`). No es un cero.')
+    }
+    if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.verdicts > 0 && f.telemetry.measuredPatronesVaraCt === 0)) {
+      console.log('`—` en `patrones-ct`: ningún veredicto de ese slice traía la columna `findings_patrones_vara_ct` (telemetría anterior a esta medida). No es un cero.')
+    }
+    if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.briefAttempts > 0 && f.telemetry.briefMeasured === 0)) {
+      console.log('`—` en `brief`: ningún intento de `implement` de ese slice traía `brief_vara_ct_docs`/`brief_bytes` (telemetría anterior a esta medida, o el brief no se pudo leer en su momento). No es un cero.')
     }
     if (filas.some((f) => f.telemetry.status === 'sin-fichero')) {
       console.log(`\`(sin telemetría)\`: el repo no trae \`${METRICS_REPO_DIR}/issue-<n>.jsonl\` para ese slice. Nadie midió — no es un cero.`)

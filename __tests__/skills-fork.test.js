@@ -237,8 +237,47 @@ describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive 
 
   it('la skill y su template tienen presupuesto: crecer obliga a recortar', () => {
     const bytes = (f) => Buffer.byteLength(read('writing-plans-prescriptive', f))
-    expect(bytes('SKILL.md')).toBeLessThanOrEqual(16314)
-    expect(bytes('plan-template.md')).toBeLessThanOrEqual(6377)
+    // Tope subido de 16314 a 16604: paga restituir, dentro de SKILL.md, la
+    // regla de precedencia con sus dos direcciones para quien escribe el plan.
+    // Esa regla no tiene otra copia durable — el kickoff se entrega una vez,
+    // en un prompt, y no es un fichero que el agente pueda reabrir después—,
+    // así que el sitio donde vivir es este. El tope sigue siendo un trinquete:
+    // la siguiente subida necesita su propio motivo escrito aquí, no vale por
+    // precedente.
+    //
+    // Tope subido de 16604 a 16616 al mergear main en la rama de la vara de ct.
+    // Ese motivo de arriba SIGUE VIGENTE y no se retira: lo que esta subida
+    // añade es lo que paga el merge, y son las dos mitades que llegaron por
+    // caminos distintos y que ninguna de las dos podía pagar sola, porque cada
+    // lado creció hasta su propio tope midiendo sólo contra sí mismo.
+    //
+    //   - De main: `## Decisiones congeladas` como entrada del plan, con su
+    //     destino nombrado (`## 2. Closed decisions`) y el deber de respetarla
+    //     sin reinterpretarla, más el paso 1 de la lista final que la enumera.
+    //     Sin ella el que escribe el plan no sabe que esa sección del issue
+    //     existe, y una decisión del epic que nadie volcó al plan es una
+    //     decisión que el juez de `decisiones-cerradas` no puede medir.
+    //   - De esta rama: la vara de ct como SEGUNDA vara, con la precedencia en
+    //     sus dos direcciones —ct gana donde las dos hablen de lo mismo, el
+    //     repo obliga entero donde ct calla— y el paso 2 que manda leer los
+    //     cuatro documentos antes de escribir el plan. Es el motivo de la
+    //     subida anterior, y sigue sin tener otra copia durable.
+    //
+    // Los 12 bytes son el saldo neto: los dos lados pagaron parte de lo suyo
+    // recortando prosa en sitio (main abrevió el párrafo del plan de 73.868
+    // caracteres; esta rama recortó la tercera copia de la precedencia), y lo
+    // que queda es lo que no se pudo recortar sin perder una de las dos mitades.
+    // El trinquete no se afloja: el tope va al tamaño EXACTO del fichero
+    // mergeado, sin holgura, y la siguiente subida necesita su propio motivo
+    // escrito aquí — tampoco vale por precedente de este merge.
+    expect(
+      bytes('SKILL.md'),
+      'SKILL.md se ha pasado del tope: recorta dentro del mismo apartado, o sube el tope escribiendo aquí mismo el motivo de la subida — no vale por precedente.'
+    ).toBeLessThanOrEqual(16616)
+    expect(
+      bytes('plan-template.md'),
+      'plan-template.md se ha pasado del tope: recorta dentro del mismo apartado, o sube el tope escribiendo aquí mismo el motivo de la subida — no vale por precedente.'
+    ).toBeLessThanOrEqual(6377)
   })
 
   it('el template no pide el estado final completo y sus huecos nombran los roles', () => {

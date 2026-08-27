@@ -126,16 +126,26 @@ describe('buildIssueBody — decisiones con contenido hostil no rompe los extrac
 
 describe('kickoff — decisiones congeladas (B1)', () => {
   const slice = { n: 2, name: 'scoring', type: 'backend', deps: [1], ac: ['AC'], gate: '', protected: '' }
+  // `conventionsDir` es OBLIGATORIO desde que la vara la dicta ct
+  // (docs/superpowers/specs/2026-08-26-la-vara-la-dicta-ct-design.md §7):
+  // `renderKickoff` lanza si no lo recibe, porque un kickoff sin la ruta de la
+  // vara de ct deja al que planifica escribiendo un plan que el juez va a
+  // bloquear, y perderlo en silencio era el fallo que esa guarda cierra. Estos
+  // tres tests son de OTRO eje —que el kickoff nombre la sección de decisiones
+  // congeladas, su frase de entrada y su destino en el plan— y siguen midiendo
+  // exactamente eso: el argumento se pasa para poder llegar a lo que asertan,
+  // igual que en el resto de los llamadores de esta función.
+  const OPTS = { repo: 'o/r', conventionsDir: '/plugin/conventions' }
   // renderKickoff devuelve el texto del kickoff como una sola cadena.
   it('nombra la sección usando la CONSTANTE, no un literal (I3.9)', () => {
-    expect(renderKickoff(slice, { repo: 'o/r' })).toContain(FROZEN_DECISIONS_HEADING)
+    expect(renderKickoff(slice, OPTS)).toContain(FROZEN_DECISIONS_HEADING)
   })
   it('la enumera como entrada del plan (misma frase que AC/Protegido)', () => {
-    const entradaLine = renderKickoff(slice, { repo: 'o/r' }).split('\n').find((l) => l.includes('entrada que la skill pide'))
+    const entradaLine = renderKickoff(slice, OPTS).split('\n').find((l) => l.includes('entrada que la skill pide'))
     expect(entradaLine).toBeDefined()
     expect(entradaLine).toContain(FROZEN_DECISIONS_HEADING)
   })
   it('nombra el destino ## 2. Closed decisions', () => {
-    expect(renderKickoff(slice, { repo: 'o/r' })).toContain('## 2. Closed decisions')
+    expect(renderKickoff(slice, OPTS)).toContain('## 2. Closed decisions')
   })
 })

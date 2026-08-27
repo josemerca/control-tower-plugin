@@ -31,14 +31,22 @@ Por el mismo motivo `type` y `gate` viajan **dentro de cada fila**, también en 
 
 ## La telemetría del juez, por slice
 
-Además del coste, la cosecha lee lo que la propia slice dejó commiteado en `docs/superpowers/metrics/issue-<n>.jsonl` y saca, **por slice**, cuántos ítems de la rúbrica volvieron **`sin-vara`** (el juez tenía sujeto que mirar y no tenía con qué medirlo) y **cuántos hallazgos hubo por regla**. Hasta ahora esa columna viajaba en la pull request y **no la leía nadie**: el número existía en disco y había que abrir los `jsonl` a mano.
+Además del coste, la cosecha lee lo que la propia slice dejó commiteado en `docs/superpowers/metrics/issue-<n>.jsonl` y saca, **por slice**, cuántos ítems de la rúbrica volvieron **`sin-vara`** (el juez tenía sujeto que mirar y no tenía con qué medirlo), **cuántos hallazgos hubo por regla** y, de los hallazgos del ítem `patrones` —el único que mide contra las varas—, **cuántos citan la vara de ct** (columna `patrones-ct`). Hasta ahora la primera de estas columnas viajaba en la pull request y **no la leía nadie**: el número existía en disco y había que abrir los `jsonl` a mano.
+
+`patrones-ct` **no** es una columna independiente de `Hallazgos por regla`: es un desglose de la cifra de `patrones` que ya aparece ahí. El complemento —los hallazgos de `patrones` que citan la vara del repo, o no citan nada— se lee restando `patrones-ct` de esa cifra de `patrones`; no viaja en una columna propia porque dos columnas que tienen que sumar lo mismo son dos sitios que pueden divergir.
+
+La cita se detecta por la FORMA de la ruta (`conventions/<algo>.md`, sin barra ni letra delante), no por la lista de los cuatro documentos de hoy: un documento renombrado o uno quinto que se añada mañana también cuenta. Y el `docs/conventions/code.md` de la vara del REPO —que contiene la misma subcadena— nunca cuenta como ct.
+
+La misma telemetría trae además, por cada intento del paso `implement`, si la vara de ct **llegó** al brief de la tarea y **cuánto pesó**: cuántas cabeceras `## Vara de ct: conventions/` trae el brief que quedó en disco (`brief_vara_ct_docs`) y su tamaño en bytes (`brief_bytes`). Es lo que cierra una desviación silenciosa: hoy el plugin aborta si los cuatro documentos faltan del PLUGIN, pero nada comprobaba que el brief se los hubiera LLEVADO — si `escribirBrief` se rompe, todo sigue en verde y el juez mide en silencio sólo contra la vara del repo. La columna `brief` de la tabla suma los dos números de todos los intentos de `implement` que el slice dejó escritos (`N docs · M B`).
 
 Se lee de GitHub, como todo lo demás: no hay checkout que suponer.
 
-**Tres cosas que este bloque nunca hace pasar por un cero:**
+**Cinco cosas que este bloque nunca hace pasar por un cero:**
 
 - **`(sin telemetría)`** — ese slice no tiene fichero: nadie midió.
 - **`—` en `sin-vara`** — el slice tiene fichero, pero ningún veredicto traía la columna (telemetría anterior a `rubric_sin_vara`). La celda enseña además cuántos veredictos son «sin columna».
+- **`—` en `patrones-ct`** — el slice tiene fichero, pero ningún veredicto traía la columna `findings_patrones_vara_ct` (telemetría anterior a esta medida). Es una tolerancia INDEPENDIENTE de la de `sin-vara`: una fila puede traer una columna y no la otra, cada una con su propia fecha de nacimiento en la telemetría.
+- **`—` en `brief`** — el slice tiene fichero, pero ningún intento de `implement` traía `brief_vara_ct_docs`/`brief_bytes` (telemetría anterior a esta medida, o un intento en el que el brief no se pudo leer en su momento). Un cero aquí afirmaría un brief sin vara que nadie pudo medir.
 - **no se pudo listar el directorio** — no se imprime ni un número, y se dice. **No baja el exit a `1`**: la causa casi siempre es que ese repo no tiene telemetría, y un `1` permanente en esos epics enseñaría a ignorar el exit code. Un **fichero** que el listado sí nombraba y no se pudo leer sí es una cosecha incompleta: motivo y exit `1`.
 
 Las líneas ilegibles de un `jsonl` se cuentan y se dicen; no tiran el fichero ni cambian el exit — una fila corrupta de hace tres semanas no se arregla repitiendo el comando.

@@ -13,7 +13,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, IDENTITY_FIELDS, aggregateVerdictMeasures, metricsRepoRelPath, METRICS_REPO_DIR } from '../scripts/run-metrics.js'
+import {
+  metricRow, metricLine, metricsPath, planSha256, verdictMeasures, IDENTITY_FIELDS, aggregateVerdictMeasures,
+  metricsRepoRelPath, METRICS_REPO_DIR, citaVaraDeCt, briefVaraCtMeasures, aggregateBriefMeasures,
+} from '../scripts/run-metrics.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(here, '..', 'scripts', 'ct-step.mjs')
@@ -161,6 +164,7 @@ describe('el conteo por severidad', () => {
       ruling: 'FAIL', findings_total: 3, findings_high: 1, findings_medium: 0, findings_low: 2,
       findings_by_rule: { contrato: 1, alcance: 2 },
       rubric_sin_vara: 0,
+      findings_patrones_vara_ct: 0,
     })
   })
 
@@ -201,6 +205,71 @@ describe('el conteo por severidad', () => {
         { rule: 'alcance', severity: 'low', what: 'c', path: 'z' },
       ],
     }).findings_by_rule).toEqual({ 'manipulacion-tests': 2, alcance: 1 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// MEDIDA 1: de qué vara salió el hallazgo. Sólo el ítem `patrones` mide contra
+// las varas — un hallazgo de `contrato` o `alcance` no es "de la vara del
+// repo" por no citar nada, es de otro ítem. El complemento (los de `patrones`
+// que NO citan a ct) no vive aquí: se deriva restando de
+// `findings_by_rule.patrones`, que ya existe.
+// ---------------------------------------------------------------------------
+describe('citaVaraDeCt — la forma de la ruta, no la lista de documentos de hoy', () => {
+  it('cita la vara de ct cuando "conventions/<algo>.md" no viene precedida de barra ni de letra', () => {
+    expect(citaVaraDeCt('`conventions/architecture.md` dice que la conversión vive en el dominio')).toBe(true)
+    expect(citaVaraDeCt('(conventions/code.md) exige inglés')).toBe(true)
+    expect(citaVaraDeCt('conventions/code.md al principio de la frase')).toBe(true)
+  })
+
+  // LA TRAMPA DEL ENCARGO: `docs/conventions/code.md` es la vara DEL REPO — un
+  // sitio típico donde vive `.agent/conventions.md` — y contiene la subcadena
+  // `conventions/code.md`. Un `includes` a secas la contaría como ct y mediría
+  // justo lo contrario de lo que el campo promete.
+  it('NO cuenta docs/conventions/code.md: esa cita es de la vara del REPO, no de ct', () => {
+    expect(citaVaraDeCt('el fichero `docs/conventions/code.md` dice que se usa camelCase')).toBe(false)
+  })
+
+  it('NO cuenta si "conventions/" viene pegada a una palabra', () => {
+    expect(citaVaraDeCt('mis_conventions/code.md no es la vara de ct')).toBe(false)
+  })
+
+  it('no depende de los cuatro nombres de hoy: un documento nuevo o renombrado también cuenta', () => {
+    expect(citaVaraDeCt('conventions/naming.md dice otra cosa')).toBe(true)
+  })
+
+  it('un evidence vacío o ausente no cita nada', () => {
+    expect(citaVaraDeCt('')).toBe(false)
+    expect(citaVaraDeCt(undefined)).toBe(false)
+    expect(citaVaraDeCt(null)).toBe(false)
+  })
+})
+
+describe('findings_patrones_vara_ct — sólo los hallazgos del ítem patrones', () => {
+  it('cuenta sólo los de patrones que citan la vara de ct, no los de otros ítems', () => {
+    expect(verdictMeasures({
+      ruling: 'FAIL',
+      findings: [
+        { rule: 'patrones', severity: 'high', what: 'a', path: 'x', evidence: 'conventions/code.md dice inglés' },
+        { rule: 'patrones', severity: 'low', what: 'b', path: 'y', evidence: 'se lee mal, sin cita' },
+        { rule: 'contrato', severity: 'low', what: 'c', path: 'z', evidence: 'conventions/code.md también aquí' },
+      ],
+    }).findings_patrones_vara_ct).toBe(1)
+  })
+
+  // EL FALSO POSITIVO QUE FIJA EL ENCARGO: un hallazgo de `patrones` que cita
+  // `docs/conventions/code.md` (la vara del REPO) no debe contar como ct.
+  it('un hallazgo de patrones que cita docs/conventions/ NO cuenta como vara de ct', () => {
+    expect(verdictMeasures({
+      ruling: 'FAIL',
+      findings: [
+        { rule: 'patrones', severity: 'low', what: 'a', path: 'x', evidence: '`docs/conventions/code.md` pide camelCase' },
+      ],
+    }).findings_patrones_vara_ct).toBe(0)
+  })
+
+  it('un PASS limpio cuenta cero, y el cero es real: sí se midió', () => {
+    expect(verdictMeasures({ ruling: 'PASS', findings: [] }).findings_patrones_vara_ct).toBe(0)
   })
 })
 
@@ -312,13 +381,173 @@ describe('el agregado de lo que el juez dejó escrito (§3.4)', () => {
   it('un fichero vacío no revienta y no afirma nada', () => {
     for (const vacio of ['', undefined]) {
       const r = aggregateVerdictMeasures(vacio)
-      expect(r).toEqual({ rows: 0, malformed: 0, verdicts: 0, measured: 0, legacy: 0, rubricSinVara: null, findingsByRule: {} })
+      expect(r).toEqual({
+        rows: 0, malformed: 0, verdicts: 0, measured: 0, legacy: 0, rubricSinVara: null, findingsByRule: {},
+        measuredPatronesVaraCt: 0, legacyPatronesVaraCt: 0, patronesVaraCt: null,
+      })
     }
   })
 
   it('el lector mira exactamente donde el escritor escribe', () => {
     expect(metricsRepoRelPath(7)).toBe('docs/superpowers/metrics/issue-7.jsonl')
     expect(METRICS_REPO_DIR).toBe('docs/superpowers/metrics')
+  })
+
+  // MEDIDA 1, calcada de rubric_sin_vara: measured/legacy PROPIOS, y una fila
+  // sin la columna nunca cuenta como cero.
+  it('suma findings_patrones_vara_ct de todos los veredictos del fichero', () => {
+    const texto = [
+      veredicto({ ruling: 'PASS', findings_patrones_vara_ct: 1 }),
+      veredicto({ ruling: 'PASS', findings_patrones_vara_ct: 0 }),
+      veredicto({ ruling: 'FAIL', findings_patrones_vara_ct: 2 }),
+    ].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.patronesVaraCt).toBe(3)
+    expect(r.measuredPatronesVaraCt).toBe(3)
+    expect(r.legacyPatronesVaraCt).toBe(0)
+  })
+
+  it('una fila anterior a findings_patrones_vara_ct cuenta como vieja y NO como un cero', () => {
+    const texto = [
+      veredicto({ ruling: 'PASS', findings_patrones_vara_ct: 2 }),
+      veredicto({ ruling: 'PASS' }), // esquema viejo: sin findings_patrones_vara_ct
+    ].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.measuredPatronesVaraCt).toBe(1)
+    expect(r.legacyPatronesVaraCt).toBe(1)
+    expect(r.patronesVaraCt).toBe(2)
+  })
+
+  it('si ningún veredicto trae la columna, patronesVaraCt es null y no 0', () => {
+    const texto = [veredicto({ ruling: 'PASS' }), veredicto({ ruling: 'FAIL' })].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.patronesVaraCt).toBeNull()
+    expect(r.legacyPatronesVaraCt).toBe(2)
+  })
+
+  it('las dos medidas nuevas llevan contadores independientes: una fila puede traer una y no la otra', () => {
+    // rubric_sin_vara SÍ, findings_patrones_vara_ct NO: son medidas con fechas
+    // de nacimiento distintas en la telemetría.
+    const texto = veredicto({ ruling: 'PASS', rubric_sin_vara: 1 })
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.measured).toBe(1)
+    expect(r.legacyPatronesVaraCt).toBe(1)
+    expect(r.patronesVaraCt).toBeNull()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// MEDIDA 2: si la vara llegó al brief, y cuánto pesó. `briefVaraCtMeasures` es
+// PURA (no lee disco: recibe el contenido ya leído) y cuenta cabeceras
+// `## Vara de ct: conventions/` — exactamente lo que `PluginYardstick.composeSection`
+// (scripts/plugin-yardstick.js) escribe por documento — en vez de comparar
+// contra `PluginYardstick.FILES.length`, para que un quinto documento de
+// mañana también cuente sin tocar esta función.
+// ---------------------------------------------------------------------------
+describe('briefVaraCtMeasures — cuántos documentos trae el brief y cuánto pesa', () => {
+  const brief = (docs) => [
+    '# Task 1',
+    '',
+    'texto de la tarea',
+    '',
+    ...docs.flatMap((d) => [`## Vara de ct: conventions/${d}`, '', 'cuerpo del documento', '']),
+  ].join('\n')
+
+  it('cuenta las cuatro cabeceras de hoy', () => {
+    const contenido = brief(['code.md', 'decisions.md', 'architecture.md', 'testing.md'])
+    expect(briefVaraCtMeasures(contenido).brief_vara_ct_docs).toBe(4)
+  })
+
+  it('no depende de los nombres de hoy: un quinto documento también se cuenta', () => {
+    const contenido = brief(['code.md', 'decisions.md', 'architecture.md', 'testing.md', 'naming.md'])
+    expect(briefVaraCtMeasures(contenido).brief_vara_ct_docs).toBe(5)
+  })
+
+  it('un brief sin ninguna cabecera cuenta cero, y es un cero real: sí se pudo medir', () => {
+    expect(briefVaraCtMeasures('# Task 1\n\nsin vara de ct por aquí\n').brief_vara_ct_docs).toBe(0)
+  })
+
+  it('pesa el brief en bytes, no en caracteres — UTF-8 de verdad', () => {
+    const conAcentos = '## Vara de ct: conventions/code.md\ncondición, año, ñ\n'
+    const { brief_bytes: bytes } = briefVaraCtMeasures(conAcentos)
+    expect(bytes).toBe(Buffer.byteLength(conAcentos, 'utf8'))
+    expect(bytes).toBeGreaterThan(conAcentos.length) // los acentos pesan más de 1 byte
+  })
+})
+
+describe('aggregateBriefMeasures — el lector de lo que el brief midió, hermano de aggregateVerdictMeasures', () => {
+  const intento = (measures) => metricLine(metricRow({ ...IDENT, step: 'implement' }, measures, { now: AHORA }))
+  const otroPaso = (step, measures) => metricLine(metricRow({ ...IDENT, step }, measures, { now: AHORA }))
+
+  it('suma docs y bytes de todos los intentos de implement del fichero', () => {
+    const texto = [
+      intento({ outcome: 'done', brief_vara_ct_docs: 4, brief_bytes: 500 }),
+      intento({ outcome: 'done', brief_vara_ct_docs: 4, brief_bytes: 520 }),
+    ].join('')
+    const r = aggregateBriefMeasures(texto)
+    expect(r.briefAttempts).toBe(2)
+    expect(r.briefMeasured).toBe(2)
+    expect(r.briefLegacy).toBe(0)
+    expect(r.briefVaraCtDocs).toBe(8)
+    expect(r.briefBytes).toBe(1020)
+  })
+
+  // ESTAS FILAS NO LLEVAN `ruling`: es justo por lo que aggregateVerdictMeasures
+  // las ignora por diseño (tolerancia nº3 de aquí arriba), y por lo que hace
+  // falta un agregador propio y no reutilizar aquél.
+  it('las filas de judge/controls/commit no entran en la cuenta de intentos de brief', () => {
+    const texto = [
+      otroPaso('judge', { ruling: 'PASS', rubric_sin_vara: 0 }),
+      otroPaso('controls', { outcome: 'done' }),
+      otroPaso('commit', { outcome: 'done' }),
+      intento({ outcome: 'done', brief_vara_ct_docs: 4, brief_bytes: 500 }),
+    ].join('')
+    expect(aggregateBriefMeasures(texto).briefAttempts).toBe(1)
+  })
+
+  // LA REGLA DEL FICHERO: una fila sin el campo (telemetría anterior a esta
+  // medida, o un intento en el que el brief no se pudo leer) NO cuenta como
+  // cero.
+  it('una fila anterior a la medida, o con el brief sin leer (null), cuenta como vieja y NO como cero', () => {
+    const texto = [
+      intento({ outcome: 'done', brief_vara_ct_docs: 4, brief_bytes: 500 }),
+      intento({ outcome: 'done' }), // esquema viejo: sin los dos campos
+      intento({ outcome: 'discarded', brief_vara_ct_docs: null, brief_bytes: null }), // brief no se pudo leer
+    ].join('')
+    const r = aggregateBriefMeasures(texto)
+    expect(r.briefAttempts).toBe(3)
+    expect(r.briefMeasured).toBe(1)
+    expect(r.briefLegacy).toBe(2)
+    expect(r.briefVaraCtDocs).toBe(4)
+  })
+
+  it('si ningún intento trae la columna, briefVaraCtDocs y briefBytes son null y no 0', () => {
+    const texto = [intento({ outcome: 'done' }), intento({ outcome: 'discarded' })].join('')
+    const r = aggregateBriefMeasures(texto)
+    expect(r.briefVaraCtDocs).toBeNull()
+    expect(r.briefBytes).toBeNull()
+    expect(r.briefLegacy).toBe(2)
+  })
+
+  it('un brief con cero documentos (roto de verdad) se suma como el cero que es: no se confunde con "sin medir"', () => {
+    const texto = intento({ outcome: 'done', brief_vara_ct_docs: 0, brief_bytes: 40 })
+    const r = aggregateBriefMeasures(texto)
+    expect(r.briefMeasured).toBe(1)
+    expect(r.briefVaraCtDocs).toBe(0)
+  })
+
+  it('un fichero vacío no revienta y no afirma nada', () => {
+    for (const vacio of ['', undefined]) {
+      expect(aggregateBriefMeasures(vacio)).toEqual({
+        briefAttempts: 0, briefMeasured: 0, briefLegacy: 0, briefVaraCtDocs: null, briefBytes: null,
+      })
+    }
+  })
+
+  it('una línea ilegible no revienta al agregador', () => {
+    const texto = [intento({ outcome: 'done', brief_vara_ct_docs: 4, brief_bytes: 500 }), '{no es json\n'].join('')
+    expect(() => aggregateBriefMeasures(texto)).not.toThrow()
+    expect(aggregateBriefMeasures(texto).briefAttempts).toBe(1)
   })
 })
 
@@ -406,5 +635,36 @@ describe('la telemetría de un paso real', () => {
     expect(r.stderr).toMatch(/no se pudo escribir la telemetría/)
     // La transición se guardó: la medida no decide nada.
     expect(JSON.parse(readFileSync(join(repo, '.agent', 'run-7.json'), 'utf8')).step).toBe('controls')
+  })
+
+  // MEDIDA 2 contra el oráculo de verdad: `ct-step next` escribe el brief REAL
+  // en disco (con la vara de ct del plugin pegada por `escribirBrief`), y
+  // `ct-step report` lo mide leyendo exactamente esa ruta.
+  it('si el brief llegó a disco, la fila cuenta sus documentos de vara de ct y su peso', () => {
+    const n = ct(casa, 'next')
+    expect(n.status).toBe(0)
+    const r = ct(casa, 'report', 'report.json')
+    expect(r.status).toBe(0)
+    const filas = readFileSync(join(casa, 'control-tower', 'log', 'ct-step.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l))
+    const f = filas[0]
+    // Los cuatro documentos de conventions/ del plugin, contados por cabecera:
+    // no por comparar contra CONVENTIONS_FILES.length.
+    expect(f.brief_vara_ct_docs).toBe(4)
+    expect(typeof f.brief_bytes).toBe('number')
+    expect(f.brief_bytes).toBeGreaterThan(0)
+  })
+
+  // Si nadie llamó a `next`, el brief no existe en disco: los dos campos van a
+  // `null`, nunca a `0` — un cero afirmaría un brief sin vara, y lo que pasó es
+  // que no se pudo mirar.
+  it('si el brief no se puede leer, los dos campos van a null, no a 0', () => {
+    const r = ct(casa, 'report', 'report.json')
+    expect(r.status).toBe(0)
+    const filas = readFileSync(join(casa, 'control-tower', 'log', 'ct-step.jsonl'), 'utf8')
+      .trim().split('\n').map((l) => JSON.parse(l))
+    const f = filas[0]
+    expect(f.brief_vara_ct_docs).toBeNull()
+    expect(f.brief_bytes).toBeNull()
   })
 })

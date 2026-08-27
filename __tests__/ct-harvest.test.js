@@ -42,6 +42,7 @@ const DIR_JSON = JSON.stringify([
 ])
 
 const veredicto = (m) => JSON.stringify({ step: 'judge', ...m }) + '\n'
+const intentoImplement = (m) => JSON.stringify({ step: 'implement', ...m }) + '\n'
 
 function bancada() {
   const dir = mkdtempSync(join(tmpdir(), 'ct-hv-'))
@@ -71,6 +72,91 @@ describe('/ct-harvest — la telemetría del juez, por slice', () => {
     const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
     expect(res.status).toBe(0)
     expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 2 \| 2 \| patrones 2 · alcance 1 \|/)
+    limpiar(b)
+  })
+
+  // MEDIDA 1: de qué vara salió el hallazgo. `patrones-ct` cuenta, de los
+  // hallazgos de `patrones` que ya aparecen en «Hallazgos por regla», cuántos
+  // citan la vara DE CT. El complemento (los que citan la del repo, o no citan
+  // nada) se lee restando de la cifra de `patrones` de al lado.
+  it('patrones-ct suma findings_patrones_vara_ct de todos los veredictos del slice', () => {
+    const b = bancada()
+    const filesJson = JSON.stringify({
+      'issue-12.jsonl': veredicto({ ruling: 'FAIL', rubric_sin_vara: 0, findings_by_rule: { patrones: 2 }, findings_patrones_vara_ct: 1 })
+        + veredicto({ ruling: 'FAIL', rubric_sin_vara: 0, findings_by_rule: { patrones: 1 }, findings_patrones_vara_ct: 1 }),
+    })
+    const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 2 \| 0 \| patrones 3 \| 2 \|/)
+    limpiar(b)
+  })
+
+  it('un slice cuya telemetría es toda anterior a findings_patrones_vara_ct imprime «—» en patrones-ct, nunca 0', () => {
+    const b = bancada()
+    const filesJson = JSON.stringify({
+      // Esquema viejo: trae rubric_sin_vara y findings_by_rule pero no
+      // findings_patrones_vara_ct (medida más nueva que las otras dos).
+      'issue-12.jsonl': veredicto({ ruling: 'FAIL', rubric_sin_vara: 0, findings_by_rule: { patrones: 2 } }),
+    })
+    const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| patrones 2 \| — \|/)
+    expect(res.stdout).toMatch(/`—` en `patrones-ct`: ningún veredicto de ese slice traía la columna `findings_patrones_vara_ct`/)
+    limpiar(b)
+  })
+
+  // MEDIDA 2: si la vara llegó al brief del paso `implement`, y cuánto pesó.
+  // Sumado sobre TODOS los intentos de `implement` que el slice dejó escritos
+  // — el mismo fichero por issue que lee la telemetría del juez.
+  it('brief suma los documentos de vara de ct y el peso de todos los intentos de implement del slice', () => {
+    const b = bancada()
+    const filesJson = JSON.stringify({
+      'issue-12.jsonl':
+        intentoImplement({ outcome: 'done', brief_vara_ct_docs: 4, brief_bytes: 500 })
+        + intentoImplement({ outcome: 'done', brief_vara_ct_docs: 4, brief_bytes: 520 })
+        + veredicto({ ruling: 'PASS', rubric_sin_vara: 0 }),
+    })
+    const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| \(ninguno\) \| — \| 8 docs · 1020B \|/)
+    limpiar(b)
+  })
+
+  it('un slice sin ningún intento de implement en su telemetría dice «—» en brief, nunca 0', () => {
+    const b = bancada()
+    const filesJson = JSON.stringify({
+      'issue-12.jsonl': veredicto({ ruling: 'PASS', rubric_sin_vara: 0 }),
+    })
+    const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| \(ninguno\) \| — \| — \|/)
+    limpiar(b)
+  })
+
+  it('un slice cuyos intentos de implement son todos anteriores a la medida dice «—» en brief, nunca 0, y lo dice en voz alta', () => {
+    const b = bancada()
+    const filesJson = JSON.stringify({
+      // Esquema viejo: fila de `implement` sin brief_vara_ct_docs/brief_bytes.
+      'issue-12.jsonl': intentoImplement({ outcome: 'done' }) + veredicto({ ruling: 'PASS', rubric_sin_vara: 0 }),
+    })
+    const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| \(ninguno\) \| — \| — \|/)
+    expect(res.stdout).toMatch(/`—` en `brief`: ningún intento de `implement` de ese slice traía `brief_vara_ct_docs`\/`brief_bytes`/)
+    limpiar(b)
+  })
+
+  it('un intento de implement con el brief no leído (null) no cuenta como cero: se anota "sin columna"', () => {
+    const b = bancada()
+    const filesJson = JSON.stringify({
+      'issue-12.jsonl':
+        intentoImplement({ outcome: 'done', brief_vara_ct_docs: 4, brief_bytes: 500 })
+        + intentoImplement({ outcome: 'discarded', brief_vara_ct_docs: null, brief_bytes: null })
+        + veredicto({ ruling: 'PASS', rubric_sin_vara: 0 }),
+    })
+    const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/4 docs · 500B \(1 sin columna\) \|/)
     limpiar(b)
   })
 
