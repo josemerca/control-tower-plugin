@@ -4,8 +4,9 @@ Applies to: **every diff**.
 
 ## No prose here either
 
-No comments and no docstrings in a test. **The test's name is the sentence**, and
-it says what is guaranteed and why, not which method is called:
+Test code follows `conventions/code.md` like any production code, no-prose rule
+included. What is specific to a test: **its name is the sentence**, and it says
+what is guaranteed and why, not which method is called:
 `a_finding_without_a_line_leaves_the_key_out_instead_of_emitting_null`, not
 `finding_is_serialised`.
 
@@ -58,7 +59,6 @@ so the test says which case it is about without reading the arguments.
 
 ## Antipatterns
 
-- A comment or a docstring in a test.
 - A test named after the method it calls.
 - A test helper at module level, or repeated in two files.
 - An object built by hand in the test when a mother exists, or the mother's

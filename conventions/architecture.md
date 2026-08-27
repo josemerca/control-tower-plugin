@@ -46,7 +46,7 @@ stretches to justify any grouping by habit.
   side.
 - **No suffix on the type**, on its parameters or on its result.
 - The main method takes a parameters object and returns a result object, both
-  immutable and declared beside it.
+  immutable and declared beside it — never a raw map (`conventions/code.md`).
 - **A configuration value enters as data, not behind a port.** A port whose only
   method returns a constant is indirection; what the object buys is that values
   which have to agree travel together and their coherence can be checked in one
@@ -150,7 +150,6 @@ extract.
 - The domain importing from application or from infrastructure.
 - A use case importing from infrastructure, or depending on an adapter.
 - A use case with a suffix on its type, its parameters or its result.
-- A use case that returns a raw map.
 - A mapping helper in the use case instead of in the boundary model.
 - A conditional in the conductor that translates a step's result.
 - A policy that returns a boolean instead of the whole effect.

@@ -49,14 +49,14 @@ stop there: a blocker travels as that field, which is the one thing a guess cann
 shape; a convention document states the rule, and a rule holds even where no analogous file exists.
 Start from `.agent/conventions.md` where the repo declares one: that file is the repo's own
 declaration, and it is what keeps slice 14 citing the same yardstick as slice 3. Then look for
-`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING`, a `docs/conventions/` directory and the project skills;
-the issue's "Contexto del epic" may have named them already. List under `Rules to obey:`, **by
+`AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING`, a `docs/conventions/` directory and the project skills.
+List under `Rules to obey:`, **by
 path**, the entries that bear on this slice — you are selecting, not transporting: the program
 pastes that file into every task brief anyway, so omitting an entry does not hide it from the judge.
 If the repo declares none, say so with `N/A — <reason>`: a path that is not in the repo fails the plan.
 
 **There is a second yardstick, and it is not in this section: ct's own.** The four documents of
-`conventions/`, whose absolute path the kickoff gives you, and which **take precedence over this
+the plugin's `conventions/` directory, whose absolute path the kickoff gives you, and which **take precedence over this
 repo's, rule by rule, not by topic**: where a rule of this repo requires what one of those four
 forbids, or forbids what they require, ct's wins; where this repo says something none of the four
 speaks about, this repo's rule binds in full. Read them before you write the plan — the program

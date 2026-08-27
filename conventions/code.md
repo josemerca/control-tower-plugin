@@ -50,7 +50,9 @@ string compared by hand.
   it inside the vocabulary is what keeps a defensive branch out of every place
   that touches the value.
 - **Dispatch over it exhaustively, with no catch-all branch**, so that adding a
-  member breaks the build instead of falling silently into the default.
+  member fails visibly — where the language allows it, at compile time or by the
+  type checker; where it does not, in the test that covers that dispatch —
+  instead of falling silently into the default branch.
 
 ## No raw map as the return value of logic
 
