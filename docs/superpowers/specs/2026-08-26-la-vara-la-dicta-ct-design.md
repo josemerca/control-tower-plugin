@@ -197,6 +197,16 @@ directorio en las dos direcciones —todo lo declarado existe en disco, y todo
 `.md` que hay en disco está declarado— para que la lista no pueda quedarse
 atrás del directorio que describe.
 
+### 4.3 Un documento declarado y vacío es la misma vara corta
+
+Que el fichero exista no basta: `ct-step` pega estos cuatro documentos verbatim
+al final de cada task brief, así que un documento sin su línea de `Applies to:`
+o reducido a encabezados sin sustancia deja al implementador y al juez midiendo
+con nada — el mismo estado que §4.2 hace visible para el borrado, pero para el
+vaciado. Por eso `__tests__/conventions-vara.test.js` comprueba, para cada uno
+de los cuatro, que la cabecera declara su alcance y que trae más de veinte
+líneas con sustancia, no sólo títulos.
+
 ## 5. Qué dicen los cuatro
 
 El idioma es **inglés**, como todo el corpus del plugin que llega a un agente
@@ -444,6 +454,14 @@ Alcance: **todo diff**.
 | La meta-convención sobre cómo se escribe una convención | La leen las personas que editan estos cuatro ficheros, no el implementador ni el juez. Si hace falta, va a `docs/`, no a `conventions/` |
 | Dónde vive el porqué de una decisión | Decidido fuera: la regla se queda en cero prosa y no dice adónde va el porqué |
 | «Nada de andamiaje especulativo» | Ya la posee el ítem `alcance` de la rúbrica del juez: código que ninguna frase de la tarea pide. Repetirla en `code.md` duplicaría el mismo hallazgo entre dos ítems, y un test lo prohíbe expresamente |
+
+El test `ninguno repite una regla que ya posee un ítem de la rúbrica`
+(`__tests__/conventions-vara.test.js`) generaliza esta fila a los tres ítems
+que ya cazan una regla antes de que la vara de ct la repita: `alcance`,
+`manipulacion-tests` y `test-desiderata`. Que uno de los cuatro documentos
+repita lo que un ítem ya posee no es cosmético: `decisions.md` prohíbe escribir
+una regla dos veces, y el recuento por severidad del veredicto se infla cuando
+dos ítems cazan el mismo defecto.
 
 ## 6. Qué se toca, y qué no
 

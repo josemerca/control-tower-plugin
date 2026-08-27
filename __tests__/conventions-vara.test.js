@@ -1,7 +1,3 @@
-// La vara que ct dicta (docs/superpowers/specs/2026-08-26-la-vara-la-dicta-ct-design.md).
-// Estos cuatro documentos los pega `ct-step` en cada task brief, así que un
-// documento vacío o sin su línea de alcance pone al implementador y al juez a
-// medir con nada — el estado que este diseño existe para hacer imposible.
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -42,10 +38,6 @@ describe('los documentos de conventions/', () => {
   })
 
   it('ninguno repite una regla que ya posee un ítem de la rúbrica', () => {
-    // Cada grupo es un ítem de la rúbrica del juez que YA posee esa regla. Que
-    // uno de estos documentos la repita es un defecto real: `decisions.md`
-    // prohíbe escribir una regla dos veces, y el recuento por severidad del
-    // veredicto se infla cuando dos ítems cazan el mismo defecto.
     const todo = Object.keys(ALCANCES).map(leer).join('\n')
     for (const [item, terminos] of Object.entries({
       'manipulacion-tests': [/skip/i, /xfail/i, /pre-existing test/i, /flaky/i],
