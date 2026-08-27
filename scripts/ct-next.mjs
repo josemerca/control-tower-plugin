@@ -2485,7 +2485,7 @@ for (let idx = 0; idx < selected.length; idx++) {
   // Verificado por construcción con la consulta de rama rota: un --dry-run
   // sin fixture imprimía "modo fixture" y salía 0.
   const destinationCheck = fx ? 'fixture' : (branchExists === 'unknown' ? 'unknown' : 'checked')
-  plans.push({ s, selIdx: idx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck, launchDir, launcherPath, sentinelPath, launcherScript, typedCommand: command })
+  plans.push({ s, selIdx: idx, branch, wt, name, kickoff, stateSeed, sliceForKickoff, cmuxArgv, destinationCheck, launchDir, launcherPath, sentinelPath, launcherScript, typedCommand: command })
 }
 
 // ============================================================================
@@ -3110,7 +3110,7 @@ let launchedCount = 0
 const unverifiedLaunches = []
 
 for (let idx = 0; idx < plans.length; idx++) {
-  const { s, selIdx, branch, wt, name, kickoff, stateSeed, cmuxArgv, destinationCheck, launchDir, launcherPath, sentinelPath, launcherScript, typedCommand } = plans[idx]
+  const { s, selIdx, branch, wt, name, kickoff, stateSeed, sliceForKickoff, cmuxArgv, destinationCheck, launchDir, launcherPath, sentinelPath, launcherScript, typedCommand } = plans[idx]
 
   if (dryRun) {
     console.log(`\n=== slice #${s.n} (${s.name}) ===`)
@@ -3158,6 +3158,7 @@ for (let idx = 0; idx < plans.length; idx++) {
       console.log(`destino: ${wt} / rama ${branch} — SIN CONFIRMAR: la consulta a git se intentó y FALLÓ (el detalle y el comando manual están en el aviso correspondiente, por stderr), así que no se puede afirmar que estén libres. Esto NO es modo fixture: la corrida real hará exactamente esta misma comprobación, y si vuelve a fallar tampoco lo sabrá.`)
     }
     console.log(`git worktree add -b ${branch} ${wt} origin/${resolvedBase}`)
+    // slice 9b: en --dry-run no hay worktree, así que este seed lleva el sha resuelto antes del bucle; la corrida real lo remide en el worktree
     console.log(`seed ${wt}/${SLICE_REL_PATH}:\n${stateSeed}`)
     // D4, defecto 3: el kickoff, en PROSA. La línea `cmux ...` de abajo lo
     // lleva dentro, pero doblemente escapado (comillas POSIX + el
@@ -3440,9 +3441,48 @@ for (let idx = 0; idx < plans.length; idx++) {
   if (!ignored.ok) {
     cleanupOrphanedWorktree(s, wt, branch, `no se pudo garantizar que ${SLICE_REL_PATH} quede fuera de git (${ignored.why}). NO se siembra: un estado de slice que git puede ver acaba dentro del PR y de ahí a main.`)
   }
+  // ==========================================================================
+  // Slice 9(b) — EL CORTE SE MIDE DONDE SE CORTÓ, NO ANTES.
+  //
+  // `resolvedBaseSha` se resuelve UNA vez antes del bucle (tras el fetch) y el
+  // worktree se corta AQUÍ. Con `--cap N` y otra sesión fetcheando el mismo
+  // repo entre medias, `origin/<base>` puede haberse movido en ese hueco: el
+  // sha resuelto antes ya no sería el corte, y `base_sha:` —el campo que
+  // existe precisamente para ser el punto fijo del diff— señalaría a un commit
+  // que esta rama no tiene por debajo. La consecuencia observable es leve (los
+  // diffs de --release usan `base...HEAD`, o sea merge-base; solo
+  // `readFileAtBase` mira el punto fijo, y daría un "no existe en la base"
+  // espurio — la misma clase de fallo que el slice 2 arregla, mucho más rara).
+  //
+  // El HEAD del worktree recién creado no tiene ese hueco por construcción:
+  // `git worktree add -b <branch> <wt> origin/<base>` (arriba) crea la rama EN
+  // el commit al que `origin/<base>` apuntaba en ESE instante, y ya nada la
+  // mueve — el agente todavía no existe. Es estrictamente mejor y no más caro:
+  // un rev-parse más, y en el caso normal devuelve el mismo sha.
+  //
+  // Alimenta a los DOS campos que salían de `resolvedBaseSha` (`base_sha` y
+  // `last_commit`): los dos quieren la misma cosa —el punto del que salió esta
+  // rama— y `buildStateSeed` los sirve del mismo argumento.
+  //
+  // Si el rev-parse falla (muy raro en un worktree que git acaba de crear:
+  // .git ilegible, disco lleno, el timeout) NO se aborta y NO se omite el
+  // campo: se cae al sha de antes del bucle, que es el comportamiento anterior
+  // a este cambio. Degradar al valor de ayer es aceptable; sembrar un hueco
+  // donde había un sha razonable, no. La omisión sigue reservada al caso en
+  // que no hay NINGÚN sha, que es el del aviso de la resolución de arriba.
+  // ==========================================================================
+  let seedToWrite = stateSeed
+  try {
+    const cutSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], {
+      cwd: wt, encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
+    }).trim()
+    if (cutSha) seedToWrite = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase, baseSha: cutSha })
+  } catch (e) {
+    console.error(`aviso: no se pudo medir el corte real en el worktree de #${s.n} (\`git rev-parse HEAD\` en ${wt} falló: ${e.message}). La semilla se siembra con el sha que se resolvió de "origin/${resolvedBase}" antes de la tanda${resolvedBaseSha ? ` (${resolvedBaseSha.slice(0, 12)}…)` : ', que tampoco se pudo resolver: irá sin `base_sha` y con `last_commit` vacío'} — el comportamiento anterior a esta mejora: puede ser el corte, o puede haberse quedado atrás si algo movió origin/${resolvedBase} entre medias.`)
+  }
   try {
     mkdirSync(`${wt}/.agent`, { recursive: true })
-    writeFileSync(`${wt}/${SLICE_REL_PATH}`, stateSeed)
+    writeFileSync(`${wt}/${SLICE_REL_PATH}`, seedToWrite)
   } catch (e) {
     cleanupOrphanedWorktree(s, wt, branch, `no se pudo sembrar ${SLICE_REL_PATH}: ${e.message}`)
   }

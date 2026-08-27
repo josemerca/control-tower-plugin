@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { makeSpecDir, specUrl } from './fixtures/spec-repo.js'
-import { buildIssueBody } from '../scripts/groom.js'
+import { buildIssueBody, FROZEN_DECISIONS_HEADING } from '../scripts/groom.js'
 
 // F5 — el groom detecta divergencia, no solo existencia. Este fichero cubre
 // la CORRIDA REAL (mutadora, sin --dry-run) contra un `gh` de mentira: el
@@ -147,6 +147,31 @@ describe('ct-groom (corrida real) — detecta divergencia por defecto, no la apl
       FAKE_GH_LIST_SEQUENCE: JSON.stringify([[MATCHING_ISSUE]]),
     })
     expect(res.status).toBe(0)
+    expect(res.stderr).not.toMatch(/divergencia/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // I3.8: la sección de decisiones NO mueve el exit code. El spec trae
+  // "## Decisiones congeladas" y el issue existente (matchingBody, sin la
+  // sección) diverge SOLO en eso → se reporta como nota:, exit 0, no 3.
+  it('el spec trae ## Decisiones congeladas y el issue no → nota:, exit 0 (no mueve el exit code)', () => {
+    const SPEC_DEC = ONE_SLICE_SPEC.replace('## 9. Slices', '## Decisiones congeladas\n- **D-1 · versión** — iOS 17. *(Procedencia: hablada.)*\n\n## 9. Slices')
+    const { dir, spec } = writeSpec(SPEC_DEC)
+    const MATCHING_ISSUE = {
+      number: 501,
+      title: '#1 login',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:plan' }, { name: 'status:in-progress' }],
+      body: matchingBody(), // sin "## Decisiones congeladas"
+    }
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[MATCHING_ISSUE]]),
+    })
+    expect(res.status).toBe(0) // NO 3: la sección es nota, no divergencia máquina
+    expect(res.stderr).toContain(FROZEN_DECISIONS_HEADING)
+    expect(res.stderr).toMatch(/nota:/)
     expect(res.stderr).not.toMatch(/divergencia/)
     rmSync(dir, { recursive: true, force: true })
   })

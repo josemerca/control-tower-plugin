@@ -12,7 +12,7 @@ import { SLICE_REL_PATH } from './state-paths.js'
 // discriminador de "señal declarada / exención / nada" para groom, kickoff y
 // (en prosa) la rúbrica del juez de slice, que no pueda divergir entre quien
 // valida la celda y quien anuncia la línea.
-import { EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING, parseSenalCell } from './groom.js'
+import { EPIC_CONTEXT_HEADING, INHERITED_CONTEXT_HEADING, FROZEN_DECISIONS_HEADING, parseSenalCell } from './groom.js'
 import { NO_MILESTONE_KEY } from './gh-issue-map.js'
 
 // SENAL_AUSENTE (Slice 10): el valor del campo `senal:` cuando el issue no
@@ -215,6 +215,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conv
     // heredada). Sin ella, un agente que no encuentra lo que se le acaba de
     // nombrar lo busca fuera del issue, que es justo lo que no puede hacer.
     `Lee también las secciones "${EPIC_CONTEXT_HEADING}" y "${INHERITED_CONTEXT_HEADING}" del issue: traen lo que el spec y los slices ya mergeados condicionan sobre este trabajo y que no cabe en los criterios de aceptación. Si alguna está vacía o no aparece, no hay nada que heredar — no lo busques fuera del issue.`,
+    `Lee también la sección "${FROZEN_DECISIONS_HEADING}" del issue: son decisiones del epic con consecuencia sobre este trabajo, que DEBES respetar (no las reinterpretes ni las cambies) y que van a "## 2. Closed decisions" de tu plan. Si no aparece, no hay ninguna — no la busques fuera del issue.`,
     // Slice 10 — la señal, NOMBRADA cuando el issue la declara: "ninguna
     // exigencia que el spec le haga al agente puede depender de que el agente
     // lea el spec" — sin esta línea, el juez de slice exigiría lo que al
@@ -248,7 +249,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conv
     // `.agent/conventions.md` y seleccionar en §3.
     `Antes de escribir el plan, LEE la vara de ct: los cuatro documentos de ${conventionsDir} (code.md, decisions.md, architecture.md, testing.md). El programa se los pega al implementador y al juez en cada tarea, así que un plan que no las respete produce tareas que el juez va a bloquear. TIENEN PREFERENCIA sobre las convenciones de este repo, y la preferencia se mide regla a regla, no por tema: donde una regla del repo manda lo que uno de esos documentos prohíbe, o prohíbe lo que uno de esos documentos manda, no aplica; donde el repo habla de algo de lo que ninguno habla —mayúsculas, prefijos, nombres de fichero—, obliga entera y la sigues. La vara del repo no desaparece: la sigues seleccionando en el \`Rules to obey:\` de §3 como hasta ahora.`,
     `Y una de ellas decide cómo reparten trabajo tus tareas: \`architecture.md\` rige los MÓDULOS NUEVOS. Un módulo que ya existía y no cumple es deuda declarada del repo —lo que le añadas sigue el estilo de su anfitrión y eso no es hallazgo—, pero un concepto nuevo es un módulo nuevo y nace cumpliendo. De qué lado cae cada cosa lo decides tú al repartir \`**Files:**\` entre \`(create)\` y \`(modify)\`.`,
-    `Primer acto, con el baseline verde: escribe el plan del slice con control-tower-loop:writing-plans-prescriptive usando el issue como spec (sus AC, "Protegido" y "Contexto del epic" son la entrada que la skill pide). SOLO bloques esenciales, cada uno con su etiqueta de rol: contratos, call sites y el tramo que cambia — los cuerpos de los módulos y los ficheros de test los escribe el implementador con TDD, y la configuración se describe en prosa. Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${slice.n}-<slug>.md, valídalo con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --check-plan\` hasta exit 0, y commitéalo: viaja en el PR, y el --release del final se negará (exit 6) sin un plan válido commiteado.`,
+    `Primer acto, con el baseline verde: escribe el plan del slice con control-tower-loop:writing-plans-prescriptive usando el issue como spec (sus AC, "Protegido", "${EPIC_CONTEXT_HEADING}" y "${FROZEN_DECISIONS_HEADING}" son la entrada que la skill pide; vuelca cada decisión congelada en "## 2. Closed decisions" del plan — son del epic y las DEBES respetar, no reinterpretar). SOLO bloques esenciales, cada uno con su etiqueta de rol: contratos, call sites y el tramo que cambia — los cuerpos de los módulos y los ficheros de test los escribe el implementador con TDD, y la configuración se describe en prosa. Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${slice.n}-<slug>.md, valídalo con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --check-plan\` hasta exit 0, y commitéalo: viaja en el PR, y el --release del final se negará (exit 6) sin un plan válido commiteado.`,
     `Con el plan commiteado y el gate 'plan' con OK humano, la implementación NO la conduces con subagent-driven-development ni con su ledger: la secuencia la dicta la máquina. Pregunta el paso con \`node ${ctStepPath} next --plan docs/superpowers/plans/<el-plan-que-commiteaste>.md --issue ${slice.n}\` y obedece LITERALMENTE lo que imprima en cada paso (donde diga \`ct-step\`, es \`node ${ctStepPath}\`): despacha el implementador como subagente con la rúbrica y el brief que te indique, luego \`ct-step report\`, \`ct-step controls\`, despacha el juez como subagente ct-judge (declarado sin Bash), \`ct-step verdict\` y \`ct-step commit\` — comitea ct-step, nunca tú ni el implementador. Tras el commit de la última tarea quedan dos pasos más, que \`next\` también dicta: \`ct-step global\` (la Global verification del plan la ejecuta el programa, no un agente) y el juicio del slice entero — despacha ct-slice-judge como subagente (declarado sin Bash) y entrega su JSON con \`ct-step slice-verdict\`. Vuelve a \`next\` tras cada paso hasta "run delivered".`,
     addendum,
     ...gateLines,
@@ -415,6 +416,41 @@ export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
       status: 'not_started',
       branch,
       base,
+      // ------------------------------------------------------------------
+      // `base_sha` (slice 1 de los apuntes de Capde) — EL SHA DEL CORTE, EN
+      // UN CAMPO QUE NADIE REESCRIBE.
+      //
+      // Es el SHA exacto al que apuntaba `origin/<base>` cuando ct-next cortó
+      // este worktree (`git rev-parse --verify --quiet origin/<base>^{commit}`,
+      // ct-next.mjs:1676, justo después del fetch que demuestra que la ref
+      // existe). Recibe el MISMO valor que `last_commit` aquí abajo, y aun así
+      // tiene que ser un campo aparte: `last_commit` es del guard de cierre de
+      // turno y el agente lo SOBREESCRIBE en cada commit de trabajo — por
+      // diseño, ver state.js ("`last_commit` se entiende como el último commit
+      // DE TRABAJO"). O sea que el único rastro del corte que hoy se siembra
+      // desaparece del fichero en el primer commit del slice.
+      //
+      // `base_sha` no lo reescribe NADIE después del despacho: ningún verbo de
+      // ct-step, ningún hook, y el mensaje del guard de cierre que le pide al
+      // agente refrescar su estado enumera los campos a tocar (you_are_here,
+      // next_action, tasks[], last_commit) sin nombrarlo (state.js:617).
+      //
+      // Y `base` no sirve para esto: `base` es un NOMBRE DE RAMA (`develop`,
+      // nunca `origin/develop` ni un sha) porque de ahí sale el `--base` de
+      // `gh pr create`. Resolver ese nombre más tarde, dentro del worktree,
+      // apunta a la copia LOCAL de la rama — que es exactamente lo que midió
+      // el diff de `dispatch-check --release` en la corrida del slice 10, con
+      // el `main` local 7 commits por detrás de su remoto.
+      //
+      // LA AUSENCIA SE OMITE, no se declara vacía: si ct-next no pudo resolver
+      // `origin/<base>` a un sha (ct-next.mjs:1679) el campo no aparece en el
+      // YAML y quien lo lea cae a su propio fallback. Es una asimetría
+      // deliberada con `last_commit`, que sí se siembra `""`: a `last_commit`
+      // lo lee `describeStopRelation`, que ya distingue el vacío ("unset",
+      // callar) de un valor; a `base_sha` lo leerá un regex sobre el TEXTO del
+      // fichero, y un campo presente con el valor vacío es un campo que afirma
+      // tener un valor. El campo que no está no engaña a nadie.
+      ...(baseSha ? { base_sha: baseSha } : {}),
       // F22: el sha de la base, NO el nombre de la rama. Con el campo vacío
       // —lo que se sembraba hasta ahora— `describeStopRelation` devuelve
       // `unset` y `classifyStopState` sale en silencio: el hook `Stop` que

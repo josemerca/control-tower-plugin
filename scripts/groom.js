@@ -53,6 +53,15 @@ export function renderE2eContent(slice) {
 export const EPIC_CONTEXT_HEADING = '## Contexto del epic'
 export const INHERITED_CONTEXT_HEADING = '## Contexto heredado'
 
+// FROZEN_DECISIONS_HEADING: la sección de decisiones congeladas del spec, que
+// groom proyecta al cuerpo de cada issue del epic. Mismo trato que
+// EPIC_CONTEXT_HEADING (del spec, idéntica en todos los issues, reconciliada),
+// con una sola diferencia: al proyectar se le quita la procedencia de cada
+// línea (ver readFrozenDecisions). Constante exportada por el mismo motivo que
+// las de al lado: la nombran el que la escribe, el que la compara y sus tests.
+// Es la MISMA cadena en el fichero de spec y en el cuerpo del issue.
+export const FROZEN_DECISIONS_HEADING = '## Decisiones congeladas'
+
 // El placeholder afirma dos cosas que un humano necesita leer ahí mismo: quién
 // rellena la sección, y que lo que escriba no se lo va a pisar nadie. Una
 // sección vacía sin esa segunda frase invita a no usarla.
@@ -173,8 +182,20 @@ export function analyzeSpecFreeze(specMd) {
 // contexto de los N issues del epic en el siguiente --reconcile. "El epic no
 // tiene contexto" (ausente/vacía) autoriza a retirar; "no he podido leer un
 // texto válido" (malformada) no autoriza nada — ver EPIC_CONTEXT_REASONS.
-export function readEpicContext(specMd) {
+// readSpecSection: el lector puro que comparten readEpicContext y
+// readFrozenDecisions. Localiza la sección por TEXTO de cabecera (nunca por
+// número), aplica los guardarraíles (delimitador sin cerrar, truncamiento por
+// cabecera interna) y devuelve el contrato de siempre: { content, reason,
+// warnings }. Los cuatro reason viven en EPIC_CONTEXT_REASONS porque son
+// agnósticos de la sección. `opts.strip` (opcional) es un RegExp que se recorta
+// de cada línea del contenido YA validado; `opts.stripLabel` es la palabra cuya
+// supervivencia tras el recorte delata un fallo de limpieza (se avisa, B2).
+export function readSpecSection(specMd, heading, opts = {}) {
   const warnings = []
+  // `noun` mantiene byte-idénticos los avisos de cada cliente: el epic dice
+  // "lleva contexto común", las decisiones "lleva decisiones congeladas". Sin
+  // esto, extraer el lector cambiaría el texto que hoy imprime readEpicContext.
+  const noun = opts.noun || 'esta sección'
   // CRLF (review final de rama, I2). Se normaliza AQUÍ, antes de localizar
   // nada, y por dos motivos distintos:
   //
@@ -193,9 +214,9 @@ export function readEpicContext(specMd) {
   //      hecho coincide con ATX_HEADING_RE en rechazar "##\r"; lo que estaba
   //      mal era el texto que se les daba a los dos.
   const src = normalizeToLF(specMd || '')
-  const loc = locateSection(src, EPIC_CONTEXT_HEADING)
+  const loc = locateSection(src, heading)
   if (!loc) {
-    warnings.push(`aviso: el spec no trae la sección "${EPIC_CONTEXT_HEADING}" — ningún issue de este epic lleva contexto común (ni el que se cree ahora, ni el que ya exista: con --reconcile la sección se retira del cuerpo). Si lo quieres, añade esa sección al spec, fuera de la tabla de slices, y vuelve a correr.`)
+    warnings.push(`aviso: el spec no trae la sección "${heading}" — ningún issue de este epic lleva ${noun} (ni el que se cree ahora, ni el que ya exista: con --reconcile la sección se retira del cuerpo). Si lo quieres, añade esa sección al spec, fuera de la tabla de slices, y vuelve a correr.`)
     return { content: null, reason: EPIC_CONTEXT_REASONS.ABSENT, warnings }
   }
   // Delimitador sin cerrar (review final de rama, C3). Va ANTES del
@@ -209,21 +230,77 @@ export function readEpicContext(specMd) {
   const abierto = unterminatedDelimiter(loc.content)
   if (abierto) {
     const que = abierto === 'valla' ? 'una valla de código (```) sin cerrar' : 'un comentario HTML (<!--) sin cerrar'
-    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec contiene ${que} y por eso NO se emite en ningún issue. Sin el cierre, la sección no termina donde parece: se traga todo lo que venga detrás en el spec (la tabla de slices incluida) y ese texto acabaría en el cuerpo de todos los issues. Cierra el delimitador y vuelve a correr. ${MALFORMED_KEEPS_WHAT_IS_THERE}`)
+    warnings.push(`aviso: la sección "${heading}" del spec contiene ${que} y por eso NO se emite en ningún issue. Sin el cierre, la sección no termina donde parece: se traga todo lo que venga detrás en el spec (la tabla de slices incluida) y ese texto acabaría en el cuerpo de todos los issues. Cierra el delimitador y vuelve a correr. ${MALFORMED_KEEPS_WHAT_IS_THERE}`)
     return { content: null, reason: EPIC_CONTEXT_REASONS.MALFORMED, warnings }
   }
 
   const truncating = truncationLine(src, loc)
   if (truncating) {
-    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec contiene ("${truncating}") y por eso NO se emite en ningún issue. La sección se reescribe entera desde el spec: el reemplazo termina en la primera cosa que corta la sección (cabecera de cualquier nivel, comentario HTML, etc.), así que nada que corte puede vivir dentro. ${MALFORMED_KEEPS_WHAT_IS_THERE}`)
+    warnings.push(`aviso: la sección "${heading}" del spec contiene ("${truncating}") y por eso NO se emite en ningún issue. La sección se reescribe entera desde el spec: el reemplazo termina en la primera cosa que corta la sección (cabecera de cualquier nivel, comentario HTML, etc.), así que nada que corte puede vivir dentro. ${MALFORMED_KEEPS_WHAT_IS_THERE}`)
     return { content: null, reason: EPIC_CONTEXT_REASONS.MALFORMED, warnings }
   }
   const content = loc.content.trim()
   if (!content) {
-    warnings.push(`aviso: la sección "${EPIC_CONTEXT_HEADING}" del spec está presente pero sin contenido — se trata igual que si no estuviera, o sea que ningún issue lleva contexto común (y con --reconcile la sección se retira del cuerpo de los que ya la tengan). Escribe algo debajo de la cabecera, o quítala.`)
+    warnings.push(`aviso: la sección "${heading}" del spec está presente pero sin contenido — se trata igual que si no estuviera, o sea que ningún issue lleva ${noun} (y con --reconcile la sección se retira del cuerpo de los que ya la tengan). Escribe algo debajo de la cabecera, o quítala.`)
     return { content: null, reason: EPIC_CONTEXT_REASONS.EMPTY, warnings }
   }
-  return { content, reason: null, warnings }
+  let out = content
+  if (opts.strip) {
+    // Recorte best-effort del sufijo (ver PROCEDENCIA_SUFFIX_RE). Se hace sobre
+    // el contenido YA validado: los guardarraíles miran la sección cruda; el
+    // recorte solo afecta a lo que se proyecta al cuerpo.
+    out = content.split('\n').map((l) => l.replace(opts.strip, '')).join('\n')
+    // B2: la limpieza es best-effort sobre un formato externo. Si tras recortar
+    // SOBREVIVE un MARCADOR (sufijo en otra línea, o un segundo marcador
+    // interior que el recorte templado no toca), NO se calla: se proyecta el
+    // texto igual, pero con un aviso que nombra cada línea que sigue sucia. "No
+    // poder comprobar NO es estar limpio" (scope.js): el fallo tiene que verse.
+    // Se comprueba el MARCADOR (opts.survives), no la palabra suelta —
+    // "Procedencia" en prosa legítima no es un fallo (DeepSeek #2).
+    if (opts.survives) {
+      for (const l of out.split('\n')) {
+        if (opts.survives.test(l)) {
+          warnings.push(`aviso: en la sección "${heading}" del spec, esta línea conserva un marcador "${opts.stripLabel}" tras limpiar el sufijo y por eso viaja tal cual al cuerpo de los issues: "${l}". Revisa que cada decisión lleve como mucho un sufijo "*(Procedencia: …)*", en una sola línea, o quítalo a mano.`)
+        }
+      }
+    }
+  }
+  return { content: out, reason: null, warnings }
+}
+
+// readEpicContext: el contexto común del epic. Wrapper de readSpecSection sin
+// strip — su contenido viaja verbatim (I1: antes era el cuerpo que ahora vive
+// en readSpecSection; se conserva la firma y los tests que ya lo cubren).
+export function readEpicContext(specMd) {
+  return readSpecSection(specMd, EPIC_CONTEXT_HEADING, { noun: 'contexto común' })
+}
+
+// PROCEDENCIA_SUFFIX_RE: el sufijo "*(Procedencia: …)*" que la plantilla de
+// decisiones (_TEMPLATE-execution-spec.md, el núcleo) escribe al final de cada
+// línea, con formato verificado contra docs/loop/loop.body.html. Es meta para
+// quien CONGELA (hablada | deducida | propuesta), no para quien EJECUTA: al
+// agente le da igual el origen — la decisión le vincula igual —, así que se
+// quita al proyectar. No es un parser: solo recorta el sufijo. `[^\n]` (no `.`)
+// para no cruzar saltos de línea: si el sufijo se envolvió a dos líneas, no
+// casa, y la limpieza lo delata por B2 en vez de partir el markdown. Y el
+// contenido está TEMPLADO con `(?!\*\(Procedencia:)` para no cruzar un SEGUNDO
+// marcador: sin eso, una línea con dos marcadores casaba desde el primero hasta
+// el `)*` final y borraba en silencio todo lo de en medio (DeepSeek #1). Así se
+// recorta solo el sufijo final; el marcador interior sobrevive y B2 lo avisa.
+const PROCEDENCIA_SUFFIX_RE = /\s*\*\(Procedencia:(?:(?!\*\(Procedencia:)[^\n])*?\)\*\s*$/i
+
+// PROCEDENCIA_MARKER_RE: detecta un marcador de procedencia SUPERVIVIENTE tras
+// el recorte (para el aviso B2). Mira el MARCADOR —un paréntesis de apertura
+// seguido de "Procedencia:"— y no la palabra suelta: "Procedencia" en prosa
+// legítima ("revisar la Procedencia en el acta") no es un fallo de limpieza
+// (DeepSeek #2). Case-insensitive como el recorte; cubre `*(`, `_(` y `(`.
+const PROCEDENCIA_MARKER_RE = /\(Procedencia:/i
+
+// readFrozenDecisions: espejo de readEpicContext, los dos sobre readSpecSection.
+// La ÚNICA diferencia es el strip de la procedencia (y su aviso observable si
+// sobrevive un marcador tras el recorte, B2).
+export function readFrozenDecisions(specMd) {
+  return readSpecSection(specMd, FROZEN_DECISIONS_HEADING, { noun: 'decisiones congeladas', strip: PROCEDENCIA_SUFFIX_RE, survives: PROCEDENCIA_MARKER_RE, stripLabel: 'Procedencia' })
 }
 
 // gatesOf: la resolución de gates de un slice, en un solo sitio. La llaman
@@ -511,7 +588,7 @@ export function renderAcContent(ac) {
   return (ac && ac.length) ? ac.map((a) => `- ${a}`).join('\n') : '- (rellenar desde el spec)'
 }
 
-export function buildIssueBody(slice, specRef, epicContext = null) {
+export function buildIssueBody(slice, specRef, epicContext = null, frozenDecisions = null) {
   const lines = []
   lines.push(renderSpecLink(slice, specRef))
   lines.push('')
@@ -540,6 +617,15 @@ export function buildIssueBody(slice, specRef, epicContext = null) {
   if (epicContext) {
     lines.push(EPIC_CONTEXT_HEADING)
     lines.push(epicContext)
+    lines.push('')
+  }
+  // Decisiones congeladas: mismo trato que el contexto del epic (del spec,
+  // reconciliada) y por eso emitida aquí mismo, justo detrás. Sección propia
+  // —no dentro de "## Contexto del epic"— y solo si hay contenido. Con esto el
+  // orden del cuerpo pasa a ser epic → decisiones → heredado → criterios.
+  if (frozenDecisions) {
+    lines.push(FROZEN_DECISIONS_HEADING)
+    lines.push(frozenDecisions)
     lines.push('')
   }
   lines.push(INHERITED_CONTEXT_HEADING)
@@ -616,13 +702,18 @@ function findDuplicateOrders(slices) {
   return [...dupes].sort((a, b) => a - b)
 }
 
-export function groomPlan(slices, { milestone, specRef, epicContext = null, epicContextReason = null }) {
+export function groomPlan(slices, { milestone, specRef, epicContext = null, epicContextReason = null, frozenDecisions = null, frozenDecisionsReason = null }) {
   // epicContextUnknown (I1): "no he podido leer un texto válido" NO es "el
   // epic no tiene contexto". Sin esta distinción, `epicContext: null` viajaba
   // igual en los dos casos y buildReconcileBody lo leía siempre como "retira
   // la sección". Es lo único que reconcile.js necesita saber del motivo: el
   // resto del detalle vive en el aviso, que ya lo ha impreso el wrapper.
   const epicContextUnknown = epicContextReason === EPIC_CONTEXT_REASONS.MALFORMED
+  // frozenDecisionsUnknown (espejo de epicContextUnknown): "no se pudo leer un
+  // texto válido" NO es "el epic no tiene decisiones". Sin esta distinción,
+  // frozenDecisions: null viajaría igual en los dos casos y buildReconcileBody
+  // lo leería siempre como "retira la sección".
+  const frozenDecisionsUnknown = frozenDecisionsReason === EPIC_CONTEXT_REASONS.MALFORMED
   const dupes = findDuplicateOrders(slices)
   if (dupes.length) {
     throw new Error(`groomPlan: orden(es) de slice duplicado(s) en la tabla §9: ${dupes.join(', ')}`)
@@ -632,7 +723,7 @@ export function groomPlan(slices, { milestone, specRef, epicContext = null, epic
     issues: slices.map((s) => ({
       order: s.n,
       title: buildIssueTitle(s),
-      body: buildIssueBody(s, specRef, epicContext),
+      body: buildIssueBody(s, specRef, epicContext, frozenDecisions),
       labels: buildLabels(s),
       deps: s.deps,
       // F5: además del body ya renderizado (arriba), el plan lleva los
@@ -669,6 +760,12 @@ export function groomPlan(slices, { milestone, specRef, epicContext = null, epic
       // la lectura del spec.
       epicContext,
       epicContextUnknown,
+      // Las decisiones viajan en el plan, no solo dentro del body ya
+      // renderizado, por el mismo motivo que epicContext: para que comparar
+      // este slice contra un issue existente no obligue a re-parsear el cuerpo
+      // recién generado, y para que el JSON del --dry-run las muestre.
+      frozenDecisions,
+      frozenDecisionsUnknown,
     })),
   }
 }
