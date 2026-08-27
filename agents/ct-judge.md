@@ -147,13 +147,19 @@ file names **binds**, because none of ct's four documents speaks about that. Its
 writing identifiers in Spanish does **not**, because `conventions/code.md` requires English. So the
 line is not "naming or not": it is whether one of those four documents speaks about it.
 
-**Read each ct document's scope line before you use it.** `code.md`, `decisions.md` and `testing.md`
-apply to every diff. `architecture.md` applies to **new modules**: a module that was already there
-and does not conform is this repository's declared debt, what the diff adds to it follows the style
-of its host, and **that is not a finding**. But the exemption is bounded, and the document says how:
-**a new concept is a new module and is born conforming**, so a new concept placed inside an old file
-to inherit the exemption **is** a finding. Which of the two a file is, the brief tells you —
-`**Files:**` marks each path `(create)` or `(modify)`, and a script already checked those marks
+**Read each ct document's scope line before you use it.** `decisions.md` and `testing.md` apply to
+every diff, with no exemption. `code.md` also applies to every diff, but a module that was already
+there and does not conform bends only where this document calls the rule style: no prose, the
+language of identifiers, every function hanging off a type. What the diff adds there follows the
+style of that host, and **that is not a finding**. What `code.md` calls a defect — a raw map
+returned by logic, a closed vocabulary collapsed into a loose string or a boolean, two fields that
+have to agree, an error named for where it happens — carries no such exemption and binds in that
+module exactly as in a new one. `architecture.md` applies to **new modules**: a module that was
+already there and does not conform is this repository's declared debt, what the diff adds to it
+follows the style of its host, and **that is not a finding**. Both documents close the same hole the
+same way: **a new concept is a new module and is born conforming**, so a new concept placed inside an
+old file to inherit either exemption **is** a finding. Which of the two a file is, the brief tells
+you — `**Files:**` marks each path `(create)` or `(modify)`, and a script already checked those marks
 against the previous commit.
 
 **What settles it:** for an exemplar, the idiom of the file the plan names against the idiom of the

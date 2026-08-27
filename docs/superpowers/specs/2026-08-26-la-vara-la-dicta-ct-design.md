@@ -224,7 +224,20 @@ precedencia se lee antes de que llegue la vara sobre la que decide.
 
 ### 5.1 `conventions/code.md`
 
-Alcance: **todo diff**.
+Alcance: **todo diff**. Un módulo que ya existía y no cumple es **deuda
+declarada** sólo para lo que este documento llama estilo: cero prosa, el
+idioma de los identificadores, que toda función cuelgue de un tipo. Lo que se
+le añada a ese módulo puede seguir el estilo de su anfitrión ahí, y eso **no es
+hallazgo**. Lo que este documento llama defecto no tiene esa exención: mapa
+crudo como retorno de lógica, vocabulario cerrado colapsado en una cadena o un
+booleano, dos campos que tienen que concordar, un error nombrado por dónde
+pasa en vez de por qué pasa. Eso rige en todo diff, en un módulo nacido hoy
+igual que en uno que ya estaba.
+
+Y el mismo agujero que cierra `architecture.md` se cierra aquí igual: un
+concepto nuevo es un módulo nuevo y nace cumpliendo, así que esconder un
+concepto nuevo dentro de un fichero viejo para heredar la exención de estilo
+**sí es hallazgo**.
 
 - **Cero prosa en el código: ni comentarios ni docstrings.** Si un trozo de
   código no se entiende sin un párrafo al lado, el arreglo es el código —nombres
@@ -511,6 +524,19 @@ La consecuencia aceptada es que un repo así **no acaba de migrar solo**: conviv
 con dos formas, la vieja congelada y la nueva conforme. Se acepta porque la
 alternativa —migrar al tocar— hace que el tamaño de un slice dependa de lo viejo
 que sea el fichero que le toque, y eso lo decide el azar, no el trabajo.
+
+Esta afirmación era cierta sólo de `architecture.md`, y conviene dejarlo escrito
+en vez de corregirlo en silencio: `code.md` no traía esta cláusula hasta ahora,
+su alcance era todo diff sin excepción alguna, así que una línea que sólo seguía
+el estilo del fichero anfitrión —un comentario en el idioma de alrededor, por
+ejemplo— incumplía `code.md` igual que si el módulo fuera nuevo. El
+implementador que la escribía para no romper el estilo circundante y el juez que
+la bloqueaba citando el mismo documento estaban los dos siguiendo la vara al
+pie de la letra: eso es el interbloqueo de §7, y este apartado lo cerraba para
+`architecture.md` mientras lo dejaba abierto para `code.md`. La cláusula nueva
+de §5.1 lo cierra ahora del mismo modo, con su misma asimetría: lo que es
+estilo se exime igual que en `architecture.md`; lo que es defecto sigue rigiendo
+todo diff, así que tampoco ahí hay migración que un slice tenga que arrastrar.
 
 ## 8. Lo que esto NO hace
 

@@ -71,12 +71,21 @@ this prompt or in the files it names.
    follow this repo's: precedence resolves a clash, it does not excuse you from
    this repo's conventions.
 
-   **Read each ct document's scope line.** `code.md`, `decisions.md` and
-   `testing.md` apply to everything you write. `architecture.md` applies to **new
-   modules**: a module that was already there and does not conform is this
-   repository's declared debt, so what you add to it follows the style of its
-   host and nobody will block you for that. What you may not do is hide a new
-   concept inside an old file to inherit the exemption:
+   **Read each ct document's scope line.** `decisions.md` and `testing.md` apply
+   to everything you write, with no exemption. `code.md` also applies to
+   everything you write, but a module that was already there and does not
+   conform bends only where it calls the rule style: no prose, the language of
+   identifiers, every function hanging off a type. What you add there follows
+   the style of that host and nobody will block you for that. What `code.md`
+   calls a defect — a raw map returned by logic, a closed vocabulary collapsed
+   into a loose string or a boolean, two fields that have to agree, an error
+   named for where it happens — gets no such exemption and binds in that module
+   exactly as in a new one. `architecture.md` applies to **new modules**: a
+   module that was already there and does not conform is this repository's
+   declared debt, so what you add to it follows the style of its host and
+   nobody will block you for that. Both documents close the same hole the same
+   way: what you may not do is hide a new concept inside an old file to inherit
+   either exemption:
    **a new concept is a new module and is born conforming.**
    Which of the two you are writing is already decided for you by the `(create)`
    and `(modify)` marks of the `**Files:**` line.

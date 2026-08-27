@@ -37,6 +37,10 @@ describe('los documentos de conventions/', () => {
     expect(leer('architecture.md')).toContain('a new concept is a new module and is born conforming')
   })
 
+  it('code.md cierra el mismo agujero para su exención de estilo', () => {
+    expect(leer('code.md')).toContain('a new concept is a new module and is born conforming')
+  })
+
   it('ninguno repite una regla que ya posee un ítem de la rúbrica', () => {
     // Cada grupo es un ítem de la rúbrica del juez que YA posee esa regla. Que
     // uno de estos documentos la repita es un defecto real: `decisions.md`

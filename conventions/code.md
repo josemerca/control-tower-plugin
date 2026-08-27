@@ -6,6 +6,25 @@ This document is part of ct's yardstick, which travels with the plugin. How it
 relates to the conventions of the repository you are working in is stated in the
 header of the block that carried it here.
 
+A module that was already there and does not conform is the repository's
+**declared debt**, but the debt is only as wide as this document's **style**
+rules: no prose, the language its identifiers are written in, and that every
+function hangs off a type. What you add to such a module may follow the style
+of its host there, and that is not a finding — half a migration reads worse
+than none. This document's **defect** rules carry no such exemption: a raw map
+returned as the value of logic, a closed vocabulary collapsed into a loose
+string or a boolean, two fields that have to agree instead of one that makes
+the wrong state impossible, an error named for where it happens instead of
+what happens — those bind on every diff, in a module born today and one that
+was already there alike.
+
+The hole that exemption opens is closed in the same breath, because otherwise
+the cheapest way to dodge this document is to write new code inside an old
+file: **a new concept is a new module and is born conforming.** Sheltering
+under the host's style covers only what genuinely extends what was already
+there; placing a new concept inside an old file to inherit the exemption **is**
+a finding.
+
 ## No prose in the code
 
 No comments and no docstrings. If a piece of code cannot be understood without a
