@@ -232,11 +232,11 @@ describe('formatCandidatos', () => {
     expect(texto).not.toContain('unblock')
   })
 
-  it('con un candidato marcado esqueleto, explica que declararlo mide contra un documento vacío', () => {
+  it('con un candidato marcado esqueleto, explica que declararlo es peor que no declararlo — le da al juez un documento vacío que sí cuenta como vara del repo', () => {
     const texto = formatCandidatos([{ ruta: 'AGENTS.md', motivo: 'guía del repo en la raíz', esqueleto: true }])
     expect(texto).toContain('[esqueleto: sólo encabezados]')
     expect(texto).toMatch(/documento vacío/)
-    expect(texto).toContain('sin-vara')
+    expect(texto).toMatch(/peor que no declararlos/)
   })
 
   it('con omitidos, dice cuántos candidatos más hay sin listar', () => {

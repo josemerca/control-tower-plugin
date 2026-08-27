@@ -38,11 +38,13 @@ documentos de reglas del código, que `ct-step` pega en el brief de cada tarea.
 el barrido no trajo, puedes proponerlo también, pero **diciendo que es tuyo y
 no del barrido**. Escribe en el fichero SOLO lo que el usuario confirme — no
 lo rellenes por tu cuenta, y si no confirma nada, déjalo con su placeholder:
-la ausencia se mide (`sin-vara`), no se rellena. Si el scaffolder dice que
-**no se ha podido barrer** (falta `node`), dilo también: ese caso no es "aquí
-no hay convenciones", es "no se ha mirado". Un candidato marcado esqueleto
-declarado hoy hace que el juez mida contra un documento vacío: proponlo igual,
-pero cuéntale al usuario esa mitad. No es `.agent/conventions-ack.md` (eso son
+el diff se mide sólo contra la vara de ct, y la del repo no aporta nada. Si el
+scaffolder dice que **no se ha podido barrer** (falta `node`), dilo también:
+ese caso no es "aquí no hay convenciones", es "no se ha mirado". Un candidato
+marcado esqueleto declarado hoy es peor que no declararlo: le da al juez un
+documento vacío que SÍ cuenta como vara del repo, en vez de dejar que el
+diff se mida sólo contra la de ct. Proponlo igual, pero cuéntale al usuario
+esa mitad. No es `.agent/conventions-ack.md` (eso son
 acuses de señales de colisión de protocolo del loop, ver más abajo); este
 fichero declara cómo se escribe código en este repo.
 
