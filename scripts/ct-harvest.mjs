@@ -196,7 +196,10 @@ try {
 // Enum CERRADO, por el mismo motivo que RUBRIC_OUTCOMES: `sin-fichero` (nadie
 // midió) y `no-leido` (no se sabe) no son la misma cosa y ninguna de las dos es
 // un cero.
-const SIN_CUENTAS = { rows: null, malformed: null, verdicts: null, measured: null, legacy: null, rubricSinVara: null, findingsByRule: null }
+const SIN_CUENTAS = {
+  rows: null, malformed: null, verdicts: null, measured: null, legacy: null, rubricSinVara: null, findingsByRule: null,
+  measuredPatronesVaraCt: null, legacyPatronesVaraCt: null, patronesVaraCt: null,
+}
 
 function telemetriaDe(n) {
   if (dirTelemetria.status === 'no-leido' || n === null || n === undefined) {
@@ -261,13 +264,20 @@ if (comoJson) {
   if (dirTelemetria.status === 'no-leido') {
     console.log(`no se pudo listar \`${METRICS_REPO_DIR}\` en ${repo} (${dirTelemetria.why}). Puede que este repo no tenga telemetría del juez o que la lectura fallara: **no se cuenta nada**, y el hueco NO es un cero.`)
   } else {
-    console.log('| Issue | Slice | Veredictos | sin-vara | Hallazgos por regla |')
-    console.log('|---|---|---|---|---|')
+    console.log('| Issue | Slice | Veredictos | sin-vara | Hallazgos por regla | patrones-ct |')
+    console.log('|---|---|---|---|---|---|')
     for (const f of filas) {
       const t = f.telemetry
       let veredictos = '—'
       let sinVara = '—'
       let porRegla = '—'
+      // De qué vara salió un hallazgo de `patrones`: cuántos, de los que ya
+      // cuenta `Hallazgos por regla`, citan la vara DE CT. El complemento —los
+      // de `patrones` que citan la del repo, o no citan nada— no viaja en su
+      // propia columna: se deriva restando de la cifra de `patrones` de al
+      // lado, que ya está en la tabla. Dos columnas que tienen que sumar lo
+      // mismo son dos sitios que pueden divergir.
+      let patronesCt = '—'
       if (t.status === 'sin-fichero') porRegla = '(sin telemetría)'
       else if (t.status === 'no-leido') porRegla = '(no se pudo leer)'
       else {
@@ -277,12 +287,18 @@ if (comoJson) {
         sinVara = t.measured > 0 ? String(t.rubricSinVara) : '—'
         const entradas = Object.entries(t.findingsByRule).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
         porRegla = t.verdicts === 0 ? '(sin veredictos)' : (entradas.length ? entradas.map(([r, n]) => `${r} ${n}`).join(' · ') : '(ninguno)')
+        // Misma regla que `sin-vara`: measuredPatronesVaraCt === 0 imprime «—»,
+        // nunca «0» — ningún veredicto de este slice traía la columna.
+        patronesCt = t.measuredPatronesVaraCt > 0 ? String(t.patronesVaraCt) : '—'
       }
-      console.log(`| #${f.issue} | ${f.title ?? '—'} | ${veredictos} | ${sinVara} | ${porRegla} |`)
+      console.log(`| #${f.issue} | ${f.title ?? '—'} | ${veredictos} | ${sinVara} | ${porRegla} | ${patronesCt} |`)
     }
     console.log('')
     if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.verdicts > 0 && f.telemetry.measured === 0)) {
       console.log('`—` en `sin-vara`: ningún veredicto de ese slice traía la columna (telemetría anterior a `rubric_sin_vara`). No es un cero.')
+    }
+    if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.verdicts > 0 && f.telemetry.measuredPatronesVaraCt === 0)) {
+      console.log('`—` en `patrones-ct`: ningún veredicto de ese slice traía la columna `findings_patrones_vara_ct` (telemetría anterior a esta medida). No es un cero.')
     }
     if (filas.some((f) => f.telemetry.status === 'sin-fichero')) {
       console.log(`\`(sin telemetría)\`: el repo no trae \`${METRICS_REPO_DIR}/issue-<n>.jsonl\` para ese slice. Nadie midió — no es un cero.`)

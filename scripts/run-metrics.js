@@ -160,6 +160,27 @@ function normalizar(campo, valor) {
 
 export const metricLine = (fila) => JSON.stringify(fila) + '\n'
 
+// ¿Cita este `evidence` la vara de ct? Se mide con la FORMA de la ruta —
+// `conventions/<algo>.md`— y no con la lista de `CONVENTIONS_FILES` de hoy: el
+// mismo argumento por el que `findings_by_rule` no se cruza con el enum de
+// reglas de hoy. Un documento renombrado o uno quinto que se añada mañana
+// tiene que seguir contando en las filas viejas y en las nuevas.
+//
+// LA TRAMPA: `docs/conventions/code.md` también contiene la subcadena
+// `conventions/code.md`, y ES la vara DEL REPO, no la de ct — `docs/conventions/`
+// es justo el sitio típico donde vive `.agent/conventions.md` (ver
+// `conventions/decisions.md`). Un `includes('conventions/')` a secas contaría
+// esa cita como ct y mediría lo contrario de lo que promete. Por eso la ruta no
+// puede venir precedida de una barra (`/`) — que delata un directorio padre
+// como `docs/`— ni de un carácter de palabra (`code_conventions/x.md` tampoco es
+// la vara de ct). Un lookbehind negativo es la única forma de exigir "nada de
+// eso justo delante" sin capturar y descartar a mano.
+const CITA_VARA_DE_CT = /(?<![\w/])conventions\/[\w.-]+\.md/
+
+export function citaVaraDeCt(evidence) {
+  return typeof evidence === 'string' && CITA_VARA_DE_CT.test(evidence)
+}
+
 // El conteo por severidad del veredicto, que es lo que permite leer "cuántos
 // vetos" sin volver a cargar los hallazgos.
 //
@@ -187,6 +208,15 @@ export function verdictMeasures(verdict) {
     // exactamente lo que no se podía ver leyendo los veredictos de
     // rust-monitoring a mano.
     rubric_sin_vara: (verdict?.rubric || []).filter((paso) => paso.outcome === 'sin-vara').length,
+    // De qué vara salió un hallazgo de `patrones` — el ÚNICO ítem que mide
+    // contra las varas. Un hallazgo de `contrato` o `alcance` no es "de la vara
+    // del repo" por no citar nada: es de otro ítem y no tiene nada que ver aquí,
+    // así que contar sobre TODOS los hallazgos mediría una cosa distinta de la
+    // que este campo promete. Un solo campo, no dos: el complemento —los de
+    // `patrones` que NO citan a ct— se deriva restando de
+    // `findings_by_rule.patrones`, que ya existe; dos columnas que tienen que
+    // sumar lo mismo son dos sitios que pueden divergir.
+    findings_patrones_vara_ct: findings.filter((f) => f.rule === 'patrones' && citaVaraDeCt(f.evidence)).length,
   }
 }
 
@@ -233,6 +263,14 @@ export function aggregateVerdictMeasures(texto) {
   let measured = 0
   let legacy = 0
   let sinVara = 0
+  // Contadores GEMELOS a `measured`/`legacy`, pero de `findings_patrones_vara_ct`
+  // y no de `rubric_sin_vara`: son medidas distintas, cada una con su propia
+  // fecha de nacimiento en la telemetría, así que una fila puede traer la una y
+  // no la otra. Fundirlos en los mismos contadores confundiría "esta fila es
+  // vieja para la medida A" con "lo es para la medida B".
+  let measuredPatronesVaraCt = 0
+  let legacyPatronesVaraCt = 0
+  let patronesVaraCt = 0
   const findingsByRule = {}
   for (const linea of String(texto ?? '').split('\n')) {
     if (linea.trim() === '') continue
@@ -249,6 +287,8 @@ export function aggregateVerdictMeasures(texto) {
     verdicts += 1
     const n = fila.rubric_sin_vara
     if (Number.isInteger(n) && n >= 0) { measured += 1; sinVara += n } else { legacy += 1 }
+    const p = fila.findings_patrones_vara_ct
+    if (Number.isInteger(p) && p >= 0) { measuredPatronesVaraCt += 1; patronesVaraCt += p } else { legacyPatronesVaraCt += 1 }
     const porRegla = fila.findings_by_rule
     if (porRegla && typeof porRegla === 'object' && !Array.isArray(porRegla)) {
       for (const [regla, cuantos] of Object.entries(porRegla)) {
@@ -256,5 +296,9 @@ export function aggregateVerdictMeasures(texto) {
       }
     }
   }
-  return { rows, malformed, verdicts, measured, legacy, rubricSinVara: measured ? sinVara : null, findingsByRule }
+  return {
+    rows, malformed, verdicts, measured, legacy, rubricSinVara: measured ? sinVara : null, findingsByRule,
+    measuredPatronesVaraCt, legacyPatronesVaraCt,
+    patronesVaraCt: measuredPatronesVaraCt ? patronesVaraCt : null,
+  }
 }

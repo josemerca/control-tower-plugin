@@ -13,7 +13,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, IDENTITY_FIELDS, aggregateVerdictMeasures, metricsRepoRelPath, METRICS_REPO_DIR } from '../scripts/run-metrics.js'
+import {
+  metricRow, metricLine, metricsPath, planSha256, verdictMeasures, IDENTITY_FIELDS, aggregateVerdictMeasures,
+  metricsRepoRelPath, METRICS_REPO_DIR, citaVaraDeCt,
+} from '../scripts/run-metrics.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(here, '..', 'scripts', 'ct-step.mjs')
@@ -161,6 +164,7 @@ describe('el conteo por severidad', () => {
       ruling: 'FAIL', findings_total: 3, findings_high: 1, findings_medium: 0, findings_low: 2,
       findings_by_rule: { contrato: 1, alcance: 2 },
       rubric_sin_vara: 0,
+      findings_patrones_vara_ct: 0,
     })
   })
 
@@ -201,6 +205,71 @@ describe('el conteo por severidad', () => {
         { rule: 'alcance', severity: 'low', what: 'c', path: 'z' },
       ],
     }).findings_by_rule).toEqual({ 'manipulacion-tests': 2, alcance: 1 })
+  })
+})
+
+// ---------------------------------------------------------------------------
+// MEDIDA 1: de qué vara salió el hallazgo. Sólo el ítem `patrones` mide contra
+// las varas — un hallazgo de `contrato` o `alcance` no es "de la vara del
+// repo" por no citar nada, es de otro ítem. El complemento (los de `patrones`
+// que NO citan a ct) no vive aquí: se deriva restando de
+// `findings_by_rule.patrones`, que ya existe.
+// ---------------------------------------------------------------------------
+describe('citaVaraDeCt — la forma de la ruta, no la lista de documentos de hoy', () => {
+  it('cita la vara de ct cuando "conventions/<algo>.md" no viene precedida de barra ni de letra', () => {
+    expect(citaVaraDeCt('`conventions/architecture.md` dice que la conversión vive en el dominio')).toBe(true)
+    expect(citaVaraDeCt('(conventions/code.md) exige inglés')).toBe(true)
+    expect(citaVaraDeCt('conventions/code.md al principio de la frase')).toBe(true)
+  })
+
+  // LA TRAMPA DEL ENCARGO: `docs/conventions/code.md` es la vara DEL REPO — un
+  // sitio típico donde vive `.agent/conventions.md` — y contiene la subcadena
+  // `conventions/code.md`. Un `includes` a secas la contaría como ct y mediría
+  // justo lo contrario de lo que el campo promete.
+  it('NO cuenta docs/conventions/code.md: esa cita es de la vara del REPO, no de ct', () => {
+    expect(citaVaraDeCt('el fichero `docs/conventions/code.md` dice que se usa camelCase')).toBe(false)
+  })
+
+  it('NO cuenta si "conventions/" viene pegada a una palabra', () => {
+    expect(citaVaraDeCt('mis_conventions/code.md no es la vara de ct')).toBe(false)
+  })
+
+  it('no depende de los cuatro nombres de hoy: un documento nuevo o renombrado también cuenta', () => {
+    expect(citaVaraDeCt('conventions/naming.md dice otra cosa')).toBe(true)
+  })
+
+  it('un evidence vacío o ausente no cita nada', () => {
+    expect(citaVaraDeCt('')).toBe(false)
+    expect(citaVaraDeCt(undefined)).toBe(false)
+    expect(citaVaraDeCt(null)).toBe(false)
+  })
+})
+
+describe('findings_patrones_vara_ct — sólo los hallazgos del ítem patrones', () => {
+  it('cuenta sólo los de patrones que citan la vara de ct, no los de otros ítems', () => {
+    expect(verdictMeasures({
+      ruling: 'FAIL',
+      findings: [
+        { rule: 'patrones', severity: 'high', what: 'a', path: 'x', evidence: 'conventions/code.md dice inglés' },
+        { rule: 'patrones', severity: 'low', what: 'b', path: 'y', evidence: 'se lee mal, sin cita' },
+        { rule: 'contrato', severity: 'low', what: 'c', path: 'z', evidence: 'conventions/code.md también aquí' },
+      ],
+    }).findings_patrones_vara_ct).toBe(1)
+  })
+
+  // EL FALSO POSITIVO QUE FIJA EL ENCARGO: un hallazgo de `patrones` que cita
+  // `docs/conventions/code.md` (la vara del REPO) no debe contar como ct.
+  it('un hallazgo de patrones que cita docs/conventions/ NO cuenta como vara de ct', () => {
+    expect(verdictMeasures({
+      ruling: 'FAIL',
+      findings: [
+        { rule: 'patrones', severity: 'low', what: 'a', path: 'x', evidence: '`docs/conventions/code.md` pide camelCase' },
+      ],
+    }).findings_patrones_vara_ct).toBe(0)
+  })
+
+  it('un PASS limpio cuenta cero, y el cero es real: sí se midió', () => {
+    expect(verdictMeasures({ ruling: 'PASS', findings: [] }).findings_patrones_vara_ct).toBe(0)
   })
 })
 
@@ -312,13 +381,58 @@ describe('el agregado de lo que el juez dejó escrito (§3.4)', () => {
   it('un fichero vacío no revienta y no afirma nada', () => {
     for (const vacio of ['', undefined]) {
       const r = aggregateVerdictMeasures(vacio)
-      expect(r).toEqual({ rows: 0, malformed: 0, verdicts: 0, measured: 0, legacy: 0, rubricSinVara: null, findingsByRule: {} })
+      expect(r).toEqual({
+        rows: 0, malformed: 0, verdicts: 0, measured: 0, legacy: 0, rubricSinVara: null, findingsByRule: {},
+        measuredPatronesVaraCt: 0, legacyPatronesVaraCt: 0, patronesVaraCt: null,
+      })
     }
   })
 
   it('el lector mira exactamente donde el escritor escribe', () => {
     expect(metricsRepoRelPath(7)).toBe('docs/superpowers/metrics/issue-7.jsonl')
     expect(METRICS_REPO_DIR).toBe('docs/superpowers/metrics')
+  })
+
+  // MEDIDA 1, calcada de rubric_sin_vara: measured/legacy PROPIOS, y una fila
+  // sin la columna nunca cuenta como cero.
+  it('suma findings_patrones_vara_ct de todos los veredictos del fichero', () => {
+    const texto = [
+      veredicto({ ruling: 'PASS', findings_patrones_vara_ct: 1 }),
+      veredicto({ ruling: 'PASS', findings_patrones_vara_ct: 0 }),
+      veredicto({ ruling: 'FAIL', findings_patrones_vara_ct: 2 }),
+    ].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.patronesVaraCt).toBe(3)
+    expect(r.measuredPatronesVaraCt).toBe(3)
+    expect(r.legacyPatronesVaraCt).toBe(0)
+  })
+
+  it('una fila anterior a findings_patrones_vara_ct cuenta como vieja y NO como un cero', () => {
+    const texto = [
+      veredicto({ ruling: 'PASS', findings_patrones_vara_ct: 2 }),
+      veredicto({ ruling: 'PASS' }), // esquema viejo: sin findings_patrones_vara_ct
+    ].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.measuredPatronesVaraCt).toBe(1)
+    expect(r.legacyPatronesVaraCt).toBe(1)
+    expect(r.patronesVaraCt).toBe(2)
+  })
+
+  it('si ningún veredicto trae la columna, patronesVaraCt es null y no 0', () => {
+    const texto = [veredicto({ ruling: 'PASS' }), veredicto({ ruling: 'FAIL' })].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.patronesVaraCt).toBeNull()
+    expect(r.legacyPatronesVaraCt).toBe(2)
+  })
+
+  it('las dos medidas nuevas llevan contadores independientes: una fila puede traer una y no la otra', () => {
+    // rubric_sin_vara SÍ, findings_patrones_vara_ct NO: son medidas con fechas
+    // de nacimiento distintas en la telemetría.
+    const texto = veredicto({ ruling: 'PASS', rubric_sin_vara: 1 })
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.measured).toBe(1)
+    expect(r.legacyPatronesVaraCt).toBe(1)
+    expect(r.patronesVaraCt).toBeNull()
   })
 })
 
