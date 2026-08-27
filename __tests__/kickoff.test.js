@@ -352,6 +352,8 @@ describe('el primer acto nombra la vara de ct', () => {
     const k = renderKickoff(SLICE, OPTS_CON_VARA)
     expect(k).toMatch(/preferencia/i)
     expect(k).toMatch(/regla a regla/i)
+    expect(k).toMatch(/no por tema/i)
+    expect(k).toMatch(/prohíbe lo que uno de esos documentos manda/i)
     expect(k).toMatch(/obliga entera/i)
   })
 })
