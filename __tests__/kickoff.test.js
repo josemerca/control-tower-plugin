@@ -20,7 +20,7 @@ const otrosAddenda = (tipo) =>
 
 describe('renderKickoff', () => {
   it('backend: lleva su addendum y ninguno de los otros', () => {
-    const k = renderKickoff(SLICE, { repo: 'o/r' })
+    const k = renderKickoff(SLICE, { repo: 'o/r' , conventionsDir: '/plugin/conventions' })
     expect(k).toContain('ct-step')
     // F22: el fichero de estado de un agente de slice es `.agent/SLICE.md`.
     // El kickoff SOLO lo recibe un agente de slice, así que nombrar aquí el
@@ -31,19 +31,19 @@ describe('renderKickoff', () => {
     for (const otro of otrosAddenda('backend')) expect(k).not.toContain(otro)
   })
   it('ui: lleva su addendum y ninguno de los otros', () => {
-    const k = renderKickoff({ ...SLICE, type: 'ui' }, { repo: 'o/r' })
+    const k = renderKickoff({ ...SLICE, type: 'ui' }, { repo: 'o/r' , conventionsDir: '/plugin/conventions' })
     expect(k).toContain(ADDENDA.ui)
     expect(k.toLowerCase()).toMatch(/screenshot|design system/)
     for (const otro of otrosAddenda('ui')) expect(k).not.toContain(otro)
   })
   it('infra: lleva su addendum y ninguno de los otros', () => {
-    const k = renderKickoff({ ...SLICE, type: 'infra' }, { repo: 'o/r' })
+    const k = renderKickoff({ ...SLICE, type: 'infra' }, { repo: 'o/r' , conventionsDir: '/plugin/conventions' })
     expect(k).toContain(ADDENDA.infra)
     expect(k.toLowerCase()).toMatch(/dry-run.*plan primero/)
     for (const otro of otrosAddenda('infra')) expect(k).not.toContain(otro)
   })
   it('bugfix: lleva su addendum y ninguno de los otros', () => {
-    const k = renderKickoff({ ...SLICE, type: 'bugfix' }, { repo: 'o/r' })
+    const k = renderKickoff({ ...SLICE, type: 'bugfix' }, { repo: 'o/r' , conventionsDir: '/plugin/conventions' })
     expect(k).toContain(ADDENDA.bugfix)
     expect(k.toLowerCase()).toMatch(/reproduce-first.*test que falla/)
     for (const otro of otrosAddenda('bugfix')) expect(k).not.toContain(otro)
@@ -73,12 +73,12 @@ describe('renderKickoff — instrucción de --release (W-C, fix round 1: ruta re
   const FAKE_DISPATCH_CHECK_PATH = '/plugin/root/scripts/dispatch-check.mjs'
 
   it('incluye el comando literal de dispatch-check --release con la ruta ABSOLUTA real recibida, con issue y repo sustituidos', () => {
-    const k = renderKickoff({ ...SLICE, n: 42 }, { repo: 'o/r', dispatchCheckPath: FAKE_DISPATCH_CHECK_PATH })
+    const k = renderKickoff({ ...SLICE, n: 42 }, { repo: 'o/r', dispatchCheckPath: FAKE_DISPATCH_CHECK_PATH , conventionsDir: '/plugin/conventions' })
     expect(k).toContain(`node ${FAKE_DISPATCH_CHECK_PATH} 42 --repo o/r --release`)
   })
 
   it('NUNCA emite el token ${CLAUDE_PLUGIN_ROOT} sin expandir — no es una env var real del shell de la sesión del agente', () => {
-    const k = renderKickoff({ ...SLICE, n: 7 }, { repo: 'menoplus-app/menoplus', dispatchCheckPath: FAKE_DISPATCH_CHECK_PATH })
+    const k = renderKickoff({ ...SLICE, n: 7 }, { repo: 'menoplus-app/menoplus', dispatchCheckPath: FAKE_DISPATCH_CHECK_PATH , conventionsDir: '/plugin/conventions' })
     expect(k).not.toContain('CLAUDE_PLUGIN_ROOT')
   })
 })
@@ -127,7 +127,7 @@ describe('buildStateSeed', () => {
   })
 
   it('el kickoff le dice al agente cómo marcar un bloqueo, y que NO lo escriba en next_action', () => {
-    const k = renderKickoff(SLICE, { repo: 'o/r', dispatchCheckPath: '/x/d.mjs' })
+    const k = renderKickoff(SLICE, { repo: 'o/r', dispatchCheckPath: '/x/d.mjs' , conventionsDir: '/plugin/conventions' })
     expect(k).toMatch(/`blocked: \{reason:/)
     expect(k).toMatch(/NO en prosa dentro de next_action/)
   })
@@ -178,7 +178,7 @@ describe('buildStateSeed / renderKickoff — issue vs. orden §9 (D4, defecto 4)
     const { meta } = parseState(buildStateSeed({ ...S, order: 47 }, { branch: 'feat/47', base: 'main' }))
     expect(meta.you_are_here).toMatch(/issue #47/)
     expect(meta.you_are_here).not.toMatch(/§9/)
-    const k = renderKickoff({ ...S, order: 47 }, { repo: 'o/r', dispatchCheckPath: '/x/d.mjs' })
+    const k = renderKickoff({ ...S, order: 47 }, { repo: 'o/r', dispatchCheckPath: '/x/d.mjs' , conventionsDir: '/plugin/conventions' })
     expect(k.split('\n')[0]).not.toMatch(/§9/)
   })
 
@@ -189,13 +189,13 @@ describe('buildStateSeed / renderKickoff — issue vs. orden §9 (D4, defecto 4)
   })
 
   it('el kickoff distingue los dos números en la primera línea', () => {
-    const k = renderKickoff(S, { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs' })
+    const k = renderKickoff(S, { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs' , conventionsDir: '/plugin/conventions' })
     expect(k.split('\n')[0]).toMatch(/issue #47/)
     expect(k.split('\n')[0]).toMatch(/#3 de la tabla §9/)
   })
 
   it('sin `issue` pero con `n`, el kickoff NO llama "orden" al número de issue (era el bug simétrico)', () => {
-    const k = renderKickoff({ ...S, issue: null }, { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs' })
+    const k = renderKickoff({ ...S, issue: null }, { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs' , conventionsDir: '/plugin/conventions' })
     expect(k.split('\n')[0]).toMatch(/issue #47/)
     expect(k.split('\n')[0]).not.toMatch(/orden #47/)
   })
@@ -209,7 +209,7 @@ describe('buildStateSeed / renderKickoff — issue vs. orden §9 (D4, defecto 4)
 // con el ISSUE como spec—, y (c) las dos prohibiciones que la costura 3 del
 // fork ya impone pero que no pueden depender de que el agente llegue a leerla.
 describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan primero, prohibiciones)', () => {
-  const OPTS = { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs', ctStepPath: '/x/ct-step.mjs' }
+  const OPTS = { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs', ctStepPath: '/x/ct-step.mjs' , conventionsDir: '/plugin/conventions' }
 
   it('cita los skills PROPIOS (control-tower-loop:*) y ninguna referencia al namespace superpowers:', () => {
     const k = renderKickoff(SLICE, OPTS)
@@ -264,7 +264,7 @@ describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan pri
 // exención o sin declaración no hay nada que exigir (el silencio cuando no
 // hay nada que decir es lo que mantiene útiles a las líneas que sí salen).
 describe('la señal en el despacho (Slice 10)', () => {
-  const OPTS = { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs', ctStepPath: '/x/ct-step.mjs' }
+  const OPTS = { repo: 'o/r', dispatchCheckPath: '/x/dispatch-check.mjs', ctStepPath: '/x/ct-step.mjs' , conventionsDir: '/plugin/conventions' }
 
   it('buildStateSeed siembra senal: con el texto del issue, verbatim', () => {
     const seed = buildStateSeed({ ...SLICE, senal: 'métrica `backfill_progress` con label `estado`' }, { branch: 'feat/7', base: 'main' })

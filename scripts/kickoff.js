@@ -147,6 +147,18 @@ function resolveE2eRunsForAgent(slice) {
 }
 
 export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conventionsDir, base }) {
+  // `dispatchCheckPath` y `ctStepPath` van dentro de comandos que el agente
+  // EJECUTA: si el llamador los omite, el fallo es ruidoso (un comando que no
+  // arranca). `conventionsDir` en cambio solo se interpola en una frase de
+  // prosa — omitido, produciría "los cuatro documentos de undefined" y nadie
+  // lo vería fallar. Se cierra la asimetría en el origen: sin este dato no
+  // hay kickoff, y el error es de quien llama (ct-next.mjs debe resolverlo
+  // como ruta absoluta, igual que sus dos hermanas), no de renderKickoff.
+  if (!conventionsDir) {
+    throw new Error(
+      'renderKickoff: falta conventionsDir — fallo de cableado del llamador (ct-next.mjs), no del kickoff.'
+    )
+  }
   const addendum = ADDENDA[slice.type] || ''
   // F21 — LOS GATES, POR FIN SEPARADOS DEL TIPO. `resolveGatesForAgent` (ver
   // gates.js) prefiere lo que DECLARA el issue (sus labels `gate:`, que es lo

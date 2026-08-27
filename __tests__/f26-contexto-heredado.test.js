@@ -419,7 +419,7 @@ describe('buildReconcileBody — reescribe el del epic, no toca el heredado', ()
 // ============================================================================
 
 describe('renderKickoff — nombra las dos secciones', () => {
-  const K = () => renderKickoff({ n: 7, name: 'card', type: 'ui', ac: ['AC-7.1'], deps: [], issue: '#7' }, { repo: 'o/r' })
+  const K = () => renderKickoff({ n: 7, name: 'card', type: 'ui', ac: ['AC-7.1'], deps: [], issue: '#7' }, { repo: 'o/r' , conventionsDir: '/plugin/conventions' })
 
   it('nombra las dos cabeceras EXACTAS que emite el groom', () => {
     expect(K()).toContain(EPIC_CONTEXT_HEADING)
@@ -440,7 +440,7 @@ describe('renderKickoff — nombra las dos secciones', () => {
         epicContext: 'TEXTO EPICCONTEXT QUE NO DEBE APARECER',
         inheritedContext: 'TEXTO INHERITEDCONTEXT QUE NO DEBE APARECER',
       },
-      { repo: 'o/r' },
+      { repo: 'o/r', conventionsDir: '/plugin/conventions' },
     )
     expect(sinContexto).toBe(conContexto)
   })

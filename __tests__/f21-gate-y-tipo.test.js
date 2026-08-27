@@ -345,14 +345,14 @@ describe('F21 — gates leídos del issue (supervivencia al redespacho)', () => 
 // ============================================================================
 describe('F21 — renderKickoff', () => {
   it('un slice backend CON gate visual recibe el gate (era el caso real que no lo recibía)', () => {
-    const k = renderKickoff({ ...SLICE, gates: ['visual'], gatesDeclared: true }, { repo: 'o/r' })
+    const k = renderKickoff({ ...SLICE, gates: ['visual'], gatesDeclared: true }, { repo: 'o/r' , conventionsDir: '/plugin/conventions' })
     expect(k.toLowerCase()).toMatch(/screenshot|captura/)
     expect(k.toLowerCase()).toMatch(/human/) // que lo cierra un humano, no él
     expect(k.toLowerCase()).toMatch(/migraci|rollback/) // y conserva su addendum técnico de backend
   })
 
   it('un slice ui que RENUNCIÓ al gate no lo recibe', () => {
-    const k = renderKickoff({ ...SLICE, type: 'ui', gates: [], gatesDeclared: true }, { repo: 'o/r' })
+    const k = renderKickoff({ ...SLICE, type: 'ui', gates: [], gatesDeclared: true }, { repo: 'o/r' , conventionsDir: '/plugin/conventions' })
     expect(k.toLowerCase()).not.toMatch(/screenshot|captura/)
     expect(k.toLowerCase()).toMatch(/design system/) // el addendum técnico de ui sigue
   })
@@ -361,7 +361,7 @@ describe('F21 — renderKickoff', () => {
     // Sin este fallback, el día que esto se despliega todos los issues `ui` ya
     // groomeados perderían su gate en silencio — exactamente la avería que
     // esta ronda existe para cerrar, en la otra dirección.
-    const k = renderKickoff({ ...SLICE, type: 'ui', gatesDeclared: false }, { repo: 'o/r' })
+    const k = renderKickoff({ ...SLICE, type: 'ui', gatesDeclared: false }, { repo: 'o/r' , conventionsDir: '/plugin/conventions' })
     expect(k.toLowerCase()).toMatch(/screenshot|captura/)
   })
 
@@ -379,7 +379,7 @@ describe('F21 — renderKickoff', () => {
     // cuerpo del issue, pero el kickoff enumera los criterios de aceptación
     // uno a uno y no nombraba jamás lo que queda FUERA de alcance. "Hidrátate
     // del issue" es más débil que nombrar la sección.
-    const k = renderKickoff(SLICE, { repo: 'o/r' })
+    const k = renderKickoff(SLICE, { repo: 'o/r' , conventionsDir: '/plugin/conventions' })
     expect(k).toContain('Out of scope / Protected')
   })
 })
