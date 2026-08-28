@@ -219,13 +219,53 @@ Los consumidores no quieren lo mismo:
 |---|---|---|
 | Puerta de ficheros de estado (exit 5) | `merge-base` | el diff no debe incluir lo que trajo la fusión |
 | Contrato del plan, ficheros aportados (exit 6) | `merge-base` | lo mismo |
-| `ct-step`, cuenta de commits | `merge-base` | si no, PRECONDITION y el run se atasca |
+| `ct-step`, cuenta de commits | **`run.baseSha`, excluyendo `origin/<base>`** | ver abajo: no es la misma pregunta |
 | Validación de citas del plan | `base_sha` | el plan se escribió contra B |
 | `ct-harvest`, latencia y coste | `base_sha` | de dónde nació el slice |
 
-Para `ct-step`, además, `--no-merges` deja la cuenta exactamente como hoy:
-`git rev-list --count <merge-base>..HEAD --no-merges` excluye el commit de fusión,
-así que **la tabla de la máquina no cambia**.
+### `ct-step` no hace la misma pregunta, y esto costó una revisión entera
+
+Una versión anterior de esta sección decía que `ct-step` también debía medir
+desde el `merge-base`. **Es falso, y romperlo así tumba todos los runs.**
+
+`run.baseSha` no es el corte de la rama. Es `headSha()` **en el momento en que
+se crea el fichero del run** (`ct-step.mjs:302`), y para entonces el kickoff ya
+ha ordenado commitear el plan: *«commitéalo: viaja en el PR»*, y sólo después
+*«Con el plan commiteado… Pregunta el paso con `ct-step next`»*
+(`kickoff.js:252-253`). Así que en producción la historia es
+`B (corte) → P (commit del plan) → nace el run`, con `run.baseSha = P` mientras
+que el `merge-base` es `B`.
+
+Y `esperados` (`ct-step.mjs:244-246`) no cuenta los commits **de la rama**:
+cuenta los commits **que este run ha hecho**. Mover el origen del rango a `B`
+mete el commit del plan dentro de la cuenta, `hechos` sale permanentemente uno
+de más, y **todo run muere en su segundo verbo** — sin que haya ninguna fusión
+de por medio. Que es exactamente la avería que este diseño existe para quitar,
+disparada ahora sin condición.
+
+Las dos preguntas son distintas y por eso la referencia no puede ser la misma:
+
+- *«¿Qué ficheros aporta esta rama?»* → el `merge-base` es la respuesta.
+- *«¿Cuántos commits ha hecho este run?»* → el origen tiene que seguir siendo
+  `run.baseSha`; lo que sobra es lo que la base aportó.
+
+La forma que satisface las dos mitades:
+
+```
+git rev-list --count --no-merges run.baseSha..HEAD ^origin/<base>
+```
+
+`run.baseSha..HEAD` deja fuera lo anterior al run —el commit del plan incluido—,
+`^origin/<base>` deja fuera lo que trajo la fusión, y `--no-merges` deja fuera
+el commit de fusión. **La tabla de la máquina no cambia y `esperados` no se
+toca.**
+
+Y una consecuencia para los tests que la primera implementación no cubrió: los
+fixtures de `ct-step` no crean remoto `origin`, así que cualquier código que
+dependa de `origin/<base>` cae ahí en su camino de reserva y el fallo no se ve.
+El escenario que lo pina necesita **un `origin/<base>` de verdad y un commit en
+la rama anterior a la creación del fichero del run** — la secuencia de
+producción.
 
 ### El paso `reconcile`
 
