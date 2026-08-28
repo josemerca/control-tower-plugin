@@ -675,6 +675,10 @@ Se leen juntas y en ese orden: `5 docs · 0 hallazgos` slice tras slice es el ca
 a vigilar, y con una sola cifra «conformaba» y «se nombró de adorno» son el mismo
 número.
 
+> **Corregido por §10.** `rubric_vara_ct_docs` nació midiendo la FORMA de la cita
+> y no el uso: exigía el prefijo `conventions/`, y el juez del slice #8 citó los
+> cinco documentos por su nombre a secas. Contó cero.
+
 ### 9.5 Un control de ct peleando contra una convención de ct
 
 El plan clavaba «52 tests verdes» en cuatro controles. El juez exigió con razón
@@ -729,3 +733,54 @@ fuera el formato entero, que es de donde salía la confusión.
   nunca contra el primero, que es cómo un trinquete cede por acumulación sin que
   ninguna subida parezca grande. El acumulado desde 16.314 son +893 bytes, un
   5,5 %, y queda escrito para que la próxima subida tenga que mirarlo.
+
+
+---
+
+## 10. La columna medía la grafía, no el uso
+
+El slice #8 de `jjponz/rust-monitoring` (instrument y guard, pull request 19) es
+la primera corrida con las correcciones de §9. Lo que enseñó del propio
+instrumento va aquí.
+
+`rubric_vara_ct_docs` salió `5, 4, 5, 5, 0` en las cinco tareas. El cero de la
+tarea 5 es **falso**: su `patrones` discute los cinco documentos por su nombre,
+uno a uno, y el conteo no los vio porque el juez escribió `style.md` y no
+`conventions/style.md`. §9.4 sustituyó una columna que medía **dónde se archivaba
+el hallazgo** por otra que medía **cómo se escribía el nombre del documento**: el
+mismo defecto una capa más arriba, y las dos veces un proxy.
+
+El arreglo acepta las dos formas. La de la ruta se queda intacta —es la que no
+depende de los nombres de hoy, y es la que contó `defects.md` sin que nadie
+tocara nada—. La del nombre a secas se resuelve contra `PluginYardstick.FILES`,
+que no es «la lista de hoy» elegida a dedo sino la **definición** de lo que la
+vara contiene: un documento que no está en ella no viaja en el brief, así que
+nadie puede haberlo citado como vara. Y el nombre se normaliza al devolverlo, o
+las dos grafías del mismo documento contarían dos.
+
+Lo que cuesta, dicho: una cita **a secas** de un documento **renombrado** deja de
+contar hasta que `FILES` lo nombre. Es aceptable por el mismo argumento —
+renombrarlo sin tocar `FILES` significa que ha dejado de viajar— y la forma con
+prefijo sigue cubriendo ese caso. El riesgo que queda es un repo que nombre a
+secas un fichero propio llamado igual que uno de los nuestros; se acepta, porque
+el ítem donde esto se mide está hablando de la vara de ct cuando lo escribe.
+
+Remedido sobre los veredictos reales del #8: `5, 4, 5, 5, 5`. El **4** de la
+tarea 2 sobrevive al arreglo y es verdadero — omite `testing.md` —, que es
+exactamente lo que la columna tiene que poder distinguir de un artefacto de
+grafía.
+
+### 10.1 Lo que §9 sí demostró
+
+Para que quede junto al defecto: el corte de `code.md` funcionó. Los cinco
+veredictos contestan las cuatro reglas de `defects.md` una por una —las tareas 1
+a 4 numeradas, la 5 con letras— y donde una regla no tiene sujeto lo dicen. En el
+#7 esas cuatro reglas no se preguntaron ni una vez en cinco tareas. La cláusula
+del centinela que §9.3 añadió se aplica con nombre propio: la tarea 1 juzga
+`TraceId` como enum con la ausencia (`Untraced`) dentro del vocabulario, «no como
+`Option<String>` ni cadena vacía».
+
+Y el resto: ningún control clava el total de la suite (con la misma trampa de 52
+tests delante), y el gate `plan` ya no publica `<nonce>` como si fuera el formato
+entero. Cero hallazgos en cinco tareas, así que `findings_vara_ct` sigue sin
+poder decir nada: no había nada que cazar.

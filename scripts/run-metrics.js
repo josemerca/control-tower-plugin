@@ -72,6 +72,7 @@ import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { NO_MILESTONE_KEY } from './gh-issue-map.js'
+import { PluginYardstick } from './plugin-yardstick.js'
 
 // Los campos de identidad del §10.1 del spec, en orden: dónde y contra qué
 // (repo, epic, issue, plan y su hash), qué paso (tarea, paso, intento) y con qué
@@ -160,41 +161,66 @@ function normalizar(campo, valor) {
 
 export const metricLine = (fila) => JSON.stringify(fila) + '\n'
 
-// ¿Cita este `evidence` la vara de ct? Se mide con la FORMA de la ruta —
-// `conventions/<algo>.md`— y no con la lista de `CONVENTIONS_FILES` de hoy: el
-// mismo argumento por el que `findings_by_rule` no se cruza con el enum de
-// reglas de hoy. Un documento renombrado o uno quinto que se añada mañana
-// tiene que seguir contando en las filas viejas y en las nuevas.
+// ¿Cita este texto la vara de ct? DOS formas se aceptan, y la segunda entró
+// porque la primera midió mal en campo.
 //
-// LA TRAMPA: `docs/conventions/code.md` también contiene la subcadena
-// `conventions/code.md`, y ES la vara DEL REPO, no la de ct — `docs/conventions/`
-// es justo el sitio típico donde vive `.agent/conventions.md` (ver
-// `conventions/decisions.md`). Un `includes('conventions/')` a secas contaría
-// esa cita como ct y mediría lo contrario de lo que promete. Por eso la ruta no
-// puede venir precedida de una barra (`/`) — que delata un directorio padre
-// como `docs/`— ni de un carácter de palabra (`code_conventions/x.md` tampoco es
-// la vara de ct). Un lookbehind negativo es la única forma de exigir "nada de
-// eso justo delante" sin capturar y descartar a mano.
-const CITA_VARA_DE_CT = /(?<![\w/])conventions\/[\w.-]+\.md/
+// LA FORMA DE LA RUTA — `conventions/<algo>.md`— sigue tal cual, y sigue siendo
+// la que no depende de los nombres de hoy: un documento renombrado, o uno sexto
+// que se añada mañana, se cuenta sin tocar esta función. Así se contó
+// `defects.md` el día que se partió `code.md`, sin que nadie viniera aquí.
+//
+// EL NOMBRE A SECAS entró después. Medido en el slice #8 de rust-monitoring: el
+// juez de la tarea 5 discutió los cinco documentos por su nombre y esta función
+// contó CERO, porque escribió `style.md` y no `conventions/style.md`. La columna
+// medía la FORMA DE LA CITA y no el uso — el mismo defecto que hundió a la que
+// ella misma sustituyó (`findings_patrones_vara_ct` medía dónde se archivaba el
+// hallazgo), una capa más arriba.
+//
+// Un nombre a secas no tiene forma que lo delate: `style.md` es indistinguible
+// de cualquier otro markdown. La única manera de reconocerlo es por el nombre, y
+// la lista buena es `PluginYardstick.FILES`, que no es «la lista de hoy» elegida
+// a dedo: es la DEFINICIÓN de lo que la vara contiene. Un documento que no está
+// en ella no viaja en el brief, así que nadie puede haberlo citado como vara.
+//
+// LO QUE ESTO CUESTA, dicho: una cita a secas de un documento RENOMBRADO deja de
+// contar hasta que `FILES` lo nombre. Es aceptable justo por lo de arriba —
+// renombrarlo sin tocar `FILES` significa que ha dejado de viajar—, y la forma
+// con prefijo sigue cubriendo ese caso igual.
+//
+// LA TRAMPA QUE SE CONSERVA: `docs/conventions/style.md` es la vara DEL REPO
+// —`docs/conventions/` es el sitio típico donde vive `.agent/conventions.md`— y
+// contiene las dos subcadenas. El lookbehind negativo la excluye por las dos
+// ramas: ni `conventions/` ni `style.md` pueden venir precedidos de una barra o
+// de un carácter de palabra. El riesgo que QUEDA es un repo que nombre a secas
+// un fichero propio llamado igual que uno de los nuestros; se acepta, porque el
+// ítem donde esto se mide está hablando de la vara de ct cuando lo escribe.
+const NOMBRES_DE_LA_VARA = PluginYardstick.FILES
+  .map((nombre) => nombre.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  .join('|')
+
+const CITA_VARA_DE_CT = new RegExp(
+  `(?<![\\w/])(?:conventions/[\\w.-]+\\.md|(?:${NOMBRES_DE_LA_VARA}))`
+)
 
 export function citaVaraDeCt(evidence) {
   return typeof evidence === 'string' && CITA_VARA_DE_CT.test(evidence)
 }
 
-// QUÉ documentos de la vara cita un texto, no cuántas veces. Con la misma
-// forma de ruta que `citaVaraDeCt` y su mismo lookbehind, sobre una copia con
-// `g` — el flag no se le pone al regex compartido porque un regex global
-// arrastra `lastIndex` entre llamadas y el siguiente `test()` empezaría a
-// mentir desde la mitad de la cadena.
+// QUÉ documentos cita un texto, no cuántas veces, y por su NOMBRE — no por la
+// cadena que se encontró. `conventions/style.md` y `style.md` son el mismo
+// documento leído, y devolver las dos cadenas los contaría como dos: la columna
+// promete cuántos de los cinco se usaron, no cuántas maneras de escribirlos
+// aparecen.
 //
-// Devuelve nombres únicos: el juez puede citar `conventions/style.md` cinco
-// veces en el mismo párrafo, y eso sigue siendo UN documento leído. Lo que la
-// columna tiene que contestar es cuántos de los cinco llegaron a usarse.
+// El flag `g` va en una copia y no en el regex compartido: un regex global
+// arrastra `lastIndex` entre llamadas y el siguiente `test()` empezaría a mentir
+// desde la mitad de la cadena.
 const CITAS_VARA_DE_CT = new RegExp(CITA_VARA_DE_CT.source, 'g')
 
 export function documentosDeLaVaraDeCt(texto) {
   if (typeof texto !== 'string') return []
-  return [...new Set(texto.match(CITAS_VARA_DE_CT) || [])]
+  const encontrados = texto.match(CITAS_VARA_DE_CT) || []
+  return [...new Set(encontrados.map((cita) => cita.replace(/^conventions\//, '')))]
 }
 
 // El conteo por severidad del veredicto, que es lo que permite leer "cuántos

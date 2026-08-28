@@ -18,6 +18,7 @@ import {
   metricsRepoRelPath, METRICS_REPO_DIR, citaVaraDeCt, documentosDeLaVaraDeCt, briefVaraCtMeasures,
   aggregateBriefMeasures,
 } from '../scripts/run-metrics.js'
+import { PluginYardstick } from '../scripts/plugin-yardstick.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(here, '..', 'scripts', 'ct-step.mjs')
@@ -241,6 +242,19 @@ describe('citaVaraDeCt — la forma de la ruta, no la lista de documentos de hoy
     expect(citaVaraDeCt('conventions/naming.md dice otra cosa')).toBe(true)
   })
 
+  it('cita también el nombre a secas de un documento de la vara, sin el prefijo', () => {
+    expect(citaVaraDeCt('lo prohíbe defects.md')).toBe(true)
+    expect(citaVaraDeCt('style.md exige inglés')).toBe(true)
+  })
+
+  it('un nombre a secas que no es de la vara NO cita: sin prefijo no hay forma que lo delate', () => {
+    expect(citaVaraDeCt('naming.md dice otra cosa')).toBe(false)
+  })
+
+  it('el nombre a secas precedido de barra sigue siendo la vara del REPO, no la de ct', () => {
+    expect(citaVaraDeCt('el fichero `docs/style.md` pide camelCase')).toBe(false)
+  })
+
   it('un evidence vacío o ausente no cita nada', () => {
     expect(citaVaraDeCt('')).toBe(false)
     expect(citaVaraDeCt(undefined)).toBe(false)
@@ -248,14 +262,46 @@ describe('citaVaraDeCt — la forma de la ruta, no la lista de documentos de hoy
   })
 })
 
-describe('documentosDeLaVaraDeCt — qué documentos, no cuántas veces', () => {
-  it('devuelve cada documento UNA vez aunque el texto lo cite tres', () => {
-    expect(documentosDeLaVaraDeCt('conventions/style.md, y otra vez conventions/style.md, y conventions/defects.md'))
-      .toEqual(['conventions/style.md', 'conventions/defects.md'])
+describe('documentosDeLaVaraDeCt — qué documentos, no cómo se escribieron', () => {
+  it('devuelve el NOMBRE del documento, con prefijo o sin él, y las dos grafías son UNO', () => {
+    expect(documentosDeLaVaraDeCt('conventions/style.md y también style.md a secas'))
+      .toEqual(['style.md'])
   })
 
-  it('no cuenta la vara del REPO aunque contenga la misma subcadena', () => {
+  it('devuelve cada documento UNA vez aunque el texto lo cite tres', () => {
+    expect(documentosDeLaVaraDeCt('conventions/style.md, y otra vez conventions/style.md, y conventions/defects.md'))
+      .toEqual(['style.md', 'defects.md'])
+  })
+
+  // EL CASO MEDIDO en el slice #8 de rust-monitoring: el juez de la tarea 5
+  // discutió los cinco documentos por su nombre a secas y esta función contaba
+  // CERO. La columna medía la forma de la cita y no el uso.
+  it('cuenta el nombre a secas: es como el juez del slice #8 citó los cinco', () => {
+    const comoLoEscribio = 'style.md: la regla de inglés no la alcanza. architecture.md: no nace ningún módulo. '
+      + 'decisions.md: la decisión se escribe una vez. testing.md: no hay tests en el diff. defects.md, sus cuatro reglas.'
+    expect(documentosDeLaVaraDeCt(comoLoEscribio))
+      .toEqual(['style.md', 'architecture.md', 'decisions.md', 'testing.md', 'defects.md'])
+  })
+
+  it('la lista de nombres sale de PluginYardstick.FILES, que es lo que define la vara', () => {
+    for (const nombre of PluginYardstick.FILES) {
+      expect(documentosDeLaVaraDeCt(`el juez citó ${nombre} aquí`), `${nombre} a secas no cuenta`)
+        .toEqual([nombre])
+    }
+  })
+
+  it('un nombre a secas que NO es de la vara no cuenta: sin prefijo no hay forma que lo delate', () => {
+    expect(documentosDeLaVaraDeCt('naming.md dice otra cosa')).toEqual([])
+    expect(documentosDeLaVaraDeCt('AGENTS.md dice otra cosa')).toEqual([])
+  })
+
+  it('con prefijo sí cuenta un documento renombrado, que es lo que la forma de la ruta sigue cubriendo', () => {
+    expect(documentosDeLaVaraDeCt('conventions/naming.md dice otra cosa')).toEqual(['naming.md'])
+  })
+
+  it('no cuenta la vara del REPO aunque contenga las dos subcadenas', () => {
     expect(documentosDeLaVaraDeCt('`docs/conventions/style.md` pide camelCase')).toEqual([])
+    expect(documentosDeLaVaraDeCt('el fichero `docs/style.md` pide camelCase')).toEqual([])
   })
 
   it('un texto ausente o que no es texto no devuelve documentos', () => {
@@ -266,8 +312,8 @@ describe('documentosDeLaVaraDeCt — qué documentos, no cuántas veces', () => 
 
   it('el regex global no arrastra lastIndex entre llamadas: la segunda llamada mide desde el principio', () => {
     const texto = 'conventions/defects.md'
-    expect(documentosDeLaVaraDeCt(texto)).toEqual(['conventions/defects.md'])
-    expect(documentosDeLaVaraDeCt(texto)).toEqual(['conventions/defects.md'])
+    expect(documentosDeLaVaraDeCt(texto)).toEqual(['defects.md'])
+    expect(documentosDeLaVaraDeCt(texto)).toEqual(['defects.md'])
   })
 })
 

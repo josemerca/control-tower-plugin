@@ -310,13 +310,13 @@ describe('un intento de go que no arranca nada recibe el formato en el issue', (
   const cuantosPublicados = () => registro().split('issue comment').length - 1
 
   it('publica el formato cuando el comentario nuevo es el token pelado', () => {
-    correr({ ...conIntento(GO_TOKEN), FAKE_GH_ARGV_LOG_FILE: join(dir, 'argv.log') }, { timeoutMs: 400, pollMs: 40 })
+    correr({ ...conIntento(GO_TOKEN), FAKE_GH_ARGV_LOG_FILE: join(dir, 'argv.log') }, { timeoutMs: 1500, pollMs: 40 })
     expect(cuantosPublicados()).toBe(1)
     expect(registro()).toContain('jjponz/repo-pulse')
   })
 
   it('el cuerpo publicado es el texto del módulo, y NO lleva el nonce ni su hash', () => {
-    correr({ ...conIntento(`${GO_TOKEN} deadbeef`), FAKE_GH_ARGV_LOG_FILE: join(dir, 'argv.log') }, { timeoutMs: 400, pollMs: 40 })
+    correr({ ...conIntento(`${GO_TOKEN} deadbeef`), FAKE_GH_ARGV_LOG_FILE: join(dir, 'argv.log') }, { timeoutMs: 1500, pollMs: 40 })
     expect(cuantosPublicados()).toBe(1)
     expect(registro()).toContain(GO_FORMAT_REPLY)
     expect(registro()).not.toContain(NONCE)
@@ -333,7 +333,7 @@ describe('un intento de go que no arranca nada recibe el formato en el issue', (
       ]),
       FAKE_GH_VIEW_COMMENTS_COUNTER_FILE: join(dir, `contador-repe-${++secuencias}`),
       FAKE_GH_ARGV_LOG_FILE: join(dir, 'argv.log'),
-    }, { timeoutMs: 500, pollMs: 40 })
+    }, { timeoutMs: 1500, pollMs: 40 })
     expect(cuantosPublicados()).toBe(1)
   })
 
@@ -343,7 +343,7 @@ describe('un intento de go que no arranca nada recibe el formato en el issue', (
   })
 
   it('un comentario que no intenta dar el go no recibe explicación', () => {
-    correr({ ...conIntento('me parece bien el plan'), FAKE_GH_ARGV_LOG_FILE: join(dir, 'argv.log') }, { timeoutMs: 400, pollMs: 40 })
+    correr({ ...conIntento('me parece bien el plan'), FAKE_GH_ARGV_LOG_FILE: join(dir, 'argv.log') }, { timeoutMs: 1500, pollMs: 40 })
     expect(cuantosPublicados()).toBe(0)
   })
 
@@ -356,7 +356,13 @@ describe('un intento de go que no arranca nada recibe el formato en el issue', (
       ]),
       FAKE_GH_VIEW_COMMENTS_COUNTER_FILE: join(dir, `contador-fallo-${++secuencias}`),
       FAKE_GH_ISSUE_COMMENT_FAIL: '1',
-    }, { timeoutMs: 600, pollMs: 40 })
+      // Plazo HOLGADO y no ajustado, y el motivo es una regresión medida: con
+      // 600 ms este caso pasaba suelto y fallaba en la suite completa, porque
+      // el go llega en el TERCER sondeo y con la máquina cargada un tick tarda
+      // más que su presupuesto. Aquí el plazo no es el sujeto —el sujeto es que
+      // un fallo al publicar no mata la vigilancia— y el proceso sale solo en
+      // cuanto entrega, así que sobrar plazo no cuesta tiempo cuando pasa.
+    }, { timeoutMs: 8000, pollMs: 40 })
     expect(r.status).toBe(0)
     expect(r.stdout).toMatch(/no se pudo publicar el formato/)
     expect(r.stdout).toMatch(new RegExp(`${GO_TOKEN} visto`))

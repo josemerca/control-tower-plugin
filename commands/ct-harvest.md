@@ -37,7 +37,11 @@ Además del coste, la cosecha lee lo que la propia slice dejó commiteado en `do
 
 Sustituyen a `patrones-ct`, que contaba sólo hallazgos del ítem `patrones` con el argumento de que es el único que mide contra las varas. El run del slice #7 de `rust-monitoring` lo refutó midiendo: la vara de ct salió citada dos veces bajo `decisiones-cerradas`, y la regla de mutación de `conventions/testing.md` se contestó bajo `test-desiderata`. Un hallazgo que la vara produjo y que se archivó en otro ítem era invisible, así que la columna medía **dónde se archivó** el hallazgo y no **qué lo produjo**.
 
-La cita se detecta por la FORMA de la ruta (`conventions/<algo>.md`, sin barra ni letra delante), no por la lista de documentos de hoy: un documento renombrado o uno nuevo también cuenta — y así se comprobó al partir `code.md` en `style.md` y `defects.md`, que no hizo falta tocar nada de esto. Y el `docs/conventions/code.md` de la vara del REPO —que contiene la misma subcadena— nunca cuenta como ct.
+La cita se detecta de **dos** formas. Por la FORMA de la ruta (`conventions/<algo>.md`, sin barra ni letra delante), que no depende de los nombres de hoy: un documento renombrado o uno nuevo también cuenta — así se contó `defects.md` el día que se partió `code.md`, sin tocar nada de esto. Y por el NOMBRE a secas (`style.md`), contra `PluginYardstick.FILES`, porque un nombre sin prefijo no tiene forma que lo delate y la única lista buena es la que define qué documentos viajan.
+
+La segunda entró midiendo: en el slice #8 de `rust-monitoring` el juez de la tarea 5 discutió los cinco documentos por su nombre a secas y la columna contó **cero**. Medía la forma de la cita y no el uso.
+
+En las dos formas, el `docs/conventions/style.md` de la vara del REPO —que contiene las dos subcadenas— nunca cuenta como ct: ni `conventions/` ni el nombre pueden venir precedidos de una barra.
 
 La misma telemetría trae además, por cada intento del paso `implement`, si la vara de ct **llegó** al brief de la tarea y **cuánto pesó**: cuántas cabeceras `## Vara de ct: conventions/` trae el brief que quedó en disco (`brief_vara_ct_docs`) y su tamaño en bytes (`brief_bytes`). Es lo que cierra una desviación silenciosa: hoy el plugin aborta si los documentos faltan del PLUGIN, pero nada comprobaba que el brief se los hubiera LLEVADO — si `escribirBrief` se rompe, todo sigue en verde y el juez mide en silencio sólo contra la vara del repo. La columna `brief` de la tabla suma los dos números de todos los intentos de `implement` que el slice dejó escritos (`N docs · M B`).
 
