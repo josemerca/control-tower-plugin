@@ -77,6 +77,54 @@ const minimalPlanFor = (issue) => [
   '',
 ].join('\n')
 
+const planCitingFoo = (issue, fooContent) => [
+  `# #${issue} — fixture slice`,
+  '',
+  '> **This plan is written to be executed by task-scoped subagents with zero context.**',
+  '',
+  '## 1. Context and goal',
+  'Fixture.',
+  '### Desired end state',
+  'Work done.',
+  '### Out of scope',
+  'N/A — fixture.',
+  '## 2. Closed decisions',
+  '| Decision | Value |',
+  '|---|---|',
+  '| fixture | yes |',
+  '## 3. Reference patterns',
+  'N/A — fixture.',
+  '## 4. Inventory',
+  'foo.txt, work.txt',
+  '## 5. Interfaces',
+  'Consumes: N/A. Produces: N/A.',
+  '## 6. Test strategy',
+  'N/A — fixture.',
+  '## 7. Tasks',
+  '### Task 1 — do the work',
+  '**Objective:** the work is committed, citing the base state of foo.txt.',
+  '**Files:** foo.txt, work.txt',
+  'Current state (foo.txt):',
+  FENCE,
+  fooContent,
+  FENCE,
+  'Final text (work.txt):',
+  FENCE,
+  'trabajo',
+  FENCE,
+  '**TDD:** No TDD — fixture.',
+  '**Tests:** N/A — fixture.',
+  '**Verification:** git log shows the commit.',
+  FENCE + 'bash',
+  'git log --oneline -1',
+  FENCE,
+  '## 8. Global verification',
+  'N/A — fixture.',
+  '## 9. Assumptions',
+  'None.',
+  '',
+].join('\n')
+
 // RepoMother — monta el mundo con `git` de verdad. NUNCA llama a
 // dispatch-check.mjs para construir el arrange: eso mediría la pieza bajo
 // prueba con la pieza bajo prueba.
@@ -133,6 +181,63 @@ class RepoMother {
 
     return { remote, seed, work, cutSha }
   }
+
+  // Fix round 1, Importante 2 — el escenario que le falta a la clase de
+  // arriba: aquí NADA toca `.agent/STATE.md` (la puerta de ficheros de
+  // estado nunca puede morder), así que la única forma de que el release
+  // falle es que la validación del PLAN mida el fichero citado contra la
+  // referencia equivocada. `foo.txt` existe en el corte con un contenido, el
+  // plan lo cita verbatim con ESE contenido, y la base avanza cambiándolo
+  // ANTES de que el slice haga merge — si `readFileAtBase` leyera desde
+  // `measurementRef` (el merge-base) en vez de desde el corte, la cita
+  // saldría "de memoria" porque el contenido de hoy ya no es el citado.
+  static aSliceWhoseCitedFileWasChangedByTheMergedBase(issue, { cutContent, newContent }) {
+    const remote = mkdtempSync(join(tmpdir(), 'ct-mb-cite-remote-'))
+    execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: remote })
+
+    const seed = mkdtempSync(join(tmpdir(), 'ct-mb-cite-seed-'))
+    const seedGit = (...a) => execFileSync('git', a, { cwd: seed, encoding: 'utf8' })
+    seedGit('init', '-q', '-b', 'main')
+    seedGit('config', 'user.email', 'coordinadora@x.z')
+    seedGit('config', 'user.name', 'coordinadora')
+    writeFileSync(join(seed, 'foo.txt'), cutContent)
+    seedGit('add', '-A')
+    seedGit('commit', '-qm', 'corte')
+    seedGit('remote', 'add', 'origin', remote)
+    seedGit('push', '-q', '-u', 'origin', 'main')
+    const cutSha = seedGit('rev-parse', 'HEAD').trim()
+
+    const work = mkdtempSync(join(tmpdir(), 'ct-mb-cite-work-'))
+    execFileSync('git', ['clone', '-q', remote, '.'], { cwd: work })
+    const workGit = (...a) => execFileSync('git', a, { cwd: work, encoding: 'utf8' })
+    workGit('config', 'user.email', 'slice@x.z')
+    workGit('config', 'user.name', 'slice')
+    workGit('switch', '-q', '-c', `feat/${issue}`)
+
+    mkdirSync(join(work, 'docs', 'superpowers', 'plans'), { recursive: true })
+    writeFileSync(join(work, 'docs', 'superpowers', 'plans', `2026-08-28-issue-${issue}-work.md`), planCitingFoo(issue, cutContent))
+    writeFileSync(join(work, 'work.txt'), 'trabajo\n')
+    workGit('add', '-A')
+    workGit('commit', '-qm', 'work')
+
+    // La base avanza y CAMBIA el fichero que el plan citó contra el corte.
+    writeFileSync(join(seed, 'foo.txt'), newContent)
+    seedGit('add', '-A')
+    seedGit('commit', '-qm', 'la base cambia foo.txt')
+    seedGit('push', '-q', 'origin', 'main')
+
+    workGit('fetch', '-q', 'origin', 'main')
+    workGit('merge', '-q', '--no-edit', 'origin/main')
+
+    mkdirSync(join(work, '.agent'), { recursive: true })
+    writeFileSync(join(work, '.agent', 'SLICE.md'), `---\ntask: slice\nbase: main\nbase_sha: ${cutSha}\n---\n# s\n`)
+    writeFileSync(join(work, '.agent', `run-${issue}.json`), JSON.stringify({
+      plan: `docs/superpowers/plans/2026-08-28-issue-${issue}-work.md`,
+      issue, task: 1, tasksTotal: 1, step: 'commit', closed: 'delivered',
+    }))
+
+    return { remote, seed, work, cutSha }
+  }
 }
 
 const release = (issue, cwd) => spawnSync(process.execPath, [SCRIPT, String(issue), '--repo', 'o/r', '--release', '--dry-run'], {
@@ -177,5 +282,56 @@ describe('dispatch-check --release — la medida del diff es el merge-base, no e
 
     expect(diffFrom(world.cutSha)).toContain('.agent/STATE.md')
     expect(diffFrom(mergeBase)).not.toContain('.agent/STATE.md')
+  })
+})
+
+// ============================================================================
+// Fix round 1, Importante 2 — la mitad de la propiedad que el round anterior
+// dejó sin red: `branchIntroducedFiles()` mide lo que la rama aporta desde
+// `measurementRef` (el merge-base), pero las CITAS del plan tienen que
+// seguir leyéndose desde `cut` (el corte real) — `readFileAtBase(plan.cut)`.
+// Si alguien revirtiera eso a `readFileAtBase(plan.measurementRef)` (el
+// exacto falso positivo que `base_sha:` existe para cerrar), el escenario de
+// arriba no lo detectaría: su único fichero ajeno es `.agent/STATE.md`, que
+// muere en la puerta de ESTADO (exit 5) antes de que el plan se valide
+// siquiera. Aquí NADA toca `.agent/STATE.md`: la única puerta que puede
+// morder es la del plan.
+// ============================================================================
+describe('dispatch-check --release — las citas del plan se leen contra el corte, no contra el merge-base (fix round 1, Importante 2)', () => {
+  const issue = 92
+  const cutContent = 'valor del corte\n'
+  const newContent = 'valor nuevo tras el merge\n'
+  let world
+
+  beforeEach(() => {
+    world = RepoMother.aSliceWhoseCitedFileWasChangedByTheMergedBase(issue, { cutContent, newContent })
+  })
+  afterEach(() => {
+    for (const d of [world.work, world.remote, world.seed]) rmSync(d, { recursive: true, force: true })
+  })
+
+  it('a_plan_citation_written_against_the_cut_is_not_invalidated_by_a_file_the_merged_base_later_changed', () => {
+    const r = release(issue, world.work)
+
+    // Con `readCitedFile` apuntando al merge-base, "Current state (foo.txt):"
+    // citaría `cutContent`, pero foo.txt en el merge-base ya vale
+    // `newContent` — el contrato lo acusaría de "cita de memoria" (exit 6).
+    // Contra el corte, el contenido citado SIGUE siendo el real: el release
+    // no debe quejarse del plan.
+    expect((r.stderr || '')).not.toContain('cita de memoria')
+    expect((r.stderr || '')).not.toContain('no existe en la base')
+    expect(r.status).toBe(0)
+    expect(r.stdout).toMatch(new RegExp(`released #${issue}.*in-review`))
+  })
+
+  // Characterization test: pina en crudo que foo.txt de verdad difiere entre
+  // el corte y el merge-base — la premisa que hace el test de arriba
+  // significativo. No sustituye al test del gate.
+  it('the_cited_file_really_does_differ_between_the_cut_and_the_merge_base', () => {
+    const atRef = (ref) => execFileSync('git', ['show', `${ref}:foo.txt`], { cwd: world.work, encoding: 'utf8' })
+    const mergeBase = execFileSync('git', ['merge-base', 'HEAD', 'origin/main'], { cwd: world.work, encoding: 'utf8' }).trim()
+
+    expect(atRef(world.cutSha)).toBe(cutContent)
+    expect(atRef(mergeBase)).toBe(newContent)
   })
 })

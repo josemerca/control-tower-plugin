@@ -478,11 +478,26 @@ function baseNoEsUnaRama(base) {
   return refResuelve(`${base}^{commit}`)
 }
 
+// Fix round 1 (Importante 1) — el parseo del campo `base:` de la semilla
+// vivía escrito dos veces (aquí y en nombreDeLaRamaBase(), más abajo): mismo
+// readFileSync, mismo regex, mismo recorte de comillas. `conventions/decisions.md`:
+// si cambia cómo se escribe o se entrecomilla ese campo, hay que tocar las DOS
+// a la vez o divergen en silencio. Un solo sitio que sepa parsear el campo
+// crudo — la deuda declarada del fichero exime del estilo, no de esto.
+function parseBaseField(seedText) {
+  const b = seedText.match(/^base:[ \t]*(.+)$/m)
+  return b ? b[1].trim().replace(/^['"]|['"]$/g, '') : ''
+}
+
+function campoBaseDeLaSemilla() {
+  const seed = readFileSync(join(process.cwd(), SLICE_REL_PATH), 'utf8')
+  return parseBaseField(seed)
+}
+
 function sliceBaseRef() {
   try {
     const seed = readFileSync(join(process.cwd(), SLICE_REL_PATH), 'utf8')
-    const b = seed.match(/^base:[ \t]*(.+)$/m)
-    const base = b ? b[1].trim().replace(/^['"]|['"]$/g, '') : ''
+    const base = parseBaseField(seed)
     // Barandilla contra el arreglo espontáneo observado en la corrida real:
     // un agente que "arregla" el diff metiendo un SHA en `base:`. El diff
     // sale igual (un sha resuelve como cualquier ref), así que NO se aborta —
@@ -546,9 +561,7 @@ function sliceBaseRef() {
 // deja "sin medir": el peor caso es medir como se mide hoy.
 function nombreDeLaRamaBase() {
   try {
-    const seed = readFileSync(join(process.cwd(), SLICE_REL_PATH), 'utf8')
-    const b = seed.match(/^base:[ \t]*(.+)$/m)
-    const base = b ? b[1].trim().replace(/^['"]|['"]$/g, '') : ''
+    const base = campoBaseDeLaSemilla()
     if (base) return base
   } catch { /* sin SLICE.md: sin nombre de rama, cae al corte */ }
   // Misma intención que la cadena de arriba (origin/HEAD → origin/main →
@@ -607,25 +620,25 @@ function stateFilesIntroducedByBranch() {
   if (!cut) {
     return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base_sha:`/`base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
   }
-  const base = referenciaDeMedida(cut)
-  let baseSha, headSha
+  const measurementRef = referenciaDeMedida(cut)
+  let measurementSha, headSha
   try {
-    baseSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${base}^{commit}`], { encoding: 'utf8' }).trim()
+    measurementSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${measurementRef}^{commit}`], { encoding: 'utf8' }).trim()
     headSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], { encoding: 'utf8' }).trim()
   } catch (e) {
-    return { known: false, why: `no se pudo resolver \`${base}\` o HEAD a un commit: ${e.message}` }
+    return { known: false, why: `no se pudo resolver \`${measurementRef}\` o HEAD a un commit: ${e.message}` }
   }
-  if (baseSha === headSha) {
-    return { known: false, why: `la base resuelta (\`${base}\`) es EL MISMO commit que HEAD (${headSha.slice(0, 12)}) — un diff contra sí mismo sale vacío por construcción, así que eso no es "limpia", es "no comparada"` }
+  if (measurementSha === headSha) {
+    return { known: false, why: `la referencia de medida (\`${measurementRef}\`) es EL MISMO commit que HEAD (${headSha.slice(0, 12)}) — un diff contra sí mismo sale vacío por construcción, así que eso no es "limpia", es "no comparada"` }
   }
   let out = ''
   try {
-    out = execFileSync('git', ['diff', '--no-relative', '--no-renames', '--name-only', `${base}...HEAD`], { encoding: 'utf8' })
+    out = execFileSync('git', ['diff', '--no-relative', '--no-renames', '--name-only', `${measurementRef}...HEAD`], { encoding: 'utf8' })
   } catch (e) {
-    return { known: false, why: `\`git diff ${base}...HEAD\` falló: ${e.message}` }
+    return { known: false, why: `\`git diff ${measurementRef}...HEAD\` falló: ${e.message}` }
   }
   const touched = out.split('\n').map((l) => l.trim()).filter(Boolean)
-  return { known: true, base, hits: NEVER_IN_A_SLICE_PR.filter((p) => touched.includes(p)) }
+  return { known: true, measurementRef, hits: NEVER_IN_A_SLICE_PR.filter((p) => touched.includes(p)) }
 }
 
 // F-jjponz-1 — EL PLAN DEL SLICE ES UN ENTREGABLE, NO UNA COSTUMBRE.
@@ -789,7 +802,7 @@ if (release) {
     // emite tiene que poder pegarse tal cual, y con los dos ficheros a la vez
     // es justo cuando más falta hace.
     const pathspec = check.hits.join(' ')
-    dieErr(`no se libera #${issue}: esta rama INTRODUCE ${lista} respecto a ${check.base}. Ese fichero es el estado de la sesión coordinadora, no producto de este slice: al mergear con squash, main se quedaría con el estado de este slice y cualquier sesión nueva del repo se hidrataría creyendo que es este agente. Restáuralo y vuelve a intentarlo: \`git checkout ${check.base} -- ${pathspec}\` y commitea (o \`git rm --cached\` si lo añadiste nuevo). El issue sigue en status:in-progress: no se ha movido nada.`, 5)
+    dieErr(`no se libera #${issue}: esta rama INTRODUCE ${lista} respecto a ${check.measurementRef}. Ese fichero es el estado de la sesión coordinadora, no producto de este slice: al mergear con squash, main se quedaría con el estado de este slice y cualquier sesión nueva del repo se hidrataría creyendo que es este agente. Restáuralo y vuelve a intentarlo: \`git checkout ${check.measurementRef} -- ${pathspec}\` y commitea (o \`git rm --cached\` si lo añadiste nuevo). El issue sigue en status:in-progress: no se ha movido nada.`, 5)
   }
   // F-jjponz-1 — el plan, DESPUÉS del check de ficheros de estado a propósito:
   // la contaminación de main (exit 5) es la avería más cara y su mensaje debe
