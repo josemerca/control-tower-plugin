@@ -49,7 +49,7 @@ const dispatchCheckPath = join(dirname(fileURLToPath(import.meta.url)), 'dispatc
 const ctStepPath = join(dirname(fileURLToPath(import.meta.url)), 'ct-step.mjs')
 // La misma resolución que sus dos hermanas, y por el mismo motivo: el kickoff es
 // texto plano y el token ${CLAUDE_PLUGIN_ROOT} no existe ahí. El agente que
-// escribe el plan tiene que poder abrir estos cuatro documentos por su ruta.
+// escribe el plan tiene que poder abrir estos cinco documentos por su ruta.
 const conventionsDir = join(dirname(fileURLToPath(import.meta.url)), '..', PluginYardstick.DIRECTORY)
 // El vigilante del `-OK`: se lanza desprendido tras despachar un slice con gate
 // `plan`. Ver lanzarVigilanteDelGo.

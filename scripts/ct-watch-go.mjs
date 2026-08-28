@@ -62,7 +62,7 @@
 // ============================================================================
 
 import { execFileSync } from 'node:child_process'
-import { hasGo, commentIds, GO_TOKEN } from './go-response.js'
+import { hasGo, commentIds, failedGoAttempt, GO_FORMAT_REPLY, GO_TOKEN } from './go-response.js'
 import { buildCmuxSendArgv, buildCmuxSendKeyArgv } from './dispatch.js'
 import { findWorkspaceByTitle } from './cmux.js'
 import { arg, sleep, plazo, abrirLog } from './watch-common.js'
@@ -182,6 +182,28 @@ while (previos === null) {
 }
 log(`foto inicial: ${previos.size} comentario(s) ya presentes, que no cuentan como respuesta`)
 
+// UNA sola vez por vigilancia. El formato no cambia entre un intento y el
+// siguiente, así que contestar a cada uno sería ruido en el issue de alguien que
+// ya sabe lo que le dijimos. Y si el proceso se reinicia se vuelve a poder
+// contestar, que es lo correcto: quien lo relanzó puede no haber visto el
+// primero.
+let intentoContestado = false
+
+function explicarElFormato(idDelIntento) {
+  try {
+    execFileSync('gh', ['issue', 'comment', String(issue), '--repo', repo, '--body', GO_FORMAT_REPLY], {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: GH_TIMEOUT_MS, killSignal: 'SIGKILL',
+    })
+    intentoContestado = true
+    log(`intento de go que no arranca nada (${idDelIntento}): publicado el formato en ${repo}#${issue}`)
+  } catch (e) {
+    // No se reintenta ni se marca como contestado: el próximo tick lo vuelve a
+    // ver y lo vuelve a intentar. Fallar en publicar una explicación no puede
+    // costar la vigilancia, que es lo único que este proceso existe para hacer.
+    log(`aviso: se vio un intento de go (${idDelIntento}) y no se pudo publicar el formato (${String(e.message).trim()}) — se reintenta en el próximo tick`)
+  }
+}
+
 for (;;) {
   const comentarios = leerComentarios()
   if (comentarios && hasGo(comentarios, previos, goHash)) {
@@ -221,6 +243,13 @@ for (;;) {
     // No se pudo PREGUNTAR por la sesión. De eso no se sigue nada, y menos con
     // el go ya en la mano: se reintenta en el próximo tick.
     log(`el go está visto pero no se pudo consultar cmux para localizar la sesión — se reintenta la entrega en el próximo tick`)
+  } else if (comentarios && !intentoContestado) {
+    // Alguien está intentando dar el go y su comentario no lo abre. El gate NO
+    // se mueve por esto —lo único que lo abre sigue siendo `matchesGo`—: lo
+    // único que pasa es que quien lo intenta se entera del formato en el sitio
+    // donde está mirando.
+    const intento = failedGoAttempt(comentarios, previos, goHash)
+    if (intento) explicarElFormato(intento)
   }
   // ---------------------------------------------------------------------------
   // SIN SESIÓN NO HAY NADA QUE VIGILAR, Y ESO ES UNA COTA DE VERDAD.

@@ -407,6 +407,53 @@ describe('validatePlan — presupuesto por rol', () => {
   })
 })
 
+// El control que clava el total de la suite. Medido en el slice #7 de
+// rust-monitoring: `52 passed` en cuatro controles, el juez exigió con razón un
+// test más, y con el total clavado no quedaba hueco para conducir en rojo la
+// aserción que conventions/testing.md exige — dos ramas se entregaron sin test
+// para que el control siguiera verde. Es la vara de ct peleando contra un
+// control de ct, y aquí es el único sitio donde se puede impedir.
+describe('validatePlan — ningún control clava el total de tests de la suite', () => {
+  const conControl = (comando) => planConTareas([[CONTRATO, ['Se comprueba así:', [comando], 'bash']]])
+
+  it('rechaza el total de cargo test', () => {
+    expect(violacionesDe(conControl(`test "$(cargo test 2>&1 | grep -c 'test result: ok. 52 passed')" -eq 1`), 'commands'))
+      .toHaveLength(1)
+  })
+
+  it('rechaza el total de pytest y el de jest, que lo escriben igual', () => {
+    expect(violacionesDe(conControl(`test "$(pytest -q | grep -c '41 passed')" -eq 1`), 'commands')).toHaveLength(1)
+    expect(violacionesDe(conControl(`npm test 2>&1 | grep 'Tests:       12 passed'`), 'commands')).toHaveLength(1)
+  })
+
+  it('rechaza el total de mocha, que dice "passing" y no "passed"', () => {
+    expect(violacionesDe(conControl(`npm test | grep '7 passing'`), 'commands')).toHaveLength(1)
+  })
+
+  it('el mensaje ofrece la alternativa: contar los tests de la tarea por su prefijo de módulo', () => {
+    const [violacion] = violacionesDe(conControl(`test "$(cargo test | grep -c '52 passed')" -eq 1`), 'commands')
+    expect(violacion.detail).toMatch(/prefijo de módulo/)
+    expect(violacion.detail).toMatch(/conventions\/testing\.md/)
+  })
+
+  it('NO rechaza el recuento acotado al módulo de la tarea, que es la alternativa que ofrece', () => {
+    expect(violacionesDe(conControl(`test "$(cargo test log_timestamp 2>&1 | grep -c '^test log_timestamp::')" -eq 2`), 'commands'))
+      .toEqual([])
+  })
+
+  it('NO rechaza un comando que corre la suite sin clavar su número', () => {
+    expect(violacionesDe(conControl('cargo test'), 'commands')).toEqual([])
+    expect(violacionesDe(conControl('npm test'), 'commands')).toEqual([])
+  })
+
+  it('señala la línea del control, no la del cercado que lo abre', () => {
+    const plan = planConTareas([[CONTRATO, ['Se comprueba así:', ['cargo build', `grep -c '52 passed'`], 'bash']]])
+    const [violacion] = violacionesDe(plan, 'commands')
+    const lineaDelControl = plan.split('\n').findIndex((l) => l.includes('52 passed')) + 1
+    expect(violacion.detail).toMatch(new RegExp(`^línea ${lineaDelControl}:`))
+  })
+})
+
 describe('validatePlan — las configuraciones no llevan bloque', () => {
   it.each([
     'package.json', 'server/tsconfig.json', '.github/workflows/ci.yml',

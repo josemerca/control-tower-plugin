@@ -179,6 +179,74 @@ export function commentIds(comentarios) {
   return ids
 }
 
+// EL INTENTO QUE NO ARRANCA NADA, Y POR QUÉ AHORA SE CONTESTA.
+//
+// La cabecera de este módulo argumenta que no hay categoría de «malformado» a
+// propósito: «si escribes algo que no es exactamente `-OK`, no pasa nada, y eso
+// es lo que querías», porque un token reconocido de más arrancaría lo que la
+// persona quería frenar. Ese argumento SIGUE ENTERO y esto no lo toca: el gate
+// se abre sólo con `matchesGo`, y nada de aquí abajo cambia eso.
+//
+// Lo que el argumento daba por hecho es la otra mitad: «un token que no se
+// reconoce te deja esperando, y lo notas: vas a mirar». Medido en
+// jjponz/rust-monitoring#7: la persona escribió `-OK` pelado a las 10:50, no
+// pasó nada, y el go bueno no llegó hasta las 10:58. Miró, sí — y no tenía nada
+// que mirar. El formato está escrito en el CUERPO del issue (scripts/gates.js) y
+// quien contesta está leyendo el comentario del plan, que es otro sitio.
+//
+// Así que lo que falta no es una tercera respuesta de la máquina: es decirle el
+// formato a quien ya demostró que lo está intentando. Un intento es un
+// comentario nuevo que empieza por el token —en cualquier caja, porque escribir
+// `-ok` es justo la clase de error que esto existe para explicar— y que
+// `matchesGo` no reconoce.
+//
+// NO SE DEVUELVE EL CUERPO, sólo el `id`. Un intento puede llevar un nonce mal
+// tecleado, y repetirlo en un comentario público publicaría casi todo el
+// permiso. Quien conteste explica el formato y no cita lo que se escribió.
+// LA TENSIÓN CON `conventions/defects.md`, DECLARADA Y NO RESUELTA EN SILENCIO.
+// Su primera regla dice que una respuesta lleva el vocabulario y no un booleano
+// derivado de él, y aquí la respuesta al gate son tres estados —no hay nada, hay
+// un go, hay un intento que no lo es— servidos por un `hasGo` booleano más este
+// identificador anulable. El diseño conforme sería una función con un vocabulario
+// cerrado de tres miembros.
+//
+// No se hace, y el motivo es la mitad de la regla que aquí no se cumple: «un
+// booleano colapsa estados que se arreglan distinto, y su consumidor no puede
+// volver a separarlos». El consumidor SÍ puede — llama a esta función—, así que
+// el daño que la regla nombra no ocurre. Y enfrente hay un coste real: `hasGo`
+// es la única puerta del gate, y su estrechez es la propiedad de seguridad que
+// la cabecera de este módulo defiende. Fundirla con «explicarle el formato a
+// quien se equivocó» acoplaría una decisión de seguridad a una de comodidad, y
+// el día que alguien audite qué abre el gate tendría que leer las dos.
+//
+// Lo que sí se cierra es el estado inválido: un go VÁLIDO no puede salir de aquí
+// como intento fallido, porque `matchesGo` lo descarta dentro. Sin eso el
+// vigilante entregaría y explicaría a la vez.
+export function failedGoAttempt(comentarios, idsPrevios, commitment) {
+  const previos = idsPrevios instanceof Set ? idsPrevios : new Set(idsPrevios || [])
+  for (const comentario of [...(comentarios || [])].reverse()) {
+    const id = typeof comentario?.id === 'string' ? comentario.id : ''
+    if (id !== '' && previos.has(id)) continue
+    const cuerpo = String(comentario?.body ?? '').trim()
+    if (!cuerpo.toUpperCase().startsWith(GO_TOKEN)) continue
+    if (matchesGo(cuerpo, commitment)) continue
+    return id === '' ? null : id
+  }
+  return null
+}
+
+// El texto con el que se contesta a un intento. Vive aquí y no en el vigilante
+// porque es contenido, no entrada y salida, y porque un test tiene que poder
+// comprobar que NO lleva el nonce: es lo único que este comentario no puede
+// decir, ya que el agente lee el issue.
+export const GO_FORMAT_REPLY = [
+  `El go de este gate es exactamente \`${GO_TOKEN} <nonce>\`: el token en mayúsculas, un espacio, y el nonce que \`/ct-next\` imprimió al despachar este slice.`,
+  '',
+  `Lo que se escribió no lo arranca, y eso es deliberado: \`${GO_TOKEN}\` a secas o con cualquier otra cosa detrás no abre el gate, para que un "ok, pero cambia el nombre" no eche a andar justo lo que se quería frenar.`,
+  '',
+  'El nonce **no está escrito en este issue** a propósito, porque el agente lee el issue: es la parte del permiso que él no puede fabricar. Si se ha perdido, quien despachó lo reemite con `scripts/ct-go.mjs`.',
+].join('\n')
+
 // ¿Hay un go entre los comentarios que NO estaban en la foto inicial?
 //
 // Se recorre AL REVÉS y se contesta con el primero que se reconoce, o sea el

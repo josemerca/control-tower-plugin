@@ -5,7 +5,10 @@
 // empujaba la sesión a mano. Este módulo es la mitad que decide; la que habla
 // con `gh` y con `cmux` es scripts/ct-watch-go.mjs.
 import { describe, it, expect } from 'vitest'
-import { hasGo, commentIds, GO_TOKEN, matchesGo, goBody, goCommitment, newGoNonce } from '../scripts/go-response.js'
+import {
+  hasGo, commentIds, GO_TOKEN, matchesGo, goBody, goCommitment, newGoNonce,
+  failedGoAttempt, GO_FORMAT_REPLY,
+} from '../scripts/go-response.js'
 
 const comentario = (id, body) => ({ id, body })
 
@@ -188,5 +191,80 @@ describe('la foto inicial', () => {
   it('sin comentarios la foto está vacía', () => {
     expect(commentIds(null)).toEqual(new Set())
     expect(commentIds([])).toEqual(new Set())
+  })
+})
+
+// El intento que no arranca nada. Medido en jjponz/rust-monitoring#7: `-OK`
+// pelado a las 10:50, silencio, y el go bueno a las 10:58. El silencio ante un
+// go mal formado es deliberado y no se toca —el gate sigue abriéndose sólo con
+// `matchesGo`—; lo que faltaba es decirle el formato a quien ya demostró que lo
+// está intentando.
+describe('el intento de go que no arranca nada', () => {
+  const previos = commentIds([comentario('IC_viejo', 'el plan')])
+  const conElViejo = (...nuevos) => [comentario('IC_viejo', 'el plan'), ...nuevos]
+
+  it('reconoce el caso medido: el token pelado, sin nonce', () => {
+    expect(failedGoAttempt(conElViejo(comentario('IC_a', GO_TOKEN)), previos, HASH)).toBe('IC_a')
+  })
+
+  it('reconoce el token en minúsculas, que es justo el error que hay que explicar', () => {
+    expect(failedGoAttempt(conElViejo(comentario('IC_b', `-ok ${NONCE}`)), previos, HASH)).toBe('IC_b')
+  })
+
+  it('reconoce el nonce equivocado', () => {
+    expect(failedGoAttempt(conElViejo(comentario('IC_c', `${GO_TOKEN} deadbeef`)), previos, HASH)).toBe('IC_c')
+  })
+
+  it('un go VÁLIDO no es un intento fallido: lo contrario sería contestar a quien acertó', () => {
+    expect(failedGoAttempt(conElViejo(comentario('IC_d', GO)), previos, HASH)).toBeNull()
+  })
+
+  it('un comentario que no empieza por el token no es un intento: nadie estaba dando el go', () => {
+    expect(failedGoAttempt(conElViejo(comentario('IC_e', 'me parece bien el plan')), previos, HASH)).toBeNull()
+    expect(failedGoAttempt(conElViejo(comentario('IC_f', 'ok')), previos, HASH)).toBeNull()
+  })
+
+  it('un intento que ya estaba en la foto inicial no se contesta: es de un despacho anterior', () => {
+    const viejos = [comentario('IC_viejo', GO_TOKEN)]
+    expect(failedGoAttempt(viejos, commentIds(viejos), HASH)).toBeNull()
+  })
+
+  it('sin comentarios, o con basura por comentarios, no hay intento', () => {
+    expect(failedGoAttempt([], previos, HASH)).toBeNull()
+    expect(failedGoAttempt(null, previos, HASH)).toBeNull()
+    expect(failedGoAttempt([null, undefined], previos, HASH)).toBeNull()
+  })
+
+  it('devuelve el ÚLTIMO intento cuando hay varios, igual que hasGo recorre al revés', () => {
+    const comentarios = conElViejo(comentario('IC_x', GO_TOKEN), comentario('IC_y', `${GO_TOKEN} nope`))
+    expect(failedGoAttempt(comentarios, previos, HASH)).toBe('IC_y')
+  })
+})
+
+describe('el texto con el que se contesta al intento', () => {
+  // Este texto se publica en el issue y el agente LEE el issue, así que el
+  // nonce es lo único que no puede decir. Asertar `not.toContain(NONCE)` sobre
+  // la constante no valdría: la constante no tiene el nonce en su alcance, así
+  // que esa aserción no puede fallar nunca por el motivo que su nombre da — es
+  // el defecto que conventions/testing.md manda cazar mutando, y mutando salió.
+  // Lo que SÍ puede pasar es que alguien escriba un ejemplo («por ejemplo `-OK
+  // 3f9a1c2b`»), y eso es lo que esto caza: ningún token con forma de nonce.
+  // Quien comprueba lo otro —que el vigilante publique el texto y no otra cosa
+  // con el nonce interpolado— es ct-watch-go.test.js, que sí lo tiene en la mano.
+  it('no lleva ningún token con forma de nonce, ni de ejemplo', () => {
+    expect(GO_FORMAT_REPLY).not.toMatch(/\b(?=[0-9a-f]{4,64}\b)[0-9a-f]*\d[0-9a-f]*\b/i)
+  })
+
+  it('dice el formato exacto, con el token en su caja', () => {
+    expect(GO_FORMAT_REPLY).toContain(`\`${GO_TOKEN} <nonce>\``)
+  })
+
+  it('dice de dónde sale el nonce y cómo se recupera si se perdió', () => {
+    expect(GO_FORMAT_REPLY).toContain('/ct-next')
+    expect(GO_FORMAT_REPLY).toContain('scripts/ct-go.mjs')
+  })
+
+  it('dice que el silencio es deliberado, para que no se lea como una avería', () => {
+    expect(GO_FORMAT_REPLY).toContain('deliberado')
   })
 })

@@ -43,7 +43,7 @@ them, not the agent that wrote the code.
   **not** yardstick: it is context for the objective, and it never widens
   `**Files:**` — code that serves the slice's end but no sentence of this task
   is an `alcance` finding, not an excused one. The brief closes with ct's
-  yardstick — the four documents of the plugin's `conventions/` directory,
+  yardstick — the five documents of the plugin's `conventions/` directory,
   pasted by the program, which take precedence over this repo's rule by rule, not by topic — and then, when the repo declares its
   conventions, a section the program pasted from `.agent/conventions.md`. No
   agent wrote either into the brief and the plan cannot remove them. Both are
@@ -134,39 +134,62 @@ not arrive: say so in `result`, and go on with the rest. That is not a finding: 
 skill, the diff did not.
 
 **And the brief closes with ct's own yardstick**, pasted there by the program from the
-plugin's `conventions/` directory: `code.md`, `decisions.md`, `architecture.md` and `testing.md`.
+plugin's `conventions/` directory: `defects.md`, `style.md`, `decisions.md`, `architecture.md` and
+`testing.md`.
 No agent wrote them into the brief and the plan cannot remove them. You do not open anything to get
 them; they are in front of you. The brief may also close with the repo's own declaration, pasted
 from `.agent/conventions.md`: the rule documents it names bind exactly as if §3 had named them, and
 where the two lists differ the union is the repo's yardstick.
 
-**Which one wins, and this is the part to get right.** ct's four documents take precedence, and the
+**Which one wins, and this is the part to get right.** ct's five documents take precedence, and the
 precedence is measured **rule by rule, not by topic**. Where a rule of this repo requires what one
 of those documents forbids, or forbids what they require, that rule of the repo does not apply and
-the diff is measured by ct's. Where a rule of this repo speaks about something none of those four
+the diff is measured by ct's. Where a rule of this repo speaks about something none of those five
 speaks about, **it binds in full** and a diff that breaks it is a finding like any other. Precedence
 resolves a clash; it does not delete this repo's yardstick, and reading it as "ct's is the only one"
 is the failure to avoid here.
 
 The case that fixes the boundary, with both sides: this repo's convention about casing, prefixes or
-file names **binds**, because none of ct's four documents speaks about that. Its convention of
-writing identifiers in Spanish does **not**, because `conventions/code.md` requires English. So the
-line is not "naming or not": it is whether one of those four documents speaks about it.
+file names **binds**, because none of ct's five documents speaks about that. Its convention of
+writing identifiers in Spanish does **not**, because `conventions/style.md` requires English. So the
+line is not "naming or not": it is whether one of those five documents speaks about it.
 
-**Read each ct document's scope line before you use it.** `decisions.md` and `testing.md` apply to
-every diff, with no exemption. `code.md` also applies to every diff, but a module that was already
-there and does not conform bends only where this document calls the rule style: no prose, the
-language of identifiers, every function hanging off a type. What the diff adds there follows the
-style of that host, and **that is not a finding**. What `code.md` calls a defect — a raw map
-returned by logic, a closed vocabulary collapsed into a loose string or a boolean, two fields that
-have to agree, an error named for where it happens — carries no such exemption and binds in that
-module exactly as in a new one. `architecture.md` applies to **new modules**: a module that was
+**A control of the plan can clash with one of these documents too, and that clash is not the
+implementer's fault.** A `**Verification:**` command that pins the exact number of tests in the whole
+suite forbids what `conventions/testing.md` requires — driving each branch red before it ships —
+because there is no room left for the assertion the document asks for. Where a control and one of
+these documents cannot both be satisfied, say so in `result` and **do not count it as a finding**:
+it is the same treatment as a clash with the repo's own linter, and for the same reason. The diff in
+front of you could not have been written any other way. The defect is in the plan, and the plan is
+not what you are judging.
+
+**Read each ct document's scope line before you use it.** `defects.md`, `decisions.md` and
+`testing.md` apply to every diff, with no exemption. `style.md` also applies to every diff, but a
+module that was already there and does not conform bends on that document's three rules — no prose,
+the language of identifiers, every function hanging off a type. What the diff adds there follows the
+style of that host, and **that is not a finding**. `architecture.md` applies to **new modules**: a module that was
 already there and does not conform is this repository's declared debt, what the diff adds to it
 follows the style of its host, and **that is not a finding**. Both documents close the same hole the
 same way: **a new concept is a new module and is born conforming**, so a new concept placed inside an
 old file to inherit either exemption **is** a finding. Which of the two a file is, the brief tells
 you — `**Files:**` marks each path `(create)` or `(modify)`, and a script already checked those marks
 against the previous commit.
+
+**`conventions/defects.md` is answered rule by rule, and this is not optional prose.** It carries
+four, and a diff can introduce any of them while reading beautifully, so a paragraph saying the diff
+conforms is not an answer to it. In `result`, name each of its four and say what you found:
+
+- **closed vocabulary** — a value that classifies something held as a loose string or a boolean, or a
+  dispatch over it with a catch-all branch.
+- **raw map as the return value of logic** — including a map handed to a module that still decides
+  anything with it, however close to serialization that module sits.
+- **two fields that have to agree** — including a sentinel value standing for an absence: the empty
+  string for "no message", zero for "never happened".
+- **an error named for where it happens** instead of for what happens.
+
+Four short verdicts, one per rule. Where a rule has no subject in this diff, say that; what is not
+allowed is to leave it unmentioned, because an unmentioned rule and a rule that passed read the same
+in the row this verdict becomes.
 
 **What settles it:** for an exemplar, the idiom of the file the plan names against the idiom of the
 diff. For a rule, whether the diff does what the document says — and here you do have a criterion,

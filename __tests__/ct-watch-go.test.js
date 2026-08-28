@@ -16,7 +16,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { GO_TOKEN, goBody, goCommitment, newGoNonce } from '../scripts/go-response.js'
+import { GO_TOKEN, goBody, goCommitment, newGoNonce, GO_FORMAT_REPLY } from '../scripts/go-response.js'
 
 // F38 — el go que este vigilante reconoce es `-OK <nonce>`, con el nonce de SU
 // despacho. Lo que le llega por argv es el sha256 (`--go-hash`): su argv lo
@@ -277,5 +277,88 @@ describe('los argumentos y los plazos', () => {
     const r = correr({ CT_WATCH_GO_POLL_MS: 'un rato' })
     expect(r.status).toBe(2)
     expect(r.stderr).toMatch(/CT_WATCH_GO_POLL_MS inválido/)
+  })
+})
+
+// El intento que no arranca nada, contestado donde la persona está mirando.
+// Medido en jjponz/rust-monitoring#7: `-OK` pelado, silencio, y ocho minutos
+// hasta el go bueno. El gate NO se mueve por esto — sigue abriéndose sólo con el
+// token exacto—; lo que cambia es que quien lo intenta se entera del formato.
+describe('un intento de go que no arranca nada recibe el formato en el issue', () => {
+  const conIntento = (cuerpo) => {
+    const contador = join(dir, `contador-intento-${++secuencias}`)
+    return {
+      FAKE_GH_VIEW_COMMENTS_SEQUENCE: JSON.stringify([
+        { comments: [] },
+        { comments: [comentario(cuerpo)] },
+      ]),
+      FAKE_GH_VIEW_COMMENTS_COUNTER_FILE: contador,
+    }
+  }
+  // El registro SE LEE CRUDO y no partido por saltos de línea. El cuerpo que se
+  // publica es multilínea, así que partirlo dejaba `publicados()[0]` en el
+  // primer fragmento del cuerpo y la aserción del nonce miraba donde el nonce
+  // nunca iba a estar. Salió mutando: interpolar el hash al FINAL del cuerpo
+  // dejaba el test en verde.
+  const registro = () => {
+    try {
+      return readFileSync(join(dir, 'argv.log'), 'utf8')
+    } catch {
+      return ''
+    }
+  }
+  const cuantosPublicados = () => registro().split('issue comment').length - 1
+
+  it('publica el formato cuando el comentario nuevo es el token pelado', () => {
+    correr({ ...conIntento(GO_TOKEN), FAKE_GH_ARGV_LOG_FILE: join(dir, 'argv.log') }, { timeoutMs: 400, pollMs: 40 })
+    expect(cuantosPublicados()).toBe(1)
+    expect(registro()).toContain('jjponz/repo-pulse')
+  })
+
+  it('el cuerpo publicado es el texto del módulo, y NO lleva el nonce ni su hash', () => {
+    correr({ ...conIntento(`${GO_TOKEN} deadbeef`), FAKE_GH_ARGV_LOG_FILE: join(dir, 'argv.log') }, { timeoutMs: 400, pollMs: 40 })
+    expect(cuantosPublicados()).toBe(1)
+    expect(registro()).toContain(GO_FORMAT_REPLY)
+    expect(registro()).not.toContain(NONCE)
+    expect(registro()).not.toContain(GO_HASH)
+  })
+
+  it('lo publica UNA vez aunque el intento siga ahí tick tras tick', () => {
+    correr({
+      FAKE_GH_VIEW_COMMENTS_SEQUENCE: JSON.stringify([
+        { comments: [] },
+        { comments: [comentario(GO_TOKEN, 'IC_intento')] },
+        { comments: [comentario(GO_TOKEN, 'IC_intento')] },
+        { comments: [comentario(GO_TOKEN, 'IC_intento')] },
+      ]),
+      FAKE_GH_VIEW_COMMENTS_COUNTER_FILE: join(dir, `contador-repe-${++secuencias}`),
+      FAKE_GH_ARGV_LOG_FILE: join(dir, 'argv.log'),
+    }, { timeoutMs: 500, pollMs: 40 })
+    expect(cuantosPublicados()).toBe(1)
+  })
+
+  it('un go VÁLIDO no recibe explicación: se contestaría a quien acertó', () => {
+    correr({ ...conGo(), FAKE_GH_ARGV_LOG_FILE: join(dir, 'argv.log') })
+    expect(cuantosPublicados()).toBe(0)
+  })
+
+  it('un comentario que no intenta dar el go no recibe explicación', () => {
+    correr({ ...conIntento('me parece bien el plan'), FAKE_GH_ARGV_LOG_FILE: join(dir, 'argv.log') }, { timeoutMs: 400, pollMs: 40 })
+    expect(cuantosPublicados()).toBe(0)
+  })
+
+  it('si publicar falla, la vigilancia sigue: el go posterior se entrega igual', () => {
+    const r = correr({
+      FAKE_GH_VIEW_COMMENTS_SEQUENCE: JSON.stringify([
+        { comments: [] },
+        { comments: [comentario(GO_TOKEN, 'IC_intento')] },
+        { comments: [comentario(GO_TOKEN, 'IC_intento'), comentario(GO, 'IC_bueno')] },
+      ]),
+      FAKE_GH_VIEW_COMMENTS_COUNTER_FILE: join(dir, `contador-fallo-${++secuencias}`),
+      FAKE_GH_ISSUE_COMMENT_FAIL: '1',
+    }, { timeoutMs: 600, pollMs: 40 })
+    expect(r.status).toBe(0)
+    expect(r.stdout).toMatch(/no se pudo publicar el formato/)
+    expect(r.stdout).toMatch(new RegExp(`${GO_TOKEN} visto`))
   })
 })

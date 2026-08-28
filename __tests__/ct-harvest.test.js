@@ -75,33 +75,41 @@ describe('/ct-harvest — la telemetría del juez, por slice', () => {
     limpiar(b)
   })
 
-  // MEDIDA 1: de qué vara salió el hallazgo. `patrones-ct` cuenta, de los
-  // hallazgos de `patrones` que ya aparecen en «Hallazgos por regla», cuántos
-  // citan la vara DE CT. El complemento (los que citan la del repo, o no citan
-  // nada) se lee restando de la cifra de `patrones` de al lado.
-  it('patrones-ct suma findings_patrones_vara_ct de todos los veredictos del slice', () => {
+  // MEDIDA 1: si la vara de ct se usó y si cazó algo, en una sola celda y sus
+  // dos mitades. Sustituye a `patrones-ct`, que sólo miraba hallazgos del ítem
+  // `patrones` y por eso no veía los que el juez archiva en otro ítem.
+  it('vara ct imprime las dos mitades sumadas de todos los veredictos del slice', () => {
     const b = bancada()
     const filesJson = JSON.stringify({
-      'issue-12.jsonl': veredicto({ ruling: 'FAIL', rubric_sin_vara: 0, findings_by_rule: { patrones: 2 }, findings_patrones_vara_ct: 1 })
-        + veredicto({ ruling: 'FAIL', rubric_sin_vara: 0, findings_by_rule: { patrones: 1 }, findings_patrones_vara_ct: 1 }),
+      'issue-12.jsonl': veredicto({ ruling: 'FAIL', rubric_sin_vara: 0, findings_by_rule: { patrones: 2 }, rubric_vara_ct_docs: 5, findings_vara_ct: 1 })
+        + veredicto({ ruling: 'FAIL', rubric_sin_vara: 0, findings_by_rule: { patrones: 1 }, rubric_vara_ct_docs: 4, findings_vara_ct: 1 }),
     })
     const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
     expect(res.status).toBe(0)
-    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 2 \| 0 \| patrones 3 \| 2 \|/)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 2 \| 0 \| patrones 3 \| 9 docs · 2 hallazgos \|/)
     limpiar(b)
   })
 
-  it('un slice cuya telemetría es toda anterior a findings_patrones_vara_ct imprime «—» en patrones-ct, nunca 0', () => {
+  it('un slice cuya telemetría es toda anterior a estas columnas imprime «—» en vara ct, nunca 0', () => {
     const b = bancada()
     const filesJson = JSON.stringify({
-      // Esquema viejo: trae rubric_sin_vara y findings_by_rule pero no
-      // findings_patrones_vara_ct (medida más nueva que las otras dos).
       'issue-12.jsonl': veredicto({ ruling: 'FAIL', rubric_sin_vara: 0, findings_by_rule: { patrones: 2 } }),
     })
     const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
     expect(res.status).toBe(0)
     expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| patrones 2 \| — \|/)
-    expect(res.stdout).toMatch(/`—` en `patrones-ct`: ningún veredicto de ese slice traía la columna `findings_patrones_vara_ct`/)
+    expect(res.stdout).toMatch(/`—` en `vara ct`: ningún veredicto de ese slice traía las columnas/)
+    limpiar(b)
+  })
+
+  it('media medida no imprime media celda: con una columna sola sale «—», porque el hueco se leería como un cero', () => {
+    const b = bancada()
+    const filesJson = JSON.stringify({
+      'issue-12.jsonl': veredicto({ ruling: 'FAIL', rubric_sin_vara: 0, findings_by_rule: { patrones: 2 }, rubric_vara_ct_docs: 5 }),
+    })
+    const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| patrones 2 \| — \|/)
     limpiar(b)
   })
 

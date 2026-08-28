@@ -1474,7 +1474,7 @@ describe('la vara del repo viaja en el brief, sin agente en medio', () => {
 describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
   const briefDeLaUno = () => readFileSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'), 'utf8')
 
-  it('el brief termina con los cuatro documentos, DETRÁS de la tarea', () => {
+  it('el brief termina con los cinco documentos, DETRÁS de la tarea', () => {
     ct('next')
     const brief = briefDeLaUno()
     expect(brief).toMatch(/\*\*La vara de ct\*\*/)
@@ -1486,8 +1486,10 @@ describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
 
   it('pega el contenido real de los documentos, no un resumen', () => {
     ct('next')
-    const codeMd = readFileSync(join(PLUGIN_ROOT_TEST, 'conventions', 'code.md'), 'utf8')
-    expect(briefDeLaUno()).toContain(codeMd.trim())
+    for (const nombre of PluginYardstick.FILES) {
+      const documento = readFileSync(join(PLUGIN_ROOT_TEST, 'conventions', nombre), 'utf8')
+      expect(briefDeLaUno(), `${nombre} no viaja verbatim`).toContain(documento.trim())
+    }
   })
 
   it('con declaración del repo, la de ct va PRIMERO', () => {
@@ -1501,7 +1503,7 @@ describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
   it('sin declaración del repo, la de ct viaja igual: son dos varas independientes', () => {
     ct('next')
     const brief = briefDeLaUno()
-    expect(brief).toContain('## Vara de ct: conventions/code.md')
+    expect(brief).toContain('## Vara de ct: conventions/defects.md')
     expect(brief).not.toMatch(/leída directo de `\.agent\/conventions\.md`/)
   })
 
@@ -1525,7 +1527,7 @@ describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
         env: { ...process.env, CLAUDE_CONFIG_DIR: join(repo, '.telemetria') },
       })
       expect(r.status).toBe(8)
-      expect(r.stderr).toMatch(/code\.md/)
+      expect(r.stderr).toMatch(/defects\.md/)
       expect(r.stderr).toMatch(/instalación/)
       expect(existsSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'))).toBe(false)
     } finally {

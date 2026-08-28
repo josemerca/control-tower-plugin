@@ -370,6 +370,27 @@ export function validatePlan(markdown, { readFile } = {}) {
     if (body.length > COMMAND_BUDGET) {
       push('commands', `línea ${i + 1}: el bloque de comandos tiene ${body.length} líneas y su presupuesto son ${COMMAND_BUDGET}. Un bloque de comandos son los comandos y su salida esperada, no un script: si hace falta un script, va al repo y el plan lo invoca.`)
     }
+    // EL TOTAL DE LA SUITE CLAVADO. Medido en el slice #7 de rust-monitoring: el
+    // plan clavaba `52 passed` en cuatro controles, el juez exigió con razón un
+    // test más, y el número caducado hubo que corregirlo en siete sitios del
+    // plan —dos briefs se generaron ya con el valor viejo—. El daño mayor no es
+    // ése: con el total clavado no queda hueco para la aserción que
+    // `conventions/testing.md` manda conducir en rojo, así que dos ramas se
+    // entregaron sin un solo test para que un control siguiera verde. Es la vara
+    // de ct peleando contra un control de ct, y el único sitio donde se puede
+    // impedir es aquí, antes de que el plan exista: el juez ya sólo puede
+    // declarar el choque, y el implementador no puede satisfacer los dos.
+    //
+    // Se mide sobre el LITERAL del comando y no sobre su intención: un total de
+    // la suite se escribe con el número pegado a `passed`/`passing`, que es la
+    // forma que imprimen cargo, pytest, jest y mocha. Un recuento acotado al
+    // módulo de la tarea —`grep -c '^test log_timestamp::'`— no la tiene, y es
+    // exactamente la alternativa que el mensaje ofrece.
+    for (const [j, linea] of body.entries()) {
+      const total = /\b\d+\s+pass(?:ed|ing)\b/i.exec(linea)
+      if (!total) continue
+      push('commands', `línea ${i + 2 + j}: el control clava el número de tests de la suite ("${total[0]}"). Es un proxy: el juez puede exigir con razón una aserción más, y entonces el número caduca en todos los controles que lo repiten; y mientras esté clavado no queda hueco para conducir en rojo la aserción que conventions/testing.md exige, así que una rama se entrega sin test para que el control siga verde. Cuenta los tests DE ESTA TAREA por su prefijo de módulo (por ejemplo: grep -c '^test <modulo>::'), no el total.`)
+    }
   })
 
   // F-jjponz-4 — sustituye la regla vieja ("cada tarea contiene al menos un

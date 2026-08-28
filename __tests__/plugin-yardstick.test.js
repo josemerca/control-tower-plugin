@@ -13,7 +13,8 @@ class YardstickDocumentMother {
 
   static realistic() {
     return [
-      { name: 'code.md', content: '# How code is written here\nno prose\n' },
+      { name: 'defects.md', content: '# Defects no diff may introduce\nno raw map\n' },
+      { name: 'style.md', content: '# How code is written here\nno prose\n' },
       { name: 'decisions.md', content: '# Where a decision lives\nonce\n' },
       { name: 'architecture.md', content: '# Where each thing lives\nthree layers\n' },
       { name: 'testing.md', content: '# What a test pins\nthe name is the sentence\n' },
@@ -46,18 +47,22 @@ class YardstickDocumentMother {
     return [{ name: 'other.md', content: 'x' }]
   }
 
-  static onlyCodeAndDecisions() {
+  static onlyTheFirstTwo() {
     return YardstickDocumentMother.withContentForEach().slice(0, 2)
   }
 
   static withLeadingNullEntry() {
-    return [null, { name: 'code.md', content: 'x' }]
+    return [null, { name: 'style.md', content: 'x' }]
   }
 }
 
 describe('PluginYardstick.FILES', () => {
-  it('lists_the_four_yardstick_documents_in_paste_order', () => {
-    expect(PluginYardstick.FILES).toEqual(['code.md', 'decisions.md', 'architecture.md', 'testing.md'])
+  it('lists_the_five_yardstick_documents_in_paste_order', () => {
+    expect(PluginYardstick.FILES).toEqual(['defects.md', 'style.md', 'decisions.md', 'architecture.md', 'testing.md'])
+  })
+
+  it('pastes_defects_before_style_so_the_rule_without_exemption_is_read_before_the_exemption_is_offered', () => {
+    expect(PluginYardstick.FILES.indexOf('defects.md')).toBeLessThan(PluginYardstick.FILES.indexOf('style.md'))
   })
 
   it('every_declared_file_exists_in_the_conventions_directory', () => {
@@ -82,16 +87,16 @@ describe('PluginYardstick.missingDocuments', () => {
   })
 
   it('names_the_document_that_arrives_null', () => {
-    expect(PluginYardstick.missingDocuments(YardstickDocumentMother.withNullContentFor('code.md')))
-      .toEqual(['code.md'])
+    expect(PluginYardstick.missingDocuments(YardstickDocumentMother.withNullContentFor('style.md')))
+      .toEqual(['style.md'])
   })
 
   it('names_the_document_absent_from_the_received_list', () => {
-    expect(PluginYardstick.missingDocuments(YardstickDocumentMother.onlyCodeAndDecisions()))
-      .toEqual(['architecture.md', 'testing.md'])
+    expect(PluginYardstick.missingDocuments(YardstickDocumentMother.onlyTheFirstTwo()))
+      .toEqual(['decisions.md', 'architecture.md', 'testing.md'])
   })
 
-  it('reports_all_four_missing_when_nothing_is_received', () => {
+  it('reports_all_five_missing_when_nothing_is_received', () => {
     expect(PluginYardstick.missingDocuments(YardstickDocumentMother.none())).toEqual([...PluginYardstick.FILES])
   })
 
@@ -108,7 +113,7 @@ describe('PluginYardstick.missingDocuments', () => {
 
   it('a_null_entry_inside_the_list_does_not_break_the_count_of_the_rest', () => {
     expect(PluginYardstick.missingDocuments(YardstickDocumentMother.withLeadingNullEntry()))
-      .toEqual(['decisions.md', 'architecture.md', 'testing.md'])
+      .toEqual(['defects.md', 'decisions.md', 'architecture.md', 'testing.md'])
   })
 })
 
@@ -131,8 +136,9 @@ describe('PluginYardstick.composeSection', () => {
     expect(section).toContain('the name is the sentence')
   })
 
-  it('keeps_the_declared_order', () => {
-    const positions = PluginYardstick.FILES.map((name) => section.indexOf(`conventions/${name}`))
+  it('keeps_the_declared_order_measured_on_the_headings_not_on_the_bare_path_the_header_also_mentions', () => {
+    const positions = PluginYardstick.FILES.map((name) => section.indexOf(`## Vara de ct: conventions/${name}`))
+    expect(positions.every((at) => at >= 0)).toBe(true)
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
   })
 })
@@ -154,8 +160,8 @@ describe('PluginYardstick.composeSection refuses to compose half a promise', () 
   })
 
   it('throws_naming_the_missing_document_when_one_arrives_with_non_string_content', () => {
-    expect(() => PluginYardstick.composeSection(YardstickDocumentMother.withNullContentFor('code.md')))
-      .toThrow(/code\.md/)
+    expect(() => PluginYardstick.composeSection(YardstickDocumentMother.withNullContentFor('style.md')))
+      .toThrow(/style\.md/)
   })
 })
 
@@ -185,7 +191,7 @@ describe('the precedence header carries both sides of the rule', () => {
     const text = header()
     expect(text).toMatch(/mayúsculas/i)
     expect(text).toContain('castellano')
-    expect(text).toContain('conventions/code.md')
+    expect(text).toContain('conventions/style.md')
   })
 })
 

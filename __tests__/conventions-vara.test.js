@@ -7,7 +7,8 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const leer = (nombre) => readFileSync(join(root, 'conventions', nombre), 'utf8')
 
 const ALCANCES = {
-  'code.md': 'every diff',
+  'defects.md': 'every diff',
+  'style.md': 'every diff',
   'decisions.md': 'every diff',
   'testing.md': 'every diff',
   'architecture.md': 'new modules',
@@ -33,8 +34,8 @@ describe('los documentos de conventions/', () => {
     expect(leer('architecture.md')).toContain('a new concept is a new module and is born conforming')
   })
 
-  it('code.md cierra el mismo agujero para su exención de estilo', () => {
-    expect(leer('code.md')).toContain('a new concept is a new module and is born conforming')
+  it('style.md cierra el mismo agujero para su exención de estilo', () => {
+    expect(leer('style.md')).toContain('a new concept is a new module and is born conforming')
   })
 
   it('ninguno repite una regla que ya posee un ítem de la rúbrica', () => {
@@ -51,41 +52,80 @@ describe('los documentos de conventions/', () => {
   })
 })
 
-describe('code.md distingue estilo (exento en módulo viejo) de defecto (nunca exento)', () => {
-  const clausula = () =>
-    /A module that was already there[\s\S]*?(?=\n## )/.exec(leer('code.md'))[0].replace(/\s+/g, ' ')
-
-  const REGLAS_DE_DEFECTO = [
-    /raw map returned as the value of logic/,
-    /closed vocabulary collapsed into a loose string or a boolean/,
-    /two fields that have to agree instead of one that makes the wrong state impossible/,
-    /an error named for where it happens instead of what happens/,
-  ]
+describe('la exención de deuda vive en style.md y NO alcanza a defects.md', () => {
+  const clausulaDeEstilo = () =>
+    /A module that was already there[\s\S]*?(?=\n## )/.exec(leer('style.md'))[0].replace(/\s+/g, ' ')
+  const cabeceraDeDefectos = () =>
+    leer('defects.md').split('\n## ')[0].replace(/\s+/g, ' ')
 
   const AFIRMACIONES = {
-    'acota la deuda a lo que es estilo, no la declara general':
-      () => expect(clausula()).toContain("the debt is only as wide as this document's **style** rules"),
-    'enumera las tres reglas de estilo exentas: prosa, idioma de los identificadores, función colgada de un tipo':
+    'style.md acota la deuda a sus tres reglas, no la declara general':
+      () => expect(clausulaDeEstilo()).toContain("the debt is exactly as wide as this document's three rules"),
+    'style.md enumera las tres reglas exentas: prosa, idioma de los identificadores, función colgada de un tipo':
       () =>
-        expect(clausula()).toContain(
+        expect(clausulaDeEstilo()).toContain(
           'no prose, the language its identifiers are written in, and that every function hangs off a type'
         ),
-    'declara que las reglas de defecto NO tienen la exención':
-      () => expect(clausula()).toContain("This document's **defect** rules carry no such exemption"),
-    'nombra al menos dos de las cuatro reglas de defecto, para que la declaración tenga sujeto':
+    'style.md dice que su exención TERMINA en defects.md, nombrándolo por su ruta':
       () => {
-        const nombradas = REGLAS_DE_DEFECTO.filter((regla) => regla.test(clausula())).length
-        expect(nombradas, 'code.md nombra menos de dos reglas de defecto sin exención').toBeGreaterThanOrEqual(2)
+        expect(clausulaDeEstilo()).toContain('The exemption ends at this document')
+        expect(clausulaDeEstilo()).toContain('`conventions/defects.md` bind on every diff')
       },
-    'dice que las reglas de defecto rigen en un módulo viejo igual que en uno nuevo':
-      () => expect(clausula()).toContain('those bind on every diff, in a module born today and one that was already there alike'),
+    'defects.md declara en su LÍNEA DE ALCANCE que no hay exención, no sólo en la prosa':
+      () => expect(leer('defects.md').split('\n').slice(0, 6).join('\n')).toContain('with no exemption'),
+    'defects.md dice que la exención de style.md se detiene en él':
+      () => expect(cabeceraDeDefectos()).toContain('That exemption stops at this document'),
+    'defects.md dice que sus reglas rigen en un módulo viejo igual que en uno nuevo':
+      () =>
+        expect(cabeceraDeDefectos()).toContain(
+          'in a module born today and in one that was already there'
+        ),
   }
 
   for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
-    it(`code.md ${afirmacion}`, () => {
+    it(afirmacion, () => {
       comprobar()
     })
   }
+})
+
+describe('defects.md lleva las cuatro reglas de defecto como SU asunto, cada una con su encabezado', () => {
+  const ENCABEZADOS = [
+    '## Closed vocabulary instead of loose strings and booleans',
+    '## No raw map as the return value of logic',
+    '## Two fields that have to agree',
+    '## Errors are named for what happens, not for where',
+  ]
+
+  for (const encabezado of ENCABEZADOS) {
+    it(`tiene su propia sección: ${encabezado}`, () => {
+      expect(leer('defects.md')).toContain(encabezado)
+    })
+  }
+
+  it('ninguna de las cuatro se quedó en style.md al partir el documento', () => {
+    const estilo = leer('style.md')
+    for (const encabezado of ENCABEZADOS) {
+      expect(estilo, `${encabezado} sigue en style.md`).not.toContain(encabezado)
+    }
+  })
+
+  it('cierra el hueco que el juez tomó en el slice #7: que el consumidor serialice al final NO exime al mapa', () => {
+    const seccion = /## No raw map as the return value of logic[\s\S]*?(?=\n## )/
+      .exec(leer('defects.md'))[0]
+      .replace(/\s+/g, ' ')
+    expect(seccion).toContain('The boundary is the last step before the wire, and it is one step')
+    expect(seccion).toContain('does not make a raw map its legitimate input')
+    expect(seccion).toContain('however close to the wire it sits')
+  })
+
+  it('nombra el valor centinela como el segundo campo disfrazado, con el caso medido del mensaje vacío', () => {
+    const seccion = /## Two fields that have to agree[\s\S]*?(?=\n## )/
+      .exec(leer('defects.md'))[0]
+      .replace(/\s+/g, ' ')
+    expect(seccion).toContain("A sentinel value is that second field wearing the first field's clothes")
+    expect(seccion).toContain('The empty string standing for "no message"')
+  })
 })
 
 describe('testing.md separa "visto fallar por su motivo" de la fase roja del ciclo, y declara la asimetría de quién puede correrla', () => {
