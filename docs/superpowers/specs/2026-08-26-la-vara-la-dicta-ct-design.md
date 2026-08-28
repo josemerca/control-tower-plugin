@@ -823,7 +823,25 @@ lista de los módulos nacidos bajo la vara: cero líneas de prosa, ninguna funci
 suelta a nivel de módulo, ninguna constante suelta a nivel de módulo, y los
 identificadores en inglés por lista negra exacta.
 
-Dos cosas de esa guarda salieron mutando, y las dos eran fallos suyos:
+La lista incluye **el fichero de la guarda misma**, y no por elegancia: la
+primera versión sólo cubría `scripts/*.js`, era ciega a su propio fichero, y se
+dejó **21 líneas de comentario dentro** — en el fichero cuyo trabajo es prohibir
+la prosa en los ficheros nacidos conformes. Lo cazó una lectura del diff, no la
+guarda.
+
+Y la guarda comprobaba **una cuarta regla que `style.md` no tiene**. Sus tres
+reglas son la prosa, el idioma y «ninguna función suelta a nivel de módulo»; las
+constantes sueltas aparecen sólo en el RAZONAMIENTO de la tercera, como el
+síntoma de un tipo que falta. La guarda las prohibía como regla propia, y con eso
+marcaba el `const root = join(dirname(...))` de tres ficheros de test — una ruta
+de fixture que ese documento nunca prohibió—. Una guarda más estricta que su
+documento fuerza código peor o acaba borrada, así que ahora mide las tres reglas
+y ninguna más. Lo que sí conserva de aquel intento es la **función suelta
+disfrazada de constante** (`const leer = (nombre) => …`), que es una función a
+nivel de módulo y por tanto sí es la tercera regla: por ahí se colaba, y con ella
+se arregló la que `conventions-vara.test.js` llevaba desde su propia ronda.
+
+Otras dos cosas de esa guarda salieron mutando, y las dos eran fallos suyos:
 
 - marcaba los identificadores que **empiezan** por una palabra castellana, y
   señaló `citation` —inglés perfecto— por empezar por `cita`. Una guarda que da
