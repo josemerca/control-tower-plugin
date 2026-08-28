@@ -80,6 +80,7 @@ import { parseStateSafe } from './state.js'
 import { SENAL_AUSENTE } from './kickoff.js'
 import { SLICE_REL_PATH } from './state-paths.js'
 import { findClosingKeywords } from './closing-keywords.js'
+import { SliceBase } from './slice-base.js'
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -197,9 +198,46 @@ const workDir = join(repoRoot, '.agent', `run-${issue}`)
 mkdirSync(workDir, { recursive: true })
 
 const headSha = () => (git(['rev-parse', 'HEAD']) || '').trim()
+// Reconciliación de ramas, tarea 3 — `--no-merges`: la cuenta cruza tareas
+// comiteadas, no fusiones. Sin este filtro, el commit de fusión que trae la
+// base avanzada (ver `medidaDelRun` más abajo) contaba como si fuera un
+// commit de tarea, e inflaba `hechos` por encima de `esperados` incluso ya
+// resuelta la referencia de medida.
 const commitsDesde = (sha) => {
-  const salida = git(['rev-list', '--count', `${sha}..HEAD`], { allowFail: true })
+  const salida = git(['rev-list', '--count', '--no-merges', `${sha}..HEAD`], { allowFail: true })
   return salida === null ? null : Number(salida.trim())
+}
+
+// Reconciliación de ramas, tarea 3 — MEDIR desde el merge-base, no desde el
+// corte congelado en `run.baseSha`. En cuanto el slice hace `git merge` de su
+// base (el caso que esta tarea arregla), `run.baseSha..HEAD` incluye TODO lo
+// que la fusión trajo: cada commit ajeno cuenta como si fuera de una tarea, y
+// el cruce `hechos !== esperados` de abajo muere en PRECONDITION para
+// SIEMPRE (un proceso nuevo no tiene forma de saber que esos commits no son
+// suyos). `SliceBase` (scripts/slice-base.js, Tarea 1 de esta reconciliación)
+// ya resuelve esto para `dispatch-check.mjs` (Tarea 2): `git merge-base HEAD
+// origin/<rama-base>` aísla el punto donde la historia del slice se separó
+// de su base, DESPUÉS de cualquier merge que haya hecho de ella.
+//
+// El nombre de la rama sale de `.agent/SLICE.md` con `parseStateSafe` — el
+// mismo parser que este fichero ya usa para `epic:` y `senal:` (ver abajo) —
+// y NO con una regex propia: `dispatch-check.mjs` sí tiene la suya para este
+// mismo campo (`campoBaseDeLaSemilla`), deuda anterior a esta tarea y fuera
+// de su alcance.
+//
+// Sin `base:` en la semilla, o si el merge-base no resuelve (sin remoto, sin
+// `origin/<rama>`), se cae al corte de siempre (`fallbackRef`): el peor caso
+// es medir como se medía hasta hoy, nunca "sin medir".
+const gitParaSliceBase = (argv) => {
+  const salida = git(argv, { allowFail: true })
+  return salida === null ? null : salida.trim()
+}
+function medidaDelRun(fallbackRef) {
+  const { meta } = parseStateSafe(readFileSync(join(repoRoot, SLICE_REL_PATH), 'utf8'))
+  const baseBranch = typeof meta.base === 'string' && meta.base.trim() ? meta.base.trim() : null
+  if (!baseBranch) return fallbackRef
+  const sliceBase = new SliceBase({ git: gitParaSliceBase })
+  return sliceBase.measurementRef({ baseBranch, fallbackRef }) ?? fallbackRef
 }
 
 let run
@@ -217,9 +255,10 @@ if (existsSync(stateFile)) {
     die(`el run del issue ${issue} ya está entregado: no queda paso que dar`, EXIT.WRONG_STEP)
   }
   // No se cree el fichero a solas: cruza la tarea que dice el estado con los
-  // commits que hay desde baseSha. Adivinar aquí es reimplementar encima de una
-  // tarea ya comiteada.
-  const hechos = commitsDesde(run.baseSha)
+  // commits que hay desde la referencia de medida. Adivinar aquí es
+  // reimplementar encima de una tarea ya comiteada.
+  const measurementRef = medidaDelRun(run.baseSha)
+  const hechos = commitsDesde(measurementRef)
   if (hechos === null) {
     die(`el estado dice baseSha ${run.baseSha}, que no existe en este worktree. Borra ${stateFile} si el run es de otra rama.`, EXIT.PRECONDITION)
   }
@@ -245,7 +284,7 @@ if (existsSync(stateFile)) {
     ? run.tasksTotal + (run.sliceCommits || 0)
     : run.task - 1
   if (hechos !== esperados) {
-    die(`el estado y git no cuentan lo mismo: el fichero espera ${esperados} commit(s) (tarea ${run.task}, paso ${run.step}) y desde ${run.baseSha.slice(0, 7)} hay ${hechos}. No se sigue a ciegas.`, EXIT.PRECONDITION)
+    die(`el estado y git no cuentan lo mismo: el fichero espera ${esperados} commit(s) (tarea ${run.task}, paso ${run.step}) y desde ${measurementRef.slice(0, 7)} hay ${hechos}. No se sigue a ciegas.`, EXIT.PRECONDITION)
   }
 } else {
   if ((git(['diff', '--cached', '--name-only']) || '').trim()) {
