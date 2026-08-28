@@ -142,6 +142,17 @@ class RepoMother {
     workGit('config', 'user.email', 'slice@x.z')
     workGit('config', 'user.name', 'slice')
     workGit('switch', '-q', '-c', `feat/${issue}`)
+    // El corte real: exactamente donde ct-step.mjs lo captura en producción
+    // (`baseSha: headSha()` al crear el run, ct-step.mjs ~línea 302) — ANTES
+    // de cualquier commit de tarea, sobre el worktree recién cortado. Si se
+    // capturara después de comitear "tarea 1" (como hacía una versión previa
+    // de este fixture), el corte y el commit de la tarea coincidirían y el
+    // grafo saldría simétrico: un commit no-merge a cada lado de la fusión,
+    // así que contar sin fusiones desde CUALQUIERA de los dos puntos —el
+    // corte o el merge-base— daría 1, y el test pasaría aunque `medidaDelRun`
+    // se tirara entera. Con el corte aquí, sólo pasa el conteo que resuelve
+    // por `SliceBase` (ver más abajo).
+    const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: work, encoding: 'utf8' }).trim()
 
     // La tarea 1 del plan: un único commit, con el plan y la semilla dentro
     // (igual que hace ct-step de verdad — `report`+`commit` stagean y
@@ -153,7 +164,6 @@ class RepoMother {
     writeFileSync(join(work, 'work.txt'), 'trabajo\n')
     workGit('add', '-A')
     workGit('commit', '-qm', 'tarea 1')
-    const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: work, encoding: 'utf8' }).trim()
 
     // La base avanza DESPUÉS del corte que congeló `baseSha` — un commit que
     // el slice nunca escribió.
