@@ -4,13 +4,11 @@ import { SliceBase } from '../scripts/slice-base.js'
 class GitDouble {
   constructor(answers) {
     this.answers = answers
-    this.calls = []
   }
 
   run = (argv) => {
-    this.calls.push(argv)
     const key = argv.join(' ')
-    if (!(key in this.answers)) return null
+    if (!(key in this.answers)) throw new Error(`Unexpected git command: ${key}`)
     return this.answers[key]
   }
 }
@@ -25,14 +23,14 @@ describe('SliceBase', () => {
   })
 
   it('a_remote_that_does_not_resolve_falls_back_to_the_cut_instead_of_measuring_nothing', () => {
-    const git = new GitDouble({})
+    const git = new GitDouble({ 'merge-base HEAD origin/main': null })
     const base = new SliceBase({ git: git.run })
 
     expect(base.measurementRef({ baseBranch: 'main', fallbackRef: 'bbbbbbbb' })).toBe('bbbbbbbb')
   })
 
   it('no_remote_and_no_cut_answers_nothing_instead_of_guessing_a_reference', () => {
-    const git = new GitDouble({})
+    const git = new GitDouble({ 'merge-base HEAD origin/main': null })
     const base = new SliceBase({ git: git.run })
 
     expect(base.measurementRef({ baseBranch: 'main', fallbackRef: null })).toBe(null)
