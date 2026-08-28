@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
+import { rmSyncBestEffort } from './fixtures/cleanup.js'
 
 import { deliveredRun } from '../scripts/run-machine.js'
 import { VERDICT_RULES, SLICE_VERDICT_RULES } from '../scripts/step-contracts.js'
@@ -208,7 +209,7 @@ const sliceOk = () => {
 }
 
 beforeEach(() => { repo = montarRepo() })
-afterEach(() => { rmSync(repo, { recursive: true, force: true }) })
+afterEach(() => { rmSyncBestEffort(repo) })
 
 describe('next: la sesión pregunta y el oráculo contesta', () => {
   it('dice la tarea, el paso y qué despachar, sin transicionar', () => {
@@ -350,7 +351,7 @@ describe('la cola completa: commit → global → slice-verdict → e2e → DELI
   }
 
   beforeEach(() => {
-    rmSync(repo, { recursive: true, force: true })
+    rmSyncBestEffort(repo)
     repo = montarRepo({ e2e: [RECORRIDO] })
   })
 
@@ -1531,7 +1532,7 @@ describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
       expect(r.stderr).toMatch(/instalación/)
       expect(existsSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'))).toBe(false)
     } finally {
-      rmSync(fake, { recursive: true, force: true })
+      rmSyncBestEffort(fake)
     }
   })
 })
