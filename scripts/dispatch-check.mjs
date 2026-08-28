@@ -36,6 +36,7 @@ import { controlTowerLogDir } from './run-metrics.js'
 import { matchesGo, GO_TOKEN } from './go-response.js'
 import { readGoCommitment } from './go-registry.js'
 import { gatesFromLabels } from './gates.js'
+import { SliceBase, BaseBranch } from './slice-base.js'
 
 const ctWatchMergePath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch-merge.mjs')
 
@@ -477,11 +478,26 @@ function baseNoEsUnaRama(base) {
   return refResuelve(`${base}^{commit}`)
 }
 
+// Fix round 1 (Importante 1) — el parseo del campo `base:` de la semilla
+// vivía escrito dos veces (aquí y en nombreDeLaRamaBase(), más abajo): mismo
+// readFileSync, mismo regex, mismo recorte de comillas. `conventions/decisions.md`:
+// si cambia cómo se escribe o se entrecomilla ese campo, hay que tocar las DOS
+// a la vez o divergen en silencio. Un solo sitio que sepa parsear el campo
+// crudo — la deuda declarada del fichero exime del estilo, no de esto.
+function parseBaseField(seedText) {
+  const b = seedText.match(/^base:[ \t]*(.+)$/m)
+  return b ? b[1].trim().replace(/^['"]|['"]$/g, '') : ''
+}
+
+function campoBaseDeLaSemilla() {
+  const seed = readFileSync(join(process.cwd(), SLICE_REL_PATH), 'utf8')
+  return parseBaseField(seed)
+}
+
 function sliceBaseRef() {
   try {
     const seed = readFileSync(join(process.cwd(), SLICE_REL_PATH), 'utf8')
-    const b = seed.match(/^base:[ \t]*(.+)$/m)
-    const base = b ? b[1].trim().replace(/^['"]|['"]$/g, '') : ''
+    const base = parseBaseField(seed)
     // Barandilla contra el arreglo espontáneo observado en la corrida real:
     // un agente que "arregla" el diff metiendo un SHA en `base:`. El diff
     // sale igual (un sha resuelve como cualquier ref), así que NO se aborta —
@@ -524,6 +540,62 @@ function sliceBaseRef() {
   return ''
 }
 
+// ============================================================================
+// Reconciliación de ramas, tarea 2 — LA MEDIDA no es EL CORTE.
+//
+// `sliceBaseRef()` de arriba responde a DOS preguntas que dejaron de ser la
+// misma: contra qué medir lo que la rama introduce, y contra qué commit se
+// escribieron las citas del plan (el corte real — `readFileAtBase()` más
+// abajo sigue recibiendo ESE, no se toca). Mientras la rama del slice no
+// mergea nada, corte y medida coinciden. En cuanto mergea su base avanzada
+// (el caso que esta tarea viene a arreglar), el corte se queda fijo en un
+// punto anterior a ese merge: diferir contra él cuenta como "de la rama"
+// cada fichero que el merge trajo y el slice nunca escribió.
+//
+// `git merge-base HEAD origin/<rama>` sí aísla eso: es el commit donde la
+// historia del slice se separó de la base, DESPUÉS de cualquier merge que la
+// rama haya hecho de ella. `SliceBase` (scripts/slice-base.js, Tarea 1) hace
+// ese cálculo con el nombre de la rama remota — no con el `base_sha:`/`base:`
+// sembrado, que puede ser un sha del corte —, y cae al corte si no hay rama
+// remota que combinar con `origin/` o si el merge-base no resuelve. Nunca
+// deja "sin medir": el peor caso es medir como se mide hoy.
+//
+// QUÉ rama remota es, y qué hacer cuando la semilla no la nombra, lo decide
+// `BaseBranch` (scripts/slice-base.js) y no este fichero: la misma pregunta se
+// la hace `ct-step.mjs` para excluir de su cuenta lo que trajo la fusión, y la
+// cadena de reserva vivía escrita dos veces contestando distinto (aquí
+// origin/HEAD → origin/main → origin/master; allí sólo `base:`). El resolutor
+// devuelve un NOMBRE de rama ('main'), no una ref ('origin/main'): quien la
+// consume antepone `origin/` (eso daría `origin/origin/HEAD`).
+//
+// Lo que NO se unifica es el PARSEO del campo `base:` — este fichero usa su
+// propia regex y `ct-step.mjs` usa `parseStateSafe`: deuda anterior y fuera
+// del alcance de este arreglo.
+function nombreDeLaRamaBase() {
+  let declarada = null
+  try {
+    declarada = campoBaseDeLaSemilla()
+  } catch { /* sin SLICE.md: sin nombre declarado, a la cadena de reserva */ }
+  const resolutor = new BaseBranch({ remoteRefExists: (nombre) => refResuelve(`refs/remotes/origin/${nombre}`) })
+  return resolutor.resolve({ declared: declarada })
+}
+
+const gitParaSliceBase = (argv) => {
+  try {
+    return execFileSync('git', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+  } catch {
+    return null
+  }
+}
+
+function referenciaDeMedida(cut) {
+  const rama = nombreDeLaRamaBase()
+  if (!rama) return cut
+  const sliceBase = new SliceBase({ git: gitParaSliceBase })
+  return sliceBase.measurementRef({ baseBranch: rama, fallbackRef: cut })
+}
+// ============================================================================
+
 // F22, fix round 1 (Important + Minor elevado) — TRES formas de que esta
 // función informe "limpia" sin haber comprobado nada de verdad:
 //
@@ -550,28 +622,29 @@ function sliceBaseRef() {
 //       "no se pudo determinar la base": known:false, nunca known:true con
 //       hits vacíos.
 function stateFilesIntroducedByBranch() {
-  const base = sliceBaseRef()
-  if (!base) {
+  const cut = sliceBaseRef()
+  if (!cut) {
     return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base_sha:`/`base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
   }
-  let baseSha, headSha
+  const measurementRef = referenciaDeMedida(cut)
+  let measurementSha, headSha
   try {
-    baseSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${base}^{commit}`], { encoding: 'utf8' }).trim()
+    measurementSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${measurementRef}^{commit}`], { encoding: 'utf8' }).trim()
     headSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], { encoding: 'utf8' }).trim()
   } catch (e) {
-    return { known: false, why: `no se pudo resolver \`${base}\` o HEAD a un commit: ${e.message}` }
+    return { known: false, why: `no se pudo resolver \`${measurementRef}\` o HEAD a un commit: ${e.message}` }
   }
-  if (baseSha === headSha) {
-    return { known: false, why: `la base resuelta (\`${base}\`) es EL MISMO commit que HEAD (${headSha.slice(0, 12)}) — un diff contra sí mismo sale vacío por construcción, así que eso no es "limpia", es "no comparada"` }
+  if (measurementSha === headSha) {
+    return { known: false, why: `la referencia de medida (\`${measurementRef}\`) es EL MISMO commit que HEAD (${headSha.slice(0, 12)}) — un diff contra sí mismo sale vacío por construcción, así que eso no es "limpia", es "no comparada"` }
   }
   let out = ''
   try {
-    out = execFileSync('git', ['diff', '--no-relative', '--no-renames', '--name-only', `${base}...HEAD`], { encoding: 'utf8' })
+    out = execFileSync('git', ['diff', '--no-relative', '--no-renames', '--name-only', `${measurementRef}...HEAD`], { encoding: 'utf8' })
   } catch (e) {
-    return { known: false, why: `\`git diff ${base}...HEAD\` falló: ${e.message}` }
+    return { known: false, why: `\`git diff ${measurementRef}...HEAD\` falló: ${e.message}` }
   }
   const touched = out.split('\n').map((l) => l.trim()).filter(Boolean)
-  return { known: true, base, hits: NEVER_IN_A_SLICE_PR.filter((p) => touched.includes(p)) }
+  return { known: true, measurementRef, hits: NEVER_IN_A_SLICE_PR.filter((p) => touched.includes(p)) }
 }
 
 // F-jjponz-1 — EL PLAN DEL SLICE ES UN ENTREGABLE, NO UNA COSTUMBRE.
@@ -584,27 +657,40 @@ function stateFilesIntroducedByBranch() {
 // --no-renames, base === HEAD) que stateFilesIntroducedByBranch — pero sin
 // el filtro NEVER_IN_A_SLICE_PR, porque aquí buscamos lo que la rama APORTA.
 function branchIntroducedFiles() {
-  const base = sliceBaseRef()
-  if (!base) {
+  const cut = sliceBaseRef()
+  if (!cut) {
     return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base_sha:`/`base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
   }
-  let baseSha, headSha
+  let cutSha, headSha
   try {
-    baseSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${base}^{commit}`], { encoding: 'utf8' }).trim()
+    cutSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${cut}^{commit}`], { encoding: 'utf8' }).trim()
     headSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], { encoding: 'utf8' }).trim()
   } catch (e) {
-    return { known: false, why: `no se pudo resolver \`${base}\` o HEAD a un commit: ${e.message}` }
+    return { known: false, why: `no se pudo resolver \`${cut}\` o HEAD a un commit: ${e.message}` }
   }
-  if (baseSha === headSha) {
-    return { known: false, why: `la base resuelta (\`${base}\`) es EL MISMO commit que HEAD (${headSha.slice(0, 12)}) — un diff contra sí mismo sale vacío por construcción` }
+  // `measurementRef` es donde se MIDE lo que la rama aporta (Tarea 2 de la
+  // reconciliación de ramas); `cutSha` es donde se LEEN las citas del plan
+  // (F-jjponz-3, readFileAtBase más abajo) y NO cambia: el plan se escribió
+  // contra el corte, no contra el merge-base. Devolver un solo `base` para
+  // los dos usos es justo el defecto que reintroduce el falso positivo que
+  // `base_sha:` vino a arreglar — de ahí que se devuelvan por separado.
+  const measurementRef = referenciaDeMedida(cut)
+  let measurementSha
+  try {
+    measurementSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${measurementRef}^{commit}`], { encoding: 'utf8' }).trim()
+  } catch (e) {
+    return { known: false, why: `no se pudo resolver \`${measurementRef}\` a un commit: ${e.message}` }
+  }
+  if (measurementSha === headSha) {
+    return { known: false, why: `la referencia de medida (\`${measurementRef}\`) es EL MISMO commit que HEAD (${headSha.slice(0, 12)}) — un diff contra sí mismo sale vacío por construcción` }
   }
   let out = ''
   try {
-    out = execFileSync('git', ['diff', '--no-relative', '--no-renames', '--name-only', `${base}...HEAD`], { encoding: 'utf8' })
+    out = execFileSync('git', ['diff', '--no-relative', '--no-renames', '--name-only', `${measurementRef}...HEAD`], { encoding: 'utf8' })
   } catch (e) {
-    return { known: false, why: `\`git diff ${base}...HEAD\` falló: ${e.message}` }
+    return { known: false, why: `\`git diff ${measurementRef}...HEAD\` falló: ${e.message}` }
   }
-  return { known: true, base: baseSha, files: out.split('\n').map((l) => l.trim()).filter(Boolean) }
+  return { known: true, measurementRef, cut: cutSha, files: out.split('\n').map((l) => l.trim()).filter(Boolean) }
 }
 
 const readRepoFile = (p) => readFileSync(p, 'utf8')
@@ -722,7 +808,7 @@ if (release) {
     // emite tiene que poder pegarse tal cual, y con los dos ficheros a la vez
     // es justo cuando más falta hace.
     const pathspec = check.hits.join(' ')
-    dieErr(`no se libera #${issue}: esta rama INTRODUCE ${lista} respecto a ${check.base}. Ese fichero es el estado de la sesión coordinadora, no producto de este slice: al mergear con squash, main se quedaría con el estado de este slice y cualquier sesión nueva del repo se hidrataría creyendo que es este agente. Restáuralo y vuelve a intentarlo: \`git checkout ${check.base} -- ${pathspec}\` y commitea (o \`git rm --cached\` si lo añadiste nuevo). El issue sigue en status:in-progress: no se ha movido nada.`, 5)
+    dieErr(`no se libera #${issue}: esta rama INTRODUCE ${lista} respecto a ${check.measurementRef}. Ese fichero es el estado de la sesión coordinadora, no producto de este slice: al mergear con squash, main se quedaría con el estado de este slice y cualquier sesión nueva del repo se hidrataría creyendo que es este agente. Restáuralo y vuelve a intentarlo: \`git checkout ${check.measurementRef} -- ${pathspec}\` y commitea (o \`git rm --cached\` si lo añadiste nuevo). El issue sigue en status:in-progress: no se ha movido nada.`, 5)
   }
   // F-jjponz-1 — el plan, DESPUÉS del check de ficheros de estado a propósito:
   // la contaminación de main (exit 5) es la avería más cara y su mensaje debe
@@ -735,7 +821,7 @@ if (release) {
     issue,
     candidates: plan.files,
     readFile: readRepoFile,
-    readCitedFile: readFileAtBase(plan.base),
+    readCitedFile: readFileAtBase(plan.cut),
   })
   if (!planCheck.ok) {
     dieErr(`no se libera #${issue}: ${planCheck.message} El issue sigue en status:in-progress: no se ha movido nada.`, planCheck.code)
