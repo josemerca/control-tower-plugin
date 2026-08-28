@@ -784,3 +784,52 @@ Y el resto: ningún control clava el total de la suite (con la misma trampa de 5
 tests delante), y el gate `plan` ya no publica `<nonce>` como si fuera el formato
 entero. Cero hallazgos en cinco tareas, así que `findings_vara_ct` sigue sin
 poder decir nada: no había nada que cazar.
+
+### 10.2 El arreglo incumplía la vara que arregla
+
+La primera versión del arreglo dejó el reconocedor de citas donde estaba, en
+`scripts/run-metrics.js`, y le añadió una constante más. Al mirarlo con los cinco
+documentos delante había tres cosas mal, y las tres eran la misma:
+
+- **`style.md`** — tres constantes sueltas (`NOMBRES_DE_LA_VARA`,
+  `CITA_VARA_DE_CT`, `CITAS_VARA_DE_CT`) más dos funciones libres
+  (`citaVaraDeCt`, `documentosDeLaVaraDeCt`). Es literalmente la forma que ese
+  documento describe: «un puñado de funciones de módulo privadas más unas
+  constantes sueltas es casi siempre un tipo esperando a nacer».
+- **El cierre del agujero** — «un concepto nuevo es un módulo nuevo y nace
+  conforme». *Reconocer una cita de la vara* es un concepto nuevo, y creció
+  **dentro de un fichero viejo** a lo largo de dos rondas, heredando por el camino
+  la exención de estilo de su anfitrión. Eso es exactamente el caso que la
+  cláusula nombra como hallazgo.
+- **`architecture.md`** — un concepto por módulo. `run-metrics.js` compone filas
+  de telemetría; parsear prosa para reconocer citas no es eso.
+
+Extraído a `scripts/yardstick-citation.js` como `YardstickCitation`, y al nacer
+nuevo nace conforme: inglés, cero prosa dentro, todo colgando del tipo. El
+argumento de por qué se aceptan dos formas de cita se queda en este documento,
+que es el precedente que ya fijó `plugin-yardstick.js` — un módulo sin
+comentarios necesita su razonamiento en un sitio durable, y ése es aquí y los
+nombres de sus tests.
+
+De paso desaparece el par de constantes que había que mantener de acuerdo: el
+regex se construye por llamada, así que no hay una segunda copia con el flag `g`
+que pueda divergir ni un `lastIndex` que arrastrar.
+
+### 10.3 Y nada impedía que volviera a pasar
+
+`plugin-yardstick.js` llevaba dos rondas declarando que nace conforme y **nada lo
+comprobaba**. `__tests__/modulos-conformes.test.js` lo comprueba ahora, sobre una
+lista de los módulos nacidos bajo la vara: cero líneas de prosa, ninguna función
+suelta a nivel de módulo, ninguna constante suelta a nivel de módulo, y los
+identificadores en inglés por lista negra exacta.
+
+Dos cosas de esa guarda salieron mutando, y las dos eran fallos suyos:
+
+- marcaba los identificadores que **empiezan** por una palabra castellana, y
+  señaló `citation` —inglés perfecto— por empezar por `cita`. Una guarda que da
+  falsas alarmas sobre nombres legítimos se acaba borrando, así que la
+  coincidencia es exacta; la deriva real (`nombre`, `cita`, `texto`,
+  `encontrados`) lo era.
+- **vaciar la lista dejaba la suite entera en verde**, porque un `for` sobre un
+  array vacío no genera ningún test: la guarda se podía desactivar borrando una
+  línea. La lista se comprueba ahora fuera del bucle.
