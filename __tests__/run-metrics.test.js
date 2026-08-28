@@ -15,8 +15,7 @@ import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   metricRow, metricLine, metricsPath, planSha256, verdictMeasures, IDENTITY_FIELDS, aggregateVerdictMeasures,
-  metricsRepoRelPath, METRICS_REPO_DIR, citaVaraDeCt, documentosDeLaVaraDeCt, briefVaraCtMeasures,
-  aggregateBriefMeasures,
+  metricsRepoRelPath, METRICS_REPO_DIR, briefVaraCtMeasures, aggregateBriefMeasures,
 } from '../scripts/run-metrics.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -217,60 +216,12 @@ describe('el conteo por severidad', () => {
 // rust-monitoring lo refutó midiendo: la vara salió citada dos veces bajo
 // `decisiones-cerradas`. Un hallazgo que la vara produjo y se archivó en otro
 // ítem era invisible.
+//
+// QUÉ CUENTA COMO CITA no se prueba aquí: vive en `YardstickCitation` y lo
+// prueba `__tests__/yardstick-citation.test.js`. Lo de aquí abajo es que estas
+// dos columnas la usen sobre el sujeto correcto — todos los ítems del recorrido
+// para una, todos los hallazgos para la otra—.
 // ---------------------------------------------------------------------------
-describe('citaVaraDeCt — la forma de la ruta, no la lista de documentos de hoy', () => {
-  it('cita la vara de ct cuando "conventions/<algo>.md" no viene precedida de barra ni de letra', () => {
-    expect(citaVaraDeCt('`conventions/architecture.md` dice que la conversión vive en el dominio')).toBe(true)
-    expect(citaVaraDeCt('(conventions/code.md) exige inglés')).toBe(true)
-    expect(citaVaraDeCt('conventions/code.md al principio de la frase')).toBe(true)
-  })
-
-  // LA TRAMPA DEL ENCARGO: `docs/conventions/code.md` es la vara DEL REPO — un
-  // sitio típico donde vive `.agent/conventions.md` — y contiene la subcadena
-  // `conventions/code.md`. Un `includes` a secas la contaría como ct y mediría
-  // justo lo contrario de lo que el campo promete.
-  it('NO cuenta docs/conventions/code.md: esa cita es de la vara del REPO, no de ct', () => {
-    expect(citaVaraDeCt('el fichero `docs/conventions/code.md` dice que se usa camelCase')).toBe(false)
-  })
-
-  it('NO cuenta si "conventions/" viene pegada a una palabra', () => {
-    expect(citaVaraDeCt('mis_conventions/code.md no es la vara de ct')).toBe(false)
-  })
-
-  it('no depende de los nombres de hoy: un documento nuevo o renombrado también cuenta', () => {
-    expect(citaVaraDeCt('conventions/naming.md dice otra cosa')).toBe(true)
-  })
-
-  it('un evidence vacío o ausente no cita nada', () => {
-    expect(citaVaraDeCt('')).toBe(false)
-    expect(citaVaraDeCt(undefined)).toBe(false)
-    expect(citaVaraDeCt(null)).toBe(false)
-  })
-})
-
-describe('documentosDeLaVaraDeCt — qué documentos, no cuántas veces', () => {
-  it('devuelve cada documento UNA vez aunque el texto lo cite tres', () => {
-    expect(documentosDeLaVaraDeCt('conventions/style.md, y otra vez conventions/style.md, y conventions/defects.md'))
-      .toEqual(['conventions/style.md', 'conventions/defects.md'])
-  })
-
-  it('no cuenta la vara del REPO aunque contenga la misma subcadena', () => {
-    expect(documentosDeLaVaraDeCt('`docs/conventions/style.md` pide camelCase')).toEqual([])
-  })
-
-  it('un texto ausente o que no es texto no devuelve documentos', () => {
-    expect(documentosDeLaVaraDeCt(undefined)).toEqual([])
-    expect(documentosDeLaVaraDeCt(null)).toEqual([])
-    expect(documentosDeLaVaraDeCt(42)).toEqual([])
-  })
-
-  it('el regex global no arrastra lastIndex entre llamadas: la segunda llamada mide desde el principio', () => {
-    const texto = 'conventions/defects.md'
-    expect(documentosDeLaVaraDeCt(texto)).toEqual(['conventions/defects.md'])
-    expect(documentosDeLaVaraDeCt(texto)).toEqual(['conventions/defects.md'])
-  })
-})
-
 describe('rubric_vara_ct_docs — cuántos documentos de la vara llegaron a usarse', () => {
   const recorrido = (pasos) => verdictMeasures({ ruling: 'PASS', findings: [], rubric: pasos })
 

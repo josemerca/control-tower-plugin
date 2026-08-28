@@ -4,7 +4,22 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
-const leer = (nombre) => readFileSync(join(root, 'conventions', nombre), 'utf8')
+
+class Documento {
+  static texto(nombre) {
+    return readFileSync(join(root, 'conventions', nombre), 'utf8')
+  }
+
+  static cabeceraDe(nombre) {
+    return Documento.texto(nombre).split('\n').slice(0, 6).join('\n')
+  }
+
+  static clausulaDe(nombre, encabezado) {
+    return new RegExp(`${encabezado}[\\s\\S]*?(?=\\n## )`)
+      .exec(Documento.texto(nombre))[0]
+      .replace(/\s+/g, ' ')
+  }
+}
 
 const ALCANCES = {
   'defects.md': 'every diff',
@@ -17,13 +32,13 @@ const ALCANCES = {
 describe('los documentos de conventions/', () => {
   for (const [nombre, alcance] of Object.entries(ALCANCES)) {
     it(`${nombre} declara su alcance en la cabecera`, () => {
-      const cabecera = leer(nombre).split('\n').slice(0, 6).join('\n')
+      const cabecera = Documento.cabeceraDe(nombre)
       expect(cabecera).toContain('Applies to:')
       expect(cabecera).toContain(alcance)
     })
 
     it(`${nombre} trae reglas, no sólo encabezados`, () => {
-      const sustancia = leer(nombre)
+      const sustancia = Documento.texto(nombre)
         .split('\n')
         .filter((l) => l.trim() && !l.trim().startsWith('#'))
       expect(sustancia.length).toBeGreaterThan(20)
@@ -31,15 +46,15 @@ describe('los documentos de conventions/', () => {
   }
 
   it('architecture.md cierra el agujero de la exención del módulo viejo', () => {
-    expect(leer('architecture.md')).toContain('a new concept is a new module and is born conforming')
+    expect(Documento.texto('architecture.md')).toContain('a new concept is a new module and is born conforming')
   })
 
   it('style.md cierra el mismo agujero para su exención de estilo', () => {
-    expect(leer('style.md')).toContain('a new concept is a new module and is born conforming')
+    expect(Documento.texto('style.md')).toContain('a new concept is a new module and is born conforming')
   })
 
   it('ninguno repite una regla que ya posee un ítem de la rúbrica', () => {
-    const todo = Object.keys(ALCANCES).map(leer).join('\n')
+    const todo = Object.keys(ALCANCES).map(Documento.texto).join('\n')
     for (const [item, terminos] of Object.entries({
       'manipulacion-tests': [/skip/i, /xfail/i, /pre-existing test/i, /flaky/i],
       'test-desiderata': [/deterministic/i, /\bisolated\b/i, /call count/i, /real behaviou?r/i],
@@ -53,10 +68,9 @@ describe('los documentos de conventions/', () => {
 })
 
 describe('la exención de deuda vive en style.md y NO alcanza a defects.md', () => {
-  const clausulaDeEstilo = () =>
-    /A module that was already there[\s\S]*?(?=\n## )/.exec(leer('style.md'))[0].replace(/\s+/g, ' ')
+  const clausulaDeEstilo = () => Documento.clausulaDe('style.md', 'A module that was already there')
   const cabeceraDeDefectos = () =>
-    leer('defects.md').split('\n## ')[0].replace(/\s+/g, ' ')
+    Documento.texto('defects.md').split('\n## ')[0].replace(/\s+/g, ' ')
 
   const AFIRMACIONES = {
     'style.md acota la deuda a sus tres reglas, no la declara general':
@@ -72,7 +86,7 @@ describe('la exención de deuda vive en style.md y NO alcanza a defects.md', () 
         expect(clausulaDeEstilo()).toContain('`conventions/defects.md` bind on every diff')
       },
     'defects.md declara en su LÍNEA DE ALCANCE que no hay exención, no sólo en la prosa':
-      () => expect(leer('defects.md').split('\n').slice(0, 6).join('\n')).toContain('with no exemption'),
+      () => expect(Documento.cabeceraDe('defects.md')).toContain('with no exemption'),
     'defects.md dice que la exención de style.md se detiene en él':
       () => expect(cabeceraDeDefectos()).toContain('That exemption stops at this document'),
     'defects.md dice que sus reglas rigen en un módulo viejo igual que en uno nuevo':
@@ -99,40 +113,36 @@ describe('defects.md lleva las cuatro reglas de defecto como SU asunto, cada una
 
   for (const encabezado of ENCABEZADOS) {
     it(`tiene su propia sección: ${encabezado}`, () => {
-      expect(leer('defects.md')).toContain(encabezado)
+      expect(Documento.texto('defects.md')).toContain(encabezado)
     })
   }
 
   it('ninguna de las cuatro se quedó en style.md al partir el documento', () => {
-    const estilo = leer('style.md')
+    const estilo = Documento.texto('style.md')
     for (const encabezado of ENCABEZADOS) {
       expect(estilo, `${encabezado} sigue en style.md`).not.toContain(encabezado)
     }
   })
 
   it('cierra el hueco que el juez tomó en el slice #7: que el consumidor serialice al final NO exime al mapa', () => {
-    const seccion = /## No raw map as the return value of logic[\s\S]*?(?=\n## )/
-      .exec(leer('defects.md'))[0]
-      .replace(/\s+/g, ' ')
+    const seccion = Documento.clausulaDe('defects.md', '## No raw map as the return value of logic')
     expect(seccion).toContain('The boundary is the last step before the wire, and it is one step')
     expect(seccion).toContain('does not make a raw map its legitimate input')
     expect(seccion).toContain('however close to the wire it sits')
   })
 
   it('nombra el valor centinela como el segundo campo disfrazado, con el caso medido del mensaje vacío', () => {
-    const seccion = /## Two fields that have to agree[\s\S]*?(?=\n## )/
-      .exec(leer('defects.md'))[0]
-      .replace(/\s+/g, ' ')
+    const seccion = Documento.clausulaDe('defects.md', '## Two fields that have to agree')
     expect(seccion).toContain("A sentinel value is that second field wearing the first field's clothes")
     expect(seccion).toContain('The empty string standing for "no message"')
   })
 })
 
 describe('testing.md separa "visto fallar por su motivo" de la fase roja del ciclo, y declara la asimetría de quién puede correrla', () => {
-  const clausula = () =>
-    /## An assertion is not finished until it has been seen to fail for the reason its name gives[\s\S]*?(?=\n## )/
-      .exec(leer('testing.md'))[0]
-      .replace(/\s+/g, ' ')
+  const clausula = () => Documento.clausulaDe(
+    'testing.md',
+    '## An assertion is not finished until it has been seen to fail for the reason its name gives'
+  )
 
   const AFIRMACIONES = {
     'declara explícitamente que no es la fase roja del ciclo':

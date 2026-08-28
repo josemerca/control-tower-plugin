@@ -72,6 +72,7 @@ import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { NO_MILESTONE_KEY } from './gh-issue-map.js'
+import { YardstickCitation } from './yardstick-citation.js'
 
 // Los campos de identidad del §10.1 del spec, en orden: dónde y contra qué
 // (repo, epic, issue, plan y su hash), qué paso (tarea, paso, intento) y con qué
@@ -160,42 +161,15 @@ function normalizar(campo, valor) {
 
 export const metricLine = (fila) => JSON.stringify(fila) + '\n'
 
-// ¿Cita este `evidence` la vara de ct? Se mide con la FORMA de la ruta —
-// `conventions/<algo>.md`— y no con la lista de `CONVENTIONS_FILES` de hoy: el
-// mismo argumento por el que `findings_by_rule` no se cruza con el enum de
-// reglas de hoy. Un documento renombrado o uno quinto que se añada mañana
-// tiene que seguir contando en las filas viejas y en las nuevas.
-//
-// LA TRAMPA: `docs/conventions/code.md` también contiene la subcadena
-// `conventions/code.md`, y ES la vara DEL REPO, no la de ct — `docs/conventions/`
-// es justo el sitio típico donde vive `.agent/conventions.md` (ver
-// `conventions/decisions.md`). Un `includes('conventions/')` a secas contaría
-// esa cita como ct y mediría lo contrario de lo que promete. Por eso la ruta no
-// puede venir precedida de una barra (`/`) — que delata un directorio padre
-// como `docs/`— ni de un carácter de palabra (`code_conventions/x.md` tampoco es
-// la vara de ct). Un lookbehind negativo es la única forma de exigir "nada de
-// eso justo delante" sin capturar y descartar a mano.
-const CITA_VARA_DE_CT = /(?<![\w/])conventions\/[\w.-]+\.md/
-
-export function citaVaraDeCt(evidence) {
-  return typeof evidence === 'string' && CITA_VARA_DE_CT.test(evidence)
-}
-
-// QUÉ documentos de la vara cita un texto, no cuántas veces. Con la misma
-// forma de ruta que `citaVaraDeCt` y su mismo lookbehind, sobre una copia con
-// `g` — el flag no se le pone al regex compartido porque un regex global
-// arrastra `lastIndex` entre llamadas y el siguiente `test()` empezaría a
-// mentir desde la mitad de la cadena.
-//
-// Devuelve nombres únicos: el juez puede citar `conventions/style.md` cinco
-// veces en el mismo párrafo, y eso sigue siendo UN documento leído. Lo que la
-// columna tiene que contestar es cuántos de los cinco llegaron a usarse.
-const CITAS_VARA_DE_CT = new RegExp(CITA_VARA_DE_CT.source, 'g')
-
-export function documentosDeLaVaraDeCt(texto) {
-  if (typeof texto !== 'string') return []
-  return [...new Set(texto.match(CITAS_VARA_DE_CT) || [])]
-}
+// RECONOCER UNA CITA DE LA VARA vive en `scripts/yardstick-citation.js` y no
+// aquí. Estuvo aquí dos rondas y era un concepto nuevo engordando dentro de un
+// fichero viejo —tres constantes sueltas y dos funciones libres, que es
+// literalmente la forma que `conventions/style.md` describe como «un tipo
+// esperando a nacer»— y heredando por el camino la exención de estilo de este
+// módulo. Este fichero compone FILAS de telemetría; parsear prosa para
+// reconocer citas es otro asunto (`conventions/architecture.md`: un concepto por
+// módulo). El argumento de POR QUÉ se aceptan dos formas de cita está en el §10
+// del diseño: aquel módulo nace conforme, así que no lleva prosa dentro.
 
 // El conteo por severidad del veredicto, que es lo que permite leer "cuántos
 // vetos" sin volver a cargar los hallazgos.
@@ -250,9 +224,9 @@ export function verdictMeasures(verdict) {
     // dos columnas que tengan que sumar lo mismo —el reproche que hundió a la
     // anterior—: miden el insumo y el efecto.
     rubric_vara_ct_docs: [...new Set(
-      (verdict?.rubric || []).flatMap((paso) => documentosDeLaVaraDeCt(paso?.result))
+      (verdict?.rubric || []).flatMap((paso) => YardstickCitation.documentsIn(paso?.result))
     )].length,
-    findings_vara_ct: findings.filter((f) => citaVaraDeCt(f.evidence)).length,
+    findings_vara_ct: findings.filter((f) => YardstickCitation.cites(f.evidence)).length,
   }
 }
 
