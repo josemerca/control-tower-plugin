@@ -1,27 +1,3 @@
-// ============================================================================
-// Reconciliación de ramas, tarea 3 — `ct-step` cuenta los commits QUE ESTE RUN
-// HA HECHO: el origen del rango sigue siendo `run.baseSha`, y lo que se quita
-// es lo que la base aportó.
-//
-//   git rev-list --count --no-merges run.baseSha..HEAD ^origin/<rama-base>
-//
-// La guardia de arranque de `ct-step` (`hechos !== esperados`, ver
-// scripts/ct-step.mjs) cruza lo que el estado afirma contra los commits que
-// hay de verdad. Dos formas de romperla, y las dos matan el run en
-// PRECONDITION para siempre (cada verbo es un proceso nuevo que relee el
-// fichero desde cero, y no tiene forma de distinguir eso de un estado
-// corrupto):
-//
-//   - Contar `baseSha..HEAD` a secas: en cuanto la rama mergea su base
-//     avanzada, cada commit ajeno que el merge trae —y el propio commit de
-//     fusión— entra en el rango y `hechos` se dispara. De ahí
-//     `^origin/<rama-base>` y `--no-merges`.
-//   - Mover el origen al merge-base: `run.baseSha` NO es el corte de la rama,
-//     es `headSha()` cuando nace el fichero del run, y para entonces el
-//     kickoff ya ha ordenado commitear el plan. Medir desde el corte mete ese
-//     commit del plan en la cuenta y `hechos` sale uno de más SIEMPRE, sin
-//     que haya ninguna fusión de por medio.
-// ============================================================================
 import { describe, it, expect } from 'vitest'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
@@ -33,13 +9,7 @@ const STEP = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts', 'ct-
 
 const FENCE = '```'
 
-// Copiado (no importado — conventions/testing.md: los tests de este repo no
-// se importan entre sí) de __tests__/e2e-ct-step.test.js: el único plan
-// mínimo de una tarea que plan-tasks.js#extractTasks trocea sin marcar
-// PLAN_NOT_EXECUTABLE (los ficheros van entre backticks; sin ellas
-// `splitFiles` no los reconoce y CUALQUIER verbo muere con exit 6 antes de
-// llegar a la guardia que este test quiere ejercitar).
-const planDeUnaTarea = () => [
+const planOfOneTaskWithBacktickedFiles = () => [
   '# #99 — fixture slice',
   '',
   '> **This plan is written to be executed by task-scoped subagents with zero context.**',
@@ -83,13 +53,8 @@ const planDeUnaTarea = () => [
   '',
 ].join('\n')
 
-// RepoMother — monta el mundo con git real: un remoto desnudo (para que
-// `origin/main` exista de verdad, que es lo que la exclusión de la cuenta
-// necesita) y un clon donde vive el slice. NUNCA llama a ct-step.mjs para
-// construir el arrange (conventions/testing.md: el arrange no se construye
-// con la pieza bajo prueba).
 class RepoMother {
-  static #unRemotoConSuClon(prefijo, issue) {
+  static #aBareRemoteWithACloneSoOriginMainReallyExists(prefijo, issue) {
     const remote = mkdtempSync(join(tmpdir(), `${prefijo}-remote-`))
     execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: remote })
 
@@ -134,16 +99,13 @@ class RepoMother {
 
   static #escribeElPlanYLaSemilla(work, issue) {
     mkdirSync(join(work, 'docs', 'superpowers', 'plans'), { recursive: true })
-    writeFileSync(join(work, 'docs', 'superpowers', 'plans', 'plan.md'), planDeUnaTarea())
+    writeFileSync(join(work, 'docs', 'superpowers', 'plans', 'plan.md'), planOfOneTaskWithBacktickedFiles())
     mkdirSync(join(work, '.agent'), { recursive: true })
     writeFileSync(join(work, '.agent', 'SLICE.md'), `---\nissue: ${issue}\nbase: main\n---\n# s\n`)
   }
 
-  // El corte congelado en `baseSha` coincide con el merge-base: el caso
-  // degenerado en el que la única contaminación posible es la que trajo la
-  // fusión.
-  static aSliceThatMergedAnAdvancedBase(issue) {
-    const { remote, seed, work, seedGit, workGit } = RepoMother.#unRemotoConSuClon('ct-step-mb', issue)
+  static aSliceWhoseBaseShaIsTheCutAndMergedAnAdvancedBase(issue) {
+    const { remote, seed, work, seedGit, workGit } = RepoMother.#aBareRemoteWithACloneSoOriginMainReallyExists('ct-step-mb', issue)
     const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: work, encoding: 'utf8' }).trim()
 
     RepoMother.#escribeElPlanYLaSemilla(work, issue)
@@ -157,18 +119,12 @@ class RepoMother {
     return { remote, seed, work }
   }
 
-  // La secuencia de PRODUCCIÓN: el kickoff ordena commitear el plan («viaja
-  // en el PR») y sólo DESPUÉS se pide el primer paso, que es cuando nace el
-  // fichero del run con `baseSha = headSha()`. Así que hay un commit de la
-  // rama ANTERIOR al run, y `baseSha` (P) NO es el merge-base (B).
   static aRunBornAfterThePlanCommit(issue) {
-    const { remote, seed, work, seedGit, workGit } = RepoMother.#unRemotoConSuClon('ct-step-plan', issue)
+    const { remote, seed, work, seedGit, workGit } = RepoMother.#aBareRemoteWithACloneSoOriginMainReallyExists('ct-step-plan', issue)
     const cut = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: work, encoding: 'utf8' }).trim()
 
     RepoMother.#escribeElPlanYLaSemilla(work, issue)
-    workGit('add', '-A')
-    workGit('commit', '-qm', 'plan: la slice, planificada')
-    const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: work, encoding: 'utf8' }).trim()
+    const baseSha = RepoMother.#commitThePlanAndCaptureBaseShaAsProductionDoesAtRunBirth(work, workGit)
 
     writeFileSync(join(work, 'work.txt'), 'trabajo\n')
     workGit('add', '-A')
@@ -179,6 +135,12 @@ class RepoMother {
 
     return { remote, seed, work, cut, baseSha }
   }
+
+  static #commitThePlanAndCaptureBaseShaAsProductionDoesAtRunBirth(work, workGit) {
+    workGit('add', '-A')
+    workGit('commit', '-qm', 'plan: la slice, planificada')
+    return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: work, encoding: 'utf8' }).trim()
+  }
 }
 
 const next = (cwd, issue) => spawnSync(process.execPath, [
@@ -187,12 +149,7 @@ const next = (cwd, issue) => spawnSync(process.execPath, [
 
 const limpia = (...dirs) => { for (const d of dirs) rmSync(d, { recursive: true, force: true }) }
 
-// ----------------------------------------------------------------------------
-// Characterization test: pina el HECHO de git en crudo del que depende la
-// guardia, sobre el grafo de producción. No ejecuta ct-step — documenta por
-// qué la forma es la que es, no la sustituye.
-// ----------------------------------------------------------------------------
-describe('la cuenta de commits del run', () => {
+describe('the run commit count', () => {
   it('counts_neither_the_plan_commit_that_precedes_the_run_nor_what_the_merge_of_the_base_brought', () => {
     const { remote, seed, work, cut, baseSha } = RepoMother.aRunBornAfterThePlanCommit(99)
     const cuenta = (...a) => Number(execFileSync('git', ['rev-list', '--count', ...a], { cwd: work, encoding: 'utf8' }).trim())
@@ -206,11 +163,11 @@ describe('la cuenta de commits del run', () => {
   })
 })
 
-describe('ct-step — el run de un slice que mergeó su base avanzada', () => {
+describe('ct-step for a run whose slice merged an advanced base', () => {
   const issue = 99
 
   it('a_run_paused_at_a_slice_step_after_merging_an_advanced_base_is_not_rejected_as_out_of_sync', () => {
-    const { remote, seed, work } = RepoMother.aSliceThatMergedAnAdvancedBase(issue)
+    const { remote, seed, work } = RepoMother.aSliceWhoseBaseShaIsTheCutAndMergedAnAdvancedBase(issue)
     try {
       const r = next(work, issue)
       expect(r.stderr).not.toMatch(/no cuentan lo mismo/)
@@ -222,14 +179,7 @@ describe('ct-step — el run de un slice que mergeó su base avanzada', () => {
   })
 })
 
-// ----------------------------------------------------------------------------
-// La red de regresión de Critical 1: la secuencia de producción, con un
-// `origin/main` de verdad y el commit del plan ANTES de que nazca el fichero
-// del run. Se pone en rojo en cuanto alguien vuelve a mover el origen de la
-// cuenta al merge-base — ahí el commit del plan entra en el rango y `hechos`
-// sale 2 contra 1 esperado.
-// ----------------------------------------------------------------------------
-describe('ct-step — el run nacido después del commit del plan', () => {
+describe('ct-step for a run born after the plan commit', () => {
   const issue = 99
 
   it('the_plan_commit_made_before_the_run_was_born_is_not_counted_as_work_this_run_did', () => {

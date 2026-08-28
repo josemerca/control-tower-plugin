@@ -1,25 +1,3 @@
-// ============================================================================
-// Reconciliación de ramas, tarea 2 — las puertas de --release miden desde el
-// merge-base, no desde el corte congelado en la semilla.
-//
-// La geometría real: un worktree de slice se corta de `origin/main` en un
-// commit S (`base_sha:` lo congela ahí, para siempre — no se reescribe). Si
-// la sesión coordinadora avanza `main` DESPUÉS del corte (p. ej. actualiza
-// `.agent/STATE.md`, el estado que la propia doctrina de F22 dice que ningún
-// PR de slice puede introducir) y el slice hace `git merge origin/main` en
-// algún punto de su trabajo, ese commit de STATE.md entra en la historia de
-// la rama del slice. Medir `base_sha:...HEAD` (el corte) ve ese cambio como
-// si lo hubiera escrito el slice: falso positivo, exit 5, el slice no se
-// libera por un fichero que nunca tocó. Medir `merge-base HEAD
-// origin/main...HEAD` no lo ve: el merge-base es el propio commit que trajo
-// STATE.md, así que STATE.md ya está en el punto de comparación.
-//
-// Se ejercen las DOS funciones de dispatch-check.mjs invocando el script de
-// verdad (spawnSync sobre `--release --dry-run`), no midiendo git a mano —
-// conventions/testing.md: el observable es el gate, no su implementación. El
-// arranque del mundo (el repo, el remoto, el merge) sí usa git de verdad,
-// pero nunca invocando dispatch-check para construirlo.
-// ============================================================================
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
@@ -125,9 +103,6 @@ const planCitingFoo = (issue, fooContent) => [
   '',
 ].join('\n')
 
-// RepoMother — monta el mundo con `git` de verdad. NUNCA llama a
-// dispatch-check.mjs para construir el arrange: eso mediría la pieza bajo
-// prueba con la pieza bajo prueba.
 class RepoMother {
   static aSliceThatMergedAnAdvancedBase(issue) {
     const remote = mkdtempSync(join(tmpdir(), 'ct-mb-remote-'))
@@ -160,17 +135,8 @@ class RepoMother {
     workGit('add', '-A')
     workGit('commit', '-qm', 'work')
 
-    // La coordinadora avanza `main` DESPUÉS del corte: actualiza su propio
-    // estado. El slice nunca escribió esto.
-    writeFileSync(join(seed, '.agent', 'STATE.md'), '---\ntask: el epic\n---\n# estado v2\n')
-    seedGit('add', '-A')
-    seedGit('commit', '-qm', 'la coordinadora avanza')
-    seedGit('push', '-q', 'origin', 'main')
-
-    // El slice hace merge de esa base avanzada — el vector que reconciliar
-    // ramas viene a arreglar.
-    workGit('fetch', '-q', 'origin', 'main')
-    workGit('merge', '-q', '--no-edit', 'origin/main')
+    RepoMother.theCoordinatorAdvancesStateAfterTheCut(seed, seedGit)
+    RepoMother.theSliceMergesTheAdvancedBase(workGit)
 
     mkdirSync(join(work, '.agent'), { recursive: true })
     writeFileSync(join(work, '.agent', 'SLICE.md'), `---\ntask: slice\nbase: main\nbase_sha: ${cutSha}\n---\n# s\n`)
@@ -182,15 +148,18 @@ class RepoMother {
     return { remote, seed, work, cutSha }
   }
 
-  // Fix round 1, Importante 2 — el escenario que le falta a la clase de
-  // arriba: aquí NADA toca `.agent/STATE.md` (la puerta de ficheros de
-  // estado nunca puede morder), así que la única forma de que el release
-  // falle es que la validación del PLAN mida el fichero citado contra la
-  // referencia equivocada. `foo.txt` existe en el corte con un contenido, el
-  // plan lo cita verbatim con ESE contenido, y la base avanza cambiándolo
-  // ANTES de que el slice haga merge — si `readFileAtBase` leyera desde
-  // `measurementRef` (el merge-base) en vez de desde el corte, la cita
-  // saldría "de memoria" porque el contenido de hoy ya no es el citado.
+  static theCoordinatorAdvancesStateAfterTheCut(seed, seedGit) {
+    writeFileSync(join(seed, '.agent', 'STATE.md'), '---\ntask: el epic\n---\n# estado v2\n')
+    seedGit('add', '-A')
+    seedGit('commit', '-qm', 'la coordinadora avanza')
+    seedGit('push', '-q', 'origin', 'main')
+  }
+
+  static theSliceMergesTheAdvancedBase(workGit) {
+    workGit('fetch', '-q', 'origin', 'main')
+    workGit('merge', '-q', '--no-edit', 'origin/main')
+  }
+
   static aSliceWhoseCitedFileWasChangedByTheMergedBase(issue, { cutContent, newContent }) {
     const remote = mkdtempSync(join(tmpdir(), 'ct-mb-cite-remote-'))
     execFileSync('git', ['init', '-q', '--bare', '-b', 'main'], { cwd: remote })
@@ -220,14 +189,8 @@ class RepoMother {
     workGit('add', '-A')
     workGit('commit', '-qm', 'work')
 
-    // La base avanza y CAMBIA el fichero que el plan citó contra el corte.
-    writeFileSync(join(seed, 'foo.txt'), newContent)
-    seedGit('add', '-A')
-    seedGit('commit', '-qm', 'la base cambia foo.txt')
-    seedGit('push', '-q', 'origin', 'main')
-
-    workGit('fetch', '-q', 'origin', 'main')
-    workGit('merge', '-q', '--no-edit', 'origin/main')
+    RepoMother.theBaseAdvancesChangingTheCitedFile(seed, seedGit, newContent)
+    RepoMother.theSliceMergesTheAdvancedBase(workGit)
 
     mkdirSync(join(work, '.agent'), { recursive: true })
     writeFileSync(join(work, '.agent', 'SLICE.md'), `---\ntask: slice\nbase: main\nbase_sha: ${cutSha}\n---\n# s\n`)
@@ -238,6 +201,13 @@ class RepoMother {
 
     return { remote, seed, work, cutSha }
   }
+
+  static theBaseAdvancesChangingTheCitedFile(seed, seedGit, newContent) {
+    writeFileSync(join(seed, 'foo.txt'), newContent)
+    seedGit('add', '-A')
+    seedGit('commit', '-qm', 'la base cambia foo.txt')
+    seedGit('push', '-q', 'origin', 'main')
+  }
 }
 
 const release = (issue, cwd) => spawnSync(process.execPath, [SCRIPT, String(issue), '--repo', 'o/r', '--release', '--dry-run'], {
@@ -247,7 +217,7 @@ const release = (issue, cwd) => spawnSync(process.execPath, [SCRIPT, String(issu
   env: { ...process.env, PATH: `${fakeGhDir}:${process.env.PATH}`, ...envDelGo({ repo: 'o/r', issue }) },
 })
 
-describe('dispatch-check --release — la medida del diff es el merge-base, no el corte (reconciliación de ramas, tarea 2)', () => {
+describe('dispatch-check --release measures the diff from the merge base, not the cut', () => {
   const issue = 91
   let world
 
@@ -259,18 +229,11 @@ describe('dispatch-check --release — la medida del diff es el merge-base, no e
   it('a_branch_that_merged_its_base_does_not_report_the_files_that_merge_brought_as_its_own', () => {
     const r = release(issue, world.work)
 
-    // Con el corte congelado (`base_sha:`) como medida, esto salía exit 5:
-    // ".agent/STATE.md" contado como introducido por el slice. Con el
-    // merge-base, el slice se libera — el gate no le atribuye el fichero
-    // que trajo el merge.
     expect((r.stderr || '')).not.toContain('.agent/STATE.md')
     expect(r.status).toBe(0)
     expect(r.stdout).toMatch(new RegExp(`released #${issue}.*in-review`))
   })
 
-  // Characterization test (permitido explícitamente): pina el HECHO de git
-  // en crudo que explica por qué hace falta el cambio de arriba. No
-  // sustituye al test del gate — documenta la causa.
   it('the_cut_recorded_in_the_seed_would_have_reported_the_foreign_file_as_the_slices_own', () => {
     const diffFrom = (ref) => execFileSync(
       'git',
@@ -285,19 +248,7 @@ describe('dispatch-check --release — la medida del diff es el merge-base, no e
   })
 })
 
-// ============================================================================
-// Fix round 1, Importante 2 — la mitad de la propiedad que el round anterior
-// dejó sin red: `branchIntroducedFiles()` mide lo que la rama aporta desde
-// `measurementRef` (el merge-base), pero las CITAS del plan tienen que
-// seguir leyéndose desde `cut` (el corte real) — `readFileAtBase(plan.cut)`.
-// Si alguien revirtiera eso a `readFileAtBase(plan.measurementRef)` (el
-// exacto falso positivo que `base_sha:` existe para cerrar), el escenario de
-// arriba no lo detectaría: su único fichero ajeno es `.agent/STATE.md`, que
-// muere en la puerta de ESTADO (exit 5) antes de que el plan se valide
-// siquiera. Aquí NADA toca `.agent/STATE.md`: la única puerta que puede
-// morder es la del plan.
-// ============================================================================
-describe('dispatch-check --release — las citas del plan se leen contra el corte, no contra el merge-base (fix round 1, Importante 2)', () => {
+describe('dispatch-check --release reads plan citations against the cut, not the merge base', () => {
   const issue = 92
   const cutContent = 'valor del corte\n'
   const newContent = 'valor nuevo tras el merge\n'
@@ -313,20 +264,12 @@ describe('dispatch-check --release — las citas del plan se leen contra el cort
   it('a_plan_citation_written_against_the_cut_is_not_invalidated_by_a_file_the_merged_base_later_changed', () => {
     const r = release(issue, world.work)
 
-    // Con `readCitedFile` apuntando al merge-base, "Current state (foo.txt):"
-    // citaría `cutContent`, pero foo.txt en el merge-base ya vale
-    // `newContent` — el contrato lo acusaría de "cita de memoria" (exit 6).
-    // Contra el corte, el contenido citado SIGUE siendo el real: el release
-    // no debe quejarse del plan.
     expect((r.stderr || '')).not.toContain('cita de memoria')
     expect((r.stderr || '')).not.toContain('no existe en la base')
     expect(r.status).toBe(0)
     expect(r.stdout).toMatch(new RegExp(`released #${issue}.*in-review`))
   })
 
-  // Characterization test: pina en crudo que foo.txt de verdad difiere entre
-  // el corte y el merge-base — la premisa que hace el test de arriba
-  // significativo. No sustituye al test del gate.
   it('the_cited_file_really_does_differ_between_the_cut_and_the_merge_base', () => {
     const atRef = (ref) => execFileSync('git', ['show', `${ref}:foo.txt`], { cwd: world.work, encoding: 'utf8' })
     const mergeBase = execFileSync('git', ['merge-base', 'HEAD', 'origin/main'], { cwd: world.work, encoding: 'utf8' }).trim()
