@@ -36,6 +36,7 @@ import { controlTowerLogDir } from './run-metrics.js'
 import { matchesGo, GO_TOKEN } from './go-response.js'
 import { readGoCommitment } from './go-registry.js'
 import { gatesFromLabels } from './gates.js'
+import { SliceBase } from './slice-base.js'
 
 const ctWatchMergePath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch-merge.mjs')
 
@@ -524,6 +525,58 @@ function sliceBaseRef() {
   return ''
 }
 
+// ============================================================================
+// Reconciliación de ramas, tarea 2 — LA MEDIDA no es EL CORTE.
+//
+// `sliceBaseRef()` de arriba responde a DOS preguntas que dejaron de ser la
+// misma: contra qué medir lo que la rama introduce, y contra qué commit se
+// escribieron las citas del plan (el corte real — `readFileAtBase()` más
+// abajo sigue recibiendo ESE, no se toca). Mientras la rama del slice no
+// mergea nada, corte y medida coinciden. En cuanto mergea su base avanzada
+// (el caso que esta tarea viene a arreglar), el corte se queda fijo en un
+// punto anterior a ese merge: diferir contra él cuenta como "de la rama"
+// cada fichero que el merge trajo y el slice nunca escribió.
+//
+// `git merge-base HEAD origin/<rama>` sí aísla eso: es el commit donde la
+// historia del slice se separó de la base, DESPUÉS de cualquier merge que la
+// rama haya hecho de ella. `SliceBase` (scripts/slice-base.js, Tarea 1) hace
+// ese cálculo con el nombre de la rama remota — no con el `base_sha:`/`base:`
+// sembrado, que puede ser un sha del corte —, y cae al corte si no hay rama
+// remota que combinar con `origin/` o si el merge-base no resuelve. Nunca
+// deja "sin medir": el peor caso es medir como se mide hoy.
+function nombreDeLaRamaBase() {
+  try {
+    const seed = readFileSync(join(process.cwd(), SLICE_REL_PATH), 'utf8')
+    const b = seed.match(/^base:[ \t]*(.+)$/m)
+    const base = b ? b[1].trim().replace(/^['"]|['"]$/g, '') : ''
+    if (base) return base
+  } catch { /* sin SLICE.md: sin nombre de rama, cae al corte */ }
+  // Misma intención que la cadena de arriba (origin/HEAD → origin/main →
+  // main → master), pero en forma de NOMBRE: `SliceBase.measurementRef`
+  // antepone `origin/` ella misma, así que aquí hace falta 'HEAD'/'main', no
+  // 'origin/HEAD'/'origin/main' (eso daría `origin/origin/HEAD`).
+  for (const nombre of ['HEAD', 'main', 'master']) {
+    if (refResuelve(`refs/remotes/origin/${nombre}`)) return nombre
+  }
+  return null
+}
+
+const gitParaSliceBase = (argv) => {
+  try {
+    return execFileSync('git', argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+  } catch {
+    return null
+  }
+}
+
+function referenciaDeMedida(cut) {
+  const rama = nombreDeLaRamaBase()
+  if (!rama) return cut
+  const sliceBase = new SliceBase({ git: gitParaSliceBase })
+  return sliceBase.measurementRef({ baseBranch: rama, fallbackRef: cut }) ?? cut
+}
+// ============================================================================
+
 // F22, fix round 1 (Important + Minor elevado) — TRES formas de que esta
 // función informe "limpia" sin haber comprobado nada de verdad:
 //
@@ -550,10 +603,11 @@ function sliceBaseRef() {
 //       "no se pudo determinar la base": known:false, nunca known:true con
 //       hits vacíos.
 function stateFilesIntroducedByBranch() {
-  const base = sliceBaseRef()
-  if (!base) {
+  const cut = sliceBaseRef()
+  if (!cut) {
     return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base_sha:`/`base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
   }
+  const base = referenciaDeMedida(cut)
   let baseSha, headSha
   try {
     baseSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${base}^{commit}`], { encoding: 'utf8' }).trim()
@@ -584,27 +638,40 @@ function stateFilesIntroducedByBranch() {
 // --no-renames, base === HEAD) que stateFilesIntroducedByBranch — pero sin
 // el filtro NEVER_IN_A_SLICE_PR, porque aquí buscamos lo que la rama APORTA.
 function branchIntroducedFiles() {
-  const base = sliceBaseRef()
-  if (!base) {
+  const cut = sliceBaseRef()
+  if (!cut) {
     return { known: false, why: 'no se pudo determinar la base de esta rama (ni `base_sha:`/`base:` en la semilla, ni origin/HEAD, ni main, ni master)' }
   }
-  let baseSha, headSha
+  let cutSha, headSha
   try {
-    baseSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${base}^{commit}`], { encoding: 'utf8' }).trim()
+    cutSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${cut}^{commit}`], { encoding: 'utf8' }).trim()
     headSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], { encoding: 'utf8' }).trim()
   } catch (e) {
-    return { known: false, why: `no se pudo resolver \`${base}\` o HEAD a un commit: ${e.message}` }
+    return { known: false, why: `no se pudo resolver \`${cut}\` o HEAD a un commit: ${e.message}` }
   }
-  if (baseSha === headSha) {
-    return { known: false, why: `la base resuelta (\`${base}\`) es EL MISMO commit que HEAD (${headSha.slice(0, 12)}) — un diff contra sí mismo sale vacío por construcción` }
+  // `measurementRef` es donde se MIDE lo que la rama aporta (Tarea 2 de la
+  // reconciliación de ramas); `cutSha` es donde se LEEN las citas del plan
+  // (F-jjponz-3, readFileAtBase más abajo) y NO cambia: el plan se escribió
+  // contra el corte, no contra el merge-base. Devolver un solo `base` para
+  // los dos usos es justo el defecto que reintroduce el falso positivo que
+  // `base_sha:` vino a arreglar — de ahí que se devuelvan por separado.
+  const measurementRef = referenciaDeMedida(cut)
+  let measurementSha
+  try {
+    measurementSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', `${measurementRef}^{commit}`], { encoding: 'utf8' }).trim()
+  } catch (e) {
+    return { known: false, why: `no se pudo resolver \`${measurementRef}\` a un commit: ${e.message}` }
+  }
+  if (measurementSha === headSha) {
+    return { known: false, why: `la referencia de medida (\`${measurementRef}\`) es EL MISMO commit que HEAD (${headSha.slice(0, 12)}) — un diff contra sí mismo sale vacío por construcción` }
   }
   let out = ''
   try {
-    out = execFileSync('git', ['diff', '--no-relative', '--no-renames', '--name-only', `${base}...HEAD`], { encoding: 'utf8' })
+    out = execFileSync('git', ['diff', '--no-relative', '--no-renames', '--name-only', `${measurementRef}...HEAD`], { encoding: 'utf8' })
   } catch (e) {
-    return { known: false, why: `\`git diff ${base}...HEAD\` falló: ${e.message}` }
+    return { known: false, why: `\`git diff ${measurementRef}...HEAD\` falló: ${e.message}` }
   }
-  return { known: true, base: baseSha, files: out.split('\n').map((l) => l.trim()).filter(Boolean) }
+  return { known: true, measurementRef, cut: cutSha, files: out.split('\n').map((l) => l.trim()).filter(Boolean) }
 }
 
 const readRepoFile = (p) => readFileSync(p, 'utf8')
@@ -735,7 +802,7 @@ if (release) {
     issue,
     candidates: plan.files,
     readFile: readRepoFile,
-    readCitedFile: readFileAtBase(plan.base),
+    readCitedFile: readFileAtBase(plan.cut),
   })
   if (!planCheck.ok) {
     dieErr(`no se libera #${issue}: ${planCheck.message} El issue sigue en status:in-progress: no se ha movido nada.`, planCheck.code)
