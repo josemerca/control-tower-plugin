@@ -36,7 +36,7 @@ import { controlTowerLogDir } from './run-metrics.js'
 import { matchesGo, GO_TOKEN } from './go-response.js'
 import { readGoCommitment } from './go-registry.js'
 import { gatesFromLabels } from './gates.js'
-import { SliceBase } from './slice-base.js'
+import { SliceBase, BaseBranch } from './slice-base.js'
 
 const ctWatchMergePath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch-merge.mjs')
 
@@ -559,19 +559,25 @@ function sliceBaseRef() {
 // sembrado, que puede ser un sha del corte —, y cae al corte si no hay rama
 // remota que combinar con `origin/` o si el merge-base no resuelve. Nunca
 // deja "sin medir": el peor caso es medir como se mide hoy.
+//
+// QUÉ rama remota es, y qué hacer cuando la semilla no la nombra, lo decide
+// `BaseBranch` (scripts/slice-base.js) y no este fichero: la misma pregunta se
+// la hace `ct-step.mjs` para excluir de su cuenta lo que trajo la fusión, y la
+// cadena de reserva vivía escrita dos veces contestando distinto (aquí
+// origin/HEAD → origin/main → origin/master; allí sólo `base:`). El resolutor
+// devuelve un NOMBRE de rama ('main'), no una ref ('origin/main'): quien la
+// consume antepone `origin/` (eso daría `origin/origin/HEAD`).
+//
+// Lo que NO se unifica es el PARSEO del campo `base:` — este fichero usa su
+// propia regex y `ct-step.mjs` usa `parseStateSafe`: deuda anterior y fuera
+// del alcance de este arreglo.
 function nombreDeLaRamaBase() {
+  let declarada = null
   try {
-    const base = campoBaseDeLaSemilla()
-    if (base) return base
-  } catch { /* sin SLICE.md: sin nombre de rama, cae al corte */ }
-  // Misma intención que la cadena de arriba (origin/HEAD → origin/main →
-  // main → master), pero en forma de NOMBRE: `SliceBase.measurementRef`
-  // antepone `origin/` ella misma, así que aquí hace falta 'HEAD'/'main', no
-  // 'origin/HEAD'/'origin/main' (eso daría `origin/origin/HEAD`).
-  for (const nombre of ['HEAD', 'main', 'master']) {
-    if (refResuelve(`refs/remotes/origin/${nombre}`)) return nombre
-  }
-  return null
+    declarada = campoBaseDeLaSemilla()
+  } catch { /* sin SLICE.md: sin nombre declarado, a la cadena de reserva */ }
+  const resolutor = new BaseBranch({ remoteRefExists: (nombre) => refResuelve(`refs/remotes/origin/${nombre}`) })
+  return resolutor.resolve({ declared: declarada })
 }
 
 const gitParaSliceBase = (argv) => {
@@ -586,7 +592,7 @@ function referenciaDeMedida(cut) {
   const rama = nombreDeLaRamaBase()
   if (!rama) return cut
   const sliceBase = new SliceBase({ git: gitParaSliceBase })
-  return sliceBase.measurementRef({ baseBranch: rama, fallbackRef: cut }) ?? cut
+  return sliceBase.measurementRef({ baseBranch: rama, fallbackRef: cut })
 }
 // ============================================================================
 
