@@ -15,6 +15,12 @@ export const DiscardReason = Object.freeze({
 
 export class ReconcileRound {
   constructor({ outcome, files, reason }) {
+    if (outcome === ReconcileOutcome.ROUND_DISCARDED && reason === null) {
+      throw new Error(`ROUND_DISCARDED outcome requires a reason from DiscardReason, got null`)
+    }
+    if (outcome !== ReconcileOutcome.ROUND_DISCARDED && reason !== null) {
+      throw new Error(`outcome ${outcome} must have reason null, got ${reason}`)
+    }
     this.outcome = outcome
     this.files = Object.freeze([...files])
     this.reason = reason ?? null
@@ -22,10 +28,16 @@ export class ReconcileRound {
   }
 
   static of({ outcome, files }) {
+    if (outcome === ReconcileOutcome.ROUND_DISCARDED) {
+      throw new Error(`ReconcileRound.of() cannot create ROUND_DISCARDED outcome; use discarded() instead`)
+    }
     return new ReconcileRound({ outcome, files, reason: null })
   }
 
   static discarded({ files, reason }) {
+    if (!Object.values(DiscardReason).includes(reason)) {
+      throw new Error(`discarded() requires reason to be a DiscardReason member, got ${reason}`)
+    }
     return new ReconcileRound({ outcome: ReconcileOutcome.ROUND_DISCARDED, files, reason })
   }
 }

@@ -28,4 +28,32 @@ describe('ReconcileOutcome', () => {
 
     expect(round.reason).toBe(null)
   })
+
+  it('discarded_throws_if_reason_is_not_a_discard_reason_member', () => {
+    expect(() =>
+      ReconcileRound.discarded({ files: ['a.txt'], reason: 'invalid-reason' })
+    ).toThrow(/requires reason to be a DiscardReason member/)
+  })
+
+  it('of_throws_if_outcome_is_round_discarded', () => {
+    expect(() =>
+      ReconcileRound.of({ outcome: ReconcileOutcome.ROUND_DISCARDED, files: [] })
+    ).toThrow(/cannot create ROUND_DISCARDED outcome/)
+  })
+
+  it('constructor_throws_if_round_discarded_lacks_reason', () => {
+    expect(() =>
+      new ReconcileRound({ outcome: ReconcileOutcome.ROUND_DISCARDED, files: [], reason: null })
+    ).toThrow(/ROUND_DISCARDED outcome requires a reason/)
+  })
+
+  it('constructor_throws_if_non_discarded_outcome_has_reason', () => {
+    expect(() =>
+      new ReconcileRound({
+        outcome: ReconcileOutcome.MERGED,
+        files: [],
+        reason: DiscardReason.MARKERS_LEFT,
+      })
+    ).toThrow(/must have reason null/)
+  })
 })
