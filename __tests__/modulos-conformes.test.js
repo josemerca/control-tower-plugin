@@ -61,47 +61,89 @@ class NacidosConformes {
       NacidosConformes.PALABRAS_CASTELLANAS.includes(identificador.toLowerCase())
     ))]
   }
+
+  static #cadenasDeTestEn(ruta) {
+    return NacidosConformes.#numeradas(ruta)
+      .map(([numero, linea]) => [numero, linea.match(/^\s*(?:describe|it)\(\s*(['"`])((?:\\.|(?!\1).)*)\1/)])
+      .filter(([, encaje]) => encaje)
+      .map(([numero, encaje]) => [numero, encaje[2].replace(/\$\{[^}]*\}/g, ' ')])
+  }
+
+  static #letraNoAsciiEn(cadena) {
+    return [...cadena].some((caracter) => {
+      if (caracter.codePointAt(0) <= 127) return false
+      if (caracter === '¿' || caracter === '¡') return true
+      return /\p{L}/u.test(caracter)
+    })
+  }
+
+  static noAsciiEnTestsDe(ruta) {
+    return NacidosConformes.#cadenasDeTestEn(ruta)
+      .filter(([, cadena]) => NacidosConformes.#letraNoAsciiEn(cadena))
+      .map(([numero]) => numero)
+  }
+
+  static palabrasCastellanasEnTestsDe(ruta) {
+    return NacidosConformes.#cadenasDeTestEn(ruta)
+      .filter(([, cadena]) => cadena.split(/[^A-Za-z]+/).some((palabra) =>
+        NacidosConformes.PALABRAS_CASTELLANAS.includes(palabra.toLowerCase())
+      ))
+      .map(([numero]) => numero)
+  }
 }
 
-describe('los ficheros nacidos bajo la vara siguen naciendo conformes', () => {
-  it('mide sólo las TRES reglas de style.md y no una cuarta inventada: ese documento no prohíbe una constante suelta, sólo una función suelta', () => {
+describe('modules born under the yardstick keep being born conforming', () => {
+  it('measures only the THREE rules of style.md and not a fourth invented one: that document does not forbid a loose constant, only a loose function', () => {
     expect(NacidosConformes.prosaEn('scripts/yardstick-citation.js')).toEqual([])
     expect(NacidosConformes.funcionesSueltasEn('scripts/yardstick-citation.js')).toEqual([])
     expect(NacidosConformes.funcionesSueltasDisfrazadasEn('scripts/yardstick-citation.js')).toEqual([])
   })
 
-  it('la lista nombra los dos módulos y se nombra a SÍ MISMA: una guarda ciega a su propio fichero ya se dejó 21 comentarios dentro', () => {
+  it('the list names both modules and names ITSELF: a guard blind to its own file once left 21 comments inside it', () => {
     expect(NacidosConformes.RUTAS).toContain('scripts/plugin-yardstick.js')
     expect(NacidosConformes.RUTAS).toContain('scripts/yardstick-citation.js')
     expect(NacidosConformes.RUTAS).toContain('__tests__/modulos-conformes.test.js')
   })
 
   for (const ruta of NacidosConformes.RUTAS) {
-    it(`${ruta} no lleva ni una línea de prosa`, () => {
-      expect(NacidosConformes.prosaEn(ruta), `${ruta} tiene comentarios en esas líneas`).toEqual([])
+    it(`${ruta} does not carry a single line of prose`, () => {
+      expect(NacidosConformes.prosaEn(ruta), `${ruta} has comments on those lines`).toEqual([])
     })
 
-    it(`${ruta} no declara ninguna función suelta a nivel de módulo`, () => {
-      expect(NacidosConformes.funcionesSueltasEn(ruta), `${ruta} declara funciones sueltas en esas líneas`)
+    it(`${ruta} does not declare any loose function at module level`, () => {
+      expect(NacidosConformes.funcionesSueltasEn(ruta), `${ruta} declares loose functions on those lines`)
         .toEqual([])
     })
 
-    it(`${ruta} no cuela una función suelta a nivel de módulo disfrazada de constante con una flecha`, () => {
-      expect(NacidosConformes.funcionesSueltasDisfrazadasEn(ruta), `${ruta} declara funciones flecha sueltas`)
+    it(`${ruta} does not sneak in a loose module-level function disguised as an arrow constant`, () => {
+      expect(NacidosConformes.funcionesSueltasDisfrazadasEn(ruta), `${ruta} declares loose arrow functions`)
         .toEqual([])
     })
   }
 })
 
-describe('el idioma de los identificadores, por lista negra EXACTA', () => {
+describe('the language of identifiers, by an EXACT block list', () => {
   for (const ruta of ['scripts/plugin-yardstick.js', 'scripts/yardstick-citation.js']) {
-    it(`${ruta} no declara identificadores en castellano`, () => {
+    it(`${ruta} does not declare identifiers in Spanish`, () => {
       expect(NacidosConformes.identificadoresCastellanosEn(ruta)).toEqual([])
     })
   }
 
-  it('la coincidencia es exacta y no por prefijo: por prefijo señalaba `citation`, que es inglés perfecto', () => {
+  it('the match is exact and not by prefix: by prefix it flagged `citation`, which is perfect English', () => {
     expect(NacidosConformes.PALABRAS_CASTELLANAS).toContain('cita')
     expect(NacidosConformes.identificadoresCastellanosEn('scripts/yardstick-citation.js')).toEqual([])
   })
+})
+
+describe('the language of test names, by two mechanical checks: no non-ASCII letters, and the same EXACT block list', () => {
+  for (const ruta of NacidosConformes.RUTAS) {
+    it(`${ruta} carries no describe or it with a non-ASCII letter`, () => {
+      expect(NacidosConformes.noAsciiEnTestsDe(ruta), `${ruta} has a non-ASCII test name on those lines`).toEqual([])
+    })
+
+    it(`${ruta} carries no describe or it with a word from the Spanish block list`, () => {
+      expect(NacidosConformes.palabrasCastellanasEnTestsDe(ruta), `${ruta} has a Spanish test name on those lines`)
+        .toEqual([])
+    })
+  }
 })
