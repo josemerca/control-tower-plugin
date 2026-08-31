@@ -107,6 +107,41 @@ class ConversationMother {
       'commit --no-edit': ok(),
     })
   }
+
+  // Fix round 2 (Task 8): la huella del propio loop (telemetría, veredictos,
+  // el plan) sin comitear en `status --porcelain` no es una resolución
+  // tocando de más — es la máquina, no el reconciliador.
+  static aMachineryFileOutsideTheConflict() {
+    return new GitConversation({
+      'diff --name-only --diff-filter=U': [ok('src/a.js'), ok('')],
+      'status --porcelain': ok('?? docs/superpowers/metrics/7.jsonl'),
+      'grep -l -e <<<<<<< -e ======= -e >>>>>>> -- src/a.js': failed(''),
+      'add src/a.js': ok(),
+      'commit --no-edit': ok(),
+    })
+  }
+
+  // La exención no puede tragarse el caso que la comprobación existe para
+  // cazar: un fichero AJENO de verdad, junto a uno de la maquinaria, sigue
+  // descartando.
+  static aForeignFileAlongsideAMachineryFile() {
+    return new GitConversation({
+      'diff --name-only --diff-filter=U': ok('src/a.js'),
+      'status --porcelain': ok(' M src/other.js\n?? docs/superpowers/metrics/7.jsonl'),
+      'checkout --merge -- src/a.js': ok(),
+    })
+  }
+
+  // Sin `isMachineryPath` (el valor por defecto), un fichero con la MISMA
+  // forma que uno de la maquinaria sigue descartando: el default es
+  // conservador (`() => false`, nadie exento), nunca un fail-open.
+  static aMachineryShapedFileWithoutThePredicate() {
+    return new GitConversation({
+      'diff --name-only --diff-filter=U': ok('src/a.js'),
+      'status --porcelain': ok('?? docs/superpowers/metrics/7.jsonl'),
+      'checkout --merge -- src/a.js': ok(),
+    })
+  }
 }
 
 describe('BranchReconciliation, al fusionar', () => {
@@ -197,5 +232,37 @@ describe('BranchReconciliation, al concluir una ronda', () => {
     expect(() => new BranchReconciliation({ git: git.run }).conclude()).toThrow(/git grep failed/)
     expect(git.asked('add')).toBe(false)
     expect(git.asked('commit')).toBe(false)
+  })
+
+  // Fix round 2 (Task 8) — `isMachineryPath` entra por constructor
+  // (`conventions/architecture.md`: la política no vive en el adaptador).
+  const esDeLaMaquinariaDePrueba = (path) => path.startsWith('docs/superpowers/')
+
+  it('a_machinery_file_outside_the_conflict_does_not_discard_and_the_round_still_resolves', () => {
+    const git = ConversationMother.aMachineryFileOutsideTheConflict()
+    const round = new BranchReconciliation({ git: git.run, isMachineryPath: esDeLaMaquinariaDePrueba }).conclude()
+
+    expect(round.outcome).toBe(ReconcileOutcome.RESOLVED)
+    expect(git.asked('checkout --merge')).toBe(false)
+    expect(git.asked('add src/a.js')).toBe(true)
+    expect(git.asked('commit --no-edit')).toBe(true)
+  })
+
+  it('a_genuinely_foreign_file_still_discards_even_alongside_a_machinery_file', () => {
+    const git = ConversationMother.aForeignFileAlongsideAMachineryFile()
+    const round = new BranchReconciliation({ git: git.run, isMachineryPath: esDeLaMaquinariaDePrueba }).conclude()
+
+    expect(round.outcome).toBe(ReconcileOutcome.ROUND_DISCARDED)
+    expect(round.reason).toBe(DiscardReason.TOUCHED_OUTSIDE_THE_CONFLICT)
+    expect(git.asked('checkout --merge')).toBe(true)
+    expect(git.asked('commit')).toBe(false)
+  })
+
+  it('without isMachineryPath (the default), a machinery-shaped file still discards — the default never fails open', () => {
+    const git = ConversationMother.aMachineryShapedFileWithoutThePredicate()
+    const round = new BranchReconciliation({ git: git.run }).conclude()
+
+    expect(round.outcome).toBe(ReconcileOutcome.ROUND_DISCARDED)
+    expect(round.reason).toBe(DiscardReason.TOUCHED_OUTSIDE_THE_CONFLICT)
   })
 })

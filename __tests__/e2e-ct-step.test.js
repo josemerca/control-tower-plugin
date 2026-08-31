@@ -545,28 +545,31 @@ describe('ct-step reconcile', () => {
       } finally { rmSync(dir, { recursive: true, force: true }) }
     })
 
-    // HALLAZGO (ver el informe): se intentó primero `markers-left` (segunda
-    // llamada sin tocar nada, marcas de git todavía puestas). No se puede
-    // llegar ahí: la PRIMERA llamada ya deja `docs/superpowers/metrics/*.jsonl`
-    // SIN comitear en el árbol —es la propia telemetría de `medir('reconcile',
-    // ...)`, que escribe en cada invocación, la que se acaba de pedir en este
-    // mismo fix round— y `filesTouchedOutside` mira ESO antes que las marcas:
-    // cualquier segunda llamada descarta por `touched-outside-the-conflict`,
-    // nunca por `markers-left`. Se prueba el reason que de verdad es
-    // alcanzable, y se documenta por qué el otro no lo es — no se tocó
-    // `branch-reconciliation.js` ni la telemetría para forzarlo.
-    it('ROUND_DISCARDED: nombra cuál de los tres DiscardReason fue (aquí, touched-outside-the-conflict)', () => {
+    // Fix round 1: se pensó primero que `markers-left` era inalcanzable
+    // aquí, porque la PRIMERA llamada deja `docs/superpowers/metrics/*.jsonl`
+    // sin comitear (la propia telemetría de `medir('reconcile', ...)`) y
+    // `filesTouchedOutside` mira eso antes que las marcas. Ese hallazgo era
+    // real (ver el informe, fix round 1) pero la causa era que
+    // `BranchReconciliation` no distinguía la huella del propio loop de una
+    // resolución tocando de más. Fix round 2 se lo enseña por constructor
+    // (`isMachineryPath`, cableado en `verboReconcile` a partir de
+    // `LOOP_ARTIFACT_PATTERNS`/`matchesPattern` de `scope.js`): el fichero de
+    // métricas ya no cuenta como "tocado fuera", así que esta segunda llamada
+    // SÍ llega a mirar las marcas — y las encuentra, porque nadie resolvió
+    // nada. `markers-left` vuelve a ser el reason correcto y alcanzable.
+    it('ROUND_DISCARDED: nombra cuál de los tres DiscardReason fue (markers-left)', () => {
       const dir = worktreeEnConflicto({ reconcileRetries: 0 })
       try {
         // Primera ronda: CONFLICTING (cubierta arriba). Su propia telemetría
-        // deja el fichero de métricas sin comitear en el árbol.
+        // deja el fichero de métricas sin comitear en el árbol — ya no
+        // importa, gracias a `isMachineryPath`.
         step(dir, ['reconcile'])
-        // Segunda ronda: nadie tocó nada — pero el fichero de métricas de la
-        // ronda anterior sigue ahí, sin comitear, y `conclude()` lo ve antes
-        // que las marcas de conflicto.
+        // Segunda ronda: nadie tocó nada — las marcas de git siguen puestas
+        // en `shared.txt` — así que `conclude()` tiene que descartar por
+        // MARKERS_LEFT.
         const r = step(dir, ['reconcile'])
-        expect(r.stdout).toMatch(/round-discarded \(touched-outside-the-conflict\)/)
-        expect(r.stdout).toMatch(/la resolución tocó ficheros que no estaban en la lista de conflicto/)
+        expect(r.stdout).toMatch(/round-discarded \(markers-left\)/)
+        expect(r.stdout).toMatch(/quedaron marcas de conflicto/)
       } finally { rmSync(dir, { recursive: true, force: true }) }
     })
   })

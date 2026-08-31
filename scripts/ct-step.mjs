@@ -62,6 +62,7 @@ import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS, outcomeOfR
 import { extractTasks } from './plan-tasks.js'
 import { BranchReconciliation } from './branch-reconciliation.js'
 import { ReconcileOutcome, DiscardReason } from './reconcile-outcome.js'
+import { LOOP_ARTIFACT_PATTERNS, matchesPattern } from './scope.js'
 import { CONVENTIONS_FILE, seccionDeVara } from './vara.js'
 import { PluginYardstick } from './plugin-yardstick.js'
 import {
@@ -1138,6 +1139,16 @@ const gitParaReconciliar = (argv) => {
   }
 }
 
+// La huella del propio loop —telemetría, veredictos, el plan, el informe de
+// e2e— NO es una resolución tocando de más: es la MISMA lista que ya declara
+// `scope.js` para el gate de alcance del PR, con el mismo motivo dicho allí
+// ("al revés, el primer slice que la produzca sale rojo por un fichero del
+// loop y quien lea el gate no podrá distinguir si el rojo lo puso el agente
+// o la maquinaria"). Una sola fuente para la decisión de qué es "de la
+// maquinaria": `LOOP_ARTIFACT_PATTERNS`, consumida aquí y en el workflow del
+// repo destino, nunca una segunda lista tecleada a mano.
+const esRutaDeLaMaquinaria = (path) => LOOP_ARTIFACT_PATTERNS.some((pat) => matchesPattern(path, pat))
+
 // Idempotente por MERGE_HEAD (Tarea 7): sin fusión en marcha, arranca la
 // siguiente ronda contra la base; con una a medias, concluye la resolución
 // que la sesión ya haya dejado en el índice. El estado de "en qué ronda
@@ -1155,7 +1166,7 @@ function verboReconcile() {
   if (!rama) {
     die('reconcile no puede resolver la rama base del slice (ni "base:" en .agent/SLICE.md, ni main/master remotos en este worktree): no hay con qué fusionar.', EXIT.PRECONDITION)
   }
-  const reconciliacion = new BranchReconciliation({ git: gitParaReconciliar })
+  const reconciliacion = new BranchReconciliation({ git: gitParaReconciliar, isMachineryPath: esRutaDeLaMaquinaria })
   const ronda = reconciliacion.isMergeInProgress()
     ? reconciliacion.conclude()
     : reconciliacion.merge({ baseBranch: rama })
