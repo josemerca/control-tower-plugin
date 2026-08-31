@@ -20,7 +20,7 @@ afterEach(() => { rmSyncBestEffort(repo) })
 // juez de tarea mira — si las tareas juntas entregan el fin del slice, y si
 // son coherentes entre sí.
 describe('el juicio del slice entero (§3.7-B)', () => {
-  const enJuezDeSlice = () => { tareaOk('uno.txt'); tareaOk('dos.txt'); ct('global') }
+  const enJuezDeSlice = () => { tareaOk('uno.txt'); tareaOk('dos.txt'); ct('reconcile'); ct('global') }
 
   it('next despacha ct-slice-judge con el paquete del RANGO de commits', () => {
     enJuezDeSlice()

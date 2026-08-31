@@ -142,6 +142,7 @@ describe('un fallo de la telemetría no puede tumbar la tarea', () => {
     execFileSync('git', ['commit', '-q', '-m', 'ignora la evidencia'], { cwd: repo })
     tareaOk('uno.txt')
     tareaOk('dos.txt')
+    ct('reconcile')
     ct('global')
     const r = juzgarSlice(veredictoDeSlice('PASS'))
     expect(r.status).toBe(0)

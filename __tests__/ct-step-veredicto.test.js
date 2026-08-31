@@ -116,6 +116,7 @@ describe('un veredicto emitido sin paquete de revisión no es un veredicto', () 
     // volver a `next`: `escribirPaqueteDeSlice` no ha corrido nunca.
     tareaOk('uno.txt')
     tareaOk('dos.txt')
+    ct('reconcile')
     ct('global')
     expect(existsSync(join(repo, '.agent', 'run-7', 'slice-review.diff'))).toBe(false)
 

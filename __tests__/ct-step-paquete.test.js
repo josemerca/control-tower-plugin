@@ -109,7 +109,7 @@ describe('el paquete de revisión es de un solo uso: lo consume el veredicto que
   })
 
   it('EL GEMELO DE SLICE: el descarte conserva el paquete y el veredicto aceptado lo gasta', () => {
-    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('global')
+    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('reconcile'); ct('global')
     ct('next')
     const antes = readFileSync(paqueteDeSlice(), 'utf8')
 
@@ -127,7 +127,7 @@ describe('el paquete de revisión es de un solo uso: lo consume el veredicto que
   })
 
   it('EL GEMELO DE SLICE: un FAIL también gasta el paquete — también es un veredicto leído', () => {
-    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('global')
+    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('reconcile'); ct('global')
     const r = juzgarSlice(veredictoDeSlice('FAIL', [{ severity: 'high', what: 'la tarea 2 deshace la 1', path: 'uno.txt', line: 1 }]))
     expect(r.status).toBe(1)                       // el veto de slice cierra el run
     expect(existsSync(paqueteDeSlice())).toBe(false)
@@ -305,7 +305,7 @@ describe('el veredicto se ata al paquete: el token content-addressed que el juez
   })
 
   it('EL GEMELO DE SLICE: el token sale del diff del RANGO y viaja en el veredicto comiteado', () => {
-    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('global')
+    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('reconcile'); ct('global')
     ct('next')
     const token = tokenDelPaquete(paqueteDeSlice())
     const diff = execFileSync('git', ['diff', '-U10', estado().baseSha, 'HEAD'], { cwd: repo, encoding: 'utf8' })
@@ -319,7 +319,7 @@ describe('el veredicto se ata al paquete: el token content-addressed que el juez
   })
 
   it('EL GEMELO DE SLICE: un veredicto de slice con el token de otro paquete no entrega el run', () => {
-    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('global')
+    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('reconcile'); ct('global')
     ct('next')
     const p = join(repo, 'sv.json')
     writeFileSync(p, JSON.stringify({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [], review_token: 'f'.repeat(64) }))
@@ -335,7 +335,7 @@ describe('el veredicto se ata al paquete: el token content-addressed que el juez
     // La variante de (b) que la invariante de commits del estado NO caza: un
     // `--amend` deja la cuenta igual (`hechos === esperados`) y el contenido
     // distinto. Sin el token, esto entra.
-    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('global')
+    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('reconcile'); ct('global')
     ct('next')
     expect(ct('slice-verdict', crudo('ni json ni nada')).stdout).toMatch(/descartado/)
     writeFileSync(join(repo, 'dos.txt'), 'dos, reescrito después del juicio\n')
