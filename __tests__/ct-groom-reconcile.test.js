@@ -151,6 +151,32 @@ describe('ct-groom (corrida real) — detecta divergencia por defecto, no la apl
     rmSync(dir, { recursive: true, force: true })
   })
 
+  // Review #45, punto 4 — la RED de la paginación GraphQL. El issue que coincide
+  // (idempotencia) va en la PÁGINA 2 (FAKE_GH_GRAPHQL_PAGE_SIZE=1, con un issue
+  // ajeno en la página 1). Si `--paginate` se quedara en la página 1 (variable
+  // mal nombrada, pageInfo ausente, gh viejo), ct-groom no vería el #501 e
+  // intentaría crearlo. Que salga "ya existe, no se duplica" prueba que leyó la 2.
+  it('paginación: el issue que coincide en la PÁGINA 2 se ve → idempotente, no lo recrea', () => {
+    const { dir, spec } = writeSpec(ONE_SLICE_SPEC)
+    const OTRO = { number: 601, title: 'otro epic', state: 'open', milestone: { title: 'Otro Epic' }, labels: [], body: 'sin marcador' }
+    const MATCHING_ISSUE = {
+      number: 501,
+      title: '#1 login',
+      state: 'open',
+      milestone: { title: 'Epic' },
+      labels: [{ name: 'type:backend' }, { name: 'area:api' }, { name: 'touches:db' }, { name: 'gate:plan' }, { name: 'status:in-progress' }],
+      body: matchingBody(),
+    }
+    const res = run([spec, '--repo', 'o/r', '--milestone', 'Epic'], {
+      FAKE_GH_MILESTONES_LIST: JSON.stringify([{ title: 'Epic', number: 7 }]),
+      FAKE_GH_LIST_SEQUENCE: JSON.stringify([[OTRO, MATCHING_ISSUE]]),
+      FAKE_GH_GRAPHQL_PAGE_SIZE: '1', // fuerza 2 páginas: OTRO en la 1, #501 en la 2
+    })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/ya existe \(#501\), no se duplica/) // vio la página 2
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   // I3.8: la sección de decisiones NO mueve el exit code. El spec trae
   // "## Decisiones congeladas" y el issue existente (matchingBody, sin la
   // sección) diverge SOLO en eso → se reporta como nota:, exit 0, no 3.
