@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { E2E_REQUIRED_BY_VERDICT } from '../scripts/step-contracts.js'
+import { DEFAULT_BUDGETS } from '../scripts/run-machine.js'
 
 const STEP = new URL('../scripts/ct-step.mjs', import.meta.url).pathname
 const A = 'el server escucha en 9115 por defecto y en el puerto indicado si se pasa'
@@ -72,6 +73,116 @@ function worktreeEnReconcile({ tasksTotal = 1 } = {}) {
     controlRetries: 0, judgeRetries: 0, correctionRetries: 0, reconcileRetries: 0,
     discards: 0, spendUsd: 0,
   }, null, 2))
+  return dir
+}
+
+// Fix round 1 (Task 8) — los cuatro mensajes de escalado de `verboReconcile`
+// SON el mecanismo: son lo único que hace que un conflicto llegue a
+// resolverse. Probarlos contra un doble no demuestra nada del verbo — hace
+// falta un conflicto de VERDAD contra un `origin` real.
+//
+// `shared.txt` cambia en la tarea 1 y, DESPUÉS, en la base — misma línea, dos
+// historias— para que `git merge` deje un conflicto de contenido real y no
+// un fast-forward limpio. La base avanza empujando desde un clon aparte del
+// `origin` bare: no se puede tocar un bare a mano, y clonarlo es más fiel a
+// cómo avanza una base de verdad que fabricar el commit a pelo con
+// `hash-object`.
+//
+// El `.gitignore` con `.agent/*` (salvo `SLICE.md`) es un HALLAZGO, no una
+// comodidad: sin él, `.agent/run-4.json` —que `ct-step` escribe sin
+// comitear, y que `ct-init` no gitignora salvo por `SLICE.md`— aparece en
+// `git status --porcelain` como "??  .agent/", y `filesTouchedOutside`
+// (branch-reconciliation.js) NO distingue esa basura propia de un fichero
+// que la resolución tocó de más: descarta con `TOUCHED_OUTSIDE_THE_CONFLICT`
+// SIEMPRE, antes de llegar nunca a `MARKERS_LEFT` ni a `RESOLVED`. Verificado
+// a mano (ver el informe): sin este `.gitignore`, git status muestra
+// `?? .agent/`; con él, sólo `UU shared.txt`. Ver "Preocupaciones" en el
+// informe — no se tocó `branch-reconciliation.js` para arreglarlo.
+function worktreeEnConflicto({ reconcileRetries = 0 } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'ct-step-reconcile-conflicto-'))
+  const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' })
+  git('init', '-q', '-b', 'main')
+  git('config', 'user.email', 't@t'); git('config', 'user.name', 't')
+  writeFileSync(join(dir, '.gitignore'), '.agent/*\n!.agent/SLICE.md\n')
+  writeFileSync(join(dir, 'shared.txt'), 'línea original\n')
+  git('add', '-A'); git('commit', '-qm', 'base')
+  const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
+  const origin = mkdtempSync(join(tmpdir(), 'ct-step-reconcile-conflicto-origin-'))
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { stdio: 'ignore' })
+  git('remote', 'add', 'origin', origin)
+  git('push', '-q', 'origin', 'main')
+  git('checkout', '-qb', 'feat/4')
+  mkdirSync(join(dir, 'docs', 'superpowers', 'plans'), { recursive: true })
+  writeFileSync(join(dir, 'docs', 'superpowers', 'plans', 'plan.md'), planDeUnaTarea())
+  mkdirSync(join(dir, '.agent'), { recursive: true })
+  writeFileSync(join(dir, '.agent', 'SLICE.md'), '---\nissue: 4\n---\n')
+  writeFileSync(join(dir, 'work.txt'), 'trabajo\n')
+  writeFileSync(join(dir, 'shared.txt'), 'línea de la tarea\n')
+  git('add', '-A')
+  git('commit', '-qm', 'tarea 1')
+  // La base avanza DESPUÉS de que `feat/4` se bifurcara, tocando la MISMA
+  // línea de `shared.txt`: es lo que convierte "la base se movió" en un
+  // conflicto real y no en un fast-forward limpio.
+  const clone = mkdtempSync(join(tmpdir(), 'ct-step-reconcile-conflicto-clone-'))
+  execFileSync('git', ['clone', '-q', origin, clone], { stdio: 'ignore' })
+  const gClone = (...a) => execFileSync('git', a, { cwd: clone, stdio: 'ignore' })
+  gClone('config', 'user.email', 'b@b'); gClone('config', 'user.name', 'b')
+  writeFileSync(join(clone, 'shared.txt'), 'línea de la base avanzada\n')
+  gClone('add', '-A'); gClone('commit', '-qm', 'la base avanza')
+  gClone('push', '-q', 'origin', 'main')
+  writeFileSync(join(dir, '.agent', 'run-4.json'), JSON.stringify({
+    plan: 'docs/superpowers/plans/plan.md', issue: 4, baseSha,
+    task: 1, tasksTotal: 1, e2eRuns: [], step: 'reconcile',
+    controlRetries: 0, judgeRetries: 0, correctionRetries: 0, reconcileRetries,
+    discards: 0, spendUsd: 0,
+  }, null, 2))
+  return dir
+}
+
+// UNMERGEABLE_TREE: git ni siquiera EMPIEZA la fusión — no hace falta
+// contenido en conflicto, basta con que la base toque un fichero que el
+// propio slice dejó modificado SIN comitear: `git merge` se niega
+// ("your local changes ... would be overwritten by merge") y no llega a
+// crear `MERGE_HEAD`. Es el árbol sucio del propio slice, no un conflicto
+// de contenido — por eso no necesita el `.gitignore` del helper de arriba:
+// `merge()` nunca llama a `git status --porcelain`.
+function worktreeConArbolSucio() {
+  const dir = mkdtempSync(join(tmpdir(), 'ct-step-reconcile-sucio-'))
+  const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' })
+  git('init', '-q', '-b', 'main')
+  git('config', 'user.email', 't@t'); git('config', 'user.name', 't')
+  writeFileSync(join(dir, 'f.txt'), 'base\n'); git('add', '-A'); git('commit', '-qm', 'base')
+  const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
+  const origin = mkdtempSync(join(tmpdir(), 'ct-step-reconcile-sucio-origin-'))
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { stdio: 'ignore' })
+  git('remote', 'add', 'origin', origin)
+  git('push', '-q', 'origin', 'main')
+  git('checkout', '-qb', 'feat/4')
+  mkdirSync(join(dir, 'docs', 'superpowers', 'plans'), { recursive: true })
+  writeFileSync(join(dir, 'docs', 'superpowers', 'plans', 'plan.md'), planDeUnaTarea())
+  mkdirSync(join(dir, '.agent'), { recursive: true })
+  writeFileSync(join(dir, '.agent', 'SLICE.md'), '---\nissue: 4\n---\n')
+  writeFileSync(join(dir, 'work.txt'), 'trabajo\n')
+  git('add', '-A')
+  git('commit', '-qm', 'tarea 1')
+  // La base avanza tocando `f.txt`, el MISMO fichero que se va a ensuciar
+  // localmente sin comitear.
+  const clone = mkdtempSync(join(tmpdir(), 'ct-step-reconcile-sucio-clone-'))
+  execFileSync('git', ['clone', '-q', origin, clone], { stdio: 'ignore' })
+  const gClone = (...a) => execFileSync('git', a, { cwd: clone, stdio: 'ignore' })
+  gClone('config', 'user.email', 'b@b'); gClone('config', 'user.name', 'b')
+  writeFileSync(join(clone, 'f.txt'), 'avance en la base\n')
+  gClone('add', '-A'); gClone('commit', '-qm', 'la base avanza')
+  gClone('push', '-q', 'origin', 'main')
+  writeFileSync(join(dir, '.agent', 'run-4.json'), JSON.stringify({
+    plan: 'docs/superpowers/plans/plan.md', issue: 4, baseSha,
+    task: 1, tasksTotal: 1, e2eRuns: [], step: 'reconcile',
+    controlRetries: 0, judgeRetries: 0, correctionRetries: 0, reconcileRetries: 0,
+    discards: 0, spendUsd: 0,
+  }, null, 2))
+  // El cambio SIN comitear en `f.txt`, DESPUÉS de escribir el run: es lo que
+  // hace que git rechace incluso empezar la fusión.
+  writeFileSync(join(dir, 'f.txt'), 'cambio local sin commitear\n')
   return dir
 }
 
@@ -385,5 +496,78 @@ describe('ct-step reconcile', () => {
       expect(r.status).toBe(9)
       expect(r.stderr).toMatch(/reconcile/)
     } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  // Fix round 1 — los cuatro mensajes de escalado son el mecanismo: son lo
+  // único que hace que un conflicto llegue a resolverse. Cada test dispara
+  // el camino de VERDAD contra un `origin` real (nunca un doble) y asierta
+  // contra la FRASE DISTINTIVA de ese camino, nunca una subcadena que los
+  // cuatro compartan (los cuatro dicen "reconcile", los tres primeros dicen
+  // "shared.txt", etc.).
+  describe('los cuatro mensajes de escalado', () => {
+    it('CONFLICTING con presupuesto: nombra los ficheros en conflicto y pide despachar a ct-reconciler', () => {
+      const dir = worktreeEnConflicto({ reconcileRetries: 0 })
+      try {
+        const r = step(dir, ['reconcile'])
+        expect(r.stdout).toMatch(/conflicting — 1 fichero\(s\) en conflicto/)
+        expect(r.stdout).toContain('- shared.txt')
+        expect(r.stdout).toMatch(/DESPACHA ct-reconciler/)
+        // Presupuesto disponible (reconcileRetries: 0 < 2): FAILED sigue
+        // OPEN — reintenta el mismo paso, no cierra el run.
+        expect(r.status).toBe(0)
+        const run = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))
+        expect(run.step).toBe('reconcile')
+        expect(run.reconcileRetries).toBe(1)
+      } finally { rmSync(dir, { recursive: true, force: true }) }
+    })
+
+    it('CONFLICTING con el presupuesto agotado: deja de nombrar a ct-reconciler y pasa el turno al agente del slice', () => {
+      const dir = worktreeEnConflicto({ reconcileRetries: DEFAULT_BUDGETS.reconcileRetries })
+      try {
+        const r = step(dir, ['reconcile'])
+        expect(r.stdout).toMatch(/conflicting — 1 fichero\(s\) en conflicto/)
+        expect(r.stdout).not.toMatch(/DESPACHA ct-reconciler/)
+        expect(r.stdout).toMatch(/ct-reconciler agotó sus \d+ ronda\(s\)/)
+        expect(r.stdout).toMatch(/le toca al agente del propio slice, que sí tiene Bash/)
+        // Presupuesto agotado: FAILED cierra el run por EXIT.RECONCILE_BLOCKED.
+        expect(r.status).toBe(13)
+      } finally { rmSync(dir, { recursive: true, force: true }) }
+    })
+
+    it('UNMERGEABLE_TREE: va al agente del slice y NUNCA menciona a ct-reconciler (no es un conflicto de contenido)', () => {
+      const dir = worktreeConArbolSucio()
+      try {
+        const r = step(dir, ['reconcile'])
+        expect(r.stdout).toMatch(/unmergeable-tree/)
+        expect(r.stdout).toMatch(/DESPACHA AL AGENTE DEL SLICE/)
+        // La aserción que importa: la AUSENCIA, no sólo lo que sí se dice.
+        expect(r.stdout + r.stderr).not.toMatch(/ct-reconciler/)
+      } finally { rmSync(dir, { recursive: true, force: true }) }
+    })
+
+    // HALLAZGO (ver el informe): se intentó primero `markers-left` (segunda
+    // llamada sin tocar nada, marcas de git todavía puestas). No se puede
+    // llegar ahí: la PRIMERA llamada ya deja `docs/superpowers/metrics/*.jsonl`
+    // SIN comitear en el árbol —es la propia telemetría de `medir('reconcile',
+    // ...)`, que escribe en cada invocación, la que se acaba de pedir en este
+    // mismo fix round— y `filesTouchedOutside` mira ESO antes que las marcas:
+    // cualquier segunda llamada descarta por `touched-outside-the-conflict`,
+    // nunca por `markers-left`. Se prueba el reason que de verdad es
+    // alcanzable, y se documenta por qué el otro no lo es — no se tocó
+    // `branch-reconciliation.js` ni la telemetría para forzarlo.
+    it('ROUND_DISCARDED: nombra cuál de los tres DiscardReason fue (aquí, touched-outside-the-conflict)', () => {
+      const dir = worktreeEnConflicto({ reconcileRetries: 0 })
+      try {
+        // Primera ronda: CONFLICTING (cubierta arriba). Su propia telemetría
+        // deja el fichero de métricas sin comitear en el árbol.
+        step(dir, ['reconcile'])
+        // Segunda ronda: nadie tocó nada — pero el fichero de métricas de la
+        // ronda anterior sigue ahí, sin comitear, y `conclude()` lo ve antes
+        // que las marcas de conflicto.
+        const r = step(dir, ['reconcile'])
+        expect(r.stdout).toMatch(/round-discarded \(touched-outside-the-conflict\)/)
+        expect(r.stdout).toMatch(/la resolución tocó ficheros que no estaban en la lista de conflicto/)
+      } finally { rmSync(dir, { recursive: true, force: true }) }
+    })
   })
 })
