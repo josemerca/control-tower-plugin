@@ -100,9 +100,11 @@ class ConversationMother {
 
   static aGitGrepThatFailsWhileCheckingForMarkers() {
     return new GitConversation({
-      'diff --name-only --diff-filter=U': ok('src/a.js'),
+      'diff --name-only --diff-filter=U': [ok('src/a.js'), ok('')],
       'status --porcelain': ok(''),
       'grep -l -e <<<<<<< -e ======= -e >>>>>>> -- src/a.js': { code: 128, stdout: '' },
+      'add src/a.js': ok(),
+      'commit --no-edit': ok(),
     })
   }
 }
