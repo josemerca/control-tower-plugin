@@ -58,8 +58,10 @@ import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unl
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS } from './run-machine.js'
+import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS, outcomeOfReconcile } from './run-machine.js'
 import { extractTasks } from './plan-tasks.js'
+import { BranchReconciliation } from './branch-reconciliation.js'
+import { ReconcileOutcome, DiscardReason } from './reconcile-outcome.js'
 import { CONVENTIONS_FILE, seccionDeVara } from './vara.js'
 import { PluginYardstick } from './plugin-yardstick.js'
 import {
@@ -103,6 +105,10 @@ const EXIT = {
   // stageado que corregir, es "no abras la pull request".
   GLOBAL_RED: 11,
   GLOBAL_UNMEASURED: 12,
+  // Fase B: el reconciliador y, tras él, el propio agente del slice agotaron
+  // sus rondas contra la base — la misma forma que GLOBAL_RED, código propio
+  // porque lo que sigue no es "corrige la tarea", es "resuelve el conflicto".
+  RECONCILE_BLOCKED: 13,
 }
 
 const MAX_DISCARDS = 6
@@ -128,6 +134,7 @@ const USAGE = `uso: ct-step <verbo> [args] --plan <fichero> --issue <n>
   controls                  ejecuta los comandos de **Verification:** de la tarea
   verdict <fichero.json>    el veredicto del juez: ruling + recorrido de la rúbrica + findings
   commit                    comitea la tarea con el mensaje que compone el plugin
+  reconcile                 fusiona la base o concluye una fusión a medias, tras la última tarea
   global                    ejecuta los comandos de ## 8. Global verification, tras la última tarea
   slice-verdict <fichero.json>  el veredicto del juez de SLICE: ruling + recorrido + findings
   e2e <fichero.json>        el informe de la travesía de punta a punta de la slice
@@ -137,7 +144,7 @@ por 9 y dice cuál es. El estado vive en .agent/run-<issue>.json.`
 
 const verbo = process.argv[2]
 if (!verbo || verbo.startsWith('--')) die(USAGE, EXIT.USAGE)
-if (!['next', 'report', 'controls', 'verdict', 'commit', 'global', 'slice-verdict', 'e2e'].includes(verbo)) {
+if (!['next', 'report', 'controls', 'verdict', 'commit', 'reconcile', 'global', 'slice-verdict', 'e2e'].includes(verbo)) {
   die(`verbo desconocido: ${verbo}\n\n${USAGE}`, EXIT.USAGE)
 }
 
@@ -188,7 +195,7 @@ if (problems.length) {
 // mismo concepto estaba escrito dos veces la segunda copia se quedó atrás al
 // llegar `e2e` — con el resultado de que cada fila de e2e se le atribuía a la
 // última tarea del plan.
-const PASOS_DE_SLICE = [STEPS.GLOBAL, STEPS.SLICE_JUDGE, STEPS.E2E]
+const PASOS_DE_SLICE = [STEPS.RECONCILE, STEPS.GLOBAL, STEPS.SLICE_JUDGE, STEPS.E2E]
 
 // ---------------------------------------------------------------------------
 // El estado del run
@@ -240,9 +247,20 @@ const headSha = () => (git(['rev-parse', 'HEAD']) || '').trim()
 const refRemotaResuelve = (nombre) =>
   git(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${nombre}`], { allowFail: true }) !== null
 
-function exclusionDeLaBase() {
+// La resolución en sí —qué rama es "la base"— vive en una sola función, y no
+// una por consumidor: `reconcile` (Tarea 8) necesita el NOMBRE para pasárselo
+// a `BranchReconciliation.merge({ baseBranch })`, y esta exclusión necesita el
+// nombre para construir el filtro de `git rev-list`. Es la misma pregunta
+// hecha dos veces por dos motivos distintos, y el reviewer de la fase
+// anterior avisó por escrito de que una segunda copia aquí sería "la tercera
+// copia divergente" de esta misma decisión.
+function resolverRamaBase() {
   const { meta } = parseStateSafe(readFileSync(join(repoRoot, SLICE_REL_PATH), 'utf8'))
-  const rama = new BaseBranch({ remoteRefExists: refRemotaResuelve }).resolve({ declared: meta.base })
+  return new BaseBranch({ remoteRefExists: refRemotaResuelve }).resolve({ declared: meta.base })
+}
+
+function exclusionDeLaBase() {
+  const rama = resolverRamaBase()
   if (!rama || !refRemotaResuelve(rama)) return null
   return `^origin/${rama}`
 }
@@ -427,7 +445,7 @@ function medir(step, measures) {
 // se deja la asimetría dicha en vez de arreglada.
 const VERBO_DE = {
   report: STEPS.IMPLEMENT, controls: STEPS.CONTROLS, verdict: STEPS.JUDGE, commit: STEPS.COMMIT,
-  global: STEPS.GLOBAL, 'slice-verdict': STEPS.SLICE_JUDGE, e2e: STEPS.E2E,
+  reconcile: STEPS.RECONCILE, global: STEPS.GLOBAL, 'slice-verdict': STEPS.SLICE_JUDGE, e2e: STEPS.E2E,
 }
 function exigirPaso(v) {
   if (run.step !== VERBO_DE[v]) {
@@ -442,7 +460,7 @@ function verboNext() {
   const t = tarea()
   // §3.7: `global` y `slice-judge` corren DESPUÉS de la última tarea — no hay
   // "tarea N/M" que anunciar, sino el slice entero con sus tareas ya comiteadas.
-  if (run.step === STEPS.GLOBAL || run.step === STEPS.SLICE_JUDGE) {
+  if (run.step === STEPS.RECONCILE || run.step === STEPS.GLOBAL || run.step === STEPS.SLICE_JUDGE) {
     out(`slice del issue ${issue} — las ${run.tasksTotal} tareas comiteadas`)
   } else {
     out(`tarea ${run.task}/${run.tasksTotal} — ${t.name}`)
@@ -506,6 +524,18 @@ function verboNext() {
         out('')
         out(`Lo que dijo el implementador de esta tarea, por si va en la pull request: ${run.lastSummary}`)
       }
+      break
+    // Fase B: la rama al día con su base, tras el último commit y ANTES de la
+    // punta a punta — verificar antes de reconciliar mediría un árbol que ya
+    // no es el que se entrega (ver el comentario de STEPS.RECONCILE en
+    // run-machine.js). Idempotente por MERGE_HEAD: el propio verbo decide si
+    // toca fusionar o concluir una fusión a medias, así que no hay nada más
+    // que decirle aquí — y si hay conflicto, es el verbo el que dice a quién
+    // despachar, no `next`.
+    case STEPS.RECONCILE:
+      out('RECONCILIA LA RAMA CON SU BASE (idempotente: decide solo, según MERGE_HEAD, si toca fusionar o concluir una fusión a medias):')
+      out(`  ct-step reconcile --plan ${planPath} --issue ${issue}`)
+      out('Si hay conflicto, el propio verbo dice a quién despachar.')
       break
     // §3.7-A: la punta a punta del plan, tras el último commit. La ejecuta el
     // PROGRAMA — nunca un agente que se autoevalúe.
@@ -1090,6 +1120,109 @@ function ejecutarControl(comando) {
   }
 }
 
+// Fase B — RECONCILE. `BranchReconciliation` (Tareas 6-7) habla con git a
+// través de un adaptador `(argv) => ({ code, stdout })` que NUNCA lanza: a
+// diferencia del `git(...)` de arriba —pensado para comandos que sólo tienen
+// sentido si funcionan—, aquí un `git merge` que devuelve 1 es la mitad
+// esperada del camino (CONFLICTING), no un fallo del programa. Por eso este
+// adaptador es propio y no el de arriba: envolver el de arriba en un
+// try/catch habría sido reimplementar `execFileSync` con más pasos.
+const gitParaReconciliar = (argv) => {
+  try {
+    return { code: 0, stdout: execFileSync('git', argv, {
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: GIT_MAX_BUFFER, timeout: 120_000, killSignal: 'SIGKILL',
+    }) }
+  } catch (e) {
+    return { code: typeof e.status === 'number' ? e.status : 1, stdout: String(e.stdout || '') }
+  }
+}
+
+// Idempotente por MERGE_HEAD (Tarea 7): sin fusión en marcha, arranca la
+// siguiente ronda contra la base; con una a medias, concluye la resolución
+// que la sesión ya haya dejado en el índice. El estado de "en qué ronda
+// estamos" lo lleva git, no este fichero — no hay contador que mantener
+// sincronizado ni forma de invocarlo fuera de orden.
+//
+// El nombre de la rama base NO se resuelve aquí: `resolverRamaBase()` es la
+// misma función que ya usa `exclusionDeLaBase()` (ver su comentario, arriba).
+// Preguntarlo dos veces con dos caminos —uno para excluir commits, otro para
+// fusionar— es la copia divergente que el reviewer de la fase anterior avisó
+// por escrito que no debía volver a escribirse.
+function verboReconcile() {
+  const arranque = Date.now()
+  const rama = resolverRamaBase()
+  if (!rama) {
+    die('reconcile no puede resolver la rama base del slice (ni "base:" en .agent/SLICE.md, ni main/master remotos en este worktree): no hay con qué fusionar.', EXIT.PRECONDITION)
+  }
+  const reconciliacion = new BranchReconciliation({ git: gitParaReconciliar })
+  const ronda = reconciliacion.isMergeInProgress()
+    ? reconciliacion.conclude()
+    : reconciliacion.merge({ baseBranch: rama })
+  medir('reconcile', {
+    outcome: ronda.outcome, files: ronda.files, reason: ronda.reason,
+    duration_ms: Date.now() - arranque,
+  })
+  // El presupuesto que decide el mensaje es el de ESTA ronda, ANTES de que
+  // `after()` (más abajo, en el despacho final) lo consuma: es la misma
+  // cuenta que `trasReconciliar` usa para decidir si retiene el paso o
+  // cierra en BLOCKED_RECONCILE, y aquí sólo se lee, nunca se repite la
+  // decisión — el mensaje describe lo que la tabla va a decidir, no decide
+  // por su cuenta.
+  const quedaPresupuesto = run.reconcileRetries < DEFAULT_BUDGETS.reconcileRetries
+  switch (ronda.outcome) {
+    case ReconcileOutcome.UP_TO_DATE:
+      out(`reconcile: up-to-date (la base "${rama}" no se ha movido)`)
+      break
+    case ReconcileOutcome.MERGED:
+      out(`reconcile: merged (la base "${rama}" se fusionó sin conflictos)`)
+      break
+    case ReconcileOutcome.RESOLVED:
+      out(`reconcile: resolved (la resolución de ${ronda.files.length} fichero(s) se comiteó)`)
+      break
+    // El conflicto de CONTENIDO: hay con qué trabajar (los ficheros en
+    // disputa), así que mientras quede presupuesto lo resuelve el
+    // reconciliador (Tarea 9, `ct-reconciler`) y no el agente del slice.
+    case ReconcileOutcome.CONFLICTING:
+      out(`reconcile: conflicting — ${ronda.files.length} fichero(s) en conflicto con "${rama}":`)
+      for (const f of ronda.files) out(`  - ${f}`)
+      out('')
+      if (quedaPresupuesto) {
+        out('DESPACHA ct-reconciler (subagente CON Bash) a resolver el conflicto: que deje los ficheros resueltos y STAGEADOS, sin marcas de conflicto, y sin tocar nada fuera de esa lista.')
+        out(`Cuando vuelva:  ct-step reconcile --plan ${planPath} --issue ${issue}  (concluye la fusión a medias — lo decide MERGE_HEAD, no hace falta indicar nada más).`)
+      } else {
+        out(`ct-reconciler agotó sus ${DEFAULT_BUDGETS.reconcileRetries} ronda(s) sin resolverlo: le toca al agente del propio slice, que sí tiene Bash. Que resuelva el conflicto a mano, deje los ficheros stageados y llame a:`)
+        out(`  ct-step reconcile --plan ${planPath} --issue ${issue}`)
+      }
+      break
+    // El árbol sucio del propio slice: git ni siquiera pudo EMPEZAR la
+    // fusión. No hay contenido en conflicto que enseñarle al reconciliador —
+    // enseñárselo sería mandarlo a resolver algo que no existe— así que va
+    // derecho al agente del slice, sin mencionar a ct-reconciler.
+    case ReconcileOutcome.UNMERGEABLE_TREE:
+      out(`reconcile: unmergeable-tree — git no pudo empezar la fusión con "${rama}": esto no es un conflicto de contenido, es el árbol del propio slice (cambios sin comitear, o algo a medias).`)
+      out('DESPACHA AL AGENTE DEL SLICE (tiene Bash) a dejar el árbol limpio, y vuelve a preguntar con ct-step next.')
+      break
+    // La ronda que se descartó SIN tocar el árbol (`checkout --merge` la
+    // deshace) — como implement y el juez, no gasta reintento, sólo el
+    // presupuesto de descartes de la slice. El mensaje dice CUÁL de las tres
+    // razones fue, porque cada una se arregla distinto.
+    case ReconcileOutcome.ROUND_DISCARDED: {
+      const arreglo = {
+        [DiscardReason.MARKERS_LEFT]: 'quedaron marcas de conflicto (<<<<<<< / ======= / >>>>>>>) sin quitar en alguno de los ficheros resueltos.',
+        [DiscardReason.TOUCHED_OUTSIDE_THE_CONFLICT]: 'la resolución tocó ficheros que no estaban en la lista de conflicto: el índice sólo puede llevar los ficheros en disputa.',
+        [DiscardReason.UNRESOLVED_FILES_REMAIN]: 'siguen quedando ficheros sin resolver tras intentar stagearlos: hay que resolverlos todos antes de concluir.',
+      }[ronda.reason]
+      out(`reconcile: round-discarded (${ronda.reason}) — ${arreglo}`)
+      out('La ronda se descartó sin comitear nada: corrígelo y vuelve a llamar a reconcile.')
+      break
+    }
+    default:
+      throw new Error(`ronda de reconciliación con desenlace sin mensaje: "${ronda.outcome}"`)
+  }
+  return outcomeOfReconcile(ronda.outcome)
+}
+
 // §3.7-A: la punta a punta del plan, ejecutada POR EL PROGRAMA tras la última
 // tarea comiteada. Misma maquinaria que los comandos de `controls`
 // (`ejecutarControl`: exit code manda, `unmeasured` es una clase distinta de
@@ -1615,7 +1748,7 @@ try {
   exigirPaso(verbo)
   const outcome = {
     report: verboReport, controls: verboControls, verdict: verboVerdict, commit: verboCommit,
-    global: verboGlobal, 'slice-verdict': verboSliceVerdict, e2e: verboE2e,
+    reconcile: verboReconcile, global: verboGlobal, 'slice-verdict': verboSliceVerdict, e2e: verboE2e,
   }[verbo]()
 
   if (run.discards >= MAX_DISCARDS && outcome === OUTCOMES.DISCARDED) {
@@ -1662,6 +1795,10 @@ function codigoDe(estado, paso, outcome) {
       out('las tareas comiteadas, la Global verification en verde y el slice con veredicto PASS: la rama está lista para la pull request.')
       return EXIT.OK
     case RUN_STATES.BLOCKED_COMMIT: return EXIT.PRECONDITION
+    // Fase B: el reconciliador y, agotado su presupuesto, el agente del slice
+    // no dejaron la base al día. Código propio, como GLOBAL_RED: lo que sigue
+    // no es "corrige la tarea", es resolver el conflicto antes de nada.
+    case RUN_STATES.BLOCKED_RECONCILE: return EXIT.RECONCILE_BLOCKED
     case RUN_STATES.BLOCKED_CONTROLS:
       return outcome === OUTCOMES.INDETERMINATE ? EXIT.CONTROLS_UNMEASURED : EXIT.CONTROLS_RED
     case RUN_STATES.BLOCKED_JUDGE:

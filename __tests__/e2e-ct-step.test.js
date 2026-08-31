@@ -39,6 +39,42 @@ function worktreeEnE2e({ tasksTotal = 1, e2eRuns = [A], comiteaLaTarea = true } 
   return dir
 }
 
+// Un worktree de slice con la última tarea ya comiteada y el run parado en
+// `reconcile` (Fase B, Tarea 8). A diferencia de `worktreeEnE2e`, aquí SÍ
+// hace falta un `origin` de verdad: `verboReconcile` habla con git —
+// `BranchReconciliation.merge` hace `git fetch origin <rama>` y mide cuántos
+// commits trae— así que sin remoto real no hay "base sin mover" que probar.
+// El `origin` es un bare que arranca en el mismo commit que `HEAD` y no se
+// vuelve a tocar: eso ES "la base no se ha movido", sin necesidad de fingir
+// nada más.
+function worktreeEnReconcile({ tasksTotal = 1 } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'ct-step-reconcile-'))
+  const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' })
+  git('init', '-q', '-b', 'main')
+  git('config', 'user.email', 't@t'); git('config', 'user.name', 't')
+  writeFileSync(join(dir, 'f.txt'), 'base\n'); git('add', '-A'); git('commit', '-qm', 'base')
+  const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
+  const origin = mkdtempSync(join(tmpdir(), 'ct-step-reconcile-origin-'))
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { stdio: 'ignore' })
+  git('remote', 'add', 'origin', origin)
+  git('push', '-q', 'origin', 'main')
+  git('checkout', '-qb', 'feat/4')
+  mkdirSync(join(dir, 'docs', 'superpowers', 'plans'), { recursive: true })
+  writeFileSync(join(dir, 'docs', 'superpowers', 'plans', 'plan.md'), planDeUnaTarea())
+  mkdirSync(join(dir, '.agent'), { recursive: true })
+  writeFileSync(join(dir, '.agent', 'SLICE.md'), '---\nissue: 4\n---\n')
+  writeFileSync(join(dir, 'work.txt'), 'trabajo\n')
+  git('add', '-A')
+  git('commit', '-qm', 'tarea 1')
+  writeFileSync(join(dir, '.agent', 'run-4.json'), JSON.stringify({
+    plan: 'docs/superpowers/plans/plan.md', issue: 4, baseSha,
+    task: tasksTotal, tasksTotal, e2eRuns: [], step: 'reconcile',
+    controlRetries: 0, judgeRetries: 0, correctionRetries: 0, reconcileRetries: 0,
+    discards: 0, spendUsd: 0,
+  }, null, 2))
+  return dir
+}
+
 // Un worktree de slice SIN run-<issue>.json todavía: es el único camino que
 // pasa por `newRun` (ver `else` de la carga del estado en ct-step.mjs), y por
 // tanto el único que puede probar que el lector de `.agent/SLICE.md` de
@@ -283,11 +319,14 @@ describe('ct-step e2e', () => {
       expect(r.status).toBe(0)
       const after = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))
       expect(after.step).not.toBe('e2e')
-      expect(after.step).toBe('global')
-      // Y `next` tampoco lo pide: pide la global verification, no una travesía.
+      // Fase B (Tarea 8): la última tarea comiteada abre RECONCILE, no GLOBAL
+      // directamente — la rama tiene que quedar al día con su base antes de
+      // que la punta a punta la mida.
+      expect(after.step).toBe('reconcile')
+      // Y `next` tampoco lo pide: pide reconciliar la base, no una travesía.
       const n = step(dir, ['next'])
       expect(n.status).toBe(0)
-      expect(n.stdout).toMatch(/GLOBAL VERIFICATION/)
+      expect(n.stdout).toMatch(/RECONCILIA LA RAMA/)
       expect(n.stdout).not.toMatch(/e2e/)
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
@@ -314,6 +353,37 @@ describe('ct-step e2e', () => {
       expect(r.status).toBe(0)
       const run = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))
       expect(run.e2eRuns).toEqual([])
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+})
+
+// Fase B, Tarea 8 — el verbo `reconcile`, idempotente por MERGE_HEAD.
+describe('ct-step reconcile', () => {
+  it('con la base sin mover, avanza a global sin crear ningún commit', () => {
+    const dir = worktreeEnReconcile()
+    try {
+      const antes = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
+      const r = step(dir, ['reconcile'])
+      expect(r.status).toBe(0)
+      expect(r.stdout).toMatch(/up-to-date/)
+      const despues = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim()
+      expect(despues).toBe(antes) // ninguna ronda de reconcile comitea nada aquí
+      const run = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))
+      expect(run.step).toBe('global')
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  // Ruling 2 del brief: RECONCILE es un paso de la SLICE, no de una tarea —
+  // si `PASOS_DE_SLICE` no lo supiera, el estado y git no cuadrarían al
+  // cargar el run y CUALQUIER verbo (incluido este `global`) moriría en
+  // PRECONDITION antes de llegar siquiera a mirar el paso. Este test también
+  // sirve de red para esa regresión (ver Step 5 del brief).
+  it('`global` fuera de su paso (el run está en reconcile) sale por 9 nombrando "reconcile"', () => {
+    const dir = worktreeEnReconcile()
+    try {
+      const r = step(dir, ['global'])
+      expect(r.status).toBe(9)
+      expect(r.stderr).toMatch(/reconcile/)
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 })

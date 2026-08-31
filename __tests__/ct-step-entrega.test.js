@@ -20,8 +20,9 @@ describe('el camino feliz', () => {
     tareaOk('uno.txt')
     const r = tareaOk('dos.txt')
     expect(r.status).toBe(0)
-    // §3.7: el último commit ya NO entrega — abre la fase global.
-    expect(r.stdout).toMatch(/paso global/)
+    // §3.7: el último commit ya NO entrega — abre la Fase B (Tarea 8): antes
+    // de la global verification, la rama tiene que reconciliarse con su base.
+    expect(r.stdout).toMatch(/paso reconcile/)
     expect(commits()).toBe(3)
     expect(log()).toMatch(/la primera \(#7, tarea 1\/2\)/)
     expect(log()).toMatch(/la segunda \(#7, tarea 2\/2\)/)

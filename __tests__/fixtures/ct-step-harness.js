@@ -95,6 +95,16 @@ export function montarRepo({ e2e = null } = {}) {
   writeFileSync(join(d, 'plan.md'), PLAN)
   g('add', '-A')
   g('commit', '-q', '-m', 'base del slice')
+  // El paso `reconcile` (Fase B, Tarea 8) habla con git de verdad —
+  // `BranchReconciliation.merge` hace `git fetch origin <rama>` y mide cuántos
+  // commits trae— así que el repo necesita un `origin` real. Un bare que
+  // arranca AQUÍ MISMO y nunca se vuelve a tocar es, por construcción, "la
+  // base que no se ha movido": lo que miden por defecto los tests que llegan
+  // a `reconcile` a través de este fixture.
+  const origin = mkdtempSync(join(tmpdir(), 'ct-step-origin-'))
+  execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { stdio: 'ignore' })
+  g('remote', 'add', 'origin', origin)
+  g('push', '-q', 'origin', 'main')
   // Los ficheros existen sin stagear, que es como deja el worktree un
   // implementador de verdad.
   writeFileSync(join(d, 'uno.txt'), 'uno\n')
@@ -205,11 +215,13 @@ export function crearHelpers(ref) {
     juzgar(veredicto('PASS'))
     return ct('commit')
   }
-  // El slice entero por el camino feliz: las dos tareas, la Global verification
-  // y el juicio del slice (§3.7).
+  // El slice entero por el camino feliz: las dos tareas, la reconciliación con
+  // la base (Fase B, Tarea 8 — el fixture deja la base sin mover, así que sale
+  // en la primera ronda), la Global verification y el juicio del slice (§3.7).
   const sliceOk = () => {
     tareaOk('uno.txt')
     tareaOk('dos.txt')
+    ct('reconcile')
     ct('global')
     return juzgarSlice(veredictoDeSlice('PASS'))
   }
