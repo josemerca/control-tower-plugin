@@ -56,4 +56,20 @@ describe('ReconcileOutcome', () => {
       })
     ).toThrow(/must have reason null/)
   })
+
+  it('constructor_throws_if_round_discarded_has_undefined_reason', () => {
+    expect(() =>
+      new ReconcileRound({ outcome: ReconcileOutcome.ROUND_DISCARDED, files: [], reason: undefined })
+    ).toThrow(/ROUND_DISCARDED outcome requires a reason/)
+  })
+
+  it('constructor_throws_if_round_discarded_has_invalid_reason', () => {
+    expect(() =>
+      new ReconcileRound({
+        outcome: ReconcileOutcome.ROUND_DISCARDED,
+        files: [],
+        reason: 'invented-reason',
+      })
+    ).toThrow(/ROUND_DISCARDED outcome requires a reason/)
+  })
 })
