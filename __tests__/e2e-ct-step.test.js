@@ -521,6 +521,24 @@ describe('ct-step reconcile', () => {
       } finally { rmSync(dir, { recursive: true, force: true }) }
     })
 
+    // Tarea 9 — el paquete que consume `ct-reconciler`: la lista de ficheros en
+    // conflicto y el log de los commits que la base trajo, SIN los cuales el
+    // reconciliador mira dos textos que chocan sin saber qué pretendía la base
+    // (el brief de la Tarea 9 es explícito: "sin esto resuelve a ciegas").
+    it('CONFLICTING con presupuesto: escribe el paquete de reconciliación con los ficheros en conflicto y el log de la base', () => {
+      const dir = worktreeEnConflicto({ reconcileRetries: 0 })
+      try {
+        const r = step(dir, ['reconcile'])
+        expect(r.status).toBe(0)
+        const paquete = join(dir, '.agent', 'run-4', 'reconcile-package-1.md')
+        expect(existsSync(paquete)).toBe(true)
+        const contenido = readFileSync(paquete, 'utf8')
+        expect(contenido).toContain('shared.txt')
+        expect(contenido).toMatch(/la base avanza/)
+        expect(r.stdout).toContain(paquete)
+      } finally { rmSync(dir, { recursive: true, force: true }) }
+    })
+
     it('CONFLICTING con el presupuesto agotado: deja de nombrar a ct-reconciler y pasa el turno al agente del slice', () => {
       const dir = worktreeEnConflicto({ reconcileRetries: DEFAULT_BUDGETS.reconcileRetries })
       try {
@@ -570,6 +588,27 @@ describe('ct-step reconcile', () => {
         const r = step(dir, ['reconcile'])
         expect(r.stdout).toMatch(/round-discarded \(markers-left\)/)
         expect(r.stdout).toMatch(/quedaron marcas de conflicto/)
+      } finally { rmSync(dir, { recursive: true, force: true }) }
+    })
+
+    // Tarea 9 — en el intento con motivo de descarte, el paquete NUEVO lleva
+    // ese motivo: sin él, el reconciliador redespachado repite el mismo
+    // intento que ya falló, ciego a por qué falló.
+    it('ROUND_DISCARDED: el paquete nuevo (intento 2) lleva el motivo del descarte', () => {
+      const dir = worktreeEnConflicto({ reconcileRetries: 0 })
+      try {
+        step(dir, ['reconcile']) // ronda 1: CONFLICTING, escribe reconcile-package-1.md
+        const r = step(dir, ['reconcile']) // ronda 2: nadie resolvió -> MARKERS_LEFT
+        expect(r.status).toBe(0)
+        const primero = join(dir, '.agent', 'run-4', 'reconcile-package-1.md')
+        const segundo = join(dir, '.agent', 'run-4', 'reconcile-package-2.md')
+        expect(existsSync(primero)).toBe(true)
+        expect(existsSync(segundo)).toBe(true)
+        const contenido = readFileSync(segundo, 'utf8')
+        expect(contenido).toContain('shared.txt')
+        expect(contenido).toMatch(/markers-left/)
+        expect(contenido).toMatch(/quedaron marcas de conflicto/)
+        expect(r.stdout).toContain(segundo)
       } finally { rmSync(dir, { recursive: true, force: true }) }
     })
   })

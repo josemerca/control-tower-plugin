@@ -54,7 +54,7 @@
 //   (`agents/ct-judge.md`, declarado sin `Bash`), no porque un flag se lo quite.
 // ============================================================================
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, writeSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, writeSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -70,7 +70,7 @@ import {
   readE2eReport, E2E_SCHEMA,
   IMPLEMENTER_TOOLS, JUDGE_TOOLS, PACKAGE_SECTIONS,
   readSliceVerdict, outcomeOfSliceVerdict, sliceVerdictCommitMessage,
-  SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS,
+  SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS, RECONCILER_TOOLS,
   REVIEW_TOKEN_LABEL, reviewToken, reviewTokenLine, reviewTokenOf,
 } from './step-contracts.js'
 import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, metricsRepoRelPath, briefVaraCtMeasures } from './run-metrics.js'
@@ -599,14 +599,18 @@ function verboNext() {
   process.exit(EXIT.OK)
 }
 
-function escribirBrief() {
-  const brief = join(workDir, `task-${run.task}-brief.md`)
-  // La vara de CT, comprobada ANTES de construir nada: su ausencia NO es un
-  // estado del repo sino una instalación rota del plugin, de ahí que se aborte
-  // en vez de avisar — lo contrario de lo que se hace con la del repo más abajo.
-  // Un brief sin ella deja al implementador y al juez midiendo con nada, y en
-  // silencio eso no se distingue de un ítem conforme. Y se comprueba antes de
-  // llamar a `task-brief` para no dejar en disco un brief que nadie va a usar.
+// La vara de CT, comprobada ANTES de construir nada: su ausencia NO es un
+// estado del repo sino una instalación rota del plugin, de ahí que se aborte
+// en vez de avisar — lo contrario de lo que se hace con la del repo más abajo.
+// Un brief o un paquete sin ella deja a quien lo lee midiendo con nada, y en
+// silencio eso no se distingue de un ítem conforme.
+//
+// Reconciliación de ramas, Tarea 9: la comparte `escribirBrief` (el brief del
+// implementador y del juez) y `escribirPaqueteDeReconciliacion` (el paquete
+// del reconciliador) — una sola lectura y un solo mensaje de aborto, en vez de
+// dos copias que ya avisó de que divergen (ver JUDGE_TOOLS en
+// step-contracts.js).
+function cargarVaraDeCt() {
   const deCt = PluginYardstick.FILES.map((nombre) => {
     try {
       return { name: nombre, content: readFileSync(join(PLUGIN_ROOT, PluginYardstick.DIRECTORY, nombre), 'utf8') }
@@ -616,8 +620,33 @@ function escribirBrief() {
   })
   const faltas = PluginYardstick.missingDocuments(deCt)
   if (faltas.length) {
-    die(`la vara de ct no se puede leer: falta o está vacío ${faltas.join(', ')} en ${join(PLUGIN_ROOT, PluginYardstick.DIRECTORY)}. Es una instalación del plugin incompleta, no una propiedad de este repo: sin esos documentos el implementador escribe y el juez bloquea sin nada contra qué medir, y eso no se distingue en silencio de un diff conforme. Reinstala el plugin.`, EXIT.PRECONDITION)
+    die(`la vara de ct no se puede leer: falta o está vacío ${faltas.join(', ')} en ${join(PLUGIN_ROOT, PluginYardstick.DIRECTORY)}. Es una instalación del plugin incompleta, no una propiedad de este repo: sin esos documentos quien implementa, juzga o reconcilia mide contra nada, y eso no se distingue en silencio de un diff conforme. Reinstala el plugin.`, EXIT.PRECONDITION)
   }
+  return deCt
+}
+
+// §3.3: la vara del repo cruza el embudo AQUÍ, leída directo del disco y sin
+// ningún agente en medio. Su ausencia no avisa: es el estado normal de casi
+// todo repo hoy, y el juez lo mide como `sin-vara`, no como un error.
+// `nombreDelArtefacto` sólo entra en el aviso de fallo de lectura, para que el
+// mismo mensaje sirva al brief y al paquete de reconciliación sin mentir sobre
+// cuál de los dos se quedó corto.
+function seccionVaraDelRepo(nombreDelArtefacto) {
+  try {
+    const ruta = join(repoRoot, CONVENTIONS_FILE)
+    if (!existsSync(ruta)) return ''
+    return seccionDeVara(readFileSync(ruta, 'utf8'))
+  } catch (e) {
+    err(`aviso: ${CONVENTIONS_FILE} existe y no se ha podido leer (${String(e.message).trim()}): ${nombreDelArtefacto} sale sin la vara del repo.`)
+    return ''
+  }
+}
+
+function escribirBrief() {
+  const brief = join(workDir, `task-${run.task}-brief.md`)
+  // Se comprueba antes de llamar a `task-brief` para no dejar en disco un
+  // brief que nadie va a usar.
+  const deCt = cargarVaraDeCt()
   try {
     execFileSync(join(PLUGIN_ROOT, 'skills', 'subagent-driven-development', 'scripts', 'task-brief'),
       ['--with-plan-context', planPath, String(run.task), brief], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -625,18 +654,7 @@ function escribirBrief() {
     die(`no se pudo extraer el brief de la tarea ${run.task}: ${String(e.stderr || e.message).trim()}`, EXIT.PRECONDITION)
   }
   appendFileSync(brief, PluginYardstick.composeSection(deCt))
-  // §3.3: la vara del repo cruza el embudo AQUÍ, leída directo del disco y sin
-  // ningún agente en medio. Su ausencia no avisa: es el estado normal de casi
-  // todo repo hoy, y el juez lo mide como `sin-vara`, no como un error.
-  try {
-    const ruta = join(repoRoot, CONVENTIONS_FILE)
-    if (existsSync(ruta)) {
-      const seccion = seccionDeVara(readFileSync(ruta, 'utf8'))
-      if (seccion) appendFileSync(brief, seccion)
-    }
-  } catch (e) {
-    err(`aviso: ${CONVENTIONS_FILE} existe y no se ha podido leer (${String(e.message).trim()}): el brief sale sin la vara del repo.`)
-  }
+  appendFileSync(brief, seccionVaraDelRepo('el brief'))
   return brief
 }
 
@@ -1149,6 +1167,101 @@ const gitParaReconciliar = (argv) => {
 // repo destino, nunca una segunda lista tecleada a mano.
 const esRutaDeLaMaquinaria = (path) => LOOP_ARTIFACT_PATTERNS.some((pat) => matchesPattern(path, pat))
 
+// El extractor de una sección del plan por su encabezado literal, hasta el
+// siguiente encabezado de igual o menor nivel — mismo criterio que
+// `extract_section` de `skills/subagent-driven-development/scripts/task-brief`
+// (bash/awk), reescrito aquí porque el paquete de reconciliación lo pega
+// `verboReconcile` directamente, sin ese script de por medio. Respeta los
+// cercados de código para no confundir un comentario "### ..." de un bloque
+// con un encabezado real. La ausencia se declara, nunca se calla — un hueco en
+// blanco leído como "sección vacía" no es lo mismo que "el plan no la trae".
+function seccionDelPlan(markdown, encabezado) {
+  const nivel = /^#+/.exec(encabezado)[0].length
+  let enCercado = false
+  let dentro = false
+  let visto = false
+  const salida = []
+  for (const linea of markdown.split('\n')) {
+    if (/^```/.test(linea)) enCercado = !enCercado
+    if (!enCercado && !visto && linea.startsWith(encabezado)) {
+      visto = true
+      dentro = true
+      salida.push(linea)
+      continue
+    }
+    if (dentro && !enCercado && /^#+[ \t]/.test(linea)) {
+      if (/^#+/.exec(linea)[0].length <= nivel) dentro = false
+    }
+    if (dentro) salida.push(linea)
+  }
+  const contenido = salida.join('\n').trim()
+  return contenido || `(sección "${encabezado}" no encontrada en el plan)`
+}
+
+// El log de los commits que la base trajo — lo primero que abriría un humano
+// resolviendo el mismo conflicto, y lo que el brief de la Tarea 9 pide por
+// nombre: sin él, `ct-reconciler` mira dos textos que chocan y no sabe qué
+// pretendía el otro lado, y adivinarlo es justo la invención que el rol tiene
+// prohibida. `allowFail` porque un merge-base no calculable no es un fallo del
+// programa: es un dato menos en el paquete, declarado en vez de callado.
+function logDeLaBase(rama) {
+  const mergeBase = git(['merge-base', 'HEAD', `origin/${rama}`], { allowFail: true })
+  if (!mergeBase) return '(no se pudo calcular el merge-base con la base: no hay log de commits que enseñar)'
+  const log = git(['log', `${mergeBase.trim()}..origin/${rama}`, '--oneline'], { allowFail: true })
+  return log || '(la base no trae ningún commit nuevo)'
+}
+
+// El intento de esta ronda: cuántos paquetes de reconciliación ya se
+// escribieron para este run. Ni `run.reconcileRetries` (sólo cuenta la
+// primera vez que un CONFLICTING se queda sin resolver, no cada descarte) ni
+// `run.discards` (presupuesto GLOBAL del run, compartido con implement, judge
+// y slice-judge, así que ya podría venir por encima de cero sin que este
+// conflicto haya visto un solo paquete) cuentan lo que hace falta aquí: cada
+// llamada que va a dispatchar a `ct-reconciler` escribe uno, y el siguiente
+// número es simplemente cuántos hay ya en el directorio del run.
+function proximoIntentoDeReconciliacion() {
+  const previos = readdirSync(workDir).filter((f) => /^reconcile-package-\d+\.md$/.test(f))
+  return previos.length + 1
+}
+
+// El texto de arreglo de cada `DiscardReason`, para el paquete y para el
+// mensaje de stdout — UNA lista y no dos copias que puedan divergir en qué
+// dice cada motivo. `verboReconcile`, más abajo, la usa para el mensaje.
+const ARREGLO_DE_DESCARTE = {
+  [DiscardReason.MARKERS_LEFT]: 'quedaron marcas de conflicto (<<<<<<< / ======= / >>>>>>>) sin quitar en alguno de los ficheros resueltos.',
+  [DiscardReason.TOUCHED_OUTSIDE_THE_CONFLICT]: 'la resolución tocó ficheros que no estaban en la lista de conflicto: el índice sólo puede llevar los ficheros en disputa.',
+  [DiscardReason.UNRESOLVED_FILES_REMAIN]: 'siguen quedando ficheros sin resolver tras intentar stagearlos: hay que resolverlos todos antes de concluir.',
+}
+
+// El paquete que consume `ct-reconciler` (Tarea 9) — mismo patrón que
+// `escribirPaquete`/`escribirPaqueteDeSlice`: el programa pega en disco texto
+// ya resuelto y el agente lo lee de un tirón. Sin token de revisión: a
+// diferencia de un juez, el reconciliador no emite un veredicto que haya que
+// atar a un corte del índice — edita ficheros, y es el PROGRAMA quien valida
+// el árbol después (`BranchReconciliation.conclude()`), nunca un JSON que este
+// paquete tenga que anclar.
+function escribirPaqueteDeReconciliacion({ rama, ronda, intento }) {
+  const paquete = join(workDir, `reconcile-package-${intento}.md`)
+  const deCt = cargarVaraDeCt()
+  const ficheros = ronda.files.map((f) => `- ${f}`).join('\n') || '(ninguno)'
+  const cabecera = ronda.reason
+    ? `# Reconcile package: issue #${issue}, round ${intento} (previous round discarded: ${ronda.reason})`
+    : `# Reconcile package: issue #${issue}, round ${intento}`
+  const lineas = [
+    cabecera, '',
+    '## Conflicted files', ficheros,
+    '', '## Base commits', logDeLaBase(rama),
+    '', seccionDelPlan(planText, '### Desired end state'),
+  ]
+  if (ronda.reason) {
+    lineas.push('', '## Discard reason', ARREGLO_DE_DESCARTE[ronda.reason] ?? ronda.reason)
+  }
+  writeFileSync(paquete, lineas.join('\n'))
+  appendFileSync(paquete, PluginYardstick.composeSection(deCt))
+  appendFileSync(paquete, seccionVaraDelRepo('el paquete de reconciliación'))
+  return paquete
+}
+
 // Idempotente por MERGE_HEAD (Tarea 7): sin fusión en marcha, arranca la
 // siguiente ronda contra la base; con una a medias, concluye la resolución
 // que la sesión ya haya dejado en el índice. El estado de "en qué ronda
@@ -1199,7 +1312,9 @@ function verboReconcile() {
       for (const f of ronda.files) out(`  - ${f}`)
       out('')
       if (quedaPresupuesto) {
-        out('DESPACHA ct-reconciler (subagente CON Bash) a resolver el conflicto: que deje los ficheros resueltos y STAGEADOS, sin marcas de conflicto, y sin tocar nada fuera de esa lista.')
+        const paquete = escribirPaqueteDeReconciliacion({ rama, ronda, intento: proximoIntentoDeReconciliacion() })
+        out(`DESPACHA ct-reconciler (subagente — declarado SIN Bash y SIN Write: ${RECONCILER_TOOLS}) a resolver el conflicto: que deje los ficheros resueltos, sin marcas de conflicto, y sin tocar nada fuera de esa lista — no puede stagear, comitear ni abortar la fusión: eso lo hace este programa al concluir. Dale:`)
+        out(`  - el paquete de reconciliación: ${paquete}`)
         out(`Cuando vuelva:  ct-step reconcile --plan ${planPath} --issue ${issue}  (concluye la fusión a medias — lo decide MERGE_HEAD, no hace falta indicar nada más).`)
       } else {
         out(`ct-reconciler agotó sus ${DEFAULT_BUDGETS.reconcileRetries} ronda(s) sin resolverlo: le toca al agente del propio slice, que sí tiene Bash. Que resuelva el conflicto a mano, deje los ficheros stageados y llame a:`)
@@ -1219,13 +1334,16 @@ function verboReconcile() {
     // presupuesto de descartes de la slice. El mensaje dice CUÁL de las tres
     // razones fue, porque cada una se arregla distinto.
     case ReconcileOutcome.ROUND_DISCARDED: {
-      const arreglo = {
-        [DiscardReason.MARKERS_LEFT]: 'quedaron marcas de conflicto (<<<<<<< / ======= / >>>>>>>) sin quitar en alguno de los ficheros resueltos.',
-        [DiscardReason.TOUCHED_OUTSIDE_THE_CONFLICT]: 'la resolución tocó ficheros que no estaban en la lista de conflicto: el índice sólo puede llevar los ficheros en disputa.',
-        [DiscardReason.UNRESOLVED_FILES_REMAIN]: 'siguen quedando ficheros sin resolver tras intentar stagearlos: hay que resolverlos todos antes de concluir.',
-      }[ronda.reason]
-      out(`reconcile: round-discarded (${ronda.reason}) — ${arreglo}`)
-      out('La ronda se descartó sin comitear nada: corrígelo y vuelve a llamar a reconcile.')
+      out(`reconcile: round-discarded (${ronda.reason}) — ${ARREGLO_DE_DESCARTE[ronda.reason]}`)
+      out('La ronda se descartó sin comitear nada: el merge sigue vivo, con los ficheros en conflicto restaurados a como los dejó git.')
+      // El merge SIGUE EN MARCHA (el descarte no lo aborta), así que sigue
+      // siendo turno de ct-reconciler — el paquete nuevo lleva el motivo del
+      // descarte para que el próximo intento no sea ciego a por qué falló el
+      // anterior.
+      const paquete = escribirPaqueteDeReconciliacion({ rama, ronda, intento: proximoIntentoDeReconciliacion() })
+      out(`REDESPACHA ct-reconciler (subagente — declarado SIN Bash y SIN Write: ${RECONCILER_TOOLS}) con el paquete nuevo:`)
+      out(`  - el paquete de reconciliación: ${paquete}`)
+      out(`Cuando vuelva:  ct-step reconcile --plan ${planPath} --issue ${issue}`)
       break
     }
     default:

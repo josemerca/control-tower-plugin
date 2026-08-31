@@ -426,6 +426,24 @@ export const PACKAGE_SECTIONS = ['Files changed', 'Rutas tocadas', 'Diff']
 // es el test, no el código.
 export const SLICE_JUDGE_TOOLS = 'Read, Grep, Glob, Write'
 
+// El reconciliador (Reconciliación de ramas, Tarea 9, `agents/ct-reconciler.md`)
+// invierte la asimetría de los dos jueces de arriba en vez de repetirla:
+// `Edit` en lugar de `Write`, y ni `Bash` ni `Write`. Git no da por resuelto un
+// fichero en conflicto hasta que alguien corre `git add`, y el único que corre
+// ese comando es el programa (`BranchReconciliation.conclude()`,
+// `scripts/branch-reconciliation.js`) — nunca el agente. Sin `Write` no puede
+// crear un fichero nuevo para rodear un conflicto que no quiso tocar
+// directamente, y sin `Bash` no puede stagear, comitear ni abortar la fusión
+// por su cuenta. Lo único que puede hacer es abrir los ficheros que git ya
+// marcó en conflicto y editar su contenido: la higiene deja de ser una
+// comprobación y pasa a ser una propiedad de lo que el agente puede alcanzar.
+//
+// Copia del frontmatter de `agents/ct-reconciler.md`, atada por
+// `step-contracts.test.js` con el mismo criterio que `JUDGE_TOOLS` y
+// `SLICE_JUDGE_TOOLS`: este módulo es puro y no lee disco, así que lo que
+// impide que las dos diverjan es el test, no el código.
+export const RECONCILER_TOOLS = 'Read, Grep, Glob, Edit'
+
 // Los cuatro encabezados del paquete de SLICE que escribe `escribirPaqueteDeSlice`
 // en `scripts/ct-step.mjs`: la señal de observabilidad que el issue del slice
 // declaró (Slice 10 — PRIMERA porque es la vara del ítem `observabilidad`:

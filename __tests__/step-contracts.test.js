@@ -16,13 +16,22 @@ import {
   VERDICT_SCHEMA, REPORT_SCHEMA, IMPLEMENTER_TOOLS, JUDGE_TOOLS, VERDICT_RULES,
   PACKAGE_SECTIONS, RUBRIC_OUTCOMES,
   readSliceVerdict, outcomeOfSliceVerdict, sliceVerdictCommitMessage,
-  SLICE_VERDICT_RULES, SLICE_VERDICT_SCHEMA, SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS,
+  SLICE_VERDICT_RULES, SLICE_VERDICT_SCHEMA, SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS, RECONCILER_TOOLS,
   REVIEW_TOKEN_LABEL, reviewToken, reviewTokenLine, reviewTokenOf,
 } from '../scripts/step-contracts.js'
 import { findClosingKeywords } from '../scripts/closing-keywords.js'
 
 const AGENTE_JUEZ = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-judge.md')
 const AGENTE_JUEZ_DE_SLICE = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-slice-judge.md')
+const AGENTE_RECONCILIADOR = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-reconciler.md')
+
+// La línea `tools:` del frontmatter del reconciliador (Reconciliación de
+// ramas, Tarea 9) — mismo patrón que `toolsDelAgente()`/`toolsDelJuezDeSlice()`,
+// sobre `agents/ct-reconciler.md`.
+const toolsDelReconciliador = () => {
+  const m = /^tools:\s*(.+)$/m.exec(readFileSync(AGENTE_RECONCILIADOR, 'utf8'))
+  return m ? m[1].trim() : null
+}
 
 // La línea `tools:` del frontmatter del juez de SLICE — mismo patrón que
 // `toolsDelAgente()` para ct-judge.md, sobre el fichero propio de §3.7-B.
@@ -653,6 +662,37 @@ describe('el juez de slice (§3.7-B)', () => {
     const sev = /\*\*Severity, decided here:\*\*[\s\S]*?(?=\n\n)/.exec(itemObservabilidad())
     expect(sev).not.toBeNull()
     expect(sev[0].replace(/\s+/g, ' ')).toContain('restated an acceptance criterion is `low`')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// EL RECONCILIADOR (Reconciliación de ramas, Tarea 9): `agents/ct-reconciler.md`.
+// A diferencia de los dos jueces de arriba, invierte la asimetría en vez de
+// repetirla — `Edit` en vez de `Write`, y ni `Bash` ni `Write` — porque git no
+// da un fichero en conflicto por resuelto hasta que alguien lo stagea, y el
+// único que puede es el programa (`BranchReconciliation.conclude()`), nunca
+// el agente. Este invariante sostiene TODA la higiene del diseño (un
+// reconciliador que pudiera stagear o crear ficheros podría esconder una
+// resolución mala detrás de un `git status` verde), así que va pinado con las
+// AUSENCIAS comprobadas explícitamente y no sólo las presencias.
+// ---------------------------------------------------------------------------
+describe('el reconciliador (Reconciliación de ramas, Tarea 9)', () => {
+  it('declara exactamente Read, Grep, Glob, Edit — ni Bash ni Write', () => {
+    expect(toolsDelReconciliador()).toBe('Read, Grep, Glob, Edit')
+    expect(toolsDelReconciliador()).not.toMatch(/\bBash\b/)
+    expect(toolsDelReconciliador()).not.toMatch(/\bWrite\b/)
+  })
+
+  it('la constante RECONCILER_TOOLS no puede divergir del agente que se despacha', () => {
+    // Mismo fallo que ya sufrieron JUDGE_TOOLS y SLICE_JUDGE_TOOLS: una
+    // constante copiada a mano que se queda atrás del frontmatter real.
+    expect(RECONCILER_TOOLS).toBe(toolsDelReconciliador())
+    expect(RECONCILER_TOOLS).not.toMatch(/\bBash\b/)
+    expect(RECONCILER_TOOLS).not.toMatch(/\bWrite\b/)
+  })
+
+  it('el reconciliador puede editar ficheros que ya existen: es el único canal por el que resuelve', () => {
+    expect(toolsDelReconciliador()).toMatch(/\bEdit\b/)
   })
 })
 
