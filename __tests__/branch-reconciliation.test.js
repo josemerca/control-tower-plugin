@@ -97,6 +97,14 @@ class ConversationMother {
       'checkout --merge -- src/a.js': ok(),
     })
   }
+
+  static aGitGrepThatFailsWhileCheckingForMarkers() {
+    return new GitConversation({
+      'diff --name-only --diff-filter=U': ok('src/a.js'),
+      'status --porcelain': ok(''),
+      'grep -l -e <<<<<<< -e ======= -e >>>>>>> -- src/a.js': { code: 128, stdout: '' },
+    })
+  }
 }
 
 describe('BranchReconciliation, al fusionar', () => {
@@ -178,6 +186,14 @@ describe('BranchReconciliation, al concluir una ronda', () => {
     expect(round.outcome).toBe(ReconcileOutcome.ROUND_DISCARDED)
     expect(round.reason).toBe(DiscardReason.UNRESOLVED_FILES_REMAIN)
     expect(git.asked('checkout --merge')).toBe(true)
+    expect(git.asked('commit')).toBe(false)
+  })
+
+  it('a_git_grep_that_cannot_tell_whether_markers_are_left_raises_instead_of_concluding_the_merge', () => {
+    const git = ConversationMother.aGitGrepThatFailsWhileCheckingForMarkers()
+
+    expect(() => new BranchReconciliation({ git: git.run }).conclude()).toThrow(/git grep failed/)
+    expect(git.asked('add')).toBe(false)
     expect(git.asked('commit')).toBe(false)
   })
 })

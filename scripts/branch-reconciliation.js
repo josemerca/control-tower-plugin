@@ -60,7 +60,10 @@ export class BranchReconciliation {
   }
 
   filesStillCarryingMarkers(files) {
-    return this.git(['grep', '-l', '-e', '<<<<<<<', '-e', '=======', '-e', '>>>>>>>', '--', ...files])
-      .stdout.split('\n').map((l) => l.trim()).filter(Boolean)
+    const result = this.git(['grep', '-l', '-e', '<<<<<<<', '-e', '=======', '-e', '>>>>>>>', '--', ...files])
+    if (result.code !== 0 && result.code !== 1) {
+      throw new Error(`git grep failed while checking for conflict markers (exit code ${result.code})`)
+    }
+    return result.stdout.split('\n').map((l) => l.trim()).filter(Boolean)
   }
 }
