@@ -32,6 +32,63 @@ export function realIssuesOnly(entries) {
   return (entries || []).filter((e) => !isPullRequest(e))
 }
 
+// GROOM_ISSUES_QUERY: el listado de issues del repo que /ct-groom necesita para
+// ser idempotente y seguro de re-ejecutar (idempotencia por marcador ct-order,
+// huérfanos, y las Puertas A/B del alcance por epic). Se pide por GraphQL en vez
+// del REST `repos/<o>/<r>/issues` por una razón de PAYLOAD, no de comportamiento:
+//   1. La conexión `issues` de GraphQL devuelve SOLO issues, NUNCA pull requests
+//      — el REST v3 comparte namespace y traía todos los PRs del repo, que
+//      `realIssuesOnly` tiraba después de descargarlos (en un repo con miles de
+//      PRs, ese peso muerto desbordaba el buffer de execFileSync → ENOBUFS y el
+//      groom moría antes de crear nada).
+//   2. Se piden SOLO los campos que el código usa (number/title/body/state/
+//      milestone/labels), no el objeto REST completo (reactions, user, assignees…).
+// El conjunto de issues resultante es IDÉNTICO al que producía el REST tras
+// `realIssuesOnly`: mismo comportamiento, una fracción de los bytes.
+//
+// `$endCursor` + `pageInfo` los usa `gh api graphql --paginate` para seguir la
+// paginación por cursor solo. `states:[OPEN,CLOSED]` = el `state=all` de antes.
+//
+// `$endCursor` va DECLARADO PRIMERO (review de #45): las variables GraphQL se
+// pasan por nombre, no por posición, así que en teoría da igual — pero es la
+// forma del ejemplo canónico de `gh` y elimina cualquier duda. Lo que NO es
+// opcional: la variable ha de llamarse exactamente `endCursor` y `pageInfo` ha
+// de estar presente, o `gh api graphql --paginate` devuelve SOLO la primera
+// página en silencio. La red que lo caza es el test multipágina del fake-gh.
+export const GROOM_ISSUES_QUERY = `query($endCursor:String,$owner:String!,$name:String!){
+  repository(owner:$owner,name:$name){
+    issues(first:100,after:$endCursor,states:[OPEN,CLOSED],orderBy:{field:CREATED_AT,direction:ASC}){
+      nodes{ number title body state milestone{title} labels(first:50){nodes{name}} }
+      pageInfo{ hasNextPage endCursor }
+    }
+  }
+}`
+
+// normalizeGraphqlIssues: aplana las páginas de `gh api graphql --paginate
+// --slurp` (un array de objetos-respuesta, uno por página) y devuelve los issues
+// en la MISMA forma que el resto del pipeline ya espera del REST: `state` en
+// minúsculas ('open'/'closed', como comparaba diffIssue), `labels` aplanadas a
+// `[{name}]`, `milestone` como `{title}` o null. No inventa campos: solo traduce.
+export function normalizeGraphqlIssues(pages) {
+  if (!Array.isArray(pages)) return []
+  const out = []
+  for (const page of pages) {
+    const nodes = page?.data?.repository?.issues?.nodes
+    if (!Array.isArray(nodes)) continue
+    for (const n of nodes) {
+      out.push({
+        number: n.number,
+        title: n.title,
+        body: n.body,
+        state: typeof n.state === 'string' ? n.state.toLowerCase() : n.state,
+        milestone: n.milestone ? { title: n.milestone.title } : null,
+        labels: (n.labels?.nodes || []).map((l) => ({ name: l.name })),
+      })
+    }
+  }
+  return out
+}
+
 export function findByMarker(issues, marker) {
   return (issues || []).find((i) => (i.body || '').includes(marker))
 }

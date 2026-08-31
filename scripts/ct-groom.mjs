@@ -25,7 +25,7 @@ import { groomPlan, readEpicContext, readFrozenDecisions, EPIC_CONTEXT_HEADING, 
 // por qué). Ver scripts/spec-link.js para las tres decisiones que toma y por
 // qué las toma así.
 import { resolveSpecRef } from './spec-link.js'
-import { flattenIssuePages, flattenPages, realIssuesOnly, findByMarker, partitionByEpic, epicTitleOf } from './gh-issues.js'
+import { flattenPages, realIssuesOnly, findByMarker, partitionByEpic, epicTitleOf, GROOM_ISSUES_QUERY, normalizeGraphqlIssues } from './gh-issues.js'
 import { pickCurrentIteration, hasProjectItem } from './project-fields.js'
 import { parseStrictInt } from './argnum.js'
 // extractOrder (F5, importante 4): para detectar issues huérfanos — un issue
@@ -700,12 +700,21 @@ try {
 }
 
 // maxBuffer explícito (finding 7 de la review final): el default de Node para
-// execFileSync es 1 MiB. El `--paginate` de más abajo sobre TODOS los issues y
-// PRs de un repo (con bodies completos) puede superar eso con facilidad en un
-// repo con unos pocos cientos de issues — Node aborta ruidosamente en vez de
-// truncar en silencio (bien), pero eso haría /ct-groom inusable contra un
-// repo real. 20 MiB es generoso para miles de issues/PRs con body completo
-// sin ser "sin límite" de verdad (un runaway real seguiría abortando).
+// execFileSync es 1 MiB. El listado de más abajo (GraphQL, SOLO issues y SOLO
+// los campos que se usan — ver GROOM_ISSUES_QUERY) pagina sobre todos los issues
+// del repo y aun así cabe holgado aquí: al no traer PRs ni el objeto REST
+// completo, el payload es una fracción del de antes. Antes este listado era el
+// REST `repos/<repo>/issues` con TODOS los PRs y bodies completos, y en un repo
+// grande y activo (miles de issues+PRs) desbordaba los 20 MiB → ENOBUFS y el
+// groom moría antes de crear nada. 20 MiB sigue siendo generoso sin ser "sin
+// límite" de verdad (un runaway real seguiría abortando).
+//
+// GH_MAX_BUFFER es un LÍMITE DE SEGURIDAD compartido por todas las llamadas
+// gh(), no una feature. El riesgo de desborde no desaparece: se MUEVE de
+// "PRs + bodies de issues" a "bodies de issues solos a gran escala". Si algún
+// día los bodies legítimos de los issues de un repo superan 20 MiB, eso es un
+// problema de diseño aparte (paginar y procesar por páginas sin acumular), no
+// algo que se tape subiendo este número.
 const GH_MAX_BUFFER = 20 * 1024 * 1024
 const gh = (args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: GH_MAX_BUFFER }).trim()
 
@@ -922,8 +931,15 @@ let anyOrphans = false
 let existingLabelNames = null
 if (typeof repo === 'string') {
   try {
-    const raw = JSON.parse(gh(['api', `repos/${repo}/issues`, '--method', 'GET', '-f', 'state=all', '--paginate', '--slurp']))
-    existingIssues = realIssuesOnly(flattenIssuePages(raw))
+    // Listado por GraphQL (solo issues, nunca PRs; solo los campos que se usan)
+    // — ver GROOM_ISSUES_QUERY. Sustituye al REST `repos/<repo>/issues` que
+    // traía TODOS los PRs del repo con body completo y desbordaba el buffer en
+    // repos grandes (ENOBUFS). Mismo conjunto de issues que producía
+    // `realIssuesOnly` sobre el REST; realIssuesOnly se mantiene como red de
+    // seguridad (inocua: GraphQL no devuelve PRs).
+    const [owner, name] = repo.split('/')
+    const pages = JSON.parse(gh(['api', 'graphql', '--paginate', '--slurp', '-f', `query=${GROOM_ISSUES_QUERY}`, '-f', `owner=${owner}`, '-f', `name=${name}`]))
+    existingIssues = realIssuesOnly(normalizeGraphqlIssues(pages))
   } catch (e) {
     console.error(`no se pudo listar issues de ${repo}: ${e.message}`)
     process.exit(1)
