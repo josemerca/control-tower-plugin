@@ -1,4 +1,4 @@
-import { ReconcileOutcome, ReconcileRound } from './reconcile-outcome.js'
+import { DiscardReason, ReconcileOutcome, ReconcileRound } from './reconcile-outcome.js'
 
 export class BranchReconciliation {
   constructor({ git }) {
@@ -27,6 +27,40 @@ export class BranchReconciliation {
 
   unmergedFiles() {
     return this.git(['diff', '--name-only', '--diff-filter=U'])
+      .stdout.split('\n').map((l) => l.trim()).filter(Boolean)
+  }
+
+  conclude() {
+    const files = this.unmergedFiles()
+    if (this.filesTouchedOutside(files).length) {
+      return this.discard(files, DiscardReason.TOUCHED_OUTSIDE_THE_CONFLICT)
+    }
+    if (this.filesStillCarryingMarkers(files).length) {
+      return this.discard(files, DiscardReason.MARKERS_LEFT)
+    }
+    this.git(['add', ...files])
+    if (this.unmergedFiles().length) {
+      return this.discard(files, DiscardReason.UNRESOLVED_FILES_REMAIN)
+    }
+    this.git(['commit', '--no-edit'])
+    return ReconcileRound.of({ outcome: ReconcileOutcome.RESOLVED, files })
+  }
+
+  discard(files, reason) {
+    this.git(['checkout', '--merge', '--', ...files])
+    return ReconcileRound.discarded({ files, reason })
+  }
+
+  filesTouchedOutside(files) {
+    return this.git(['status', '--porcelain'])
+      .stdout.split('\n')
+      .filter((line) => line.trim().length > 0)
+      .map((line) => line.slice(3).trim())
+      .filter((path) => !files.includes(path))
+  }
+
+  filesStillCarryingMarkers(files) {
+    return this.git(['grep', '-l', '-e', '<<<<<<<', '-e', '=======', '-e', '>>>>>>>', '--', ...files])
       .stdout.split('\n').map((l) => l.trim()).filter(Boolean)
   }
 }

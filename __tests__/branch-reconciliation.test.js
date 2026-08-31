@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { BranchReconciliation } from '../scripts/branch-reconciliation.js'
-import { ReconcileOutcome } from '../scripts/reconcile-outcome.js'
+import { ReconcileOutcome, DiscardReason } from '../scripts/reconcile-outcome.js'
 
 class GitConversation {
   constructor(answers) {
@@ -12,7 +12,10 @@ class GitConversation {
     const key = argv.join(' ')
     this.calls.push(key)
     if (!(key in this.answers)) throw new Error(`nadie escribió respuesta para: git ${key}`)
-    return this.answers[key]
+    const answer = this.answers[key]
+    if (!Array.isArray(answer)) return answer
+    if (answer.length === 0) throw new Error(`nadie escribió respuesta para: git ${key}`)
+    return answer.shift()
   }
 
   asked(fragment) {
@@ -57,6 +60,43 @@ class ConversationMother {
       'rev-parse --verify --quiet MERGE_HEAD': failed(),
     })
   }
+
+  static aResolutionWithNoLeftovers() {
+    return new GitConversation({
+      'diff --name-only --diff-filter=U': [ok('src/a.js\nsrc/b.js'), ok('')],
+      'status --porcelain': ok(''),
+      'grep -l -e <<<<<<< -e ======= -e >>>>>>> -- src/a.js src/b.js': failed(''),
+      'add src/a.js src/b.js': ok(),
+      'commit --no-edit': ok(),
+    })
+  }
+
+  static aResolutionThatStillCarriesMarkers() {
+    return new GitConversation({
+      'diff --name-only --diff-filter=U': ok('src/a.js\nsrc/b.js'),
+      'status --porcelain': ok(''),
+      'grep -l -e <<<<<<< -e ======= -e >>>>>>> -- src/a.js src/b.js': ok('src/a.js'),
+      'checkout --merge -- src/a.js src/b.js': ok(),
+    })
+  }
+
+  static aFileTouchedOutsideTheConflict() {
+    return new GitConversation({
+      'diff --name-only --diff-filter=U': ok('src/a.js'),
+      'status --porcelain': ok(' M src/other.js'),
+      'checkout --merge -- src/a.js': ok(),
+    })
+  }
+
+  static aFileStillUnmergedAfterTheAdd() {
+    return new GitConversation({
+      'diff --name-only --diff-filter=U': [ok('src/a.js'), ok('src/a.js')],
+      'status --porcelain': ok(''),
+      'grep -l -e <<<<<<< -e ======= -e >>>>>>> -- src/a.js': failed(''),
+      'add src/a.js': ok(),
+      'checkout --merge -- src/a.js': ok(),
+    })
+  }
 }
 
 describe('BranchReconciliation, al fusionar', () => {
@@ -97,5 +137,47 @@ describe('BranchReconciliation, al fusionar', () => {
     new BranchReconciliation({ git: git.run }).merge({ baseBranch: 'main' })
 
     expect(git.asked('rev-parse --verify --quiet MERGE_HEAD')).toBe(true)
+  })
+})
+
+describe('BranchReconciliation, al concluir una ronda', () => {
+  it('a_resolution_with_no_leftovers_is_staged_by_the_program_and_committed_so_the_merge_concludes', () => {
+    const git = ConversationMother.aResolutionWithNoLeftovers()
+    const round = new BranchReconciliation({ git: git.run }).conclude()
+
+    expect(round.outcome).toBe(ReconcileOutcome.RESOLVED)
+    expect(round.reason).toBe(null)
+    expect(git.asked('add src/a.js src/b.js')).toBe(true)
+    expect(git.asked('commit --no-edit')).toBe(true)
+  })
+
+  it('markers_left_in_a_resolved_file_discard_the_round_before_anything_is_committed', () => {
+    const git = ConversationMother.aResolutionThatStillCarriesMarkers()
+    const round = new BranchReconciliation({ git: git.run }).conclude()
+
+    expect(round.outcome).toBe(ReconcileOutcome.ROUND_DISCARDED)
+    expect(round.reason).toBe(DiscardReason.MARKERS_LEFT)
+    expect(git.asked('checkout --merge')).toBe(true)
+    expect(git.asked('commit')).toBe(false)
+  })
+
+  it('a_file_touched_outside_the_conflict_discards_the_round_before_anything_is_committed', () => {
+    const git = ConversationMother.aFileTouchedOutsideTheConflict()
+    const round = new BranchReconciliation({ git: git.run }).conclude()
+
+    expect(round.outcome).toBe(ReconcileOutcome.ROUND_DISCARDED)
+    expect(round.reason).toBe(DiscardReason.TOUCHED_OUTSIDE_THE_CONFLICT)
+    expect(git.asked('checkout --merge')).toBe(true)
+    expect(git.asked('commit')).toBe(false)
+  })
+
+  it('a_file_still_unmerged_after_the_add_discards_the_round_instead_of_committing_half_a_merge', () => {
+    const git = ConversationMother.aFileStillUnmergedAfterTheAdd()
+    const round = new BranchReconciliation({ git: git.run }).conclude()
+
+    expect(round.outcome).toBe(ReconcileOutcome.ROUND_DISCARDED)
+    expect(round.reason).toBe(DiscardReason.UNRESOLVED_FILES_REMAIN)
+    expect(git.asked('checkout --merge')).toBe(true)
+    expect(git.asked('commit')).toBe(false)
   })
 })
