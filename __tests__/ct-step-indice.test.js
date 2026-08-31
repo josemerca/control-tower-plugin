@@ -103,7 +103,7 @@ describe('lo que se comitea es lo que se aprobó: el sello del índice', () => {
   })
 
   it('EL GEMELO DEL SLICE: código stageado antes del veredicto de slice no entra en su commit', () => {
-    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('global')
+    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('reconcile'); ct('global')
     writeFileSync(join(repo, 'colado.txt'), 'nadie ha visto esto\n')
     execFileSync('git', ['add', 'colado.txt'], { cwd: repo })
     const r = juzgarSlice(veredictoDeSlice('PASS'))

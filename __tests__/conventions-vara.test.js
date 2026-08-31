@@ -29,15 +29,15 @@ const ALCANCES = {
   'architecture.md': 'new modules',
 }
 
-describe('los documentos de conventions/', () => {
+describe('the documents in conventions/', () => {
   for (const [nombre, alcance] of Object.entries(ALCANCES)) {
-    it(`${nombre} declara su alcance en la cabecera`, () => {
+    it(`${nombre} declares its scope in the header`, () => {
       const cabecera = Documento.cabeceraDe(nombre)
       expect(cabecera).toContain('Applies to:')
       expect(cabecera).toContain(alcance)
     })
 
-    it(`${nombre} trae reglas, no sólo encabezados`, () => {
+    it(`${nombre} carries rules, not just headings`, () => {
       const sustancia = Documento.texto(nombre)
         .split('\n')
         .filter((l) => l.trim() && !l.trim().startsWith('#'))
@@ -45,15 +45,15 @@ describe('los documentos de conventions/', () => {
     })
   }
 
-  it('architecture.md cierra el agujero de la exención del módulo viejo', () => {
+  it('architecture.md closes the hole in the old-module exemption', () => {
     expect(Documento.texto('architecture.md')).toContain('a new concept is a new module and is born conforming')
   })
 
-  it('style.md cierra el mismo agujero para su exención de estilo', () => {
+  it('style.md closes the same hole for its style exemption', () => {
     expect(Documento.texto('style.md')).toContain('a new concept is a new module and is born conforming')
   })
 
-  it('ninguno repite una regla que ya posee un ítem de la rúbrica', () => {
+  it('none repeats a rule that a rubric item already owns', () => {
     const todo = Object.keys(ALCANCES).map(Documento.texto).join('\n')
     for (const [item, terminos] of Object.entries({
       'manipulacion-tests': [/skip/i, /xfail/i, /pre-existing test/i, /flaky/i],
@@ -67,7 +67,7 @@ describe('los documentos de conventions/', () => {
   })
 })
 
-describe('la exención de deuda vive en style.md y NO alcanza a defects.md', () => {
+describe('the debt exemption lives in style.md and does NOT reach defects.md', () => {
   const clausulaDeEstilo = () => Documento.clausulaDe('style.md', 'A module that was already there')
   const cabeceraDeDefectos = () =>
     Documento.texto('defects.md').split('\n## ')[0].replace(/\s+/g, ' ')
@@ -103,7 +103,7 @@ describe('la exención de deuda vive en style.md y NO alcanza a defects.md', () 
   }
 })
 
-describe('defects.md lleva las cuatro reglas de defecto como SU asunto, cada una con su encabezado', () => {
+describe('defects.md carries the four defect rules as its own subject, each under its own heading', () => {
   const ENCABEZADOS = [
     '## Closed vocabulary instead of loose strings and booleans',
     '## No raw map as the return value of logic',
@@ -112,33 +112,33 @@ describe('defects.md lleva las cuatro reglas de defecto como SU asunto, cada una
   ]
 
   for (const encabezado of ENCABEZADOS) {
-    it(`tiene su propia sección: ${encabezado}`, () => {
+    it(`has its own section: ${encabezado}`, () => {
       expect(Documento.texto('defects.md')).toContain(encabezado)
     })
   }
 
-  it('ninguna de las cuatro se quedó en style.md al partir el documento', () => {
+  it('none of the four stayed in style.md when the document was split', () => {
     const estilo = Documento.texto('style.md')
     for (const encabezado of ENCABEZADOS) {
-      expect(estilo, `${encabezado} sigue en style.md`).not.toContain(encabezado)
+      expect(estilo, `${encabezado} is still in style.md`).not.toContain(encabezado)
     }
   })
 
-  it('cierra el hueco que el juez tomó en el slice #7: que el consumidor serialice al final NO exime al mapa', () => {
+  it('closes the gap the judge caught in slice #7: the consumer serializing at the end does NOT exempt the map', () => {
     const seccion = Documento.clausulaDe('defects.md', '## No raw map as the return value of logic')
     expect(seccion).toContain('The boundary is the last step before the wire, and it is one step')
     expect(seccion).toContain('does not make a raw map its legitimate input')
     expect(seccion).toContain('however close to the wire it sits')
   })
 
-  it('nombra el valor centinela como el segundo campo disfrazado, con el caso medido del mensaje vacío', () => {
+  it('names the sentinel value as the second field in disguise, with the empty-message case measured', () => {
     const seccion = Documento.clausulaDe('defects.md', '## Two fields that have to agree')
     expect(seccion).toContain("A sentinel value is that second field wearing the first field's clothes")
     expect(seccion).toContain('The empty string standing for "no message"')
   })
 })
 
-describe('testing.md separa "visto fallar por su motivo" de la fase roja del ciclo, y declara la asimetría de quién puede correrla', () => {
+describe('testing.md separates "seen to fail for its reason" from the cycle\'s red phase, and declares the asymmetry of who can run it', () => {
   const clausula = () => Documento.clausulaDe(
     'testing.md',
     '## An assertion is not finished until it has been seen to fail for the reason its name gives'

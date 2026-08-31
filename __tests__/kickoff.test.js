@@ -293,6 +293,22 @@ describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan pri
     // La razón de la prohibición del worktree viaja con ella: ya está en uno.
     expect(k).toMatch(/ya estás en/i)
   })
+
+  // Tarea 10 — sin esto el paso `reconcile` existe en la máquina y nadie del
+  // lado del agente sabe invocarlo ni sabe qué hacer con un conflicto.
+  it('nombra el paso `ct-step reconcile` y que ante un conflicto despacha ct-reconciler sin Bash y sin Write', () => {
+    const k = renderKickoff(SLICE, OPTS)
+    expect(k).toContain('ct-step reconcile')
+    expect(k).toMatch(/despacha ct-reconciler como subagente, declarado sin Bash y sin Write/)
+  })
+
+  // La cuenta tiene que llevar el paso nuevo: antes de esta tarea eran dos
+  // (global, slice-verdict); con `reconcile` delante, son tres.
+  it('cuenta tres pasos tras el commit de la última tarea, no dos', () => {
+    const k = renderKickoff(SLICE, OPTS)
+    expect(k).toMatch(/quedan tres pasos más/)
+    expect(k).not.toMatch(/quedan dos pasos más/)
+  })
 })
 
 // Slice 10 — la señal en el despacho. El campo `senal:` se siembra SIEMPRE

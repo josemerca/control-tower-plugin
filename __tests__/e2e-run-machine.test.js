@@ -22,14 +22,15 @@ const enCommitDeLaUltima = (e2eRuns) => ({
 })
 
 // trasLaColaDeSlice: comitear la última tarea ya NO decide la entrega — desde
-// la fase §3.7 (GLOBAL + SLICE_JUDGE) hay dos pasos de slice entre ese commit
-// y el cierre, y el e2e va DETRÁS de los dos: es el último de la cola y el
-// único condicional. Este helper recorre la cola entera para que cada test
-// mida la transición que le toca y no el orden de la cola, que se prueba en
-// los tests de la fase global.
+// la Fase B (RECONCILE + GLOBAL + SLICE_JUDGE) hay tres pasos de slice entre
+// ese commit y el cierre, y el e2e va DETRÁS de los tres: es el último de la
+// cola y el único condicional. Este helper recorre la cola entera para que
+// cada test mida la transición que le toca y no el orden de la cola, que se
+// prueba en los tests de la fase global.
 const trasLaColaDeSlice = (e2eRuns) => {
   const trasCommit = after(enCommitDeLaUltima(e2eRuns), OUTCOMES.DONE)
-  const trasGlobal = after(trasCommit.run, OUTCOMES.DONE)
+  const trasReconcile = after(trasCommit.run, OUTCOMES.DONE)
+  const trasGlobal = after(trasReconcile.run, OUTCOMES.DONE)
   return after(trasGlobal.run, OUTCOMES.DONE)
 }
 

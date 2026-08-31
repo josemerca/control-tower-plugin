@@ -17,7 +17,11 @@ afterEach(() => { rmSyncBestEffort(repo) })
 // la última tarea comiteada. Hasta este slice no la corría nadie: `controls`
 // sólo mide el bloque **Verification:** de cada tarea.
 describe('la Global verification la corre el programa (§3.7-A)', () => {
-  const dosTareas = () => { tareaOk('uno.txt'); tareaOk('dos.txt') }
+  // `reconcile` (Fase B, Tarea 8) se cuela entre el último commit y la global
+  // verification: el fixture deja la base sin mover, así que sale en la
+  // primera ronda (up-to-date) y deja el run exactamente donde estos tests ya
+  // lo esperaban.
+  const dosTareas = () => { tareaOk('uno.txt'); tareaOk('dos.txt'); ct('reconcile') }
 
   it('tras el último commit, next anuncia la fase global con los comandos del §8', () => {
     dosTareas()

@@ -7,7 +7,8 @@
 // tabla con un hueco no es una tabla, es una tabla y una decisión implícita
 // tomada por omisión.
 import { describe, it, expect } from 'vitest'
-import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS } from '../scripts/run-machine.js'
+import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS, outcomeOfReconcile } from '../scripts/run-machine.js'
+import { ReconcileOutcome } from '../scripts/reconcile-outcome.js'
 
 const run = (over = {}) => ({ ...newRun({ plan: 'p.md', issue: 7, baseSha: 'abc', tasksTotal: 3 }), ...over })
 
@@ -20,7 +21,8 @@ const DESCRITOS = new Set([
   'controls/done', 'controls/failed', 'controls/indeterminate',
   'judge/done', 'judge/failed', 'judge/corrections-ordered', 'judge/discarded',
   'commit/done', 'commit/failed',
-  // §3.7: los dos pasos que corren tras la última tarea comiteada.
+  // §3.7: los pasos que corren tras la última tarea comiteada.
+  'reconcile/done', 'reconcile/failed', 'reconcile/discarded',
   'global/done', 'global/failed', 'global/indeterminate',
   'slice-judge/done', 'slice-judge/failed', 'slice-judge/discarded',
   // El e2e cierra la cola, y sólo si la slice declara recorridos.
@@ -140,12 +142,13 @@ describe('commit', () => {
     expect(state).toBe(RUN_STATES.OPEN)
   })
 
-  it('done en la última tarea NO entrega: abre la fase global con los reintentos a cero', () => {
-    // §3.7: tras el último commit el run ya no cierra en delivered — falta
-    // correr la punta a punta (global) y juzgar el slice entero (slice-judge).
+  it('done en la última tarea NO entrega: abre la reconciliación con los reintentos a cero', () => {
+    // Fase B: tras el último commit el run ya no cierra en delivered — falta
+    // reconciliar la rama con su base, correr la punta a punta (global) y
+    // juzgar el slice entero (slice-judge).
     const { run: r, state } = after(enCommit({ task: 3, tasksTotal: 3 }), OUTCOMES.DONE)
     expect(state).toBe(RUN_STATES.OPEN)
-    expect(r.step).toBe(STEPS.GLOBAL)
+    expect(r.step).toBe(STEPS.RECONCILE)
     expect([r.controlRetries, r.judgeRetries, r.correctionRetries]).toEqual([0, 0, 0])
     // Los descartes y el dinero son de la slice entera: no se tocan aquí.
     expect(r.discards).toBe(0)
@@ -153,6 +156,85 @@ describe('commit', () => {
 
   it('failed cierra en blocked-commit sin reintentar', () => {
     expect(after(enCommit(), OUTCOMES.FAILED).state).toBe(RUN_STATES.BLOCKED_COMMIT)
+  })
+})
+
+describe('el paso reconcile', () => {
+  const enReconcile = (over = {}) => run({ step: STEPS.RECONCILE, ...over })
+
+  it('a_branch_that_is_up_to_date_moves_on_to_the_global_verification', () => {
+    const { run: siguiente, state } = after(enReconcile(), OUTCOMES.DONE)
+    expect(siguiente.step).toBe(STEPS.GLOBAL)
+    expect(state).toBe(RUN_STATES.OPEN)
+  })
+
+  it('a_conflict_that_was_not_resolved_spends_a_retry_before_blocking', () => {
+    const { run: siguiente, state } = after(enReconcile({ reconcileRetries: 0 }), OUTCOMES.FAILED)
+    expect(siguiente.step).toBe(STEPS.RECONCILE)
+    expect(siguiente.reconcileRetries).toBe(1)
+    expect(state).toBe(RUN_STATES.OPEN)
+  })
+
+  it('the_run_blocks_on_reconcile_once_its_retries_are_spent_instead_of_looping', () => {
+    const agotado = enReconcile({ reconcileRetries: DEFAULT_BUDGETS.reconcileRetries })
+    expect(after(agotado, OUTCOMES.FAILED).state).toBe(RUN_STATES.BLOCKED_RECONCILE)
+  })
+
+  // El descarte de reconcile NO es el de implement ni el del juez: allí la
+  // respuesta no se pudo leer y el árbol quedó como estaba; aquí el conflicto
+  // persiste (el descarte no aborta la fusión), así que sin gastar reintento
+  // toda ronda posterior vuelve a descartar y la escalera nunca baja.
+  it('a_discarded_round_spends_a_retry_because_the_conflict_survives_it_and_the_dispatch_was_paid', () => {
+    const { run: siguiente } = after(enReconcile({ reconcileRetries: 0 }), OUTCOMES.DISCARDED)
+    expect(siguiente.step).toBe(STEPS.RECONCILE)
+    expect(siguiente.reconcileRetries).toBe(1)
+    expect(siguiente.discards).toBe(1)
+  })
+
+  it('discarded_rounds_alone_reach_blocked_reconcile_instead_of_looping_until_the_discard_budget_dies', () => {
+    const agotado = enReconcile({ reconcileRetries: DEFAULT_BUDGETS.reconcileRetries })
+    expect(after(agotado, OUTCOMES.DISCARDED).state).toBe(RUN_STATES.BLOCKED_RECONCILE)
+  })
+
+  it('the_ladder_from_a_first_conflict_to_blocked_reconcile_is_walked_by_rounds_that_only_ever_discard', () => {
+    const rondas = [OUTCOMES.FAILED, OUTCOMES.DISCARDED, OUTCOMES.DISCARDED]
+    let actual = { run: enReconcile({ reconcileRetries: 0 }), state: RUN_STATES.OPEN }
+    for (const outcome of rondas) actual = after(actual.run, outcome)
+
+    expect(actual.state).toBe(RUN_STATES.BLOCKED_RECONCILE)
+    expect(actual.run.discards).toBeLessThan(6)
+  })
+
+  it('the_last_committed_task_reconciles_before_it_verifies_globally', () => {
+    const ultima = run({ step: STEPS.COMMIT, task: 3, tasksTotal: 3 })
+    expect(after(ultima, OUTCOMES.DONE).run.step).toBe(STEPS.RECONCILE)
+  })
+})
+
+describe('la proyeccion del vocabulario de reconcile', () => {
+  it.each([
+    [ReconcileOutcome.UP_TO_DATE, OUTCOMES.DONE],
+    [ReconcileOutcome.MERGED, OUTCOMES.DONE],
+    [ReconcileOutcome.RESOLVED, OUTCOMES.DONE],
+    [ReconcileOutcome.CONFLICTING, OUTCOMES.FAILED],
+    [ReconcileOutcome.UNMERGEABLE_TREE, OUTCOMES.FAILED],
+    [ReconcileOutcome.ROUND_DISCARDED, OUTCOMES.DISCARDED],
+    [ReconcileOutcome.MARKERS_COMMITTED, OUTCOMES.FAILED],
+  ])('%s se proyecta a %s', (miembro, esperado) => {
+    expect(outcomeOfReconcile(miembro)).toBe(esperado)
+  })
+
+  // La lista de arriba está tecleada a mano, así que un miembro nuevo podría
+  // no aparecer en ella y el despacho seguiría sin cubrirse. Esto la ata al
+  // vocabulario: todo miembro se proyecta, lo hayan escrito arriba o no.
+  it('todo_miembro_del_vocabulario_tiene_proyeccion_y_ninguno_se_queda_sin_recorrer', () => {
+    for (const miembro of Object.values(ReconcileOutcome)) {
+      expect(() => outcomeOfReconcile(miembro), miembro).not.toThrow()
+    }
+  })
+
+  it('un_miembro_nuevo_sin_proyectar_lanza_en_vez_de_caer_en_una_rama_por_omision', () => {
+    expect(() => outcomeOfReconcile('un-miembro-que-nadie-proyecto')).toThrow()
   })
 })
 

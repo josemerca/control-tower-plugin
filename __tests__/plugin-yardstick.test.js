@@ -223,7 +223,7 @@ describe('the same rule reaches both English texts: the judge and the implemente
   }
 })
 
-describe('scripts/vara.js, the sibling module, is untouched', () => {
+describe("the sibling module that carries this repo's own yardstick is untouched", () => {
   it('keeps_transporting_the_repo_declaration_from_its_own_dot_agent_file', async () => {
     const repoYardstick = await import('../scripts/vara.js')
     expect(repoYardstick.CONVENTIONS_FILE).toBe('.agent/conventions.md')
@@ -251,7 +251,7 @@ describe('the patrones item measures both yardsticks', () => {
     expect(item()).toContain("does not delete this repo's yardstick")
   })
 
-  it('declares_sin_vara_can_no_longer_happen_instead_of_offering_it_as_an_outcome', () => {
+  it('declares_the_no_yardstick_outcome_can_no_longer_happen_instead_of_being_offered_as_an_outcome', () => {
     expect(item()).toMatch(/never `sin-vara`/)
     expect(item()).not.toMatch(/count the item `sin-vara`/)
   })
