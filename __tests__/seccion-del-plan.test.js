@@ -113,7 +113,7 @@ beforeAll(async () => { seccionDelPlan = await TheRuleWrittenInJavaScript.load()
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'seccion-del-plan-')); awk = new TheRuleWrittenInAwk(dir) })
 afterEach(() => { rmSync(dir, { recursive: true, force: true }) })
 
-describe('la misma regla escrita dos veces: extract_section en awk y seccionDelPlan en JavaScript', () => {
+describe('the same rule written twice: extract_section in awk and seccionDelPlan in JavaScript', () => {
   const planes = [
     ['a_section_closed_by_the_next_heading_of_the_same_level', PlanMother.aSectionClosedByTheNextHeadingOfTheSameLevel()],
     ['a_fenced_block_carrying_something_that_looks_like_a_heading', PlanMother.aSectionWhoseFencedBlockCarriesSomethingThatLooksLikeAHeading()],
@@ -130,7 +130,7 @@ describe('la misma regla escrita dos veces: extract_section en awk y seccionDelP
     expect(seccionDelPlan(plan, HEADING).trim()).toBe(awk.extract(planPath))
   })
 
-  it('el recorte de la salida de task-brief no es vacío, o los cinco casos pasarían por comparar nada con nada', () => {
+  it('task_briefs_extracted_snippet_is_not_empty_or_the_five_cases_would_pass_by_comparing_nothing_with_nothing', () => {
     const planPath = join(dir, 'plan.md')
     writeFileSync(planPath, PlanMother.aSectionClosedByTheNextHeadingOfTheSameLevel())
 
@@ -138,7 +138,7 @@ describe('la misma regla escrita dos veces: extract_section en awk y seccionDelP
     expect(awk.extract(planPath)).not.toContain('D-1: fuera de la sección')
   })
 
-  it('el verbo que pega la sección en el paquete de reconciliación es el mismo que este test mide', () => {
+  it('the_call_that_pastes_the_section_into_the_reconciliation_package_matches_the_one_this_suite_measures', () => {
     expect(readFileSync(CT_STEP, 'utf8')).toContain("seccionDelPlan(planText, '### Desired end state')")
   })
 })

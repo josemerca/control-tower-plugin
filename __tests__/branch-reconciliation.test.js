@@ -21,131 +21,142 @@ class GitConversation {
   asked(fragment) {
     return this.calls.some((c) => c.includes(fragment))
   }
-}
 
-const ok = (stdout = '') => ({ code: 0, stdout })
-const failed = (stdout = '') => ({ code: 1, stdout })
+  static ok(stdout = '') {
+    return { code: 0, stdout }
+  }
+
+  static failed(stdout = '') {
+    return { code: 1, stdout }
+  }
+
+  static markerScanOf(...files) {
+    return [...ANCHORED_MARKER_SCAN, ...files].join(' ')
+  }
+
+  static nulSeparated(...paths) {
+    return paths.join('\0')
+  }
+}
 
 const UNMERGED_FILES = 'diff --name-only -z --diff-filter=U'
 const FILES_DIFFERING_FROM_THE_INDEX = 'diff --name-only -z'
 const HEAD_IS_A_MERGE_COMMIT = 'rev-parse --verify --quiet HEAD^2'
 const MERGE_IN_PROGRESS = 'rev-parse --verify --quiet MERGE_HEAD'
 const ANCHORED_MARKER_SCAN = ['grep', '-l', '-e', '^<<<<<<< ', '-e', '^=======$', '-e', '^>>>>>>> ', '--']
-const markerScanOf = (...files) => [...ANCHORED_MARKER_SCAN, ...files].join(' ')
-const nulSeparated = (...paths) => paths.join('\0')
 
 class ConversationMother {
   static aBaseThatDidNotMove() {
     return new GitConversation({
-      'fetch origin main': ok(),
-      'rev-list --count HEAD..origin/main': ok('0'),
-      [MERGE_IN_PROGRESS]: failed(),
-      [HEAD_IS_A_MERGE_COMMIT]: failed(),
+      'fetch origin main': GitConversation.ok(),
+      'rev-list --count HEAD..origin/main': GitConversation.ok('0'),
+      [MERGE_IN_PROGRESS]: GitConversation.failed(),
+      [HEAD_IS_A_MERGE_COMMIT]: GitConversation.failed(),
     })
   }
 
   static aBaseThatMergesCleanly() {
     return new GitConversation({
-      'fetch origin main': ok(),
-      'rev-list --count HEAD..origin/main': ok('2'),
-      'merge --no-edit origin/main': ok(),
+      'fetch origin main': GitConversation.ok(),
+      'rev-list --count HEAD..origin/main': GitConversation.ok('2'),
+      'merge --no-edit origin/main': GitConversation.ok(),
     })
   }
 
   static aBaseThatConflictsOnTwoFiles() {
     return new GitConversation({
-      'fetch origin main': ok(),
-      'rev-list --count HEAD..origin/main': ok('2'),
-      'merge --no-edit origin/main': failed(),
-      [MERGE_IN_PROGRESS]: ok('aaaa'),
-      [UNMERGED_FILES]: ok(nulSeparated('src/a.js', 'src/b.js')),
+      'fetch origin main': GitConversation.ok(),
+      'rev-list --count HEAD..origin/main': GitConversation.ok('2'),
+      'merge --no-edit origin/main': GitConversation.failed(),
+      [MERGE_IN_PROGRESS]: GitConversation.ok('aaaa'),
+      [UNMERGED_FILES]: GitConversation.ok(GitConversation.nulSeparated('src/a.js', 'src/b.js')),
     })
   }
 
   static aMergeThatGitRefusedToStart() {
     return new GitConversation({
-      'fetch origin main': ok(),
-      'rev-list --count HEAD..origin/main': ok('2'),
-      'merge --no-edit origin/main': failed(),
-      [MERGE_IN_PROGRESS]: failed(),
+      'fetch origin main': GitConversation.ok(),
+      'rev-list --count HEAD..origin/main': GitConversation.ok('2'),
+      'merge --no-edit origin/main': GitConversation.failed(),
+      [MERGE_IN_PROGRESS]: GitConversation.failed(),
     })
   }
 
   static aResolutionWithNoLeftovers() {
     return new GitConversation({
-      [UNMERGED_FILES]: [ok(nulSeparated('src/a.js', 'src/b.js')), ok('')],
-      [FILES_DIFFERING_FROM_THE_INDEX]: ok(nulSeparated('src/a.js', 'src/b.js')),
-      [markerScanOf('src/a.js', 'src/b.js')]: failed(''),
-      'add src/a.js src/b.js': ok(),
-      'commit --no-edit': ok(),
+      [UNMERGED_FILES]: [GitConversation.ok(GitConversation.nulSeparated('src/a.js', 'src/b.js')), GitConversation.ok('')],
+      [FILES_DIFFERING_FROM_THE_INDEX]: GitConversation.ok(GitConversation.nulSeparated('src/a.js', 'src/b.js')),
+      [GitConversation.markerScanOf('src/a.js', 'src/b.js')]: GitConversation.failed(''),
+      'add src/a.js src/b.js': GitConversation.ok(),
+      'commit --no-edit': GitConversation.ok(),
     })
   }
 
   static aResolutionThatStillCarriesMarkers() {
     return new GitConversation({
-      [UNMERGED_FILES]: ok(nulSeparated('src/a.js', 'src/b.js')),
-      [FILES_DIFFERING_FROM_THE_INDEX]: ok(nulSeparated('src/a.js', 'src/b.js')),
-      [markerScanOf('src/a.js', 'src/b.js')]: ok('src/a.js'),
-      'checkout --merge -- src/a.js src/b.js': ok(),
+      [UNMERGED_FILES]: GitConversation.ok(GitConversation.nulSeparated('src/a.js', 'src/b.js')),
+      [FILES_DIFFERING_FROM_THE_INDEX]: GitConversation.ok(GitConversation.nulSeparated('src/a.js', 'src/b.js')),
+      [GitConversation.markerScanOf('src/a.js', 'src/b.js')]: GitConversation.ok('src/a.js'),
+      'checkout --merge -- src/a.js src/b.js': GitConversation.ok(),
     })
   }
 
   static aFileTouchedOutsideTheConflict() {
     return new GitConversation({
-      [UNMERGED_FILES]: ok('src/a.js'),
-      [FILES_DIFFERING_FROM_THE_INDEX]: ok(nulSeparated('src/a.js', 'src/other.js')),
-      'checkout --merge -- src/a.js': ok(),
+      [UNMERGED_FILES]: GitConversation.ok('src/a.js'),
+      [FILES_DIFFERING_FROM_THE_INDEX]: GitConversation.ok(GitConversation.nulSeparated('src/a.js', 'src/other.js')),
+      'checkout --merge -- src/a.js': GitConversation.ok(),
     })
   }
 
   static aFileStillUnmergedAfterTheAdd() {
     return new GitConversation({
-      [UNMERGED_FILES]: [ok('src/a.js'), ok('src/a.js')],
-      [FILES_DIFFERING_FROM_THE_INDEX]: ok('src/a.js'),
-      [markerScanOf('src/a.js')]: failed(''),
-      'add src/a.js': ok(),
-      'checkout --merge -- src/a.js': ok(),
+      [UNMERGED_FILES]: [GitConversation.ok('src/a.js'), GitConversation.ok('src/a.js')],
+      [FILES_DIFFERING_FROM_THE_INDEX]: GitConversation.ok('src/a.js'),
+      [GitConversation.markerScanOf('src/a.js')]: GitConversation.failed(''),
+      'add src/a.js': GitConversation.ok(),
+      'checkout --merge -- src/a.js': GitConversation.ok(),
     })
   }
 
   static aGitGrepThatFailsWhileCheckingForMarkers() {
     return new GitConversation({
-      [UNMERGED_FILES]: [ok('src/a.js'), ok('')],
-      [FILES_DIFFERING_FROM_THE_INDEX]: ok('src/a.js'),
-      [markerScanOf('src/a.js')]: { code: 128, stdout: '' },
-      'add src/a.js': ok(),
-      'commit --no-edit': ok(),
+      [UNMERGED_FILES]: [GitConversation.ok('src/a.js'), GitConversation.ok('')],
+      [FILES_DIFFERING_FROM_THE_INDEX]: GitConversation.ok('src/a.js'),
+      [GitConversation.markerScanOf('src/a.js')]: { code: 128, stdout: '' },
+      'add src/a.js': GitConversation.ok(),
+      'commit --no-edit': GitConversation.ok(),
     })
   }
 
   static aTrackedMachineryFileModifiedOutsideTheConflict() {
     return new GitConversation({
-      [UNMERGED_FILES]: [ok('src/a.js'), ok('')],
-      [FILES_DIFFERING_FROM_THE_INDEX]: ok(nulSeparated('src/a.js', 'docs/superpowers/metrics/7.jsonl')),
-      [markerScanOf('src/a.js')]: failed(''),
-      'add src/a.js': ok(),
-      'commit --no-edit': ok(),
+      [UNMERGED_FILES]: [GitConversation.ok('src/a.js'), GitConversation.ok('')],
+      [FILES_DIFFERING_FROM_THE_INDEX]: GitConversation.ok(GitConversation.nulSeparated('src/a.js', 'docs/superpowers/metrics/7.jsonl')),
+      [GitConversation.markerScanOf('src/a.js')]: GitConversation.failed(''),
+      'add src/a.js': GitConversation.ok(),
+      'commit --no-edit': GitConversation.ok(),
     })
   }
 
   static aForeignFileAlongsideAMachineryFile() {
     return new GitConversation({
-      [UNMERGED_FILES]: ok('src/a.js'),
-      [FILES_DIFFERING_FROM_THE_INDEX]: ok(nulSeparated('src/a.js', 'src/other.js', 'docs/superpowers/metrics/7.jsonl')),
-      'checkout --merge -- src/a.js': ok(),
+      [UNMERGED_FILES]: GitConversation.ok('src/a.js'),
+      [FILES_DIFFERING_FROM_THE_INDEX]: GitConversation.ok(GitConversation.nulSeparated('src/a.js', 'src/other.js', 'docs/superpowers/metrics/7.jsonl')),
+      'checkout --merge -- src/a.js': GitConversation.ok(),
     })
   }
 
   static aMachineryShapedFileWithoutThePredicate() {
     return new GitConversation({
-      [UNMERGED_FILES]: ok('src/a.js'),
-      [FILES_DIFFERING_FROM_THE_INDEX]: ok(nulSeparated('src/a.js', 'docs/superpowers/metrics/7.jsonl')),
-      'checkout --merge -- src/a.js': ok(),
+      [UNMERGED_FILES]: GitConversation.ok('src/a.js'),
+      [FILES_DIFFERING_FROM_THE_INDEX]: GitConversation.ok(GitConversation.nulSeparated('src/a.js', 'docs/superpowers/metrics/7.jsonl')),
+      'checkout --merge -- src/a.js': GitConversation.ok(),
     })
   }
 }
 
-describe('BranchReconciliation, al fusionar', () => {
+describe('BranchReconciliation, when merging', () => {
   it('a_base_that_did_not_move_produces_no_merge_commit_and_no_merge_call', () => {
     const git = ConversationMother.aBaseThatDidNotMove()
     const round = new BranchReconciliation({ git: git.run }).merge({ baseBranch: 'main' })
@@ -186,7 +197,7 @@ describe('BranchReconciliation, al fusionar', () => {
   })
 })
 
-describe('BranchReconciliation, al concluir una ronda', () => {
+describe('BranchReconciliation, when concluding a round', () => {
   it('a_resolution_with_no_leftovers_is_staged_by_the_program_and_committed_so_the_merge_concludes', () => {
     const git = ConversationMother.aResolutionWithNoLeftovers()
     const round = new BranchReconciliation({ git: git.run }).conclude()

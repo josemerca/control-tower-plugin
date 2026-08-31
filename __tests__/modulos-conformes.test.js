@@ -15,6 +15,12 @@ class NacidosConformes {
     'scripts/branch-reconciliation.js',
     'scripts/reconcile-outcome.js',
     '__tests__/modulos-conformes.test.js',
+    '__tests__/branch-reconciliation.test.js',
+    '__tests__/branch-reconciliation-real-git.test.js',
+    '__tests__/branch-reconciliation-real-git-produccion.test.js',
+    '__tests__/branch-reconciliation-base-ilegible.test.js',
+    '__tests__/reconcile-outcome.test.js',
+    '__tests__/seccion-del-plan.test.js',
   ]
 
   static PALABRAS_CASTELLANAS = [
