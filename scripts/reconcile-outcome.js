@@ -5,6 +5,7 @@ export const ReconcileOutcome = Object.freeze({
   UNMERGEABLE_TREE: 'unmergeable-tree',
   RESOLVED: 'resolved',
   ROUND_DISCARDED: 'round-discarded',
+  MARKERS_COMMITTED: 'markers-committed',
 })
 
 export const DiscardReason = Object.freeze({

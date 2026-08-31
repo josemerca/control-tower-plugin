@@ -26,11 +26,21 @@ class GitConversation {
 const ok = (stdout = '') => ({ code: 0, stdout })
 const failed = (stdout = '') => ({ code: 1, stdout })
 
+const UNMERGED_FILES = 'diff --name-only -z --diff-filter=U'
+const FILES_DIFFERING_FROM_THE_INDEX = 'diff --name-only -z'
+const HEAD_IS_A_MERGE_COMMIT = 'rev-parse --verify --quiet HEAD^2'
+const MERGE_IN_PROGRESS = 'rev-parse --verify --quiet MERGE_HEAD'
+const ANCHORED_MARKER_SCAN = ['grep', '-l', '-e', '^<<<<<<< ', '-e', '^=======$', '-e', '^>>>>>>> ', '--']
+const markerScanOf = (...files) => [...ANCHORED_MARKER_SCAN, ...files].join(' ')
+const nulSeparated = (...paths) => paths.join('\0')
+
 class ConversationMother {
   static aBaseThatDidNotMove() {
     return new GitConversation({
       'fetch origin main': ok(),
       'rev-list --count HEAD..origin/main': ok('0'),
+      [MERGE_IN_PROGRESS]: failed(),
+      [HEAD_IS_A_MERGE_COMMIT]: failed(),
     })
   }
 
@@ -47,8 +57,8 @@ class ConversationMother {
       'fetch origin main': ok(),
       'rev-list --count HEAD..origin/main': ok('2'),
       'merge --no-edit origin/main': failed(),
-      'rev-parse --verify --quiet MERGE_HEAD': ok('aaaa'),
-      'diff --name-only --diff-filter=U': ok('src/a.js\nsrc/b.js'),
+      [MERGE_IN_PROGRESS]: ok('aaaa'),
+      [UNMERGED_FILES]: ok(nulSeparated('src/a.js', 'src/b.js')),
     })
   }
 
@@ -57,15 +67,15 @@ class ConversationMother {
       'fetch origin main': ok(),
       'rev-list --count HEAD..origin/main': ok('2'),
       'merge --no-edit origin/main': failed(),
-      'rev-parse --verify --quiet MERGE_HEAD': failed(),
+      [MERGE_IN_PROGRESS]: failed(),
     })
   }
 
   static aResolutionWithNoLeftovers() {
     return new GitConversation({
-      'diff --name-only --diff-filter=U': [ok('src/a.js\nsrc/b.js'), ok('')],
-      'status --porcelain': ok(''),
-      'grep -l -e <<<<<<< -e ======= -e >>>>>>> -- src/a.js src/b.js': failed(''),
+      [UNMERGED_FILES]: [ok(nulSeparated('src/a.js', 'src/b.js')), ok('')],
+      [FILES_DIFFERING_FROM_THE_INDEX]: ok(nulSeparated('src/a.js', 'src/b.js')),
+      [markerScanOf('src/a.js', 'src/b.js')]: failed(''),
       'add src/a.js src/b.js': ok(),
       'commit --no-edit': ok(),
     })
@@ -73,26 +83,26 @@ class ConversationMother {
 
   static aResolutionThatStillCarriesMarkers() {
     return new GitConversation({
-      'diff --name-only --diff-filter=U': ok('src/a.js\nsrc/b.js'),
-      'status --porcelain': ok(''),
-      'grep -l -e <<<<<<< -e ======= -e >>>>>>> -- src/a.js src/b.js': ok('src/a.js'),
+      [UNMERGED_FILES]: ok(nulSeparated('src/a.js', 'src/b.js')),
+      [FILES_DIFFERING_FROM_THE_INDEX]: ok(nulSeparated('src/a.js', 'src/b.js')),
+      [markerScanOf('src/a.js', 'src/b.js')]: ok('src/a.js'),
       'checkout --merge -- src/a.js src/b.js': ok(),
     })
   }
 
   static aFileTouchedOutsideTheConflict() {
     return new GitConversation({
-      'diff --name-only --diff-filter=U': ok('src/a.js'),
-      'status --porcelain': ok(' M src/other.js'),
+      [UNMERGED_FILES]: ok('src/a.js'),
+      [FILES_DIFFERING_FROM_THE_INDEX]: ok(nulSeparated('src/a.js', 'src/other.js')),
       'checkout --merge -- src/a.js': ok(),
     })
   }
 
   static aFileStillUnmergedAfterTheAdd() {
     return new GitConversation({
-      'diff --name-only --diff-filter=U': [ok('src/a.js'), ok('src/a.js')],
-      'status --porcelain': ok(''),
-      'grep -l -e <<<<<<< -e ======= -e >>>>>>> -- src/a.js': failed(''),
+      [UNMERGED_FILES]: [ok('src/a.js'), ok('src/a.js')],
+      [FILES_DIFFERING_FROM_THE_INDEX]: ok('src/a.js'),
+      [markerScanOf('src/a.js')]: failed(''),
       'add src/a.js': ok(),
       'checkout --merge -- src/a.js': ok(),
     })
@@ -100,45 +110,36 @@ class ConversationMother {
 
   static aGitGrepThatFailsWhileCheckingForMarkers() {
     return new GitConversation({
-      'diff --name-only --diff-filter=U': [ok('src/a.js'), ok('')],
-      'status --porcelain': ok(''),
-      'grep -l -e <<<<<<< -e ======= -e >>>>>>> -- src/a.js': { code: 128, stdout: '' },
+      [UNMERGED_FILES]: [ok('src/a.js'), ok('')],
+      [FILES_DIFFERING_FROM_THE_INDEX]: ok('src/a.js'),
+      [markerScanOf('src/a.js')]: { code: 128, stdout: '' },
       'add src/a.js': ok(),
       'commit --no-edit': ok(),
     })
   }
 
-  // Fix round 2 (Task 8): la huella del propio loop (telemetría, veredictos,
-  // el plan) sin comitear en `status --porcelain` no es una resolución
-  // tocando de más — es la máquina, no el reconciliador.
-  static aMachineryFileOutsideTheConflict() {
+  static aTrackedMachineryFileModifiedOutsideTheConflict() {
     return new GitConversation({
-      'diff --name-only --diff-filter=U': [ok('src/a.js'), ok('')],
-      'status --porcelain': ok('?? docs/superpowers/metrics/7.jsonl'),
-      'grep -l -e <<<<<<< -e ======= -e >>>>>>> -- src/a.js': failed(''),
+      [UNMERGED_FILES]: [ok('src/a.js'), ok('')],
+      [FILES_DIFFERING_FROM_THE_INDEX]: ok(nulSeparated('src/a.js', 'docs/superpowers/metrics/7.jsonl')),
+      [markerScanOf('src/a.js')]: failed(''),
       'add src/a.js': ok(),
       'commit --no-edit': ok(),
     })
   }
 
-  // La exención no puede tragarse el caso que la comprobación existe para
-  // cazar: un fichero AJENO de verdad, junto a uno de la maquinaria, sigue
-  // descartando.
   static aForeignFileAlongsideAMachineryFile() {
     return new GitConversation({
-      'diff --name-only --diff-filter=U': ok('src/a.js'),
-      'status --porcelain': ok(' M src/other.js\n?? docs/superpowers/metrics/7.jsonl'),
+      [UNMERGED_FILES]: ok('src/a.js'),
+      [FILES_DIFFERING_FROM_THE_INDEX]: ok(nulSeparated('src/a.js', 'src/other.js', 'docs/superpowers/metrics/7.jsonl')),
       'checkout --merge -- src/a.js': ok(),
     })
   }
 
-  // Sin `isMachineryPath` (el valor por defecto), un fichero con la MISMA
-  // forma que uno de la maquinaria sigue descartando: el default es
-  // conservador (`() => false`, nadie exento), nunca un fail-open.
   static aMachineryShapedFileWithoutThePredicate() {
     return new GitConversation({
-      'diff --name-only --diff-filter=U': ok('src/a.js'),
-      'status --porcelain': ok('?? docs/superpowers/metrics/7.jsonl'),
+      [UNMERGED_FILES]: ok('src/a.js'),
+      [FILES_DIFFERING_FROM_THE_INDEX]: ok(nulSeparated('src/a.js', 'docs/superpowers/metrics/7.jsonl')),
       'checkout --merge -- src/a.js': ok(),
     })
   }
@@ -234,13 +235,11 @@ describe('BranchReconciliation, al concluir una ronda', () => {
     expect(git.asked('commit')).toBe(false)
   })
 
-  // Fix round 2 (Task 8) — `isMachineryPath` entra por constructor
-  // (`conventions/architecture.md`: la política no vive en el adaptador).
-  const esDeLaMaquinariaDePrueba = (path) => path.startsWith('docs/superpowers/')
+  const theLoopsOwnFootprint = (path) => path.startsWith('docs/superpowers/')
 
   it('a_machinery_file_outside_the_conflict_does_not_discard_and_the_round_still_resolves', () => {
-    const git = ConversationMother.aMachineryFileOutsideTheConflict()
-    const round = new BranchReconciliation({ git: git.run, isMachineryPath: esDeLaMaquinariaDePrueba }).conclude()
+    const git = ConversationMother.aTrackedMachineryFileModifiedOutsideTheConflict()
+    const round = new BranchReconciliation({ git: git.run, isMachineryPath: theLoopsOwnFootprint }).conclude()
 
     expect(round.outcome).toBe(ReconcileOutcome.RESOLVED)
     expect(git.asked('checkout --merge')).toBe(false)
@@ -250,7 +249,7 @@ describe('BranchReconciliation, al concluir una ronda', () => {
 
   it('a_genuinely_foreign_file_still_discards_even_alongside_a_machinery_file', () => {
     const git = ConversationMother.aForeignFileAlongsideAMachineryFile()
-    const round = new BranchReconciliation({ git: git.run, isMachineryPath: esDeLaMaquinariaDePrueba }).conclude()
+    const round = new BranchReconciliation({ git: git.run, isMachineryPath: theLoopsOwnFootprint }).conclude()
 
     expect(round.outcome).toBe(ReconcileOutcome.ROUND_DISCARDED)
     expect(round.reason).toBe(DiscardReason.TOUCHED_OUTSIDE_THE_CONFLICT)

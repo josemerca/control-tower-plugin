@@ -180,11 +180,29 @@ describe('el paso reconcile', () => {
     expect(after(agotado, OUTCOMES.FAILED).state).toBe(RUN_STATES.BLOCKED_RECONCILE)
   })
 
-  it('a_discarded_round_asks_again_without_spending_a_retry_because_nothing_was_resolved', () => {
-    const { run: siguiente } = after(enReconcile({ reconcileRetries: 1 }), OUTCOMES.DISCARDED)
+  // El descarte de reconcile NO es el de implement ni el del juez: allí la
+  // respuesta no se pudo leer y el árbol quedó como estaba; aquí el conflicto
+  // persiste (el descarte no aborta la fusión), así que sin gastar reintento
+  // toda ronda posterior vuelve a descartar y la escalera nunca baja.
+  it('a_discarded_round_spends_a_retry_because_the_conflict_survives_it_and_the_dispatch_was_paid', () => {
+    const { run: siguiente } = after(enReconcile({ reconcileRetries: 0 }), OUTCOMES.DISCARDED)
     expect(siguiente.step).toBe(STEPS.RECONCILE)
     expect(siguiente.reconcileRetries).toBe(1)
     expect(siguiente.discards).toBe(1)
+  })
+
+  it('discarded_rounds_alone_reach_blocked_reconcile_instead_of_looping_until_the_discard_budget_dies', () => {
+    const agotado = enReconcile({ reconcileRetries: DEFAULT_BUDGETS.reconcileRetries })
+    expect(after(agotado, OUTCOMES.DISCARDED).state).toBe(RUN_STATES.BLOCKED_RECONCILE)
+  })
+
+  it('the_ladder_from_a_first_conflict_to_blocked_reconcile_is_walked_by_rounds_that_only_ever_discard', () => {
+    const rondas = [OUTCOMES.FAILED, OUTCOMES.DISCARDED, OUTCOMES.DISCARDED]
+    let actual = { run: enReconcile({ reconcileRetries: 0 }), state: RUN_STATES.OPEN }
+    for (const outcome of rondas) actual = after(actual.run, outcome)
+
+    expect(actual.state).toBe(RUN_STATES.BLOCKED_RECONCILE)
+    expect(actual.run.discards).toBeLessThan(6)
   })
 
   it('the_last_committed_task_reconciles_before_it_verifies_globally', () => {
@@ -201,8 +219,18 @@ describe('la proyeccion del vocabulario de reconcile', () => {
     [ReconcileOutcome.CONFLICTING, OUTCOMES.FAILED],
     [ReconcileOutcome.UNMERGEABLE_TREE, OUTCOMES.FAILED],
     [ReconcileOutcome.ROUND_DISCARDED, OUTCOMES.DISCARDED],
+    [ReconcileOutcome.MARKERS_COMMITTED, OUTCOMES.FAILED],
   ])('%s se proyecta a %s', (miembro, esperado) => {
     expect(outcomeOfReconcile(miembro)).toBe(esperado)
+  })
+
+  // La lista de arriba está tecleada a mano, así que un miembro nuevo podría
+  // no aparecer en ella y el despacho seguiría sin cubrirse. Esto la ata al
+  // vocabulario: todo miembro se proyecta, lo hayan escrito arriba o no.
+  it('todo_miembro_del_vocabulario_tiene_proyeccion_y_ninguno_se_queda_sin_recorrer', () => {
+    for (const miembro of Object.values(ReconcileOutcome)) {
+      expect(() => outcomeOfReconcile(miembro), miembro).not.toThrow()
+    }
   })
 
   it('un_miembro_nuevo_sin_proyectar_lanza_en_vez_de_caer_en_una_rama_por_omision', () => {

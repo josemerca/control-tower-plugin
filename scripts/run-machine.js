@@ -258,16 +258,39 @@ function trasReconciliar(run, outcome, budgets) {
     case OUTCOMES.DONE:
       return abierto(run, { step: STEPS.GLOBAL })
     case OUTCOMES.FAILED:
-      return run.reconcileRetries < budgets.reconcileRetries
-        ? abierto(run, { step: STEPS.RECONCILE, reconcileRetries: run.reconcileRetries + 1 })
-        : cerrado(run, RUN_STATES.BLOCKED_RECONCILE)
-    // La ronda que se rechazó sin tocar el árbol: como en implement y en el
-    // juez, no gasta reintento. Su freno es MAX_DISCARDS, que ya existe.
+      return reconcileBudgetSpent(run, budgets)
+        ? cerrado(run, RUN_STATES.BLOCKED_RECONCILE)
+        : abierto(run, { step: STEPS.RECONCILE, reconcileRetries: run.reconcileRetries + 1 })
+    // La ronda descartada SÍ gasta reintento, y aquí es donde este paso se
+    // separa de implement y del juez. Allí un descarte significa "la respuesta
+    // no se pudo leer" y el árbol quedó como estaba, así que la ronda siguiente
+    // arranca de cero. Aquí el conflicto PERSISTE: el descarte no aborta la
+    // fusión, así que toda llamada posterior vuelve a `conclude()` y vuelve a
+    // descartar. Sin gastar, `reconcileRetries` no se consume nunca,
+    // BLOCKED_RECONCILE y el relevo al agente del slice son inalcanzables, y el
+    // run acaba muriendo en MAX_DISCARDS —"no hay veredicto de fiar"— hablando
+    // de una fusión a medias. Y lo caro ya se gastó: cada descarte consumió un
+    // despacho real de ct-reconciler.
     case OUTCOMES.DISCARDED:
-      return abierto(run, { step: STEPS.RECONCILE, discards: run.discards + 1 })
+      return reconcileBudgetSpent(run, budgets)
+        ? cerrado(run, RUN_STATES.BLOCKED_RECONCILE)
+        : abierto(run, {
+            step: STEPS.RECONCILE,
+            reconcileRetries: run.reconcileRetries + 1,
+            discards: run.discards + 1,
+          })
     default:
       return imposible(run, outcome)
   }
+}
+
+// La pregunta del presupuesto de reconcile, con el dato. `ct-step` la hace para
+// decidir a quién nombra el mensaje —al reconciliador o ya al agente del
+// slice— y la tabla la hace para decidir si retiene el paso o cierra en
+// BLOCKED_RECONCILE: es UNA decisión, y las dos mitades tienen que contestar lo
+// mismo o el verbo anuncia una cosa y la máquina hace otra.
+export function reconcileBudgetSpent(run, budgets = DEFAULT_BUDGETS) {
+  return run.reconcileRetries >= budgets.reconcileRetries
 }
 
 // La proyección del vocabulario de Task 4 (`reconcile-outcome.js`) al
@@ -282,6 +305,11 @@ export function outcomeOfReconcile(reconcileOutcome) {
       return OUTCOMES.DONE
     case ReconcileOutcome.CONFLICTING:
     case ReconcileOutcome.UNMERGEABLE_TREE:
+    // Marcas de conflicto DENTRO de un commit de fusión que ya está hecho: no
+    // hay ronda que descartar (no queda fusión viva) y el paso no avanza — lo
+    // arregla quien tiene shell, y si no lo arregla, bloquea. Misma proyección
+    // que el árbol sucio, por el mismo motivo.
+    case ReconcileOutcome.MARKERS_COMMITTED:
       return OUTCOMES.FAILED
     case ReconcileOutcome.ROUND_DISCARDED:
       return OUTCOMES.DISCARDED

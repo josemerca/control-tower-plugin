@@ -58,7 +58,7 @@ import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unl
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
-import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS, outcomeOfReconcile } from './run-machine.js'
+import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS, outcomeOfReconcile, reconcileBudgetSpent } from './run-machine.js'
 import { extractTasks } from './plan-tasks.js'
 import { BranchReconciliation } from './branch-reconciliation.js'
 import { ReconcileOutcome, DiscardReason } from './reconcile-outcome.js'
@@ -276,6 +276,14 @@ const commitsDelRun = (desde, exclusion) => {
 let run
 if (existsSync(stateFile)) {
   run = JSON.parse(readFileSync(stateFile, 'utf8'))
+  // Fase B: un run ABIERTO antes de que `reconcileRetries` existiera no trae
+  // el campo, y `undefined < 2` es `false` — el presupuesto se leería como
+  // agotado y el primer conflicto cerraría en BLOCKED_RECONCILE sin haber
+  // despachado al reconciliador ni una vez. Justo los runs más viejos, que son
+  // los que más se ha movido su base. Mismo remedio y mismo motivo que el
+  // `sliceCommits || 0` de unas líneas más abajo: ningún estado persistido
+  // gana un campo obligatorio.
+  run = { ...run, reconcileRetries: run.reconcileRetries || 0 }
   // Un run entregado no tiene paso siguiente, y se sabe SIN reconstruir la
   // tabla: el cierre bueno se persiste como `closed` (es lo que lee el gate
   // de `dispatch-check --release`). `next` contesta "ya está" y sale bien;
@@ -1153,7 +1161,16 @@ const gitParaReconciliar = (argv) => {
       maxBuffer: GIT_MAX_BUFFER, timeout: 120_000, killSignal: 'SIGKILL',
     }) }
   } catch (e) {
-    return { code: typeof e.status === 'number' ? e.status : 1, stdout: String(e.stdout || '') }
+    // Sin `status` numérico el proceso no terminó por su cuenta: lo mató una
+    // señal, y la que llega aquí es la del tope de tiempo (SIGKILL). Devolver
+    // `code: 1` cierra en falso — un `git merge` matado se clasificaría como
+    // una fusión que git rechazó (UNMERGEABLE_TREE), y el mensaje mandaría al
+    // agente del slice a limpiar un árbol que está perfectamente. No se puede
+    // interpretar lo que no se llegó a medir: se para aquí.
+    if (typeof e.status !== 'number') {
+      die(`git ${argv.join(' ')} no terminó por su cuenta (señal ${e.signal || 'desconocida'}): saltó el tope de tiempo o alguien lo mató. No se distingue de un fallo de git y no se va a interpretar como tal.`, EXIT.PRECONDITION)
+    }
+    return { code: e.status, stdout: String(e.stdout || '') }
   }
 }
 
@@ -1171,7 +1188,16 @@ const esRutaDeLaMaquinaria = (path) => LOOP_ARTIFACT_PATTERNS.some((pat) => matc
 // siguiente encabezado de igual o menor nivel — mismo criterio que
 // `extract_section` de `skills/subagent-driven-development/scripts/task-brief`
 // (bash/awk), reescrito aquí porque el paquete de reconciliación lo pega
-// `verboReconcile` directamente, sin ese script de por medio. Respeta los
+// `verboReconcile` directamente, sin ese script de por medio.
+//
+// LA COPIA ESTÁ DECLARADA Y MEDIDA (`conventions/decisions.md`, "cuando la
+// copia es inevitable"): la regla vive en dos idiomas porque el script es bash
+// y esto es JavaScript, y `__tests__/seccion-del-plan.test.js` pasa los mismos
+// planes por las dos implementaciones y compara la salida byte a byte — así
+// reescribir las dos pasa y tocar una sola falla. Hasta que ese test existió,
+// las dos ya habían divergido en las comillas del mensaje de sección ausente.
+//
+// Respeta los
 // cercados de código para no confundir un comentario "### ..." de un bloque
 // con un encabezado real. La ausencia se declara, nunca se calla — un hueco en
 // blanco leído como "sección vacía" no es lo mismo que "el plan no la trae".
@@ -1195,7 +1221,7 @@ function seccionDelPlan(markdown, encabezado) {
     if (dentro) salida.push(linea)
   }
   const contenido = salida.join('\n').trim()
-  return contenido || `(sección "${encabezado}" no encontrada en el plan)`
+  return contenido || `(sección '${encabezado}' no encontrada en el plan)`
 }
 
 // El log de los commits que la base trajo — lo primero que abriría un humano
@@ -1262,6 +1288,16 @@ function escribirPaqueteDeReconciliacion({ rama, ronda, intento }) {
   return paquete
 }
 
+// La última bala de la escalera, y la promesa que `agents/ct-reconciler.md` le
+// hace al reconciliador cuando le dice que declarar "no sé resolverlo" lleva a
+// alguien con shell. Se dice IGUAL venga de un CONFLICTING que nadie tocó o de
+// una ronda descartada: es el mismo relevo, y escribirlo dos veces es lo que
+// dejaría una de las dos mitades sin escribir.
+function relevoAlAgenteDelSlice() {
+  out(`ct-reconciler agotó sus ${DEFAULT_BUDGETS.reconcileRetries} ronda(s) sin resolverlo: le toca al agente del propio slice, que sí tiene Bash. Que resuelva el conflicto a mano, deje los ficheros stageados y llame a:`)
+  out(`  ct-step reconcile --plan ${planPath} --issue ${issue}`)
+}
+
 // Idempotente por MERGE_HEAD (Tarea 7): sin fusión en marcha, arranca la
 // siguiente ronda contra la base; con una a medias, concluye la resolución
 // que la sesión ya haya dejado en el índice. El estado de "en qué ronda
@@ -1288,12 +1324,13 @@ function verboReconcile() {
     duration_ms: Date.now() - arranque,
   })
   // El presupuesto que decide el mensaje es el de ESTA ronda, ANTES de que
-  // `after()` (más abajo, en el despacho final) lo consuma: es la misma
-  // cuenta que `trasReconciliar` usa para decidir si retiene el paso o
-  // cierra en BLOCKED_RECONCILE, y aquí sólo se lee, nunca se repite la
-  // decisión — el mensaje describe lo que la tabla va a decidir, no decide
-  // por su cuenta.
-  const quedaPresupuesto = run.reconcileRetries < DEFAULT_BUDGETS.reconcileRetries
+  // `after()` (más abajo, en el despacho final) lo consuma. La pregunta la
+  // contesta `run-machine.js`, que es quien tiene la regla: aquí sólo se lee.
+  // Rederivarla —`run.reconcileRetries < DEFAULT_BUDGETS.reconcileRetries`
+  // escrito otra vez— era la misma decisión en dos ficheros, y con la ronda
+  // descartada gastando reintento las dos copias habrían dejado de coincidir:
+  // el verbo anunciaría otra ronda y la tabla cerraría el run.
+  const quedaPresupuesto = !reconcileBudgetSpent(run)
   switch (ronda.outcome) {
     case ReconcileOutcome.UP_TO_DATE:
       out(`reconcile: up-to-date (la base "${rama}" no se ha movido)`)
@@ -1317,9 +1354,20 @@ function verboReconcile() {
         out(`  - el paquete de reconciliación: ${paquete}`)
         out(`Cuando vuelva:  ct-step reconcile --plan ${planPath} --issue ${issue}  (concluye la fusión a medias — lo decide MERGE_HEAD, no hace falta indicar nada más).`)
       } else {
-        out(`ct-reconciler agotó sus ${DEFAULT_BUDGETS.reconcileRetries} ronda(s) sin resolverlo: le toca al agente del propio slice, que sí tiene Bash. Que resuelva el conflicto a mano, deje los ficheros stageados y llame a:`)
-        out(`  ct-step reconcile --plan ${planPath} --issue ${issue}`)
+        relevoAlAgenteDelSlice()
       }
+      break
+    // La mitigación que el diseño prometió por escrito ("Límites declarados"):
+    // el agente del slice tiene Bash, así que puede stagear y comitear la
+    // fusión por su cuenta sin volver a pasar por aquí. Cuando eso ocurre, lo
+    // único que queda por mirar es el commit de fusión ya hecho — y lo que se
+    // mira es lo que la validación se saltó: que no lleve marcas dentro. No es
+    // hermético; mueve el caso de la retina del humano al loop.
+    case ReconcileOutcome.MARKERS_COMMITTED:
+      out(`reconcile: markers-committed — HEAD ya es un commit de fusión, hecho fuera de este verbo, y ${ronda.files.length} fichero(s) suyos traen marcas de conflicto DENTRO del commit:`)
+      for (const f of ronda.files) out(`  - ${f}`)
+      out('No hay fusión viva que concluir ni ronda que descartar: la pull request llevaría los marcadores dentro, y si el conflicto cae en un fichero que los controles no compilan, sale verde.')
+      out('DESPACHA AL AGENTE DEL SLICE (tiene Bash) a quitar las marcas y comitear el arreglo, y vuelve a preguntar con ct-step next.')
       break
     // El árbol sucio del propio slice: git ni siquiera pudo EMPEZAR la
     // fusión. No hay contenido en conflicto que enseñarle al reconciliador —
@@ -1336,10 +1384,16 @@ function verboReconcile() {
     case ReconcileOutcome.ROUND_DISCARDED: {
       out(`reconcile: round-discarded (${ronda.reason}) — ${ARREGLO_DE_DESCARTE[ronda.reason]}`)
       out('La ronda se descartó sin comitear nada: el merge sigue vivo, con los ficheros en conflicto restaurados a como los dejó git.')
-      // El merge SIGUE EN MARCHA (el descarte no lo aborta), así que sigue
-      // siendo turno de ct-reconciler — el paquete nuevo lleva el motivo del
-      // descarte para que el próximo intento no sea ciego a por qué falló el
-      // anterior.
+      // El merge SIGUE EN MARCHA (el descarte no lo aborta), así que mientras
+      // quede presupuesto sigue siendo turno de ct-reconciler — el paquete
+      // nuevo lleva el motivo del descarte para que el próximo intento no sea
+      // ciego a por qué falló el anterior. Agotado el presupuesto, el relevo es
+      // el MISMO que en CONFLICTING: es la misma escalera, y una ronda
+      // descartada gasta reintento precisamente para que llegue hasta abajo.
+      if (!quedaPresupuesto) {
+        relevoAlAgenteDelSlice()
+        break
+      }
       const paquete = escribirPaqueteDeReconciliacion({ rama, ronda, intento: proximoIntentoDeReconciliacion() })
       out(`REDESPACHA ct-reconciler (subagente — declarado SIN Bash y SIN Write: ${RECONCILER_TOOLS}) con el paquete nuevo:`)
       out(`  - el paquete de reconciliación: ${paquete}`)

@@ -5,7 +5,7 @@ describe('ReconcileOutcome', () => {
   it('every_member_is_distinct_so_no_two_states_that_are_fixed_differently_collapse', () => {
     const members = Object.values(ReconcileOutcome)
     expect(new Set(members).size).toBe(members.length)
-    expect(members).toHaveLength(6)
+    expect(members).toHaveLength(7)
   })
 
   it('the_vocabulary_cannot_be_widened_at_runtime_by_a_consumer', () => {

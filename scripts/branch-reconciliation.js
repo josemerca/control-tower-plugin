@@ -1,5 +1,7 @@
 import { DiscardReason, ReconcileOutcome, ReconcileRound } from './reconcile-outcome.js'
 
+const CONFLICT_MARKERS_ANCHORED_AS_GIT_WRITES_THEM = ['^<<<<<<< ', '^=======$', '^>>>>>>> ']
+
 export class BranchReconciliation {
   constructor({ git, isMachineryPath = () => false }) {
     this.git = git
@@ -7,10 +9,19 @@ export class BranchReconciliation {
   }
 
   merge({ baseBranch }) {
-    this.git(['fetch', 'origin', baseBranch])
+    const fetched = this.git(['fetch', 'origin', baseBranch])
+    if (fetched.code !== 0) {
+      throw new Error(`git fetch origin ${baseBranch} failed (exit code ${fetched.code}): a stale origin/${baseBranch} cannot be told apart from a base that did not move`)
+    }
     const behind = this.git(['rev-list', '--count', `HEAD..origin/${baseBranch}`])
+    if (behind.code !== 0) {
+      throw new Error(`git rev-list --count HEAD..origin/${baseBranch} failed (exit code ${behind.code}): how far behind the base this branch is cannot be counted`)
+    }
     if (Number(behind.stdout.trim()) === 0) {
-      return ReconcileRound.of({ outcome: ReconcileOutcome.UP_TO_DATE, files: [] })
+      const committed = this.markersCommittedInTheMergeAtHead()
+      return committed.length
+        ? ReconcileRound.of({ outcome: ReconcileOutcome.MARKERS_COMMITTED, files: committed })
+        : ReconcileRound.of({ outcome: ReconcileOutcome.UP_TO_DATE, files: [] })
     }
     const merged = this.git(['merge', '--no-edit', `origin/${baseBranch}`])
     if (merged.code === 0) {
@@ -26,9 +37,23 @@ export class BranchReconciliation {
     return this.git(['rev-parse', '--verify', '--quiet', 'MERGE_HEAD']).code === 0
   }
 
+  headIsAMergeCommit() {
+    return this.git(['rev-parse', '--verify', '--quiet', 'HEAD^2']).code === 0
+  }
+
+  markersCommittedInTheMergeAtHead() {
+    if (this.isMergeInProgress() || !this.headIsAMergeCommit()) return []
+    const brought = this.filesBroughtByTheMergeAtHead()
+    if (!brought.length) return []
+    return this.filesCarryingMarkers(['HEAD', '--', ...brought]).map((path) => path.replace(/^HEAD:/, ''))
+  }
+
+  filesBroughtByTheMergeAtHead() {
+    return this.pathsIn(this.git(['diff', '--name-only', '-z', 'HEAD^1', 'HEAD']))
+  }
+
   unmergedFiles() {
-    return this.git(['diff', '--name-only', '--diff-filter=U'])
-      .stdout.split('\n').map((l) => l.trim()).filter(Boolean)
+    return this.pathsIn(this.git(['diff', '--name-only', '-z', '--diff-filter=U']))
   }
 
   conclude() {
@@ -53,19 +78,29 @@ export class BranchReconciliation {
   }
 
   filesTouchedOutside(files) {
-    return this.git(['status', '--porcelain'])
-      .stdout.split('\n')
-      .filter((line) => line.trim().length > 0)
-      .map((line) => line.slice(3).trim())
+    return this.filesDifferingFromTheIndex()
       .filter((path) => !files.includes(path))
       .filter((path) => !this.isMachineryPath(path))
   }
 
+  filesDifferingFromTheIndex() {
+    return this.pathsIn(this.git(['diff', '--name-only', '-z']))
+  }
+
   filesStillCarryingMarkers(files) {
-    const result = this.git(['grep', '-l', '-e', '<<<<<<<', '-e', '=======', '-e', '>>>>>>>', '--', ...files])
+    return this.filesCarryingMarkers(['--', ...files])
+  }
+
+  filesCarryingMarkers(scope) {
+    const patterns = CONFLICT_MARKERS_ANCHORED_AS_GIT_WRITES_THEM.flatMap((pattern) => ['-e', pattern])
+    const result = this.git(['grep', '-l', ...patterns, ...scope])
     if (result.code !== 0 && result.code !== 1) {
       throw new Error(`git grep failed while checking for conflict markers (exit code ${result.code})`)
     }
-    return result.stdout.split('\n').map((l) => l.trim()).filter(Boolean)
+    return result.stdout.split('\n').map((line) => line.trim()).filter(Boolean)
+  }
+
+  pathsIn(result) {
+    return result.stdout.split('\0').filter((path) => path.trim().length > 0)
   }
 }

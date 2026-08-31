@@ -88,16 +88,13 @@ function worktreeEnReconcile({ tasksTotal = 1 } = {}) {
 // cómo avanza una base de verdad que fabricar el commit a pelo con
 // `hash-object`.
 //
-// El `.gitignore` con `.agent/*` (salvo `SLICE.md`) es un HALLAZGO, no una
-// comodidad: sin él, `.agent/run-4.json` —que `ct-step` escribe sin
-// comitear, y que `ct-init` no gitignora salvo por `SLICE.md`— aparece en
-// `git status --porcelain` como "??  .agent/", y `filesTouchedOutside`
-// (branch-reconciliation.js) NO distingue esa basura propia de un fichero
-// que la resolución tocó de más: descarta con `TOUCHED_OUTSIDE_THE_CONFLICT`
-// SIEMPRE, antes de llegar nunca a `MARKERS_LEFT` ni a `RESOLVED`. Verificado
-// a mano (ver el informe): sin este `.gitignore`, git status muestra
-// `?? .agent/`; con él, sólo `UU shared.txt`. Ver "Preocupaciones" en el
-// informe — no se tocó `branch-reconciliation.js` para arreglarlo.
+// El `.gitignore` con `.agent/*` (salvo `SLICE.md`) reproduce lo que `ct-init`
+// siembra en un repo de verdad, y ya no es lo que hace que este fixture
+// funcione: la review final de rama demostró que la pregunta de
+// `filesTouchedOutside` estaba mal hecha —`git status --porcelain` lista
+// TAMBIÉN lo que git stageó limpio en la fusión, así que `RESOLVED` era
+// inalcanzable— y desde el arreglo la pregunta es `git diff --name-only`, que
+// no ve ni lo stageado limpio ni lo que no está trackeado.
 function worktreeEnConflicto({ reconcileRetries = 0 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ct-step-reconcile-conflicto-'))
   const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' })
@@ -611,5 +608,103 @@ describe('ct-step reconcile', () => {
         expect(r.stdout).toContain(segundo)
       } finally { rmSync(dir, { recursive: true, force: true }) }
     })
+  })
+})
+
+// La ESCALERA de reconcile, de punta a punta y contra git de verdad. La review
+// final de rama midió que no llegaba abajo: como el descarte no gastaba
+// reintento y el merge sigue vivo entre rondas, todas las rondas a partir de la
+// segunda descartaban, `reconcileRetries` no se consumía nunca y
+// BLOCKED_RECONCILE (exit 13) era inalcanzable — el run moría en MAX_DISCARDS
+// con un exit 3 que habla de "no hay veredicto de fiar" sobre una fusión a
+// medias. Este test recorre las tres rondas reales y exige el final.
+describe('la escalera de reconcile llega hasta abajo', () => {
+  it('tres rondas sin resolver acaban en BLOCKED_RECONCILE, con exit 13 y el turno del agente del slice', () => {
+    const dir = worktreeEnConflicto({ reconcileRetries: 0 })
+    try {
+      const primera = step(dir, ['reconcile'])
+      expect(primera.status).toBe(0)
+      expect(primera.stdout).toMatch(/DESPACHA ct-reconciler/)
+
+      const segunda = step(dir, ['reconcile'])
+      expect(segunda.status).toBe(0)
+      expect(segunda.stdout).toMatch(/round-discarded \(markers-left\)/)
+      const trasLaSegunda = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))
+      expect(trasLaSegunda.reconcileRetries).toBe(DEFAULT_BUDGETS.reconcileRetries)
+
+      const tercera = step(dir, ['reconcile'])
+      expect(tercera.stdout).toMatch(/round-discarded \(markers-left\)/)
+      expect(tercera.stdout).toMatch(/ct-reconciler agotó sus \d+ ronda\(s\)/)
+      expect(tercera.stdout).toMatch(/le toca al agente del propio slice, que sí tiene Bash/)
+      expect(tercera.stdout).not.toMatch(/REDESPACHA ct-reconciler/)
+      expect(tercera.status).toBe(13)
+      expect(tercera.stdout).toMatch(/run blocked-reconcile/)
+      const alFinal = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))
+      expect(alFinal.discards).toBeLessThan(6)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  // Un run ABIERTO antes de que existiera `reconcileRetries` no trae el campo.
+  // `undefined < 2` es `false`, así que sin normalizarlo al cargar el estado el
+  // presupuesto se lee como agotado y el primer conflicto cierra el run sin
+  // haber despachado al reconciliador ni una vez — justo a los runs más viejos,
+  // que son aquéllos cuya base más se ha movido.
+  it('un run abierto antes de que el campo existiera despacha al reconciliador en vez de bloquear a la primera', () => {
+    const dir = worktreeEnConflicto({ reconcileRetries: 0 })
+    try {
+      const estado = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))
+      delete estado.reconcileRetries
+      writeFileSync(join(dir, '.agent', 'run-4.json'), JSON.stringify(estado, null, 2))
+
+      const r = step(dir, ['reconcile'])
+
+      expect(r.status).toBe(0)
+      expect(r.stdout).toMatch(/DESPACHA ct-reconciler/)
+      expect(r.stdout).not.toMatch(/agotó sus/)
+      const despues = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))
+      expect(despues.reconcileRetries).toBe(1)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+})
+
+// El límite declarado del diseño: el agente del slice tiene Bash, así que puede
+// stagear y comitear la fusión sin volver a llamar a este verbo. Cuando lo hace
+// mal, lo único que queda por mirar es el commit ya hecho — y la validación
+// post-hoc es lo que impide que la rama siga a `global` con los marcadores
+// dentro del commit.
+describe('ct-step reconcile valida post-hoc la fusión que otro comiteó', () => {
+  function worktreeConLaFusionComiteadaAMano(resolucion) {
+    const dir = worktreeEnConflicto({ reconcileRetries: 0 })
+    const git = (...a) => execFileSync('git', a, { cwd: dir, stdio: 'ignore' })
+    git('fetch', '-q', 'origin', 'main')
+    const fusion = spawnSync('git', ['merge', '--no-edit', 'origin/main'], { cwd: dir, encoding: 'utf8' })
+    if (fusion.status === 0) throw new Error('el montaje esperaba un conflicto real y no lo obtuvo')
+    writeFileSync(join(dir, 'shared.txt'), resolucion)
+    git('add', 'shared.txt')
+    git('commit', '-qm', 'fusion resuelta a mano, sin pasar por ct-step reconcile')
+    return dir
+  }
+
+  it('un commit de fusión con marcadores dentro no se anuncia como up-to-date: nombra el fichero y manda al agente del slice', () => {
+    const dir = worktreeConLaFusionComiteadaAMano('<<<<<<< HEAD\nlínea de la tarea\n=======\nlínea de la base avanzada\n>>>>>>> origin/main\n')
+    try {
+      const r = step(dir, ['reconcile'])
+      expect(r.stdout).toMatch(/markers-committed/)
+      expect(r.stdout).not.toMatch(/up-to-date/)
+      expect(r.stdout).toContain('- shared.txt')
+      expect(r.stdout).toMatch(/DESPACHA AL AGENTE DEL SLICE/)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('un commit de fusión bien resuelto sigue siendo up-to-date y avanza a global', () => {
+    const dir = worktreeConLaFusionComiteadaAMano('línea de la tarea\nlínea de la base avanzada\n')
+    try {
+      const r = step(dir, ['reconcile'])
+      expect(r.status).toBe(0)
+      expect(r.stdout).toMatch(/up-to-date/)
+      expect(r.stdout).not.toMatch(/markers-committed/)
+      const despues = JSON.parse(readFileSync(join(dir, '.agent', 'run-4.json'), 'utf8'))
+      expect(despues.step).toBe('global')
+    } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 })

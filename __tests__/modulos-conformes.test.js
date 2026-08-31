@@ -12,6 +12,8 @@ class NacidosConformes {
     '__tests__/plugin-yardstick.test.js',
     '__tests__/yardstick-citation.test.js',
     '__tests__/conventions-vara.test.js',
+    'scripts/branch-reconciliation.js',
+    'scripts/reconcile-outcome.js',
     '__tests__/modulos-conformes.test.js',
   ]
 
