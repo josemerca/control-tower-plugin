@@ -272,7 +272,7 @@ scripts/      la lógica — módulos puros y los ejecutables .mjs (los cuatro d
 hooks/        SessionStart (hidratación), Stop (estado al día), PreToolUse (guarda de commits)
 dist/         bundles de los hooks — DERIVADO, trackeado, ver arriba
 skills/       los 11 skills forkados + writing-plans-prescriptive (propio) + LICENSE-superpowers + FORK.md
-__tests__/    72 ficheros, 2.091 tests
+__tests__/    119 ficheros, 2.973 tests
 docs/loop/    el documento del ciclo: fuente, HTML autocontenido y PDF
 docs/         los handoffs de cada ronda (prompt-fNN-*.md) — cómo se llegó hasta aquí
 ```
