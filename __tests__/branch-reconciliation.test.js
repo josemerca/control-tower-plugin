@@ -258,7 +258,7 @@ describe('BranchReconciliation, al concluir una ronda', () => {
     expect(git.asked('commit')).toBe(false)
   })
 
-  it('without isMachineryPath (the default), a machinery-shaped file still discards — the default never fails open', () => {
+  it('without_a_machinery_predicate_a_machinery_shaped_file_still_discards_so_the_default_never_fails_open', () => {
     const git = ConversationMother.aMachineryShapedFileWithoutThePredicate()
     const round = new BranchReconciliation({ git: git.run }).conclude()
 
