@@ -35,11 +35,19 @@
 // proceso.
 // ============================================================================
 
+import { ReconcileOutcome } from './reconcile-outcome.js'
+
 export const STEPS = Object.freeze({
   IMPLEMENT: 'implement',
   CONTROLS: 'controls',
   JUDGE: 'judge',
   COMMIT: 'commit',
+  // RECONCILE va ANTES de GLOBAL y no después: la punta a punta del plan
+  // (`global`) tiene que correr sobre el árbol ya puesto al día con su base,
+  // no sobre uno que se quede atrás y que luego el merge de la pull request
+  // vuelva a mover. Verificar antes de reconciliar mediría un árbol que ya no
+  // es el que se entrega.
+  RECONCILE: 'reconcile',
   // GLOBAL / SLICE_JUDGE (§3.7) y E2E son los tres pasos que NO son por tarea:
   // se entra en ellos al comitear la última, y cierran la SLICE, no una tarea.
   GLOBAL: 'global',
@@ -71,6 +79,7 @@ export const RUN_STATES = Object.freeze({
   BLOCKED_COMMIT: 'blocked-commit',
   BLOCKED_GLOBAL: 'blocked-global',
   BLOCKED_SLICE_JUDGE: 'blocked-slice-judge',
+  BLOCKED_RECONCILE: 'blocked-reconcile',
   // Mismo sitio y misma forma que sus hermanos: un cierre en fallo del que
   // sale una persona, no un reintento.
   BLOCKED_E2E: 'blocked-e2e',
@@ -81,6 +90,7 @@ export const DEFAULT_BUDGETS = Object.freeze({
   controlRetries: 2,
   judgeRetries: 2,
   correctionRetries: 2,
+  reconcileRetries: 2,
 })
 
 // El run recién nacido: tarea 1, paso implement, todos los contadores a cero.
@@ -99,6 +109,7 @@ export function newRun({ plan, issue, baseSha, tasksTotal, e2eRuns }) {
     controlRetries: 0,
     judgeRetries: 0,
     correctionRetries: 0,
+    reconcileRetries: 0,
     discards: 0,
     spendUsd: 0,
   })
@@ -138,6 +149,7 @@ export function after(run, outcome, budgets = DEFAULT_BUDGETS) {
     case STEPS.CONTROLS: return trasLosControles(run, outcome, budgets)
     case STEPS.JUDGE: return trasElJuez(run, outcome, budgets)
     case STEPS.COMMIT: return trasElCommit(run, outcome)
+    case STEPS.RECONCILE: return trasReconciliar(run, outcome, budgets)
     case STEPS.GLOBAL: return trasLaGlobal(run, outcome)
     case STEPS.SLICE_JUDGE: return trasElJuezDeSlice(run, outcome)
     case STEPS.E2E: return trasElE2e(run, outcome)
@@ -217,22 +229,64 @@ function trasElCommit(run, outcome) {
             correctionRetries: 0,
           })
         // La última tarea comiteada NO entrega el run: §3.7 abre aquí la fase
-        // GLOBAL, con los tres contadores a cero (la fase estrena su cuenta,
-        // como cada tarea). `delivered` pasa a significar tareas comiteadas +
-        // punta a punta verde + slice juzgado, no sólo lo primero.
+        // RECONCILE — la rama tiene que quedar al día con su base antes de que
+        // GLOBAL mida la punta a punta — con los tres contadores a cero (la
+        // fase estrena su cuenta, como cada tarea). `delivered` pasa a
+        // significar tareas comiteadas + rama reconciliada + punta a punta
+        // verde + slice juzgado, no sólo lo primero.
         //
-        // `task` NO avanza en ninguno de los pasos de esa cola final (GLOBAL,
-        // SLICE_JUDGE y, si el spec declaró recorridos, E2E): son pasos de la
-        // SLICE, no de una tarea sexta que no existe. (Ojo: eso rompe la
-        // invariante `commits === task - 1` que ct-step comprueba al cargar el
-        // estado — ver Task 8.)
-        : abierto(run, { step: STEPS.GLOBAL, controlRetries: 0, judgeRetries: 0, correctionRetries: 0 })
+        // `task` NO avanza en ninguno de los pasos de esa cola final
+        // (RECONCILE, GLOBAL, SLICE_JUDGE y, si el spec declaró recorridos,
+        // E2E): son pasos de la SLICE, no de una tarea sexta que no existe.
+        // (Ojo: eso rompe la invariante `commits === task - 1` que ct-step
+        // comprueba al cargar el estado — ver Task 8.)
+        : abierto(run, { step: STEPS.RECONCILE, controlRetries: 0, judgeRetries: 0, correctionRetries: 0 })
     // Un commit que falla no se reintenta: si git dice que no, es el índice o
     // el mensaje, y ninguna de las dos cosas se arregla volviendo a implementar.
     case OUTCOMES.FAILED:
       return cerrado(run, RUN_STATES.BLOCKED_COMMIT)
     default:
       return imposible(run, outcome)
+  }
+}
+
+// LA RECONCILIACIÓN (Fase B). La política vive aquí, no en el verbo que hará
+// el `git merge`/`git rebase`: qué paso viene después de cada resultado y qué
+// cuenta como agotado es una decisión de esta tabla.
+function trasReconciliar(run, outcome, budgets) {
+  switch (outcome) {
+    case OUTCOMES.DONE:
+      return abierto(run, { step: STEPS.GLOBAL })
+    case OUTCOMES.FAILED:
+      return run.reconcileRetries < budgets.reconcileRetries
+        ? abierto(run, { step: STEPS.RECONCILE, reconcileRetries: run.reconcileRetries + 1 })
+        : cerrado(run, RUN_STATES.BLOCKED_RECONCILE)
+    // La ronda que se rechazó sin tocar el árbol: como en implement y en el
+    // juez, no gasta reintento. Su freno es MAX_DISCARDS, que ya existe.
+    case OUTCOMES.DISCARDED:
+      return abierto(run, { step: STEPS.RECONCILE, discards: run.discards + 1 })
+    default:
+      return imposible(run, outcome)
+  }
+}
+
+// La proyección del vocabulario de Task 4 (`reconcile-outcome.js`) al
+// vocabulario del flujo. Vive aquí y no en `ct-step.mjs`: traducir el
+// resultado de un paso al vocabulario del flujo es cosa del destino, no del
+// conductor.
+export function outcomeOfReconcile(reconcileOutcome) {
+  switch (reconcileOutcome) {
+    case ReconcileOutcome.UP_TO_DATE:
+    case ReconcileOutcome.MERGED:
+    case ReconcileOutcome.RESOLVED:
+      return OUTCOMES.DONE
+    case ReconcileOutcome.CONFLICTING:
+    case ReconcileOutcome.UNMERGEABLE_TREE:
+      return OUTCOMES.FAILED
+    case ReconcileOutcome.ROUND_DISCARDED:
+      return OUTCOMES.DISCARDED
+    default:
+      throw new Error(`desenlace de reconciliación sin proyectar: "${reconcileOutcome}"`)
   }
 }
 
