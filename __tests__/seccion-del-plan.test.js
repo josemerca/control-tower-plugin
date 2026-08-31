@@ -90,6 +90,16 @@ class PlanMother {
     ].join('\n')
   }
 
+  static a_section_closed_by_a_sibling_heading_at_the_same_level() {
+    return [
+      '# Plan', '', '## 1. Context', 'algo previo', '',
+      HEADING, 'El estado final del slice.', '',
+      '### Out of scope', 'fuera de la sección porque es hermano', '',
+      '## 2. Closed decisions', 'D-1: fuera de la sección', '',
+      ...PlanMother.#aTaskSoTaskBriefHasSomethingToExtract(),
+    ].join('\n')
+  }
+
   static #aTaskSoTaskBriefHasSomethingToExtract() {
     return ['## Task 1: hacer algo', '**Files:** a.js', '']
   }
@@ -110,6 +120,7 @@ describe('la misma regla escrita dos veces: extract_section en awk y seccionDelP
     ['a_plan_that_never_declared_the_section', PlanMother.aPlanThatNeverDeclaredTheSection()],
     ['a_section_declared_twice_where_only_the_first_counts', PlanMother.aSectionDeclaredTwiceWhereOnlyTheFirstCounts()],
     ['a_heading_with_something_else_tacked_onto_the_same_line', PlanMother.aHeadingWithSomethingElseTackedOntoTheSameLine()],
+    ['a_section_closed_by_a_sibling_heading_at_the_same_level', PlanMother.a_section_closed_by_a_sibling_heading_at_the_same_level()],
   ]
 
   it.each(planes)('las dos implementaciones dicen lo mismo sobre %s', (_nombre, plan) => {
