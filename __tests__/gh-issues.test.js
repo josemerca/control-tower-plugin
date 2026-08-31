@@ -116,3 +116,46 @@ describe('partitionByEpic', () => {
     }
   })
 })
+
+describe('normalizeGraphqlIssues — traduce la respuesta GraphQL a la forma REST que el resto del código espera', () => {
+  it('aplana páginas, baja state a minúsculas y normaliza labels/milestone', async () => {
+    const { normalizeGraphqlIssues } = await import('../scripts/gh-issues.js')
+    const pages = [
+      { data: { repository: { issues: { nodes: [
+        { number: 501, title: '#1 login', body: 'x <!-- ct-order:1 -->', state: 'OPEN', milestone: { title: 'Epic' }, labels: { nodes: [{ name: 'type:backend' }, { name: 'area:api' }] } },
+      ], pageInfo: { hasNextPage: true, endCursor: 'a' } } } } },
+      { data: { repository: { issues: { nodes: [
+        { number: 502, title: '#2 scoring', body: 'y <!-- ct-order:2 -->', state: 'CLOSED', milestone: null, labels: { nodes: [] } },
+      ], pageInfo: { hasNextPage: false, endCursor: 'b' } } } } },
+    ]
+    expect(normalizeGraphqlIssues(pages)).toEqual([
+      { number: 501, title: '#1 login', body: 'x <!-- ct-order:1 -->', state: 'open', milestone: { title: 'Epic' }, labels: [{ name: 'type:backend' }, { name: 'area:api' }] },
+      { number: 502, title: '#2 scoring', body: 'y <!-- ct-order:2 -->', state: 'closed', milestone: null, labels: [] },
+    ])
+  })
+  it('DOS páginas → concatena los nodes de ambas en orden (no pierde la página 2)', async () => {
+    const { normalizeGraphqlIssues } = await import('../scripts/gh-issues.js')
+    const mk = (n) => ({ number: n, title: `#${n}`, body: `<!-- ct-order:${n} -->`, state: 'OPEN', milestone: null, labels: { nodes: [] } })
+    const pages = [
+      { data: { repository: { issues: { nodes: [mk(1), mk(2)], pageInfo: { hasNextPage: true, endCursor: 'a' } } } } },
+      { data: { repository: { issues: { nodes: [mk(3)], pageInfo: { hasNextPage: false, endCursor: 'b' } } } } },
+    ]
+    expect(normalizeGraphqlIssues(pages).map((i) => i.number)).toEqual([1, 2, 3])
+  })
+  it('defensivo: páginas vacías o sin nodes → []', async () => {
+    const { normalizeGraphqlIssues } = await import('../scripts/gh-issues.js')
+    expect(normalizeGraphqlIssues([])).toEqual([])
+    expect(normalizeGraphqlIssues([{ data: { repository: { issues: { nodes: [] } } } }])).toEqual([])
+    expect(normalizeGraphqlIssues(null)).toEqual([])
+  })
+  it('defensivo: state null/undefined no revienta y sobrevive tal cual (GitHub siempre da OPEN/CLOSED, pero si cambia el esquema el test lo dice)', async () => {
+    const { normalizeGraphqlIssues } = await import('../scripts/gh-issues.js')
+    const pages = [{ data: { repository: { issues: { nodes: [
+      { number: 1, title: '#1', body: 'x', state: null, milestone: null, labels: { nodes: [] } },
+      { number: 2, title: '#2', body: 'y', state: undefined, milestone: null, labels: { nodes: [] } },
+    ] } } } }]
+    const out = normalizeGraphqlIssues(pages)
+    expect(out[0].state).toBe(null)
+    expect(out[1].state).toBe(undefined)
+  })
+})

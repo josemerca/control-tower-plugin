@@ -443,6 +443,48 @@ function main() {
     return
   }
   if (argv[0] === 'api' && argv[1] === 'graphql') {
+    // Listado de issues de /ct-groom (GROOM_ISSUES_QUERY). Se reconoce por
+    // `states:[OPEN,CLOSED]`, único de esa query. Traduce la MISMA
+    // FAKE_GH_LIST_SEQUENCE que servía la rama REST `issues` a la forma GraphQL
+    // (`--paginate --slurp` = array de objetos-respuesta, uno por página),
+    // FILTRANDO los items con `pull_request` — el server real nunca los
+    // devuelve por la conexión issues, y ése es justo el punto del fix.
+    // FAKE_GH_GRAPHQL_PAGE_SIZE parte la respuesta en varias páginas para
+    // probar que la paginación no pierde issues (review #45, punto 4).
+    if (joined.includes('states:[OPEN,CLOSED]') || joined.includes('states: [OPEN, CLOSED]')) {
+      const callIndex = nextCallIndex(process.env.FAKE_GH_COUNTER_FILE)
+      const failAt = process.env.FAKE_GH_LIST_FAIL_AT !== undefined ? Number(process.env.FAKE_GH_LIST_FAIL_AT) : null
+      if (failAt !== null && callIndex === failAt) {
+        console.error('fake-gh: api graphql issues failed (simulado)')
+        process.exitCode = 1
+        return
+      }
+      const seq = loadSequence()
+      // La entrada de la secuencia puede venir como lista plana de issues o
+      // como array-de-páginas (`[[...],[...]]`), igual que servía la rama REST
+      // —que ct-groom aplanaba con flattenIssuePages—. Se aplana aquí (.flat(),
+      // misma profundidad) para aceptar las dos formas sin tocar los fixtures.
+      const flat = (seq[Math.min(callIndex, seq.length - 1)] || []).flat()
+      const issues = flat.filter((e) => !(e && Object.prototype.hasOwnProperty.call(e, 'pull_request')))
+      const toNode = (i) => ({
+        number: i.number,
+        title: i.title,
+        body: i.body,
+        state: typeof i.state === 'string' ? i.state.toUpperCase() : i.state,
+        milestone: i.milestone ? { title: i.milestone.title } : null,
+        labels: { nodes: (i.labels || []).map((l) => ({ name: typeof l === 'string' ? l : l.name })) },
+      })
+      const size = process.env.FAKE_GH_GRAPHQL_PAGE_SIZE ? Math.max(1, Number(process.env.FAKE_GH_GRAPHQL_PAGE_SIZE)) : Math.max(1, issues.length)
+      const pages = []
+      for (let i = 0; i < issues.length; i += size) {
+        const chunk = issues.slice(i, i + size)
+        pages.push({ data: { repository: { issues: { nodes: chunk.map(toNode), pageInfo: { hasNextPage: i + size < issues.length, endCursor: `c${i}` } } } } })
+      }
+      if (pages.length === 0) pages.push({ data: { repository: { issues: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } } })
+      process.stdout.write(JSON.stringify(pages))
+      process.exitCode = 0
+      return
+    }
     // F18/H1+H4: la consulta de CIERRES de ct-next.mjs (quién cerró cada dep
     // ya satisfecha, y si la rama feat/<n> de un in-review está mergeada). Se
     // reconoce por el tipo de item de timeline que pide, que ninguna otra
