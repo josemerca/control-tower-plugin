@@ -57,7 +57,7 @@ export function realIssuesOnly(entries) {
 // página en silencio. La red que lo caza es el test multipágina del fake-gh.
 export const GROOM_ISSUES_QUERY = `query($endCursor:String,$owner:String!,$name:String!){
   repository(owner:$owner,name:$name){
-    issues(first:100,after:$endCursor,states:[OPEN,CLOSED]){
+    issues(first:100,after:$endCursor,states:[OPEN,CLOSED],orderBy:{field:CREATED_AT,direction:ASC}){
       nodes{ number title body state milestone{title} labels(first:50){nodes{name}} }
       pageInfo{ hasNextPage endCursor }
     }

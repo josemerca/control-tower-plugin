@@ -148,4 +148,14 @@ describe('normalizeGraphqlIssues — traduce la respuesta GraphQL a la forma RES
     expect(normalizeGraphqlIssues([{ data: { repository: { issues: { nodes: [] } } } }])).toEqual([])
     expect(normalizeGraphqlIssues(null)).toEqual([])
   })
+  it('defensivo: state null/undefined no revienta y sobrevive tal cual (GitHub siempre da OPEN/CLOSED, pero si cambia el esquema el test lo dice)', async () => {
+    const { normalizeGraphqlIssues } = await import('../scripts/gh-issues.js')
+    const pages = [{ data: { repository: { issues: { nodes: [
+      { number: 1, title: '#1', body: 'x', state: null, milestone: null, labels: { nodes: [] } },
+      { number: 2, title: '#2', body: 'y', state: undefined, milestone: null, labels: { nodes: [] } },
+    ] } } } }]
+    const out = normalizeGraphqlIssues(pages)
+    expect(out[0].state).toBe(null)
+    expect(out[1].state).toBe(undefined)
+  })
 })
