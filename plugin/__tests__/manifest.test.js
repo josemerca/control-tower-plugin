@@ -23,6 +23,14 @@ describe('plugin manifest', () => {
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
     expect(pkg.version).toBe(plugin.version)
   })
+  it('el README que se distribuye anuncia la version que se instala', () => {
+    const plugin = JSON.parse(readFileSync(join(root, '.claude-plugin/plugin.json'), 'utf8'))
+    const readme = readFileSync(join(root, 'README.md'), 'utf8')
+    expect(
+      readme.includes(`\`${plugin.version}\``),
+      `README.md no nombra la version ${plugin.version}: quien lo lee se lleva otra`
+    ).toBe(true)
+  })
   // El marketplace vive en la RAÍZ DEL REPO, no en la del plugin: desde que el
   // plugin se mudó a `plugin/`, el `source` de su entrada es LO QUE DECIDE qué
   // se distribuye (el subdir entero, y nada fuera de él). backend/ y frontend/

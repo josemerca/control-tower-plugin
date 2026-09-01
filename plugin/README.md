@@ -8,7 +8,7 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 
 | | |
 |---|---|
-| Versión | `0.49.0` · contrato de la tabla de slices `v21` |
+| Versión | `0.50.0` · contrato de la tabla de slices `v21` |
 | Comandos | `/ct-init` · `/ct-groom` · `/ct-next` · `/ct-status` |
 | Puertas humanas | 3 por epic — congelación, `status:ready`, merge — más el gate `plan` en cada slice (renunciable por fila con `!plan`; su go es `-OK <nonce>` y `--release` se niega sin él) y el gate `e2e` cuando la fila declara recorridos en la columna `E2E` (derivado, no se escribe a mano) |
 | Skills | 11 forkados de superpowers 6.0.3 + 1 propio (`writing-plans-prescriptive`) |
@@ -16,10 +16,10 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 | Licencia | [MIT](LICENSE) |
 
 > ### 📘 La referencia completa
-> Este README es la vista de conjunto. El documento largo —los 16 pasos uno a uno, la máquina de estados, y el **formato exacto de los 11 artefactos** que viajan entre pasos— está en [`docs/loop/`](docs/loop/):
+> Este README es la vista de conjunto. El documento largo —los 16 pasos uno a uno, la máquina de estados, y el **formato exacto de los 11 artefactos** que viajan entre pasos— está en [`docs/loop/`](https://github.com/josemerca/control-tower-plugin/tree/main/docs/loop):
 >
-> - **[control-tower-loop.pdf](docs/loop/control-tower-loop.pdf)** — 29 páginas, para leer y compartir
-> - **[control-tower-loop.html](docs/loop/control-tower-loop.html)** — página autocontenida, un solo fichero, sin dependencias de red
+> - **[control-tower-loop.pdf](https://github.com/josemerca/control-tower-plugin/blob/main/docs/loop/control-tower-loop.pdf)** — 29 páginas, para leer y compartir
+> - **[control-tower-loop.html](https://github.com/josemerca/control-tower-plugin/blob/main/docs/loop/control-tower-loop.html)** — página autocontenida, un solo fichero, sin dependencias de red
 
 ---
 
@@ -105,7 +105,7 @@ Si `/ct-init` avisa de que el repo **ya traía sus propias convenciones** —otr
 | **`/ct-next`** | Elige el siguiente slice despachable (orden, dependencias mergeadas, sin colisión de tokens, con hueco de `--cap`), lo reclama, crea worktree y rama, siembra el estado y lanza al agente **verificando que arrancó de verdad**. | GitHub + disco |
 | **`/ct-status`** | Responde de una vez: qué está en vuelo, qué ha entregado y qué es residuo. **No escribe una sola vez** — hay un test que lo comprueba mirando el `argv` real con el que se llamó a `gh`. | nada |
 
-Los cuatro comparten convención de canal: **stdout es el producto** (el plan, la selección, el informe, el motivo de bloqueo) y **stderr es el diagnóstico** (`aviso:`, `ATENCIÓN:`, y todo aborto). Y una gramática de códigos de salida con tres estados: hecho, no se pudo comprobar, queda algo pendiente. Están todos tabulados en [la referencia completa](docs/loop/control-tower-loop.pdf).
+Los cuatro comparten convención de canal: **stdout es el producto** (el plan, la selección, el informe, el motivo de bloqueo) y **stderr es el diagnóstico** (`aviso:`, `ATENCIÓN:`, y todo aborto). Y una gramática de códigos de salida con tres estados: hecho, no se pudo comprobar, queda algo pendiente. Están todos tabulados en [la referencia completa](https://github.com/josemerca/control-tower-plugin/blob/main/docs/loop/control-tower-loop.pdf).
 
 Empieza siempre en seco:
 
@@ -164,7 +164,7 @@ kickoff, como su propia cabecera pedía.
 
 El diseño, lo que se midió para tomarlo y lo que la primera corrida real enseñó
 están en
-[`docs/superpowers/specs/2026-08-18-el-conductor-como-programa-design.md`](docs/superpowers/specs/2026-08-18-el-conductor-como-programa-design.md).
+[`docs/superpowers/specs/2026-08-18-el-conductor-como-programa-design.md`](https://github.com/josemerca/control-tower-plugin/blob/main/docs/superpowers/specs/2026-08-18-el-conductor-como-programa-design.md).
 
 **El verbo `e2e` es TERMINAL, y condicional.** Se pregunta con `ct-step next`
 igual que cualquier otro paso, pero solo aparece en la secuencia de un slice
@@ -234,7 +234,7 @@ El principio que ordena todo el diseño:
 | PR | el agente | GitHub — con la closing keyword en el **cuerpo** |
 | `conventions-ack.md` | el humano | `.agent/` — silencia un aviso sin borrar documentación |
 
-**El formato exacto de cada uno está en [la referencia completa](docs/loop/control-tower-loop.pdf)**, sacado en cada caso de la función que lo emite, no de una descripción.
+**El formato exacto de cada uno está en [la referencia completa](https://github.com/josemerca/control-tower-plugin/blob/main/docs/loop/control-tower-loop.pdf)**, sacado en cada caso de la función que lo emite, no de una descripción.
 
 El plan del slice tiene contrato mecánico (`scripts/plan-contract.js`), y desde F-jjponz-4 ese contrato acota **qué** puede llevar un bloque de código: cada uno declara su rol —`Current state` (el tramo que cambia, comprobado verbatim contra el repo), `Contract` (tipos, firmas, errores tipados, constantes no deducibles), `Call site` (cómo queda la llamada en el consumidor) o `Final text` (documentación)— con su presupuesto de líneas. Los cuerpos de los módulos y los ficheros de test **no van en el plan**: los escribe el implementador con TDD, y la configuración se describe en prosa. El motivo es el gate `plan`: un plan de 74k caracteres que no cabe en un comentario del issue no se revisa, se hojea — y lo que viaja sin revisar son defectos.
 
@@ -272,9 +272,17 @@ scripts/      la lógica — módulos puros y los ejecutables .mjs (los cuatro d
 hooks/        SessionStart (hidratación), Stop (estado al día), PreToolUse (guarda de commits)
 dist/         bundles de los hooks — DERIVADO, trackeado, ver arriba
 skills/       los 11 skills forkados + writing-plans-prescriptive (propio) + LICENSE-superpowers + FORK.md
-__tests__/    119 ficheros, 2.978 tests
-docs/loop/    el documento del ciclo: fuente, HTML autocontenido y PDF
-docs/         los handoffs de cada ronda (prompt-fNN-*.md) — cómo se llegó hasta aquí
+__tests__/    120 ficheros, 2.994 tests
+```
+
+Y un nivel más arriba, en el repo y **fuera** de lo que se distribuye (el `source` del
+marketplace es `./plugin`, así que nada de esto llega a una instalación):
+
+```
+../docs/loop/  el documento del ciclo: fuente, HTML autocontenido y PDF
+../docs/       los handoffs de cada ronda (prompt-fNN-*.md) — cómo se llegó hasta aquí
+../backend/    la interfaz de programación local que consume el front
+../frontend/   el front, todavía un hueco preparado
 ```
 
 ### El fork de superpowers
