@@ -10,11 +10,14 @@ concurrency:
 jobs:
   dist:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -25,21 +28,31 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Build
-        run: npm run build
-
+      # Three ways the committed dist/ can be wrong, and a plain
+      # `git diff --exit-code -- dist/` only catches one of them: a bundle whose
+      # bytes changed. It is blind to a bundle the build now emits that nobody
+      # committed (untracked files are invisible to git diff) and to a committed
+      # bundle the build no longer emits (esbuild does not clean its outdir).
+      # Both were reproduced. Wiping the directory, rebuilding and staging makes
+      # all three show up as an index-against-HEAD difference.
       - name: Check the committed dist matches the sources
         run: |
-          if ! git diff --exit-code -- dist/; then
-            echo "::error::dist/ is stale: rebuilding it from the current sources produces a different bundle."
-            echo "hooks/hooks.json runs the bundles in dist/, not the sources in hooks/, and dist/ is tracked."
-            echo "Any change to hooks/ or to a scripts/ module they import must ship a rebuilt dist/ in the same commit."
-            echo "Fix: run 'npm run build' and commit the diff of dist/*.js as part of the change."
+          rm -rf dist
+          npm run build
+          git add -A -- dist/
+          if ! git diff --cached --exit-code -- dist/; then
+            echo "::error::dist/ does not match the sources: the diff above is what a clean rebuild produces."
+            echo "dist/ is tracked and holds the bundles that are actually executed:"
+            echo "  - hooks/hooks.json runs dist/session-start.js, dist/stop.js and dist/commit-keyword-guard.js — never the sources in hooks/."
+            echo "  - templates/scope-gate.yml vendors dist/scope-check.js into governed repos; no hook imports it."
+            echo "The canonical input list of every bundle lives in __tests__/dist-coherente-con-fuentes.test.js."
+            echo "Fix: run 'npm run build' and commit the diff of dist/ as part of the same change."
             exit 1
           fi
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -49,10 +62,15 @@ jobs:
       # below the graft, and the test would accuse a correct ledger of forgery")
       # and task-brief.test.js:50 does `git show <sha>:<path>` against a commit
       # that a depth-1 clone does not have.
+      #
+      # persist-credentials: false because nothing here pushes, and `npm test`
+      # spawns dozens of this repo's own subprocesses inside this checkout — no
+      # reason to leave the token sitting in .git/config while they run.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -66,10 +84,16 @@ jobs:
       - name: Run tests
         run: npm test
 
+  # `!cancelled()` and not `always()`. With cancel-in-progress above, a push that
+  # supersedes a running check would leave this job running, read `cancelled`
+  # from its dependencies and exit 1 — so the required check would show up as a
+  # failure instead of a cancellation. The precedent this workflow follows uses
+  # `always()`, but it has no concurrency group and never meets the combination.
   ci:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     needs: [dist, test]
-    if: ${{ always() }}
+    if: ${{ !cancelled() }}
     permissions:
       contents: read
     steps:
