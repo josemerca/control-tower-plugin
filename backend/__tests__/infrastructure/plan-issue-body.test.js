@@ -69,6 +69,23 @@ describe('PlanIssueBody', () => {
     expect(scope.reason).toContain('no declara `Alcance:`')
   })
 
+  it('an_issue_number_written_in_jira_does_not_become_a_link_to_someone_elses_issue_here', () => {
+    const body = PlanIssueBody.of(Opened.ticket({ description: 'Slice #7 del epic, sobre las vistas de #5' }))
+
+    expect(body).toContain('Slice `#7` del epic, sobre las vistas de `#5`')
+    expect(body.split('\n').filter((line) => /(?<![\w`])#\d+/.test(line))).toEqual([])
+  })
+
+  it('a_handle_written_in_jira_does_not_notify_whoever_owns_it_on_github', () => {
+    const body = PlanIssueBody.of(Opened.ticket({ description: 'lo revisa @jjponz, escribe a foo@bar.com' }))
+
+    expect(body).toContain('lo revisa `@jjponz`, escribe a foo@bar.com')
+  })
+
+  it('what_jira_already_wrote_as_code_is_left_alone_instead_of_being_fenced_twice', () => {
+    expect(PlanIssueBody.quieted('ya viene en `#7` y suelto #8')).toBe('ya viene en `#7` y suelto `#8`')
+  })
+
   it('the_title_names_the_ticket_because_without_a_slice_table_there_is_no_order_to_name', () => {
     expect(PlanIssueBody.titleFor(Opened.ticket())).toBe('MO_SHOP-42 El buscador acepta acentos')
   })

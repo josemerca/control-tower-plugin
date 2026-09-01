@@ -15,6 +15,8 @@ export class PlanIssueBody {
   static PROTECTED_HEADING = '## Out of scope / Protected'
   static AC_HEADING = AC_HEADING_FORMS[AC_HEADING_FORMS.length - 1]
   static PLAN_GATE = 'plan'
+  static #ACTIVE = /((?<![\w])#\d+|(?<![\w.])@[A-Za-z0-9][A-Za-z0-9-]*)/g
+  static #CODE_SPAN = /(`[^`]*`)/
   static READY_LABEL = 'status:ready'
 
   static labels() {
@@ -40,8 +42,17 @@ export class PlanIssueBody {
 
   static #epicContextOf(ticket) {
     return ticket.hasDescription()
-      ? ticket.description
+      ? PlanIssueBody.quieted(ticket.description)
       : `_${ticket.key} no trae descripción en Jira: la historia de usuario está sin escribir._`
+  }
+
+  static quieted(text) {
+    return text
+      .split(PlanIssueBody.#CODE_SPAN)
+      .map((piece, index) => (
+        index % 2 === 1 ? piece : piece.replace(PlanIssueBody.#ACTIVE, '`$1`')
+      ))
+      .join('')
   }
 
   static of(ticket) {
