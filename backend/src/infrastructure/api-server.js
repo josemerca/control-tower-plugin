@@ -1,3 +1,4 @@
+import express from 'express'
 import { createServer } from 'node:http'
 import { PlanRequest, PlanRequestOutcome } from './plan-request.js'
 import { PlanRefusal } from './plan-refusal.js'
@@ -6,26 +7,171 @@ import { PlanFailure } from '../domain/exceptions.js'
 
 export const LOOPBACK = '127.0.0.1'
 
-export class ApiServer {
-  static #START_PLAN_PATH = '/start-plan'
-  static #START_PLAN_METHOD = 'POST'
-  static #JSON_MEDIA_TYPE = 'application/json'
-  static #MAX_BODY_BYTES = 8 * 1024
-  static #JSON_HEADERS = Object.freeze({ 'Content-Type': 'application/json' })
+class Answer {
+  static JSON_MEDIA_TYPE = 'application/json'
 
+  static send(response, status, payload) {
+    response.setHeader('Content-Type', Answer.JSON_MEDIA_TYPE)
+    response.status(status).end(JSON.stringify(payload))
+  }
+
+  static refuse(response, status, error) {
+    Answer.send(response, status, { error })
+  }
+
+  static refuseAs(response, refusal) {
+    Answer.refuse(response, refusal.status, refusal.error)
+  }
+}
+
+class Route {
+  static #TRAILING_SLASHES = /\/+$/
+
+  static collapseTrailingSlashes(request, response, next) {
+    const asked = request.url.indexOf('?')
+    const path = asked === -1 ? request.url : request.url.slice(0, asked)
+    const query = asked === -1 ? '' : request.url.slice(asked)
+    request.url = `${path.replace(Route.#TRAILING_SLASHES, '') || '/'}${query}`
+
+    next()
+  }
+}
+
+class Browsers {
+  static #ORIGIN = 'Origin'
+
+  static turnAway(request, response, next) {
+    if (request.get(Browsers.#ORIGIN) === undefined) {
+      next()
+      return
+    }
+    Answer.refuse(response, 403, 'this api does not serve browsers')
+  }
+}
+
+class JsonBody {
+  static MAX_BYTES = 8 * 1024
+
+  static #declaredBy(request) {
+    const declared = request.get('Content-Type')
+
+    return typeof declared === 'string' && declared.split(';')[0].trim() === Answer.JSON_MEDIA_TYPE
+  }
+
+  static demandDeclared(request, response, next) {
+    if (JsonBody.#declaredBy(request)) {
+      next()
+      return
+    }
+    Answer.refuse(response, 415, `Content-Type must be ${Answer.JSON_MEDIA_TYPE}`)
+  }
+
+  static reader() {
+    return express.raw({ type: Answer.JSON_MEDIA_TYPE, limit: JsonBody.MAX_BYTES, inflate: false })
+  }
+
+  static textOf(request) {
+    return Buffer.isBuffer(request.body) ? request.body.toString('utf8') : ''
+  }
+}
+
+class StartPlanRoute {
+  static PATH = '/start-plan'
+  static METHOD = 'POST'
+
+  static handledBy(startPlan) {
+    return async (request, response) => {
+      const asked = PlanRequest.from(JsonBody.textOf(request))
+      if (asked.outcome !== PlanRequestOutcome.ACCEPTED) {
+        Answer.refuseAs(response, PlanRefusal.of(asked))
+        return
+      }
+      await StartPlanRoute.#accept(startPlan, response, asked)
+    }
+  }
+
+  static async #accept(startPlan, response, asked) {
+    let started
+    try {
+      started = await startPlan.execute(
+        new StartPlanParams({ ticket: asked.ticket, repository: asked.repository })
+      )
+    } catch (cause) {
+      if (!(cause instanceof PlanFailure)) throw cause
+      Answer.refuse(response, 503, `could not start the plan: ${cause.message}`)
+      return
+    }
+    Answer.send(response, 202, {
+      status: 'started',
+      [PlanRequest.ID_FIELD]: asked.ticket.text,
+      [PlanRequest.REPO_FIELD]: asked.repository.text,
+      issue: { number: started.issue.number, url: started.issue.url },
+      session: started.session,
+    })
+  }
+
+  static refuseOtherMethods(request, response) {
+    response.setHeader('Allow', StartPlanRoute.METHOD)
+    Answer.refuse(response, 405, 'method not allowed')
+  }
+}
+
+class Failures {
+  static #TOO_LARGE = 'entity.too.large'
+
+  static nothingMatched(request, response) {
+    Answer.refuse(response, 404, 'not found')
+  }
+
+  static answer(cause, request, response, next) {
+    if (cause.type === Failures.#TOO_LARGE) {
+      Answer.refuseAs(response, PlanRefusal.of(PlanRequest.tooLarge()))
+      return
+    }
+    if (cause.status === undefined) {
+      process.stderr.write(`request to ${request.originalUrl} failed: ${cause.stack ?? cause.message}\n`)
+    }
+    if (response.headersSent || response.writableEnded) {
+      request.destroy()
+      response.destroy()
+      return
+    }
+    response.once('finish', () => request.destroy())
+    Answer.refuse(response, 400, 'request failed')
+  }
+}
+
+export class ApiServer {
   constructor({ port, startPlan }) {
     this.requestedPort = port
     this.startPlan = startPlan
     this.server = null
   }
 
+  #route() {
+    const app = express()
+    app.disable('x-powered-by')
+    app.set('case sensitive routing', true)
+    app.use(Route.collapseTrailingSlashes)
+    app.post(
+      StartPlanRoute.PATH,
+      Browsers.turnAway,
+      JsonBody.demandDeclared,
+      JsonBody.reader(),
+      StartPlanRoute.handledBy(this.startPlan)
+    )
+    app.all(StartPlanRoute.PATH, StartPlanRoute.refuseOtherMethods)
+    app.use(Failures.nothingMatched)
+    app.use(Failures.answer)
+
+    return app
+  }
+
   async start() {
     if (this.server !== null) {
       throw new Error('start() was called on a server that is already listening')
     }
-    const server = createServer((request, response) => {
-      this.#answer(request, response).catch((cause) => this.#collapse(request, response, cause))
-    })
+    const server = createServer(this.#route())
     await new Promise((resolve, reject) => {
       server.once('error', reject)
       server.listen(this.requestedPort, LOOPBACK, () => {
@@ -34,6 +180,7 @@ export class ApiServer {
       })
     })
     this.server = server
+
     return server.address().port
   }
 
@@ -45,99 +192,5 @@ export class ApiServer {
       server.close(resolve)
       server.closeAllConnections()
     })
-  }
-
-  async #answer(request, response) {
-    if (this.#pathOf(request.url) !== ApiServer.#START_PLAN_PATH) {
-      this.#refuse(response, 404, 'not found')
-      return
-    }
-    if (request.method !== ApiServer.#START_PLAN_METHOD) {
-      response
-        .writeHead(405, { ...ApiServer.#JSON_HEADERS, Allow: ApiServer.#START_PLAN_METHOD })
-        .end(JSON.stringify({ error: 'method not allowed' }))
-      return
-    }
-    if (request.headers.origin !== undefined) {
-      this.#refuse(response, 403, 'this api does not serve browsers')
-      return
-    }
-    if (!this.#declaresJson(request)) {
-      this.#refuse(response, 415, `Content-Type must be ${ApiServer.#JSON_MEDIA_TYPE}`)
-      return
-    }
-    const asked = await this.#read(request)
-    if (asked.outcome === PlanRequestOutcome.ACCEPTED) {
-      await this.#accept(response, asked)
-      return
-    }
-    const refusal = PlanRefusal.of(asked)
-    this.#refuse(response, refusal.status, refusal.error)
-  }
-
-  async #accept(response, asked) {
-    let started
-    try {
-      started = await this.startPlan.execute(
-        new StartPlanParams({ ticket: asked.ticket, repository: asked.repository })
-      )
-    } catch (cause) {
-      if (!(cause instanceof PlanFailure)) throw cause
-      this.#refuse(response, 503, `could not start the plan: ${cause.message}`)
-      return
-    }
-    response
-      .writeHead(202, ApiServer.#JSON_HEADERS)
-      .end(JSON.stringify({
-        status: 'started',
-        [PlanRequest.ID_FIELD]: asked.ticket.text,
-        [PlanRequest.REPO_FIELD]: asked.repository.text,
-        issue: { number: started.issue.number, url: started.issue.url },
-        session: started.session,
-      }))
-  }
-
-  #declaresJson(request) {
-    const declared = request.headers['content-type']
-    return typeof declared === 'string' && declared.split(';')[0].trim() === ApiServer.#JSON_MEDIA_TYPE
-  }
-
-  #pathOf(url) {
-    let pathname
-    try {
-      ;({ pathname } = new URL(url, `http://${LOOPBACK}`))
-    } catch {
-      return null
-    }
-    return pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
-  }
-
-  async #read(request) {
-    const room = Buffer.allocUnsafe(ApiServer.#MAX_BODY_BYTES)
-    let filled = 0
-    for await (const chunk of request) {
-      if (filled + chunk.length > ApiServer.#MAX_BODY_BYTES) {
-        return PlanRequest.tooLarge()
-      }
-      chunk.copy(room, filled)
-      filled += chunk.length
-    }
-    return PlanRequest.from(room.toString('utf8', 0, filled))
-  }
-
-  #refuse(response, status, error) {
-    response.writeHead(status, ApiServer.#JSON_HEADERS).end(JSON.stringify({ error }))
-  }
-
-  #collapse(request, response, cause) {
-    if (cause.code !== 'ECONNRESET') {
-      process.stderr.write(`request to ${request.url} failed: ${cause.stack ?? cause.message}\n`)
-    }
-    request.destroy()
-    if (response.headersSent || response.writableEnded) {
-      response.destroy()
-      return
-    }
-    this.#refuse(response, 400, 'request failed')
   }
 }

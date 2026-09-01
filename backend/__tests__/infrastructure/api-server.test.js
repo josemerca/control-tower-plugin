@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { connect } from 'node:net'
+import { gzipSync } from 'node:zlib'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { StartPlanResult } from '../../src/application/actions/start-plan.js'
 import {
@@ -80,6 +81,24 @@ class RunningApi {
 
   static async accepted(port) {
     return RunningApi.startPlan(port, RunningApi.ACCEPTED_BODY)
+  }
+
+  static ask(port, lines) {
+    return new Promise((resolve) => {
+      const socket = connect(port, '127.0.0.1', () => socket.write(lines))
+      let said = ''
+      socket.on('data', (chunk) => {
+        said += chunk
+      })
+      socket.on('close', () => resolve(said.split('\r\n')[0]))
+    })
+  }
+
+  static asking(path, headers, body) {
+    const written = [`POST ${path} HTTP/1.1`, 'Host: 127.0.0.1', 'Connection: close', ...headers]
+    if (body !== undefined) written.push(`Content-Length: ${Buffer.byteLength(body)}`)
+
+    return `${written.join('\r\n')}\r\n\r\n${body ?? ''}`
   }
 
   static cutMidBody(port) {
@@ -384,6 +403,86 @@ describe('ApiServer', () => {
     const response = await RunningApi.startPlan(port, `{"id":"${'A'.repeat(9000)}","repo":"owner/name"}`)
 
     expect(response.status).toBe(413)
+  })
+
+  it('the_route_is_one_exact_name_and_not_the_thousand_aliases_a_case_blind_router_answers_to', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.post(port, '/START-PLAN', `{"id":"${RunningApi.TICKET}"}`)
+
+    expect(response.status).toBe(404)
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
+  it('a_compressed_body_is_not_a_shape_this_api_agreed_to_accept_and_never_reaches_the_domain_inflated', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await fetch(`http://127.0.0.1:${port}/start-plan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
+      body: gzipSync(Buffer.from(`{"id":"${RunningApi.TICKET}"}`)),
+    })
+
+    expect(response.status).toBe(400)
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
+  it('the_cap_counts_the_bytes_the_client_sent_so_a_refusal_never_names_a_size_nobody_wrote', async () => {
+    const port = await RunningApi.listening()
+    const squeezed = gzipSync(Buffer.from(`{"id":"${'A'.repeat(20000)}"}`))
+
+    const response = await fetch(`http://127.0.0.1:${port}/start-plan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
+      body: squeezed,
+    })
+
+    expect(squeezed.length).toBeLessThan(8 * 1024)
+    expect(response.status).not.toBe(413)
+  })
+
+  it('a_body_that_arrives_with_no_length_is_judged_by_the_domain_instead_of_blamed_on_its_media_type', async () => {
+    const port = await RunningApi.listening()
+
+    const said = await RunningApi.ask(port, RunningApi.asking('/start-plan', ['Content-Type: application/json']))
+
+    expect(said).toContain('400')
+  })
+
+  it('the_trace_of_a_failure_names_the_url_the_client_asked_for_and_not_the_one_routing_rewrote', async () => {
+    const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.buggy() })
+    const port = await server.start()
+    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+
+    try {
+      await RunningApi.post(port, '/start-plan//', RunningApi.ACCEPTED_BODY)
+
+      expect(complaining.mock.calls.map(([line]) => line).join('')).toContain('request to /start-plan// failed')
+    } finally {
+      complaining.mockRestore()
+      await server.stop()
+    }
+  })
+
+  it('a_path_that_climbs_out_and_back_in_is_not_the_route_however_a_client_writes_it', async () => {
+    const port = await RunningApi.listening()
+    const body = `{"id":"${RunningApi.TICKET}"}`
+
+    const climbed = await RunningApi.ask(
+      port,
+      RunningApi.asking('/foo/../start-plan', ['Content-Type: application/json'], body)
+    )
+
+    expect(climbed).toContain('404')
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
+  it('the_answer_does_not_advertise_the_stack_that_serves_it', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.accepted(port)
+
+    expect(response.headers.get('x-powered-by')).toBe(null)
   })
 
   it('stop_closes_the_socket_so_a_later_request_cannot_reach_a_server_believed_dead', async () => {
