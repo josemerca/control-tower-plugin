@@ -70,10 +70,17 @@ No sabe que existen `cmux`, `git` ni los subprocesos.
 | `workspace-location.js` | value object: la ruta del worktree y el nombre de la rama |
 | `plan-briefing.js` | value object: el texto que arranca al agente y el directorio donde corre |
 | `plan-session.js` | **puerto**: arranca la sesión. Ya existe, cambia su firma |
-| `plan-session-ref.js` | value object: lo que identifica la sesión viva |
 | `plan-progress.js` | **puerto**: contesta en qué estado está el plan de una sesión |
 | `plan-state.js` | vocabulario cerrado: `writing`, `ready`. Ver §6.4 |
 | `exceptions.js` | ya existe; crece con los fallos del espacio de trabajo |
+
+Una versión anterior de esta tabla traía además un `plan-session-ref.js` para envolver el
+`workspace:4` que imprime cmux. **Se retira**: nadie le pregunta nada, no lo construye
+otra capa y no lleva álgebra propia, así que sería la indirección que
+`architecture.md` rechaza — *"a port whose only method returns a constant is
+indirection"*, con el mismo espíritu. La única validación que ese identificador
+necesita —que cmux imprimiera uno— ya vive en el adaptador que lo lee. Viaja como
+cadena hasta que algo tenga una pregunta que hacerle.
 
 `PlanSession.start(ticket)` se queda corto: no basta con la clave del ticket
 para arrancar nada. Pasa a `start(briefing) -> PlanSessionRef`.
