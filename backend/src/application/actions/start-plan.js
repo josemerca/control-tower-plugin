@@ -30,13 +30,22 @@ export class StartPlan {
     const ticket = await this.tickets.detail(params.ticket)
     const issue = await this.planIssues.open({ ticket, repository: params.repository })
     const located = await this.workspace.prepare(issue)
-    const session = await this.planSession.start(new PlanBriefing({
-      ticket: params.ticket,
-      issue,
-      located,
-      errand: this.brief.errandFor({ issue, repository: params.repository }),
-    }))
+    const session = await this.#launch(params, issue, located)
 
     return new StartPlanResult({ issue, session, located })
+  }
+
+  async #launch(params, issue, located) {
+    try {
+      return await this.planSession.start(new PlanBriefing({
+        ticket: params.ticket,
+        issue,
+        located,
+        errand: this.brief.errandFor({ issue, repository: params.repository }),
+      }))
+    } catch (failure) {
+      await this.workspace.undo(located).catch(() => {})
+      throw failure
+    }
   }
 }

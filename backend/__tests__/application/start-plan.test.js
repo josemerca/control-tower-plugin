@@ -21,16 +21,23 @@ class PlanSessionDouble extends PlanSession {
 }
 
 class WorkspaceDouble extends Workspace {
-  constructor(answer) {
+  constructor(answer, { undoFailure } = {}) {
     super()
     this.answer = answer
     this.asked = []
+    this.undone = []
+    this.undoFailure = undoFailure
   }
 
   async prepare(issue) {
     this.asked.push(issue)
     if (this.answer instanceof Error) throw this.answer
     return this.answer
+  }
+
+  async undo(located) {
+    this.undone.push(located)
+    if (this.undoFailure instanceof Error) throw this.undoFailure
   }
 }
 
@@ -168,5 +175,60 @@ describe('StartPlan prepares the ground before it opens the session', () => {
       .catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+  })
+})
+
+describe('StartPlan cleans up after a launch that never took off', () => {
+  const conducted = ({ workspace, planSession }) => new StartPlan({
+    tickets: { detail: async (ticket) => ({ key: ticket }) },
+    planIssues: { open: async () => issue },
+    workspace,
+    planSession,
+    brief: BriefDouble,
+  })
+
+  it('a_launch_that_fails_after_the_workspace_was_prepared_undoes_that_workspace', async () => {
+    const workspace = new WorkspaceDouble(located)
+    const planSession = new PlanSessionDouble(new PlanSessionNotStarted('cmux is not reachable'))
+
+    await conducted({ workspace, planSession })
+      .execute(new StartPlanParams({ ticket: new TicketKey('ABC-42'), repository: 'owner/name' }))
+      .catch(() => {})
+
+    expect(workspace.undone).toEqual([located])
+  })
+
+  it('the_failure_that_reaches_the_caller_is_still_the_launch_failure_and_not_a_status_derived_from_it', async () => {
+    const workspace = new WorkspaceDouble(located)
+    const planSession = new PlanSessionDouble(new PlanSessionNotStarted('cmux is not reachable'))
+
+    const refusal = await conducted({ workspace, planSession })
+      .execute(new StartPlanParams({ ticket: new TicketKey('ABC-42'), repository: 'owner/name' }))
+      .catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(PlanSessionNotStarted)
+    expect(refusal.message).toBe('cmux is not reachable')
+  })
+
+  it('a_cleanup_that_also_fails_does_not_replace_the_launch_failure_that_caused_it', async () => {
+    const workspace = new WorkspaceDouble(located, { undoFailure: new Error('worktree remove failed') })
+    const planSession = new PlanSessionDouble(new PlanSessionNotStarted('cmux is not reachable'))
+
+    const refusal = await conducted({ workspace, planSession })
+      .execute(new StartPlanParams({ ticket: new TicketKey('ABC-42'), repository: 'owner/name' }))
+      .catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(PlanSessionNotStarted)
+    expect(refusal.message).toBe('cmux is not reachable')
+  })
+
+  it('a_launch_that_succeeds_never_undoes_the_workspace_it_just_prepared', async () => {
+    const workspace = new WorkspaceDouble(located)
+    const planSession = new PlanSessionDouble('workspace:4')
+
+    await conducted({ workspace, planSession })
+      .execute(new StartPlanParams({ ticket: new TicketKey('ABC-42'), repository: 'owner/name' }))
+
+    expect(workspace.undone).toEqual([])
   })
 })

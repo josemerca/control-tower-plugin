@@ -21,10 +21,24 @@ describe('WorkspaceLocation', () => {
   it('a_location_without_a_branch_refuses_to_exist_because_nothing_could_be_committed_to_it', () => {
     expect(() => new WorkspaceLocation({ path: '/a', branch: '' })).toThrow(/branch/)
   })
+
+  it('a_directory_made_only_of_spaces_refuses_to_exist_the_same_as_an_empty_one', () => {
+    expect(() => new WorkspaceLocation({ path: '   ', branch: 'feat/42' })).toThrow(/directory/)
+  })
+
+  it('a_branch_made_only_of_spaces_refuses_to_exist_the_same_as_an_empty_one', () => {
+    expect(() => new WorkspaceLocation({ path: '/a', branch: '   ' })).toThrow(/branch/)
+  })
 })
 
 describe('Workspace', () => {
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
     await expect(new Workspace().prepare({ number: 42 })).rejects.toThrow(/must implement prepare/)
+  })
+
+  it('a_port_that_nobody_implemented_undo_for_says_so_instead_of_answering_undefined', async () => {
+    const located = new WorkspaceLocation({ path: '/repo/.worktrees/42', branch: 'feat/42' })
+
+    await expect(new Workspace().undo(located)).rejects.toThrow(/must implement undo/)
   })
 })
