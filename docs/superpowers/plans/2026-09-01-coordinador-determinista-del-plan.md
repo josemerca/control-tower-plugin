@@ -1581,12 +1581,13 @@ Dos hechos, no uno. `--check-plan` es deliberadamente permisivo con el commit �
 - Create: `backend/src/domain/plan-state.js`
 - Create: `backend/src/domain/plan-progress.js`
 - Create: `backend/src/infrastructure/plan-contract-progress.js`
-- Modify: `backend/src/infrastructure/tool-runner.js`
 - Test: `backend/__tests__/infrastructure/plan-contract-progress.test.js`
 
 **Interfaces:**
-- Consumes: `WorkspaceLocation` (tarea 1); `ToolRunner` de la otra rama.
-- Produces: `PlanState.WRITING === 'writing'`, `PlanState.READY === 'ready'`; `PlanProgress` con `async of({ located, issue })`; `new PlanContractProgress({ node, git, dispatchCheck, repository })`; `ToolRunner.run(argv, { cwd })`.
+- Consumes: `WorkspaceLocation` (tarea 1).
+- Produces: `PlanState.WRITING === 'writing'`, `PlanState.READY === 'ready'`; `PlanProgress` con `async of({ located, issue })`; `new PlanContractProgress({ node, git, dispatchCheck, repository })`, donde `node` y `git` son invocables `(argv, options) => Promise<{ failed, stdout, stderr }>` y `node` tiene que honrar `options.cwd`.
+
+`tool-runner.js` **no existe en esta rama** (viene de `alcaptar/start-plan-crea-el-issue`, sin mergear), así que esta tarea no lo toca. Quién construye esos invocables, y con qué directorio de trabajo, es cosa de la composición en la tarea 9.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1760,14 +1761,6 @@ export class PlanContractProgress extends PlanProgress {
 }
 ```
 
-Modify `backend/src/infrastructure/tool-runner.js` — `run` acepta un segundo argumento opcional y lo pasa a `execFile`:
-
-```js
-  run(argv, { cwd } = {}) {
-    return new Promise((resolve) => {
-      execFile(this.bin, argv, { timeout: this.budgetMs, cwd }, (failure, stdout, stderr) => {
-```
-
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `cd backend && npx vitest run __tests__/infrastructure/plan-contract-progress.test.js`
@@ -1781,7 +1774,7 @@ Expected: PASS
 - [ ] **Step 6: Commit**
 
 ```bash
-git add backend/src/domain/plan-state.js backend/src/domain/plan-progress.js backend/src/infrastructure/plan-contract-progress.js backend/src/infrastructure/tool-runner.js backend/__tests__/infrastructure/plan-contract-progress.test.js
+git add backend/src/domain/plan-state.js backend/src/domain/plan-progress.js backend/src/infrastructure/plan-contract-progress.js backend/__tests__/infrastructure/plan-contract-progress.test.js
 git commit -m "feat(progress): el plan está hecho cuando es válido y está commiteado, no antes"
 ```
 
