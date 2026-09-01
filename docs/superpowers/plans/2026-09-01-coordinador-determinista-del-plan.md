@@ -394,6 +394,11 @@ describe('SliceSeed', () => {
   it('the_rule_it_asks_git_to_ignore_is_the_very_file_it_writes', () => {
     expect(SliceSeed.EXCLUDE_RULE).toBe(SliceSeed.RELATIVE_PATH)
   })
+
+  it('the_exclude_file_hangs_off_the_git_dir_and_not_off_the_worktree_because_dot_git_is_a_file_there', () => {
+    expect(SliceSeed.EXCLUDE_PATH.startsWith('.git/')).toBe(false)
+    expect(SliceSeed.EXCLUDE_PATH).toBe('info/exclude')
+  })
 })
 ```
 
@@ -410,7 +415,7 @@ Create `backend/src/infrastructure/slice-seed.js`:
 export class SliceSeed {
   static RELATIVE_PATH = '.agent/SLICE.md'
   static DIRECTORY = '.agent'
-  static EXCLUDE_PATH = '.git/info/exclude'
+  static EXCLUDE_PATH = 'info/exclude'
   static EXCLUDE_RULE = SliceSeed.RELATIVE_PATH
 
   static textFor({ issue, branch, base, cut }) {
@@ -480,6 +485,10 @@ export class GitWorkspace extends Workspace {
     return ['-C', path, 'rev-parse', 'HEAD']
   }
 
+  static gitDirArgvFor(path) {
+    return ['-C', path, 'rev-parse', '--absolute-git-dir']
+  }
+
   async prepare(issue) {
     const path = GitWorkspace.pathFor(this.root, issue)
     const branch = GitWorkspace.branchFor(issue)
@@ -499,13 +508,24 @@ export class GitWorkspace extends Workspace {
   }
 
   async #seed(located, issue) {
-    await this.write(`${this.root}/${GitWorkspace.DIRECTORY}/${issue.number}/${SliceSeed.EXCLUDE_PATH}`, `${SliceSeed.EXCLUDE_RULE}\n`)
+    await this.write(`${await this.#gitDirOf(located)}/${SliceSeed.EXCLUDE_PATH}`, `${SliceSeed.EXCLUDE_RULE}\n`)
     const measured = await this.run(GitWorkspace.cutArgvFor(located.path))
     const cut = measured.failed ? '' : measured.stdout.trim()
     await this.write(
       `${located.path}/${SliceSeed.RELATIVE_PATH}`,
       SliceSeed.textFor({ issue, branch: located.branch, base: this.base, cut })
     )
+  }
+
+  async #gitDirOf(located) {
+    const asked = await this.run(GitWorkspace.gitDirArgvFor(located.path))
+    if (asked.failed) {
+      throw new WorkspaceNotPrepared(
+        `no se pudo resolver el git dir de ${located.path}, así que ${SliceSeed.RELATIVE_PATH} quedaría visible para git: ${asked.stderr.trim()}`
+      )
+    }
+
+    return asked.stdout.trim()
   }
 }
 ```
@@ -519,6 +539,7 @@ class GitDouble {
   static ROOT = '/repo/checkout'
   static BASE = 'main'
   static CUT = 'a1b2c3d'
+  static GIT_DIR = '/repo/checkout/.git/worktrees/42'
 
   constructor(answer) {
     this.answer = answer
@@ -536,6 +557,9 @@ class GitDouble {
       },
       run: (argv) => {
         this.calls.push(argv)
+        if (argv.includes('--absolute-git-dir')) {
+          return Promise.resolve({ failed: false, stdout: `${GitDouble.GIT_DIR}\n`, stderr: '' })
+        }
         if (argv.includes('rev-parse')) {
           return Promise.resolve({ failed: false, stdout: `${GitDouble.CUT}\n`, stderr: '' })
         }
@@ -563,9 +587,23 @@ Cambia el primer aserto de `expect(git.calls).toEqual([[...]])` a `expect(git.ca
     await git.workspace().prepare({ number: 42 })
 
     expect(git.written.map(([path]) => path)).toEqual([
-      '/repo/checkout/.worktrees/42/.git/info/exclude',
+      '/repo/checkout/.git/worktrees/42/info/exclude',
       '/repo/checkout/.worktrees/42/.agent/SLICE.md',
     ])
+  })
+
+  it('a_git_dir_it_cannot_resolve_stops_the_seeding_because_the_state_would_be_visible_to_git', async () => {
+    const git = new GitDouble(GitDouble.ok())
+    git.workspace = () => new GitWorkspace({
+      root: GitDouble.ROOT,
+      base: GitDouble.BASE,
+      write: () => Promise.resolve(),
+      run: (argv) => Promise.resolve(argv.includes('--absolute-git-dir')
+        ? { failed: true, stdout: '', stderr: 'not a git repository' }
+        : GitDouble.ok()),
+    })
+
+    await expect(git.workspace().prepare({ number: 42 })).rejects.toBeInstanceOf(WorkspaceNotPrepared)
   })
 
   it('the_state_it_seeds_carries_the_cut_it_measured_in_the_worktree_and_not_the_one_it_guessed', async () => {
@@ -649,12 +687,10 @@ import { describe, it, expect } from 'vitest'
 import { PlanAgentBrief } from '../../src/infrastructure/plan-agent-brief.js'
 
 describe('PlanAgentBrief', () => {
-  const errand = () => PlanAgentBrief.errandFor({
-    issue: { number: 42 },
-    repository: 'owner/name',
+  const errand = () => new PlanAgentBrief({
     dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
     conventions: '/plugin/conventions',
-  })
+  }).errandFor({ issue: { number: 42 }, repository: 'owner/name' })
 
   it('it_starts_by_asking_for_the_ground_to_be_checked_before_anything_is_touched', () => {
     expect(errand()).toMatch(/pwd/)
@@ -682,6 +718,11 @@ describe('PlanAgentBrief', () => {
   it('it_never_promises_a_permission_nobody_mints', () => {
     expect(errand()).not.toContain('-OK')
     expect(errand()).not.toContain('nonce')
+  })
+
+  it('a_brief_without_the_paths_it_interpolates_refuses_to_exist_instead_of_shipping_the_word_undefined', () => {
+    expect(() => new PlanAgentBrief({ conventions: '/plugin/conventions' })).toThrow(/dispatch-check/)
+    expect(() => new PlanAgentBrief({ dispatchCheck: '/x' })).toThrow(/yardstick/)
   })
 })
 ```
@@ -716,7 +757,22 @@ Create `backend/src/infrastructure/plan-agent-brief.js`:
 export class PlanAgentBrief {
   static DOCUMENTS = 'defects.md, style.md, decisions.md, architecture.md, testing.md'
 
-  static errandFor({ issue, repository, dispatchCheck, conventions }) {
+  constructor({ dispatchCheck, conventions }) {
+    if (typeof dispatchCheck !== 'string' || dispatchCheck.length === 0) {
+      throw new Error(`the errand names dispatch-check by absolute path, got ${JSON.stringify(dispatchCheck)}`)
+    }
+    if (typeof conventions !== 'string' || conventions.length === 0) {
+      throw new Error(`the errand names where the yardstick lives, got ${JSON.stringify(conventions)}`)
+    }
+    this.dispatchCheck = dispatchCheck
+    this.conventions = conventions
+    Object.freeze(this)
+  }
+
+  errandFor({ issue, repository }) {
+    const dispatchCheck = this.dispatchCheck
+    const conventions = this.conventions
+
     return [
       `Escribes el PLAN del issue #${issue.number} del repo ${repository}. No lo implementas.`,
       'Arranque verification-first: confirma pwd, rama y git log, y deja el baseline en verde ANTES de tocar nada.',
@@ -808,9 +864,10 @@ describe('CmuxLauncher', () => {
 
   it('the_sentinel_is_written_before_the_agent_starts_because_waiting_for_it_to_finish_is_the_thing_we_cannot_do', () => {
     const written = script().indexOf('> ')
-    const started = script().indexOf('claude')
+    const started = script().indexOf("claude '")
 
     expect(written).toBeGreaterThan(-1)
+    expect(started).toBeGreaterThan(-1)
     expect(written).toBeLessThan(started)
   })
 
@@ -2069,7 +2126,7 @@ y compón:
         sleep: () => new Promise((resolve) => setTimeout(resolve, CtApi.#SENTINEL_TICK_MS)),
         runsIn: join(tmpdir(), 'ct-plan'),
       }),
-      brief: PlanAgentBrief,
+      brief: new PlanAgentBrief({ dispatchCheck: CtApi.#DISPATCH_CHECK, conventions: CtApi.#CONVENTIONS }),
     })
     const planEvents = new PlanEvents({
       sleep: () => new Promise((resolve) => setTimeout(resolve, PlanEvents.TICK_MS)),
@@ -2091,6 +2148,7 @@ con los ayudantes de disco y las constantes que faltan como estáticos de `CtApi
   static #BASE = 'main'
   static #SENTINEL_TICK_MS = 500
   static #DISPATCH_CHECK = process.env.CT_DISPATCH_CHECK ?? ''
+  static #CONVENTIONS = process.env.CT_CONVENTIONS ?? ''
   static #REPOSITORY = process.env.CT_REPOSITORY ?? ''
 
   static async #write(path, text) {
