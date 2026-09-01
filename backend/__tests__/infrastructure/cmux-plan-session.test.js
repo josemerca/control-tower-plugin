@@ -2,9 +2,11 @@ import { describe, it, expect } from 'vitest'
 import { CmuxPlanSession } from '../../src/infrastructure/cmux-plan-session.js'
 import { PlanSessionNotStarted, PlanSessionNotNamed, PlanSessionFailure } from '../../src/domain/exceptions.js'
 import { TicketKey } from '../../src/domain/ticket-key.js'
+import { PlanIssue } from '../../src/domain/plan-issue.js'
 
 class CmuxDouble {
   static CWD = '/repo/checkout'
+  static ISSUE = new PlanIssue({ number: 7, url: 'https://github.com/owner/name/issues/7' })
 
   constructor(printed) {
     this.printed = printed
@@ -22,8 +24,8 @@ class CmuxDouble {
     })
   }
 
-  async startFor(text) {
-    return this.session().start(new TicketKey(text))
+  async startFor(text, issue = CmuxDouble.ISSUE) {
+    return this.session().start({ ticket: new TicketKey(text), issue })
   }
 }
 
@@ -37,7 +39,7 @@ describe('CmuxPlanSession', () => {
       'new-workspace',
       '--name', 'ct-plan-MO_SHOP-42',
       '--cwd', CmuxDouble.CWD,
-      '--command', 'echo "plan session up for MO_SHOP-42"',
+      '--command', 'echo "plan session up for MO_SHOP-42 on issue #7"',
     ]])
   })
 

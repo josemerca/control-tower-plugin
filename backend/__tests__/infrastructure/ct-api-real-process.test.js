@@ -28,11 +28,11 @@ class Entrypoint {
     })
   }
 
-  static startPlan(port) {
+  static startPlan(port, body = '{"id":"ABC-123"}') {
     return fetch(`http://127.0.0.1:${port}/start-plan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: '{"id":"ABC-123"}',
+      body,
     })
   }
 
@@ -89,7 +89,16 @@ describe('ct-api entrypoint', () => {
     await Entrypoint.cutMidBody(port)
 
     expect(Entrypoint.alive()).toBe(true)
-    await expect(Entrypoint.startPlan(port)).resolves.toBeDefined()
+    expect((await Entrypoint.startPlan(port)).status).toBe(400)
+  })
+
+  it('a_whole_request_reaches_jira_first_so_no_issue_is_ever_opened_for_a_ticket_nobody_read', async () => {
+    const port = await Entrypoint.listening({ CT_API_PORT: '0' })
+
+    const response = await Entrypoint.startPlan(port, '{"id":"ZZZ-999999","repo":"josemerca/nope"}')
+
+    expect(response.status).toBe(503)
+    expect((await response.json()).error).toMatch(/^could not start the plan: acli jira failed: /)
   })
 
   it('a_refused_invocation_stops_the_process_with_the_usage_code_and_says_why', async () => {

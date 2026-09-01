@@ -10,19 +10,19 @@ export class CmuxPlanSession extends PlanSession {
     this.cwd = cwd
   }
 
-  static argvFor(ticket, cwd) {
+  static argvFor({ ticket, issue, cwd }) {
     return [
       'new-workspace',
       '--name', `ct-plan-${ticket}`,
       '--cwd', cwd,
-      '--command', `echo "plan session up for ${ticket}"`,
+      '--command', `echo "plan session up for ${ticket} on issue ${issue}"`,
     ]
   }
 
-  async start(ticket) {
+  async start({ ticket, issue }) {
     let printed
     try {
-      printed = await this.run(CmuxPlanSession.argvFor(ticket, this.cwd))
+      printed = await this.run(CmuxPlanSession.argvFor({ ticket, issue, cwd: this.cwd }))
     } catch (cause) {
       throw new PlanSessionNotStarted(cause.message)
     }

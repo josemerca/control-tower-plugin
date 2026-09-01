@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { PlanRequest, PlanRequestOutcome } from './plan-request.js'
 import { PlanRefusal } from './plan-refusal.js'
 import { StartPlanParams } from '../application/actions/start-plan.js'
-import { PlanSessionFailure } from '../domain/exceptions.js'
+import { PlanFailure } from '../domain/exceptions.js'
 
 export const LOOPBACK = '127.0.0.1'
 
@@ -68,27 +68,31 @@ export class ApiServer {
     }
     const asked = await this.#read(request)
     if (asked.outcome === PlanRequestOutcome.ACCEPTED) {
-      await this.#accept(response, asked.ticket)
+      await this.#accept(response, asked)
       return
     }
     const refusal = PlanRefusal.of(asked)
     this.#refuse(response, refusal.status, refusal.error)
   }
 
-  async #accept(response, ticket) {
+  async #accept(response, asked) {
     let started
     try {
-      started = await this.startPlan.execute(new StartPlanParams({ ticket }))
+      started = await this.startPlan.execute(
+        new StartPlanParams({ ticket: asked.ticket, repository: asked.repository })
+      )
     } catch (cause) {
-      if (!(cause instanceof PlanSessionFailure)) throw cause
-      this.#refuse(response, 503, `could not start the plan session: ${cause.message}`)
+      if (!(cause instanceof PlanFailure)) throw cause
+      this.#refuse(response, 503, `could not start the plan: ${cause.message}`)
       return
     }
     response
       .writeHead(202, ApiServer.#JSON_HEADERS)
       .end(JSON.stringify({
         status: 'started',
-        [PlanRequest.ID_FIELD]: ticket.text,
+        [PlanRequest.ID_FIELD]: asked.ticket.text,
+        [PlanRequest.REPO_FIELD]: asked.repository.text,
+        issue: { number: started.issue.number, url: started.issue.url },
         session: started.session,
       }))
   }
