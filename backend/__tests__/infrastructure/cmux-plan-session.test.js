@@ -15,14 +15,22 @@ class CmuxDouble {
     this.sentinel = sentinel
     this.calls = []
     this.written = []
+    this.removed = []
+    this.events = []
     this.slept = 0
   }
 
   session() {
     return new CmuxPlanSession({
       runsIn: CmuxDouble.RUNS_IN,
+      remove: (path) => {
+        this.removed.push(path)
+        this.events.push(['remove', path])
+        return Promise.resolve()
+      },
       write: (path, text) => {
         this.written.push([path, text])
+        this.events.push(['write', path])
         return Promise.resolve()
       },
       read: () => Promise.resolve(this.sentinel),
@@ -60,6 +68,36 @@ class CmuxDouble {
 }
 
 describe('CmuxPlanSession', () => {
+  it('a_sentinel_a_previous_attempt_left_on_disk_is_removed_before_the_new_launch_script_is_written', async () => {
+    const cmux = new CmuxDouble({ printed: CmuxDouble.named(), sentinel: CmuxDouble.ran() })
+
+    await cmux.start()
+
+    expect(cmux.removed).toEqual([`${CmuxDouble.RUNS_IN}/42/${CmuxLauncher.SENTINEL_NAME}`])
+    expect(cmux.events[0]).toEqual(['remove', `${CmuxDouble.RUNS_IN}/42/${CmuxLauncher.SENTINEL_NAME}`])
+    expect(cmux.events[1]).toEqual(['write', `${CmuxDouble.RUNS_IN}/42/${CmuxLauncher.SCRIPT_NAME}`])
+  })
+
+  it('a_stale_sentinel_left_by_an_earlier_attempt_cannot_be_read_as_this_attempt_succeeding_once_it_is_gone_from_disk', async () => {
+    const sentinelPath = `${CmuxDouble.RUNS_IN}/42/${CmuxLauncher.SENTINEL_NAME}`
+    let onDisk = CmuxDouble.ran()
+    const session = new CmuxPlanSession({
+      runsIn: CmuxDouble.RUNS_IN,
+      write: () => Promise.resolve(),
+      remove: (path) => {
+        if (path === sentinelPath) onDisk = null
+        return Promise.resolve()
+      },
+      read: () => Promise.resolve(onDisk),
+      sleep: () => Promise.resolve(),
+      run: () => Promise.resolve(CmuxDouble.named()),
+    })
+
+    const refusal = await session.start(CmuxDouble.briefing()).catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(PlanSessionDidNotRun)
+  })
+
   it('the_window_it_opens_is_cut_in_the_worktree_and_not_where_the_api_happens_to_run', async () => {
     const cmux = new CmuxDouble({ printed: CmuxDouble.named(), sentinel: CmuxDouble.ran() })
 

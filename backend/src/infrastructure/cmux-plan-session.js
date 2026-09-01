@@ -8,11 +8,12 @@ export class CmuxPlanSession extends PlanSession {
   static ATTEMPTS = 20
   static #REF = /^OK\s+(workspace:\d+)\s*$/m
 
-  constructor({ run, write, read, sleep, runsIn }) {
+  constructor({ run, write, read, remove, sleep, runsIn }) {
     super()
     this.run = run
     this.write = write
     this.read = read
+    this.remove = remove
     this.sleep = sleep
     this.runsIn = runsIn
   }
@@ -43,6 +44,7 @@ export class CmuxPlanSession extends PlanSession {
     const script = `${directory}/${CmuxLauncher.SCRIPT_NAME}`
     const sentinel = `${directory}/${CmuxLauncher.SENTINEL_NAME}`
     const typed = CmuxLauncher.typedFor(script)
+    await this.remove(sentinel)
     await this.write(script, CmuxLauncher.scriptFor({
       sentinel,
       errand: briefing.errand,
