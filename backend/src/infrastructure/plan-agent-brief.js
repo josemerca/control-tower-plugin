@@ -16,6 +16,9 @@ export class PlanAgentBrief {
   }
 
   errandFor({ issue, repository }) {
+    if (typeof repository !== 'string' || repository.trim().length === 0) {
+      throw new Error(`the errand names the repository whose issue it opens, got ${JSON.stringify(repository)}`)
+    }
     const dispatchCheck = this.dispatchCheck
     const conventions = this.conventions
 

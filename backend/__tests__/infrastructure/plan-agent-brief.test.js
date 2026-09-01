@@ -50,4 +50,22 @@ describe('PlanAgentBrief', () => {
       conventions: 'plugin/conventions',
     })).toThrow(/yardstick/)
   })
+
+  it('a_missing_repository_refuses_to_exist_instead_of_shipping_the_word_undefined_into_gh_issue_view', () => {
+    const brief = new PlanAgentBrief({
+      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+      conventions: '/plugin/conventions',
+    })
+
+    expect(() => brief.errandFor({ issue: { number: 42 }, repository: undefined })).toThrow(/repository/)
+  })
+
+  it('a_repository_made_only_of_spaces_refuses_to_exist_the_same_as_a_missing_one', () => {
+    const brief = new PlanAgentBrief({
+      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+      conventions: '/plugin/conventions',
+    })
+
+    expect(() => brief.errandFor({ issue: { number: 42 }, repository: '   ' })).toThrow(/repository/)
+  })
 })
