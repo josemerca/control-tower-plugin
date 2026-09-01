@@ -168,6 +168,16 @@ cierto que el modelo de amenaza mejore. Ver §8.2.
 
 ### 3.3 El monorepo: simétrico
 
+> **DIVERGENCIA EJECUTADA (2026-09-01) — esta sección quedó superada por la
+> rama `refactor/plugin-a-subdir`.** El reparto de nombres cambió antes de que
+> este diseño se ejecutara: `backend/` lo ocupó la API HTTP local (PR #56) y
+> **el plugin CT vive en `plugin/`**, no en `backend/` —
+> `.claude-plugin/marketplace.json` apunta a `"./plugin"`. Y `frontend/` **no
+> entra por `git subtree`**: la decisión es repo único, el front nace aquí y
+> `pocs.companion` no se importa con su historia. Lo que sigue abajo describe
+> el reparto que NO se hizo; el coste que sí sobrevive intacto es el último
+> punto — cada repo gobernado reinstala una vez.
+
 `backend/` es CT (entra con `git mv`), `frontend/` es la app (entra con
 `git subtree add --prefix frontend`). Las dos historias se conservan.
 `.claude-plugin/marketplace.json` pasa de `"source": "./"` a `"./backend"`.

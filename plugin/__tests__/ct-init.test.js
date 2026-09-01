@@ -110,6 +110,14 @@ function git(args) {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
 }
 
+const prefijoDeArbolDe = (cwd) =>
+  execFileSync('git', ['rev-parse', '--show-prefix'], { cwd, encoding: 'utf8' }).trim()
+
+const rutasDeArbolPara = (cwd, ruta) => [...new Set([`${prefijoDeArbolDe(cwd)}${ruta}`, ruta])]
+
+const existeEnElArbol = (cwd, rev, rutas) =>
+  rutas.some((r) => spawnSync('git', ['cat-file', '-e', `${rev}:${r}`], { cwd }).status === 0)
+
 // extractBlockFromSource: el bloque tal cual lo emitiría ese ct-init.sh. El
 // bloque vive dentro de un heredoc `<<'EOF'` sin expansión, así que las líneas
 // del script entre el marcador de apertura y el de cierre (comparadas como
@@ -153,12 +161,16 @@ function historicalContractBlocks() {
   }
   const oids = []
   const seenOid = new Set()
+  const rutasDelLedger = rutasDeArbolPara(root, RUTA_LEDGER)
   for (const c of commits) {
-    let oid
-    try {
-      oid = git(['rev-parse', '--verify', '--quiet', `${c}:scripts/ct-init.sh`]).trim()
-    } catch {
-      continue // el fichero no existía todavía en ese commit
+    let oid = ''
+    for (const ruta of rutasDelLedger) {
+      try {
+        oid = git(['rev-parse', '--verify', '--quiet', `${c}:${ruta}`]).trim()
+      } catch {
+        oid = '' // el fichero no vivía todavía en esa ruta en ese commit
+      }
+      if (oid) break
     }
     if (oid && !seenOid.has(oid)) { seenOid.add(oid); oids.push({ oid, commit: c }) }
   }
@@ -243,12 +255,20 @@ const RUTA_FIXTURES = '__tests__/fixtures'
 // nada).
 function procedenciaDelBloqueGuardado({ cwd, fixture, hash }) {
   const g = (args) => execFileSync('git', args, { cwd, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
-  const existeEn = (rev, ruta) => spawnSync('git', ['cat-file', '-e', `${rev}:${ruta}`], { cwd }).status === 0
   const rutaFixture = `${RUTA_FIXTURES}/${fixture}`
+  const rutasDelLedger = rutasDeArbolPara(cwd, RUTA_LEDGER)
+  const rutasDelFixture = rutasDeArbolPara(cwd, rutaFixture)
+  const existeEn = (rev, rutas) => existeEnElArbol(cwd, rev, rutas)
   // Control anti-tautología: si estas rutas relativas dejaran de existir (un
   // día que se mueva el directorio de fixtures o el script), el `cat-file -e`
   // de abajo fallaría SIEMPRE y la comprobación pasaría a estar vacía en
-  // silencio — exactamente el modo de fallo que este slice viene a cerrar.
+  // silencio — exactamente el modo de fallo que este slice viene a cerrar. No
+  // basta con mirar el disco: el `git mv` a `plugin/` dejó el fichero donde
+  // `existsSync` lo ve y donde `cat-file` ya no. De que las rutas de ÁRBOL
+  // sigan nombrando algo se ocupa "las fixtures y el ledger se buscan por
+  // rutas que el ÁRBOL de HEAD resuelve", que juzga el repo real; aquí no,
+  // porque un repo de juguete sin commitear es un caso legítimo con su propio
+  // diagnóstico.
   if (!existsSync(join(cwd, RUTA_LEDGER))) return `no existe ${RUTA_LEDGER} en ${cwd}`
   if (!existsSync(join(cwd, rutaFixture))) return `no existe ${rutaFixture} en ${cwd}`
   // El commit que introdujo el hash en el ledger. `git log` sin revisión =
@@ -258,7 +278,8 @@ function procedenciaDelBloqueGuardado({ cwd, fixture, hash }) {
   // (743fe3f, ac48fa3) NO son alcanzables desde HEAD — usarlos como ref
   // funciona en esta máquina y se rompe en un clon limpio.
   // Cronológico inverso, así que el más antiguo es el último.
-  const testigos = g(['log', '--format=%H', `-S${hash}`, '--', RUTA_LEDGER]).trim().split('\n').filter(Boolean)
+  const testigos = g(['log', '--format=%H', `-S${hash}`, '--', ...rutasDelLedger.map((r) => `:(top)${r}`)])
+    .trim().split('\n').filter(Boolean)
   if (testigos.length === 0) {
     return (
       `${fixture}: el hash ${hash.slice(0, 12)}… no entró en ${RUTA_LEDGER} en ningún commit ` +
@@ -267,7 +288,7 @@ function procedenciaDelBloqueGuardado({ cwd, fixture, hash }) {
     )
   }
   const testigo = testigos[testigos.length - 1]
-  if (existeEn(testigo, rutaFixture)) {
+  if (existeEn(testigo, rutasDelFixture)) {
     return (
       `${fixture}: el commit que metió el hash en el ledger (${testigo.slice(0, 7)}) YA traía ` +
       `${rutaFixture}. El par (entrada, fixture) se valida contra sí mismo: no hay evidencia ` +
@@ -1188,6 +1209,16 @@ describe('ct-init.sh', () => {
     ).toEqual([])
   })
 
+  it('la reconstrucción histórica alcanza el commit de HOY: el bloque de HEAD está entre los que ve', () => {
+    const deHead = extractBlockFromSource(initScriptSrc)
+    expect(
+      historicalContractBlocks().map(({ block }) => block),
+      'historicalContractBlocks() pregunta por `<commit>:<ruta>`, que se resuelve contra la RAÍZ del ' +
+        'árbol: si nombra la ruta de una sola época, los commits de la otra caen en el `catch` y no ' +
+        'se ven. Un bloque emitido desde entonces deja de estar cubierto sin que nada se ponga rojo.'
+    ).toContain(deHead)
+  })
+
   it('el extractor textual del historial coincide con lo que ct-init emite de verdad al correr', () => {
     // El test de arriba lee los bloques históricos de la FUENTE de cada
     // ct-init.sh (entre marcadores, dentro de su heredoc) en vez de ejecutar
@@ -1279,6 +1310,52 @@ describe('ct-init.sh', () => {
         'contenía el fixture. Si no, el par se valida contra sí mismo y un bloque que ct-init ' +
         'nunca emitió puede colarse como pristine.'
     ).toEqual([])
+  })
+
+  it('el testigo que se toma por el commit que introdujo el hash lo introdujo de verdad: su padre no lo traía', () => {
+    exigirHistorialCompleto()
+    const rutas = rutasDeArbolPara(root, RUTA_LEDGER)
+    const ledgerEn = (rev) => {
+      for (const ruta of rutas) {
+        const leido = spawnSync('git', ['show', `${rev}:${ruta}`], { cwd: root, encoding: 'utf8' })
+        if (leido.status === 0) return leido.stdout
+      }
+      return ''
+    }
+    const falsosTestigos = squashedBlocks().map(({ fixture, block }) => {
+      const hash = sha256(block)
+      const testigos = execFileSync(
+        'git',
+        ['log', '--format=%H', `-S${hash}`, '--', ...rutas.map((r) => `:(top)${r}`)],
+        { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }
+      ).trim().split('\n').filter(Boolean)
+      const testigo = testigos[testigos.length - 1]
+      if (!testigo) return `${fixture}: ningún commit alcanzable desde HEAD metió su hash en el ledger`
+      if (!ledgerEn(`${testigo}^`)) return null
+      if (!ledgerEn(`${testigo}^`).includes(hash)) return null
+      return `${fixture}: ${testigo.slice(0, 7)} se toma por el commit que metió el hash, y su padre YA lo traía`
+    }).filter(Boolean)
+
+    expect(
+      falsosTestigos,
+      'El testigo sale de `git log -S` sobre el ledger, y sus pathspecs se resuelven contra la RAÍZ ' +
+        'del árbol: si nombran la ruta de una sola época, el commit más antiguo que se encuentra es ' +
+        'el que movió el fichero, no el que introdujo el hash. La procedencia queda anclada a un ' +
+        'commit que no prueba nada.'
+    ).toEqual([])
+  })
+
+  it('las fixtures y el ledger se buscan por rutas que el ÁRBOL de HEAD resuelve, no sólo el disco', () => {
+    expect(
+      existeEnElArbol(root, 'HEAD', rutasDeArbolPara(root, RUTA_LEDGER)),
+      `HEAD no resuelve ${RUTA_LEDGER}: todo cat-file de la procedencia falla y la comprobación queda vacía`
+    ).toBe(true)
+    for (const fixture of SQUASHED_BLOCK_FIXTURES) {
+      expect(
+        existeEnElArbol(root, 'HEAD', rutasDeArbolPara(root, `${RUTA_FIXTURES}/${fixture}`)),
+        `HEAD no resuelve ${RUTA_FIXTURES}/${fixture}: el par (entrada, fixture) dejaría de compararse`
+      ).toBe(true)
+    }
   })
 
   it('la comprobación de procedencia caza el par forjado: entrada del ledger y fixture en el MISMO commit', () => {

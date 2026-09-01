@@ -9,7 +9,7 @@ class Subjects {
   static HERE = dirname(fileURLToPath(import.meta.url))
   static BACKEND = join(Subjects.HERE, '..')
   static REPOSITORY = join(Subjects.BACKEND, '..')
-  static ROOT_GUARD = join('__tests__', 'modulos-conformes.test.js')
+  static ROOT_GUARD = join('plugin', '__tests__', 'modulos-conformes.test.js')
 
   static measured() {
     return Yardstick.measuredUnder(Subjects.BACKEND)

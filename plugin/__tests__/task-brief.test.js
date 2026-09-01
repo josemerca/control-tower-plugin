@@ -22,8 +22,12 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const REPO_ROOT = join(here, '..')
-const SCRIPT = join(REPO_ROOT, 'skills', 'subagent-driven-development', 'scripts', 'task-brief')
+// Dos raíces desde que el plugin vive en plugin/: el script bajo prueba está
+// dentro del plugin, pero el plan que hace de input fijo es documentación del
+// REPO (docs/ no se distribuye, a propósito) y queda un nivel más arriba.
+const PLUGIN_ROOT = join(here, '..')
+const REPO_ROOT = join(PLUGIN_ROOT, '..')
+const SCRIPT = join(PLUGIN_ROOT, 'skills', 'subagent-driven-development', 'scripts', 'task-brief')
 const PLAN = join(REPO_ROOT, 'docs', 'superpowers', 'plans', '2026-08-18-los-dos-agentes-y-la-vara-del-plan.md')
 const TASK = '7'
 // El último commit anterior a esta ronda, anterior también a `1c2fc61` (que
