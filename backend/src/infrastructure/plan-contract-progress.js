@@ -29,10 +29,21 @@ export class PlanContractProgress extends PlanProgress {
       }),
       { cwd: located.path }
     )
-    if (validated.failed) return PlanState.WRITING
+    if (validated.failed) {
+      PlanContractProgress.#trace('dispatch-check', validated.stderr)
+      return PlanState.WRITING
+    }
     const pending = await this.git(PlanContractProgress.pendingArgvFor(located))
-    if (pending.failed || pending.stdout.trim().length > 0) return PlanState.WRITING
+    if (pending.failed) {
+      PlanContractProgress.#trace('git', pending.stderr)
+      return PlanState.WRITING
+    }
+    if (pending.stdout.trim().length > 0) return PlanState.WRITING
 
     return PlanState.READY
+  }
+
+  static #trace(bin, stderr) {
+    process.stderr.write(`plan progress: ${bin} failed: ${stderr.trim()}\n`)
   }
 }

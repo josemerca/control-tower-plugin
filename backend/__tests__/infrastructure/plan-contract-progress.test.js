@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { PlanContractProgress } from '../../src/infrastructure/plan-contract-progress.js'
 import { PlanState } from '../../src/domain/plan-state.js'
 import { PlanProgress } from '../../src/domain/plan-progress.js'
@@ -96,6 +96,60 @@ describe('PlanContractProgress', () => {
     await asked.asked()
 
     expect(asked.node).toHaveLength(1)
+  })
+
+  it('a_contract_that_the_dispatch_check_rejects_leaves_a_trace_naming_it_and_carrying_its_error_channel', async () => {
+    const asked = new ProgressDouble({ validated: false, dirty: '' })
+    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+
+    try {
+      await asked.asked()
+
+      const said = complaining.mock.calls.map(([line]) => line).join('')
+      expect(said).toContain('dispatch-check')
+      expect(said).toContain('no hay ningún plan prescriptivo')
+    } finally {
+      complaining.mockRestore()
+    }
+  })
+
+  it('a_git_status_that_refuses_to_answer_leaves_a_trace_naming_it_and_carrying_its_error_channel', async () => {
+    const asked = new ProgressDouble({ validated: true, dirty: '', gitFailed: true })
+    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+
+    try {
+      await asked.asked()
+
+      const said = complaining.mock.calls.map(([line]) => line).join('')
+      expect(said).toContain('git')
+      expect(said).toContain('git is not available')
+    } finally {
+      complaining.mockRestore()
+    }
+  })
+
+  it('a_plan_that_validates_cleanly_leaves_the_error_channel_untouched', async () => {
+    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+
+    try {
+      await new ProgressDouble({ validated: true, dirty: '' }).asked()
+
+      expect(complaining.mock.calls).toEqual([])
+    } finally {
+      complaining.mockRestore()
+    }
+  })
+
+  it('a_plan_that_is_valid_but_not_yet_committed_leaves_the_error_channel_untouched_because_nothing_actually_failed', async () => {
+    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+
+    try {
+      await new ProgressDouble({ validated: true, dirty: '?? docs/superpowers/plans/x.md\n' }).asked()
+
+      expect(complaining.mock.calls).toEqual([])
+    } finally {
+      complaining.mockRestore()
+    }
   })
 })
 
