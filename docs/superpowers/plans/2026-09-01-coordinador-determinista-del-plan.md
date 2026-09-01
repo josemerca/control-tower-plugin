@@ -2108,6 +2108,31 @@ git commit -m "feat(events): el frontend se entera de que el plan está hecho si
 
 ---
 
+## Residuo del repaso final — dos cosas pendientes antes de mergear
+
+La re-revisión de la ola de arreglo cerró los doce hallazgos, pero encontró dos que la propia ola abrió. Se
+dejan aquí escritas porque son pequeñas, están diagnosticadas y la persona decide cuándo entran.
+
+1. **`GitWorkspace.undo` no le dice a git dónde correr, y una de sus dos órdenes es destructiva.**
+   `removeArgvFor` y `deleteBranchArgvFor` no llevan `-C`, a diferencia de todos los demás constructores de
+   argv de esa clase. `undo` queda a merced del directorio de trabajo del invocable `run`. Si la composición
+   aterriza con un runner sobre `process.cwd()` —que es el patrón que `ct-api.mjs` ya usa para `cmux`—
+   `git branch -D feat/<n>` se ejecuta en el repositorio que haya debajo y borra allí una rama con ese nombre.
+   Y `StartPlan` se traga el fallo de la limpieza sin traza, así que no habría ni aviso. Son dos líneas.
+   **No es alcanzable hoy** (nada construye `GitWorkspace` fuera de los tests), pero se vuelve alcanzable en el
+   mismo acto que cablea la composición de la sección siguiente.
+
+2. **`prepare()` sigue dejando el worktree tras de sí.** La compensación sólo envuelve `planSession.start`,
+   pero el arreglo del crítico añadió dos puntos de fallo nuevos DESPUÉS de crear el worktree (los dos de
+   `#verifyHidden`), además de los dos que ya había. Se llega al mismo síntoma que la compensación existía para
+   cerrar: worktree y rama vivos, segundo intento del mismo issue imposible. Y en el caso de `#verifyHidden` es
+   peor, porque el `SLICE.md` ya se escribió: queda un worktree huérfano con el fichero visible para git.
+
+Menores del mismo repaso, sin urgencia: el `.catch(() => {})` de la compensación no cubre un `undo` ausente
+(un `TypeError` síncrono sustituiría al fallo original); la limpieza que falla no deja traza, justo lo que esta
+misma ola arregló para el predicado; y `PlanContractProgress` escribe a `process.stderr` sin inyectar, lo que
+ensucia la salida de dos tests.
+
 ## Después del merge: la composición
 
 Esto NO es una tarea de este plan: es lo que queda por hacer cuando
