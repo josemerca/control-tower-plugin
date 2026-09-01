@@ -484,6 +484,34 @@ describe('ApiServer', () => {
     }
   })
 
+  it('an_origin_header_on_the_events_route_is_not_turned_away_because_that_guard_is_parked_for_one_browser_on_purpose', async () => {
+    const located = new WorkspaceLocation({ path: '/repo/.worktrees/9', branch: 'feat/9' })
+    const issue = { number: 9 }
+    const events = new PlanEvents({
+      read: () => Promise.resolve({ state: PlanState.READY }),
+      sleep: () => Promise.resolve(),
+    })
+    const server = new ApiServer({
+      port: 0,
+      startPlan: new StartPlanSpy({ issue, located }),
+      planEvents: events,
+    })
+    const port = await server.start()
+
+    try {
+      await RunningApi.post(port, '/start-plan', `{"id":"${RunningApi.TICKET}"}`)
+
+      const response = await fetch(`http://127.0.0.1:${port}/plan-events/${issue.number}`, {
+        headers: { Origin: 'https://evil.example' },
+      })
+
+      expect(response.status).not.toBe(403)
+      expect(response.headers.get('access-control-allow-origin')).toBe(null)
+    } finally {
+      await server.stop()
+    }
+  })
+
   it('closing_the_connection_from_the_client_stops_the_progress_port_from_being_asked_again', async () => {
     const located = new WorkspaceLocation({ path: '/repo/.worktrees/9', branch: 'feat/9' })
     const issue = { number: 9 }
