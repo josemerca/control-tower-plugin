@@ -132,12 +132,24 @@ const nombreInvocado = (ruta) => ruta.slice(ruta.lastIndexOf('/') + 1)
 // `pgrep -x claude` NO se ve a sí mismo en la salida; el filtro de aquí abajo
 // sí lo lista.
 //
-// LÍMITE CONOCIDO, y se deja escrito porque nadie lo ha podido comprobar: todo
-// lo de arriba está medido en macOS. Que la columna `comm` de `ps` traiga la
-// RUTA invocada es lo que hace funcionar esto, y en otro sistema operativo esa
-// columna puede significar otra cosa. Si alguien lleva el loop a Linux, lo
-// primero que hay que verificar es qué devuelve ahí `ps -o comm=`; hasta
-// entonces, esta señal está comprobada sólo donde se ha medido.
+// LÍMITE CONOCIDO, y ya PARCIALMENTE MEDIDO. Todo lo de arriba está medido en
+// macOS: que la columna `comm` de `ps` traiga la RUTA invocada es lo que hace
+// funcionar esto, y en otro sistema operativo esa columna puede significar
+// otra cosa.
+//
+// Lo que se pedía verificar «si alguien lleva el loop a Linux» ya tiene
+// respuesta, y la dio la primera corrida de la integración continua sobre
+// ubuntu-latest (ver el canario de __tests__/ct-status.test.js): en Linux
+// `comm` —y su alias `ucomm`— dan el basename INVOCADO, no la ruta completa ni
+// el ejecutable resuelto. Para el filtro de aquí abajo eso da igual: toma el
+// basename de lo que devuelva `comm`, y el basename de 'claude' es 'claude'.
+// Así que la señal funciona en los dos sistemas, por caminos distintos.
+//
+// Lo que NO está medido en Linux, y conviene saberlo antes de fiarse: `comm`
+// está TRUNCADO a 15 caracteres (TASK_COMM_LEN). A `claude` no le afecta, pero
+// cualquier futuro binario con un nombre más largo se compararía contra una
+// cadena cortada. Y el resto del camino —el agrupado de `lsof`, sus códigos de
+// salida, los topes de tiempo— sigue medido sólo en macOS.
 //
 // Una sola llamada a `lsof` para todos los PID (medido: 180 ms sobre 400 PID).
 // Un PID que muera entre el `ps` y el `lsof` no rompe nada, pero no porque

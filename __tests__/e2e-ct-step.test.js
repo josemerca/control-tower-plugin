@@ -4,10 +4,11 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { E2E_REQUIRED_BY_VERDICT } from '../scripts/step-contracts.js'
 import { DEFAULT_BUDGETS } from '../scripts/run-machine.js'
 
-const STEP = new URL('../scripts/ct-step.mjs', import.meta.url).pathname
+const STEP = fileURLToPath(new URL('../scripts/ct-step.mjs', import.meta.url))
 const A = 'el server escucha en 9115 por defecto y en el puerto indicado si se pasa'
 
 // Un worktree de slice con UNA tarea ya comiteada y el run parado en `e2e`.

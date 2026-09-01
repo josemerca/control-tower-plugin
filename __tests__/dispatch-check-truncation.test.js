@@ -17,6 +17,8 @@
 // (el que se perdería primero si algo se trunca) sigue apareciendo íntegro.
 import { describe, it, expect } from 'vitest'
 import { execFileSync } from 'node:child_process'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -45,10 +47,26 @@ describe('dispatch-check.mjs — el diagnóstico COLLISION no se trunca aunque s
     for (let i = 1; i <= N; i++) {
       inFlight.push({ number: 1000 + i, labels: [{ name: 'status:in-progress' }, { name: 'touches:db' }] })
     }
-    const r = runReal(['5', '--repo', 'o/r'], {
-      FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
-      FAKE_GH_LIST_SEQUENCE: JSON.stringify([inFlight]),
-    })
+    // La secuencia viaja por FICHERO y no inline en la variable de entorno.
+    // Linux limita CADA cadena de argv/entorno a MAX_ARG_STRLEN (32 páginas,
+    // 128 KiB); estos 10.000 issues pasan de 700 KiB, así que el `execve`
+    // fallaba y `r.code` llegaba como `null` — el proceso no arrancaba, y el
+    // test no medía el truncamiento que dice medir. macOS no tiene ese tope
+    // por cadena, y por eso pasaba en local y no en la integración continua.
+    // El fake gh ya trae este camino (FAKE_GH_LIST_SEQUENCE_FILE), añadido
+    // por el mismo motivo de tamaño.
+    const seqDir = mkdtempSync(join(tmpdir(), 'ct-truncation-'))
+    const seqFile = join(seqDir, 'list-sequence.json')
+    writeFileSync(seqFile, JSON.stringify([inFlight]))
+    let r
+    try {
+      r = runReal(['5', '--repo', 'o/r'], {
+        FAKE_GH_VIEW_LABELS: JSON.stringify(['touches:db']),
+        FAKE_GH_LIST_SEQUENCE_FILE: seqFile,
+      })
+    } finally {
+      rmSync(seqDir, { recursive: true, force: true })
+    }
     expect(r.code).toBe(1)
     expect(r.out.length).toBeGreaterThan(100 * 1024) // confirma que el escenario SÍ es lo bastante grande para superar un buffer de pipe típico (~64 KiB)
     expect(r.out).toMatch(/^COLLISION: #5 choca con/)
