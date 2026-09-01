@@ -8,9 +8,10 @@ class ProgressDouble {
   static WORKTREE = '/repo/.worktrees/42'
   static CHECK = '/plugin/scripts/dispatch-check.mjs'
 
-  constructor({ validated, dirty }) {
+  constructor({ validated, dirty, gitFailed = false }) {
     this.validated = validated
     this.dirty = dirty
+    this.gitFailed = gitFailed
     this.node = []
     this.git = []
   }
@@ -27,7 +28,9 @@ class ProgressDouble {
       },
       git: (argv) => {
         this.git.push(argv)
-        return Promise.resolve({ failed: false, stdout: this.dirty, stderr: '' })
+        return Promise.resolve(this.gitFailed
+          ? { failed: true, stdout: '', stderr: 'git is not available' }
+          : { failed: false, stdout: this.dirty, stderr: '' })
       },
     })
   }
@@ -46,7 +49,10 @@ describe('PlanContractProgress', () => {
   })
 
   it('a_plan_the_contract_rejects_is_still_being_written', async () => {
-    expect(await new ProgressDouble({ validated: false, dirty: '' }).asked()).toBe(PlanState.WRITING)
+    const asked = new ProgressDouble({ validated: false, dirty: '' })
+
+    expect(await asked.asked()).toBe(PlanState.WRITING)
+    expect(asked.git).toHaveLength(0)
   })
 
   it('a_valid_plan_that_is_not_committed_is_not_ready_because_it_would_not_travel_in_the_pull_request', async () => {
@@ -59,6 +65,10 @@ describe('PlanContractProgress', () => {
     const asked = new ProgressDouble({ validated: true, dirty: ' M docs/superpowers/plans/2026-09-01-issue-42-x.md\n' })
 
     expect(await asked.asked()).toBe(PlanState.WRITING)
+  })
+
+  it('a_git_that_does_not_answer_is_not_a_clean_tree', async () => {
+    expect(await new ProgressDouble({ validated: true, dirty: '', gitFailed: true }).asked()).toBe(PlanState.WRITING)
   })
 
   it('the_contract_is_asked_from_inside_the_worktree_because_it_resolves_its_paths_from_there', async () => {
