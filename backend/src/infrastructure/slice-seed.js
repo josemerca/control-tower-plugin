@@ -1,6 +1,5 @@
 export class SliceSeed {
   static RELATIVE_PATH = '.agent/SLICE.md'
-  static DIRECTORY = '.agent'
   static EXCLUDE_PATH = 'info/exclude'
   static EXCLUDE_RULE = SliceSeed.RELATIVE_PATH
 

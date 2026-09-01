@@ -1,8 +1,6 @@
 import { PlanState } from '../domain/plan-state.js'
 
 export class PlanEvents {
-  static TICK_MS = 3_000
-
   constructor({ read, sleep }) {
     this.read = read
     this.sleep = sleep

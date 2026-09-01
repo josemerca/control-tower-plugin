@@ -24,4 +24,22 @@ describe('PlanBriefing', () => {
   it('an_errand_with_nothing_in_it_refuses_to_exist_because_the_session_would_start_idle', () => {
     expect(() => built('   ')).toThrow(/errand/)
   })
+
+  it('a_briefing_without_a_location_refuses_to_exist_instead_of_letting_the_cmux_adapter_crash_on_it_later', () => {
+    expect(() => new PlanBriefing({
+      ticket: new TicketKey('ABC-42'),
+      issue: { number: 42 },
+      located: undefined,
+      errand: 'escribe el plan',
+    })).toThrow(/located/)
+  })
+
+  it('a_briefing_without_an_issue_refuses_to_exist_because_the_session_has_nowhere_to_hydrate_from', () => {
+    expect(() => new PlanBriefing({
+      ticket: new TicketKey('ABC-42'),
+      issue: undefined,
+      located,
+      errand: 'escribe el plan',
+    })).toThrow(/issue/)
+  })
 })
