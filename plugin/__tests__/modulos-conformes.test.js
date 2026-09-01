@@ -21,6 +21,7 @@ class NacidosConformes {
     '__tests__/branch-reconciliation-base-ilegible.test.js',
     '__tests__/reconcile-outcome.test.js',
     '__tests__/seccion-del-plan.test.js',
+    '__tests__/frontera-de-distribucion.test.js',
   ]
 
   static PALABRAS_CASTELLANAS = [

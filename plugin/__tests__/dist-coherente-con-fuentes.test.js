@@ -40,8 +40,25 @@ async function comprobarDist(root) {
     //    no hace falta shell alguno (ni interpolar `root` en un string de
     //    shell), y el fallo de `git` llega tal cual al llamante. No lo
     //    "simplifiques" de vuelta a una tubería.
+    //    Desde que el plugin vive en plugin/, `root` puede ser un SUBDIRECTORIO
+    //    del repo ('' de prefijo en los repos de mentira, cuya raíz sí es la
+    //    del repo). Eso obliga a dos cosas aquí. Una: el árbol que se archiva y
+    //    se compara es `HEAD:<prefijo>` — SOLO el subárbol del plugin, que
+    //    además es la misma frontera que la distribución: lo de fuera de `root`
+    //    no participa del build ni debe hacerlo. Y dos: archive y ls-tree se
+    //    lanzan desde el TOPLEVEL, no desde `root`, porque git convierte el
+    //    prefijo del cwd en un pathspec IMPLÍCITO — desde plugin/, un
+    //    `git archive HEAD:plugin` busca `plugin/` DENTRO de ese subárbol y
+    //    produce un tar vacío sin quejarse (reproducido). `git show` no sufre
+    //    esto (la ruta tras `:` es del árbol, no del cwd), y `git log` y
+    //    `git diff`, más abajo, quieren justo lo contrario: sus pathspecs
+    //    relativos al cwd de `-C root` ya apuntan dentro del plugin.
+    const gitFacts = execFileSync('git', ['-C', root, 'rev-parse', '--show-toplevel', '--show-prefix'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).split('\n')
+    const toplevel = gitFacts[0]
+    const prefix = gitFacts[1].trim()
+    const headTree = prefix ? `HEAD:${prefix.replace(/\/$/, '')}` : 'HEAD'
     const tar = join(tmp, 'head.tar')
-    execFileSync('git', ['-C', root, 'archive', '--format=tar', '-o', tar, 'HEAD'], { stdio: ['ignore', 'ignore', 'pipe'] })
+    execFileSync('git', ['-C', toplevel, 'archive', '--format=tar', '-o', tar, headTree], { stdio: ['ignore', 'ignore', 'pipe'] })
     execFileSync('tar', ['-xf', tar, '-C', tmp], { stdio: ['ignore', 'ignore', 'pipe'] })
     // El .tar se escribió DENTRO de `tmp`, que es donde va a correr el build:
     // se borra antes de nada para no dejar un intruso en el directorio que
@@ -75,7 +92,7 @@ async function comprobarDist(root) {
 
     // 5. Comparación de CONJUNTO en las dos direcciones, no de una lista.
     const construido = readdirSync(join(tmp, 'dist')).sort()
-    const enHead = execFileSync('git', ['-C', root, 'ls-tree', '--name-only', 'HEAD', 'dist/'], { encoding: 'utf8' })
+    const enHead = execFileSync('git', ['-C', toplevel, 'ls-tree', '--name-only', headTree, 'dist/'], { encoding: 'utf8' })
       .split('\n').filter(Boolean).map((p) => p.replace(/^dist\//, '')).sort()
 
     const faltan = construido.filter((f) => !enHead.includes(f))
@@ -83,7 +100,7 @@ async function comprobarDist(root) {
     const difieren = []
     for (const f of construido.filter((f) => enHead.includes(f))) {
       const nuevo = readFileSync(join(tmp, 'dist', f))
-      const viejo = execFileSync('git', ['-C', root, 'show', `HEAD:dist/${f}`], { maxBuffer: 256 * 1024 * 1024 })
+      const viejo = execFileSync('git', ['-C', root, 'show', `HEAD:${prefix}dist/${f}`], { maxBuffer: 256 * 1024 * 1024 })
       if (Buffer.compare(nuevo, viejo) !== 0) difieren.push(f)
     }
 
@@ -176,6 +193,10 @@ describe('el dist/ commiteado corresponde a los fuentes commiteados (F24)', () =
       'scripts/scope.js',
       'scripts/state-paths.js',
       'scripts/state.js',
+      // El bundle de `yaml`: state.js lo importa a él y no al paquete, porque
+      // una instalación de un plugin no trae node_modules. Entra en los tres
+      // hooks por state.js, y se construye en el mismo `npm run build`.
+      'scripts/vendor/yaml.js',
     ])
   }, 60_000)
 })

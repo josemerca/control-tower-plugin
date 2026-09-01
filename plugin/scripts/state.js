@@ -1,4 +1,4 @@
-import { parse, stringify } from 'yaml'
+import { parse, stringify } from './vendor/yaml.js'
 import { STATE_REL_PATH as COORD_REL_PATH, SLICE_REL_PATH } from './state-paths.js'
 
 // ===========================================================================
