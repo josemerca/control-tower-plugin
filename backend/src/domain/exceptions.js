@@ -8,3 +8,12 @@ export class PlanSessionFailure extends Error {
 export class PlanSessionNotStarted extends PlanSessionFailure {}
 
 export class PlanSessionNotNamed extends PlanSessionFailure {}
+
+export class WorkspaceFailure extends Error {
+  constructor(reason) {
+    super(reason)
+    this.name = new.target.name
+  }
+}
+
+export class WorkspaceNotPrepared extends WorkspaceFailure {}
