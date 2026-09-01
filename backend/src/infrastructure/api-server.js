@@ -52,8 +52,14 @@ class Browsers {
 class JsonBody {
   static MAX_BYTES = 8 * 1024
 
+  static #declaredBy(request) {
+    const declared = request.get('Content-Type')
+
+    return typeof declared === 'string' && declared.split(';')[0].trim() === Answer.JSON_MEDIA_TYPE
+  }
+
   static demandDeclared(request, response, next) {
-    if (request.is(Answer.JSON_MEDIA_TYPE)) {
+    if (JsonBody.#declaredBy(request)) {
       next()
       return
     }
@@ -61,7 +67,7 @@ class JsonBody {
   }
 
   static reader() {
-    return express.raw({ type: Answer.JSON_MEDIA_TYPE, limit: JsonBody.MAX_BYTES })
+    return express.raw({ type: Answer.JSON_MEDIA_TYPE, limit: JsonBody.MAX_BYTES, inflate: false })
   }
 
   static textOf(request) {
@@ -119,13 +125,14 @@ class Failures {
       return
     }
     if (cause.status === undefined) {
-      process.stderr.write(`request to ${request.url} failed: ${cause.stack ?? cause.message}\n`)
+      process.stderr.write(`request to ${request.originalUrl} failed: ${cause.stack ?? cause.message}\n`)
     }
-    request.destroy()
     if (response.headersSent || response.writableEnded) {
+      request.destroy()
       response.destroy()
       return
     }
+    response.once('finish', () => request.destroy())
     Answer.refuse(response, 400, 'request failed')
   }
 }
@@ -140,7 +147,7 @@ export class ApiServer {
   #route() {
     const app = express()
     app.disable('x-powered-by')
-    app.set('etag', false)
+    app.set('case sensitive routing', true)
     app.use(Route.collapseTrailingSlashes)
     app.post(
       StartPlanRoute.PATH,
