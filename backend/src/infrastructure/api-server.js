@@ -3,7 +3,7 @@ import { createServer } from 'node:http'
 import { PlanRequest, PlanRequestOutcome } from './plan-request.js'
 import { PlanRefusal } from './plan-refusal.js'
 import { StartPlanParams } from '../application/actions/start-plan.js'
-import { PlanSessionFailure } from '../domain/exceptions.js'
+import { PlanSessionFailure, WorkspaceFailure } from '../domain/exceptions.js'
 
 export const LOOPBACK = '127.0.0.1'
 
@@ -95,7 +95,7 @@ class StartPlanRoute {
     try {
       started = await startPlan.execute(new StartPlanParams({ ticket }))
     } catch (cause) {
-      if (!(cause instanceof PlanSessionFailure)) throw cause
+      if (!(cause instanceof PlanSessionFailure) && !(cause instanceof WorkspaceFailure)) throw cause
       Answer.refuse(response, 503, `could not start the plan session: ${cause.message}`)
       return
     }

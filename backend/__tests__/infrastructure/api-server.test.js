@@ -3,7 +3,7 @@ import { connect } from 'node:net'
 import { gzipSync } from 'node:zlib'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { StartPlanResult } from '../../src/application/actions/start-plan.js'
-import { PlanSessionNotStarted } from '../../src/domain/exceptions.js'
+import { PlanSessionNotStarted, WorkspaceNotPrepared } from '../../src/domain/exceptions.js'
 
 class StartPlanSpy {
   static SESSION = 'workspace:4'
@@ -17,6 +17,15 @@ class StartPlanSpy {
     const spy = new StartPlanSpy()
     spy.execute = async () => {
       throw new TypeError('a bug of ours')
+    }
+
+    return spy
+  }
+
+  static refusingWorkspace() {
+    const spy = new StartPlanSpy()
+    spy.execute = async () => {
+      throw new WorkspaceNotPrepared('branch is taken')
     }
 
     return spy
@@ -144,6 +153,22 @@ describe('ApiServer', () => {
       expect(response.status).toBe(503)
       expect(await response.text()).toBe(
         '{"error":"could not start the plan session: cmux is not reachable"}'
+      )
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('a_workspace_that_could_not_be_prepared_is_answered_as_unavailable_and_not_as_a_crash', async () => {
+    const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.refusingWorkspace() })
+    const port = await server.start()
+
+    try {
+      const response = await RunningApi.accepted(port)
+
+      expect(response.status).toBe(503)
+      expect(await response.text()).toBe(
+        '{"error":"could not start the plan session: branch is taken"}'
       )
     } finally {
       await server.stop()

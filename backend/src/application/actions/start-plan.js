@@ -1,23 +1,42 @@
+import { PlanBriefing } from '../../domain/plan-briefing.js'
+
 export class StartPlanParams {
-  constructor({ ticket }) {
+  constructor({ ticket, repository }) {
     this.ticket = ticket
+    this.repository = repository
     Object.freeze(this)
   }
 }
 
 export class StartPlanResult {
-  constructor({ session }) {
+  constructor({ issue, session, located }) {
+    this.issue = issue
     this.session = session
+    this.located = located
     Object.freeze(this)
   }
 }
 
 export class StartPlan {
-  constructor({ planSession }) {
+  constructor({ tickets, planIssues, workspace, planSession, brief }) {
+    this.tickets = tickets
+    this.planIssues = planIssues
+    this.workspace = workspace
     this.planSession = planSession
+    this.brief = brief
   }
 
   async execute(params) {
-    return new StartPlanResult({ session: await this.planSession.start(params.ticket) })
+    const ticket = await this.tickets.detail(params.ticket)
+    const issue = await this.planIssues.open({ ticket, repository: params.repository })
+    const located = await this.workspace.prepare(issue)
+    const session = await this.planSession.start(new PlanBriefing({
+      ticket: params.ticket,
+      issue,
+      located,
+      errand: this.brief.errandFor({ issue, repository: params.repository }),
+    }))
+
+    return new StartPlanResult({ issue, session, located })
   }
 }
