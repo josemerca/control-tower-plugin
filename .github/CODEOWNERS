@@ -1,0 +1,15 @@
+# CODEOWNERS — quién firma una PR antes de que entre en main.
+#
+# Los tres nombres y no dos, a propósito. Con `require_code_owner_reviews` una
+# PR necesita el visto de un owner QUE NO SEA SU AUTOR: con dos owners, el que
+# esté fuera deja al otro sin poder cerrar nada suyo; con tres, al autor le
+# quedan siempre dos que pueden desatascarlo.
+#
+# Requisito para figurar aquí: escritura en el repo — GitHub ignora en silencio
+# a un owner que no la tenga, y la regla se queda sin efecto sin avisar.
+#
+# Esta lista es sólo la mitad de la puerta. La otra mitad vive en la protección
+# de rama de `main` y NO está en ningún fichero de este repo: check `ci`
+# requerido, una aprobación, y `enforce_admins`.
+
+*  @josemerca @alcaptar @jjponz
