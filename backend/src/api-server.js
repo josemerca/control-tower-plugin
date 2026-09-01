@@ -1,33 +1,148 @@
+import express from 'express'
 import { createServer } from 'node:http'
 import { PlanRequest, PlanRequestOutcome } from './plan-request.js'
 
 export const LOOPBACK = '127.0.0.1'
 
-export class ApiServer {
-  static #START_PLAN_PATH = '/start-plan'
-  static #START_PLAN_METHOD = 'POST'
-  static #JSON_MEDIA_TYPE = 'application/json'
-  static #MAX_BODY_BYTES = 8 * 1024
-  static #JSON_HEADERS = Object.freeze({ 'Content-Type': 'application/json' })
+class Answer {
+  static JSON_MEDIA_TYPE = 'application/json'
+
+  static send(response, status, payload) {
+    response.setHeader('Content-Type', Answer.JSON_MEDIA_TYPE)
+    response.status(status).end(JSON.stringify(payload))
+  }
+
+  static refuse(response, status, error) {
+    Answer.send(response, status, { error })
+  }
+}
+
+class Route {
+  static #TRAILING_SLASHES = /\/+$/
+
+  static collapseTrailingSlashes(request, response, next) {
+    const asked = request.url.indexOf('?')
+    const path = asked === -1 ? request.url : request.url.slice(0, asked)
+    const query = asked === -1 ? '' : request.url.slice(asked)
+    request.url = `${path.replace(Route.#TRAILING_SLASHES, '') || '/'}${query}`
+    next()
+  }
+}
+
+class Browsers {
+  static #ORIGIN = 'Origin'
+
+  static turnAway(request, response, next) {
+    if (request.get(Browsers.#ORIGIN) === undefined) {
+      next()
+      return
+    }
+    Answer.refuse(response, 403, 'this api does not serve browsers')
+  }
+}
+
+class JsonBody {
+  static MAX_BYTES = 8 * 1024
+
+  static demandDeclared(request, response, next) {
+    if (request.is(Answer.JSON_MEDIA_TYPE)) {
+      next()
+      return
+    }
+    Answer.refuse(response, 415, `Content-Type must be ${Answer.JSON_MEDIA_TYPE}`)
+  }
+
+  static reader() {
+    return express.raw({ type: Answer.JSON_MEDIA_TYPE, limit: JsonBody.MAX_BYTES })
+  }
+
+  static textOf(request) {
+    return Buffer.isBuffer(request.body) ? request.body.toString('utf8') : ''
+  }
+}
+
+class StartPlan {
+  static PATH = '/start-plan'
+  static METHOD = 'POST'
 
   static #REFUSALS = Object.freeze({
-    [PlanRequestOutcome.BODY_TOO_LARGE]: { status: 413, error: 'body must not exceed 8192 bytes' },
     [PlanRequestOutcome.BODY_NOT_A_JSON_OBJECT]: { status: 400, error: 'body must be a JSON object' },
     [PlanRequestOutcome.MALFORMED_ID]: { status: 400, error: 'id must be a ticket key such as ABC-123' },
   })
 
+  static accept(request, response) {
+    const asked = PlanRequest.from(JsonBody.textOf(request))
+    if (asked.outcome === PlanRequestOutcome.ACCEPTED) {
+      Answer.send(response, 200, { status: 'ok', [PlanRequest.ID_FIELD]: asked.id })
+      return
+    }
+    if (asked.outcome === PlanRequestOutcome.UNKNOWN_FIELD) {
+      Answer.refuse(response, 400, `unknown field: ${asked.fields.join(', ')}`)
+      return
+    }
+    const refusal = StartPlan.#REFUSALS[asked.outcome]
+    if (refusal === undefined) {
+      throw new Error(`no refusal declared for outcome ${asked.outcome}`)
+    }
+    Answer.refuse(response, refusal.status, refusal.error)
+  }
+
+  static refuseOtherMethods(request, response) {
+    response.setHeader('Allow', StartPlan.METHOD)
+    Answer.refuse(response, 405, 'method not allowed')
+  }
+}
+
+class Failures {
+  static #TOO_LARGE = 'entity.too.large'
+
+  static nothingMatched(request, response) {
+    Answer.refuse(response, 404, 'not found')
+  }
+
+  static answer(cause, request, response, next) {
+    request.destroy()
+    if (response.headersSent || response.writableEnded) {
+      response.destroy()
+      return
+    }
+    if (cause.type === Failures.#TOO_LARGE) {
+      Answer.refuse(response, 413, `body must not exceed ${JsonBody.MAX_BYTES} bytes`)
+      return
+    }
+    Answer.refuse(response, 400, 'request failed')
+  }
+}
+
+export class ApiServer {
   constructor({ port }) {
     this.requestedPort = port
     this.server = null
+  }
+
+  static #route() {
+    const app = express()
+    app.disable('x-powered-by')
+    app.set('etag', false)
+    app.use(Route.collapseTrailingSlashes)
+    app.post(
+      StartPlan.PATH,
+      Browsers.turnAway,
+      JsonBody.demandDeclared,
+      JsonBody.reader(),
+      StartPlan.accept
+    )
+    app.all(StartPlan.PATH, StartPlan.refuseOtherMethods)
+    app.use(Failures.nothingMatched)
+    app.use(Failures.answer)
+    return app
   }
 
   async start() {
     if (this.server !== null) {
       throw new Error('start() was called on a server that is already listening')
     }
-    const server = createServer((request, response) => {
-      this.#answer(request, response).catch((cause) => this.#collapse(request, response, cause))
-    })
+    const server = createServer(ApiServer.#route())
     await new Promise((resolve, reject) => {
       server.once('error', reject)
       server.listen(this.requestedPort, LOOPBACK, () => {
@@ -47,83 +162,5 @@ export class ApiServer {
       server.close(resolve)
       server.closeAllConnections()
     })
-  }
-
-  async #answer(request, response) {
-    if (this.#pathOf(request.url) !== ApiServer.#START_PLAN_PATH) {
-      this.#refuse(response, 404, 'not found')
-      return
-    }
-    if (request.method !== ApiServer.#START_PLAN_METHOD) {
-      response
-        .writeHead(405, { ...ApiServer.#JSON_HEADERS, Allow: ApiServer.#START_PLAN_METHOD })
-        .end(JSON.stringify({ error: 'method not allowed' }))
-      return
-    }
-    if (request.headers.origin !== undefined) {
-      this.#refuse(response, 403, 'this api does not serve browsers')
-      return
-    }
-    if (!this.#declaresJson(request)) {
-      this.#refuse(response, 415, `Content-Type must be ${ApiServer.#JSON_MEDIA_TYPE}`)
-      return
-    }
-    const asked = await this.#read(request)
-    if (asked.outcome === PlanRequestOutcome.ACCEPTED) {
-      response
-        .writeHead(200, ApiServer.#JSON_HEADERS)
-        .end(JSON.stringify({ status: 'ok', [PlanRequest.ID_FIELD]: asked.id }))
-      return
-    }
-    if (asked.outcome === PlanRequestOutcome.UNKNOWN_FIELD) {
-      this.#refuse(response, 400, `unknown field: ${asked.fields.join(', ')}`)
-      return
-    }
-    const refusal = ApiServer.#REFUSALS[asked.outcome]
-    if (refusal === undefined) {
-      throw new Error(`no refusal declared for outcome ${asked.outcome}`)
-    }
-    this.#refuse(response, refusal.status, refusal.error)
-  }
-
-  #declaresJson(request) {
-    const declared = request.headers['content-type']
-    return typeof declared === 'string' && declared.split(';')[0].trim() === ApiServer.#JSON_MEDIA_TYPE
-  }
-
-  #pathOf(url) {
-    let pathname
-    try {
-      ;({ pathname } = new URL(url, `http://${LOOPBACK}`))
-    } catch {
-      return null
-    }
-    return pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
-  }
-
-  async #read(request) {
-    const room = Buffer.allocUnsafe(ApiServer.#MAX_BODY_BYTES)
-    let filled = 0
-    for await (const chunk of request) {
-      if (filled + chunk.length > ApiServer.#MAX_BODY_BYTES) {
-        return PlanRequest.tooLarge()
-      }
-      chunk.copy(room, filled)
-      filled += chunk.length
-    }
-    return PlanRequest.from(room.toString('utf8', 0, filled))
-  }
-
-  #refuse(response, status, error) {
-    response.writeHead(status, ApiServer.#JSON_HEADERS).end(JSON.stringify({ error }))
-  }
-
-  #collapse(request, response, cause) {
-    request.destroy()
-    if (response.headersSent || response.writableEnded) {
-      response.destroy()
-      return
-    }
-    this.#refuse(response, 400, 'request failed')
   }
 }

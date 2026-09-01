@@ -195,6 +195,22 @@ describe('ApiServer', () => {
     expect(response.status).toBe(413)
   })
 
+  it('the_answer_does_not_advertise_the_stack_that_serves_it', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.accepted(port)
+
+    expect(response.headers.get('x-powered-by')).toBe(null)
+  })
+
+  it('the_answer_carries_no_etag_because_a_started_plan_is_not_a_thing_to_cache', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.accepted(port)
+
+    expect(response.headers.get('etag')).toBe(null)
+  })
+
   it('stop_closes_the_socket_so_a_later_request_cannot_reach_a_server_believed_dead', async () => {
     const server = new ApiServer({ port: 0 })
     const port = await server.start()
