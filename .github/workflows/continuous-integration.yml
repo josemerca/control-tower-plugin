@@ -1,0 +1,73 @@
+name: Continuous Integration
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dist:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Check the committed dist matches the sources
+        run: |
+          if ! git diff --exit-code -- dist/; then
+            echo "::error::dist/ is stale: rebuilding it from the current sources produces a different bundle."
+            echo "hooks/hooks.json runs the bundles in dist/, not the sources in hooks/, and dist/ is tracked."
+            echo "Any change to hooks/ or to a scripts/ module they import must ship a rebuilt dist/ in the same commit."
+            echo "Fix: run 'npm run build' and commit the diff of dist/*.js as part of the change."
+            exit 1
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+  ci:
+    runs-on: ubuntu-latest
+    needs: [dist, test]
+    if: ${{ always() }}
+    permissions:
+      contents: read
+    steps:
+      - name: Check results
+        run: |
+          if [[ "${{ needs.dist.result }}" != "success" || "${{ needs.test.result }}" != "success" ]]; then
+            echo "One or more jobs failed"
+            exit 1
+          fi
