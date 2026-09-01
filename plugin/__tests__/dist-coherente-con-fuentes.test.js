@@ -193,6 +193,10 @@ describe('el dist/ commiteado corresponde a los fuentes commiteados (F24)', () =
       'scripts/scope.js',
       'scripts/state-paths.js',
       'scripts/state.js',
+      // El bundle de `yaml`: state.js lo importa a él y no al paquete, porque
+      // una instalación de un plugin no trae node_modules. Entra en los tres
+      // hooks por state.js, y se construye en el mismo `npm run build`.
+      'scripts/vendor/yaml.js',
     ])
   }, 60_000)
 })
