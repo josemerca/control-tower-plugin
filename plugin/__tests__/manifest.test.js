@@ -23,8 +23,16 @@ describe('plugin manifest', () => {
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
     expect(pkg.version).toBe(plugin.version)
   })
-  it('marketplace.json referencia el plugin', () => {
-    const mk = JSON.parse(readFileSync(join(root, '.claude-plugin/marketplace.json'), 'utf8'))
-    expect(mk.plugins.some((p) => p.name === 'control-tower-loop')).toBe(true)
+  // El marketplace vive en la RAÍZ DEL REPO, no en la del plugin: desde que el
+  // plugin se mudó a `plugin/`, el `source` de su entrada es LO QUE DECIDE qué
+  // se distribuye (el subdir entero, y nada fuera de él). backend/ y frontend/
+  // quedan fuera de la instalación precisamente porque ese campo dice
+  // "./plugin" — si alguien lo devuelve a "./", cada instalación volvería a
+  // llevarse el repo completo, y este test es el único que lo notaría.
+  it('marketplace.json referencia el plugin y distribuye solo plugin/', () => {
+    const mk = JSON.parse(readFileSync(join(root, '..', '.claude-plugin/marketplace.json'), 'utf8'))
+    const entry = mk.plugins.find((p) => p.name === 'control-tower-loop')
+    expect(entry).toBeDefined()
+    expect(entry.source).toBe('./plugin')
   })
 })
