@@ -1,7 +1,7 @@
 import express from 'express'
 import { createServer } from 'node:http'
 import { PlanRequest, PlanRequestOutcome } from './plan-request.js'
-import { PlanRefusal } from './plan-refusal.js'
+import { PlanRefusal, PlanCollapse } from './plan-refusal.js'
 import { StartPlanParams } from '../application/actions/start-plan.js'
 import { PlanFailure } from '../domain/exceptions.js'
 
@@ -98,7 +98,7 @@ class StartPlanRoute {
       )
     } catch (cause) {
       if (!(cause instanceof PlanFailure)) throw cause
-      Answer.refuse(response, 503, `could not start the plan: ${cause.message}`)
+      Answer.refuseAs(response, PlanCollapse.of(cause))
       return
     }
     Answer.send(response, 202, {

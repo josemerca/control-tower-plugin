@@ -4,6 +4,18 @@ import { Ticket } from '../../src/domain/ticket.js'
 import { TicketKey } from '../../src/domain/ticket-key.js'
 import { mapGhIssue, extractAc, extractOrder } from '../../../plugin/scripts/gh-issue-map.js'
 import { parseScope } from '../../../plugin/scripts/scope.js'
+import { buildIssueBody } from '../../../plugin/scripts/groom.js'
+
+class Groomed {
+  static #ROW = {
+    n: 1, name: 'un slice', entrega: 'lo que entrega', type: '', gate: '', e2e: '',
+    ac: ['un criterio'], deps: [], protected: '',
+  }
+
+  static body() {
+    return buildIssueBody(Groomed.#ROW, { path: 'spec.md', reason: 'sin remoto' }, 'contexto', null)
+  }
+}
 
 class Opened {
   static NUMBER = 41
@@ -17,7 +29,7 @@ class Opened {
       number: Opened.NUMBER,
       title: PlanIssueBody.titleFor(ticket),
       body: PlanIssueBody.of(ticket),
-      labels: PlanIssueBody.labels().map((name) => ({ name })),
+      labels: PlanIssueBody.labels(ticket).map((name) => ({ name })),
       milestone: null,
     }
   }
@@ -84,6 +96,37 @@ describe('PlanIssueBody', () => {
 
   it('what_jira_already_wrote_as_code_is_left_alone_instead_of_being_fenced_twice', () => {
     expect(PlanIssueBody.quieted('ya viene en `#7` y suelto #8')).toBe('ya viene en `#7` y suelto `#8`')
+  })
+
+  it('the_headings_it_writes_are_the_ones_the_plugin_writes_so_a_rename_there_cannot_pass_unseen', () => {
+    const groomed = Groomed.body()
+
+    for (const heading of [
+      PlanIssueBody.DESCRIPTION_HEADING,
+      PlanIssueBody.AC_HEADING,
+      PlanIssueBody.PROTECTED_HEADING,
+    ]) {
+      expect(groomed, `the plugin no longer writes ${heading}`).toContain(`\n${heading}\n`)
+    }
+  })
+
+  it('a_summary_carrying_an_issue_number_does_not_reach_out_and_touch_that_issue_either', () => {
+    const body = PlanIssueBody.of(Opened.ticket({ summary: 'Bug #4521 con @jjponz' }))
+
+    expect(body).toContain('## Descripción\nBug `#4521` con `@jjponz`')
+    expect(body.split('\n').filter((line) => /(?<![\w`])#\d+/.test(line))).toEqual([])
+  })
+
+  it('a_reference_written_the_long_way_round_reaches_the_other_repository_just_the_same', () => {
+    expect(PlanIssueBody.quieted('ver mercadona/shop#123 ahora'))
+      .toBe('ver `mercadona/shop#123` ahora')
+    expect(PlanIssueBody.quieted('ver https://github.com/mercadona/shop/issues/9 ahora'))
+      .toBe('ver `https://github.com/mercadona/shop/issues/9` ahora')
+  })
+
+  it('a_ticket_with_no_summary_worth_the_name_says_so_instead_of_leaving_the_section_blank', () => {
+    expect(PlanIssueBody.of(Opened.ticket({ summary: '—' })))
+      .toContain('_MO_SHOP-42 no trae resumen en Jira._')
   })
 
   it('the_title_names_the_ticket_because_without_a_slice_table_there_is_no_order_to_name', () => {

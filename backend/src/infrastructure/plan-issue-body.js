@@ -8,30 +8,31 @@ import {
   renderGatesContent,
   renderProtectedLine,
 } from '../../../plugin/scripts/groom.js'
-import { AC_HEADING_FORMS } from '../../../plugin/scripts/gh-issue-map.js'
+import { gatesOf } from '../../../plugin/scripts/groom.js'
+import { gateLabels } from '../../../plugin/scripts/gates.js'
 
 export class PlanIssueBody {
   static DESCRIPTION_HEADING = '## Descripción'
   static PROTECTED_HEADING = '## Out of scope / Protected'
-  static AC_HEADING = AC_HEADING_FORMS[AC_HEADING_FORMS.length - 1]
-  static PLAN_GATE = 'plan'
-  static #ACTIVE = /((?<![\w])#\d+|(?<![\w.])@[A-Za-z0-9][A-Za-z0-9-]*)/g
+  static AC_HEADING = '## Acceptance criteria (EARS, 1:1 con tests)'
+  static #ACTIVE =
+    /((?<![\w])[\w.-]+\/[\w.-]+#\d+|(?<![\w])#\d+|(?<![\w.])@[A-Za-z0-9][A-Za-z0-9-]*|https?:\/\/\S*github\.com\/\S+)/g
   static #CODE_SPAN = /(`[^`]*`)/
   static READY_LABEL = 'status:ready'
 
-  static labels() {
-    return [`gate:${PlanIssueBody.PLAN_GATE}`, PlanIssueBody.READY_LABEL]
+  static labels(ticket) {
+    return [...gateLabels(gatesOf(PlanIssueBody.rowFor(ticket)).gates), PlanIssueBody.READY_LABEL]
   }
 
   static titleFor(ticket) {
     return `${ticket.key} ${ticket.summary}`
   }
 
-  static #rowFor(ticket) {
+  static rowFor(ticket) {
     return {
       n: null,
       name: ticket.summary,
-      entrega: ticket.summary,
+      entrega: PlanIssueBody.quieted(ticket.summary),
       type: '',
       e2e: '',
       ac: [],
@@ -56,13 +57,13 @@ export class PlanIssueBody {
   }
 
   static of(ticket) {
-    const row = PlanIssueBody.#rowFor(ticket)
+    const row = PlanIssueBody.rowFor(ticket)
 
     return [
       `> Historia de usuario: ${ticket.key}`,
       '',
       PlanIssueBody.DESCRIPTION_HEADING,
-      renderDescripcion(row),
+      renderDescripcion(row) ?? `_${ticket.key} no trae resumen en Jira._`,
       '',
       EPIC_CONTEXT_HEADING,
       PlanIssueBody.#epicContextOf(ticket),

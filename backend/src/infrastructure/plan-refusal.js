@@ -2,6 +2,10 @@ import { PlanRequestOutcome } from './plan-request.js'
 import { TicketKey } from '../domain/ticket-key.js'
 import { RepositoryName } from '../domain/repository-name.js'
 import { PlanRequest } from './plan-request.js'
+import {
+  TicketNotRead, TicketNotUnderstood, PlanIssueNotCreated, PlanIssueNotNamed,
+  PlanSessionNotStarted, PlanSessionNotNamed,
+} from '../domain/exceptions.js'
 
 export class PlanRefusal {
   static #BY_OUTCOME = Object.freeze({
@@ -32,5 +36,32 @@ export class PlanRefusal {
 
   static declaredOutcomes() {
     return Object.keys(PlanRefusal.#BY_OUTCOME)
+  }
+}
+
+export class PlanCollapse {
+  static #REFUSED = 503
+  static #ANSWERED_SOMETHING_ELSE = 502
+
+  static #BY_FAILURE = [
+    [TicketNotRead, PlanCollapse.#REFUSED],
+    [PlanIssueNotCreated, PlanCollapse.#REFUSED],
+    [PlanSessionNotStarted, PlanCollapse.#REFUSED],
+    [TicketNotUnderstood, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
+    [PlanIssueNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
+    [PlanSessionNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
+  ]
+
+  static of(cause) {
+    const declared = PlanCollapse.#BY_FAILURE.find(([failure]) => cause.constructor === failure)
+    if (declared === undefined) {
+      throw new Error(`no status declared for ${cause.constructor.name}`)
+    }
+
+    return { status: declared[1], error: `could not start the plan: ${cause.message}` }
+  }
+
+  static declaredFailures() {
+    return PlanCollapse.#BY_FAILURE.map(([failure]) => failure.name)
   }
 }

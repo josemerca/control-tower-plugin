@@ -19,7 +19,7 @@ export class GhPlanIssues extends PlanIssues {
       '--repo', repository.text,
       '--title', PlanIssueBody.titleFor(ticket),
       '--body', PlanIssueBody.of(ticket),
-      ...PlanIssueBody.labels().flatMap((label) => ['--label', label]),
+      ...PlanIssueBody.labels(ticket).flatMap((label) => ['--label', label]),
     ]
   }
 
@@ -45,11 +45,12 @@ export class GhPlanIssues extends PlanIssues {
 
   async #createSowingLabels({ ticket, repository }) {
     const argv = GhPlanIssues.argvFor({ ticket, repository })
+    const ours = PlanIssueBody.labels(ticket)
     const sown = new Set()
     let outcome = await this.call.make(argv, { safeToRepeat: false })
     while (outcome.failed) {
       const missing = GhFailure.labelMissingIn(outcome.stderr)
-      if (missing === null || !PlanIssueBody.labels().includes(missing) || sown.has(missing)) break
+      if (missing === null || !ours.includes(missing) || sown.has(missing)) break
 
       sown.add(missing)
       await this.call.make(GhPlanIssues.labelArgvFor(repository, missing), { safeToRepeat: true })

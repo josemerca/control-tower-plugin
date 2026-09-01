@@ -24,7 +24,6 @@ class ClockDouble extends Clock {
 class GhDouble {
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
   static CREATED = 'https://github.com/josemerca/ct-loop-sandbox/issues/7\n'
-  static CALL_CAP = 12
 
   constructor(answers) {
     this.answers = answers
@@ -49,10 +48,10 @@ class GhDouble {
       call: new GhCall({
         run: (argv) => {
           this.calls.push(argv)
-          if (this.calls.length > GhDouble.CALL_CAP) {
-            throw new Error(`gh was asked ${this.calls.length} times: this flow does not end`)
+          const answer = this.answers[this.calls.length - 1]
+          if (answer === undefined) {
+            throw new Error(`nobody wrote an answer for call ${this.calls.length}: ${argv.join(' ')}`)
           }
-          const answer = this.answers[Math.min(this.calls.length - 1, this.answers.length - 1)]
 
           return Promise.resolve(answer)
         },
@@ -221,15 +220,35 @@ describe('GhPlanIssues', () => {
   })
 
   it('a_blip_that_never_clears_stops_at_the_budget_instead_of_calling_forever', async () => {
-    const gh = new GhDouble([
-      new ProcessOutput({ code: 1, stdout: '', stderr: "could not add label: 'gate:plan' not found" }),
-      new ProcessOutput({ code: 1, stdout: '', stderr: '502 Bad Gateway' }),
-    ])
+    const blip = new ProcessOutput({ code: 1, stdout: '', stderr: '502 Bad Gateway' })
+    const missing = new ProcessOutput({ code: 1, stdout: '', stderr: "could not add label: 'gate:plan' not found" })
+    const gh = new GhDouble([missing, blip, blip, blip, blip, missing])
 
     await gh.refusalFor()
 
     expect(gh.commands.filter((command) => command.startsWith('label'))).toHaveLength(4)
     expect(gh.clock.slept).toEqual([2, 2, 2])
+  })
+
+  it('a_rate_limit_is_not_a_blip_because_asking_again_two_seconds_later_makes_it_worse', async () => {
+    const missing = new ProcessOutput({ code: 1, stdout: '', stderr: "could not add label: 'gate:plan' not found" })
+    const gh = new GhDouble([
+      missing,
+      new ProcessOutput({ code: 1, stdout: '', stderr: 'You have exceeded a secondary rate limit' }),
+      missing,
+    ])
+
+    await gh.refusalFor()
+
+    expect(gh.clock.slept).toEqual([])
+  })
+
+  it('the_double_of_this_conversation_refuses_to_answer_a_call_nobody_wrote_an_answer_for', async () => {
+    const gh = new GhDouble([
+      new ProcessOutput({ code: 1, stdout: '', stderr: "could not add label: 'gate:plan' not found" }),
+    ])
+
+    await expect(gh.openFor()).rejects.toThrow(/nobody wrote an answer for call 2/)
   })
 
   it('output_with_no_issue_url_in_it_raises_instead_of_handing_back_something_unusable', async () => {

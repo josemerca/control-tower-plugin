@@ -4,7 +4,7 @@ import { gzipSync } from 'node:zlib'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { StartPlanResult } from '../../src/application/actions/start-plan.js'
 import {
-  PlanSessionNotStarted, TicketNotRead, PlanIssueNotCreated,
+  PlanSessionNotStarted, TicketNotRead, PlanIssueNotCreated, PlanIssueNotNamed,
 } from '../../src/domain/exceptions.js'
 import { PlanIssue } from '../../src/domain/plan-issue.js'
 
@@ -185,6 +185,22 @@ describe('ApiServer', () => {
       } finally {
         await server.stop()
       }
+    }
+  })
+
+  it('a_tool_that_answered_something_unreadable_is_not_offered_as_something_to_retry', async () => {
+    const server = new ApiServer({
+      port: 0, startPlan: StartPlanSpy.failingWith(new PlanIssueNotNamed('gh printed "done"')),
+    })
+    const port = await server.start()
+
+    try {
+      const response = await RunningApi.accepted(port)
+
+      expect(response.status).toBe(502)
+      expect(await response.text()).toBe('{"error":"could not start the plan: gh printed \\"done\\""}')
+    } finally {
+      await server.stop()
     }
   })
 

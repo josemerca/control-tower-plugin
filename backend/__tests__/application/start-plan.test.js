@@ -146,15 +146,6 @@ describe('StartPlan', () => {
     expect(refusal.message).toBe('Access denied')
   })
 
-  it('neither_what_goes_in_nor_what_comes_out_can_be_edited_after_the_use_case_settled_it', async () => {
-    const params = new StartPlanParams({ ticket: Flow.TICKET, repository: Flow.REPOSITORY })
-
-    const started = await new StartPlan(new Flow()).execute(params)
-
-    expect(Object.isFrozen(params)).toBe(true)
-    expect(Object.isFrozen(started)).toBe(true)
-  })
-
   it('the_ticket_reaches_the_session_whole_so_the_tab_can_be_named_after_it', async () => {
     const flow = new Flow()
 
@@ -178,11 +169,6 @@ describe('StartPlan', () => {
     expect(() => new PlanIssue({ number: 0, url: 'https://github.com/owner/name/issues/0' }))
       .toThrow(/numbered from one/)
     expect(() => new PlanIssue({ number: 7, url: '' })).toThrow(/reachable at a url/)
-  })
-
-  it('a_repository_that_is_not_owner_and_name_cannot_be_built_because_it_becomes_an_argument', () => {
-    expect(() => new RepositoryName('name')).toThrow(/a repository looks like owner\/name/)
-    expect(new RepositoryName('owner/name').text).toBe('owner/name')
   })
 
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {

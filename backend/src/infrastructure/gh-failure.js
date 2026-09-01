@@ -11,8 +11,6 @@ export class GhFailure {
     'dial tcp',
     'no such host',
     'network is unreachable',
-    'secondary rate limit',
-    'api rate limit exceeded',
     'internal server error',
     'bad gateway',
     'service unavailable',
