@@ -24,6 +24,7 @@ class ClockDouble extends Clock {
 class GhDouble {
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
   static CREATED = 'https://github.com/josemerca/ct-loop-sandbox/issues/7\n'
+  static CALL_CAP = 12
 
   constructor(answers) {
     this.answers = answers
@@ -48,6 +49,9 @@ class GhDouble {
       call: new GhCall({
         run: (argv) => {
           this.calls.push(argv)
+          if (this.calls.length > GhDouble.CALL_CAP) {
+            throw new Error(`gh was asked ${this.calls.length} times: this flow does not end`)
+          }
           const answer = this.answers[Math.min(this.calls.length - 1, this.answers.length - 1)]
 
           return Promise.resolve(answer)
@@ -192,6 +196,19 @@ describe('GhPlanIssues', () => {
     ])
     expect(gh.clock.slept).toEqual([2])
     expect(issue.number).toBe(7)
+  })
+
+  it('a_five_hundred_is_a_blip_even_when_gh_words_it_as_a_status_and_not_as_a_sentence', async () => {
+    const gh = new GhDouble([
+      new ProcessOutput({ code: 1, stdout: '', stderr: "could not add label: 'gate:plan' not found" }),
+      new ProcessOutput({ code: 1, stdout: '', stderr: 'HTTP 503 (https://api.github.com/repos/o/n/labels)' }),
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: GhDouble.CREATED, stderr: '' }),
+    ])
+
+    await gh.openFor()
+
+    expect(gh.clock.slept).toEqual([2])
   })
 
   it('a_refusal_that_is_not_a_blip_is_not_retried_because_repeating_it_changes_nothing', async () => {

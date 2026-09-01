@@ -31,7 +31,6 @@ export class PlanIssueBody {
       name: ticket.summary,
       entrega: ticket.summary,
       type: '',
-      gate: PlanIssueBody.PLAN_GATE,
       e2e: '',
       ac: [],
       deps: [],
