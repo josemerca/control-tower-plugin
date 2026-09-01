@@ -55,4 +55,29 @@ describe('CmuxLauncher', () => {
   it('a_directory_with_a_tab_in_it_survives_because_it_is_the_last_field', () => {
     expect(CmuxLauncher.read(`${CmuxLauncher.MAGIC}\t1\tok\t/repo/od\td\n`).cwd).toBe('/repo/od\td')
   })
+
+  it('a_binary_with_a_shell_metacharacter_is_rejected', () => {
+    expect(() => CmuxLauncher.scriptFor({
+      sentinel: '/tmp/run/started',
+      errand: 'escribe el plan',
+      bin: 'claude; rm -rf ~',
+    })).toThrow(/a binary path looks like.*got "claude; rm -rf ~"/)
+  })
+
+  it('a_binary_with_a_space_is_rejected', () => {
+    expect(() => CmuxLauncher.scriptFor({
+      sentinel: '/tmp/run/started',
+      errand: 'escribe el plan',
+      bin: 'claude personal',
+    })).toThrow(/a binary path looks like.*got "claude personal"/)
+  })
+
+  it('a_legitimate_binary_with_absolute_path_and_hyphens_is_accepted', () => {
+    const result = CmuxLauncher.scriptFor({
+      sentinel: '/tmp/run/started',
+      errand: 'escribe el plan',
+      bin: '/opt/bin/claude-personal',
+    })
+    expect(result).toContain('/opt/bin/claude-personal')
+  })
 })

@@ -7,12 +7,21 @@ export class CmuxLauncher {
   static VERSION = '1'
   static RESOLVED = 'ok'
   static MISSING = 'missing'
+  static #BINARY_SHAPE = /^[a-zA-Z0-9._\/-]+$/
+  static BINARY_EXAMPLE = 'claude'
 
   static typedFor(script) {
     return `. ${ShellWord.quote(script)}`
   }
 
+  static isValidBinary(text) {
+    return typeof text === 'string' && CmuxLauncher.#BINARY_SHAPE.test(text)
+  }
+
   static scriptFor({ sentinel, errand, bin }) {
+    if (!CmuxLauncher.isValidBinary(bin)) {
+      throw new Error(`a binary path looks like ${CmuxLauncher.BINARY_EXAMPLE}, got ${JSON.stringify(bin)}`)
+    }
     const quoted = ShellWord.quote(sentinel)
 
     return [
