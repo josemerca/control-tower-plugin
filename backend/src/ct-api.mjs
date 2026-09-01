@@ -1,12 +1,13 @@
 import { ApiServer, LOOPBACK } from './api-server.js'
+import { CmuxPlanSession } from './cmux-plan-session.js'
+import { execFile } from 'node:child_process'
+import { Invocation, InvocationOutcome } from './invocation.js'
 
 class CtApi {
-  static #DEFAULT_PORT = 8787
-  static #MAX_PORT = 65535
-  static #PORT_VARIABLE = 'CT_API_PORT'
   static #USAGE = 'usage: ct-api.mjs (no arguments; set CT_API_PORT to pick a port, 0 for an ephemeral one)'
   static #BAD_USAGE = 2
   static #CANNOT_LISTEN = 1
+  static #CMUX_TIMEOUT_MS = 30_000
 
   static #refuseUsage(reason) {
     process.stderr.write(`${reason}\n${CtApi.#USAGE}\n`)
@@ -18,22 +19,22 @@ class CtApi {
     process.exit(CtApi.#CANNOT_LISTEN)
   }
 
-  static #portFrom(environment) {
-    const given = environment[CtApi.#PORT_VARIABLE]
-    if (given === undefined) return CtApi.#DEFAULT_PORT
-    if (!/^\d+$/.test(given) || Number(given) > CtApi.#MAX_PORT) {
-      CtApi.#refuseUsage(
-        `${CtApi.#PORT_VARIABLE} must be an integer between 0 and ${CtApi.#MAX_PORT}, got ${JSON.stringify(given)}`
-      )
-    }
-    return Number(given)
+  static #cmux(cmuxArgv) {
+    return new Promise((resolve, reject) => {
+      execFile('cmux', cmuxArgv, { timeout: CtApi.#CMUX_TIMEOUT_MS }, (failure, stdout, stderr) => {
+        if (failure === null) resolve(stdout)
+        else reject(new Error(`cmux ${cmuxArgv[0]} failed: ${(stderr || failure.message).trim()}`))
+      })
+    })
   }
 
   static async run(argv, environment) {
-    if (argv.length > 0) {
-      CtApi.#refuseUsage(`unexpected argument: ${JSON.stringify(argv[0])}`)
+    const asked = Invocation.from(argv, environment)
+    if (asked.outcome !== InvocationOutcome.READY) {
+      CtApi.#refuseUsage(asked.reason)
     }
-    const server = new ApiServer({ port: CtApi.#portFrom(environment) })
+    const planSession = new CmuxPlanSession({ run: (cmuxArgv) => CtApi.#cmux(cmuxArgv) })
+    const server = new ApiServer({ port: asked.port, planSession })
     let port
     try {
       port = await server.start()

@@ -1,5 +1,6 @@
 import { createServer } from 'node:http'
 import { PlanRequest, PlanRequestOutcome } from './plan-request.js'
+import { PlanRefusal } from './plan-refusal.js'
 
 export const LOOPBACK = '127.0.0.1'
 
@@ -10,14 +11,9 @@ export class ApiServer {
   static #MAX_BODY_BYTES = 8 * 1024
   static #JSON_HEADERS = Object.freeze({ 'Content-Type': 'application/json' })
 
-  static #REFUSALS = Object.freeze({
-    [PlanRequestOutcome.BODY_TOO_LARGE]: { status: 413, error: 'body must not exceed 8192 bytes' },
-    [PlanRequestOutcome.BODY_NOT_A_JSON_OBJECT]: { status: 400, error: 'body must be a JSON object' },
-    [PlanRequestOutcome.MALFORMED_ID]: { status: 400, error: 'id must be a ticket key such as ABC-123' },
-  })
-
-  constructor({ port }) {
+  constructor({ port, planSession }) {
     this.requestedPort = port
+    this.planSession = planSession
     this.server = null
   }
 
@@ -70,20 +66,24 @@ export class ApiServer {
     }
     const asked = await this.#read(request)
     if (asked.outcome === PlanRequestOutcome.ACCEPTED) {
-      response
-        .writeHead(200, ApiServer.#JSON_HEADERS)
-        .end(JSON.stringify({ status: 'ok', [PlanRequest.ID_FIELD]: asked.id }))
+      await this.#accept(response, asked.id)
       return
     }
-    if (asked.outcome === PlanRequestOutcome.UNKNOWN_FIELD) {
-      this.#refuse(response, 400, `unknown field: ${asked.fields.join(', ')}`)
-      return
-    }
-    const refusal = ApiServer.#REFUSALS[asked.outcome]
-    if (refusal === undefined) {
-      throw new Error(`no refusal declared for outcome ${asked.outcome}`)
-    }
+    const refusal = PlanRefusal.of(asked)
     this.#refuse(response, refusal.status, refusal.error)
+  }
+
+  async #accept(response, id) {
+    let session
+    try {
+      session = await this.planSession.start(id)
+    } catch (cause) {
+      this.#refuse(response, 503, `could not start the plan session: ${cause.message}`)
+      return
+    }
+    response
+      .writeHead(202, ApiServer.#JSON_HEADERS)
+      .end(JSON.stringify({ status: 'started', [PlanRequest.ID_FIELD]: id, session }))
   }
 
   #declaresJson(request) {
