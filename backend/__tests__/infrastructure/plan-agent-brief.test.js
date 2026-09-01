@@ -39,4 +39,15 @@ describe('PlanAgentBrief', () => {
     expect(() => new PlanAgentBrief({ conventions: '/plugin/conventions' })).toThrow(/dispatch-check/)
     expect(() => new PlanAgentBrief({ dispatchCheck: '/x' })).toThrow(/yardstick/)
   })
+
+  it('it_rejects_relative_paths_because_they_resolve_silently_wrong_in_the_agents_working_directory', () => {
+    expect(() => new PlanAgentBrief({
+      dispatchCheck: 'scripts/dispatch-check.mjs',
+      conventions: '/plugin/conventions',
+    })).toThrow(/dispatch-check/)
+    expect(() => new PlanAgentBrief({
+      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+      conventions: 'plugin/conventions',
+    })).toThrow(/yardstick/)
+  })
 })

@@ -1,11 +1,13 @@
+import { isAbsolute } from 'node:path'
+
 export class PlanAgentBrief {
   static DOCUMENTS = 'defects.md, style.md, decisions.md, architecture.md, testing.md'
 
   constructor({ dispatchCheck, conventions }) {
-    if (typeof dispatchCheck !== 'string' || dispatchCheck.length === 0) {
+    if (typeof dispatchCheck !== 'string' || !isAbsolute(dispatchCheck)) {
       throw new Error(`the errand names dispatch-check by absolute path, got ${JSON.stringify(dispatchCheck)}`)
     }
-    if (typeof conventions !== 'string' || conventions.length === 0) {
+    if (typeof conventions !== 'string' || !isAbsolute(conventions)) {
       throw new Error(`the errand names where the yardstick lives, got ${JSON.stringify(conventions)}`)
     }
     this.dispatchCheck = dispatchCheck
