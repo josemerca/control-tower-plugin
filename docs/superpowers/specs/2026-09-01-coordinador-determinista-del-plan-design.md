@@ -66,7 +66,6 @@ No sabe que existen `cmux`, `git` ni los subprocesos.
 | Módulo | Qué es |
 |---|---|
 | `ticket-key.js` | value object. Ya existe |
-| `slice-identity.js` | value object: la clave de Jira y el número de issue de GitHub, juntos. Ver §8 |
 | `workspace.js` | **puerto**: prepara el espacio aislado y devuelve dónde quedó |
 | `workspace-location.js` | value object: la ruta del worktree y el nombre de la rama |
 | `plan-briefing.js` | value object: el texto que arranca al agente y el directorio donde corre |
@@ -81,19 +80,21 @@ para arrancar nada. Pasa a `start(briefing) -> PlanSessionRef`.
 
 ### 3.2 Aplicación
 
-`StartPlan` pasa a conducir tres pasos:
+`StartPlan` ya conduce tres pasos en `alcaptar/start-plan-crea-el-issue` (leer
+el ticket, abrir el issue, arrancar la sesión). Este diseño intercala uno:
 
 ```
 execute(params) ->
-  1. workspace.prepare(identity)      -> WorkspaceLocation
-  2. briefing = PlanBriefing.for(identity, location)
-  3. planSession.start(briefing)      -> PlanSessionRef
+  1. ticket   = tickets.detail(params.ticket)          (ya existe)
+  2. issue    = planIssues.open({ ticket, repository }) (ya existe)
+  3. location = workspace.prepare({ ticket, issue })   -> WorkspaceLocation
+  4. briefing = PlanBriefing.for({ ticket, issue, location })
+  5. session  = planSession.start(briefing)            -> PlanSessionRef
 ```
 
-Tres puertos, no una lista que crezca. `application.md` de `agentic-skills` y
-`architecture.md` de este repo dicen lo mismo: **conducir no es ejecutar**, y en
-cuanto aparezca un cuarto paso cuyo resultado el flujo consuma, cada paso entra
-por su propio caso de uso y `StartPlan` sólo los invoca.
+El paso 4 no es un puerto: es componer un value object del dominio a partir de
+otros, que es trabajo legítimo de un caso de uso. Los puertos son cuatro, y por
+qué no se parte todavía está en §8.3.
 
 Un caso de uso nuevo de sólo lectura, `application/queries/read-plan-progress.js`,
 contesta el estado. Vive en `queries/` porque no muta nada.
@@ -302,19 +303,62 @@ seguridad, no un detalle: se declara aquí para que no entre de tapadillo.
 ## 8. La costura con la otra rama
 
 El caso de uso que crea el issue de GitHub a partir del ticket de Jira vive en
-otra rama. Este diseño depende de su salida en un punto concreto y no negociable:
+`alcaptar/start-plan-crea-el-issue`. **Ya está resuelto ahí**, y de una forma que
+este diseño adopta en vez de proponer la suya.
 
-**El contrato del plan indexa por número de issue.** `--check-plan` exige un
-entero >= 1 (`dispatch-check.mjs:189`) y busca ficheros
-`YYYY-MM-DD-issue-<n>-<slug>.md`. Una clave de Jira (`ABC-123`) no sirve.
+### 8.1 El número de issue ya viaja
 
-Por eso `SliceIdentity` lleva las dos cosas, y `StartPlanParams` pasa de
-`{ ticket }` a `{ identity }`. Es el único cambio de firma en la frontera HTTP,
-y hay que acordarlo con la otra rama antes de escribirlo.
+El contrato del plan indexa por número de issue: `--check-plan` exige un entero
+>= 1 (`dispatch-check.mjs:189`) y busca ficheros
+`YYYY-MM-DD-issue-<n>-<slug>.md`. Una clave de Jira (`ABC-123`) no sirve, y una
+versión anterior de este documento proponía un value object `SliceIdentity` para
+llevar las dos cosas juntas.
 
-Si al integrar resulta que el issue todavía no existe cuando se pide el plan, el
-diseño no se sostiene tal cual: habría que crear el issue dentro de este flujo o
-cambiar el predicado. Se nombra ahora para que no aparezca al final.
+**No hace falta.** En esa rama, `PlanSession.start({ ticket, issue })` ya recibe
+un `PlanIssue` con su `number` y su `url`, y `StartPlan` ya lo compone:
+
+```
+const ticket  = await this.tickets.detail(params.ticket)
+const issue   = await this.planIssues.open({ ticket, repository: params.repository })
+const session = await this.planSession.start({ ticket: params.ticket, issue })
+```
+
+Así que el predicado de §6 tiene el entero que necesita sin inventar nada.
+`slice-identity.js` se retira de §3.1.
+
+### 8.2 Lo que sí choca, y es poco
+
+Tres ficheros, y los tres de la misma forma — este diseño añade a lo que la otra
+rama ya cambió, no lo contradice:
+
+| Fichero | Lo suyo | Lo nuestro |
+|---|---|---|
+| `domain/plan-session.js` | la firma pasó a `start({ ticket, issue })` | añade dónde arrancar: el worktree y el texto |
+| `infrastructure/cmux-plan-session.js` | `--command echo "…"`, y `run` devuelve `{ failed, stdout, stderr }` | sustituye el `echo` por el arranque real (§4) |
+| `application/actions/start-plan.js` | conduce tres pasos | intercala el espacio de trabajo antes de arrancar |
+
+`GitWorkspace` usa **el mismo `tool-runner.js`** que esa rama introdujo para
+`gh` y `cmux`. No se añade un segundo camino para lanzar procesos.
+
+### 8.3 La decisión que el choque destapa
+
+Con el espacio de trabajo, `StartPlan` pasa a tener **cuatro puertos** y cuatro
+pasos cuyo resultado consume el flujo. `architecture.md` de este repo es
+explícito: *"conducting is not executing... each dispatched step enters through
+its own use case"*, lo que llevado a la letra son cuatro casos de uso más un
+conductor.
+
+**Recomendación: no partirlo todavía.** La misma convención pone la línea en que
+la lista de puertos crezca con el número de responsabilidades, y aquí crece con
+lo que este caso de uso existe para recorrer — arrancar una sesión de plan de
+punta a punta. Partirlo ahora no quitaría ni un puerto: repartiría la misma lista
+entre cuatro piezas y añadiría una quinta que las compone, para un piloto de una
+sesión a la vez.
+
+**La línea, para que no se amplíe por precedente:** el quinto puerto se parte.
+Y si antes del quinto aparece un paso que alguien quiera invocar por separado
+—reabrir una sesión, rehacer un plan sobre un worktree que ya existe—, ese paso
+sale a su caso de uso el día que aparezca, no antes.
 
 ---
 
