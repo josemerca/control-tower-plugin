@@ -12,6 +12,15 @@ class StartPlanSpy {
     this.failing = failing
   }
 
+  static buggy() {
+    const spy = new StartPlanSpy()
+    spy.execute = async () => {
+      throw new TypeError('a bug of ours')
+    }
+
+    return spy
+  }
+
   async execute(params) {
     this.asked.push(params.ticket.text)
     if (this.failing) throw new PlanSessionNotStarted('cmux is not reachable')
@@ -123,12 +132,9 @@ describe('ApiServer', () => {
   })
 
   it('a_failure_that_is_not_a_refusal_to_start_is_not_dressed_up_as_one', async () => {
-    const spy = new StartPlanSpy()
-    spy.execute = async () => {
-      throw new TypeError('a bug of ours')
-    }
-    const server = new ApiServer({ port: 0, startPlan: spy })
+    const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.buggy() })
     const port = await server.start()
+    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
 
     try {
       const response = await RunningApi.accepted(port)
@@ -136,16 +142,13 @@ describe('ApiServer', () => {
       expect(response.status).toBe(400)
       expect(await response.text()).toBe('{"error":"request failed"}')
     } finally {
+      complaining.mockRestore()
       await server.stop()
     }
   })
 
   it('a_bug_of_ours_leaves_a_trace_on_the_error_channel_instead_of_vanishing_behind_that_400', async () => {
-    const spy = new StartPlanSpy()
-    spy.execute = async () => {
-      throw new TypeError('a bug of ours')
-    }
-    const server = new ApiServer({ port: 0, startPlan: spy })
+    const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.buggy() })
     const port = await server.start()
     const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
 
