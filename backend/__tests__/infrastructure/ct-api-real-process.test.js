@@ -3,6 +3,7 @@ import { execFile, spawn } from 'node:child_process'
 import { connect } from 'node:net'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { Invocation } from '../../src/infrastructure/invocation.js'
 
 class Entrypoint {
   static #PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'infrastructure', 'ct-api.mjs')
@@ -97,6 +98,7 @@ describe('ct-api entrypoint', () => {
     expect(refused.code).toBe(2)
     expect(refused.stderr).toContain('CT_API_PORT must be an integer between 0 and 65535, got "abc"')
     expect(refused.stderr).toContain('usage: ct-api.mjs')
+    expect(refused.stderr).toContain(`set ${Invocation.PORT_VARIABLE} to pick a port`)
   })
 
   it('a_port_already_taken_is_reported_without_the_usage_line_because_the_invocation_was_fine', async () => {

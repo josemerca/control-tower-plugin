@@ -5,7 +5,8 @@ import { execFile } from 'node:child_process'
 import { Invocation, InvocationOutcome } from './invocation.js'
 
 class CtApi {
-  static #USAGE = 'usage: ct-api.mjs (no arguments; set CT_API_PORT to pick a port, 0 for an ephemeral one)'
+  static #USAGE =
+    `usage: ct-api.mjs (no arguments; set ${Invocation.PORT_VARIABLE} to pick a port, 0 for an ephemeral one)`
   static #BAD_USAGE = 2
   static #CANNOT_LISTEN = 1
   static #CMUX_TIMEOUT_MS = 30_000
@@ -34,7 +35,7 @@ class CtApi {
     if (asked.outcome !== InvocationOutcome.READY) {
       CtApi.#refuseUsage(asked.reason)
     }
-    const planSession = new CmuxPlanSession({ run: (cmuxArgv) => CtApi.#cmux(cmuxArgv) })
+    const planSession = new CmuxPlanSession({ run: (cmuxArgv) => CtApi.#cmux(cmuxArgv), cwd: process.cwd() })
     const server = new ApiServer({ port: asked.port, startPlan: new StartPlan({ planSession }) })
     let port
     try {

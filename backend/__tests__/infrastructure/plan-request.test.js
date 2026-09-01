@@ -31,6 +31,10 @@ describe('PlanRequest', () => {
     expect(refused).toEqual(Array(4).fill(PlanRequestOutcome.MALFORMED_ID))
   })
 
+  it('the_unknown_fields_come_back_in_a_settled_order_so_the_answer_does_not_depend_on_the_sender', () => {
+    expect(PlanRequest.from('{"id":"ABC-1","zulu":1,"alpha":2}').fields).toEqual(['alpha', 'zulu'])
+  })
+
   it('an_accepted_body_hands_back_the_ticket_as_a_domain_value_and_not_as_the_raw_string', () => {
     const accepted = PlanRequest.from('{"id":"MO_SHOP-42"}')
 

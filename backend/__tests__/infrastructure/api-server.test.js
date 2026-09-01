@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { connect } from 'node:net'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { StartPlanResult } from '../../src/application/actions/start-plan.js'
@@ -81,6 +81,20 @@ describe('ApiServer', () => {
     expect(afterwards.status).toBe(202)
   })
 
+  it('a_client_that_hangs_up_is_ordinary_and_does_not_get_reported_as_something_gone_wrong', async () => {
+    const port = await RunningApi.listening()
+    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+
+    try {
+      await RunningApi.cutMidBody(port)
+      await RunningApi.accepted(port)
+
+      expect(complaining.mock.calls).toEqual([])
+    } finally {
+      complaining.mockRestore()
+    }
+  })
+
   it('start_plan_accepts_and_answers_with_the_process_it_started_rather_than_waiting_for_it', async () => {
     const port = await RunningApi.listening()
 
@@ -126,12 +140,34 @@ describe('ApiServer', () => {
     }
   })
 
+  it('a_bug_of_ours_leaves_a_trace_on_the_error_channel_instead_of_vanishing_behind_that_400', async () => {
+    const spy = new StartPlanSpy()
+    spy.execute = async () => {
+      throw new TypeError('a bug of ours')
+    }
+    const server = new ApiServer({ port: 0, startPlan: spy })
+    const port = await server.start()
+    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+
+    try {
+      await RunningApi.accepted(port)
+
+      const said = complaining.mock.calls.map(([line]) => line).join('')
+      expect(said).toContain('request to /start-plan failed')
+      expect(said).toContain('a bug of ours')
+    } finally {
+      complaining.mockRestore()
+      await server.stop()
+    }
+  })
+
   it('the_id_that_reaches_the_session_is_the_one_the_body_carried_and_not_a_default', async () => {
     const port = await RunningApi.listening()
 
-    await RunningApi.post(port, '/start-plan', '{"id":"MO_SHOP-42"}')
+    const response = await RunningApi.post(port, '/start-plan', '{"id":"MO_SHOP-42"}')
 
     expect(RunningApi.spy.asked).toEqual(['MO_SHOP-42'])
+    expect(await response.text()).toBe('{"status":"started","id":"MO_SHOP-42","session":"workspace:4"}')
   })
 
   it('a_refused_request_never_starts_a_process', async () => {
@@ -241,11 +277,19 @@ describe('ApiServer', () => {
     const port = await RunningApi.listening()
 
     const refused = await Promise.all(
-      ['{"id":"   "}', '{"id":123}', '{"id":"../../etc/passwd"}', '{"id":"-o"}', '{"id":"abc-1"}']
-        .map((body) => RunningApi.startPlan(port, body))
+      [
+        '{"id":"   "}',
+        '{"id":123}',
+        '{"id":"../../etc/passwd"}',
+        '{"id":"-o"}',
+        '{"id":"abc-1"}',
+        '{"id":"ABC"}',
+        '{"id":"ABC-123 rm -rf"}',
+        '{"id":"ABC-123\\n"}',
+      ].map((body) => RunningApi.startPlan(port, body))
     )
 
-    expect(refused.map((response) => response.status)).toEqual([400, 400, 400, 400, 400])
+    expect(refused.map((response) => response.status)).toEqual(Array(8).fill(400))
   })
 
   it('an_unknown_field_is_refused_because_it_means_the_other_side_changed_shape', async () => {

@@ -2,7 +2,7 @@ import { createServer } from 'node:http'
 import { PlanRequest, PlanRequestOutcome } from './plan-request.js'
 import { PlanRefusal } from './plan-refusal.js'
 import { StartPlanParams } from '../application/actions/start-plan.js'
-import { PlanSessionNotStarted } from '../domain/exceptions.js'
+import { PlanSessionFailure } from '../domain/exceptions.js'
 
 export const LOOPBACK = '127.0.0.1'
 
@@ -80,7 +80,7 @@ export class ApiServer {
     try {
       started = await this.startPlan.execute(new StartPlanParams({ ticket }))
     } catch (cause) {
-      if (!(cause instanceof PlanSessionNotStarted)) throw cause
+      if (!(cause instanceof PlanSessionFailure)) throw cause
       this.#refuse(response, 503, `could not start the plan session: ${cause.message}`)
       return
     }
@@ -126,6 +126,9 @@ export class ApiServer {
   }
 
   #collapse(request, response, cause) {
+    if (cause.code !== 'ECONNRESET') {
+      process.stderr.write(`request to ${request.url} failed: ${cause.stack ?? cause.message}\n`)
+    }
     request.destroy()
     if (response.headersSent || response.writableEnded) {
       response.destroy()

@@ -40,9 +40,32 @@ describe('StartPlan', () => {
   it('a_session_that_refuses_to_start_travels_out_typed_instead_of_being_turned_into_a_status', async () => {
     const planSession = new PlanSessionDouble(new PlanSessionNotStarted('Access denied'))
 
-    await expect(
-      new StartPlan({ planSession }).execute(new StartPlanParams({ ticket: new TicketKey('ABC-1') }))
-    ).rejects.toBeInstanceOf(PlanSessionNotStarted)
+    const refusal = await new StartPlan({ planSession })
+      .execute(new StartPlanParams({ ticket: new TicketKey('ABC-1') }))
+      .catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(PlanSessionNotStarted)
+    expect(refusal.name).toBe('PlanSessionNotStarted')
+    expect(refusal.message).toBe('Access denied')
+  })
+
+  it('neither_what_goes_in_nor_what_comes_out_can_be_edited_after_the_use_case_settled_it', async () => {
+    const planSession = new PlanSessionDouble('workspace:4')
+    const params = new StartPlanParams({ ticket: new TicketKey('ABC-1') })
+
+    const started = await new StartPlan({ planSession }).execute(params)
+
+    expect(Object.isFrozen(params)).toBe(true)
+    expect(Object.isFrozen(started)).toBe(true)
+  })
+
+  it('the_ticket_reaches_the_session_whole_so_the_tab_can_be_named_after_it', async () => {
+    const planSession = new PlanSessionDouble('workspace:4')
+
+    await new StartPlan({ planSession })
+      .execute(new StartPlanParams({ ticket: new TicketKey('MO_SHOP-42') }))
+
+    expect(String(planSession.asked[0])).toBe('MO_SHOP-42')
   })
 
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {

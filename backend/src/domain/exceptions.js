@@ -1,6 +1,10 @@
-export class PlanSessionNotStarted extends Error {
+export class PlanSessionFailure extends Error {
   constructor(reason) {
     super(reason)
-    this.name = 'PlanSessionNotStarted'
+    this.name = new.target.name
   }
 }
+
+export class PlanSessionNotStarted extends PlanSessionFailure {}
+
+export class PlanSessionNotNamed extends PlanSessionFailure {}
