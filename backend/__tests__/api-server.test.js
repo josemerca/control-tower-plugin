@@ -1,0 +1,228 @@
+import { describe, it, expect, afterEach } from 'vitest'
+import { connect } from 'node:net'
+import { ApiServer } from '../src/api-server.js'
+
+class RunningApi {
+  static #started = []
+  static TICKET = 'ABC-123'
+
+  static async listening() {
+    const server = new ApiServer({ port: 0 })
+    const port = await server.start()
+    RunningApi.#started.push(server)
+    return port
+  }
+
+  static async stopAll() {
+    const running = RunningApi.#started.splice(0)
+    await Promise.all(running.map((server) => server.stop()))
+  }
+
+  static async post(port, path, body, headers = {}) {
+    return fetch(`http://127.0.0.1:${port}${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body,
+    })
+  }
+
+  static async startPlan(port, body, headers = {}) {
+    return RunningApi.post(port, '/start-plan', body, headers)
+  }
+
+  static async accepted(port) {
+    return RunningApi.startPlan(port, `{"id":"${RunningApi.TICKET}"}`)
+  }
+
+  static cutMidBody(port) {
+    return new Promise((resolve) => {
+      const socket = connect(port, '127.0.0.1', () => {
+        socket.write(
+          'POST /start-plan HTTP/1.1\r\nHost: 127.0.0.1\r\n' +
+            'Content-Type: application/json\r\nContent-Length: 5000\r\n\r\n{"id":"'
+        )
+        socket.destroy()
+        resolve()
+      })
+    })
+  }
+}
+
+describe('ApiServer', () => {
+  afterEach(async () => {
+    await RunningApi.stopAll()
+  })
+
+  it('a_request_cut_halfway_through_its_body_does_not_take_the_whole_process_down_with_it', async () => {
+    const port = await RunningApi.listening()
+
+    await RunningApi.cutMidBody(port)
+    const afterwards = await RunningApi.accepted(port)
+
+    expect(afterwards.status).toBe(200)
+  })
+
+  it('start_plan_echoes_the_id_it_received_so_the_front_can_tell_the_body_arrived', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.accepted(port)
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toBe('application/json')
+    expect(await response.text()).toBe('{"status":"ok","id":"ABC-123"}')
+  })
+
+  it('trailing_slashes_do_not_change_the_route_however_many_of_them_are_written', async () => {
+    const port = await RunningApi.listening()
+
+    const one = await RunningApi.post(port, '/start-plan/', `{"id":"${RunningApi.TICKET}"}`)
+    const two = await RunningApi.post(port, '/start-plan//', `{"id":"${RunningApi.TICKET}"}`)
+
+    expect([one.status, two.status]).toEqual([200, 200])
+  })
+
+  it('a_query_string_does_not_hide_the_route_because_routing_reads_the_path_and_not_the_raw_url', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.post(port, '/start-plan?from=ui', `{"id":"${RunningApi.TICKET}"}`)
+
+    expect(response.status).toBe(200)
+  })
+
+  it('reading_start_plan_is_refused_because_starting_a_plan_claims_the_issue_and_cuts_a_worktree', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await fetch(`http://127.0.0.1:${port}/start-plan`)
+
+    expect(response.status).toBe(405)
+    expect(response.headers.get('allow')).toBe('POST')
+  })
+
+  it('an_unknown_route_is_rejected_instead_of_answering_ok_to_anything', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.post(port, '/whatever', `{"id":"${RunningApi.TICKET}"}`)
+
+    expect(response.status).toBe(404)
+    expect(await response.text()).toBe('{"error":"not found"}')
+  })
+
+  it('a_request_carrying_an_origin_is_refused_because_only_a_browser_sends_one', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.TICKET}"}`, {
+      Origin: 'https://evil.example',
+    })
+
+    expect(response.status).toBe(403)
+  })
+
+  it('a_body_not_declared_as_json_is_refused_so_a_page_cannot_reach_this_without_a_preflight', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.TICKET}"}`, {
+      'Content-Type': 'text/plain',
+    })
+
+    expect(response.status).toBe(415)
+  })
+
+  it('a_charset_on_the_content_type_is_still_json_because_clients_add_one_unasked', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.TICKET}"}`, {
+      'Content-Type': 'application/json; charset=utf-8',
+    })
+
+    expect(response.status).toBe(200)
+  })
+
+  it('a_body_that_is_not_json_is_refused_instead_of_starting_a_plan_for_nothing', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, 'ABC-123')
+
+    expect(response.status).toBe(400)
+    expect(await response.text()).toBe('{"error":"body must be a JSON object"}')
+  })
+
+  it('valid_json_that_is_not_an_object_is_refused_as_such_and_not_mistaken_for_a_missing_id', async () => {
+    const port = await RunningApi.listening()
+
+    const refused = await Promise.all(
+      ['"ABC-123"', '[{"id":"ABC-123"}]', 'null', '123'].map((body) => RunningApi.startPlan(port, body))
+    )
+
+    expect(await Promise.all(refused.map((response) => response.text()))).toEqual(
+      Array(4).fill('{"error":"body must be a JSON object"}')
+    )
+  })
+
+  it('a_body_with_no_id_is_refused_because_there_is_nothing_to_plan_without_one', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, '{}')
+
+    expect(response.status).toBe(400)
+    expect(await response.text()).toBe('{"error":"id must be a ticket key such as ABC-123"}')
+  })
+
+  it('an_id_that_is_not_shaped_like_a_ticket_key_is_refused_before_it_ever_becomes_a_branch_name', async () => {
+    const port = await RunningApi.listening()
+
+    const refused = await Promise.all(
+      ['{"id":"   "}', '{"id":123}', '{"id":"../../etc/passwd"}', '{"id":"-o"}', '{"id":"abc-1"}']
+        .map((body) => RunningApi.startPlan(port, body))
+    )
+
+    expect(refused.map((response) => response.status)).toEqual([400, 400, 400, 400, 400])
+  })
+
+  it('an_unknown_field_is_refused_because_it_means_the_other_side_changed_shape', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.TICKET}","priority":"high"}`)
+
+    expect(response.status).toBe(400)
+    expect(await response.text()).toBe('{"error":"unknown field: priority"}')
+  })
+
+  it('a_body_over_the_cap_is_refused_instead_of_being_buffered_whole', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, `{"id":"${'A'.repeat(9000)}"}`)
+
+    expect(response.status).toBe(413)
+  })
+
+  it('stop_closes_the_socket_so_a_later_request_cannot_reach_a_server_believed_dead', async () => {
+    const server = new ApiServer({ port: 0 })
+    const port = await server.start()
+
+    await server.stop()
+
+    await expect(RunningApi.accepted(port)).rejects.toThrow()
+  })
+
+  it('an_error_after_a_successful_listen_is_not_swallowed_by_the_promise_that_already_resolved', async () => {
+    const server = new ApiServer({ port: 0 })
+    await server.start()
+
+    try {
+      expect(() => server.server.emit('error', new Error('boom'))).toThrow('boom')
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('starting_twice_is_refused_instead_of_leaking_the_first_server_out_of_reach', async () => {
+    const server = new ApiServer({ port: 0 })
+    await server.start()
+
+    try {
+      await expect(server.start()).rejects.toThrow(/already listening/)
+    } finally {
+      await server.stop()
+    }
+  })
+})
