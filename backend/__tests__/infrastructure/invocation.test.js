@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { Invocation, InvocationOutcome } from '../src/invocation.js'
+import { Invocation, InvocationOutcome } from '../../src/infrastructure/invocation.js'
 
 class Invoked {
   static withPort(given) {

@@ -1,6 +1,8 @@
 import { createServer } from 'node:http'
 import { PlanRequest, PlanRequestOutcome } from './plan-request.js'
 import { PlanRefusal } from './plan-refusal.js'
+import { StartPlanParams } from '../application/actions/start-plan.js'
+import { PlanSessionNotStarted } from '../domain/exceptions.js'
 
 export const LOOPBACK = '127.0.0.1'
 
@@ -11,9 +13,9 @@ export class ApiServer {
   static #MAX_BODY_BYTES = 8 * 1024
   static #JSON_HEADERS = Object.freeze({ 'Content-Type': 'application/json' })
 
-  constructor({ port, planSession }) {
+  constructor({ port, startPlan }) {
     this.requestedPort = port
-    this.planSession = planSession
+    this.startPlan = startPlan
     this.server = null
   }
 
@@ -66,24 +68,29 @@ export class ApiServer {
     }
     const asked = await this.#read(request)
     if (asked.outcome === PlanRequestOutcome.ACCEPTED) {
-      await this.#accept(response, asked.id)
+      await this.#accept(response, asked.ticket)
       return
     }
     const refusal = PlanRefusal.of(asked)
     this.#refuse(response, refusal.status, refusal.error)
   }
 
-  async #accept(response, id) {
-    let session
+  async #accept(response, ticket) {
+    let started
     try {
-      session = await this.planSession.start(id)
+      started = await this.startPlan.execute(new StartPlanParams({ ticket }))
     } catch (cause) {
+      if (!(cause instanceof PlanSessionNotStarted)) throw cause
       this.#refuse(response, 503, `could not start the plan session: ${cause.message}`)
       return
     }
     response
       .writeHead(202, ApiServer.#JSON_HEADERS)
-      .end(JSON.stringify({ status: 'started', [PlanRequest.ID_FIELD]: id, session }))
+      .end(JSON.stringify({
+        status: 'started',
+        [PlanRequest.ID_FIELD]: ticket.text,
+        session: started.session,
+      }))
   }
 
   #declaresJson(request) {

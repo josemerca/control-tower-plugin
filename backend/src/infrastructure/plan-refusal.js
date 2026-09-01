@@ -1,10 +1,11 @@
 import { PlanRequestOutcome } from './plan-request.js'
+import { TicketKey } from '../domain/ticket-key.js'
 
 export class PlanRefusal {
   static #BY_OUTCOME = Object.freeze({
     [PlanRequestOutcome.BODY_TOO_LARGE]: { status: 413, error: 'body must not exceed 8192 bytes' },
     [PlanRequestOutcome.BODY_NOT_A_JSON_OBJECT]: { status: 400, error: 'body must be a JSON object' },
-    [PlanRequestOutcome.MALFORMED_ID]: { status: 400, error: 'id must be a ticket key such as ABC-123' },
+    [PlanRequestOutcome.MALFORMED_ID]: { status: 400, error: `id must be a ticket key such as ${TicketKey.EXAMPLE}` },
     [PlanRequestOutcome.UNKNOWN_FIELD]: { status: 400, error: null },
   })
 

@@ -1,5 +1,6 @@
 import { ApiServer, LOOPBACK } from './api-server.js'
 import { CmuxPlanSession } from './cmux-plan-session.js'
+import { StartPlan } from '../application/actions/start-plan.js'
 import { execFile } from 'node:child_process'
 import { Invocation, InvocationOutcome } from './invocation.js'
 
@@ -34,7 +35,7 @@ class CtApi {
       CtApi.#refuseUsage(asked.reason)
     }
     const planSession = new CmuxPlanSession({ run: (cmuxArgv) => CtApi.#cmux(cmuxArgv) })
-    const server = new ApiServer({ port: asked.port, planSession })
+    const server = new ApiServer({ port: asked.port, startPlan: new StartPlan({ planSession }) })
     let port
     try {
       port = await server.start()

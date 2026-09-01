@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { CmuxPlanSession } from '../src/cmux-plan-session.js'
+import { CmuxPlanSession } from '../../src/infrastructure/cmux-plan-session.js'
+import { PlanSessionNotStarted } from '../../src/domain/exceptions.js'
 
 class CmuxDouble {
   constructor(printed) {
@@ -48,9 +49,18 @@ describe('CmuxPlanSession', () => {
     await expect(cmux.session().start('ABC-123')).rejects.toThrow(/did not name the workspace/)
   })
 
-  it('a_cmux_that_refuses_the_call_lets_its_own_reason_through', async () => {
+  it('a_cmux_that_refuses_the_call_arrives_typed_so_the_caller_can_tell_it_from_a_crash', async () => {
     const cmux = new CmuxDouble(new Error('Access denied'))
 
-    await expect(cmux.session().start('ABC-123')).rejects.toThrow(/Access denied/)
+    const refusal = await cmux.session().start('ABC-123').catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(PlanSessionNotStarted)
+    expect(refusal.message).toContain('Access denied')
+  })
+
+  it('output_with_no_handle_arrives_typed_too_because_it_is_the_same_failure_to_start', async () => {
+    const cmux = new CmuxDouble('OK\n')
+
+    await expect(cmux.session().start('ABC-123')).rejects.toBeInstanceOf(PlanSessionNotStarted)
   })
 })

@@ -1,8 +1,10 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { connect } from 'node:net'
-import { ApiServer } from '../src/api-server.js'
+import { ApiServer } from '../../src/infrastructure/api-server.js'
+import { StartPlanResult } from '../../src/application/actions/start-plan.js'
+import { PlanSessionNotStarted } from '../../src/domain/exceptions.js'
 
-class PlanSessionSpy {
+class StartPlanSpy {
   static SESSION = 'workspace:4'
 
   constructor({ failing = false } = {}) {
@@ -10,10 +12,10 @@ class PlanSessionSpy {
     this.failing = failing
   }
 
-  async start(id) {
-    this.asked.push(id)
-    if (this.failing) throw new Error('cmux is not reachable')
-    return PlanSessionSpy.SESSION
+  async execute(params) {
+    this.asked.push(params.ticket.text)
+    if (this.failing) throw new PlanSessionNotStarted('cmux is not reachable')
+    return new StartPlanResult({ session: StartPlanSpy.SESSION })
   }
 }
 
@@ -23,8 +25,8 @@ class RunningApi {
   static spy = null
 
   static async listening() {
-    RunningApi.spy = new PlanSessionSpy()
-    const server = new ApiServer({ port: 0, planSession: RunningApi.spy })
+    RunningApi.spy = new StartPlanSpy()
+    const server = new ApiServer({ port: 0, startPlan: RunningApi.spy })
     const port = await server.start()
     RunningApi.#started.push(server)
     return port
@@ -90,8 +92,8 @@ describe('ApiServer', () => {
   })
 
   it('a_session_that_cannot_be_started_is_reported_as_such_instead_of_a_generic_failure', async () => {
-    RunningApi.spy = new PlanSessionSpy({ failing: true })
-    const server = new ApiServer({ port: 0, planSession: RunningApi.spy })
+    RunningApi.spy = new StartPlanSpy({ failing: true })
+    const server = new ApiServer({ port: 0, startPlan: RunningApi.spy })
     const port = await server.start()
 
     try {
@@ -101,6 +103,24 @@ describe('ApiServer', () => {
       expect(await response.text()).toBe(
         '{"error":"could not start the plan session: cmux is not reachable"}'
       )
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('a_failure_that_is_not_a_refusal_to_start_is_not_dressed_up_as_one', async () => {
+    const spy = new StartPlanSpy()
+    spy.execute = async () => {
+      throw new TypeError('a bug of ours')
+    }
+    const server = new ApiServer({ port: 0, startPlan: spy })
+    const port = await server.start()
+
+    try {
+      const response = await RunningApi.accepted(port)
+
+      expect(response.status).toBe(400)
+      expect(await response.text()).toBe('{"error":"request failed"}')
     } finally {
       await server.stop()
     }
@@ -246,7 +266,7 @@ describe('ApiServer', () => {
   })
 
   it('stop_closes_the_socket_so_a_later_request_cannot_reach_a_server_believed_dead', async () => {
-    const server = new ApiServer({ port: 0, planSession: new PlanSessionSpy() })
+    const server = new ApiServer({ port: 0, startPlan: new StartPlanSpy() })
     const port = await server.start()
 
     await server.stop()
@@ -255,7 +275,7 @@ describe('ApiServer', () => {
   })
 
   it('an_error_after_a_successful_listen_is_not_swallowed_by_the_promise_that_already_resolved', async () => {
-    const server = new ApiServer({ port: 0, planSession: new PlanSessionSpy() })
+    const server = new ApiServer({ port: 0, startPlan: new StartPlanSpy() })
     await server.start()
 
     try {
@@ -266,7 +286,7 @@ describe('ApiServer', () => {
   })
 
   it('starting_twice_is_refused_instead_of_leaking_the_first_server_out_of_reach', async () => {
-    const server = new ApiServer({ port: 0, planSession: new PlanSessionSpy() })
+    const server = new ApiServer({ port: 0, startPlan: new StartPlanSpy() })
     await server.start()
 
     try {

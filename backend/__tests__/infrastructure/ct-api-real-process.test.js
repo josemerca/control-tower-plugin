@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 class Entrypoint {
-  static #PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'ct-api.mjs')
+  static #PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'infrastructure', 'ct-api.mjs')
   static #TIMEOUT_MS = 30_000
   static #spawned = []
 
