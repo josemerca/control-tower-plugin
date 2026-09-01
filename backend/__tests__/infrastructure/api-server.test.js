@@ -1,13 +1,41 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { connect } from 'node:net'
-import { ApiServer } from '../src/api-server.js'
+import { ApiServer } from '../../src/infrastructure/api-server.js'
+import { StartPlanResult } from '../../src/application/actions/start-plan.js'
+import { PlanSessionNotStarted } from '../../src/domain/exceptions.js'
+
+class StartPlanSpy {
+  static SESSION = 'workspace:4'
+
+  constructor({ failing = false } = {}) {
+    this.asked = []
+    this.failing = failing
+  }
+
+  static buggy() {
+    const spy = new StartPlanSpy()
+    spy.execute = async () => {
+      throw new TypeError('a bug of ours')
+    }
+
+    return spy
+  }
+
+  async execute(params) {
+    this.asked.push(params.ticket.text)
+    if (this.failing) throw new PlanSessionNotStarted('cmux is not reachable')
+    return new StartPlanResult({ session: StartPlanSpy.SESSION })
+  }
+}
 
 class RunningApi {
   static #started = []
   static TICKET = 'ABC-123'
+  static spy = null
 
   static async listening() {
-    const server = new ApiServer({ port: 0 })
+    RunningApi.spy = new StartPlanSpy()
+    const server = new ApiServer({ port: 0, startPlan: RunningApi.spy })
     const port = await server.start()
     RunningApi.#started.push(server)
     return port
@@ -59,17 +87,98 @@ describe('ApiServer', () => {
     await RunningApi.cutMidBody(port)
     const afterwards = await RunningApi.accepted(port)
 
-    expect(afterwards.status).toBe(200)
+    expect(afterwards.status).toBe(202)
   })
 
-  it('start_plan_echoes_the_id_it_received_so_the_front_can_tell_the_body_arrived', async () => {
+  it('a_client_that_hangs_up_is_ordinary_and_does_not_get_reported_as_something_gone_wrong', async () => {
+    const port = await RunningApi.listening()
+    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+
+    try {
+      await RunningApi.cutMidBody(port)
+      await RunningApi.accepted(port)
+
+      expect(complaining.mock.calls).toEqual([])
+    } finally {
+      complaining.mockRestore()
+    }
+  })
+
+  it('start_plan_accepts_and_answers_with_the_process_it_started_rather_than_waiting_for_it', async () => {
     const port = await RunningApi.listening()
 
     const response = await RunningApi.accepted(port)
 
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(202)
     expect(response.headers.get('content-type')).toBe('application/json')
-    expect(await response.text()).toBe('{"status":"ok","id":"ABC-123"}')
+    expect(await response.text()).toBe('{"status":"started","id":"ABC-123","session":"workspace:4"}')
+  })
+
+  it('a_session_that_cannot_be_started_is_reported_as_such_instead_of_a_generic_failure', async () => {
+    RunningApi.spy = new StartPlanSpy({ failing: true })
+    const server = new ApiServer({ port: 0, startPlan: RunningApi.spy })
+    const port = await server.start()
+
+    try {
+      const response = await RunningApi.accepted(port)
+
+      expect(response.status).toBe(503)
+      expect(await response.text()).toBe(
+        '{"error":"could not start the plan session: cmux is not reachable"}'
+      )
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('a_failure_that_is_not_a_refusal_to_start_is_not_dressed_up_as_one', async () => {
+    const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.buggy() })
+    const port = await server.start()
+    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+
+    try {
+      const response = await RunningApi.accepted(port)
+
+      expect(response.status).toBe(400)
+      expect(await response.text()).toBe('{"error":"request failed"}')
+    } finally {
+      complaining.mockRestore()
+      await server.stop()
+    }
+  })
+
+  it('a_bug_of_ours_leaves_a_trace_on_the_error_channel_instead_of_vanishing_behind_that_400', async () => {
+    const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.buggy() })
+    const port = await server.start()
+    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+
+    try {
+      await RunningApi.accepted(port)
+
+      const said = complaining.mock.calls.map(([line]) => line).join('')
+      expect(said).toContain('request to /start-plan failed')
+      expect(said).toContain('a bug of ours')
+    } finally {
+      complaining.mockRestore()
+      await server.stop()
+    }
+  })
+
+  it('the_id_that_reaches_the_session_is_the_one_the_body_carried_and_not_a_default', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.post(port, '/start-plan', '{"id":"MO_SHOP-42"}')
+
+    expect(RunningApi.spy.asked).toEqual(['MO_SHOP-42'])
+    expect(await response.text()).toBe('{"status":"started","id":"MO_SHOP-42","session":"workspace:4"}')
+  })
+
+  it('a_refused_request_never_starts_a_process', async () => {
+    const port = await RunningApi.listening()
+
+    await RunningApi.startPlan(port, '{"id":"nope"}')
+
+    expect(RunningApi.spy.asked).toEqual([])
   })
 
   it('trailing_slashes_do_not_change_the_route_however_many_of_them_are_written', async () => {
@@ -78,7 +187,7 @@ describe('ApiServer', () => {
     const one = await RunningApi.post(port, '/start-plan/', `{"id":"${RunningApi.TICKET}"}`)
     const two = await RunningApi.post(port, '/start-plan//', `{"id":"${RunningApi.TICKET}"}`)
 
-    expect([one.status, two.status]).toEqual([200, 200])
+    expect([one.status, two.status]).toEqual([202, 202])
   })
 
   it('a_query_string_does_not_hide_the_route_because_routing_reads_the_path_and_not_the_raw_url', async () => {
@@ -86,7 +195,7 @@ describe('ApiServer', () => {
 
     const response = await RunningApi.post(port, '/start-plan?from=ui', `{"id":"${RunningApi.TICKET}"}`)
 
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(202)
   })
 
   it('reading_start_plan_is_refused_because_starting_a_plan_claims_the_issue_and_cuts_a_worktree', async () => {
@@ -134,7 +243,7 @@ describe('ApiServer', () => {
       'Content-Type': 'application/json; charset=utf-8',
     })
 
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(202)
   })
 
   it('a_body_that_is_not_json_is_refused_instead_of_starting_a_plan_for_nothing', async () => {
@@ -171,11 +280,19 @@ describe('ApiServer', () => {
     const port = await RunningApi.listening()
 
     const refused = await Promise.all(
-      ['{"id":"   "}', '{"id":123}', '{"id":"../../etc/passwd"}', '{"id":"-o"}', '{"id":"abc-1"}']
-        .map((body) => RunningApi.startPlan(port, body))
+      [
+        '{"id":"   "}',
+        '{"id":123}',
+        '{"id":"../../etc/passwd"}',
+        '{"id":"-o"}',
+        '{"id":"abc-1"}',
+        '{"id":"ABC"}',
+        '{"id":"ABC-123 rm -rf"}',
+        '{"id":"ABC-123\\n"}',
+      ].map((body) => RunningApi.startPlan(port, body))
     )
 
-    expect(refused.map((response) => response.status)).toEqual([400, 400, 400, 400, 400])
+    expect(refused.map((response) => response.status)).toEqual(Array(8).fill(400))
   })
 
   it('an_unknown_field_is_refused_because_it_means_the_other_side_changed_shape', async () => {
@@ -196,7 +313,7 @@ describe('ApiServer', () => {
   })
 
   it('stop_closes_the_socket_so_a_later_request_cannot_reach_a_server_believed_dead', async () => {
-    const server = new ApiServer({ port: 0 })
+    const server = new ApiServer({ port: 0, startPlan: new StartPlanSpy() })
     const port = await server.start()
 
     await server.stop()
@@ -205,7 +322,7 @@ describe('ApiServer', () => {
   })
 
   it('an_error_after_a_successful_listen_is_not_swallowed_by_the_promise_that_already_resolved', async () => {
-    const server = new ApiServer({ port: 0 })
+    const server = new ApiServer({ port: 0, startPlan: new StartPlanSpy() })
     await server.start()
 
     try {
@@ -216,7 +333,7 @@ describe('ApiServer', () => {
   })
 
   it('starting_twice_is_refused_instead_of_leaking_the_first_server_out_of_reach', async () => {
-    const server = new ApiServer({ port: 0 })
+    const server = new ApiServer({ port: 0, startPlan: new StartPlanSpy() })
     await server.start()
 
     try {

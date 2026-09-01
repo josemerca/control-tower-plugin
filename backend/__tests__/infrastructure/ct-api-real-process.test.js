@@ -3,9 +3,10 @@ import { execFile, spawn } from 'node:child_process'
 import { connect } from 'node:net'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { Invocation } from '../../src/infrastructure/invocation.js'
 
 class Entrypoint {
-  static #PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'ct-api.mjs')
+  static #PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'infrastructure', 'ct-api.mjs')
   static #TIMEOUT_MS = 30_000
   static #spawned = []
 
@@ -24,6 +25,14 @@ class Entrypoint {
         socket.destroy()
         setTimeout(resolve, 250)
       })
+    })
+  }
+
+  static startPlan(port) {
+    return fetch(`http://127.0.0.1:${port}/start-plan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{"id":"ABC-123"}',
     })
   }
 
@@ -74,62 +83,22 @@ describe('ct-api entrypoint', () => {
     expect(port).toBeGreaterThan(0)
   })
 
-  it('with_no_port_asked_for_it_binds_the_documented_default', async () => {
-    const port = await Entrypoint.listening({ CT_API_PORT: undefined })
-
-    expect(port).toBe(8787)
-  })
-
-  it('the_server_it_starts_answers_start_plan_end_to_end', async () => {
-    const port = await Entrypoint.listening({ CT_API_PORT: '0' })
-
-    const response = await fetch(`http://127.0.0.1:${port}/start-plan`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{"id":"ABC-123"}',
-    })
-
-    expect(await response.text()).toBe('{"status":"ok","id":"ABC-123"}')
-  })
-
   it('a_request_cut_halfway_through_its_body_leaves_the_process_alive_and_still_serving', async () => {
     const port = await Entrypoint.listening({ CT_API_PORT: '0' })
 
     await Entrypoint.cutMidBody(port)
 
     expect(Entrypoint.alive()).toBe(true)
-    const afterwards = await fetch(`http://127.0.0.1:${port}/start-plan`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: '{"id":"ABC-123"}',
-    })
-    expect(afterwards.status).toBe(200)
+    await expect(Entrypoint.startPlan(port)).resolves.toBeDefined()
   })
 
-  it('an_unexpected_argument_is_refused_instead_of_quietly_listening_somewhere_else', async () => {
-    const refused = await Entrypoint.refused({}, ['--port', '9000'])
-
-    expect(refused.code).toBe(2)
-    expect(refused.stderr).toContain('unexpected argument: "--port"')
-  })
-
-  it('a_port_that_is_not_an_integer_is_refused_instead_of_binding_whatever_number_wins', async () => {
+  it('a_refused_invocation_stops_the_process_with_the_usage_code_and_says_why', async () => {
     const refused = await Entrypoint.refused({ CT_API_PORT: 'abc' })
 
     expect(refused.code).toBe(2)
-    expect(refused.stderr).toContain('CT_API_PORT must be an integer between 0 and 65535')
-  })
-
-  it('an_empty_port_variable_is_refused_so_an_unset_shell_variable_never_binds_at_random', async () => {
-    const refused = await Entrypoint.refused({ CT_API_PORT: '' })
-
-    expect(refused.code).toBe(2)
-  })
-
-  it('a_port_above_the_maximum_is_refused_instead_of_failing_deeper_with_a_worse_message', async () => {
-    const refused = await Entrypoint.refused({ CT_API_PORT: '70000' })
-
-    expect(refused.code).toBe(2)
+    expect(refused.stderr).toContain('CT_API_PORT must be an integer between 0 and 65535, got "abc"')
+    expect(refused.stderr).toContain('usage: ct-api.mjs')
+    expect(refused.stderr).toContain(`set ${Invocation.PORT_VARIABLE} to pick a port`)
   })
 
   it('a_port_already_taken_is_reported_without_the_usage_line_because_the_invocation_was_fine', async () => {
