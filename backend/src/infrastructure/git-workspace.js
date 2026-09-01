@@ -61,8 +61,7 @@ export class GitWorkspace extends Workspace {
 
   async #seed(located, issue) {
     await this.write(`${await this.#gitDirOf(located)}/${SliceSeed.EXCLUDE_PATH}`, `${SliceSeed.EXCLUDE_RULE}\n`)
-    const measured = await this.run(GitWorkspace.cutArgvFor(located.path))
-    const cut = measured.failed ? '' : measured.stdout.trim()
+    const cut = await this.#cutOf(located)
     await this.write(
       `${located.path}/${SliceSeed.RELATIVE_PATH}`,
       SliceSeed.textFor({ issue, branch: located.branch, base: this.base, cut })
@@ -78,5 +77,16 @@ export class GitWorkspace extends Workspace {
     }
 
     return asked.stdout.trim()
+  }
+
+  async #cutOf(located) {
+    const measured = await this.run(GitWorkspace.cutArgvFor(located.path))
+    if (measured.failed) {
+      throw new WorkspaceNotPrepared(
+        `no se pudo medir el commit de ${located.path}, así que ${SliceSeed.RELATIVE_PATH} no se siembra sin corte: ${measured.stderr.trim()}`
+      )
+    }
+
+    return measured.stdout.trim()
   }
 }

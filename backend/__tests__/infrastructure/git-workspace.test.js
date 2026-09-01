@@ -113,4 +113,18 @@ describe('GitWorkspace', () => {
 
     expect(git.written[1][1]).toContain('base_sha: "a1b2c3d"')
   })
+
+  it('a_head_it_cannot_measure_stops_the_seeding_instead_of_writing_a_state_without_a_cut', async () => {
+    const git = new GitDouble(GitDouble.ok())
+    git.workspace = () => new GitWorkspace({
+      root: GitDouble.ROOT,
+      base: GitDouble.BASE,
+      write: () => Promise.resolve(),
+      run: (argv) => Promise.resolve(argv.includes('HEAD')
+        ? { failed: true, stdout: '', stderr: 'fatal: ambiguous argument HEAD' }
+        : GitDouble.ok()),
+    })
+
+    await expect(git.workspace().prepare({ number: 42 })).rejects.toBeInstanceOf(WorkspaceNotPrepared)
+  })
 })
