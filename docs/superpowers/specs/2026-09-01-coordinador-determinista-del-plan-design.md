@@ -73,7 +73,7 @@ No sabe que existen `cmux`, `git` ni los subprocesos.
 | `plan-session.js` | **puerto**: arranca la sesión. Ya existe, cambia su firma |
 | `plan-session-ref.js` | value object: lo que identifica la sesión viva |
 | `plan-progress.js` | **puerto**: contesta en qué estado está el plan de una sesión |
-| `plan-state.js` | vocabulario cerrado: `writing`, `ready`, `stalled` |
+| `plan-state.js` | vocabulario cerrado: `writing`, `ready`. Ver §6.4 |
 | `exceptions.js` | ya existe; crece con los fallos del espacio de trabajo |
 
 `PlanSession.start(ticket)` se queda corto: no basta con la clave del ticket
@@ -232,7 +232,7 @@ lleva el número de issue, y valida cada uno contra el contrato del plan
 ### 6.2 Por qué el predicado y no el fichero
 
 La alternativa barata es mirar el directorio de planes con `fs.watch`. Se
-descarta por tres motivos:
+descarta por dos motivos:
 
 - **El fichero aparece mucho antes de estar terminado.** El agente lo crea y lo
   reescribe varias veces. El primer evento llega en el primer byte, y evitar el
@@ -240,39 +240,46 @@ descarta por tres motivos:
 - **"El fichero existe" no es lo que el sistema acepta como plan hecho.** Si se
   mide un proxy, el backend puede declarar listo un plan que el siguiente paso
   va a rechazar, y esa contradicción la descubre quien usa la aplicación.
-- **No distingue terminado de atascado.** Un agente que paró a preguntar, que
-  agotó el contexto o que chocó con un muro de permisos produce el mismo
-  silencio que uno que nunca arrancó.
 
-### 6.3 Cómo se consulta: primero tick, después hook
+Lo que **no** es un motivo para descartarlo, dicho para no venderse de más:
+distinguir "ha terminado" de "se ha atascado". Un agente que paró a preguntar
+produce el mismo silencio que uno que sigue escribiendo, y eso es cierto
+mirando el fichero **y** sondeando el predicado. Esa distinción no la compra
+ninguna de las dos: la compra el hook, y el hook queda fuera (§6.3).
 
-**Fase 1 — sondeo.** El backend evalúa el predicado cada pocos segundos
-mientras haya una sesión viva. Es la pieza que lleva la verdad y no depende de
-que nada esté bien instalado.
+### 6.3 Cómo se consulta: sondeo
 
-**Fase 2 — el hook como despertador.** Un hook `Stop` en el worktree hace un
-POST al backend cuando el agente devuelve el control; el backend evalúa el
-predicado y decide. El hook no afirma que el plan esté hecho — **el `Stop`
-miente**: llega mucho antes del plan, y lo disparan igual un error, el límite de
-contexto o un muro de permisos. Sólo quita la latencia del tick.
+El backend evalúa el predicado cada pocos segundos mientras haya una sesión
+viva. Es la pieza que lleva la verdad y no depende de que nada esté bien
+instalado en el worktree del agente.
 
-El reparto importa: el predicado no cambia entre las dos fases, así que la fase
-2 borra el tick sin tocar ni el predicado ni el frontend.
+**Un hook `Stop` que avise por POST queda fuera de este alcance**, decidido en
+conversación. Lo que compraría es quitar la latencia del tick, y lo que costaría
+está en §9.2. Lo que no compraría es fiabilidad: el `Stop` no significa "el plan
+está hecho" sino "el agente ha soltado el control", y de eso hay varios por
+sesión — el propio hook del plugin le bloquea el turno en cuanto commitea el
+plan, porque `HEAD` se adelanta al `last_commit` de la semilla
+(`plugin/scripts/stop.js`), así que el agente actualiza `SLICE.md` y para otra
+vez. Dos como mínimo, más los que salgan si pregunta algo o choca con un
+permiso.
 
-### 6.4 Los tres estados
+De ahí el reparto, que es lo que deja la fase 2 barata: **el hook nunca decide,
+sólo despierta al predicado.** Cuando se añada, el predicado no cambia y el
+frontend tampoco; sólo desaparece el tick.
 
-`PlanState` es un vocabulario cerrado de tres miembros, y el tercero no es
-relleno:
+### 6.4 Los estados
+
+`PlanState` es un vocabulario cerrado:
 
 - `writing` — la sesión vive y el predicado dice que no.
 - `ready` — el predicado dice que sí.
-- `stalled` — la sesión devolvió el control y el predicado sigue diciendo que
-  no. Es "esperando a una persona", y la aplicación lo necesita para no
-  quedarse mirando una barra de progreso que no avanza.
 
-`stalled` sólo es distinguible de `writing` con el hook, así que en la fase 1
-no se emite. Se declara desde el principio porque el frontend se escribe contra
-el vocabulario entero.
+Falta el tercero, `stalled` ("el agente soltó el control y el plan sigue sin
+estar"), que es el estado en que una persona tiene que mirar. **No se declara
+todavía porque sondeando no es distinguible de `writing`**: sin el hook, un
+agente parado y un agente escribiendo producen exactamente la misma respuesta
+del predicado. Un miembro que nada puede emitir es una rama muerta en todo
+`switch` que lo mencione, y llega con la fase 2.
 
 ---
 
@@ -323,13 +330,19 @@ implementación es sólo que el texto del informe le dice al agente que pare.
 Un agente que decida seguir, sigue. Para este piloto es aceptable porque no hay
 `--release` ni pull request automático detrás; deja de serlo en cuanto los haya.
 
-### 9.2 El hook vive dentro del worktree del agente
+### 9.2 El coste que traerá el hook, anotado antes de traerlo
 
-Su configuración está en el área de trabajo de quien vigila, y el servidor no
-autentica nada. Un `curl` con el sobre del `Stop` produce el mismo aviso que el
+No es un límite de lo que se construye ahora — el hook queda fuera (§6.3) — pero
+la decisión se registra aquí para que la fase 2 no la re-litigue.
+
+Su configuración vive **dentro del worktree del agente**, y el servidor no
+autentica nada: un `curl` con el sobre del `Stop` produce el mismo aviso que el
 agente. El predicado limita el daño — un aviso falso no convierte un plan
-inexistente en `ready` — pero el canal es falsificable, y ya está anotado como
-tal en §8.2 del diseño de fusión.
+inexistente en `ready`, sólo provoca una comprobación de más — pero el canal es
+falsificable, y ya está anotado como tal en §8.2 del diseño de fusión.
+
+Y si el hook no llega a instalarse, no hay aviso ninguno. Tiene que fallar
+ruidosamente al instalarlo, y conservar el tick como red.
 
 ### 9.3 El arranque se verifica; el trabajo, no
 
@@ -353,6 +366,8 @@ que es el lado prudente, pero la interfaz no debe ofrecerlo.
 - No sortea el nonce ni levanta el vigilante del `-OK`.
 - No conduce la implementación: la sesión escribe el plan y para.
 - No abre pull request ni libera nada.
+- No instala ningún hook en el worktree: la detección es por sondeo (§6.3).
+- No declara el estado `stalled`, que no es observable sin el hook (§6.4).
 - No importa código del plugin: lo invoca por subproceso, como manda §7 del
   diseño de fusión.
 - No toca el flujo del plugin. `/ct-next` sigue existiendo para quien despache
