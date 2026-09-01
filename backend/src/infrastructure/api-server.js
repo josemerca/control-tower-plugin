@@ -115,6 +115,17 @@ class StartPlanRoute {
   }
 }
 
+class Disconnection {
+  static watch(request) {
+    let happened = false
+    request.on('close', () => {
+      happened = true
+    })
+
+    return () => happened
+  }
+}
+
 class PlanEventsRoute {
   static PATH = '/plan-events/:issue'
   static METHOD = 'GET'
@@ -124,6 +135,8 @@ class PlanEventsRoute {
     Connection: 'keep-alive',
   }
 
+  static #ignore() {}
+
   static handledBy(sessions, events) {
     return async (request, response) => {
       const watched = sessions.get(Number(request.params.issue))
@@ -131,9 +144,11 @@ class PlanEventsRoute {
         Answer.refuse(response, 404, 'no plan session was started for that issue')
         return
       }
+      const disconnected = Disconnection.watch(request)
+      response.on('error', PlanEventsRoute.#ignore)
       response.writeHead(200, PlanEventsRoute.#HEADERS)
       for await (const frame of events.stream(watched)) {
-        if (response.writableEnded) return
+        if (disconnected()) return
         response.write(frame)
       }
       response.end()
