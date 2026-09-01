@@ -440,11 +440,32 @@ describe('/ct-status — la señal de vida en el bloque de residuo', () => {
     const hijo = spawn(join(bin, 'claude'), ['30'], { cwd: join(b.repo, '.worktrees', '9'), stdio: 'ignore' })
     try {
       execFileSync('sh', ['-c', 'sleep 0.5'])
-      // El nombre de proceso NO es "claude": es el del binario resuelto. Si
-      // alguien vuelve a identificar por nombre, esta línea lo delata antes
-      // que la aserción de abajo.
+      // EL CANARIO, Y POR QUÉ DEPENDE DEL SISTEMA OPERATIVO.
+      //
+      // En macOS `ucomm` da el ejecutable RESUELTO ('2.1.221'), así que
+      // "el nombre no es claude" delata a quien vuelva a identificar por
+      // nombre antes que la aserción de abajo. En Linux `ucomm` es alias de
+      // `comm`, que da el basename INVOCADO: 'claude'.
+      //
+      // Eso NO es una suposición: es lo que midió la primera corrida de la
+      // integración continua sobre ubuntu-latest, y es exactamente la pregunta
+      // que scripts/liveness.js dejó abierta por escrito («si alguien lleva el
+      // loop a Linux, lo primero que hay que verificar es qué devuelve ahí
+      // `ps -o comm=`»). Consecuencia para el filtro de liveness.js, que acepta
+      // un proceso si el basename de `comm` es exactamente `claude`: en Linux
+      // sigue funcionando, porque el basename de 'claude' es 'claude'.
+      //
+      // Se AFIRMA el valor de cada plataforma en vez de saltarse la aserción
+      // donde estorba: así el test documenta la medición y se rompe el día que
+      // cambie. En Linux el canario es inerte —el nombre sí es 'claude'—, y la
+      // garantía de este test es por tanto más débil ahí; queda dicho en vez de
+      // relajarse en silencio.
       const nombreDeProceso = execFileSync('ps', ['-o', 'ucomm=', '-p', String(hijo.pid)], { encoding: 'utf8' }).trim()
-      expect(nombreDeProceso).not.toBe('claude')
+      if (process.platform === 'darwin') {
+        expect(nombreDeProceso).not.toBe('claude')
+      } else {
+        expect(nombreDeProceso).toBe('claude')
+      }
       const res = correr(b, { FAKE_GH_LIST_SEQUENCE: SIN_ISSUES })
       // LA afirmación que no se puede hacer sin mirar: la primera versión
       // imprimía «nadie lo está trabajando ahora» sin consultar
