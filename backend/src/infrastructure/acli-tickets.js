@@ -3,6 +3,7 @@ import { Ticket } from '../domain/ticket.js'
 import { TicketNotRead, TicketNotUnderstood } from '../domain/exceptions.js'
 
 export class AcliTickets extends Tickets {
+  static BIN = 'acli'
   static #FIELDS = 'summary,description'
   static #UNAUTHENTICATED = /auth|login|unauthorized|401/i
   static #BREAKING_NODES = ['paragraph', 'heading', 'listItem']
@@ -18,12 +19,14 @@ export class AcliTickets extends Tickets {
   }
 
   async detail(key) {
-    let printed
-    try {
-      printed = await this.run(AcliTickets.argvFor(key))
-    } catch (cause) {
-      throw new TicketNotRead(AcliTickets.#reasonFor(cause.message))
+    const argv = AcliTickets.argvFor(key)
+    const output = await this.run(argv)
+    if (output.failed) {
+      throw new TicketNotRead(
+        `${AcliTickets.BIN} ${argv[0]} failed: ${AcliTickets.#reasonFor(output.stderr.trim())}`
+      )
     }
+    const printed = output.stdout
     const fields = AcliTickets.#fieldsIn(printed, key)
     return new Ticket({
       key,
@@ -34,7 +37,7 @@ export class AcliTickets extends Tickets {
 
   static #reasonFor(message) {
     return AcliTickets.#UNAUTHENTICATED.test(message)
-      ? `acli is not authenticated, run "acli jira auth login" and try again: ${message}`
+      ? `${AcliTickets.BIN} is not authenticated, run "acli jira auth login" and try again: ${message}`
       : message
   }
 

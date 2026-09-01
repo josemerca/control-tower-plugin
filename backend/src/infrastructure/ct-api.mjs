@@ -4,6 +4,9 @@ import { AcliTickets } from './acli-tickets.js'
 import { GhPlanIssues } from './gh-plan-issues.js'
 import { StartPlan } from '../application/actions/start-plan.js'
 import { ToolRunner } from './tool-runner.js'
+import { GhCall } from './gh-call.js'
+import { SystemClock } from './system-clock.js'
+import { GhBudget, GhRetryPolicy } from '../domain/gh-retry-policy.js'
 import { Invocation, InvocationOutcome } from './invocation.js'
 
 class CtApi {
@@ -12,6 +15,8 @@ class CtApi {
   static #BAD_USAGE = 2
   static #CANNOT_LISTEN = 1
   static #PROCESS_TIMEOUT_MS = 30_000
+  static #GH_RETRIES = 3
+  static #SECONDS_BETWEEN_GH_RETRIES = 2
 
   static #refuseUsage(reason) {
     process.stderr.write(`${reason}\n${CtApi.#USAGE}\n`)
@@ -28,15 +33,28 @@ class CtApi {
     return (argv) => runner.run(argv)
   }
 
+  static #gh() {
+    return new GhCall({
+      run: CtApi.#tool(GhCall.BIN),
+      policy: new GhRetryPolicy({
+        budget: new GhBudget({
+          attempts: CtApi.#GH_RETRIES,
+          waitSeconds: CtApi.#SECONDS_BETWEEN_GH_RETRIES,
+        }),
+      }),
+      clock: new SystemClock(),
+    })
+  }
+
   static async run(argv, environment) {
     const asked = Invocation.from(argv, environment)
     if (asked.outcome !== InvocationOutcome.READY) {
       CtApi.#refuseUsage(asked.reason)
     }
     const startPlan = new StartPlan({
-      tickets: new AcliTickets({ run: CtApi.#tool('acli') }),
-      planIssues: new GhPlanIssues({ run: CtApi.#tool('gh') }),
-      planSession: new CmuxPlanSession({ run: CtApi.#tool('cmux'), cwd: process.cwd() }),
+      tickets: new AcliTickets({ run: CtApi.#tool(AcliTickets.BIN) }),
+      planIssues: new GhPlanIssues({ call: CtApi.#gh() }),
+      planSession: new CmuxPlanSession({ run: CtApi.#tool(CmuxPlanSession.BIN), cwd: process.cwd() }),
     })
     const server = new ApiServer({ port: asked.port, startPlan })
     let port

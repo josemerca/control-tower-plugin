@@ -2,6 +2,7 @@ import { PlanSession } from '../domain/plan-session.js'
 import { PlanSessionNotStarted, PlanSessionNotNamed } from '../domain/exceptions.js'
 
 export class CmuxPlanSession extends PlanSession {
+  static BIN = 'cmux'
   static #REF = /^OK\s+(workspace:\d+)\s*$/m
 
   constructor({ run, cwd }) {
@@ -20,12 +21,12 @@ export class CmuxPlanSession extends PlanSession {
   }
 
   async start({ ticket, issue }) {
-    let printed
-    try {
-      printed = await this.run(CmuxPlanSession.argvFor({ ticket, issue, cwd: this.cwd }))
-    } catch (cause) {
-      throw new PlanSessionNotStarted(cause.message)
+    const argv = CmuxPlanSession.argvFor({ ticket, issue, cwd: this.cwd })
+    const output = await this.run(argv)
+    if (output.failed) {
+      throw new PlanSessionNotStarted(`${CmuxPlanSession.BIN} ${argv[0]} failed: ${output.stderr.trim()}`)
     }
+    const printed = output.stdout
     const found = printed.match(CmuxPlanSession.#REF)
     if (found === null) {
       throw new PlanSessionNotNamed(

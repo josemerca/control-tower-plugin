@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { AcliTickets } from '../../src/infrastructure/acli-tickets.js'
 import { TicketKey } from '../../src/domain/ticket-key.js'
 import { TicketNotRead, TicketNotUnderstood, TicketFailure } from '../../src/domain/exceptions.js'
+import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
 
 class AcliDouble {
   constructor(printed) {
@@ -13,12 +14,16 @@ class AcliDouble {
     return new AcliDouble(JSON.stringify({ key: 'MO_SHOP-42', fields }))
   }
 
+  static refusing(said) {
+    return new AcliDouble(new ProcessOutput({ code: 1, stdout: '', stderr: said }))
+  }
+
   tickets() {
     return new AcliTickets({
       run: (argv) => {
         this.calls.push(argv)
-        if (this.printed instanceof Error) return Promise.reject(this.printed)
-        return Promise.resolve(this.printed)
+        if (this.printed instanceof ProcessOutput) return Promise.resolve(this.printed)
+        return Promise.resolve(new ProcessOutput({ code: 0, stdout: this.printed, stderr: '' }))
       },
     })
   }
@@ -106,14 +111,14 @@ describe('AcliTickets', () => {
   })
 
   it('an_acli_that_refuses_the_call_arrives_typed_so_the_caller_can_tell_it_from_a_crash', async () => {
-    const refusal = await new AcliDouble(new Error('acli view failed: no such work item')).refusalFor()
+    const refusal = await AcliDouble.refusing('no such work item').refusalFor()
 
     expect(refusal).toBeInstanceOf(TicketNotRead)
     expect(refusal.message).toContain('no such work item')
   })
 
   it('an_acli_that_is_not_logged_in_says_what_to_run_instead_of_repeating_its_own_wording', async () => {
-    const refusal = await new AcliDouble(new Error('401 Unauthorized')).refusalFor()
+    const refusal = await AcliDouble.refusing('401 Unauthorized').refusalFor()
 
     expect(refusal).toBeInstanceOf(TicketNotRead)
     expect(refusal.message).toContain('acli jira auth login')
@@ -122,7 +127,7 @@ describe('AcliTickets', () => {
 
   it('acli_answering_something_unreadable_is_told_apart_from_acli_refusing_the_call', async () => {
     const unreadable = await new AcliDouble('not json at all').refusalFor()
-    const refused = await new AcliDouble(new Error('boom')).refusalFor()
+    const refused = await AcliDouble.refusing('boom').refusalFor()
 
     expect(unreadable).toBeInstanceOf(TicketNotUnderstood)
     expect(refused).toBeInstanceOf(TicketNotRead)
@@ -138,7 +143,7 @@ describe('AcliTickets', () => {
 
   it('both_ways_of_failing_share_a_type_so_a_caller_that_does_not_care_can_catch_one_thing', async () => {
     const unreadable = await new AcliDouble('not json at all').refusalFor()
-    const refused = await new AcliDouble(new Error('boom')).refusalFor()
+    const refused = await AcliDouble.refusing('boom').refusalFor()
 
     expect(unreadable).toBeInstanceOf(TicketFailure)
     expect(refused).toBeInstanceOf(TicketFailure)

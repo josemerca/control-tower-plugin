@@ -3,9 +3,15 @@ import { CmuxPlanSession } from '../../src/infrastructure/cmux-plan-session.js'
 import { PlanSessionNotStarted, PlanSessionNotNamed, PlanSessionFailure } from '../../src/domain/exceptions.js'
 import { TicketKey } from '../../src/domain/ticket-key.js'
 import { PlanIssue } from '../../src/domain/plan-issue.js'
+import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
 
 class CmuxDouble {
   static CWD = '/repo/checkout'
+
+  static refusing(said) {
+    return new CmuxDouble(new ProcessOutput({ code: 1, stdout: '', stderr: said }))
+  }
+
   static ISSUE = new PlanIssue({ number: 7, url: 'https://github.com/owner/name/issues/7' })
 
   constructor(printed) {
@@ -18,8 +24,8 @@ class CmuxDouble {
       cwd: CmuxDouble.CWD,
       run: (argv) => {
         this.calls.push(argv)
-        if (this.printed instanceof Error) return Promise.reject(this.printed)
-        return Promise.resolve(this.printed)
+        if (this.printed instanceof ProcessOutput) return Promise.resolve(this.printed)
+        return Promise.resolve(new ProcessOutput({ code: 0, stdout: this.printed, stderr: '' }))
       },
     })
   }
@@ -62,7 +68,7 @@ describe('CmuxPlanSession', () => {
   })
 
   it('a_cmux_that_refuses_the_call_arrives_typed_so_the_caller_can_tell_it_from_a_crash', async () => {
-    const cmux = new CmuxDouble(new Error('Access denied'))
+    const cmux = CmuxDouble.refusing('Access denied')
 
     const refusal = await cmux.startFor('ABC-123').catch((cause) => cause)
 
@@ -72,7 +78,7 @@ describe('CmuxPlanSession', () => {
 
   it('cmux_answering_something_unreadable_is_told_apart_from_cmux_refusing_the_call', async () => {
     const unreadable = await new CmuxDouble('OK\n').startFor('ABC-123').catch((cause) => cause)
-    const refused = await new CmuxDouble(new Error('Access denied')).startFor('ABC-123').catch((c) => c)
+    const refused = await CmuxDouble.refusing('Access denied').startFor('ABC-123').catch((c) => c)
 
     expect(unreadable).toBeInstanceOf(PlanSessionNotNamed)
     expect(refused).toBeInstanceOf(PlanSessionNotStarted)
@@ -81,7 +87,7 @@ describe('CmuxPlanSession', () => {
 
   it('both_ways_of_failing_share_a_type_so_a_caller_that_does_not_care_can_catch_one_thing', async () => {
     const unreadable = await new CmuxDouble('OK\n').startFor('ABC-123').catch((cause) => cause)
-    const refused = await new CmuxDouble(new Error('Access denied')).startFor('ABC-123').catch((c) => c)
+    const refused = await CmuxDouble.refusing('Access denied').startFor('ABC-123').catch((c) => c)
 
     expect(unreadable).toBeInstanceOf(PlanSessionFailure)
     expect(refused).toBeInstanceOf(PlanSessionFailure)

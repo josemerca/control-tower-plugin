@@ -1,29 +1,60 @@
 import { describe, it, expect } from 'vitest'
 import { GhPlanIssues } from '../../src/infrastructure/gh-plan-issues.js'
+import { GhCall } from '../../src/infrastructure/gh-call.js'
+import { PlanIssueBody } from '../../src/infrastructure/plan-issue-body.js'
+import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
+import { GhBudget, GhRetryPolicy } from '../../src/domain/gh-retry-policy.js'
+import { Clock } from '../../src/domain/clock.js'
 import { Ticket } from '../../src/domain/ticket.js'
 import { TicketKey } from '../../src/domain/ticket-key.js'
 import { RepositoryName } from '../../src/domain/repository-name.js'
 import { PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueFailure } from '../../src/domain/exceptions.js'
 
-class GhDouble {
-  static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
-
-  constructor(printed) {
-    this.printed = printed
-    this.calls = []
+class ClockDouble extends Clock {
+  constructor() {
+    super()
+    this.slept = []
   }
 
-  static ticket({ summary = 'rename the button', description = 'como usuario quiero' } = {}) {
+  async sleep(seconds) {
+    this.slept.push(seconds)
+  }
+}
+
+class GhDouble {
+  static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
+  static CREATED = 'https://github.com/josemerca/ct-loop-sandbox/issues/7\n'
+
+  constructor(answers) {
+    this.answers = answers
+    this.calls = []
+    this.clock = new ClockDouble()
+  }
+
+  static created(printed = GhDouble.CREATED) {
+    return new GhDouble([new ProcessOutput({ code: 0, stdout: printed, stderr: '' })])
+  }
+
+  static refusing(said, times = 1) {
+    return new GhDouble(Array(times).fill(new ProcessOutput({ code: 1, stdout: '', stderr: said })))
+  }
+
+  static ticket({ summary = 'El buscador acepta acentos', description = 'como comprador quiero' } = {}) {
     return new Ticket({ key: new TicketKey('MO_SHOP-42'), summary, description })
   }
 
-  issues() {
+  issues({ attempts = 3 } = {}) {
     return new GhPlanIssues({
-      run: (argv) => {
-        this.calls.push(argv)
-        if (this.printed instanceof Error) return Promise.reject(this.printed)
-        return Promise.resolve(this.printed)
-      },
+      call: new GhCall({
+        run: (argv) => {
+          this.calls.push(argv)
+          const answer = this.answers[Math.min(this.calls.length - 1, this.answers.length - 1)]
+
+          return Promise.resolve(answer)
+        },
+        policy: new GhRetryPolicy({ budget: new GhBudget({ attempts, waitSeconds: 2 }) }),
+        clock: this.clock,
+      }),
     })
   }
 
@@ -34,35 +65,31 @@ class GhDouble {
   async refusalFor(ticket = GhDouble.ticket()) {
     return this.openFor(ticket).catch((cause) => cause)
   }
+
+  get commands() {
+    return this.calls.map((argv) => argv.slice(0, 3).join(' '))
+  }
 }
 
 describe('GhPlanIssues', () => {
-  it('the_call_it_makes_names_the_repository_the_ticket_and_the_only_label_the_loop_dispatches_on', async () => {
-    const gh = new GhDouble('https://github.com/josemerca/ct-loop-sandbox/issues/7\n')
+  it('the_call_it_makes_names_the_repository_the_title_and_the_labels_the_loop_reads', async () => {
+    const gh = GhDouble.created()
+    const ticket = GhDouble.ticket()
 
-    await gh.openFor()
+    await gh.openFor(ticket)
 
     expect(gh.calls).toEqual([[
       'issue', 'create',
       '--repo', 'josemerca/ct-loop-sandbox',
-      '--title', 'MO_SHOP-42 rename the button',
-      '--body', '> Historia de usuario: MO_SHOP-42\n\ncomo usuario quiero\n',
+      '--title', 'MO_SHOP-42 El buscador acepta acentos',
+      '--body', PlanIssueBody.of(ticket),
+      '--label', 'gate:plan',
       '--label', 'status:ready',
     ]])
   })
 
-  it('a_ticket_with_no_description_says_so_in_the_body_instead_of_opening_an_empty_issue', async () => {
-    const gh = new GhDouble('https://github.com/josemerca/ct-loop-sandbox/issues/7\n')
-
-    await gh.openFor(GhDouble.ticket({ description: '   ' }))
-
-    expect(gh.calls[0][7]).toBe(
-      '> Historia de usuario: MO_SHOP-42\n\n_MO_SHOP-42 no trae descripción en Jira._\n'
-    )
-  })
-
   it('the_issue_gh_printed_comes_back_numbered_so_the_next_step_can_be_told_which_one_it_is', async () => {
-    const gh = new GhDouble('https://github.com/josemerca/ct-loop-sandbox/issues/213\n')
+    const gh = GhDouble.created('https://github.com/josemerca/ct-loop-sandbox/issues/213\n')
 
     const issue = await gh.openFor()
 
@@ -72,38 +99,132 @@ describe('GhPlanIssues', () => {
   })
 
   it('a_repository_whose_name_carries_digits_does_not_lend_them_to_the_issue_number', async () => {
-    const gh = new GhDouble('https://github.com/mercadona/mo.shop2/issues/41\n')
+    const gh = GhDouble.created('https://github.com/mercadona/mo.shop2/issues/41\n')
 
     expect((await gh.openFor()).number).toBe(41)
   })
 
   it('the_notice_gh_prints_before_the_url_does_not_get_mistaken_for_the_issue', async () => {
-    const gh = new GhDouble(
+    const gh = GhDouble.created(
       'Creating issue in josemerca/ct-loop-sandbox\n\nhttps://github.com/josemerca/ct-loop-sandbox/issues/9\n'
     )
 
     expect((await gh.openFor()).number).toBe(9)
   })
 
+  it('a_label_the_repository_does_not_have_yet_is_created_and_the_issue_opened_on_the_retry', async () => {
+    const gh = new GhDouble([
+      new ProcessOutput({ code: 1, stdout: '', stderr: "could not add label: 'gate:plan' not found" }),
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: GhDouble.CREATED, stderr: '' }),
+    ])
+
+    const issue = await gh.openFor()
+
+    expect(gh.commands).toEqual(['issue create --repo', 'label create gate:plan', 'issue create --repo'])
+    expect(gh.calls[1]).toEqual([
+      'label', 'create', 'gate:plan', '--repo', 'josemerca/ct-loop-sandbox', '--force',
+    ])
+    expect(issue.number).toBe(7)
+  })
+
+  it('two_labels_missing_are_both_sown_instead_of_giving_up_after_the_first', async () => {
+    const gh = new GhDouble([
+      new ProcessOutput({ code: 1, stdout: '', stderr: "could not add label: 'gate:plan' not found" }),
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+      new ProcessOutput({ code: 1, stdout: '', stderr: "could not add label: 'status:ready' not found" }),
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: GhDouble.CREATED, stderr: '' }),
+    ])
+
+    await gh.openFor()
+
+    expect(gh.commands).toEqual([
+      'issue create --repo', 'label create gate:plan',
+      'issue create --repo', 'label create status:ready',
+      'issue create --repo',
+    ])
+  })
+
+  it('a_label_that_is_none_of_ours_is_not_created_in_someone_elses_repository', async () => {
+    const gh = GhDouble.refusing("could not add label: 'area:whatever' not found", 1)
+
+    const refusal = await gh.refusalFor()
+
+    expect(gh.commands).toEqual(['issue create --repo'])
+    expect(refusal).toBeInstanceOf(PlanIssueNotCreated)
+  })
+
+  it('the_same_label_reported_missing_twice_stops_instead_of_sowing_it_forever', async () => {
+    const gh = GhDouble.refusing("could not add label: 'gate:plan' not found", 9)
+
+    const refusal = await gh.refusalFor()
+
+    expect(gh.commands).toEqual(['issue create --repo', 'label create gate:plan', 'issue create --repo'])
+    expect(refusal).toBeInstanceOf(PlanIssueNotCreated)
+  })
+
+  it('a_blip_while_opening_the_issue_is_not_retried_because_the_answer_may_have_been_the_one_lost', async () => {
+    const gh = new GhDouble([
+      new ProcessOutput({ code: 1, stdout: '', stderr: 'error connecting to api.github.com' }),
+      new ProcessOutput({ code: 0, stdout: GhDouble.CREATED, stderr: '' }),
+    ])
+
+    const refusal = await gh.refusalFor()
+
+    expect(gh.calls).toHaveLength(1)
+    expect(gh.clock.slept).toEqual([])
+    expect(refusal).toBeInstanceOf(PlanIssueNotCreated)
+  })
+
+  it('a_blip_while_sowing_a_label_is_retried_because_writing_it_twice_leaves_the_same_label', async () => {
+    const gh = new GhDouble([
+      new ProcessOutput({ code: 1, stdout: '', stderr: "could not add label: 'gate:plan' not found" }),
+      new ProcessOutput({ code: 1, stdout: '', stderr: 'error connecting to api.github.com' }),
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: GhDouble.CREATED, stderr: '' }),
+    ])
+
+    const issue = await gh.openFor()
+
+    expect(gh.commands).toEqual([
+      'issue create --repo', 'label create gate:plan', 'label create gate:plan', 'issue create --repo',
+    ])
+    expect(gh.clock.slept).toEqual([2])
+    expect(issue.number).toBe(7)
+  })
+
+  it('a_refusal_that_is_not_a_blip_is_not_retried_because_repeating_it_changes_nothing', async () => {
+    const gh = GhDouble.refusing('could not resolve to a Repository', 9)
+
+    await gh.refusalFor()
+
+    expect(gh.calls).toHaveLength(1)
+    expect(gh.clock.slept).toEqual([])
+  })
+
+  it('a_blip_that_never_clears_stops_at_the_budget_instead_of_calling_forever', async () => {
+    const gh = new GhDouble([
+      new ProcessOutput({ code: 1, stdout: '', stderr: "could not add label: 'gate:plan' not found" }),
+      new ProcessOutput({ code: 1, stdout: '', stderr: '502 Bad Gateway' }),
+    ])
+
+    await gh.refusalFor()
+
+    expect(gh.commands.filter((command) => command.startsWith('label'))).toHaveLength(4)
+    expect(gh.clock.slept).toEqual([2, 2, 2])
+  })
+
   it('output_with_no_issue_url_in_it_raises_instead_of_handing_back_something_unusable', async () => {
-    const refusal = await new GhDouble('done\n').refusalFor()
+    const refusal = await GhDouble.created('done\n').refusalFor()
 
     expect(refusal).toBeInstanceOf(PlanIssueNotNamed)
     expect(refusal.message).toContain('did not name the issue')
   })
 
-  it('a_gh_that_refuses_the_call_arrives_typed_with_its_own_reason_in_it', async () => {
-    const refusal = await new GhDouble(
-      new Error("gh issue failed: could not add label: 'status:ready' not found")
-    ).refusalFor()
-
-    expect(refusal).toBeInstanceOf(PlanIssueNotCreated)
-    expect(refusal.message).toContain("'status:ready' not found")
-  })
-
   it('gh_answering_something_unreadable_is_told_apart_from_gh_refusing_the_call', async () => {
-    const unreadable = await new GhDouble('done\n').refusalFor()
-    const refused = await new GhDouble(new Error('boom')).refusalFor()
+    const unreadable = await GhDouble.created('done\n').refusalFor()
+    const refused = await GhDouble.refusing('boom', 9).refusalFor()
 
     expect(unreadable).toBeInstanceOf(PlanIssueNotNamed)
     expect(refused).toBeInstanceOf(PlanIssueNotCreated)
@@ -111,8 +232,8 @@ describe('GhPlanIssues', () => {
   })
 
   it('both_ways_of_failing_share_a_type_so_a_caller_that_does_not_care_can_catch_one_thing', async () => {
-    const unreadable = await new GhDouble('done\n').refusalFor()
-    const refused = await new GhDouble(new Error('boom')).refusalFor()
+    const unreadable = await GhDouble.created('done\n').refusalFor()
+    const refused = await GhDouble.refusing('boom', 9).refusalFor()
 
     expect(unreadable).toBeInstanceOf(PlanIssueFailure)
     expect(refused).toBeInstanceOf(PlanIssueFailure)
