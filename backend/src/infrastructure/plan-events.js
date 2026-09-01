@@ -12,7 +12,7 @@ export class PlanEvents {
     return `data: ${JSON.stringify({ state })}\n\n`
   }
 
-  async *stream(subject) {
+  async *stream(subject, cancelled = () => false) {
     let last = null
     for (;;) {
       const read = await this.read(subject)
@@ -22,6 +22,7 @@ export class PlanEvents {
       }
       if (read.state === PlanState.READY) return
       await this.sleep()
+      if (cancelled()) return
     }
   }
 }

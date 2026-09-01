@@ -24,9 +24,9 @@ class EventsDouble {
     })
   }
 
-  async collected() {
+  async collected(cancelled) {
     const frames = []
-    for await (const frame of this.events().stream(EventsDouble.SUBJECT)) frames.push(frame)
+    for await (const frame of this.events().stream(EventsDouble.SUBJECT, cancelled)) frames.push(frame)
 
     return frames
   }
@@ -68,6 +68,20 @@ describe('PlanEvents', () => {
 
     await events.collected()
 
+    expect(events.slept).toBe(2)
+  })
+
+  it('a_cancel_signal_stops_the_generator_that_would_otherwise_spin_forever_on_an_unchanging_state', async () => {
+    const events = new EventsDouble(Array(50).fill(PlanState.WRITING))
+    let asked = 0
+    const cancelled = () => {
+      asked += 1
+      return asked >= 2
+    }
+
+    const frames = await events.collected(cancelled)
+
+    expect(frames).toEqual([PlanEvents.frameFor(PlanState.WRITING)])
     expect(events.slept).toBe(2)
   })
 })

@@ -147,8 +147,7 @@ class PlanEventsRoute {
       const disconnected = Disconnection.watch(request)
       response.on('error', PlanEventsRoute.#ignore)
       response.writeHead(200, PlanEventsRoute.#HEADERS)
-      for await (const frame of events.stream(watched)) {
-        if (disconnected()) return
+      for await (const frame of events.stream(watched, disconnected)) {
         response.write(frame)
       }
       response.end()

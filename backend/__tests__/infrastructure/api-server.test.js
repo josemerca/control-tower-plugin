@@ -4,13 +4,18 @@ import { gzipSync } from 'node:zlib'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { StartPlanResult } from '../../src/application/actions/start-plan.js'
 import { PlanSessionNotStarted, WorkspaceNotPrepared } from '../../src/domain/exceptions.js'
+import { PlanEvents } from '../../src/infrastructure/plan-events.js'
+import { PlanState } from '../../src/domain/plan-state.js'
+import { WorkspaceLocation } from '../../src/domain/workspace-location.js'
 
 class StartPlanSpy {
   static SESSION = 'workspace:4'
 
-  constructor({ failing = false } = {}) {
+  constructor({ failing = false, issue, located } = {}) {
     this.asked = []
     this.failing = failing
+    this.issue = issue
+    this.located = located
   }
 
   static buggy() {
@@ -34,7 +39,19 @@ class StartPlanSpy {
   async execute(params) {
     this.asked.push(params.ticket.text)
     if (this.failing) throw new PlanSessionNotStarted('cmux is not reachable')
-    return new StartPlanResult({ session: StartPlanSpy.SESSION })
+    return new StartPlanResult({ session: StartPlanSpy.SESSION, issue: this.issue, located: this.located })
+  }
+}
+
+class ProgressSpy {
+  constructor(state) {
+    this.state = state
+    this.asked = 0
+  }
+
+  async read() {
+    this.asked += 1
+    return { state: this.state }
   }
 }
 
@@ -462,6 +479,43 @@ describe('ApiServer', () => {
 
     try {
       await expect(server.start()).rejects.toThrow(/already listening/)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('closing_the_connection_from_the_client_stops_the_progress_port_from_being_asked_again', async () => {
+    const located = new WorkspaceLocation({ path: '/repo/.worktrees/9', branch: 'feat/9' })
+    const issue = { number: 9 }
+    const progress = new ProgressSpy(PlanState.WRITING)
+    const events = new PlanEvents({
+      read: () => progress.read(),
+      sleep: () => new Promise((resolve) => setTimeout(resolve, 5)),
+    })
+    const server = new ApiServer({
+      port: 0,
+      startPlan: new StartPlanSpy({ issue, located }),
+      planEvents: events,
+    })
+    const port = await server.start()
+
+    try {
+      await RunningApi.post(port, '/start-plan', `{"id":"${RunningApi.TICKET}"}`)
+
+      const controller = new AbortController()
+      const opened = await fetch(`http://127.0.0.1:${port}/plan-events/${issue.number}`, {
+        signal: controller.signal,
+      })
+      await opened.body.getReader().read()
+      controller.abort()
+
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      const askedRightAfterAbort = progress.asked
+
+      await new Promise((resolve) => setTimeout(resolve, 30))
+
+      expect(askedRightAfterAbort).toBeGreaterThan(0)
+      expect(progress.asked).toBe(askedRightAfterAbort)
     } finally {
       await server.stop()
     }
