@@ -79,18 +79,18 @@ class StartPlanRoute {
   static PATH = '/start-plan'
   static METHOD = 'POST'
 
-  static handledBy(startPlan) {
+  static handledBy(startPlan, sessions) {
     return async (request, response) => {
       const asked = PlanRequest.from(JsonBody.textOf(request))
       if (asked.outcome !== PlanRequestOutcome.ACCEPTED) {
         Answer.refuseAs(response, PlanRefusal.of(asked))
         return
       }
-      await StartPlanRoute.#accept(startPlan, response, asked.ticket)
+      await StartPlanRoute.#accept(startPlan, sessions, response, asked.ticket)
     }
   }
 
-  static async #accept(startPlan, response, ticket) {
+  static async #accept(startPlan, sessions, response, ticket) {
     let started
     try {
       started = await startPlan.execute(new StartPlanParams({ ticket }))
@@ -98,6 +98,9 @@ class StartPlanRoute {
       if (!(cause instanceof PlanSessionFailure) && !(cause instanceof WorkspaceFailure)) throw cause
       Answer.refuse(response, 503, `could not start the plan session: ${cause.message}`)
       return
+    }
+    if (started.issue !== undefined && started.located !== undefined) {
+      sessions.set(started.issue.number, { located: started.located, issue: started.issue })
     }
     Answer.send(response, 202, {
       status: 'started',
@@ -109,6 +112,32 @@ class StartPlanRoute {
   static refuseOtherMethods(request, response) {
     response.setHeader('Allow', StartPlanRoute.METHOD)
     Answer.refuse(response, 405, 'method not allowed')
+  }
+}
+
+class PlanEventsRoute {
+  static PATH = '/plan-events/:issue'
+  static METHOD = 'GET'
+  static #HEADERS = {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    Connection: 'keep-alive',
+  }
+
+  static handledBy(sessions, events) {
+    return async (request, response) => {
+      const watched = sessions.get(Number(request.params.issue))
+      if (watched === undefined) {
+        Answer.refuse(response, 404, 'no plan session was started for that issue')
+        return
+      }
+      response.writeHead(200, PlanEventsRoute.#HEADERS)
+      for await (const frame of events.stream(watched)) {
+        if (response.writableEnded) return
+        response.write(frame)
+      }
+      response.end()
+    }
   }
 }
 
@@ -138,9 +167,11 @@ class Failures {
 }
 
 export class ApiServer {
-  constructor({ port, startPlan }) {
+  constructor({ port, startPlan, sessions, planEvents }) {
     this.requestedPort = port
     this.startPlan = startPlan
+    this.sessions = sessions ?? new Map()
+    this.planEvents = planEvents
     this.server = null
   }
 
@@ -154,9 +185,12 @@ export class ApiServer {
       Browsers.turnAway,
       JsonBody.demandDeclared,
       JsonBody.reader(),
-      StartPlanRoute.handledBy(this.startPlan)
+      StartPlanRoute.handledBy(this.startPlan, this.sessions)
     )
     app.all(StartPlanRoute.PATH, StartPlanRoute.refuseOtherMethods)
+    if (this.planEvents !== undefined) {
+      app.get(PlanEventsRoute.PATH, PlanEventsRoute.handledBy(this.sessions, this.planEvents))
+    }
     app.use(Failures.nothingMatched)
     app.use(Failures.answer)
 
