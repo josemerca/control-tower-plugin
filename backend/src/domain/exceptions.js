@@ -9,6 +9,8 @@ export class PlanSessionNotStarted extends PlanSessionFailure {}
 
 export class PlanSessionNotNamed extends PlanSessionFailure {}
 
+export class PlanSessionDidNotRun extends PlanSessionFailure {}
+
 export class WorkspaceFailure extends Error {
   constructor(reason) {
     super(reason)

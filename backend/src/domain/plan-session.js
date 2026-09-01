@@ -1,5 +1,5 @@
 export class PlanSession {
-  async start(ticket) {
-    throw new Error(`${this.constructor.name} must implement start(ticket), asked for ${ticket}`)
+  async start(briefing) {
+    throw new Error(`${this.constructor.name} must implement start(briefing), asked for ${briefing?.ticket}`)
   }
 }

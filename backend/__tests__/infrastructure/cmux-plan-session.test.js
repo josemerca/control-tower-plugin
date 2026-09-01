@@ -1,87 +1,152 @@
 import { describe, it, expect } from 'vitest'
 import { CmuxPlanSession } from '../../src/infrastructure/cmux-plan-session.js'
-import { PlanSessionNotStarted, PlanSessionNotNamed, PlanSessionFailure } from '../../src/domain/exceptions.js'
+import { CmuxLauncher } from '../../src/infrastructure/cmux-launcher.js'
+import { PlanBriefing } from '../../src/domain/plan-briefing.js'
+import { WorkspaceLocation } from '../../src/domain/workspace-location.js'
 import { TicketKey } from '../../src/domain/ticket-key.js'
+import { PlanSessionNotStarted, PlanSessionNotNamed, PlanSessionDidNotRun } from '../../src/domain/exceptions.js'
 
 class CmuxDouble {
-  static CWD = '/repo/checkout'
+  static RUNS_IN = '/tmp/ct-plan'
+  static WORKTREE = '/repo/.worktrees/42'
 
-  constructor(printed) {
+  constructor({ printed, sentinel }) {
     this.printed = printed
+    this.sentinel = sentinel
     this.calls = []
+    this.written = []
+    this.slept = 0
   }
 
   session() {
     return new CmuxPlanSession({
-      cwd: CmuxDouble.CWD,
+      runsIn: CmuxDouble.RUNS_IN,
+      write: (path, text) => {
+        this.written.push([path, text])
+        return Promise.resolve()
+      },
+      read: () => Promise.resolve(this.sentinel),
+      sleep: () => {
+        this.slept += 1
+        return Promise.resolve()
+      },
       run: (argv) => {
         this.calls.push(argv)
-        if (this.printed instanceof Error) return Promise.reject(this.printed)
         return Promise.resolve(this.printed)
       },
     })
   }
 
-  async startFor(text) {
-    return this.session().start(new TicketKey(text))
+  static briefing() {
+    return new PlanBriefing({
+      ticket: new TicketKey('ABC-42'),
+      issue: { number: 42 },
+      located: new WorkspaceLocation({ path: CmuxDouble.WORKTREE, branch: 'feat/42' }),
+      errand: 'escribe el plan',
+    })
+  }
+
+  static named() {
+    return { failed: false, stdout: 'OK workspace:4\n', stderr: '' }
+  }
+
+  static ran(cwd = CmuxDouble.WORKTREE) {
+    return `${CmuxLauncher.MAGIC}\t1\tok\t${cwd}\n`
+  }
+
+  start() {
+    return this.session().start(CmuxDouble.briefing())
   }
 }
 
 describe('CmuxPlanSession', () => {
-  it('the_call_it_makes_names_the_ticket_and_cuts_it_in_the_directory_it_was_given', async () => {
-    const cmux = new CmuxDouble('OK workspace:4\n')
+  it('the_window_it_opens_is_cut_in_the_worktree_and_not_where_the_api_happens_to_run', async () => {
+    const cmux = new CmuxDouble({ printed: CmuxDouble.named(), sentinel: CmuxDouble.ran() })
 
-    await cmux.startFor('MO_SHOP-42')
+    await cmux.start()
 
-    expect(cmux.calls).toEqual([[
+    expect(cmux.calls[0]).toEqual([
       'new-workspace',
-      '--name', 'ct-plan-MO_SHOP-42',
-      '--cwd', CmuxDouble.CWD,
-      '--command', 'echo "plan session up for MO_SHOP-42"',
-    ]])
+      '--name', 'ct-plan-ABC-42',
+      '--cwd', CmuxDouble.WORKTREE,
+      '--command', CmuxLauncher.typedFor(`${CmuxDouble.RUNS_IN}/42/${CmuxLauncher.SCRIPT_NAME}`),
+    ])
+  })
+
+  it('the_errand_travels_by_disk_and_never_as_keystrokes', async () => {
+    const cmux = new CmuxDouble({ printed: CmuxDouble.named(), sentinel: CmuxDouble.ran() })
+
+    await cmux.start()
+
+    expect(cmux.written[0][0]).toBe(`${CmuxDouble.RUNS_IN}/42/${CmuxLauncher.SCRIPT_NAME}`)
+    expect(cmux.written[0][1]).toContain('escribe el plan')
+    expect(JSON.stringify(cmux.calls[0])).not.toContain('escribe el plan')
   })
 
   it('the_handle_cmux_prints_is_what_comes_back_so_the_caller_can_reach_the_session_later', async () => {
-    const cmux = new CmuxDouble('OK workspace:4\n')
+    const cmux = new CmuxDouble({ printed: CmuxDouble.named(), sentinel: CmuxDouble.ran() })
 
-    expect(await cmux.startFor('ABC-123')).toBe('workspace:4')
+    expect(await cmux.start()).toBe('workspace:4')
   })
 
-  it('the_notice_cmux_prints_before_the_handle_does_not_get_mistaken_for_one', async () => {
-    const cmux = new CmuxDouble("cmux: 'new-workspace' is now an alias\nOK workspace:12\n")
+  it('a_cmux_that_refuses_travels_out_typed', async () => {
+    const cmux = new CmuxDouble({
+      printed: { failed: true, stdout: '', stderr: 'no daemon' },
+      sentinel: null,
+    })
 
-    expect(await cmux.startFor('ABC-123')).toBe('workspace:12')
+    await expect(cmux.start()).rejects.toBeInstanceOf(PlanSessionNotStarted)
   })
 
-  it('output_with_no_handle_in_it_raises_instead_of_handing_back_something_unusable', async () => {
-    const cmux = new CmuxDouble('OK\n')
+  it('a_cmux_that_names_nothing_is_not_taken_for_a_success', async () => {
+    const cmux = new CmuxDouble({
+      printed: { failed: false, stdout: 'starting...\n', stderr: '' },
+      sentinel: CmuxDouble.ran(),
+    })
 
-    await expect(cmux.startFor('ABC-123')).rejects.toThrow(/did not name the workspace/)
+    await expect(cmux.start()).rejects.toBeInstanceOf(PlanSessionNotNamed)
   })
 
-  it('a_cmux_that_refuses_the_call_arrives_typed_so_the_caller_can_tell_it_from_a_crash', async () => {
-    const cmux = new CmuxDouble(new Error('Access denied'))
+  it('when_the_sentinel_does_not_show_up_the_line_is_resent_because_the_pty_can_eat_it', async () => {
+    const cmux = new CmuxDouble({ printed: CmuxDouble.named(), sentinel: null })
 
-    const refusal = await cmux.startFor('ABC-123').catch((cause) => cause)
+    await cmux.start().catch(() => {})
 
-    expect(refusal).toBeInstanceOf(PlanSessionNotStarted)
-    expect(refusal.message).toContain('Access denied')
+    const typed = CmuxLauncher.typedFor(`${CmuxDouble.RUNS_IN}/42/${CmuxLauncher.SCRIPT_NAME}`)
+    expect(cmux.calls).toContainEqual(['send', '--workspace', 'ct-plan-ABC-42', typed])
+    expect(cmux.calls).toContainEqual(['send-key', '--workspace', 'ct-plan-ABC-42', 'Enter'])
   })
 
-  it('cmux_answering_something_unreadable_is_told_apart_from_cmux_refusing_the_call', async () => {
-    const unreadable = await new CmuxDouble('OK\n').startFor('ABC-123').catch((cause) => cause)
-    const refused = await new CmuxDouble(new Error('Access denied')).startFor('ABC-123').catch((c) => c)
+  it('a_sentinel_that_never_shows_up_is_reported_instead_of_being_called_a_launch', async () => {
+    const cmux = new CmuxDouble({ printed: CmuxDouble.named(), sentinel: null })
 
-    expect(unreadable).toBeInstanceOf(PlanSessionNotNamed)
-    expect(refused).toBeInstanceOf(PlanSessionNotStarted)
-    expect(unreadable).not.toBeInstanceOf(PlanSessionNotStarted)
+    const refusal = await cmux.start().catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(PlanSessionDidNotRun)
+    expect(refusal.message).toMatch(/centinela/)
   })
 
-  it('both_ways_of_failing_share_a_type_so_a_caller_that_does_not_care_can_catch_one_thing', async () => {
-    const unreadable = await new CmuxDouble('OK\n').startFor('ABC-123').catch((cause) => cause)
-    const refused = await new CmuxDouble(new Error('Access denied')).startFor('ABC-123').catch((c) => c)
+  it('a_sentinel_that_says_the_binary_was_missing_names_the_binary_and_not_the_window', async () => {
+    const cmux = new CmuxDouble({
+      printed: CmuxDouble.named(),
+      sentinel: `${CmuxLauncher.MAGIC}\t1\tmissing\t${CmuxDouble.WORKTREE}\n`,
+    })
 
-    expect(unreadable).toBeInstanceOf(PlanSessionFailure)
-    expect(refused).toBeInstanceOf(PlanSessionFailure)
+    const refusal = await cmux.start().catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(PlanSessionDidNotRun)
+    expect(refusal.message).toContain('claude')
+  })
+
+  it('a_shell_that_landed_somewhere_else_is_reported_because_the_window_title_would_not_show_it', async () => {
+    const cmux = new CmuxDouble({
+      printed: CmuxDouble.named(),
+      sentinel: CmuxDouble.ran('/somewhere/else'),
+    })
+
+    const refusal = await cmux.start().catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(PlanSessionDidNotRun)
+    expect(refusal.message).toContain('/somewhere/else')
   })
 })
