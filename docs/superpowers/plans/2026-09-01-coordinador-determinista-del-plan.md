@@ -1786,7 +1786,6 @@ git commit -m "feat(progress): el plan está hecho cuando es válido y está com
 - Create: `backend/src/application/queries/read-plan-progress.js`
 - Create: `backend/src/infrastructure/plan-events.js`
 - Modify: `backend/src/infrastructure/api-server.js`
-- Modify: `backend/src/infrastructure/ct-api.mjs`
 - Test: `backend/__tests__/application/read-plan-progress.test.js`
 - Test: `backend/__tests__/infrastructure/plan-events.test.js`
 
@@ -2090,69 +2089,10 @@ La guarda sobre `started.issue` existe por el mismo motivo que la anterior: `Sta
 no el caso de uso. Obligarle a componer un issue y una ubicación sería hacerle reimplementar lo que la
 tarea 7 ya mide.
 
-En `backend/src/infrastructure/ct-api.mjs`, añade los imports que lo nuevo necesita:
-
-```js
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { tmpdir } from 'node:os'
-import { GitWorkspace } from './git-workspace.js'
-import { PlanAgentBrief } from './plan-agent-brief.js'
-import { PlanContractProgress } from './plan-contract-progress.js'
-import { PlanEvents } from './plan-events.js'
-import { ReadPlanProgress, ReadPlanProgressParams } from '../application/queries/read-plan-progress.js'
-```
-
-y compón:
-
-```js
-    const git = CtApi.#tool(GitWorkspace.BIN)
-    const sessions = new Map()
-    const startPlan = new StartPlan({
-      tickets: new AcliTickets({ run: CtApi.#tool(AcliTickets.BIN) }),
-      planIssues: new GhPlanIssues({ call: CtApi.#gh() }),
-      workspace: new GitWorkspace({ run: git, write: CtApi.#write, root: process.cwd(), base: CtApi.#BASE }),
-      planSession: new CmuxPlanSession({
-        run: CtApi.#tool(CmuxPlanSession.BIN),
-        write: CtApi.#write,
-        read: CtApi.#read,
-        sleep: () => new Promise((resolve) => setTimeout(resolve, CtApi.#SENTINEL_TICK_MS)),
-        runsIn: join(tmpdir(), 'ct-plan'),
-      }),
-      brief: new PlanAgentBrief({ dispatchCheck: CtApi.#DISPATCH_CHECK, conventions: CtApi.#CONVENTIONS }),
-    })
-    const planEvents = new PlanEvents({
-      sleep: () => new Promise((resolve) => setTimeout(resolve, PlanEvents.TICK_MS)),
-      read: (subject) => new ReadPlanProgress({
-        planProgress: new PlanContractProgress({
-          node: (argv, options) => new ToolRunner({ bin: 'node', budgetMs: CtApi.#PROCESS_TIMEOUT_MS }).run(argv, options),
-          git,
-          dispatchCheck: CtApi.#DISPATCH_CHECK,
-          repository: CtApi.#REPOSITORY,
-        }),
-      }).execute(new ReadPlanProgressParams(subject)),
-    })
-    const server = new ApiServer({ port: asked.port, startPlan, sessions, planEvents })
-```
-
-con los ayudantes de disco y las constantes que faltan como estáticos de `CtApi`:
-
-```js
-  static #BASE = 'main'
-  static #SENTINEL_TICK_MS = 500
-  static #DISPATCH_CHECK = process.env.CT_DISPATCH_CHECK ?? ''
-  static #CONVENTIONS = process.env.CT_CONVENTIONS ?? ''
-  static #REPOSITORY = process.env.CT_REPOSITORY ?? ''
-
-  static async #write(path, text) {
-    await mkdir(dirname(path), { recursive: true })
-    await writeFile(path, text, 'utf8')
-  }
-
-  static async #read(path) {
-    return readFile(path, 'utf8').catch(() => null)
-  }
-```
+**`ct-api.mjs` NO se toca en esta tarea.** Su composición necesita `AcliTickets`, `GhPlanIssues`, `GhCall` y
+`ToolRunner`, que viven en `alcaptar/start-plan-crea-el-issue` y no existen en esta rama: sin `tickets` ni
+`planIssues` no hay forma de construir un `StartPlan` que arranque. Cablearlo es trabajo de después del merge y
+está descrito abajo, en su propia sección.
 
 - [ ] **Step 6: Run the whole suite**
 
@@ -2162,11 +2102,33 @@ Expected: PASS
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/src/application/queries/read-plan-progress.js backend/src/infrastructure/plan-events.js backend/src/infrastructure/api-server.js backend/src/infrastructure/ct-api.mjs backend/__tests__/application/read-plan-progress.test.js backend/__tests__/infrastructure/plan-events.test.js
+git add backend/src/application/queries/read-plan-progress.js backend/src/infrastructure/plan-events.js backend/src/infrastructure/api-server.js backend/__tests__/application/read-plan-progress.test.js backend/__tests__/infrastructure/plan-events.test.js
 git commit -m "feat(events): el frontend se entera de que el plan está hecho sin sondear él"
 ```
 
 ---
+
+## Después del merge: la composición
+
+Esto NO es una tarea de este plan: es lo que queda por hacer cuando
+`alcaptar/start-plan-crea-el-issue` entre. Se escribe aquí para que no se pierda.
+
+En `backend/src/infrastructure/ct-api.mjs`:
+
+1. `StartPlan` se construye con los cinco colaboradores: `tickets` y `planIssues` de esa rama, más
+   `workspace: new GitWorkspace({ run, write, root, base })`, el `planSession` con su constructor nuevo
+   (`{ run, write, read, sleep, runsIn }`) y `brief: new PlanAgentBrief({ dispatchCheck, conventions })` con
+   **rutas absolutas** — el constructor las exige.
+2. `CmuxPlanSession` está hoy instanciado con el constructor viejo `{ run, cwd }`. Si se deja así, la instancia
+   real lleva `write`, `read`, `sleep` y `runsIn` en `undefined` y revienta en la primera llamada, con la suite
+   entera en verde. Es el hallazgo que la revisión de la tarea 6 dejó anotado.
+3. `api-server.js` construye `new StartPlanParams({ ticket })` sin `repository`. Hay dos formas de cerrarlo y la
+   decisión es de quien mergee: que `PlanRequest` acepte un campo `repository` (es lo que la otra rama ya toca,
+   así que probablemente venga hecho), o que el repositorio entre por configuración (`CT_REPOSITORY`, que la
+   tarea 9 ya necesita para el predicado) y la ruta lo pase. Lo que NO vale es dejarlo `undefined`: llegaría
+   hasta el cuerpo del issue y hasta el comando de `--check-plan`.
+4. `ToolRunner.run` tiene que aceptar `{ cwd }` y pasarlo a `execFile`: `--check-plan` resuelve sus rutas desde
+   el directorio de trabajo y hay que invocarlo dentro del worktree.
 
 ## Verificación de punta a punta
 
