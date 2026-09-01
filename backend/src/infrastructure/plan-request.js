@@ -1,3 +1,5 @@
+import { TicketKey } from '../domain/ticket-key.js'
+
 export const PlanRequestOutcome = Object.freeze({
   ACCEPTED: 'accepted',
   BODY_TOO_LARGE: 'body-too-large',
@@ -8,18 +10,13 @@ export const PlanRequestOutcome = Object.freeze({
 
 export class PlanRequest {
   static ID_FIELD = 'id'
-  static #ID_SHAPE = /^[A-Z][A-Z0-9_]*-\d+$/
 
-  constructor({ outcome, id, fields }) {
+  constructor({ outcome, ticket, fields }) {
     if (!Object.values(PlanRequestOutcome).includes(outcome)) {
       throw new Error(`outcome must be a PlanRequestOutcome member, got ${outcome}`)
     }
-    if (outcome === PlanRequestOutcome.ACCEPTED) {
-      if (!PlanRequest.#ID_SHAPE.test(id)) {
-        throw new Error(`an accepted request carries an id shaped like a ticket key, got ${JSON.stringify(id)}`)
-      }
-    } else if (id !== null) {
-      throw new Error(`outcome ${outcome} must carry a null id, got ${JSON.stringify(id)}`)
+    if ((outcome === PlanRequestOutcome.ACCEPTED) === (ticket === null)) {
+      throw new Error(`outcome ${outcome} disagrees with its ticket, got ${ticket}`)
     }
     if (outcome !== PlanRequestOutcome.UNKNOWN_FIELD && fields.length > 0) {
       throw new Error(`outcome ${outcome} must carry no fields, got ${fields.join(', ')}`)
@@ -28,21 +25,21 @@ export class PlanRequest {
       throw new Error('an unknown-field outcome must name the fields it rejected')
     }
     this.outcome = outcome
-    this.id = id
+    this.ticket = ticket
     this.fields = Object.freeze([...fields])
     Object.freeze(this)
   }
 
-  static accepted(id) {
-    return new PlanRequest({ outcome: PlanRequestOutcome.ACCEPTED, id, fields: [] })
+  static accepted(ticket) {
+    return new PlanRequest({ outcome: PlanRequestOutcome.ACCEPTED, ticket, fields: [] })
   }
 
   static refused(outcome) {
-    return new PlanRequest({ outcome, id: null, fields: [] })
+    return new PlanRequest({ outcome, ticket: null, fields: [] })
   }
 
   static withUnknownFields(fields) {
-    return new PlanRequest({ outcome: PlanRequestOutcome.UNKNOWN_FIELD, id: null, fields })
+    return new PlanRequest({ outcome: PlanRequestOutcome.UNKNOWN_FIELD, ticket: null, fields })
   }
 
   static tooLarge() {
@@ -63,10 +60,10 @@ export class PlanRequest {
     if (unknown.length > 0) {
       return PlanRequest.withUnknownFields(unknown.sort())
     }
-    const id = parsed[PlanRequest.ID_FIELD]
-    if (typeof id !== 'string' || !PlanRequest.#ID_SHAPE.test(id)) {
+    const given = parsed[PlanRequest.ID_FIELD]
+    if (!TicketKey.isWellFormed(given)) {
       return PlanRequest.refused(PlanRequestOutcome.MALFORMED_ID)
     }
-    return PlanRequest.accepted(id)
+    return PlanRequest.accepted(new TicketKey(given))
   }
 }

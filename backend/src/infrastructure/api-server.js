@@ -1,6 +1,9 @@
 import express from 'express'
 import { createServer } from 'node:http'
 import { PlanRequest, PlanRequestOutcome } from './plan-request.js'
+import { PlanRefusal } from './plan-refusal.js'
+import { StartPlanParams } from '../application/actions/start-plan.js'
+import { PlanSessionFailure } from '../domain/exceptions.js'
 
 export const LOOPBACK = '127.0.0.1'
 
@@ -15,6 +18,10 @@ class Answer {
   static refuse(response, status, error) {
     Answer.send(response, status, { error })
   }
+
+  static refuseAs(response, refusal) {
+    Answer.refuse(response, refusal.status, refusal.error)
+  }
 }
 
 class Route {
@@ -25,6 +32,7 @@ class Route {
     const path = asked === -1 ? request.url : request.url.slice(0, asked)
     const query = asked === -1 ? '' : request.url.slice(asked)
     request.url = `${path.replace(Route.#TRAILING_SLASHES, '') || '/'}${query}`
+
     next()
   }
 }
@@ -61,34 +69,39 @@ class JsonBody {
   }
 }
 
-class StartPlan {
+class StartPlanRoute {
   static PATH = '/start-plan'
   static METHOD = 'POST'
 
-  static #REFUSALS = Object.freeze({
-    [PlanRequestOutcome.BODY_NOT_A_JSON_OBJECT]: { status: 400, error: 'body must be a JSON object' },
-    [PlanRequestOutcome.MALFORMED_ID]: { status: 400, error: 'id must be a ticket key such as ABC-123' },
-  })
+  static handledBy(startPlan) {
+    return async (request, response) => {
+      const asked = PlanRequest.from(JsonBody.textOf(request))
+      if (asked.outcome !== PlanRequestOutcome.ACCEPTED) {
+        Answer.refuseAs(response, PlanRefusal.of(asked))
+        return
+      }
+      await StartPlanRoute.#accept(startPlan, response, asked.ticket)
+    }
+  }
 
-  static accept(request, response) {
-    const asked = PlanRequest.from(JsonBody.textOf(request))
-    if (asked.outcome === PlanRequestOutcome.ACCEPTED) {
-      Answer.send(response, 200, { status: 'ok', [PlanRequest.ID_FIELD]: asked.id })
+  static async #accept(startPlan, response, ticket) {
+    let started
+    try {
+      started = await startPlan.execute(new StartPlanParams({ ticket }))
+    } catch (cause) {
+      if (!(cause instanceof PlanSessionFailure)) throw cause
+      Answer.refuse(response, 503, `could not start the plan session: ${cause.message}`)
       return
     }
-    if (asked.outcome === PlanRequestOutcome.UNKNOWN_FIELD) {
-      Answer.refuse(response, 400, `unknown field: ${asked.fields.join(', ')}`)
-      return
-    }
-    const refusal = StartPlan.#REFUSALS[asked.outcome]
-    if (refusal === undefined) {
-      throw new Error(`no refusal declared for outcome ${asked.outcome}`)
-    }
-    Answer.refuse(response, refusal.status, refusal.error)
+    Answer.send(response, 202, {
+      status: 'started',
+      [PlanRequest.ID_FIELD]: ticket.text,
+      session: started.session,
+    })
   }
 
   static refuseOtherMethods(request, response) {
-    response.setHeader('Allow', StartPlan.METHOD)
+    response.setHeader('Allow', StartPlanRoute.METHOD)
     Answer.refuse(response, 405, 'method not allowed')
   }
 }
@@ -101,13 +114,16 @@ class Failures {
   }
 
   static answer(cause, request, response, next) {
+    if (cause.type === Failures.#TOO_LARGE) {
+      Answer.refuseAs(response, PlanRefusal.of(PlanRequest.tooLarge()))
+      return
+    }
+    if (cause.status === undefined) {
+      process.stderr.write(`request to ${request.url} failed: ${cause.stack ?? cause.message}\n`)
+    }
     request.destroy()
     if (response.headersSent || response.writableEnded) {
       response.destroy()
-      return
-    }
-    if (cause.type === Failures.#TOO_LARGE) {
-      Answer.refuse(response, 413, `body must not exceed ${JsonBody.MAX_BYTES} bytes`)
       return
     }
     Answer.refuse(response, 400, 'request failed')
@@ -115,26 +131,28 @@ class Failures {
 }
 
 export class ApiServer {
-  constructor({ port }) {
+  constructor({ port, startPlan }) {
     this.requestedPort = port
+    this.startPlan = startPlan
     this.server = null
   }
 
-  static #route() {
+  #route() {
     const app = express()
     app.disable('x-powered-by')
     app.set('etag', false)
     app.use(Route.collapseTrailingSlashes)
     app.post(
-      StartPlan.PATH,
+      StartPlanRoute.PATH,
       Browsers.turnAway,
       JsonBody.demandDeclared,
       JsonBody.reader(),
-      StartPlan.accept
+      StartPlanRoute.handledBy(this.startPlan)
     )
-    app.all(StartPlan.PATH, StartPlan.refuseOtherMethods)
+    app.all(StartPlanRoute.PATH, StartPlanRoute.refuseOtherMethods)
     app.use(Failures.nothingMatched)
     app.use(Failures.answer)
+
     return app
   }
 
@@ -142,7 +160,7 @@ export class ApiServer {
     if (this.server !== null) {
       throw new Error('start() was called on a server that is already listening')
     }
-    const server = createServer(ApiServer.#route())
+    const server = createServer(this.#route())
     await new Promise((resolve, reject) => {
       server.once('error', reject)
       server.listen(this.requestedPort, LOOPBACK, () => {
@@ -151,6 +169,7 @@ export class ApiServer {
       })
     })
     this.server = server
+
     return server.address().port
   }
 
