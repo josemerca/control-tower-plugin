@@ -3,10 +3,11 @@ import { spawnSync, execFileSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { envDelGo } from './fixtures/go-gate.js'
 
-const SCRIPT = new URL('../scripts/dispatch-check.mjs', import.meta.url).pathname
-const FAKE_GH = new URL('./fixtures/fake-gh-bin', import.meta.url).pathname
+const SCRIPT = fileURLToPath(new URL('../scripts/dispatch-check.mjs', import.meta.url))
+const FAKE_GH = fileURLToPath(new URL('./fixtures/fake-gh-bin', import.meta.url))
 const A = 'el server escucha en 9115 por defecto y en el puerto indicado si se pasa'
 
 const cuerpo = (recorridos) => [

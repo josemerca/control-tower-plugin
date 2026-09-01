@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const GROOM = new URL('../scripts/ct-groom.mjs', import.meta.url).pathname
+const GROOM = fileURLToPath(new URL('../scripts/ct-groom.mjs', import.meta.url))
 
 // --dry-run enumera issues existentes de `--repo` (F5, lectura pura para
 // detectar divergencia) ANTES de imprimir el plan — sin un `gh` de mentira en

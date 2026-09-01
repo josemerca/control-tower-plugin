@@ -17,8 +17,9 @@ import { spawnSync } from 'node:child_process'
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const INIT = new URL('../scripts/ct-init.sh', import.meta.url).pathname
+const INIT = fileURLToPath(new URL('../scripts/ct-init.sh', import.meta.url))
 
 // La versión del contrato se LEE del propio ct-init.sh (misma doctrina y misma
 // razón que en ct-init.test.js): el número tecleado aquí a mano se quedó atrás

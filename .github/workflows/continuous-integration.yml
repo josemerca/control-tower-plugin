@@ -43,8 +43,16 @@ jobs:
     permissions:
       contents: read
     steps:
+      # fetch-depth: 0 is not caution, it is a requirement two tests state out
+      # loud. ct-init.test.js:301 refuses to run its provenance check on a
+      # shallow clone ("the commit that put the hash in the ledger may fall
+      # below the graft, and the test would accuse a correct ledger of forgery")
+      # and task-brief.test.js:50 does `git show <sha>:<path>` against a commit
+      # that a depth-1 clone does not have.
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
