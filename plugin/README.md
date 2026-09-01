@@ -262,6 +262,8 @@ npm run build       # sólo el bundle de los hooks
 
 > **Todo cambio en `hooks/`, o en cualquier módulo de `scripts/` que esos hooks importen, tiene que llevar un `dist/` reconstruido en el mismo commit.**
 
+Lo mismo vale para `scripts/vendor/yaml.js`, y por una razón distinta: **Claude Code instala un plugin copiándolo, nunca corriendo `npm install`**, así que un `import` de un paquete npm sólo sobrevive mientras un `node_modules` sin trackear viaje de gorra con la copia — y muere en cualquier instalación desde git. `scripts/state.js` importa el bundle, no el paquete, y `__tests__/frontera-de-distribucion.test.js` se pone rojo ante cualquier `import` de un paquete en el código de runtime.
+
 Si no, el repo sigue distribuyendo el hook viejo mientras la fuente ya dice otra cosa — y la suite se queda **en verde**, porque `npm test` construye primero: prueba un `dist/` recién hecho mientras el commiteado se pudre. Pasó de verdad. Antes de commitear algo que toque `hooks/`: `npm run build`, y mira el diff de `dist/*.js` como parte del cambio.
 
 ### Estructura
@@ -269,10 +271,11 @@ Si no, el repo sigue distribuyendo el hook viejo mientras la fuente ya dice otra
 ```
 commands/     los cuatro slash commands (Markdown + prosa larga: son la documentación)
 scripts/      la lógica — módulos puros y los ejecutables .mjs (los cuatro del loop y ct-step)
+scripts/vendor/  `yaml` bundleado — DERIVADO, trackeado, ver abajo
 hooks/        SessionStart (hidratación), Stop (estado al día), PreToolUse (guarda de commits)
 dist/         bundles de los hooks — DERIVADO, trackeado, ver arriba
 skills/       los 11 skills forkados + writing-plans-prescriptive (propio) + LICENSE-superpowers + FORK.md
-__tests__/    120 ficheros, 2.994 tests
+__tests__/    120 ficheros, 2.997 tests
 ```
 
 Y un nivel más arriba, en el repo y **fuera** de lo que se distribuye (el `source` del

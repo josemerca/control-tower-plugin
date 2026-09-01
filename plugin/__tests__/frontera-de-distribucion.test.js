@@ -1,7 +1,10 @@
 import { describe, it, expect } from 'vitest'
+import { build } from 'esbuild'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, extname, join, relative, resolve } from 'node:path'
+import { isBuiltin } from 'node:module'
 import { fileURLToPath } from 'node:url'
+import { vendorOptions } from '../scripts/build.mjs'
 
 class Frontier {
   static ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -9,6 +12,8 @@ class Frontier {
   static SOURCE_EXTENSIONS = ['.js', '.mjs', '.cjs']
   static README = 'README.md'
   static LICENSE = 'LICENSE'
+  static BUILD_ONLY = [join('scripts', 'build.mjs')]
+  static RUNTIME_DIRECTORIES = ['scripts', 'hooks', 'dist', 'skills', 'agents', 'commands', 'templates', 'conventions', 'prompts']
 
   static #SPECIFIER = /(?:\bfrom|\bimport|\brequire)\s*\(?\s*(['"])([^'"]+)\1/g
   static #LINK = /\[[^\]]*\]\(([^)\s]+)\)/g
@@ -40,6 +45,23 @@ class Frontier {
       if (!specifier.startsWith('.')) return false
       return relative(Frontier.ROOT, resolve(join(Frontier.ROOT, from), specifier)).startsWith('..')
     })
+  }
+
+  static runtimeSources() {
+    return Frontier.sourcesUnder().filter((file) =>
+      Frontier.RUNTIME_DIRECTORIES.includes(file.split('/')[0]) &&
+      !Frontier.BUILD_ONLY.includes(file)
+    )
+  }
+
+  static packageSpecifiersInSource(source) {
+    return [...new Set(Frontier.#specifiersIn(source).filter((specifier) =>
+      !specifier.startsWith('.') && !specifier.startsWith('/') && !isBuiltin(specifier)
+    ))]
+  }
+
+  static packageSpecifiersIn(file) {
+    return Frontier.packageSpecifiersInSource(readFileSync(join(Frontier.ROOT, file), 'utf8'))
   }
 
   static escapesIn(file) {
@@ -113,6 +135,34 @@ describe('what the marketplace ships has to stand on its own', () => {
       Frontier.unreachableLinksInReadme(),
       'those links point outside the plugin: they are dead on GitHub and dead in every install'
     ).toEqual([])
+  })
+
+  it('no runtime source asks for an npm package: an install has no node_modules to answer with', () => {
+    const asking = Frontier.runtimeSources()
+      .flatMap((file) => Frontier.packageSpecifiersIn(file).map((specifier) => `${file} -> ${specifier}`))
+
+    expect(
+      asking,
+      'Claude Code installs a plugin by copying it, never by running npm install. A package import ' +
+        'survives only while an untracked node_modules happens to travel with the copy, and dies on ' +
+        'any install from git. Bundle it into scripts/vendor/ the way yaml is bundled.'
+    ).toEqual([])
+  })
+
+  it('the package detector really fires on the import that used to die on every install', () => {
+    expect(Frontier.packageSpecifiersInSource("import { parse } from 'yaml'")).toEqual(['yaml'])
+    expect(Frontier.packageSpecifiersInSource("import { parse } from './vendor/yaml.js'")).toEqual([])
+    expect(Frontier.packageSpecifiersInSource("import { readFileSync } from 'node:fs'")).toEqual([])
+    expect(Frontier.packageSpecifiersInSource("const { readFileSync } = require('fs')")).toEqual([])
+  })
+
+  it('the vendored bundle is the one esbuild produces from the declared version, byte for byte', async () => {
+    const built = await build({ ...vendorOptions, write: false })
+
+    expect(
+      Buffer.compare(Buffer.from(built.outputFiles[0].contents), readFileSync(vendorOptions.outfile)),
+      'scripts/vendor/yaml.js is committed and derived, like dist/: run npm run build and commit it'
+    ).toBe(0)
   })
 
   it('the license that ships is the very one the repository declares, byte for byte', () => {

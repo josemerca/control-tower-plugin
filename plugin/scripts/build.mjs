@@ -13,7 +13,29 @@
 // verifica que el bundle resultante solo importa builtins `node:*`.
 import { build } from 'esbuild'
 import { realpathSync } from 'node:fs'
-import { pathToFileURL } from 'node:url'
+import { dirname, join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+
+const pluginRoot = join(dirname(fileURLToPath(import.meta.url)), '..')
+
+export const RUNTIME_BANNER =
+  "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);"
+
+export const VENDOR_BANNER =
+  "import { createRequire as vendorCreateRequire } from 'node:module'; const require = vendorCreateRequire(import.meta.url);"
+
+export const vendorOptions = {
+  stdin: {
+    contents: "export { parse, stringify } from 'yaml'",
+    resolveDir: pluginRoot,
+    loader: 'js',
+  },
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  outfile: join(pluginRoot, 'scripts', 'vendor', 'yaml.js'),
+  banner: { js: VENDOR_BANNER },
+}
 
 // buildOptions se exporta (F24) para que haya UNA sola fuente de verdad de la
 // configuración de build: quien necesite reconstruir los fuentes y comparar el
@@ -42,9 +64,7 @@ export const buildOptions = {
   platform: 'node',
   format: 'esm',
   outdir: 'dist',
-  banner: {
-    js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);",
-  },
+  banner: { js: RUNTIME_BANNER },
 }
 
 // Construye solo al EJECUTARSE (`npm run build`), nunca al importarse — el
@@ -81,5 +101,6 @@ export const buildOptions = {
 // cuando `argv[1]` está definido el fichero existe.
 // No lo "simplifiques" quitándolo.
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
+  await build(vendorOptions)
   await build(buildOptions)
 }

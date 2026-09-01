@@ -1,23 +1,14 @@
-#!/usr/bin/env node
-import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);
-
-// hooks/session-start.js
-import { readFileSync } from "node:fs";
-import { execFileSync } from "node:child_process";
-
-// scripts/vendor/yaml.js
-import { createRequire as vendorCreateRequire } from "node:module";
-var require2 = vendorCreateRequire(import.meta.url);
+import { createRequire as vendorCreateRequire } from 'node:module'; const require = vendorCreateRequire(import.meta.url);
 var __create = Object.create;
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __require = /* @__PURE__ */ ((x) => typeof require2 !== "undefined" ? require2 : typeof Proxy !== "undefined" ? new Proxy(x, {
-  get: (a, b) => (typeof require2 !== "undefined" ? require2 : a)[b]
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
 }) : x)(function(x) {
-  if (typeof require2 !== "undefined") return require2.apply(this, arguments);
+  if (typeof require !== "undefined") return require.apply(this, arguments);
   throw Error('Dynamic require of "' + x + '" is not supported');
 });
 var __commonJS = (cb, mod) => function __require2() {
@@ -43,6 +34,8 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
+
+// node_modules/yaml/dist/nodes/identity.js
 var require_identity = __commonJS({
   "node_modules/yaml/dist/nodes/identity.js"(exports) {
     "use strict";
@@ -98,6 +91,8 @@ var require_identity = __commonJS({
     exports.isSeq = isSeq;
   }
 });
+
+// node_modules/yaml/dist/visit.js
 var require_visit = __commonJS({
   "node_modules/yaml/dist/visit.js"(exports) {
     "use strict";
@@ -254,6 +249,8 @@ var require_visit = __commonJS({
     exports.visitAsync = visitAsync;
   }
 });
+
+// node_modules/yaml/dist/doc/directives.js
 var require_directives = __commonJS({
   "node_modules/yaml/dist/doc/directives.js"(exports) {
     "use strict";
@@ -423,6 +420,8 @@ var require_directives = __commonJS({
     exports.Directives = Directives;
   }
 });
+
+// node_modules/yaml/dist/doc/anchors.js
 var require_anchors = __commonJS({
   "node_modules/yaml/dist/doc/anchors.js"(exports) {
     "use strict";
@@ -491,6 +490,8 @@ var require_anchors = __commonJS({
     exports.findNewAnchor = findNewAnchor;
   }
 });
+
+// node_modules/yaml/dist/doc/applyReviver.js
 var require_applyReviver = __commonJS({
   "node_modules/yaml/dist/doc/applyReviver.js"(exports) {
     "use strict";
@@ -539,6 +540,8 @@ var require_applyReviver = __commonJS({
     exports.applyReviver = applyReviver;
   }
 });
+
+// node_modules/yaml/dist/nodes/toJS.js
 var require_toJS = __commonJS({
   "node_modules/yaml/dist/nodes/toJS.js"(exports) {
     "use strict";
@@ -567,6 +570,8 @@ var require_toJS = __commonJS({
     exports.toJS = toJS;
   }
 });
+
+// node_modules/yaml/dist/nodes/Node.js
 var require_Node = __commonJS({
   "node_modules/yaml/dist/nodes/Node.js"(exports) {
     "use strict";
@@ -606,6 +611,8 @@ var require_Node = __commonJS({
     exports.NodeBase = NodeBase;
   }
 });
+
+// node_modules/yaml/dist/nodes/Alias.js
 var require_Alias = __commonJS({
   "node_modules/yaml/dist/nodes/Alias.js"(exports) {
     "use strict";
@@ -720,6 +727,8 @@ var require_Alias = __commonJS({
     exports.Alias = Alias;
   }
 });
+
+// node_modules/yaml/dist/nodes/Scalar.js
 var require_Scalar = __commonJS({
   "node_modules/yaml/dist/nodes/Scalar.js"(exports) {
     "use strict";
@@ -748,6 +757,8 @@ var require_Scalar = __commonJS({
     exports.isScalarValue = isScalarValue;
   }
 });
+
+// node_modules/yaml/dist/doc/createNode.js
 var require_createNode = __commonJS({
   "node_modules/yaml/dist/doc/createNode.js"(exports) {
     "use strict";
@@ -821,6 +832,8 @@ var require_createNode = __commonJS({
     exports.createNode = createNode;
   }
 });
+
+// node_modules/yaml/dist/nodes/Collection.js
 var require_Collection = __commonJS({
   "node_modules/yaml/dist/nodes/Collection.js"(exports) {
     "use strict";
@@ -962,21 +975,25 @@ var require_Collection = __commonJS({
     exports.isEmptyPath = isEmptyPath;
   }
 });
+
+// node_modules/yaml/dist/stringify/stringifyComment.js
 var require_stringifyComment = __commonJS({
   "node_modules/yaml/dist/stringify/stringifyComment.js"(exports) {
     "use strict";
-    var stringifyComment = (str2) => str2.replace(/^(?!$)(?: $)?/gm, "#");
+    var stringifyComment = (str) => str.replace(/^(?!$)(?: $)?/gm, "#");
     function indentComment(comment, indent) {
       if (/^\n+$/.test(comment))
         return comment.substring(1);
       return indent ? comment.replace(/^(?! *$)/gm, indent) : comment;
     }
-    var lineComment = (str2, indent, comment) => str2.endsWith("\n") ? indentComment(comment, indent) : comment.includes("\n") ? "\n" + indentComment(comment, indent) : (str2.endsWith(" ") ? "" : " ") + comment;
+    var lineComment = (str, indent, comment) => str.endsWith("\n") ? indentComment(comment, indent) : comment.includes("\n") ? "\n" + indentComment(comment, indent) : (str.endsWith(" ") ? "" : " ") + comment;
     exports.indentComment = indentComment;
     exports.lineComment = lineComment;
     exports.stringifyComment = stringifyComment;
   }
 });
+
+// node_modules/yaml/dist/stringify/foldFlowLines.js
 var require_foldFlowLines = __commonJS({
   "node_modules/yaml/dist/stringify/foldFlowLines.js"(exports) {
     "use strict";
@@ -1111,6 +1128,8 @@ ${indent}${text.slice(fold + 1, end2)}`;
     exports.foldFlowLines = foldFlowLines;
   }
 });
+
+// node_modules/yaml/dist/stringify/stringifyString.js
 var require_stringifyString = __commonJS({
   "node_modules/yaml/dist/stringify/stringifyString.js"(exports) {
     "use strict";
@@ -1121,16 +1140,16 @@ var require_stringifyString = __commonJS({
       lineWidth: ctx.options.lineWidth,
       minContentWidth: ctx.options.minContentWidth
     });
-    var containsDocumentMarker = (str2) => /^(%|---|\.\.\.)/m.test(str2);
-    function lineLengthOverLimit(str2, lineWidth, indentLength) {
+    var containsDocumentMarker = (str) => /^(%|---|\.\.\.)/m.test(str);
+    function lineLengthOverLimit(str, lineWidth, indentLength) {
       if (!lineWidth || lineWidth < 0)
         return false;
       const limit = lineWidth - indentLength;
-      const strLen = str2.length;
+      const strLen = str.length;
       if (strLen <= limit)
         return false;
       for (let i = 0, start = 0; i < strLen; ++i) {
-        if (str2[i] === "\n") {
+        if (str[i] === "\n") {
           if (i - start > limit)
             return true;
           start = i + 1;
@@ -1147,11 +1166,11 @@ var require_stringifyString = __commonJS({
       const { implicitKey } = ctx;
       const minMultiLineLength = ctx.options.doubleQuotedMinMultiLineLength;
       const indent = ctx.indent || (containsDocumentMarker(value) ? "  " : "");
-      let str2 = "";
+      let str = "";
       let start = 0;
       for (let i = 0, ch = json[i]; ch; ch = json[++i]) {
         if (ch === " " && json[i + 1] === "\\" && json[i + 2] === "n") {
-          str2 += json.slice(start, i) + "\\ ";
+          str += json.slice(start, i) + "\\ ";
           i += 1;
           start = i;
           ch = "\\";
@@ -1160,38 +1179,38 @@ var require_stringifyString = __commonJS({
           switch (json[i + 1]) {
             case "u":
               {
-                str2 += json.slice(start, i);
+                str += json.slice(start, i);
                 const code = json.substr(i + 2, 4);
                 switch (code) {
                   case "0000":
-                    str2 += "\\0";
+                    str += "\\0";
                     break;
                   case "0007":
-                    str2 += "\\a";
+                    str += "\\a";
                     break;
                   case "000b":
-                    str2 += "\\v";
+                    str += "\\v";
                     break;
                   case "001b":
-                    str2 += "\\e";
+                    str += "\\e";
                     break;
                   case "0085":
-                    str2 += "\\N";
+                    str += "\\N";
                     break;
                   case "00a0":
-                    str2 += "\\_";
+                    str += "\\_";
                     break;
                   case "2028":
-                    str2 += "\\L";
+                    str += "\\L";
                     break;
                   case "2029":
-                    str2 += "\\P";
+                    str += "\\P";
                     break;
                   default:
                     if (code.substr(0, 2) === "00")
-                      str2 += "\\x" + code.substr(2);
+                      str += "\\x" + code.substr(2);
                     else
-                      str2 += json.substr(i, 6);
+                      str += json.substr(i, 6);
                 }
                 i += 5;
                 start = i + 1;
@@ -1201,14 +1220,14 @@ var require_stringifyString = __commonJS({
               if (implicitKey || json[i + 2] === '"' || json.length < minMultiLineLength) {
                 i += 1;
               } else {
-                str2 += json.slice(start, i) + "\n\n";
+                str += json.slice(start, i) + "\n\n";
                 while (json[i + 2] === "\\" && json[i + 3] === "n" && json[i + 4] !== '"') {
-                  str2 += "\n";
+                  str += "\n";
                   i += 2;
                 }
-                str2 += indent;
+                str += indent;
                 if (json[i + 2] === " ")
-                  str2 += "\\";
+                  str += "\\";
                 i += 1;
                 start = i + 1;
               }
@@ -1217,8 +1236,8 @@ var require_stringifyString = __commonJS({
               i += 1;
           }
       }
-      str2 = start ? str2 + json.slice(start) : json;
-      return implicitKey ? str2 : foldFlowLines.foldFlowLines(str2, indent, foldFlowLines.FOLD_QUOTED, getFoldOptions(ctx, false));
+      str = start ? str + json.slice(start) : json;
+      return implicitKey ? str : foldFlowLines.foldFlowLines(str, indent, foldFlowLines.FOLD_QUOTED, getFoldOptions(ctx, false));
     }
     function singleQuotedString(value, ctx) {
       if (ctx.options.singleQuote === false || ctx.implicitKey && value.includes("\n") || /[ \t]\n|\n[ \t]/.test(value))
@@ -1346,15 +1365,15 @@ ${indent}${start}${value}${end}`;
           return quotedString(value, ctx);
         }
       }
-      const str2 = value.replace(/\n+/g, `$&
+      const str = value.replace(/\n+/g, `$&
 ${indent}`);
       if (actualString) {
-        const test = (tag) => tag.default && tag.tag !== "tag:yaml.org,2002:str" && tag.test?.test(str2);
+        const test = (tag) => tag.default && tag.tag !== "tag:yaml.org,2002:str" && tag.test?.test(str);
         const { compat, tags } = ctx.doc.schema;
         if (tags.some(test) || compat?.some(test))
           return quotedString(value, ctx);
       }
-      return implicitKey ? str2 : foldFlowLines.foldFlowLines(str2, indent, foldFlowLines.FOLD_FLOW, getFoldOptions(ctx, false));
+      return implicitKey ? str : foldFlowLines.foldFlowLines(str, indent, foldFlowLines.FOLD_FLOW, getFoldOptions(ctx, false));
     }
     function stringifyString(item, ctx, onComment, onChompKeep) {
       const { implicitKey, inFlow } = ctx;
@@ -1392,6 +1411,8 @@ ${indent}`);
     exports.stringifyString = stringifyString;
   }
 });
+
+// node_modules/yaml/dist/stringify/stringify.js
 var require_stringify = __commonJS({
   "node_modules/yaml/dist/stringify/stringify.js"(exports) {
     "use strict";
@@ -1504,16 +1525,18 @@ var require_stringify = __commonJS({
       const props = stringifyProps(node, tagObj, ctx);
       if (props.length > 0)
         ctx.indentAtStart = (ctx.indentAtStart ?? 0) + props.length + 1;
-      const str2 = typeof tagObj.stringify === "function" ? tagObj.stringify(node, ctx, onComment, onChompKeep) : identity.isScalar(node) ? stringifyString.stringifyString(node, ctx, onComment, onChompKeep) : node.toString(ctx, onComment, onChompKeep);
+      const str = typeof tagObj.stringify === "function" ? tagObj.stringify(node, ctx, onComment, onChompKeep) : identity.isScalar(node) ? stringifyString.stringifyString(node, ctx, onComment, onChompKeep) : node.toString(ctx, onComment, onChompKeep);
       if (!props)
-        return str2;
-      return identity.isScalar(node) || str2[0] === "{" || str2[0] === "[" ? `${props} ${str2}` : `${props}
-${ctx.indent}${str2}`;
+        return str;
+      return identity.isScalar(node) || str[0] === "{" || str[0] === "[" ? `${props} ${str}` : `${props}
+${ctx.indent}${str}`;
     }
     exports.createStringifyContext = createStringifyContext;
     exports.stringify = stringify2;
   }
 });
+
+// node_modules/yaml/dist/stringify/stringifyPair.js
 var require_stringifyPair = __commonJS({
   "node_modules/yaml/dist/stringify/stringifyPair.js"(exports) {
     "use strict";
@@ -1541,8 +1564,8 @@ var require_stringifyPair = __commonJS({
       });
       let keyCommentDone = false;
       let chompKeep = false;
-      let str2 = stringify2.stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
-      if (!explicitKey && !ctx.inFlow && str2.length > 1024) {
+      let str = stringify2.stringify(key, ctx, () => keyCommentDone = true, () => chompKeep = true);
+      if (!explicitKey && !ctx.inFlow && str.length > 1024) {
         if (simpleKeys)
           throw new Error("With simple keys, single line scalar must not span more than 1024 characters");
         explicitKey = true;
@@ -1551,27 +1574,27 @@ var require_stringifyPair = __commonJS({
         if (allNullValues || value == null) {
           if (keyCommentDone && onComment)
             onComment();
-          return str2 === "" ? "?" : explicitKey ? `? ${str2}` : str2;
+          return str === "" ? "?" : explicitKey ? `? ${str}` : str;
         }
       } else if (allNullValues && !simpleKeys || value == null && explicitKey) {
-        str2 = `? ${str2}`;
+        str = `? ${str}`;
         if (keyComment && !keyCommentDone) {
-          str2 += stringifyComment.lineComment(str2, ctx.indent, commentString(keyComment));
+          str += stringifyComment.lineComment(str, ctx.indent, commentString(keyComment));
         } else if (chompKeep && onChompKeep)
           onChompKeep();
-        return str2;
+        return str;
       }
       if (keyCommentDone)
         keyComment = null;
       if (explicitKey) {
         if (keyComment)
-          str2 += stringifyComment.lineComment(str2, ctx.indent, commentString(keyComment));
-        str2 = `? ${str2}
+          str += stringifyComment.lineComment(str, ctx.indent, commentString(keyComment));
+        str = `? ${str}
 ${indent}:`;
       } else {
-        str2 = `${str2}:`;
+        str = `${str}:`;
         if (keyComment)
-          str2 += stringifyComment.lineComment(str2, ctx.indent, commentString(keyComment));
+          str += stringifyComment.lineComment(str, ctx.indent, commentString(keyComment));
       }
       let vsb, vcb, valueComment;
       if (identity.isNode(value)) {
@@ -1587,7 +1610,7 @@ ${indent}:`;
       }
       ctx.implicitKey = false;
       if (!explicitKey && !keyComment && identity.isScalar(value))
-        ctx.indentAtStart = str2.length + 1;
+        ctx.indentAtStart = str.length + 1;
       chompKeep = false;
       if (!indentSeq && indentStep.length >= 2 && !ctx.inFlow && !explicitKey && identity.isSeq(value) && !value.flow && !value.tag && !value.anchor) {
         ctx.indent = ctx.indent.substring(2);
@@ -1631,20 +1654,22 @@ ${ctx.indent}`;
       } else if (valueStr === "" || valueStr[0] === "\n") {
         ws = "";
       }
-      str2 += ws + valueStr;
+      str += ws + valueStr;
       if (ctx.inFlow) {
         if (valueCommentDone && onComment)
           onComment();
       } else if (valueComment && !valueCommentDone) {
-        str2 += stringifyComment.lineComment(str2, ctx.indent, commentString(valueComment));
+        str += stringifyComment.lineComment(str, ctx.indent, commentString(valueComment));
       } else if (chompKeep && onChompKeep) {
         onChompKeep();
       }
-      return str2;
+      return str;
     }
     exports.stringifyPair = stringifyPair;
   }
 });
+
+// node_modules/yaml/dist/log.js
 var require_log = __commonJS({
   "node_modules/yaml/dist/log.js"(exports) {
     "use strict";
@@ -1665,6 +1690,8 @@ var require_log = __commonJS({
     exports.warn = warn;
   }
 });
+
+// node_modules/yaml/dist/schema/yaml-1.1/merge.js
 var require_merge = __commonJS({
   "node_modules/yaml/dist/schema/yaml-1.1/merge.js"(exports) {
     "use strict";
@@ -1723,6 +1750,8 @@ var require_merge = __commonJS({
     exports.merge = merge;
   }
 });
+
+// node_modules/yaml/dist/nodes/addPairToJSMap.js
 var require_addPairToJSMap = __commonJS({
   "node_modules/yaml/dist/nodes/addPairToJSMap.js"(exports) {
     "use strict";
@@ -1785,6 +1814,8 @@ var require_addPairToJSMap = __commonJS({
     exports.addPairToJSMap = addPairToJSMap;
   }
 });
+
+// node_modules/yaml/dist/nodes/Pair.js
 var require_Pair = __commonJS({
   "node_modules/yaml/dist/nodes/Pair.js"(exports) {
     "use strict";
@@ -1823,6 +1854,8 @@ var require_Pair = __commonJS({
     exports.createPair = createPair;
   }
 });
+
+// node_modules/yaml/dist/stringify/stringifyCollection.js
 var require_stringifyCollection = __commonJS({
   "node_modules/yaml/dist/stringify/stringifyCollection.js"(exports) {
     "use strict";
@@ -1857,31 +1890,31 @@ var require_stringifyCollection = __commonJS({
           }
         }
         chompKeep = false;
-        let str22 = stringify2.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
+        let str2 = stringify2.stringify(item, itemCtx, () => comment2 = null, () => chompKeep = true);
         if (comment2)
-          str22 += stringifyComment.lineComment(str22, itemIndent, commentString(comment2));
+          str2 += stringifyComment.lineComment(str2, itemIndent, commentString(comment2));
         if (chompKeep && comment2)
           chompKeep = false;
-        lines.push(blockItemPrefix + str22);
+        lines.push(blockItemPrefix + str2);
       }
-      let str2;
+      let str;
       if (lines.length === 0) {
-        str2 = flowChars.start + flowChars.end;
+        str = flowChars.start + flowChars.end;
       } else {
-        str2 = lines[0];
+        str = lines[0];
         for (let i = 1; i < lines.length; ++i) {
           const line = lines[i];
-          str2 += line ? `
+          str += line ? `
 ${indent}${line}` : "\n";
         }
       }
       if (comment) {
-        str2 += "\n" + stringifyComment.indentComment(commentString(comment), indent);
+        str += "\n" + stringifyComment.indentComment(commentString(comment), indent);
         if (onComment)
           onComment();
       } else if (chompKeep && onChompKeep)
         onChompKeep();
-      return str2;
+      return str;
     }
     function stringifyFlowCollection({ items }, ctx, { flowChars, itemIndent }) {
       const { indent, indentStep, flowCollectionPadding: fcPadding, options: { commentString } } = ctx;
@@ -1924,21 +1957,21 @@ ${indent}${line}` : "\n";
         }
         if (comment)
           reqNewline = true;
-        let str2 = stringify2.stringify(item, itemCtx, () => comment = null);
-        reqNewline || (reqNewline = lines.length > linesAtValue || str2.includes("\n"));
+        let str = stringify2.stringify(item, itemCtx, () => comment = null);
+        reqNewline || (reqNewline = lines.length > linesAtValue || str.includes("\n"));
         if (i < items.length - 1) {
-          str2 += ",";
+          str += ",";
         } else if (ctx.options.trailingComma) {
           if (ctx.options.lineWidth > 0) {
-            reqNewline || (reqNewline = lines.reduce((sum, line) => sum + line.length + 2, 2) + (str2.length + 2) > ctx.options.lineWidth);
+            reqNewline || (reqNewline = lines.reduce((sum, line) => sum + line.length + 2, 2) + (str.length + 2) > ctx.options.lineWidth);
           }
           if (reqNewline) {
-            str2 += ",";
+            str += ",";
           }
         }
         if (comment)
-          str2 += stringifyComment.lineComment(str2, itemIndent, commentString(comment));
-        lines.push(str2);
+          str += stringifyComment.lineComment(str, itemIndent, commentString(comment));
+        lines.push(str);
         linesAtValue = lines.length;
       }
       const { start, end } = flowChars;
@@ -1950,11 +1983,11 @@ ${indent}${line}` : "\n";
           reqNewline = ctx.options.lineWidth > 0 && len > ctx.options.lineWidth;
         }
         if (reqNewline) {
-          let str2 = start;
+          let str = start;
           for (const line of lines)
-            str2 += line ? `
+            str += line ? `
 ${indentStep}${indent}${line}` : "\n";
-          return `${str2}
+          return `${str}
 ${indent}${end}`;
         } else {
           return `${start}${fcPadding}${lines.join(" ")}${fcPadding}${end}`;
@@ -1972,6 +2005,8 @@ ${indent}${end}`;
     exports.stringifyCollection = stringifyCollection;
   }
 });
+
+// node_modules/yaml/dist/nodes/YAMLMap.js
 var require_YAMLMap = __commonJS({
   "node_modules/yaml/dist/nodes/YAMLMap.js"(exports) {
     "use strict";
@@ -2114,6 +2149,8 @@ var require_YAMLMap = __commonJS({
     exports.findPair = findPair;
   }
 });
+
+// node_modules/yaml/dist/schema/common/map.js
 var require_map = __commonJS({
   "node_modules/yaml/dist/schema/common/map.js"(exports) {
     "use strict";
@@ -2134,6 +2171,8 @@ var require_map = __commonJS({
     exports.map = map;
   }
 });
+
+// node_modules/yaml/dist/nodes/YAMLSeq.js
 var require_YAMLSeq = __commonJS({
   "node_modules/yaml/dist/nodes/YAMLSeq.js"(exports) {
     "use strict";
@@ -2248,6 +2287,8 @@ var require_YAMLSeq = __commonJS({
     exports.YAMLSeq = YAMLSeq;
   }
 });
+
+// node_modules/yaml/dist/schema/common/seq.js
 var require_seq = __commonJS({
   "node_modules/yaml/dist/schema/common/seq.js"(exports) {
     "use strict";
@@ -2268,6 +2309,8 @@ var require_seq = __commonJS({
     exports.seq = seq;
   }
 });
+
+// node_modules/yaml/dist/schema/common/string.js
 var require_string = __commonJS({
   "node_modules/yaml/dist/schema/common/string.js"(exports) {
     "use strict";
@@ -2276,7 +2319,7 @@ var require_string = __commonJS({
       identify: (value) => typeof value === "string",
       default: true,
       tag: "tag:yaml.org,2002:str",
-      resolve: (str2) => str2,
+      resolve: (str) => str,
       stringify(item, ctx, onComment, onChompKeep) {
         ctx = Object.assign({ actualString: true }, ctx);
         return stringifyString.stringifyString(item, ctx, onComment, onChompKeep);
@@ -2285,6 +2328,8 @@ var require_string = __commonJS({
     exports.string = string;
   }
 });
+
+// node_modules/yaml/dist/schema/common/null.js
 var require_null = __commonJS({
   "node_modules/yaml/dist/schema/common/null.js"(exports) {
     "use strict";
@@ -2301,6 +2346,8 @@ var require_null = __commonJS({
     exports.nullTag = nullTag;
   }
 });
+
+// node_modules/yaml/dist/schema/core/bool.js
 var require_bool = __commonJS({
   "node_modules/yaml/dist/schema/core/bool.js"(exports) {
     "use strict";
@@ -2310,7 +2357,7 @@ var require_bool = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:bool",
       test: /^(?:[Tt]rue|TRUE|[Ff]alse|FALSE)$/,
-      resolve: (str2) => new Scalar.Scalar(str2[0] === "t" || str2[0] === "T"),
+      resolve: (str) => new Scalar.Scalar(str[0] === "t" || str[0] === "T"),
       stringify({ source, value }, ctx) {
         if (source && boolTag.test.test(source)) {
           const sv = source[0] === "t" || source[0] === "T";
@@ -2323,6 +2370,8 @@ var require_bool = __commonJS({
     exports.boolTag = boolTag;
   }
 });
+
+// node_modules/yaml/dist/stringify/stringifyNumber.js
 var require_stringifyNumber = __commonJS({
   "node_modules/yaml/dist/stringify/stringifyNumber.js"(exports) {
     "use strict";
@@ -2348,6 +2397,8 @@ var require_stringifyNumber = __commonJS({
     exports.stringifyNumber = stringifyNumber;
   }
 });
+
+// node_modules/yaml/dist/schema/core/float.js
 var require_float = __commonJS({
   "node_modules/yaml/dist/schema/core/float.js"(exports) {
     "use strict";
@@ -2358,7 +2409,7 @@ var require_float = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:float",
       test: /^(?:[-+]?\.(?:inf|Inf|INF)|\.nan|\.NaN|\.NAN)$/,
-      resolve: (str2) => str2.slice(-3).toLowerCase() === "nan" ? NaN : str2[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
+      resolve: (str) => str.slice(-3).toLowerCase() === "nan" ? NaN : str[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
       stringify: stringifyNumber.stringifyNumber
     };
     var floatExp = {
@@ -2367,7 +2418,7 @@ var require_float = __commonJS({
       tag: "tag:yaml.org,2002:float",
       format: "EXP",
       test: /^[-+]?(?:\.[0-9]+|[0-9]+(?:\.[0-9]*)?)[eE][-+]?[0-9]+$/,
-      resolve: (str2) => parseFloat(str2),
+      resolve: (str) => parseFloat(str),
       stringify(node) {
         const num = Number(node.value);
         return isFinite(num) ? num.toExponential() : stringifyNumber.stringifyNumber(node);
@@ -2378,11 +2429,11 @@ var require_float = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:float",
       test: /^[-+]?(?:\.[0-9]+|[0-9]+\.[0-9]*)$/,
-      resolve(str2) {
-        const node = new Scalar.Scalar(parseFloat(str2));
-        const dot = str2.indexOf(".");
-        if (dot !== -1 && str2[str2.length - 1] === "0")
-          node.minFractionDigits = str2.length - dot - 1;
+      resolve(str) {
+        const node = new Scalar.Scalar(parseFloat(str));
+        const dot = str.indexOf(".");
+        if (dot !== -1 && str[str.length - 1] === "0")
+          node.minFractionDigits = str.length - dot - 1;
         return node;
       },
       stringify: stringifyNumber.stringifyNumber
@@ -2392,12 +2443,14 @@ var require_float = __commonJS({
     exports.floatNaN = floatNaN;
   }
 });
+
+// node_modules/yaml/dist/schema/core/int.js
 var require_int = __commonJS({
   "node_modules/yaml/dist/schema/core/int.js"(exports) {
     "use strict";
     var stringifyNumber = require_stringifyNumber();
     var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
-    var intResolve = (str2, offset, radix, { intAsBigInt }) => intAsBigInt ? BigInt(str2) : parseInt(str2.substring(offset), radix);
+    var intResolve = (str, offset, radix, { intAsBigInt }) => intAsBigInt ? BigInt(str) : parseInt(str.substring(offset), radix);
     function intStringify(node, radix, prefix) {
       const { value } = node;
       if (intIdentify(value) && value >= 0)
@@ -2410,7 +2463,7 @@ var require_int = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "OCT",
       test: /^0o[0-7]+$/,
-      resolve: (str2, _onError, opt) => intResolve(str2, 2, 8, opt),
+      resolve: (str, _onError, opt) => intResolve(str, 2, 8, opt),
       stringify: (node) => intStringify(node, 8, "0o")
     };
     var int = {
@@ -2418,7 +2471,7 @@ var require_int = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:int",
       test: /^[-+]?[0-9]+$/,
-      resolve: (str2, _onError, opt) => intResolve(str2, 0, 10, opt),
+      resolve: (str, _onError, opt) => intResolve(str, 0, 10, opt),
       stringify: stringifyNumber.stringifyNumber
     };
     var intHex = {
@@ -2427,7 +2480,7 @@ var require_int = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "HEX",
       test: /^0x[0-9a-fA-F]+$/,
-      resolve: (str2, _onError, opt) => intResolve(str2, 2, 16, opt),
+      resolve: (str, _onError, opt) => intResolve(str, 2, 16, opt),
       stringify: (node) => intStringify(node, 16, "0x")
     };
     exports.int = int;
@@ -2435,6 +2488,8 @@ var require_int = __commonJS({
     exports.intOct = intOct;
   }
 });
+
+// node_modules/yaml/dist/schema/core/schema.js
 var require_schema = __commonJS({
   "node_modules/yaml/dist/schema/core/schema.js"(exports) {
     "use strict";
@@ -2461,6 +2516,8 @@ var require_schema = __commonJS({
     exports.schema = schema;
   }
 });
+
+// node_modules/yaml/dist/schema/json/schema.js
 var require_schema2 = __commonJS({
   "node_modules/yaml/dist/schema/json/schema.js"(exports) {
     "use strict";
@@ -2476,7 +2533,7 @@ var require_schema2 = __commonJS({
         identify: (value) => typeof value === "string",
         default: true,
         tag: "tag:yaml.org,2002:str",
-        resolve: (str2) => str2,
+        resolve: (str) => str,
         stringify: stringifyJSON
       },
       {
@@ -2493,7 +2550,7 @@ var require_schema2 = __commonJS({
         default: true,
         tag: "tag:yaml.org,2002:bool",
         test: /^true$|^false$/,
-        resolve: (str2) => str2 === "true",
+        resolve: (str) => str === "true",
         stringify: stringifyJSON
       },
       {
@@ -2501,7 +2558,7 @@ var require_schema2 = __commonJS({
         default: true,
         tag: "tag:yaml.org,2002:int",
         test: /^-?(?:0|[1-9][0-9]*)$/,
-        resolve: (str2, _onError, { intAsBigInt }) => intAsBigInt ? BigInt(str2) : parseInt(str2, 10),
+        resolve: (str, _onError, { intAsBigInt }) => intAsBigInt ? BigInt(str) : parseInt(str, 10),
         stringify: ({ value }) => intIdentify(value) ? value.toString() : JSON.stringify(value)
       },
       {
@@ -2509,7 +2566,7 @@ var require_schema2 = __commonJS({
         default: true,
         tag: "tag:yaml.org,2002:float",
         test: /^-?(?:0|[1-9][0-9]*)(?:\.[0-9]*)?(?:[eE][-+]?[0-9]+)?$/,
-        resolve: (str2) => parseFloat(str2),
+        resolve: (str) => parseFloat(str),
         stringify: stringifyJSON
       }
     ];
@@ -2517,15 +2574,17 @@ var require_schema2 = __commonJS({
       default: true,
       tag: "",
       test: /^/,
-      resolve(str2, onError) {
-        onError(`Unresolved plain scalar ${JSON.stringify(str2)}`);
-        return str2;
+      resolve(str, onError) {
+        onError(`Unresolved plain scalar ${JSON.stringify(str)}`);
+        return str;
       }
     };
     var schema = [map.map, seq.seq].concat(jsonScalars, jsonError);
     exports.schema = schema;
   }
 });
+
+// node_modules/yaml/dist/schema/yaml-1.1/binary.js
 var require_binary = __commonJS({
   "node_modules/yaml/dist/schema/yaml-1.1/binary.js"(exports) {
     "use strict";
@@ -2549,10 +2608,10 @@ var require_binary = __commonJS({
         if (typeof node_buffer.Buffer === "function") {
           return node_buffer.Buffer.from(src, "base64");
         } else if (typeof atob === "function") {
-          const str2 = atob(src.replace(/[\n\r]/g, ""));
-          const buffer = new Uint8Array(str2.length);
-          for (let i = 0; i < str2.length; ++i)
-            buffer[i] = str2.charCodeAt(i);
+          const str = atob(src.replace(/[\n\r]/g, ""));
+          const buffer = new Uint8Array(str.length);
+          for (let i = 0; i < str.length; ++i)
+            buffer[i] = str.charCodeAt(i);
           return buffer;
         } else {
           onError("This environment does not support reading binary tags; either Buffer or atob is required");
@@ -2563,33 +2622,35 @@ var require_binary = __commonJS({
         if (!value)
           return "";
         const buf = value;
-        let str2;
+        let str;
         if (typeof node_buffer.Buffer === "function") {
-          str2 = buf instanceof node_buffer.Buffer ? buf.toString("base64") : node_buffer.Buffer.from(buf.buffer).toString("base64");
+          str = buf instanceof node_buffer.Buffer ? buf.toString("base64") : node_buffer.Buffer.from(buf.buffer).toString("base64");
         } else if (typeof btoa === "function") {
           let s = "";
           for (let i = 0; i < buf.length; ++i)
             s += String.fromCharCode(buf[i]);
-          str2 = btoa(s);
+          str = btoa(s);
         } else {
           throw new Error("This environment does not support writing binary tags; either Buffer or btoa is required");
         }
         type ?? (type = Scalar.Scalar.BLOCK_LITERAL);
         if (type !== Scalar.Scalar.QUOTE_DOUBLE) {
           const lineWidth = Math.max(ctx.options.lineWidth - ctx.indent.length, ctx.options.minContentWidth);
-          const n = Math.ceil(str2.length / lineWidth);
+          const n = Math.ceil(str.length / lineWidth);
           const lines = new Array(n);
           for (let i = 0, o = 0; i < n; ++i, o += lineWidth) {
-            lines[i] = str2.substr(o, lineWidth);
+            lines[i] = str.substr(o, lineWidth);
           }
-          str2 = lines.join(type === Scalar.Scalar.BLOCK_LITERAL ? "\n" : " ");
+          str = lines.join(type === Scalar.Scalar.BLOCK_LITERAL ? "\n" : " ");
         }
-        return stringifyString.stringifyString({ comment, type, value: str2 }, ctx, onComment, onChompKeep);
+        return stringifyString.stringifyString({ comment, type, value: str }, ctx, onComment, onChompKeep);
       }
     };
     exports.binary = binary;
   }
 });
+
+// node_modules/yaml/dist/schema/yaml-1.1/pairs.js
 var require_pairs = __commonJS({
   "node_modules/yaml/dist/schema/yaml-1.1/pairs.js"(exports) {
     "use strict";
@@ -2666,6 +2727,8 @@ ${cn.comment}` : item.comment;
     exports.resolvePairs = resolvePairs;
   }
 });
+
+// node_modules/yaml/dist/schema/yaml-1.1/omap.js
 var require_omap = __commonJS({
   "node_modules/yaml/dist/schema/yaml-1.1/omap.js"(exports) {
     "use strict";
@@ -2742,6 +2805,8 @@ var require_omap = __commonJS({
     exports.omap = omap;
   }
 });
+
+// node_modules/yaml/dist/schema/yaml-1.1/bool.js
 var require_bool2 = __commonJS({
   "node_modules/yaml/dist/schema/yaml-1.1/bool.js"(exports) {
     "use strict";
@@ -2772,6 +2837,8 @@ var require_bool2 = __commonJS({
     exports.trueTag = trueTag;
   }
 });
+
+// node_modules/yaml/dist/schema/yaml-1.1/float.js
 var require_float2 = __commonJS({
   "node_modules/yaml/dist/schema/yaml-1.1/float.js"(exports) {
     "use strict";
@@ -2782,7 +2849,7 @@ var require_float2 = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:float",
       test: /^(?:[-+]?\.(?:inf|Inf|INF)|\.nan|\.NaN|\.NAN)$/,
-      resolve: (str2) => str2.slice(-3).toLowerCase() === "nan" ? NaN : str2[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
+      resolve: (str) => str.slice(-3).toLowerCase() === "nan" ? NaN : str[0] === "-" ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY,
       stringify: stringifyNumber.stringifyNumber
     };
     var floatExp = {
@@ -2791,7 +2858,7 @@ var require_float2 = __commonJS({
       tag: "tag:yaml.org,2002:float",
       format: "EXP",
       test: /^[-+]?(?:[0-9][0-9_]*)?(?:\.[0-9_]*)?[eE][-+]?[0-9]+$/,
-      resolve: (str2) => parseFloat(str2.replace(/_/g, "")),
+      resolve: (str) => parseFloat(str.replace(/_/g, "")),
       stringify(node) {
         const num = Number(node.value);
         return isFinite(num) ? num.toExponential() : stringifyNumber.stringifyNumber(node);
@@ -2802,11 +2869,11 @@ var require_float2 = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:float",
       test: /^[-+]?(?:[0-9][0-9_]*)?\.[0-9_]*$/,
-      resolve(str2) {
-        const node = new Scalar.Scalar(parseFloat(str2.replace(/_/g, "")));
-        const dot = str2.indexOf(".");
+      resolve(str) {
+        const node = new Scalar.Scalar(parseFloat(str.replace(/_/g, "")));
+        const dot = str.indexOf(".");
         if (dot !== -1) {
-          const f = str2.substring(dot + 1).replace(/_/g, "");
+          const f = str.substring(dot + 1).replace(/_/g, "");
           if (f[f.length - 1] === "0")
             node.minFractionDigits = f.length;
         }
@@ -2819,39 +2886,41 @@ var require_float2 = __commonJS({
     exports.floatNaN = floatNaN;
   }
 });
+
+// node_modules/yaml/dist/schema/yaml-1.1/int.js
 var require_int2 = __commonJS({
   "node_modules/yaml/dist/schema/yaml-1.1/int.js"(exports) {
     "use strict";
     var stringifyNumber = require_stringifyNumber();
     var intIdentify = (value) => typeof value === "bigint" || Number.isInteger(value);
-    function intResolve(str2, offset, radix, { intAsBigInt }) {
-      const sign = str2[0];
+    function intResolve(str, offset, radix, { intAsBigInt }) {
+      const sign = str[0];
       if (sign === "-" || sign === "+")
         offset += 1;
-      str2 = str2.substring(offset).replace(/_/g, "");
+      str = str.substring(offset).replace(/_/g, "");
       if (intAsBigInt) {
         switch (radix) {
           case 2:
-            str2 = `0b${str2}`;
+            str = `0b${str}`;
             break;
           case 8:
-            str2 = `0o${str2}`;
+            str = `0o${str}`;
             break;
           case 16:
-            str2 = `0x${str2}`;
+            str = `0x${str}`;
             break;
         }
-        const n2 = BigInt(str2);
+        const n2 = BigInt(str);
         return sign === "-" ? BigInt(-1) * n2 : n2;
       }
-      const n = parseInt(str2, radix);
+      const n = parseInt(str, radix);
       return sign === "-" ? -1 * n : n;
     }
     function intStringify(node, radix, prefix) {
       const { value } = node;
       if (intIdentify(value)) {
-        const str2 = value.toString(radix);
-        return value < 0 ? "-" + prefix + str2.substr(1) : prefix + str2;
+        const str = value.toString(radix);
+        return value < 0 ? "-" + prefix + str.substr(1) : prefix + str;
       }
       return stringifyNumber.stringifyNumber(node);
     }
@@ -2861,7 +2930,7 @@ var require_int2 = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "BIN",
       test: /^[-+]?0b[0-1_]+$/,
-      resolve: (str2, _onError, opt) => intResolve(str2, 2, 2, opt),
+      resolve: (str, _onError, opt) => intResolve(str, 2, 2, opt),
       stringify: (node) => intStringify(node, 2, "0b")
     };
     var intOct = {
@@ -2870,7 +2939,7 @@ var require_int2 = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "OCT",
       test: /^[-+]?0[0-7_]+$/,
-      resolve: (str2, _onError, opt) => intResolve(str2, 1, 8, opt),
+      resolve: (str, _onError, opt) => intResolve(str, 1, 8, opt),
       stringify: (node) => intStringify(node, 8, "0")
     };
     var int = {
@@ -2878,7 +2947,7 @@ var require_int2 = __commonJS({
       default: true,
       tag: "tag:yaml.org,2002:int",
       test: /^[-+]?[0-9][0-9_]*$/,
-      resolve: (str2, _onError, opt) => intResolve(str2, 0, 10, opt),
+      resolve: (str, _onError, opt) => intResolve(str, 0, 10, opt),
       stringify: stringifyNumber.stringifyNumber
     };
     var intHex = {
@@ -2887,7 +2956,7 @@ var require_int2 = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "HEX",
       test: /^[-+]?0x[0-9a-fA-F_]+$/,
-      resolve: (str2, _onError, opt) => intResolve(str2, 2, 16, opt),
+      resolve: (str, _onError, opt) => intResolve(str, 2, 16, opt),
       stringify: (node) => intStringify(node, 16, "0x")
     };
     exports.int = int;
@@ -2896,6 +2965,8 @@ var require_int2 = __commonJS({
     exports.intOct = intOct;
   }
 });
+
+// node_modules/yaml/dist/schema/yaml-1.1/set.js
 var require_set = __commonJS({
   "node_modules/yaml/dist/schema/yaml-1.1/set.js"(exports) {
     "use strict";
@@ -2983,13 +3054,15 @@ var require_set = __commonJS({
     exports.set = set;
   }
 });
+
+// node_modules/yaml/dist/schema/yaml-1.1/timestamp.js
 var require_timestamp = __commonJS({
   "node_modules/yaml/dist/schema/yaml-1.1/timestamp.js"(exports) {
     "use strict";
     var stringifyNumber = require_stringifyNumber();
-    function parseSexagesimal(str2, asBigInt) {
-      const sign = str2[0];
-      const parts = sign === "-" || sign === "+" ? str2.substring(1) : str2;
+    function parseSexagesimal(str, asBigInt) {
+      const sign = str[0];
+      const parts = sign === "-" || sign === "+" ? str.substring(1) : str;
       const num = (n) => asBigInt ? BigInt(n) : Number(n);
       const res = parts.replace(/_/g, "").split(":").reduce((res2, p) => res2 * num(60) + num(p), num(0));
       return sign === "-" ? num(-1) * res : res;
@@ -3026,7 +3099,7 @@ var require_timestamp = __commonJS({
       tag: "tag:yaml.org,2002:int",
       format: "TIME",
       test: /^[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+$/,
-      resolve: (str2, _onError, { intAsBigInt }) => parseSexagesimal(str2, intAsBigInt),
+      resolve: (str, _onError, { intAsBigInt }) => parseSexagesimal(str, intAsBigInt),
       stringify: stringifySexagesimal
     };
     var floatTime = {
@@ -3035,7 +3108,7 @@ var require_timestamp = __commonJS({
       tag: "tag:yaml.org,2002:float",
       format: "TIME",
       test: /^[-+]?[0-9][0-9_]*(?::[0-5]?[0-9])+\.[0-9_]*$/,
-      resolve: (str2) => parseSexagesimal(str2, false),
+      resolve: (str) => parseSexagesimal(str, false),
       stringify: stringifySexagesimal
     };
     var timestamp = {
@@ -3046,8 +3119,8 @@ var require_timestamp = __commonJS({
       // may be omitted altogether, resulting in a date format. In such a case, the time part is
       // assumed to be 00:00:00Z (start of day, UTC).
       test: RegExp("^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})(?:(?:t|T|[ \\t]+)([0-9]{1,2}):([0-9]{1,2}):([0-9]{1,2}(\\.[0-9]+)?)(?:[ \\t]*(Z|[-+][012]?[0-9](?::[0-9]{2})?))?)?$"),
-      resolve(str2) {
-        const match = str2.match(timestamp.test);
+      resolve(str) {
+        const match = str.match(timestamp.test);
         if (!match)
           throw new Error("!!timestamp expects a date, starting with yyyy-mm-dd");
         const [, year, month, day, hour, minute, second] = match.map(Number);
@@ -3069,6 +3142,8 @@ var require_timestamp = __commonJS({
     exports.timestamp = timestamp;
   }
 });
+
+// node_modules/yaml/dist/schema/yaml-1.1/schema.js
 var require_schema3 = __commonJS({
   "node_modules/yaml/dist/schema/yaml-1.1/schema.js"(exports) {
     "use strict";
@@ -3111,6 +3186,8 @@ var require_schema3 = __commonJS({
     exports.schema = schema;
   }
 });
+
+// node_modules/yaml/dist/schema/tags.js
 var require_tags = __commonJS({
   "node_modules/yaml/dist/schema/tags.js"(exports) {
     "use strict";
@@ -3203,6 +3280,8 @@ var require_tags = __commonJS({
     exports.getTags = getTags;
   }
 });
+
+// node_modules/yaml/dist/schema/Schema.js
 var require_Schema = __commonJS({
   "node_modules/yaml/dist/schema/Schema.js"(exports) {
     "use strict";
@@ -3233,6 +3312,8 @@ var require_Schema = __commonJS({
     exports.Schema = Schema;
   }
 });
+
+// node_modules/yaml/dist/stringify/stringifyDocument.js
 var require_stringifyDocument = __commonJS({
   "node_modules/yaml/dist/stringify/stringifyDocument.js"(exports) {
     "use strict";
@@ -3311,6 +3392,8 @@ var require_stringifyDocument = __commonJS({
     exports.stringifyDocument = stringifyDocument;
   }
 });
+
+// node_modules/yaml/dist/doc/Document.js
 var require_Document = __commonJS({
   "node_modules/yaml/dist/doc/Document.js"(exports) {
     "use strict";
@@ -3618,6 +3701,8 @@ var require_Document = __commonJS({
     exports.Document = Document;
   }
 });
+
+// node_modules/yaml/dist/errors.js
 var require_errors = __commonJS({
   "node_modules/yaml/dist/errors.js"(exports) {
     "use strict";
@@ -3681,6 +3766,8 @@ ${pointer}
     exports.prettifyError = prettifyError;
   }
 });
+
+// node_modules/yaml/dist/compose/resolve-props.js
 var require_resolve_props = __commonJS({
   "node_modules/yaml/dist/compose/resolve-props.js"(exports) {
     "use strict";
@@ -3813,6 +3900,8 @@ var require_resolve_props = __commonJS({
     exports.resolveProps = resolveProps;
   }
 });
+
+// node_modules/yaml/dist/compose/util-contains-newline.js
 var require_util_contains_newline = __commonJS({
   "node_modules/yaml/dist/compose/util-contains-newline.js"(exports) {
     "use strict";
@@ -3853,6 +3942,8 @@ var require_util_contains_newline = __commonJS({
     exports.containsNewline = containsNewline;
   }
 });
+
+// node_modules/yaml/dist/compose/util-flow-indent-check.js
 var require_util_flow_indent_check = __commonJS({
   "node_modules/yaml/dist/compose/util-flow-indent-check.js"(exports) {
     "use strict";
@@ -3869,6 +3960,8 @@ var require_util_flow_indent_check = __commonJS({
     exports.flowIndentCheck = flowIndentCheck;
   }
 });
+
+// node_modules/yaml/dist/compose/util-map-includes.js
 var require_util_map_includes = __commonJS({
   "node_modules/yaml/dist/compose/util-map-includes.js"(exports) {
     "use strict";
@@ -3883,6 +3976,8 @@ var require_util_map_includes = __commonJS({
     exports.mapIncludes = mapIncludes;
   }
 });
+
+// node_modules/yaml/dist/compose/resolve-block-map.js
 var require_resolve_block_map = __commonJS({
   "node_modules/yaml/dist/compose/resolve-block-map.js"(exports) {
     "use strict";
@@ -3989,6 +4084,8 @@ var require_resolve_block_map = __commonJS({
     exports.resolveBlockMap = resolveBlockMap;
   }
 });
+
+// node_modules/yaml/dist/compose/resolve-block-seq.js
 var require_resolve_block_seq = __commonJS({
   "node_modules/yaml/dist/compose/resolve-block-seq.js"(exports) {
     "use strict";
@@ -4038,6 +4135,8 @@ var require_resolve_block_seq = __commonJS({
     exports.resolveBlockSeq = resolveBlockSeq;
   }
 });
+
+// node_modules/yaml/dist/compose/resolve-end.js
 var require_resolve_end = __commonJS({
   "node_modules/yaml/dist/compose/resolve-end.js"(exports) {
     "use strict";
@@ -4079,6 +4178,8 @@ var require_resolve_end = __commonJS({
     exports.resolveEnd = resolveEnd;
   }
 });
+
+// node_modules/yaml/dist/compose/resolve-flow-collection.js
 var require_resolve_flow_collection = __commonJS({
   "node_modules/yaml/dist/compose/resolve-flow-collection.js"(exports) {
     "use strict";
@@ -4271,6 +4372,8 @@ var require_resolve_flow_collection = __commonJS({
     exports.resolveFlowCollection = resolveFlowCollection;
   }
 });
+
+// node_modules/yaml/dist/compose/compose-collection.js
 var require_compose_collection = __commonJS({
   "node_modules/yaml/dist/compose/compose-collection.js"(exports) {
     "use strict";
@@ -4334,6 +4437,8 @@ var require_compose_collection = __commonJS({
     exports.composeCollection = composeCollection;
   }
 });
+
+// node_modules/yaml/dist/compose/resolve-block-scalar.js
 var require_resolve_block_scalar = __commonJS({
   "node_modules/yaml/dist/compose/resolve-block-scalar.js"(exports) {
     "use strict";
@@ -4515,6 +4620,8 @@ var require_resolve_block_scalar = __commonJS({
     exports.resolveBlockScalar = resolveBlockScalar;
   }
 });
+
+// node_modules/yaml/dist/compose/resolve-flow-scalar.js
 var require_resolve_flow_scalar = __commonJS({
   "node_modules/yaml/dist/compose/resolve-flow-scalar.js"(exports) {
     "use strict";
@@ -4733,6 +4840,8 @@ var require_resolve_flow_scalar = __commonJS({
     exports.resolveFlowScalar = resolveFlowScalar;
   }
 });
+
+// node_modules/yaml/dist/compose/compose-scalar.js
 var require_compose_scalar = __commonJS({
   "node_modules/yaml/dist/compose/compose-scalar.js"(exports) {
     "use strict";
@@ -4812,6 +4921,8 @@ var require_compose_scalar = __commonJS({
     exports.composeScalar = composeScalar;
   }
 });
+
+// node_modules/yaml/dist/compose/util-empty-scalar-position.js
 var require_util_empty_scalar_position = __commonJS({
   "node_modules/yaml/dist/compose/util-empty-scalar-position.js"(exports) {
     "use strict";
@@ -4840,6 +4951,8 @@ var require_util_empty_scalar_position = __commonJS({
     exports.emptyScalarPosition = emptyScalarPosition;
   }
 });
+
+// node_modules/yaml/dist/compose/compose-node.js
 var require_compose_node = __commonJS({
   "node_modules/yaml/dist/compose/compose-node.js"(exports) {
     "use strict";
@@ -4944,6 +5057,8 @@ var require_compose_node = __commonJS({
     exports.composeNode = composeNode;
   }
 });
+
+// node_modules/yaml/dist/compose/compose-doc.js
 var require_compose_doc = __commonJS({
   "node_modules/yaml/dist/compose/compose-doc.js"(exports) {
     "use strict";
@@ -4985,6 +5100,8 @@ var require_compose_doc = __commonJS({
     exports.composeDoc = composeDoc;
   }
 });
+
+// node_modules/yaml/dist/compose/composer.js
 var require_composer = __commonJS({
   "node_modules/yaml/dist/compose/composer.js"(exports) {
     "use strict";
@@ -5191,6 +5308,8 @@ ${end.comment}` : end.comment;
     exports.Composer = Composer;
   }
 });
+
+// node_modules/yaml/dist/parse/cst-scalar.js
 var require_cst_scalar = __commonJS({
   "node_modules/yaml/dist/parse/cst-scalar.js"(exports) {
     "use strict";
@@ -5374,6 +5493,8 @@ var require_cst_scalar = __commonJS({
     exports.setScalarValue = setScalarValue;
   }
 });
+
+// node_modules/yaml/dist/parse/cst-stringify.js
 var require_cst_stringify = __commonJS({
   "node_modules/yaml/dist/parse/cst-stringify.js"(exports) {
     "use strict";
@@ -5433,6 +5554,8 @@ var require_cst_stringify = __commonJS({
     exports.stringify = stringify2;
   }
 });
+
+// node_modules/yaml/dist/parse/cst-visit.js
 var require_cst_visit = __commonJS({
   "node_modules/yaml/dist/parse/cst-visit.js"(exports) {
     "use strict";
@@ -5493,6 +5616,8 @@ var require_cst_visit = __commonJS({
     exports.visit = visit;
   }
 });
+
+// node_modules/yaml/dist/parse/cst.js
 var require_cst = __commonJS({
   "node_modules/yaml/dist/parse/cst.js"(exports) {
     "use strict";
@@ -5593,6 +5718,8 @@ var require_cst = __commonJS({
     exports.tokenType = tokenType;
   }
 });
+
+// node_modules/yaml/dist/parse/lexer.js
 var require_lexer = __commonJS({
   "node_modules/yaml/dist/parse/lexer.js"(exports) {
     "use strict";
@@ -6180,6 +6307,8 @@ var require_lexer = __commonJS({
     exports.Lexer = Lexer;
   }
 });
+
+// node_modules/yaml/dist/parse/line-counter.js
 var require_line_counter = __commonJS({
   "node_modules/yaml/dist/parse/line-counter.js"(exports) {
     "use strict";
@@ -6209,6 +6338,8 @@ var require_line_counter = __commonJS({
     exports.LineCounter = LineCounter;
   }
 });
+
+// node_modules/yaml/dist/parse/parser.js
 var require_parser = __commonJS({
   "node_modules/yaml/dist/parse/parser.js"(exports) {
     "use strict";
@@ -7081,6 +7212,8 @@ var require_parser = __commonJS({
     exports.Parser = Parser;
   }
 });
+
+// node_modules/yaml/dist/public-api.js
 var require_public_api = __commonJS({
   "node_modules/yaml/dist/public-api.js"(exports) {
     "use strict";
@@ -7176,6 +7309,8 @@ var require_public_api = __commonJS({
     exports.stringify = stringify2;
   }
 });
+
+// node_modules/yaml/dist/index.js
 var require_dist = __commonJS({
   "node_modules/yaml/dist/index.js"(exports) {
     "use strict";
@@ -7226,197 +7361,12 @@ var require_dist = __commonJS({
     exports.visitAsync = visit.visitAsync;
   }
 });
+
+// <stdin>
 var import_yaml = __toESM(require_dist());
 var export_parse = import_yaml.parse;
 var export_stringify = import_yaml.stringify;
-
-// scripts/state-paths.js
-import { existsSync } from "node:fs";
-import { join } from "node:path";
-var STATE_REL_PATH = ".agent/STATE.md";
-var SLICE_REL_PATH = ".agent/SLICE.md";
-function resolveStatePath(cwd2) {
-  const slice = join(cwd2, SLICE_REL_PATH);
-  if (existsSync(slice)) return { path: slice, kind: "slice", rel: SLICE_REL_PATH };
-  const state = join(cwd2, STATE_REL_PATH);
-  if (existsSync(state)) return { path: state, kind: "coordinator", rel: STATE_REL_PATH };
-  return { path: null, kind: "none", rel: null };
-}
-
-// scripts/state.js
-var FM = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
-function parseState(md) {
-  const s = (md ?? "").replace(/^﻿/, "").trimStart();
-  const m = s.match(FM);
-  if (!m) return { meta: {}, body: s.trim() };
-  return { meta: export_parse(m[1]) ?? {}, body: m[2].trim() };
-}
-function parseStateSafe(md) {
-  try {
-    return { ...parseState(md), error: null };
-  } catch (e) {
-    const s = (md ?? "").replace(/^﻿/, "").trimStart();
-    return { meta: {}, body: s.trim(), error: e?.message || String(e) };
-  }
-}
-var NOT_BLOCKED_WORDS = /* @__PURE__ */ new Set([
-  "no",
-  "false",
-  "none",
-  "null",
-  "nil",
-  "n",
-  "ninguno",
-  "ninguna",
-  "nada",
-  "n/a",
-  "na",
-  "-",
-  "\u2013",
-  "\u2014",
-  "\u2015",
-  "\u2212",
-  "--"
-]);
-var BLOCK_KEYS = ["reason", "since", "unblock"];
-var STATUS_BLOCKED_WORDS = /* @__PURE__ */ new Set([
-  "blocked",
-  "blocked_on",
-  "bloqueado",
-  "bloqueada",
-  "on_hold",
-  "on-hold",
-  "parado",
-  "parada"
-]);
-var str = (v) => v == null ? "" : String(v).trim();
-function readBlocked(meta, { stateRel: stateRel2 = STATE_REL_PATH } = {}) {
-  if (meta == null || typeof meta !== "object" || Array.isArray(meta)) {
-    return { state: "unreadable", why: `el frontmatter de ${stateRel2} no es un mapa de campos` };
-  }
-  const statusWord = str(meta.status).toLowerCase();
-  const statusSaysBlocked = STATUS_BLOCKED_WORDS.has(statusWord);
-  const declared = Object.prototype.hasOwnProperty.call(meta, "blocked");
-  const v = declared ? meta.blocked : null;
-  if (!declared || v == null || v === false || v === 0 || typeof v === "string" && (!v.trim() || NOT_BLOCKED_WORDS.has(v.trim().toLowerCase()))) {
-    if (!statusSaysBlocked) return { state: "none" };
-    return {
-      state: "blocked",
-      reason: "",
-      since: "",
-      unblock: "",
-      notes: [declared ? `contradicci\xF3n en ${stateRel2}: el campo \`blocked\` est\xE1 vac\xEDo/\`null\` pero \`status: ${statusWord}\` dice que el trabajo est\xE1 bloqueado. Se trata como BLOQUEADO por seguridad. Resu\xE9lvela: el bloqueo se declara en \`blocked: {reason: "\u2026", unblock: "\u2026"}\`.` : `\`status: ${statusWord}\` dice que el trabajo est\xE1 bloqueado, pero el bloqueo NO se declara ah\xED: \`status\` es el eje de PROGRESO y no tiene d\xF3nde poner el motivo ni qu\xE9 har\xEDa falta para levantarlo. Se trata como BLOQUEADO por seguridad; p\xE1salo a \`blocked: {reason: "\u2026", unblock: "\u2026"}\` para que la pr\xF3xima sesi\xF3n sepa por qu\xE9.`]
-    };
-  }
-  if (typeof v === "string") return { state: "blocked", reason: v.trim(), since: "", unblock: "", notes: [] };
-  if (v === true) {
-    return { state: "blocked", reason: "", since: "", unblock: "", notes: [] };
-  }
-  if (typeof v === "object" && !Array.isArray(v)) {
-    const notes = [];
-    const unknown = Object.keys(v).filter((k) => !BLOCK_KEYS.includes(k));
-    if (unknown.length) {
-      notes.push(
-        `el campo \`blocked\` trae claves que no se leen (${unknown.map((k) => `\`${k}\``).join(", ")}); las que se leen son ${BLOCK_KEYS.map((k) => `\`${k}\``).join(", ")}. Contenido de las que no se leen, para que no se pierda: ` + unknown.map((k) => `${k}: ${JSON.stringify(v[k])}`).join(" | ")
-      );
-    }
-    return { state: "blocked", reason: str(v.reason), since: str(v.since), unblock: str(v.unblock), notes };
-  }
-  return {
-    state: "blocked",
-    reason: "",
-    since: "",
-    unblock: "",
-    notes: [`el campo \`blocked\` tiene una forma que no se reconoce (${Array.isArray(v) ? "lista" : typeof v}): ${JSON.stringify(v)}. Se trata como BLOQUEADO por seguridad. La forma esperada es \`blocked: {reason: "\u2026", unblock: "\u2026", since: "\u2026"}\`.`]
-  };
-}
-function quoteForNotice(s, max = 300) {
-  const one = String(s).replace(/\s+/g, " ").trim();
-  return one.length > max ? `${one.slice(0, max)}\u2026` : one;
-}
-var NOTICE_TOP = "=========== TRABAJO BLOQUEADO \u2014 LEE ESTO ANTES DE HACER NADA ===========";
-var NOTICE_BOTTOM = "=========== fin del aviso de bloqueo ===========";
-function blockNotice(blocked, { nextAction = "", stateRel: stateRel2 = STATE_REL_PATH } = {}) {
-  if (!blocked || blocked.state !== "blocked") return "";
-  const lines = [NOTICE_TOP, ""];
-  lines.push(`\`${stateRel2}\` declara este trabajo BLOQUEADO (campo \`blocked\`). Bloqueado NO es "pendiente": alguien decidi\xF3 que esto no puede continuar tal cual.`);
-  lines.push("");
-  lines.push(blocked.reason ? `Motivo: ${blocked.reason}` : "Motivo: NO CONSTA \u2014 el bloqueo est\xE1 declarado pero sin `reason`. No supongas cu\xE1l es ni lo deduzcas del resto del estado: pregunta antes de tocar nada.");
-  if (blocked.since) lines.push(`Bloqueado desde: ${blocked.since}`);
-  lines.push(blocked.unblock ? `Para desbloquear har\xEDa falta: ${blocked.unblock}` : `Para desbloquear: NO CONSTA \u2014 ${stateRel2} no dice qu\xE9 har\xEDa falta. Aver\xEDgualo y escr\xEDbelo en \`blocked.unblock\` antes de que otra sesi\xF3n se encuentre con lo mismo.`);
-  for (const n of blocked.notes || []) lines.push(`Nota sobre c\xF3mo est\xE1 escrito este bloqueo: ${n}`);
-  lines.push("");
-  if (nextAction) {
-    lines.push(`\`next_action\` est\xE1 SUSPENDIDO y NO es una orden vigente: \xAB${quoteForNotice(nextAction)}\xBB. No lo ejecutes, no lo trates como "lo siguiente que hab\xEDa que hacer" y no lo uses para deducir qu\xE9 se esperaba de esta sesi\xF3n \u2014 aparece m\xE1s abajo solo como contexto de lo que qued\xF3 a medias.`);
-  } else {
-    lines.push("`next_action` no dice nada, y con el trabajo bloqueado tampoco debes deducir uno del resto del estado.");
-  }
-  lines.push(`Levantar el bloqueo es una decisi\xF3n humana y expl\xEDcita: se borra el campo \`blocked\` de \`${stateRel2}\` (o se pone a \`null\`). Si crees que ya no aplica, dilo y p\xEDdelo \u2014 no lo levantes por tu cuenta ni "de paso".`);
-  lines.push(NOTICE_BOTTOM);
-  return lines.join("\n");
-}
-function unreadableNotice(why, { stateRel: stateRel2 = STATE_REL_PATH } = {}) {
-  return [
-    `=========== AVISO: \`${stateRel2}\` NO SE PUDO LEER ENTERO ===========`,
-    "",
-    `No se ha podido interpretar el frontmatter YAML de \`${stateRel2}\` (${why}).`,
-    "Eso significa que NO se puede saber si el trabajo est\xE1 BLOQUEADO (campo `blocked`): tr\xE1talo como posiblemente bloqueado.",
-    "No ejecutes nada de lo que diga el estado de abajo sin confirmarlo antes, y arregla el frontmatter lo primero \u2014 mientras siga as\xED, ninguna sesi\xF3n de este repo podr\xE1 hidratarse bien.",
-    "=========== fin del aviso ==========="
-  ].join("\n");
-}
-function fieldReadingGuide(meta, { blocked = false } = {}) {
-  if (meta == null || typeof meta !== "object" || Array.isArray(meta)) return "";
-  const lines = [];
-  if (str(meta.verify)) {
-    lines.push("- `verify` es la comprobaci\xF3n PENDIENTE que valida este trabajo AL TERMINAR, no un hecho ya comprobado \u2014 aunque est\xE9 redactada en presente (\xAB\u2026 devuelve 6 issues\xBB). Ejec\xFAtala antes de afirmar su resultado; si falla o no se puede ejecutar, dilo en vez de darla por buena.");
-  }
-  if (!blocked && str(meta.next_action)) {
-    lines.push("- `next_action` es lo que apunt\xF3 la sesi\xF3n ANTERIOR al cerrar, no una orden verificada hoy: puede haber caducado (ya hecho, revertido, descartado o bloqueado desde entonces). Contr\xE1stalo con el repo antes de ejecutarlo. Si ves que ya no aplica, dilo \u2014 y si el trabajo est\xE1 bloqueado de verdad, se marca en el campo `blocked`, no reescribiendo este texto.");
-  }
-  if (!lines.length) return "";
-  return `## C\xF3mo leer estos campos
-${lines.join("\n")}`;
-}
-function composeHydration(stateText, gitLog, { stateRel: stateRel2 = STATE_REL_PATH } = {}) {
-  if (!stateText || !stateText.trim()) return "";
-  const { meta, error } = parseStateSafe(stateText);
-  const blocked = error ? { state: "unreadable", why: error } : readBlocked(meta, { stateRel: stateRel2 });
-  const parts = [];
-  if (blocked.state === "unreadable") parts.push(unreadableNotice(error || blocked.why, { stateRel: stateRel2 }));
-  else if (blocked.state === "blocked") parts.push(blockNotice(blocked, { nextAction: meta?.next_action, stateRel: stateRel2 }));
-  const titulo = stateRel2 === SLICE_REL_PATH ? "Estado del slice" : "Estado del repo";
-  parts.push(`# ${titulo} (hidrataci\xF3n autom\xE1tica)
-
-${stateText.trim()}`);
-  const guide = fieldReadingGuide(meta, { blocked: blocked.state === "blocked" });
-  if (guide) parts.push(guide);
-  const log = (gitLog || "").trim();
-  if (log) parts.push(`## \xDAltimos commits
-${log}`);
-  return parts.join("\n\n");
-}
-
-// hooks/session-start.js
-var input;
-try {
-  input = JSON.parse(readFileSync(0, "utf8"));
-} catch {
-  process.exit(0);
-}
-var cwd = input.cwd || process.cwd();
-var { path: statePath, rel: stateRel } = resolveStatePath(cwd);
-if (statePath) {
-  const stateText = readFileSync(statePath, "utf8");
-  let gitLog = "";
-  try {
-    gitLog = execFileSync("git", ["log", "--oneline", "-5"], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-  } catch {
-  }
-  const additionalContext = composeHydration(stateText, gitLog, { stateRel });
-  if (additionalContext) {
-    process.stdout.write(JSON.stringify({
-      hookSpecificOutput: { hookEventName: "SessionStart", additionalContext }
-    }));
-  }
-}
+export {
+  export_parse as parse,
+  export_stringify as stringify
+};
