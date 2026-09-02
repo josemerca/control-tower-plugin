@@ -86,7 +86,7 @@ describe('PlanAgentBrief resuming the agent', () => {
     dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
     conventions: '/plugin/conventions',
     ctStep: '/plugin/scripts/ct-step.mjs',
-  }).implementationErrandFor({ issue: 42, repository: new RepositoryName('owner/name') })
+  }).implementationErrandFor({ issueNumber: 42, repository: new RepositoryName('owner/name') })
 
   it('it_is_one_single_line_because_a_newline_would_run_the_order_half_written', () => {
     expect(errand()).not.toContain('\n')
@@ -109,6 +109,27 @@ describe('PlanAgentBrief resuming the agent', () => {
     expect(errand()).toContain('node /plugin/scripts/ct-step.mjs next --plan')
     expect(errand()).toContain('--issue 42')
     expect(errand()).not.toContain('CLAUDE_PLUGIN_ROOT')
+  })
+
+  it('it_translates_ct_step_to_node_by_absolute_path_because_ct_step_is_not_a_command', () => {
+    expect(errand()).toContain('donde diga `ct-step`, es `node /plugin/scripts/ct-step.mjs`')
+  })
+
+  it('it_says_the_sequence_is_not_conducted_with_subagent_driven_development_nor_its_ledger', () => {
+    expect(errand()).toContain('no la conduces con subagent-driven-development ni con su ledger')
+    expect(errand()).toContain('la dicta la máquina')
+  })
+
+  it('it_orders_returning_to_next_after_every_step_until_the_run_is_delivered', () => {
+    expect(errand()).toContain('volviendo a `next` tras cada paso')
+    expect(errand()).toContain('run delivered')
+  })
+
+  it('it_orders_rewriting_slice_md_role_task_and_next_action_before_asking_for_the_first_step', () => {
+    const composed = errand()
+    expect(composed).toContain('.agent/SLICE.md')
+    expect(composed).toContain('role, task y next_action')
+    expect(composed.indexOf('.agent/SLICE.md')).toBeLessThan(composed.indexOf('Pregunta el paso'))
   })
 
   it('it_names_the_plan_by_where_the_first_errand_told_it_to_commit_it', () => {
