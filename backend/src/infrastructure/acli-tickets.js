@@ -7,9 +7,9 @@ export class AcliTickets extends Tickets {
   static BIN = 'acli'
   static #UNAUTHENTICATED = /auth|login|unauthorized|401/i
 
-  constructor({ run }) {
+  constructor({ acli }) {
     super()
-    this.run = run
+    this.acli = acli
   }
 
   static argvFor(key) {
@@ -18,7 +18,7 @@ export class AcliTickets extends Tickets {
 
   async detail(key) {
     const argv = AcliTickets.argvFor(key)
-    const output = await this.run(argv)
+    const output = await this.acli.run(argv, { safeToRepeat: true })
     if (output.failed) {
       throw new TicketNotRead(
         `${AcliTickets.BIN} ${argv[0]} failed: ${AcliTickets.#reasonFor(output.stderr.trim())}`

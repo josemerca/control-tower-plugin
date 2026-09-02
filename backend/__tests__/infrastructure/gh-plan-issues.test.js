@@ -3,8 +3,8 @@ import { GhPlanIssues } from '../../src/infrastructure/gh-plan-issues.js'
 import { Gh } from '../../src/infrastructure/gh.js'
 import { PlanIssueBody } from '../../src/infrastructure/plan-issue-body.js'
 import { ProcessOutput } from '../../src/infrastructure/process-output.js'
-import { GhRetryPolicy } from '../../src/domain/policies/gh-retry-policy.js'
-import { GhBudget } from '../../src/domain/value-objects/gh-budget.js'
+import { RetryPolicy } from '../../src/domain/policies/retry-policy.js'
+import { RetryBudget } from '../../src/domain/value-objects/retry-budget.js'
 import { Clock } from '../../src/domain/ports/clock.js'
 import { Ticket } from '../../src/domain/value-objects/ticket.js'
 import { TicketKey } from '../../src/domain/value-objects/ticket-key.js'
@@ -56,7 +56,7 @@ class GhDouble {
 
           return Promise.resolve(answer)
         },
-        policy: new GhRetryPolicy({ budget: new GhBudget({ attempts, waitSeconds: 2 }) }),
+        policy: new RetryPolicy({ budget: new RetryBudget({ attempts, waitSeconds: 2 }) }),
         clock: this.clock,
       }),
     })

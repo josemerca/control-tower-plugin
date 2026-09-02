@@ -6,8 +6,9 @@ import { StartPlan } from '../application/actions/start-plan.js'
 import { ToolRunner } from './tool-runner.js'
 import { Gh } from './gh.js'
 import { SystemClock } from './system-clock.js'
-import { GhRetryPolicy } from '../domain/policies/gh-retry-policy.js'
-import { GhBudget } from '../domain/value-objects/gh-budget.js'
+import { ExternalTool } from './external-tool.js'
+import { RetryPolicy } from '../domain/policies/retry-policy.js'
+import { RetryBudget } from '../domain/value-objects/retry-budget.js'
 import { Invocation, InvocationOutcome } from './invocation.js'
 
 class CtApi {
@@ -16,8 +17,8 @@ class CtApi {
   static #BAD_USAGE = 2
   static #CANNOT_LISTEN = 1
   static #PROCESS_TIMEOUT_MS = 30_000
-  static #GH_RETRIES = 3
-  static #SECONDS_BETWEEN_GH_RETRIES = 2
+  static #RETRIES = 3
+  static #SECONDS_BETWEEN_RETRIES = 2
 
   static #refuseUsage(reason) {
     process.stderr.write(`${reason}\n${CtApi.#USAGE}\n`)
@@ -34,13 +35,13 @@ class CtApi {
     return (argv) => runner.run(argv)
   }
 
-  static #gh() {
-    return new Gh({
-      launch: CtApi.#tool(Gh.BIN),
-      policy: new GhRetryPolicy({
-        budget: new GhBudget({
-          attempts: CtApi.#GH_RETRIES,
-          waitSeconds: CtApi.#SECONDS_BETWEEN_GH_RETRIES,
+  static #talkingTo(bin, Tool) {
+    return new Tool({
+      launch: CtApi.#tool(bin),
+      policy: new RetryPolicy({
+        budget: new RetryBudget({
+          attempts: CtApi.#RETRIES,
+          waitSeconds: CtApi.#SECONDS_BETWEEN_RETRIES,
         }),
       }),
       clock: new SystemClock(),
@@ -53,8 +54,8 @@ class CtApi {
       CtApi.#refuseUsage(asked.reason)
     }
     const startPlan = new StartPlan({
-      tickets: new AcliTickets({ run: CtApi.#tool(AcliTickets.BIN) }),
-      planIssues: new GhPlanIssues({ gh: CtApi.#gh() }),
+      tickets: new AcliTickets({ acli: CtApi.#talkingTo(AcliTickets.BIN, ExternalTool) }),
+      planIssues: new GhPlanIssues({ gh: CtApi.#talkingTo(Gh.BIN, Gh) }),
       planSession: new CmuxPlanSession({ run: CtApi.#tool(CmuxPlanSession.BIN), cwd: process.cwd() }),
     })
     const server = new ApiServer({ port: asked.port, startPlan })

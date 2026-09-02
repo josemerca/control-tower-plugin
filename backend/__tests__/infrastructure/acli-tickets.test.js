@@ -3,11 +3,27 @@ import { AcliTickets } from '../../src/infrastructure/acli-tickets.js'
 import { TicketKey } from '../../src/domain/value-objects/ticket-key.js'
 import { TicketNotRead, TicketNotUnderstood, TicketFailure } from '../../src/domain/exceptions.js'
 import { ProcessOutput } from '../../src/infrastructure/process-output.js'
+import { ExternalTool } from '../../src/infrastructure/external-tool.js'
+import { RetryPolicy } from '../../src/domain/policies/retry-policy.js'
+import { RetryBudget } from '../../src/domain/value-objects/retry-budget.js'
+import { Clock } from '../../src/domain/ports/clock.js'
+
+class ClockDouble extends Clock {
+  constructor() {
+    super()
+    this.slept = []
+  }
+
+  async sleep(seconds) {
+    this.slept.push(seconds)
+  }
+}
 
 class AcliDouble {
   constructor(printed) {
     this.printed = printed
     this.calls = []
+    this.clock = new ClockDouble()
   }
 
   static answering(fields) {
@@ -20,11 +36,15 @@ class AcliDouble {
 
   tickets() {
     return new AcliTickets({
-      run: (argv) => {
-        this.calls.push(argv)
-        if (this.printed instanceof ProcessOutput) return Promise.resolve(this.printed)
-        return Promise.resolve(new ProcessOutput({ code: 0, stdout: this.printed, stderr: '' }))
-      },
+      acli: new ExternalTool({
+        launch: (argv) => {
+          this.calls.push(argv)
+          if (this.printed instanceof ProcessOutput) return Promise.resolve(this.printed)
+          return Promise.resolve(new ProcessOutput({ code: 0, stdout: this.printed, stderr: '' }))
+        },
+        policy: new RetryPolicy({ budget: new RetryBudget({ attempts: 3, waitSeconds: 2 }) }),
+        clock: this.clock,
+      }),
     })
   }
 
@@ -115,6 +135,25 @@ describe('AcliTickets', () => {
 
     expect(refusal).toBeInstanceOf(TicketNotRead)
     expect(refusal.message).toContain('no such work item')
+  })
+
+  it('a_blip_reading_jira_is_retried_because_asking_for_the_same_ticket_twice_reads_the_same_ticket', async () => {
+    const acli = AcliDouble.refusing('dial tcp: i/o timeout')
+
+    const refusal = await acli.refusalFor()
+
+    expect(acli.calls).toHaveLength(4)
+    expect(acli.clock.slept).toEqual([2, 2, 2])
+    expect(refusal).toBeInstanceOf(TicketNotRead)
+  })
+
+  it('a_ticket_that_does_not_exist_is_not_asked_for_again_because_it_will_not_appear', async () => {
+    const acli = AcliDouble.refusing('Issue does not exist or you do not have permission to see it')
+
+    await acli.refusalFor()
+
+    expect(acli.calls).toHaveLength(1)
+    expect(acli.clock.slept).toEqual([])
   })
 
   it('an_acli_that_is_not_logged_in_says_what_to_run_instead_of_repeating_its_own_wording', async () => {

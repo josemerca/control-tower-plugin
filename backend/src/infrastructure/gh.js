@@ -1,59 +1,20 @@
-export class Gh {
+import { ExternalTool } from './external-tool.js'
+
+export class Gh extends ExternalTool {
   static BIN = 'gh'
 
-  static #MARKERS = [
-    'connection reset',
-    'connection refused',
-    'tls handshake',
-    'i/o timeout',
-    'context deadline exceeded',
-    'unexpected eof',
-    'unexpected end of json input',
-    'temporary failure in name resolution',
-    'dial tcp',
-    'no such host',
-    'network is unreachable',
-    'internal server error',
-    'bad gateway',
-    'service unavailable',
-    'gateway timeout',
+  static #ALSO_TRANSIENT = [
     'no server is currently available to service your request',
     'error connecting to',
   ]
 
-  static #SERVER_STATUS = /http 5\d\d/
-
   static #MISSING_LABEL = /'(.+?)' not found/
 
-  constructor({ launch, policy, clock }) {
-    this.launch = launch
-    this.policy = policy
-    this.clock = clock
-  }
-
-  async run(argv, { safeToRepeat }) {
-    let output = await this.launch(argv)
-    let attempted = 0
-    while (output.failed) {
-      const decision = this.policy.afterAFailure({
-        transient: Gh.isTransient(output.stderr),
-        safeToRepeat,
-        attempted,
-      })
-      if (!decision.retry) break
-
-      await this.clock.sleep(decision.waitSeconds)
-      output = await this.launch(argv)
-      attempted += 1
-    }
-
-    return output
-  }
-
-  static isTransient(stderr) {
+  isTransient(stderr) {
     const lowered = String(stderr).toLowerCase()
 
-    return Gh.#MARKERS.some((marker) => lowered.includes(marker)) || Gh.#SERVER_STATUS.test(lowered)
+    return super.isTransient(stderr) ||
+      Gh.#ALSO_TRANSIENT.some((marker) => lowered.includes(marker))
   }
 
   static labelMissingIn(stderr) {

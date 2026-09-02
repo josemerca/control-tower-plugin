@@ -1,4 +1,4 @@
-export class GhRetryDecision {
+export class RetryDecision {
   constructor({ retry, waitSeconds = 0 }) {
     this.retry = retry
     this.waitSeconds = waitSeconds
@@ -6,7 +6,7 @@ export class GhRetryDecision {
   }
 }
 
-export class GhRetryPolicy {
+export class RetryPolicy {
   constructor({ budget }) {
     this.budget = budget
     Object.freeze(this)
@@ -14,9 +14,9 @@ export class GhRetryPolicy {
 
   afterAFailure({ transient, safeToRepeat, attempted }) {
     if (!transient || !safeToRepeat || attempted >= this.budget.attempts) {
-      return new GhRetryDecision({ retry: false })
+      return new RetryDecision({ retry: false })
     }
 
-    return new GhRetryDecision({ retry: true, waitSeconds: this.budget.waitSeconds })
+    return new RetryDecision({ retry: true, waitSeconds: this.budget.waitSeconds })
   }
 }
