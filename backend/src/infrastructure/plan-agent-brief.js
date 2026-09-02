@@ -48,7 +48,7 @@ export class PlanAgentBrief {
     const dispatchCheck = this.dispatchCheck
 
     return [
-      `El gate \`plan\` del issue #${issueNumber} de ${repository.text} lo ha cerrado una persona:`,
+      `El gate \`plan\` del issue #${issueNumber} lo ha cerrado una persona:`,
       'implementa AHORA el plan que commiteaste, sin reescribirlo.',
       `Antes de pedir el primer paso, reescribe en ${SLICE_REL_PATH} los campos role, task y next_action para que digan que estás implementando el plan, no escribiéndolo.`,
       `La secuencia no la conduces con subagent-driven-development ni con su ledger: la dicta la máquina. Pregunta el paso con \`node ${ctStep} next --plan <tu plan de docs/superpowers/plans/> --issue ${issueNumber}\``,

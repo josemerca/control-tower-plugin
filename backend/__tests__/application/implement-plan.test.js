@@ -3,7 +3,6 @@ import { ImplementPlan, ImplementPlanParams } from '../../src/application/action
 import { PlanAgents } from '../../src/domain/ports/plan-agents.js'
 import { PlanIssues } from '../../src/domain/ports/plan-issues.js'
 import { GoRegistry } from '../../src/domain/ports/go-registry.js'
-import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import {
   PlanAgentNotResumed, PlanGoNotAnswered, GoNotRecorded,
@@ -57,14 +56,14 @@ class PlanAgentsDouble extends PlanAgents {
     return new PlanAgentsDouble(cause)
   }
 
-  async resume({ story, issue, repository }) {
-    this.asked.push({ story, issue, repository })
+  async resume({ agent, issue, repository }) {
+    this.asked.push({ agent, issue, repository })
     if (this.answer instanceof Error) throw this.answer
   }
 }
 
 class Flow {
-  static STORY = new UserStoryKey('XOP-4909')
+  static AGENT = 'workspace:20'
   static ISSUE = 33
   static REPOSITORY = new RepositoryName('jjponz/repo-pulse')
 
@@ -76,19 +75,19 @@ class Flow {
 
   async run() {
     return new ImplementPlan(this).execute(new ImplementPlanParams({
-      story: Flow.STORY, issue: Flow.ISSUE, repository: Flow.REPOSITORY,
+      agent: Flow.AGENT, issue: Flow.ISSUE, repository: Flow.REPOSITORY,
     }))
   }
 }
 
 describe('ImplementPlan', () => {
-  it('the_agent_it_resumes_is_the_one_of_the_story_and_issue_it_was_given', async () => {
+  it('the_agent_it_resumes_is_the_handle_it_was_given_and_not_one_it_derived', async () => {
     const flow = new Flow()
 
     await flow.run()
 
     expect(flow.planAgents.asked).toEqual([
-      { story: Flow.STORY, issue: Flow.ISSUE, repository: Flow.REPOSITORY },
+      { agent: Flow.AGENT, issue: Flow.ISSUE, repository: Flow.REPOSITORY },
     ])
   })
 
@@ -144,5 +143,8 @@ describe('ImplementPlan closes the plan gate before the agent works', () => {
     await expect(new PlanIssues().answerGo({
       issueNumber: Flow.ISSUE, repository: Flow.REPOSITORY, nonce: 'aa',
     })).rejects.toThrow(/must implement answerGo/)
+    await expect(new PlanAgents().resume({
+      agent: Flow.AGENT, issue: Flow.ISSUE, repository: Flow.REPOSITORY,
+    })).rejects.toThrow(/must implement resume/)
   })
 })

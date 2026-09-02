@@ -38,7 +38,7 @@ class Failures {
 
 export class ApiServer {
   constructor({
-    port, startPlan, implementPlan = null, planEvents = null, sessions = new PlanSessions(), frontendRoot = null,
+    port, startPlan, implementPlan, planEvents = null, sessions = new PlanSessions(), frontendRoot = null,
   }) {
     this.requestedPort = port
     this.startPlan = startPlan

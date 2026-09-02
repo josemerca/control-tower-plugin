@@ -92,19 +92,6 @@ describe('PlanAgentBrief resuming the agent', () => {
     expect(errand()).not.toContain('\n')
   })
 
-  it('it_says_a_person_closed_the_gate_so_the_agent_knows_the_pause_is_over', () => {
-    expect(errand()).toContain('lo ha cerrado una persona')
-    expect(errand()).toContain('#42')
-  })
-
-  it('it_names_the_repository_whose_gate_was_closed_so_the_agent_does_not_guess_which_one', () => {
-    expect(errand()).toContain('owner/name')
-  })
-
-  it('it_orders_implementing_the_plan_already_committed_instead_of_rewriting_it', () => {
-    expect(errand()).toContain('implementa AHORA el plan que commiteaste, sin reescribirlo.')
-  })
-
   it('it_hands_the_driving_to_ct_step_by_absolute_path_instead_of_describing_the_sequence', () => {
     expect(errand()).toContain('node /plugin/scripts/ct-step.mjs next --plan')
     expect(errand()).toContain('--issue 42')
@@ -115,31 +102,11 @@ describe('PlanAgentBrief resuming the agent', () => {
     expect(errand()).toContain('donde diga `ct-step`, es `node /plugin/scripts/ct-step.mjs`')
   })
 
-  it('it_says_the_sequence_is_not_conducted_with_subagent_driven_development_nor_its_ledger', () => {
-    expect(errand()).toContain('no la conduces con subagent-driven-development ni con su ledger')
-    expect(errand()).toContain('la dicta la máquina')
-  })
-
-  it('it_orders_returning_to_next_after_every_step_until_the_run_is_delivered', () => {
-    expect(errand()).toContain('volviendo a `next` tras cada paso')
-    expect(errand()).toContain('run delivered')
-  })
-
   it('it_orders_rewriting_slice_md_role_task_and_next_action_before_asking_for_the_first_step', () => {
     const composed = errand()
     expect(composed).toContain('.agent/SLICE.md')
     expect(composed).toContain('role, task y next_action')
     expect(composed.indexOf('.agent/SLICE.md')).toBeLessThan(composed.indexOf('Pregunta el paso'))
-  })
-
-  it('it_names_the_plan_by_where_the_first_errand_told_it_to_commit_it', () => {
-    expect(errand()).toContain('docs/superpowers/plans/')
-  })
-
-  it('it_ends_at_an_open_pull_request_that_closes_the_issue_and_stops_before_the_merge', () => {
-    expect(errand()).toContain('Closes #42')
-    expect(errand()).toMatch(/PARA/)
-    expect(errand()).toMatch(/no la mergees/i)
   })
 
   it('it_orders_the_release_that_moves_the_issue_to_review_instead_of_forbidding_it', () => {
@@ -153,11 +120,6 @@ describe('PlanAgentBrief resuming the agent', () => {
   it('it_still_stops_before_the_merge_because_that_is_the_second_human_decision', () => {
     expect(errand()).toMatch(/no la mergees/i)
     expect(errand()).toMatch(/PARA/)
-  })
-
-  it('it_never_promises_a_permission_nobody_mints', () => {
-    expect(errand()).not.toContain('-OK')
-    expect(errand()).not.toContain('nonce')
   })
 
   it('a_brief_that_cannot_name_ct_step_refuses_to_exist_instead_of_shipping_the_word_undefined', () => {

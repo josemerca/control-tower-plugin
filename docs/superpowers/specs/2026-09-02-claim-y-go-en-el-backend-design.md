@@ -23,8 +23,9 @@ medida contra lo que cada programa del plugin lee de GitHub:
 Y con `--release` prohibido se pierden sus otras cuatro puertas: plan válido commiteado, run entregado, rama
 sin `.agent/STATE.md`, recorridos e2e cubiertos.
 
-La deuda ya estaba declarada (diseño de implement-plan, §5.2 y §5.3). Este documento la cobra, y va **antes**
-de la cosecha: cosechar sobre un issue que GitHub cree en cola sería construir sobre el estado equivocado.
+La deuda se declaró al construir `POST /implement-plan` (PR #66, cuyo diseño no viaja en el repo) y este
+documento la cobra. Va **antes** de la cosecha: cosechar sobre un issue que GitHub cree en cola sería
+construir sobre el estado equivocado.
 
 ---
 
@@ -66,7 +67,8 @@ El agente, al entregar, ejecuta `--release`: encuentra el hash, encuentra el com
 **Lo que esto no compra, dicho sin adorno.** El nonce en el plugin protege de que el agente se dé el go a sí
 mismo. Aquí quien acuña y quien contesta es el mismo programa, con la misma cuenta de `gh` que usa el
 agente. Se conserva lo que importa —el nonce nunca pasa por el contexto del agente— y no se construye un
-verificador independiente, que el plugin tampoco tiene (diseño de la fusión, §8.2). No se hace por
+verificador independiente, que el plugin tampoco tiene
+(`docs/superpowers/specs/2026-08-31-fusion-con-app-companion-design.md`, §8.2). No se hace por
 seguridad: se hace para que el flujo de la app hable el mismo idioma que el plugin en GitHub.
 
 Si el paso 2 o el 3 fallan, la persona vuelve a pulsar: el nuevo registro sobreescribe el hash y el
@@ -117,6 +119,15 @@ issue sigue en `status:ready`, no hay worktree.
 
 ### `POST /implement-plan`
 
+**Un campo vuelve a la petición: `repo`.** La PR #66 lo recortó de las cinco capas con el argumento medido
+de que «su única utilidad era una cláusula del encargo, y `ct-step`, `gh pr create` y el nombre de la
+pestaña no lo necesitan». Este slice cambia esa premisa y el campo vuelve con tres consumidores, no con una
+frase: el nombre del fichero del registro, el `--repo` de `gh issue comment` y el `--repo` del `--release`
+que el encargo ahora manda ejecutar. La petición es `{ agent, issue, repo }`; la respuesta de éxito no
+cambia y sigue devolviendo sólo `agent` e `issue`.
+
+Un 400 nuevo: `repo must be a repository such as owner/name`.
+
 Dos 503 nuevos, ambos «la herramienta se negó, reintentar puede funcionar»:
 
 | Causa | Estado del mundo al responder |
@@ -137,7 +148,7 @@ tipo nuevo tiene la carga de la prueba»); lo que se consideró y no entró est�
 
 ### 4.1 Dominio
 
-- **`GoRegistry`**, puerto nuevo con un método: `mint({ issue, repository })` → el nonce, una cadena. El
+- **`GoRegistry`**, puerto nuevo con un método: `mint({ issueNumber, repository })` → el nonce, una cadena. El
   colaborador es nuevo —el registro en disco que `dispatch-check` lee— y un puerto corta por quién está
   enfrente.
 - **`PlanIssues`** gana tres métodos, porque el colaborador es el mismo: `claim({ issue, repository })`,

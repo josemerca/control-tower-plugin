@@ -43,12 +43,12 @@ export class CmuxPlanAgents extends PlanAgents {
     ]
   }
 
-  static sendArgvFor(name, typed) {
-    return ['send', '--workspace', name, typed]
+  static sendArgvFor(handle, typed) {
+    return ['send', '--workspace', handle, typed]
   }
 
-  static enterArgvFor(name) {
-    return ['send-key', '--workspace', name, 'Enter']
+  static enterArgvFor(handle) {
+    return ['send-key', '--workspace', handle, 'Enter']
   }
 
   static scriptFor({ sentinelPath, errand, bin, issue, worktree }) {
@@ -76,16 +76,15 @@ export class CmuxPlanAgents extends PlanAgents {
       worktree: briefing.located.path,
     }))
     const handle = await this.#open(briefing, typed)
-    await this.#confirm({ briefing, sentinelPath, typed })
+    await this.#confirm({ briefing, sentinelPath, typed, handle })
 
     return handle
   }
 
-  async resume({ story, issue, repository }) {
+  async resume({ agent, issue, repository }) {
     const errand = this.brief.implementationErrandFor({ issueNumber: issue, repository })
-    const name = CmuxPlanAgents.nameFor(story)
-    await this.#type(CmuxPlanAgents.sendArgvFor(name, errand))
-    await this.#type(CmuxPlanAgents.enterArgvFor(name))
+    await this.#type(CmuxPlanAgents.sendArgvFor(agent, errand))
+    await this.#type(CmuxPlanAgents.enterArgvFor(agent))
   }
 
   async #type(argv) {
@@ -112,7 +111,7 @@ export class CmuxPlanAgents extends PlanAgents {
     return found[1]
   }
 
-  async #confirm({ briefing, sentinelPath, typed }) {
+  async #confirm({ briefing, sentinelPath, typed, handle }) {
     for (let probes = 1; ; probes += 1) {
       const seen = await this.#peek(sentinelPath)
       if (seen !== null) return this.#judge(seen, briefing)
@@ -120,7 +119,7 @@ export class CmuxPlanAgents extends PlanAgents {
       const step = this.policy.afterProbing(probes)
       if (step === LaunchStep.KEEP_PROBING) continue
       if (step === LaunchStep.RESEND_THE_LINE) {
-        await this.#resend(briefing, typed)
+        await this.#resend(handle, typed)
         continue
       }
       if (step === LaunchStep.GIVE_UP) {
@@ -151,9 +150,8 @@ export class CmuxPlanAgents extends PlanAgents {
     return text === null ? null : parseSentinel(text)
   }
 
-  async #resend(briefing, typed) {
-    const name = CmuxPlanAgents.nameFor(briefing.story)
-    await this.run(CmuxPlanAgents.sendArgvFor(name, typed))
-    await this.run(CmuxPlanAgents.enterArgvFor(name))
+  async #resend(handle, typed) {
+    await this.run(CmuxPlanAgents.sendArgvFor(handle, typed))
+    await this.run(CmuxPlanAgents.enterArgvFor(handle))
   }
 }

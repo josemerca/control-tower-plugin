@@ -9,7 +9,9 @@
 **Spec:** `docs/superpowers/specs/2026-09-02-claim-y-go-en-el-backend-design.md`
 
 **Branch:** `alcaptar/claim_y_go`, cut from `alcaptar/implement_plan` — it changes the errand that
-branch introduces.
+branch introduces. That branch landed as PR #66 and `main` was merged in afterwards; the merge brought two
+decisions of its own: the cmux session is addressed by its **handle** (`agent`) and not by its title, and
+the `repo` field had been cut from this endpoint. It comes back — see the spec's §3.
 
 **Tech stack:** Node 24 ESM, express 5, vitest 4. No new dependency.
 
