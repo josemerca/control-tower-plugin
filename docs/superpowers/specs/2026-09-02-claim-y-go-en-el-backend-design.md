@@ -69,7 +69,7 @@ agente. Se conserva lo que importa —el nonce nunca pasa por el contexto del ag
 verificador independiente, que el plugin tampoco tiene (diseño de la fusión, §8.2). No se hace por
 seguridad: se hace para que el flujo de la app hable el mismo idioma que el plugin en GitHub.
 
-Si el paso 2 o el 3 fallan, la persona vuelve a pulsar: el nuevo `mint` sobreescribe el hash y el
+Si el paso 2 o el 3 fallan, la persona vuelve a pulsar: el nuevo registro sobreescribe el hash y el
 comentario anterior deja de encajar. Es el comportamiento de `ct-go.mjs` («el anterior ya no vale»).
 
 ### 2.3 Sin importar nada nuevo del plugin
@@ -81,9 +81,23 @@ El formato del registro y del comentario los lee otro programa del mismo reposit
 regla de `backend/conventions/testing.md` para payloads de frontera: **lo que escribe el backend se alimenta
 al lector real del plugin en un test de contrato** —`readGoCommitment` de `go-registry.js` y `matchesGo`
 de `go-response.js`— y el test falla el día que uno de los dos cambie. Los tests importan al plugin; el
-código de producción, no.
+código de producción, no. Es la copia declarada de `plugin/conventions/decisions.md`: las dos mitades de
+un contrato que cruza un proceso existen dos veces, medidas por un test que las compara.
 
-### 2.4 El vigilante del merge se deja correr
+### 2.4 Las labels que el backend escribe las siembra el backend
+
+Verificado en `groom.js:326-352`: `gh issue edit --add-label` resuelve el nombre a un id y **falla si la
+label no existe en el repo**. `/ct-groom` siembra el vocabulario `status:` entero por eso, pero en el flujo
+de la app no hay groom. `open` ya siembra sobre la marcha lo que `issue create` necesita; `claim` hace lo
+mismo con `status:in-progress`, con la misma vuelta, y sólo con labels nuestras.
+
+**Lo que queda fuera y se declara:** `--release` escribe `status:in-review` con el `setStatus` del plugin,
+que no siembra. En un repo que nunca pasó por `/ct-groom`, el agente moriría al liberar con «reintenta más
+tarde», consejo que no puede funcionar. La decisión de sembrar vive donde se escribe la label
+(`decisions.md`), así que el arreglo es del plugin, en su propio slice. Los dos repos de prueba tienen la
+label.
+
+### 2.5 El vigilante del merge se deja correr
 
 `--release` lanza `ct-watch-merge.mjs`, que busca una sesión coordinadora en el checkout principal para
 avisarle del merge. En el flujo de la app no la hay: verá el merge, no encontrará a quién decírselo, lo
@@ -118,19 +132,19 @@ como familias a medio escribir.
 
 ## 4. Las piezas
 
+Lo mínimo que resuelve §1. Cada tipo nuevo se justifica por `backend/conventions/architecture.md` («un
+tipo nuevo tiene la carga de la prueba»); lo que se consideró y no entró está en §4.4.
+
 ### 4.1 Dominio
 
-- **`PlanGo`**, value object: el nonce, ocho caracteres hexadecimales en minúscula. Guarda esa forma y
-  nada más. No calcula el hash ni compone el comentario: esos son formatos de frontera y viven con el
-  adaptador que los escribe (`backend/conventions/architecture.md`: «el payload que sólo su dueño
-  construye comparte el fichero del dueño»).
-- **`GoRegistry`**, puerto nuevo con un método: `mint({ issue, repository })` → `PlanGo`. El colaborador
-  es nuevo —el registro que `dispatch-check` lee— y un puerto corta por quién está enfrente.
+- **`GoRegistry`**, puerto nuevo con un método: `mint({ issue, repository })` → el nonce, una cadena. El
+  colaborador es nuevo —el registro en disco que `dispatch-check` lee— y un puerto corta por quién está
+  enfrente.
 - **`PlanIssues`** gana tres métodos, porque el colaborador es el mismo: `claim({ issue, repository })`,
-  `requeue({ issue, repository })` y `answerGo({ issue, repository, go })`.
-- **Excepciones**: `PlanIssueNotClaimed` y `PlanGoNotAnswered` bajo `PlanIssueFailure`; `GoFailure` con
-  `GoNotRecorded`. `requeue` no tiene excepción propia: sólo se llama en compensación y su fallo se avisa
-  por stderr y se traga, como hoy el `undo` del worktree.
+  `requeue({ issue, repository })` y `answerGo({ issue, repository, nonce })`.
+- **Excepciones**: `PlanIssueNotClaimed`, `PlanIssueNotRequeued` y `PlanGoNotAnswered` bajo
+  `PlanIssueFailure`; `GoFailure` con `GoNotRecorded`, familia de una causa como ya lo es
+  `PlanProgressFailure`.
 
 ### 4.2 Aplicación
 
@@ -140,9 +154,9 @@ como familias a medio escribir.
 detail → open → claim → prepare → launch
 ```
 
-Compensación: si `prepare` falla, `requeue`. Si `launch` falla, `undo` del worktree y `requeue`. Si
-`claim` falla, nada que deshacer: el issue está en `ready` sin worktree, igual que hoy cuando falla
-`prepare`.
+Compensación: si `prepare` falla, `requeue`. Si `launch` falla, `undo` del worktree y `requeue`. Los dos
+se tragan como hoy se traga `undo`. Si `claim` falla, nada que deshacer: el issue está en `ready` sin
+worktree, igual que hoy cuando falla `prepare`.
 
 **`ImplementPlan.execute`**, tres pasos:
 
@@ -150,49 +164,60 @@ Compensación: si `prepare` falla, `requeue`. Si `launch` falla, `undo` del work
 goRegistry.mint → planIssues.answerGo → planAgents.resume
 ```
 
-Sin compensación: volver a pulsar reemite el go (§2.2). Gana el puerto `goRegistry` y `planIssues` en su
+Sin compensación: volver a pulsar reemite el go (§2.2). Gana `goRegistry` y `planIssues` en su
 constructor.
 
 ### 4.3 Infraestructura
 
-- **`disk-go-registry.js`**: adaptador de `GoRegistry`. Recibe inyectados `random(bytes)` (para que el
-  test fije el nonce), `write(path, text)` y la raíz del estado de Control Tower. Dentro, el modelo de
-  frontera `GoCommitmentFile`, dueño del formato:
-  - ruta: `<configDir ?? ~/.claude>/control-tower/go/<owner>__<name>-<n>.json`, donde `/` del repo pasa a
-    `__` y todo lo que no sea `[A-Za-z0-9._-]` a `_`;
+- **`disk-go-registry.js`**, módulo nuevo, adaptador de `GoRegistry`. Recibe inyectados `random(bytes)`
+  para que el test fije el nonce, `write(path, text)` y la raíz del estado de Control Tower. Sus métodos
+  estáticos componen el formato, como `argvFor` en los demás adaptadores:
+  - nonce: cuatro bytes aleatorios en hexadecimal minúscula;
+  - ruta: `<raíz>/go/<owner>__<name>-<n>.json`, donde `/` del repo pasa a `__` y todo lo que no sea
+    `[A-Za-z0-9._-]` a `_`;
   - contenido: `JSON.stringify({ repo, issue, commitment }, null, 2)` más salto de línea;
-  - `commitment`: sha256 hexadecimal del nonce en minúscula;
-  - permisos: directorio `0700`, fichero `0600`, como el plugin.
+  - `commitment`: sha256 hexadecimal del nonce.
 - **`gh-plan-issues.js`**: `claim` → `gh issue edit <n> --repo <r> --add-label status:in-progress
   --remove-label status:ready`; `requeue` → lo simétrico; `answerGo` → `gh issue comment <n> --repo <r>
-  --body "-OK <nonce>"`. El texto del comentario lo compone `GoComment` dentro de este fichero. Ninguna de
-  las tres es `safeToRepeat`: son escrituras. `claim` y `requeue` siembran la label que falte con la misma
-  vuelta que ya da `open` (`Gh.labelMissingIn` → `label create --force` → reintento), y sólo si la label es
-  nuestra: `gh issue edit --add-label` falla igual que `issue create` cuando la label no existe en el repo.
+  --body "-OK <nonce>"`. Ninguna es `safeToRepeat`: son escrituras. `claim` siembra la label que falte
+  con la misma vuelta que `open` ya da (`Gh.labelMissingIn` → `label create --force` → reintento), que
+  pasa a recibir el argv en vez de componerlo, porque las dos escrituras fallan por la misma causa y se
+  arreglan igual. Un fallo de `requeue` se avisa por stderr y se lanza, como hace `GitWorkspace.undo`.
 - **`plan-agent-brief.js`**: el encargo de implementación pierde las dos frases de la prohibición y gana
   «al entregar, libera con `node <dispatch-check> <n> --repo <r> --release` y PARA». La ruta de
   `dispatch-check` ya está en el constructor.
 - **`start-plan-route.js` / `implement-plan-route.js`**: las proyecciones de colapso ganan sus causas
   nuevas, todas a 503. Los tests de exhaustividad que ya existen son los que obligan a añadirlas.
-- **`ct-api.mjs`**: monta `DiskGoRegistry` con `randomBytes`, la escritura con permisos y
-  `CLAUDE_CONFIG_DIR ?? ~/.claude`, y se lo pasa a `ImplementPlan` junto con el `GhPlanIssues` que ya
-  construye para `StartPlan`.
+- **`ct-api.mjs`**: monta `DiskGoRegistry` con `randomBytes`, `Disk.write` y
+  `CLAUDE_CONFIG_DIR ?? ~/.claude` como raíz, que es donde `dispatch-check` busca (`controlTowerDir`), y se
+  lo pasa a `ImplementPlan` junto con el `GhPlanIssues` que ya construye para `StartPlan`.
+
+### 4.4 Lo que se consideró y no entra
+
+- **Un value object para el nonce.** Lo compone el propio adaptador a partir de bytes aleatorios: no hay
+  forma inválida que guardar ni álgebra que ofrecer. Una cadena que viaja de `mint` a `answerGo` basta.
+- **Permisos `0700`/`0600` en el registro**, como escribe el plugin. Ningún lector los comprueba y el
+  fichero guarda un hash, no el nonce. Exigiría una escritura distinta de `Disk.write` para nada medible.
+- **Tipos con nombre para el fichero del registro y el comentario.** Son un template literal y un
+  `JSON.stringify`: métodos estáticos del adaptador que los escribe.
+- **Sembrar `status:in-review` desde el backend** para que `--release` no muera en un repo sin groom. La
+  label la escribe el plugin; sembrarla aquí sería decidir por él (§2.4).
 
 ---
 
 ## 5. Tests
 
-Los tres tipos que `backend/conventions/testing.md` manda, y ninguno más:
+Los tipos que `backend/conventions/testing.md` manda, y ninguno más:
 
-- **Casos de uso, outside-in**: `StartPlan` pide `claim` antes de `prepare` y `requeue` cuando `prepare` o
-  `launch` fallan; cuando `claim` falla, `prepare` nunca fue preguntado. `ImplementPlan` pide `mint`,
-  luego `answerGo` con el `PlanGo` que `mint` devolvió, luego `resume`; cuando `answerGo` falla, `resume`
+- **Casos de uso, outside-in**: `StartPlan` pide `claim` antes de `prepare`, y `requeue` cuando `prepare`
+  o `launch` fallan; cuando `claim` falla, `prepare` nunca fue preguntado. `ImplementPlan` pide `mint`,
+  luego `answerGo` con el nonce que `mint` devolvió, luego `resume`; cuando `answerGo` falla, `resume`
   nunca fue preguntado.
 - **Adaptadores, cortando antes de la herramienta**: el argv literal de `claim`, `requeue` y `answerGo`;
-  la ruta y el texto literal que escribe `DiskGoRegistry` con un `random` fijado.
-- **Frontera con el plugin**: el texto que escribe `GoCommitmentFile` se lee con `readGoCommitment` y el
-  comentario de `GoComment` se comprueba con `matchesGo` contra ese `commitment`. Un segundo caso: un
-  nonce distinto **no** encaja.
+  la siembra de `status:in-progress` cuando `gh` dice que falta; la ruta y el texto literal que escribe
+  `DiskGoRegistry` con un `random` fijado.
+- **Frontera con el plugin**: el texto que escribe `DiskGoRegistry` se lee con `readGoCommitment` y el
+  comentario de `answerGo` se comprueba con `matchesGo` contra ese `commitment`.
 - **Controladores**: cada causa nueva proyecta al 503 con el cuerpo literal; el catálogo de
   `declaredFailures()` cubre el de `exceptions.js`.
 - **Entrypoint**: sin cambios. El camino feliz real ya cubre el montaje; lo nuevo no añade wiring que un
@@ -208,4 +233,5 @@ entregado, la rama sin `STATE.md` y los recorridos e2e —que aquí pasan vacío
 `## E2E`.
 
 Fuera de este slice: la cosecha (merge, worktree, rama, pestaña); el front; el `STATE.md` de la
-coordinadora; comprobar que la pestaña siga viva; y qué hacer con el vigilante del merge (§2.4).
+coordinadora; comprobar que la pestaña siga viva; la siembra de `status:in-review` en el plugin (§2.4); y
+qué hacer con el vigilante del merge (§2.5).
