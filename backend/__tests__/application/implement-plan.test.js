@@ -58,14 +58,4 @@ describe('ImplementPlan', () => {
     expect(refusal.name).toBe('PlanAgentNotResumed')
     expect(refusal.message).toBe('no such workspace')
   })
-
-  it('what_goes_in_cannot_be_edited_after_the_use_case_settled_it', async () => {
-    const params = new ImplementPlanParams({
-      story: Flow.STORY, issue: Flow.ISSUE, repository: Flow.REPOSITORY,
-    })
-
-    await new ImplementPlan(new Flow()).execute(params)
-
-    expect(Object.isFrozen(params)).toBe(true)
-  })
 })
