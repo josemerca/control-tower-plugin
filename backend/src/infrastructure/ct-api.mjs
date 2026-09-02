@@ -7,8 +7,7 @@ import { ToolRunner } from './tool-runner.js'
 import { Gh } from './gh.js'
 import { SystemClock } from './system-clock.js'
 import { ExternalTool } from './external-tool.js'
-import { RetryPolicy } from '../domain/policies/retry-policy.js'
-import { RetryBudget } from '../domain/value-objects/retry-budget.js'
+import { RetryPolicy, RetryBudget } from '../domain/policies/retry-policy.js'
 import { Invocation, InvocationOutcome } from './invocation.js'
 
 class CtApi {

@@ -3,7 +3,7 @@ import { CmuxPlanAgents } from '../../src/infrastructure/cmux-plan-agents.js'
 import { PlanAgentNotLaunched, PlanAgentNotNamed, PlanAgentFailure } from '../../src/domain/exceptions.js'
 import { TicketKey } from '../../src/domain/value-objects/ticket-key.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
-import { ProcessOutput } from '../../src/infrastructure/process-output.js'
+import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
 
 class CmuxDouble {
   static CWD = '/repo/checkout'

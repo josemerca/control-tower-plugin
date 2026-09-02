@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { PlanRequest, PlanRequestOutcome } from '../../src/infrastructure/plan-request.js'
 import { PlanRefusal, PlanCollapse } from '../../src/infrastructure/plan-refusal.js'
-import { Refusal } from '../../src/infrastructure/refusal.js'
+import { Refusal } from '../../src/infrastructure/plan-refusal.js'
 import * as exceptions from '../../src/domain/exceptions.js'
 
 describe('PlanRefusal', () => {
