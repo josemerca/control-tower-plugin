@@ -1,3 +1,4 @@
+import { Ticket } from '../domain/value-objects/ticket.js'
 import { TicketNotUnderstood } from '../domain/exceptions.js'
 
 export class AcliWorkItem {
@@ -6,18 +7,13 @@ export class AcliWorkItem {
   static #BREAKING_NODES = ['paragraph', 'heading', 'listItem']
   static #BLANK_RUN = /\n{3,}/g
 
-  constructor({ summary, description }) {
-    this.summary = summary
-    this.description = description
-    Object.freeze(this)
-  }
-
-  static from(printed, key) {
+  static ticketFrom(printed, key) {
     const fields = AcliWorkItem.#fieldsIn(printed, key)
 
-    return new AcliWorkItem({
+    return new Ticket({
+      key,
       summary: AcliWorkItem.#summaryIn(fields, key),
-      description: AcliWorkItem.plainText(fields.description),
+      description: AcliWorkItem.#plainText(fields.description),
     })
   }
 
@@ -48,7 +44,7 @@ export class AcliWorkItem {
     return summary.trim()
   }
 
-  static plainText(description) {
+  static #plainText(description) {
     if (typeof description === 'string') return description.trim()
     if (description === null || typeof description !== 'object') return ''
     const parts = []

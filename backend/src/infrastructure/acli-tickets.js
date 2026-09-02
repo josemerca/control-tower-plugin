@@ -1,5 +1,4 @@
 import { Tickets } from '../domain/ports/tickets.js'
-import { Ticket } from '../domain/value-objects/ticket.js'
 import { TicketNotRead } from '../domain/exceptions.js'
 import { AcliWorkItem } from './acli-work-item.js'
 
@@ -24,9 +23,7 @@ export class AcliTickets extends Tickets {
         `${AcliTickets.BIN} ${argv[0]} failed: ${AcliTickets.#reasonFor(output.stderr.trim())}`
       )
     }
-    const item = AcliWorkItem.from(output.stdout, key)
-
-    return new Ticket({ key, summary: item.summary, description: item.description })
+    return AcliWorkItem.ticketFrom(output.stdout, key)
   }
 
   static #reasonFor(message) {
