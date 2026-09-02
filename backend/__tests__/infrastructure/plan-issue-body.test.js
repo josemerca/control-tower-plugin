@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { PlanIssueBody } from '../../src/infrastructure/plan-issue-body.js'
+import { PlanIssueBody } from '../../src/infrastructure/gh-plan-issues.js'
 import { UserStory } from '../../src/domain/value-objects/user-story.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { mapGhIssue, extractAc, extractOrder } from '../../../plugin/scripts/gh-issue-map.js'

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { GhPlanIssues } from '../../src/infrastructure/gh-plan-issues.js'
 import { Gh } from '../../src/infrastructure/gh.js'
-import { PlanIssueBody } from '../../src/infrastructure/plan-issue-body.js'
+import { PlanIssueBody } from '../../src/infrastructure/gh-plan-issues.js'
 import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
 import { RetryPolicy, RetryBudget } from '../../src/domain/policies/retry-policy.js'
 import { Clock } from '../../src/domain/ports/clock.js'
