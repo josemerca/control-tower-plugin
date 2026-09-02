@@ -6,7 +6,8 @@ import { StartPlan } from '../application/actions/start-plan.js'
 import { ToolRunner } from './tool-runner.js'
 import { GhCall } from './gh-call.js'
 import { SystemClock } from './system-clock.js'
-import { GhBudget, GhRetryPolicy } from '../domain/gh-retry-policy.js'
+import { GhRetryPolicy } from '../domain/policies/gh-retry-policy.js'
+import { GhBudget } from '../domain/value-objects/gh-budget.js'
 import { Invocation, InvocationOutcome } from './invocation.js'
 
 class CtApi {

@@ -6,7 +6,7 @@ import { StartPlanResult } from '../../src/application/actions/start-plan.js'
 import {
   PlanSessionNotStarted, TicketNotRead, PlanIssueNotCreated, PlanIssueNotNamed,
 } from '../../src/domain/exceptions.js'
-import { PlanIssue } from '../../src/domain/plan-issue.js'
+import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 
 class StartPlanSpy {
   static SESSION = 'workspace:4'

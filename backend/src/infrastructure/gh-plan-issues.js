@@ -1,5 +1,5 @@
-import { PlanIssues } from '../domain/plan-issues.js'
-import { PlanIssue } from '../domain/plan-issue.js'
+import { PlanIssues } from '../domain/ports/plan-issues.js'
+import { PlanIssue } from '../domain/value-objects/plan-issue.js'
 import { PlanIssueNotCreated, PlanIssueNotNamed } from '../domain/exceptions.js'
 import { PlanIssueBody } from './plan-issue-body.js'
 import { GhFailure } from './gh-failure.js'

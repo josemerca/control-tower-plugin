@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import { AcliTickets } from '../../src/infrastructure/acli-tickets.js'
-import { TicketKey } from '../../src/domain/ticket-key.js'
+import { TicketKey } from '../../src/domain/value-objects/ticket-key.js'
 import { TicketNotRead, TicketNotUnderstood, TicketFailure } from '../../src/domain/exceptions.js'
-import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
+import { ProcessOutput } from '../../src/infrastructure/process-output.js'
 
 class AcliDouble {
   constructor(printed) {

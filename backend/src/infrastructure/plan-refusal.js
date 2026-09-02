@@ -1,6 +1,6 @@
 import { PlanRequestOutcome } from './plan-request.js'
-import { TicketKey } from '../domain/ticket-key.js'
-import { RepositoryName } from '../domain/repository-name.js'
+import { TicketKey } from '../domain/value-objects/ticket-key.js'
+import { RepositoryName } from '../domain/value-objects/repository-name.js'
 import { PlanRequest } from './plan-request.js'
 import {
   TicketNotRead, TicketNotUnderstood, PlanIssueNotCreated, PlanIssueNotNamed,

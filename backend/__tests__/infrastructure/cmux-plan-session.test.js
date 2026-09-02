@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest'
 import { CmuxPlanSession } from '../../src/infrastructure/cmux-plan-session.js'
 import { PlanSessionNotStarted, PlanSessionNotNamed, PlanSessionFailure } from '../../src/domain/exceptions.js'
-import { TicketKey } from '../../src/domain/ticket-key.js'
-import { PlanIssue } from '../../src/domain/plan-issue.js'
-import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
+import { TicketKey } from '../../src/domain/value-objects/ticket-key.js'
+import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
+import { ProcessOutput } from '../../src/infrastructure/process-output.js'
 
 class CmuxDouble {
   static CWD = '/repo/checkout'

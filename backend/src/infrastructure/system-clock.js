@@ -1,5 +1,5 @@
 import { setTimeout as after } from 'node:timers/promises'
-import { Clock } from '../domain/clock.js'
+import { Clock } from '../domain/ports/clock.js'
 
 export class SystemClock extends Clock {
   static #A_SECOND_IN_MS = 1000

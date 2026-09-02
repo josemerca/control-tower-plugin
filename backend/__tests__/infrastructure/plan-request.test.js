@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { PlanRequest, PlanRequestOutcome } from '../../src/infrastructure/plan-request.js'
-import { TicketKey } from '../../src/domain/ticket-key.js'
-import { RepositoryName } from '../../src/domain/repository-name.js'
+import { TicketKey } from '../../src/domain/value-objects/ticket-key.js'
+import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 
 describe('PlanRequest', () => {
   it('every_outcome_is_distinct_so_no_two_refusals_answered_differently_collapse_into_one', () => {

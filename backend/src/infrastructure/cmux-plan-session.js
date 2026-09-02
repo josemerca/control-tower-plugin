@@ -1,4 +1,4 @@
-import { PlanSession } from '../domain/plan-session.js'
+import { PlanSession } from '../domain/ports/plan-session.js'
 import { PlanSessionNotStarted, PlanSessionNotNamed } from '../domain/exceptions.js'
 
 export class CmuxPlanSession extends PlanSession {

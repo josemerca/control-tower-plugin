@@ -1,5 +1,5 @@
-import { Tickets } from '../domain/tickets.js'
-import { Ticket } from '../domain/ticket.js'
+import { Tickets } from '../domain/ports/tickets.js'
+import { Ticket } from '../domain/value-objects/ticket.js'
 import { TicketNotRead, TicketNotUnderstood } from '../domain/exceptions.js'
 
 export class AcliTickets extends Tickets {
