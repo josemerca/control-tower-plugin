@@ -145,6 +145,18 @@ describe('ImplementPlanRoute', () => {
     expect(RunningApi.spy.asked).toEqual([])
   })
 
+  it('a_body_over_the_cap_is_refused_with_the_same_answer_start_plan_gives_and_never_reaches_the_use_case', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.post(
+      port, `{"id":"${'A'.repeat(9000)}","repo":"jjponz/repo-pulse","issue":33}`
+    )
+
+    expect(response.status).toBe(413)
+    expect(await response.text()).toBe('{"error":"body must not exceed 8192 bytes"}')
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
   it('a_tool_that_refuses_to_write_in_the_tab_answers_that_trying_again_may_work', async () => {
     const port = await RunningApi.listening(
       ImplementPlanSpy.failingWith(new PlanAgentNotResumed('cmux send failed: no such workspace'))

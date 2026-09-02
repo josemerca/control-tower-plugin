@@ -32,10 +32,6 @@ describe('PlanRefusal', () => {
       .toThrow(/client or server status/)
     expect(() => new Refusal({ status: 400, error: '  ' })).toThrow(/says why/)
   })
-
-  it('a_body_over_the_cap_is_answered_with_the_status_that_names_the_size_and_not_a_plain_400', () => {
-    expect(PlanRefusal.of(PlanRequest.tooLarge()).status).toBe(413)
-  })
 })
 
 describe('PlanCollapse', () => {
