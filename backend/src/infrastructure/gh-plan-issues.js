@@ -19,6 +19,7 @@ import { Gh } from './gh.js'
 
 export class GhPlanIssues extends PlanIssues {
   static IN_PROGRESS_LABEL = 'status:in-progress'
+  static IN_REVIEW_LABEL = 'status:in-review'
   static GO_TOKEN = '-OK'
   static #REF = /\/issues\/(\d+)\s*$/
 
@@ -68,6 +69,7 @@ export class GhPlanIssues extends PlanIssues {
       argv: GhPlanIssues.argvFor({ story, repository }),
       ours: PlanIssueBody.labels(story),
       repository,
+      safeToRepeat: false,
     })
     if (outcome.failed) {
       throw new PlanIssueNotCreated(`${Gh.BIN} issue create failed: ${outcome.stderr.trim()}`)
@@ -84,7 +86,8 @@ export class GhPlanIssues extends PlanIssues {
   }
 
   async claim({ issue, repository }) {
-    const outcome = await this.#swapping({
+    await this.#sowForTheRelease(repository)
+    const { outcome } = await this.#swapping({
       issue, repository,
       adding: GhPlanIssues.IN_PROGRESS_LABEL,
       removing: PlanIssueBody.READY_LABEL,
@@ -95,12 +98,12 @@ export class GhPlanIssues extends PlanIssues {
   }
 
   async requeue({ issue, repository }) {
-    const outcome = await this.#swapping({
+    const { argv, outcome } = await this.#swapping({
       issue, repository,
       adding: PlanIssueBody.READY_LABEL,
       removing: GhPlanIssues.IN_PROGRESS_LABEL,
     })
-    if (outcome.failed) this.#warn({ issue, repository, said: outcome.stderr.trim() })
+    if (outcome.failed) this.#warn({ issue, argv, said: outcome.stderr.trim() })
   }
 
   async answerGo({ issueNumber, repository, nonce }) {
@@ -112,35 +115,39 @@ export class GhPlanIssues extends PlanIssues {
     }
   }
 
-  async #swapping({ issue, repository, adding, removing }) {
-    return this.#sowing({
-      argv: GhPlanIssues.statusArgvFor({ issue, repository, adding, removing }),
-      ours: [adding],
-      repository,
-    })
+  async #sowForTheRelease(repository) {
+    const argv = GhPlanIssues.labelArgvFor(repository, GhPlanIssues.IN_REVIEW_LABEL)
+    const outcome = await this.gh.run(argv, { safeToRepeat: true })
+    if (outcome.failed) {
+      throw new PlanIssueNotClaimed(
+        `${GhPlanIssues.IN_REVIEW_LABEL} could not be sown in ${repository.text}, and dispatch-check --release cannot create it when the agent delivers: ${outcome.stderr.trim()}`
+      )
+    }
   }
 
-  #warn({ issue, repository, said }) {
-    const argv = GhPlanIssues.statusArgvFor({
-      issue, repository,
-      adding: PlanIssueBody.READY_LABEL,
-      removing: GhPlanIssues.IN_PROGRESS_LABEL,
-    })
+  async #swapping({ issue, repository, adding, removing }) {
+    const argv = GhPlanIssues.statusArgvFor({ issue, repository, adding, removing })
+    const outcome = await this.#sowing({ argv, ours: [adding], repository, safeToRepeat: true })
+
+    return { argv, outcome }
+  }
+
+  #warn({ issue, argv, said }) {
     this.stderr(
       `gh plan issues: ${issue} stays claimed because it could not be put back in the queue: ${said}. Run it yourself: ${Gh.BIN} ${argv.join(' ')}\n`
     )
   }
 
-  async #sowing({ argv, ours, repository }) {
+  async #sowing({ argv, ours, repository, safeToRepeat }) {
     const sown = new Set()
-    let outcome = await this.gh.run(argv, { safeToRepeat: false })
+    let outcome = await this.gh.run(argv, { safeToRepeat })
     while (outcome.failed) {
       const missing = Gh.labelMissingIn(outcome.stderr)
       if (missing === null || !ours.includes(missing) || sown.has(missing)) break
 
       sown.add(missing)
       await this.gh.run(GhPlanIssues.labelArgvFor(repository, missing), { safeToRepeat: true })
-      outcome = await this.gh.run(argv, { safeToRepeat: false })
+      outcome = await this.gh.run(argv, { safeToRepeat })
     }
 
     return outcome

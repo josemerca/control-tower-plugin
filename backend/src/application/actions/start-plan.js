@@ -69,8 +69,6 @@ export class StartPlan {
   }
 
   async #release(params, issue) {
-    try {
-      await this.planIssues.requeue({ issue, repository: params.repository })
-    } catch {}
+    await this.planIssues.requeue({ issue, repository: params.repository })
   }
 }

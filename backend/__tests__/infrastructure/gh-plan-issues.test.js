@@ -47,6 +47,12 @@ class GhDouble {
     return new GhDouble(Array(times).fill(new ProcessOutput({ code: 1, stdout: '', stderr: said })))
   }
 
+  static #DONE = new ProcessOutput({ code: 0, stdout: '', stderr: '' })
+
+  static claiming(...answers) {
+    return new GhDouble([GhDouble.#DONE, ...(answers.length === 0 ? [GhDouble.#DONE] : answers)])
+  }
+
   static story({ summary = 'El buscador acepta acentos', description = 'como comprador quiero' } = {}) {
     return new UserStory({ key: new UserStoryKey('MO_SHOP-42'), summary, description })
   }
@@ -309,43 +315,45 @@ describe('GhPlanIssues', () => {
 
 describe('GhPlanIssues moving the status label of a claim', () => {
   it('claiming_an_issue_sends_the_label_swap_gh_understands', async () => {
-    const gh = GhDouble.created('')
+    const gh = GhDouble.claiming()
 
     await gh.claimFor()
 
-    expect(gh.calls).toEqual([[
+    expect(gh.calls[1]).toEqual([
       'issue', 'edit', '7',
       '--repo', 'josemerca/ct-loop-sandbox',
       '--add-label', 'status:in-progress',
       '--remove-label', 'status:ready',
-    ]])
+    ])
   })
 
   it('a_status_label_the_repo_does_not_have_is_sown_and_the_claim_retried', async () => {
-    const gh = new GhDouble([
+    const gh = GhDouble.claiming(
       new ProcessOutput({ code: 1, stdout: '', stderr: "could not add label: 'status:in-progress' not found" }),
       new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
       new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
-    ])
+    )
 
     await gh.claimFor()
 
     expect(gh.commands).toEqual([
-      'issue edit 7', 'label create status:in-progress', 'issue edit 7',
+      'label create status:in-review', 'issue edit 7', 'label create status:in-progress', 'issue edit 7',
     ])
-    expect(gh.calls[1]).toEqual([
+    expect(gh.calls[2]).toEqual([
       'label', 'create', 'status:in-progress', '--repo', 'josemerca/ct-loop-sandbox', '--force',
     ])
   })
 
   it('a_label_that_is_not_ours_is_not_sown_and_the_claim_fails_with_what_gh_said', async () => {
-    const gh = GhDouble.refusing("could not add label: 'team:shop' not found")
+    const gh = GhDouble.claiming(
+      new ProcessOutput({ code: 1, stdout: '', stderr: "could not add label: 'team:shop' not found" }),
+    )
 
     const refusal = await gh.claimRefusalFor()
 
     expect(refusal).toBeInstanceOf(PlanIssueNotClaimed)
     expect(refusal.message).toBe("gh issue edit failed: could not add label: 'team:shop' not found")
-    expect(gh.commands).toEqual(['issue edit 7'])
+    expect(gh.commands).toEqual(['label create status:in-review', 'issue edit 7'])
   })
 
   it('requeueing_an_issue_sends_the_swap_the_other_way_round', async () => {
@@ -359,6 +367,51 @@ describe('GhPlanIssues moving the status label of a claim', () => {
       '--add-label', 'status:ready',
       '--remove-label', 'status:in-progress',
     ]])
+  })
+
+  it('claiming_first_sows_the_label_the_release_will_write_because_no_call_of_ours_can_sow_it_on_demand', async () => {
+    const gh = GhDouble.claiming()
+
+    await gh.claimFor()
+
+    expect(gh.calls[0]).toEqual([
+      'label', 'create', 'status:in-review', '--repo', 'josemerca/ct-loop-sandbox', '--force',
+    ])
+    expect(gh.commands).toEqual(['label create status:in-review', 'issue edit 7'])
+  })
+
+  it('a_release_label_that_could_not_be_sown_stops_the_claim_instead_of_dying_at_the_last_gate', async () => {
+    const gh = GhDouble.refusing('gh: not authenticated')
+
+    const refusal = await gh.claimRefusalFor()
+
+    expect(refusal).toBeInstanceOf(PlanIssueNotClaimed)
+    expect(refusal.message).toContain('status:in-review')
+    expect(gh.commands).toEqual(['label create status:in-review'])
+  })
+
+  it('a_blip_while_claiming_is_retried_because_moving_a_label_twice_leaves_the_same_label', async () => {
+    const gh = GhDouble.claiming(
+      new ProcessOutput({ code: 1, stdout: '', stderr: 'error connecting to api.github.com' }),
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+    )
+
+    await gh.claimFor()
+
+    expect(gh.commands).toEqual(['label create status:in-review', 'issue edit 7', 'issue edit 7'])
+    expect(gh.clock.slept).toEqual([2])
+  })
+
+  it('a_blip_while_requeueing_is_retried_because_the_compensation_is_the_last_chance_to_free_the_issue', async () => {
+    const gh = new GhDouble([
+      new ProcessOutput({ code: 1, stdout: '', stderr: 'error connecting to api.github.com' }),
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+    ])
+
+    await gh.requeueFor()
+
+    expect(gh.calls).toHaveLength(2)
+    expect(gh.warnings).toEqual([])
   })
 
   it('a_requeue_gh_refused_names_the_command_a_human_can_run_instead_of_throwing', async () => {

@@ -2,16 +2,19 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { readGoCommitment } from '../../../plugin/scripts/go-registry.js'
+import { readGoCommitment, goPath } from '../../../plugin/scripts/go-registry.js'
 import { matchesGo } from '../../../plugin/scripts/go-response.js'
+import { controlTowerDir } from '../../../plugin/scripts/run-metrics.js'
+import { LOOP_STATUS_LABELS } from '../../../plugin/scripts/groom.js'
 import { DiskGoRegistry } from '../../src/infrastructure/disk-go-registry.js'
-import { GhPlanIssues } from '../../src/infrastructure/gh-plan-issues.js'
+import { GhPlanIssues, PlanIssueBody } from '../../src/infrastructure/gh-plan-issues.js'
+import { Invocation } from '../../src/infrastructure/invocation.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 
 class Both {
   static ISSUE = 33
   static REPOSITORY = new RepositoryName('jjponz/repo-pulse')
-  static BYTES = Buffer.from([127, 58, 145, 194])
+  static FILL = 127
 
   constructor(configDir) {
     this.configDir = configDir
@@ -27,7 +30,7 @@ class Both {
 
   async mint() {
     const registry = new DiskGoRegistry({
-      random: () => Both.BYTES,
+      random: (bytes) => Buffer.alloc(bytes, Both.FILL),
       write: async (path, text) => {
         await mkdir(dirname(path), { recursive: true })
         await writeFile(path, text)
@@ -71,5 +74,41 @@ describe('the two halves of the go the plugin reads', () => {
     const commented = GhPlanIssues.goBodyFor(nonce)
 
     expect(matchesGo(commented, both.readBack().commitment)).toBe(true)
+  })
+})
+
+describe('the directory both halves write the go into', () => {
+  const HOME = '/home/someone'
+
+  it('the_state_root_this_backend_resolves_is_the_one_the_plugin_computes_for_the_same_environment', () => {
+    const asked = [{}, { [Invocation.CONFIG_VARIABLE]: '/elsewhere/cfg' }]
+
+    const ours = asked.map((environment) => Invocation.stateRootIn(environment, HOME))
+    const theirs = asked.map((environment) => controlTowerDir({
+      configDir: environment[Invocation.CONFIG_VARIABLE] || null, home: HOME,
+    }))
+
+    expect(ours).toEqual(theirs)
+  })
+
+  it('the_whole_path_of_the_registry_is_the_one_the_release_gate_opens', () => {
+    const environment = { [Invocation.CONFIG_VARIABLE]: '/elsewhere/cfg' }
+
+    const ours = DiskGoRegistry.pathFor({
+      issueNumber: Both.ISSUE,
+      repository: Both.REPOSITORY,
+      root: Invocation.stateRootIn(environment, HOME),
+    })
+
+    expect(ours).toBe(goPath({
+      repo: Both.REPOSITORY.text, issue: Both.ISSUE, configDir: '/elsewhere/cfg', home: HOME,
+    }))
+  })
+})
+
+describe('the status labels this backend writes and the plugin reads', () => {
+  it('both_ends_of_the_claim_are_labels_the_loop_declares_instead_of_names_invented_here', () => {
+    expect(LOOP_STATUS_LABELS).toContain(GhPlanIssues.IN_PROGRESS_LABEL)
+    expect(LOOP_STATUS_LABELS).toContain(PlanIssueBody.READY_LABEL)
   })
 })

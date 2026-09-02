@@ -94,8 +94,6 @@ class CtApi {
   static #SECONDS_BETWEEN_PROBES = 1
   static #SECONDS_BETWEEN_READS = 2
   static #LAUNCH_DIRECTORY = 'ct-plan'
-  static #STATE_DIRECTORY = 'control-tower'
-  static #DEFAULT_CONFIG_DIRECTORY = '.claude'
 
   static #refuseUsage(reason) {
     process.stderr.write(`${reason}\n${CtApi.#USAGE}\n`)
@@ -127,13 +125,6 @@ class CtApi {
 
   static #waiting(seconds) {
     return after(seconds * 1000)
-  }
-
-  static #stateRoot() {
-    const configDir = process.env.CLAUDE_CONFIG_DIR
-      || join(homedir(), CtApi.#DEFAULT_CONFIG_DIRECTORY)
-
-    return join(configDir, CtApi.#STATE_DIRECTORY)
   }
 
   static #startPlan(git, planAgents, planIssues) {
@@ -168,7 +159,7 @@ class CtApi {
   }
 
   static async run(argv, environment) {
-    const asked = Invocation.from(argv, environment)
+    const asked = Invocation.from(argv, environment, homedir())
     if (asked.outcome !== InvocationOutcome.READY) {
       CtApi.#refuseUsage(asked.reason)
     }
@@ -190,7 +181,10 @@ class CtApi {
         ctStep: PluginTree.ctStep(),
       }),
     })
-    const planIssues = new GhPlanIssues({ gh: CtApi.#talkingTo(Gh.BIN, Gh) })
+    const planIssues = new GhPlanIssues({
+      gh: CtApi.#talkingTo(Gh.BIN, Gh),
+      stderr: (line) => process.stderr.write(line),
+    })
     const server = new ApiServer({
       port: asked.port,
       startPlan: CtApi.#startPlan(git, planAgents, planIssues),
@@ -198,7 +192,7 @@ class CtApi {
         goRegistry: new DiskGoRegistry({
           random: randomBytes,
           write: Disk.write,
-          root: CtApi.#stateRoot(),
+          root: asked.stateRoot,
         }),
         planIssues,
         planAgents,

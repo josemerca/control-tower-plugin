@@ -6,8 +6,8 @@ import { GoNotRecorded } from '../../src/domain/exceptions.js'
 
 class DiskDouble {
   static ROOT = '/home/someone/.claude/control-tower'
-  static BYTES = Buffer.from([1, 2, 3, 4])
-  static NONCE = '01020304'
+  static FILL = 7
+  static NONCE = '07070707'
 
   constructor(failure = null) {
     this.failure = failure
@@ -20,7 +20,7 @@ class DiskDouble {
 
   registry({ root = DiskDouble.ROOT } = {}) {
     return new DiskGoRegistry({
-      random: () => DiskDouble.BYTES,
+      random: (bytes) => Buffer.alloc(bytes, DiskDouble.FILL),
       write: async (path, text) => {
         this.written.push({ path, text })
         if (this.failure !== null) throw this.failure
@@ -69,16 +69,23 @@ describe('DiskGoRegistry', () => {
     expect(disk.written[0].text).not.toContain(DiskDouble.NONCE)
   })
 
+  it('the_nonce_is_as_long_as_the_bytes_the_registry_asked_for_so_the_go_keeps_its_entropy', async () => {
+    const disk = new DiskDouble()
+
+    const nonce = await disk.mintFor()
+
+    expect(nonce).toHaveLength(DiskGoRegistry.NONCE_BYTES * 2)
+  })
+
   it('what_it_writes_names_the_repository_and_the_issue_the_go_belongs_to', async () => {
     const disk = new DiskDouble()
 
     await disk.mintFor()
 
-    expect(JSON.parse(disk.written[0].text)).toEqual({
-      repo: 'jjponz/repo-pulse',
-      issue: 33,
-      commitment: createHash('sha256').update(DiskDouble.NONCE, 'utf8').digest('hex'),
-    })
+    const digest = createHash('sha256').update(DiskDouble.NONCE, 'utf8').digest('hex')
+    expect(disk.written[0].text).toBe(
+      `{\n  "repo": "jjponz/repo-pulse",\n  "issue": 33,\n  "commitment": "${digest}"\n}\n`
+    )
   })
 
   it('a_registry_the_disk_refused_is_a_go_that_was_never_recorded', async () => {

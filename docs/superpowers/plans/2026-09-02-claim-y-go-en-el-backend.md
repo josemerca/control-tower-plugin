@@ -59,7 +59,7 @@ the merge watcher that `--release` launches.
 | A value object for the nonce | no — the adapter composes it from random bytes; a string suffices |
 | File permissions on the registry | none set; no reader checks them and the file holds a hash |
 | `status:in-progress` missing from the repo | `claim` sows it, reusing the loop `open` already has |
-| `status:in-review` missing from the repo | out of scope: the plugin writes that label, so sowing it is the plugin's decision |
+| `status:in-review` missing from the repo | `claim` sows it before claiming, and refuses to claim if it cannot: this slice is what makes the errand order `--release`, so the precondition is ours |
 
 ## 3. Reference patterns
 
@@ -97,6 +97,7 @@ solve today's problem. Do not guard values this code composes itself.
 | `backend/src/infrastructure/disk-go-registry.js` | create | `ct-api.mjs` | Contract (T4) |
 | `backend/src/infrastructure/plan-agent-brief.js` | modify | `CmuxPlanAgents` | Current state (T6) |
 | `backend/src/infrastructure/ct-api.mjs` | modify | — | Call site (T7) |
+| `backend/src/infrastructure/invocation.js` | modify | `ct-api.mjs`, the contract test | Contract (T8) |
 
 ## 5. Interfaces
 
@@ -271,17 +272,16 @@ npx vitest run --exclude '**/*-real-process.test.js'   # exit 0: nothing else re
 - Modify: `backend/__tests__/application/implement-plan.test.js`
 - Modify: `backend/__tests__/infrastructure/plan-refusal.test.js`
 
-Current state (backend/src/application/actions/implement-plan.js, lines 11-19):
+Current state (backend/src/application/actions/implement-plan.js, lines 9-17):
 
 ```javascript
+export class ImplementPlan {
   constructor({ planAgents }) {
     this.planAgents = planAgents
   }
 
   async execute(params) {
-    await this.planAgents.resume({
-      story: params.story, issue: params.issue, repository: params.repository,
-    })
+    await this.planAgents.resume({ agent: params.agent, issue: params.issue })
   }
 ```
 
@@ -317,8 +317,9 @@ asserting the order and that `planIssues.answered` carries the nonce `mint` retu
 each asserting the later ports were never asked.
 
 **Tests:** added: the three above in `implement-plan.test.js`, plus `GoRegistryDouble` and
-`PlanIssuesDouble` with the scenarios `refusing(said)`. Modified: `plan-refusal.test.js` asserts
-both new causes project to 503 and that `GoFailure` itself raises `no status declared`.
+`PlanIssuesDouble` with the scenarios `refusing(said)`. Modified: `implement-plan-route.test.js` asserts both new
+causes project to 503 with their literal body and that `GoFailure` itself raises
+`no status declared`; `plan-refusal.test.js` only adds `'GoFailure'` to its list of families.
 
 **Verification:** the use case suite and the exhaustiveness suite pass.
 
@@ -346,7 +347,9 @@ export class DiskGoRegistry extends GoRegistry {
   static nonceFrom(bytes)               // Buffer -> lowercase hexadecimal
   static commitmentOf(nonce)            // sha256 hexadecimal digest of the nonce
   static fileNameFor({ issueNumber, repository })
-    // `${repository.text.replace(/\//g, '__').replace(/[^A-Za-z0-9._-]/g, '_')}-${issueNumber}.json`
+    // `${repository.text.replace(/\//g, '__')}-${issueNumber}.json` — no character sanitiser:
+    // RepositoryName already restricts the shape, and guarding a value this code validated is
+    // exactly what §4.4 refuses to add
   static pathFor({ issueNumber, repository, root })
   static contentFor({ issueNumber, repository, commitment })
     // `${JSON.stringify({ repo, issue, commitment }, null, 2)}\n`
@@ -481,15 +484,18 @@ const planIssues = new GhPlanIssues({ gh: CtApi.#talkingTo(Gh.BIN, Gh) })
 // before: implementPlan: new ImplementPlan({ planAgents })
 // after:
 implementPlan: new ImplementPlan({
-  goRegistry: new DiskGoRegistry({ random: randomBytes, write: Disk.write, root: CtApi.#goRoot() }),
+  goRegistry: new DiskGoRegistry({ random: randomBytes, write: Disk.write, root: asked.stateRoot }),
   planIssues,
   planAgents,
 }),
 ```
 
-`CtApi.#goRoot()` resolves `join(process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), '.claude'),
-'control-tower')` — the same directory `dispatch-check` computes, which is why the plugin finds the
-file. The single `planIssues` instance is shared with `StartPlan`: one adapter per port.
+The root of that registry is **not** resolved here: it arrives already validated on
+`Invocation.stateRoot`, so the entrypoint only injects it. That is what lets a test compare it
+against the plugin's own `controlTowerDir` instead of trusting a literal nobody measures, and what
+turns an unresolvable home into a printed refusal rather than a stack trace before the port line.
+The single `planIssues` instance is shared with `StartPlan`: one adapter per port, and the
+entrypoint injects its `stderr` explicitly, as it already does for `GitWorkspace`.
 
 The README needs no change: its `backend/` row already names both endpoints, and neither the claim
 nor the go adds one.
@@ -507,6 +513,55 @@ entrypoint, and the yardstick accepts the two new modules.
 npx vitest run   # exit 0: the whole suite, real-process tests included
 npx vitest run __tests__/yardstick.test.js   # exit 0: English, no prose, every function on a type
 test "$(grep -c 'DiskGoRegistry' src/infrastructure/ct-api.mjs)" -eq 2
+```
+
+### Task 8 — La raíz del estado se valida en la invocación y se mide contra el plugin
+
+**Objective:** the directory the go is written into arrives validated on `Invocation`, so a test can
+compare it against the plugin's own resolution and an unresolvable home refuses instead of crashing.
+
+**Files:**
+- Modify: `backend/src/infrastructure/invocation.js`
+- Modify: `backend/src/infrastructure/ct-api.mjs`
+- Modify: `backend/__tests__/infrastructure/invocation.test.js`
+- Rename and extend: `backend/__tests__/infrastructure/go-contract.test.js` →
+  `backend/__tests__/infrastructure/plugin-contract.test.js`
+
+Contract (backend/src/infrastructure/invocation.js):
+
+```javascript
+static CONFIG_VARIABLE = 'CLAUDE_CONFIG_DIR'
+static STATE_DIRECTORY = 'control-tower'
+static DEFAULT_CONFIG_DIRECTORY = '.claude'
+static configuredIn(environment, home)   // the config dir asked for, or <home>/.claude
+static stateRootIn(environment, home)    // <configured>/control-tower, or null if not absolute
+static from(argv, environment, home)     // gains a third argument and `stateRoot` on the result
+// InvocationOutcome gains UNKNOWN_STATE_HOME
+```
+
+This exists because the entrypoint composed that path from three private literals nobody measured,
+and `plugin/conventions/decisions.md` requires the two halves of a cross-process contract be
+**compared by a test**. `backend/conventions/testing.md` names the precedent: logic that can be
+observed without a process moves out of the entrypoint until it can, *"which is why
+`invocation.js` exists"*.
+
+**TDD:** red first — `it('the_state_root_this_backend_resolves_is_the_one_the_plugin_computes_for_the_same_environment')`
+in the contract test, comparing `Invocation.stateRootIn` against the plugin's `controlTowerDir` for
+a bare environment and one naming `CLAUDE_CONFIG_DIR`; and
+`it('a_home_that_resolves_to_nothing_is_refused_by_name_instead_of_writing_the_go_where_nobody_reads')`
+asserting the outcome and the literal reason.
+
+**Tests:** added: the two above, plus the shape of the root with and without the variable, an empty
+variable falling back to the home, a non-absolute one refused, and a refused invocation carrying no
+root. Also `it('both_ends_of_the_claim_are_labels_the_loop_declares_instead_of_names_invented_here')`,
+which measures the other transcribed copy against `LOOP_STATUS_LABELS`.
+
+**Verification:** the two suites pass and an empty home no longer reaches a stack trace.
+
+```bash
+npx vitest run __tests__/infrastructure/invocation.test.js   # exit 0: the root and its refusal
+npx vitest run __tests__/infrastructure/plugin-contract.test.js   # exit 0: both halves compared
+test "$(HOME='' CT_API_PORT=0 node src/infrastructure/ct-api.mjs 2>&1 | grep -c 'could not be resolved')" -eq 1
 ```
 
 ## 8. Global verification

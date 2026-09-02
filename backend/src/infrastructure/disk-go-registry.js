@@ -20,7 +20,7 @@ export class DiskGoRegistry extends GoRegistry {
   }
 
   static nonceFrom(bytes) {
-    return Buffer.from(bytes).toString('hex').toLowerCase()
+    return Buffer.from(bytes).toString('hex')
   }
 
   static commitmentOf(nonce) {
@@ -28,9 +28,7 @@ export class DiskGoRegistry extends GoRegistry {
   }
 
   static fileNameFor({ issueNumber, repository }) {
-    const named = repository.text.replace(/\//g, '__').replace(/[^A-Za-z0-9._-]/g, '_')
-
-    return `${named}-${issueNumber}.json`
+    return `${repository.text.replace(/\//g, '__')}-${issueNumber}.json`
   }
 
   static pathFor({ issueNumber, repository, root }) {

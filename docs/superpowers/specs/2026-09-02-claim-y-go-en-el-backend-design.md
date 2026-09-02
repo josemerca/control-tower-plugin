@@ -66,7 +66,9 @@ El agente, al entregar, ejecuta `--release`: encuentra el hash, encuentra el com
 
 **Lo que esto no compra, dicho sin adorno.** El nonce en el plugin protege de que el agente se dé el go a sí
 mismo. Aquí quien acuña y quien contesta es el mismo programa, con la misma cuenta de `gh` que usa el
-agente. Se conserva lo que importa —el nonce nunca pasa por el contexto del agente— y no se construye un
+agente. Y lo que se conserva hay que decirlo con precisión: el nonce **no pasa por el contexto del agente
+antes del go**, que es lo que impide fabricarlo. Después del go sí es legible —está en un comentario del
+issue y el agente tiene `gh`—, y da igual: la puerta ya se abrió. No se construye un
 verificador independiente, que el plugin tampoco tiene
 (`docs/superpowers/specs/2026-08-31-fusion-con-app-companion-design.md`, §8.2). No se hace por
 seguridad: se hace para que el flujo de la app hable el mismo idioma que el plugin en GitHub.
@@ -93,11 +95,16 @@ label no existe en el repo**. `/ct-groom` siembra el vocabulario `status:` enter
 de la app no hay groom. `open` ya siembra sobre la marcha lo que `issue create` necesita; `claim` hace lo
 mismo con `status:in-progress`, con la misma vuelta, y sólo con labels nuestras.
 
-**Lo que queda fuera y se declara:** `--release` escribe `status:in-review` con el `setStatus` del plugin,
-que no siembra. En un repo que nunca pasó por `/ct-groom`, el agente moriría al liberar con «reintenta más
-tarde», consejo que no puede funcionar. La decisión de sembrar vive donde se escribe la label
-(`decisions.md`), así que el arreglo es del plugin, en su propio slice. Los dos repos de prueba tienen la
-label.
+**Y la que escribe el programa que invocamos también.** `--release` escribe `status:in-review` con el
+`setStatus` del plugin, que **no** siembra: en un repo que nunca pasó por `/ct-groom` el agente moriría al
+liberar con «reintenta más tarde», consejo que no puede funcionar. La primera versión de este diseño lo
+dejó fuera con el argumento de que la decisión de sembrar vive donde se escribe la label. Un juez
+adversarial lo tumbó, y con razón: **es este slice el que hace que el encargo ordene `--release`**, y quien
+crea una precondición la posee. Así que `claim` siembra `status:in-review` antes de reclamar, y si no puede,
+**no reclama** — el motivo nombra la label y dice que el release no podrá crearla. Cuesta una llamada
+idempotente por despacho y cierra el único agujero que dejaba morir el flujo en su última puerta.
+
+Lo que sigue fuera: sembrar desde dentro del plugin, que es otra decisión y otro slice.
 
 ### 2.5 El vigilante del merge se deja correr
 
@@ -188,8 +195,8 @@ constructor.
   para que el test fije el nonce, `write(path, text)` y la raíz del estado de Control Tower. Sus métodos
   estáticos componen el formato, como `argvFor` en los demás adaptadores:
   - nonce: cuatro bytes aleatorios en hexadecimal minúscula;
-  - ruta: `<raíz>/go/<owner>__<name>-<n>.json`, donde `/` del repo pasa a `__` y todo lo que no sea
-    `[A-Za-z0-9._-]` a `_`;
+  - ruta: `<raíz>/go/<owner>__<name>-<n>.json`, donde `/` del repo pasa a `__`; sin saneador de
+    caracteres, porque `RepositoryName` ya restringe la forma;
   - contenido: `JSON.stringify({ repo, issue, commitment }, null, 2)` más salto de línea;
   - `commitment`: sha256 hexadecimal del nonce.
 - **`gh-plan-issues.js`**: `claim` → `gh issue edit <n> --repo <r> --add-label status:in-progress

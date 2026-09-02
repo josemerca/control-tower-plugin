@@ -36,24 +36,20 @@ class UserStoriesDouble extends UserStories {
 class PlanIssuesDouble extends PlanIssues {
   static OPENED = new PlanIssue({ number: 7, url: 'https://github.com/owner/name/issues/7' })
 
-  constructor(answer = PlanIssuesDouble.OPENED, { claimFailure = null, requeueFailure = null } = {}) {
+  constructor(answer = PlanIssuesDouble.OPENED, { claimFailure = null } = {}) {
     super()
     this.answer = answer
     this.claimFailure = claimFailure
-    this.requeueFailure = requeueFailure
     this.asked = []
     this.claimed = []
     this.requeued = []
+    this.steps = []
   }
 
   static refusingToClaim(said) {
     return new PlanIssuesDouble(PlanIssuesDouble.OPENED, {
       claimFailure: new PlanIssueNotClaimed(said),
     })
-  }
-
-  static leakingOnRequeue(said) {
-    return new PlanIssuesDouble(PlanIssuesDouble.OPENED, { requeueFailure: new Error(said) })
   }
 
   async open({ story, repository }) {
@@ -69,7 +65,7 @@ class PlanIssuesDouble extends PlanIssues {
 
   async requeue({ issue, repository }) {
     this.requeued.push({ issue, repository })
-    if (this.requeueFailure !== null) throw this.requeueFailure
+    this.steps.push('requeue')
   }
 }
 
@@ -82,6 +78,7 @@ class WorkspaceDouble extends Workspace {
     this.undoFailure = undoFailure
     this.asked = []
     this.undone = []
+    this.steps = []
   }
 
   static refusing(said) {
@@ -100,6 +97,7 @@ class WorkspaceDouble extends Workspace {
 
   async undo(located) {
     this.undone.push(located)
+    this.steps.push('undo')
     if (this.undoFailure !== null) throw this.undoFailure
   }
 }
@@ -131,6 +129,9 @@ class Flow {
     this.planIssues = planIssues ?? new PlanIssuesDouble()
     this.workspace = workspace ?? new WorkspaceDouble()
     this.planAgents = planAgents ?? new PlanAgentsDouble()
+    this.steps = []
+    this.planIssues.steps = this.steps
+    this.workspace.steps = this.steps
   }
 
   async run(story = Flow.STORY) {
@@ -395,19 +396,7 @@ describe('StartPlan claims the issue so no second dispatcher takes it', () => {
     expect(flow.planIssues.requeued).toEqual([
       { issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY },
     ])
-  })
-
-  it('a_requeue_that_fails_does_not_replace_the_failure_the_caller_has_to_hear', async () => {
-    const flow = new Flow({
-      planIssues: PlanIssuesDouble.leakingOnRequeue('gh is not authenticated'),
-      workspace: WorkspaceDouble.refusing('branch is taken'),
-    })
-
-    const refusal = await flow.refusal()
-
-    expect(flow.planIssues.requeued).toHaveLength(1)
-    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
-    expect(refusal.message).toBe('branch is taken')
+    expect(flow.steps).toEqual(['undo', 'requeue'])
   })
 
   it('a_port_that_nobody_implemented_says_so_for_the_two_ends_of_the_claim_too', async () => {
