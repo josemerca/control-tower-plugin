@@ -17,7 +17,7 @@ export class CmuxPlanAgents extends PlanAgents {
   static #AGENT_SHAPE = /^[a-zA-Z0-9._\/-]+$/
   static #REF = /^OK\s+(workspace:\d+)\s*$/m
 
-  constructor({ run, write, read, remove, sleep, runsIn, policy }) {
+  constructor({ run, write, read, remove, sleep, runsIn, policy, brief }) {
     super()
     this.run = run
     this.write = write
@@ -26,6 +26,7 @@ export class CmuxPlanAgents extends PlanAgents {
     this.sleep = sleep
     this.runsIn = runsIn
     this.policy = policy
+    this.brief = brief
   }
 
   static nameFor(story) {
@@ -64,6 +65,7 @@ export class CmuxPlanAgents extends PlanAgents {
   }
 
   async launch(briefing) {
+    const errand = this.brief.errandFor({ issue: briefing.issue, repository: briefing.repository })
     const directory = `${this.runsIn}/${briefing.issue.number}`
     const launcherPath = `${directory}/${LAUNCHER_FILENAME}`
     const sentinelPath = `${directory}/${SENTINEL_FILENAME}`
@@ -71,7 +73,7 @@ export class CmuxPlanAgents extends PlanAgents {
     await this.remove(sentinelPath)
     await this.write(launcherPath, CmuxPlanAgents.scriptFor({
       sentinelPath,
-      errand: briefing.errand,
+      errand,
       bin: CmuxPlanAgents.AGENT,
       issue: briefing.issue.number,
       worktree: briefing.located.path,

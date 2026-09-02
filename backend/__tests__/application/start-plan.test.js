@@ -96,23 +96,15 @@ class PlanAgentsDouble extends PlanAgents {
   }
 }
 
-class BriefDouble {
-  static errandFor({ issue, repository }) {
-    return `escribe el plan de #${issue.number} en ${repository.text}`
-  }
-}
-
 class Flow {
   static STORY = new UserStoryKey('MO_SHOP-42')
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
-  static ERRAND = 'escribe el plan de #7 en josemerca/ct-loop-sandbox'
 
   constructor({ userStories, planIssues, workspace, planAgents } = {}) {
     this.userStories = userStories ?? UserStoriesDouble.reading('the summary of the story')
     this.planIssues = planIssues ?? new PlanIssuesDouble()
     this.workspace = workspace ?? new WorkspaceDouble()
     this.planAgents = planAgents ?? new PlanAgentsDouble()
-    this.brief = BriefDouble
   }
 
   async run(story = Flow.STORY) {
@@ -152,7 +144,7 @@ describe('StartPlan', () => {
     expect(flow.workspace.asked).toEqual([PlanIssuesDouble.OPENED])
   })
 
-  it('the_agent_is_told_where_to_run_and_what_to_do_and_never_has_to_work_it_out', async () => {
+  it('the_agent_is_told_where_to_run_and_which_issue_in_which_repository_and_never_has_to_work_it_out', async () => {
     const flow = new Flow()
 
     await flow.run()
@@ -160,7 +152,7 @@ describe('StartPlan', () => {
     const [briefing] = flow.planAgents.asked
     expect(briefing.located).toBe(WorkspaceDouble.LOCATED)
     expect(briefing.issue).toBe(PlanIssuesDouble.OPENED)
-    expect(briefing.errand).toBe(Flow.ERRAND)
+    expect(briefing.repository).toBe(Flow.REPOSITORY)
   })
 
   it('the_story_reaches_the_agent_whole_so_the_tab_can_be_named_after_it', async () => {

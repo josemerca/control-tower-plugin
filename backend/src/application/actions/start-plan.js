@@ -18,12 +18,11 @@ export class StartPlanResult {
 }
 
 export class StartPlan {
-  constructor({ userStories, planIssues, workspace, planAgents, brief }) {
+  constructor({ userStories, planIssues, workspace, planAgents }) {
     this.userStories = userStories
     this.planIssues = planIssues
     this.workspace = workspace
     this.planAgents = planAgents
-    this.brief = brief
   }
 
   async execute(params) {
@@ -41,7 +40,7 @@ export class StartPlan {
         story: params.story,
         issue,
         located,
-        errand: this.brief.errandFor({ issue, repository: params.repository }),
+        repository: params.repository,
       }))
     } catch (failure) {
       await this.#abandon(located)

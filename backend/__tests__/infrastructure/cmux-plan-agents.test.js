@@ -10,14 +10,29 @@ import { PlanBriefing } from '../../src/domain/value-objects/plan-briefing.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
+import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import {
   PlanAgentNotLaunched, PlanAgentNotNamed, PlanAgentFailure,
 } from '../../src/domain/exceptions.js'
 
+class BriefDouble {
+  constructor() {
+    this.asked = []
+  }
+
+  errandFor({ issue, repository }) {
+    this.asked.push({ issue, repository })
+
+    return `escribe el plan de #${issue.number} en ${repository.text}`
+  }
+}
+
 class CmuxDouble {
   static RUNS_IN = '/tmp/ct-plan'
   static WORKTREE = '/repo/.worktrees/42'
-  static ERRAND = 'escribe el plan'
+  static ISSUE = new PlanIssue({ number: 42, url: 'https://github.com/owner/name/issues/42' })
+  static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
+  static ERRAND = 'escribe el plan de #42 en josemerca/ct-loop-sandbox'
   static TAB = 'ct-plan-ABC-42'
   static PROBES_PER_SEND = 2
   static RESENDS = 1
@@ -28,6 +43,7 @@ class CmuxDouble {
   constructor({ printed, sentinels }) {
     this.printed = printed
     this.sentinels = [...sentinels]
+    this.brief = new BriefDouble()
     this.calls = []
     this.written = []
     this.removed = []
@@ -94,15 +110,16 @@ class CmuxDouble {
   static briefing() {
     return new PlanBriefing({
       story: new UserStoryKey('ABC-42'),
-      issue: new PlanIssue({ number: 42, url: 'https://github.com/owner/name/issues/42' }),
+      issue: CmuxDouble.ISSUE,
       located: new WorkspaceLocation({ path: CmuxDouble.WORKTREE, branch: 'feat/42' }),
-      errand: CmuxDouble.ERRAND,
+      repository: CmuxDouble.REPOSITORY,
     })
   }
 
   agents() {
     return new CmuxPlanAgents({
       runsIn: CmuxDouble.RUNS_IN,
+      brief: this.brief,
       policy: new LaunchPolicy({
         budget: new LaunchBudget({
           attempts: CmuxDouble.PROBES_PER_SEND,
@@ -191,6 +208,17 @@ describe('CmuxPlanAgents', () => {
 
     expect(cmux.written[0][1]).toContain(CmuxDouble.ERRAND)
     expect(JSON.stringify(cmux.calls)).not.toContain(CmuxDouble.ERRAND)
+  })
+
+  it('the_errand_it_writes_is_the_one_the_brief_composed_for_that_issue_and_that_repository', async () => {
+    const cmux = CmuxDouble.launched()
+
+    await cmux.launch()
+
+    expect(cmux.brief.asked).toEqual([
+      { issue: CmuxDouble.ISSUE, repository: CmuxDouble.REPOSITORY },
+    ])
+    expect(cmux.written[0][1]).toContain(`claude ${shQuote(CmuxDouble.ERRAND)}`)
   })
 
   it('the_handle_cmux_prints_is_what_comes_back_so_the_caller_can_reach_the_agent_later', async () => {

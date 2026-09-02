@@ -134,10 +134,10 @@ class CtApi {
         policy: new LaunchPolicy({
           budget: new LaunchBudget({ attempts: CtApi.#PROBES_PER_SEND, resends: CtApi.#RESENDS }),
         }),
-      }),
-      brief: new PlanAgentBrief({
-        dispatchCheck: PluginTree.dispatchCheck(),
-        conventions: PluginTree.conventions(),
+        brief: new PlanAgentBrief({
+          dispatchCheck: PluginTree.dispatchCheck(),
+          conventions: PluginTree.conventions(),
+        }),
       }),
     })
   }
