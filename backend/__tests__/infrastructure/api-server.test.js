@@ -9,6 +9,7 @@ import { StartPlanResult } from '../../src/application/actions/start-plan.js'
 import { PlanEvents, PlanEventsRoute } from '../../src/infrastructure/plan-events-route.js'
 import {
   PlanAgentNotLaunched, UserStoryNotRead, PlanIssueNotCreated, PlanIssueNotNamed, WorkspaceNotPrepared,
+  PlanProgressNotRead,
 } from '../../src/domain/exceptions.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { PlanState } from '../../src/domain/value-objects/plan-state.js'
@@ -56,14 +57,25 @@ class StartPlanSpy {
 }
 
 class ProgressSpy {
-  constructor(state) {
+  static UNREADABLE = 'git status could not say whether the plan is committed'
+
+  constructor(state, cause) {
     this.state = state
+    this.cause = cause
     this.asked = 0
   }
 
   static events(state, { sleepMs = 0 } = {}) {
-    const spy = new ProgressSpy(state)
+    return ProgressSpy.answering(new ProgressSpy(state, null), sleepMs)
+  }
 
+  static unable({ sleepMs = 0 } = {}) {
+    const spy = new ProgressSpy(null, new PlanProgressNotRead(ProgressSpy.UNREADABLE))
+
+    return ProgressSpy.answering(spy, sleepMs)
+  }
+
+  static answering(spy, sleepMs) {
     return {
       spy,
       planEvents: new PlanEvents({
@@ -75,6 +87,7 @@ class ProgressSpy {
 
   async read() {
     this.asked += 1
+    if (this.cause !== null) throw this.cause
     return { state: this.state }
   }
 }
@@ -705,6 +718,21 @@ describe('ApiServer', () => {
     expect(response.status).toBe(403)
     expect(await response.text()).toBe('{"error":"this api only serves the page it hosts"}')
     expect(spy.asked).toBe(0)
+  })
+
+  it('a_progress_nobody_could_read_reaches_the_page_as_an_error_frame_and_closes_instead_of_hanging_open', async () => {
+    const { spy, planEvents } = ProgressSpy.unable()
+    const port = await RunningApi.listening({ planEvents })
+
+    await RunningApi.accepted(port)
+    const response = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+      headers: { Origin: `http://127.0.0.1:${port}` },
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.text())
+      .toBe(`event: error\ndata: {"error":"${ProgressSpy.UNREADABLE}"}\n\n`)
+    expect(spy.asked).toBe(1)
   })
 
   it('closing_the_connection_from_the_client_stops_the_progress_port_from_being_asked_again', async () => {

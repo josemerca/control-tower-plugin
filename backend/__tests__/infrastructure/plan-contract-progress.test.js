@@ -3,16 +3,23 @@ import { PlanContractProgress } from '../../src/infrastructure/plan-contract-pro
 import { PlanState } from '../../src/domain/value-objects/plan-state.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
+import {
+  PlanProgressFailure, PlanProgressNotRead,
+} from '../../src/domain/exceptions.js'
 
 class ProgressDouble {
   static WORKTREE = '/repo/.worktrees/42'
   static CHECK = '/plugin/scripts/dispatch-check.mjs'
   static REPOSITORY = new RepositoryName('owner/name')
 
-  constructor({ validated, dirty, gitFailed = false }) {
+  static CONTRACT_UNMET = 6
+  static COULD_NOT_RUN = 1
+
+  constructor({ validated, dirty, gitFailed = false, contractCode = ProgressDouble.CONTRACT_UNMET }) {
     this.validated = validated
     this.dirty = dirty
     this.gitFailed = gitFailed
+    this.contractCode = contractCode
     this.node = []
     this.git = []
     this.stderr = []
@@ -24,19 +31,28 @@ class ProgressDouble {
       node: (argv, options) => {
         this.node.push([argv, options])
         return Promise.resolve(this.validated
-          ? { failed: false, stdout: 'plan ok', stderr: '' }
-          : { failed: true, stdout: '', stderr: 'no hay ningún plan prescriptivo' })
+          ? { failed: false, code: 0, stdout: 'plan ok', stderr: '' }
+          : {
+            failed: true,
+            code: this.contractCode,
+            stdout: '',
+            stderr: 'no hay ningún plan prescriptivo',
+          })
       },
       git: (argv) => {
         this.git.push(argv)
         return Promise.resolve(this.gitFailed
-          ? { failed: true, stdout: '', stderr: 'git is not available' }
-          : { failed: false, stdout: this.dirty, stderr: '' })
+          ? { failed: true, code: 128, stdout: '', stderr: 'git is not available' }
+          : { failed: false, code: 0, stdout: this.dirty, stderr: '' })
       },
       stderr: (line) => {
         this.stderr.push(line)
       },
     })
+  }
+
+  refusal() {
+    return this.asked().catch((cause) => cause)
   }
 
   asked() {
@@ -72,8 +88,29 @@ describe('PlanContractProgress', () => {
     expect(await asked.asked()).toBe(PlanState.WRITING)
   })
 
-  it('a_git_that_does_not_answer_is_not_a_clean_tree', async () => {
-    expect(await new ProgressDouble({ validated: true, dirty: '', gitFailed: true }).asked()).toBe(PlanState.WRITING)
+  it('a_git_that_does_not_answer_is_not_a_clean_tree_and_not_a_plan_still_being_written_either', async () => {
+    const refusal = await new ProgressDouble({ validated: true, dirty: '', gitFailed: true }).refusal()
+
+    expect(refusal).toBeInstanceOf(PlanProgressNotRead)
+  })
+
+  it('a_dispatch_check_that_could_not_run_at_all_is_not_read_as_a_plan_that_does_not_comply_yet', async () => {
+    const refusal = await new ProgressDouble({
+      validated: false, dirty: '', contractCode: ProgressDouble.COULD_NOT_RUN,
+    }).refusal()
+
+    expect(refusal).toBeInstanceOf(PlanProgressNotRead)
+    expect(refusal.message).toContain('no hay ningún plan prescriptivo')
+  })
+
+  it('a_contract_the_plan_does_not_meet_yet_is_told_apart_from_a_contract_nobody_could_ask_about', async () => {
+    const unmet = await new ProgressDouble({ validated: false, dirty: '' }).asked()
+    const unaskable = await new ProgressDouble({
+      validated: false, dirty: '', contractCode: ProgressDouble.COULD_NOT_RUN,
+    }).refusal()
+
+    expect(unmet).toBe(PlanState.WRITING)
+    expect(unaskable).toBeInstanceOf(PlanProgressFailure)
   })
 
   it('the_contract_is_asked_from_inside_the_worktree_because_it_resolves_its_paths_from_there', async () => {
@@ -113,14 +150,19 @@ describe('PlanContractProgress', () => {
     expect(said).toContain('no hay ningún plan prescriptivo')
   })
 
-  it('a_git_status_that_refuses_to_answer_leaves_a_trace_naming_it_and_carrying_its_error_channel', async () => {
+  it('a_git_status_that_refuses_to_answer_names_git_in_the_typed_failure_instead_of_only_saying_it_failed', async () => {
+    const refusal = await new ProgressDouble({ validated: true, dirty: '', gitFailed: true }).refusal()
+
+    expect(refusal.message).toContain('git status')
+    expect(refusal.message).toContain('git is not available')
+  })
+
+  it('a_failure_the_caller_gets_typed_is_not_also_traced_to_the_error_channel_behind_its_back', async () => {
     const asked = new ProgressDouble({ validated: true, dirty: '', gitFailed: true })
 
-    await asked.asked()
+    await asked.refusal()
 
-    const said = asked.stderr.join('')
-    expect(said).toContain('git')
-    expect(said).toContain('git is not available')
+    expect(asked.stderr).toEqual([])
   })
 
   it('a_plan_that_validates_cleanly_leaves_the_error_channel_untouched', async () => {
@@ -143,8 +185,10 @@ describe('PlanContractProgress', () => {
     const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
     const progress = new PlanContractProgress({
       dispatchCheck: ProgressDouble.CHECK,
-      node: () => Promise.resolve({ failed: true, stdout: '', stderr: 'no hay ningún plan prescriptivo' }),
-      git: () => Promise.resolve({ failed: false, stdout: '', stderr: '' }),
+      node: () => Promise.resolve({
+        failed: true, code: 6, stdout: '', stderr: 'no hay ningún plan prescriptivo',
+      }),
+      git: () => Promise.resolve({ failed: false, code: 0, stdout: '', stderr: '' }),
     })
 
     try {

@@ -39,15 +39,24 @@ describe('PlanRefusal', () => {
 describe('PlanCollapse', () => {
   const FAMILIES = [
     'PlanFailure', 'UserStoryFailure', 'PlanIssueFailure', 'PlanAgentFailure', 'WorkspaceFailure',
+    'PlanProgressFailure',
   ]
 
+  const startingAPlan = ([name, thrown]) =>
+    thrown.prototype instanceof exceptions.PlanFailure &&
+    !FAMILIES.includes(name) &&
+    !(thrown.prototype instanceof exceptions.PlanProgressFailure)
+
   it('every_way_the_plan_can_collapse_has_a_status_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
-    const ways = Object.entries(exceptions)
-      .filter(([name, thrown]) =>
-        thrown.prototype instanceof exceptions.PlanFailure && !FAMILIES.includes(name))
-      .map(([name]) => name)
+    const ways = Object.entries(exceptions).filter(startingAPlan).map(([name]) => name)
 
     expect(PlanCollapse.declaredFailures().sort()).toEqual(ways.sort())
+  })
+
+  it('a_failure_of_watching_a_plan_has_no_status_here_because_it_travels_down_the_stream_that_is_already_open', () => {
+    expect(PlanCollapse.declaredFailures()).not.toContain('PlanProgressNotRead')
+    expect(() => PlanCollapse.of(new exceptions.PlanProgressNotRead('git refused')))
+      .toThrow(/no status declared/)
   })
 
   it('a_tool_that_refused_the_call_is_something_to_try_again_and_says_so', () => {

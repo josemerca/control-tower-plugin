@@ -1,5 +1,6 @@
 import { Answer } from './http.js'
 import { PlanState } from '../domain/value-objects/plan-state.js'
+import { PlanProgressFailure } from '../domain/exceptions.js'
 
 export class PlanSessions {
   constructor() {
@@ -21,14 +22,27 @@ export class PlanEvents {
     this.sleep = sleep
   }
 
+  static ERROR_EVENT = 'error'
+
   static frameFor(state) {
     return `data: ${JSON.stringify({ state })}\n\n`
+  }
+
+  static failureFrameFor(cause) {
+    return `event: ${PlanEvents.ERROR_EVENT}\ndata: ${JSON.stringify({ error: cause.message })}\n\n`
   }
 
   async *stream(session, cancelled = () => false) {
     let last = null
     for (;;) {
-      const read = await this.read(session)
+      let read
+      try {
+        read = await this.read(session)
+      } catch (cause) {
+        if (!(cause instanceof PlanProgressFailure)) throw cause
+        yield PlanEvents.failureFrameFor(cause)
+        return
+      }
       if (read.state !== last) {
         last = read.state
         yield PlanEvents.frameFor(read.state)

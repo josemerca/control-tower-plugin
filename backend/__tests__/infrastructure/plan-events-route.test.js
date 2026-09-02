@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { PlanEvents } from '../../src/infrastructure/plan-events-route.js'
 import { PlanState } from '../../src/domain/value-objects/plan-state.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
+import { PlanProgressNotRead } from '../../src/domain/exceptions.js'
 
 class EventsDouble {
   static SUBJECT = {
@@ -12,6 +13,10 @@ class EventsDouble {
   constructor(answers) {
     this.answers = [...answers]
     this.slept = 0
+  }
+
+  static unable(said) {
+    return new EventsDouble([new PlanProgressNotRead(said)])
   }
 
   events() {
@@ -25,7 +30,10 @@ class EventsDouble {
           throw new Error('the progress was read more times than this test scripted an answer for')
         }
 
-        return Promise.resolve({ state: this.answers.shift() })
+        const answer = this.answers.shift()
+        if (answer instanceof Error) return Promise.reject(answer)
+
+        return Promise.resolve({ state: answer })
       },
     })
   }
@@ -75,6 +83,29 @@ describe('PlanEvents', () => {
     await events.collected()
 
     expect(events.slept).toBe(2)
+  })
+
+  it('a_progress_that_could_not_be_read_reaches_the_page_as_one_error_frame_and_not_as_a_state', async () => {
+    const frames = await EventsDouble.unable('git status refused').collected()
+
+    expect(frames).toEqual(['event: error\ndata: {"error":"git status refused"}\n\n'])
+  })
+
+  it('a_progress_that_could_not_be_read_ends_the_stream_instead_of_launching_two_subprocesses_forever', async () => {
+    const events = new EventsDouble([
+      PlanState.WRITING, new PlanProgressNotRead('git status refused'),
+    ])
+
+    const frames = await events.collected()
+
+    expect(frames).toHaveLength(2)
+    expect(events.answers).toEqual([])
+  })
+
+  it('a_bug_of_ours_is_not_dressed_up_as_an_error_frame_because_nobody_could_act_on_it', async () => {
+    const events = new EventsDouble([new TypeError('a bug of ours')])
+
+    await expect(events.collected()).rejects.toThrow(/a bug of ours/)
   })
 
   it('a_cancel_signal_stops_the_generator_that_would_otherwise_spin_forever_on_an_unchanging_state', async () => {
