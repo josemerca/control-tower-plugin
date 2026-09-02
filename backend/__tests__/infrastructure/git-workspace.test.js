@@ -229,8 +229,19 @@ describe('GitWorkspace', () => {
     await git.workspace().undo(located)
 
     expect(git.calls).toEqual([
-      ['worktree', 'remove', '--force', GitDouble.WORKTREE],
-      ['branch', '-D', 'feat/42'],
+      ['-C', GitDouble.ROOT, 'worktree', 'remove', '--force', GitDouble.WORKTREE],
+      ['-C', GitDouble.ROOT, 'branch', '-D', 'feat/42'],
     ])
   })
+
+  it('undoing_a_location_runs_both_orders_against_the_root_and_never_against_whatever_directory_the_process_happens_to_be_in', async () => {
+    const git = new GitDouble()
+    const located = await git.workspace().prepare({ number: 42 })
+    git.calls = []
+
+    await git.workspace().undo(located)
+
+    expect(git.calls.every((argv) => argv[0] === '-C' && argv[1] === GitDouble.ROOT)).toBe(true)
+  })
 })
+

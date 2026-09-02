@@ -47,12 +47,12 @@ export class GitWorkspace extends Workspace {
     return ['-C', path, 'status', '--porcelain', '--untracked-files=all']
   }
 
-  static removeArgvFor(path) {
-    return ['worktree', 'remove', '--force', path]
+  static removeArgvFor(root, path) {
+    return ['-C', root, 'worktree', 'remove', '--force', path]
   }
 
-  static deleteBranchArgvFor(branch) {
-    return ['branch', '-D', branch]
+  static deleteBranchArgvFor(root, branch) {
+    return ['-C', root, 'branch', '-D', branch]
   }
 
   static excludeContentWith(current, rule) {
@@ -74,8 +74,8 @@ export class GitWorkspace extends Workspace {
   }
 
   async undo(located) {
-    await this.run(GitWorkspace.removeArgvFor(located.path))
-    await this.run(GitWorkspace.deleteBranchArgvFor(located.branch))
+    await this.run(GitWorkspace.removeArgvFor(this.root, located.path))
+    await this.run(GitWorkspace.deleteBranchArgvFor(this.root, located.branch))
   }
 
   async #cut(issue) {
