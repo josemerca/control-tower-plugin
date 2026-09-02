@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   PlanRequest, PlanRequestOutcome, PlanRefusal, PlanCollapse,
 } from '../../src/infrastructure/start-plan-route.js'
+import { ImplementCollapse } from '../../src/infrastructure/implement-plan-route.js'
 import { Refusal } from '../../src/infrastructure/http.js'
 import * as exceptions from '../../src/domain/exceptions.js'
 
@@ -31,10 +32,6 @@ describe('PlanRefusal', () => {
       .toThrow(/client or server status/)
     expect(() => new Refusal({ status: 400, error: '  ' })).toThrow(/says why/)
   })
-
-  it('a_body_over_the_cap_is_answered_with_the_status_that_names_the_size_and_not_a_plain_400', () => {
-    expect(PlanRefusal.of(PlanRequest.tooLarge()).status).toBe(413)
-  })
 })
 
 describe('PlanCollapse', () => {
@@ -43,9 +40,12 @@ describe('PlanCollapse', () => {
     'PlanProgressFailure',
   ]
 
+  const RESUMING_AN_AGENT = ImplementCollapse.declaredFailures()
+
   const startingAPlan = ([name, thrown]) =>
     thrown.prototype instanceof exceptions.PlanFailure &&
     !FAMILIES.includes(name) &&
+    !RESUMING_AN_AGENT.includes(name) &&
     !(thrown.prototype instanceof exceptions.PlanProgressFailure)
 
   it('every_way_the_plan_can_collapse_has_a_status_so_adding_one_cannot_reach_the_client_as_a_crash', () => {

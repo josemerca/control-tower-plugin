@@ -12,7 +12,7 @@ import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import {
-  PlanAgentNotLaunched, PlanAgentNotNamed, PlanAgentFailure,
+  PlanAgentNotLaunched, PlanAgentNotNamed, PlanAgentNotResumed, PlanAgentFailure,
 } from '../../src/domain/exceptions.js'
 
 class BriefDouble {
@@ -279,13 +279,17 @@ describe('CmuxPlanAgents', () => {
     expect(refused).toBeInstanceOf(PlanAgentFailure)
   })
 
-  it('when_the_sentinel_does_not_show_up_the_line_is_resent_because_the_pty_can_eat_it', async () => {
+  it('the_resent_line_goes_to_the_handle_cmux_answered_because_send_refuses_a_title', async () => {
     const cmux = CmuxDouble.answeringLate()
 
     await cmux.launch()
 
-    expect(cmux.calls).toContainEqual(['send', '--workspace', CmuxDouble.TAB, CmuxDouble.TYPED])
-    expect(cmux.calls).toContainEqual(['send-key', '--workspace', CmuxDouble.TAB, 'Enter'])
+    expect(cmux.calls).toContainEqual(['send', '--workspace', 'workspace:4', CmuxDouble.TYPED])
+    expect(cmux.calls).toContainEqual(['send-key', '--workspace', 'workspace:4', 'Enter'])
+    const workspacesTold = cmux.calls
+      .filter((argv) => argv[0] === 'send' || argv[0] === 'send-key')
+      .map((argv) => argv[2])
+    expect(workspacesTold).not.toContain(CmuxDouble.TAB)
   })
 
   it('a_line_that_lands_after_the_resend_is_still_a_launch_and_not_a_refusal', async () => {
@@ -374,5 +378,101 @@ describe('LaunchPolicy', () => {
 
     expect(strict.afterProbing(1)).toBe(LaunchStep.KEEP_PROBING)
     expect(strict.afterProbing(2)).toBe(LaunchStep.GIVE_UP)
+  })
+})
+
+class ResumeDouble {
+  static AGENT = 'workspace:20'
+  static ISSUE = 42
+  static ERRAND = 'implementa el plan de #42'
+
+  constructor(answers) {
+    this.answers = answers
+    this.calls = []
+    this.brief = {
+      asked: [],
+      implementationErrandFor: ({ issueNumber }) => {
+        this.brief.asked.push({ issueNumber })
+
+        return ResumeDouble.ERRAND
+      },
+    }
+  }
+
+  static accepting() {
+    return new ResumeDouble([
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+    ])
+  }
+
+  static refusing(said) {
+    return new ResumeDouble([new ProcessOutput({ code: 1, stdout: '', stderr: said })])
+  }
+
+  static refusingTheEnter(said) {
+    return new ResumeDouble([
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+      new ProcessOutput({ code: 1, stdout: '', stderr: said }),
+    ])
+  }
+
+  agents() {
+    return new CmuxPlanAgents({
+      brief: this.brief,
+      run: (argv) => {
+        this.calls.push(argv)
+        const answer = this.answers[this.calls.length - 1]
+        if (answer === undefined) {
+          throw new Error(`nobody wrote an answer for call ${this.calls.length}: ${argv.join(' ')}`)
+        }
+
+        return Promise.resolve(answer)
+      },
+    })
+  }
+
+  async resume() {
+    return this.agents().resume({ agent: ResumeDouble.AGENT, issue: ResumeDouble.ISSUE })
+  }
+
+  async refusal() {
+    return this.resume().catch((cause) => cause)
+  }
+}
+
+describe('CmuxPlanAgents resuming a parked agent', () => {
+  it('it_types_the_errand_on_the_handle_it_was_given_and_then_presses_enter', async () => {
+    const cmux = ResumeDouble.accepting()
+
+    await cmux.resume()
+
+    expect(cmux.calls).toEqual([
+      ['send', '--workspace', ResumeDouble.AGENT, ResumeDouble.ERRAND],
+      ['send-key', '--workspace', ResumeDouble.AGENT, 'Enter'],
+    ])
+  })
+
+  it('the_errand_it_types_is_the_one_the_brief_composed_for_that_issue', async () => {
+    const cmux = ResumeDouble.accepting()
+
+    await cmux.resume()
+
+    expect(cmux.brief.asked).toEqual([{ issueNumber: ResumeDouble.ISSUE }])
+  })
+
+  it('a_cmux_that_refuses_to_write_arrives_typed_so_the_boundary_can_tell_it_from_a_crash', async () => {
+    const refusal = await ResumeDouble.refusing('Access denied - only processes started inside cmux').refusal()
+
+    expect(refusal).toBeInstanceOf(PlanAgentNotResumed)
+    expect(refusal).toBeInstanceOf(PlanAgentFailure)
+    expect(refusal.message).toContain('Access denied')
+  })
+
+  it('an_enter_that_never_lands_is_reported_because_the_line_is_sitting_there_unrun', async () => {
+    const refusal = await ResumeDouble.refusingTheEnter('no such workspace').refusal()
+
+    expect(refusal).toBeInstanceOf(PlanAgentNotResumed)
+    expect(refusal.message).toContain('no such workspace')
   })
 })

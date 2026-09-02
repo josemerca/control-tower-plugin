@@ -10,7 +10,6 @@ import {
 
 export const PlanRequestOutcome = Object.freeze({
   ACCEPTED: 'accepted',
-  BODY_TOO_LARGE: 'body-too-large',
   BODY_NOT_A_JSON_OBJECT: 'body-not-a-json-object',
   UNKNOWN_FIELD: 'unknown-field',
   MALFORMED_ID: 'malformed-id',
@@ -59,10 +58,6 @@ export class PlanRequest {
     })
   }
 
-  static tooLarge() {
-    return PlanRequest.refused(PlanRequestOutcome.BODY_TOO_LARGE)
-  }
-
   static from(raw) {
     let parsed
     try {
@@ -91,8 +86,6 @@ export class PlanRequest {
 
 export class PlanRefusal {
   static #BY_OUTCOME = Object.freeze({
-    [PlanRequestOutcome.BODY_TOO_LARGE]: () =>
-      new Refusal({ status: 413, error: 'body must not exceed 8192 bytes' }),
     [PlanRequestOutcome.BODY_NOT_A_JSON_OBJECT]: () =>
       new Refusal({ status: 400, error: 'body must be a JSON object' }),
     [PlanRequestOutcome.MALFORMED_ID]: () => new Refusal({

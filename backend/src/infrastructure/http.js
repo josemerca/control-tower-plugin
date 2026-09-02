@@ -71,6 +71,15 @@ export class Browsers {
 
 export class JsonBody {
   static MAX_BYTES = 8 * 1024
+  static #OVERFLOW = 'entity.too.large'
+
+  static isOverflow(cause) {
+    return cause.type === JsonBody.#OVERFLOW
+  }
+
+  static overflowRefusal() {
+    return new Refusal({ status: 413, error: `body must not exceed ${JsonBody.MAX_BYTES} bytes` })
+  }
 
   static #declaredBy(request) {
     const declared = request.get('Content-Type')

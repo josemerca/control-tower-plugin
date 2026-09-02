@@ -13,6 +13,7 @@ import { PlanAgentBrief } from './plan-agent-brief.js'
 import { PlanContractProgress } from './plan-contract-progress.js'
 import { PlanEvents } from './plan-events-route.js'
 import { StartPlan } from '../application/actions/start-plan.js'
+import { ImplementPlan } from '../application/actions/implement-plan.js'
 import { ReadPlanProgress, ReadPlanProgressParams } from '../application/queries/read-plan-progress.js'
 import { ToolRunner } from './tool-runner.js'
 import { Gh } from './gh.js'
@@ -43,6 +44,10 @@ class PluginTree {
 
   static conventions() {
     return join(PluginTree.#root(), 'conventions')
+  }
+
+  static ctStep() {
+    return join(PluginTree.#root(), 'scripts', 'ct-step.mjs')
   }
 }
 
@@ -120,7 +125,7 @@ class CtApi {
     return after(seconds * 1000)
   }
 
-  static #startPlan(git) {
+  static #startPlan(git, planAgents) {
     return new StartPlan({
       userStories: new AcliUserStories({ acli: CtApi.#talkingTo(AcliUserStories.BIN, ExternalTool) }),
       planIssues: new GhPlanIssues({ gh: CtApi.#talkingTo(Gh.BIN, Gh) }),
@@ -131,22 +136,7 @@ class CtApi {
         root: process.cwd(),
         stderr: (line) => process.stderr.write(line),
       }),
-      planAgents: new CmuxPlanAgents({
-        run: CtApi.#tool(CmuxPlanAgents.BIN),
-        write: Disk.write,
-        read: Disk.read,
-        remove: Disk.remove,
-        realpathOf: Disk.realpathOf,
-        sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_PROBES),
-        runsIn: join(tmpdir(), CtApi.#LAUNCH_DIRECTORY),
-        policy: new LaunchPolicy({
-          budget: new LaunchBudget({ attempts: CtApi.#PROBES_PER_SEND, resends: CtApi.#RESENDS }),
-        }),
-        brief: new PlanAgentBrief({
-          dispatchCheck: PluginTree.dispatchCheck(),
-          conventions: PluginTree.conventions(),
-        }),
-      }),
+      planAgents,
     })
   }
 
@@ -172,9 +162,27 @@ class CtApi {
       CtApi.#refuseUsage(asked.reason)
     }
     const git = CtApi.#tool(GitWorkspace.BIN)
+    const planAgents = new CmuxPlanAgents({
+      run: CtApi.#tool(CmuxPlanAgents.BIN),
+      write: Disk.write,
+      read: Disk.read,
+      remove: Disk.remove,
+      realpathOf: Disk.realpathOf,
+      sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_PROBES),
+      runsIn: join(tmpdir(), CtApi.#LAUNCH_DIRECTORY),
+      policy: new LaunchPolicy({
+        budget: new LaunchBudget({ attempts: CtApi.#PROBES_PER_SEND, resends: CtApi.#RESENDS }),
+      }),
+      brief: new PlanAgentBrief({
+        dispatchCheck: PluginTree.dispatchCheck(),
+        conventions: PluginTree.conventions(),
+        ctStep: PluginTree.ctStep(),
+      }),
+    })
     const server = new ApiServer({
       port: asked.port,
-      startPlan: CtApi.#startPlan(git),
+      startPlan: CtApi.#startPlan(git, planAgents),
+      implementPlan: new ImplementPlan({ planAgents }),
       planEvents: CtApi.#planEvents(git),
       frontendRoot: FrontendBuild.root(),
     })

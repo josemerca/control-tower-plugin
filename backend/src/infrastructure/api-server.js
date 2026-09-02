@@ -2,7 +2,8 @@ import express from 'express'
 import { existsSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { Answer, Route, Browsers, JsonBody } from './http.js'
-import { StartPlanRoute, PlanRequest, PlanRefusal } from './start-plan-route.js'
+import { StartPlanRoute } from './start-plan-route.js'
+import { ImplementPlanRoute } from './implement-plan-route.js'
 import { PlanEventsRoute, PlanSessions } from './plan-events-route.js'
 
 export const LOOPBACK = '127.0.0.1'
@@ -13,15 +14,13 @@ class FrontendPages {
   }
 }
 class Failures {
-  static #TOO_LARGE = 'entity.too.large'
-
   static nothingMatched(request, response) {
     Answer.refuse(response, 404, 'not found')
   }
 
   static answer(cause, request, response, next) {
-    if (cause.type === Failures.#TOO_LARGE) {
-      Answer.refuseAs(response, PlanRefusal.of(PlanRequest.tooLarge()))
+    if (JsonBody.isOverflow(cause)) {
+      Answer.refuseAs(response, JsonBody.overflowRefusal())
       return
     }
     if (cause.status === undefined) {
@@ -38,9 +37,12 @@ class Failures {
 }
 
 export class ApiServer {
-  constructor({ port, startPlan, planEvents = null, sessions = new PlanSessions(), frontendRoot = null }) {
+  constructor({
+    port, startPlan, implementPlan, planEvents = null, sessions = new PlanSessions(), frontendRoot = null,
+  }) {
     this.requestedPort = port
     this.startPlan = startPlan
+    this.implementPlan = implementPlan
     this.planEvents = planEvents
     this.sessions = sessions
     this.frontendRoot = frontendRoot
@@ -61,6 +63,14 @@ export class ApiServer {
       StartPlanRoute.handledBy(this.startPlan, this.sessions)
     )
     app.all(StartPlanRoute.PATH, StartPlanRoute.refuseOtherMethods)
+    app.post(
+      ImplementPlanRoute.PATH,
+      Browsers.turnAwayForeign,
+      JsonBody.demandDeclared,
+      JsonBody.reader(),
+      ImplementPlanRoute.handledBy(this.implementPlan)
+    )
+    app.all(ImplementPlanRoute.PATH, ImplementPlanRoute.refuseOtherMethods)
     app.get(
       PlanEventsRoute.PATH,
       Browsers.turnAwayForeign,

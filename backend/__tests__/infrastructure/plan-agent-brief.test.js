@@ -6,6 +6,7 @@ describe('PlanAgentBrief', () => {
   const errand = () => new PlanAgentBrief({
     dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
     conventions: '/plugin/conventions',
+    ctStep: '/plugin/scripts/ct-step.mjs',
   }).errandFor({ issue: { number: 42 }, repository: new RepositoryName('owner/name') })
 
   it('it_starts_by_asking_for_the_ground_to_be_checked_before_anything_is_touched', () => {
@@ -62,6 +63,7 @@ describe('PlanAgentBrief', () => {
     const brief = new PlanAgentBrief({
       dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
       conventions: '/plugin/conventions',
+      ctStep: '/plugin/scripts/ct-step.mjs',
     })
 
     expect(() => brief.errandFor({ issue: { number: 42 }, repository: undefined })).toThrow(/repository/)
@@ -71,9 +73,56 @@ describe('PlanAgentBrief', () => {
     const brief = new PlanAgentBrief({
       dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
       conventions: '/plugin/conventions',
+      ctStep: '/plugin/scripts/ct-step.mjs',
     })
 
     expect(() => brief.errandFor({ issue: { number: 42 }, repository: 'owner/name' })).toThrow(/repository/)
     expect(() => brief.errandFor({ issue: { number: 42 }, repository: '   ' })).toThrow(/repository/)
+  })
+})
+
+describe('PlanAgentBrief resuming the agent', () => {
+  const errand = () => new PlanAgentBrief({
+    dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+    conventions: '/plugin/conventions',
+    ctStep: '/plugin/scripts/ct-step.mjs',
+  }).implementationErrandFor({ issueNumber: 42 })
+
+  it('it_is_one_single_line_because_a_newline_would_run_the_order_half_written', () => {
+    expect(errand()).not.toContain('\n')
+  })
+
+  it('it_hands_the_driving_to_ct_step_by_absolute_path_instead_of_describing_the_sequence', () => {
+    expect(errand()).toContain('node /plugin/scripts/ct-step.mjs next --plan')
+    expect(errand()).toContain('--issue 42')
+    expect(errand()).not.toContain('CLAUDE_PLUGIN_ROOT')
+  })
+
+  it('it_translates_ct_step_to_node_by_absolute_path_because_ct_step_is_not_a_command', () => {
+    expect(errand()).toContain('donde diga `ct-step`, es `node /plugin/scripts/ct-step.mjs`')
+  })
+
+  it('it_orders_rewriting_slice_md_role_task_and_next_action_before_asking_for_the_first_step', () => {
+    const composed = errand()
+    expect(composed).toContain('.agent/SLICE.md')
+    expect(composed).toContain('role, task y next_action')
+    expect(composed.indexOf('.agent/SLICE.md')).toBeLessThan(composed.indexOf('Pregunta el paso'))
+  })
+
+  it('it_waves_off_the_release_that_ct_step_will_suggest_so_the_agent_does_not_crash_into_exit_9', () => {
+    expect(errand()).toContain('dispatch-check --release')
+    expect(errand()).toMatch(/no ejecutes/i)
+  })
+
+  it('a_brief_that_cannot_name_ct_step_refuses_to_exist_instead_of_shipping_the_word_undefined', () => {
+    expect(() => new PlanAgentBrief({
+      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+      conventions: '/plugin/conventions',
+    })).toThrow(/ct-step/)
+    expect(() => new PlanAgentBrief({
+      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+      conventions: '/plugin/conventions',
+      ctStep: 'scripts/ct-step.mjs',
+    })).toThrow(/ct-step/)
   })
 })
