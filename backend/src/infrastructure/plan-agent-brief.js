@@ -28,7 +28,7 @@ export class PlanAgentBrief {
       `Escribes el PLAN del issue #${issue.number} del repo ${named}. No lo implementas.`,
       'Arranque verification-first: confirma pwd, rama y git log, y deja el baseline en verde ANTES de tocar nada.',
       `Hidrátate del issue: \`gh issue view ${issue.number} --repo ${named}\`. Sus criterios de aceptación, su sección "## Out of scope / Protected" y sus decisiones congeladas son la entrada del plan.`,
-      `Lee la vara de Control Tower: los cinco documentos de ${conventions} (${PlanAgentBrief.DOCUMENTS}). Tienen preferencia sobre las convenciones de este repo, y la preferencia se mide regla a regla: donde el repo mande lo que uno de esos documentos prohíbe, no aplica; donde el repo hable de algo de lo que ninguno habla, obliga entera.`,
+      `Lee la vara de Control Tower: los cinco documentos de ${conventions} (${PlanAgentBrief.DOCUMENTS}), y el bloque de la vara del \`AGENTS.md\` de este repo, que dice qué manda y en qué orden.`,
       'Escribe el plan con control-tower-loop:writing-plans-prescriptive, usando el issue como spec.',
       `Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${issue.number}-<slug>.md.`,
       `Valídalo con \`node ${dispatchCheck} ${issue.number} --repo ${named} --check-plan\` hasta exit 0.`,

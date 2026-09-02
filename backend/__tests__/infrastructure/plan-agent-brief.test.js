@@ -31,6 +31,12 @@ describe('PlanAgentBrief', () => {
     expect(errand()).toMatch(/no implementes/i)
   })
 
+  it('it_says_where_the_order_of_precedence_is_written_instead_of_restating_it_a_second_time', () => {
+    expect(errand()).toContain('/plugin/conventions')
+    expect(errand()).toContain('AGENTS.md')
+    expect(errand()).not.toMatch(/preferencia/i)
+  })
+
   it('it_never_promises_a_permission_nobody_mints', () => {
     expect(errand()).not.toContain('-OK')
     expect(errand()).not.toContain('nonce')
