@@ -720,6 +720,49 @@ describe('ApiServer', () => {
     expect(response.headers.get('access-control-allow-origin')).toBe(null)
   })
 
+  it('a_second_subscription_after_ready_is_a_404_so_an_event_source_gives_up_instead_of_reconnecting_forever', async () => {
+    const { planEvents } = ProgressSpy.events(PlanState.READY)
+    const port = await RunningApi.listening({ planEvents })
+
+    await RunningApi.accepted(port)
+    await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`)
+    const again = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`)
+
+    expect(again.status).toBe(404)
+    expect(await again.text()).toBe(`{"error":"${EventsRefusal.NOT_WATCHED}"}`)
+  })
+
+  it('a_subscription_after_a_progress_nobody_could_read_is_a_404_too_because_that_ending_is_final_as_well', async () => {
+    const { planEvents } = ProgressSpy.unable()
+    const port = await RunningApi.listening({ planEvents })
+
+    await RunningApi.accepted(port)
+    await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`)
+    const again = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`)
+
+    expect(again.status).toBe(404)
+  })
+
+  it('a_page_that_hangs_up_while_the_plan_is_still_being_written_keeps_its_watch_so_it_can_come_back', async () => {
+    const { planEvents } = ProgressSpy.events(PlanState.WRITING, { sleepMs: 5 })
+    const port = await RunningApi.listening({ planEvents })
+
+    await RunningApi.accepted(port)
+    const controller = new AbortController()
+    const opened = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+      signal: controller.signal,
+    })
+    await opened.body.getReader().read()
+    controller.abort()
+    await new Promise((resolve) => setTimeout(resolve, 30))
+
+    const again = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+      signal: AbortSignal.timeout(50),
+    }).catch((cause) => cause)
+
+    expect(again.status ?? 200).toBe(200)
+  })
+
   it('the_events_route_turns_away_a_foreign_page_exactly_like_the_one_that_starts_a_plan', async () => {
     const { spy, planEvents } = ProgressSpy.events(PlanState.READY)
     const port = await RunningApi.listening({ planEvents })

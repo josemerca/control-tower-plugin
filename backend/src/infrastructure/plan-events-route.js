@@ -14,6 +14,10 @@ export class PlanSessions {
   watching(number) {
     return this.live.get(number) ?? null
   }
+
+  forget(number) {
+    this.live.delete(number)
+  }
 }
 
 export const EventsRequestOutcome = Object.freeze({
@@ -157,6 +161,7 @@ export class PlanEventsRoute {
       for await (const frame of events.stream(asked.watched, disconnected)) {
         response.write(frame)
       }
+      if (!disconnected()) sessions.forget(asked.watched.issue.number)
       response.end()
     }
   }
