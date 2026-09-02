@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { Home } from 'pages/home/Home'
 import { Theme } from 'system-ui/theme/Theme'
 import 'system-ui/theme/styles.css'
+import './base.css'
 
 const root = document.getElementById('root')
 if (root === null) throw new Error('index.html has no #root element to mount on')

@@ -2,9 +2,6 @@
   display: flex;
   flex-direction: column;
   min-height: 100vh;
-  font-family: var(--font-family-opensans), sans-serif;
-  color: var(--foreground-primary);
-  background-color: var(--background-primary);
 }
 
 .home__logo {
