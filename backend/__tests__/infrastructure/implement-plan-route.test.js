@@ -101,10 +101,26 @@ describe('ImplementPlanRoute', () => {
     expect(RunningApi.spy.asked).toEqual([])
   })
 
+  it('an_issue_of_zero_is_refused_because_the_count_of_whole_numbers_from_one_starts_at_one', async () => {
+    const response = await RunningApi.asking('{"id":"XOP-4909","repo":"jjponz/repo-pulse","issue":0}')
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'issue must be a whole number from one' })
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
   it('a_malformed_repository_is_refused_before_it_can_become_an_argument_of_a_tool', async () => {
     const response = await RunningApi.asking('{"id":"XOP-4909","repo":"-o","issue":33}')
 
     expect(response.status).toBe(400)
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
+  it('a_repo_and_an_issue_both_malformed_are_refused_for_the_repo_because_it_is_checked_first', async () => {
+    const response = await RunningApi.asking('{"id":"XOP-4909","repo":"-o","issue":"33"}')
+
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toMatch(/^repo must be a repository/)
     expect(RunningApi.spy.asked).toEqual([])
   })
 
