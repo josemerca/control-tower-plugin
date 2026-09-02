@@ -220,8 +220,8 @@ Contract (backend/src/infrastructure/gh-plan-issues.js):
 
 ```javascript
 static IN_PROGRESS_LABEL = 'status:in-progress'
-static statusArgvFor({ issueNumber, repository, adding, removing })
-  // ['issue', 'edit', String(issueNumber), '--repo', repository.text,
+static statusArgvFor({ issue, repository, adding, removing })
+  // ['issue', 'edit', String(issue.number), '--repo', repository.text,
   //  '--add-label', adding, '--remove-label', removing]
 async claim({ issue, repository })    // adding IN_PROGRESS_LABEL, removing PlanIssueBody.READY_LABEL
 async requeue({ issue, repository })  // the mirror image
@@ -453,7 +453,8 @@ and **not** the words that forbade it. Then
 
 **Tests:** added: the two above. Removed on purpose:
 `it('it_waves_off_the_release_that_ct_step_will_suggest_so_the_agent_does_not_crash_into_exit_9')`
-— the reason it existed is gone, and leaving it would pin the behaviour this task removes.
+and `it('it_says_why_no_release_permission_gets_minted_in_this_flow')` — the reason both existed is
+gone, and leaving either would pin the behaviour this task removes.
 
 **Verification:** the brief suite passes and the errand is still one line.
 
