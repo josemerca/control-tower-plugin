@@ -116,6 +116,16 @@ describe('PlanEvents', () => {
     expect(events.slept).toBe(2)
   })
 
+  it('every_plan_state_says_whether_it_ends_the_watch_so_a_third_one_cannot_arrive_as_writing', () => {
+    expect(PlanEvents.declaredStates().sort()).toEqual(PlanState.declared().sort())
+  })
+
+  it('a_plan_state_nobody_declared_an_ending_for_raises_instead_of_being_polled_forever_as_if_unfinished', async () => {
+    const events = new EventsDouble(['stalled'])
+
+    await expect(events.collected()).rejects.toThrow(/no ending declared for plan state stalled/)
+  })
+
   it('a_progress_that_could_not_be_read_reaches_the_page_as_one_error_frame_and_not_as_a_state', async () => {
     const frames = await EventsDouble.unable('git status refused').collected()
 

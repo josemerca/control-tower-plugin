@@ -1,8 +1,12 @@
-export const LaunchStep = Object.freeze({
-  KEEP_PROBING: 'keep-probing',
-  RESEND_THE_LINE: 'resend-the-line',
-  GIVE_UP: 'give-up',
-})
+export class LaunchStep {
+  static KEEP_PROBING = 'keep-probing'
+  static RESEND_THE_LINE = 'resend-the-line'
+  static GIVE_UP = 'give-up'
+
+  static declared() {
+    return Object.values(LaunchStep)
+  }
+}
 
 export class LaunchBudget {
   constructor({ attempts, resends }) {

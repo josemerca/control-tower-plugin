@@ -17,6 +17,7 @@ export class CmuxPlanAgents extends PlanAgents {
   static AGENT_EXAMPLE = 'claude'
   static #AGENT_SHAPE = /^[a-zA-Z0-9._\/-]+$/
   static #REF = /^OK\s+(workspace:\d+)\s*$/m
+  static NO_MOVE = 'no move declared for launch step'
 
   constructor({ run, write, read, remove, sleep, runsIn, policy, brief, realpathOf }) {
     super()
@@ -119,7 +120,7 @@ export class CmuxPlanAgents extends PlanAgents {
           `the cmux window opened but no sentinel ever appeared at ${sentinelPath}: the line never ran`
         )
       }
-      throw new Error(`no move declared for launch step ${step}`)
+      throw new Error(`${CmuxPlanAgents.NO_MOVE} ${step}`)
     }
   }
 

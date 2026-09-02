@@ -1,4 +1,8 @@
-export const PlanState = Object.freeze({
-  WRITING: 'writing',
-  READY: 'ready',
-})
+export class PlanState {
+  static WRITING = 'writing'
+  static READY = 'ready'
+
+  static declared() {
+    return Object.values(PlanState)
+  }
+}

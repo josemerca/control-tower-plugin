@@ -41,10 +41,11 @@ class CmuxDouble {
   static SENTINEL = `${CmuxDouble.RUNS_IN}/42/${SENTINEL_FILENAME}`
   static TYPED = buildTypedCommand(CmuxDouble.LAUNCHER, shQuote)
 
-  constructor({ printed, sentinels, realpaths = new Map() }) {
+  constructor({ printed, sentinels, realpaths = new Map(), step = null }) {
     this.printed = printed
     this.sentinels = [...sentinels]
     this.realpaths = realpaths
+    this.step = step
     this.brief = new BriefDouble()
     this.calls = []
     this.written = []
@@ -71,6 +72,12 @@ class CmuxDouble {
 
   static launched() {
     return new CmuxDouble({ printed: CmuxDouble.named(), sentinels: [CmuxDouble.ran()] })
+  }
+
+  onlyEverAnswering(step) {
+    this.step = step
+
+    return this
   }
 
   static silent() {
@@ -134,12 +141,14 @@ class CmuxDouble {
       runsIn: CmuxDouble.RUNS_IN,
       realpathOf: (path) => this.realpaths.get(path) ?? null,
       brief: this.brief,
-      policy: new LaunchPolicy({
-        budget: new LaunchBudget({
-          attempts: CmuxDouble.PROBES_PER_SEND,
-          resends: CmuxDouble.RESENDS,
-        }),
-      }),
+      policy: this.step === null
+        ? new LaunchPolicy({
+          budget: new LaunchBudget({
+            attempts: CmuxDouble.PROBES_PER_SEND,
+            resends: CmuxDouble.RESENDS,
+          }),
+        })
+        : { afterProbing: () => this.step },
       remove: (path) => {
         this.removed.push(path)
         this.doings.push(['remove', path])
@@ -317,6 +326,20 @@ describe('CmuxPlanAgents', () => {
     const cmux = CmuxDouble.reachedThroughASymlink()
 
     await expect(cmux.launch()).resolves.toBe('workspace:4')
+  })
+
+  it('every_launch_step_the_policy_can_answer_has_a_move_so_a_fourth_one_cannot_pass_for_keep_probing', async () => {
+    for (const step of LaunchStep.declared()) {
+      const refusal = await CmuxDouble.silent().onlyEverAnswering(step).refusal()
+
+      expect(refusal.message).not.toContain(CmuxPlanAgents.NO_MOVE)
+    }
+  })
+
+  it('a_launch_step_nobody_declared_a_move_for_raises_instead_of_being_taken_for_keep_probing', async () => {
+    const refusal = await CmuxDouble.silent().onlyEverAnswering('invented').refusal()
+
+    expect(refusal.message).toContain(CmuxPlanAgents.NO_MOVE)
   })
 
   it('an_agent_binary_with_a_shell_metacharacter_is_rejected_before_it_reaches_the_script', () => {

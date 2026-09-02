@@ -95,6 +95,23 @@ export class PlanEvents {
   }
 
   static ERROR_EVENT = 'error'
+  static #ENDINGS = Object.freeze({
+    [PlanState.WRITING]: false,
+    [PlanState.READY]: true,
+  })
+
+  static declaredStates() {
+    return Object.keys(PlanEvents.#ENDINGS)
+  }
+
+  static endsAt(state) {
+    const declared = PlanEvents.#ENDINGS[state]
+    if (declared === undefined) {
+      throw new Error(`no ending declared for plan state ${state}`)
+    }
+
+    return declared
+  }
 
   static frameFor(state) {
     return `data: ${JSON.stringify({ state })}\n\n`
@@ -115,11 +132,12 @@ export class PlanEvents {
         yield PlanEvents.failureFrameFor(cause)
         return
       }
+      const ends = PlanEvents.endsAt(read.state)
       if (read.state !== last) {
         last = read.state
         yield PlanEvents.frameFor(read.state)
       }
-      if (read.state === PlanState.READY) return
+      if (ends) return
       await this.sleep()
       if (cancelled()) return
     }
