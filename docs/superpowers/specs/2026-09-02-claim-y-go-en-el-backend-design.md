@@ -142,9 +142,13 @@ tipo nuevo tiene la carga de la prueba»); lo que se consideró y no entró est�
   enfrente.
 - **`PlanIssues`** gana tres métodos, porque el colaborador es el mismo: `claim({ issue, repository })`,
   `requeue({ issue, repository })` y `answerGo({ issue, repository, nonce })`.
-- **Excepciones**: `PlanIssueNotClaimed`, `PlanIssueNotRequeued` y `PlanGoNotAnswered` bajo
-  `PlanIssueFailure`; `GoFailure` con `GoNotRecorded`, familia de una causa como ya lo es
-  `PlanProgressFailure`.
+- **Excepciones**: `PlanIssueNotClaimed` y `PlanGoNotAnswered` bajo `PlanIssueFailure`; `GoFailure`
+  con `GoNotRecorded`, familia de una causa como ya lo es `PlanProgressFailure`. **`requeue` no
+  tiene excepción propia**: sólo se llama compensando un fallo que ya se está reportando, así que
+  un tipo nuevo habría que declararlo igualmente en `PlanCollapse` para que el test de
+  exhaustividad siguiera verde, y esa proyección sería muerta — un status para un fallo que no
+  puede llegar a un cliente. Avisa por el `stderr` inyectado nombrando el comando exacto, como ya
+  hace `GitWorkspace`.
 
 ### 4.2 Aplicación
 
@@ -182,7 +186,9 @@ constructor.
   --body "-OK <nonce>"`. Ninguna es `safeToRepeat`: son escrituras. `claim` siembra la label que falte
   con la misma vuelta que `open` ya da (`Gh.labelMissingIn` → `label create --force` → reintento), que
   pasa a recibir el argv en vez de componerlo, porque las dos escrituras fallan por la misma causa y se
-  arreglan igual. Un fallo de `requeue` se avisa por stderr y se lanza, como hace `GitWorkspace.undo`.
+  arreglan igual. `requeue` no lanza ante un rechazo: escribe en el `stderr` inyectado el
+  `gh issue edit … --add-label status:ready --remove-label status:in-progress` que una persona puede
+  ejecutar, con la forma que ya usa `GitWorkspace`, que gana ese parámetro en el constructor.
 - **`plan-agent-brief.js`**: el encargo de implementación pierde las dos frases de la prohibición y gana
   «al entregar, libera con `node <dispatch-check> <n> --repo <r> --release` y PARA». La ruta de
   `dispatch-check` ya está en el constructor.
