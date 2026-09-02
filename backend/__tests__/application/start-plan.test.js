@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { StartPlan, StartPlanParams } from '../../src/application/actions/start-plan.js'
-import { PlanSession } from '../../src/domain/ports/plan-session.js'
+import { PlanAgents } from '../../src/domain/ports/plan-agents.js'
 import { PlanIssues } from '../../src/domain/ports/plan-issues.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { Tickets } from '../../src/domain/ports/tickets.js'
@@ -8,7 +8,7 @@ import { Ticket } from '../../src/domain/value-objects/ticket.js'
 import { TicketKey } from '../../src/domain/value-objects/ticket-key.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import {
-  PlanSessionNotStarted, PlanIssueNotCreated, TicketNotRead,
+  PlanAgentNotLaunched, PlanIssueNotCreated, TicketNotRead,
 } from '../../src/domain/exceptions.js'
 
 class TicketsDouble extends Tickets {
@@ -45,14 +45,14 @@ class PlanIssuesDouble extends PlanIssues {
   }
 }
 
-class PlanSessionDouble extends PlanSession {
+class PlanAgentsDouble extends PlanAgents {
   constructor(answer = 'workspace:4') {
     super()
     this.answer = answer
     this.asked = []
   }
 
-  async start({ ticket, issue }) {
+  async launch({ ticket, issue }) {
     this.asked.push({ ticket, issue })
     if (this.answer instanceof Error) throw this.answer
     return this.answer
@@ -63,10 +63,10 @@ class Flow {
   static TICKET = new TicketKey('MO_SHOP-42')
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
 
-  constructor({ tickets, planIssues, planSession } = {}) {
+  constructor({ tickets, planIssues, planAgents } = {}) {
     this.tickets = tickets ?? TicketsDouble.reading('the summary of the ticket')
     this.planIssues = planIssues ?? new PlanIssuesDouble()
-    this.planSession = planSession ?? new PlanSessionDouble()
+    this.planAgents = planAgents ?? new PlanAgentsDouble()
   }
 
   async run(ticket = Flow.TICKET) {
@@ -100,21 +100,21 @@ describe('StartPlan', () => {
     expect(asked.ticket.key).toBe(Flow.TICKET)
   })
 
-  it('the_session_is_opened_on_the_issue_that_was_just_created_and_not_on_the_ticket_alone', async () => {
+  it('the_agent_is_launched_on_the_issue_that_was_just_created_and_not_on_the_ticket_alone', async () => {
     const flow = new Flow()
 
     await flow.run()
 
-    expect(flow.planSession.asked).toEqual([
+    expect(flow.planAgents.asked).toEqual([
       { ticket: Flow.TICKET, issue: PlanIssuesDouble.OPENED },
     ])
   })
 
-  it('both_the_issue_and_the_session_come_back_so_the_caller_can_reach_either_of_them_later', async () => {
+  it('both_the_issue_and_the_agent_come_back_so_the_caller_can_reach_either_of_them_later', async () => {
     const started = await new Flow().run()
 
     expect(started.issue).toBe(PlanIssuesDouble.OPENED)
-    expect(started.session).toBe('workspace:4')
+    expect(started.agent).toBe('workspace:4')
   })
 
   it('a_ticket_that_cannot_be_read_stops_the_flow_before_an_issue_is_created_for_nothing', async () => {
@@ -124,34 +124,34 @@ describe('StartPlan', () => {
 
     expect(refusal).toBeInstanceOf(TicketNotRead)
     expect(flow.planIssues.asked).toEqual([])
-    expect(flow.planSession.asked).toEqual([])
+    expect(flow.planAgents.asked).toEqual([])
   })
 
-  it('an_issue_that_cannot_be_created_stops_the_flow_before_a_session_is_opened_for_nothing', async () => {
+  it('an_issue_that_cannot_be_created_stops_the_flow_before_an_agent_is_launched_for_nothing', async () => {
     const flow = new Flow({ planIssues: new PlanIssuesDouble(new PlanIssueNotCreated('label not found')) })
 
     const refusal = await flow.refusal()
 
     expect(refusal).toBeInstanceOf(PlanIssueNotCreated)
-    expect(flow.planSession.asked).toEqual([])
+    expect(flow.planAgents.asked).toEqual([])
   })
 
-  it('a_session_that_refuses_to_start_travels_out_typed_instead_of_being_turned_into_a_status', async () => {
-    const flow = new Flow({ planSession: new PlanSessionDouble(new PlanSessionNotStarted('Access denied')) })
+  it('an_agent_that_refuses_to_launch_travels_out_typed_instead_of_being_turned_into_a_status', async () => {
+    const flow = new Flow({ planAgents: new PlanAgentsDouble(new PlanAgentNotLaunched('Access denied')) })
 
     const refusal = await flow.refusal()
 
-    expect(refusal).toBeInstanceOf(PlanSessionNotStarted)
-    expect(refusal.name).toBe('PlanSessionNotStarted')
+    expect(refusal).toBeInstanceOf(PlanAgentNotLaunched)
+    expect(refusal.name).toBe('PlanAgentNotLaunched')
     expect(refusal.message).toBe('Access denied')
   })
 
-  it('the_ticket_reaches_the_session_whole_so_the_tab_can_be_named_after_it', async () => {
+  it('the_ticket_reaches_the_agent_whole_so_the_tab_can_be_named_after_it', async () => {
     const flow = new Flow()
 
     await flow.run()
 
-    expect(String(flow.planSession.asked[0].ticket)).toBe('MO_SHOP-42')
+    expect(String(flow.planAgents.asked[0].ticket)).toBe('MO_SHOP-42')
   })
 
   it('a_ticket_with_no_summary_at_all_is_refused_by_the_value_object_and_not_carried_around_empty', async () => {
@@ -172,8 +172,8 @@ describe('StartPlan', () => {
   })
 
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
-    await expect(new PlanSession().start({ ticket: Flow.TICKET, issue: PlanIssuesDouble.OPENED }))
-      .rejects.toThrow(/must implement start/)
+    await expect(new PlanAgents().launch({ ticket: Flow.TICKET, issue: PlanIssuesDouble.OPENED }))
+      .rejects.toThrow(/must implement launch/)
     await expect(new PlanIssues().open({ ticket: null, repository: Flow.REPOSITORY }))
       .rejects.toThrow(/must implement open/)
     await expect(new Tickets().detail(Flow.TICKET)).rejects.toThrow(/must implement detail/)

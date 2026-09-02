@@ -37,7 +37,7 @@ describe('PlanRefusal', () => {
 })
 
 describe('PlanCollapse', () => {
-  const FAMILIES = ['PlanFailure', 'TicketFailure', 'PlanIssueFailure', 'PlanSessionFailure']
+  const FAMILIES = ['PlanFailure', 'TicketFailure', 'PlanIssueFailure', 'PlanAgentFailure']
 
   it('every_way_the_plan_can_collapse_has_a_status_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
     const ways = Object.entries(exceptions)
@@ -55,13 +55,13 @@ describe('PlanCollapse', () => {
     expect(collapse.status).toBe(503)
     expect(collapse.error).toBe('could not start the plan: acli is not authenticated')
     expect(PlanCollapse.of(new exceptions.PlanIssueNotCreated('nope')).status).toBe(503)
-    expect(PlanCollapse.of(new exceptions.PlanSessionNotStarted('nope')).status).toBe(503)
+    expect(PlanCollapse.of(new exceptions.PlanAgentNotLaunched('nope')).status).toBe(503)
   })
 
   it('a_tool_that_answered_something_we_cannot_read_is_not_something_trying_again_would_fix', () => {
     expect(PlanCollapse.of(new exceptions.TicketNotUnderstood('nope')).status).toBe(502)
     expect(PlanCollapse.of(new exceptions.PlanIssueNotNamed('nope')).status).toBe(502)
-    expect(PlanCollapse.of(new exceptions.PlanSessionNotNamed('nope')).status).toBe(502)
+    expect(PlanCollapse.of(new exceptions.PlanAgentNotNamed('nope')).status).toBe(502)
   })
 
   it('a_family_is_not_a_way_of_collapsing_so_answering_one_raises_instead_of_guessing', () => {

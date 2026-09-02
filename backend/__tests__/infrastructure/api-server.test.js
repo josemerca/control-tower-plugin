@@ -4,12 +4,12 @@ import { gzipSync } from 'node:zlib'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { StartPlanResult } from '../../src/application/actions/start-plan.js'
 import {
-  PlanSessionNotStarted, TicketNotRead, PlanIssueNotCreated, PlanIssueNotNamed,
+  PlanAgentNotLaunched, TicketNotRead, PlanIssueNotCreated, PlanIssueNotNamed,
 } from '../../src/domain/exceptions.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 
 class StartPlanSpy {
-  static SESSION = 'workspace:4'
+  static AGENT = 'workspace:4'
   static ISSUE = new PlanIssue({ number: 7, url: 'https://github.com/owner/name/issues/7' })
 
   constructor({ failing = false } = {}) {
@@ -39,8 +39,8 @@ class StartPlanSpy {
   async execute(params) {
     this.asked.push(params.ticket.text)
     this.repositories.push(params.repository.text)
-    if (this.failing) throw new PlanSessionNotStarted('cmux is not reachable')
-    return new StartPlanResult({ issue: StartPlanSpy.ISSUE, session: StartPlanSpy.SESSION })
+    if (this.failing) throw new PlanAgentNotLaunched('cmux is not reachable')
+    return new StartPlanResult({ issue: StartPlanSpy.ISSUE, agent: StartPlanSpy.AGENT })
   }
 }
 
@@ -51,7 +51,7 @@ class RunningApi {
   static ACCEPTED_BODY = `{"id":"ABC-123","repo":"owner/name"}`
   static ANSWER =
     '{"status":"started","id":"ABC-123","repo":"owner/name",' +
-    '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"session":"workspace:4"}'
+    '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"agent":"workspace:4"}'
   static spy = null
 
   static async listening() {
@@ -143,7 +143,7 @@ describe('ApiServer', () => {
     }
   })
 
-  it('start_plan_accepts_and_answers_with_the_process_it_started_rather_than_waiting_for_it', async () => {
+  it('start_plan_accepts_and_answers_with_the_agent_it_launched_rather_than_waiting_for_it', async () => {
     const port = await RunningApi.listening()
 
     const response = await RunningApi.accepted(port)
@@ -153,7 +153,7 @@ describe('ApiServer', () => {
     expect(await response.text()).toBe(RunningApi.ANSWER)
   })
 
-  it('a_session_that_cannot_be_started_is_reported_as_such_instead_of_a_generic_failure', async () => {
+  it('an_agent_that_cannot_be_launched_is_reported_as_such_instead_of_a_generic_failure', async () => {
     RunningApi.spy = new StartPlanSpy({ failing: true })
     const server = new ApiServer({ port: 0, startPlan: RunningApi.spy })
     const port = await server.start()
@@ -237,7 +237,7 @@ describe('ApiServer', () => {
     }
   })
 
-  it('the_id_that_reaches_the_session_is_the_one_the_body_carried_and_not_a_default', async () => {
+  it('the_id_that_reaches_the_agent_is_the_one_the_body_carried_and_not_a_default', async () => {
     const port = await RunningApi.listening()
 
     const response = await RunningApi.post(port, '/start-plan', '{"id":"MO_SHOP-42","repo":"owner/name"}')

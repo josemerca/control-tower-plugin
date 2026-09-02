@@ -5,7 +5,7 @@ import { PlanRequest } from './plan-request.js'
 import { Refusal } from './refusal.js'
 import {
   TicketNotRead, TicketNotUnderstood, PlanIssueNotCreated, PlanIssueNotNamed,
-  PlanSessionNotStarted, PlanSessionNotNamed,
+  PlanAgentNotLaunched, PlanAgentNotNamed,
 } from '../domain/exceptions.js'
 
 export class PlanRefusal {
@@ -49,10 +49,10 @@ export class PlanCollapse {
   static #BY_FAILURE = [
     [TicketNotRead, PlanCollapse.#REFUSED],
     [PlanIssueNotCreated, PlanCollapse.#REFUSED],
-    [PlanSessionNotStarted, PlanCollapse.#REFUSED],
+    [PlanAgentNotLaunched, PlanCollapse.#REFUSED],
     [TicketNotUnderstood, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
     [PlanIssueNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
-    [PlanSessionNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
+    [PlanAgentNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
   ]
 
   static of(cause) {

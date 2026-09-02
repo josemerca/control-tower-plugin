@@ -1,5 +1,5 @@
 import { ApiServer, LOOPBACK } from './api-server.js'
-import { CmuxPlanSession } from './cmux-plan-session.js'
+import { CmuxPlanAgents } from './cmux-plan-agents.js'
 import { AcliTickets } from './acli-tickets.js'
 import { GhPlanIssues } from './gh-plan-issues.js'
 import { StartPlan } from '../application/actions/start-plan.js'
@@ -56,7 +56,7 @@ class CtApi {
     const startPlan = new StartPlan({
       tickets: new AcliTickets({ acli: CtApi.#talkingTo(AcliTickets.BIN, ExternalTool) }),
       planIssues: new GhPlanIssues({ gh: CtApi.#talkingTo(Gh.BIN, Gh) }),
-      planSession: new CmuxPlanSession({ run: CtApi.#tool(CmuxPlanSession.BIN), cwd: process.cwd() }),
+      planAgents: new CmuxPlanAgents({ run: CtApi.#tool(CmuxPlanAgents.BIN), cwd: process.cwd() }),
     })
     const server = new ApiServer({ port: asked.port, startPlan })
     let port

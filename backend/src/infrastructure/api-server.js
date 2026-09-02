@@ -106,7 +106,7 @@ class StartPlanRoute {
       [PlanRequest.ID_FIELD]: asked.ticket.text,
       [PlanRequest.REPO_FIELD]: asked.repository.text,
       issue: { number: started.issue.number, url: started.issue.url },
-      session: started.session,
+      agent: started.agent,
     })
   }
 
