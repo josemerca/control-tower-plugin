@@ -300,10 +300,13 @@ Se elige sobre WebSocket porque el tráfico es en una sola dirección y el
 navegador reconecta solo; y sobre que el frontend sondee, porque duplicaría el
 tick que la fase 2 existe para borrar.
 
-**`api-server.js` rechaza hoy toda petición que traiga cabecera `Origin`**
-(`Browsers.turnAway`), que es toda petición de un navegador. La ruta de eventos
-tiene que quedar fuera de esa guarda, y eso es una decisión con consecuencia de
-seguridad, no un detalle: se declara aquí para que no entre de tapadillo.
+**`api-server.js` filtra el `Origin` de toda petición de navegador**
+(`Browsers.turnAwayForeign`): admite la que no trae `Origin` y la que lo trae
+igual a la página que este mismo servidor sirve, avalada por un `Host` de
+loopback; cualquier otra página, en cualquier otro puerto, es un sitio ajeno.
+La ruta de eventos va **detrás del mismo filtro que las demás** — mismo origen,
+sin CORS, sin excepción para ella. Se declara aquí porque una excepción a ese
+filtro sería una decisión con consecuencia de seguridad, y no la hay.
 
 ---
 
