@@ -22,3 +22,13 @@ export class PlanAgentFailure extends PlanFailure {}
 export class PlanAgentNotLaunched extends PlanAgentFailure {}
 
 export class PlanAgentNotNamed extends PlanAgentFailure {}
+
+export class WorkspaceFailure extends PlanFailure {}
+
+export class WorkspaceNotPrepared extends WorkspaceFailure {}
+
+export class WorkspaceNotUnderstood extends WorkspaceFailure {}
+
+export class PlanProgressFailure extends PlanFailure {}
+
+export class PlanProgressNotRead extends PlanProgressFailure {}

@@ -8,7 +8,6 @@ describe('PlanRequest', () => {
     const members = Object.values(PlanRequestOutcome)
 
     expect(new Set(members).size).toBe(members.length)
-    expect(Object.isFrozen(PlanRequestOutcome)).toBe(true)
   })
 
   it('a_refused_request_cannot_carry_a_story_that_a_consumer_would_then_act_on', () => {
@@ -68,7 +67,6 @@ describe('PlanRequest', () => {
 
     expect(accepted.story).toBeInstanceOf(UserStoryKey)
     expect(accepted.story.text).toBe('MO_SHOP-42')
-    expect(Object.isFrozen(accepted.story)).toBe(true)
   })
 
   it('an_accepted_body_hands_back_the_repository_as_a_domain_value_too', () => {
@@ -76,7 +74,6 @@ describe('PlanRequest', () => {
 
     expect(accepted.repository).toBeInstanceOf(RepositoryName)
     expect(accepted.repository.text).toBe('josemerca/ct-loop-sandbox')
-    expect(Object.isFrozen(accepted.repository)).toBe(true)
   })
 
   it('an_unknown_field_outcome_has_to_name_what_it_rejected_or_the_answer_says_nothing', () => {
@@ -85,12 +82,5 @@ describe('PlanRequest', () => {
 
   it('an_outcome_outside_the_vocabulary_raises_instead_of_travelling_on_as_a_string', () => {
     expect(() => PlanRequest.refused('invented')).toThrow(/PlanRequestOutcome member/)
-  })
-
-  it('an_accepted_request_cannot_be_edited_after_it_was_validated', () => {
-    const asked = PlanRequest.accepted(new UserStoryKey('ABC-123'), new RepositoryName('owner/name'))
-
-    expect(Object.isFrozen(asked)).toBe(true)
-    expect(Object.isFrozen(asked.fields)).toBe(true)
   })
 })

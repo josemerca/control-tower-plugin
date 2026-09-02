@@ -6,14 +6,26 @@ import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { StartPlanResult } from '../../src/application/actions/start-plan.js'
+import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
+import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
+import { PlanEvents, EventsRefusal } from '../../src/infrastructure/plan-events-route.js'
 import {
-  PlanAgentNotLaunched, UserStoryNotRead, PlanIssueNotCreated, PlanIssueNotNamed,
+  PlanAgentNotLaunched, UserStoryNotRead, PlanIssueNotCreated, PlanIssueNotNamed, WorkspaceNotPrepared,
+  PlanProgressNotRead,
 } from '../../src/domain/exceptions.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
+import { PlanState } from '../../src/domain/value-objects/plan-state.js'
+import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 
 class StartPlanSpy {
   static AGENT = 'workspace:4'
   static ISSUE = new PlanIssue({ number: 7, url: 'https://github.com/owner/name/issues/7' })
+  static LOCATED = new WorkspaceLocation({ path: '/repo/.worktrees/7', branch: 'feat/7' })
+  static WATCH = new PlanWatch({
+    issue: StartPlanSpy.ISSUE,
+    located: StartPlanSpy.LOCATED,
+    repository: new RepositoryName('owner/name'),
+  })
 
   constructor({ failing = false } = {}) {
     this.asked = []
@@ -43,7 +55,43 @@ class StartPlanSpy {
     this.asked.push(params.story.text)
     this.repositories.push(params.repository.text)
     if (this.failing) throw new PlanAgentNotLaunched('cmux is not reachable')
-    return new StartPlanResult({ issue: StartPlanSpy.ISSUE, agent: StartPlanSpy.AGENT })
+    return new StartPlanResult({ agent: StartPlanSpy.AGENT, watch: StartPlanSpy.WATCH })
+  }
+}
+
+class ProgressSpy {
+  static UNREADABLE = 'git status could not say whether the plan is committed'
+
+  constructor(state, cause) {
+    this.state = state
+    this.cause = cause
+    this.asked = 0
+  }
+
+  static events(state, { sleepMs = 0 } = {}) {
+    return ProgressSpy.answering(new ProgressSpy(state, null), sleepMs)
+  }
+
+  static unable({ sleepMs = 0 } = {}) {
+    const spy = new ProgressSpy(null, new PlanProgressNotRead(ProgressSpy.UNREADABLE))
+
+    return ProgressSpy.answering(spy, sleepMs)
+  }
+
+  static answering(spy, sleepMs) {
+    return {
+      spy,
+      planEvents: new PlanEvents({
+        read: () => spy.read(),
+        sleep: () => new Promise((resolve) => setTimeout(resolve, sleepMs)),
+      }),
+    }
+  }
+
+  async read() {
+    this.asked += 1
+    if (this.cause !== null) throw this.cause
+    return { state: this.state }
   }
 }
 
@@ -188,8 +236,12 @@ describe('ApiServer', () => {
     }
   })
 
-  it('a_story_that_cannot_be_read_and_an_issue_that_cannot_be_created_are_refusals_too', async () => {
-    const causes = [new UserStoryNotRead('acli is not authenticated'), new PlanIssueNotCreated('label not found')]
+  it('a_story_an_issue_or_a_worktree_the_tool_refuses_are_all_answered_as_worth_trying_again', async () => {
+    const causes = [
+      new UserStoryNotRead('acli is not authenticated'),
+      new PlanIssueNotCreated('label not found'),
+      new WorkspaceNotPrepared('branch is taken'),
+    ]
 
     for (const cause of causes) {
       const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.failingWith(cause) })
@@ -353,7 +405,7 @@ describe('ApiServer', () => {
       RunningApi.asking(
         '/start-plan',
         [`Origin: http://rebound.example:${port}`, 'Content-Type: application/json'],
-        `{"id":"${RunningApi.TICKET}"}`,
+        RunningApi.ACCEPTED_BODY,
         `rebound.example:${port}`
       )
     )
@@ -365,7 +417,7 @@ describe('ApiServer', () => {
   it('an_origin_on_another_port_of_loopback_is_foreign_because_another_local_server_is_another_site', async () => {
     const port = await RunningApi.listening()
 
-    const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.TICKET}"}`, {
+    const response = await RunningApi.startPlan(port, RunningApi.ACCEPTED_BODY, {
       Origin: `http://127.0.0.1:${port + 1}`,
     })
 
@@ -631,5 +683,132 @@ describe('ApiServer', () => {
     } finally {
       await server.stop()
     }
+  })
+
+  it('a_plan_events_request_for_an_issue_nobody_started_is_a_404_instead_of_an_open_stream', async () => {
+    const { planEvents } = ProgressSpy.events(PlanState.READY)
+    const port = await RunningApi.listening({ planEvents })
+
+    const response = await fetch(`http://127.0.0.1:${port}/plan-events/404`)
+
+    expect(response.status).toBe(404)
+    expect(await response.text()).toBe(`{"error":"${EventsRefusal.NOT_WATCHED}"}`)
+  })
+
+  it('an_issue_that_is_not_a_number_is_a_400_the_caller_can_fix_and_not_a_404_for_a_lookup_of_nan', async () => {
+    const { spy, planEvents } = ProgressSpy.events(PlanState.READY)
+    const port = await RunningApi.listening({ planEvents })
+
+    const response = await fetch(`http://127.0.0.1:${port}/plan-events/abc`)
+
+    expect(response.status).toBe(400)
+    expect(await response.text()).toBe('{"error":"the issue to watch is a number such as 42"}')
+    expect(spy.asked).toBe(0)
+  })
+
+  it('a_plan_that_started_is_remembered_so_the_page_can_watch_it_by_the_issue_it_opened', async () => {
+    const { planEvents } = ProgressSpy.events(PlanState.READY)
+    const port = await RunningApi.listening({ planEvents })
+
+    await RunningApi.accepted(port)
+    const response = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+      headers: { Origin: `http://127.0.0.1:${port}` },
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe(PlanEvents.frameFor(PlanState.READY))
+    expect(response.headers.get('access-control-allow-origin')).toBe(null)
+  })
+
+  it('a_second_subscription_after_ready_is_a_404_so_an_event_source_gives_up_instead_of_reconnecting_forever', async () => {
+    const { planEvents } = ProgressSpy.events(PlanState.READY)
+    const port = await RunningApi.listening({ planEvents })
+
+    await RunningApi.accepted(port)
+    await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`)
+    const again = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`)
+
+    expect(again.status).toBe(404)
+    expect(await again.text()).toBe(`{"error":"${EventsRefusal.NOT_WATCHED}"}`)
+  })
+
+  it('a_subscription_after_a_progress_nobody_could_read_is_a_404_too_because_that_ending_is_final_as_well', async () => {
+    const { planEvents } = ProgressSpy.unable()
+    const port = await RunningApi.listening({ planEvents })
+
+    await RunningApi.accepted(port)
+    await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`)
+    const again = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`)
+
+    expect(again.status).toBe(404)
+  })
+
+  it('a_page_that_hangs_up_while_the_plan_is_still_being_written_keeps_its_watch_so_it_can_come_back', async () => {
+    const { planEvents } = ProgressSpy.events(PlanState.WRITING, { sleepMs: 5 })
+    const port = await RunningApi.listening({ planEvents })
+
+    await RunningApi.accepted(port)
+    const controller = new AbortController()
+    const opened = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+      signal: controller.signal,
+    })
+    await opened.body.getReader().read()
+    controller.abort()
+    await new Promise((resolve) => setTimeout(resolve, 30))
+
+    const again = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+      signal: AbortSignal.timeout(50),
+    }).catch((cause) => cause)
+
+    expect(again.status ?? 200).toBe(200)
+  })
+
+  it('the_events_route_turns_away_a_foreign_page_exactly_like_the_one_that_starts_a_plan', async () => {
+    const { spy, planEvents } = ProgressSpy.events(PlanState.READY)
+    const port = await RunningApi.listening({ planEvents })
+
+    await RunningApi.accepted(port)
+    const response = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+      headers: { Origin: 'https://evil.example' },
+    })
+
+    expect(response.status).toBe(403)
+    expect(await response.text()).toBe('{"error":"this api only serves the page it hosts"}')
+    expect(spy.asked).toBe(0)
+  })
+
+  it('a_progress_nobody_could_read_reaches_the_page_as_an_error_frame_and_closes_instead_of_hanging_open', async () => {
+    const { spy, planEvents } = ProgressSpy.unable()
+    const port = await RunningApi.listening({ planEvents })
+
+    await RunningApi.accepted(port)
+    const response = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+      headers: { Origin: `http://127.0.0.1:${port}` },
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.text())
+      .toBe(`event: error\ndata: {"error":"${ProgressSpy.UNREADABLE}"}\n\n`)
+    expect(spy.asked).toBe(1)
+  })
+
+  it('closing_the_connection_from_the_client_stops_the_progress_port_from_being_asked_again', async () => {
+    const { spy, planEvents } = ProgressSpy.events(PlanState.WRITING, { sleepMs: 5 })
+    const port = await RunningApi.listening({ planEvents })
+
+    await RunningApi.accepted(port)
+    const controller = new AbortController()
+    const opened = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+      signal: controller.signal,
+    })
+    await opened.body.getReader().read()
+    controller.abort()
+
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    const askedRightAfterAbort = spy.asked
+    await new Promise((resolve) => setTimeout(resolve, 30))
+
+    expect(askedRightAfterAbort).toBeGreaterThan(0)
+    expect(spy.asked).toBe(askedRightAfterAbort)
   })
 })

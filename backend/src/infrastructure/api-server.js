@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { Answer, Route, Browsers, JsonBody } from './http.js'
 import { StartPlanRoute, PlanRequest, PlanRefusal } from './start-plan-route.js'
+import { PlanEventsRoute, PlanSessions } from './plan-events-route.js'
 
 export const LOOPBACK = '127.0.0.1'
 class FrontendPages {
@@ -37,9 +38,11 @@ class Failures {
 }
 
 export class ApiServer {
-  constructor({ port, startPlan, frontendRoot = null }) {
+  constructor({ port, startPlan, planEvents = null, sessions = new PlanSessions(), frontendRoot = null }) {
     this.requestedPort = port
     this.startPlan = startPlan
+    this.planEvents = planEvents
+    this.sessions = sessions
     this.frontendRoot = frontendRoot
     this.server = null
   }
@@ -55,9 +58,14 @@ export class ApiServer {
       Browsers.turnAwayForeign,
       JsonBody.demandDeclared,
       JsonBody.reader(),
-      StartPlanRoute.handledBy(this.startPlan)
+      StartPlanRoute.handledBy(this.startPlan, this.sessions)
     )
     app.all(StartPlanRoute.PATH, StartPlanRoute.refuseOtherMethods)
+    app.get(
+      PlanEventsRoute.PATH,
+      Browsers.turnAwayForeign,
+      PlanEventsRoute.handledBy(this.sessions, this.planEvents)
+    )
     app.use(Failures.nothingMatched)
     app.use(Failures.answer)
 

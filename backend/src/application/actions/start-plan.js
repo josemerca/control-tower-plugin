@@ -1,3 +1,6 @@
+import { PlanBriefing } from '../../domain/value-objects/plan-briefing.js'
+import { PlanWatch } from '../../domain/value-objects/plan-watch.js'
+
 export class StartPlanParams {
   constructor({ story, repository }) {
     this.story = story
@@ -7,25 +10,50 @@ export class StartPlanParams {
 }
 
 export class StartPlanResult {
-  constructor({ issue, agent }) {
-    this.issue = issue
+  constructor({ agent, watch }) {
     this.agent = agent
+    this.watch = watch
     Object.freeze(this)
   }
 }
 
 export class StartPlan {
-  constructor({ userStories, planIssues, planAgents }) {
+  constructor({ userStories, planIssues, workspace, planAgents }) {
     this.userStories = userStories
     this.planIssues = planIssues
+    this.workspace = workspace
     this.planAgents = planAgents
   }
 
   async execute(params) {
     const story = await this.userStories.detail(params.story)
     const issue = await this.planIssues.open({ story, repository: params.repository })
-    const agent = await this.planAgents.launch({ story: params.story, issue })
+    const located = await this.workspace.prepare({ issue, repository: params.repository })
+    const agent = await this.#launch(params, issue, located)
 
-    return new StartPlanResult({ issue, agent })
+    return new StartPlanResult({
+      agent,
+      watch: new PlanWatch({ issue, located, repository: params.repository }),
+    })
+  }
+
+  async #launch(params, issue, located) {
+    try {
+      return await this.planAgents.launch(new PlanBriefing({
+        story: params.story,
+        issue,
+        located,
+        repository: params.repository,
+      }))
+    } catch (failure) {
+      await this.#abandon(located)
+      throw failure
+    }
+  }
+
+  async #abandon(located) {
+    try {
+      await this.workspace.undo(located)
+    } catch {}
   }
 }

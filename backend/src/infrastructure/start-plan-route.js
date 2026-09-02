@@ -1,11 +1,11 @@
-import { Answer, JsonBody } from './http.js'
+import { Answer, JsonBody, Refusal } from './http.js'
 import { StartPlanParams } from '../application/actions/start-plan.js'
 import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
 import {
   PlanFailure,
   UserStoryNotRead, UserStoryNotUnderstood, PlanIssueNotCreated, PlanIssueNotNamed,
-  PlanAgentNotLaunched, PlanAgentNotNamed,
+  PlanAgentNotLaunched, PlanAgentNotNamed, WorkspaceNotPrepared, WorkspaceNotUnderstood,
 } from '../domain/exceptions.js'
 
 export const PlanRequestOutcome = Object.freeze({
@@ -89,20 +89,6 @@ export class PlanRequest {
   }
 }
 
-export class Refusal {
-  constructor({ status, error }) {
-    if (!Number.isInteger(status) || status < 400 || status > 599) {
-      throw new Error(`a refusal answers with a client or server status, got ${JSON.stringify(status)}`)
-    }
-    if (typeof error !== 'string' || error.trim().length === 0) {
-      throw new Error(`a refusal says why, got ${JSON.stringify(error)}`)
-    }
-    this.status = status
-    this.error = error
-    Object.freeze(this)
-  }
-}
-
 export class PlanRefusal {
   static #BY_OUTCOME = Object.freeze({
     [PlanRequestOutcome.BODY_TOO_LARGE]: () =>
@@ -145,9 +131,11 @@ export class PlanCollapse {
     [UserStoryNotRead, PlanCollapse.#REFUSED],
     [PlanIssueNotCreated, PlanCollapse.#REFUSED],
     [PlanAgentNotLaunched, PlanCollapse.#REFUSED],
+    [WorkspaceNotPrepared, PlanCollapse.#REFUSED],
     [UserStoryNotUnderstood, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
     [PlanIssueNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
     [PlanAgentNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
+    [WorkspaceNotUnderstood, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
   ]
 
   static of(cause) {
@@ -168,18 +156,18 @@ export class StartPlanRoute {
   static PATH = '/start-plan'
   static METHOD = 'POST'
 
-  static handledBy(startPlan) {
+  static handledBy(startPlan, sessions) {
     return async (request, response) => {
       const asked = PlanRequest.from(JsonBody.textOf(request))
       if (asked.outcome !== PlanRequestOutcome.ACCEPTED) {
         Answer.refuseAs(response, PlanRefusal.of(asked))
         return
       }
-      await StartPlanRoute.#accept(startPlan, response, asked)
+      await StartPlanRoute.#accept(startPlan, sessions, response, asked)
     }
   }
 
-  static async #accept(startPlan, response, asked) {
+  static async #accept(startPlan, sessions, response, asked) {
     let started
     try {
       started = await startPlan.execute(
@@ -190,11 +178,12 @@ export class StartPlanRoute {
       Answer.refuseAs(response, PlanCollapse.of(cause))
       return
     }
+    sessions.remember(started.watch)
     Answer.send(response, 202, {
       status: 'started',
       [PlanRequest.ID_FIELD]: asked.story.text,
       [PlanRequest.REPO_FIELD]: asked.repository.text,
-      issue: { number: started.issue.number, url: started.issue.url },
+      issue: { number: started.watch.issue.number, url: started.watch.issue.url },
       agent: started.agent,
     })
   }

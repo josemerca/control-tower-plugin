@@ -36,3 +36,8 @@ cd backend && npm ci && npm test    # la API y su vara
 ```
 
 CI corre las dos por separado (`.github/workflows/continuous-integration.yml`).
+
+Y un `Makefile` en la raíz las junta sin sustituirlas. Cada objetivo nombra
+su paquete: `make test-backend`, `make build-frontend`, `make run-backend`…
+y `make run-frontend` construye el front y arranca el backend sirviéndolo en
+`http://127.0.0.1:8787/`. `make help` lista los objetivos.

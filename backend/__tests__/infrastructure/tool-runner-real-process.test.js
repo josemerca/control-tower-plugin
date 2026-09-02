@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest'
+import { realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { ToolRunner } from '../../src/infrastructure/tool-runner.js'
 
 class Node {
@@ -52,6 +54,22 @@ describe('ToolRunner', () => {
 
     expect(output.failed).toBe(true)
     expect(output.stderr).toContain('ct-no-such-tool')
+  })
+
+  it('the_directory_the_caller_names_is_where_the_tool_runs_and_not_where_the_api_was_started', async () => {
+    const elsewhere = realpathSync(tmpdir())
+
+    const output = await Node.running(30_000)
+      .run(['-e', 'process.stdout.write(process.cwd())'], { cwd: elsewhere })
+
+    expect(output.stdout).toBe(elsewhere)
+    expect(output.stdout).not.toBe(process.cwd())
+  })
+
+  it('a_call_that_names_no_directory_still_runs_where_the_api_was_started', async () => {
+    const output = await Node.running(30_000).run(['-e', 'process.stdout.write(process.cwd())'])
+
+    expect(output.stdout).toBe(process.cwd())
   })
 
   it('a_runner_without_a_budget_cannot_be_built_because_no_call_goes_out_uncapped', () => {

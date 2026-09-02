@@ -3,21 +3,44 @@
 La interfaz web que consume la API de `backend/`. Nace en este repo — repo
 único, sin subtree: la decisión de 2026-09-01 que registra la nota de
 divergencia en `docs/superpowers/specs/2026-08-31-fusion-con-app-companion-design.md`.
+El diseño del front, endpoint a endpoint, está en
+`docs/superpowers/specs/2026-09-02-frontend-primer-endpoint-design.md`.
 
-Hoy es un hueco preparado: `package.json` privado sin dependencias y el
-`.gitignore` de rigor. La elección de framework se toma al arrancar el
-desarrollo del front, no antes.
+Vite + React 19 + TypeScript. Hoy una pantalla sobre el único endpoint:
+un campo para la clave del ticket, un botón, y el resultado de `POST /start-plan`.
 
-## Lo único que ya está decidido
+## Lo que ya está decidido
 
 - **Nunca se distribuye con el plugin.** El `source` del marketplace es
   `./plugin` y este directorio queda fuera de toda instalación; aquí las
   dependencias npm son legítimas.
-- **Lo sirve `backend/`, en el mismo origen.** `ct-api.mjs` sirve el
-  contenido de `frontend/dist/` en `/` cuando ese directorio existe, así que
-  página y API comparten `http://127.0.0.1:<puerto>`. La API rechaza con
-  `403` cualquier `Origin` que no sea el suyo propio, con `Host` de loopback:
-  una página ajena no puede llamar a `POST /start-plan`, y la nuestra sí sin
-  CORS ni preflight.
-- **Habla con `backend/` por HTTP.** El primer endpoint ya existe:
-  `POST /start-plan` (`backend/src/infrastructure/api-server.js`).
+- **Lo sirve `backend/`, en el mismo origen.** `ct-api.mjs` sirve `dist/` en
+  `/` cuando existe, así que página y API comparten `http://127.0.0.1:<puerto>`.
+  La API rechaza con `403` cualquier `Origin` que no sea el suyo propio, con
+  `Host` de loopback: una página ajena no puede llamar a `POST /start-plan`, y
+  la nuestra sí, sin CORS ni preflight.
+- **El cliente es `fetch` sin envoltorio** (`src/app/start-plan/client.ts`).
+  Las librerías de la casa esperan a que CI tenga acceso al registry privado.
+
+## Desarrollo
+
+```bash
+make run-frontend        # desde la raíz: instala, construye dist/ y arranca el backend sirviéndolo
+make dev-frontend        # vite en el 5173 con proxy a la API (arranca antes `make run-backend`)
+make test-frontend
+```
+
+O dentro de `frontend/`: `npm ci`, `npm test`, `npm run build`, `npm run dev`.
+
+El proxy de `vite.config.ts` quita la cabecera `Origin` de lo que reenvía:
+sin ella el backend trata la petición como cliente no-navegador. Es una
+excepción de desarrollo; en producción la página sale del propio backend.
+
+## Convenciones
+
+Las de la skill `frontend-engineering` (sin punto y coma, exports con nombre,
+imports absolutos desde `src/`, un componente por fichero, BEM) más la vara
+que `__tests__/yardstick.test.ts` mide en cada fichero: nombres en inglés,
+cero prosa en comentarios, ningún `export default` salvo el que Vite exige en
+su config, y ningún import que trepe con `../`. Las etiquetas de la interfaz
+van en castellano; todo lo demás, en inglés.

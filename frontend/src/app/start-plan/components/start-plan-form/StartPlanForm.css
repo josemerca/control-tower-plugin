@@ -1,0 +1,47 @@
+.start-plan-form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 28rem;
+}
+
+.start-plan-form__label {
+  font-weight: 600;
+}
+
+.start-plan-form__input {
+  font: inherit;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid #8a8a8a;
+  border-radius: 4px;
+}
+
+.start-plan-form__button {
+  font: inherit;
+  padding: 0.5rem 1rem;
+  border: 0;
+  border-radius: 4px;
+  background: #0b5d57;
+  color: #fff;
+  cursor: pointer;
+}
+
+.start-plan-form__button:disabled {
+  background: #b5c9c7;
+  cursor: not-allowed;
+}
+
+.start-plan-form__result {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+}
+
+.start-plan-form__result--started {
+  background: #e0eeec;
+  color: #0e1918;
+}
+
+.start-plan-form__result--refused {
+  background: #f7ebd5;
+  color: #4a3200;
+}
