@@ -8,7 +8,7 @@ import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { StartPlanResult } from '../../src/application/actions/start-plan.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
-import { PlanEvents, PlanEventsRoute } from '../../src/infrastructure/plan-events-route.js'
+import { PlanEvents, EventsRefusal } from '../../src/infrastructure/plan-events-route.js'
 import {
   PlanAgentNotLaunched, UserStoryNotRead, PlanIssueNotCreated, PlanIssueNotNamed, WorkspaceNotPrepared,
   PlanProgressNotRead,
@@ -692,7 +692,18 @@ describe('ApiServer', () => {
     const response = await fetch(`http://127.0.0.1:${port}/plan-events/404`)
 
     expect(response.status).toBe(404)
-    expect(await response.text()).toBe(`{"error":"${PlanEventsRoute.NOT_WATCHED}"}`)
+    expect(await response.text()).toBe(`{"error":"${EventsRefusal.NOT_WATCHED}"}`)
+  })
+
+  it('an_issue_that_is_not_a_number_is_a_400_the_caller_can_fix_and_not_a_404_for_a_lookup_of_nan', async () => {
+    const { spy, planEvents } = ProgressSpy.events(PlanState.READY)
+    const port = await RunningApi.listening({ planEvents })
+
+    const response = await fetch(`http://127.0.0.1:${port}/plan-events/abc`)
+
+    expect(response.status).toBe(400)
+    expect(await response.text()).toBe('{"error":"the issue to watch is a number such as 42"}')
+    expect(spy.asked).toBe(0)
   })
 
   it('a_plan_that_started_is_remembered_so_the_page_can_watch_it_by_the_issue_it_opened', async () => {

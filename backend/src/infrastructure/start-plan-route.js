@@ -1,4 +1,4 @@
-import { Answer, JsonBody } from './http.js'
+import { Answer, JsonBody, Refusal } from './http.js'
 import { StartPlanParams } from '../application/actions/start-plan.js'
 import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
@@ -86,20 +86,6 @@ export class PlanRequest {
       return PlanRequest.refused(PlanRequestOutcome.MALFORMED_REPO)
     }
     return PlanRequest.accepted(new UserStoryKey(given), new RepositoryName(asked))
-  }
-}
-
-export class Refusal {
-  constructor({ status, error }) {
-    if (!Number.isInteger(status) || status < 400 || status > 599) {
-      throw new Error(`a refusal answers with a client or server status, got ${JSON.stringify(status)}`)
-    }
-    if (typeof error !== 'string' || error.trim().length === 0) {
-      throw new Error(`a refusal says why, got ${JSON.stringify(error)}`)
-    }
-    this.status = status
-    this.error = error
-    Object.freeze(this)
   }
 }
 

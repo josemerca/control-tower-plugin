@@ -1,4 +1,4 @@
-import { Answer } from './http.js'
+import { Answer, Refusal } from './http.js'
 import { PlanState } from '../domain/value-objects/plan-state.js'
 import { PlanProgressFailure } from '../domain/exceptions.js'
 
@@ -13,6 +13,74 @@ export class PlanSessions {
 
   watching(number) {
     return this.live.get(number) ?? null
+  }
+}
+
+export const EventsRequestOutcome = Object.freeze({
+  ACCEPTED: 'accepted',
+  MALFORMED_ISSUE: 'malformed-issue',
+  NOT_WATCHED: 'not-watched',
+})
+
+export class EventsRequest {
+  static EXAMPLE = 42
+  static #NUMBERED = /^[1-9][0-9]*$/
+
+  constructor({ outcome, watched }) {
+    if (!Object.values(EventsRequestOutcome).includes(outcome)) {
+      throw new Error(`outcome must be an EventsRequestOutcome member, got ${outcome}`)
+    }
+    if ((outcome === EventsRequestOutcome.ACCEPTED) === (watched === null)) {
+      throw new Error(`outcome ${outcome} disagrees with its watch, got ${watched}`)
+    }
+    this.outcome = outcome
+    this.watched = watched
+    Object.freeze(this)
+  }
+
+  static accepted(watched) {
+    return new EventsRequest({ outcome: EventsRequestOutcome.ACCEPTED, watched })
+  }
+
+  static refused(outcome) {
+    return new EventsRequest({ outcome, watched: null })
+  }
+
+  static from(rawIssue, sessions) {
+    if (typeof rawIssue !== 'string' || !EventsRequest.#NUMBERED.test(rawIssue)) {
+      return EventsRequest.refused(EventsRequestOutcome.MALFORMED_ISSUE)
+    }
+    const watched = sessions.watching(Number(rawIssue))
+    if (watched === null) {
+      return EventsRequest.refused(EventsRequestOutcome.NOT_WATCHED)
+    }
+
+    return EventsRequest.accepted(watched)
+  }
+}
+
+export class EventsRefusal {
+  static NOT_WATCHED = 'no plan was started for that issue'
+  static #BY_OUTCOME = Object.freeze({
+    [EventsRequestOutcome.MALFORMED_ISSUE]: () => new Refusal({
+      status: 400,
+      error: `the issue to watch is a number such as ${EventsRequest.EXAMPLE}`,
+    }),
+    [EventsRequestOutcome.NOT_WATCHED]: () =>
+      new Refusal({ status: 404, error: EventsRefusal.NOT_WATCHED }),
+  })
+
+  static of(asked) {
+    const declared = EventsRefusal.#BY_OUTCOME[asked.outcome]
+    if (declared === undefined) {
+      throw new Error(`no refusal declared for outcome ${asked.outcome}`)
+    }
+
+    return declared(asked)
+  }
+
+  static declaredOutcomes() {
+    return Object.keys(EventsRefusal.#BY_OUTCOME)
   }
 }
 
@@ -68,7 +136,6 @@ class Disconnection {
 export class PlanEventsRoute {
   static PATH = '/plan-events/:issue'
   static METHOD = 'GET'
-  static NOT_WATCHED = 'no plan was started for that issue'
   static #HEADERS = Object.freeze({
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -79,15 +146,15 @@ export class PlanEventsRoute {
 
   static handledBy(sessions, events) {
     return async (request, response) => {
-      const watched = sessions.watching(Number(request.params.issue))
-      if (watched === null) {
-        Answer.refuse(response, 404, PlanEventsRoute.NOT_WATCHED)
+      const asked = EventsRequest.from(request.params.issue, sessions)
+      if (asked.outcome !== EventsRequestOutcome.ACCEPTED) {
+        Answer.refuseAs(response, EventsRefusal.of(asked))
         return
       }
       const disconnected = Disconnection.watch(request)
       response.on('error', PlanEventsRoute.#ignore)
       response.writeHead(200, PlanEventsRoute.#HEADERS)
-      for await (const frame of events.stream(watched, disconnected)) {
+      for await (const frame of events.stream(asked.watched, disconnected)) {
         response.write(frame)
       }
       response.end()

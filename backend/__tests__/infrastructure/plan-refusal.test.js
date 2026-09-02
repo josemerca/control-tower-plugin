@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest'
 import {
-  PlanRequest, PlanRequestOutcome, PlanRefusal, PlanCollapse, Refusal,
+  PlanRequest, PlanRequestOutcome, PlanRefusal, PlanCollapse,
 } from '../../src/infrastructure/start-plan-route.js'
+import { Refusal } from '../../src/infrastructure/http.js'
 import * as exceptions from '../../src/domain/exceptions.js'
 
 describe('PlanRefusal', () => {
