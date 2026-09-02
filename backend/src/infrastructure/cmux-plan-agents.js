@@ -2,6 +2,7 @@ import {
   buildLauncherScript,
   buildTypedCommand,
   parseSentinel,
+  sameDir,
   LAUNCHER_FILENAME,
   SENTINEL_FILENAME,
 } from '../../../plugin/scripts/launch-sentinel.js'
@@ -17,8 +18,9 @@ export class CmuxPlanAgents extends PlanAgents {
   static #AGENT_SHAPE = /^[a-zA-Z0-9._\/-]+$/
   static #REF = /^OK\s+(workspace:\d+)\s*$/m
 
-  constructor({ run, write, read, remove, sleep, runsIn, policy, brief }) {
+  constructor({ run, write, read, remove, sleep, runsIn, policy, brief, realpathOf }) {
     super()
+    this.realpathOf = realpathOf
     this.run = run
     this.write = write
     this.read = read
@@ -104,7 +106,7 @@ export class CmuxPlanAgents extends PlanAgents {
   async #confirm({ briefing, sentinelPath, typed }) {
     for (let probes = 1; ; probes += 1) {
       const seen = await this.#peek(sentinelPath)
-      if (seen !== null) return CmuxPlanAgents.#judge(seen, briefing)
+      if (seen !== null) return this.#judge(seen, briefing)
       await this.sleep()
       const step = this.policy.afterProbing(probes)
       if (step === LaunchStep.KEEP_PROBING) continue
@@ -121,13 +123,13 @@ export class CmuxPlanAgents extends PlanAgents {
     }
   }
 
-  static #judge(seen, briefing) {
+  #judge(seen, briefing) {
     if (!seen.claudeResolved) {
       throw new PlanAgentNotLaunched(
         `the shell of the session cannot find ${CmuxPlanAgents.AGENT} on its PATH, so no agent is writing anything`
       )
     }
-    if (seen.cwd !== briefing.located.path) {
+    if (!sameDir(seen.cwd, briefing.located.path, this.realpathOf)) {
       throw new PlanAgentNotLaunched(
         `the session started in ${seen.cwd} and not in ${briefing.located.path}: whatever it writes misses this branch`
       )

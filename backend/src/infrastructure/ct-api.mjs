@@ -1,4 +1,5 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { realpathSync } from 'node:fs'
 import { setTimeout as after } from 'node:timers/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -46,6 +47,14 @@ class PluginTree {
 }
 
 class Disk {
+  static realpathOf(path) {
+    try {
+      return realpathSync(path)
+    } catch {
+      return null
+    }
+  }
+
   static async write(path, text) {
     await mkdir(dirname(path), { recursive: true })
     await writeFile(path, text)
@@ -127,6 +136,7 @@ class CtApi {
         write: Disk.write,
         read: Disk.read,
         remove: Disk.remove,
+        realpathOf: Disk.realpathOf,
         sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_PROBES),
         runsIn: join(tmpdir(), CtApi.#LAUNCH_DIRECTORY),
         policy: new LaunchPolicy({

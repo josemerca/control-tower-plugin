@@ -30,6 +30,7 @@ class BriefDouble {
 class CmuxDouble {
   static RUNS_IN = '/tmp/ct-plan'
   static WORKTREE = '/repo/.worktrees/42'
+  static WORKTREE_THROUGH_A_SYMLINK = '/private/repo/.worktrees/42'
   static ISSUE = new PlanIssue({ number: 42, url: 'https://github.com/owner/name/issues/42' })
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
   static ERRAND = 'escribe el plan de #42 en josemerca/ct-loop-sandbox'
@@ -40,9 +41,10 @@ class CmuxDouble {
   static SENTINEL = `${CmuxDouble.RUNS_IN}/42/${SENTINEL_FILENAME}`
   static TYPED = buildTypedCommand(CmuxDouble.LAUNCHER, shQuote)
 
-  constructor({ printed, sentinels }) {
+  constructor({ printed, sentinels, realpaths = new Map() }) {
     this.printed = printed
     this.sentinels = [...sentinels]
+    this.realpaths = realpaths
     this.brief = new BriefDouble()
     this.calls = []
     this.written = []
@@ -93,6 +95,17 @@ class CmuxDouble {
     })
   }
 
+  static reachedThroughASymlink() {
+    return new CmuxDouble({
+      printed: CmuxDouble.named(),
+      sentinels: [CmuxDouble.ran(CmuxDouble.WORKTREE_THROUGH_A_SYMLINK)],
+      realpaths: new Map([
+        [CmuxDouble.WORKTREE, CmuxDouble.WORKTREE_THROUGH_A_SYMLINK],
+        [CmuxDouble.WORKTREE_THROUGH_A_SYMLINK, CmuxDouble.WORKTREE_THROUGH_A_SYMLINK],
+      ]),
+    })
+  }
+
   static refusing(said) {
     return new CmuxDouble({
       printed: new ProcessOutput({ code: 1, stdout: '', stderr: said }),
@@ -119,6 +132,7 @@ class CmuxDouble {
   agents() {
     return new CmuxPlanAgents({
       runsIn: CmuxDouble.RUNS_IN,
+      realpathOf: (path) => this.realpaths.get(path) ?? null,
       brief: this.brief,
       policy: new LaunchPolicy({
         budget: new LaunchBudget({
@@ -297,6 +311,12 @@ describe('CmuxPlanAgents', () => {
 
     expect(refusal).toBeInstanceOf(PlanAgentNotLaunched)
     expect(refusal.message).toContain('/somewhere/else')
+  })
+
+  it('a_shell_that_reached_the_very_same_directory_through_a_symlink_is_not_reported_as_the_wrong_one', async () => {
+    const cmux = CmuxDouble.reachedThroughASymlink()
+
+    await expect(cmux.launch()).resolves.toBe('workspace:4')
   })
 
   it('an_agent_binary_with_a_shell_metacharacter_is_rejected_before_it_reaches_the_script', () => {
