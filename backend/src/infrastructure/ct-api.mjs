@@ -44,6 +44,10 @@ class PluginTree {
   static conventions() {
     return join(PluginTree.#root(), 'conventions')
   }
+
+  static ctStep() {
+    return join(PluginTree.#root(), 'scripts', 'ct-step.mjs')
+  }
 }
 
 class Disk {
@@ -145,6 +149,7 @@ class CtApi {
         brief: new PlanAgentBrief({
           dispatchCheck: PluginTree.dispatchCheck(),
           conventions: PluginTree.conventions(),
+          ctStep: PluginTree.ctStep(),
         }),
       }),
     })
