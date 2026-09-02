@@ -24,6 +24,8 @@ class NacidosConformes {
     '__tests__/frontera-de-distribucion.test.js',
     'scripts/slice-collection.js',
     '__tests__/slice-collection.test.js',
+    'scripts/slice-collector.js',
+    '__tests__/slice-collector.test.js',
   ]
 
   static PALABRAS_CASTELLANAS = [

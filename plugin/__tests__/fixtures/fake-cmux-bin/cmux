@@ -71,6 +71,19 @@ function appendState(entry) {
   writeFileSync(f, JSON.stringify(cur))
 }
 
+// Los `ref` que emite `workspace list` numeran PRIMERO las sesiones estáticas
+// del test (FAKE_CMUX_WORKSPACE_TITLES_JSON) y después las lanzadas de verdad,
+// así que traducir un `--workspace workspace:<i>` a su entrada del estado
+// exige descontar ese desplazamiento. La cuenta vive AQUÍ y no en cada
+// subcomando: `send`/`send-key` y `close-workspace` la hacían por separado, y
+// dos copias de la misma aritmética mandan el comando a la sesión equivocada
+// en cuanto una de las dos se ajuste sin la otra.
+function sessionIndexFor(ws) {
+  const staticCount = process.env.FAKE_CMUX_WORKSPACE_TITLES_JSON ? JSON.parse(process.env.FAKE_CMUX_WORKSPACE_TITLES_JSON).length : 0
+  const refNum = ws && ws.startsWith('workspace:') ? Number(ws.slice('workspace:'.length)) : NaN
+  return Number.isInteger(refNum) ? refNum - staticCount : NaN
+}
+
 if (argv[0] === 'list-windows' && argv.includes('--json')) {
   if (process.env.FAKE_CMUX_LIST_WINDOWS_FAIL) {
     console.error('fake-cmux: list-windows failed (simulado, daemon no disponible)')
@@ -132,6 +145,32 @@ if (argv[0] === 'workspace' && argv[1] === 'list' && argv.includes('--json')) {
   process.exit(0)
 }
 
+// F20/cosecha — `close-workspace`: el cmux real cierra la workspace y con ella
+// el `claude` que vivía dentro. Aquí se simula quitando su entrada del estado,
+// que es lo que hace que un `workspace list` posterior ya no la vea: sin eso,
+// un test no podría distinguir "se cerró" de "se pidió cerrar". La invocación
+// ya quedó registrada arriba en FAKE_CMUX_INVOKED_LOG_FILE.
+// FAKE_CMUX_CLOSE_FAIL simula que el cierre falla (daemon caído, sesión
+// bloqueada) SIN tocar el estado: es el caso que deja la cosecha a medias.
+if (argv[0] === 'close-workspace') {
+  if (process.env.FAKE_CMUX_CLOSE_FAIL) {
+    console.error('fake-cmux: close-workspace failed (simulado)')
+    process.exit(1)
+  }
+  const wsIdx = argv.indexOf('--workspace')
+  const ws = wsIdx !== -1 ? argv[wsIdx + 1] : null
+  const idx = sessionIndexFor(ws)
+  const state = readState()
+  const entry = Number.isInteger(idx) && idx >= 0 ? state[idx] : null
+  if (!entry || !stateFilePath()) {
+    console.error(`fake-cmux: close-workspace: no hay ninguna sesión ${ws}`)
+    process.exit(1)
+  }
+  state.splice(idx, 1)
+  writeFileSync(stateFilePath(), JSON.stringify(state))
+  process.exit(0)
+}
+
 // ===========================================================================
 // F20/H1 — `send` / `send-key`: el REENVÍO de la línea.
 //
@@ -144,14 +183,7 @@ if (argv[0] === 'workspace' && argv[1] === 'list' && argv.includes('--json')) {
 if (argv[0] === 'send' || argv[0] === 'send-key') {
   const wsIdx = argv.indexOf('--workspace')
   const ws = wsIdx !== -1 ? argv[wsIdx + 1] : null
-  // Los `ref` que emite `workspace list` numeran PRIMERO las sesiones
-  // estáticas del test (FAKE_CMUX_WORKSPACE_TITLES_JSON) y después las
-  // lanzadas de verdad, así que aquí hay que descontar ese desplazamiento —
-  // si no, un test con sesiones preexistentes reenviaría a la sesión
-  // equivocada y el fallo parecería del código bajo prueba.
-  const staticCount = process.env.FAKE_CMUX_WORKSPACE_TITLES_JSON ? JSON.parse(process.env.FAKE_CMUX_WORKSPACE_TITLES_JSON).length : 0
-  const refNum = ws && ws.startsWith('workspace:') ? Number(ws.slice('workspace:'.length)) : NaN
-  const idx = Number.isInteger(refNum) ? refNum - staticCount : NaN
+  const idx = sessionIndexFor(ws)
   const state = readState()
   const entry = Number.isInteger(idx) && idx >= 0 ? state[idx] : null
   if (!entry || !stateFilePath()) {
