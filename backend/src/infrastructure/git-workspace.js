@@ -37,7 +37,9 @@ export class GitWorkspace extends Workspace {
   static BIN = 'git'
   static DIRECTORY = '.worktrees'
   static REMOTE_HEAD = 'refs/remotes/origin/HEAD'
+  static REMOTE = 'origin'
   static #DECLARED = /^refs\/remotes\/origin\/(.+)$/
+  static #NAMED = /^(?:git@github\.com:|https:\/\/github\.com\/)([^/]+\/[^/]+?)(?:\.git)?$/
 
   constructor({ run, write, read, root, stderr = (line) => process.stderr.write(line) }) {
     super()
@@ -66,6 +68,10 @@ export class GitWorkspace extends Workspace {
     ]
   }
 
+  static remoteArgvFor(root) {
+    return ['-C', root, 'remote', 'get-url', GitWorkspace.REMOTE]
+  }
+
   static defaultBranchArgvFor(root) {
     return ['-C', root, 'symbolic-ref', GitWorkspace.REMOTE_HEAD]
   }
@@ -90,7 +96,8 @@ export class GitWorkspace extends Workspace {
     return ['-C', root, 'branch', '-D', branch]
   }
 
-  async prepare(issue) {
+  async prepare({ issue, repository }) {
+    await this.#confirmRoot(repository)
     const base = await this.#declaredBase()
     const path = GitWorkspace.pathFor(this.root, issue)
     const branch = GitWorkspace.branchFor(issue)
@@ -104,6 +111,27 @@ export class GitWorkspace extends Workspace {
     }
 
     return located
+  }
+
+  async #confirmRoot(repository) {
+    const asked = await this.run(GitWorkspace.remoteArgvFor(this.root))
+    if (asked.failed) {
+      throw new WorkspaceNotPrepared(
+        `${this.root} does not name a ${GitWorkspace.REMOTE} remote, so the repository it holds cannot be confirmed: ${asked.stderr.trim()}`
+      )
+    }
+    const url = asked.stdout.trim()
+    const named = url.match(GitWorkspace.#NAMED)
+    if (named === null) {
+      throw new WorkspaceNotUnderstood(
+        `the ${GitWorkspace.REMOTE} of ${this.root} is ${JSON.stringify(url)}, and no owner/name can be read out of it`
+      )
+    }
+    if (named[1] !== repository.text) {
+      throw new WorkspaceNotPrepared(
+        `${this.root} holds ${named[1]} and the issue lives in ${repository.text}: cutting a worktree here would plan one repository inside another`
+      )
+    }
   }
 
   async #declaredBase() {

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 import { Workspace } from '../../src/domain/ports/workspace.js'
+import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 
 describe('WorkspaceLocation', () => {
   it('it_carries_the_directory_and_the_branch_together_because_neither_is_usable_alone', () => {
@@ -33,7 +34,9 @@ describe('WorkspaceLocation', () => {
 
 describe('Workspace', () => {
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
-    await expect(new Workspace().prepare({ number: 42 })).rejects.toThrow(/must implement prepare/)
+    await expect(new Workspace().prepare({
+      issue: { number: 42 }, repository: new RepositoryName('owner/name'),
+    })).rejects.toThrow(/must implement prepare/)
   })
 
   it('a_port_that_nobody_implemented_undo_for_says_so_instead_of_answering_undefined', async () => {

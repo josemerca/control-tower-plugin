@@ -66,8 +66,8 @@ class WorkspaceDouble extends Workspace {
     return new WorkspaceDouble(WorkspaceDouble.LOCATED, { undoFailure: new Error(said) })
   }
 
-  async prepare(issue) {
-    this.asked.push(issue)
+  async prepare({ issue, repository }) {
+    this.asked.push({ issue, repository })
     if (this.answer instanceof Error) throw this.answer
     return this.answer
   }
@@ -141,7 +141,18 @@ describe('StartPlan', () => {
 
     await flow.run()
 
-    expect(flow.workspace.asked).toEqual([PlanIssuesDouble.OPENED])
+    expect(flow.workspace.asked).toEqual([
+      { issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY },
+    ])
+  })
+
+  it('the_worktree_is_prepared_for_the_repository_the_issue_was_opened_in_so_neither_can_drift_from_the_other', async () => {
+    const flow = new Flow()
+
+    await flow.run()
+
+    const [prepared] = flow.workspace.asked
+    expect(prepared.repository).toBe(flow.planIssues.asked[0].repository)
   })
 
   it('the_agent_is_told_where_to_run_and_which_issue_in_which_repository_and_never_has_to_work_it_out', async () => {
@@ -233,7 +244,9 @@ describe('StartPlan', () => {
     await expect(new PlanIssues().open({ story: null, repository: Flow.REPOSITORY }))
       .rejects.toThrow(/must implement open/)
     await expect(new UserStories().detail(Flow.STORY)).rejects.toThrow(/must implement detail/)
-    await expect(new Workspace().prepare(PlanIssuesDouble.OPENED)).rejects.toThrow(/must implement prepare/)
+    await expect(new Workspace().prepare({
+      issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY,
+    })).rejects.toThrow(/must implement prepare/)
     await expect(new Workspace().undo(WorkspaceDouble.LOCATED)).rejects.toThrow(/must implement undo/)
   })
 })

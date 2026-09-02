@@ -1,6 +1,8 @@
 export class Workspace {
-  async prepare(issue) {
-    throw new Error(`${this.constructor.name} must implement prepare(issue), asked for ${issue?.number}`)
+  async prepare({ issue, repository }) {
+    throw new Error(
+      `${this.constructor.name} must implement prepare({ issue, repository }), asked for ${issue?.number} in ${repository}`
+    )
   }
 
   async undo(located) {

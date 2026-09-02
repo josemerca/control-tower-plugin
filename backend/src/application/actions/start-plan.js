@@ -28,7 +28,7 @@ export class StartPlan {
   async execute(params) {
     const story = await this.userStories.detail(params.story)
     const issue = await this.planIssues.open({ story, repository: params.repository })
-    const located = await this.workspace.prepare(issue)
+    const located = await this.workspace.prepare({ issue, repository: params.repository })
     const agent = await this.#launch(params, issue, located)
 
     return new StartPlanResult({ issue, agent, located })
