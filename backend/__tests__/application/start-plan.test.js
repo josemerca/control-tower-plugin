@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { StartPlan, StartPlanParams } from '../../src/application/actions/start-plan.js'
 import { PlanSession } from '../../src/domain/plan-session.js'
 import { PlanSessionNotStarted, WorkspaceNotPrepared } from '../../src/domain/exceptions.js'
@@ -230,5 +230,34 @@ describe('StartPlan cleans up after a launch that never took off', () => {
       .execute(new StartPlanParams({ ticket: new TicketKey('ABC-42'), repository: 'owner/name' }))
 
     expect(workspace.undone).toEqual([])
+  })
+
+  it('a_workspace_with_no_undo_at_all_does_not_replace_the_launch_failure_that_caused_the_cleanup', async () => {
+    const workspace = { prepare: async () => located }
+    const planSession = new PlanSessionDouble(new PlanSessionNotStarted('cmux is not reachable'))
+
+    const refusal = await conducted({ workspace, planSession })
+      .execute(new StartPlanParams({ ticket: new TicketKey('ABC-42'), repository: 'owner/name' }))
+      .catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(PlanSessionNotStarted)
+    expect(refusal.message).toBe('cmux is not reachable')
+  })
+
+  it('a_cleanup_that_fails_leaves_a_trace_on_the_error_channel_instead_of_disappearing_in_silence', async () => {
+    const workspace = new WorkspaceDouble(located, { undoFailure: new Error('worktree remove failed') })
+    const planSession = new PlanSessionDouble(new PlanSessionNotStarted('cmux is not reachable'))
+    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+
+    try {
+      await conducted({ workspace, planSession })
+        .execute(new StartPlanParams({ ticket: new TicketKey('ABC-42'), repository: 'owner/name' }))
+        .catch(() => {})
+
+      const said = complaining.mock.calls.map(([line]) => line).join('')
+      expect(said).toContain('worktree remove failed')
+    } finally {
+      complaining.mockRestore()
+    }
   })
 })

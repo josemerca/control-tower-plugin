@@ -44,8 +44,16 @@ export class StartPlan {
         errand: this.brief.errandFor({ issue, repository: params.repository }),
       }))
     } catch (failure) {
-      await this.workspace.undo(located).catch(() => {})
+      await this.#abandon(located)
       throw failure
+    }
+  }
+
+  async #abandon(located) {
+    try {
+      await this.workspace.undo(located)
+    } catch (cleanupFailure) {
+      process.stderr.write(`start plan: cleanup after a failed launch also failed: ${cleanupFailure.message}\n`)
     }
   }
 }
