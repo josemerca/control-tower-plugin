@@ -68,7 +68,12 @@ export class GitWorkspace extends Workspace {
     const branch = GitWorkspace.branchFor(issue)
     await this.#cut(issue)
     const located = new WorkspaceLocation({ path, branch })
-    await this.#seed(located, issue)
+    try {
+      await this.#seed(located, issue)
+    } catch (failure) {
+      await this.#compensate(located)
+      throw failure
+    }
 
     return located
   }
@@ -76,6 +81,12 @@ export class GitWorkspace extends Workspace {
   async undo(located) {
     await this.run(GitWorkspace.removeArgvFor(this.root, located.path))
     await this.run(GitWorkspace.deleteBranchArgvFor(this.root, located.branch))
+  }
+
+  async #compensate(located) {
+    try {
+      await this.undo(located)
+    } catch {}
   }
 
   async #cut(issue) {

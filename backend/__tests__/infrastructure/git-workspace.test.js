@@ -245,3 +245,96 @@ describe('GitWorkspace', () => {
   })
 })
 
+describe('GitWorkspace undoes what it already created when preparing the ground fails afterward', () => {
+  const undone = [
+    ['-C', GitDouble.ROOT, 'worktree', 'remove', '--force', GitDouble.WORKTREE],
+    ['-C', GitDouble.ROOT, 'branch', '-D', 'feat/42'],
+  ]
+
+  it('a_common_dir_git_refuses_to_resolve_still_gets_the_worktree_and_branch_undone', async () => {
+    const git = new GitDouble()
+    git.workspace = () => new GitWorkspace({
+      root: GitDouble.ROOT,
+      base: GitDouble.BASE,
+      read: () => Promise.resolve(null),
+      write: () => Promise.resolve(),
+      run: (argv) => {
+        git.calls.push(argv)
+        return Promise.resolve(argv.includes('--git-common-dir')
+          ? { failed: true, stdout: '', stderr: 'not a git repository' }
+          : GitDouble.ok())
+      },
+    })
+
+    const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(refusal.message).toContain('no se pudo resolver el directorio común')
+    expect(git.calls.slice(-2)).toEqual(undone)
+  })
+
+  it('a_head_git_cannot_measure_still_gets_the_worktree_and_branch_undone', async () => {
+    const git = new GitDouble()
+    git.workspace = () => new GitWorkspace({
+      root: GitDouble.ROOT,
+      base: GitDouble.BASE,
+      read: () => Promise.resolve(null),
+      write: () => Promise.resolve(),
+      run: (argv) => {
+        git.calls.push(argv)
+        return Promise.resolve(argv.includes('HEAD')
+          ? { failed: true, stdout: '', stderr: 'fatal: ambiguous argument HEAD' }
+          : GitDouble.ok())
+      },
+    })
+
+    const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(refusal.message).toContain('no se pudo medir el commit')
+    expect(git.calls.slice(-2)).toEqual(undone)
+  })
+
+  it('a_status_check_git_refuses_to_answer_still_gets_the_worktree_and_branch_undone', async () => {
+    const git = new GitDouble({ status: GitDouble.refused('git is not available') })
+
+    const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(git.calls.slice(-2)).toEqual(undone)
+  })
+
+  it('a_state_file_still_visible_to_git_after_seeding_still_gets_the_worktree_and_branch_undone', async () => {
+    const git = new GitDouble({ status: GitDouble.stillVisible() })
+
+    const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(refusal.message).toContain(SliceSeed.RELATIVE_PATH)
+    expect(git.calls.slice(-2)).toEqual(undone)
+  })
+
+  it('a_cleanup_that_also_fails_after_a_common_dir_refusal_does_not_replace_the_original_failure', async () => {
+    const git = new GitDouble()
+    git.workspace = () => new GitWorkspace({
+      root: GitDouble.ROOT,
+      base: GitDouble.BASE,
+      read: () => Promise.resolve(null),
+      write: () => Promise.resolve(),
+      run: (argv) => {
+        git.calls.push(argv)
+        if (argv.includes('--git-common-dir')) {
+          return Promise.resolve({ failed: true, stdout: '', stderr: 'not a git repository' })
+        }
+        if (argv.includes('remove')) return Promise.reject(new Error('worktree remove refused'))
+
+        return Promise.resolve(GitDouble.ok())
+      },
+    })
+
+    const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(refusal.message).toContain('no se pudo resolver el directorio común')
+  })
+})
