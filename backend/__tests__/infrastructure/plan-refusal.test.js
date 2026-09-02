@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { PlanRequest, PlanRequestOutcome } from '../../src/infrastructure/plan-request.js'
 import { PlanRefusal, PlanCollapse } from '../../src/infrastructure/plan-refusal.js'
+import { Refusal } from '../../src/infrastructure/refusal.js'
 import * as exceptions from '../../src/domain/exceptions.js'
 
 describe('PlanRefusal', () => {
@@ -17,10 +18,17 @@ describe('PlanRefusal', () => {
   })
 
   it('the_rejected_field_names_reach_the_answer_instead_of_a_generic_sentence', () => {
-    expect(PlanRefusal.of(PlanRequest.withUnknownFields(['b', 'a']))).toEqual({
-      status: 400,
-      error: 'unknown field: b, a',
-    })
+    const refusal = PlanRefusal.of(PlanRequest.withUnknownFields(['b', 'a']))
+
+    expect(refusal).toBeInstanceOf(Refusal)
+    expect(refusal.status).toBe(400)
+    expect(refusal.error).toBe('unknown field: b, a')
+  })
+
+  it('a_status_that_is_not_a_refusal_or_a_reason_that_says_nothing_cannot_be_built', () => {
+    expect(() => new Refusal({ status: 200, error: 'fine' }))
+      .toThrow(/client or server status/)
+    expect(() => new Refusal({ status: 400, error: '  ' })).toThrow(/says why/)
   })
 
   it('a_body_over_the_cap_is_answered_with_the_status_that_names_the_size_and_not_a_plain_400', () => {
@@ -41,10 +49,11 @@ describe('PlanCollapse', () => {
   })
 
   it('a_tool_that_refused_the_call_is_something_to_try_again_and_says_so', () => {
-    expect(PlanCollapse.of(new exceptions.TicketNotRead('acli is not authenticated'))).toEqual({
-      status: 503,
-      error: 'could not start the plan: acli is not authenticated',
-    })
+    const collapse = PlanCollapse.of(new exceptions.TicketNotRead('acli is not authenticated'))
+
+    expect(collapse).toBeInstanceOf(Refusal)
+    expect(collapse.status).toBe(503)
+    expect(collapse.error).toBe('could not start the plan: acli is not authenticated')
     expect(PlanCollapse.of(new exceptions.PlanIssueNotCreated('nope')).status).toBe(503)
     expect(PlanCollapse.of(new exceptions.PlanSessionNotStarted('nope')).status).toBe(503)
   })

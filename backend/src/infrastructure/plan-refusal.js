@@ -2,6 +2,7 @@ import { PlanRequestOutcome } from './plan-request.js'
 import { TicketKey } from '../domain/value-objects/ticket-key.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
 import { PlanRequest } from './plan-request.js'
+import { Refusal } from './refusal.js'
 import {
   TicketNotRead, TicketNotUnderstood, PlanIssueNotCreated, PlanIssueNotNamed,
   PlanSessionNotStarted, PlanSessionNotNamed,
@@ -9,17 +10,19 @@ import {
 
 export class PlanRefusal {
   static #BY_OUTCOME = Object.freeze({
-    [PlanRequestOutcome.BODY_TOO_LARGE]: () => ({ status: 413, error: 'body must not exceed 8192 bytes' }),
-    [PlanRequestOutcome.BODY_NOT_A_JSON_OBJECT]: () => ({ status: 400, error: 'body must be a JSON object' }),
-    [PlanRequestOutcome.MALFORMED_ID]: () => ({
+    [PlanRequestOutcome.BODY_TOO_LARGE]: () =>
+      new Refusal({ status: 413, error: 'body must not exceed 8192 bytes' }),
+    [PlanRequestOutcome.BODY_NOT_A_JSON_OBJECT]: () =>
+      new Refusal({ status: 400, error: 'body must be a JSON object' }),
+    [PlanRequestOutcome.MALFORMED_ID]: () => new Refusal({
       status: 400,
       error: `${PlanRequest.ID_FIELD} must be a ticket key such as ${TicketKey.EXAMPLE}`,
     }),
-    [PlanRequestOutcome.MALFORMED_REPO]: () => ({
+    [PlanRequestOutcome.MALFORMED_REPO]: () => new Refusal({
       status: 400,
       error: `${PlanRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
     }),
-    [PlanRequestOutcome.UNKNOWN_FIELD]: (asked) => ({
+    [PlanRequestOutcome.UNKNOWN_FIELD]: (asked) => new Refusal({
       status: 400,
       error: `unknown field: ${asked.fields.join(', ')}`,
     }),
@@ -58,7 +61,7 @@ export class PlanCollapse {
       throw new Error(`no status declared for ${cause.constructor.name}`)
     }
 
-    return { status: declared[1], error: `could not start the plan: ${cause.message}` }
+    return new Refusal({ status: declared[1], error: `could not start the plan: ${cause.message}` })
   }
 
   static declaredFailures() {
