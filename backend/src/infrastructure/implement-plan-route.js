@@ -1,50 +1,53 @@
 import { Answer, JsonBody, Refusal } from './http.js'
 import { ImplementPlanParams } from '../application/actions/implement-plan.js'
-import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
 import { PlanFailure, PlanAgentNotResumed } from '../domain/exceptions.js'
 
 export const ImplementRequestOutcome = Object.freeze({
   ACCEPTED: 'accepted',
   BODY_NOT_A_JSON_OBJECT: 'body-not-a-json-object',
   UNKNOWN_FIELD: 'unknown-field',
-  MALFORMED_ID: 'malformed-id',
+  MALFORMED_AGENT: 'malformed-agent',
   MALFORMED_ISSUE: 'malformed-issue',
 })
 
 class ImplementRequest {
-  static ID_FIELD = 'id'
+  static AGENT_FIELD = 'agent'
   static ISSUE_FIELD = 'issue'
-  static KNOWN_FIELDS = Object.freeze([ImplementRequest.ID_FIELD, ImplementRequest.ISSUE_FIELD])
+  static KNOWN_FIELDS = Object.freeze([ImplementRequest.AGENT_FIELD, ImplementRequest.ISSUE_FIELD])
 
-  constructor({ outcome, story, issue, fields }) {
+  constructor({ outcome, agent, issue, fields }) {
     this.outcome = outcome
-    this.story = story
+    this.agent = agent
     this.issue = issue
     this.fields = Object.freeze([...fields])
     Object.freeze(this)
   }
 
-  static accepted({ story, issue }) {
+  static accepted({ agent, issue }) {
     return new ImplementRequest({
-      outcome: ImplementRequestOutcome.ACCEPTED, story, issue, fields: [],
+      outcome: ImplementRequestOutcome.ACCEPTED, agent, issue, fields: [],
     })
   }
 
   static refused(outcome) {
     return new ImplementRequest({
-      outcome, story: null, issue: null, fields: [],
+      outcome, agent: null, issue: null, fields: [],
     })
   }
 
   static withUnknownFields(fields) {
     return new ImplementRequest({
       outcome: ImplementRequestOutcome.UNKNOWN_FIELD,
-      story: null, issue: null, fields,
+      agent: null, issue: null, fields,
     })
   }
 
   static #isWellFormedIssue(given) {
     return Number.isInteger(given) && given >= 1
+  }
+
+  static #isWellFormedAgent(given) {
+    return typeof given === 'string' && given.length > 0 && !/\s/.test(given)
   }
 
   static from(raw) {
@@ -63,15 +66,15 @@ class ImplementRequest {
     if (unknown.length > 0) {
       return ImplementRequest.withUnknownFields(unknown.sort())
     }
-    if (!UserStoryKey.isWellFormed(parsed[ImplementRequest.ID_FIELD])) {
-      return ImplementRequest.refused(ImplementRequestOutcome.MALFORMED_ID)
+    if (!ImplementRequest.#isWellFormedAgent(parsed[ImplementRequest.AGENT_FIELD])) {
+      return ImplementRequest.refused(ImplementRequestOutcome.MALFORMED_AGENT)
     }
     if (!ImplementRequest.#isWellFormedIssue(parsed[ImplementRequest.ISSUE_FIELD])) {
       return ImplementRequest.refused(ImplementRequestOutcome.MALFORMED_ISSUE)
     }
 
     return ImplementRequest.accepted({
-      story: new UserStoryKey(parsed[ImplementRequest.ID_FIELD]),
+      agent: parsed[ImplementRequest.AGENT_FIELD],
       issue: parsed[ImplementRequest.ISSUE_FIELD],
     })
   }
@@ -81,9 +84,9 @@ export class ImplementRefusal {
   static #BY_OUTCOME = Object.freeze({
     [ImplementRequestOutcome.BODY_NOT_A_JSON_OBJECT]: () =>
       new Refusal({ status: 400, error: 'body must be a JSON object' }),
-    [ImplementRequestOutcome.MALFORMED_ID]: () => new Refusal({
+    [ImplementRequestOutcome.MALFORMED_AGENT]: () => new Refusal({
       status: 400,
-      error: `${ImplementRequest.ID_FIELD} must be a user story key such as ${UserStoryKey.EXAMPLE}`,
+      error: `${ImplementRequest.AGENT_FIELD} must be the handle start-plan answered with`,
     }),
     [ImplementRequestOutcome.MALFORMED_ISSUE]: () => new Refusal({
       status: 400,
@@ -148,7 +151,7 @@ export class ImplementPlanRoute {
   static async #accept(implementPlan, response, asked) {
     try {
       await implementPlan.execute(new ImplementPlanParams({
-        story: asked.story, issue: asked.issue,
+        agent: asked.agent, issue: asked.issue,
       }))
     } catch (cause) {
       if (!(cause instanceof PlanFailure)) throw cause
@@ -157,7 +160,7 @@ export class ImplementPlanRoute {
     }
     Answer.send(response, 202, {
       status: 'implementing',
-      [ImplementRequest.ID_FIELD]: asked.story.text,
+      [ImplementRequest.AGENT_FIELD]: asked.agent,
       [ImplementRequest.ISSUE_FIELD]: asked.issue,
     })
   }

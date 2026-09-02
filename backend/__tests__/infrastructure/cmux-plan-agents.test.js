@@ -279,13 +279,17 @@ describe('CmuxPlanAgents', () => {
     expect(refused).toBeInstanceOf(PlanAgentFailure)
   })
 
-  it('when_the_sentinel_does_not_show_up_the_line_is_resent_because_the_pty_can_eat_it', async () => {
+  it('the_resent_line_goes_to_the_handle_cmux_answered_because_send_refuses_a_title', async () => {
     const cmux = CmuxDouble.answeringLate()
 
     await cmux.launch()
 
-    expect(cmux.calls).toContainEqual(['send', '--workspace', CmuxDouble.TAB, CmuxDouble.TYPED])
-    expect(cmux.calls).toContainEqual(['send-key', '--workspace', CmuxDouble.TAB, 'Enter'])
+    expect(cmux.calls).toContainEqual(['send', '--workspace', 'workspace:4', CmuxDouble.TYPED])
+    expect(cmux.calls).toContainEqual(['send-key', '--workspace', 'workspace:4', 'Enter'])
+    const workspacesTold = cmux.calls
+      .filter((argv) => argv[0] === 'send' || argv[0] === 'send-key')
+      .map((argv) => argv[2])
+    expect(workspacesTold).not.toContain(CmuxDouble.TAB)
   })
 
   it('a_line_that_lands_after_the_resend_is_still_a_launch_and_not_a_refusal', async () => {
@@ -378,9 +382,8 @@ describe('LaunchPolicy', () => {
 })
 
 class ResumeDouble {
-  static STORY = new UserStoryKey('ABC-42')
+  static AGENT = 'workspace:20'
   static ISSUE = 42
-  static TAB = 'ct-plan-ABC-42'
   static ERRAND = 'implementa el plan de #42'
 
   constructor(answers) {
@@ -430,7 +433,7 @@ class ResumeDouble {
   }
 
   async resume() {
-    return this.agents().resume({ story: ResumeDouble.STORY, issue: ResumeDouble.ISSUE })
+    return this.agents().resume({ agent: ResumeDouble.AGENT, issue: ResumeDouble.ISSUE })
   }
 
   async refusal() {
@@ -439,14 +442,14 @@ class ResumeDouble {
 }
 
 describe('CmuxPlanAgents resuming a parked agent', () => {
-  it('it_types_the_errand_in_the_tab_it_named_when_it_launched_it_and_then_presses_enter', async () => {
+  it('it_types_the_errand_on_the_handle_it_was_given_and_then_presses_enter', async () => {
     const cmux = ResumeDouble.accepting()
 
     await cmux.resume()
 
     expect(cmux.calls).toEqual([
-      ['send', '--workspace', ResumeDouble.TAB, ResumeDouble.ERRAND],
-      ['send-key', '--workspace', ResumeDouble.TAB, 'Enter'],
+      ['send', '--workspace', ResumeDouble.AGENT, ResumeDouble.ERRAND],
+      ['send-key', '--workspace', ResumeDouble.AGENT, 'Enter'],
     ])
   })
 

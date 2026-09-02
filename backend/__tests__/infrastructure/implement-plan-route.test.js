@@ -30,7 +30,7 @@ class ImplementPlanSpy {
 
   async execute(params) {
     this.asked.push({
-      story: params.story.text,
+      agent: params.agent,
       issue: params.issue,
     })
   }
@@ -39,8 +39,8 @@ class ImplementPlanSpy {
 class RunningApi {
   static #started = []
   static PATH = '/implement-plan'
-  static ACCEPTED_BODY = '{"id":"XOP-4909","issue":33}'
-  static ANSWER = '{"status":"implementing","id":"XOP-4909","issue":33}'
+  static ACCEPTED_BODY = '{"agent":"workspace:20","issue":33}'
+  static ANSWER = '{"status":"implementing","agent":"workspace:20","issue":33}'
   static spy = null
 
   static async listening(spy = new ImplementPlanSpy()) {
@@ -83,20 +83,20 @@ describe('ImplementPlanRoute', () => {
     await RunningApi.asking(RunningApi.ACCEPTED_BODY)
 
     expect(RunningApi.spy.asked).toEqual([
-      { story: 'XOP-4909', issue: 33 },
+      { agent: 'workspace:20', issue: 33 },
     ])
   })
 
-  it('a_malformed_story_key_is_refused_naming_the_shape_it_wanted_and_never_reaches_the_use_case', async () => {
-    const response = await RunningApi.asking('{"id":"nope","issue":33}')
+  it('an_agent_handle_with_whitespace_is_refused_before_it_can_become_an_argument_of_cmux', async () => {
+    const response = await RunningApi.asking('{"agent":"ct-plan XOP-4909","issue":33}')
 
     expect(response.status).toBe(400)
-    expect((await response.json()).error).toMatch(/^id must be a user story key/)
+    expect((await response.json()).error).toMatch(/^agent must be the handle/)
     expect(RunningApi.spy.asked).toEqual([])
   })
 
   it('an_issue_that_is_not_a_whole_number_from_one_is_refused_and_never_reaches_the_use_case', async () => {
-    const response = await RunningApi.asking('{"id":"XOP-4909","issue":"33"}')
+    const response = await RunningApi.asking('{"agent":"workspace:20","issue":"33"}')
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: 'issue must be a whole number from one' })
@@ -104,7 +104,7 @@ describe('ImplementPlanRoute', () => {
   })
 
   it('an_issue_of_zero_is_refused_because_the_count_of_whole_numbers_from_one_starts_at_one', async () => {
-    const response = await RunningApi.asking('{"id":"XOP-4909","issue":0}')
+    const response = await RunningApi.asking('{"agent":"workspace:20","issue":0}')
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: 'issue must be a whole number from one' })
@@ -112,7 +112,7 @@ describe('ImplementPlanRoute', () => {
   })
 
   it('a_field_nobody_declared_is_named_in_the_refusal_instead_of_being_ignored', async () => {
-    const response = await RunningApi.asking('{"id":"XOP-4909","issue":33,"force":true}')
+    const response = await RunningApi.asking('{"agent":"workspace:20","issue":33,"force":true}')
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: 'unknown field: force' })

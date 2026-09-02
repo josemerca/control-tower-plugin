@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { ImplementPlan, ImplementPlanParams } from '../../src/application/actions/implement-plan.js'
 import { PlanAgents } from '../../src/domain/ports/plan-agents.js'
-import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { PlanAgentNotResumed } from '../../src/domain/exceptions.js'
 
 class PlanAgentsDouble extends PlanAgents {
@@ -15,14 +14,14 @@ class PlanAgentsDouble extends PlanAgents {
     return new PlanAgentsDouble(cause)
   }
 
-  async resume({ story, issue }) {
-    this.asked.push({ story, issue })
+  async resume({ agent, issue }) {
+    this.asked.push({ agent, issue })
     if (this.answer instanceof Error) throw this.answer
   }
 }
 
 class Flow {
-  static STORY = new UserStoryKey('XOP-4909')
+  static AGENT = 'workspace:20'
   static ISSUE = 33
 
   constructor({ planAgents } = {}) {
@@ -31,19 +30,19 @@ class Flow {
 
   async run() {
     return new ImplementPlan(this).execute(new ImplementPlanParams({
-      story: Flow.STORY, issue: Flow.ISSUE,
+      agent: Flow.AGENT, issue: Flow.ISSUE,
     }))
   }
 }
 
 describe('ImplementPlan', () => {
-  it('the_agent_it_resumes_is_the_one_of_the_story_and_issue_it_was_given', async () => {
+  it('the_agent_it_resumes_is_the_handle_it_was_given_and_not_one_it_derived', async () => {
     const flow = new Flow()
 
     await flow.run()
 
     expect(flow.planAgents.asked).toEqual([
-      { story: Flow.STORY, issue: Flow.ISSUE },
+      { agent: Flow.AGENT, issue: Flow.ISSUE },
     ])
   })
 

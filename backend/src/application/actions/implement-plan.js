@@ -1,6 +1,6 @@
 export class ImplementPlanParams {
-  constructor({ story, issue }) {
-    this.story = story
+  constructor({ agent, issue }) {
+    this.agent = agent
     this.issue = issue
     Object.freeze(this)
   }
@@ -12,6 +12,6 @@ export class ImplementPlan {
   }
 
   async execute(params) {
-    await this.planAgents.resume({ story: params.story, issue: params.issue })
+    await this.planAgents.resume({ agent: params.agent, issue: params.issue })
   }
 }
