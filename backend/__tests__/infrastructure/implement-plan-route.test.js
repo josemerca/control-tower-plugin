@@ -1,6 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
-import { PlanAgentNotResumed } from '../../src/domain/exceptions.js'
+import {
+  ImplementRequestOutcome, ImplementRefusal, ImplementCollapse,
+} from '../../src/infrastructure/implement-plan-route.js'
+import { PlanAgentNotResumed, PlanFailure } from '../../src/domain/exceptions.js'
 
 class ImplementPlanSpy {
   constructor() {
@@ -178,5 +181,31 @@ describe('ImplementPlanRoute', () => {
 
     expect(response.status).toBe(405)
     expect(response.headers.get('Allow')).toBe('POST')
+  })
+})
+
+describe('ImplementRefusal', () => {
+  it('every_refusable_outcome_has_an_answer_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
+    const refusable = Object.values(ImplementRequestOutcome).filter(
+      (outcome) => outcome !== ImplementRequestOutcome.ACCEPTED
+    )
+
+    expect(ImplementRefusal.declaredOutcomes().sort()).toEqual(refusable.sort())
+  })
+
+  it('an_outcome_with_no_answer_raises_instead_of_being_served_as_a_blank_refusal', () => {
+    expect(() => ImplementRefusal.of({ outcome: 'invented' })).toThrow(/no refusal declared/)
+  })
+})
+
+describe('ImplementCollapse', () => {
+  const RESUMING_AN_AGENT = ['PlanAgentNotResumed']
+
+  it('every_way_resuming_an_agent_can_collapse_has_a_status_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
+    expect(ImplementCollapse.declaredFailures().sort()).toEqual(RESUMING_AN_AGENT.sort())
+  })
+
+  it('a_family_is_not_a_way_of_collapsing_so_answering_one_raises_instead_of_guessing', () => {
+    expect(() => ImplementCollapse.of(new PlanFailure('nope'))).toThrow(/no status declared/)
   })
 })
