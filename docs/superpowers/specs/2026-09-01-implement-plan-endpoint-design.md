@@ -1,182 +1,145 @@
-# El endpoint que implementa el plan — el front da el go, el plugin hace el resto
+# El endpoint que implementa el plan — una línea a la sesión, y manda ct-step
 
-**Fecha:** 2026-09-01 (revisado el 2026-09-02 sobre `main`)
-**Alcance:** primera iteración, un slice a la vez, sin tocar `plugin/`
+**Fecha:** 2026-09-01 (reescrito el 2026-09-02 sobre el coordinador determinista)
+**Alcance:** el endpoint que reanuda al agente parado en el gate del plan
 **Vara:** `backend/conventions/` entera, más `plugin/conventions/style.md`, `defects.md` y `decisions.md`
 
 ---
 
-## 1. Qué se decide
+## 1. Qué cambió, y por qué este diseño se reescribió entero
 
-`POST /start-plan` ya lee la historia de usuario con `acli`, crea el issue de GitHub con la forma que
-le da el `groom.js` del plugin y devuelve `{ issue, agent }`. Lo que todavía no hace de verdad es
-lanzar al agente: `CmuxPlanAgents` abre una pestaña de cmux con un `echo`. Este diseño rellena ese
-hueco y añade el endpoint siguiente:
+La primera versión de este documento daba por hecho que el backend despacharía llamando a
+`ct-next.mjs` y que el permiso del gate viajaría como el nonce que ese programa imprime. La rama del
+**coordinador determinista** (merge `ce0d615`) tomó el camino contrario y ya está en `main`: el backend
+hace el despacho él mismo, y **no hay nonce en ninguna parte**.
 
-| Endpoint | Qué hace | Quién decide |
-|---|---|---|
-| `POST /start-plan` | Crea el issue y **despacha con `ct-next`**: worktree, rama, cmux, `claude`. El agente escribe el plan prescriptivo, lo publica en el issue y **para** | Nadie |
-| `POST /implement-plan` | Contesta el GO en el issue. El vigilante que `ct-next` dejó sondeando empuja la sesión, y la implementación corre hasta el pull request | **El humano, en el front** |
+Lo que `POST /start-plan` hace hoy, verificado en el código:
 
-El front es la coordinadora: no hay sesión de agente que coordine nada.
+1. `acli` → la historia de usuario; `gh` → el issue con `gate:plan` y `status:ready`.
+2. `git-workspace.prepare` → el worktree cortado de `origin/<base>`, con `.agent/SLICE.md` sembrado por
+   el propio `renderState` del plugin y su exclusión escrita donde git la lee.
+3. `CmuxPlanAgents.launch` → escribe un launcher, abre la pestaña de cmux, teclea la orden y
+   **verifica el efecto con el centinela**, reenviando la línea si el shell se la comió.
+4. Responde `202 { status, id, repo, issue: { number, url }, agent }`, donde `agent` es el handle de la
+   pestaña, y recuerda un `PlanWatch`.
+5. `GET /plan-events/:issue` emite `writing` → `ready` cuando `dispatch-check --check-plan` da 0 **y** el
+   plan está commiteado.
 
-## 2. La tesis: el plugin ya hace el trabajo
+Y el encargo (`PlanAgentBrief.errandFor`) termina: *«Y entonces PARA. No implementes nada, no abras
+pull request, no mergees, no crees worktrees nuevos.»*
 
-Tres piezas del plugin, verificadas en el código, hacen gratis lo que el diseño de fusión
-(`2026-08-31-fusion-con-app-companion-design.md`, §3.1 y §6.1) planeaba construir:
+**Consecuencia para este endpoint: el agente no espera un permiso en GitHub, espera una línea en su
+terminal.** No hay vigilante sondeando el issue, así que un comentario `-OK` no movería a nadie.
+Contestar el GO en el issue queda fuera de este diseño, y con él el nonce, el value object que lo
+llevaba y el método que lo publicaba.
 
-1. **`ct-next` imprime el nonce por stdout.** `go-channel.js:39` emite `GO de #N: contesta exactamente
-   \`-OK <nonce>\` en un comentario del issue.` Ese canal existe para que lo lea una persona en su
-   terminal; cuando quien invoca `ct-next` es este backend, el nonce lo captura un proceso y **no entra
-   en el contexto de ningún agente**. Es lo que §6.1.3 quería comprar moviendo el sorteo del nonce, y
-   sale sin mover nada.
-2. **El vigilante del go cierra el ciclo solo.** `ct-watch-go.mjs` sondea el issue cada 30 s y, al ver
-   el comentario, teclea él la línea en la sesión de cmux (`:214`). El backend **no sostiene ningún
-   pseudo-terminal**: el terminal sigue siendo cmux.
-3. **El gate lo pone el issue que ya se crea.** Las labels `gate:` que escribe `PlanIssueBody.labels`
-   son lo que hace que `ct-next` lance el vigilante y que el agente pare a esperar.
+## 2. La tesis: mantener el flujo del plugin no cuesta nada
 
-**Consecuencia: `--issue N`, `--no-launch`, `--emit json` y el sobre no hacen falta todavía.** Se
-quedan para el día que el front quiera el terminal dentro de su ventana en lugar de en cmux.
+`ct-step` es el tramo interno de una slice en el plugin —`next` → implementador con TDD → `report` →
+`controls` medidos por programa → juez adversarial sin `Bash` → `verdict` → `commit`, tarea a tarea, con
+el sitio en `.agent/run-<issue>.json`— y **corre tal cual sobre lo que el backend ya prepara**. Sus
+precondiciones son tres (`plugin/scripts/ct-step.mjs:176-192`):
 
-## 3. El backend no guarda nada: el front devuelve lo que se le dio
+| Lo que exige | Quién lo puso ya |
+|---|---|
+| Estar dentro de un repositorio git | El worktree de `git-workspace` |
+| **`.agent/SLICE.md`** — su único portazo: «esto no es el worktree de un slice» | La semilla de `git-workspace` |
+| Un plan **ejecutable** y **commiteado** | El encargo del plan, medido por `dispatch-check --check-plan` |
 
-`/start-plan` ya le entrega al front el issue que creó. Con el nonce en esa misma respuesta, el front
-puede devolver los dos en `/implement-plan`, y entonces **el backend no necesita recordar ningún
-despacho entre las dos llamadas**: ni registro en memoria, ni puerto para guardarlo, ni un 404 cuando
-el proceso se reinicia. Los dos endpoints quedan sin estado.
+No pide claim, ni labels, ni nonce, ni que nadie haya pasado por `ct-next`. Así que reanudar al agente
+diciéndole que obedezca a `ct-step` **no añade ni un programa que el backend tenga que invocar**: la
+secuencia entera la decide `run-machine.js` dentro de esa sesión.
 
-Eso cambia lo que `/start-plan` contesta. Donde hoy devuelve `agent` —el handle que le daba cmux, que
-con `ct-next` ya no existe— devuelve el nonce del despacho:
+El único punto donde el flujo del plugin topa con el permiso que aquí no existe es
+`dispatch-check --release`, que se niega sin un go registrado (exit 9). Queda fuera: este endpoint
+entrega la implementación, no el pull request.
 
-```json
-{ "status": "started", "id": "MO_SHOP-42", "repo": "owner/name",
-  "issue": { "number": 7, "url": "https://github.com/owner/name/issues/7" },
-  "go": "a1b2c3d4" }
-```
+## 3. El contrato
 
-El worktree no viaja: `ct-next` lo imprime, pero nadie lo consume todavía y un campo que nadie lee es
-un campo que hay que mantener.
-
-Que el nonce viaje al front es coherente con el modelo, no una excepción a él: §5.1 del diseño de
-fusión ya decía que la coordinadora **se queda el nonce en su proceso**, y la coordinadora es el front.
-Lo que la barandilla protege es que el nonce no pase por el contexto del **agente implementador**, que
-es quien tiene `gh` en su worktree y el incentivo para autorizarse; el front no es un agente. Y no se
-abre una puerta nueva: el servidor solo admite un `Origin` cuando es la página que él mismo sirve,
-avalada por un `Host` de loopback (`backend/conventions/infrastructure.md`).
-
-## 4. El contrato
-
-### 4.1 La petición
+### 3.1 La petición
 
 ```
 POST /implement-plan
 Content-Type: application/json
 
-{ "repo": "owner/name", "issue": 7, "go": "a1b2c3d4" }
+{ "id": "XOP-4909", "repo": "jjponz/repo-pulse", "issue": 33 }
 ```
 
-Los tres campos se validan antes de llegar al caso de uso, y los tres por el mismo motivo: acaban
-dentro de un argv de `gh`. `repo` ya tiene su value object (`RepositoryName`); `issue` y `go` son el
-value object nuevo de §5.1.
+Los tres los tiene el front sin guardar nada nuevo: `id` y `repo` son los que envió a `/start-plan`, y
+`issue` el que esa respuesta le devolvió. **El backend no recuerda el despacho**, y no puede: el
+registro de sesiones olvida el `watch` en cuanto emite el desenlace, o sea justo cuando el plan está
+`ready` y una persona pulsa el botón.
 
-### 4.2 Las respuestas
+`id` y `repo` se validan con los value objects que ya existen. `issue` se valida en el modelo de
+petición del controlador, como ya hace `EventsRequest` con el número que llega en su ruta; no gana un
+value object porque no hay una segunda pregunta que hacerle.
+
+**No se comprueba que el plan esté listo.** El front habilita su botón con el `ready` del canal de
+eventos, y volver a medir lo que el propio flujo ya garantiza es complejidad sin problema que resolver.
+
+### 3.2 Las respuestas
 
 | Código | Cuándo |
 |---|---|
-| 202 | El GO está contestado: `{ "status": "implementing", "repo", "issue" }` |
-| 400 | Cuerpo que no es un objeto JSON, campo desconocido, o `repo` / `issue` / `go` malformados |
+| 202 | La línea está entregada: `{ "status": "implementing", "id", "repo", "issue" }` |
+| 400 | Cuerpo que no es objeto JSON, campo desconocido, o `id` / `repo` / `issue` malformados |
 | 413 | Cuerpo de más de 8192 bytes |
-| 503 | `gh` se negó a comentar; reintentar puede funcionar |
+| 503 | `cmux` se negó a escribir en la pestaña; reintentar puede funcionar |
 | 405 | Cualquier método que no sea `POST` |
 
-**No hay 502 en este endpoint**, y es una decisión, no un olvido: 502 significa «la herramienta
-contestó algo que no sabemos leer», y de `gh issue comment` no se lee nada — se comprueba su código de
-salida y se descarta su salida. Sin contrato de lectura no hay contrato que romper. Por el mismo
-motivo la familia de excepciones del GO tiene **una sola causa** donde las otras tres del backend
-tienen dos (`backend/conventions/domain.md`), y eso se declara aquí para que no se lea como una
-familia a medio escribir.
+**No hay 502**: de `cmux send` no se lee nada, se comprueba su código de salida. Sin contrato de
+lectura no hay contrato que romper, y por eso la familia de fallos de esta operación tiene **una sola
+causa** donde las otras del backend tienen dos. Se declara aquí para que no se lea como una familia a
+medio escribir.
 
-**Tampoco se devuelve el título de la sesión de cmux, porque el backend no lo tiene.** `ct-next` lo
-calcula (`dispatch.js#cmuxSessionName`) y nombra la ventana con él, pero **no lo imprime**: de su
-stdout solo salen el número del issue, el worktree (`lanzado #<n> en <ruta>`) y el nonce. Componerlo
-por nuestra cuenta exigiría reconstruir el nombre de la slice con las reglas de `mapGhIssue`, que es
-la copia que el propio plugin documenta como la que rompe la entrega del go cuando difiere en un
-espacio.
+**Un 202 no promete que el agente haya obedecido**, solo que los dos comandos devolvieron 0. Es la
+misma honestidad que el vigilante del plugin se impone: no hay centinela para el reanudado, y afirmar
+más sería afirmar lo que no se midió. Quien lo nota es el humano, mirando la pestaña.
 
-## 5. Las piezas
+## 4. Las piezas
 
-### 5.1 Dominio
+Ninguna es un tipo nuevo del dominio: la operación cae entera en colaboradores que ya existen.
 
-- **`Go`** — value object nuevo, en `domain/value-objects/go.js`: el issue donde se contesta y el
-  nonce que lo cierra, con sus dos guardas (un issue numerado desde uno, un nonce de ocho hex). Es el
-  término que el glosario ya tiene —*el `-OK <nonce>` del humano en el issue que libera al agente*— y
-  se gana su módulo porque lo construyen dos sitios (la ruta al recibirlo, el adaptador de `ct-next`
-  al leer el stdout) y lo consume un tercero.
-- **`PlanIssues` gana un método**, no aparece un puerto nuevo: `answerGo({ go, repository })`. El
-  colaborador al otro lado sigue siendo el mismo —los issues de GitHub—, y `domain.md` lo dice con
-  esas palabras: un puerto corta por quién está enfrente, nunca por paso del flujo.
-- **`PlanAgents.launch` devuelve `Go`** en lugar del handle de cmux. Lo que el dominio necesita saber
-  de un agente lanzado es con qué permiso queda pendiente, y el handle era el nombre que le daba cmux
-  — el defecto que `domain.md` documenta haber tenido que renombrar ya dos veces.
-- **`GoNotAnswered`**, bajo una `GoFailure` que cuelga de `PlanFailure`.
+- **`PlanAgents` gana `resume({ story, issue, repository })`.** Un puerto corta por quién está
+  enfrente, nunca por paso del flujo (`backend/conventions/domain.md`), y enfrente sigue estando
+  quien planifica. El puerto que lo lanzó es el que lo reanuda.
+- **`PlanAgentBrief` gana el segundo encargo** y una tercera ruta absoluta en su constructor
+  (`ctStep`), que `PluginTree` resuelve al lado del `dispatchCheck` que ya resuelve. El encargo lo
+  compone quien lanza al agente y no el caso de uso — decisión ya tomada en `ce63453`.
+- **`CmuxPlanAgents.resume`** manda el encargo con `sendArgvFor` y `enterArgvFor`, **que ya existen**
+  porque el reenvío del arranque los usa, sobre el nombre que compone `nameFor(story)` — la misma
+  función que nombró la pestaña al crearla, así que no hay segunda copia que divergir.
+- **`ImplementPlan`** en `application/actions/`, con su `Params`. Un puerto, un paso, sin `Result`.
+- **`implement-plan-route.js`**, con su modelo de petición, su vocabulario cerrado y sus proyecciones,
+  más una línea de montaje en `api-server.js`.
 
-### 5.2 Aplicación
+### 4.1 El encargo cabe en una línea, y no es un gusto
 
-`ImplementPlan`, en `application/actions/implement-plan.js`, con sus `Params` y `Result` congelados en
-el mismo módulo: recibe el `Go` y el `RepositoryName`, se lo pasa a `planIssues.answerGo` y devuelve
-lo que el front necesita para pintar el resultado. Un solo puerto y un solo paso.
+`cmux send` teclea lo que reciba y `send-key Enter` lo ejecuta: un salto de línea dentro del texto
+ejecutaría la orden a medias. El vigilante del plugin manda una sola línea por este motivo exacto
+(`ct-watch-go.mjs:159`), y este encargo hace lo mismo — a diferencia del encargo del plan, que viaja
+como argumento de `claude` y puede tener nueve líneas.
 
-Llamarlo dos veces publica dos comentarios idénticos y no rompe nada: el vigilante consume el primero
-que ve y se apaga con exit 0, y `--release` sigue encontrando un go válido. No se añade idempotencia
-que nadie ha pedido.
+Dice tres cosas: que el gate del plan quedó cerrado por una persona, que la conducción es de
+`ct-step next --plan <el plan que commiteó> --issue <n>` y que obedezca hasta que el run quede
+entregado, y que **pare ahí**: sin pull request, sin merge, sin worktrees nuevos.
 
-### 5.3 Infraestructura
+## 5. Las deudas, declaradas
 
-- **`ct-next-plan-agents.js`** — el adaptador nuevo de `PlanAgents`, que sustituye a
-  `cmux-plan-agents.js`. Invoca `node plugin/scripts/ct-next.mjs --repo <repo> --cap 1` por el tronco
-  de `ExternalTool`, y de su stdout compone el `Go`. El modelo de frontera que lee ese stdout vive en
-  su fichero mientras sea su único consumidor, como el sobre de `acli` vive en `acli-user-stories.js`.
-- **El parseo de ese stdout es la única copia frágil del diseño**, y se paga como manda
-  `decisions.md`: **un test de contrato que importa `goDictationLine` de `plugin/scripts/go-channel.js`
-  y compara el parser contra la línea que el plugin produce de verdad.** Reescribir las dos mitades
-  pasa; tocar una falla.
-- **`GhPlanIssues` gana `answerGo`**: `gh issue comment <n> --repo <r> --body <goBody(nonce)>`, con
-  `goBody` importado de `plugin/scripts/go-response.js` para que el cuerpo que se publica y el que el
-  matcher reconoce no puedan divergir en un espacio. Declarado **no seguro de repetir**
-  (`safeToRepeat: false`): es una escritura.
-- **`implement-plan-route.js`** — un controlador por endpoint, con su modelo de petición, su
-  vocabulario cerrado de desenlaces y sus proyecciones a HTTP dentro, y una línea de montaje en
-  `api-server.js`.
-- **`Refusal` se muda de `start-plan-route.js` a `http.js`.** Es literalmente «lo que todo endpoint
-  repetiría» y hoy vive dentro de un controlador; con el segundo endpoint, importarla de ahí ataría
-  los dos controladores entre sí. Lo demás que se parezca entre los dos modelos de petición —los
-  desenlaces del cuerpo y sus mensajes— **se queda duplicado a propósito**: es idioma de frontera y no
-  una decisión de negocio, así que le aplica la regla de tres y todavía no toca
-  (`plugin/conventions/decisions.md`).
+1. **Nadie comprueba que la pestaña siga viva.** Si se cerró, los dos comandos fallan y el 503 lo
+   dice, que es el caso fácil; si la pestaña vive pero el agente murió dentro, la línea se escribe en
+   un shell y el 202 miente. Cobrarlo pide el recorrido de cmux con su guarda de esquema
+   (`plugin/scripts/cmux.js#findWorkspaceByTitle`) y un vocabulario de tres miembros: está, no está, no
+   se pudo saber.
+2. **El pull request no lo abre nadie.** El encargo para al entregar el run, porque `--release` exige
+   un go que este flujo no acuña. Cerrarlo es la decisión de si el segundo permiso humano vive en un
+   botón o en el merge de GitHub, y no es de este endpoint.
+3. **El residuo del 413.** `api-server.js` sigue proyectando el cuerpo demasiado grande con el
+   vocabulario de `start-plan-route.js` (`PlanRefusal.of(PlanRequest.tooLarge())`), así que la última
+   red del servidor conoce el modelo de petición de un endpoint concreto — con tres endpoints
+   montados, ya son dos los que no son suyos. `Refusal` ya bajó a `http.js`; esto es lo que quedó.
 
-## 6. Las deudas, declaradas
+## 6. Lo que queda fuera
 
-1. **Nadie comprueba que la sesión siga viva.** El agente que escribió el plan está parado dentro de
-   la ventana de cmux esperando la línea que lo empuja, y hay dos formas de que esa línea no llegue:
-   si la ventana se cerró, el vigilante ya se apagó con exit 4 (`ct-watch-go.mjs:271-274`); si pasaron
-   más de ocho horas, con exit 3 (`:78`). En los dos casos el GO se publica, el backend responde 202 y
-   no empuja a nadie; quien lo nota es el humano, porque el plan no avanza. Cobrarla pide un puerto
-   nuevo con un adaptador que importe `findWorkspaceByTitle` de `plugin/scripts/cmux.js` —nunca
-   recorriendo cmux por cuenta propia: ese fichero existe porque el recorrido vivía en tres sitios y
-   solo uno tenía la guarda de esquema— con un vocabulario cerrado de **tres** miembros (está, no
-   está, no se pudo saber), y **el título de la sesión, que hoy `ct-next` no imprime** (§4.2).
-2. **`ct-next` elige el issue él**: no acepta `--issue N`. `/start-plan` lo mitiga en este orden —crea
-   el issue, corre `ct-next --dry-run`, comprueba que el issue que piensa despachar es el que acaba de
-   crear, y solo entonces lo lanza de verdad; si no coincide, no lanza nada y falla con el motivo en
-   prosa. Queda una carrera entre las dos invocaciones, benigna con un slice en vuelo (`--cap 1`, y el
-   piloto es de uno en uno). La salida limpia es `--issue N`, segunda iteración.
-3. **El backend tiene que correr dentro del checkout gobernado.** `ct-next` verifica el remote `origin`
-   y aborta si no cuadra con `--repo`. Ese rechazo lo sufre `/start-plan`, no este endpoint, y sale por
-   su 503 con el motivo de `ct-next` en prosa. No se añade configuración de rutas: es lo que
-   `CmuxPlanAgents` ya asumía con `cwd: process.cwd()`.
-
-## 7. Lo que queda fuera
-
-El sobre y sus flags; comprobar la sesión; sostener el pseudo-terminal desde el backend; empujar la
-sesión cuando el vigilante ya murió; y cualquier cambio en `plugin/`.
+Contestar el GO en el issue y el nonce entero; `ct-next` y su sobre; comprobar la pestaña; el pull
+request y `--release`; y cualquier cambio en `plugin/`.

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add `POST /implement-plan`, which answers the human's GO on the plan issue so the agent that is parked at the `plan` gate resumes and implements, and make `POST /start-plan` dispatch for real with `ct-next` instead of echoing into a cmux tab.
+**Goal:** Add `POST /implement-plan`, which writes one line into the cmux tab where the plan agent is parked so it implements the plan it just committed, driven by the plugin's own `ct-step`.
 
-**Architecture:** The backend drives the plugin by child process and never reimplements dispatch. `/start-plan` runs `ct-next.mjs`, reads the issue number and the GO nonce off its stdout, and hands both to the front; the front gives them back when a human presses the button, so neither endpoint keeps state. The GO is not a new port: the collaborator on the other side is still GitHub's issues, so `PlanIssues` grows `answerGo()`.
+**Architecture:** The agent is not waiting for anything in GitHub — it stopped because its errand told it to, and it resumes when someone types in its tab. So this endpoint is `cmux send` plus `cmux send-key Enter`, both already written in `CmuxPlanAgents`, carrying a second errand composed by `PlanAgentBrief`. No new domain type, no state kept between requests: the front sends back the three values it already has.
 
 **Tech Stack:** Node 24 ESM, express 5, vitest 4. No new dependency.
 
@@ -13,232 +13,385 @@
 ## Global Constraints
 
 - **The yardstick binds entire, old module or new**: `backend/conventions/` (README, architecture, domain, infrastructure, testing) plus `plugin/conventions/style.md`, `defects.md` and `decisions.md`. Read them before writing code; there is no declared debt under `backend/`.
+- **Nothing "just in case".** Simple does not mean fewer layers: it means adding nothing that does not solve today's problem. Do not guard values this code composes itself — `domain.md` asks for validation of what **ends up in an argv**, and that is the whole licence.
 - **No prose in the code**: no comments, no docstrings. Rename instead of explaining.
-- **Code is written in English**: modules, types, methods, variables, test names, error messages.
+- **Code is written in English**: modules, types, methods, variables, test names, error messages. The exception is the errand's text, which an agent reads and is product copy.
 - **No free function at module level**: every function hangs off a type.
-- **`plugin/` never imports from `backend/`.** The backend imports the plugin's pure renderers and readers; what the plugin does not export is copied as a literal **with a contract test that renders the plugin's own output and compares**.
-- **A non-zero exit code is data, not an exception.** `ToolRunner` never throws; the adapter interprets `output.failed` and the error channel.
-- **The caller declares whether its call is safe to repeat.** Reads are `safeToRepeat: true`; writes (`issue create`, `issue comment`) are `safeToRepeat: false`.
-- **One status per decision of whoever receives it**: 4xx fix the request, 503 the tool refused, 502 the tool answered something unreadable.
-- **Closed vocabularies, never loose strings**, dispatched exhaustively with no catch-all branch.
-- **Suite is run from `backend/`.** Fast subset: `npx vitest run --exclude '**/*-real-process.test.js'`. Whole suite before handing anything over.
-- **Every test file's fixture class is its mother**: named scenarios with sensible defaults, and a scripted double raises when asked for an answer nobody wrote.
+- **The domain speaks no tool's language.** cmux, gh, acli and git exist only in `infrastructure/`.
+- **One port per collaborator, growing with methods.** A new step of the flow against an old collaborator is a method, never a new port.
+- **A non-zero exit code is data, not an exception.** `ToolRunner` never throws; the adapter interprets.
+- **The domain has no tests of its own**: every guard is reached through the use case that carries it (`backend/conventions/testing.md`).
+- **Suite runs from `backend/`.** Fast subset: `npx vitest run --exclude '**/*-real-process.test.js'`. Whole suite before handing anything over.
+- **Real-process tests are only two kinds**: the entrypoint's happy path and `ToolRunner`. Do not add a third.
 
 ## File Structure
 
 | File | Responsibility |
 |---|---|
-| `backend/src/domain/value-objects/go.js` | **Create.** The GO: the issue it answers and the nonce that closes it, with both guards |
-| `backend/src/domain/exceptions.js` | **Modify.** Add `GoFailure` and `GoNotAnswered` |
-| `backend/src/domain/ports/plan-issues.js` | **Modify.** Add `answerGo({ go, repository })` |
-| `backend/src/infrastructure/gh-plan-issues.js` | **Modify.** Implement `answerGo` with `goBody` from the plugin |
+| `backend/src/infrastructure/plan-agent-brief.js` | **Modify.** Take `ctStep`; compose the one-line errand that resumes the agent |
+| `backend/src/domain/exceptions.js` | **Modify.** Add `PlanAgentNotResumed` under `PlanAgentFailure` |
+| `backend/src/domain/ports/plan-agents.js` | **Modify.** Add `resume({ story, issue, repository })` |
+| `backend/src/infrastructure/cmux-plan-agents.js` | **Modify.** Implement `resume` with the send argv builders it already has |
 | `backend/src/application/actions/implement-plan.js` | **Create.** The use case and its `Params` |
-| `backend/src/infrastructure/http.js` | **Modify.** Host `Refusal` and the too-large body projection, which every endpoint shares |
-| `backend/src/infrastructure/start-plan-route.js` | **Modify.** Import `Refusal` from `http.js`; drop the transport-level outcome |
-| `backend/src/infrastructure/api-server.js` | **Modify.** Project 413 without knowing any endpoint; mount the new route |
 | `backend/src/infrastructure/implement-plan-route.js` | **Create.** The controller, its request model, its refusal projections |
-| `backend/src/infrastructure/ct-next-plan-agents.js` | **Create.** The `PlanAgents` adapter that dispatches with `ct-next`, and the reader of its stdout |
-| `backend/src/infrastructure/cmux-plan-agents.js` | **Delete.** Replaced by the adapter above |
-| `backend/src/infrastructure/ct-api.mjs` | **Modify.** Wire both use cases and the path to `ct-next.mjs` |
+| `backend/src/infrastructure/api-server.js` | **Modify.** Take `implementPlan`, mount the route |
+| `backend/src/infrastructure/ct-api.mjs` | **Modify.** Resolve `ct-step.mjs`, wire the second use case |
+| `README.md` | **Modify.** Name the endpoint |
 
 ---
 
-### Task 1: The GO, its failure, and the port method that answers it
+### Task 1: The errand that resumes the agent
+
+One line, not nine: `cmux send` types what it receives and `send-key Enter` runs it, so a newline
+inside the text would run the order half-written. The plugin's watcher sends a single line for this
+exact reason (`ct-watch-go.mjs:159`).
 
 **Files:**
-- Create: `backend/src/domain/value-objects/go.js`
-- Modify: `backend/src/domain/exceptions.js`
-- Modify: `backend/src/domain/ports/plan-issues.js`
-- Modify: `backend/src/infrastructure/gh-plan-issues.js`
-- Test: `backend/__tests__/infrastructure/gh-plan-issues.test.js`
+- Modify: `backend/src/infrastructure/plan-agent-brief.js`
+- Test: `backend/__tests__/infrastructure/plan-agent-brief.test.js`
 
 **Interfaces:**
-- Consumes: `Gh` (`gh.js`), `ProcessOutput` (`tool-runner.js`), `RepositoryName`.
-- Produces: `new Go({ issue, nonce })` with fields `issue` (integer ≥ 1) and `nonce` (8 lowercase hex), statics `Go.isWellFormedIssue(value)`, `Go.isWellFormedNonce(value)`, `Go.NONCE_EXAMPLE = 'a1b2c3d4'`, and `toString()` returning `#<issue>`. `PlanIssues.answerGo({ go, repository })` resolving to nothing. `GoNotAnswered` under `GoFailure` under `PlanFailure`. `GhPlanIssues.goArgvFor({ go, repository })`.
-
-**Note on the issue guard:** `PlanIssue` already refuses an issue numbered below one. That sentence living in two value objects is boundary idiom, not a business decision — no business change forces touching both at once (`plugin/conventions/decisions.md`) — and a GO cannot depend on carrying a url it has no use for.
+- Consumes: `RepositoryName`.
+- Produces: `new PlanAgentBrief({ dispatchCheck, conventions, ctStep })` — the third path validated like its two siblings, absolute — and `implementationErrandFor({ issue, repository })` returning a single-line string, where `issue` is
+  the **number** — the only thing the errand interpolates, and the only thing that arrives over HTTP.
+  Its sibling `errandFor` takes the `PlanIssue` that `gh` just handed back; the divergence is
+  deliberate and the existing test of `errandFor` already passes a bare `{ number: 42 }`, so no
+  contract narrows here.
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `backend/__tests__/infrastructure/gh-plan-issues.test.js`, and add `Go` and `GoNotAnswered`/`GoFailure` to the imports at the top of that file:
+Append to `backend/__tests__/infrastructure/plan-agent-brief.test.js`:
 
 ```javascript
-import { Go } from '../../src/domain/value-objects/go.js'
-import { GoNotAnswered, GoFailure } from '../../src/domain/exceptions.js'
-import { PlanIssues } from '../../src/domain/ports/plan-issues.js'
-import { goBody } from '../../../plugin/scripts/go-response.js'
+describe('PlanAgentBrief resuming the agent', () => {
+  const errand = () => new PlanAgentBrief({
+    dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+    conventions: '/plugin/conventions',
+    ctStep: '/plugin/scripts/ct-step.mjs',
+  }).implementationErrandFor({ issue: 42, repository: new RepositoryName('owner/name') })
 
-describe('GhPlanIssues answering the GO', () => {
-  const GO = new Go({ issue: 7, nonce: 'a1b2c3d4' })
-
-  it('the_call_it_makes_comments_the_go_on_the_issue_the_human_answered', async () => {
-    const gh = GhDouble.created('https://github.com/josemerca/ct-loop-sandbox/issues/7#issuecomment-1\n')
-
-    await gh.issues().answerGo({ go: GO, repository: GhDouble.REPOSITORY })
-
-    expect(gh.calls).toEqual([[
-      'issue', 'comment', '7',
-      '--repo', GhDouble.REPOSITORY.text,
-      '--body', '-OK a1b2c3d4',
-    ]])
+  it('it_is_one_single_line_because_a_newline_would_run_the_order_half_written', () => {
+    expect(errand()).not.toContain('\n')
   })
 
-  it('the_body_it_publishes_is_the_one_the_plugin_matcher_recognises_and_not_a_second_spelling', () => {
-    const argv = GhPlanIssues.goArgvFor({ go: GO, repository: GhDouble.REPOSITORY })
-
-    expect(argv[argv.length - 1]).toBe(goBody(GO.nonce))
+  it('it_says_a_person_closed_the_gate_so_the_agent_knows_the_pause_is_over', () => {
+    expect(errand()).toMatch(/plan/)
+    expect(errand()).toMatch(/#42/)
   })
 
-  it('a_gh_that_refuses_to_comment_arrives_typed_so_the_boundary_can_tell_it_from_a_crash', async () => {
-    const gh = GhDouble.refusing('could not add comment: HTTP 404')
-
-    const refusal = await gh.issues({ attempts: 1 })
-      .answerGo({ go: GO, repository: GhDouble.REPOSITORY })
-      .catch((cause) => cause)
-
-    expect(refusal).toBeInstanceOf(GoNotAnswered)
-    expect(refusal).toBeInstanceOf(GoFailure)
-    expect(refusal.message).toContain('HTTP 404')
+  it('it_hands_the_driving_to_ct_step_by_absolute_path_instead_of_describing_the_sequence', () => {
+    expect(errand()).toContain('node /plugin/scripts/ct-step.mjs next --plan')
+    expect(errand()).toContain('--issue 42')
+    expect(errand()).not.toContain('CLAUDE_PLUGIN_ROOT')
   })
 
-  it('answering_the_go_is_never_repeated_on_its_own_because_a_lost_answer_may_have_been_published', async () => {
-    const gh = GhDouble.refusing('connection reset by peer', 4)
-
-    await gh.issues({ attempts: 3 })
-      .answerGo({ go: GO, repository: GhDouble.REPOSITORY })
-      .catch(() => null)
-
-    expect(gh.calls).toHaveLength(1)
+  it('it_names_the_plan_by_where_the_first_errand_told_it_to_commit_it', () => {
+    expect(errand()).toContain('docs/superpowers/plans/')
   })
 
-  it('a_go_that_names_no_readable_issue_or_no_nonce_cannot_be_built_at_all', () => {
-    expect(() => new Go({ issue: 0, nonce: 'a1b2c3d4' })).toThrow(/numbered from one/)
-    expect(() => new Go({ issue: 7, nonce: 'nope' })).toThrow(/nonce such as a1b2c3d4/)
-    expect(() => new Go({ issue: 7, nonce: 'A1B2C3D4' })).toThrow(/nonce such as a1b2c3d4/)
+  it('it_stops_the_agent_at_the_delivered_run_and_not_at_a_pull_request', () => {
+    expect(errand()).toMatch(/PARA/)
+    expect(errand()).toMatch(/no abras pull request/i)
   })
 
-  it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
-    await expect(new PlanIssues().answerGo({ go: GO, repository: GhDouble.REPOSITORY }))
-      .rejects.toThrow(/must implement answerGo/)
+  it('it_never_promises_a_permission_nobody_mints', () => {
+    expect(errand()).not.toContain('-OK')
+    expect(errand()).not.toContain('nonce')
+  })
+
+  it('a_brief_that_cannot_name_ct_step_refuses_to_exist_instead_of_shipping_the_word_undefined', () => {
+    expect(() => new PlanAgentBrief({
+      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+      conventions: '/plugin/conventions',
+    })).toThrow(/ct-step/)
+    expect(() => new PlanAgentBrief({
+      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+      conventions: '/plugin/conventions',
+      ctStep: 'scripts/ct-step.mjs',
+    })).toThrow(/ct-step/)
   })
 })
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npx vitest run __tests__/infrastructure/gh-plan-issues.test.js`
-Expected: FAIL — cannot resolve `../../src/domain/value-objects/go.js`.
+Run: `npx vitest run __tests__/infrastructure/plan-agent-brief.test.js`
+Expected: FAIL — `implementationErrandFor` is not a function, and the constructor accepts a brief with no `ctStep`.
 
-- [ ] **Step 3: Write the value object**
+- [ ] **Step 3: Take the third path and compose the errand**
 
-Create `backend/src/domain/value-objects/go.js`:
+In `backend/src/infrastructure/plan-agent-brief.js`, add the guard beside its two siblings and store it:
 
 ```javascript
-export class Go {
-  static #NONCE = /^[0-9a-f]{8}$/
-  static NONCE_EXAMPLE = 'a1b2c3d4'
-
-  constructor({ issue, nonce }) {
-    if (!Go.isWellFormedIssue(issue)) {
-      throw new Error(`a go answers an issue numbered from one, got ${JSON.stringify(issue)}`)
+  constructor({ dispatchCheck, conventions, ctStep }) {
+    if (typeof dispatchCheck !== 'string' || !isAbsolute(dispatchCheck)) {
+      throw new Error(`the errand names dispatch-check by absolute path, got ${JSON.stringify(dispatchCheck)}`)
     }
-    if (!Go.isWellFormedNonce(nonce)) {
-      throw new Error(`a go carries a nonce such as ${Go.NONCE_EXAMPLE}, got ${JSON.stringify(nonce)}`)
+    if (typeof conventions !== 'string' || !isAbsolute(conventions)) {
+      throw new Error(`the errand names where the yardstick lives, got ${JSON.stringify(conventions)}`)
     }
-    this.issue = issue
-    this.nonce = nonce
+    if (typeof ctStep !== 'string' || !isAbsolute(ctStep)) {
+      throw new Error(`the errand names ct-step by absolute path, got ${JSON.stringify(ctStep)}`)
+    }
+    this.dispatchCheck = dispatchCheck
+    this.conventions = conventions
+    this.ctStep = ctStep
     Object.freeze(this)
   }
-
-  static isWellFormedIssue(issue) {
-    return Number.isInteger(issue) && issue >= 1
-  }
-
-  static isWellFormedNonce(nonce) {
-    return typeof nonce === 'string' && Go.#NONCE.test(nonce)
-  }
-
-  toString() {
-    return `#${this.issue}`
-  }
-}
 ```
 
-- [ ] **Step 4: Add the failure family**
-
-Append to `backend/src/domain/exceptions.js`:
+and add the second errand, which is the only method of this class that must fit on one line:
 
 ```javascript
-export class GoFailure extends PlanFailure {}
-
-export class GoNotAnswered extends GoFailure {}
-```
-
-- [ ] **Step 5: Grow the port**
-
-In `backend/src/domain/ports/plan-issues.js`, add a second method to the existing class:
-
-```javascript
-  async answerGo({ go, repository }) {
-    throw new Error(
-      `${this.constructor.name} must implement answerGo({ go, repository }), asked for ${go} in ${repository}`
-    )
-  }
-```
-
-- [ ] **Step 6: Implement it in the adapter**
-
-In `backend/src/infrastructure/gh-plan-issues.js`, add `goBody` to the plugin imports and `GoNotAnswered` to the exceptions import, then add to `GhPlanIssues`:
-
-```javascript
-  static goArgvFor({ go, repository }) {
+  implementationErrandFor({ issue, repository }) {
     return [
-      'issue', 'comment', String(go.issue),
-      '--repo', repository.text,
-      '--body', goBody(go.nonce),
-    ]
-  }
-
-  async answerGo({ go, repository }) {
-    const outcome = await this.gh.run(GhPlanIssues.goArgvFor({ go, repository }), { safeToRepeat: false })
-    if (outcome.failed) {
-      throw new GoNotAnswered(`${Gh.BIN} issue comment failed: ${outcome.stderr.trim()}`)
-    }
+      `El gate \`plan\` del issue #${issue} de ${repository.text} lo ha cerrado una persona:`,
+      'implementa AHORA el plan que commiteaste, sin reescribirlo.',
+      `Pregunta el paso con \`node ${this.ctStep} next --plan <tu plan de docs/superpowers/plans/> --issue ${issue}\``,
+      'y obedece exactamente lo que conteste, tarea a tarea, hasta que el run quede entregado.',
+      'Y entonces PARA: no abras pull request, no mergees, no crees worktrees nuevos.',
+    ].join(' ')
   }
 ```
 
-The plugin import line is `import { goBody } from '../../../plugin/scripts/go-response.js'`.
+- [ ] **Step 4: Run the tests to verify they pass**
 
-- [ ] **Step 7: Run the tests to verify they pass**
+Run: `npx vitest run __tests__/infrastructure/plan-agent-brief.test.js`
+Expected: PASS.
 
-Run: `npx vitest run __tests__/infrastructure/gh-plan-issues.test.js`
-Expected: PASS, all of them.
+- [ ] **Step 5: Give the existing wiring its third path**
 
-- [ ] **Step 8: Run the fast subset**
+The brief is built in two places, and both now need `ctStep` or they throw at startup. In
+`backend/src/infrastructure/ct-api.mjs`, add to `PluginTree`:
 
-Run: `npx vitest run --exclude '**/*-real-process.test.js'`
-Expected: PASS — 261 existing tests plus the new ones.
+```javascript
+  static ctStep() {
+    return join(PluginTree.#root(), 'scripts', 'ct-step.mjs')
+  }
+```
 
-- [ ] **Step 9: Commit**
+and add `ctStep: PluginTree.ctStep()` where the `PlanAgentBrief` is constructed. Then grep for any
+other construction and give it the path too:
+
+Run: `grep -rn "new PlanAgentBrief" backend/src backend/__tests__`
+Expected: every hit either passes `ctStep` or is a test that asserts its absence.
+
+- [ ] **Step 6: Run the whole suite**
+
+Run: `npx vitest run`
+Expected: PASS.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add backend/src/domain/value-objects/go.js backend/src/domain/exceptions.js \
-        backend/src/domain/ports/plan-issues.js backend/src/infrastructure/gh-plan-issues.js \
-        backend/__tests__/infrastructure/gh-plan-issues.test.js
-git commit -m "feat: el GO viaja tipado y gh sabe contestarlo en el issue"
+git add backend/src/infrastructure/plan-agent-brief.js backend/src/infrastructure/ct-api.mjs \
+        backend/__tests__/infrastructure/plan-agent-brief.test.js
+git commit -m "feat(brief): el encargo que reanuda al agente, en una sola línea"
 ```
 
 ---
 
-### Task 2: The use case
+### Task 2: The port and the adapter that type the line
+
+**Files:**
+- Modify: `backend/src/domain/exceptions.js`
+- Modify: `backend/src/domain/ports/plan-agents.js`
+- Modify: `backend/src/infrastructure/cmux-plan-agents.js`
+- Test: `backend/__tests__/infrastructure/cmux-plan-agents.test.js`
+
+**Interfaces:**
+- Consumes: `UserStoryKey`, `RepositoryName`, `ProcessOutput`, and the fixtures already in that test file.
+- Produces: `PlanAgents.resume({ story, issue, repository })` resolving to nothing, with `issue` the **number**; `CmuxPlanAgents.resume` sending `['send', '--workspace', 'ct-plan-<story>', <errand>]` and then `['send-key', '--workspace', 'ct-plan-<story>', 'Enter']`; `PlanAgentNotResumed` under `PlanAgentFailure`.
+- **One cause, not two**, unlike this adapter's `launch`: nothing is read back from `cmux send`, so there is no contract of ours it could break. Declared in the spec so it is not read as a family half written.
+
+- [ ] **Step 1: Write the failing tests**
+
+Add `PlanAgentNotResumed` to the exceptions imported at the top of
+`backend/__tests__/infrastructure/cmux-plan-agents.test.js`, then append:
+
+```javascript
+class ResumeDouble {
+  static STORY = new UserStoryKey('ABC-42')
+  static ISSUE = 42
+  static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
+  static TAB = 'ct-plan-ABC-42'
+  static ERRAND = 'implementa el plan de #42'
+
+  constructor(answers) {
+    this.answers = answers
+    this.calls = []
+    this.brief = {
+      asked: [],
+      implementationErrandFor: ({ issue, repository }) => {
+        this.brief.asked.push({ issue, repository })
+
+        return ResumeDouble.ERRAND
+      },
+    }
+  }
+
+  static accepting() {
+    return new ResumeDouble([
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+    ])
+  }
+
+  static refusing(said) {
+    return new ResumeDouble([new ProcessOutput({ code: 1, stdout: '', stderr: said })])
+  }
+
+  static refusingTheEnter(said) {
+    return new ResumeDouble([
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+      new ProcessOutput({ code: 1, stdout: '', stderr: said }),
+    ])
+  }
+
+  agents() {
+    return new CmuxPlanAgents({
+      brief: this.brief,
+      run: (argv) => {
+        this.calls.push(argv)
+        const answer = this.answers[this.calls.length - 1]
+        if (answer === undefined) {
+          throw new Error(`nobody wrote an answer for call ${this.calls.length}: ${argv.join(' ')}`)
+        }
+
+        return Promise.resolve(answer)
+      },
+    })
+  }
+
+  async resume() {
+    return this.agents().resume({
+      story: ResumeDouble.STORY, issue: ResumeDouble.ISSUE, repository: ResumeDouble.REPOSITORY,
+    })
+  }
+
+  async refusal() {
+    return this.resume().catch((cause) => cause)
+  }
+}
+
+describe('CmuxPlanAgents resuming a parked agent', () => {
+  it('it_types_the_errand_in_the_tab_it_named_when_it_launched_it_and_then_presses_enter', async () => {
+    const cmux = ResumeDouble.accepting()
+
+    await cmux.resume()
+
+    expect(cmux.calls).toEqual([
+      ['send', '--workspace', ResumeDouble.TAB, ResumeDouble.ERRAND],
+      ['send-key', '--workspace', ResumeDouble.TAB, 'Enter'],
+    ])
+  })
+
+  it('the_errand_it_types_is_the_one_the_brief_composed_for_that_issue_and_repository', async () => {
+    const cmux = ResumeDouble.accepting()
+
+    await cmux.resume()
+
+    expect(cmux.brief.asked).toEqual([
+      { issue: ResumeDouble.ISSUE, repository: ResumeDouble.REPOSITORY },
+    ])
+  })
+
+  it('a_cmux_that_refuses_to_write_arrives_typed_so_the_boundary_can_tell_it_from_a_crash', async () => {
+    const refusal = await ResumeDouble.refusing('Access denied - only processes started inside cmux').refusal()
+
+    expect(refusal).toBeInstanceOf(PlanAgentNotResumed)
+    expect(refusal).toBeInstanceOf(PlanAgentFailure)
+    expect(refusal.message).toContain('Access denied')
+  })
+
+  it('an_enter_that_never_lands_is_reported_because_the_line_is_sitting_there_unrun', async () => {
+    const refusal = await ResumeDouble.refusingTheEnter('no such workspace').refusal()
+
+    expect(refusal).toBeInstanceOf(PlanAgentNotResumed)
+    expect(refusal.message).toContain('no such workspace')
+  })
+
+  it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
+    await expect(new PlanAgents().resume({
+      story: ResumeDouble.STORY, issue: ResumeDouble.ISSUE, repository: ResumeDouble.REPOSITORY,
+    })).rejects.toThrow(/must implement resume/)
+  })
+})
+```
+
+Add `PlanAgents` to that file's imports: `import { PlanAgents } from '../../src/domain/ports/plan-agents.js'`.
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `npx vitest run __tests__/infrastructure/cmux-plan-agents.test.js`
+Expected: FAIL — `resume` is not a function.
+
+- [ ] **Step 3: Add the failure**
+
+Append to `backend/src/domain/exceptions.js`, inside the `PlanAgentFailure` family:
+
+```javascript
+export class PlanAgentNotResumed extends PlanAgentFailure {}
+```
+
+- [ ] **Step 4: Grow the port**
+
+In `backend/src/domain/ports/plan-agents.js`, add the second method:
+
+```javascript
+  async resume({ story, issue, repository }) {
+    throw new Error(
+      `${this.constructor.name} must implement resume({ story, issue, repository }), asked for ${story} on ${issue} in ${repository}`
+    )
+  }
+```
+
+- [ ] **Step 5: Implement it in the adapter**
+
+In `backend/src/infrastructure/cmux-plan-agents.js`, add `PlanAgentNotResumed` to the exceptions
+import and add the method, reusing the two argv builders that are already there:
+
+```javascript
+  async resume({ story, issue, repository }) {
+    const errand = this.brief.implementationErrandFor({ issue, repository })
+    const name = CmuxPlanAgents.nameFor(story)
+    await this.#type(CmuxPlanAgents.sendArgvFor(name, errand))
+    await this.#type(CmuxPlanAgents.enterArgvFor(name))
+  }
+
+  async #type(argv) {
+    const output = await this.run(argv)
+    if (output.failed) {
+      throw new PlanAgentNotResumed(`${CmuxPlanAgents.BIN} ${argv[0]} failed: ${output.stderr.trim()}`)
+    }
+  }
+```
+
+- [ ] **Step 6: Run the tests to verify they pass**
+
+Run: `npx vitest run __tests__/infrastructure/cmux-plan-agents.test.js`
+Expected: PASS, the new ones and the launch ones untouched.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add backend/src/domain/exceptions.js backend/src/domain/ports/plan-agents.js \
+        backend/src/infrastructure/cmux-plan-agents.js \
+        backend/__tests__/infrastructure/cmux-plan-agents.test.js
+git commit -m "feat(cmux): la línea que reanuda al agente parado en el gate"
+```
+
+---
+
+### Task 3: The use case
 
 **Files:**
 - Create: `backend/src/application/actions/implement-plan.js`
 - Test: `backend/__tests__/application/implement-plan.test.js`
 
 **Interfaces:**
-- Consumes: `Go`, `RepositoryName`, `PlanIssues.answerGo` (Task 1).
-- Produces: `new ImplementPlanParams({ go, repository })` (frozen) and `new ImplementPlan({ planIssues }).execute(params)`, which resolves to nothing. There is no `Result`: what the front needs to paint the answer is what it sent, and a type nobody reads is a type to maintain.
+- Consumes: `PlanAgents.resume` (Task 2), `UserStoryKey`, `RepositoryName`.
+- Produces: `new ImplementPlanParams({ story, issue, repository })` (frozen, `issue` the number) and `new ImplementPlan({ planAgents }).execute(params)`, resolving to nothing. No `Result`: the front already has everything the answer carries.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -247,12 +400,12 @@ Create `backend/__tests__/application/implement-plan.test.js`:
 ```javascript
 import { describe, it, expect } from 'vitest'
 import { ImplementPlan, ImplementPlanParams } from '../../src/application/actions/implement-plan.js'
-import { PlanIssues } from '../../src/domain/ports/plan-issues.js'
-import { Go } from '../../src/domain/value-objects/go.js'
+import { PlanAgents } from '../../src/domain/ports/plan-agents.js'
+import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
-import { GoNotAnswered } from '../../src/domain/exceptions.js'
+import { PlanAgentNotResumed } from '../../src/domain/exceptions.js'
 
-class PlanIssuesDouble extends PlanIssues {
+class PlanAgentsDouble extends PlanAgents {
   constructor(answer = null) {
     super()
     this.answer = answer
@@ -260,51 +413,56 @@ class PlanIssuesDouble extends PlanIssues {
   }
 
   static refusing(cause) {
-    return new PlanIssuesDouble(cause)
+    return new PlanAgentsDouble(cause)
   }
 
-  async answerGo({ go, repository }) {
-    this.asked.push({ go, repository })
+  async resume({ story, issue, repository }) {
+    this.asked.push({ story, issue, repository })
     if (this.answer instanceof Error) throw this.answer
   }
 }
 
 class Flow {
-  static GO = new Go({ issue: 7, nonce: 'a1b2c3d4' })
-  static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
+  static STORY = new UserStoryKey('XOP-4909')
+  static ISSUE = 33
+  static REPOSITORY = new RepositoryName('jjponz/repo-pulse')
 
-  constructor({ planIssues } = {}) {
-    this.planIssues = planIssues ?? new PlanIssuesDouble()
+  constructor({ planAgents } = {}) {
+    this.planAgents = planAgents ?? new PlanAgentsDouble()
   }
 
-  async run(go = Flow.GO) {
-    return new ImplementPlan(this).execute(
-      new ImplementPlanParams({ go, repository: Flow.REPOSITORY })
-    )
+  async run() {
+    return new ImplementPlan(this).execute(new ImplementPlanParams({
+      story: Flow.STORY, issue: Flow.ISSUE, repository: Flow.REPOSITORY,
+    }))
   }
 }
 
 describe('ImplementPlan', () => {
-  it('the_go_it_was_given_is_the_one_that_reaches_the_issue_whole', async () => {
+  it('the_agent_it_resumes_is_the_one_of_the_story_and_issue_it_was_given', async () => {
     const flow = new Flow()
 
     await flow.run()
 
-    expect(flow.planIssues.asked).toEqual([{ go: Flow.GO, repository: Flow.REPOSITORY }])
+    expect(flow.planAgents.asked).toEqual([
+      { story: Flow.STORY, issue: Flow.ISSUE, repository: Flow.REPOSITORY },
+    ])
   })
 
-  it('a_go_that_cannot_be_published_travels_out_typed_instead_of_being_turned_into_a_status', async () => {
-    const flow = new Flow({ planIssues: PlanIssuesDouble.refusing(new GoNotAnswered('HTTP 403')) })
+  it('an_agent_that_cannot_be_resumed_travels_out_typed_instead_of_being_turned_into_a_status', async () => {
+    const flow = new Flow({ planAgents: PlanAgentsDouble.refusing(new PlanAgentNotResumed('no such workspace')) })
 
     const refusal = await flow.run().catch((cause) => cause)
 
-    expect(refusal).toBeInstanceOf(GoNotAnswered)
-    expect(refusal.name).toBe('GoNotAnswered')
-    expect(refusal.message).toBe('HTTP 403')
+    expect(refusal).toBeInstanceOf(PlanAgentNotResumed)
+    expect(refusal.name).toBe('PlanAgentNotResumed')
+    expect(refusal.message).toBe('no such workspace')
   })
 
   it('what_goes_in_cannot_be_edited_after_the_use_case_settled_it', async () => {
-    const params = new ImplementPlanParams({ go: Flow.GO, repository: Flow.REPOSITORY })
+    const params = new ImplementPlanParams({
+      story: Flow.STORY, issue: Flow.ISSUE, repository: Flow.REPOSITORY,
+    })
 
     await new ImplementPlan(new Flow()).execute(params)
 
@@ -324,20 +482,23 @@ Create `backend/src/application/actions/implement-plan.js`:
 
 ```javascript
 export class ImplementPlanParams {
-  constructor({ go, repository }) {
-    this.go = go
+  constructor({ story, issue, repository }) {
+    this.story = story
+    this.issue = issue
     this.repository = repository
     Object.freeze(this)
   }
 }
 
 export class ImplementPlan {
-  constructor({ planIssues }) {
-    this.planIssues = planIssues
+  constructor({ planAgents }) {
+    this.planAgents = planAgents
   }
 
   async execute(params) {
-    await this.planIssues.answerGo({ go: params.go, repository: params.repository })
+    await this.planAgents.resume({
+      story: params.story, issue: params.issue, repository: params.repository,
+    })
   }
 }
 ```
@@ -352,129 +513,7 @@ Expected: PASS.
 ```bash
 git add backend/src/application/actions/implement-plan.js \
         backend/__tests__/application/implement-plan.test.js
-git commit -m "feat: el caso de uso que contesta el go del plan"
-```
-
----
-
-### Task 3: What both endpoints share moves to `http.js`
-
-Pure refactor: no behaviour changes, and the 261 existing tests are the net. `Refusal` lives inside a controller today; importing it from there would tie the two controllers to each other. The too-large body is a **transport** outcome — `PlanRequest.from` never produces it, `api-server.js` does — so it leaves the endpoint's vocabulary and stops making the server's last net know about one endpoint's request model.
-
-**Files:**
-- Modify: `backend/src/infrastructure/http.js`
-- Modify: `backend/src/infrastructure/start-plan-route.js:13,62-64,107-110` (the outcome member, the `tooLarge` factory, its projection)
-- Modify: `backend/src/infrastructure/api-server.js:5,22-24` (the import and the projection)
-- Modify: `backend/__tests__/infrastructure/plan-refusal.test.js:1-4,34-36`
-- Test: `backend/__tests__/infrastructure/http.test.js`
-
-**Interfaces:**
-- Produces: `Refusal` exported from `http.js` with `{ status, error }`; `BodyRefusal.tooLarge()` returning a `Refusal` of status 413 and error `body must not exceed 8192 bytes`. `PlanRequestOutcome` no longer has `BODY_TOO_LARGE`, and `PlanRequest.tooLarge()` is gone.
-
-- [ ] **Step 1: Write the failing test**
-
-Create `backend/__tests__/infrastructure/http.test.js`:
-
-```javascript
-import { describe, it, expect } from 'vitest'
-import { Refusal, BodyRefusal, JsonBody } from '../../src/infrastructure/http.js'
-
-describe('Refusal', () => {
-  it('a_status_that_is_not_a_refusal_or_a_reason_that_says_nothing_cannot_be_built', () => {
-    expect(() => new Refusal({ status: 200, error: 'fine' })).toThrow(/client or server status/)
-    expect(() => new Refusal({ status: 400, error: '  ' })).toThrow(/says why/)
-  })
-})
-
-describe('BodyRefusal', () => {
-  it('a_body_over_the_cap_is_answered_with_the_status_that_names_the_size_and_not_a_plain_400', () => {
-    const refusal = BodyRefusal.tooLarge()
-
-    expect(refusal).toBeInstanceOf(Refusal)
-    expect(refusal.status).toBe(413)
-  })
-
-  it('the_size_it_names_is_the_cap_the_reader_enforces_and_not_a_number_typed_twice', () => {
-    expect(BodyRefusal.tooLarge().error).toBe(`body must not exceed ${JsonBody.MAX_BYTES} bytes`)
-  })
-})
-```
-
-- [ ] **Step 2: Run the test to verify it fails**
-
-Run: `npx vitest run __tests__/infrastructure/http.test.js`
-Expected: FAIL — `Refusal` and `BodyRefusal` are not exported from `http.js`.
-
-- [ ] **Step 3: Move `Refusal` into `http.js` and add `BodyRefusal`**
-
-In `backend/src/infrastructure/http.js`, add both classes after `JsonBody`:
-
-```javascript
-export class Refusal {
-  constructor({ status, error }) {
-    if (!Number.isInteger(status) || status < 400 || status > 599) {
-      throw new Error(`a refusal answers with a client or server status, got ${JSON.stringify(status)}`)
-    }
-    if (typeof error !== 'string' || error.trim().length === 0) {
-      throw new Error(`a refusal says why, got ${JSON.stringify(error)}`)
-    }
-    this.status = status
-    this.error = error
-    Object.freeze(this)
-  }
-}
-
-export class BodyRefusal {
-  static tooLarge() {
-    return new Refusal({ status: 413, error: `body must not exceed ${JsonBody.MAX_BYTES} bytes` })
-  }
-}
-```
-
-- [ ] **Step 4: Take the moved pieces out of the controller**
-
-In `backend/src/infrastructure/start-plan-route.js`:
-- Delete the `Refusal` class (it now lives in `http.js`) and import it instead: change the first import to `import { Answer, JsonBody, Refusal } from './http.js'`.
-- Delete `BODY_TOO_LARGE: 'body-too-large',` from `PlanRequestOutcome`.
-- Delete the `static tooLarge()` factory from `PlanRequest`.
-- Delete the `[PlanRequestOutcome.BODY_TOO_LARGE]` entry from `PlanRefusal.#BY_OUTCOME`.
-
-`Refusal` is no longer exported from this module. The only place outside that imported it is
-`plan-refusal.test.js`, which Step 6 points at `http.js`.
-
-- [ ] **Step 5: Project the 413 without naming an endpoint**
-
-In `backend/src/infrastructure/api-server.js`, change the import line 5 to
-`import { Answer, Route, Browsers, JsonBody, BodyRefusal } from './http.js'`, delete the
-`import { StartPlanRoute, PlanRequest, PlanRefusal } from './start-plan-route.js'` names that are no
-longer used (keep `StartPlanRoute`), and replace the body of the too-large branch:
-
-```javascript
-    if (cause.type === Failures.#TOO_LARGE) {
-      Answer.refuseAs(response, BodyRefusal.tooLarge())
-      return
-    }
-```
-
-- [ ] **Step 6: Point the existing test at the new home**
-
-In `backend/__tests__/infrastructure/plan-refusal.test.js`:
-- Change the import to `import { PlanRequest, PlanRequestOutcome, PlanRefusal, PlanCollapse } from '../../src/infrastructure/start-plan-route.js'` and add `import { Refusal } from '../../src/infrastructure/http.js'`.
-- Delete the test `a_status_that_is_not_a_refusal_or_a_reason_that_says_nothing_cannot_be_built` and the test `a_body_over_the_cap_is_answered_with_the_status_that_names_the_size_and_not_a_plain_400`: both now live in `http.test.js`.
-
-- [ ] **Step 7: Run the fast subset**
-
-Run: `npx vitest run --exclude '**/*-real-process.test.js'`
-Expected: PASS. The end-to-end 413 assertion in `api-server.test.js:522` still passes — the status and the message are unchanged.
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add backend/src/infrastructure/http.js backend/src/infrastructure/start-plan-route.js \
-        backend/src/infrastructure/api-server.js \
-        backend/__tests__/infrastructure/http.test.js \
-        backend/__tests__/infrastructure/plan-refusal.test.js
-git commit -m "refactor: lo que todo endpoint repite baja a http.js"
+git commit -m "feat: el caso de uso que manda implementar el plan"
 ```
 
 ---
@@ -483,14 +522,14 @@ git commit -m "refactor: lo que todo endpoint repite baja a http.js"
 
 **Files:**
 - Create: `backend/src/infrastructure/implement-plan-route.js`
-- Modify: `backend/src/infrastructure/api-server.js` (constructor and `#route`)
-- Modify: `backend/src/infrastructure/ct-api.mjs` (wire the second use case)
+- Modify: `backend/src/infrastructure/api-server.js`
+- Modify: `backend/src/infrastructure/ct-api.mjs`
 - Test: `backend/__tests__/infrastructure/implement-plan-route.test.js`
 
 **Interfaces:**
-- Consumes: `ImplementPlan`, `ImplementPlanParams` (Task 2); `Go` (Task 1); `Answer`, `JsonBody`, `Refusal` (`http.js`, Task 3).
-- Produces: `ImplementPlanRoute.PATH = '/implement-plan'`, `ImplementPlanRoute.METHOD = 'POST'`, `ImplementPlanRoute.handledBy(implementPlan)`, `ImplementPlanRoute.refuseOtherMethods`. `ApiServer` takes `{ port, startPlan, implementPlan, frontendRoot }`.
-- The request model is this endpoint's own (`GoRequest`, `GoRequestOutcome`, `GoRefusal`, `GoCollapse`). What resembles `start-plan-route.js` — the body outcomes and their sentences — stays duplicated on purpose: boundary idiom, not a business decision, so the rule of three applies and has not been reached (`plugin/conventions/decisions.md`).
+- Consumes: `ImplementPlan`, `ImplementPlanParams` (Task 3); `Answer`, `JsonBody`, `Refusal` from `http.js`; `UserStoryKey`, `RepositoryName`.
+- Produces: `ImplementPlanRoute.PATH = '/implement-plan'`, `METHOD = 'POST'`, `handledBy(implementPlan)`, `refuseOtherMethods`. `ApiServer` takes `implementPlan` in its constructor options.
+- The request carries `{ id, repo, issue }`. `id` and `repo` reuse their value objects; the issue number is validated in the request model the way `EventsRequest` validates the one in its route, and travels **as a number**. No `PlanIssue` is built here: it would need a url nobody sent, and composing one to satisfy a guard is inventing a datum to get past a type.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -499,8 +538,7 @@ Create `backend/__tests__/infrastructure/implement-plan-route.test.js`:
 ```javascript
 import { describe, it, expect, afterEach } from 'vitest'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
-import { Go } from '../../src/domain/value-objects/go.js'
-import { GoNotAnswered } from '../../src/domain/exceptions.js'
+import { PlanAgentNotResumed } from '../../src/domain/exceptions.js'
 
 class ImplementPlanSpy {
   constructor() {
@@ -526,15 +564,19 @@ class ImplementPlanSpy {
   }
 
   async execute(params) {
-    this.asked.push({ issue: params.go.issue, nonce: params.go.nonce, repo: params.repository.text })
+    this.asked.push({
+      story: params.story.text,
+      issue: params.issue,
+      repo: params.repository.text,
+    })
   }
 }
 
 class RunningApi {
   static #started = []
   static PATH = '/implement-plan'
-  static ACCEPTED_BODY = '{"repo":"josemerca/ct-loop-sandbox","issue":7,"go":"a1b2c3d4"}'
-  static ANSWER = '{"status":"implementing","repo":"josemerca/ct-loop-sandbox","issue":7}'
+  static ACCEPTED_BODY = '{"id":"XOP-4909","repo":"jjponz/repo-pulse","issue":33}'
+  static ANSWER = '{"status":"implementing","id":"XOP-4909","repo":"jjponz/repo-pulse","issue":33}'
   static spy = null
 
   static async listening(spy = new ImplementPlanSpy()) {
@@ -556,9 +598,7 @@ class RunningApi {
   }
 
   static async asking(body) {
-    const port = await RunningApi.listening()
-
-    return RunningApi.post(port, body)
+    return RunningApi.post(await RunningApi.listening(), body)
   }
 }
 
@@ -567,10 +607,11 @@ afterEach(async () => {
 })
 
 describe('ImplementPlanRoute', () => {
-  it('an_accepted_go_answers_that_the_implementation_is_under_way_with_the_issue_it_unblocked', async () => {
+  it('an_accepted_order_answers_that_the_implementation_is_under_way', async () => {
     const response = await RunningApi.asking(RunningApi.ACCEPTED_BODY)
 
     expect(response.status).toBe(202)
+    expect(response.headers.get('content-type')).toBe('application/json')
     expect(await response.text()).toBe(RunningApi.ANSWER)
   })
 
@@ -578,28 +619,28 @@ describe('ImplementPlanRoute', () => {
     await RunningApi.asking(RunningApi.ACCEPTED_BODY)
 
     expect(RunningApi.spy.asked).toEqual([
-      { issue: 7, nonce: 'a1b2c3d4', repo: 'josemerca/ct-loop-sandbox' },
+      { story: 'XOP-4909', issue: 33, repo: 'jjponz/repo-pulse' },
     ])
   })
 
-  it('a_malformed_nonce_is_refused_naming_the_shape_it_wanted_and_never_reaches_the_use_case', async () => {
-    const response = await RunningApi.asking('{"repo":"josemerca/ct-loop-sandbox","issue":7,"go":"nope"}')
+  it('a_malformed_story_key_is_refused_naming_the_shape_it_wanted_and_never_reaches_the_use_case', async () => {
+    const response = await RunningApi.asking('{"id":"nope","repo":"jjponz/repo-pulse","issue":33}')
 
     expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ error: `go must be a nonce such as ${Go.NONCE_EXAMPLE}` })
+    expect((await response.json()).error).toMatch(/^id must be a user story key/)
     expect(RunningApi.spy.asked).toEqual([])
   })
 
   it('an_issue_that_is_not_a_whole_number_from_one_is_refused_and_never_reaches_the_use_case', async () => {
-    const response = await RunningApi.asking('{"repo":"josemerca/ct-loop-sandbox","issue":"7","go":"a1b2c3d4"}')
+    const response = await RunningApi.asking('{"id":"XOP-4909","repo":"jjponz/repo-pulse","issue":"33"}')
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: 'issue must be a whole number from one' })
     expect(RunningApi.spy.asked).toEqual([])
   })
 
-  it('a_malformed_repository_is_refused_before_it_can_become_an_argument_of_gh', async () => {
-    const response = await RunningApi.asking('{"repo":"-o","issue":7,"go":"a1b2c3d4"}')
+  it('a_malformed_repository_is_refused_before_it_can_become_an_argument_of_a_tool', async () => {
+    const response = await RunningApi.asking('{"id":"XOP-4909","repo":"-o","issue":33}')
 
     expect(response.status).toBe(400)
     expect(RunningApi.spy.asked).toEqual([])
@@ -607,7 +648,7 @@ describe('ImplementPlanRoute', () => {
 
   it('a_field_nobody_declared_is_named_in_the_refusal_instead_of_being_ignored', async () => {
     const response = await RunningApi.asking(
-      '{"repo":"josemerca/ct-loop-sandbox","issue":7,"go":"a1b2c3d4","force":true}'
+      '{"id":"XOP-4909","repo":"jjponz/repo-pulse","issue":33,"force":true}'
     )
 
     expect(response.status).toBe(400)
@@ -622,15 +663,15 @@ describe('ImplementPlanRoute', () => {
     expect(await response.json()).toEqual({ error: 'body must be a JSON object' })
   })
 
-  it('a_tool_that_refuses_to_publish_the_go_answers_that_trying_again_may_work', async () => {
+  it('a_tool_that_refuses_to_write_in_the_tab_answers_that_trying_again_may_work', async () => {
     const port = await RunningApi.listening(
-      ImplementPlanSpy.failingWith(new GoNotAnswered('gh issue comment failed: HTTP 500'))
+      ImplementPlanSpy.failingWith(new PlanAgentNotResumed('cmux send failed: no such workspace'))
     )
 
     const response = await RunningApi.post(port, RunningApi.ACCEPTED_BODY)
 
     expect(response.status).toBe(503)
-    expect((await response.json()).error).toContain('could not answer the go')
+    expect((await response.json()).error).toMatch(/^could not implement the plan: /)
   })
 
   it('a_bug_of_ours_is_not_dressed_up_as_the_tool_refusing', async () => {
@@ -673,62 +714,75 @@ Create `backend/src/infrastructure/implement-plan-route.js`:
 ```javascript
 import { Answer, JsonBody, Refusal } from './http.js'
 import { ImplementPlanParams } from '../application/actions/implement-plan.js'
-import { Go } from '../domain/value-objects/go.js'
+import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
-import { PlanFailure, GoNotAnswered } from '../domain/exceptions.js'
+import { PlanFailure, PlanAgentNotResumed } from '../domain/exceptions.js'
 
-export const GoRequestOutcome = Object.freeze({
+export const ImplementRequestOutcome = Object.freeze({
   ACCEPTED: 'accepted',
   BODY_NOT_A_JSON_OBJECT: 'body-not-a-json-object',
   UNKNOWN_FIELD: 'unknown-field',
+  MALFORMED_ID: 'malformed-id',
   MALFORMED_REPO: 'malformed-repo',
   MALFORMED_ISSUE: 'malformed-issue',
-  MALFORMED_GO: 'malformed-go',
 })
 
-export class GoRequest {
+export class ImplementRequest {
+  static ID_FIELD = 'id'
   static REPO_FIELD = 'repo'
   static ISSUE_FIELD = 'issue'
-  static GO_FIELD = 'go'
   static KNOWN_FIELDS = Object.freeze([
-    GoRequest.REPO_FIELD, GoRequest.ISSUE_FIELD, GoRequest.GO_FIELD,
+    ImplementRequest.ID_FIELD, ImplementRequest.REPO_FIELD, ImplementRequest.ISSUE_FIELD,
   ])
 
-  constructor({ outcome, go, repository, fields }) {
-    if (!Object.values(GoRequestOutcome).includes(outcome)) {
-      throw new Error(`outcome must be a GoRequestOutcome member, got ${outcome}`)
+  constructor({ outcome, story, issue, repository, fields }) {
+    if (!Object.values(ImplementRequestOutcome).includes(outcome)) {
+      throw new Error(`outcome must be an ImplementRequestOutcome member, got ${outcome}`)
     }
-    if ((outcome === GoRequestOutcome.ACCEPTED) === (go === null)) {
-      throw new Error(`outcome ${outcome} disagrees with its go, got ${go}`)
+    if ((outcome === ImplementRequestOutcome.ACCEPTED) === (story === null)) {
+      throw new Error(`outcome ${outcome} disagrees with its story, got ${story}`)
     }
-    if ((outcome === GoRequestOutcome.ACCEPTED) === (repository === null)) {
+    if ((outcome === ImplementRequestOutcome.ACCEPTED) === (issue === null)) {
+      throw new Error(`outcome ${outcome} disagrees with its issue, got ${issue}`)
+    }
+    if ((outcome === ImplementRequestOutcome.ACCEPTED) === (repository === null)) {
       throw new Error(`outcome ${outcome} disagrees with its repository, got ${repository}`)
     }
-    if (outcome !== GoRequestOutcome.UNKNOWN_FIELD && fields.length > 0) {
+    if (outcome !== ImplementRequestOutcome.UNKNOWN_FIELD && fields.length > 0) {
       throw new Error(`outcome ${outcome} must carry no fields, got ${fields.join(', ')}`)
     }
-    if (outcome === GoRequestOutcome.UNKNOWN_FIELD && fields.length === 0) {
+    if (outcome === ImplementRequestOutcome.UNKNOWN_FIELD && fields.length === 0) {
       throw new Error('an unknown-field outcome must name the fields it rejected')
     }
     this.outcome = outcome
-    this.go = go
+    this.story = story
+    this.issue = issue
     this.repository = repository
     this.fields = Object.freeze([...fields])
     Object.freeze(this)
   }
 
-  static accepted(go, repository) {
-    return new GoRequest({ outcome: GoRequestOutcome.ACCEPTED, go, repository, fields: [] })
+  static accepted({ story, issue, repository }) {
+    return new ImplementRequest({
+      outcome: ImplementRequestOutcome.ACCEPTED, story, issue, repository, fields: [],
+    })
   }
 
   static refused(outcome) {
-    return new GoRequest({ outcome, go: null, repository: null, fields: [] })
+    return new ImplementRequest({
+      outcome, story: null, issue: null, repository: null, fields: [],
+    })
   }
 
   static withUnknownFields(fields) {
-    return new GoRequest({
-      outcome: GoRequestOutcome.UNKNOWN_FIELD, go: null, repository: null, fields,
+    return new ImplementRequest({
+      outcome: ImplementRequestOutcome.UNKNOWN_FIELD,
+      story: null, issue: null, repository: null, fields,
     })
+  }
+
+  static isWellFormedIssue(given) {
+    return Number.isInteger(given) && given >= 1
   }
 
   static from(raw) {
@@ -736,56 +790,59 @@ export class GoRequest {
     try {
       parsed = JSON.parse(raw)
     } catch {
-      return GoRequest.refused(GoRequestOutcome.BODY_NOT_A_JSON_OBJECT)
+      return ImplementRequest.refused(ImplementRequestOutcome.BODY_NOT_A_JSON_OBJECT)
     }
     if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return GoRequest.refused(GoRequestOutcome.BODY_NOT_A_JSON_OBJECT)
+      return ImplementRequest.refused(ImplementRequestOutcome.BODY_NOT_A_JSON_OBJECT)
     }
-    const unknown = Object.keys(parsed).filter((field) => !GoRequest.KNOWN_FIELDS.includes(field))
+    const unknown = Object.keys(parsed).filter(
+      (field) => !ImplementRequest.KNOWN_FIELDS.includes(field)
+    )
     if (unknown.length > 0) {
-      return GoRequest.withUnknownFields(unknown.sort())
+      return ImplementRequest.withUnknownFields(unknown.sort())
     }
-    if (!RepositoryName.isWellFormed(parsed[GoRequest.REPO_FIELD])) {
-      return GoRequest.refused(GoRequestOutcome.MALFORMED_REPO)
+    if (!UserStoryKey.isWellFormed(parsed[ImplementRequest.ID_FIELD])) {
+      return ImplementRequest.refused(ImplementRequestOutcome.MALFORMED_ID)
     }
-    if (!Go.isWellFormedIssue(parsed[GoRequest.ISSUE_FIELD])) {
-      return GoRequest.refused(GoRequestOutcome.MALFORMED_ISSUE)
+    if (!RepositoryName.isWellFormed(parsed[ImplementRequest.REPO_FIELD])) {
+      return ImplementRequest.refused(ImplementRequestOutcome.MALFORMED_REPO)
     }
-    if (!Go.isWellFormedNonce(parsed[GoRequest.GO_FIELD])) {
-      return GoRequest.refused(GoRequestOutcome.MALFORMED_GO)
+    if (!ImplementRequest.isWellFormedIssue(parsed[ImplementRequest.ISSUE_FIELD])) {
+      return ImplementRequest.refused(ImplementRequestOutcome.MALFORMED_ISSUE)
     }
 
-    return GoRequest.accepted(
-      new Go({ issue: parsed[GoRequest.ISSUE_FIELD], nonce: parsed[GoRequest.GO_FIELD] }),
-      new RepositoryName(parsed[GoRequest.REPO_FIELD])
-    )
+    return ImplementRequest.accepted({
+      story: new UserStoryKey(parsed[ImplementRequest.ID_FIELD]),
+      issue: parsed[ImplementRequest.ISSUE_FIELD],
+      repository: new RepositoryName(parsed[ImplementRequest.REPO_FIELD]),
+    })
   }
 }
 
-export class GoRefusal {
+export class ImplementRefusal {
   static #BY_OUTCOME = Object.freeze({
-    [GoRequestOutcome.BODY_NOT_A_JSON_OBJECT]: () =>
+    [ImplementRequestOutcome.BODY_NOT_A_JSON_OBJECT]: () =>
       new Refusal({ status: 400, error: 'body must be a JSON object' }),
-    [GoRequestOutcome.MALFORMED_REPO]: () => new Refusal({
+    [ImplementRequestOutcome.MALFORMED_ID]: () => new Refusal({
       status: 400,
-      error: `${GoRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
+      error: `${ImplementRequest.ID_FIELD} must be a user story key such as ${UserStoryKey.EXAMPLE}`,
     }),
-    [GoRequestOutcome.MALFORMED_ISSUE]: () => new Refusal({
+    [ImplementRequestOutcome.MALFORMED_REPO]: () => new Refusal({
       status: 400,
-      error: `${GoRequest.ISSUE_FIELD} must be a whole number from one`,
+      error: `${ImplementRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
     }),
-    [GoRequestOutcome.MALFORMED_GO]: () => new Refusal({
+    [ImplementRequestOutcome.MALFORMED_ISSUE]: () => new Refusal({
       status: 400,
-      error: `${GoRequest.GO_FIELD} must be a nonce such as ${Go.NONCE_EXAMPLE}`,
+      error: `${ImplementRequest.ISSUE_FIELD} must be a whole number from one`,
     }),
-    [GoRequestOutcome.UNKNOWN_FIELD]: (asked) => new Refusal({
+    [ImplementRequestOutcome.UNKNOWN_FIELD]: (asked) => new Refusal({
       status: 400,
       error: `unknown field: ${asked.fields.join(', ')}`,
     }),
   })
 
   static of(asked) {
-    const declared = GoRefusal.#BY_OUTCOME[asked.outcome]
+    const declared = ImplementRefusal.#BY_OUTCOME[asked.outcome]
     if (declared === undefined) {
       throw new Error(`no refusal declared for outcome ${asked.outcome}`)
     }
@@ -794,26 +851,28 @@ export class GoRefusal {
   }
 
   static declaredOutcomes() {
-    return Object.keys(GoRefusal.#BY_OUTCOME)
+    return Object.keys(ImplementRefusal.#BY_OUTCOME)
   }
 }
 
-export class GoCollapse {
+export class ImplementCollapse {
   static #REFUSED = 503
 
-  static #BY_FAILURE = [[GoNotAnswered, GoCollapse.#REFUSED]]
+  static #BY_FAILURE = [[PlanAgentNotResumed, ImplementCollapse.#REFUSED]]
 
   static of(cause) {
-    const declared = GoCollapse.#BY_FAILURE.find(([failure]) => cause.constructor === failure)
+    const declared = ImplementCollapse.#BY_FAILURE.find(([failure]) => cause.constructor === failure)
     if (declared === undefined) {
       throw new Error(`no status declared for ${cause.constructor.name}`)
     }
 
-    return new Refusal({ status: declared[1], error: `could not answer the go: ${cause.message}` })
+    return new Refusal({
+      status: declared[1], error: `could not implement the plan: ${cause.message}`,
+    })
   }
 
   static declaredFailures() {
-    return GoCollapse.#BY_FAILURE.map(([failure]) => failure.name)
+    return ImplementCollapse.#BY_FAILURE.map(([failure]) => failure.name)
   }
 }
 
@@ -823,9 +882,9 @@ export class ImplementPlanRoute {
 
   static handledBy(implementPlan) {
     return async (request, response) => {
-      const asked = GoRequest.from(JsonBody.textOf(request))
-      if (asked.outcome !== GoRequestOutcome.ACCEPTED) {
-        Answer.refuseAs(response, GoRefusal.of(asked))
+      const asked = ImplementRequest.from(JsonBody.textOf(request))
+      if (asked.outcome !== ImplementRequestOutcome.ACCEPTED) {
+        Answer.refuseAs(response, ImplementRefusal.of(asked))
         return
       }
       await ImplementPlanRoute.#accept(implementPlan, response, asked)
@@ -834,18 +893,19 @@ export class ImplementPlanRoute {
 
   static async #accept(implementPlan, response, asked) {
     try {
-      await implementPlan.execute(
-        new ImplementPlanParams({ go: asked.go, repository: asked.repository })
-      )
+      await implementPlan.execute(new ImplementPlanParams({
+        story: asked.story, issue: asked.issue, repository: asked.repository,
+      }))
     } catch (cause) {
       if (!(cause instanceof PlanFailure)) throw cause
-      Answer.refuseAs(response, GoCollapse.of(cause))
+      Answer.refuseAs(response, ImplementCollapse.of(cause))
       return
     }
     Answer.send(response, 202, {
       status: 'implementing',
-      [GoRequest.REPO_FIELD]: asked.repository.text,
-      [GoRequest.ISSUE_FIELD]: asked.go.issue,
+      [ImplementRequest.ID_FIELD]: asked.story.text,
+      [ImplementRequest.REPO_FIELD]: asked.repository.text,
+      [ImplementRequest.ISSUE_FIELD]: asked.issue,
     })
   }
 
@@ -858,11 +918,10 @@ export class ImplementPlanRoute {
 
 - [ ] **Step 4: Mount it**
 
-In `backend/src/infrastructure/api-server.js`, add the import
+In `backend/src/infrastructure/api-server.js`, add
 `import { ImplementPlanRoute } from './implement-plan-route.js'`, take `implementPlan` in the
-constructor (`constructor({ port, startPlan, implementPlan, frontendRoot = null })`, storing
-`this.implementPlan = implementPlan`), and add to `#route()` right after the `app.all` of the first
-route:
+constructor options (storing `this.implementPlan = implementPlan`), and add to `#route()` after the
+`app.all` of the start-plan route:
 
 ```javascript
     app.post(
@@ -878,31 +937,36 @@ route:
 - [ ] **Step 5: Run the test to verify it passes**
 
 Run: `npx vitest run __tests__/infrastructure/implement-plan-route.test.js`
-Expected: PASS, all of them.
+Expected: PASS, all eleven.
 
 - [ ] **Step 6: Wire the entrypoint**
 
-In `backend/src/infrastructure/ct-api.mjs`, add `import { ImplementPlan } from '../application/actions/implement-plan.js'`, and inside `run()` build the shared adapter once so both use cases talk to the same `gh`:
+In `backend/src/infrastructure/ct-api.mjs`, add
+`import { ImplementPlan } from '../application/actions/implement-plan.js'`, hold the adapter that
+`StartPlan` already builds in a variable so both use cases share one, and pass the second use case to
+the server:
 
 ```javascript
-    const planIssues = new GhPlanIssues({ gh: CtApi.#talkingTo(Gh.BIN, Gh) })
-    const startPlan = new StartPlan({
-      userStories: new AcliUserStories({ acli: CtApi.#talkingTo(AcliUserStories.BIN, ExternalTool) }),
-      planIssues,
-      planAgents: new CmuxPlanAgents({ run: CtApi.#tool(CmuxPlanAgents.BIN), cwd: process.cwd() }),
-    })
+    const planAgents = new CmuxPlanAgents({ /* the arguments already there, unchanged */ })
+```
+
+```javascript
     const server = new ApiServer({
       port: asked.port,
       startPlan,
-      implementPlan: new ImplementPlan({ planIssues }),
+      implementPlan: new ImplementPlan({ planAgents }),
+      planEvents,
+      sessions,
       frontendRoot: FrontendBuild.root(),
     })
 ```
 
+Keep the names of the existing options exactly as they are in the file; only `implementPlan` is new.
+
 - [ ] **Step 7: Run the whole suite**
 
 Run: `npx vitest run`
-Expected: PASS, including the real-process tests of the entrypoint.
+Expected: PASS, including the entrypoint's real-process happy path.
 
 - [ ] **Step 8: Commit**
 
@@ -910,625 +974,18 @@ Expected: PASS, including the real-process tests of the entrypoint.
 git add backend/src/infrastructure/implement-plan-route.js \
         backend/src/infrastructure/api-server.js backend/src/infrastructure/ct-api.mjs \
         backend/__tests__/infrastructure/implement-plan-route.test.js
-git commit -m "feat: POST /implement-plan contesta el go del humano en el issue"
+git commit -m "feat: POST /implement-plan reanuda al agente y le pasa la conducción a ct-step"
 ```
 
 ---
 
-### Task 5: Reading what `ct-next` printed
+### Task 5: The mutation sweep, and the README
 
-The only fragile copy in this design: `ct-next` speaks prose, and this reader depends on its shape. Paid for as `plugin/conventions/decisions.md` demands — a contract test that renders the plugin's **own** output and compares, so rewriting both halves passes and touching one fails.
-
-Verified shapes, from `plugin/scripts/ct-next.mjs:3675,3695,3703` and `plugin/scripts/go-channel.js:33`:
-
-```
-lanzado #47 en .worktrees/47 — verificado: la sesión cmux está corriendo en ese directorio, …
-  GO de #47: contesta exactamente `-OK 7f3a91c2` en un comentario del issue.
-```
+`backend/conventions/testing.md` requires the sweep after each round. Commit the tree first — a sweep
+killed mid-run leaves a mutation glued to the tree.
 
 **Files:**
-- Create: `backend/src/infrastructure/ct-next-plan-agents.js` (the reader only; the adapter arrives in Task 6)
-- Test: `backend/__tests__/infrastructure/ct-next-plan-agents.test.js`
-
-**Interfaces:**
-- Consumes: `Go` (Task 1).
-- Produces: `CtNextReport.goIn(printed, issue)` returning a `Go` or `null` when the dictation line for that issue is absent; `CtNextReport.dispatchedIn(printed)` returning the array of issue numbers `ct-next` said it launched or would launch, in the order printed.
-
-- [ ] **Step 1: Write the failing test**
-
-Create `backend/__tests__/infrastructure/ct-next-plan-agents.test.js`:
-
-```javascript
-import { describe, it, expect } from 'vitest'
-import { CtNextReport } from '../../src/infrastructure/ct-next-plan-agents.js'
-import { Go } from '../../src/domain/value-objects/go.js'
-import { goDictationLine } from '../../../plugin/scripts/go-channel.js'
-
-class Printed {
-  static LAUNCHED = 'lanzado #47 en .worktrees/47 — verificado: la sesión cmux está corriendo'
-  static WATCHING = '  vigilante del -OK de #47 lanzado (pid 8412) — cuando contestes el go'
-
-  static ofADispatch(issue = 47, nonce = '7f3a91c2') {
-    return [
-      'rama base resuelta: main',
-      `lanzado #${issue} en .worktrees/${issue} — verificado: la sesión cmux está corriendo`,
-      `  vigilante del -OK de #${issue} lanzado (pid 8412) — cuando contestes el go`,
-      goDictationLine(issue, nonce),
-      'lanzados 1/1 slice(s) seleccionados de esta tanda.',
-      '',
-    ].join('\n')
-  }
-
-  static ofADryRun(issue = 47) {
-    return [
-      'rama base resuelta: main',
-      'En vuelo: ninguno (0/1 del cap ocupados).',
-      `\n=== slice #${issue} (el buscador acepta acentos) ===`,
-      'cmux new-workspace --name "sandbox · #47 el buscador"',
-      '',
-    ].join('\n')
-  }
-}
-
-describe('CtNextReport reading the GO', () => {
-  it('the_nonce_it_reads_is_the_one_the_plugin_dictated_for_that_issue', () => {
-    const go = CtNextReport.goIn(Printed.ofADispatch(47, '7f3a91c2'), 47)
-
-    expect(go).toBeInstanceOf(Go)
-    expect(go.issue).toBe(47)
-    expect(go.nonce).toBe('7f3a91c2')
-  })
-
-  it('the_line_it_parses_is_the_plugins_own_and_not_a_second_spelling_of_it', () => {
-    const dictated = goDictationLine(9, 'beef1234')
-
-    expect(CtNextReport.goIn(dictated, 9).nonce).toBe('beef1234')
-  })
-
-  it('a_dictation_line_for_another_issue_is_not_mistaken_for_ours', () => {
-    expect(CtNextReport.goIn(Printed.ofADispatch(48, '7f3a91c2'), 47)).toBeNull()
-  })
-
-  it('output_with_no_dictation_line_answers_that_there_is_no_go_instead_of_inventing_one', () => {
-    expect(CtNextReport.goIn(`${Printed.LAUNCHED}\n${Printed.WATCHING}\n`, 47)).toBeNull()
-  })
-
-  it('the_notice_of_the_watcher_that_also_names_the_token_is_not_read_as_the_dictation', () => {
-    expect(CtNextReport.goIn(`${Printed.WATCHING}\n`, 47)).toBeNull()
-  })
-})
-
-describe('CtNextReport reading which issues it dispatched', () => {
-  it('the_issue_a_dry_run_says_it_would_launch_is_the_one_it_reports', () => {
-    expect(CtNextReport.dispatchedIn(Printed.ofADryRun(47))).toEqual([47])
-  })
-
-  it('the_issue_a_real_run_says_it_launched_is_the_one_it_reports', () => {
-    expect(CtNextReport.dispatchedIn(Printed.ofADispatch(47))).toEqual([47])
-  })
-
-  it('output_that_dispatched_nothing_reports_an_empty_list_and_not_a_zero', () => {
-    expect(CtNextReport.dispatchedIn('En vuelo: ninguno (0/1 del cap ocupados).\n')).toEqual([])
-  })
-
-  it('every_issue_it_names_travels_in_the_order_printed_so_a_caller_can_tell_the_first', () => {
-    const printed = `${Printed.ofADryRun(47)}\n=== slice #48 (otra cosa) ===\n`
-
-    expect(CtNextReport.dispatchedIn(printed)).toEqual([47, 48])
-  })
-})
-```
-
-- [ ] **Step 2: Run the test to verify it fails**
-
-Run: `npx vitest run __tests__/infrastructure/ct-next-plan-agents.test.js`
-Expected: FAIL — cannot resolve `../../src/infrastructure/ct-next-plan-agents.js`.
-
-- [ ] **Step 3: Write the reader**
-
-Create `backend/src/infrastructure/ct-next-plan-agents.js`:
-
-```javascript
-import { Go } from '../domain/value-objects/go.js'
-
-export class CtNextReport {
-  static #DICTATION = /^\s*GO de #(\d+): contesta exactamente `-OK ([0-9a-f]{8})`/m
-  static #DISPATCHED = /^(?:lanzado #(\d+) en |=== slice #(\d+) \()/gm
-
-  static goIn(printed, issue) {
-    const found = String(printed).match(CtNextReport.#DICTATION)
-    if (found === null || Number(found[1]) !== issue) return null
-
-    return new Go({ issue, nonce: found[2] })
-  }
-
-  static dispatchedIn(printed) {
-    return [...String(printed).matchAll(CtNextReport.#DISPATCHED)]
-      .map((found) => Number(found[1] ?? found[2]))
-  }
-}
-```
-
-- [ ] **Step 4: Run the test to verify it passes**
-
-Run: `npx vitest run __tests__/infrastructure/ct-next-plan-agents.test.js`
-Expected: PASS, all nine.
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add backend/src/infrastructure/ct-next-plan-agents.js \
-        backend/__tests__/infrastructure/ct-next-plan-agents.test.js
-git commit -m "feat: el lector del stdout de ct-next, medido contra la línea del plugin"
-```
-
----
-
-### Task 6: Dispatching with `ct-next`
-
-Two calls, in this order: `--dry-run` to find out which issue it would dispatch, and the real one only if that issue is the one we just created. `ct-next` has no `--issue N` (verified: its flags are `--repo`, `--cap`, `--base`, `--dry-run`), so this guard is what keeps a second ready issue from being dispatched in our name. The race between the two calls is accepted: one slice in flight, `--cap 1`.
-
-**Files:**
-- Modify: `backend/src/infrastructure/ct-next-plan-agents.js` (add the adapter beside its reader)
-- Modify: `backend/src/domain/exceptions.js` (add `PlanAgentNotAsked`)
-- Test: `backend/__tests__/infrastructure/ct-next-plan-agents.test.js`
-
-**Interfaces:**
-- Consumes: `CtNextReport` (Task 5), `PlanAgents` port, `ProcessOutput`, `Go`, `PlanIssue`, `UserStoryKey`.
-- Produces: `new CtNextPlanAgents({ run, program })` where `run` is `(argv) => Promise<ProcessOutput>` and `program` is the absolute path of `ct-next.mjs`. `CtNextPlanAgents.argvFor({ repository, program, dryRun })`. `launch({ story, issue, repository })` resolves to a `Go`. `PlanAgentNotAsked` under `PlanAgentFailure` for a dispatcher that would have launched someone else's issue.
-
-**Note:** `PlanAgents.launch` gains `repository`, because `ct-next` needs `--repo`. Update the port's signature and its unimplemented message accordingly.
-
-**Two fields this adapter does NOT take**, unlike the echo adapter it replaces: the binary (`node`) is already fixed inside `run` by the entrypoint, and `cwd` is not passed to `execFile` at all — `ct-next` inherits the backend's working directory, which is the spec's declared debt 3 (the backend runs inside the governed checkout). A constructor field nobody reads is a field to maintain.
-
-- [ ] **Step 1: Write the failing test**
-
-Append to `backend/__tests__/infrastructure/ct-next-plan-agents.test.js`, adding these imports at the top:
-
-```javascript
-import { CtNextPlanAgents } from '../../src/infrastructure/ct-next-plan-agents.js'
-import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
-import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
-import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
-import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
-import { PlanAgents } from '../../src/domain/ports/plan-agents.js'
-import {
-  PlanAgentNotLaunched, PlanAgentNotNamed, PlanAgentNotAsked, PlanAgentFailure,
-} from '../../src/domain/exceptions.js'
-```
-
-```javascript
-class CtNextDouble {
-  static PROGRAM = '/plugin/scripts/ct-next.mjs'
-  static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
-  static STORY = new UserStoryKey('MO_SHOP-42')
-  static ISSUE = new PlanIssue({ number: 47, url: 'https://github.com/josemerca/ct-loop-sandbox/issues/47' })
-
-  constructor(answers) {
-    this.answers = answers
-    this.calls = []
-  }
-
-  static answering(...printed) {
-    return new CtNextDouble(printed.map((out) => new ProcessOutput({ code: 0, stdout: out, stderr: '' })))
-  }
-
-  static refusing(said) {
-    return new CtNextDouble([new ProcessOutput({ code: 1, stdout: '', stderr: said })])
-  }
-
-  static dispatching(issue = 47, nonce = '7f3a91c2') {
-    return CtNextDouble.answering(Printed.ofADryRun(issue), Printed.ofADispatch(issue, nonce))
-  }
-
-  agents() {
-    return new CtNextPlanAgents({
-      program: CtNextDouble.PROGRAM,
-      run: (argv) => {
-        this.calls.push(argv)
-        const answer = this.answers[this.calls.length - 1]
-        if (answer === undefined) {
-          throw new Error(`nobody wrote an answer for call ${this.calls.length}: ${argv.join(' ')}`)
-        }
-
-        return Promise.resolve(answer)
-      },
-    })
-  }
-
-  async launch(issue = CtNextDouble.ISSUE) {
-    return this.agents().launch({
-      story: CtNextDouble.STORY, issue, repository: CtNextDouble.REPOSITORY,
-    })
-  }
-
-  async refusal(issue = CtNextDouble.ISSUE) {
-    return this.launch(issue).catch((cause) => cause)
-  }
-}
-
-describe('CtNextPlanAgents', () => {
-  it('it_asks_in_dry_run_first_and_only_then_dispatches_for_real', async () => {
-    const ctNext = CtNextDouble.dispatching()
-
-    await ctNext.launch()
-
-    expect(ctNext.calls).toEqual([
-      [CtNextDouble.PROGRAM, '--repo', CtNextDouble.REPOSITORY.text, '--cap', '1', '--dry-run'],
-      [CtNextDouble.PROGRAM, '--repo', CtNextDouble.REPOSITORY.text, '--cap', '1'],
-    ])
-  })
-
-  it('the_go_of_the_dispatch_is_what_comes_back_so_the_front_can_answer_it_later', async () => {
-    const go = await CtNextDouble.dispatching(47, 'beef1234').launch()
-
-    expect(go).toBeInstanceOf(Go)
-    expect(go.issue).toBe(47)
-    expect(go.nonce).toBe('beef1234')
-  })
-
-  it('a_dispatcher_about_to_launch_somebody_elses_issue_is_stopped_before_it_mutates_anything', async () => {
-    const ctNext = new CtNextDouble([
-      new ProcessOutput({ code: 0, stdout: Printed.ofADryRun(48), stderr: '' }),
-    ])
-
-    const refusal = await ctNext.refusal()
-
-    expect(refusal).toBeInstanceOf(PlanAgentNotAsked)
-    expect(refusal.message).toContain('#48')
-    expect(refusal.message).toContain('#47')
-    expect(ctNext.calls).toHaveLength(1)
-  })
-
-  it('a_dry_run_that_would_dispatch_nothing_is_stopped_too_instead_of_launching_blind', async () => {
-    const ctNext = new CtNextDouble([
-      new ProcessOutput({ code: 0, stdout: 'En vuelo: ninguno (0/1 del cap ocupados).\n', stderr: '' }),
-    ])
-
-    expect(await ctNext.refusal()).toBeInstanceOf(PlanAgentNotAsked)
-    expect(ctNext.calls).toHaveLength(1)
-  })
-
-  it('a_ct_next_that_refuses_the_call_arrives_typed_so_the_caller_can_tell_it_from_a_crash', async () => {
-    const refusal = await CtNextDouble.refusing('cmux no está en el PATH de este proceso').refusal()
-
-    expect(refusal).toBeInstanceOf(PlanAgentNotLaunched)
-    expect(refusal.message).toContain('cmux no está en el PATH')
-  })
-
-  it('a_dispatch_that_printed_no_go_is_told_apart_from_a_dispatch_that_failed', async () => {
-    const ctNext = CtNextDouble.answering(Printed.ofADryRun(47), Printed.LAUNCHED)
-
-    const unreadable = await ctNext.refusal()
-
-    expect(unreadable).toBeInstanceOf(PlanAgentNotNamed)
-    expect(unreadable).not.toBeInstanceOf(PlanAgentNotLaunched)
-    expect(unreadable).toBeInstanceOf(PlanAgentFailure)
-  })
-
-  it('the_port_says_which_arguments_it_needs_when_nobody_implemented_it', async () => {
-    await expect(new PlanAgents().launch({
-      story: CtNextDouble.STORY, issue: CtNextDouble.ISSUE, repository: CtNextDouble.REPOSITORY,
-    })).rejects.toThrow(/must implement launch/)
-  })
-})
-```
-
-- [ ] **Step 2: Run the test to verify it fails**
-
-Run: `npx vitest run __tests__/infrastructure/ct-next-plan-agents.test.js`
-Expected: FAIL — `CtNextPlanAgents` is not exported.
-
-- [ ] **Step 3: Add the failure**
-
-Append to `backend/src/domain/exceptions.js`:
-
-```javascript
-export class PlanAgentNotAsked extends PlanAgentFailure {}
-```
-
-- [ ] **Step 4: Write the adapter**
-
-Add to `backend/src/infrastructure/ct-next-plan-agents.js` (keeping `CtNextReport` where it is):
-
-```javascript
-import { PlanAgents } from '../domain/ports/plan-agents.js'
-import { PlanAgentNotLaunched, PlanAgentNotNamed, PlanAgentNotAsked } from '../domain/exceptions.js'
-
-export class CtNextPlanAgents extends PlanAgents {
-  static CAP = '1'
-
-  constructor({ run, program }) {
-    super()
-    this.run = run
-    this.program = program
-  }
-
-  static argvFor({ repository, program, dryRun }) {
-    const argv = [program, '--repo', repository.text, '--cap', CtNextPlanAgents.CAP]
-
-    return dryRun ? [...argv, '--dry-run'] : argv
-  }
-
-  async launch({ story, issue, repository }) {
-    await this.#refuseUnlessItWouldDispatch(issue, repository)
-    const printed = await this.#dispatch(repository, false)
-    const go = CtNextReport.goIn(printed, issue.number)
-    if (go === null) {
-      throw new PlanAgentNotNamed(
-        `ct-next dispatched ${issue} for ${story} and did not dictate its go, it printed ${JSON.stringify(printed)}`
-      )
-    }
-
-    return go
-  }
-
-  async #refuseUnlessItWouldDispatch(issue, repository) {
-    const [next] = CtNextReport.dispatchedIn(await this.#dispatch(repository, true))
-    if (next === issue.number) return
-
-    throw new PlanAgentNotAsked(
-      next === undefined
-        ? `ct-next would dispatch nothing in ${repository}, so ${issue} is not next: promote it or wait for the slice in flight`
-        : `ct-next would dispatch #${next} in ${repository}, not ${issue}: nothing was launched`
-    )
-  }
-
-  async #dispatch(repository, dryRun) {
-    const argv = CtNextPlanAgents.argvFor({ repository, program: this.program, dryRun })
-    const output = await this.run(argv)
-    if (output.failed) {
-      throw new PlanAgentNotLaunched(`ct-next ${dryRun ? '--dry-run ' : ''}failed: ${output.stderr.trim()}`)
-    }
-
-    return output.stdout
-  }
-}
-```
-
-- [ ] **Step 5: Grow the port's signature**
-
-In `backend/src/domain/ports/plan-agents.js`:
-
-```javascript
-export class PlanAgents {
-  async launch({ story, issue, repository }) {
-    throw new Error(
-      `${this.constructor.name} must implement launch({ story, issue, repository }), asked for ${story} on ${issue} in ${repository}`
-    )
-  }
-}
-```
-
-- [ ] **Step 6: Run the test to verify it passes**
-
-Run: `npx vitest run __tests__/infrastructure/ct-next-plan-agents.test.js`
-Expected: PASS. `cmux-plan-agents.test.js` now fails on the port's message — that is Task 7.
-
-- [ ] **Step 7: Commit**
-
-```bash
-git add backend/src/infrastructure/ct-next-plan-agents.js backend/src/domain/exceptions.js \
-        backend/src/domain/ports/plan-agents.js \
-        backend/__tests__/infrastructure/ct-next-plan-agents.test.js
-git commit -m "feat: el despacho de verdad — ct-next con la guarda del dry-run"
-```
-
----
-
-### Task 7: `/start-plan` hands the front the GO
-
-**Files:**
-- Modify: `backend/src/application/actions/start-plan.js`
-- Modify: `backend/src/infrastructure/start-plan-route.js` (the answer and the collapse table)
-- Modify: `backend/src/infrastructure/ct-api.mjs`
-- Delete: `backend/src/infrastructure/cmux-plan-agents.js`
-- Delete: `backend/__tests__/infrastructure/cmux-plan-agents.test.js`
-- Modify: `backend/__tests__/application/start-plan.test.js`
-- Modify: `backend/__tests__/infrastructure/api-server.test.js`
-
-**Interfaces:**
-- Consumes: `CtNextPlanAgents` (Task 6), `Go` (Task 1).
-- Produces: `StartPlanResult` carrying `{ issue, go }` instead of `{ issue, agent }`. The answer of `POST /start-plan` becomes `{"status":"started","id":…,"repo":…,"issue":{"number":…,"url":…},"go":"<nonce>"}`.
-
-- [ ] **Step 1: Update the application test**
-
-In `backend/__tests__/application/start-plan.test.js`, add
-`import { Go } from '../../src/domain/value-objects/go.js'` and replace the double and the three
-tests that name the agent:
-
-```javascript
-class PlanAgentsDouble extends PlanAgents {
-  static LAUNCHED = new Go({ issue: 7, nonce: 'a1b2c3d4' })
-
-  constructor(answer = PlanAgentsDouble.LAUNCHED) {
-    super()
-    this.answer = answer
-    this.asked = []
-  }
-
-  async launch({ story, issue, repository }) {
-    this.asked.push({ story, issue, repository })
-    if (this.answer instanceof Error) throw this.answer
-    return this.answer
-  }
-}
-```
-
-```javascript
-  it('the_agent_is_launched_on_the_issue_that_was_just_created_and_not_on_the_story_alone', async () => {
-    const flow = new Flow()
-
-    await flow.run()
-
-    expect(flow.planAgents.asked).toEqual([
-      { story: Flow.STORY, issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY },
-    ])
-  })
-
-  it('both_the_issue_and_the_go_come_back_so_the_caller_can_answer_it_when_a_human_decides', async () => {
-    const started = await new Flow().run()
-
-    expect(started.issue).toBe(PlanIssuesDouble.OPENED)
-    expect(started.go).toBe(PlanAgentsDouble.LAUNCHED)
-  })
-
-  it('the_story_reaches_the_agent_whole_so_the_tab_can_be_named_after_it', async () => {
-    const flow = new Flow()
-
-    await flow.run()
-
-    expect(String(flow.planAgents.asked[0].story)).toBe('MO_SHOP-42')
-  })
-```
-
-And in the last test of the file, the one about unimplemented ports, pass the repository:
-
-```javascript
-    await expect(new PlanAgents().launch({
-      story: Flow.STORY, issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY,
-    })).rejects.toThrow(/must implement launch/)
-```
-
-- [ ] **Step 2: Run it to verify it fails**
-
-Run: `npx vitest run __tests__/application/start-plan.test.js`
-Expected: FAIL — the double is asked without `repository`, and `started.go` is undefined.
-
-- [ ] **Step 3: Carry the repository and the GO through the use case**
-
-In `backend/src/application/actions/start-plan.js`, rename the result's second field and pass the
-repository on:
-
-```javascript
-export class StartPlanResult {
-  constructor({ issue, go }) {
-    this.issue = issue
-    this.go = go
-    Object.freeze(this)
-  }
-}
-```
-
-and in `execute`:
-
-```javascript
-  async execute(params) {
-    const story = await this.userStories.detail(params.story)
-    const issue = await this.planIssues.open({ story, repository: params.repository })
-    const go = await this.planAgents.launch({
-      story: params.story, issue, repository: params.repository,
-    })
-
-    return new StartPlanResult({ issue, go })
-  }
-```
-
-- [ ] **Step 4: Run it to verify it passes**
-
-Run: `npx vitest run __tests__/application/start-plan.test.js`
-Expected: PASS.
-
-- [ ] **Step 5: Update the controller and its test**
-
-In `backend/src/infrastructure/start-plan-route.js`, replace `agent: started.agent` in the 202 payload
-with `go: started.go.nonce`, and add `[PlanAgentNotAsked, PlanCollapse.#REFUSED]` to
-`PlanCollapse.#BY_FAILURE` (importing `PlanAgentNotAsked` from the exceptions): a dispatcher that
-refused because our issue was not next is the tool declining, and trying again after promoting it may
-work.
-
-In `backend/__tests__/infrastructure/api-server.test.js`, add
-`import { Go } from '../../src/domain/value-objects/go.js'` and make these three edits:
-
-```javascript
-class StartPlanSpy {
-  static GO = new Go({ issue: 7, nonce: 'a1b2c3d4' })
-  static ISSUE = new PlanIssue({ number: 7, url: 'https://github.com/owner/name/issues/7' })
-```
-
-```javascript
-  async execute(params) {
-    this.asked.push(params.story.text)
-    this.repositories.push(params.repository.text)
-    if (this.failing) throw new PlanAgentNotLaunched('cmux is not reachable')
-    return new StartPlanResult({ issue: StartPlanSpy.ISSUE, go: StartPlanSpy.GO })
-  }
-```
-
-```javascript
-  static ANSWER =
-    '{"status":"started","id":"ABC-123","repo":"owner/name",' +
-    '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"go":"a1b2c3d4"}'
-```
-
-And in `RunningApi.listening`, give the mounted second route an explicit collaborator so these tests
-say what they wire:
-
-```javascript
-    const server = new ApiServer({ port: 0, startPlan: RunningApi.spy, implementPlan: null, ...options })
-```
-
-One test name at `api-server.test.js:164` still promises the old answer. Rename it — the name is the
-sentence, so a name that says `agent` where the answer now carries the GO is a lie the suite tells:
-
-```javascript
-  it('start_plan_accepts_and_answers_with_the_go_of_the_dispatch_rather_than_waiting_for_it', async () => {
-```
-
-- [ ] **Step 6: Retire the echo adapter and wire the real one**
-
-Delete `backend/src/infrastructure/cmux-plan-agents.js` and
-`backend/__tests__/infrastructure/cmux-plan-agents.test.js`.
-
-In `backend/src/infrastructure/ct-api.mjs`, drop the `CmuxPlanAgents` import, add
-`import { CtNextPlanAgents } from './ct-next-plan-agents.js'`, teach `FrontendBuild`'s sibling how to
-find the program, and wire it:
-
-```javascript
-class PluginPrograms {
-  static #HERE = dirname(fileURLToPath(import.meta.url))
-
-  static ctNext() {
-    return join(PluginPrograms.#HERE, '..', '..', '..', 'plugin', 'scripts', 'ct-next.mjs')
-  }
-}
-```
-
-```javascript
-      planAgents: new CtNextPlanAgents({
-        run: CtApi.#tool(process.execPath),
-        program: PluginPrograms.ctNext(),
-      }),
-```
-
-- [ ] **Step 7: Run the whole suite**
-
-Run: `npx vitest run`
-Expected: PASS. `ct-api-real-process.test.js` needs no edit — verified: it asserts the bound port, a
-body cut halfway, and the 503 whose message starts with `could not start the plan: acli jira failed:`,
-and never the second field of an accepted answer.
-
-- [ ] **Step 8: Commit**
-
-```bash
-git add backend/src/application/actions/start-plan.js backend/src/infrastructure/start-plan-route.js \
-        backend/src/infrastructure/ct-api.mjs backend/__tests__/application/start-plan.test.js \
-        backend/__tests__/infrastructure/api-server.test.js
-git rm backend/src/infrastructure/cmux-plan-agents.js \
-       backend/__tests__/infrastructure/cmux-plan-agents.test.js
-git commit -m "feat: start-plan entrega el go al front y el echo de cmux se retira"
-```
-
----
-
-### Task 8: The mutation sweep, and the README
-
-`backend/conventions/testing.md` requires the sweep after each round: mutate production code one
-change at a time, run the whole suite, and hunt the mutations that leave it green. Commit the tree
-first — a sweep killed mid-run leaves a mutation glued to the tree.
-
-**Files:**
-- Modify: `README.md` (the table naming the endpoints)
+- Modify: `README.md`
 - Modify: whichever test files the sweep proves are watching nothing
 
 - [ ] **Step 1: Confirm the tree is committed and green**
@@ -1540,22 +997,24 @@ Run: `git status --porcelain` (expect empty) and `npx vitest run` (expect all gr
 One mutation at a time, restoring the file and verifying it is identical before the next. Each of
 these must turn the suite red; a green one is a finding to fix with a test:
 
-- `go.js`: `issue >= 1` → `issue >= 0`; the nonce regex `{8}` → `{7,8}`; drop the `Object.freeze`
-  (this one is declared unmeasured — do not chase it).
-- `ct-next-plan-agents.js`: `next === issue.number` → `next !== undefined`; `dryRun ? [...argv, '--dry-run'] : argv` → always `argv`; `[next]` → `next` of the last element.
-- `implement-plan-route.js`: swap the order of the `MALFORMED_ISSUE` and `MALFORMED_GO` guards;
-  `safeToRepeat: false` → `true` in `gh-plan-issues.js#answerGo`; the 202 status → 200.
-- `ct-next-plan-agents.js#CtNextReport`: drop the `Number(found[1]) !== issue` comparison.
+- `plan-agent-brief.js`: `.join(' ')` → `.join('\n')` (the one-line rule); drop the `ctStep` guard;
+  remove the `PARA` sentence from the errand's array.
+- `cmux-plan-agents.js`: in `resume`, swap the order of the two `#type` calls; drop the second one
+  entirely; `output.failed` → `false` inside `#type`.
+- `implement-plan-route.js`: swap the `MALFORMED_REPO` and `MALFORMED_ISSUE` guards; `given >= 1` →
+  `given >= 0`; the 202 status → 200; drop `[ImplementRequest.ISSUE_FIELD]` from the answer.
+- `implement-plan.js`: pass `params.story` where `params.issue` goes.
 
 - [ ] **Step 3: Fix every green mutation with a test, then re-run**
 
 Run: `npx vitest run`
-Expected: PASS with the new tests, and the mutation red when reapplied.
+Expected: PASS with the new tests, and each mutation red when reapplied.
 
 - [ ] **Step 4: Update the README**
 
-In `README.md`, the row that reads `La API HTTP local que la interfaz consume (`POST /start-plan`)`
-becomes `La API HTTP local que la interfaz consume (`POST /start-plan`, `POST /implement-plan`)`.
+In `README.md`, the row of the table that names the backend's endpoints gains this one, keeping the
+sentence's shape: the local HTTP API the interface consumes (`POST /start-plan`,
+`GET /plan-events/:issue`, `POST /implement-plan`).
 
 - [ ] **Step 5: Run the whole suite one last time**
 
@@ -1571,9 +1030,22 @@ git commit -m "test: los agujeros que la barrida de mutación dejó al descubier
 
 ---
 
+## Trying it for real
+
+Not a task: the check a person does. The API **has to be started from a cmux tab** — cmux refuses any
+process not born inside it — and from the root of the governed checkout, because it cuts worktrees
+from `process.cwd()`. The bench is `jjponz/repo-pulse` with the story `XOP-4909`.
+
+```
+POST /start-plan     {"id":"XOP-4909","repo":"jjponz/repo-pulse"}
+GET  /plan-events/<n>   -N     # until it says ready
+POST /implement-plan {"id":"XOP-4909","repo":"jjponz/repo-pulse","issue":<n>}
+```
+
+Then watch the tab: the agent should answer `ct-step next` and start the first task.
+
 ## What this plan does not build
 
-Declared in the spec and deliberately absent here: `--issue N`, `--no-launch` and `--emit json` in the
-plugin; checking that the cmux session is still alive before answering the GO; holding the
-pseudo-terminal from the backend; pushing the session when the watcher already died; and any change
+Answering the GO in the issue and the nonce entire; `ct-next` and its envelope; checking that the tab
+is still alive; the pull request and `--release`; the 413 residue in `api-server.js`; and any change
 under `plugin/`.
