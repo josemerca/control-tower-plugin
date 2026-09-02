@@ -213,13 +213,18 @@ describe('StartPlan cleans up after a launch that never took off', () => {
   it('a_cleanup_that_also_fails_does_not_replace_the_launch_failure_that_caused_it', async () => {
     const workspace = new WorkspaceDouble(located, { undoFailure: new Error('worktree remove failed') })
     const planSession = new PlanSessionDouble(new PlanSessionNotStarted('cmux is not reachable'))
+    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
 
-    const refusal = await conducted({ workspace, planSession })
-      .execute(new StartPlanParams({ ticket: new TicketKey('ABC-42'), repository: 'owner/name' }))
-      .catch((cause) => cause)
+    try {
+      const refusal = await conducted({ workspace, planSession })
+        .execute(new StartPlanParams({ ticket: new TicketKey('ABC-42'), repository: 'owner/name' }))
+        .catch((cause) => cause)
 
-    expect(refusal).toBeInstanceOf(PlanSessionNotStarted)
-    expect(refusal.message).toBe('cmux is not reachable')
+      expect(refusal).toBeInstanceOf(PlanSessionNotStarted)
+      expect(refusal.message).toBe('cmux is not reachable')
+    } finally {
+      complaining.mockRestore()
+    }
   })
 
   it('a_launch_that_succeeds_never_undoes_the_workspace_it_just_prepared', async () => {
@@ -235,13 +240,18 @@ describe('StartPlan cleans up after a launch that never took off', () => {
   it('a_workspace_with_no_undo_at_all_does_not_replace_the_launch_failure_that_caused_the_cleanup', async () => {
     const workspace = { prepare: async () => located }
     const planSession = new PlanSessionDouble(new PlanSessionNotStarted('cmux is not reachable'))
+    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
 
-    const refusal = await conducted({ workspace, planSession })
-      .execute(new StartPlanParams({ ticket: new TicketKey('ABC-42'), repository: 'owner/name' }))
-      .catch((cause) => cause)
+    try {
+      const refusal = await conducted({ workspace, planSession })
+        .execute(new StartPlanParams({ ticket: new TicketKey('ABC-42'), repository: 'owner/name' }))
+        .catch((cause) => cause)
 
-    expect(refusal).toBeInstanceOf(PlanSessionNotStarted)
-    expect(refusal.message).toBe('cmux is not reachable')
+      expect(refusal).toBeInstanceOf(PlanSessionNotStarted)
+      expect(refusal.message).toBe('cmux is not reachable')
+    } finally {
+      complaining.mockRestore()
+    }
   })
 
   it('a_cleanup_that_fails_leaves_a_trace_on_the_error_channel_instead_of_disappearing_in_silence', async () => {
