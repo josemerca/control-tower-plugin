@@ -32,13 +32,26 @@ export class Route {
 
 export class Browsers {
   static #ORIGIN = 'Origin'
+  static #HOST = 'Host'
+  static LOOPBACK_NAMES = Object.freeze(['127.0.0.1', 'localhost', '[::1]'])
 
-  static turnAway(request, response, next) {
-    if (request.get(Browsers.#ORIGIN) === undefined) {
+  static #hostnameOf(host) {
+    return host.startsWith('[') ? host.slice(0, host.indexOf(']') + 1) : host.split(':')[0]
+  }
+
+  static isOurOwnPage(origin, host) {
+    if (typeof host !== 'string' || !Browsers.LOOPBACK_NAMES.includes(Browsers.#hostnameOf(host))) return false
+
+    return origin === `http://${host}`
+  }
+
+  static turnAwayForeign(request, response, next) {
+    const origin = request.get(Browsers.#ORIGIN)
+    if (origin === undefined || Browsers.isOurOwnPage(origin, request.get(Browsers.#HOST))) {
       next()
       return
     }
-    Answer.refuse(response, 403, 'this api does not serve browsers')
+    Answer.refuse(response, 403, 'this api only serves the page it hosts')
   }
 }
 

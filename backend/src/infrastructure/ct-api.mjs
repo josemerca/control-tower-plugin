@@ -8,7 +8,17 @@ import { Gh } from './gh.js'
 import { SystemClock } from './system-clock.js'
 import { ExternalTool } from './external-tool.js'
 import { RetryPolicy, RetryBudget } from '../domain/policies/retry-policy.js'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Invocation, InvocationOutcome } from './invocation.js'
+
+class FrontendBuild {
+  static #HERE = dirname(fileURLToPath(import.meta.url))
+
+  static root() {
+    return join(FrontendBuild.#HERE, '..', '..', '..', 'frontend', 'dist')
+  }
+}
 
 class CtApi {
   static #USAGE =
@@ -57,7 +67,11 @@ class CtApi {
       planIssues: new GhPlanIssues({ gh: CtApi.#talkingTo(Gh.BIN, Gh) }),
       planAgents: new CmuxPlanAgents({ run: CtApi.#tool(CmuxPlanAgents.BIN), cwd: process.cwd() }),
     })
-    const server = new ApiServer({ port: asked.port, startPlan })
+    const server = new ApiServer({
+      port: asked.port,
+      startPlan,
+      frontendRoot: FrontendBuild.root(),
+    })
     let port
     try {
       port = await server.start()

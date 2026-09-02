@@ -1,10 +1,16 @@
 import express from 'express'
+import { existsSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { Answer, Route, Browsers, JsonBody } from './http.js'
 import { StartPlanRoute, PlanRequest, PlanRefusal } from './start-plan-route.js'
 
 export const LOOPBACK = '127.0.0.1'
-
+class FrontendPages {
+  static mountedOn(app, root) {
+    if (root === null || !existsSync(root)) return
+    app.use(express.static(root, { index: 'index.html', redirect: false, fallthrough: true }))
+  }
+}
 class Failures {
   static #TOO_LARGE = 'entity.too.large'
 
@@ -31,9 +37,10 @@ class Failures {
 }
 
 export class ApiServer {
-  constructor({ port, startPlan }) {
+  constructor({ port, startPlan, frontendRoot = null }) {
     this.requestedPort = port
     this.startPlan = startPlan
+    this.frontendRoot = frontendRoot
     this.server = null
   }
 
@@ -42,9 +49,10 @@ export class ApiServer {
     app.disable('x-powered-by')
     app.set('case sensitive routing', true)
     app.use(Route.collapseTrailingSlashes)
+    FrontendPages.mountedOn(app, this.frontendRoot)
     app.post(
       StartPlanRoute.PATH,
-      Browsers.turnAway,
+      Browsers.turnAwayForeign,
       JsonBody.demandDeclared,
       JsonBody.reader(),
       StartPlanRoute.handledBy(this.startPlan)
