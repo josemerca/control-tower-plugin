@@ -387,6 +387,19 @@ describe('GhPlanIssues answering the go on the issue', () => {
     ]])
   })
 
+  it('a_blip_while_answering_the_go_is_not_retried_because_the_answer_may_have_been_the_one_lost', async () => {
+    const gh = new GhDouble([
+      new ProcessOutput({ code: 1, stdout: '', stderr: 'error connecting to api.github.com' }),
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+    ])
+
+    const refusal = await gh.goRefusalFor()
+
+    expect(gh.calls).toHaveLength(1)
+    expect(gh.clock.slept).toEqual([])
+    expect(refusal).toBeInstanceOf(PlanGoNotAnswered)
+  })
+
   it('a_comment_gh_refused_is_a_go_the_issue_never_took', async () => {
     const gh = GhDouble.refusing('gh: not authenticated')
 
