@@ -10,7 +10,7 @@ import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import {
-  PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueNotClaimed, PlanIssueFailure,
+  PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueNotClaimed, PlanGoNotAnswered, PlanIssueFailure,
 } from '../../src/domain/exceptions.js'
 
 class ClockDouble extends Clock {
@@ -80,6 +80,16 @@ class GhDouble {
 
   async requeueFor(issue = GhDouble.OPENED) {
     return this.issues().requeue({ issue, repository: GhDouble.REPOSITORY })
+  }
+
+  async answerGoFor(nonce = '7f3a91c2') {
+    return this.issues().answerGo({
+      issueNumber: 33, repository: GhDouble.REPOSITORY, nonce,
+    })
+  }
+
+  async goRefusalFor(nonce = '7f3a91c2') {
+    return this.answerGoFor(nonce).catch((cause) => cause)
   }
 
   async openFor(story = GhDouble.story()) {
@@ -361,5 +371,28 @@ describe('GhPlanIssues moving the status label of a claim', () => {
       'gh issue edit 7 --repo josemerca/ct-loop-sandbox --add-label status:ready --remove-label status:in-progress'
     )
     expect(gh.warnings[0]).toContain('gh: not authenticated')
+  })
+})
+
+describe('GhPlanIssues answering the go on the issue', () => {
+  it('answering_the_go_sends_the_comment_gh_understands', async () => {
+    const gh = GhDouble.created('')
+
+    await gh.answerGoFor('7f3a91c2')
+
+    expect(gh.calls).toEqual([[
+      'issue', 'comment', '33',
+      '--repo', 'josemerca/ct-loop-sandbox',
+      '--body', '-OK 7f3a91c2',
+    ]])
+  })
+
+  it('a_comment_gh_refused_is_a_go_the_issue_never_took', async () => {
+    const gh = GhDouble.refusing('gh: not authenticated')
+
+    const refusal = await gh.goRefusalFor()
+
+    expect(refusal).toBeInstanceOf(PlanGoNotAnswered)
+    expect(refusal.message).toBe('gh issue comment failed: gh: not authenticated')
   })
 })

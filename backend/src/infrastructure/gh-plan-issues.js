@@ -12,17 +12,32 @@ import { gatesOf } from '../../../plugin/scripts/groom.js'
 import { gateLabels } from '../../../plugin/scripts/gates.js'
 import { PlanIssues } from '../domain/ports/plan-issues.js'
 import { PlanIssue } from '../domain/value-objects/plan-issue.js'
-import { PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueNotClaimed } from '../domain/exceptions.js'
+import {
+  PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueNotClaimed, PlanGoNotAnswered,
+} from '../domain/exceptions.js'
 import { Gh } from './gh.js'
 
 export class GhPlanIssues extends PlanIssues {
   static IN_PROGRESS_LABEL = 'status:in-progress'
+  static GO_TOKEN = '-OK'
   static #REF = /\/issues\/(\d+)\s*$/
 
   constructor({ gh, stderr = (line) => process.stderr.write(line) }) {
     super()
     this.gh = gh
     this.stderr = stderr
+  }
+
+  static goBodyFor(nonce) {
+    return `${GhPlanIssues.GO_TOKEN} ${nonce}`
+  }
+
+  static goArgvFor({ issueNumber, repository, nonce }) {
+    return [
+      'issue', 'comment', String(issueNumber),
+      '--repo', repository.text,
+      '--body', GhPlanIssues.goBodyFor(nonce),
+    ]
   }
 
   static statusArgvFor({ issue, repository, adding, removing }) {
@@ -86,6 +101,15 @@ export class GhPlanIssues extends PlanIssues {
       removing: GhPlanIssues.IN_PROGRESS_LABEL,
     })
     if (outcome.failed) this.#warn({ issue, repository, said: outcome.stderr.trim() })
+  }
+
+  async answerGo({ issueNumber, repository, nonce }) {
+    const outcome = await this.gh.run(
+      GhPlanIssues.goArgvFor({ issueNumber, repository, nonce }), { safeToRepeat: false }
+    )
+    if (outcome.failed) {
+      throw new PlanGoNotAnswered(`${Gh.BIN} issue comment failed: ${outcome.stderr.trim()}`)
+    }
   }
 
   async #swapping({ issue, repository, adding, removing }) {
