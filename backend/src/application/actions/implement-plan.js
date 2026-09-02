@@ -1,8 +1,7 @@
 export class ImplementPlanParams {
-  constructor({ story, issue, repository }) {
+  constructor({ story, issue }) {
     this.story = story
     this.issue = issue
-    this.repository = repository
     Object.freeze(this)
   }
 }
@@ -13,8 +12,6 @@ export class ImplementPlan {
   }
 
   async execute(params) {
-    await this.planAgents.resume({
-      story: params.story, issue: params.issue, repository: params.repository,
-    })
+    await this.planAgents.resume({ story: params.story, issue: params.issue })
   }
 }

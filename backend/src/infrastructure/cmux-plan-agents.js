@@ -81,8 +81,8 @@ export class CmuxPlanAgents extends PlanAgents {
     return handle
   }
 
-  async resume({ story, issue, repository }) {
-    const errand = this.brief.implementationErrandFor({ issueNumber: issue, repository })
+  async resume({ story, issue }) {
+    const errand = this.brief.implementationErrandFor({ issueNumber: issue })
     const name = CmuxPlanAgents.nameFor(story)
     await this.#type(CmuxPlanAgents.sendArgvFor(name, errand))
     await this.#type(CmuxPlanAgents.enterArgvFor(name))
