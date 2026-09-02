@@ -390,8 +390,8 @@ class ResumeDouble {
     this.calls = []
     this.brief = {
       asked: [],
-      implementationErrandFor: ({ issue, repository }) => {
-        this.brief.asked.push({ issue, repository })
+      implementationErrandFor: ({ issueNumber, repository }) => {
+        this.brief.asked.push({ issueNumber, repository })
 
         return ResumeDouble.ERRAND
       },
@@ -460,7 +460,7 @@ describe('CmuxPlanAgents resuming a parked agent', () => {
     await cmux.resume()
 
     expect(cmux.brief.asked).toEqual([
-      { issue: ResumeDouble.ISSUE, repository: ResumeDouble.REPOSITORY },
+      { issueNumber: ResumeDouble.ISSUE, repository: ResumeDouble.REPOSITORY },
     ])
   })
 
