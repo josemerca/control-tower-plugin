@@ -1,6 +1,6 @@
 # The backend's domain
 
-Applies to: **everything under `src/domain/`**.
+Applies to: **every diff under `backend/`** — the rule about names binds wherever a domain word is chosen, not only inside `src/domain/`.
 
 ## The domain does not speak any tool's language
 
@@ -22,8 +22,7 @@ acli and gh exist only in `infrastructure/`.
 The port cuts by **who is on the other side**, never by step of the flow.
 When the flow gains a step against a collaborator it already has, the port
 gains a method; a port per step would multiply seams without adding one thing
-that can be swapped. `mo.catalog.api` does the same: one repository with six
-methods, not six repositories.
+that can be swapped.
 
 ## Ubiquitous language
 

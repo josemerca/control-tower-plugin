@@ -1,6 +1,6 @@
 # The backend's boundaries
 
-Applies to: **everything under `src/infrastructure/`**.
+Applies to: **every diff under `backend/`**.
 
 ## Talking to a tool: four steps, each with one job
 
@@ -23,8 +23,8 @@ Gh (idiom)      extends the trunk with what only that tool writes
   idiom of its own (acli today) inherits the trunk bare — inventing markers
   nobody measured is a preference dressed as a rule.
 - **A rate limit is not a blip.** GitHub documents waiting 60 seconds or more;
-  retrying it on the blip cadence lengthens the block. Declared divergence from
-  agentic-skills, which classifies it as transient.
+  retrying it on the blip cadence lengthens the block instead of clearing it,
+  so it is deliberately absent from the transient markers.
 - **A missing label is a datum, not a failure**: read which one, sow it with
   `--force` (the benign-race argument is `ct-groom.mjs`'s), retry the creation,
   and never sow a label that is not ours.

@@ -13,6 +13,9 @@ after.
    folder never restates it: a rule written twice is already the defect.
 3. The `backend-best-practices` skill — general guidance; it yields to both.
 
+There is no declared debt in `backend/`: these documents bind on every diff,
+old module or new.
+
 ## What to load, by task
 
 | Task | Read |
