@@ -1,6 +1,7 @@
 import { FormEvent, useState } from 'react'
 import { StartPlanClient } from 'app/start-plan/client'
-import { StartPlanOutcome } from 'app/start-plan/StartPlan.types'
+import { RepositoryName } from 'app/start-plan/RepositoryName'
+import { StartPlanOutcome, StartedPlan } from 'app/start-plan/StartPlan.types'
 import { TicketKey } from 'app/start-plan/TicketKey'
 import { Banner } from 'system-ui/banner'
 import { Button } from 'system-ui/button'
@@ -10,19 +11,31 @@ import './StartPlanForm.css'
 
 const UNREACHABLE_MESSAGE = 'No se pudo contactar con el backend'
 
-const StartPlanForm = () => {
-  const [ticketKey, setTicketKey] = useState('')
-  const [isSending, setIsSending] = useState(false)
-  const [outcome, setOutcome] = useState<StartPlanOutcome | null>(null)
+type StartPlanRefusal = Exclude<StartPlanOutcome, { kind: 'started' }>
 
-  const canStart = TicketKey.isWellFormed(ticketKey) && !isSending
+type StartPlanFormProps = {
+  onStarted: (plan: StartedPlan) => void
+}
+
+const StartPlanForm = ({ onStarted }: StartPlanFormProps) => {
+  const [ticketKey, setTicketKey] = useState('')
+  const [repository, setRepository] = useState('')
+  const [isSending, setIsSending] = useState(false)
+  const [refusal, setRefusal] = useState<StartPlanRefusal | null>(null)
+
+  const canStart = TicketKey.isWellFormed(ticketKey) && RepositoryName.isWellFormed(repository) && !isSending
 
   const startPlan = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setIsSending(true)
-    setOutcome(null)
-    setOutcome(await StartPlanClient.start(ticketKey))
+    setRefusal(null)
+    const outcome = await StartPlanClient.start({ id: ticketKey, repo: repository })
     setIsSending(false)
+    if (outcome.kind === 'started') {
+      onStarted(outcome.plan)
+      return
+    }
+    setRefusal(outcome)
   }
 
   return (
@@ -36,18 +49,25 @@ const StartPlanForm = () => {
           onChange={(event) => setTicketKey(event.target.value)}
         />
       </FormField>
+      <FormField label="Repositorio" message={`Con la forma ${RepositoryName.EXAMPLE}`}>
+        <Input
+          placeholder={RepositoryName.EXAMPLE}
+          value={repository}
+          disabled={isSending}
+          autoComplete="off"
+          onChange={(event) => setRepository(event.target.value)}
+        />
+      </FormField>
       <div className="start-plan-form__actions">
         <Button type="submit" disabled={!canStart}>
           Arrancar plan
         </Button>
       </div>
-      {outcome?.kind === 'started' && (
-        <Banner type="success" title="Sesión arrancada:" description={<code>{outcome.session}</code>} descriptionLayout="inline" />
-      )}
-      {outcome?.kind === 'refused' && <Banner type="error" role="alert" title={outcome.error} />}
-      {outcome?.kind === 'backend-unreachable' && <Banner type="error" role="alert" title={UNREACHABLE_MESSAGE} />}
+      {refusal?.kind === 'refused' && <Banner type="error" role="alert" title={refusal.error} />}
+      {refusal?.kind === 'backend-unreachable' && <Banner type="error" role="alert" title={UNREACHABLE_MESSAGE} />}
     </form>
   )
 }
 
 export { StartPlanForm }
+export type { StartPlanFormProps }
