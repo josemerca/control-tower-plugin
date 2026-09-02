@@ -5,11 +5,11 @@ export class PlanFailure extends Error {
   }
 }
 
-export class TicketFailure extends PlanFailure {}
+export class UserStoryFailure extends PlanFailure {}
 
-export class TicketNotRead extends TicketFailure {}
+export class UserStoryNotRead extends UserStoryFailure {}
 
-export class TicketNotUnderstood extends TicketFailure {}
+export class UserStoryNotUnderstood extends UserStoryFailure {}
 
 export class PlanIssueFailure extends PlanFailure {}
 

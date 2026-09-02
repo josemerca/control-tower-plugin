@@ -1,7 +1,7 @@
 export class PlanAgents {
-  async launch({ ticket, issue }) {
+  async launch({ story, issue }) {
     throw new Error(
-      `${this.constructor.name} must implement launch({ ticket, issue }), asked for ${ticket} on ${issue}`
+      `${this.constructor.name} must implement launch({ story, issue }), asked for ${story} on ${issue}`
     )
   }
 }

@@ -37,7 +37,7 @@ describe('PlanRefusal', () => {
 })
 
 describe('PlanCollapse', () => {
-  const FAMILIES = ['PlanFailure', 'TicketFailure', 'PlanIssueFailure', 'PlanAgentFailure']
+  const FAMILIES = ['PlanFailure', 'UserStoryFailure', 'PlanIssueFailure', 'PlanAgentFailure']
 
   it('every_way_the_plan_can_collapse_has_a_status_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
     const ways = Object.entries(exceptions)
@@ -49,7 +49,7 @@ describe('PlanCollapse', () => {
   })
 
   it('a_tool_that_refused_the_call_is_something_to_try_again_and_says_so', () => {
-    const collapse = PlanCollapse.of(new exceptions.TicketNotRead('acli is not authenticated'))
+    const collapse = PlanCollapse.of(new exceptions.UserStoryNotRead('acli is not authenticated'))
 
     expect(collapse).toBeInstanceOf(Refusal)
     expect(collapse.status).toBe(503)
@@ -59,7 +59,7 @@ describe('PlanCollapse', () => {
   })
 
   it('a_tool_that_answered_something_we_cannot_read_is_not_something_trying_again_would_fix', () => {
-    expect(PlanCollapse.of(new exceptions.TicketNotUnderstood('nope')).status).toBe(502)
+    expect(PlanCollapse.of(new exceptions.UserStoryNotUnderstood('nope')).status).toBe(502)
     expect(PlanCollapse.of(new exceptions.PlanIssueNotNamed('nope')).status).toBe(502)
     expect(PlanCollapse.of(new exceptions.PlanAgentNotNamed('nope')).status).toBe(502)
   })

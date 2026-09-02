@@ -20,19 +20,19 @@ export class PlanIssueBody {
   static #CODE_SPAN = /(`[^`]*`)/
   static READY_LABEL = 'status:ready'
 
-  static labels(ticket) {
-    return [...gateLabels(gatesOf(PlanIssueBody.rowFor(ticket)).gates), PlanIssueBody.READY_LABEL]
+  static labels(story) {
+    return [...gateLabels(gatesOf(PlanIssueBody.rowFor(story)).gates), PlanIssueBody.READY_LABEL]
   }
 
-  static titleFor(ticket) {
-    return `${ticket.key} ${ticket.summary}`
+  static titleFor(story) {
+    return `${story.key} ${story.summary}`
   }
 
-  static rowFor(ticket) {
+  static rowFor(story) {
     return {
       n: null,
-      name: ticket.summary,
-      entrega: PlanIssueBody.quieted(ticket.summary),
+      name: story.summary,
+      entrega: PlanIssueBody.quieted(story.summary),
       type: '',
       e2e: '',
       ac: [],
@@ -41,10 +41,10 @@ export class PlanIssueBody {
     }
   }
 
-  static #epicContextOf(ticket) {
-    return ticket.hasDescription()
-      ? PlanIssueBody.quieted(ticket.description)
-      : `_${ticket.key} no trae descripción en Jira: la historia de usuario está sin escribir._`
+  static #epicContextOf(story) {
+    return story.hasDescription()
+      ? PlanIssueBody.quieted(story.description)
+      : `_${story.key} no trae descripción en Jira: la historia de usuario está sin escribir._`
   }
 
   static quieted(text) {
@@ -56,17 +56,17 @@ export class PlanIssueBody {
       .join('')
   }
 
-  static of(ticket) {
-    const row = PlanIssueBody.rowFor(ticket)
+  static of(story) {
+    const row = PlanIssueBody.rowFor(story)
 
     return [
-      `> Historia de usuario: ${ticket.key}`,
+      `> Historia de usuario: ${story.key}`,
       '',
       PlanIssueBody.DESCRIPTION_HEADING,
-      renderDescripcion(row) ?? `_${ticket.key} no trae resumen en Jira._`,
+      renderDescripcion(row) ?? `_${story.key} no trae resumen en Jira._`,
       '',
       EPIC_CONTEXT_HEADING,
-      PlanIssueBody.#epicContextOf(ticket),
+      PlanIssueBody.#epicContextOf(story),
       '',
       INHERITED_CONTEXT_HEADING,
       INHERITED_CONTEXT_PLACEHOLDER,

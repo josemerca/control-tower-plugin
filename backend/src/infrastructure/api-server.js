@@ -94,7 +94,7 @@ class StartPlanRoute {
     let started
     try {
       started = await startPlan.execute(
-        new StartPlanParams({ ticket: asked.ticket, repository: asked.repository })
+        new StartPlanParams({ story: asked.story, repository: asked.repository })
       )
     } catch (cause) {
       if (!(cause instanceof PlanFailure)) throw cause
@@ -103,7 +103,7 @@ class StartPlanRoute {
     }
     Answer.send(response, 202, {
       status: 'started',
-      [PlanRequest.ID_FIELD]: asked.ticket.text,
+      [PlanRequest.ID_FIELD]: asked.story.text,
       [PlanRequest.REPO_FIELD]: asked.repository.text,
       issue: { number: started.issue.number, url: started.issue.url },
       agent: started.agent,

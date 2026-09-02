@@ -1,5 +1,5 @@
 import { PlanRequestOutcome } from './plan-request.js'
-import { TicketKey } from '../domain/value-objects/ticket-key.js'
+import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
 import { PlanRequest } from './plan-request.js'
 export class Refusal {
@@ -16,7 +16,7 @@ export class Refusal {
   }
 }
 import {
-  TicketNotRead, TicketNotUnderstood, PlanIssueNotCreated, PlanIssueNotNamed,
+  UserStoryNotRead, UserStoryNotUnderstood, PlanIssueNotCreated, PlanIssueNotNamed,
   PlanAgentNotLaunched, PlanAgentNotNamed,
 } from '../domain/exceptions.js'
 
@@ -28,7 +28,7 @@ export class PlanRefusal {
       new Refusal({ status: 400, error: 'body must be a JSON object' }),
     [PlanRequestOutcome.MALFORMED_ID]: () => new Refusal({
       status: 400,
-      error: `${PlanRequest.ID_FIELD} must be a ticket key such as ${TicketKey.EXAMPLE}`,
+      error: `${PlanRequest.ID_FIELD} must be a user story key such as ${UserStoryKey.EXAMPLE}`,
     }),
     [PlanRequestOutcome.MALFORMED_REPO]: () => new Refusal({
       status: 400,
@@ -59,10 +59,10 @@ export class PlanCollapse {
   static #ANSWERED_SOMETHING_ELSE = 502
 
   static #BY_FAILURE = [
-    [TicketNotRead, PlanCollapse.#REFUSED],
+    [UserStoryNotRead, PlanCollapse.#REFUSED],
     [PlanIssueNotCreated, PlanCollapse.#REFUSED],
     [PlanAgentNotLaunched, PlanCollapse.#REFUSED],
-    [TicketNotUnderstood, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
+    [UserStoryNotUnderstood, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
     [PlanIssueNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
     [PlanAgentNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
   ]

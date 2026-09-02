@@ -1,6 +1,6 @@
 export class StartPlanParams {
-  constructor({ ticket, repository }) {
-    this.ticket = ticket
+  constructor({ story, repository }) {
+    this.story = story
     this.repository = repository
     Object.freeze(this)
   }
@@ -15,16 +15,16 @@ export class StartPlanResult {
 }
 
 export class StartPlan {
-  constructor({ tickets, planIssues, planAgents }) {
-    this.tickets = tickets
+  constructor({ userStories, planIssues, planAgents }) {
+    this.userStories = userStories
     this.planIssues = planIssues
     this.planAgents = planAgents
   }
 
   async execute(params) {
-    const ticket = await this.tickets.detail(params.ticket)
-    const issue = await this.planIssues.open({ ticket, repository: params.repository })
-    const agent = await this.planAgents.launch({ ticket: params.ticket, issue })
+    const story = await this.userStories.detail(params.story)
+    const issue = await this.planIssues.open({ story, repository: params.repository })
+    const agent = await this.planAgents.launch({ story: params.story, issue })
 
     return new StartPlanResult({ issue, agent })
   }

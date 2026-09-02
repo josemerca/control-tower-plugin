@@ -1,7 +1,7 @@
 export class PlanIssues {
-  async open({ ticket, repository }) {
+  async open({ story, repository }) {
     throw new Error(
-      `${this.constructor.name} must implement open({ ticket, repository }), asked for ${ticket?.key} in ${repository}`
+      `${this.constructor.name} must implement open({ story, repository }), asked for ${story?.key} in ${repository}`
     )
   }
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { CmuxPlanAgents } from '../../src/infrastructure/cmux-plan-agents.js'
 import { PlanAgentNotLaunched, PlanAgentNotNamed, PlanAgentFailure } from '../../src/domain/exceptions.js'
-import { TicketKey } from '../../src/domain/value-objects/ticket-key.js'
+import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
 
@@ -31,12 +31,12 @@ class CmuxDouble {
   }
 
   async launchFor(text, issue = CmuxDouble.ISSUE) {
-    return this.agents().launch({ ticket: new TicketKey(text), issue })
+    return this.agents().launch({ story: new UserStoryKey(text), issue })
   }
 }
 
 describe('CmuxPlanAgents', () => {
-  it('the_call_it_makes_names_the_ticket_and_cuts_it_in_the_directory_it_was_given', async () => {
+  it('the_call_it_makes_names_the_story_and_cuts_it_in_the_directory_it_was_given', async () => {
     const cmux = new CmuxDouble('OK workspace:4\n')
 
     await cmux.launchFor('MO_SHOP-42')

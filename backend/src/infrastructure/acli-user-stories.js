@@ -1,8 +1,8 @@
-import { Tickets } from '../domain/ports/tickets.js'
-import { Ticket } from '../domain/value-objects/ticket.js'
-import { TicketNotRead, TicketNotUnderstood } from '../domain/exceptions.js'
+import { UserStories } from '../domain/ports/user-stories.js'
+import { UserStory } from '../domain/value-objects/user-story.js'
+import { UserStoryNotRead, UserStoryNotUnderstood } from '../domain/exceptions.js'
 
-export class AcliTickets extends Tickets {
+export class AcliUserStories extends UserStories {
   static BIN = 'acli'
 
   static #FIELDS = 'summary,description'
@@ -16,34 +16,34 @@ export class AcliTickets extends Tickets {
   }
 
   static argvFor(key) {
-    return ['jira', 'workitem', 'view', key.text, '--json', '--fields', AcliTickets.#FIELDS]
+    return ['jira', 'workitem', 'view', key.text, '--json', '--fields', AcliUserStories.#FIELDS]
   }
 
   async detail(key) {
-    const argv = AcliTickets.argvFor(key)
+    const argv = AcliUserStories.argvFor(key)
     const output = await this.acli.run(argv, { safeToRepeat: true })
     if (output.failed) {
-      throw new TicketNotRead(
-        `${AcliTickets.BIN} ${argv[0]} failed: ${AcliTickets.#reasonFor(output.stderr.trim())}`
+      throw new UserStoryNotRead(
+        `${AcliUserStories.BIN} ${argv[0]} failed: ${AcliUserStories.#reasonFor(output.stderr.trim())}`
       )
     }
 
-    return AcliTickets.#ticketFrom(output.stdout, key)
+    return AcliUserStories.#storyFrom(output.stdout, key)
   }
 
   static #reasonFor(message) {
-    return AcliTickets.#UNAUTHENTICATED.test(message)
-      ? `${AcliTickets.BIN} is not authenticated, run "acli jira auth login" and try again: ${message}`
+    return AcliUserStories.#UNAUTHENTICATED.test(message)
+      ? `${AcliUserStories.BIN} is not authenticated, run "acli jira auth login" and try again: ${message}`
       : message
   }
 
-  static #ticketFrom(printed, key) {
-    const fields = AcliTickets.#fieldsIn(printed, key)
+  static #storyFrom(printed, key) {
+    const fields = AcliUserStories.#fieldsIn(printed, key)
 
-    return new Ticket({
+    return new UserStory({
       key,
-      summary: AcliTickets.#summaryIn(fields, key),
-      description: AcliTickets.#plainText(fields.description),
+      summary: AcliUserStories.#summaryIn(fields, key),
+      description: AcliUserStories.#plainText(fields.description),
     })
   }
 
@@ -52,12 +52,12 @@ export class AcliTickets extends Tickets {
     try {
       parsed = JSON.parse(printed)
     } catch {
-      throw new TicketNotUnderstood(
+      throw new UserStoryNotUnderstood(
         `acli answered something that is not json for ${key}, it printed ${JSON.stringify(printed)}`
       )
     }
     if (parsed === null || typeof parsed !== 'object' || typeof parsed.fields !== 'object' || parsed.fields === null) {
-      throw new TicketNotUnderstood(
+      throw new UserStoryNotUnderstood(
         `acli answered without the fields of ${key}, it printed ${JSON.stringify(printed)}`
       )
     }
@@ -68,7 +68,7 @@ export class AcliTickets extends Tickets {
   static #summaryIn(fields, key) {
     const { summary } = fields
     if (typeof summary !== 'string' || summary.trim().length === 0) {
-      throw new TicketNotUnderstood(`${key} has no summary in jira, so there is nothing to plan`)
+      throw new UserStoryNotUnderstood(`${key} has no summary in jira, so there is nothing to plan`)
     }
 
     return summary.trim()
@@ -78,16 +78,16 @@ export class AcliTickets extends Tickets {
     if (typeof description === 'string') return description.trim()
     if (description === null || typeof description !== 'object') return ''
     const parts = []
-    AcliTickets.#walk(description, parts)
+    AcliUserStories.#walk(description, parts)
 
-    return parts.join('').replace(AcliTickets.#BLANK_RUN, '\n\n').trim()
+    return parts.join('').replace(AcliUserStories.#BLANK_RUN, '\n\n').trim()
   }
 
   static #walk(node, parts) {
     if (node === null || typeof node !== 'object') return
     if (typeof node.text === 'string') parts.push(node.text)
     if (!Array.isArray(node.content)) return
-    for (const child of node.content) AcliTickets.#walk(child, parts)
-    if (AcliTickets.#BREAKING_NODES.includes(node.type)) parts.push('\n')
+    for (const child of node.content) AcliUserStories.#walk(child, parts)
+    if (AcliUserStories.#BREAKING_NODES.includes(node.type)) parts.push('\n')
   }
 }

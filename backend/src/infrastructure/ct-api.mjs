@@ -1,6 +1,6 @@
 import { ApiServer, LOOPBACK } from './api-server.js'
 import { CmuxPlanAgents } from './cmux-plan-agents.js'
-import { AcliTickets } from './acli-tickets.js'
+import { AcliUserStories } from './acli-user-stories.js'
 import { GhPlanIssues } from './gh-plan-issues.js'
 import { StartPlan } from '../application/actions/start-plan.js'
 import { ToolRunner } from './tool-runner.js'
@@ -53,7 +53,7 @@ class CtApi {
       CtApi.#refuseUsage(asked.reason)
     }
     const startPlan = new StartPlan({
-      tickets: new AcliTickets({ acli: CtApi.#talkingTo(AcliTickets.BIN, ExternalTool) }),
+      userStories: new AcliUserStories({ acli: CtApi.#talkingTo(AcliUserStories.BIN, ExternalTool) }),
       planIssues: new GhPlanIssues({ gh: CtApi.#talkingTo(Gh.BIN, Gh) }),
       planAgents: new CmuxPlanAgents({ run: CtApi.#tool(CmuxPlanAgents.BIN), cwd: process.cwd() }),
     })

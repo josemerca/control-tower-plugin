@@ -12,13 +12,13 @@ export class GhPlanIssues extends PlanIssues {
     this.gh = gh
   }
 
-  static argvFor({ ticket, repository }) {
+  static argvFor({ story, repository }) {
     return [
       'issue', 'create',
       '--repo', repository.text,
-      '--title', PlanIssueBody.titleFor(ticket),
-      '--body', PlanIssueBody.of(ticket),
-      ...PlanIssueBody.labels(ticket).flatMap((label) => ['--label', label]),
+      '--title', PlanIssueBody.titleFor(story),
+      '--body', PlanIssueBody.of(story),
+      ...PlanIssueBody.labels(story).flatMap((label) => ['--label', label]),
     ]
   }
 
@@ -26,8 +26,8 @@ export class GhPlanIssues extends PlanIssues {
     return ['label', 'create', label, '--repo', repository.text, '--force']
   }
 
-  async open({ ticket, repository }) {
-    const outcome = await this.#createSowingLabels({ ticket, repository })
+  async open({ story, repository }) {
+    const outcome = await this.#createSowingLabels({ story, repository })
     if (outcome.failed) {
       throw new PlanIssueNotCreated(`${Gh.BIN} issue create failed: ${outcome.stderr.trim()}`)
     }
@@ -42,9 +42,9 @@ export class GhPlanIssues extends PlanIssues {
     return new PlanIssue({ number: Number(found[1]), url })
   }
 
-  async #createSowingLabels({ ticket, repository }) {
-    const argv = GhPlanIssues.argvFor({ ticket, repository })
-    const ours = PlanIssueBody.labels(ticket)
+  async #createSowingLabels({ story, repository }) {
+    const argv = GhPlanIssues.argvFor({ story, repository })
+    const ours = PlanIssueBody.labels(story)
     const sown = new Set()
     let outcome = await this.gh.run(argv, { safeToRepeat: false })
     while (outcome.failed) {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { PlanRequest, PlanRequestOutcome } from '../../src/infrastructure/plan-request.js'
-import { TicketKey } from '../../src/domain/value-objects/ticket-key.js'
+import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 
 describe('PlanRequest', () => {
@@ -11,23 +11,23 @@ describe('PlanRequest', () => {
     expect(Object.isFrozen(PlanRequestOutcome)).toBe(true)
   })
 
-  it('a_refused_request_cannot_carry_a_ticket_that_a_consumer_would_then_act_on', () => {
+  it('a_refused_request_cannot_carry_a_story_that_a_consumer_would_then_act_on', () => {
     expect(() =>
       new PlanRequest({
         outcome: PlanRequestOutcome.MALFORMED_ID,
-        ticket: new TicketKey('ABC-123'),
+        story: new UserStoryKey('ABC-123'),
         fields: [],
       })
-    ).toThrow(/disagrees with its ticket/)
+    ).toThrow(/disagrees with its story/)
   })
 
-  it('an_accepted_request_cannot_be_built_without_the_ticket_the_caller_will_read', () => {
+  it('an_accepted_request_cannot_be_built_without_the_story_the_caller_will_read', () => {
     expect(() => PlanRequest.accepted(null, new RepositoryName('owner/name')))
-      .toThrow(/disagrees with its ticket/)
+      .toThrow(/disagrees with its story/)
   })
 
   it('an_accepted_request_cannot_be_built_without_the_repository_the_issue_goes_to', () => {
-    expect(() => PlanRequest.accepted(new TicketKey('ABC-123'), null))
+    expect(() => PlanRequest.accepted(new UserStoryKey('ABC-123'), null))
       .toThrow(/disagrees with its repository/)
   })
 
@@ -48,7 +48,7 @@ describe('PlanRequest', () => {
       .toBe(PlanRequestOutcome.MALFORMED_ID)
   })
 
-  it('a_body_whose_id_is_not_a_ticket_key_comes_back_refused_rather_than_raising_at_the_boundary', () => {
+  it('a_body_whose_id_is_not_a_story_key_comes_back_refused_rather_than_raising_at_the_boundary', () => {
     const refused = [
       '{"id":"abc-1","repo":"owner/name"}',
       '{"id":"../../etc/passwd","repo":"owner/name"}',
@@ -63,12 +63,12 @@ describe('PlanRequest', () => {
     expect(PlanRequest.from('{"id":"ABC-1","zulu":1,"alpha":2}').fields).toEqual(['alpha', 'zulu'])
   })
 
-  it('an_accepted_body_hands_back_the_ticket_as_a_domain_value_and_not_as_the_raw_string', () => {
+  it('an_accepted_body_hands_back_the_story_as_a_domain_value_and_not_as_the_raw_string', () => {
     const accepted = PlanRequest.from('{"id":"MO_SHOP-42","repo":"josemerca/ct-loop-sandbox"}')
 
-    expect(accepted.ticket).toBeInstanceOf(TicketKey)
-    expect(accepted.ticket.text).toBe('MO_SHOP-42')
-    expect(Object.isFrozen(accepted.ticket)).toBe(true)
+    expect(accepted.story).toBeInstanceOf(UserStoryKey)
+    expect(accepted.story.text).toBe('MO_SHOP-42')
+    expect(Object.isFrozen(accepted.story)).toBe(true)
   })
 
   it('an_accepted_body_hands_back_the_repository_as_a_domain_value_too', () => {
@@ -88,7 +88,7 @@ describe('PlanRequest', () => {
   })
 
   it('an_accepted_request_cannot_be_edited_after_it_was_validated', () => {
-    const asked = PlanRequest.accepted(new TicketKey('ABC-123'), new RepositoryName('owner/name'))
+    const asked = PlanRequest.accepted(new UserStoryKey('ABC-123'), new RepositoryName('owner/name'))
 
     expect(Object.isFrozen(asked)).toBe(true)
     expect(Object.isFrozen(asked.fields)).toBe(true)

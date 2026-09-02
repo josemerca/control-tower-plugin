@@ -5,8 +5,8 @@ import { PlanIssueBody } from '../../src/infrastructure/plan-issue-body.js'
 import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
 import { RetryPolicy, RetryBudget } from '../../src/domain/policies/retry-policy.js'
 import { Clock } from '../../src/domain/ports/clock.js'
-import { Ticket } from '../../src/domain/value-objects/ticket.js'
-import { TicketKey } from '../../src/domain/value-objects/ticket-key.js'
+import { UserStory } from '../../src/domain/value-objects/user-story.js'
+import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueFailure } from '../../src/domain/exceptions.js'
 
@@ -39,8 +39,8 @@ class GhDouble {
     return new GhDouble(Array(times).fill(new ProcessOutput({ code: 1, stdout: '', stderr: said })))
   }
 
-  static ticket({ summary = 'El buscador acepta acentos', description = 'como comprador quiero' } = {}) {
-    return new Ticket({ key: new TicketKey('MO_SHOP-42'), summary, description })
+  static story({ summary = 'El buscador acepta acentos', description = 'como comprador quiero' } = {}) {
+    return new UserStory({ key: new UserStoryKey('MO_SHOP-42'), summary, description })
   }
 
   issues({ attempts = 3 } = {}) {
@@ -61,12 +61,12 @@ class GhDouble {
     })
   }
 
-  async openFor(ticket = GhDouble.ticket()) {
-    return this.issues().open({ ticket, repository: GhDouble.REPOSITORY })
+  async openFor(story = GhDouble.story()) {
+    return this.issues().open({ story, repository: GhDouble.REPOSITORY })
   }
 
-  async refusalFor(ticket = GhDouble.ticket()) {
-    return this.openFor(ticket).catch((cause) => cause)
+  async refusalFor(story = GhDouble.story()) {
+    return this.openFor(story).catch((cause) => cause)
   }
 
   get commands() {
@@ -77,15 +77,15 @@ class GhDouble {
 describe('GhPlanIssues', () => {
   it('the_call_it_makes_names_the_repository_the_title_and_the_labels_the_loop_reads', async () => {
     const gh = GhDouble.created()
-    const ticket = GhDouble.ticket()
+    const story = GhDouble.story()
 
-    await gh.openFor(ticket)
+    await gh.openFor(story)
 
     expect(gh.calls).toEqual([[
       'issue', 'create',
       '--repo', 'josemerca/ct-loop-sandbox',
       '--title', 'MO_SHOP-42 El buscador acepta acentos',
-      '--body', PlanIssueBody.of(ticket),
+      '--body', PlanIssueBody.of(story),
       '--label', 'gate:plan',
       '--label', 'status:ready',
     ]])

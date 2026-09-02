@@ -11,17 +11,17 @@ export class CmuxPlanAgents extends PlanAgents {
     this.cwd = cwd
   }
 
-  static argvFor({ ticket, issue, cwd }) {
+  static argvFor({ story, issue, cwd }) {
     return [
       'new-workspace',
-      '--name', `ct-plan-${ticket}`,
+      '--name', `ct-plan-${story}`,
       '--cwd', cwd,
-      '--command', `echo "plan agent up for ${ticket} on issue ${issue}"`,
+      '--command', `echo "plan agent up for ${story} on issue ${issue}"`,
     ]
   }
 
-  async launch({ ticket, issue }) {
-    const argv = CmuxPlanAgents.argvFor({ ticket, issue, cwd: this.cwd })
+  async launch({ story, issue }) {
+    const argv = CmuxPlanAgents.argvFor({ story, issue, cwd: this.cwd })
     const output = await this.run(argv)
     if (output.failed) {
       throw new PlanAgentNotLaunched(`${CmuxPlanAgents.BIN} ${argv[0]} failed: ${output.stderr.trim()}`)

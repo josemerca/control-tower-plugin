@@ -92,7 +92,7 @@ describe('ct-api entrypoint', () => {
     expect((await Entrypoint.startPlan(port)).status).toBe(400)
   })
 
-  it('a_whole_request_reaches_jira_first_so_no_issue_is_ever_opened_for_a_ticket_nobody_read', async () => {
+  it('a_whole_request_reaches_jira_first_so_no_issue_is_ever_opened_for_a_story_nobody_read', async () => {
     const port = await Entrypoint.listening({ CT_API_PORT: '0' })
 
     const response = await Entrypoint.startPlan(port, '{"id":"ZZZ-999999","repo":"josemerca/nope"}')

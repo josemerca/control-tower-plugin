@@ -3,15 +3,15 @@ import { StartPlan, StartPlanParams } from '../../src/application/actions/start-
 import { PlanAgents } from '../../src/domain/ports/plan-agents.js'
 import { PlanIssues } from '../../src/domain/ports/plan-issues.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
-import { Tickets } from '../../src/domain/ports/tickets.js'
-import { Ticket } from '../../src/domain/value-objects/ticket.js'
-import { TicketKey } from '../../src/domain/value-objects/ticket-key.js'
+import { UserStories } from '../../src/domain/ports/user-stories.js'
+import { UserStory } from '../../src/domain/value-objects/user-story.js'
+import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import {
-  PlanAgentNotLaunched, PlanIssueNotCreated, TicketNotRead,
+  PlanAgentNotLaunched, PlanIssueNotCreated, UserStoryNotRead,
 } from '../../src/domain/exceptions.js'
 
-class TicketsDouble extends Tickets {
+class UserStoriesDouble extends UserStories {
   constructor(answer) {
     super()
     this.answer = answer
@@ -19,7 +19,7 @@ class TicketsDouble extends Tickets {
   }
 
   static reading(summary) {
-    return new TicketsDouble((key) => new Ticket({ key, summary, description: 'as a user I want' }))
+    return new UserStoriesDouble((key) => new UserStory({ key, summary, description: 'as a user I want' }))
   }
 
   async detail(key) {
@@ -38,8 +38,8 @@ class PlanIssuesDouble extends PlanIssues {
     this.asked = []
   }
 
-  async open({ ticket, repository }) {
-    this.asked.push({ ticket, repository })
+  async open({ story, repository }) {
+    this.asked.push({ story, repository })
     if (this.answer instanceof Error) throw this.answer
     return this.answer
   }
@@ -52,61 +52,61 @@ class PlanAgentsDouble extends PlanAgents {
     this.asked = []
   }
 
-  async launch({ ticket, issue }) {
-    this.asked.push({ ticket, issue })
+  async launch({ story, issue }) {
+    this.asked.push({ story, issue })
     if (this.answer instanceof Error) throw this.answer
     return this.answer
   }
 }
 
 class Flow {
-  static TICKET = new TicketKey('MO_SHOP-42')
+  static STORY = new UserStoryKey('MO_SHOP-42')
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
 
-  constructor({ tickets, planIssues, planAgents } = {}) {
-    this.tickets = tickets ?? TicketsDouble.reading('the summary of the ticket')
+  constructor({ userStories, planIssues, planAgents } = {}) {
+    this.userStories = userStories ?? UserStoriesDouble.reading('the summary of the story')
     this.planIssues = planIssues ?? new PlanIssuesDouble()
     this.planAgents = planAgents ?? new PlanAgentsDouble()
   }
 
-  async run(ticket = Flow.TICKET) {
+  async run(story = Flow.STORY) {
     return new StartPlan(this).execute(
-      new StartPlanParams({ ticket, repository: Flow.REPOSITORY })
+      new StartPlanParams({ story, repository: Flow.REPOSITORY })
     )
   }
 
-  async refusal(ticket = Flow.TICKET) {
-    return this.run(ticket).catch((cause) => cause)
+  async refusal(story = Flow.STORY) {
+    return this.run(story).catch((cause) => cause)
   }
 }
 
 describe('StartPlan', () => {
-  it('the_ticket_it_was_given_is_the_one_it_reads_before_anything_is_created', async () => {
+  it('the_story_it_was_given_is_the_one_it_reads_before_anything_is_created', async () => {
     const flow = new Flow()
 
     await flow.run()
 
-    expect(flow.tickets.asked).toEqual([Flow.TICKET])
+    expect(flow.userStories.asked).toEqual([Flow.STORY])
   })
 
   it('the_issue_is_opened_in_the_repository_the_caller_named_and_carries_what_jira_said', async () => {
-    const flow = new Flow({ tickets: TicketsDouble.reading('rename the button') })
+    const flow = new Flow({ userStories: UserStoriesDouble.reading('rename the button') })
 
     await flow.run()
 
     const [asked] = flow.planIssues.asked
     expect(asked.repository).toBe(Flow.REPOSITORY)
-    expect(asked.ticket.summary).toBe('rename the button')
-    expect(asked.ticket.key).toBe(Flow.TICKET)
+    expect(asked.story.summary).toBe('rename the button')
+    expect(asked.story.key).toBe(Flow.STORY)
   })
 
-  it('the_agent_is_launched_on_the_issue_that_was_just_created_and_not_on_the_ticket_alone', async () => {
+  it('the_agent_is_launched_on_the_issue_that_was_just_created_and_not_on_the_story_alone', async () => {
     const flow = new Flow()
 
     await flow.run()
 
     expect(flow.planAgents.asked).toEqual([
-      { ticket: Flow.TICKET, issue: PlanIssuesDouble.OPENED },
+      { story: Flow.STORY, issue: PlanIssuesDouble.OPENED },
     ])
   })
 
@@ -117,12 +117,12 @@ describe('StartPlan', () => {
     expect(started.agent).toBe('workspace:4')
   })
 
-  it('a_ticket_that_cannot_be_read_stops_the_flow_before_an_issue_is_created_for_nothing', async () => {
-    const flow = new Flow({ tickets: new TicketsDouble(new TicketNotRead('acli is not authenticated')) })
+  it('a_story_that_cannot_be_read_stops_the_flow_before_an_issue_is_created_for_nothing', async () => {
+    const flow = new Flow({ userStories: new UserStoriesDouble(new UserStoryNotRead('acli is not authenticated')) })
 
     const refusal = await flow.refusal()
 
-    expect(refusal).toBeInstanceOf(TicketNotRead)
+    expect(refusal).toBeInstanceOf(UserStoryNotRead)
     expect(flow.planIssues.asked).toEqual([])
     expect(flow.planAgents.asked).toEqual([])
   })
@@ -146,23 +146,23 @@ describe('StartPlan', () => {
     expect(refusal.message).toBe('Access denied')
   })
 
-  it('the_ticket_reaches_the_agent_whole_so_the_tab_can_be_named_after_it', async () => {
+  it('the_story_reaches_the_agent_whole_so_the_tab_can_be_named_after_it', async () => {
     const flow = new Flow()
 
     await flow.run()
 
-    expect(String(flow.planAgents.asked[0].ticket)).toBe('MO_SHOP-42')
+    expect(String(flow.planAgents.asked[0].story)).toBe('MO_SHOP-42')
   })
 
-  it('a_ticket_with_no_summary_at_all_is_refused_by_the_value_object_and_not_carried_around_empty', async () => {
-    const flow = new Flow({ tickets: TicketsDouble.reading(undefined) })
+  it('a_story_with_no_summary_at_all_is_refused_by_the_value_object_and_not_carried_around_empty', async () => {
+    const flow = new Flow({ userStories: UserStoriesDouble.reading(undefined) })
 
-    await expect(flow.run()).rejects.toThrow(/a ticket carries text/)
+    await expect(flow.run()).rejects.toThrow(/a user story carries text/)
   })
 
-  it('a_ticket_that_is_not_keyed_by_a_ticket_key_cannot_be_built_at_all', () => {
-    expect(() => new Ticket({ key: 'MO_SHOP-42', summary: 'a', description: 'b' }))
-      .toThrow(/keyed by a TicketKey/)
+  it('a_story_that_is_not_keyed_by_a_story_key_cannot_be_built_at_all', () => {
+    expect(() => new UserStory({ key: 'MO_SHOP-42', summary: 'a', description: 'b' }))
+      .toThrow(/keyed by a UserStoryKey/)
   })
 
   it('an_issue_without_a_number_cannot_be_built_because_nothing_downstream_could_use_it', () => {
@@ -172,10 +172,10 @@ describe('StartPlan', () => {
   })
 
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
-    await expect(new PlanAgents().launch({ ticket: Flow.TICKET, issue: PlanIssuesDouble.OPENED }))
+    await expect(new PlanAgents().launch({ story: Flow.STORY, issue: PlanIssuesDouble.OPENED }))
       .rejects.toThrow(/must implement launch/)
-    await expect(new PlanIssues().open({ ticket: null, repository: Flow.REPOSITORY }))
+    await expect(new PlanIssues().open({ story: null, repository: Flow.REPOSITORY }))
       .rejects.toThrow(/must implement open/)
-    await expect(new Tickets().detail(Flow.TICKET)).rejects.toThrow(/must implement detail/)
+    await expect(new UserStories().detail(Flow.STORY)).rejects.toThrow(/must implement detail/)
   })
 })
