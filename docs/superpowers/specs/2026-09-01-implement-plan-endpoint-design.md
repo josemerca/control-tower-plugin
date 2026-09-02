@@ -50,9 +50,17 @@ No pide claim, ni labels, ni nonce, ni que nadie haya pasado por `ct-next`. Así
 diciéndole que obedezca a `ct-step` **no añade ni un programa que el backend tenga que invocar**: la
 secuencia entera la decide `run-machine.js` dentro de esa sesión.
 
-El único punto donde el flujo del plugin topa con el permiso que aquí no existe es
-`dispatch-check --release`, que se niega sin un go registrado (exit 9). Queda fuera: este endpoint
-entrega la implementación, no el pull request.
+El único punto donde el flujo del plugin no se puede seguir es `dispatch-check --release`, y no por un
+motivo sino por dos: exige un go registrado (exit 9) y exige que el issue esté en `status:in-progress`
+(`dispatch-check.mjs:1014`), y en este flujo **nadie reclama el issue** — se queda en `status:ready`
+desde que se crea. **La pull request, en cambio, sí se abre**: es `gh pr create` con `Closes #<n>`, y no
+depende ni del go ni de las etiquetas. Sin ella el modelo se queda cojo, porque las dos decisiones
+humanas son el plan y **el merge**, y sin pull request no hay dónde tomar la segunda.
+
+Por eso el encargo de reanudación **le dice expresamente al agente que no ejecute `--release` aunque
+`ct-step` se lo sugiera**: al entregar el run, ese programa imprime «abre la pull request y libera con
+dispatch-check --release» (`ct-step.mjs:293`), y un encargo que lo ignorase dejaría al agente
+estrellándose contra un exit 9 sin saber por qué.
 
 ## 3. El contrato
 
@@ -120,9 +128,11 @@ ejecutaría la orden a medias. El vigilante del plugin manda una sola línea por
 (`ct-watch-go.mjs:159`), y este encargo hace lo mismo — a diferencia del encargo del plan, que viaja
 como argumento de `claude` y puede tener nueve líneas.
 
-Dice tres cosas: que el gate del plan quedó cerrado por una persona, que la conducción es de
+Dice cuatro cosas: que el gate del plan quedó cerrado por una persona; que la conducción es de
 `ct-step next --plan <el plan que commiteó> --issue <n>` y que obedezca hasta que el run quede
-entregado, y que **pare ahí**: sin pull request, sin merge, sin worktrees nuevos.
+entregado; que abra entonces la pull request con `Closes #<n>` en el cuerpo; y que **pare ahí** —sin
+mergear, sin worktrees nuevos y sin `--release`, que es la única parte del consejo final de `ct-step`
+que este flujo no puede seguir.
 
 ## 5. Las deudas, declaradas
 
@@ -131,15 +141,20 @@ entregado, y que **pare ahí**: sin pull request, sin merge, sin worktrees nuevo
    un shell y el 202 miente. Cobrarlo pide el recorrido de cmux con su guarda de esquema
    (`plugin/scripts/cmux.js#findWorkspaceByTitle`) y un vocabulario de tres miembros: está, no está, no
    se pudo saber.
-2. **El pull request no lo abre nadie.** El encargo para al entregar el run, porque `--release` exige
-   un go que este flujo no acuña. Cerrarlo es la decisión de si el segundo permiso humano vive en un
-   botón o en el merge de GitHub, y no es de este endpoint.
-3. **El residuo del 413.** `api-server.js` sigue proyectando el cuerpo demasiado grande con el
+2. **Las dos puertas de `--release` que nadie sustituye.** De sus cinco, tres las cubre el camino (el
+   plan válido lo mide `--check-plan` antes del go, el run entregado lo declara `ct-step`, y el go es
+   el botón). Se pierden la que impide que la rama arrastre el `.agent/STATE.md` de la coordinadora al
+   pull request y la que cruza los recorridos e2e declarados en el issue contra los que el run cubrió.
+3. **El issue no se reclama nunca.** Nace en `status:ready` y ahí se queda hasta que el merge lo cierra
+   con `Closes #<n>`. Consecuencia medible: un `/ct-next` lanzado en ese repo mientras el agente
+   trabaja vería el issue disponible y lo despacharía por segunda vez. Es anterior a este endpoint —lo
+   trae el flujo del coordinador— y se cierra reclamando el issue al preparar el worktree.
+4. **El residuo del 413.** `api-server.js` sigue proyectando el cuerpo demasiado grande con el
    vocabulario de `start-plan-route.js` (`PlanRefusal.of(PlanRequest.tooLarge())`), así que la última
    red del servidor conoce el modelo de petición de un endpoint concreto — con tres endpoints
    montados, ya son dos los que no son suyos. `Refusal` ya bajó a `http.js`; esto es lo que quedó.
 
 ## 6. Lo que queda fuera
 
-Contestar el GO en el issue y el nonce entero; `ct-next` y su sobre; comprobar la pestaña; el pull
-request y `--release`; y cualquier cambio en `plugin/`.
+Contestar el GO en el issue y el nonce entero; `ct-next` y su sobre; comprobar la pestaña;
+`--release` y las dos puertas que se van con él; reclamar el issue; y cualquier cambio en `plugin/`.

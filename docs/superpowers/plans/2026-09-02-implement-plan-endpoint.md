@@ -89,9 +89,15 @@ describe('PlanAgentBrief resuming the agent', () => {
     expect(errand()).toContain('docs/superpowers/plans/')
   })
 
-  it('it_stops_the_agent_at_the_delivered_run_and_not_at_a_pull_request', () => {
+  it('it_ends_at_an_open_pull_request_that_closes_the_issue_and_stops_before_the_merge', () => {
+    expect(errand()).toContain('Closes #42')
     expect(errand()).toMatch(/PARA/)
-    expect(errand()).toMatch(/no abras pull request/i)
+    expect(errand()).toMatch(/no la mergees/i)
+  })
+
+  it('it_waves_off_the_release_that_ct_step_will_suggest_so_the_agent_does_not_crash_into_exit_9', () => {
+    expect(errand()).toContain('dispatch-check --release')
+    expect(errand()).toMatch(/no ejecutes/i)
   })
 
   it('it_never_promises_a_permission_nobody_mints', () => {
@@ -149,7 +155,9 @@ and add the second errand, which is the only method of this class that must fit 
       'implementa AHORA el plan que commiteaste, sin reescribirlo.',
       `Pregunta el paso con \`node ${this.ctStep} next --plan <tu plan de docs/superpowers/plans/> --issue ${issue}\``,
       'y obedece exactamente lo que conteste, tarea a tarea, hasta que el run quede entregado.',
-      'Y entonces PARA: no abras pull request, no mergees, no crees worktrees nuevos.',
+      `Entonces abre la pull request con \`Closes #${issue}\` en el cuerpo y PARA: no la mergees,`,
+      'no crees worktrees nuevos, y NO ejecutes `dispatch-check --release` aunque ct-step te lo diga',
+      '(en este flujo el issue no se reclama y el permiso que esa puerta exige no se acuña: saldría por 9).',
     ].join(' ')
   }
 ```
@@ -998,7 +1006,7 @@ One mutation at a time, restoring the file and verifying it is identical before 
 these must turn the suite red; a green one is a finding to fix with a test:
 
 - `plan-agent-brief.js`: `.join(' ')` → `.join('\n')` (the one-line rule); drop the `ctStep` guard;
-  remove the `PARA` sentence from the errand's array.
+  remove the `PARA` sentence from the errand's array; remove the sentence that waves off `--release`.
 - `cmux-plan-agents.js`: in `resume`, swap the order of the two `#type` calls; drop the second one
   entirely; `output.failed` → `false` inside `#type`.
 - `implement-plan-route.js`: swap the `MALFORMED_REPO` and `MALFORMED_ISSUE` guards; `given >= 1` →
@@ -1042,10 +1050,11 @@ GET  /plan-events/<n>   -N     # until it says ready
 POST /implement-plan {"id":"XOP-4909","repo":"jjponz/repo-pulse","issue":<n>}
 ```
 
-Then watch the tab: the agent should answer `ct-step next` and start the first task.
+Then watch the tab: the agent should answer `ct-step next`, start the first task, and end with a pull
+request open against the base branch — which is where the second human decision lives.
 
 ## What this plan does not build
 
 Answering the GO in the issue and the nonce entire; `ct-next` and its envelope; checking that the tab
-is still alive; the pull request and `--release`; the 413 residue in `api-server.js`; and any change
-under `plugin/`.
+is still alive; `dispatch-check --release` and the two gates that go with it; the issue's labels, which
+nobody claims in this flow; the 413 residue in `api-server.js`; and any change under `plugin/`.
