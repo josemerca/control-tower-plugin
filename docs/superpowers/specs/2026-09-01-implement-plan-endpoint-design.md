@@ -128,11 +128,26 @@ ejecutaría la orden a medias. El vigilante del plugin manda una sola línea por
 (`ct-watch-go.mjs:159`), y este encargo hace lo mismo — a diferencia del encargo del plan, que viaja
 como argumento de `claude` y puede tener nueve líneas.
 
-Dice cuatro cosas: que el gate del plan quedó cerrado por una persona; que la conducción es de
-`ct-step next --plan <el plan que commiteó> --issue <n>` y que obedezca hasta que el run quede
-entregado; que abra entonces la pull request con `Closes #<n>` en el cuerpo; y que **pare ahí** —sin
-mergear, sin worktrees nuevos y sin `--release`, que es la única parte del consejo final de `ct-step`
-que este flujo no puede seguir.
+Dice seis cosas, y las tres del medio salieron de la revisión final porque el encargo se las había
+dejado y sin ellas la reanudación no funciona:
+
+1. que el gate del plan quedó cerrado por una persona, y que implemente el plan que commiteó sin
+   reescribirlo;
+2. que **antes de pedir el primer paso reescriba `role`, `task` y `next_action` de `.agent/SLICE.md`**
+   para que digan que está implementando — la semilla dice lo contrario y el hook `SessionStart` del
+   plugin la reinyecta en cada compactación (deuda 4);
+3. que la secuencia **no la conduce con `subagent-driven-development` ni con su ledger**: la dicta la
+   máquina;
+4. que pregunte el paso con `ct-step next --plan <el plan que commiteó> --issue <n>`, obedezca
+   literalmente lo que imprima —**y que donde diga `ct-step`, es `node <ruta absoluta>`**, porque el
+   plugin no declara `bin` y sin esa traducción el primer verbo muere en `command not found`— volviendo
+   a `next` tras cada paso hasta que diga «run delivered»;
+5. que abra entonces la pull request con `Closes #<n>` en el cuerpo;
+6. y que **pare ahí** —sin mergear, sin worktrees nuevos y sin `--release`, que es la única parte del
+   consejo final de `ct-step` que este flujo no puede seguir.
+
+Los puntos 2, 3 y 4 son los que `plugin/scripts/kickoff.js:253` ya llevaba: el encargo se había traído
+la orden de obedecer sin la traducción que la hace ejecutable.
 
 ## 5. Las deudas, declaradas
 
@@ -149,10 +164,28 @@ que este flujo no puede seguir.
    con `Closes #<n>`. Consecuencia medible: un `/ct-next` lanzado en ese repo mientras el agente
    trabaja vería el issue disponible y lo despacharía por segunda vez. Es anterior a este endpoint —lo
    trae el flujo del coordinador— y se cierra reclamando el issue al preparar el worktree.
-4. **El residuo del 413.** `api-server.js` sigue proyectando el cuerpo demasiado grande con el
+4. **La semilla del estado sigue diciendo que el agente escribe el plan y para.** `git-workspace`
+   siembra `.agent/SLICE.md` con `role: escribes el plan de este slice y PARAS. No implementas nada`, y
+   el hook `SessionStart` del plugin lo reinyecta entero **en cada compactación** (matcher
+   `startup|resume|clear|compact`). Un run de varias tareas compacta, así que sin arreglo el agente
+   recibe como contexto fresco un papel que le prohíbe lo que está haciendo. **Lo que se paga hoy** es
+   la mitad barata: el encargo le ordena reescribir `role`, `task` y `next_action` antes de pedir su
+   primer paso, y el fichero reescrito es lo que las compactaciones siguientes reinyectan. **Lo que
+   queda a deber** es la mitad mecánica: que sea el backend quien resiembre el estado por el puerto
+   `workspace` al reanudar, porque un agente puede desobedecer una instrucción y un fichero no. Con
+   ella se cierra además el `last_commit` de la semilla, que se queda en el sha del corte y hace que el
+   hook de `Stop` reclame estado en cuanto `ct-step` comitee la primera tarea.
+5. **Nada mide la línea de cableado del endpoint.** Borrar `implementPlan: new ImplementPlan(...)` de
+   `ct-api.mjs` deja la suite verde, y en producción el `TypeError` sale por la última red como un 400
+   `request failed` — que se lee como «el front manda mal el cuerpo», no como «el endpoint no está
+   cableado». El remedio que pide `testing.md` es sacar el ensamblado del entrypoint hasta que se pueda
+   observar en proceso, como ya se hizo con `invocation.js`; no lo justifica esta feature sola.
+6. **El residuo del 413.** `api-server.js` sigue proyectando el cuerpo demasiado grande con el
    vocabulario de `start-plan-route.js` (`PlanRefusal.of(PlanRequest.tooLarge())`), así que la última
-   red del servidor conoce el modelo de petición de un endpoint concreto — con tres endpoints
-   montados, ya son dos los que no son suyos. `Refusal` ya bajó a `http.js`; esto es lo que quedó.
+   red del servidor conocía el modelo de petición de un endpoint concreto. **Cerrado durante la
+   ejecución**: la proyección vive en `JsonBody` (`http.js`), derivando el tamaño de `MAX_BYTES`, y el
+   vocabulario y la factoría que quedaron inalcanzables salieron de `start-plan-route.js`. Se apuntó
+   como preexistente y no lo era: esta rama **activaba** ese camino para un segundo endpoint.
 
 ## 6. Lo que queda fuera
 
