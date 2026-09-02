@@ -123,6 +123,7 @@ describe('ImplementPlanRoute', () => {
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: 'body must be a JSON object' })
+    expect(RunningApi.spy.asked).toEqual([])
   })
 
   it('a_tool_that_refuses_to_write_in_the_tab_answers_that_trying_again_may_work', async () => {
@@ -151,6 +152,7 @@ describe('ImplementPlanRoute', () => {
     const response = await RunningApi.post(port, RunningApi.ACCEPTED_BODY, { 'Content-Type': 'text/plain' })
 
     expect(response.status).toBe(415)
+    expect(RunningApi.spy.asked).toEqual([])
   })
 
   it('any_method_other_than_post_is_refused_saying_which_one_is_allowed', async () => {
