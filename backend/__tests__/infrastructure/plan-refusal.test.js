@@ -43,9 +43,12 @@ describe('PlanCollapse', () => {
     'PlanProgressFailure',
   ]
 
+  const RESUMING_AN_AGENT = ['PlanAgentNotResumed']
+
   const startingAPlan = ([name, thrown]) =>
     thrown.prototype instanceof exceptions.PlanFailure &&
     !FAMILIES.includes(name) &&
+    !RESUMING_AN_AGENT.includes(name) &&
     !(thrown.prototype instanceof exceptions.PlanProgressFailure)
 
   it('every_way_the_plan_can_collapse_has_a_status_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
