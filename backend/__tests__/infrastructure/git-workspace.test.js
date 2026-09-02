@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { parseStateSafe } from '../../../plugin/scripts/state.js'
+import { buildStateSeed } from '../../../plugin/scripts/kickoff.js'
 import { resolveStatePath } from '../../../plugin/scripts/state-paths.js'
 import { GitWorkspace, SliceSeed } from '../../src/infrastructure/git-workspace.js'
 import {
@@ -136,7 +137,7 @@ describe('GitWorkspace', () => {
 
     await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
 
-    expect(git.written[1][1]).toContain('base: "trunk"')
+    expect(parseStateSafe(git.written[1][1]).meta.base).toBe('trunk')
   })
 
   it('a_remote_that_declares_no_default_branch_stops_before_a_worktree_is_cut_for_nothing', async () => {
@@ -356,7 +357,7 @@ describe('GitWorkspace', () => {
 
     await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
 
-    expect(git.written[1][1]).toContain('base_sha: "a1b2c3d"')
+    expect(parseStateSafe(git.written[1][1]).meta.base_sha).toBe(GitDouble.CUT)
   })
 
   it('a_head_it_cannot_measure_stops_the_seeding_instead_of_writing_a_state_without_a_cut', async () => {
@@ -619,18 +620,22 @@ class SeedFixture {
 
 describe('SliceSeed', () => {
   it('it_says_the_agent_is_the_one_that_writes_the_plan_and_not_the_coordinator', () => {
-    expect(SeedFixture.text()).toContain('role: "slice-agent')
+    expect(parseStateSafe(SeedFixture.text()).meta.role).toMatch(/^slice-agent/)
   })
 
   it('the_cut_travels_as_both_the_base_and_the_last_commit_because_no_work_has_landed_yet', () => {
-    expect(SeedFixture.text()).toContain('base_sha: "a1b2c3d"')
-    expect(SeedFixture.text()).toContain('last_commit: "a1b2c3d"')
+    const { meta } = parseStateSafe(SeedFixture.text())
+
+    expect(meta.base_sha).toBe(SeedFixture.CUT)
+    expect(meta.last_commit).toBe(SeedFixture.CUT)
   })
 
   it('it_names_the_issue_so_an_agent_that_rehydrates_knows_what_it_is_working_on', () => {
-    expect(SeedFixture.text()).toContain('github_issue: 42')
-    expect(SeedFixture.text()).toContain('branch: "feat/42"')
-    expect(SeedFixture.text()).toContain('base: "main"')
+    const { meta } = parseStateSafe(SeedFixture.text())
+
+    expect(meta.github_issue).toBe(42)
+    expect(meta.branch).toBe('feat/42')
+    expect(meta.base).toBe('main')
   })
 
   it('the_exclusion_it_asks_git_for_is_the_very_file_it_writes', () => {
@@ -642,6 +647,28 @@ describe('SliceSeed', () => {
     expect(SliceSeed.EXCLUDE_PATH).toBe('info/exclude')
   })
 })
+
+class PluginSeed {
+  static NOT_OURS = Object.freeze({
+    epic: 'the plan of one issue belongs to no milestone: the epic is groomed, this is not',
+    senal: 'an observability signal is declared by an implementation slice, not by writing a plan',
+    gates: 'the human gates close on the pull request of an implementation, and no plan opens one',
+    e2e: 'a plan walks no end-to-end run: it is written and committed, nothing is exercised',
+    tasks: 'the tasks are what the plan itself declares, so seeding them would prejudge it',
+    verify: 'the verification of a plan is --check-plan, which the errand already names',
+  })
+
+  static keys() {
+    return Object.keys(parseStateSafe(buildStateSeed(
+      { name: 'a slice', issue: '#42', ac: ['does the thing'] },
+      { branch: 'feat/42', base: 'main', baseSha: SeedFixture.CUT }
+    )).meta)
+  }
+
+  static expectedOfUs() {
+    return PluginSeed.keys().filter((key) => !(key in PluginSeed.NOT_OURS))
+  }
+}
 
 describe('what the backend sows is read back by the plugin that has to read it', () => {
   afterEach(() => {
@@ -663,6 +690,31 @@ describe('what the backend sows is read back by the plugin that has to read it',
 
     expect(read.meta.last_commit).toBe(SeedFixture.CUT)
     expect(read.meta.blocked).toBe(null)
+  })
+
+  it('a_branch_carrying_a_quote_is_serialised_instead_of_breaking_the_yaml_the_plugin_has_to_parse', () => {
+    const text = SliceSeed.textFor({
+      issue: { number: 42 }, branch: 'feat/42-"quoted"', base: 'main', cut: SeedFixture.CUT,
+    })
+
+    const read = parseStateSafe(text)
+
+    expect(read.error).toBe(null)
+    expect(read.meta.branch).toBe('feat/42-"quoted"')
+  })
+
+  it('every_field_the_plugins_own_seed_carries_is_carried_here_too_except_the_ones_declared_not_to_apply', () => {
+    const ours = Object.keys(parseStateSafe(SeedFixture.text()).meta)
+
+    expect(PluginSeed.expectedOfUs().filter((key) => !ours.includes(key))).toEqual([])
+  })
+
+  it('the_plan_is_already_under_way_when_this_is_sown_so_it_says_so_where_the_plugin_seeds_not_started', () => {
+    expect(parseStateSafe(SeedFixture.text()).meta.status).toBe('in_progress')
+    expect(parseStateSafe(buildStateSeed(
+      { name: 'a slice', issue: '#42', ac: ['does the thing'] },
+      { branch: 'feat/42', base: 'main', baseSha: SeedFixture.CUT }
+    )).meta.status).toBe('not_started')
   })
 
   it('a_worktree_that_carries_the_seed_is_recognised_by_the_plugin_as_a_slice_and_not_as_a_coordinator', () => {
