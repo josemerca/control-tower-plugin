@@ -174,6 +174,39 @@ Detalles que sí importan:
 
 ---
 
+### 3.6 El aspecto: el design system de logística, vendido a mano
+
+La pantalla sigue el **design system de logística** de Mercadona
+(`staff-design.prod.monline/logistica`, repo `mercadona/mo.staff-design`,
+paquete `@mercadona/mo.library.logistics-ds`). El paquete y su peer
+`mo.library.icons` viven en el Verdaccio privado, que resuelve a una IP interna:
+un desarrollador lo alcanza, un runner de GitHub no, con token o sin él. Hay
+planes de mudar el repo a la organización; hasta entonces **los paquetes no
+entran** y el aspecto se reproduce a mano:
+
+- **El tema, copiado literal.** `src/system-ui/theme/` es una copia de
+  `packages/logistics-ui/src/theme/` (commit `466bfd3`): tokens primitivos y
+  semánticos, radios, tamaños, elevación, layout, Open Sans autoalojada y las
+  clases de tipo `lg-*`. Son ficheros generados con cabecera `READONLY`; no se
+  editan. `VENDORED.md` dice de dónde salen y cómo refrescarlos.
+- **Los componentes, espejo.** `Button`, `Input`, `FormField`, `Banner`,
+  `TopBar` y `Panel` en `src/system-ui/` reproducen la geometría y los tokens de
+  logistics-ui con CSS plano BEM (la skill manda CSS colocado, no módulos). Sus
+  props son un **subconjunto** de las del paquete real: nada que el paquete no
+  tenga, para que el cambio sea un import cuando llegue.
+- **Los cuatro iconos de estado** (`StatusIcons.tsx`) se extrajeron del bundle
+  del propio sitio del design system, con `fill` en `currentColor` para que
+  hereden el color del tipo del banner.
+- **El scope.** Los tokens viven bajo `[data-ds='logistics']` y el modo oscuro
+  bajo `[data-theme='dark']`; los dos atributos van en el `<html>`, y
+  `Theme.followSystemPreference()` fija `data-theme` desde
+  `prefers-color-scheme` y lo sigue si cambia con la página abierta.
+- **La página**, como el DS prescribe para una aplicación de un solo destino:
+  `TopBar` con el nombre del producto y sin menú lateral, contenido centrado a
+  `--layout-container-sm` (640 px), y un `Panel` con el `h1` de la pantalla
+  envolviendo el formulario. El resultado es un `Banner` `success` (rol
+  `status`) o `error` (rol `alert`, con el texto del backend tal cual).
+
 ## 4. El cliente
 
 ```ts
@@ -232,9 +265,10 @@ Un cuarto job `frontend` en `continuous-integration.yml`, simétrico al de
 - **El siguiente endpoint.** Cuando exista, su pantalla o componente entra en
   `src/app/<feature>/` con la misma estructura, y `Home` compone. Si dos
   features necesitan compartir estado, entonces —y no antes— se decide cómo.
-- **Las librerías de la casa y Unleash** (§3.1), cuando exista el secret del
-  registry en CI. Entran juntas en un slice: `services/http`, el sistema de
-  diseño en los componentes, y `services/feature-flags/constants.ts`.
+- **Las librerías de la casa y Unleash** (§3.1), cuando el repo se mude a la
+  organización y CI alcance el Verdaccio. Entran juntas en un slice:
+  `services/http`, `@mercadona/mo.library.logistics-ds` en lugar de
+  `src/system-ui/` (§3.6), y `services/feature-flags/constants.ts`.
 - **Instalación para el desarrollador: resuelta con el `Makefile` de la raíz.**
   `make run-frontend` instala y construye el front y arranca el backend
   sirviéndolo; `make dev-frontend` levanta Vite con el proxy de §5. Lo que queda es que existan los
@@ -244,7 +278,6 @@ Un cuarto job `frontend` en `continuous-integration.yml`, simétrico al de
 
 ## 8. Lo que este diseño no hace, a propósito
 
-- No elige librería de componentes ni sistema de diseño hoy (§3.1, §7).
 - No añade routing. Una página.
 - No persiste nada en el navegador.
 - No toca `backend/` ni `plugin/`.

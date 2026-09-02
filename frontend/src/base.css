@@ -1,0 +1,11 @@
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font-family-opensans), sans-serif;
+  color: var(--foreground-primary);
+  background-color: var(--background-primary);
+}

@@ -22,6 +22,21 @@ un campo para la clave del ticket, un botón, y el resultado de `POST /start-pla
 - **El cliente es `fetch` sin envoltorio** (`src/app/start-plan/client.ts`).
   Las librerías de la casa esperan a que CI tenga acceso al registry privado.
 
+## El aspecto: design system de logística
+
+La pantalla sigue el design system de logística (`mercadona/mo.staff-design`).
+El paquete real vive en el Verdaccio privado y CI no lo alcanza, así que hasta
+que el repo se mude a la organización:
+
+- `src/system-ui/theme/` es una **copia literal** del tema del paquete (tokens,
+  Open Sans, clases `lg-*`). No se edita; `VENDORED.md` dice cómo refrescarlo.
+- `src/system-ui/{button,input,form-field,banner,top-bar,panel}` son
+  **espejos** de los componentes de `logistics-ui`, con sus mismos tokens y un
+  subconjunto de sus props. El día que entre el paquete, cambia el import.
+- Los tokens viven bajo `[data-ds='logistics']`; el `<html>` lleva ese
+  atributo y `data-theme`, que `Theme.followSystemPreference()` fija desde la
+  preferencia del sistema (claro u oscuro) y sigue si cambia.
+
 ## Desarrollo
 
 ```bash

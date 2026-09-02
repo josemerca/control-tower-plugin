@@ -1,0 +1,30 @@
+/* The logistics Design System stylesheet: every token plus the type classes.
+   This is the package's single style entry point.
+
+   All logistics tokens are scoped under [data-ds='logistics'], which the
+   consumer must set on an ancestor, so they never leak into or collide with
+   design-system globals declared in :root — see the README for what that costs.
+   The type classes carry the same scope, which makes them 0-2-0 and gives them
+   the specificity gotcha their own header explains.
+
+   Every file imported here is GENERATED from src/theme/source/ and carries a
+   READONLY header; `npm run generate:tokens` rewrites them, and a guard test in
+   the package fails if a source changed without regenerating. The Tokens Studio
+   export is where most of the values came from and where a change to them comes
+   from, but importing it is a merge into the source, not an overwrite.
+
+   The typeface ships here too: `fonts/fonts.css` declares `@font-face` for
+   the self-hosted Open Sans woff2.
+
+   Chrome tokens (--ds-*) are deliberately absent: they are the skin of the
+   Design System Studio, not brand tokens, and stay in the app. */
+
+@import url('./tokens/primitives-color.css');
+@import url('./tokens/semantic-color.css');
+@import url('./tokens/radius.css');
+@import url('./tokens/size.css');
+@import url('./tokens/layout.css');
+@import url('./tokens/elevation.css');
+@import url('./tokens/typography.css');
+@import url('./fonts/fonts.css');
+@import url('./utility-classes/typography.css');
