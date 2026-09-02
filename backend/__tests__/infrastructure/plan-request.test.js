@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { PlanRequest, PlanRequestOutcome } from '../../src/infrastructure/plan-request.js'
+import { PlanRequest, PlanRequestOutcome } from '../../src/infrastructure/start-plan-route.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 
