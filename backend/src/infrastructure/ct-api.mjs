@@ -146,7 +146,6 @@ class CtApi {
         node: CtApi.#tool(process.execPath),
         git,
         dispatchCheck: PluginTree.dispatchCheck(),
-        stderr: (line) => process.stderr.write(line),
       }),
     })
 

@@ -6,12 +6,11 @@ export class PlanContractProgress extends PlanProgress {
   static PLANS = 'docs/superpowers/plans'
   static CONTRACT_UNMET = 6
 
-  constructor({ node, git, dispatchCheck, stderr = (line) => process.stderr.write(line) }) {
+  constructor({ node, git, dispatchCheck }) {
     super()
     this.node = node
     this.git = git
     this.dispatchCheck = dispatchCheck
-    this.stderr = stderr
   }
 
   static contractArgvFor({ dispatchCheck, issue, repository }) {
@@ -27,10 +26,7 @@ export class PlanContractProgress extends PlanProgress {
       PlanContractProgress.contractArgvFor({ dispatchCheck: this.dispatchCheck, issue, repository }),
       { cwd: located.path }
     )
-    if (validated.code === PlanContractProgress.CONTRACT_UNMET) {
-      this.#trace('dispatch-check', validated.stderr)
-      return PlanState.WRITING
-    }
+    if (validated.code === PlanContractProgress.CONTRACT_UNMET) return PlanState.WRITING
     if (validated.failed) {
       throw new PlanProgressNotRead(
         `dispatch-check --check-plan could not be asked in ${located.path}, it exited ${validated.code}: ${validated.stderr.trim()}`
@@ -45,9 +41,5 @@ export class PlanContractProgress extends PlanProgress {
     if (pending.stdout.trim().length > 0) return PlanState.WRITING
 
     return PlanState.READY
-  }
-
-  #trace(bin, detail) {
-    this.stderr(`plan progress: ${bin} failed: ${detail.trim()}\n`)
   }
 }
