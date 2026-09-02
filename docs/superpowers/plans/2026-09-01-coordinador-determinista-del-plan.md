@@ -2108,30 +2108,19 @@ git commit -m "feat(events): el frontend se entera de que el plan está hecho si
 
 ---
 
-## Residuo del repaso final — dos cosas pendientes antes de mergear
+## Residuo del repaso final — RESUELTO
 
-La re-revisión de la ola de arreglo cerró los doce hallazgos, pero encontró dos que la propia ola abrió. Se
-dejan aquí escritas porque son pequeñas, están diagnosticadas y la persona decide cuándo entran.
+La re-revisión de la ola de arreglo cerró los doce hallazgos y encontró dos que la propia ola había abierto.
+Los dos están arreglados (commits `63c0c5b`, `95b4aa3`, `f9377f5`, `04a1e93`, `597208b`, `db29d60`):
 
-1. **`GitWorkspace.undo` no le dice a git dónde correr, y una de sus dos órdenes es destructiva.**
-   `removeArgvFor` y `deleteBranchArgvFor` no llevan `-C`, a diferencia de todos los demás constructores de
-   argv de esa clase. `undo` queda a merced del directorio de trabajo del invocable `run`. Si la composición
-   aterriza con un runner sobre `process.cwd()` —que es el patrón que `ct-api.mjs` ya usa para `cmux`—
-   `git branch -D feat/<n>` se ejecuta en el repositorio que haya debajo y borra allí una rama con ese nombre.
-   Y `StartPlan` se traga el fallo de la limpieza sin traza, así que no habría ni aviso. Son dos líneas.
-   **No es alcanzable hoy** (nada construye `GitWorkspace` fuera de los tests), pero se vuelve alcanzable en el
-   mismo acto que cablea la composición de la sección siguiente.
-
-2. **`prepare()` sigue dejando el worktree tras de sí.** La compensación sólo envuelve `planSession.start`,
-   pero el arreglo del crítico añadió dos puntos de fallo nuevos DESPUÉS de crear el worktree (los dos de
-   `#verifyHidden`), además de los dos que ya había. Se llega al mismo síntoma que la compensación existía para
-   cerrar: worktree y rama vivos, segundo intento del mismo issue imposible. Y en el caso de `#verifyHidden` es
-   peor, porque el `SLICE.md` ya se escribió: queda un worktree huérfano con el fichero visible para git.
-
-Menores del mismo repaso, sin urgencia: el `.catch(() => {})` de la compensación no cubre un `undo` ausente
-(un `TypeError` síncrono sustituiría al fallo original); la limpieza que falla no deja traza, justo lo que esta
-misma ola arregló para el predicado; y `PlanContractProgress` escribe a `process.stderr` sin inyectar, lo que
-ensucia la salida de dos tests.
+- **`undo()` ya le dice a git dónde correr.** `removeArgvFor` y `deleteBranchArgvFor` llevan `-C root`, como el
+  resto de constructores de argv de la clase. Cerraba un `git branch -D` que podía correr en el repositorio
+  equivocado, destructivo y silencioso.
+- **`prepare()` compensa lo que creó.** Si algo falla después del corte —`#commonDirOf`, `#cutOf` o cualquiera
+  de los dos caminos de `#verifyHidden`— deshace worktree y rama y relanza el fallo original.
+- Y de propina, los tres sitios que descubren un fallo de limpieza cuentan lo mismo de la misma forma: el
+  escritor de diagnóstico se inyecta en `GitWorkspace` igual que en `PlanContractProgress`, `undo` se cuenta a
+  sí mismo, y la capa de aplicación quedó **sin entrada/salida** — con un test que lo clava.
 
 ## Después del merge: la composición
 
