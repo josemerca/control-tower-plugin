@@ -35,7 +35,7 @@ describe('every file under backend keeps being born conforming', () => {
   const measured = Subjects.measured()
 
   it('the_guard_finds_its_subjects_by_walking_so_a_new_file_is_covered_without_anyone_listing_it', () => {
-    expect(measured).toContain(join('src', 'domain', 'ticket-key.js'))
+    expect(measured).toContain(join('src', 'domain', 'value-objects', 'user-story-key.js'))
     expect(measured).toContain(join('src', 'application', 'actions', 'start-plan.js'))
     expect(measured).toContain(join('src', 'infrastructure', 'api-server.js'))
     expect(measured).toContain(join('__tests__', 'yardstick.test.js'))

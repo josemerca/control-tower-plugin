@@ -1,16 +1,33 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { connect } from 'node:net'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { StartPlanResult } from '../../src/application/actions/start-plan.js'
-import { PlanSessionNotStarted } from '../../src/domain/exceptions.js'
+import {
+  PlanAgentNotLaunched, UserStoryNotRead, PlanIssueNotCreated, PlanIssueNotNamed,
+} from '../../src/domain/exceptions.js'
+import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 
 class StartPlanSpy {
-  static SESSION = 'workspace:4'
+  static AGENT = 'workspace:4'
+  static ISSUE = new PlanIssue({ number: 7, url: 'https://github.com/owner/name/issues/7' })
 
   constructor({ failing = false } = {}) {
     this.asked = []
+    this.repositories = []
     this.failing = failing
+  }
+
+  static failingWith(cause) {
+    const spy = new StartPlanSpy()
+    spy.execute = async () => {
+      throw cause
+    }
+
+    return spy
   }
 
   static buggy() {
@@ -23,20 +40,41 @@ class StartPlanSpy {
   }
 
   async execute(params) {
-    this.asked.push(params.ticket.text)
-    if (this.failing) throw new PlanSessionNotStarted('cmux is not reachable')
-    return new StartPlanResult({ session: StartPlanSpy.SESSION })
+    this.asked.push(params.story.text)
+    this.repositories.push(params.repository.text)
+    if (this.failing) throw new PlanAgentNotLaunched('cmux is not reachable')
+    return new StartPlanResult({ issue: StartPlanSpy.ISSUE, agent: StartPlanSpy.AGENT })
+  }
+}
+
+class FrontendFixture {
+  static INDEX = '<!doctype html><title>control tower</title>'
+
+  static built() {
+    const root = mkdtempSync(join(tmpdir(), 'ct-frontend-'))
+    writeFileSync(join(root, 'index.html'), FrontendFixture.INDEX)
+
+    return root
+  }
+
+  static missing() {
+    return join(tmpdir(), 'ct-frontend-never-built')
   }
 }
 
 class RunningApi {
   static #started = []
-  static TICKET = 'ABC-123'
+  static STORY = 'ABC-123'
+  static REPO = 'owner/name'
+  static ACCEPTED_BODY = `{"id":"ABC-123","repo":"owner/name"}`
+  static ANSWER =
+    '{"status":"started","id":"ABC-123","repo":"owner/name",' +
+    '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"agent":"workspace:4"}'
   static spy = null
 
-  static async listening() {
+  static async listening(options = {}) {
     RunningApi.spy = new StartPlanSpy()
-    const server = new ApiServer({ port: 0, startPlan: RunningApi.spy })
+    const server = new ApiServer({ port: 0, startPlan: RunningApi.spy, ...options })
     const port = await server.start()
     RunningApi.#started.push(server)
     return port
@@ -60,7 +98,7 @@ class RunningApi {
   }
 
   static async accepted(port) {
-    return RunningApi.startPlan(port, `{"id":"${RunningApi.TICKET}"}`)
+    return RunningApi.startPlan(port, RunningApi.ACCEPTED_BODY)
   }
 
   static ask(port, lines) {
@@ -74,8 +112,8 @@ class RunningApi {
     })
   }
 
-  static asking(path, headers, body) {
-    const written = [`POST ${path} HTTP/1.1`, 'Host: 127.0.0.1', 'Connection: close', ...headers]
+  static asking(path, headers, body, host = '127.0.0.1') {
+    const written = [`POST ${path} HTTP/1.1`, `Host: ${host}`, 'Connection: close', ...headers]
     if (body !== undefined) written.push(`Content-Length: ${Buffer.byteLength(body)}`)
 
     return `${written.join('\r\n')}\r\n\r\n${body ?? ''}`
@@ -123,17 +161,17 @@ describe('ApiServer', () => {
     }
   })
 
-  it('start_plan_accepts_and_answers_with_the_process_it_started_rather_than_waiting_for_it', async () => {
+  it('start_plan_accepts_and_answers_with_the_agent_it_launched_rather_than_waiting_for_it', async () => {
     const port = await RunningApi.listening()
 
     const response = await RunningApi.accepted(port)
 
     expect(response.status).toBe(202)
     expect(response.headers.get('content-type')).toBe('application/json')
-    expect(await response.text()).toBe('{"status":"started","id":"ABC-123","session":"workspace:4"}')
+    expect(await response.text()).toBe(RunningApi.ANSWER)
   })
 
-  it('a_session_that_cannot_be_started_is_reported_as_such_instead_of_a_generic_failure', async () => {
+  it('an_agent_that_cannot_be_launched_is_reported_as_such_instead_of_a_generic_failure', async () => {
     RunningApi.spy = new StartPlanSpy({ failing: true })
     const server = new ApiServer({ port: 0, startPlan: RunningApi.spy })
     const port = await server.start()
@@ -143,8 +181,42 @@ describe('ApiServer', () => {
 
       expect(response.status).toBe(503)
       expect(await response.text()).toBe(
-        '{"error":"could not start the plan session: cmux is not reachable"}'
+        '{"error":"could not start the plan: cmux is not reachable"}'
       )
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('a_story_that_cannot_be_read_and_an_issue_that_cannot_be_created_are_refusals_too', async () => {
+    const causes = [new UserStoryNotRead('acli is not authenticated'), new PlanIssueNotCreated('label not found')]
+
+    for (const cause of causes) {
+      const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.failingWith(cause) })
+      const port = await server.start()
+
+      try {
+        const response = await RunningApi.accepted(port)
+
+        expect(response.status).toBe(503)
+        expect(await response.text()).toBe(`{"error":"could not start the plan: ${cause.message}"}`)
+      } finally {
+        await server.stop()
+      }
+    }
+  })
+
+  it('a_tool_that_answered_something_unreadable_is_not_offered_as_something_to_retry', async () => {
+    const server = new ApiServer({
+      port: 0, startPlan: StartPlanSpy.failingWith(new PlanIssueNotNamed('gh printed "done"')),
+    })
+    const port = await server.start()
+
+    try {
+      const response = await RunningApi.accepted(port)
+
+      expect(response.status).toBe(502)
+      expect(await response.text()).toBe('{"error":"could not start the plan: gh printed \\"done\\""}')
     } finally {
       await server.stop()
     }
@@ -183,19 +255,19 @@ describe('ApiServer', () => {
     }
   })
 
-  it('the_id_that_reaches_the_session_is_the_one_the_body_carried_and_not_a_default', async () => {
+  it('the_id_that_reaches_the_agent_is_the_one_the_body_carried_and_not_a_default', async () => {
     const port = await RunningApi.listening()
 
-    const response = await RunningApi.post(port, '/start-plan', '{"id":"MO_SHOP-42"}')
+    const response = await RunningApi.post(port, '/start-plan', '{"id":"MO_SHOP-42","repo":"owner/name"}')
 
     expect(RunningApi.spy.asked).toEqual(['MO_SHOP-42'])
-    expect(await response.text()).toBe('{"status":"started","id":"MO_SHOP-42","session":"workspace:4"}')
+    expect(await response.text()).toBe(RunningApi.ANSWER.replace('ABC-123', 'MO_SHOP-42'))
   })
 
   it('a_refused_request_never_starts_a_process', async () => {
     const port = await RunningApi.listening()
 
-    await RunningApi.startPlan(port, '{"id":"nope"}')
+    await RunningApi.startPlan(port, '{"id":"nope","repo":"owner/name"}')
 
     expect(RunningApi.spy.asked).toEqual([])
   })
@@ -203,8 +275,8 @@ describe('ApiServer', () => {
   it('trailing_slashes_do_not_change_the_route_however_many_of_them_are_written', async () => {
     const port = await RunningApi.listening()
 
-    const one = await RunningApi.post(port, '/start-plan/', `{"id":"${RunningApi.TICKET}"}`)
-    const two = await RunningApi.post(port, '/start-plan//', `{"id":"${RunningApi.TICKET}"}`)
+    const one = await RunningApi.post(port, '/start-plan/', RunningApi.ACCEPTED_BODY)
+    const two = await RunningApi.post(port, '/start-plan//', RunningApi.ACCEPTED_BODY)
 
     expect([one.status, two.status]).toEqual([202, 202])
   })
@@ -212,7 +284,7 @@ describe('ApiServer', () => {
   it('a_query_string_does_not_hide_the_route_because_routing_reads_the_path_and_not_the_raw_url', async () => {
     const port = await RunningApi.listening()
 
-    const response = await RunningApi.post(port, '/start-plan?from=ui', `{"id":"${RunningApi.TICKET}"}`)
+    const response = await RunningApi.post(port, '/start-plan?from=ui', RunningApi.ACCEPTED_BODY)
 
     expect(response.status).toBe(202)
   })
@@ -229,26 +301,109 @@ describe('ApiServer', () => {
   it('an_unknown_route_is_rejected_instead_of_answering_ok_to_anything', async () => {
     const port = await RunningApi.listening()
 
-    const response = await RunningApi.post(port, '/whatever', `{"id":"${RunningApi.TICKET}"}`)
+    const response = await RunningApi.post(port, '/whatever', RunningApi.ACCEPTED_BODY)
 
     expect(response.status).toBe(404)
     expect(await response.text()).toBe('{"error":"not found"}')
   })
 
-  it('a_request_carrying_an_origin_is_refused_because_only_a_browser_sends_one', async () => {
+  it('a_request_from_a_foreign_page_is_refused_because_any_site_can_post_to_localhost', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, RunningApi.ACCEPTED_BODY, {
+      Origin: 'https://evil.example',
+    })
+
+    expect(response.status).toBe(403)
+    expect(await response.text()).toBe('{"error":"this api only serves the page it hosts"}')
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
+  it('a_request_from_the_page_this_server_hosts_is_accepted_because_that_page_is_the_frontend', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, RunningApi.ACCEPTED_BODY, {
+      Origin: `http://127.0.0.1:${port}`,
+    })
+
+    expect(response.status).toBe(202)
+  })
+
+  it('the_page_opened_as_localhost_is_still_our_own_because_the_host_header_says_so_too', async () => {
+    const port = await RunningApi.listening()
+
+    const said = await RunningApi.ask(
+      port,
+      RunningApi.asking(
+        '/start-plan',
+        [`Origin: http://localhost:${port}`, 'Content-Type: application/json'],
+        RunningApi.ACCEPTED_BODY,
+        `localhost:${port}`
+      )
+    )
+
+    expect(said).toContain('202')
+  })
+
+  it('a_host_that_is_not_loopback_does_not_vouch_for_its_origin_because_dns_can_point_any_name_here', async () => {
+    const port = await RunningApi.listening()
+
+    const said = await RunningApi.ask(
+      port,
+      RunningApi.asking(
+        '/start-plan',
+        [`Origin: http://rebound.example:${port}`, 'Content-Type: application/json'],
+        `{"id":"${RunningApi.TICKET}"}`,
+        `rebound.example:${port}`
+      )
+    )
+
+    expect(said).toContain('403')
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
+  it('an_origin_on_another_port_of_loopback_is_foreign_because_another_local_server_is_another_site', async () => {
     const port = await RunningApi.listening()
 
     const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.TICKET}"}`, {
-      Origin: 'https://evil.example',
+      Origin: `http://127.0.0.1:${port + 1}`,
     })
 
     expect(response.status).toBe(403)
   })
 
+  it('the_frontend_build_is_served_from_the_root_so_page_and_api_share_one_origin', async () => {
+    const root = FrontendFixture.built()
+    const port = await RunningApi.listening({ frontendRoot: root })
+
+    const response = await fetch(`http://127.0.0.1:${port}/`)
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe(FrontendFixture.INDEX)
+  })
+
+  it('a_frontend_root_that_does_not_exist_yet_leaves_the_api_up_instead_of_refusing_to_start', async () => {
+    const port = await RunningApi.listening({ frontendRoot: FrontendFixture.missing() })
+
+    const page = await fetch(`http://127.0.0.1:${port}/`)
+    const api = await RunningApi.accepted(port)
+
+    expect(page.status).toBe(404)
+    expect(api.status).toBe(202)
+  })
+
+  it('serving_pages_does_not_open_start_plan_to_a_get_because_static_files_fall_through_to_the_routes', async () => {
+    const port = await RunningApi.listening({ frontendRoot: FrontendFixture.built() })
+
+    const response = await fetch(`http://127.0.0.1:${port}/start-plan`)
+
+    expect(response.status).toBe(405)
+  })
+
   it('a_body_not_declared_as_json_is_refused_so_a_page_cannot_reach_this_without_a_preflight', async () => {
     const port = await RunningApi.listening()
 
-    const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.TICKET}"}`, {
+    const response = await RunningApi.startPlan(port, RunningApi.ACCEPTED_BODY, {
       'Content-Type': 'text/plain',
     })
 
@@ -258,7 +413,7 @@ describe('ApiServer', () => {
   it('a_charset_on_the_content_type_is_still_json_because_clients_add_one_unasked', async () => {
     const port = await RunningApi.listening()
 
-    const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.TICKET}"}`, {
+    const response = await RunningApi.startPlan(port, RunningApi.ACCEPTED_BODY, {
       'Content-Type': 'application/json; charset=utf-8',
     })
 
@@ -292,10 +447,10 @@ describe('ApiServer', () => {
     const response = await RunningApi.startPlan(port, '{}')
 
     expect(response.status).toBe(400)
-    expect(await response.text()).toBe('{"error":"id must be a ticket key such as ABC-123"}')
+    expect(await response.text()).toBe('{"error":"id must be a user story key such as ABC-123"}')
   })
 
-  it('an_id_that_is_not_shaped_like_a_ticket_key_is_refused_before_it_ever_becomes_a_branch_name', async () => {
+  it('an_id_that_is_not_shaped_like_a_story_key_is_refused_before_it_ever_becomes_a_branch_name', async () => {
     const port = await RunningApi.listening()
 
     const refused = await Promise.all(
@@ -317,16 +472,52 @@ describe('ApiServer', () => {
   it('an_unknown_field_is_refused_because_it_means_the_other_side_changed_shape', async () => {
     const port = await RunningApi.listening()
 
-    const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.TICKET}","priority":"high"}`)
+    const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.STORY}","repo":"owner/name","priority":"high"}`)
 
     expect(response.status).toBe(400)
     expect(await response.text()).toBe('{"error":"unknown field: priority"}')
   })
 
+  it('the_repository_the_body_names_is_the_one_the_use_case_is_asked_to_open_the_issue_in', async () => {
+    const port = await RunningApi.listening()
+
+    await RunningApi.post(port, '/start-plan', '{"id":"ABC-123","repo":"josemerca/ct-loop-sandbox"}')
+
+    expect(RunningApi.spy.repositories).toEqual(['josemerca/ct-loop-sandbox'])
+  })
+
+  it('a_body_with_no_repo_is_refused_because_an_issue_has_to_be_opened_somewhere', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.STORY}"}`)
+
+    expect(response.status).toBe(400)
+    expect(await response.text()).toBe('{"error":"repo must be a repository such as owner/name"}')
+  })
+
+  it('a_repo_that_is_not_shaped_like_one_is_refused_before_it_ever_becomes_an_argument_of_gh', async () => {
+    const port = await RunningApi.listening()
+
+    const refused = await Promise.all(
+      [
+        '{"id":"ABC-123","repo":"name"}',
+        '{"id":"ABC-123","repo":"owner/name/extra"}',
+        '{"id":"ABC-123","repo":"-o/name"}',
+        '{"id":"ABC-123","repo":"owner/../../etc"}',
+        '{"id":"ABC-123","repo":"owner/name rm -rf"}',
+        '{"id":"ABC-123","repo":""}',
+        '{"id":"ABC-123","repo":123}',
+      ].map((body) => RunningApi.startPlan(port, body))
+    )
+
+    expect(refused.map((response) => response.status)).toEqual(Array(7).fill(400))
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
   it('a_body_over_the_cap_is_refused_instead_of_being_buffered_whole', async () => {
     const port = await RunningApi.listening()
 
-    const response = await RunningApi.startPlan(port, `{"id":"${'A'.repeat(9000)}"}`)
+    const response = await RunningApi.startPlan(port, `{"id":"${'A'.repeat(9000)}","repo":"owner/name"}`)
 
     expect(response.status).toBe(413)
   })
@@ -334,7 +525,7 @@ describe('ApiServer', () => {
   it('the_route_is_one_exact_name_and_not_the_thousand_aliases_a_case_blind_router_answers_to', async () => {
     const port = await RunningApi.listening()
 
-    const response = await RunningApi.post(port, '/START-PLAN', `{"id":"${RunningApi.TICKET}"}`)
+    const response = await RunningApi.post(port, '/START-PLAN', `{"id":"${RunningApi.STORY}"}`)
 
     expect(response.status).toBe(404)
     expect(RunningApi.spy.asked).toEqual([])
@@ -346,7 +537,7 @@ describe('ApiServer', () => {
     const response = await fetch(`http://127.0.0.1:${port}/start-plan`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' },
-      body: gzipSync(Buffer.from(`{"id":"${RunningApi.TICKET}"}`)),
+      body: gzipSync(Buffer.from(`{"id":"${RunningApi.STORY}"}`)),
     })
 
     expect(response.status).toBe(400)
@@ -381,7 +572,7 @@ describe('ApiServer', () => {
     const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
 
     try {
-      await RunningApi.post(port, '/start-plan//', `{"id":"${RunningApi.TICKET}"}`)
+      await RunningApi.post(port, '/start-plan//', RunningApi.ACCEPTED_BODY)
 
       expect(complaining.mock.calls.map(([line]) => line).join('')).toContain('request to /start-plan// failed')
     } finally {
@@ -392,7 +583,7 @@ describe('ApiServer', () => {
 
   it('a_path_that_climbs_out_and_back_in_is_not_the_route_however_a_client_writes_it', async () => {
     const port = await RunningApi.listening()
-    const body = `{"id":"${RunningApi.TICKET}"}`
+    const body = `{"id":"${RunningApi.STORY}"}`
 
     const climbed = await RunningApi.ask(
       port,
