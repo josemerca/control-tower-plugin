@@ -36,14 +36,15 @@ export class SliceSeed {
 export class GitWorkspace extends Workspace {
   static BIN = 'git'
   static DIRECTORY = '.worktrees'
+  static REMOTE_HEAD = 'refs/remotes/origin/HEAD'
+  static #DECLARED = /^refs\/remotes\/origin\/(.+)$/
 
-  constructor({ run, write, read, root, base, stderr = (line) => process.stderr.write(line) }) {
+  constructor({ run, write, read, root, stderr = (line) => process.stderr.write(line) }) {
     super()
     this.run = run
     this.write = write
     this.read = read
     this.root = root
-    this.base = base
     this.stderr = stderr
   }
 
@@ -63,6 +64,10 @@ export class GitWorkspace extends Workspace {
       GitWorkspace.pathFor(root, issue),
       `origin/${base}`,
     ]
+  }
+
+  static defaultBranchArgvFor(root) {
+    return ['-C', root, 'symbolic-ref', GitWorkspace.REMOTE_HEAD]
   }
 
   static cutArgvFor(path) {
@@ -86,18 +91,36 @@ export class GitWorkspace extends Workspace {
   }
 
   async prepare(issue) {
+    const base = await this.#declaredBase()
     const path = GitWorkspace.pathFor(this.root, issue)
     const branch = GitWorkspace.branchFor(issue)
-    await this.#cut(issue)
+    await this.#cut(issue, base)
     const located = new WorkspaceLocation({ path, branch })
     try {
-      await this.#seed(located, issue)
+      await this.#seed(located, issue, base)
     } catch (failure) {
       await this.#compensate(located)
       throw failure
     }
 
     return located
+  }
+
+  async #declaredBase() {
+    const asked = await this.run(GitWorkspace.defaultBranchArgvFor(this.root))
+    if (asked.failed) {
+      throw new WorkspaceNotPrepared(
+        `the remote of ${this.root} does not declare a default branch, so there is no base to cut from: ${asked.stderr.trim()}`
+      )
+    }
+    const declared = asked.stdout.trim().match(GitWorkspace.#DECLARED)
+    if (declared === null) {
+      throw new WorkspaceNotPrepared(
+        `the remote does not declare a default branch under ${GitWorkspace.REMOTE_HEAD}, git printed ${JSON.stringify(asked.stdout)}`
+      )
+    }
+
+    return declared[1]
   }
 
   async undo(located) {
@@ -122,20 +145,20 @@ export class GitWorkspace extends Workspace {
     } catch {}
   }
 
-  async #cut(issue) {
-    const argv = GitWorkspace.argvFor({ root: this.root, base: this.base, issue })
+  async #cut(issue, base) {
+    const argv = GitWorkspace.argvFor({ root: this.root, base, issue })
     const output = await this.run(argv)
     if (output.failed) {
       throw new WorkspaceNotPrepared(`${GitWorkspace.BIN} worktree add failed: ${output.stderr.trim()}`)
     }
   }
 
-  async #seed(located, issue) {
+  async #seed(located, issue, base) {
     await this.#exclude(located)
     const cut = await this.#cutOf(located)
     await this.write(
       `${located.path}/${SliceSeed.RELATIVE_PATH}`,
-      SliceSeed.textFor({ issue, branch: located.branch, base: this.base, cut })
+      SliceSeed.textFor({ issue, branch: located.branch, base, cut })
     )
     await this.#verifyHidden(located)
   }

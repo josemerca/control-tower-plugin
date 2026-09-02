@@ -77,7 +77,6 @@ class CtApi {
   static #RESENDS = 1
   static #SECONDS_BETWEEN_PROBES = 1
   static #SECONDS_BETWEEN_READS = 2
-  static #BASE_BRANCH = 'main'
   static #LAUNCH_DIRECTORY = 'ct-plan'
 
   static #refuseUsage(reason) {
@@ -121,7 +120,6 @@ class CtApi {
         write: Disk.write,
         read: Disk.read,
         root: process.cwd(),
-        base: CtApi.#BASE_BRANCH,
         stderr: (line) => process.stderr.write(line),
       }),
       planAgents: new CmuxPlanAgents({

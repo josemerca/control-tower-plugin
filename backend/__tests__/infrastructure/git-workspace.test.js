@@ -11,16 +11,18 @@ import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-loca
 class GitDouble {
   static ROOT = '/repo/checkout'
   static BASE = 'main'
+  static DECLARED = `refs/remotes/origin/${GitDouble.BASE}\n`
   static CUT = 'a1b2c3d'
   static COMMON_DIR = '/repo/checkout/.git'
   static WORKTREE = '/repo/checkout/.worktrees/42'
   static EXCLUDE_PATH = `${GitDouble.COMMON_DIR}/info/exclude`
 
-  constructor({ answer, status, existingExclude = null, commonDir } = {}) {
+  constructor({ answer, status, existingExclude = null, commonDir, declared } = {}) {
     this.answer = answer ?? GitDouble.ok()
     this.status = status ?? GitDouble.clean()
     this.existingExclude = existingExclude
     this.commonDir = commonDir ?? GitDouble.COMMON_DIR
+    this.declared = declared ?? GitDouble.declaring()
     this.calls = []
     this.written = []
     this.reads = []
@@ -30,7 +32,6 @@ class GitDouble {
   workspace() {
     return new GitWorkspace({
       root: GitDouble.ROOT,
-      base: GitDouble.BASE,
       read: (path) => {
         this.reads.push(path)
         return Promise.resolve(this.existingExclude)
@@ -41,6 +42,9 @@ class GitDouble {
       },
       run: (argv) => {
         this.calls.push(argv)
+        if (argv.includes('symbolic-ref')) {
+          return Promise.resolve(this.declared)
+        }
         if (argv.includes('--git-common-dir')) {
           return Promise.resolve({ failed: false, stdout: `${this.commonDir}\n`, stderr: '' })
         }
@@ -62,6 +66,14 @@ class GitDouble {
     return { failed: false, stdout: '', stderr: '' }
   }
 
+  static declaring(stdout = GitDouble.DECLARED) {
+    return { failed: false, stdout, stderr: '' }
+  }
+
+  static declaringNothing(argv) {
+    return argv.includes('symbolic-ref') ? GitDouble.declaring() : null
+  }
+
   static refused(stderr) {
     return { failed: true, stdout: '', stderr }
   }
@@ -81,13 +93,52 @@ describe('GitWorkspace', () => {
 
     await git.workspace().prepare({ number: 42 })
 
-    expect(git.calls[0]).toEqual([
+    expect(git.calls[1]).toEqual([
       '-C', '/repo/checkout',
       'worktree', 'add',
       '-b', 'feat/42',
       '/repo/checkout/.worktrees/42',
       'origin/main',
     ])
+  })
+
+  it('the_base_it_cuts_from_is_the_one_the_remote_declares_and_never_a_name_the_backend_assumed', async () => {
+    const git = new GitDouble({ declared: GitDouble.declaring('refs/remotes/origin/trunk\n') })
+
+    await git.workspace().prepare({ number: 42 })
+
+    expect(git.calls[0]).toEqual(['-C', GitDouble.ROOT, 'symbolic-ref', 'refs/remotes/origin/HEAD'])
+    expect(git.calls[1].at(-1)).toBe('origin/trunk')
+  })
+
+  it('the_base_the_remote_declares_is_the_one_the_seed_records_so_a_rehydrated_agent_reads_the_truth', async () => {
+    const git = new GitDouble({ declared: GitDouble.declaring('refs/remotes/origin/trunk\n') })
+
+    await git.workspace().prepare({ number: 42 })
+
+    expect(git.written[1][1]).toContain('base: "trunk"')
+  })
+
+  it('a_remote_that_declares_no_default_branch_stops_before_a_worktree_is_cut_for_nothing', async () => {
+    const git = new GitDouble({
+      declared: GitDouble.refused('fatal: ref refs/remotes/origin/HEAD is not a symbolic ref'),
+    })
+
+    const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(refusal.message).toContain('does not declare a default branch')
+    expect(git.calls.some((argv) => argv.includes('worktree'))).toBe(false)
+  })
+
+  it('git_answering_something_that_is_not_a_remote_head_is_not_guessed_into_a_branch_name', async () => {
+    const git = new GitDouble({ declared: GitDouble.declaring('refs/heads/main\n') })
+
+    const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(refusal.message).toContain('refs/remotes/origin/HEAD')
+    expect(git.calls.some((argv) => argv.includes('worktree'))).toBe(false)
   })
 
   it('the_location_it_answers_is_where_the_session_will_actually_run', async () => {
@@ -169,12 +220,11 @@ describe('GitWorkspace', () => {
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({
       root: GitDouble.ROOT,
-      base: GitDouble.BASE,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
-      run: (argv) => Promise.resolve(argv.includes('--git-common-dir')
+      run: (argv) => Promise.resolve(GitDouble.declaringNothing(argv) ?? (argv.includes('--git-common-dir')
         ? { failed: true, stdout: '', stderr: 'not a git repository' }
-        : GitDouble.ok()),
+        : GitDouble.ok())),
     })
 
     await expect(git.workspace().prepare({ number: 42 })).rejects.toBeInstanceOf(WorkspaceNotPrepared)
@@ -192,14 +242,13 @@ describe('GitWorkspace', () => {
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({
       root: GitDouble.ROOT,
-      base: GitDouble.BASE,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
-      run: (argv) => Promise.resolve(argv.includes('HEAD')
+      run: (argv) => Promise.resolve(GitDouble.declaringNothing(argv) ?? (argv.includes('HEAD')
         ? { failed: true, stdout: '', stderr: 'fatal: ambiguous argument HEAD' }
         : argv.includes('--git-common-dir')
           ? { failed: false, stdout: `${GitDouble.COMMON_DIR}\n`, stderr: '' }
-          : GitDouble.ok())
+          : GitDouble.ok()))
     })
 
     await expect(git.workspace().prepare({ number: 42 })).rejects.toBeInstanceOf(WorkspaceNotPrepared)
@@ -264,14 +313,13 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({
       root: GitDouble.ROOT,
-      base: GitDouble.BASE,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
       run: (argv) => {
         git.calls.push(argv)
-        return Promise.resolve(argv.includes('--git-common-dir')
+        return Promise.resolve(GitDouble.declaringNothing(argv) ?? (argv.includes('--git-common-dir')
           ? { failed: true, stdout: '', stderr: 'not a git repository' }
-          : GitDouble.ok())
+          : GitDouble.ok()))
       },
     })
 
@@ -286,14 +334,13 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({
       root: GitDouble.ROOT,
-      base: GitDouble.BASE,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
       run: (argv) => {
         git.calls.push(argv)
-        return Promise.resolve(argv.includes('HEAD')
+        return Promise.resolve(GitDouble.declaringNothing(argv) ?? (argv.includes('HEAD')
           ? { failed: true, stdout: '', stderr: 'fatal: ambiguous argument HEAD' }
-          : GitDouble.ok())
+          : GitDouble.ok()))
       },
     })
 
@@ -327,11 +374,11 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({
       root: GitDouble.ROOT,
-      base: GitDouble.BASE,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
       run: (argv) => {
         git.calls.push(argv)
+        if (argv.includes('symbolic-ref')) return Promise.resolve(GitDouble.declaring())
         if (argv.includes('--git-common-dir')) {
           return Promise.resolve({ failed: true, stdout: '', stderr: 'not a git repository' })
         }
@@ -353,11 +400,11 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({
       root: GitDouble.ROOT,
-      base: GitDouble.BASE,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
       run: (argv) => {
         git.calls.push(argv)
+        if (argv.includes('symbolic-ref')) return Promise.resolve(GitDouble.declaring())
         if (argv.includes('--git-common-dir')) {
           return Promise.resolve({ failed: true, stdout: '', stderr: 'not a git repository' })
         }
@@ -384,7 +431,6 @@ describe('GitWorkspace tells its diagnostic writer when undo itself cannot colle
     git.stderr = []
     git.workspace = () => new GitWorkspace({
       root: GitDouble.ROOT,
-      base: GitDouble.BASE,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
       run: (argv) => {
@@ -410,7 +456,6 @@ describe('GitWorkspace tells its diagnostic writer when undo itself cannot colle
     const located = new WorkspaceLocation({ path: GitDouble.WORKTREE, branch: 'feat/42' })
     const workspace = new GitWorkspace({
       root: GitDouble.ROOT,
-      base: GitDouble.BASE,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
       run: (argv) => (argv.includes('remove')
