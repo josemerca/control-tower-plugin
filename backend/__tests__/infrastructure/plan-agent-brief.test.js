@@ -97,6 +97,14 @@ describe('PlanAgentBrief resuming the agent', () => {
     expect(errand()).toContain('#42')
   })
 
+  it('it_names_the_repository_whose_gate_was_closed_so_the_agent_does_not_guess_which_one', () => {
+    expect(errand()).toContain('owner/name')
+  })
+
+  it('it_orders_implementing_the_plan_already_committed_instead_of_rewriting_it', () => {
+    expect(errand()).toContain('implementa AHORA el plan que commiteaste, sin reescribirlo.')
+  })
+
   it('it_hands_the_driving_to_ct_step_by_absolute_path_instead_of_describing_the_sequence', () => {
     expect(errand()).toContain('node /plugin/scripts/ct-step.mjs next --plan')
     expect(errand()).toContain('--issue 42')
@@ -116,6 +124,10 @@ describe('PlanAgentBrief resuming the agent', () => {
   it('it_waves_off_the_release_that_ct_step_will_suggest_so_the_agent_does_not_crash_into_exit_9', () => {
     expect(errand()).toContain('dispatch-check --release')
     expect(errand()).toMatch(/no ejecutes/i)
+  })
+
+  it('it_says_why_no_release_permission_gets_minted_in_this_flow', () => {
+    expect(errand()).toContain('saldría por 9')
   })
 
   it('it_never_promises_a_permission_nobody_mints', () => {
