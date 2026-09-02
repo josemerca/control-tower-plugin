@@ -5,7 +5,9 @@ import { dirname, join } from 'node:path'
 import { parseStateSafe } from '../../../plugin/scripts/state.js'
 import { resolveStatePath } from '../../../plugin/scripts/state-paths.js'
 import { GitWorkspace, SliceSeed } from '../../src/infrastructure/git-workspace.js'
-import { WorkspaceNotPrepared } from '../../src/domain/exceptions.js'
+import {
+  WorkspaceFailure, WorkspaceNotPrepared, WorkspaceNotUnderstood,
+} from '../../src/domain/exceptions.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 
 class GitDouble {
@@ -136,9 +138,49 @@ describe('GitWorkspace', () => {
 
     const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
 
-    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
     expect(refusal.message).toContain('refs/remotes/origin/HEAD')
     expect(git.calls.some((argv) => argv.includes('worktree'))).toBe(false)
+  })
+
+  it('git_answering_no_common_directory_at_all_is_not_pasted_onto_the_root_as_a_dangling_path', async () => {
+    const git = new GitDouble({ commonDir: '   ' })
+
+    const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
+    expect(refusal.message).toContain('--git-common-dir')
+  })
+
+  it('a_state_file_git_never_hid_after_the_rule_was_written_broke_our_contract_with_git_and_says_so', async () => {
+    const git = new GitDouble({ status: GitDouble.stillVisible() })
+
+    const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
+    expect(refusal.message).toContain(SliceSeed.RELATIVE_PATH)
+  })
+
+  it('git_answering_something_unreadable_is_told_apart_from_git_refusing_the_call', async () => {
+    const unreadable = await new GitDouble({ declared: GitDouble.declaring('refs/heads/main\n') })
+      .workspace().prepare({ number: 42 }).catch((cause) => cause)
+    const refused = await new GitDouble({ declared: GitDouble.refused('fatal: no such ref') })
+      .workspace().prepare({ number: 42 }).catch((cause) => cause)
+
+    expect(unreadable).toBeInstanceOf(WorkspaceNotUnderstood)
+    expect(refused).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(unreadable).not.toBeInstanceOf(WorkspaceNotPrepared)
+    expect(refused).not.toBeInstanceOf(WorkspaceNotUnderstood)
+  })
+
+  it('both_ways_of_failing_share_a_type_so_a_caller_that_does_not_care_can_catch_one_thing', async () => {
+    const unreadable = await new GitDouble({ declared: GitDouble.declaring('refs/heads/main\n') })
+      .workspace().prepare({ number: 42 }).catch((cause) => cause)
+    const refused = await new GitDouble({ declared: GitDouble.refused('fatal: no such ref') })
+      .workspace().prepare({ number: 42 }).catch((cause) => cause)
+
+    expect(unreadable).toBeInstanceOf(WorkspaceFailure)
+    expect(refused).toBeInstanceOf(WorkspaceFailure)
   })
 
   it('the_location_it_answers_is_where_the_session_will_actually_run', async () => {
@@ -264,15 +306,6 @@ describe('GitWorkspace', () => {
     ])
   })
 
-  it('a_state_file_that_is_still_visible_to_git_after_seeding_aborts_the_prepare_instead_of_trusting_the_exit_code', async () => {
-    const git = new GitDouble({ status: GitDouble.stillVisible() })
-
-    const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
-
-    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
-    expect(refusal.message).toContain(SliceSeed.RELATIVE_PATH)
-  })
-
   it('a_status_check_that_git_refuses_to_answer_is_not_taken_for_a_clean_tree', async () => {
     const git = new GitDouble({ status: GitDouble.refused('git is not available') })
 
@@ -340,7 +373,9 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
         git.calls.push(argv)
         return Promise.resolve(GitDouble.declaringNothing(argv) ?? (argv.includes('HEAD')
           ? { failed: true, stdout: '', stderr: 'fatal: ambiguous argument HEAD' }
-          : GitDouble.ok()))
+          : argv.includes('--git-common-dir')
+            ? { failed: false, stdout: `${GitDouble.COMMON_DIR}\n`, stderr: '' }
+            : GitDouble.ok()))
       },
     })
 
@@ -365,7 +400,7 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
 
     const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
 
-    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
     expect(refusal.message).toContain(SliceSeed.RELATIVE_PATH)
     expect(git.calls.slice(-2)).toEqual(undone)
   })

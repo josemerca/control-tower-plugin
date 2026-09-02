@@ -65,6 +65,7 @@ describe('PlanCollapse', () => {
     expect(PlanCollapse.of(new exceptions.UserStoryNotUnderstood('nope')).status).toBe(502)
     expect(PlanCollapse.of(new exceptions.PlanIssueNotNamed('nope')).status).toBe(502)
     expect(PlanCollapse.of(new exceptions.PlanAgentNotNamed('nope')).status).toBe(502)
+    expect(PlanCollapse.of(new exceptions.WorkspaceNotUnderstood('nope')).status).toBe(502)
   })
 
   it('a_family_is_not_a_way_of_collapsing_so_answering_one_raises_instead_of_guessing', () => {

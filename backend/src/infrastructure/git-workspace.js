@@ -2,7 +2,7 @@ import { isAbsolute } from 'node:path'
 import { SLICE_REL_PATH, excludeContentWith } from '../../../plugin/scripts/state-paths.js'
 import { Workspace } from '../domain/ports/workspace.js'
 import { WorkspaceLocation } from '../domain/value-objects/workspace-location.js'
-import { WorkspaceNotPrepared } from '../domain/exceptions.js'
+import { WorkspaceNotPrepared, WorkspaceNotUnderstood } from '../domain/exceptions.js'
 
 export class SliceSeed {
   static RELATIVE_PATH = SLICE_REL_PATH
@@ -115,7 +115,7 @@ export class GitWorkspace extends Workspace {
     }
     const declared = asked.stdout.trim().match(GitWorkspace.#DECLARED)
     if (declared === null) {
-      throw new WorkspaceNotPrepared(
+      throw new WorkspaceNotUnderstood(
         `the remote does not declare a default branch under ${GitWorkspace.REMOTE_HEAD}, git printed ${JSON.stringify(asked.stdout)}`
       )
     }
@@ -179,6 +179,11 @@ export class GitWorkspace extends Workspace {
       )
     }
     const answered = asked.stdout.trim()
+    if (answered.length === 0) {
+      throw new WorkspaceNotUnderstood(
+        `git --git-common-dir printed nothing for ${located.path}, so there is no directory to write ${SliceSeed.EXCLUDE_PATH} into`
+      )
+    }
 
     return isAbsolute(answered) ? answered : `${this.root}/${answered}`
   }
@@ -203,7 +208,7 @@ export class GitWorkspace extends Workspace {
     }
     const visible = status.stdout.split('\n').some((line) => line.includes(SliceSeed.RELATIVE_PATH))
     if (visible) {
-      throw new WorkspaceNotPrepared(
+      throw new WorkspaceNotUnderstood(
         `${SliceSeed.RELATIVE_PATH} is still visible to git in ${located.path} after seeding the exclusion rule`
       )
     }

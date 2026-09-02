@@ -5,7 +5,7 @@ import { RepositoryName } from '../domain/value-objects/repository-name.js'
 import {
   PlanFailure,
   UserStoryNotRead, UserStoryNotUnderstood, PlanIssueNotCreated, PlanIssueNotNamed,
-  PlanAgentNotLaunched, PlanAgentNotNamed, WorkspaceNotPrepared,
+  PlanAgentNotLaunched, PlanAgentNotNamed, WorkspaceNotPrepared, WorkspaceNotUnderstood,
 } from '../domain/exceptions.js'
 
 export const PlanRequestOutcome = Object.freeze({
@@ -149,6 +149,7 @@ export class PlanCollapse {
     [UserStoryNotUnderstood, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
     [PlanIssueNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
     [PlanAgentNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
+    [WorkspaceNotUnderstood, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
   ]
 
   static of(cause) {
