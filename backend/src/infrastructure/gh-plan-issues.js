@@ -12,15 +12,26 @@ import { gatesOf } from '../../../plugin/scripts/groom.js'
 import { gateLabels } from '../../../plugin/scripts/gates.js'
 import { PlanIssues } from '../domain/ports/plan-issues.js'
 import { PlanIssue } from '../domain/value-objects/plan-issue.js'
-import { PlanIssueNotCreated, PlanIssueNotNamed } from '../domain/exceptions.js'
+import { PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueNotClaimed } from '../domain/exceptions.js'
 import { Gh } from './gh.js'
 
 export class GhPlanIssues extends PlanIssues {
+  static IN_PROGRESS_LABEL = 'status:in-progress'
   static #REF = /\/issues\/(\d+)\s*$/
 
-  constructor({ gh }) {
+  constructor({ gh, stderr = (line) => process.stderr.write(line) }) {
     super()
     this.gh = gh
+    this.stderr = stderr
+  }
+
+  static statusArgvFor({ issue, repository, adding, removing }) {
+    return [
+      'issue', 'edit', String(issue.number),
+      '--repo', repository.text,
+      '--add-label', adding,
+      '--remove-label', removing,
+    ]
   }
 
   static argvFor({ story, repository }) {
@@ -38,7 +49,11 @@ export class GhPlanIssues extends PlanIssues {
   }
 
   async open({ story, repository }) {
-    const outcome = await this.#createSowingLabels({ story, repository })
+    const outcome = await this.#sowing({
+      argv: GhPlanIssues.argvFor({ story, repository }),
+      ours: PlanIssueBody.labels(story),
+      repository,
+    })
     if (outcome.failed) {
       throw new PlanIssueNotCreated(`${Gh.BIN} issue create failed: ${outcome.stderr.trim()}`)
     }
@@ -53,9 +68,46 @@ export class GhPlanIssues extends PlanIssues {
     return new PlanIssue({ number: Number(found[1]), url })
   }
 
-  async #createSowingLabels({ story, repository }) {
-    const argv = GhPlanIssues.argvFor({ story, repository })
-    const ours = PlanIssueBody.labels(story)
+  async claim({ issue, repository }) {
+    const outcome = await this.#swapping({
+      issue, repository,
+      adding: GhPlanIssues.IN_PROGRESS_LABEL,
+      removing: PlanIssueBody.READY_LABEL,
+    })
+    if (outcome.failed) {
+      throw new PlanIssueNotClaimed(`${Gh.BIN} issue edit failed: ${outcome.stderr.trim()}`)
+    }
+  }
+
+  async requeue({ issue, repository }) {
+    const outcome = await this.#swapping({
+      issue, repository,
+      adding: PlanIssueBody.READY_LABEL,
+      removing: GhPlanIssues.IN_PROGRESS_LABEL,
+    })
+    if (outcome.failed) this.#warn({ issue, repository, said: outcome.stderr.trim() })
+  }
+
+  async #swapping({ issue, repository, adding, removing }) {
+    return this.#sowing({
+      argv: GhPlanIssues.statusArgvFor({ issue, repository, adding, removing }),
+      ours: [adding],
+      repository,
+    })
+  }
+
+  #warn({ issue, repository, said }) {
+    const argv = GhPlanIssues.statusArgvFor({
+      issue, repository,
+      adding: PlanIssueBody.READY_LABEL,
+      removing: GhPlanIssues.IN_PROGRESS_LABEL,
+    })
+    this.stderr(
+      `gh plan issues: ${issue} stays claimed because it could not be put back in the queue: ${said}. Run it yourself: ${Gh.BIN} ${argv.join(' ')}\n`
+    )
+  }
+
+  async #sowing({ argv, ours, repository }) {
     const sown = new Set()
     let outcome = await this.gh.run(argv, { safeToRepeat: false })
     while (outcome.failed) {

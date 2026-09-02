@@ -8,7 +8,10 @@ import { Clock } from '../../src/domain/ports/clock.js'
 import { UserStory } from '../../src/domain/value-objects/user-story.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
-import { PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueFailure } from '../../src/domain/exceptions.js'
+import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
+import {
+  PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueNotClaimed, PlanIssueFailure,
+} from '../../src/domain/exceptions.js'
 
 class ClockDouble extends Clock {
   constructor() {
@@ -25,9 +28,14 @@ class GhDouble {
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
   static CREATED = 'https://github.com/josemerca/ct-loop-sandbox/issues/7\n'
 
+  static OPENED = new PlanIssue({
+    number: 7, url: 'https://github.com/josemerca/ct-loop-sandbox/issues/7',
+  })
+
   constructor(answers) {
     this.answers = answers
     this.calls = []
+    this.warnings = []
     this.clock = new ClockDouble()
   }
 
@@ -58,7 +66,20 @@ class GhDouble {
         policy: new RetryPolicy({ budget: new RetryBudget({ attempts, waitSeconds: 2 }) }),
         clock: this.clock,
       }),
+      stderr: (line) => this.warnings.push(line),
     })
+  }
+
+  async claimFor(issue = GhDouble.OPENED) {
+    return this.issues().claim({ issue, repository: GhDouble.REPOSITORY })
+  }
+
+  async claimRefusalFor(issue = GhDouble.OPENED) {
+    return this.claimFor(issue).catch((cause) => cause)
+  }
+
+  async requeueFor(issue = GhDouble.OPENED) {
+    return this.issues().requeue({ issue, repository: GhDouble.REPOSITORY })
   }
 
   async openFor(story = GhDouble.story()) {
@@ -273,5 +294,72 @@ describe('GhPlanIssues', () => {
 
     expect(unreadable).toBeInstanceOf(PlanIssueFailure)
     expect(refused).toBeInstanceOf(PlanIssueFailure)
+  })
+})
+
+describe('GhPlanIssues moving the status label of a claim', () => {
+  it('claiming_an_issue_sends_the_label_swap_gh_understands', async () => {
+    const gh = GhDouble.created('')
+
+    await gh.claimFor()
+
+    expect(gh.calls).toEqual([[
+      'issue', 'edit', '7',
+      '--repo', 'josemerca/ct-loop-sandbox',
+      '--add-label', 'status:in-progress',
+      '--remove-label', 'status:ready',
+    ]])
+  })
+
+  it('a_status_label_the_repo_does_not_have_is_sown_and_the_claim_retried', async () => {
+    const gh = new GhDouble([
+      new ProcessOutput({ code: 1, stdout: '', stderr: "could not add label: 'status:in-progress' not found" }),
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+    ])
+
+    await gh.claimFor()
+
+    expect(gh.commands).toEqual([
+      'issue edit 7', 'label create status:in-progress', 'issue edit 7',
+    ])
+    expect(gh.calls[1]).toEqual([
+      'label', 'create', 'status:in-progress', '--repo', 'josemerca/ct-loop-sandbox', '--force',
+    ])
+  })
+
+  it('a_label_that_is_not_ours_is_not_sown_and_the_claim_fails_with_what_gh_said', async () => {
+    const gh = GhDouble.refusing("could not add label: 'team:shop' not found")
+
+    const refusal = await gh.claimRefusalFor()
+
+    expect(refusal).toBeInstanceOf(PlanIssueNotClaimed)
+    expect(refusal.message).toBe("gh issue edit failed: could not add label: 'team:shop' not found")
+    expect(gh.commands).toEqual(['issue edit 7'])
+  })
+
+  it('requeueing_an_issue_sends_the_swap_the_other_way_round', async () => {
+    const gh = GhDouble.created('')
+
+    await gh.requeueFor()
+
+    expect(gh.calls).toEqual([[
+      'issue', 'edit', '7',
+      '--repo', 'josemerca/ct-loop-sandbox',
+      '--add-label', 'status:ready',
+      '--remove-label', 'status:in-progress',
+    ]])
+  })
+
+  it('a_requeue_gh_refused_names_the_command_a_human_can_run_instead_of_throwing', async () => {
+    const gh = GhDouble.refusing('gh: not authenticated')
+
+    await gh.requeueFor()
+
+    expect(gh.warnings).toHaveLength(1)
+    expect(gh.warnings[0]).toContain(
+      'gh issue edit 7 --repo josemerca/ct-loop-sandbox --add-label status:ready --remove-label status:in-progress'
+    )
+    expect(gh.warnings[0]).toContain('gh: not authenticated')
   })
 })
