@@ -7,8 +7,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# The plugin lives in plugin/ (the `source` the marketplace distributes) and
-# the API lives in backend/ (never distributed). Each has its own package.json
+# The plugin lives in plugin/ (the `source` the marketplace distributes), the
+# API lives in backend/ and the page in frontend/ (neither distributed). Each has its own package.json
 # and lockfile, so each job pins its working-directory and its npm cache to
 # the package it actually builds — a root-level `npm ci` has nothing to
 # install anymore.
@@ -130,6 +130,40 @@ jobs:
       - name: Run tests
         run: npm test
 
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      # A shallow clone is enough: the yardstick census asks git for the
+      # present (`ls-files`), never for history.
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      # The build is part of the check: `frontend/dist/` is the one contract
+      # with backend/, and a page that does not build is a page nobody serves.
+      - name: Build
+        run: npm run build
+
   # `!cancelled()` and not `always()`. With cancel-in-progress above, a push that
   # supersedes a running check would leave this job running, read `cancelled`
   # from its dependencies and exit 1 — so the required check would show up as a
@@ -138,14 +172,14 @@ jobs:
   ci:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    needs: [dist, test, backend]
+    needs: [dist, test, backend, frontend]
     if: ${{ !cancelled() }}
     permissions:
       contents: read
     steps:
       - name: Check results
         run: |
-          if [[ "${{ needs.dist.result }}" != "success" || "${{ needs.test.result }}" != "success" || "${{ needs.backend.result }}" != "success" ]]; then
+          if [[ "${{ needs.dist.result }}" != "success" || "${{ needs.test.result }}" != "success" || "${{ needs.backend.result }}" != "success" || "${{ needs.frontend.result }}" != "success" ]]; then
             echo "One or more jobs failed"
             exit 1
           fi

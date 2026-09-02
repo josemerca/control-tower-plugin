@@ -1,0 +1,10 @@
+.home {
+  font-family: system-ui, sans-serif;
+  padding: 2rem;
+  color: #0e1918;
+}
+
+.home__title {
+  margin: 0 0 1.5rem;
+  font-size: 1.5rem;
+}
