@@ -70,17 +70,23 @@ estrellándose contra un exit 9 sin saber por qué.
 POST /implement-plan
 Content-Type: application/json
 
-{ "id": "XOP-4909", "repo": "jjponz/repo-pulse", "issue": 33 }
+{ "id": "XOP-4909", "issue": 33 }
 ```
 
-Los tres los tiene el front sin guardar nada nuevo: `id` y `repo` son los que envió a `/start-plan`, y
-`issue` el que esa respuesta le devolvió. **El backend no recuerda el despacho**, y no puede: el
-registro de sesiones olvida el `watch` en cuanto emite el desenlace, o sea justo cuando el plan está
-`ready` y una persona pulsa el botón.
+Los dos los tiene el front sin guardar nada nuevo: `id` es el que envió a `/start-plan` e `issue` el
+que esa respuesta le devolvió. **El backend no recuerda el despacho**, y no puede: el registro de
+sesiones olvida el `watch` en cuanto emite el desenlace, o sea justo cuando el plan está `ready` y una
+persona pulsa el botón.
 
-`id` y `repo` se validan con los value objects que ya existen. `issue` se valida en el modelo de
-petición del controlador, como ya hace `EventsRequest` con el número que llega en su ruta; no gana un
-value object porque no hay una segunda pregunta que hacerle.
+**No lleva `repo`, y esa asimetría con `/start-plan` es deliberada.** Un juicio adversarial de
+sobreingeniería lo cazó: el repositorio atravesaba las cinco capas para producir una sola frase del
+encargo. Nada más lo necesitaba —`ct-step` solo lee `--plan` e `--issue`, `gh pr create` lo infiere del
+worktree, y la pestaña se llama `ct-plan-<story>`—, así que salió entero, con su miembro del
+vocabulario y su rechazo.
+
+`id` se valida con el value object que ya existe. `issue` se valida en el modelo de petición del
+controlador, como ya hace `EventsRequest` con el número que llega en su ruta; no gana un value object
+porque no hay una segunda pregunta que hacerle.
 
 **No se comprueba que el plan esté listo.** El front habilita su botón con el `ready` del canal de
 eventos, y volver a medir lo que el propio flujo ya garantiza es complejidad sin problema que resolver.
@@ -89,8 +95,8 @@ eventos, y volver a medir lo que el propio flujo ya garantiza es complejidad sin
 
 | Código | Cuándo |
 |---|---|
-| 202 | La línea está entregada: `{ "status": "implementing", "id", "repo", "issue" }` |
-| 400 | Cuerpo que no es objeto JSON, campo desconocido, o `id` / `repo` / `issue` malformados |
+| 202 | La línea está entregada: `{ "status": "implementing", "id", "issue" }` |
+| 400 | Cuerpo que no es objeto JSON, campo desconocido, o `id` / `issue` malformados |
 | 413 | Cuerpo de más de 8192 bytes |
 | 503 | `cmux` se negó a escribir en la pestaña; reintentar puede funcionar |
 | 405 | Cualquier método que no sea `POST` |
@@ -108,9 +114,9 @@ más sería afirmar lo que no se midió. Quien lo nota es el humano, mirando la 
 
 Ninguna es un tipo nuevo del dominio: la operación cae entera en colaboradores que ya existen.
 
-- **`PlanAgents` gana `resume({ story, issue, repository })`.** Un puerto corta por quién está
-  enfrente, nunca por paso del flujo (`backend/conventions/domain.md`), y enfrente sigue estando
-  quien planifica. El puerto que lo lanzó es el que lo reanuda.
+- **`PlanAgents` gana `resume({ story, issue })`.** Un puerto corta por quién está enfrente, nunca por
+  paso del flujo (`backend/conventions/domain.md`), y enfrente sigue estando quien planifica. El puerto
+  que lo lanzó es el que lo reanuda.
 - **`PlanAgentBrief` gana el segundo encargo** y una tercera ruta absoluta en su constructor
   (`ctStep`), que `PluginTree` resuelve al lado del `dispatchCheck` que ya resuelve. El encargo lo
   compone quien lanza al agente y no el caso de uso — decisión ya tomada en `ce63453`.
@@ -148,6 +154,18 @@ dejado y sin ellas la reanudación no funciona:
 
 Los puntos 2, 3 y 4 son los que `plugin/scripts/kickoff.js:253` ya llevaba: el encargo se había traído
 la orden de obedecer sin la traducción que la hace ejecutable.
+
+**Y con ellos entró una copia, que se declara aquí porque es inevitable.** Ese kickoff decide lo mismo
+con otras palabras —no conducir con `subagent-driven-development`, preguntar a `ct-step next`, traducir
+el verbo a `node <ruta>`, volver a `next` hasta «run delivered»—, y `plugin/conventions/decisions.md`
+prohíbe una regla escrita en dos sitios aunque las redacciones difieran. No se puede cerrar
+reutilizando: el agente que reanuda este backend **nunca recibe el kickoff de `ct-next`**, así que
+recortar nuestro encargo a «lo que kickoff no dice» dejaría la instrucción sin decir a nadie, y
+`renderKickoff` compone el kickoff entero de un slice, no estas cuatro frases. Lo que sí se puede es
+no dejarla implícita: si el kickoff del plugin cambia de criterio sobre cómo se conduce la
+implementación, este encargo hay que tocarlo a mano. No lleva test que compare las dos mitades porque
+lo que compararía es prosa larga contra prosa larga, y ese test se rompería con cada reescritura
+legítima del kickoff sin señalar ninguna divergencia real de criterio.
 
 ## 5. Las deudas, declaradas
 
