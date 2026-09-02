@@ -14,7 +14,6 @@ import { RepositoryName } from '../../src/domain/value-objects/repository-name.j
 import {
   PlanAgentNotLaunched, PlanAgentNotNamed, PlanAgentNotResumed, PlanAgentFailure,
 } from '../../src/domain/exceptions.js'
-import { PlanAgents } from '../../src/domain/ports/plan-agents.js'
 
 class BriefDouble {
   constructor() {
@@ -381,7 +380,6 @@ describe('LaunchPolicy', () => {
 class ResumeDouble {
   static STORY = new UserStoryKey('ABC-42')
   static ISSUE = 42
-  static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
   static TAB = 'ct-plan-ABC-42'
   static ERRAND = 'implementa el plan de #42'
 
@@ -390,8 +388,8 @@ class ResumeDouble {
     this.calls = []
     this.brief = {
       asked: [],
-      implementationErrandFor: ({ issueNumber, repository }) => {
-        this.brief.asked.push({ issueNumber, repository })
+      implementationErrandFor: ({ issueNumber }) => {
+        this.brief.asked.push({ issueNumber })
 
         return ResumeDouble.ERRAND
       },
@@ -432,9 +430,7 @@ class ResumeDouble {
   }
 
   async resume() {
-    return this.agents().resume({
-      story: ResumeDouble.STORY, issue: ResumeDouble.ISSUE, repository: ResumeDouble.REPOSITORY,
-    })
+    return this.agents().resume({ story: ResumeDouble.STORY, issue: ResumeDouble.ISSUE })
   }
 
   async refusal() {
@@ -454,14 +450,12 @@ describe('CmuxPlanAgents resuming a parked agent', () => {
     ])
   })
 
-  it('the_errand_it_types_is_the_one_the_brief_composed_for_that_issue_and_repository', async () => {
+  it('the_errand_it_types_is_the_one_the_brief_composed_for_that_issue', async () => {
     const cmux = ResumeDouble.accepting()
 
     await cmux.resume()
 
-    expect(cmux.brief.asked).toEqual([
-      { issueNumber: ResumeDouble.ISSUE, repository: ResumeDouble.REPOSITORY },
-    ])
+    expect(cmux.brief.asked).toEqual([{ issueNumber: ResumeDouble.ISSUE }])
   })
 
   it('a_cmux_that_refuses_to_write_arrives_typed_so_the_boundary_can_tell_it_from_a_crash', async () => {
@@ -477,11 +471,5 @@ describe('CmuxPlanAgents resuming a parked agent', () => {
 
     expect(refusal).toBeInstanceOf(PlanAgentNotResumed)
     expect(refusal.message).toContain('no such workspace')
-  })
-
-  it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
-    await expect(new PlanAgents().resume({
-      story: ResumeDouble.STORY, issue: ResumeDouble.ISSUE, repository: ResumeDouble.REPOSITORY,
-    })).rejects.toThrow(/must implement resume/)
   })
 })

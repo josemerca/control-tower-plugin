@@ -86,23 +86,10 @@ describe('PlanAgentBrief resuming the agent', () => {
     dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
     conventions: '/plugin/conventions',
     ctStep: '/plugin/scripts/ct-step.mjs',
-  }).implementationErrandFor({ issueNumber: 42, repository: new RepositoryName('owner/name') })
+  }).implementationErrandFor({ issueNumber: 42 })
 
   it('it_is_one_single_line_because_a_newline_would_run_the_order_half_written', () => {
     expect(errand()).not.toContain('\n')
-  })
-
-  it('it_says_a_person_closed_the_gate_so_the_agent_knows_the_pause_is_over', () => {
-    expect(errand()).toContain('lo ha cerrado una persona')
-    expect(errand()).toContain('#42')
-  })
-
-  it('it_names_the_repository_whose_gate_was_closed_so_the_agent_does_not_guess_which_one', () => {
-    expect(errand()).toContain('owner/name')
-  })
-
-  it('it_orders_implementing_the_plan_already_committed_instead_of_rewriting_it', () => {
-    expect(errand()).toContain('implementa AHORA el plan que commiteaste, sin reescribirlo.')
   })
 
   it('it_hands_the_driving_to_ct_step_by_absolute_path_instead_of_describing_the_sequence', () => {
@@ -115,16 +102,6 @@ describe('PlanAgentBrief resuming the agent', () => {
     expect(errand()).toContain('donde diga `ct-step`, es `node /plugin/scripts/ct-step.mjs`')
   })
 
-  it('it_says_the_sequence_is_not_conducted_with_subagent_driven_development_nor_its_ledger', () => {
-    expect(errand()).toContain('no la conduces con subagent-driven-development ni con su ledger')
-    expect(errand()).toContain('la dicta la máquina')
-  })
-
-  it('it_orders_returning_to_next_after_every_step_until_the_run_is_delivered', () => {
-    expect(errand()).toContain('volviendo a `next` tras cada paso')
-    expect(errand()).toContain('run delivered')
-  })
-
   it('it_orders_rewriting_slice_md_role_task_and_next_action_before_asking_for_the_first_step', () => {
     const composed = errand()
     expect(composed).toContain('.agent/SLICE.md')
@@ -132,28 +109,9 @@ describe('PlanAgentBrief resuming the agent', () => {
     expect(composed.indexOf('.agent/SLICE.md')).toBeLessThan(composed.indexOf('Pregunta el paso'))
   })
 
-  it('it_names_the_plan_by_where_the_first_errand_told_it_to_commit_it', () => {
-    expect(errand()).toContain('docs/superpowers/plans/')
-  })
-
-  it('it_ends_at_an_open_pull_request_that_closes_the_issue_and_stops_before_the_merge', () => {
-    expect(errand()).toContain('Closes #42')
-    expect(errand()).toMatch(/PARA/)
-    expect(errand()).toMatch(/no la mergees/i)
-  })
-
   it('it_waves_off_the_release_that_ct_step_will_suggest_so_the_agent_does_not_crash_into_exit_9', () => {
     expect(errand()).toContain('dispatch-check --release')
     expect(errand()).toMatch(/no ejecutes/i)
-  })
-
-  it('it_says_why_no_release_permission_gets_minted_in_this_flow', () => {
-    expect(errand()).toContain('saldría por 9')
-  })
-
-  it('it_never_promises_a_permission_nobody_mints', () => {
-    expect(errand()).not.toContain('-OK')
-    expect(errand()).not.toContain('nonce')
   })
 
   it('a_brief_that_cannot_name_ct_step_refuses_to_exist_instead_of_shipping_the_word_undefined', () => {

@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import { ImplementPlan, ImplementPlanParams } from '../../src/application/actions/implement-plan.js'
 import { PlanAgents } from '../../src/domain/ports/plan-agents.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
-import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { PlanAgentNotResumed } from '../../src/domain/exceptions.js'
 
 class PlanAgentsDouble extends PlanAgents {
@@ -16,8 +15,8 @@ class PlanAgentsDouble extends PlanAgents {
     return new PlanAgentsDouble(cause)
   }
 
-  async resume({ story, issue, repository }) {
-    this.asked.push({ story, issue, repository })
+  async resume({ story, issue }) {
+    this.asked.push({ story, issue })
     if (this.answer instanceof Error) throw this.answer
   }
 }
@@ -25,7 +24,6 @@ class PlanAgentsDouble extends PlanAgents {
 class Flow {
   static STORY = new UserStoryKey('XOP-4909')
   static ISSUE = 33
-  static REPOSITORY = new RepositoryName('jjponz/repo-pulse')
 
   constructor({ planAgents } = {}) {
     this.planAgents = planAgents ?? new PlanAgentsDouble()
@@ -33,7 +31,7 @@ class Flow {
 
   async run() {
     return new ImplementPlan(this).execute(new ImplementPlanParams({
-      story: Flow.STORY, issue: Flow.ISSUE, repository: Flow.REPOSITORY,
+      story: Flow.STORY, issue: Flow.ISSUE,
     }))
   }
 }
@@ -45,7 +43,7 @@ describe('ImplementPlan', () => {
     await flow.run()
 
     expect(flow.planAgents.asked).toEqual([
-      { story: Flow.STORY, issue: Flow.ISSUE, repository: Flow.REPOSITORY },
+      { story: Flow.STORY, issue: Flow.ISSUE },
     ])
   })
 

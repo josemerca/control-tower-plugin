@@ -32,7 +32,6 @@ class ImplementPlanSpy {
     this.asked.push({
       story: params.story.text,
       issue: params.issue,
-      repo: params.repository.text,
     })
   }
 }
@@ -40,8 +39,8 @@ class ImplementPlanSpy {
 class RunningApi {
   static #started = []
   static PATH = '/implement-plan'
-  static ACCEPTED_BODY = '{"id":"XOP-4909","repo":"jjponz/repo-pulse","issue":33}'
-  static ANSWER = '{"status":"implementing","id":"XOP-4909","repo":"jjponz/repo-pulse","issue":33}'
+  static ACCEPTED_BODY = '{"id":"XOP-4909","issue":33}'
+  static ANSWER = '{"status":"implementing","id":"XOP-4909","issue":33}'
   static spy = null
 
   static async listening(spy = new ImplementPlanSpy()) {
@@ -80,16 +79,16 @@ describe('ImplementPlanRoute', () => {
     expect(await response.text()).toBe(RunningApi.ANSWER)
   })
 
-  it('the_three_fields_reach_the_use_case_as_domain_values_and_not_as_the_raw_json', async () => {
+  it('the_two_fields_reach_the_use_case_as_domain_values_and_not_as_the_raw_json', async () => {
     await RunningApi.asking(RunningApi.ACCEPTED_BODY)
 
     expect(RunningApi.spy.asked).toEqual([
-      { story: 'XOP-4909', issue: 33, repo: 'jjponz/repo-pulse' },
+      { story: 'XOP-4909', issue: 33 },
     ])
   })
 
   it('a_malformed_story_key_is_refused_naming_the_shape_it_wanted_and_never_reaches_the_use_case', async () => {
-    const response = await RunningApi.asking('{"id":"nope","repo":"jjponz/repo-pulse","issue":33}')
+    const response = await RunningApi.asking('{"id":"nope","issue":33}')
 
     expect(response.status).toBe(400)
     expect((await response.json()).error).toMatch(/^id must be a user story key/)
@@ -97,7 +96,7 @@ describe('ImplementPlanRoute', () => {
   })
 
   it('an_issue_that_is_not_a_whole_number_from_one_is_refused_and_never_reaches_the_use_case', async () => {
-    const response = await RunningApi.asking('{"id":"XOP-4909","repo":"jjponz/repo-pulse","issue":"33"}')
+    const response = await RunningApi.asking('{"id":"XOP-4909","issue":"33"}')
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: 'issue must be a whole number from one' })
@@ -105,32 +104,15 @@ describe('ImplementPlanRoute', () => {
   })
 
   it('an_issue_of_zero_is_refused_because_the_count_of_whole_numbers_from_one_starts_at_one', async () => {
-    const response = await RunningApi.asking('{"id":"XOP-4909","repo":"jjponz/repo-pulse","issue":0}')
+    const response = await RunningApi.asking('{"id":"XOP-4909","issue":0}')
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: 'issue must be a whole number from one' })
     expect(RunningApi.spy.asked).toEqual([])
   })
 
-  it('a_malformed_repository_is_refused_before_it_can_become_an_argument_of_a_tool', async () => {
-    const response = await RunningApi.asking('{"id":"XOP-4909","repo":"-o","issue":33}')
-
-    expect(response.status).toBe(400)
-    expect(RunningApi.spy.asked).toEqual([])
-  })
-
-  it('a_repo_and_an_issue_both_malformed_are_refused_for_the_repo_because_it_is_checked_first', async () => {
-    const response = await RunningApi.asking('{"id":"XOP-4909","repo":"-o","issue":"33"}')
-
-    expect(response.status).toBe(400)
-    expect((await response.json()).error).toMatch(/^repo must be a repository/)
-    expect(RunningApi.spy.asked).toEqual([])
-  })
-
   it('a_field_nobody_declared_is_named_in_the_refusal_instead_of_being_ignored', async () => {
-    const response = await RunningApi.asking(
-      '{"id":"XOP-4909","repo":"jjponz/repo-pulse","issue":33,"force":true}'
-    )
+    const response = await RunningApi.asking('{"id":"XOP-4909","issue":33,"force":true}')
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: 'unknown field: force' })
@@ -148,9 +130,7 @@ describe('ImplementPlanRoute', () => {
   it('a_body_over_the_cap_is_refused_with_the_same_answer_start_plan_gives_and_never_reaches_the_use_case', async () => {
     const port = await RunningApi.listening()
 
-    const response = await RunningApi.post(
-      port, `{"id":"${'A'.repeat(9000)}","repo":"jjponz/repo-pulse","issue":33}`
-    )
+    const response = await RunningApi.post(port, `{"id":"${'A'.repeat(9000)}","issue":33}`)
 
     expect(response.status).toBe(413)
     expect(await response.text()).toBe('{"error":"body must not exceed 8192 bytes"}')
