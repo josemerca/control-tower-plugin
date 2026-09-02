@@ -37,7 +37,7 @@ describe('PlanRefusal', () => {
 describe('PlanCollapse', () => {
   const FAMILIES = [
     'PlanFailure', 'UserStoryFailure', 'PlanIssueFailure', 'PlanAgentFailure', 'WorkspaceFailure',
-    'PlanProgressFailure',
+    'PlanProgressFailure', 'GoFailure',
   ]
 
   const RESUMING_AN_AGENT = ImplementCollapse.declaredFailures()

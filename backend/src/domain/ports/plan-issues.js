@@ -16,4 +16,10 @@ export class PlanIssues {
       `${this.constructor.name} must implement requeue({ issue, repository }), asked for ${issue?.number} in ${repository}`
     )
   }
+
+  async answerGo({ issueNumber, repository, nonce }) {
+    throw new Error(
+      `${this.constructor.name} must implement answerGo({ issueNumber, repository, nonce }), asked for ${issueNumber} in ${repository}`
+    )
+  }
 }

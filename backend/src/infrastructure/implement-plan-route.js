@@ -2,7 +2,9 @@ import { Answer, JsonBody, Refusal } from './http.js'
 import { ImplementPlanParams } from '../application/actions/implement-plan.js'
 import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
-import { PlanFailure, PlanAgentNotResumed } from '../domain/exceptions.js'
+import {
+  PlanFailure, PlanAgentNotResumed, PlanGoNotAnswered, GoNotRecorded,
+} from '../domain/exceptions.js'
 
 export const ImplementRequestOutcome = Object.freeze({
   ACCEPTED: 'accepted',
@@ -144,7 +146,11 @@ export class ImplementRefusal {
 export class ImplementCollapse {
   static #REFUSED = 503
 
-  static #BY_FAILURE = [[PlanAgentNotResumed, ImplementCollapse.#REFUSED]]
+  static #BY_FAILURE = [
+    [GoNotRecorded, ImplementCollapse.#REFUSED],
+    [PlanGoNotAnswered, ImplementCollapse.#REFUSED],
+    [PlanAgentNotResumed, ImplementCollapse.#REFUSED],
+  ]
 
   static of(cause) {
     const declared = ImplementCollapse.#BY_FAILURE.find(([failure]) => cause.constructor === failure)

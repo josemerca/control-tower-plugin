@@ -3,7 +3,9 @@ import { ApiServer } from '../../src/infrastructure/api-server.js'
 import {
   ImplementRequestOutcome, ImplementRefusal, ImplementCollapse,
 } from '../../src/infrastructure/implement-plan-route.js'
-import { PlanAgentNotResumed, PlanFailure } from '../../src/domain/exceptions.js'
+import {
+  PlanAgentNotResumed, PlanFailure, PlanGoNotAnswered, GoFailure, GoNotRecorded,
+} from '../../src/domain/exceptions.js'
 
 class ImplementPlanSpy {
   constructor() {
@@ -211,13 +213,28 @@ describe('ImplementRefusal', () => {
 })
 
 describe('ImplementCollapse', () => {
-  const RESUMING_AN_AGENT = ['PlanAgentNotResumed']
+  const RESUMING_AN_AGENT = ['GoNotRecorded', 'PlanGoNotAnswered', 'PlanAgentNotResumed']
 
   it('every_way_resuming_an_agent_can_collapse_has_a_status_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
     expect(ImplementCollapse.declaredFailures().sort()).toEqual(RESUMING_AN_AGENT.sort())
   })
 
+  it('a_go_nobody_could_record_is_something_to_try_again_and_names_why', () => {
+    const collapse = ImplementCollapse.of(new GoNotRecorded('the directory is not writable'))
+
+    expect(collapse.status).toBe(503)
+    expect(collapse.error).toBe('could not implement the plan: the directory is not writable')
+  })
+
+  it('a_go_the_issue_did_not_take_is_something_to_try_again_and_names_what_gh_said', () => {
+    const collapse = ImplementCollapse.of(new PlanGoNotAnswered('gh issue comment failed: nope'))
+
+    expect(collapse.status).toBe(503)
+    expect(collapse.error).toBe('could not implement the plan: gh issue comment failed: nope')
+  })
+
   it('a_family_is_not_a_way_of_collapsing_so_answering_one_raises_instead_of_guessing', () => {
     expect(() => ImplementCollapse.of(new PlanFailure('nope'))).toThrow(/no status declared/)
+    expect(() => ImplementCollapse.of(new GoFailure('nope'))).toThrow(/no status declared/)
   })
 })
