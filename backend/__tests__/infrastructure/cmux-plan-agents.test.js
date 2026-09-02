@@ -12,8 +12,9 @@ import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import {
-  PlanAgentNotLaunched, PlanAgentNotNamed, PlanAgentFailure,
+  PlanAgentNotLaunched, PlanAgentNotNamed, PlanAgentNotResumed, PlanAgentFailure,
 } from '../../src/domain/exceptions.js'
+import { PlanAgents } from '../../src/domain/ports/plan-agents.js'
 
 class BriefDouble {
   constructor() {
@@ -374,5 +375,113 @@ describe('LaunchPolicy', () => {
 
     expect(strict.afterProbing(1)).toBe(LaunchStep.KEEP_PROBING)
     expect(strict.afterProbing(2)).toBe(LaunchStep.GIVE_UP)
+  })
+})
+
+class ResumeDouble {
+  static STORY = new UserStoryKey('ABC-42')
+  static ISSUE = 42
+  static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
+  static TAB = 'ct-plan-ABC-42'
+  static ERRAND = 'implementa el plan de #42'
+
+  constructor(answers) {
+    this.answers = answers
+    this.calls = []
+    this.brief = {
+      asked: [],
+      implementationErrandFor: ({ issue, repository }) => {
+        this.brief.asked.push({ issue, repository })
+
+        return ResumeDouble.ERRAND
+      },
+    }
+  }
+
+  static accepting() {
+    return new ResumeDouble([
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+    ])
+  }
+
+  static refusing(said) {
+    return new ResumeDouble([new ProcessOutput({ code: 1, stdout: '', stderr: said })])
+  }
+
+  static refusingTheEnter(said) {
+    return new ResumeDouble([
+      new ProcessOutput({ code: 0, stdout: '', stderr: '' }),
+      new ProcessOutput({ code: 1, stdout: '', stderr: said }),
+    ])
+  }
+
+  agents() {
+    return new CmuxPlanAgents({
+      brief: this.brief,
+      run: (argv) => {
+        this.calls.push(argv)
+        const answer = this.answers[this.calls.length - 1]
+        if (answer === undefined) {
+          throw new Error(`nobody wrote an answer for call ${this.calls.length}: ${argv.join(' ')}`)
+        }
+
+        return Promise.resolve(answer)
+      },
+    })
+  }
+
+  async resume() {
+    return this.agents().resume({
+      story: ResumeDouble.STORY, issue: ResumeDouble.ISSUE, repository: ResumeDouble.REPOSITORY,
+    })
+  }
+
+  async refusal() {
+    return this.resume().catch((cause) => cause)
+  }
+}
+
+describe('CmuxPlanAgents resuming a parked agent', () => {
+  it('it_types_the_errand_in_the_tab_it_named_when_it_launched_it_and_then_presses_enter', async () => {
+    const cmux = ResumeDouble.accepting()
+
+    await cmux.resume()
+
+    expect(cmux.calls).toEqual([
+      ['send', '--workspace', ResumeDouble.TAB, ResumeDouble.ERRAND],
+      ['send-key', '--workspace', ResumeDouble.TAB, 'Enter'],
+    ])
+  })
+
+  it('the_errand_it_types_is_the_one_the_brief_composed_for_that_issue_and_repository', async () => {
+    const cmux = ResumeDouble.accepting()
+
+    await cmux.resume()
+
+    expect(cmux.brief.asked).toEqual([
+      { issue: ResumeDouble.ISSUE, repository: ResumeDouble.REPOSITORY },
+    ])
+  })
+
+  it('a_cmux_that_refuses_to_write_arrives_typed_so_the_boundary_can_tell_it_from_a_crash', async () => {
+    const refusal = await ResumeDouble.refusing('Access denied - only processes started inside cmux').refusal()
+
+    expect(refusal).toBeInstanceOf(PlanAgentNotResumed)
+    expect(refusal).toBeInstanceOf(PlanAgentFailure)
+    expect(refusal.message).toContain('Access denied')
+  })
+
+  it('an_enter_that_never_lands_is_reported_because_the_line_is_sitting_there_unrun', async () => {
+    const refusal = await ResumeDouble.refusingTheEnter('no such workspace').refusal()
+
+    expect(refusal).toBeInstanceOf(PlanAgentNotResumed)
+    expect(refusal.message).toContain('no such workspace')
+  })
+
+  it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
+    await expect(new PlanAgents().resume({
+      story: ResumeDouble.STORY, issue: ResumeDouble.ISSUE, repository: ResumeDouble.REPOSITORY,
+    })).rejects.toThrow(/must implement resume/)
   })
 })

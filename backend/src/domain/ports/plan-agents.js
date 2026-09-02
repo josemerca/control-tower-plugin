@@ -4,4 +4,10 @@ export class PlanAgents {
       `${this.constructor.name} must implement launch(briefing), asked for ${briefing?.story} on ${briefing?.issue}`
     )
   }
+
+  async resume({ story, issue, repository }) {
+    throw new Error(
+      `${this.constructor.name} must implement resume({ story, issue, repository }), asked for ${story} on ${issue} in ${repository}`
+    )
+  }
 }

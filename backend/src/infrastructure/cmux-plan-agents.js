@@ -9,7 +9,7 @@ import {
 import { shQuote } from '../../../plugin/scripts/shquote.js'
 import { PlanAgents } from '../domain/ports/plan-agents.js'
 import { LaunchStep } from '../domain/policies/launch-policy.js'
-import { PlanAgentNotLaunched, PlanAgentNotNamed } from '../domain/exceptions.js'
+import { PlanAgentNotLaunched, PlanAgentNotNamed, PlanAgentNotResumed } from '../domain/exceptions.js'
 
 export class CmuxPlanAgents extends PlanAgents {
   static BIN = 'cmux'
@@ -79,6 +79,20 @@ export class CmuxPlanAgents extends PlanAgents {
     await this.#confirm({ briefing, sentinelPath, typed })
 
     return handle
+  }
+
+  async resume({ story, issue, repository }) {
+    const errand = this.brief.implementationErrandFor({ issue, repository })
+    const name = CmuxPlanAgents.nameFor(story)
+    await this.#type(CmuxPlanAgents.sendArgvFor(name, errand))
+    await this.#type(CmuxPlanAgents.enterArgvFor(name))
+  }
+
+  async #type(argv) {
+    const output = await this.run(argv)
+    if (output.failed) {
+      throw new PlanAgentNotResumed(`${CmuxPlanAgents.BIN} ${argv[0]} failed: ${output.stderr.trim()}`)
+    }
   }
 
   async #open(briefing, typed) {
