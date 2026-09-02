@@ -4,7 +4,7 @@ import { AcliTickets } from './acli-tickets.js'
 import { GhPlanIssues } from './gh-plan-issues.js'
 import { StartPlan } from '../application/actions/start-plan.js'
 import { ToolRunner } from './tool-runner.js'
-import { GhCall } from './gh-call.js'
+import { Gh } from './gh.js'
 import { SystemClock } from './system-clock.js'
 import { GhRetryPolicy } from '../domain/policies/gh-retry-policy.js'
 import { GhBudget } from '../domain/value-objects/gh-budget.js'
@@ -35,8 +35,8 @@ class CtApi {
   }
 
   static #gh() {
-    return new GhCall({
-      run: CtApi.#tool(GhCall.BIN),
+    return new Gh({
+      launch: CtApi.#tool(Gh.BIN),
       policy: new GhRetryPolicy({
         budget: new GhBudget({
           attempts: CtApi.#GH_RETRIES,
@@ -54,7 +54,7 @@ class CtApi {
     }
     const startPlan = new StartPlan({
       tickets: new AcliTickets({ run: CtApi.#tool(AcliTickets.BIN) }),
-      planIssues: new GhPlanIssues({ call: CtApi.#gh() }),
+      planIssues: new GhPlanIssues({ gh: CtApi.#gh() }),
       planSession: new CmuxPlanSession({ run: CtApi.#tool(CmuxPlanSession.BIN), cwd: process.cwd() }),
     })
     const server = new ApiServer({ port: asked.port, startPlan })

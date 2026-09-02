@@ -2,15 +2,14 @@ import { PlanIssues } from '../domain/ports/plan-issues.js'
 import { PlanIssue } from '../domain/value-objects/plan-issue.js'
 import { PlanIssueNotCreated, PlanIssueNotNamed } from '../domain/exceptions.js'
 import { PlanIssueBody } from './plan-issue-body.js'
-import { GhFailure } from './gh-failure.js'
-import { GhCall } from './gh-call.js'
+import { Gh } from './gh.js'
 
 export class GhPlanIssues extends PlanIssues {
   static #REF = /\/issues\/(\d+)\s*$/
 
-  constructor({ call }) {
+  constructor({ gh }) {
     super()
-    this.call = call
+    this.gh = gh
   }
 
   static argvFor({ ticket, repository }) {
@@ -30,13 +29,13 @@ export class GhPlanIssues extends PlanIssues {
   async open({ ticket, repository }) {
     const outcome = await this.#createSowingLabels({ ticket, repository })
     if (outcome.failed) {
-      throw new PlanIssueNotCreated(`${GhCall.BIN} issue create failed: ${outcome.stderr.trim()}`)
+      throw new PlanIssueNotCreated(`${Gh.BIN} issue create failed: ${outcome.stderr.trim()}`)
     }
     const url = outcome.stdout.trim().split('\n').pop() ?? ''
     const found = url.match(GhPlanIssues.#REF)
     if (found === null) {
       throw new PlanIssueNotNamed(
-        `${GhCall.BIN} did not name the issue it created, it printed ${JSON.stringify(outcome.stdout)}`
+        `${Gh.BIN} did not name the issue it created, it printed ${JSON.stringify(outcome.stdout)}`
       )
     }
 
@@ -47,14 +46,14 @@ export class GhPlanIssues extends PlanIssues {
     const argv = GhPlanIssues.argvFor({ ticket, repository })
     const ours = PlanIssueBody.labels(ticket)
     const sown = new Set()
-    let outcome = await this.call.make(argv, { safeToRepeat: false })
+    let outcome = await this.gh.run(argv, { safeToRepeat: false })
     while (outcome.failed) {
-      const missing = GhFailure.labelMissingIn(outcome.stderr)
+      const missing = Gh.labelMissingIn(outcome.stderr)
       if (missing === null || !ours.includes(missing) || sown.has(missing)) break
 
       sown.add(missing)
-      await this.call.make(GhPlanIssues.labelArgvFor(repository, missing), { safeToRepeat: true })
-      outcome = await this.call.make(argv, { safeToRepeat: false })
+      await this.gh.run(GhPlanIssues.labelArgvFor(repository, missing), { safeToRepeat: true })
+      outcome = await this.gh.run(argv, { safeToRepeat: false })
     }
 
     return outcome

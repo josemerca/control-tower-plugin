@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { GhPlanIssues } from '../../src/infrastructure/gh-plan-issues.js'
-import { GhCall } from '../../src/infrastructure/gh-call.js'
+import { Gh } from '../../src/infrastructure/gh.js'
 import { PlanIssueBody } from '../../src/infrastructure/plan-issue-body.js'
 import { ProcessOutput } from '../../src/infrastructure/process-output.js'
 import { GhRetryPolicy } from '../../src/domain/policies/gh-retry-policy.js'
@@ -46,8 +46,8 @@ class GhDouble {
 
   issues({ attempts = 3 } = {}) {
     return new GhPlanIssues({
-      call: new GhCall({
-        run: (argv) => {
+      gh: new Gh({
+        launch: (argv) => {
           this.calls.push(argv)
           const answer = this.answers[this.calls.length - 1]
           if (answer === undefined) {
