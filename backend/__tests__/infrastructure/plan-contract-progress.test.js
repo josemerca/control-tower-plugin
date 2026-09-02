@@ -14,6 +14,7 @@ class ProgressDouble {
     this.gitFailed = gitFailed
     this.node = []
     this.git = []
+    this.stderr = []
   }
 
   progress() {
@@ -31,6 +32,9 @@ class ProgressDouble {
         return Promise.resolve(this.gitFailed
           ? { failed: true, stdout: '', stderr: 'git is not available' }
           : { failed: false, stdout: this.dirty, stderr: '' })
+      },
+      stderr: (line) => {
+        this.stderr.push(line)
       },
     })
   }
@@ -100,53 +104,57 @@ describe('PlanContractProgress', () => {
 
   it('a_contract_that_the_dispatch_check_rejects_leaves_a_trace_naming_it_and_carrying_its_error_channel', async () => {
     const asked = new ProgressDouble({ validated: false, dirty: '' })
-    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
 
-    try {
-      await asked.asked()
+    await asked.asked()
 
-      const said = complaining.mock.calls.map(([line]) => line).join('')
-      expect(said).toContain('dispatch-check')
-      expect(said).toContain('no hay ningún plan prescriptivo')
-    } finally {
-      complaining.mockRestore()
-    }
+    const said = asked.stderr.join('')
+    expect(said).toContain('dispatch-check')
+    expect(said).toContain('no hay ningún plan prescriptivo')
   })
 
   it('a_git_status_that_refuses_to_answer_leaves_a_trace_naming_it_and_carrying_its_error_channel', async () => {
     const asked = new ProgressDouble({ validated: true, dirty: '', gitFailed: true })
-    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
 
-    try {
-      await asked.asked()
+    await asked.asked()
 
-      const said = complaining.mock.calls.map(([line]) => line).join('')
-      expect(said).toContain('git')
-      expect(said).toContain('git is not available')
-    } finally {
-      complaining.mockRestore()
-    }
+    const said = asked.stderr.join('')
+    expect(said).toContain('git')
+    expect(said).toContain('git is not available')
   })
 
   it('a_plan_that_validates_cleanly_leaves_the_error_channel_untouched', async () => {
-    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    const asked = new ProgressDouble({ validated: true, dirty: '' })
 
-    try {
-      await new ProgressDouble({ validated: true, dirty: '' }).asked()
+    await asked.asked()
 
-      expect(complaining.mock.calls).toEqual([])
-    } finally {
-      complaining.mockRestore()
-    }
+    expect(asked.stderr).toEqual([])
   })
 
   it('a_plan_that_is_valid_but_not_yet_committed_leaves_the_error_channel_untouched_because_nothing_actually_failed', async () => {
+    const asked = new ProgressDouble({ validated: true, dirty: '?? docs/superpowers/plans/x.md\n' })
+
+    await asked.asked()
+
+    expect(asked.stderr).toEqual([])
+  })
+
+  it('the_default_error_channel_still_writes_to_the_real_stderr_when_nobody_injects_one', async () => {
     const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    const progress = new PlanContractProgress({
+      dispatchCheck: ProgressDouble.CHECK,
+      repository: 'owner/name',
+      node: () => Promise.resolve({ failed: true, stdout: '', stderr: 'no hay ningún plan prescriptivo' }),
+      git: () => Promise.resolve({ failed: false, stdout: '', stderr: '' }),
+    })
 
     try {
-      await new ProgressDouble({ validated: true, dirty: '?? docs/superpowers/plans/x.md\n' }).asked()
+      await progress.of({
+        located: new WorkspaceLocation({ path: ProgressDouble.WORKTREE, branch: 'feat/42' }),
+        issue: { number: 42 },
+      })
 
-      expect(complaining.mock.calls).toEqual([])
+      const said = complaining.mock.calls.map(([line]) => line).join('')
+      expect(said).toContain('dispatch-check')
     } finally {
       complaining.mockRestore()
     }

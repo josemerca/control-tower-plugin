@@ -4,12 +4,13 @@ import { PlanState } from '../domain/plan-state.js'
 export class PlanContractProgress extends PlanProgress {
   static PLANS = 'docs/superpowers/plans'
 
-  constructor({ node, git, dispatchCheck, repository }) {
+  constructor({ node, git, dispatchCheck, repository, stderr = (line) => process.stderr.write(line) }) {
     super()
     this.node = node
     this.git = git
     this.dispatchCheck = dispatchCheck
     this.repository = repository
+    this.stderr = stderr
   }
 
   static contractArgvFor({ dispatchCheck, issue, repository }) {
@@ -30,12 +31,12 @@ export class PlanContractProgress extends PlanProgress {
       { cwd: located.path }
     )
     if (validated.failed) {
-      PlanContractProgress.#trace('dispatch-check', validated.stderr)
+      this.#trace('dispatch-check', validated.stderr)
       return PlanState.WRITING
     }
     const pending = await this.git(PlanContractProgress.pendingArgvFor(located))
     if (pending.failed) {
-      PlanContractProgress.#trace('git', pending.stderr)
+      this.#trace('git', pending.stderr)
       return PlanState.WRITING
     }
     if (pending.stdout.trim().length > 0) return PlanState.WRITING
@@ -43,7 +44,7 @@ export class PlanContractProgress extends PlanProgress {
     return PlanState.READY
   }
 
-  static #trace(bin, stderr) {
-    process.stderr.write(`plan progress: ${bin} failed: ${stderr.trim()}\n`)
+  #trace(bin, detail) {
+    this.stderr(`plan progress: ${bin} failed: ${detail.trim()}\n`)
   }
 }
