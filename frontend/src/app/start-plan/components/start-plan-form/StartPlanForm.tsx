@@ -2,6 +2,10 @@ import { FormEvent, useState } from 'react'
 import { StartPlanClient } from 'app/start-plan/client'
 import { StartPlanOutcome } from 'app/start-plan/StartPlan.types'
 import { TicketKey } from 'app/start-plan/TicketKey'
+import { Banner } from 'system-ui/banner'
+import { Button } from 'system-ui/button'
+import { FormField } from 'system-ui/form-field'
+import { Input } from 'system-ui/input'
 import './StartPlanForm.css'
 
 const UNREACHABLE_MESSAGE = 'No se pudo contactar con el backend'
@@ -23,36 +27,25 @@ const StartPlanForm = () => {
 
   return (
     <form className="start-plan-form" onSubmit={startPlan}>
-      <label className="start-plan-form__label" htmlFor="ticket-key">
-        Clave del ticket
-      </label>
-      <input
-        id="ticket-key"
-        className="start-plan-form__input"
-        type="text"
-        placeholder={TicketKey.EXAMPLE}
-        value={ticketKey}
-        disabled={isSending}
-        onChange={(event) => setTicketKey(event.target.value)}
-      />
-      <button className="start-plan-form__button" type="submit" disabled={!canStart}>
-        Arrancar plan
-      </button>
+      <FormField label="Clave del ticket" message={`Con la forma ${TicketKey.EXAMPLE}`}>
+        <Input
+          placeholder={TicketKey.EXAMPLE}
+          value={ticketKey}
+          disabled={isSending}
+          autoComplete="off"
+          onChange={(event) => setTicketKey(event.target.value)}
+        />
+      </FormField>
+      <div className="start-plan-form__actions">
+        <Button type="submit" disabled={!canStart}>
+          Arrancar plan
+        </Button>
+      </div>
       {outcome?.kind === 'started' && (
-        <p className="start-plan-form__result start-plan-form__result--started" role="status">
-          Sesión arrancada: <code>{outcome.session}</code>
-        </p>
+        <Banner type="success" title="Sesión arrancada:" description={<code>{outcome.session}</code>} descriptionLayout="inline" />
       )}
-      {outcome?.kind === 'refused' && (
-        <p className="start-plan-form__result start-plan-form__result--refused" role="alert">
-          {outcome.error}
-        </p>
-      )}
-      {outcome?.kind === 'backend-unreachable' && (
-        <p className="start-plan-form__result start-plan-form__result--refused" role="alert">
-          {UNREACHABLE_MESSAGE}
-        </p>
-      )}
+      {outcome?.kind === 'refused' && <Banner type="error" role="alert" title={outcome.error} />}
+      {outcome?.kind === 'backend-unreachable' && <Banner type="error" role="alert" title={UNREACHABLE_MESSAGE} />}
     </form>
   )
 }

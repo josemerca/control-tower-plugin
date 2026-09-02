@@ -1,10 +1,29 @@
 .home {
-  font-family: system-ui, sans-serif;
-  padding: 2rem;
-  color: #0e1918;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  font-family: var(--font-family-opensans), sans-serif;
+  color: var(--foreground-primary);
+  background-color: var(--background-primary);
 }
 
-.home__title {
-  margin: 0 0 1.5rem;
-  font-size: 1.5rem;
+.home__logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--foreground-ondark);
+  background-color: var(--background-brand-primary);
+  border-radius: var(--shape-container-xs);
+}
+
+.home__content {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--layout-container-sm);
+  margin: 0 auto;
+  padding: 32px;
 }

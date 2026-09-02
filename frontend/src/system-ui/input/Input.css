@@ -1,0 +1,64 @@
+.input-shell {
+  --field-edge: var(--border-primary);
+
+  display: flex;
+  box-sizing: border-box;
+  align-items: center;
+  width: var(--form-control-width, 100%);
+  max-width: var(--form-control-width, 400px);
+  gap: 6px;
+  color: var(--foreground-primary);
+  background-color: var(--background-elevated);
+  border: var(--borderwidth-sm) solid var(--field-edge);
+  border-radius: var(--shape-textfield);
+  cursor: text;
+}
+
+.input-shell--desktop {
+  min-height: 40px;
+  padding: 8px 14px;
+}
+
+.input-shell--mobile {
+  min-height: 48px;
+  padding: 12px 16px;
+}
+
+.input-shell:focus-within {
+  --field-edge: var(--border-brand-primary);
+  box-shadow: inset 0 0 0 var(--borderwidth-sm) var(--field-edge);
+}
+
+.input-shell--success {
+  --field-edge: var(--border-brand-primary);
+}
+
+.input-shell--error {
+  --field-edge: var(--border-danger);
+}
+
+.input-shell--disabled {
+  --field-edge: var(--border-secondary);
+  color: var(--foreground-disabled);
+  cursor: not-allowed;
+}
+
+.input-shell__control {
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  margin: 0;
+  color: inherit;
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.input-shell__control::placeholder {
+  color: var(--foreground-secondary);
+}
+
+.input-shell__control:disabled {
+  color: inherit;
+  cursor: not-allowed;
+}
