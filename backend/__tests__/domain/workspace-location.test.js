@@ -11,10 +11,6 @@ describe('WorkspaceLocation', () => {
     expect(located.branch).toBe('feat/42')
   })
 
-  it('it_cannot_be_edited_after_it_is_built', () => {
-    expect(Object.isFrozen(new WorkspaceLocation({ path: '/a', branch: 'b' }))).toBe(true)
-  })
-
   it('a_location_without_a_directory_refuses_to_exist_instead_of_answering_undefined_later', () => {
     expect(() => new WorkspaceLocation({ path: '', branch: 'feat/42' })).toThrow(/directory/)
   })

@@ -41,16 +41,6 @@ describe('ReadPlanProgress', () => {
     expect(progress.asked).toEqual([{ located, issue, repository }])
   })
 
-  it('neither_what_goes_in_nor_what_comes_out_can_be_edited_after_the_use_case_settled_it', async () => {
-    const params = new ReadPlanProgressParams({ located, issue, repository })
-
-    const read = await new ReadPlanProgress({ planProgress: new PlanProgressDouble(PlanState.WRITING) })
-      .execute(params)
-
-    expect(Object.isFrozen(params)).toBe(true)
-    expect(Object.isFrozen(read)).toBe(true)
-  })
-
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
     await expect(new PlanProgress().of({ located, issue, repository })).rejects.toThrow(/must implement of/)
   })

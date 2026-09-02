@@ -1,7 +1,11 @@
 import { RepositoryName } from './repository-name.js'
+import { UserStoryKey } from './user-story-key.js'
 
 export class PlanBriefing {
   constructor({ story, issue, located, repository }) {
+    if (!(story instanceof UserStoryKey)) {
+      throw new Error(`a briefing carries the story whose tab is named after it, got ${JSON.stringify(story)}`)
+    }
     if (located === undefined || located === null) {
       throw new Error(`a briefing carries where the agent is located, got ${JSON.stringify(located)}`)
     }

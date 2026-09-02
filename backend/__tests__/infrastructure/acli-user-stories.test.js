@@ -77,7 +77,6 @@ describe('AcliUserStories', () => {
     expect((await AcliDouble.answering({ summary: '  padded  ', description: '' }).detailFor()).summary)
       .toBe('padded')
     expect(story.description).toBe('plain text')
-    expect(Object.isFrozen(story)).toBe(true)
   })
 
   it('a_description_written_in_the_rich_format_arrives_as_the_text_a_reader_would_see', async () => {

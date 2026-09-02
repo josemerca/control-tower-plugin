@@ -19,8 +19,11 @@ describe('PlanBriefing', () => {
     expect(String(built().story)).toBe('ABC-42')
   })
 
-  it('it_cannot_be_edited_after_it_is_built', () => {
-    expect(Object.isFrozen(built())).toBe(true)
+  it('a_story_that_was_never_validated_refuses_to_exist_because_it_becomes_the_name_of_the_cmux_tab', () => {
+    const raw = { issue: { number: 42 }, located, repository }
+
+    expect(() => new PlanBriefing({ ...raw, story: 'ABC-42' })).toThrow(/story/)
+    expect(() => new PlanBriefing({ ...raw, story: undefined })).toThrow(/story/)
   })
 
   it('a_repository_that_was_never_validated_refuses_to_exist_because_it_becomes_an_argument_of_gh', () => {
