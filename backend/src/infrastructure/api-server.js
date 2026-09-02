@@ -1,4 +1,5 @@
 import express from 'express'
+import { existsSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { PlanRequest, PlanRequestOutcome } from './plan-request.js'
 import { PlanRefusal } from './plan-refusal.js'
@@ -39,13 +40,33 @@ class Route {
 
 class Browsers {
   static #ORIGIN = 'Origin'
+  static #HOST = 'Host'
+  static LOOPBACK_NAMES = Object.freeze(['127.0.0.1', 'localhost', '[::1]'])
 
-  static turnAway(request, response, next) {
-    if (request.get(Browsers.#ORIGIN) === undefined) {
+  static #hostnameOf(host) {
+    return host.startsWith('[') ? host.slice(0, host.indexOf(']') + 1) : host.split(':')[0]
+  }
+
+  static isOurOwnPage(origin, host) {
+    if (typeof host !== 'string' || !Browsers.LOOPBACK_NAMES.includes(Browsers.#hostnameOf(host))) return false
+
+    return origin === `http://${host}`
+  }
+
+  static turnAwayForeign(request, response, next) {
+    const origin = request.get(Browsers.#ORIGIN)
+    if (origin === undefined || Browsers.isOurOwnPage(origin, request.get(Browsers.#HOST))) {
       next()
       return
     }
-    Answer.refuse(response, 403, 'this api does not serve browsers')
+    Answer.refuse(response, 403, 'this api only serves the page it hosts')
+  }
+}
+
+class FrontendPages {
+  static mountedOn(app, root) {
+    if (root === null || !existsSync(root)) return
+    app.use(express.static(root, { index: 'index.html', redirect: false, fallthrough: true }))
   }
 }
 
@@ -138,9 +159,10 @@ class Failures {
 }
 
 export class ApiServer {
-  constructor({ port, startPlan }) {
+  constructor({ port, startPlan, frontendRoot = null }) {
     this.requestedPort = port
     this.startPlan = startPlan
+    this.frontendRoot = frontendRoot
     this.server = null
   }
 
@@ -149,9 +171,10 @@ export class ApiServer {
     app.disable('x-powered-by')
     app.set('case sensitive routing', true)
     app.use(Route.collapseTrailingSlashes)
+    FrontendPages.mountedOn(app, this.frontendRoot)
     app.post(
       StartPlanRoute.PATH,
-      Browsers.turnAway,
+      Browsers.turnAwayForeign,
       JsonBody.demandDeclared,
       JsonBody.reader(),
       StartPlanRoute.handledBy(this.startPlan)

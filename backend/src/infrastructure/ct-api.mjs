@@ -2,7 +2,17 @@ import { ApiServer, LOOPBACK } from './api-server.js'
 import { CmuxPlanSession } from './cmux-plan-session.js'
 import { StartPlan } from '../application/actions/start-plan.js'
 import { execFile } from 'node:child_process'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Invocation, InvocationOutcome } from './invocation.js'
+
+class FrontendBuild {
+  static #HERE = dirname(fileURLToPath(import.meta.url))
+
+  static root() {
+    return join(FrontendBuild.#HERE, '..', '..', '..', 'frontend', 'dist')
+  }
+}
 
 class CtApi {
   static #USAGE =
@@ -36,7 +46,11 @@ class CtApi {
       CtApi.#refuseUsage(asked.reason)
     }
     const planSession = new CmuxPlanSession({ run: (cmuxArgv) => CtApi.#cmux(cmuxArgv), cwd: process.cwd() })
-    const server = new ApiServer({ port: asked.port, startPlan: new StartPlan({ planSession }) })
+    const server = new ApiServer({
+      port: asked.port,
+      startPlan: new StartPlan({ planSession }),
+      frontendRoot: FrontendBuild.root(),
+    })
     let port
     try {
       port = await server.start()

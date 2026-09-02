@@ -1,5 +1,8 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import { connect } from 'node:net'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { StartPlanResult } from '../../src/application/actions/start-plan.js'
@@ -29,14 +32,29 @@ class StartPlanSpy {
   }
 }
 
+class FrontendFixture {
+  static INDEX = '<!doctype html><title>control tower</title>'
+
+  static built() {
+    const root = mkdtempSync(join(tmpdir(), 'ct-frontend-'))
+    writeFileSync(join(root, 'index.html'), FrontendFixture.INDEX)
+
+    return root
+  }
+
+  static missing() {
+    return join(tmpdir(), 'ct-frontend-never-built')
+  }
+}
+
 class RunningApi {
   static #started = []
   static TICKET = 'ABC-123'
   static spy = null
 
-  static async listening() {
+  static async listening(options = {}) {
     RunningApi.spy = new StartPlanSpy()
-    const server = new ApiServer({ port: 0, startPlan: RunningApi.spy })
+    const server = new ApiServer({ port: 0, startPlan: RunningApi.spy, ...options })
     const port = await server.start()
     RunningApi.#started.push(server)
     return port
@@ -74,8 +92,8 @@ class RunningApi {
     })
   }
 
-  static asking(path, headers, body) {
-    const written = [`POST ${path} HTTP/1.1`, 'Host: 127.0.0.1', 'Connection: close', ...headers]
+  static asking(path, headers, body, host = '127.0.0.1') {
+    const written = [`POST ${path} HTTP/1.1`, `Host: ${host}`, 'Connection: close', ...headers]
     if (body !== undefined) written.push(`Content-Length: ${Buffer.byteLength(body)}`)
 
     return `${written.join('\r\n')}\r\n\r\n${body ?? ''}`
@@ -235,7 +253,7 @@ describe('ApiServer', () => {
     expect(await response.text()).toBe('{"error":"not found"}')
   })
 
-  it('a_request_carrying_an_origin_is_refused_because_only_a_browser_sends_one', async () => {
+  it('a_request_from_a_foreign_page_is_refused_because_any_site_can_post_to_localhost', async () => {
     const port = await RunningApi.listening()
 
     const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.TICKET}"}`, {
@@ -243,6 +261,89 @@ describe('ApiServer', () => {
     })
 
     expect(response.status).toBe(403)
+    expect(await response.text()).toBe('{"error":"this api only serves the page it hosts"}')
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
+  it('a_request_from_the_page_this_server_hosts_is_accepted_because_that_page_is_the_frontend', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.TICKET}"}`, {
+      Origin: `http://127.0.0.1:${port}`,
+    })
+
+    expect(response.status).toBe(202)
+  })
+
+  it('the_page_opened_as_localhost_is_still_our_own_because_the_host_header_says_so_too', async () => {
+    const port = await RunningApi.listening()
+
+    const said = await RunningApi.ask(
+      port,
+      RunningApi.asking(
+        '/start-plan',
+        [`Origin: http://localhost:${port}`, 'Content-Type: application/json'],
+        `{"id":"${RunningApi.TICKET}"}`,
+        `localhost:${port}`
+      )
+    )
+
+    expect(said).toContain('202')
+  })
+
+  it('a_host_that_is_not_loopback_does_not_vouch_for_its_origin_because_dns_can_point_any_name_here', async () => {
+    const port = await RunningApi.listening()
+
+    const said = await RunningApi.ask(
+      port,
+      RunningApi.asking(
+        '/start-plan',
+        [`Origin: http://rebound.example:${port}`, 'Content-Type: application/json'],
+        `{"id":"${RunningApi.TICKET}"}`,
+        `rebound.example:${port}`
+      )
+    )
+
+    expect(said).toContain('403')
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
+  it('an_origin_on_another_port_of_loopback_is_foreign_because_another_local_server_is_another_site', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.TICKET}"}`, {
+      Origin: `http://127.0.0.1:${port + 1}`,
+    })
+
+    expect(response.status).toBe(403)
+  })
+
+  it('the_frontend_build_is_served_from_the_root_so_page_and_api_share_one_origin', async () => {
+    const root = FrontendFixture.built()
+    const port = await RunningApi.listening({ frontendRoot: root })
+
+    const response = await fetch(`http://127.0.0.1:${port}/`)
+
+    expect(response.status).toBe(200)
+    expect(await response.text()).toBe(FrontendFixture.INDEX)
+  })
+
+  it('a_frontend_root_that_does_not_exist_yet_leaves_the_api_up_instead_of_refusing_to_start', async () => {
+    const port = await RunningApi.listening({ frontendRoot: FrontendFixture.missing() })
+
+    const page = await fetch(`http://127.0.0.1:${port}/`)
+    const api = await RunningApi.accepted(port)
+
+    expect(page.status).toBe(404)
+    expect(api.status).toBe(202)
+  })
+
+  it('serving_pages_does_not_open_start_plan_to_a_get_because_static_files_fall_through_to_the_routes', async () => {
+    const port = await RunningApi.listening({ frontendRoot: FrontendFixture.built() })
+
+    const response = await fetch(`http://127.0.0.1:${port}/start-plan`)
+
+    expect(response.status).toBe(405)
   })
 
   it('a_body_not_declared_as_json_is_refused_so_a_page_cannot_reach_this_without_a_preflight', async () => {
