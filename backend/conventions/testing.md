@@ -29,6 +29,10 @@ fast subset per change and the whole suite before handing anything over.
    collisions and cuts are measured in-process at the layer that owns them, or
    not at all.
 
+Where `backend-best-practices` shows something else — its Object Mothers section
+illustrates with a test of a domain entity on its own — these three rules win, as
+`README.md` already orders. An example teaches by imitation; this is the rule.
+
 ## How each layer is tested
 
 Outside-in, and each layer has its own kind of assertion:

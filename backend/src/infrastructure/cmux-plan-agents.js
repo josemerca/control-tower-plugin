@@ -14,8 +14,6 @@ import { PlanAgentNotLaunched, PlanAgentNotNamed } from '../domain/exceptions.js
 export class CmuxPlanAgents extends PlanAgents {
   static BIN = 'cmux'
   static AGENT = 'claude'
-  static AGENT_EXAMPLE = 'claude'
-  static #AGENT_SHAPE = /^[a-zA-Z0-9._\/-]+$/
   static #REF = /^OK\s+(workspace:\d+)\s*$/m
   static NO_MOVE = 'no move declared for launch step'
 
@@ -54,10 +52,6 @@ export class CmuxPlanAgents extends PlanAgents {
   }
 
   static scriptFor({ sentinelPath, errand, bin, issue, worktree }) {
-    if (typeof bin !== 'string' || !CmuxPlanAgents.#AGENT_SHAPE.test(bin)) {
-      throw new Error(`an agent binary looks like ${CmuxPlanAgents.AGENT_EXAMPLE}, got ${JSON.stringify(bin)}`)
-    }
-
     return buildLauncherScript({
       sentinelPath,
       agentCommand: `${bin} ${shQuote(errand)}`,

@@ -342,38 +342,6 @@ describe('CmuxPlanAgents', () => {
     expect(refusal.message).toContain(CmuxPlanAgents.NO_MOVE)
   })
 
-  it('an_agent_binary_with_a_shell_metacharacter_is_rejected_before_it_reaches_the_script', () => {
-    expect(() => CmuxPlanAgents.scriptFor({
-      sentinelPath: CmuxDouble.SENTINEL,
-      errand: CmuxDouble.ERRAND,
-      bin: 'claude; rm -rf ~',
-      issue: 42,
-      worktree: CmuxDouble.WORKTREE,
-    })).toThrow(/an agent binary looks like.*got "claude; rm -rf ~"/)
-  })
-
-  it('an_agent_binary_with_a_space_is_rejected_because_it_is_not_quoted_on_the_way_out', () => {
-    expect(() => CmuxPlanAgents.scriptFor({
-      sentinelPath: CmuxDouble.SENTINEL,
-      errand: CmuxDouble.ERRAND,
-      bin: 'claude personal',
-      issue: 42,
-      worktree: CmuxDouble.WORKTREE,
-    })).toThrow(/an agent binary looks like.*got "claude personal"/)
-  })
-
-  it('a_legitimate_binary_with_an_absolute_path_and_hyphens_is_accepted', () => {
-    const script = CmuxPlanAgents.scriptFor({
-      sentinelPath: CmuxDouble.SENTINEL,
-      errand: CmuxDouble.ERRAND,
-      bin: '/opt/bin/claude-personal',
-      issue: 42,
-      worktree: CmuxDouble.WORKTREE,
-    })
-
-    expect(script).toContain('command -v /opt/bin/claude-personal')
-  })
-
   it('a_second_sourcing_starts_nothing_because_the_line_gets_resent_when_the_pty_eats_it', () => {
     const script = CmuxPlanAgents.scriptFor({
       sentinelPath: CmuxDouble.SENTINEL,
