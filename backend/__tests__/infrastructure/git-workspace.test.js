@@ -48,27 +48,22 @@ class GitDouble {
       },
       run: (argv) => {
         this.calls.push(argv)
-        if (argv.includes('get-url')) {
-          return Promise.resolve(this.remote)
-        }
-        if (argv.includes('symbolic-ref')) {
-          return Promise.resolve(this.declared)
-        }
-        if (argv.includes('--git-common-dir')) {
-          return Promise.resolve({ failed: false, stdout: `${this.commonDir}\n`, stderr: '' })
-        }
-        if (argv.includes('HEAD')) {
-          return Promise.resolve({ failed: false, stdout: `${GitDouble.CUT}\n`, stderr: '' })
-        }
-        if (argv.includes('status')) {
-          return Promise.resolve(this.status)
-        }
-        return Promise.resolve(this.answer)
+        return Promise.resolve(this.answering(argv))
       },
       stderr: (line) => {
         this.stderr.push(line)
       },
     })
+  }
+
+  answering(argv) {
+    if (argv.includes('get-url')) return this.remote
+    if (argv.includes('symbolic-ref')) return this.declared
+    if (argv.includes('--git-common-dir')) return { failed: false, stdout: `${this.commonDir}\n`, stderr: '' }
+    if (argv.includes('HEAD')) return { failed: false, stdout: `${GitDouble.CUT}\n`, stderr: '' }
+    if (argv.includes('status')) return this.status
+    if (argv.includes('worktree') || argv.includes('branch')) return this.answer
+    throw new Error(`nobody wrote an answer for git ${argv.join(' ')}`)
   }
 
   asking(order) {

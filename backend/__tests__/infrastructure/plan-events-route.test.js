@@ -20,7 +20,13 @@ class EventsDouble {
         this.slept += 1
         return Promise.resolve()
       },
-      read: () => Promise.resolve({ state: this.answers.shift() ?? PlanState.READY }),
+      read: () => {
+        if (this.answers.length === 0) {
+          throw new Error('the progress was read more times than this test scripted an answer for')
+        }
+
+        return Promise.resolve({ state: this.answers.shift() })
+      },
     })
   }
 
