@@ -1,44 +1,44 @@
-import { PlanBriefing } from '../../domain/plan-briefing.js'
+import { PlanBriefing } from '../../domain/value-objects/plan-briefing.js'
 
 export class StartPlanParams {
-  constructor({ ticket, repository }) {
-    this.ticket = ticket
+  constructor({ story, repository }) {
+    this.story = story
     this.repository = repository
     Object.freeze(this)
   }
 }
 
 export class StartPlanResult {
-  constructor({ issue, session, located }) {
+  constructor({ issue, agent, located }) {
     this.issue = issue
-    this.session = session
+    this.agent = agent
     this.located = located
     Object.freeze(this)
   }
 }
 
 export class StartPlan {
-  constructor({ tickets, planIssues, workspace, planSession, brief }) {
-    this.tickets = tickets
+  constructor({ userStories, planIssues, workspace, planAgents, brief }) {
+    this.userStories = userStories
     this.planIssues = planIssues
     this.workspace = workspace
-    this.planSession = planSession
+    this.planAgents = planAgents
     this.brief = brief
   }
 
   async execute(params) {
-    const ticket = await this.tickets.detail(params.ticket)
-    const issue = await this.planIssues.open({ ticket, repository: params.repository })
+    const story = await this.userStories.detail(params.story)
+    const issue = await this.planIssues.open({ story, repository: params.repository })
     const located = await this.workspace.prepare(issue)
-    const session = await this.#launch(params, issue, located)
+    const agent = await this.#launch(params, issue, located)
 
-    return new StartPlanResult({ issue, session, located })
+    return new StartPlanResult({ issue, agent, located })
   }
 
   async #launch(params, issue, located) {
     try {
-      return await this.planSession.start(new PlanBriefing({
-        ticket: params.ticket,
+      return await this.planAgents.launch(new PlanBriefing({
+        story: params.story,
         issue,
         located,
         errand: this.brief.errandFor({ issue, repository: params.repository }),

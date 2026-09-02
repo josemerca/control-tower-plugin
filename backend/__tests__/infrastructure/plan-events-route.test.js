@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { PlanEvents } from '../../src/infrastructure/plan-events.js'
-import { PlanState } from '../../src/domain/plan-state.js'
-import { WorkspaceLocation } from '../../src/domain/workspace-location.js'
+import { PlanEvents } from '../../src/infrastructure/plan-events-route.js'
+import { PlanState } from '../../src/domain/value-objects/plan-state.js'
+import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 
 class EventsDouble {
   static SUBJECT = {

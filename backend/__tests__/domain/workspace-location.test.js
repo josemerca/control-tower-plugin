@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { WorkspaceLocation } from '../../src/domain/workspace-location.js'
-import { Workspace } from '../../src/domain/workspace.js'
+import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
+import { Workspace } from '../../src/domain/ports/workspace.js'
 
 describe('WorkspaceLocation', () => {
   it('it_carries_the_directory_and_the_branch_together_because_neither_is_usable_alone', () => {

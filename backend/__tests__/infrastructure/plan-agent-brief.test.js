@@ -1,11 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { PlanAgentBrief } from '../../src/infrastructure/plan-agent-brief.js'
+import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 
 describe('PlanAgentBrief', () => {
   const errand = () => new PlanAgentBrief({
     dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
     conventions: '/plugin/conventions',
-  }).errandFor({ issue: { number: 42 }, repository: 'owner/name' })
+  }).errandFor({ issue: { number: 42 }, repository: new RepositoryName('owner/name') })
 
   it('it_starts_by_asking_for_the_ground_to_be_checked_before_anything_is_touched', () => {
     expect(errand()).toMatch(/pwd/)
@@ -60,12 +61,13 @@ describe('PlanAgentBrief', () => {
     expect(() => brief.errandFor({ issue: { number: 42 }, repository: undefined })).toThrow(/repository/)
   })
 
-  it('a_repository_made_only_of_spaces_refuses_to_exist_the_same_as_a_missing_one', () => {
+  it('a_repository_that_was_never_validated_is_refused_even_when_it_reads_like_a_good_one', () => {
     const brief = new PlanAgentBrief({
       dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
       conventions: '/plugin/conventions',
     })
 
+    expect(() => brief.errandFor({ issue: { number: 42 }, repository: 'owner/name' })).toThrow(/repository/)
     expect(() => brief.errandFor({ issue: { number: 42 }, repository: '   ' })).toThrow(/repository/)
   })
 })

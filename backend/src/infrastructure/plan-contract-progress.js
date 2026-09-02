@@ -1,33 +1,28 @@
-import { PlanProgress } from '../domain/plan-progress.js'
-import { PlanState } from '../domain/plan-state.js'
+import { PlanProgress } from '../domain/ports/plan-progress.js'
+import { PlanState } from '../domain/value-objects/plan-state.js'
 
 export class PlanContractProgress extends PlanProgress {
   static PLANS = 'docs/superpowers/plans'
 
-  constructor({ node, git, dispatchCheck, repository, stderr = (line) => process.stderr.write(line) }) {
+  constructor({ node, git, dispatchCheck, stderr = (line) => process.stderr.write(line) }) {
     super()
     this.node = node
     this.git = git
     this.dispatchCheck = dispatchCheck
-    this.repository = repository
     this.stderr = stderr
   }
 
   static contractArgvFor({ dispatchCheck, issue, repository }) {
-    return [dispatchCheck, String(issue.number), '--repo', repository, '--check-plan']
+    return [dispatchCheck, String(issue.number), '--repo', repository.text, '--check-plan']
   }
 
   static pendingArgvFor(located) {
     return ['-C', located.path, 'status', '--porcelain', '--', PlanContractProgress.PLANS]
   }
 
-  async of({ located, issue }) {
+  async of({ located, issue, repository }) {
     const validated = await this.node(
-      PlanContractProgress.contractArgvFor({
-        dispatchCheck: this.dispatchCheck,
-        issue,
-        repository: this.repository,
-      }),
+      PlanContractProgress.contractArgvFor({ dispatchCheck: this.dispatchCheck, issue, repository }),
       { cwd: located.path }
     )
     if (validated.failed) {

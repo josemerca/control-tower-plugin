@@ -1,4 +1,5 @@
 import { isAbsolute } from 'node:path'
+import { RepositoryName } from '../domain/value-objects/repository-name.js'
 
 export class PlanAgentBrief {
   static DOCUMENTS = 'defects.md, style.md, decisions.md, architecture.md, testing.md'
@@ -16,20 +17,21 @@ export class PlanAgentBrief {
   }
 
   errandFor({ issue, repository }) {
-    if (typeof repository !== 'string' || repository.trim().length === 0) {
+    if (!(repository instanceof RepositoryName)) {
       throw new Error(`the errand names the repository whose issue it opens, got ${JSON.stringify(repository)}`)
     }
     const dispatchCheck = this.dispatchCheck
     const conventions = this.conventions
+    const named = repository.text
 
     return [
-      `Escribes el PLAN del issue #${issue.number} del repo ${repository}. No lo implementas.`,
+      `Escribes el PLAN del issue #${issue.number} del repo ${named}. No lo implementas.`,
       'Arranque verification-first: confirma pwd, rama y git log, y deja el baseline en verde ANTES de tocar nada.',
-      `Hidrátate del issue: \`gh issue view ${issue.number} --repo ${repository}\`. Sus criterios de aceptación, su sección "## Out of scope / Protected" y sus decisiones congeladas son la entrada del plan.`,
+      `Hidrátate del issue: \`gh issue view ${issue.number} --repo ${named}\`. Sus criterios de aceptación, su sección "## Out of scope / Protected" y sus decisiones congeladas son la entrada del plan.`,
       `Lee la vara de Control Tower: los cinco documentos de ${conventions} (${PlanAgentBrief.DOCUMENTS}). Tienen preferencia sobre las convenciones de este repo, y la preferencia se mide regla a regla: donde el repo mande lo que uno de esos documentos prohíbe, no aplica; donde el repo hable de algo de lo que ninguno habla, obliga entera.`,
       'Escribe el plan con control-tower-loop:writing-plans-prescriptive, usando el issue como spec.',
       `Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${issue.number}-<slug>.md.`,
-      `Valídalo con \`node ${dispatchCheck} ${issue.number} --repo ${repository} --check-plan\` hasta exit 0.`,
+      `Valídalo con \`node ${dispatchCheck} ${issue.number} --repo ${named} --check-plan\` hasta exit 0.`,
       'Commitéalo: el plan viaja en el pull request, y sin commitear no cuenta como escrito.',
       'Y entonces PARA. No implementes nada, no abras pull request, no mergees, no crees worktrees nuevos: ya estás en el que te prepararon.',
     ].join('\n')

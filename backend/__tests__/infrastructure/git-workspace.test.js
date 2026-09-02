@@ -1,8 +1,12 @@
-import { describe, it, expect, vi } from 'vitest'
-import { GitWorkspace } from '../../src/infrastructure/git-workspace.js'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { parseStateSafe } from '../../../plugin/scripts/state.js'
+import { resolveStatePath } from '../../../plugin/scripts/state-paths.js'
+import { GitWorkspace, SliceSeed } from '../../src/infrastructure/git-workspace.js'
 import { WorkspaceNotPrepared } from '../../src/domain/exceptions.js'
-import { SliceSeed } from '../../src/infrastructure/slice-seed.js'
-import { WorkspaceLocation } from '../../src/domain/workspace-location.js'
+import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 
 class GitDouble {
   static ROOT = '/repo/checkout'
@@ -274,7 +278,7 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
     const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
-    expect(refusal.message).toContain('no se pudo resolver el directorio común')
+    expect(refusal.message).toContain('could not resolve the common git directory')
     expect(git.calls.slice(-2)).toEqual(undone)
   })
 
@@ -296,7 +300,7 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
     const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
-    expect(refusal.message).toContain('no se pudo medir el commit')
+    expect(refusal.message).toContain('could not measure the commit')
     expect(git.calls.slice(-2)).toEqual(undone)
   })
 
@@ -341,7 +345,7 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
     const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
-    expect(refusal.message).toContain('no se pudo resolver el directorio común')
+    expect(refusal.message).toContain('could not resolve the common git directory')
     expect(git.stderr.join('')).toContain('worktree remove refused')
   })
 
@@ -422,5 +426,87 @@ describe('GitWorkspace tells its diagnostic writer when undo itself cannot colle
     } finally {
       complaining.mockRestore()
     }
+  })
+})
+
+class SeedFixture {
+  static CUT = 'a1b2c3d'
+  static #made = []
+
+  static text() {
+    return SliceSeed.textFor({
+      issue: { number: 42 }, branch: 'feat/42', base: 'main', cut: SeedFixture.CUT,
+    })
+  }
+
+  static sownWorktree() {
+    const worktree = mkdtempSync(join(tmpdir(), 'ct-slice-'))
+    SeedFixture.#made.push(worktree)
+    const state = join(worktree, SliceSeed.RELATIVE_PATH)
+    mkdirSync(dirname(state), { recursive: true })
+    writeFileSync(state, SeedFixture.text())
+
+    return worktree
+  }
+
+  static sweep() {
+    for (const worktree of SeedFixture.#made.splice(0)) {
+      rmSync(worktree, { recursive: true, force: true })
+    }
+  }
+}
+
+describe('SliceSeed', () => {
+  it('it_says_the_agent_is_the_one_that_writes_the_plan_and_not_the_coordinator', () => {
+    expect(SeedFixture.text()).toContain('role: "slice-agent')
+  })
+
+  it('the_cut_travels_as_both_the_base_and_the_last_commit_because_no_work_has_landed_yet', () => {
+    expect(SeedFixture.text()).toContain('base_sha: "a1b2c3d"')
+    expect(SeedFixture.text()).toContain('last_commit: "a1b2c3d"')
+  })
+
+  it('it_names_the_issue_so_an_agent_that_rehydrates_knows_what_it_is_working_on', () => {
+    expect(SeedFixture.text()).toContain('github_issue: 42')
+    expect(SeedFixture.text()).toContain('branch: "feat/42"')
+    expect(SeedFixture.text()).toContain('base: "main"')
+  })
+
+  it('the_exclusion_it_asks_git_for_is_the_very_file_it_writes', () => {
+    expect(SliceSeed.EXCLUDE_RULE).toBe(SliceSeed.RELATIVE_PATH)
+  })
+
+  it('the_exclude_file_hangs_off_the_git_dir_and_not_off_the_worktree_because_dot_git_is_a_file_there', () => {
+    expect(SliceSeed.EXCLUDE_PATH.startsWith('.git/')).toBe(false)
+    expect(SliceSeed.EXCLUDE_PATH).toBe('info/exclude')
+  })
+})
+
+describe('what the backend sows is read back by the plugin that has to read it', () => {
+  afterEach(() => {
+    SeedFixture.sweep()
+  })
+
+  it('the_plugins_own_reader_parses_the_seed_without_an_error_instead_of_the_two_halves_drifting', () => {
+    const worktree = SeedFixture.sownWorktree()
+
+    const read = parseStateSafe(readFileSync(join(worktree, SliceSeed.RELATIVE_PATH), 'utf8'))
+
+    expect(read.error).toBe(null)
+  })
+
+  it('the_cut_and_the_absence_of_a_block_reach_the_plugin_as_data_and_not_as_unparsed_prose', () => {
+    const worktree = SeedFixture.sownWorktree()
+
+    const read = parseStateSafe(readFileSync(join(worktree, SliceSeed.RELATIVE_PATH), 'utf8'))
+
+    expect(read.meta.last_commit).toBe(SeedFixture.CUT)
+    expect(read.meta.blocked).toBe(null)
+  })
+
+  it('a_worktree_that_carries_the_seed_is_recognised_by_the_plugin_as_a_slice_and_not_as_a_coordinator', () => {
+    const worktree = SeedFixture.sownWorktree()
+
+    expect(resolveStatePath(worktree).kind).toBe('slice')
   })
 })

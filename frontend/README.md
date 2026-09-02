@@ -13,6 +13,11 @@ desarrollo del front, no antes.
 - **Nunca se distribuye con el plugin.** El `source` del marketplace es
   `./plugin` y este directorio queda fuera de toda instalación; aquí las
   dependencias npm son legítimas.
+- **Lo sirve `backend/`, en el mismo origen.** `ct-api.mjs` sirve el
+  contenido de `frontend/dist/` en `/` cuando ese directorio existe, así que
+  página y API comparten `http://127.0.0.1:<puerto>`. La API rechaza con
+  `403` cualquier `Origin` que no sea el suyo propio, con `Host` de loopback:
+  una página ajena no puede llamar a `POST /start-plan`, y la nuestra sí sin
+  CORS ni preflight.
 - **Habla con `backend/` por HTTP.** El primer endpoint ya existe:
-  `POST /start-plan` (`backend/src/api-server.js`), escuchando solo en
-  loopback IPv4 (`127.0.0.1`).
+  `POST /start-plan` (`backend/src/infrastructure/api-server.js`).

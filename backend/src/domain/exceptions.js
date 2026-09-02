@@ -1,21 +1,28 @@
-export class PlanSessionFailure extends Error {
+export class PlanFailure extends Error {
   constructor(reason) {
     super(reason)
     this.name = new.target.name
   }
 }
 
-export class PlanSessionNotStarted extends PlanSessionFailure {}
+export class UserStoryFailure extends PlanFailure {}
 
-export class PlanSessionNotNamed extends PlanSessionFailure {}
+export class UserStoryNotRead extends UserStoryFailure {}
 
-export class PlanSessionDidNotRun extends PlanSessionFailure {}
+export class UserStoryNotUnderstood extends UserStoryFailure {}
 
-export class WorkspaceFailure extends Error {
-  constructor(reason) {
-    super(reason)
-    this.name = new.target.name
-  }
-}
+export class PlanIssueFailure extends PlanFailure {}
+
+export class PlanIssueNotCreated extends PlanIssueFailure {}
+
+export class PlanIssueNotNamed extends PlanIssueFailure {}
+
+export class PlanAgentFailure extends PlanFailure {}
+
+export class PlanAgentNotLaunched extends PlanAgentFailure {}
+
+export class PlanAgentNotNamed extends PlanAgentFailure {}
+
+export class WorkspaceFailure extends PlanFailure {}
 
 export class WorkspaceNotPrepared extends WorkspaceFailure {}

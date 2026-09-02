@@ -1,12 +1,13 @@
 import { describe, it, expect, vi } from 'vitest'
 import { PlanContractProgress } from '../../src/infrastructure/plan-contract-progress.js'
-import { PlanState } from '../../src/domain/plan-state.js'
-import { PlanProgress } from '../../src/domain/plan-progress.js'
-import { WorkspaceLocation } from '../../src/domain/workspace-location.js'
+import { PlanState } from '../../src/domain/value-objects/plan-state.js'
+import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
+import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 
 class ProgressDouble {
   static WORKTREE = '/repo/.worktrees/42'
   static CHECK = '/plugin/scripts/dispatch-check.mjs'
+  static REPOSITORY = new RepositoryName('owner/name')
 
   constructor({ validated, dirty, gitFailed = false }) {
     this.validated = validated
@@ -20,7 +21,6 @@ class ProgressDouble {
   progress() {
     return new PlanContractProgress({
       dispatchCheck: ProgressDouble.CHECK,
-      repository: 'owner/name',
       node: (argv, options) => {
         this.node.push([argv, options])
         return Promise.resolve(this.validated
@@ -43,6 +43,7 @@ class ProgressDouble {
     return this.progress().of({
       located: new WorkspaceLocation({ path: ProgressDouble.WORKTREE, branch: 'feat/42' }),
       issue: { number: 42 },
+      repository: ProgressDouble.REPOSITORY,
     })
   }
 }
@@ -142,7 +143,6 @@ describe('PlanContractProgress', () => {
     const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
     const progress = new PlanContractProgress({
       dispatchCheck: ProgressDouble.CHECK,
-      repository: 'owner/name',
       node: () => Promise.resolve({ failed: true, stdout: '', stderr: 'no hay ningún plan prescriptivo' }),
       git: () => Promise.resolve({ failed: false, stdout: '', stderr: '' }),
     })
@@ -151,6 +151,7 @@ describe('PlanContractProgress', () => {
       await progress.of({
         located: new WorkspaceLocation({ path: ProgressDouble.WORKTREE, branch: 'feat/42' }),
         issue: { number: 42 },
+        repository: ProgressDouble.REPOSITORY,
       })
 
       const said = complaining.mock.calls.map(([line]) => line).join('')
@@ -161,8 +162,3 @@ describe('PlanContractProgress', () => {
   })
 })
 
-describe('PlanProgress', () => {
-  it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
-    await expect(new PlanProgress().of({ issue: { number: 1 } })).rejects.toThrow(/must implement of/)
-  })
-})
