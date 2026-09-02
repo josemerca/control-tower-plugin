@@ -1,15 +1,25 @@
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { realpathSync } from 'node:fs'
+import { setTimeout as after } from 'node:timers/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { ApiServer, LOOPBACK } from './api-server.js'
 import { CmuxPlanAgents } from './cmux-plan-agents.js'
 import { AcliUserStories } from './acli-user-stories.js'
 import { GhPlanIssues } from './gh-plan-issues.js'
+import { GitWorkspace } from './git-workspace.js'
+import { PlanAgentBrief } from './plan-agent-brief.js'
+import { PlanContractProgress } from './plan-contract-progress.js'
+import { PlanEvents } from './plan-events-route.js'
 import { StartPlan } from '../application/actions/start-plan.js'
+import { ReadPlanProgress, ReadPlanProgressParams } from '../application/queries/read-plan-progress.js'
 import { ToolRunner } from './tool-runner.js'
 import { Gh } from './gh.js'
 import { SystemClock } from './system-clock.js'
 import { ExternalTool } from './external-tool.js'
 import { RetryPolicy, RetryBudget } from '../domain/policies/retry-policy.js'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { LaunchPolicy, LaunchBudget } from '../domain/policies/launch-policy.js'
 import { Invocation, InvocationOutcome } from './invocation.js'
 
 class FrontendBuild {
@@ -17,6 +27,50 @@ class FrontendBuild {
 
   static root() {
     return join(FrontendBuild.#HERE, '..', '..', '..', 'frontend', 'dist')
+  }
+}
+
+class PluginTree {
+  static #HERE = dirname(fileURLToPath(import.meta.url))
+
+  static #root() {
+    return join(PluginTree.#HERE, '..', '..', '..', 'plugin')
+  }
+
+  static dispatchCheck() {
+    return join(PluginTree.#root(), 'scripts', 'dispatch-check.mjs')
+  }
+
+  static conventions() {
+    return join(PluginTree.#root(), 'conventions')
+  }
+}
+
+class Disk {
+  static realpathOf(path) {
+    try {
+      return realpathSync(path)
+    } catch {
+      return null
+    }
+  }
+
+  static async write(path, text) {
+    await mkdir(dirname(path), { recursive: true })
+    await writeFile(path, text)
+  }
+
+  static async read(path) {
+    try {
+      return await readFile(path, 'utf8')
+    } catch (failure) {
+      if (failure.code === 'ENOENT') return null
+      throw failure
+    }
+  }
+
+  static async remove(path) {
+    await rm(path, { force: true })
   }
 }
 
@@ -28,6 +82,11 @@ class CtApi {
   static #PROCESS_TIMEOUT_MS = 30_000
   static #RETRIES = 3
   static #SECONDS_BETWEEN_RETRIES = 2
+  static #PROBES_PER_SEND = 20
+  static #RESENDS = 1
+  static #SECONDS_BETWEEN_PROBES = 1
+  static #SECONDS_BETWEEN_READS = 2
+  static #LAUNCH_DIRECTORY = 'ct-plan'
 
   static #refuseUsage(reason) {
     process.stderr.write(`${reason}\n${CtApi.#USAGE}\n`)
@@ -41,7 +100,7 @@ class CtApi {
 
   static #tool(bin) {
     const runner = new ToolRunner({ bin, budgetMs: CtApi.#PROCESS_TIMEOUT_MS })
-    return (argv) => runner.run(argv)
+    return (argv, options) => runner.run(argv, options)
   }
 
   static #talkingTo(bin, Tool) {
@@ -57,19 +116,66 @@ class CtApi {
     })
   }
 
+  static #waiting(seconds) {
+    return after(seconds * 1000)
+  }
+
+  static #startPlan(git) {
+    return new StartPlan({
+      userStories: new AcliUserStories({ acli: CtApi.#talkingTo(AcliUserStories.BIN, ExternalTool) }),
+      planIssues: new GhPlanIssues({ gh: CtApi.#talkingTo(Gh.BIN, Gh) }),
+      workspace: new GitWorkspace({
+        run: git,
+        write: Disk.write,
+        read: Disk.read,
+        root: process.cwd(),
+        stderr: (line) => process.stderr.write(line),
+      }),
+      planAgents: new CmuxPlanAgents({
+        run: CtApi.#tool(CmuxPlanAgents.BIN),
+        write: Disk.write,
+        read: Disk.read,
+        remove: Disk.remove,
+        realpathOf: Disk.realpathOf,
+        sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_PROBES),
+        runsIn: join(tmpdir(), CtApi.#LAUNCH_DIRECTORY),
+        policy: new LaunchPolicy({
+          budget: new LaunchBudget({ attempts: CtApi.#PROBES_PER_SEND, resends: CtApi.#RESENDS }),
+        }),
+        brief: new PlanAgentBrief({
+          dispatchCheck: PluginTree.dispatchCheck(),
+          conventions: PluginTree.conventions(),
+        }),
+      }),
+    })
+  }
+
+  static #planEvents(git) {
+    const readPlanProgress = new ReadPlanProgress({
+      planProgress: new PlanContractProgress({
+        node: CtApi.#tool(process.execPath),
+        git,
+        dispatchCheck: PluginTree.dispatchCheck(),
+        stderr: (line) => process.stderr.write(line),
+      }),
+    })
+
+    return new PlanEvents({
+      read: (session) => readPlanProgress.execute(new ReadPlanProgressParams(session)),
+      sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_READS),
+    })
+  }
+
   static async run(argv, environment) {
     const asked = Invocation.from(argv, environment)
     if (asked.outcome !== InvocationOutcome.READY) {
       CtApi.#refuseUsage(asked.reason)
     }
-    const startPlan = new StartPlan({
-      userStories: new AcliUserStories({ acli: CtApi.#talkingTo(AcliUserStories.BIN, ExternalTool) }),
-      planIssues: new GhPlanIssues({ gh: CtApi.#talkingTo(Gh.BIN, Gh) }),
-      planAgents: new CmuxPlanAgents({ run: CtApi.#tool(CmuxPlanAgents.BIN), cwd: process.cwd() }),
-    })
+    const git = CtApi.#tool(GitWorkspace.BIN)
     const server = new ApiServer({
       port: asked.port,
-      startPlan,
+      startPlan: CtApi.#startPlan(git),
+      planEvents: CtApi.#planEvents(git),
       frontendRoot: FrontendBuild.root(),
     })
     let port

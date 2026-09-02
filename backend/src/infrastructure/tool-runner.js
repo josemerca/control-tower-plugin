@@ -24,9 +24,9 @@ export class ToolRunner {
     this.budgetMs = budgetMs
   }
 
-  run(argv) {
+  run(argv, { cwd } = {}) {
     return new Promise((resolve) => {
-      execFile(this.bin, argv, { timeout: this.budgetMs }, (failure, stdout, stderr) => {
+      execFile(this.bin, argv, { timeout: this.budgetMs, cwd }, (failure, stdout, stderr) => {
         resolve(new ProcessOutput({
           code: ToolRunner.#codeOf(failure),
           stdout,

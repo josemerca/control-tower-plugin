@@ -18,6 +18,8 @@ src/
     exceptions.js    the catalogue, one file on purpose
   application/
     actions/         one use case per module, with its Params and Result
+    queries/         one read-only use case per module, with its Params and
+                     Result; told apart from actions by the folder
   infrastructure/
     ct-api.mjs       the entrypoint: the only place that assembles the graph
     api-server.js    what every endpoint shares: mounting, the last net, listen, stop
