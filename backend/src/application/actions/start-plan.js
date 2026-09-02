@@ -52,8 +52,6 @@ export class StartPlan {
   async #abandon(located) {
     try {
       await this.workspace.undo(located)
-    } catch (cleanupFailure) {
-      process.stderr.write(`start plan: cleanup after a failed launch also failed: ${cleanupFailure.message}\n`)
-    }
+    } catch {}
   }
 }

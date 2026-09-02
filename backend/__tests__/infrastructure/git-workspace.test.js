@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { GitWorkspace } from '../../src/infrastructure/git-workspace.js'
 import { WorkspaceNotPrepared } from '../../src/domain/exceptions.js'
 import { SliceSeed } from '../../src/infrastructure/slice-seed.js'
+import { WorkspaceLocation } from '../../src/domain/workspace-location.js'
 
 class GitDouble {
   static ROOT = '/repo/checkout'
@@ -19,6 +20,7 @@ class GitDouble {
     this.calls = []
     this.written = []
     this.reads = []
+    this.stderr = []
   }
 
   workspace() {
@@ -45,6 +47,9 @@ class GitDouble {
           return Promise.resolve(this.status)
         }
         return Promise.resolve(this.answer)
+      },
+      stderr: (line) => {
+        this.stderr.push(line)
       },
     })
   }
@@ -330,11 +335,92 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
 
         return Promise.resolve(GitDouble.ok())
       },
+      stderr: (line) => git.stderr.push(line),
     })
 
     const refusal = await git.workspace().prepare({ number: 42 }).catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
     expect(refusal.message).toContain('no se pudo resolver el directorio común')
+    expect(git.stderr.join('')).toContain('worktree remove refused')
+  })
+
+  it('a_cleanup_that_fails_names_the_worktree_and_branch_it_could_not_collect', async () => {
+    const git = new GitDouble()
+    git.workspace = () => new GitWorkspace({
+      root: GitDouble.ROOT,
+      base: GitDouble.BASE,
+      read: () => Promise.resolve(null),
+      write: () => Promise.resolve(),
+      run: (argv) => {
+        git.calls.push(argv)
+        if (argv.includes('--git-common-dir')) {
+          return Promise.resolve({ failed: true, stdout: '', stderr: 'not a git repository' })
+        }
+        if (argv.includes('remove')) return Promise.reject(new Error('worktree remove refused'))
+
+        return Promise.resolve(GitDouble.ok())
+      },
+      stderr: (line) => git.stderr.push(line),
+    })
+
+    await git.workspace().prepare({ number: 42 }).catch(() => {})
+
+    const said = git.stderr.join('')
+    expect(said).toContain(GitDouble.WORKTREE)
+    expect(said).toContain('feat/42')
+  })
+})
+
+describe('GitWorkspace tells its diagnostic writer when undo itself cannot collect what it created', () => {
+  it('a_direct_undo_that_git_refuses_reports_the_worktree_and_branch_left_behind_and_still_throws', async () => {
+    const git = new GitDouble()
+    const located = await git.workspace().prepare({ number: 42 })
+    git.calls = []
+    git.stderr = []
+    git.workspace = () => new GitWorkspace({
+      root: GitDouble.ROOT,
+      base: GitDouble.BASE,
+      read: () => Promise.resolve(null),
+      write: () => Promise.resolve(),
+      run: (argv) => {
+        git.calls.push(argv)
+        if (argv.includes('remove')) return Promise.reject(new Error('worktree remove refused'))
+
+        return Promise.resolve(GitDouble.ok())
+      },
+      stderr: (line) => git.stderr.push(line),
+    })
+
+    const refusal = await git.workspace().undo(located).catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(Error)
+    expect(refusal.message).toBe('worktree remove refused')
+    const said = git.stderr.join('')
+    expect(said).toContain(GitDouble.WORKTREE)
+    expect(said).toContain('feat/42')
+  })
+
+  it('the_default_diagnostic_writer_still_writes_to_the_real_stderr_when_nobody_injects_one', async () => {
+    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    const located = new WorkspaceLocation({ path: GitDouble.WORKTREE, branch: 'feat/42' })
+    const workspace = new GitWorkspace({
+      root: GitDouble.ROOT,
+      base: GitDouble.BASE,
+      read: () => Promise.resolve(null),
+      write: () => Promise.resolve(),
+      run: (argv) => (argv.includes('remove')
+        ? Promise.reject(new Error('worktree remove refused'))
+        : Promise.resolve(GitDouble.ok())),
+    })
+
+    try {
+      await workspace.undo(located).catch(() => {})
+
+      const said = complaining.mock.calls.map(([line]) => line).join('')
+      expect(said).toContain(GitDouble.WORKTREE)
+    } finally {
+      complaining.mockRestore()
+    }
   })
 })

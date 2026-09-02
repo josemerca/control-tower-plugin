@@ -8,13 +8,14 @@ export class GitWorkspace extends Workspace {
   static BIN = 'git'
   static DIRECTORY = '.worktrees'
 
-  constructor({ run, write, read, root, base }) {
+  constructor({ run, write, read, root, base, stderr = (line) => process.stderr.write(line) }) {
     super()
     this.run = run
     this.write = write
     this.read = read
     this.root = root
     this.base = base
+    this.stderr = stderr
   }
 
   static branchFor(issue) {
@@ -79,8 +80,19 @@ export class GitWorkspace extends Workspace {
   }
 
   async undo(located) {
-    await this.run(GitWorkspace.removeArgvFor(this.root, located.path))
-    await this.run(GitWorkspace.deleteBranchArgvFor(this.root, located.branch))
+    try {
+      await this.run(GitWorkspace.removeArgvFor(this.root, located.path))
+      await this.run(GitWorkspace.deleteBranchArgvFor(this.root, located.branch))
+    } catch (failure) {
+      this.#warn(located, failure)
+      throw failure
+    }
+  }
+
+  #warn(located, failure) {
+    this.stderr(
+      `git workspace: no se pudo deshacer el worktree ${located.path} ni la rama ${located.branch}: ${failure.message}\n`
+    )
   }
 
   async #compensate(located) {
