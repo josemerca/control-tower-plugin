@@ -1,0 +1,139 @@
+.button {
+  --state-overlay: transparent;
+
+  position: relative;
+  display: inline-flex;
+  box-sizing: border-box;
+  align-items: stretch;
+  justify-content: center;
+  padding: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  cursor: pointer;
+  background-color: transparent;
+  border: none;
+  border-radius: var(--shape-button-sm);
+  transition: background-color 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.button:disabled {
+  cursor: default;
+}
+
+.button:focus {
+  outline: none;
+}
+
+.button:focus-visible {
+  outline: var(--borderwidth-md) solid var(--border-brand-primary);
+  outline-offset: var(--borderwidth-md);
+}
+
+.button.button--danger:focus-visible,
+.button.button--danger-ghost:focus-visible {
+  outline-color: var(--border-danger);
+}
+
+.button__state-layer {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  background-color: var(--state-overlay);
+  transition: background-color 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.button:hover:not(:disabled) {
+  --state-overlay: var(--state-subtle-hover);
+}
+
+.button:active:not(:disabled) {
+  --state-overlay: var(--state-subtle-pressed);
+}
+
+.button.button--primary:hover:not(:disabled),
+.button.button--danger:hover:not(:disabled) {
+  --state-overlay: var(--state-intense-hover);
+}
+
+.button.button--primary:active:not(:disabled),
+.button.button--danger:active:not(:disabled) {
+  --state-overlay: var(--state-intense-pressed);
+}
+
+.button.button--link:hover:not(:disabled),
+.button.button--link:active:not(:disabled) {
+  --state-overlay: transparent;
+}
+
+.button--link.button--desktop {
+  min-height: 0;
+}
+
+.button--link.button--desktop .button__state-layer {
+  padding: 0;
+}
+
+.button--desktop {
+  min-height: 40px;
+}
+
+.button--mobile {
+  min-height: 48px;
+}
+
+.button--full-width {
+  width: 100%;
+}
+
+.button__label {
+  display: inline-flex;
+  align-items: center;
+}
+
+.button--primary {
+  color: var(--foreground-ondark);
+  background-color: var(--background-brand-primary);
+}
+
+.button--secondary {
+  color: var(--foreground-primary);
+  background-color: var(--background-neutral);
+}
+
+.button--tertiary {
+  color: var(--foreground-primary);
+  background-color: transparent;
+}
+
+.button--link {
+  color: var(--foreground-brand-primary);
+  background-color: transparent;
+}
+
+.button--danger {
+  color: var(--foreground-ondark);
+  background-color: var(--background-danger);
+}
+
+.button--danger-ghost {
+  color: var(--foreground-danger);
+  background-color: transparent;
+}
+
+.button:disabled {
+  color: var(--foreground-disabled);
+  background-color: var(--background-disabled);
+}
+
+.button--tertiary:disabled,
+.button--link:disabled,
+.button--danger-ghost:disabled {
+  background-color: transparent;
+}
+
+.button--secondary:disabled {
+  background-color: var(--background-neutral);
+}

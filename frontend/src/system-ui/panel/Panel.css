@@ -1,0 +1,37 @@
+.panel {
+  --panel-heading-gap: 24px;
+
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  padding: 32px;
+  background-color: var(--background-elevated);
+  border-radius: var(--shape-container-sm);
+}
+
+.panel__heading-block {
+  display: flex;
+  flex-shrink: 0;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  margin-bottom: var(--panel-heading-gap);
+}
+
+.panel__heading {
+  margin: 0;
+  color: var(--foreground-primary);
+}
+
+.panel__actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.panel__body {
+  display: flex;
+  flex-direction: column;
+}

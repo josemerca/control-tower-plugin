@@ -14,6 +14,7 @@ export default defineConfig({
     alias: {
       app: sourceRoot('app'),
       pages: sourceRoot('pages'),
+      'system-ui': sourceRoot('system-ui'),
       __scenarios__: sourceRoot('__scenarios__'),
     },
   },

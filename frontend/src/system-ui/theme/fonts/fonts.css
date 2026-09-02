@@ -1,0 +1,11 @@
+/* Open Sans, self-hosted: variable font, latin subset, weights 400–700.
+   Roboto and SF Pro are not bundled — no type class in this package
+   references them. */
+
+@font-face {
+  font-family: 'Open Sans';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('./open-sans-latin.woff2') format('woff2');
+}

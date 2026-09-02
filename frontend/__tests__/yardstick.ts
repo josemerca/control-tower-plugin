@@ -11,7 +11,7 @@ const SPANISH_WORDS = [
 ]
 
 const MEASURED_EXTENSIONS = ['.ts', '.tsx']
-const UNMEASURED_EXTENSIONS = ['.css', '.html', '.json', '.md']
+const UNMEASURED_EXTENSIONS = ['.css', '.html', '.json', '.md', '.woff2', '.svg']
 const SKIPPED_DIRECTORIES = ['node_modules', 'dist', '.git']
 
 const STRINGS = /'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`/g

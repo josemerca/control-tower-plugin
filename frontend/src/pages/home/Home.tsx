@@ -1,12 +1,18 @@
 import { StartPlanForm } from 'app/start-plan/components/start-plan-form'
+import { Panel } from 'system-ui/panel'
+import { TopBar } from 'system-ui/top-bar'
 import './Home.css'
 
 const Home = () => {
   return (
-    <main className="home">
-      <h1 className="home__title">Control Tower</h1>
-      <StartPlanForm />
-    </main>
+    <div className="home">
+      <TopBar productName="Control Tower" logo={<span className="home__logo">CT</span>} />
+      <main className="home__content">
+        <Panel heading="Arrancar plan" level={1}>
+          <StartPlanForm />
+        </Panel>
+      </main>
+    </div>
   )
 }
 
