@@ -1,7 +1,8 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { setTimeout as after } from 'node:timers/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ApiServer, LOOPBACK } from './api-server.js'
@@ -9,6 +10,7 @@ import { CmuxPlanAgents } from './cmux-plan-agents.js'
 import { AcliUserStories } from './acli-user-stories.js'
 import { GhPlanIssues } from './gh-plan-issues.js'
 import { GitWorkspace } from './git-workspace.js'
+import { DiskGoRegistry } from './disk-go-registry.js'
 import { PlanAgentBrief } from './plan-agent-brief.js'
 import { PlanContractProgress } from './plan-contract-progress.js'
 import { PlanEvents } from './plan-events-route.js'
@@ -92,6 +94,8 @@ class CtApi {
   static #SECONDS_BETWEEN_PROBES = 1
   static #SECONDS_BETWEEN_READS = 2
   static #LAUNCH_DIRECTORY = 'ct-plan'
+  static #STATE_DIRECTORY = 'control-tower'
+  static #DEFAULT_CONFIG_DIRECTORY = '.claude'
 
   static #refuseUsage(reason) {
     process.stderr.write(`${reason}\n${CtApi.#USAGE}\n`)
@@ -125,10 +129,17 @@ class CtApi {
     return after(seconds * 1000)
   }
 
-  static #startPlan(git, planAgents) {
+  static #stateRoot() {
+    const configDir = process.env.CLAUDE_CONFIG_DIR
+      || join(homedir(), CtApi.#DEFAULT_CONFIG_DIRECTORY)
+
+    return join(configDir, CtApi.#STATE_DIRECTORY)
+  }
+
+  static #startPlan(git, planAgents, planIssues) {
     return new StartPlan({
       userStories: new AcliUserStories({ acli: CtApi.#talkingTo(AcliUserStories.BIN, ExternalTool) }),
-      planIssues: new GhPlanIssues({ gh: CtApi.#talkingTo(Gh.BIN, Gh) }),
+      planIssues,
       workspace: new GitWorkspace({
         run: git,
         write: Disk.write,
@@ -179,10 +190,19 @@ class CtApi {
         ctStep: PluginTree.ctStep(),
       }),
     })
+    const planIssues = new GhPlanIssues({ gh: CtApi.#talkingTo(Gh.BIN, Gh) })
     const server = new ApiServer({
       port: asked.port,
-      startPlan: CtApi.#startPlan(git, planAgents),
-      implementPlan: new ImplementPlan({ planAgents }),
+      startPlan: CtApi.#startPlan(git, planAgents, planIssues),
+      implementPlan: new ImplementPlan({
+        goRegistry: new DiskGoRegistry({
+          random: randomBytes,
+          write: Disk.write,
+          root: CtApi.#stateRoot(),
+        }),
+        planIssues,
+        planAgents,
+      }),
       planEvents: CtApi.#planEvents(git),
       frontendRoot: FrontendBuild.root(),
     })
