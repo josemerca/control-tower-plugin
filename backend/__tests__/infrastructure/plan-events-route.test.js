@@ -1,14 +1,18 @@
 import { describe, it, expect } from 'vitest'
-import { PlanEvents } from '../../src/infrastructure/plan-events-route.js'
+import { PlanEvents, PlanSessions } from '../../src/infrastructure/plan-events-route.js'
 import { PlanState } from '../../src/domain/value-objects/plan-state.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
+import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
+import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
+import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { PlanProgressNotRead } from '../../src/domain/exceptions.js'
 
 class EventsDouble {
-  static SUBJECT = {
+  static SUBJECT = new PlanWatch({
+    issue: new PlanIssue({ number: 42, url: 'https://github.com/owner/name/issues/42' }),
     located: new WorkspaceLocation({ path: '/repo/.worktrees/42', branch: 'feat/42' }),
-    issue: { number: 42 },
-  }
+    repository: new RepositoryName('owner/name'),
+  })
 
   constructor(answers) {
     this.answers = [...answers]
@@ -45,6 +49,20 @@ class EventsDouble {
     return frames
   }
 }
+
+describe('PlanSessions', () => {
+  it('what_it_hands_back_is_the_whole_watch_so_the_flow_cannot_lose_the_repository_on_the_way', () => {
+    const sessions = new PlanSessions()
+
+    sessions.remember(EventsDouble.SUBJECT)
+
+    expect(sessions.watching(42)).toBe(EventsDouble.SUBJECT)
+  })
+
+  it('an_issue_nobody_started_a_plan_for_is_answered_with_nothing_instead_of_an_empty_watch', () => {
+    expect(new PlanSessions().watching(404)).toBe(null)
+  })
+})
 
 describe('PlanEvents', () => {
   it('a_frame_is_the_server_sent_event_a_browser_can_parse', () => {

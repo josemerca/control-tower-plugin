@@ -1,4 +1,5 @@
 import { PlanBriefing } from '../../domain/value-objects/plan-briefing.js'
+import { PlanWatch } from '../../domain/value-objects/plan-watch.js'
 
 export class StartPlanParams {
   constructor({ story, repository }) {
@@ -9,10 +10,9 @@ export class StartPlanParams {
 }
 
 export class StartPlanResult {
-  constructor({ issue, agent, located }) {
-    this.issue = issue
+  constructor({ agent, watch }) {
     this.agent = agent
-    this.located = located
+    this.watch = watch
     Object.freeze(this)
   }
 }
@@ -31,7 +31,10 @@ export class StartPlan {
     const located = await this.workspace.prepare({ issue, repository: params.repository })
     const agent = await this.#launch(params, issue, located)
 
-    return new StartPlanResult({ issue, agent, located })
+    return new StartPlanResult({
+      agent,
+      watch: new PlanWatch({ issue, located, repository: params.repository }),
+    })
   }
 
   async #launch(params, issue, located) {

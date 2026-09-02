@@ -7,8 +7,8 @@ export class PlanSessions {
     this.live = new Map()
   }
 
-  remember({ issue, located, repository }) {
-    this.live.set(issue.number, { issue, located, repository })
+  remember(watch) {
+    this.live.set(watch.issue.number, watch)
   }
 
   watching(number) {

@@ -192,16 +192,12 @@ export class StartPlanRoute {
       Answer.refuseAs(response, PlanCollapse.of(cause))
       return
     }
-    sessions.remember({
-      issue: started.issue,
-      located: started.located,
-      repository: asked.repository,
-    })
+    sessions.remember(started.watch)
     Answer.send(response, 202, {
       status: 'started',
       [PlanRequest.ID_FIELD]: asked.story.text,
       [PlanRequest.REPO_FIELD]: asked.repository.text,
-      issue: { number: started.issue.number, url: started.issue.url },
+      issue: { number: started.watch.issue.number, url: started.watch.issue.url },
       agent: started.agent,
     })
   }

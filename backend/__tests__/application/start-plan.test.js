@@ -9,6 +9,7 @@ import { UserStory } from '../../src/domain/value-objects/user-story.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
+import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import {
   PlanAgentNotLaunched, PlanIssueNotCreated, UserStoryNotRead, WorkspaceNotPrepared,
 } from '../../src/domain/exceptions.js'
@@ -174,12 +175,29 @@ describe('StartPlan', () => {
     expect(String(flow.planAgents.asked[0].story)).toBe('MO_SHOP-42')
   })
 
-  it('the_issue_the_agent_and_where_the_work_landed_all_come_back_so_the_caller_can_watch_it', async () => {
+  it('the_agent_and_everything_needed_to_watch_the_plan_come_back_as_one_thing_the_caller_cannot_misspell', async () => {
     const started = await new Flow().run()
 
-    expect(started.issue).toBe(PlanIssuesDouble.OPENED)
     expect(started.agent).toBe('workspace:4')
-    expect(started.located).toBe(WorkspaceDouble.LOCATED)
+    expect(started.watch).toBeInstanceOf(PlanWatch)
+    expect(started.watch.issue).toBe(PlanIssuesDouble.OPENED)
+    expect(started.watch.located).toBe(WorkspaceDouble.LOCATED)
+    expect(started.watch.repository).toBe(Flow.REPOSITORY)
+  })
+
+  it('a_watch_without_the_repository_the_progress_is_measured_against_refuses_to_exist', () => {
+    expect(() => new PlanWatch({
+      issue: PlanIssuesDouble.OPENED, located: WorkspaceDouble.LOCATED, repository: 'owner/name',
+    })).toThrow(/repository/)
+  })
+
+  it('a_watch_without_a_place_to_look_or_an_issue_to_look_for_refuses_to_exist_too', () => {
+    expect(() => new PlanWatch({
+      issue: PlanIssuesDouble.OPENED, located: '/repo/.worktrees/7', repository: Flow.REPOSITORY,
+    })).toThrow(/where that plan is being written/)
+    expect(() => new PlanWatch({
+      issue: undefined, located: WorkspaceDouble.LOCATED, repository: Flow.REPOSITORY,
+    })).toThrow(/the issue whose plan it follows/)
   })
 
   it('a_story_that_cannot_be_read_stops_the_flow_before_an_issue_is_created_for_nothing', async () => {

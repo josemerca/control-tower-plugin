@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { StartPlanResult } from '../../src/application/actions/start-plan.js'
+import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
+import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { PlanEvents, PlanEventsRoute } from '../../src/infrastructure/plan-events-route.js'
 import {
   PlanAgentNotLaunched, UserStoryNotRead, PlanIssueNotCreated, PlanIssueNotNamed, WorkspaceNotPrepared,
@@ -19,6 +21,11 @@ class StartPlanSpy {
   static AGENT = 'workspace:4'
   static ISSUE = new PlanIssue({ number: 7, url: 'https://github.com/owner/name/issues/7' })
   static LOCATED = new WorkspaceLocation({ path: '/repo/.worktrees/7', branch: 'feat/7' })
+  static WATCH = new PlanWatch({
+    issue: StartPlanSpy.ISSUE,
+    located: StartPlanSpy.LOCATED,
+    repository: new RepositoryName('owner/name'),
+  })
 
   constructor({ failing = false } = {}) {
     this.asked = []
@@ -48,11 +55,7 @@ class StartPlanSpy {
     this.asked.push(params.story.text)
     this.repositories.push(params.repository.text)
     if (this.failing) throw new PlanAgentNotLaunched('cmux is not reachable')
-    return new StartPlanResult({
-      issue: StartPlanSpy.ISSUE,
-      agent: StartPlanSpy.AGENT,
-      located: StartPlanSpy.LOCATED,
-    })
+    return new StartPlanResult({ agent: StartPlanSpy.AGENT, watch: StartPlanSpy.WATCH })
   }
 }
 
