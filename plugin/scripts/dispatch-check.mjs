@@ -21,8 +21,8 @@
 // — hasta que eso aterrice, esta es la garantía real: ninguna bajo
 // concurrencia, sí bajo uso secuencial disciplinado.
 import { execFileSync, spawn } from 'node:child_process'
-import { writeSync, statSync, readFileSync, existsSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { writeSync, statSync, readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { detectCollisions, claimLost } from './claim.js'
@@ -41,6 +41,8 @@ import { DeliveryState } from './slice-collection.js'
 import { CollectionAction, CollectionOutcome, SliceCollector } from './slice-collector.js'
 import { findWorkspaceByCwd } from './cmux.js'
 import { BigQueryTable, LoadOutcome } from './bigquery-load.js'
+import { SliceHarvest, SliceHarvestOutcome, TelemetryIndex } from './slice-harvest.js'
+import { HarvestLedger, LedgerIdentity } from './harvest-ledger.js'
 
 const ctWatchMergePath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch-merge.mjs')
 
@@ -1432,6 +1434,7 @@ if (requeue) {
 if (collect) {
   const COLLECT_GIT_TIMEOUT_MS = 30_000
   const COLLECT_CMUX_TIMEOUT_MS = 10_000
+  const COLLECT_BQ_TIMEOUT_MS = 120_000
   const a = localSliceArtifacts(issue)
   if (!a.known) {
     dieErr(`no se ha podido comprobar qué queda de #${issue} en esta máquina (no se pudo consultar git desde aquí): no se ha tocado nada. Corre esto desde dentro del checkout del repo.`, 3)
@@ -1459,6 +1462,25 @@ if (collect) {
     cmux: localRunner('cmux', COLLECT_CMUX_TIMEOUT_MS),
     findWorkspace: (cwd) => findWorkspaceByCwd(cwd),
   })
+  // F20/cosecha, Task 7: con `--bq` y la guarda diciendo COSECHAR, la fila
+  // viaja a BigQuery ANTES de que `collect()` (más abajo) borre nada. Un
+  // `rehearse()` aquí no muta nada — solo decide si tocaría algo — así que
+  // preguntarlo dos veces (aquí y en `collect()`, que lo repite por dentro)
+  // es redundante pero inocuo, y es lo único que permite decidir "cargaría"
+  // sin haber borrado todavía.
+  const espacioTemporal = {
+    create: () => mkdtempSync(join(tmpdir(), 'ct-collect-bq-')),
+    remove: (directory) => rmSync(directory, { recursive: true, force: true }),
+  }
+  const lecturaFallida = (c) => `${c.failures[0].read} falló (${c.failures[0].detail})`
+  let cargada = ''
+  if (bqTable && !dryRun && collector.rehearse({ artifacts: a, repo }).outcome === CollectionOutcome.WOULD_COLLECT) {
+    const cosecha = new SliceHarvest({ gh: ghRunner }).harvestIssue({ repo, number: issue, index: TelemetryIndex.read({ gh: ghRunner, repo }) })
+    if (cosecha.outcome !== SliceHarvestOutcome.COMPLETE) dieErr(`no se pudo leer la cosecha de #${issue}: ${lecturaFallida(cosecha)} — no se ha tocado nada, el siguiente barrido reintenta.`, 3)
+    const ledger = new HarvestLedger({ table: bqTable, bq: localRunner('bq', COLLECT_BQ_TIMEOUT_MS), workspace: espacioTemporal, identity: LedgerIdentity.fromEnvironment() }).record({ repo, milestone: cosecha.row.milestone, rows: [cosecha.row] })
+    if (ledger.outcome === LoadOutcome.REJECTED) { espacioTemporal.remove(ledger.directory); dieOut(`kept #${issue}: BigQuery (${bqTable.id}) rechazó la fila: bq salió con ${ledger.code}: ${ledger.detail} — no se ha borrado nada, el siguiente barrido reintenta`, 10) }
+    cargada = ` ; 1 fila cargada en ${bqTable.id} (harvest_id ${ledger.harvestId})`
+  }
   const report = dryRun
     ? collector.rehearse({ artifacts: a, repo })
     : collector.collect({ artifacts: a, repo })
@@ -1477,7 +1499,7 @@ if (collect) {
   // Proyección EXHAUSTIVA desenlace → (canal, texto, exit code). Un desenlace
   // nuevo sin fila aquí lanza en vez de salir con un código inventado.
   const PROYECCION = {
-    [CollectionOutcome.COLLECTED]: { decir: dieOut, code: 0, linea: (r) => `collected #${issue}: ${r.done.map(hechoDe).join(', ')}` },
+    [CollectionOutcome.COLLECTED]: { decir: dieOut, code: 0, linea: (r) => `collected #${issue}: ${r.done.map(hechoDe).join(', ')}${cargada}` },
     [CollectionOutcome.WOULD_COLLECT]: { decir: dieOut, code: 0, linea: (r) => `would collect #${issue}: ${r.pending.map((command) => command.line).join(' ; ')}${bqTable ? ` ; y cargaría 1 fila en ${bqTable.id}` : ''}` },
     [CollectionOutcome.NOTHING_LEFT]: { decir: dieOut, code: 0, linea: () => `nothing left for #${issue}: en ${a.mainRoot} ya no queda ni el worktree .worktrees/${issue} ni la rama ${a.branch}` },
     [CollectionOutcome.WAITING]: { decir: dieOut, code: 1, linea: (r) => `waiting on #${issue} (${r.delivery.state}): ${esperaPor(r.delivery)} — no se ha tocado nada` },

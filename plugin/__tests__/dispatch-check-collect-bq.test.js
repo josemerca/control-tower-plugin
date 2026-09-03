@@ -17,6 +17,7 @@ class Bench {
   static PULL_REQUEST_NUMBER = 71
   static MALFORMED_TABLE = 'nope'
   static TABLE_ID = 'p:d.t'
+  static MILESTONE = 'M1'
 
   static gitRun(repo, args) {
     return execFileSync('git', ['-C', repo, '-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
@@ -24,6 +25,21 @@ class Bench {
 
   static mergedPullRequestList(headRefOid) {
     return JSON.stringify([{ headRefOid, number: Bench.PULL_REQUEST_NUMBER, state: 'MERGED' }])
+  }
+
+  // Un issue cerrado, con milestone, y closedByPullRequestsReferences vacío
+  // a propósito: así SliceHarvest nunca llama a `gh pr view` (que este stub
+  // no soporta), sin que eso deje de ejercitar la fila entera de la cosecha.
+  static closedIssueWithMilestoneJson() {
+    return JSON.stringify({
+      number: Bench.ISSUE,
+      title: 'slice de prueba',
+      state: 'CLOSED',
+      closedAt: '2026-01-01T00:00:00Z',
+      labels: [],
+      milestone: { title: Bench.MILESTONE },
+      closedByPullRequestsReferences: [],
+    })
   }
 
   constructor() {
@@ -39,6 +55,7 @@ class Bench {
     this.invokedLog = join(this.dir, 'cmux-invoked.log')
     this.ghArgvLog = join(this.dir, 'gh-argv.log')
     this.bqArgvLog = join(this.dir, 'bq-argv.log')
+    this.bqCaptureDir = join(this.dir, 'bq-capture')
     writeFileSync(this.stateFile, JSON.stringify([{ title: `o/r · #${Bench.ISSUE} slice`, cwd: this.worktree }]))
   }
 
@@ -50,8 +67,20 @@ class Bench {
     return existsSync(this.ghArgvLog) ? readFileSync(this.ghArgvLog, 'utf8').trim().split('\n').filter(Boolean) : []
   }
 
+  bqArgvLines() {
+    return existsSync(this.bqArgvLog) ? readFileSync(this.bqArgvLog, 'utf8').trim().split('\n').filter(Boolean) : []
+  }
+
   bqWasInvoked() {
     return existsSync(this.bqArgvLog)
+  }
+
+  cmuxInvocations() {
+    return existsSync(this.invokedLog) ? readFileSync(this.invokedLog, 'utf8') : ''
+  }
+
+  capturedRows() {
+    return readFileSync(join(this.bqCaptureDir, 'rows.ndjson'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
   }
 
   run(args, overrides = {}) {
@@ -103,6 +132,57 @@ describe('dispatch-check --collect accepts, validates and announces --bq', () =>
     expect(bench.bqWasInvoked()).toBe(false)
     expect(existsSync(bench.worktree)).toBe(true)
     expect(bench.branchStillExists()).toBe(true)
+    bench.cleanup()
+  })
+})
+
+describe('dispatch-check --collect --bq: the row travels before anything is deleted', () => {
+  it('a_merged_slice_loads_its_row_and_only_then_loses_worktree_branch_and_session', () => {
+    const bench = new Bench()
+    const result = bench.run(['7', '--repo', Bench.REPO, '--collect', '--bq', Bench.TABLE_ID], {
+      FAKE_GH_PR_LIST: Bench.mergedPullRequestList(bench.tip),
+      FAKE_GH_ISSUE_VIEW_JSON: Bench.closedIssueWithMilestoneJson(),
+      FAKE_BQ_CAPTURE_DIR: bench.bqCaptureDir,
+    })
+    expect(result.status).toBe(0)
+    expect(result.stdout).toContain(`; 1 fila cargada en ${Bench.TABLE_ID} (harvest_id `)
+    const rows = bench.capturedRows()
+    expect(rows).toHaveLength(1)
+    expect(rows[0].issue).toBe(Bench.ISSUE)
+    expect(rows[0].repo).toBe(Bench.REPO)
+    expect(bench.bqArgvLines()[0].startsWith('--project_id=p --headless load')).toBe(true)
+    expect(existsSync(bench.worktree)).toBe(false)
+    expect(bench.branchStillExists()).toBe(false)
+    bench.cleanup()
+  })
+
+  it('a_rejected_load_keeps_worktree_branch_and_session_and_exits_10_naming_bq', () => {
+    const bench = new Bench()
+    const result = bench.run(['7', '--repo', Bench.REPO, '--collect', '--bq', Bench.TABLE_ID], {
+      FAKE_GH_PR_LIST: Bench.mergedPullRequestList(bench.tip),
+      FAKE_GH_ISSUE_VIEW_JSON: Bench.closedIssueWithMilestoneJson(),
+      FAKE_BQ_EXIT_CODE: '2',
+    })
+    expect(result.status).toBe(10)
+    expect(result.stdout).toContain(`kept #${Bench.ISSUE}: BigQuery (${Bench.TABLE_ID}) rechazó la fila: bq salió con 2:`)
+    expect(existsSync(bench.worktree)).toBe(true)
+    expect(bench.branchStillExists()).toBe(true)
+    expect(bench.cmuxInvocations()).not.toContain('close-workspace')
+    bench.cleanup()
+  })
+
+  it('a_timeline_that_cannot_be_read_exits_3_touches_nothing_and_never_calls_bq', () => {
+    const bench = new Bench()
+    const result = bench.run(['7', '--repo', Bench.REPO, '--collect', '--bq', Bench.TABLE_ID], {
+      FAKE_GH_PR_LIST: Bench.mergedPullRequestList(bench.tip),
+      FAKE_GH_ISSUE_VIEW_JSON: Bench.closedIssueWithMilestoneJson(),
+      FAKE_GH_TIMELINE_FAIL: '1',
+    })
+    expect(result.status).toBe(3)
+    expect(result.stderr).toContain(`no se pudo leer la cosecha de #${Bench.ISSUE}: gh api timeline falló`)
+    expect(existsSync(bench.worktree)).toBe(true)
+    expect(bench.branchStillExists()).toBe(true)
+    expect(bench.bqWasInvoked()).toBe(false)
     bench.cleanup()
   })
 })
