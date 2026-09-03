@@ -16,6 +16,19 @@ const backendAnswering = (answer: Answer) => {
   return fetching
 }
 
+const backendPending = () => {
+  let answerWith: (answer: Answer) => void = () => undefined
+  const pending = new Promise<Response>((resolve) => {
+    answerWith = (answer) => resolve(new Response(answer.body, { status: answer.status, headers: JSON_HEADERS }))
+  })
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => pending),
+  )
+
+  return { answerWith: async (answer: Answer) => act(async () => answerWith(answer)) }
+}
+
 const backendUnreachable = () => {
   vi.stubGlobal(
     'fetch',
@@ -64,6 +77,7 @@ const dropStream = async () => {
 
 export {
   backendAnswering,
+  backendPending,
   backendUnreachable,
   openHome,
   typeTicket,

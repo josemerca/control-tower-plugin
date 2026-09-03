@@ -5,12 +5,14 @@ La interfaz web que consume la API de `backend/`. Nace en este repo — repo
 divergencia en `docs/superpowers/specs/2026-08-31-fusion-con-app-companion-design.md`.
 El diseño del front, endpoint a endpoint, está en
 `docs/superpowers/specs/2026-09-02-frontend-primer-endpoint-design.md` (el
-arranque) y `docs/superpowers/specs/2026-09-02-frontend-plan-events-design.md`
-(el progreso).
+arranque), `docs/superpowers/specs/2026-09-02-frontend-plan-events-design.md`
+(el progreso) y `docs/superpowers/specs/2026-09-03-frontend-implement-plan-design.md`
+(la implementación).
 
-Vite + React 19 + TypeScript. Hoy una pantalla sobre dos endpoints: la clave
-del ticket y el repositorio, un botón que llama a `POST /start-plan`, y el
-progreso del plan que llega por `GET /plan-events/:issue` (Server-Sent Events).
+Vite + React 19 + TypeScript. Hoy una pantalla sobre tres endpoints: la clave
+del ticket y el repositorio, un botón que llama a `POST /start-plan`, el
+progreso del plan que llega por `GET /plan-events/:issue` (Server-Sent Events)
+y, cuando el plan está listo, un botón que llama a `POST /implement-plan`.
 
 ## Lo que ya está decidido
 
@@ -22,8 +24,9 @@ progreso del plan que llega por `GET /plan-events/:issue` (Server-Sent Events).
   La API rechaza con `403` cualquier `Origin` que no sea el suyo propio, con
   `Host` de loopback: una página ajena no puede llamar a `POST /start-plan`, y
   la nuestra sí, sin CORS ni preflight.
-- **El cliente es `fetch` sin envoltorio** (`src/app/start-plan/client.ts`) y
-  `EventSource` nativo para el flujo de eventos (`src/app/plan-events/client.ts`).
+- **El cliente es `fetch` sin envoltorio** (`src/app/start-plan/client.ts`,
+  `src/app/implement-plan/client.ts`) y `EventSource` nativo para el flujo de
+  eventos (`src/app/plan-events/client.ts`).
   Las librerías de la casa esperan a que CI tenga acceso al registry privado.
 
 ## El aspecto: design system de logística
@@ -51,7 +54,8 @@ make test-frontend
 
 O dentro de `frontend/`: `npm ci`, `npm test`, `npm run build`, `npm run dev`.
 
-El proxy de `vite.config.ts` reenvía `/start-plan` y `/plan-events` y quita
+El proxy de `vite.config.ts` reenvía `/start-plan`, `/plan-events` e
+`/implement-plan` y quita
 la cabecera `Origin` de lo que reenvía: sin ella el backend trata la petición
 como cliente no-navegador. Es una
 excepción de desarrollo; en producción la página sale del propio backend.

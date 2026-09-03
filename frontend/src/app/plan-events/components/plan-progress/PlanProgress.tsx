@@ -1,4 +1,4 @@
-import { ComponentProps } from 'react'
+import { ComponentProps, ReactNode } from 'react'
 import { PlanProgress as Progress, usePlanProgress } from 'app/plan-events/usePlanProgress'
 import { StartedPlan } from 'app/start-plan/StartPlan.types'
 import { Banner } from 'system-ui/banner'
@@ -26,9 +26,10 @@ const lookFor = (progress: Progress): Look => {
 
 type PlanProgressProps = {
   plan: StartedPlan
+  whenReady?: ReactNode
 }
 
-const PlanProgress = ({ plan }: PlanProgressProps) => {
+const PlanProgress = ({ plan, whenReady = null }: PlanProgressProps) => {
   const progress = usePlanProgress(plan.issue.number)
   const look = lookFor(progress)
   const roleProps = look.role === null ? {} : { role: look.role }
@@ -46,6 +47,7 @@ const PlanProgress = ({ plan }: PlanProgressProps) => {
   return (
     <section className="plan-progress" aria-label="Progreso del plan">
       <Banner type={look.type} title={look.title} description={facts} {...roleProps} />
+      {progress.phase === 'ready' && whenReady}
     </section>
   )
 }
