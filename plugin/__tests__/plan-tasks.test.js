@@ -413,6 +413,36 @@ describe('la vara tiene que poder medir lo que dice medir (verification-predicat
     expect(reglas(['test "$(git diff HEAD -- AGENTS.md | grep -c \'ct-init:slices-contract\')" -eq 0'])).toEqual([])
   })
 
+  it('el caso del slice 35 de repo-pulse, verbatim: `grep -c` con DOS ficheros dentro del predicado', () => {
+    const r = reglas(['test "$(grep -c \'Cargando…\' web/src/App.tsx web/src/App.test.tsx)" -eq 0'])
+    expect(r).toHaveLength(1)
+    expect(r[0].detail).toMatch(/dos o más ficheros/)
+    expect(r[0].detail).toMatch(/grep -l/)
+  })
+
+  it('un fichero dentro del predicado es la forma buena y sigue validando', () => {
+    expect(reglas(['test "$(grep -c \'^test(\' web/src/screen.test.ts)" -eq 7'])).toEqual([])
+  })
+
+  it('la frontera son dos: con uno vale, con dos no, y da igual que la cuenta sea cero o siete', () => {
+    expect(reglas(['test "$(grep -c \'x\' a.ts)" -eq 7'])).toEqual([])
+    expect(reglas(['test "$(grep -c \'x\' a.ts b.ts)" -eq 7'])).toHaveLength(1)
+    expect(reglas(['test "$(grep -c \'x\' a.ts b.ts c.ts)" -eq 0'])).toHaveLength(1)
+  })
+
+  it('con tubería no hay ficheros que contar, aunque el patrón lleve un punto', () => {
+    expect(reglas(['test "$(git diff --name-only | grep -c \'web/src/App.tsx\')" -eq 1'])).toEqual([])
+  })
+
+  it('los patrones de `-e` no se cuentan como ficheros, o dos patrones y un fichero parecerían dos ficheros', () => {
+    expect(reglas(['test "$(grep -c -e p1 -e p2 a.ts)" -eq 0'])).toEqual([])
+    expect(reglas(['test "$(grep -c -e p1 a.ts b.ts)" -eq 0'])).toHaveLength(1)
+  })
+
+  it('las banderas de grep no se confunden con ficheros', () => {
+    expect(reglas(['test "$(grep -cE \'a|b\' --color=never web/src/screen.ts)" -eq 0'])).toEqual([])
+  })
+
   it('`grep -q` y el `grep` pelado no se tocan: ahí el exit code ES la aserción', () => {
     expect(reglas(["grep -q 'cargo clippy' AGENTS.md"])).toEqual([])
     expect(reglas(["grep 'cargo clippy' AGENTS.md"])).toEqual([])
