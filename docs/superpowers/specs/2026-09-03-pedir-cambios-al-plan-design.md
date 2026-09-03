@@ -306,6 +306,23 @@ que escribiste.
   cada plan, y `POST /implement-plan` sigue exigiéndolo en el cuerpo sin que nadie
   compruebe que coinciden. Con el front de hoy manda el del cuerpo y no hay fallo
   posible; unificarlos es del slice del front, que es quien lo manda.
+- **`PlanSessions` sigue sin poder distinguir dos planes con el mismo número de
+  issue, y la vigilancia sí.** Este slice arregló la identidad de un registro y no
+  del otro, y la divergencia es deliberada: la vigilancia indexa por
+  `owner/name#numero` porque sus dos llamantes tienen el repositorio a mano, y
+  `PlanSessions` no puede porque `GET /plan-events/:issue` solo trae el número.
+  Consecuencia con dos repos que tengan cada uno su issue #7: el stream sirve la
+  watch del segundo plan a quien pregunta por el primero, y `POST /implement-plan`
+  de uno olvida la sesión del otro, que pasa a recibir `404`. Cerrarlo pide que la
+  ruta de eventos lleve el repositorio, o sea el slice del front; hasta entonces
+  el carril soporta un plan por número de issue.
+- **La clave de la vigilancia distingue mayúsculas y GitHub no.** Si un cliente
+  arranca con `owner/Alpha` e implementa con `owner/alpha` —las dos válidas para
+  `gh`—, `/implement-plan` contesta `202` y la vigilancia no se apaga, y ya no
+  queda ninguna llamada capaz de apagarla. No se normaliza porque dentro del
+  producto las dos peticiones llevan la misma cadena: el front guarda la del
+  arranque y la devuelve tal cual. Un cliente que la escriba de otra forma paga
+  esto.
 - **El cuerpo de la issue sigue diciendo del `-OK` algo que en este carril no es
   verdad.** La sección de gates que renderiza el plugin habla de un nonce que
   «/ct-next imprimió al despachar» y de un vigilante lanzado por una coordinadora;
