@@ -5,9 +5,15 @@ export class PlanAgents {
     )
   }
 
-  async resume({ agent, issue }) {
+  async resume({ agent, issue, repository }) {
     throw new Error(
-      `${this.constructor.name} must implement resume({ agent, issue }), asked for ${agent} on ${issue}`
+      `${this.constructor.name} must implement resume({ agent, issue, repository }), asked for ${agent} on ${issue} in ${repository}`
+    )
+  }
+
+  async review({ agent, issue, repository, changes }) {
+    throw new Error(
+      `${this.constructor.name} must implement review({ agent, issue, repository, changes }), asked for ${agent} on ${issue} in ${repository}`
     )
   }
 }

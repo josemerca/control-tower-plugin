@@ -2,6 +2,7 @@
 name: ct-reconciler
 description: Resolves the content conflicts of one merge in a Control Tower slice worktree. Cannot stage, commit or abort — the program does that after validating the tree. Dispatch it when ct-step reconcile reports a conflict.
 tools: Read, Grep, Glob, Edit
+model: opus
 ---
 
 You resolve the content conflicts of one merge, inside the worktree of a

@@ -1,7 +1,8 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { setTimeout as after } from 'node:timers/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ApiServer, LOOPBACK } from './api-server.js'
@@ -9,14 +10,18 @@ import { CmuxPlanAgents } from './cmux-plan-agents.js'
 import { AcliUserStories } from './acli-user-stories.js'
 import { GhPlanIssues } from './gh-plan-issues.js'
 import { GitWorkspace } from './git-workspace.js'
+import { DiskGoRegistry } from './disk-go-registry.js'
 import { DispatchCheckHarvest } from './dispatch-check-harvest.js'
 import { HarvestClock } from './harvest-clock.js'
 import { PlanAgentBrief } from './plan-agent-brief.js'
 import { PlanContractProgress } from './plan-contract-progress.js'
 import { PlanEvents } from './plan-events-route.js'
+import { PlanReviewWatch } from './plan-review-watch.js'
 import { StartPlan } from '../application/actions/start-plan.js'
 import { ImplementPlan } from '../application/actions/implement-plan.js'
 import { ReadPlanProgress, ReadPlanProgressParams } from '../application/queries/read-plan-progress.js'
+import { ReadChangesAsked, ReadChangesAskedParams } from '../application/queries/read-changes-asked.js'
+import { ReviewPlan, ReviewPlanParams } from '../application/actions/review-plan.js'
 import { SurveyWorkspaces } from '../application/queries/survey-workspaces.js'
 import { HarvestDelivery, HarvestDeliveryParams } from '../application/actions/harvest-delivery.js'
 import { ToolRunner } from './tool-runner.js'
@@ -99,6 +104,7 @@ class CtApi {
   static #RESENDS = 1
   static #SECONDS_BETWEEN_PROBES = 1
   static #SECONDS_BETWEEN_READS = 2
+  static #SECONDS_BETWEEN_ASKS = 30
   static #LAUNCH_DIRECTORY = 'ct-plan'
 
   static #refuseUsage(reason) {
@@ -133,10 +139,10 @@ class CtApi {
     return after(seconds * 1000)
   }
 
-  static #startPlan(workspace, planAgents) {
+  static #startPlan(workspace, planAgents, planIssues) {
     return new StartPlan({
       userStories: new AcliUserStories({ acli: CtApi.#talkingTo(AcliUserStories.BIN, ExternalTool) }),
-      planIssues: new GhPlanIssues({ gh: CtApi.#talkingTo(Gh.BIN, Gh) }),
+      planIssues,
       workspace,
       planAgents,
     })
@@ -188,8 +194,20 @@ class CtApi {
     })
   }
 
+  static #planReviews(planIssues, planAgents) {
+    const readChangesAsked = new ReadChangesAsked({ planIssues })
+    const reviewPlan = new ReviewPlan({ planAgents })
+
+    return new PlanReviewWatch({
+      asked: (watch) => readChangesAsked.execute(new ReadChangesAskedParams(watch)),
+      review: (params) => reviewPlan.execute(new ReviewPlanParams(params)),
+      sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_ASKS),
+      stderr: (line) => process.stderr.write(line),
+    })
+  }
+
   static async run(argv, environment) {
-    const asked = Invocation.from(argv, environment)
+    const asked = Invocation.from(argv, environment, homedir())
     if (asked.outcome !== InvocationOutcome.READY) {
       CtApi.#refuseUsage(asked.reason)
     }
@@ -219,10 +237,23 @@ class CtApi {
         ctStep: PluginTree.ctStep(),
       }),
     })
+    const planIssues = new GhPlanIssues({
+      gh: CtApi.#talkingTo(Gh.BIN, Gh),
+      stderr: (line) => process.stderr.write(line),
+    })
     const server = new ApiServer({
       port: asked.port,
-      startPlan: CtApi.#startPlan(workspace, planAgents),
-      implementPlan: new ImplementPlan({ planAgents }),
+      startPlan: CtApi.#startPlan(workspace, planAgents, planIssues),
+      reviews: CtApi.#planReviews(planIssues, planAgents),
+      implementPlan: new ImplementPlan({
+        goRegistry: new DiskGoRegistry({
+          random: randomBytes,
+          write: Disk.write,
+          root: asked.stateRoot,
+        }),
+        planIssues,
+        planAgents,
+      }),
       planEvents: CtApi.#planEvents(git),
       frontendRoot: FrontendBuild.root(),
     })

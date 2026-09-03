@@ -2,7 +2,7 @@ import { WorkspaceLocation } from './workspace-location.js'
 import { RepositoryName } from './repository-name.js'
 
 export class PlanWatch {
-  constructor({ issue, located, repository }) {
+  constructor({ issue, located, repository, agent }) {
     if (issue === undefined || issue === null) {
       throw new Error(`a watch carries the issue whose plan it follows, got ${JSON.stringify(issue)}`)
     }
@@ -15,6 +15,7 @@ export class PlanWatch {
     this.issue = issue
     this.located = located
     this.repository = repository
+    this.agent = agent
     Object.freeze(this)
   }
 }

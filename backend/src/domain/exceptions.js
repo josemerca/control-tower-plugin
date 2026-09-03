@@ -17,6 +17,10 @@ export class PlanIssueNotCreated extends PlanIssueFailure {}
 
 export class PlanIssueNotNamed extends PlanIssueFailure {}
 
+export class PlanIssueNotClaimed extends PlanIssueFailure {}
+
+export class PlanGoNotAnswered extends PlanIssueFailure {}
+
 export class PlanAgentFailure extends PlanFailure {}
 
 export class PlanAgentNotLaunched extends PlanAgentFailure {}
@@ -36,6 +40,16 @@ export class WorkspaceNotUnderstood extends WorkspaceFailure {}
 export class PlanProgressFailure extends PlanFailure {}
 
 export class PlanProgressNotRead extends PlanProgressFailure {}
+
+export class PlanChangesFailure extends PlanFailure {}
+
+export class PlanChangesNotRead extends PlanChangesFailure {}
+
+export class PlanChangesNotUnderstood extends PlanChangesFailure {}
+
+export class GoFailure extends PlanFailure {}
+
+export class GoNotRecorded extends GoFailure {}
 
 export class HarvestFailure extends PlanFailure {}
 

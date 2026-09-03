@@ -27,6 +27,11 @@ describe('PlanAgentBrief', () => {
     expect(errand()).toContain('docs/superpowers/plans/YYYY-MM-DD-issue-42-<slug>.md')
   })
 
+  it('it_orders_the_plan_published_on_the_issue_because_that_is_where_a_human_reads_it_to_ask_for_changes', () => {
+    expect(errand()).toContain('gh issue comment 42 --repo owner/name')
+    expect(errand()).toMatch(/publ/i)
+  })
+
   it('it_orders_the_session_to_stop_after_committing_instead_of_starting_the_work', () => {
     expect(errand()).toMatch(/PARA/)
     expect(errand()).toMatch(/no implementes/i)
@@ -86,7 +91,7 @@ describe('PlanAgentBrief resuming the agent', () => {
     dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
     conventions: '/plugin/conventions',
     ctStep: '/plugin/scripts/ct-step.mjs',
-  }).implementationErrandFor({ issueNumber: 42 })
+  }).implementationErrandFor({ issueNumber: 42, repository: new RepositoryName('owner/name') })
 
   it('it_is_one_single_line_because_a_newline_would_run_the_order_half_written', () => {
     expect(errand()).not.toContain('\n')
@@ -109,9 +114,21 @@ describe('PlanAgentBrief resuming the agent', () => {
     expect(composed.indexOf('.agent/SLICE.md')).toBeLessThan(composed.indexOf('Pregunta el paso'))
   })
 
-  it('it_waves_off_the_release_that_ct_step_will_suggest_so_the_agent_does_not_crash_into_exit_9', () => {
-    expect(errand()).toContain('dispatch-check --release')
-    expect(errand()).toMatch(/no ejecutes/i)
+  it('it_orders_the_release_that_moves_the_issue_to_review_instead_of_forbidding_it', () => {
+    expect(errand()).toContain(
+      'node /plugin/scripts/dispatch-check.mjs 42 --repo owner/name --release'
+    )
+    expect(errand()).not.toMatch(/no ejecutes/i)
+    expect(errand()).not.toContain('saldría por 9')
+  })
+
+  it('the_release_it_orders_waives_the_merge_watcher_because_this_flow_has_no_coordinator_to_notify', () => {
+    expect(errand()).toContain('--release --no-watch-merge')
+  })
+
+  it('it_still_stops_before_the_merge_because_that_is_the_second_human_decision', () => {
+    expect(errand()).toMatch(/no la mergees/i)
+    expect(errand()).toMatch(/PARA/)
   })
 
   it('a_brief_that_cannot_name_ct_step_refuses_to_exist_instead_of_shipping_the_word_undefined', () => {
@@ -124,5 +141,45 @@ describe('PlanAgentBrief resuming the agent', () => {
       conventions: '/plugin/conventions',
       ctStep: 'scripts/ct-step.mjs',
     })).toThrow(/ct-step/)
+  })
+})
+
+describe('PlanAgentBrief asking the agent for changes', () => {
+  const CHANGES = 'añade el caso\nde la issue sin\tdescripción'
+  const errand = (changes = CHANGES) => new PlanAgentBrief({
+    dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+    conventions: '/plugin/conventions',
+    ctStep: '/plugin/scripts/ct-step.mjs',
+  }).reviewErrandFor({ issueNumber: 42, repository: new RepositoryName('owner/name'), changes })
+
+  it('the_errand_is_one_line_even_when_the_person_wrote_the_change_across_several', () => {
+    expect(errand()).not.toContain('\n')
+    expect(errand()).not.toContain('\t')
+    expect(errand()).toContain('añade el caso de la issue sin descripción')
+  })
+
+  it('the_errand_names_the_issue_the_plan_and_the_command_that_validates_it', () => {
+    expect(errand()).toContain('#42')
+    expect(errand()).toContain('node /plugin/scripts/dispatch-check.mjs 42 --repo owner/name --check-plan')
+    expect(errand()).toMatch(/no implementes/i)
+  })
+
+  it('the_errand_orders_the_reworked_plan_back_onto_the_issue_so_the_next_change_can_be_asked_for', () => {
+    expect(errand()).toMatch(/publica/i)
+    expect(errand()).toMatch(/comentario/i)
+  })
+
+  it('it_never_promises_a_permission_nobody_mints', () => {
+    expect(errand()).not.toContain('-OK')
+    expect(errand()).not.toContain('nonce')
+  })
+
+  it('a_review_without_the_repository_refuses_to_exist_instead_of_shipping_undefined_into_the_command', () => {
+    expect(() => new PlanAgentBrief({
+      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+      conventions: '/plugin/conventions',
+      ctStep: '/plugin/scripts/ct-step.mjs',
+    }).reviewErrandFor({ issueNumber: 42, repository: 'owner/name', changes: 'x' }))
+      .toThrow(/names the repository/)
   })
 })

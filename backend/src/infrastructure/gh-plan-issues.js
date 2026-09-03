@@ -12,15 +12,52 @@ import { gatesOf } from '../../../plugin/scripts/groom.js'
 import { gateLabels } from '../../../plugin/scripts/gates.js'
 import { PlanIssues } from '../domain/ports/plan-issues.js'
 import { PlanIssue } from '../domain/value-objects/plan-issue.js'
-import { PlanIssueNotCreated, PlanIssueNotNamed } from '../domain/exceptions.js'
+import {
+  PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueNotClaimed, PlanGoNotAnswered,
+  PlanChangesNotRead, PlanChangesNotUnderstood,
+} from '../domain/exceptions.js'
 import { Gh } from './gh.js'
 
 export class GhPlanIssues extends PlanIssues {
+  static CHANGES_TOKEN = '-REVIEW'
+  static IN_PROGRESS_LABEL = 'status:in-progress'
+  static IN_REVIEW_LABEL = 'status:in-review'
+  static GO_TOKEN = '-OK'
   static #REF = /\/issues\/(\d+)\s*$/
 
-  constructor({ gh }) {
+  constructor({ gh, stderr = (line) => process.stderr.write(line) }) {
     super()
     this.gh = gh
+    this.stderr = stderr
+  }
+
+  static goBodyFor(nonce) {
+    return `${GhPlanIssues.GO_TOKEN} ${nonce}`
+  }
+
+  static goArgvFor({ issueNumber, repository, nonce }) {
+    return [
+      'issue', 'comment', String(issueNumber),
+      '--repo', repository.text,
+      '--body', GhPlanIssues.goBodyFor(nonce),
+    ]
+  }
+
+  static changesArgvFor({ issue, repository }) {
+    return [
+      'issue', 'view', String(issue.number),
+      '--repo', repository.text,
+      '--json', 'comments',
+    ]
+  }
+
+  static statusArgvFor({ issue, repository, adding, removing }) {
+    return [
+      'issue', 'edit', String(issue.number),
+      '--repo', repository.text,
+      '--add-label', adding,
+      '--remove-label', removing,
+    ]
   }
 
   static argvFor({ story, repository }) {
@@ -38,7 +75,12 @@ export class GhPlanIssues extends PlanIssues {
   }
 
   async open({ story, repository }) {
-    const outcome = await this.#createSowingLabels({ story, repository })
+    const outcome = await this.#sowing({
+      argv: GhPlanIssues.argvFor({ story, repository }),
+      ours: PlanIssueBody.labels(story),
+      repository,
+      safeToRepeat: false,
+    })
     if (outcome.failed) {
       throw new PlanIssueNotCreated(`${Gh.BIN} issue create failed: ${outcome.stderr.trim()}`)
     }
@@ -53,21 +95,132 @@ export class GhPlanIssues extends PlanIssues {
     return new PlanIssue({ number: Number(found[1]), url })
   }
 
-  async #createSowingLabels({ story, repository }) {
-    const argv = GhPlanIssues.argvFor({ story, repository })
-    const ours = PlanIssueBody.labels(story)
+  async claim({ issue, repository }) {
+    await this.#sowForTheRelease(repository)
+    const { outcome } = await this.#swapping({
+      issue, repository,
+      adding: GhPlanIssues.IN_PROGRESS_LABEL,
+      removing: PlanIssueBody.READY_LABEL,
+    })
+    if (outcome.failed) {
+      throw new PlanIssueNotClaimed(`${Gh.BIN} issue edit failed: ${outcome.stderr.trim()}`)
+    }
+  }
+
+  async requeue({ issue, repository }) {
+    const { argv, outcome } = await this.#swapping({
+      issue, repository,
+      adding: PlanIssueBody.READY_LABEL,
+      removing: GhPlanIssues.IN_PROGRESS_LABEL,
+    })
+    if (outcome.failed) this.#warn({ issue, argv, said: outcome.stderr.trim() })
+  }
+
+  async changesAsked({ issue, repository }) {
+    const outcome = await this.gh.run(
+      GhPlanIssues.changesArgvFor({ issue, repository }), { safeToRepeat: true }
+    )
+    if (outcome.failed) {
+      throw new PlanChangesNotRead(`${Gh.BIN} issue view failed: ${outcome.stderr.trim()}`)
+    }
+
+    return GhPlanIssues.#changesIn(outcome.stdout, issue)
+  }
+
+  static #changesIn(printed, issue) {
+    const asked = []
+    for (const comment of GhPlanIssues.#commentsIn(printed, issue)) {
+      GhPlanIssues.#demandRead(comment, issue)
+      if (!comment.body.startsWith(GhPlanIssues.CHANGES_TOKEN)) continue
+
+      asked.push(new ChangeAsked({
+        id: comment.id,
+        text: comment.body.slice(GhPlanIssues.CHANGES_TOKEN.length).trim(),
+      }))
+    }
+
+    return asked
+  }
+
+  static #commentsIn(printed, issue) {
+    let parsed
+    try {
+      parsed = JSON.parse(printed)
+    } catch {
+      throw new PlanChangesNotUnderstood(
+        `${Gh.BIN} answered something that is not json for the comments of ${issue.number}, it printed ${JSON.stringify(printed)}`
+      )
+    }
+    if (!Array.isArray(parsed?.comments)) {
+      throw new PlanChangesNotUnderstood(
+        `${Gh.BIN} answered without the comments of ${issue.number}, it printed ${JSON.stringify(printed)}`
+      )
+    }
+
+    return parsed.comments
+  }
+
+  static #demandRead(comment, issue) {
+    if (typeof comment?.id === 'string' && typeof comment?.body === 'string') return
+
+    throw new PlanChangesNotUnderstood(
+      `${Gh.BIN} answered a comment of ${issue.number} without the id and the body this reads, it printed ${JSON.stringify(comment)}`
+    )
+  }
+
+  async answerGo({ issueNumber, repository, nonce }) {
+    const outcome = await this.gh.run(
+      GhPlanIssues.goArgvFor({ issueNumber, repository, nonce }), { safeToRepeat: false }
+    )
+    if (outcome.failed) {
+      throw new PlanGoNotAnswered(`${Gh.BIN} issue comment failed: ${outcome.stderr.trim()}`)
+    }
+  }
+
+  async #sowForTheRelease(repository) {
+    const argv = GhPlanIssues.labelArgvFor(repository, GhPlanIssues.IN_REVIEW_LABEL)
+    const outcome = await this.gh.run(argv, { safeToRepeat: true })
+    if (outcome.failed) {
+      throw new PlanIssueNotClaimed(
+        `${GhPlanIssues.IN_REVIEW_LABEL} could not be sown in ${repository.text}, and dispatch-check --release cannot create it when the agent delivers: ${outcome.stderr.trim()}`
+      )
+    }
+  }
+
+  async #swapping({ issue, repository, adding, removing }) {
+    const argv = GhPlanIssues.statusArgvFor({ issue, repository, adding, removing })
+    const outcome = await this.#sowing({ argv, ours: [adding], repository, safeToRepeat: true })
+
+    return { argv, outcome }
+  }
+
+  #warn({ issue, argv, said }) {
+    this.stderr(
+      `gh plan issues: ${issue} stays claimed because it could not be put back in the queue: ${said}. Run it yourself: ${Gh.BIN} ${argv.join(' ')}\n`
+    )
+  }
+
+  async #sowing({ argv, ours, repository, safeToRepeat }) {
     const sown = new Set()
-    let outcome = await this.gh.run(argv, { safeToRepeat: false })
+    let outcome = await this.gh.run(argv, { safeToRepeat })
     while (outcome.failed) {
       const missing = Gh.labelMissingIn(outcome.stderr)
       if (missing === null || !ours.includes(missing) || sown.has(missing)) break
 
       sown.add(missing)
       await this.gh.run(GhPlanIssues.labelArgvFor(repository, missing), { safeToRepeat: true })
-      outcome = await this.gh.run(argv, { safeToRepeat: false })
+      outcome = await this.gh.run(argv, { safeToRepeat })
     }
 
     return outcome
+  }
+}
+
+export class ChangeAsked {
+  constructor({ id, text }) {
+    this.id = id
+    this.text = text
+    Object.freeze(this)
   }
 }
 
@@ -79,6 +232,9 @@ export class PlanIssueBody {
     /((?<![\w])[\w.-]+\/[\w.-]+#\d+|(?<![\w])#\d+|(?<![\w.])@[A-Za-z0-9][A-Za-z0-9-]*|https?:\/\/\S*github\.com\/\S+)/g
   static #CODE_SPAN = /(`[^`]*`)/
   static READY_LABEL = 'status:ready'
+  static CHANGES_LINE =
+    `> Para pedir cambios en el plan, comenta en este issue empezando por \`${GhPlanIssues.CHANGES_TOKEN}\`: ` +
+    'lo que escribas detrás es lo que se le pide al agente, y publicará el plan rehecho aquí mismo.'
 
   static labels(story) {
     return [...gateLabels(gatesOf(PlanIssueBody.rowFor(story)).gates), PlanIssueBody.READY_LABEL]
@@ -121,6 +277,7 @@ export class PlanIssueBody {
 
     return [
       `> Historia de usuario: ${story.key}`,
+      PlanIssueBody.CHANGES_LINE,
       '',
       PlanIssueBody.DESCRIPTION_HEADING,
       renderDescripcion(row) ?? `_${story.key} no trae resumen en Jira._`,

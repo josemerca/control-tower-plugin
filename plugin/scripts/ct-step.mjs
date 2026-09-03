@@ -68,7 +68,7 @@ import { PluginYardstick } from './plugin-yardstick.js'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage, findingLocation,
   readE2eReport, E2E_SCHEMA,
-  IMPLEMENTER_TOOLS, JUDGE_TOOLS, PACKAGE_SECTIONS,
+  IMPLEMENTER_TOOLS, IMPLEMENTER_MODEL, JUDGE_TOOLS, PACKAGE_SECTIONS,
   readSliceVerdict, outcomeOfSliceVerdict, sliceVerdictCommitMessage,
   SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS, RECONCILER_TOOLS,
   REVIEW_TOKEN_LABEL, reviewToken, reviewTokenLine, reviewTokenOf,
@@ -484,7 +484,7 @@ function verboNext() {
       // La lista sale de la constante y no se teclea otra vez: la copia a mano
       // de las del juez ya divergió una vez, y `ct-step next` acabó anunciando
       // unas herramientas que no eran las del agente que se despachaba.
-      out(`DESPACHA UN IMPLEMENTADOR (subagente con ${IMPLEMENTER_TOOLS}) con:`)
+      out(`DESPACHA UN IMPLEMENTADOR (subagente con modelo ${IMPLEMENTER_MODEL} — herramientas: ${IMPLEMENTER_TOOLS}) con:`)
       out(`  - la rúbrica de ${join(PLUGIN_ROOT, 'prompts', 'task-implementer.md')}`)
       out(`  - el brief de la tarea: ${brief}`)
       out(`  - que escriba su informe en: ${informe}`)

@@ -1,9 +1,17 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
+import { ReviewsSpy } from '../reviews-spy.js'
+import { PlanSessions } from '../../src/infrastructure/plan-events-route.js'
+import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
+import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
+import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
+import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import {
   ImplementRequestOutcome, ImplementRefusal, ImplementCollapse,
 } from '../../src/infrastructure/implement-plan-route.js'
-import { PlanAgentNotResumed, PlanFailure } from '../../src/domain/exceptions.js'
+import {
+  PlanAgentNotResumed, PlanFailure, PlanGoNotAnswered, GoFailure, GoNotRecorded,
+} from '../../src/domain/exceptions.js'
 
 class ImplementPlanSpy {
   constructor() {
@@ -32,6 +40,7 @@ class ImplementPlanSpy {
     this.asked.push({
       agent: params.agent,
       issue: params.issue,
+      repository: params.repository.text,
     })
   }
 }
@@ -39,13 +48,30 @@ class ImplementPlanSpy {
 class RunningApi {
   static #started = []
   static PATH = '/implement-plan'
-  static ACCEPTED_BODY = '{"agent":"workspace:20","issue":33}'
+  static ACCEPTED_BODY = '{"agent":"workspace:20","issue":33,"repo":"jjponz/repo-pulse"}'
   static ANSWER = '{"status":"implementing","agent":"workspace:20","issue":33}'
   static spy = null
+  static reviews = null
+  static sessions = null
+  static WATCHED = new PlanWatch({
+    issue: new PlanIssue({ number: 33, url: 'https://github.com/jjponz/repo-pulse/issues/33' }),
+    located: new WorkspaceLocation({ path: '/repo/.worktrees/33', branch: 'feat/33' }),
+    repository: new RepositoryName('jjponz/repo-pulse'),
+    agent: 'workspace:20',
+  })
 
   static async listening(spy = new ImplementPlanSpy()) {
     RunningApi.spy = spy
-    const server = new ApiServer({ port: 0, startPlan: null, implementPlan: spy })
+    RunningApi.reviews = new ReviewsSpy()
+    RunningApi.sessions = new PlanSessions()
+    RunningApi.sessions.remember(RunningApi.WATCHED)
+    const server = new ApiServer({
+      port: 0,
+      startPlan: null,
+      implementPlan: spy,
+      reviews: RunningApi.reviews,
+      sessions: RunningApi.sessions,
+    })
     const port = await server.start()
     RunningApi.#started.push(server)
 
@@ -79,16 +105,26 @@ describe('ImplementPlanRoute', () => {
     expect(await response.text()).toBe(RunningApi.ANSWER)
   })
 
-  it('the_two_fields_reach_the_use_case_as_domain_values_and_not_as_the_raw_json', async () => {
+  it('the_three_fields_reach_the_use_case_as_domain_values_and_not_as_the_raw_json', async () => {
     await RunningApi.asking(RunningApi.ACCEPTED_BODY)
 
     expect(RunningApi.spy.asked).toEqual([
-      { agent: 'workspace:20', issue: 33 },
+      { agent: 'workspace:20', issue: 33, repository: 'jjponz/repo-pulse' },
     ])
   })
 
+  it('a_repository_that_is_not_owner_slash_name_is_refused_before_it_can_become_an_argument_of_gh', async () => {
+    const response = await RunningApi.asking('{"agent":"workspace:20","issue":33,"repo":"-oProxy"}')
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      error: 'repo must be a repository such as owner/name',
+    })
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
   it('an_agent_handle_with_whitespace_is_refused_before_it_can_become_an_argument_of_cmux', async () => {
-    const response = await RunningApi.asking('{"agent":"ct-plan XOP-4909","issue":33}')
+    const response = await RunningApi.asking('{"agent":"ct-plan XOP-4909","issue":33,"repo":"jjponz/repo-pulse"}')
 
     expect(response.status).toBe(400)
     expect((await response.json()).error).toMatch(/^agent must be the handle/)
@@ -191,13 +227,69 @@ describe('ImplementRefusal', () => {
 })
 
 describe('ImplementCollapse', () => {
-  const RESUMING_AN_AGENT = ['PlanAgentNotResumed']
+  const RESUMING_AN_AGENT = ['GoNotRecorded', 'PlanGoNotAnswered', 'PlanAgentNotResumed']
 
   it('every_way_resuming_an_agent_can_collapse_has_a_status_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
     expect(ImplementCollapse.declaredFailures().sort()).toEqual(RESUMING_AN_AGENT.sort())
   })
 
+  it('a_go_nobody_could_record_is_something_to_try_again_and_names_why', () => {
+    const collapse = ImplementCollapse.of(new GoNotRecorded('the directory is not writable'))
+
+    expect(collapse.status).toBe(503)
+    expect(collapse.error).toBe('could not implement the plan: the directory is not writable')
+  })
+
+  it('a_go_the_issue_did_not_take_is_something_to_try_again_and_names_what_gh_said', () => {
+    const collapse = ImplementCollapse.of(new PlanGoNotAnswered('gh issue comment failed: nope'))
+
+    expect(collapse.status).toBe(503)
+    expect(collapse.error).toBe('could not implement the plan: gh issue comment failed: nope')
+  })
+
   it('a_family_is_not_a_way_of_collapsing_so_answering_one_raises_instead_of_guessing', () => {
     expect(() => ImplementCollapse.of(new PlanFailure('nope'))).toThrow(/no status declared/)
+    expect(() => ImplementCollapse.of(new GoFailure('nope'))).toThrow(/no status declared/)
+  })
+})
+
+describe('implementing the plan lifts the watch on its issue', () => {
+  afterEach(RunningApi.stopAll)
+
+  it('implementing_the_plan_lifts_the_watch_because_there_is_nothing_left_to_ask_for', async () => {
+    const response = await RunningApi.asking(RunningApi.ACCEPTED_BODY)
+
+    expect(response.status).toBe(202)
+    expect(RunningApi.reviews.stopped).toEqual([{
+      issue: 33, repository: RunningApi.WATCHED.repository,
+    }])
+  })
+
+  it('implementing_the_plan_forgets_the_session_so_nothing_keeps_reading_the_contract_of_a_plan_being_built', async () => {
+    await RunningApi.asking(RunningApi.ACCEPTED_BODY)
+
+    expect(RunningApi.sessions.watching(33)).toBe(null)
+  })
+
+  it('a_refused_request_to_implement_forgets_no_session', async () => {
+    await RunningApi.asking('{"agent":"workspace:20","issue":0,"repo":"a/b"}')
+
+    expect(RunningApi.sessions.watching(33)).toBe(RunningApi.WATCHED)
+  })
+
+  it('a_refused_request_to_implement_lifts_no_watch', async () => {
+    const response = await RunningApi.asking('{"agent":"workspace:20","issue":0,"repo":"a/b"}')
+
+    expect(response.status).toBe(400)
+    expect(RunningApi.reviews.stopped).toEqual([])
+  })
+
+  it('a_plan_the_agent_would_not_take_keeps_its_watch_so_the_changes_can_still_be_asked_for', async () => {
+    const spy = ImplementPlanSpy.failingWith(new PlanAgentNotResumed('no such workspace'))
+
+    const response = await RunningApi.post(await RunningApi.listening(spy), RunningApi.ACCEPTED_BODY)
+
+    expect(response.status).toBe(503)
+    expect(RunningApi.reviews.stopped).toEqual([])
   })
 })

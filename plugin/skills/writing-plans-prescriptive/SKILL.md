@@ -147,8 +147,11 @@ first, write down what you saw, and put the claim inside the command as a **pred
 program that runs it scores the exit code and reads nothing else. A real plan shipped
 `git diff HEAD -- AGENTS.md | grep -c 'marker'   # expected: 0` past this gate and past a human
 one: `grep -c` exits 0 on at least one match, so that control went green exactly in the case it
-existed to forbid. The predicate form is `test "$(… | grep -c 'marker')" -eq 0`, and
-`--check-plan` now rejects the commands it can prove cannot measure their own claim.
+existed to forbid. The predicate form is `test "$(… | grep -c 'marker')" -eq 0`, with **one file per
+`grep -c`**: with two it prints `file:count` per file, so the `test` gets a non-integer and exits 2,
+red forever whatever the code says. For "nothing is left in these files" use
+`test -z "$(grep -l 'm' a.ts b.ts)"`, where the empty list *is* the claim. `--check-plan` rejects
+the commands it can prove cannot measure their own claim, these two included.
 
 **Cite the files your slice rewrites, normally.** `--check-plan` reads the working tree (you
 have not implemented anything yet) and `--release` reads the **base of the branch** — the same

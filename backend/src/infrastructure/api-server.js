@@ -38,11 +38,13 @@ class Failures {
 
 export class ApiServer {
   constructor({
-    port, startPlan, implementPlan, planEvents = null, sessions = new PlanSessions(), frontendRoot = null,
+    port, startPlan, implementPlan, reviews, planEvents = null,
+    sessions = new PlanSessions(), frontendRoot = null,
   }) {
     this.requestedPort = port
     this.startPlan = startPlan
     this.implementPlan = implementPlan
+    this.reviews = reviews
     this.planEvents = planEvents
     this.sessions = sessions
     this.frontendRoot = frontendRoot
@@ -60,7 +62,7 @@ export class ApiServer {
       Browsers.turnAwayForeign,
       JsonBody.demandDeclared,
       JsonBody.reader(),
-      StartPlanRoute.handledBy(this.startPlan, this.sessions)
+      StartPlanRoute.handledBy(this.startPlan, this.sessions, this.reviews)
     )
     app.all(StartPlanRoute.PATH, StartPlanRoute.refuseOtherMethods)
     app.post(
@@ -68,7 +70,7 @@ export class ApiServer {
       Browsers.turnAwayForeign,
       JsonBody.demandDeclared,
       JsonBody.reader(),
-      ImplementPlanRoute.handledBy(this.implementPlan)
+      ImplementPlanRoute.handledBy(this.implementPlan, this.sessions, this.reviews)
     )
     app.all(ImplementPlanRoute.PATH, ImplementPlanRoute.refuseOtherMethods)
     app.get(

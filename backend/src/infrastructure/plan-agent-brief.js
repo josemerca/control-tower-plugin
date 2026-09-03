@@ -5,6 +5,7 @@ import { SLICE_REL_PATH } from '../../../plugin/scripts/state-paths.js'
 export class PlanAgentBrief {
   static DOCUMENTS = 'defects.md, style.md, decisions.md, architecture.md, testing.md'
   static NO_NEW_WORKTREES = 'no crees worktrees nuevos'
+  static WHITESPACE = /\s+/g
 
   constructor({ dispatchCheck, conventions, ctStep }) {
     if (typeof dispatchCheck !== 'string' || !isAbsolute(dispatchCheck)) {
@@ -39,12 +40,32 @@ export class PlanAgentBrief {
       `Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${issue.number}-<slug>.md.`,
       `Valídalo con \`node ${dispatchCheck} ${issue.number} --repo ${named} --check-plan\` hasta exit 0.`,
       'Commitéalo: el plan viaja en el pull request, y sin commitear no cuenta como escrito.',
+      `Y publícalo como comentario del issue con \`gh issue comment ${issue.number} --repo ${named}\`: es donde una persona lo lee para darte el go o para pedirte cambios, así que sin publicarlo el plan no existe para nadie más que para ti.`,
       `Y entonces PARA. No implementes nada, no abras pull request, no mergees, ${PlanAgentBrief.NO_NEW_WORKTREES}: ya estás en el que te prepararon.`,
     ].join('\n')
   }
 
-  implementationErrandFor({ issueNumber }) {
+  reviewErrandFor({ issueNumber, repository, changes }) {
+    if (!(repository instanceof RepositoryName)) {
+      throw new Error(`the errand names the repository whose plan it reworks, got ${JSON.stringify(repository)}`)
+    }
+    const dispatchCheck = this.dispatchCheck
+    const named = repository.text
+
+    return [
+      `Un humano ha revisado el plan del issue #${issueNumber} que commiteaste y pide cambios:`,
+      `«${String(changes).replace(PlanAgentBrief.WHITESPACE, ' ').trim()}».`,
+      'Rehaz el plan con esos cambios, sin reescribirlo de cero y sin implementar nada.',
+      `Revalídalo con \`node ${dispatchCheck} ${issueNumber} --repo ${named} --check-plan\` hasta exit 0,`,
+      'recommitéalo, y publica el plan rehecho como comentario del issue con',
+      `\`gh issue comment ${issueNumber} --repo ${named}\`, que es donde se lee para pedir el cambio siguiente.`,
+      `Y entonces PARA otra vez: no implementes nada, no abras pull request, ${PlanAgentBrief.NO_NEW_WORKTREES}.`,
+    ].join(' ')
+  }
+
+  implementationErrandFor({ issueNumber, repository }) {
     const ctStep = this.ctStep
+    const dispatchCheck = this.dispatchCheck
 
     return [
       `El gate \`plan\` del issue #${issueNumber} lo ha cerrado una persona:`,
@@ -52,9 +73,9 @@ export class PlanAgentBrief {
       `Antes de pedir el primer paso, reescribe en ${SLICE_REL_PATH} los campos role, task y next_action para que digan que estás implementando el plan, no escribiéndolo.`,
       `La secuencia no la conduces con subagent-driven-development ni con su ledger: la dicta la máquina. Pregunta el paso con \`node ${ctStep} next --plan <tu plan de docs/superpowers/plans/> --issue ${issueNumber}\``,
       `y obedece literalmente lo que imprima, tarea a tarea (donde diga \`ct-step\`, es \`node ${ctStep}\`), volviendo a \`next\` tras cada paso hasta que diga "run delivered".`,
-      `Entonces abre la pull request con \`Closes #${issueNumber}\` en el cuerpo y PARA: no la mergees,`,
-      `${PlanAgentBrief.NO_NEW_WORKTREES}, y NO ejecutes \`dispatch-check --release\` aunque ct-step te lo diga`,
-      '(en este flujo el issue no se reclama y el permiso que esa puerta exige no se acuña: saldría por 9).',
+      `Entonces abre la pull request con \`Closes #${issueNumber}\` en el cuerpo y libera con`,
+      `\`node ${dispatchCheck} ${issueNumber} --repo ${repository.text} --release --no-watch-merge\`, que mueve el issue a revisión.`,
+      `Y PARA ahí: no la mergees y ${PlanAgentBrief.NO_NEW_WORKTREES}.`,
     ].join(' ')
   }
 }

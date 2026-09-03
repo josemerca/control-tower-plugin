@@ -289,10 +289,26 @@ describe('costura 4 — el plan del slice lo escribe writing-plans-prescriptive 
     // es este skill: el juez sólo puede declarar el choque cuando ya está
     // escrito, y `plan-contract.js` sólo puede rechazarlo cuando ya se escribió.
     // Prevenirlo es lo único que ahorra la vuelta entera.
+    //
+    // Tope subido de 17207 a 17492: paga la variante de `grep -c` con dos o más
+    // ficheros, que imprime `fichero:cuenta` por línea y deja el `test` que la
+    // envuelve en rojo para siempre. Se intentó recortar dentro del mismo
+    // apartado y no había de dónde: cada frase de ahí paga un incidente medido,
+    // y quitar uno para hacer sitio al siguiente cambia una lección por otra en
+    // vez de sumarla. El motivo propio de esta subida: la skill enseñaba SOLO la
+    // forma con tubería, que devuelve un número, así que la variante con
+    // ficheros como argumentos no la desaconsejaba nadie — y bloqueó el slice
+    // #35 de repo-pulse en su quinta tarea, con un humano teniendo que decidir
+    // sobre un plan ya aprobado. El validador la rechaza desde esta misma rama,
+    // pero eso avisa al VALIDAR; esto avisa al ESCRIBIR, que es antes.
+    // El acumulado desde el primer tope (16.314) son ya +1.178 bytes, un 7,2 %,
+    // y la deuda que la subida anterior dejó escrita —mirar el acumulado, no
+    // sólo el paso previo— se paga aquí mismo: la próxima subida sigue
+    // teniendo que sumar desde 16.314, no desde 17.492.
     expect(
       bytes('SKILL.md'),
       'SKILL.md se ha pasado del tope: recorta dentro del mismo apartado, o sube el tope escribiendo aquí mismo el motivo de la subida — no vale por precedente.'
-    ).toBeLessThanOrEqual(17207)
+    ).toBeLessThanOrEqual(17492)
     expect(
       bytes('plan-template.md'),
       'plan-template.md se ha pasado del tope: recorta dentro del mismo apartado, o sube el tope escribiendo aquí mismo el motivo de la subida — no vale por precedente.'

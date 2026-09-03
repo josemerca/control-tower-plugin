@@ -24,14 +24,23 @@ class PluginEnvironment {
 }
 
 class Invoked {
+  static HOME = '/home/someone'
   static SECONDS_FOR_GH = 60
 
   static withPort(given) {
-    return Invocation.from([], { [Invocation.PORT_VARIABLE]: given })
+    return Invocation.from([], { [Invocation.PORT_VARIABLE]: given }, Invoked.HOME)
   }
 
   static bare() {
-    return Invocation.from([], {})
+    return Invocation.from([], {}, Invoked.HOME)
+  }
+
+  static withConfigDirectory(given) {
+    return Invocation.from([], { [Invocation.CONFIG_VARIABLE]: given }, Invoked.HOME)
+  }
+
+  static withHome(given) {
+    return Invocation.from([], {}, given)
   }
 
   static harvesting(environment) {
@@ -94,7 +103,7 @@ describe('Invocation', () => {
   })
 
   it('an_outcome_outside_the_vocabulary_raises_instead_of_travelling_on_as_a_string', () => {
-    expect(() => new Invocation({ outcome: 'invented', port: null, reason: 'x' }))
+    expect(() => new Invocation({ outcome: 'invented', port: null, stateRoot: null, reason: 'x' }))
       .toThrow(/InvocationOutcome member/)
   })
 
@@ -129,5 +138,44 @@ describe('Invocation', () => {
 
     expect(Object.keys(composed)).toEqual([Invocation.CHILD_TIMEOUT_VARIABLE])
     expect(composed[Invocation.CHILD_TIMEOUT_VARIABLE]).toBe('60000')
+  })
+})
+
+describe('Invocation resolving where Control Tower keeps its state', () => {
+  it('with_nothing_asked_for_the_state_root_hangs_off_the_home_of_whoever_runs_it', () => {
+    expect(Invoked.bare().stateRoot).toBe('/home/someone/.claude/control-tower')
+  })
+
+  it('the_configuration_directory_asked_for_wins_over_the_home_because_that_is_what_the_plugin_honours', () => {
+    expect(Invoked.withConfigDirectory('/elsewhere/cfg').stateRoot)
+      .toBe('/elsewhere/cfg/control-tower')
+  })
+
+  it('a_configuration_directory_asked_for_as_empty_falls_back_to_the_home_instead_of_a_relative_path', () => {
+    expect(Invoked.withConfigDirectory('').stateRoot).toBe('/home/someone/.claude/control-tower')
+  })
+
+  it('a_home_that_resolves_to_nothing_is_refused_by_name_instead_of_writing_the_go_where_nobody_reads', () => {
+    const refused = Invoked.withHome('')
+
+    expect(refused.outcome).toBe(InvocationOutcome.UNKNOWN_STATE_HOME)
+    expect(refused.reason).toBe(
+      'the home directory of whoever runs this could not be resolved, so there is no absolute path for the state Control Tower shares with its plugin: set HOME, or CLAUDE_CONFIG_DIR to an absolute path'
+    )
+  })
+
+  it('a_configuration_directory_that_is_not_absolute_is_refused_for_the_same_reason', () => {
+    expect(Invoked.withConfigDirectory('relative/cfg').outcome)
+      .toBe(InvocationOutcome.UNKNOWN_STATE_HOME)
+  })
+
+  it('a_refused_invocation_carries_no_state_root_a_consumer_could_write_into_by_mistake', () => {
+    expect(Invoked.withPort('abc').stateRoot).toBe(null)
+    expect(Invoked.withHome('').stateRoot).toBe(null)
+  })
+
+  it('an_argument_is_refused_before_the_state_root_is_even_resolved', () => {
+    expect(Invocation.from(['--port'], {}, '').outcome)
+      .toBe(InvocationOutcome.UNEXPECTED_ARGUMENT)
   })
 })

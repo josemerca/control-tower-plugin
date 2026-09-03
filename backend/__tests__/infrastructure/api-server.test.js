@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
+import { ReviewsSpy } from '../reviews-spy.js'
 import { StartPlanResult } from '../../src/application/actions/start-plan.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
@@ -119,10 +120,18 @@ class RunningApi {
     '{"status":"started","id":"ABC-123","repo":"owner/name",' +
     '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"agent":"workspace:4"}'
   static spy = null
+  static reviews = null
 
   static async listening(options = {}) {
     RunningApi.spy = new StartPlanSpy()
-    const server = new ApiServer({ port: 0, startPlan: RunningApi.spy, implementPlan: null, ...options })
+    RunningApi.reviews = new ReviewsSpy()
+    const server = new ApiServer({
+      port: 0,
+      startPlan: RunningApi.spy,
+      implementPlan: null,
+      reviews: RunningApi.reviews,
+      ...options,
+    })
     const port = await server.start()
     RunningApi.#started.push(server)
     return port
@@ -147,6 +156,21 @@ class RunningApi {
 
   static async accepted(port) {
     return RunningApi.startPlan(port, RunningApi.ACCEPTED_BODY)
+  }
+
+  static async watching(port, headers = {}) {
+    return fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+      headers: { Origin: `http://127.0.0.1:${port}`, ...headers },
+      signal: AbortSignal.timeout(1000),
+    })
+  }
+
+  static async firstFrame(response) {
+    const reader = response.body.getReader()
+    const { value } = await reader.read()
+    await reader.cancel()
+
+    return new TextDecoder().decode(value)
   }
 
   static ask(port, lines) {
@@ -707,32 +731,31 @@ describe('ApiServer', () => {
   })
 
   it('a_plan_that_started_is_remembered_so_the_page_can_watch_it_by_the_issue_it_opened', async () => {
-    const { planEvents } = ProgressSpy.events(PlanState.READY)
+    const { planEvents } = ProgressSpy.events(PlanState.READY, { sleepMs: 5 })
     const port = await RunningApi.listening({ planEvents })
 
     await RunningApi.accepted(port)
-    const response = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
-      headers: { Origin: `http://127.0.0.1:${port}` },
-    })
+    const opened = await RunningApi.watching(port)
 
-    expect(response.status).toBe(200)
-    expect(await response.text()).toBe(PlanEvents.frameFor(PlanState.READY))
-    expect(response.headers.get('access-control-allow-origin')).toBe(null)
+    expect(opened.status).toBe(200)
+    expect(await RunningApi.firstFrame(opened)).toBe(PlanEvents.frameFor(PlanState.READY))
+    expect(opened.headers.get('access-control-allow-origin')).toBe(null)
   })
 
-  it('a_second_subscription_after_ready_is_a_404_so_an_event_source_gives_up_instead_of_reconnecting_forever', async () => {
-    const { planEvents } = ProgressSpy.events(PlanState.READY)
+  it('a_watch_survives_ready_so_the_page_can_come_back_while_the_plan_is_reworked', async () => {
+    const { planEvents } = ProgressSpy.events(PlanState.READY, { sleepMs: 5 })
     const port = await RunningApi.listening({ planEvents })
 
     await RunningApi.accepted(port)
-    await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`)
-    const again = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`)
+    const opened = await RunningApi.watching(port)
+    await RunningApi.firstFrame(opened)
+    const again = await RunningApi.watching(port)
 
-    expect(again.status).toBe(404)
-    expect(await again.text()).toBe(`{"error":"${EventsRefusal.NOT_WATCHED}"}`)
+    expect(again.status).toBe(200)
+    expect(await RunningApi.firstFrame(again)).toBe(PlanEvents.frameFor(PlanState.READY))
   })
 
-  it('a_subscription_after_a_progress_nobody_could_read_is_a_404_too_because_that_ending_is_final_as_well', async () => {
+  it('a_subscription_after_a_progress_nobody_could_read_is_a_404_because_a_stream_that_broke_is_not_watched_any_more', async () => {
     const { planEvents } = ProgressSpy.unable()
     const port = await RunningApi.listening({ planEvents })
 
@@ -810,5 +833,21 @@ describe('ApiServer', () => {
 
     expect(askedRightAfterAbort).toBeGreaterThan(0)
     expect(spy.asked).toBe(askedRightAfterAbort)
+  })
+
+  it('a_plan_that_started_is_put_under_watch_so_a_change_asked_for_reaches_its_agent', async () => {
+    const port = await RunningApi.listening()
+
+    await RunningApi.accepted(port)
+
+    expect(RunningApi.reviews.started).toEqual([StartPlanSpy.WATCH])
+  })
+
+  it('a_start_that_was_refused_puts_nothing_under_watch', async () => {
+    const port = await RunningApi.listening()
+
+    await RunningApi.startPlan(port, '{"id":"nope","repo":"owner/name"}')
+
+    expect(RunningApi.reviews.started).toEqual([])
   })
 })
