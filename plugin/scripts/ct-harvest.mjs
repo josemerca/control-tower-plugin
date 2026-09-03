@@ -49,10 +49,16 @@
 // listado sí nombraba y no se pudo leer, en cambio, es una cosecha incompleta
 // de verdad: motivo y exit 1.
 import { execFileSync } from 'node:child_process'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir, userInfo } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { randomUUID } from 'node:crypto'
 import { harvestSlice, formatDuration, closingPrNumbers } from './harvest.js'
 import { parseRepoSlug } from './dispatch.js'
 import { aggregateVerdictMeasures, aggregateBriefMeasures, METRICS_REPO_DIR, metricsRepoRelPath } from './run-metrics.js'
-import { BigQueryTable } from './bigquery-load.js'
+import { BigQueryLoad, BigQueryTable, LoadOutcome } from './bigquery-load.js'
+import { HarvestIdentity, HarvestTable } from './harvest-table.js'
 
 // `arg()` endurecido: el MISMO de ct-next.mjs/ct-groom.mjs/ct-status.mjs,
 // palabra por palabra y por el mismo motivo medido — un flag colgante no puede
@@ -99,6 +105,29 @@ const gh = (a) => {
     throw new Error(detalle)
   }
 }
+
+// `bqRunner`: calcado de `localRunner` en dispatch-check.mjs. El adaptador
+// (BigQueryLoad) recibe el runner con el tope YA puesto — no elige él el
+// timeout, lo elige quien lo construye aquí.
+const bqRunner = (a) => {
+  try {
+    return { code: 0, stdout: execFileSync('bq', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: CHILD_TIMEOUT_MS, killSignal: 'SIGKILL' }), stderr: '' }
+  } catch (e) {
+    return { code: e.status ?? 1, stdout: String(e.stdout || ''), stderr: String(e.stderr || '') }
+  }
+}
+
+// La versión del plugin que hizo esta cosecha, para poder comparar dos runs
+// del propio loop (ver run-metrics.js, mismo argumento con `plugin_version`).
+// `null` si el manifiesto no se pudo leer: nunca una versión inventada.
+function versionDelPlugin() {
+  try {
+    return JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')).version ?? null
+  } catch {
+    return null
+  }
+}
+const PLUGIN_VERSION = versionDelPlugin()
 
 // motivos: todo lo que NO se pudo cosechar. Es lo único que decide el exit 1.
 const motivos = []
@@ -238,6 +267,27 @@ function telemetriaDe(n) {
 }
 
 for (const f of filas) f.telemetry = telemetriaDe(f.issue)
+
+if (bqTable && motivos.length) console.error(`BigQuery: no se carga — la cosecha está incompleta (${motivos.length} lectura(s) sin completar)`)
+else if (bqTable && !filas.length) console.error('BigQuery: nada que cargar — el milestone no tiene slices')
+else if (bqTable) {
+  const directory = mkdtempSync(join(tmpdir(), 'ct-harvest-bq-'))
+  const identity = new HarvestIdentity({ harvestId: randomUUID(), harvestedAt: new Date().toISOString(), repo, milestone, pluginVersion: PLUGIN_VERSION, actor: userInfo().username })
+  const report = new BigQueryLoad({ bq: bqRunner, directory }).load({ table: bqTable, rows: filas.map((row) => HarvestTable.rowFor({ row, identity })), schemaJson: HarvestTable.schemaJson() })
+  // Proyección EXHAUSTIVA del desenlace: un `LoadOutcome` sin clave aquí
+  // lanza (llamar a `undefined` como función), nunca cae en un catch-all
+  // silencioso.
+  const PROYECCION_BQ = {
+    [LoadOutcome.LOADED]: () => {
+      rmSync(report.directory, { recursive: true, force: true })
+      console.error(`BigQuery: ${report.rowCount} filas cargadas en ${report.table.id} (harvest_id ${identity.harvestId})`)
+    },
+    [LoadOutcome.REJECTED]: () => {
+      motivos.push(`no se pudo cargar en BigQuery (${report.table.id}): bq salió con ${report.code}: ${report.detail}. Los ficheros quedan en ${report.directory}; reintenta a mano: ${report.retryCommand}`)
+    },
+  }
+  PROYECCION_BQ[report.outcome]()
+}
 
 if (comoJson) {
   console.log(JSON.stringify({ repo, milestone, filas, motivos, telemetry: { dir: METRICS_REPO_DIR, status: dirTelemetria.status, why: dirTelemetria.why } }, null, 2))

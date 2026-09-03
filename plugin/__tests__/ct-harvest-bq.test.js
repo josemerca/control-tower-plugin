@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,7 +13,10 @@ const fakeBqDir = join(here, 'fixtures', 'fake-bq-bin')
 class Bench {
   static ISSUES = [
     { number: 12, title: 'Slice 1', state: 'closed', closedAt: '2026-08-20T10:00:00Z', labels: [{ name: 'type:infra' }], milestone: { title: 'E' }, closedByPullRequestsReferences: [] },
+    { number: 13, title: 'Slice 2', state: 'closed', closedAt: '2026-08-20T11:00:00Z', labels: [{ name: 'type:infra' }], milestone: { title: 'E' }, closedByPullRequestsReferences: [] },
   ]
+
+  static METRICS_DIR = JSON.stringify([{ name: 'issue-12.jsonl', type: 'file' }])
 
   static TIMELINE = JSON.stringify([
     { event: 'labeled', label: { name: 'status:ready' }, created_at: '2026-08-20T09:00:00Z' },
@@ -82,6 +85,64 @@ describe('ct-harvest.mjs accepts and validates --bq', () => {
     const result = bench.run(['--repo', 'o/r', '--milestone', 'E'])
     expect(result.status).toBe(0)
     expect(bench.bqWasInvoked()).toBe(false)
+    bench.cleanup()
+  })
+
+  it('a_complete_harvest_loads_one_row_per_slice_and_says_so_on_stderr_with_exit_0', () => {
+    const bench = new Bench()
+    const captureDir = join(bench.dir, 'capture')
+    const result = bench.run(['--repo', 'o/r', '--milestone', 'E', '--bq', 'p:d.t'], {
+      FAKE_GH_METRICS_DIR_JSON: Bench.METRICS_DIR,
+      FAKE_GH_METRICS_FILES: JSON.stringify({ 'issue-12.jsonl': '' }),
+      FAKE_BQ_CAPTURE_DIR: captureDir,
+    })
+    expect(result.status).toBe(0)
+    expect(result.stderr).toMatch(/BigQuery: 2 filas cargadas en p:d\.t/)
+    expect(readFileSync(bench.bqArgvLogFile, 'utf8').trim())
+      .toMatch(/^--project_id=p --headless load --source_format=NEWLINE_DELIMITED_JSON --schema_update_option=ALLOW_FIELD_ADDITION --schema=\S+\/schema\.json p:d\.t \S+\/rows\.ndjson$/)
+    const rows = readFileSync(join(captureDir, 'rows.ndjson'), 'utf8').trim().split('\n').map((line) => JSON.parse(line))
+    expect(rows.map((row) => row.issue)).toEqual([12, 13])
+    expect(rows.map((row) => row.telemetry_status)).toEqual(['ok', 'sin-fichero'])
+    bench.cleanup()
+  })
+
+  it('with_json_the_stdout_stays_a_single_json_document_when_loading', () => {
+    const bench = new Bench()
+    const result = bench.run(['--repo', 'o/r', '--milestone', 'E', '--bq', 'p:d.t', '--json'])
+    expect(result.status).toBe(0)
+    expect(bench.bqWasInvoked()).toBe(true)
+    expect(() => JSON.parse(result.stdout)).not.toThrow()
+    bench.cleanup()
+  })
+
+  it('an_incomplete_harvest_never_calls_bq_and_exits_1', () => {
+    const bench = new Bench()
+    const result = bench.run(['--repo', 'o/r', '--milestone', 'E', '--bq', 'p:d.t'], { FAKE_GH_TIMELINE_FAIL: '1' })
+    expect(result.status).toBe(1)
+    expect(bench.bqWasInvoked()).toBe(false)
+    expect(result.stderr).toMatch(/BigQuery: no se carga — la cosecha está incompleta/)
+    bench.cleanup()
+  })
+
+  it('a_bq_failure_is_a_motive_naming_the_exit_code_the_kept_directory_and_the_retry_command_with_exit_1', () => {
+    const bench = new Bench()
+    const result = bench.run(['--repo', 'o/r', '--milestone', 'E', '--bq', 'p:d.t'], { FAKE_BQ_EXIT_CODE: '2', FAKE_BQ_STDERR: 'quota exceeded' })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toMatch(/bq salió con 2: quota exceeded/)
+    const kept = result.stderr.match(/Los ficheros quedan en (\S+);/)
+    expect(kept).not.toBeNull()
+    expect(existsSync(kept[1])).toBe(true)
+    expect(result.stderr).toMatch(/reintenta a mano: bq --project_id=p --headless load/)
+    rmSync(kept[1], { recursive: true, force: true })
+    bench.cleanup()
+  })
+
+  it('an_empty_milestone_does_not_call_bq_and_exits_0', () => {
+    const bench = new Bench()
+    const result = bench.run(['--repo', 'o/r', '--milestone', 'E', '--bq', 'p:d.t'], { FAKE_GH_LIST_SEQUENCE: JSON.stringify([[]]) })
+    expect(result.status).toBe(0)
+    expect(bench.bqWasInvoked()).toBe(false)
+    expect(result.stderr).toMatch(/BigQuery: nada que cargar — el milestone no tiene slices/)
     bench.cleanup()
   })
 })
