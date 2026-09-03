@@ -228,6 +228,9 @@ export class PlanIssueBody {
     /((?<![\w])[\w.-]+\/[\w.-]+#\d+|(?<![\w])#\d+|(?<![\w.])@[A-Za-z0-9][A-Za-z0-9-]*|https?:\/\/\S*github\.com\/\S+)/g
   static #CODE_SPAN = /(`[^`]*`)/
   static READY_LABEL = 'status:ready'
+  static CHANGES_LINE =
+    `> Para pedir cambios en el plan, comenta en este issue empezando por \`${GhPlanIssues.CHANGES_TOKEN}\`: ` +
+    'lo que escribas detrás es lo que se le pide al agente, y publicará el plan rehecho aquí mismo.'
 
   static labels(story) {
     return [...gateLabels(gatesOf(PlanIssueBody.rowFor(story)).gates), PlanIssueBody.READY_LABEL]
@@ -270,6 +273,7 @@ export class PlanIssueBody {
 
     return [
       `> Historia de usuario: ${story.key}`,
+      PlanIssueBody.CHANGES_LINE,
       '',
       PlanIssueBody.DESCRIPTION_HEADING,
       renderDescripcion(row) ?? `_${story.key} no trae resumen en Jira._`,

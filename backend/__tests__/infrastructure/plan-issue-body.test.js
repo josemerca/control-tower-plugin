@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { PlanIssueBody } from '../../src/infrastructure/gh-plan-issues.js'
+import { PlanIssueBody, GhPlanIssues } from '../../src/infrastructure/gh-plan-issues.js'
 import { UserStory } from '../../src/domain/value-objects/user-story.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { mapGhIssue, extractAc, extractOrder } from '../../../plugin/scripts/gh-issue-map.js'
@@ -148,5 +148,14 @@ describe('PlanIssueBody', () => {
 
   it('the_gates_section_tells_the_human_how_to_answer_the_go_instead_of_naming_the_gate_alone', () => {
     expect(PlanIssueBody.of(Opened.story())).toContain('-OK <nonce>')
+  })
+})
+
+describe('the issue body says how changes are asked for', () => {
+  it('the_issue_body_names_the_token_that_asks_for_changes_so_the_mailbox_has_an_address', () => {
+    const body = PlanIssueBody.of(Opened.story())
+    const named = body.split(GhPlanIssues.CHANGES_TOKEN).length - 1
+
+    expect(named).toBe(1)
   })
 })
