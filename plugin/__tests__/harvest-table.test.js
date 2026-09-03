@@ -12,6 +12,10 @@ class Identities {
       actor: 'jponzvan',
     })
   }
+
+  static withoutMilestone() {
+    return new HarvestIdentity({ ...Identities.today(), milestone: null })
+  }
 }
 
 class HarvestRows {
@@ -262,5 +266,13 @@ describe('a slice row projects to the wire object under the schema names', () =>
   it('a_telemetry_status_outside_the_vocabulary_raises_instead_of_landing', () => {
     const row = HarvestRows.withTelemetry({ status: 'unexpected' })
     expect(() => HarvestTable.rowFor({ row, identity: Identities.today() })).toThrow(/unknown telemetry status/)
+  })
+
+  it('a_slice_without_milestone_lands_with_null_and_the_schema_admits_it', () => {
+    const row = HarvestTable.rowFor({ row: HarvestRows.merged(), identity: Identities.withoutMilestone() })
+    expect(row.milestone).toBeNull()
+    const schema = JSON.parse(HarvestTable.schemaJson())
+    const milestone = schema.find((column) => column.name === 'milestone')
+    expect(milestone.mode).toBe('NULLABLE')
   })
 })

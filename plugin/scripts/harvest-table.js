@@ -140,7 +140,7 @@ export class HarvestTable {
     new HarvestColumn({ name: 'harvest_id', type: HarvestColumn.STRING, mode: HarvestColumn.REQUIRED, valueOf: HarvestTable.#fromIdentity('harvestId') }),
     new HarvestColumn({ name: 'harvested_at', type: HarvestColumn.TIMESTAMP, mode: HarvestColumn.REQUIRED, valueOf: HarvestTable.#fromIdentity('harvestedAt') }),
     new HarvestColumn({ name: 'repo', type: HarvestColumn.STRING, mode: HarvestColumn.REQUIRED, valueOf: HarvestTable.#fromIdentity('repo') }),
-    new HarvestColumn({ name: 'milestone', type: HarvestColumn.STRING, mode: HarvestColumn.REQUIRED, valueOf: HarvestTable.#fromIdentity('milestone') }),
+    new HarvestColumn({ name: 'milestone', type: HarvestColumn.STRING, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#fromIdentity('milestone') }),
     new HarvestColumn({ name: 'plugin_version', type: HarvestColumn.STRING, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#fromIdentity('pluginVersion') }),
     new HarvestColumn({ name: 'actor', type: HarvestColumn.STRING, mode: HarvestColumn.REQUIRED, valueOf: HarvestTable.#fromIdentity('actor') }),
     new HarvestColumn({ name: 'issue', type: HarvestColumn.INTEGER, mode: HarvestColumn.REQUIRED, valueOf: HarvestTable.#fromRow('issue') }),

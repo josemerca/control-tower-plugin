@@ -49,16 +49,14 @@
 // listado sí nombraba y no se pudo leer, en cambio, es una cosecha incompleta
 // de verdad: motivo y exit 1.
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir, userInfo } from 'node:os'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { randomUUID } from 'node:crypto'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { formatDuration } from './harvest.js'
 import { parseRepoSlug } from './dispatch.js'
 import { METRICS_REPO_DIR } from './run-metrics.js'
-import { BigQueryLoad, BigQueryTable, LoadOutcome } from './bigquery-load.js'
-import { HarvestIdentity, HarvestTable } from './harvest-table.js'
+import { BigQueryTable, LoadOutcome } from './bigquery-load.js'
+import { HarvestLedger, LedgerIdentity } from './harvest-ledger.js'
 import { IndexOutcome, SliceHarvest, SliceRead, TelemetryIndex } from './slice-harvest.js'
 
 // `arg()` endurecido: el MISMO de ct-next.mjs/ct-groom.mjs/ct-status.mjs,
@@ -117,18 +115,6 @@ const bqRunner = (a) => {
     return { code: e.status ?? 1, stdout: String(e.stdout || ''), stderr: String(e.stderr || '') }
   }
 }
-
-// La versión del plugin que hizo esta cosecha, para poder comparar dos runs
-// del propio loop (ver run-metrics.js, mismo argumento con `plugin_version`).
-// `null` si el manifiesto no se pudo leer: nunca una versión inventada.
-function versionDelPlugin() {
-  try {
-    return JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8')).version ?? null
-  } catch {
-    return null
-  }
-}
-const PLUGIN_VERSION = versionDelPlugin()
 
 // motivos: todo lo que NO se pudo cosechar. Es lo único que decide el exit 1.
 const motivos = []
@@ -204,22 +190,16 @@ filas.sort((a, b) => (a.issue ?? 0) - (b.issue ?? 0))
 if (bqTable && motivos.length) console.error(`BigQuery: no se carga — la cosecha está incompleta (${motivos.length} lectura(s) sin completar)`)
 else if (bqTable && !filas.length) console.error('BigQuery: nada que cargar — el milestone no tiene slices')
 else if (bqTable) {
-  const directory = mkdtempSync(join(tmpdir(), 'ct-harvest-bq-'))
-  const identity = new HarvestIdentity({ harvestId: randomUUID(), harvestedAt: new Date().toISOString(), repo, milestone, pluginVersion: PLUGIN_VERSION, actor: userInfo().username })
-  const report = new BigQueryLoad({ bq: bqRunner, directory }).load({ table: bqTable, rows: filas.map((row) => HarvestTable.rowFor({ row, identity })), schemaJson: HarvestTable.schemaJson() })
+  const ledger = new HarvestLedger({ table: bqTable, bq: bqRunner, workspace: { create: () => mkdtempSync(join(tmpdir(), 'ct-harvest-bq-')), remove: (d) => rmSync(d, { recursive: true, force: true }) }, identity: LedgerIdentity.fromEnvironment() })
+  const informe = ledger.record({ repo, milestone, rows: filas })
   // Proyección EXHAUSTIVA del desenlace: un `LoadOutcome` sin clave aquí
   // lanza (llamar a `undefined` como función), nunca cae en un catch-all
   // silencioso.
   const PROYECCION_BQ = {
-    [LoadOutcome.LOADED]: () => {
-      rmSync(report.directory, { recursive: true, force: true })
-      console.error(`BigQuery: ${report.rowCount} filas cargadas en ${report.table.id} (harvest_id ${identity.harvestId})`)
-    },
-    [LoadOutcome.REJECTED]: () => {
-      motivos.push(`no se pudo cargar en BigQuery (${report.table.id}): bq salió con ${report.code}: ${report.detail}. Los ficheros quedan en ${report.directory}; reintenta a mano: ${report.retryCommand}`)
-    },
+    [LoadOutcome.LOADED]: () => console.error(`BigQuery: ${informe.rowCount} filas cargadas en ${informe.table.id} (harvest_id ${informe.harvestId})`),
+    [LoadOutcome.REJECTED]: () => motivos.push(`no se pudo cargar en BigQuery (${informe.table.id}): bq salió con ${informe.code}: ${informe.detail}. Los ficheros quedan en ${informe.directory}; reintenta a mano: ${informe.retryCommand}`),
   }
-  PROYECCION_BQ[report.outcome]()
+  PROYECCION_BQ[informe.outcome]()
 }
 
 if (comoJson) {
