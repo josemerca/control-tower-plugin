@@ -16,17 +16,18 @@ export class ProcessOutput {
 export class ToolRunner {
   static #UNKNOWN_EXIT = 1
 
-  constructor({ bin, budgetMs }) {
+  constructor({ bin, budgetMs, env }) {
     if (!Number.isInteger(budgetMs) || budgetMs < 1) {
       throw new Error(`${bin} needs a budget in milliseconds, got ${JSON.stringify(budgetMs)}`)
     }
     this.bin = bin
     this.budgetMs = budgetMs
+    this.env = env
   }
 
   run(argv, { cwd } = {}) {
     return new Promise((resolve) => {
-      execFile(this.bin, argv, { timeout: this.budgetMs, cwd }, (failure, stdout, stderr) => {
+      execFile(this.bin, argv, { timeout: this.budgetMs, cwd, env: this.env }, (failure, stdout, stderr) => {
         resolve(new ProcessOutput({
           code: ToolRunner.#codeOf(failure),
           stdout,

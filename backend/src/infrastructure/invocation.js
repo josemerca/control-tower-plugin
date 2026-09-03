@@ -7,6 +7,8 @@ export const InvocationOutcome = Object.freeze({
 export class Invocation {
   static DEFAULT_PORT = 8787
   static PORT_VARIABLE = 'CT_API_PORT'
+  static CLAIM_PREFIX = 'CT_CLAIM_'
+  static CHILD_TIMEOUT_VARIABLE = 'CT_CLAIM_CHILD_TIMEOUT_MS'
   static #MAX_PORT = 65535
   static #WHOLE_NUMBER = /^\d+$/
 
@@ -26,6 +28,16 @@ export class Invocation {
 
   static #refused(outcome, reason) {
     return new Invocation({ outcome, port: null, reason })
+  }
+
+  static harvestEnvironment(environment, { ghTimeoutMs }) {
+    const inherited = Object.entries(environment)
+      .filter(([named]) => !named.startsWith(Invocation.CLAIM_PREFIX))
+
+    return {
+      ...Object.fromEntries(inherited),
+      [Invocation.CHILD_TIMEOUT_VARIABLE]: String(ghTimeoutMs),
+    }
   }
 
   static from(argv, environment) {

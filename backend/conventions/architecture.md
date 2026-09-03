@@ -24,6 +24,8 @@ src/
     ct-api.mjs       the entrypoint: the only place that assembles the graph
     api-server.js    what every endpoint shares: mounting, the last net, listen, stop
     http.js          generic plumbing: answers, routing hygiene, origin filter, body reader
+    harvest-clock.js the sweep: every minute, survey the checkout and ask the
+                     plugin to collect each prepared workspace
     <endpoint>-route.js   one controller per endpoint, its request model and
                           its refusal projections inside
     <tool>-<port>.js      one adapter per port, named after its implementation

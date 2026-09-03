@@ -29,8 +29,16 @@ export class WorkspaceFailure extends PlanFailure {}
 
 export class WorkspaceNotPrepared extends WorkspaceFailure {}
 
+export class WorkspaceNotRead extends WorkspaceFailure {}
+
 export class WorkspaceNotUnderstood extends WorkspaceFailure {}
 
 export class PlanProgressFailure extends PlanFailure {}
 
 export class PlanProgressNotRead extends PlanProgressFailure {}
+
+export class HarvestFailure extends PlanFailure {}
+
+export class HarvestNotRead extends HarvestFailure {}
+
+export class HarvestNotUnderstood extends HarvestFailure {}

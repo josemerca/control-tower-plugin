@@ -7,7 +7,7 @@ import { buildStateSeed } from '../../../plugin/scripts/kickoff.js'
 import { resolveStatePath } from '../../../plugin/scripts/state-paths.js'
 import { GitWorkspace, SliceSeed } from '../../src/infrastructure/git-workspace.js'
 import {
-  WorkspaceFailure, WorkspaceNotPrepared, WorkspaceNotUnderstood,
+  WorkspaceFailure, WorkspaceNotPrepared, WorkspaceNotRead, WorkspaceNotUnderstood,
 } from '../../src/domain/exceptions.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
@@ -258,7 +258,7 @@ describe('GitWorkspace', () => {
       .prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
       .catch((cause) => cause)
 
-    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(refusal).toBeInstanceOf(WorkspaceNotRead)
     expect(refusal.message).toContain('No such remote origin')
     expect(git.calls.some((argv) => argv.includes('worktree'))).toBe(false)
   })
@@ -721,5 +721,188 @@ describe('what the backend sows is read back by the plugin that has to read it',
     const worktree = SeedFixture.sownWorktree()
 
     expect(resolveStatePath(worktree).kind).toBe('slice')
+  })
+})
+
+class SurveyDouble extends GitDouble {
+  static PORCELAIN = [
+    'worktree /repo/checkout',
+    'HEAD 368980b38f86b03e0f228da7388d33626c521c48',
+    'branch refs/heads/main',
+    '',
+    'worktree /repo/elsewhere/11',
+    'HEAD 368980b38f86b03e0f228da7388d33626c521c48',
+    'branch refs/heads/feat/11',
+    'prunable gitdir file points to non-existent location',
+    '',
+    'worktree /repo/checkout/.worktrees/13',
+    'HEAD 368980b38f86b03e0f228da7388d33626c521c48',
+    'branch refs/heads/hotfix',
+    'locked manual hold',
+    '',
+    'worktree /repo/checkout/.worktrees/42',
+    'HEAD 9a8b7c6d5e4f30211f0e9d8c7b6a5948372615ff',
+    'branch refs/heads/feat/42',
+    '',
+    'worktree /repo/checkout/.worktrees/7',
+    'HEAD 4f2c1ab9d3e5c7081b6a0f2d9e4c8b1a5d3f7e60',
+    'branch refs/heads/feat/7',
+    '',
+    'worktree /repo/checkout/.worktrees/9',
+    'HEAD 368980b38f86b03e0f228da7388d33626c521c48',
+    'detached',
+    '',
+    'worktree /repo/checkout/.worktrees/notes',
+    'HEAD 368980b38f86b03e0f228da7388d33626c521c48',
+    'branch refs/heads/feat/notes',
+    '',
+    'worktree /repo/checkout/.worktrees/0',
+    'HEAD 368980b38f86b03e0f228da7388d33626c521c48',
+    'branch refs/heads/feat/0',
+    '',
+    '',
+  ].join('\n')
+
+  constructor({ listed, remote } = {}) {
+    super({ remote })
+    this.listed = listed ?? SurveyDouble.listing()
+  }
+
+  answering(argv) {
+    if (argv.includes('list')) return this.listed
+
+    return super.answering(argv)
+  }
+
+  surveyed() {
+    return this.workspace().survey()
+  }
+
+  refusal() {
+    return this.surveyed().catch((cause) => cause)
+  }
+
+  numbers() {
+    return this.surveyed().then((survey) => survey.prepared.map((prepared) => prepared.issueNumber))
+  }
+
+  static listing(stdout = SurveyDouble.PORCELAIN) {
+    return { failed: false, stdout, stderr: '' }
+  }
+}
+
+describe('GitWorkspace surveying the checkout', () => {
+  it('the_checkout_is_asked_for_its_worktrees_in_the_form_that_is_a_contract_and_not_a_display', async () => {
+    const git = new SurveyDouble()
+
+    await git.surveyed()
+
+    expect(git.asking('list')).toEqual(['-C', '/repo/checkout', 'worktree', 'list', '--porcelain'])
+  })
+
+  it('every_worktree_the_backend_prepared_comes_back_with_the_issue_it_belongs_to_and_where_it_sits', async () => {
+    const surveyed = await new SurveyDouble().surveyed()
+
+    expect(surveyed.prepared.map((prepared) => prepared.issueNumber)).toEqual([42, 7])
+    expect(surveyed.prepared.map((prepared) => prepared.located.path)).toEqual([
+      '/repo/checkout/.worktrees/42',
+      '/repo/checkout/.worktrees/7',
+    ])
+    expect(surveyed.prepared.map((prepared) => prepared.located.branch)).toEqual(['feat/42', 'feat/7'])
+  })
+
+  it('the_checkout_itself_is_not_a_prepared_workspace_so_the_sweep_never_asks_to_collect_the_repository', async () => {
+    const surveyed = await new SurveyDouble().surveyed()
+
+    expect(surveyed.prepared.map((prepared) => prepared.located.path)).not.toContain('/repo/checkout')
+  })
+
+  it('a_worktree_on_a_branch_shaped_like_ours_that_sits_somewhere_else_is_not_ours_because_the_layout_names_it', async () => {
+    expect(await new SurveyDouble().numbers()).not.toContain(11)
+  })
+
+  it('a_detached_worktree_under_our_directory_is_left_alone_instead_of_being_taken_for_the_branch_it_is_not', async () => {
+    expect(await new SurveyDouble().numbers()).not.toContain(9)
+  })
+
+  it('a_worktree_under_our_directory_on_a_branch_that_is_not_the_one_we_cut_is_left_alone', async () => {
+    expect(await new SurveyDouble().numbers()).not.toContain(13)
+  })
+
+  it('a_directory_under_the_worktrees_that_is_not_an_issue_number_is_not_an_issue_however_well_its_branch_reads', async () => {
+    const surveyed = await new SurveyDouble().surveyed()
+
+    expect(surveyed.prepared.map((prepared) => prepared.located.path))
+      .not.toContain('/repo/checkout/.worktrees/notes')
+  })
+
+  it('the_repository_the_survey_names_is_the_one_the_origin_declares_and_never_one_the_backend_assumed', async () => {
+    const git = new SurveyDouble()
+
+    const surveyed = await git.surveyed()
+
+    expect(git.asking('get-url')).toEqual(['-C', '/repo/checkout', 'remote', 'get-url', 'origin'])
+    expect(surveyed.repository).toBeInstanceOf(RepositoryName)
+    expect(surveyed.repository.text).toBe('owner/name')
+  })
+
+  it('a_git_that_cannot_list_the_worktrees_travels_out_typed_carrying_what_git_said', async () => {
+    const refusal = await new SurveyDouble({
+      listed: SurveyDouble.refused('fatal: not a git repository (or any of the parent directories): .git'),
+    }).refusal()
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotRead)
+    expect(refusal.message).toContain('fatal: not a git repository')
+  })
+
+  it('an_origin_nobody_can_read_a_repository_out_of_stops_the_survey_instead_of_naming_one_we_invented', async () => {
+    const refusal = await new SurveyDouble({ remote: SurveyDouble.naming('/some/local/mirror') }).refusal()
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
+    expect(refusal.message).toContain('/some/local/mirror')
+  })
+
+  it('an_answer_that_is_not_porcelain_at_all_is_our_broken_contract_with_git_and_not_a_checkout_without_worktrees', async () => {
+    const refusal = await new SurveyDouble({
+      listed: SurveyDouble.listing('/repo/checkout          368980b [main]\n'),
+    }).refusal()
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
+    expect(refusal.message).toContain('"/repo/checkout          368980b [main]"')
+  })
+
+  it('a_git_that_printed_nothing_is_not_a_checkout_that_holds_no_worktrees', async () => {
+    const refusal = await new SurveyDouble({ listed: SurveyDouble.listing('') }).refusal()
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
+    expect(refusal.message).toContain('always lists at least itself')
+  })
+
+  it('the_two_ways_a_survey_can_fail_are_told_apart_and_still_share_the_family_a_caller_can_catch', async () => {
+    const refused = await new SurveyDouble({ listed: SurveyDouble.refused('fatal: no worktrees') }).refusal()
+    const unreadable = await new SurveyDouble({ listed: SurveyDouble.listing('nonsense\n') }).refusal()
+
+    expect(refused).toBeInstanceOf(WorkspaceNotRead)
+    expect(unreadable).toBeInstanceOf(WorkspaceNotUnderstood)
+    expect(refused).not.toBeInstanceOf(WorkspaceNotUnderstood)
+    expect(unreadable).not.toBeInstanceOf(WorkspaceNotRead)
+    expect(refused).toBeInstanceOf(WorkspaceFailure)
+    expect(unreadable).toBeInstanceOf(WorkspaceFailure)
+  })
+
+  it('a_directory_numbered_zero_is_kept_out_by_the_guard_because_issues_are_numbered_from_one', async () => {
+    const surveyed = await new SurveyDouble().surveyed()
+
+    expect(surveyed.prepared.map((prepared) => prepared.located.path))
+      .not.toContain('/repo/checkout/.worktrees/0')
+  })
+
+  it('an_origin_that_reads_as_owner_slash_name_but_is_not_one_never_becomes_an_argument_of_the_harvest', async () => {
+    const refusal = await new SurveyDouble({
+      remote: SurveyDouble.naming('git@github.com:ow ner/na me.git'),
+    }).refusal()
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
+    expect(refusal.message).toContain('ow ner/na me')
   })
 })
