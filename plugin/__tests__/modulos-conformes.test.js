@@ -28,6 +28,8 @@ class NacidosConformes {
     '__tests__/slice-collector.test.js',
     'scripts/harvest-table.js',
     '__tests__/harvest-table.test.js',
+    'scripts/bigquery-load.js',
+    '__tests__/bigquery-load.test.js',
   ]
 
   static PALABRAS_CASTELLANAS = [
