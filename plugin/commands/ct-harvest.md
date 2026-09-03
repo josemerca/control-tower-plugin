@@ -63,6 +63,8 @@ Las líneas ilegibles de un `jsonl` se cuentan y se dicen; no tiran el fichero n
 
 **Solo se carga una cosecha completa.** Con lecturas sin completar no se invoca `bq`: la cosecha se rehace desde GitHub, así que no se pierde nada. Todo `—` del informe llega como `NULL`, nunca como `0`. Si `bq` falla, el motivo trae el código, el diagnóstico, el directorio con los ficheros y el comando exacto para reintentar a mano. Todo lo de BigQuery va por stderr: stdout sigue siendo la tabla o el JSON. Sin el flag, nada cambia.
 
+Este comando carga un epic entero a posteriori. La carga de cada slice al recogerlo la hace la cosecha automática: `dispatch-check <n> --repo <o/r> --collect --bq <tabla>`, que el backend invoca cada minuto cuando arranca con `CT_HARVEST_BQ_TABLE`.
+
 ## Los códigos de salida
 
 | Código | Significa | Qué hacer |

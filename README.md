@@ -40,4 +40,6 @@ CI corre las dos por separado (`.github/workflows/continuous-integration.yml`).
 Y un `Makefile` en la raíz las junta sin sustituirlas. Cada objetivo nombra
 su paquete: `make test-backend`, `make build-frontend`, `make run-backend`…
 y `make run-frontend` construye el front y arranca el backend sirviéndolo en
-`http://127.0.0.1:8787/`. `make help` lista los objetivos.
+`http://127.0.0.1:8787/`. `CT_HARVEST_BQ_TABLE=proyecto:dataset.tabla make run-backend`
+hace además que cada slice recogido deje su fila en esa tabla de BigQuery; sin la
+variable, la cosecha no carga nada. `make help` lista los objetivos.
