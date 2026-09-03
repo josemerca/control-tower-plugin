@@ -333,6 +333,14 @@ export function lastPipelineStage(command) {
 // larga. `--color` no cuenta: empieza por dos guiones y no es `--count`.
 const shortFlagHas = (arg, letra) => /^-[A-Za-z]+$/.test(arg) && arg.includes(letra)
 
+// «Esto es un `grep -c`» es UNA decisión — qué programas cuentan coincidencias
+// y con qué bandera —, y se pregunta desde dos sitios: la regla que rechaza
+// `grep -c` a secas, y el auxiliar que cuenta sus ficheros. Vivir en dos
+// copias es lo que `conventions/decisions.md` prohíbe: añadir `rg
+// --count-matches` a una y no a la otra dejaría a la otra sin enterarse.
+const isGrepCountInvocation = (words) => /^(grep|egrep|fgrep|rg)$/.test(words[0]) &&
+  words.slice(1).some((a) => a === '--count' || shortFlagHas(a, 'c'))
+
 // La lista cerrada. `words` son las palabras del último tramo.
 // EL PREDICADO QUE NO PUEDE MEDIR PORQUE `grep -c` CAMBIA DE FORMA CON DOS
 // FICHEROS. Medido en el slice #35 de repo-pulse, que se bloqueó por esto.
@@ -371,16 +379,35 @@ function splitRespectingQuotes(text) {
   return out
 }
 
+// `-e`/`--regexp` es la única bandera cuyo argumento ES el patrón: consumirlo
+// cierra `patternTaken` a propósito.
+const PATTERN_FLAGS = new Set(['-e', '--regexp'])
+
+// El resto de banderas que se llevan un argumento propio detrás no aportan ni
+// el patrón ni un fichero — contar ese argumento como fichero es el falso
+// positivo medido en `-m 1`: sin distinguirla de `-e`, el «1» de `-m 1` cerraba
+// `patternTaken` y el patrón de verdad, que venía justo después, se contaba
+// como el primer fichero. Se consume igual, pero SIN tocar `patternTaken`.
+const VALUE_TAKING_FLAGS = new Set(['-m', '--max-count'])
+
+// Una redirección de shell (`>`, `>>`, `<`, `2>`, `2>&1`…) no es un operando
+// de grep — es lo que viene DESPUÉS de la llamada. Medido: `grep -c 'x' a.ts
+// 2>/dev/null` tiene un solo fichero de verdad y `2>/dev/null` se colaba como
+// el segundo. En cuanto aparece, deja de haber certeza sobre lo que sigue, así
+// que se corta ahí — coherente con "sólo se acusa con dos operandos con
+// certeza": aquí ni siquiera se afirma que no haya dos, se deja de contar.
+const looksLikeRedirection = (word) => /^\d*&?[<>]/.test(word)
+
 function grepCountFileOperands(stage) {
   const words = splitRespectingQuotes(stage)
-  if (words.length === 0) return null
-  if (!/^(grep|egrep|fgrep|rg)$/.test(words[0])) return null
-  if (!words.slice(1).some((a) => a === '--count' || shortFlagHas(a, 'c'))) return null
+  if (!isGrepCountInvocation(words)) return null
   const operands = []
   let patternTaken = false
   for (let i = 1; i < words.length; i++) {
     const w = words[i]
-    if (w === '-e' || w === '--regexp') { patternTaken = true; i++; continue }
+    if (looksLikeRedirection(w)) break
+    if (PATTERN_FLAGS.has(w)) { patternTaken = true; i++; continue }
+    if (VALUE_TAKING_FLAGS.has(w)) { i++; continue }
     if (w.startsWith('-')) continue
     if (!patternTaken) { patternTaken = true; continue }
     operands.push(w)
@@ -389,21 +416,37 @@ function grepCountFileOperands(stage) {
   return operands.length
 }
 
+// Dentro de comillas SIMPLES el shell no expande nada: `'$(grep -c a b)'` es
+// el texto literal ocho caracteres, no una sustitución. Medido: `grep -Fq
+// '$(grep -c mark a.ts b.ts)' incidencias.md` es un grep legítimo buscando esa
+// cadena, y sin este barrido exterior se leía como una sustitución real con
+// dos ficheros. Dentro de comillas DOBLES el shell SÍ expande `$(...)`, así
+// que ahí se sigue buscando.
 function substitutionsIn(stage) {
   const out = []
-  for (let i = 0; i < stage.length - 1; i++) {
-    if (stage[i] !== '$' || stage[i + 1] !== '(') continue
+  let outerQuote = null
+  for (let i = 0; i < stage.length; i++) {
+    const c = stage[i]
+    if (outerQuote === "'") { if (c === "'") outerQuote = null; continue }
+    if (outerQuote === '"') {
+      if (c === '"') outerQuote = null
+      if (c !== '$' || stage[i + 1] !== '(') continue
+    } else if (c === "'" || c === '"') {
+      outerQuote = c; continue
+    } else if (c !== '$' || stage[i + 1] !== '(') {
+      continue
+    }
     let depth = 1
     let j = i + 2
     let quote = null
     let inner = ''
     for (; j < stage.length && depth > 0; j++) {
-      const c = stage[j]
-      if (quote) { inner += c; if (c === quote) quote = null; continue }
-      if (c === "'" || c === '"') { quote = c; inner += c; continue }
-      if (c === '(') depth++
-      if (c === ')') { depth--; if (depth === 0) break }
-      inner += c
+      const cc = stage[j]
+      if (quote) { inner += cc; if (cc === quote) quote = null; continue }
+      if (cc === "'" || cc === '"') { quote = cc; inner += cc; continue }
+      if (cc === '(') depth++
+      if (cc === ')') { depth--; if (depth === 0) break }
+      inner += cc
     }
     if (depth === 0) out.push(inner)
   }
@@ -416,14 +459,13 @@ function countsOverManyFiles(stage) {
     const tramo = lastPipelineStage(inner)
     if (!tramo || !tramo.stage) return false
 
-    return (grepCountFileOperands(tramo.stage) ?? 0) > 1
+    return grepCountFileOperands(tramo.stage) > 1
   })
 }
 
 const NOT_A_PREDICATE = [
   {
-    matches: (words) => /^(grep|egrep|fgrep|rg)$/.test(words[0]) &&
-      words.slice(1).some((a) => a === '--count' || shortFlagHas(a, 'c')),
+    matches: (words) => isGrepCountInvocation(words),
     why: '`grep -c` sale con 0 si encuentra AL MENOS UNA coincidencia y con 1 si no encuentra ninguna: su código de salida nunca dice cuántas. Un control que afirma una cuenta se escribe como predicado — `test "$(… | grep -c …)" -eq N` — y entonces el exit code ES la afirmación. (`grep -q`, o el `grep` pelado, sí valen: ahí el exit code ya es la aserción.)',
   },
   {
@@ -511,7 +553,7 @@ function extractGlobal(lines, push) {
   for (const comando of comandos) {
     const tramo = lastPipelineStage(comando)
     if (!tramo || !tramo.stage) continue
-    const words = tramo.stage.split(/\s+/).filter(Boolean)
+    const words = splitRespectingQuotes(tramo.stage)
     const roto = NOT_A_PREDICATE.find((r) => r.matches(words, tramo.piped, tramo.stage))
     if (roto) {
       push(0, 'global-verification-predicate', `la "## 8. Global verification" verifica con \`${comando}\`, y su código de salida no puede afirmar lo que el control dice medir: ${roto.why}`)
@@ -613,7 +655,7 @@ export function extractTasks(markdown) {
       for (const comando of commands) {
         const tramo = lastPipelineStage(comando)
         if (!tramo || !tramo.stage) continue
-        const words = tramo.stage.split(/\s+/).filter(Boolean)
+        const words = splitRespectingQuotes(tramo.stage)
         const roto = NOT_A_PREDICATE.find((r) => r.matches(words, tramo.piped, tramo.stage))
         if (roto) {
           push(h.n, 'verification-predicate', `la tarea ${h.n} verifica con \`${comando}\`, y su código de salida no puede afirmar lo que el control dice medir: ${roto.why}`)
