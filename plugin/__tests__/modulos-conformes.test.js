@@ -32,6 +32,8 @@ class NacidosConformes {
     '__tests__/bigquery-load.test.js',
     'scripts/harvest-ledger.js',
     '__tests__/harvest-ledger.test.js',
+    'scripts/plugin-manifest.js',
+    '__tests__/plugin-manifest.test.js',
     '__tests__/fixtures/fake-bq-bin/bq',
     '__tests__/fixtures/scripted-runner.js',
     '__tests__/ct-harvest-bq.test.js',

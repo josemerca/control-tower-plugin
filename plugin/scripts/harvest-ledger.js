@@ -1,12 +1,10 @@
-import { readFileSync } from 'node:fs'
 import { userInfo } from 'node:os'
 import { randomUUID } from 'node:crypto'
 import { HarvestIdentity, HarvestTable } from './harvest-table.js'
 import { BigQueryLoad, LoadOutcome } from './bigquery-load.js'
+import { PluginManifest } from './plugin-manifest.js'
 
 export class LedgerIdentity {
-  static MANIFEST = new URL('../package.json', import.meta.url)
-
   constructor({ pluginVersion, actor, now, nextId }) {
     this.pluginVersion = pluginVersion
     this.actor = actor
@@ -17,19 +15,11 @@ export class LedgerIdentity {
 
   static fromEnvironment() {
     return new LedgerIdentity({
-      pluginVersion: LedgerIdentity.#pluginVersionFromManifest(),
+      pluginVersion: PluginManifest.installed().version,
       actor: userInfo().username,
       now: () => new Date().toISOString(),
       nextId: () => randomUUID(),
     })
-  }
-
-  static #pluginVersionFromManifest() {
-    try {
-      return JSON.parse(readFileSync(LedgerIdentity.MANIFEST, 'utf8')).version ?? null
-    } catch {
-      return null
-    }
   }
 }
 
