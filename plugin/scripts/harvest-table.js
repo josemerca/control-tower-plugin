@@ -1,3 +1,9 @@
+export const TelemetryStatus = Object.freeze({
+  OK: 'ok',
+  NO_FILE: 'sin-fichero',
+  NOT_READ: 'no-leido',
+})
+
 export class HarvestIdentity {
   constructor({ harvestId, harvestedAt, repo, milestone, pluginVersion, actor }) {
     this.harvestId = harvestId
@@ -80,6 +86,50 @@ export class HarvestTable {
     ))
   }
 
+  static #fromTelemetryField(key) {
+    return (row) => HarvestTable.#valueAt(HarvestTable.#valueAt(row, 'telemetry'), key)
+  }
+
+  static #telemetryStatus(row) {
+    const status = HarvestTable.#fromTelemetryField('status')(row)
+    if (!Object.values(TelemetryStatus).includes(status)) {
+      throw new Error(`unknown telemetry status "${status}"`)
+    }
+    return status
+  }
+
+  static #whenTelemetryIsOk(key) {
+    return (row) => {
+      const telemetry = HarvestTable.#valueAt(row, 'telemetry')
+      return telemetry.status === TelemetryStatus.OK ? HarvestTable.#valueAt(telemetry, key) : null
+    }
+  }
+
+  static #whenTelemetryMeasured(measuredKey, valueKey) {
+    return (row) => {
+      const telemetry = HarvestTable.#valueAt(row, 'telemetry')
+      if (telemetry.status !== TelemetryStatus.OK) return null
+      return HarvestTable.#valueAt(telemetry, measuredKey) > 0 ? HarvestTable.#valueAt(telemetry, valueKey) : null
+    }
+  }
+
+  static #ruleCountEntryField(index) {
+    return (entry) => entry[index]
+  }
+
+  static #RULE_COUNT_FIELDS = [
+    new HarvestColumn({ name: 'rule', type: HarvestColumn.STRING, mode: HarvestColumn.REQUIRED, valueOf: HarvestTable.#ruleCountEntryField(0) }),
+    new HarvestColumn({ name: 'findings', type: HarvestColumn.INTEGER, mode: HarvestColumn.REQUIRED, valueOf: HarvestTable.#ruleCountEntryField(1) }),
+  ]
+
+  static #findingsByRuleRows(row) {
+    const telemetry = HarvestTable.#valueAt(row, 'telemetry')
+    if (telemetry.status !== TelemetryStatus.OK) return []
+    return Object.entries(HarvestTable.#valueAt(telemetry, 'findingsByRule'))
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map((entry) => Object.fromEntries(HarvestTable.#RULE_COUNT_FIELDS.map((field) => [field.name, field.valueOf(entry)])))
+  }
+
   static SCHEMA = [
     new HarvestColumn({ name: 'harvest_id', type: HarvestColumn.STRING, mode: HarvestColumn.REQUIRED, valueOf: HarvestTable.#fromIdentity('harvestId') }),
     new HarvestColumn({ name: 'harvested_at', type: HarvestColumn.TIMESTAMP, mode: HarvestColumn.REQUIRED, valueOf: HarvestTable.#fromIdentity('harvestedAt') }),
@@ -105,6 +155,21 @@ export class HarvestTable {
     new HarvestColumn({ name: 'changed_files', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#fromRow('changedFiles') }),
     new HarvestColumn({ name: 'reviews', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#fromRow('reviews') }),
     new HarvestColumn({ name: 'review_comments', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#fromRow('reviewComments') }),
+    new HarvestColumn({ name: 'telemetry_status', type: HarvestColumn.STRING, mode: HarvestColumn.REQUIRED, valueOf: HarvestTable.#telemetryStatus }),
+    new HarvestColumn({ name: 'telemetry_path', type: HarvestColumn.STRING, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#fromTelemetryField('path') }),
+    new HarvestColumn({ name: 'verdicts', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryIsOk('verdicts') }),
+    new HarvestColumn({ name: 'malformed_lines', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryIsOk('malformed') }),
+    new HarvestColumn({ name: 'rubric_sin_vara', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryMeasured('measured', 'rubricSinVara') }),
+    new HarvestColumn({ name: 'rubric_sin_vara_legacy', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryIsOk('legacy') }),
+    new HarvestColumn({ name: 'rubric_vara_ct_docs', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryMeasured('measuredVaraCtDocs', 'varaCtDocs') }),
+    new HarvestColumn({ name: 'rubric_vara_ct_docs_legacy', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryIsOk('legacyVaraCtDocs') }),
+    new HarvestColumn({ name: 'findings_vara_ct', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryMeasured('measuredFindingsVaraCt', 'findingsVaraCt') }),
+    new HarvestColumn({ name: 'findings_vara_ct_legacy', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryIsOk('legacyFindingsVaraCt') }),
+    new HarvestColumn({ name: 'findings_by_rule', type: HarvestColumn.RECORD, mode: HarvestColumn.REPEATED, fields: HarvestTable.#RULE_COUNT_FIELDS, valueOf: HarvestTable.#findingsByRuleRows }),
+    new HarvestColumn({ name: 'brief_attempts', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryIsOk('briefAttempts') }),
+    new HarvestColumn({ name: 'brief_legacy', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryIsOk('briefLegacy') }),
+    new HarvestColumn({ name: 'brief_vara_ct_docs', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryMeasured('briefMeasured', 'briefVaraCtDocs') }),
+    new HarvestColumn({ name: 'brief_bytes', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryMeasured('briefMeasured', 'briefBytes') }),
   ]
 
   static schemaJson() {
