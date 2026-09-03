@@ -4,4 +4,22 @@ export class PlanIssues {
       `${this.constructor.name} must implement open({ story, repository }), asked for ${story?.key} in ${repository}`
     )
   }
+
+  async claim({ issue, repository }) {
+    throw new Error(
+      `${this.constructor.name} must implement claim({ issue, repository }), asked for ${issue?.number} in ${repository}`
+    )
+  }
+
+  async requeue({ issue, repository }) {
+    throw new Error(
+      `${this.constructor.name} must implement requeue({ issue, repository }), asked for ${issue?.number} in ${repository}`
+    )
+  }
+
+  async answerGo({ issueNumber, repository, nonce }) {
+    throw new Error(
+      `${this.constructor.name} must implement answerGo({ issueNumber, repository, nonce }), asked for ${issueNumber} in ${repository}`
+    )
+  }
 }

@@ -1,7 +1,8 @@
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { setTimeout as after } from 'node:timers/promises'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { ApiServer, LOOPBACK } from './api-server.js'
@@ -9,6 +10,7 @@ import { CmuxPlanAgents } from './cmux-plan-agents.js'
 import { AcliUserStories } from './acli-user-stories.js'
 import { GhPlanIssues } from './gh-plan-issues.js'
 import { GitWorkspace } from './git-workspace.js'
+import { DiskGoRegistry } from './disk-go-registry.js'
 import { DispatchCheckHarvest } from './dispatch-check-harvest.js'
 import { HarvestClock } from './harvest-clock.js'
 import { PlanAgentBrief } from './plan-agent-brief.js'
@@ -133,10 +135,10 @@ class CtApi {
     return after(seconds * 1000)
   }
 
-  static #startPlan(workspace, planAgents) {
+  static #startPlan(workspace, planAgents, planIssues) {
     return new StartPlan({
       userStories: new AcliUserStories({ acli: CtApi.#talkingTo(AcliUserStories.BIN, ExternalTool) }),
-      planIssues: new GhPlanIssues({ gh: CtApi.#talkingTo(Gh.BIN, Gh) }),
+      planIssues,
       workspace,
       planAgents,
     })
@@ -189,7 +191,7 @@ class CtApi {
   }
 
   static async run(argv, environment) {
-    const asked = Invocation.from(argv, environment)
+    const asked = Invocation.from(argv, environment, homedir())
     if (asked.outcome !== InvocationOutcome.READY) {
       CtApi.#refuseUsage(asked.reason)
     }
@@ -219,10 +221,22 @@ class CtApi {
         ctStep: PluginTree.ctStep(),
       }),
     })
+    const planIssues = new GhPlanIssues({
+      gh: CtApi.#talkingTo(Gh.BIN, Gh),
+      stderr: (line) => process.stderr.write(line),
+    })
     const server = new ApiServer({
       port: asked.port,
-      startPlan: CtApi.#startPlan(workspace, planAgents),
-      implementPlan: new ImplementPlan({ planAgents }),
+      startPlan: CtApi.#startPlan(workspace, planAgents, planIssues),
+      implementPlan: new ImplementPlan({
+        goRegistry: new DiskGoRegistry({
+          random: randomBytes,
+          write: Disk.write,
+          root: asked.stateRoot,
+        }),
+        planIssues,
+        planAgents,
+      }),
       planEvents: CtApi.#planEvents(git),
       frontendRoot: FrontendBuild.root(),
     })

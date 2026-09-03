@@ -43,8 +43,9 @@ export class PlanAgentBrief {
     ].join('\n')
   }
 
-  implementationErrandFor({ issueNumber }) {
+  implementationErrandFor({ issueNumber, repository }) {
     const ctStep = this.ctStep
+    const dispatchCheck = this.dispatchCheck
 
     return [
       `El gate \`plan\` del issue #${issueNumber} lo ha cerrado una persona:`,
@@ -52,9 +53,9 @@ export class PlanAgentBrief {
       `Antes de pedir el primer paso, reescribe en ${SLICE_REL_PATH} los campos role, task y next_action para que digan que estás implementando el plan, no escribiéndolo.`,
       `La secuencia no la conduces con subagent-driven-development ni con su ledger: la dicta la máquina. Pregunta el paso con \`node ${ctStep} next --plan <tu plan de docs/superpowers/plans/> --issue ${issueNumber}\``,
       `y obedece literalmente lo que imprima, tarea a tarea (donde diga \`ct-step\`, es \`node ${ctStep}\`), volviendo a \`next\` tras cada paso hasta que diga "run delivered".`,
-      `Entonces abre la pull request con \`Closes #${issueNumber}\` en el cuerpo y PARA: no la mergees,`,
-      `${PlanAgentBrief.NO_NEW_WORKTREES}, y NO ejecutes \`dispatch-check --release\` aunque ct-step te lo diga`,
-      '(en este flujo el issue no se reclama y el permiso que esa puerta exige no se acuña: saldría por 9).',
+      `Entonces abre la pull request con \`Closes #${issueNumber}\` en el cuerpo y libera con`,
+      `\`node ${dispatchCheck} ${issueNumber} --repo ${repository.text} --release --no-watch-merge\`, que mueve el issue a revisión.`,
+      `Y PARA ahí: no la mergees y ${PlanAgentBrief.NO_NEW_WORKTREES}.`,
     ].join(' ')
   }
 }

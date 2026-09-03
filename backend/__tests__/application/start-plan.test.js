@@ -11,7 +11,8 @@ import { RepositoryName } from '../../src/domain/value-objects/repository-name.j
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import {
-  PlanAgentNotLaunched, PlanIssueNotCreated, UserStoryNotRead, WorkspaceNotPrepared,
+  PlanAgentNotLaunched, PlanIssueNotClaimed, PlanIssueNotCreated, UserStoryNotRead,
+  WorkspaceNotPrepared,
 } from '../../src/domain/exceptions.js'
 
 class UserStoriesDouble extends UserStories {
@@ -35,16 +36,36 @@ class UserStoriesDouble extends UserStories {
 class PlanIssuesDouble extends PlanIssues {
   static OPENED = new PlanIssue({ number: 7, url: 'https://github.com/owner/name/issues/7' })
 
-  constructor(answer = PlanIssuesDouble.OPENED) {
+  constructor(answer = PlanIssuesDouble.OPENED, { claimFailure = null } = {}) {
     super()
     this.answer = answer
+    this.claimFailure = claimFailure
     this.asked = []
+    this.claimed = []
+    this.requeued = []
+    this.steps = []
+  }
+
+  static refusingToClaim(said) {
+    return new PlanIssuesDouble(PlanIssuesDouble.OPENED, {
+      claimFailure: new PlanIssueNotClaimed(said),
+    })
   }
 
   async open({ story, repository }) {
     this.asked.push({ story, repository })
     if (this.answer instanceof Error) throw this.answer
     return this.answer
+  }
+
+  async claim({ issue, repository }) {
+    this.claimed.push({ issue, repository })
+    if (this.claimFailure !== null) throw this.claimFailure
+  }
+
+  async requeue({ issue, repository }) {
+    this.requeued.push({ issue, repository })
+    this.steps.push('requeue')
   }
 }
 
@@ -57,6 +78,7 @@ class WorkspaceDouble extends Workspace {
     this.undoFailure = undoFailure
     this.asked = []
     this.undone = []
+    this.steps = []
   }
 
   static refusing(said) {
@@ -75,6 +97,7 @@ class WorkspaceDouble extends Workspace {
 
   async undo(located) {
     this.undone.push(located)
+    this.steps.push('undo')
     if (this.undoFailure !== null) throw this.undoFailure
   }
 }
@@ -106,6 +129,9 @@ class Flow {
     this.planIssues = planIssues ?? new PlanIssuesDouble()
     this.workspace = workspace ?? new WorkspaceDouble()
     this.planAgents = planAgents ?? new PlanAgentsDouble()
+    this.steps = []
+    this.planIssues.steps = this.steps
+    this.workspace.steps = this.steps
   }
 
   async run(story = Flow.STORY) {
@@ -331,5 +357,54 @@ describe('StartPlan collects the ground it prepared when the launch never took o
     } finally {
       complaining.mockRestore()
     }
+  })
+})
+
+describe('StartPlan claims the issue so no second dispatcher takes it', () => {
+  it('the_issue_is_claimed_before_the_worktree_is_cut_so_a_second_dispatcher_cannot_take_it', async () => {
+    const claiming = new Flow()
+    await claiming.run()
+    const refused = new Flow({ planIssues: PlanIssuesDouble.refusingToClaim('gh issue edit failed: nope') })
+
+    const refusal = await refused.refusal()
+
+    expect(claiming.planIssues.claimed).toEqual([
+      { issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY },
+    ])
+    expect(refusal).toBeInstanceOf(PlanIssueNotClaimed)
+    expect(refused.workspace.asked).toEqual([])
+  })
+
+  it('a_worktree_that_could_not_be_cut_puts_the_issue_back_in_the_queue_instead_of_leaving_a_claim_nobody_works', async () => {
+    const flow = new Flow({ workspace: WorkspaceDouble.refusing('branch is taken') })
+
+    const refusal = await flow.refusal()
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(flow.planIssues.requeued).toEqual([
+      { issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY },
+    ])
+  })
+
+  it('an_agent_that_never_launched_puts_the_issue_back_in_the_queue_after_the_worktree_is_undone', async () => {
+    const flow = new Flow({ planAgents: PlanAgentsDouble.refusing('cmux is not reachable') })
+
+    const refusal = await flow.refusal()
+
+    expect(refusal).toBeInstanceOf(PlanAgentNotLaunched)
+    expect(flow.workspace.undone).toEqual([WorkspaceDouble.LOCATED])
+    expect(flow.planIssues.requeued).toEqual([
+      { issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY },
+    ])
+    expect(flow.steps).toEqual(['undo', 'requeue'])
+  })
+
+  it('a_port_that_nobody_implemented_says_so_for_the_two_ends_of_the_claim_too', async () => {
+    await expect(new PlanIssues().claim({
+      issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY,
+    })).rejects.toThrow(/must implement claim/)
+    await expect(new PlanIssues().requeue({
+      issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY,
+    })).rejects.toThrow(/must implement requeue/)
   })
 })
