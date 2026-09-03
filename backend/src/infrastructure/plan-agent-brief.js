@@ -5,6 +5,7 @@ import { SLICE_REL_PATH } from '../../../plugin/scripts/state-paths.js'
 export class PlanAgentBrief {
   static DOCUMENTS = 'defects.md, style.md, decisions.md, architecture.md, testing.md'
   static NO_NEW_WORKTREES = 'no crees worktrees nuevos'
+  static WHITESPACE = /\s+/g
 
   constructor({ dispatchCheck, conventions, ctStep }) {
     if (typeof dispatchCheck !== 'string' || !isAbsolute(dispatchCheck)) {
@@ -41,6 +42,24 @@ export class PlanAgentBrief {
       'Commitéalo: el plan viaja en el pull request, y sin commitear no cuenta como escrito.',
       `Y entonces PARA. No implementes nada, no abras pull request, no mergees, ${PlanAgentBrief.NO_NEW_WORKTREES}: ya estás en el que te prepararon.`,
     ].join('\n')
+  }
+
+  reviewErrandFor({ issueNumber, repository, changes }) {
+    if (!(repository instanceof RepositoryName)) {
+      throw new Error(`the errand names the repository whose plan it reworks, got ${JSON.stringify(repository)}`)
+    }
+    const dispatchCheck = this.dispatchCheck
+    const named = repository.text
+
+    return [
+      `Un humano ha revisado el plan del issue #${issueNumber} que commiteaste y pide cambios:`,
+      `«${String(changes).replace(PlanAgentBrief.WHITESPACE, ' ').trim()}».`,
+      'Rehaz el plan con esos cambios, sin reescribirlo de cero y sin implementar nada.',
+      `Revalídalo con \`node ${dispatchCheck} ${issueNumber} --repo ${named} --check-plan\` hasta exit 0,`,
+      'recommitéalo, y publica el plan rehecho como comentario del issue con',
+      `\`gh issue comment ${issueNumber} --repo ${named}\`, que es donde se lee para pedir el cambio siguiente.`,
+      `Y entonces PARA otra vez: no implementes nada, no abras pull request, ${PlanAgentBrief.NO_NEW_WORKTREES}.`,
+    ].join(' ')
   }
 
   implementationErrandFor({ issueNumber, repository }) {

@@ -138,3 +138,43 @@ describe('PlanAgentBrief resuming the agent', () => {
     })).toThrow(/ct-step/)
   })
 })
+
+describe('PlanAgentBrief asking the agent for changes', () => {
+  const CHANGES = 'añade el caso\nde la issue sin\tdescripción'
+  const errand = (changes = CHANGES) => new PlanAgentBrief({
+    dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+    conventions: '/plugin/conventions',
+    ctStep: '/plugin/scripts/ct-step.mjs',
+  }).reviewErrandFor({ issueNumber: 42, repository: new RepositoryName('owner/name'), changes })
+
+  it('the_errand_is_one_line_even_when_the_person_wrote_the_change_across_several', () => {
+    expect(errand()).not.toContain('\n')
+    expect(errand()).not.toContain('\t')
+    expect(errand()).toContain('añade el caso de la issue sin descripción')
+  })
+
+  it('the_errand_names_the_issue_the_plan_and_the_command_that_validates_it', () => {
+    expect(errand()).toContain('#42')
+    expect(errand()).toContain('node /plugin/scripts/dispatch-check.mjs 42 --repo owner/name --check-plan')
+    expect(errand()).toMatch(/no implementes/i)
+  })
+
+  it('the_errand_orders_the_reworked_plan_back_onto_the_issue_so_the_next_change_can_be_asked_for', () => {
+    expect(errand()).toMatch(/publica/i)
+    expect(errand()).toMatch(/comentario/i)
+  })
+
+  it('it_never_promises_a_permission_nobody_mints', () => {
+    expect(errand()).not.toContain('-OK')
+    expect(errand()).not.toContain('nonce')
+  })
+
+  it('a_review_without_the_repository_refuses_to_exist_instead_of_shipping_undefined_into_the_command', () => {
+    expect(() => new PlanAgentBrief({
+      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+      conventions: '/plugin/conventions',
+      ctStep: '/plugin/scripts/ct-step.mjs',
+    }).reviewErrandFor({ issueNumber: 42, repository: 'owner/name', changes: 'x' }))
+      .toThrow(/names the repository/)
+  })
+})
