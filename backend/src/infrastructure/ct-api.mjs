@@ -9,12 +9,16 @@ import { CmuxPlanAgents } from './cmux-plan-agents.js'
 import { AcliUserStories } from './acli-user-stories.js'
 import { GhPlanIssues } from './gh-plan-issues.js'
 import { GitWorkspace } from './git-workspace.js'
+import { DispatchCheckHarvest } from './dispatch-check-harvest.js'
+import { HarvestClock } from './harvest-clock.js'
 import { PlanAgentBrief } from './plan-agent-brief.js'
 import { PlanContractProgress } from './plan-contract-progress.js'
 import { PlanEvents } from './plan-events-route.js'
 import { StartPlan } from '../application/actions/start-plan.js'
 import { ImplementPlan } from '../application/actions/implement-plan.js'
 import { ReadPlanProgress, ReadPlanProgressParams } from '../application/queries/read-plan-progress.js'
+import { SurveyWorkspaces } from '../application/queries/survey-workspaces.js'
+import { HarvestDelivery, HarvestDeliveryParams } from '../application/actions/harvest-delivery.js'
 import { ToolRunner } from './tool-runner.js'
 import { Gh } from './gh.js'
 import { SystemClock } from './system-clock.js'
@@ -85,6 +89,10 @@ class CtApi {
   static #BAD_USAGE = 2
   static #CANNOT_LISTEN = 1
   static #PROCESS_TIMEOUT_MS = 30_000
+  static #HARVEST_TIMEOUT_MS = 6 * 60 * 1000
+  static #SECONDS_FOR_GH_IN_A_HARVEST = 60
+  static #SECONDS_BETWEEN_SWEEPS = 60
+  static #CLOCK_STOPPED = 1
   static #RETRIES = 3
   static #SECONDS_BETWEEN_RETRIES = 2
   static #PROBES_PER_SEND = 20
@@ -103,8 +111,8 @@ class CtApi {
     process.exit(CtApi.#CANNOT_LISTEN)
   }
 
-  static #tool(bin) {
-    const runner = new ToolRunner({ bin, budgetMs: CtApi.#PROCESS_TIMEOUT_MS })
+  static #tool(bin, { budgetMs = CtApi.#PROCESS_TIMEOUT_MS, env } = {}) {
+    const runner = new ToolRunner({ bin, budgetMs, env })
     return (argv, options) => runner.run(argv, options)
   }
 
@@ -125,18 +133,43 @@ class CtApi {
     return after(seconds * 1000)
   }
 
-  static #startPlan(git, planAgents) {
+  static #startPlan(workspace, planAgents) {
     return new StartPlan({
       userStories: new AcliUserStories({ acli: CtApi.#talkingTo(AcliUserStories.BIN, ExternalTool) }),
       planIssues: new GhPlanIssues({ gh: CtApi.#talkingTo(Gh.BIN, Gh) }),
-      workspace: new GitWorkspace({
-        run: git,
-        write: Disk.write,
-        read: Disk.read,
-        root: process.cwd(),
-        stderr: (line) => process.stderr.write(line),
-      }),
+      workspace,
       planAgents,
+    })
+  }
+
+  static #harvestClock({ workspace, root, environment }) {
+    const surveyWorkspaces = new SurveyWorkspaces({ workspace })
+    const harvestDelivery = new HarvestDelivery({
+      harvest: new DispatchCheckHarvest({
+        node: CtApi.#tool(process.execPath, {
+          budgetMs: CtApi.#HARVEST_TIMEOUT_MS,
+          env: Invocation.harvestEnvironment(environment, {
+            ghTimeoutMs: CtApi.#SECONDS_FOR_GH_IN_A_HARVEST * 1000,
+          }),
+        }),
+        dispatchCheck: PluginTree.dispatchCheck(),
+        root,
+      }),
+    })
+
+    return new HarvestClock({
+      survey: () => surveyWorkspaces.execute(),
+      harvest: (prepared, repository) =>
+        harvestDelivery.execute(new HarvestDeliveryParams({ prepared, repository })),
+      sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_SWEEPS),
+      stderr: (line) => process.stderr.write(line),
+    })
+  }
+
+  static #sweepUntilItBreaks(clock) {
+    clock.start().catch((failure) => {
+      process.stderr.write(`harvest sweep: the clock stopped sweeping and nothing else will: ${failure.stack}\n`)
+      process.exit(CtApi.#CLOCK_STOPPED)
     })
   }
 
@@ -161,6 +194,14 @@ class CtApi {
       CtApi.#refuseUsage(asked.reason)
     }
     const git = CtApi.#tool(GitWorkspace.BIN)
+    const root = process.cwd()
+    const workspace = new GitWorkspace({
+      run: git,
+      write: Disk.write,
+      read: Disk.read,
+      root,
+      stderr: (line) => process.stderr.write(line),
+    })
     const planAgents = new CmuxPlanAgents({
       run: CtApi.#tool(CmuxPlanAgents.BIN),
       write: Disk.write,
@@ -180,7 +221,7 @@ class CtApi {
     })
     const server = new ApiServer({
       port: asked.port,
-      startPlan: CtApi.#startPlan(git, planAgents),
+      startPlan: CtApi.#startPlan(workspace, planAgents),
       implementPlan: new ImplementPlan({ planAgents }),
       planEvents: CtApi.#planEvents(git),
       frontendRoot: FrontendBuild.root(),
@@ -192,6 +233,7 @@ class CtApi {
       CtApi.#refuseListen(`could not listen on ${LOOPBACK}: ${error.message}`)
     }
     process.stdout.write(`${JSON.stringify({ port })}\n`)
+    CtApi.#sweepUntilItBreaks(CtApi.#harvestClock({ workspace, root, environment }))
   }
 }
 
