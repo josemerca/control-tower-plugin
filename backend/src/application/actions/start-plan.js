@@ -19,19 +19,22 @@ export class StartPlanResult {
 }
 
 export class StartPlan {
-  constructor({ userStories, planIssues, workspace, planAgents }) {
+  constructor({ userStories, planIssues, workspace, planAgents, checkouts }) {
     this.userStories = userStories
     this.planIssues = planIssues
     this.workspace = workspace
     this.planAgents = planAgents
+    this.checkouts = checkouts
   }
 
   async execute(params) {
+    await this.workspace.confirm({ root: params.root, repository: params.repository })
     const story = await this.userStories.detail(params.story)
     const issue = await this.planIssues.open({ story, repository: params.repository })
     await this.planIssues.claim({ issue, repository: params.repository })
     const located = await this.#prepare(params, issue)
     const agent = await this.#launch(params, issue, located)
+    this.checkouts.remember(params.root)
 
     return new StartPlanResult({
       agent,
@@ -41,7 +44,7 @@ export class StartPlan {
 
   async #prepare(params, issue) {
     try {
-      return await this.workspace.prepare({ issue, repository: params.repository })
+      return await this.workspace.prepare({ issue, repository: params.repository, root: params.root })
     } catch (failure) {
       await this.#release(params, issue)
       throw failure
