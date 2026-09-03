@@ -37,6 +37,9 @@ import { matchesGo, GO_TOKEN } from './go-response.js'
 import { readGoCommitment } from './go-registry.js'
 import { gatesFromLabels } from './gates.js'
 import { SliceBase, BaseBranch } from './slice-base.js'
+import { DeliveryState } from './slice-collection.js'
+import { CollectionAction, CollectionOutcome, SliceCollector } from './slice-collector.js'
+import { findWorkspaceByCwd } from './cmux.js'
 
 const ctWatchMergePath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch-merge.mjs')
 
@@ -88,7 +91,10 @@ const ctWatchMergePath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch
 //       fallido tras un fallo de readback). Esto exige que un humano lo
 //       mire antes de que ct-next.mjs reintente nada más — el caller aborta
 //       la tanda ENTERA con este código, igual que ya hacía antes al ver
-//       este mismo texto de ATENCIÓN.
+//       este mismo texto de ATENCIÓN. Con `--collect` este mismo 4 significa
+//       la misma clase de cosa por otra puerta: la COSECHA QUEDÓ A MEDIAS
+//       (algún paso mutó y otro falló), y los comandos que quedan se imprimen
+//       por separado —nunca encadenados con `&&`— para que un humano remate.
 //   5 = NUEVO (F22) — la rama del slice INTRODUCE un fichero de estado
 //       (`.agent/STATE.md` o `.agent/SLICE.md`). No se libera nada: el issue
 //       se queda en status:in-progress. Este código NO lo ve nunca
@@ -106,6 +112,13 @@ const ctWatchMergePath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch
 //       ha podido comprobar. Sale sólo de `--release`, que se niega sin mutar
 //       nada. Igual que el 5, el 6, el 7 y el 8, nunca lo ve
 //       classifyClaimOutcome.
+//  10 = NUEVO (F20/cosecha) — CONSERVADO: `--collect` encontró la PR
+//       mergeada, pero el árbol del worktree tiene cambios sin commitear o la
+//       punta local de `feat/<n>` no es el `headRefOid` que mergeó la PR. No
+//       se borra NADA y el motivo se imprime. "Mergeado" no es "nadie está
+//       tocando eso", y borrar un worktree es irreversible: ante la duda se
+//       conserva y se dice. Sale sólo de `--collect`; como el 5, el 6 y el 9,
+//       nunca lo ve classifyClaimOutcome.
 // El texto que este fichero imprime NO cambia de contenido (los mismos
 // detalles, incluido el comando manual de `--release`/revert) — solo deja
 // de ser la ÚNICA fuente de verdad para la decisión del caller.
@@ -184,6 +197,7 @@ const release = has('--release')
 const reopen = has('--reopen')
 const requeue = has('--requeue')
 const checkPlan = has('--check-plan')
+const collect = has('--collect')
 const dryRun = has('--dry-run')
 // --no-watch-merge: no lances el vigilante del merge en este release.
 //
@@ -204,11 +218,13 @@ const dryRun = has('--dry-run')
 // cinco puertas se comprueban igual y el issue se mueve igual. Lo único que se
 // pierde es el aviso, que es justo lo que el vigilante aporta —el MOMENTO, no el
 // conocimiento— porque `/ct-next` sigue emitiendo `cosecha pendiente:` en cada
-// corrida. Y se dice en voz alta al liberar, por la misma razón por la que el
-// fallo al lanzarlo también se dice: un silencio aquí es indistinguible de un
-// vigilante que sí está.
+// corrida. Y en el flujo que pide esta bandera se pierde aún menos: ahí quien
+// recoge es un reloj que llama a `--collect` por su cuenta, así que el aviso no
+// se queda sin destinatario, se queda sin función. Se dice en voz alta al
+// liberar, por la misma razón por la que el fallo al lanzarlo también se dice:
+// un silencio aquí es indistinguible de un vigilante que sí está.
 const noWatchMerge = has('--no-watch-merge')
-const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release | --reopen | --requeue | --check-plan] [--dry-run] [--no-watch-merge]'
+const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release | --reopen | --requeue | --check-plan | --collect] [--dry-run] [--no-watch-merge]'
 if (issue === null || issue < 1) {
   dieErr(`<issue#> inválido: ${process.argv[2] === undefined ? '(ausente)' : `"${process.argv[2]}"`} — debe ser un entero >= 1 escrito con dígitos a secas (nada de "42x", "1e3", "4.2", espacios, ni signo "+"/"-": un número aproximado aquí reclamaría un issue que no es el que pediste).\n${usage}`, 2)
 }
@@ -217,10 +233,13 @@ if (typeof repo !== 'string' || repo.length === 0) { dieErr(usage, 2) }
 // (ready → in-progress → in-review → in-progress → … → ready). Pasar dos
 // juntos no tiene una interpretación razonable, y elegir uno en silencio sería
 // adivinar cuál quería quien lo escribió sobre una mutación de estado real.
+// `--collect` no mueve ninguna label —borra residuo en disco— pero entra en la
+// misma exclusión por el mismo motivo: es otro modo entero de este comando, y
+// combinarlo con uno que muta labels no tiene interpretación razonable.
 {
-  const pedidos = [release && '--release', reopen && '--reopen', requeue && '--requeue', checkPlan && '--check-plan'].filter(Boolean)
+  const pedidos = [release && '--release', reopen && '--reopen', requeue && '--requeue', checkPlan && '--check-plan', collect && '--collect'].filter(Boolean)
   if (pedidos.length > 1) {
-    dieErr(`${pedidos.join(' y ')} son mutuamente excluyentes: --release cierra el slice hacia revisión (in-progress → in-review), --reopen lo devuelve al banco de trabajo tras un rechazo (in-review → in-progress) y --requeue lo abandona y lo devuelve a la cola (in-progress → ready). Elige uno.\n${usage}`, 2)
+    dieErr(`${pedidos.join(' y ')} son mutuamente excluyentes: --release cierra el slice hacia revisión (in-progress → in-review), --reopen lo devuelve al banco de trabajo tras un rechazo (in-review → in-progress), --requeue lo abandona y lo devuelve a la cola (in-progress → ready) y --collect recoge el residuo en disco de un slice ya mergeado sin tocar ninguna label. Elige uno.\n${usage}`, 2)
   }
 }
 
@@ -1382,6 +1401,86 @@ if (requeue) {
   process.exit(0)
 }
 
+// ============================================================================
+// --collect (F20/cosecha) — EL ÚNICO CAMINO DE ÉXITO DE ESTE FICHERO QUE BORRA
+// COSAS EN DISCO.
+//
+// Todo lo demás que borra un worktree en este plugin es un rollback de un
+// despacho fallido (`cleanupOrphanedWorktree` en ct-next.mjs). Aquí se borra
+// porque el slice TERMINÓ: su PR está mergeada, el árbol está limpio y la
+// punta local es el commit que aterrizó. Esas tres condiciones NO se deciden
+// aquí — las decide `CollectionPolicy` (scripts/slice-collection.js) y las
+// orquesta `SliceCollector` (scripts/slice-collector.js), que es quien lee,
+// decide y ejecuta los tres pasos. Este bloque hace lo que le toca a un
+// entrypoint y nada más: cablear los runners reales, proyectar el desenlace a
+// texto y a exit code, y salir. Ninguna regla de cosecha vive en este fichero.
+//
+// El objeto que fluye es el REAL de `localSliceArtifacts(issue)`: si un día
+// alguien renombra una de sus claves, esto deja de compilar el argv correcto y
+// el test de integración lo dice. Un `known: false` es exit 3 (no se pudo
+// mirar), nunca "no queda nada".
+// ============================================================================
+if (collect) {
+  const COLLECT_GIT_TIMEOUT_MS = 30_000
+  const COLLECT_CMUX_TIMEOUT_MS = 10_000
+  const a = localSliceArtifacts(issue)
+  if (!a.known) {
+    dieErr(`no se ha podido comprobar qué queda de #${issue} en esta máquina (no se pudo consultar git desde aquí): no se ha tocado nada. Corre esto desde dentro del checkout del repo.`, 3)
+  }
+  // Un exit code distinto de 0 es DATO, no excepción: los tres runners lo
+  // devuelven en `code` para que el colector decida (y no traduzca un fallo
+  // de lectura a un árbol limpio).
+  const ghRunner = (argv) => {
+    try {
+      return { code: 0, stdout: gh(argv), stderr: '' }
+    } catch (e) {
+      return { code: typeof e.status === 'number' ? e.status : 1, stdout: '', stderr: String(e.stderr || e.message || '') }
+    }
+  }
+  const localRunner = (bin, timeoutMs) => (argv) => {
+    try {
+      return { code: 0, stdout: execFileSync(bin, argv, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: timeoutMs, killSignal: 'SIGKILL' }), stderr: '' }
+    } catch (e) {
+      return { code: typeof e.status === 'number' ? e.status : 1, stdout: String(e.stdout || ''), stderr: String(e.stderr || e.message || '') }
+    }
+  }
+  const collector = new SliceCollector({
+    gh: ghRunner,
+    git: localRunner('git', COLLECT_GIT_TIMEOUT_MS),
+    cmux: localRunner('cmux', COLLECT_CMUX_TIMEOUT_MS),
+    findWorkspace: (cwd) => findWorkspaceByCwd(cwd),
+  })
+  const report = dryRun
+    ? collector.rehearse({ artifacts: a, repo })
+    : collector.collect({ artifacts: a, repo })
+  const hechoDe = (command) => {
+    if (command.action === CollectionAction.CLOSE_WORKSPACE) return 'cerrada la workspace de cmux'
+    if (command.action === CollectionAction.REMOVE_WORKTREE) return `borrado el worktree ${a.worktree}`
+    if (command.action === CollectionAction.DELETE_BRANCH) return `borrada la rama ${a.branch}`
+    throw new Error(`--collect no sabe nombrar la acción ${command.action}`)
+  }
+  const esperaPor = (delivery) => {
+    if (delivery.state === DeliveryState.NOT_OPENED) return `no hay ninguna PR para la rama ${a.branch}`
+    if (delivery.state === DeliveryState.OPEN) return `la PR #${delivery.number} sigue abierta`
+    if (delivery.state === DeliveryState.ABANDONED) return `la PR #${delivery.number} se cerró sin mergear`
+    throw new Error(`--collect no sabe esperar por el estado ${delivery.state}`)
+  }
+  // Proyección EXHAUSTIVA desenlace → (canal, texto, exit code). Un desenlace
+  // nuevo sin fila aquí lanza en vez de salir con un código inventado.
+  const PROYECCION = {
+    [CollectionOutcome.COLLECTED]: { decir: dieOut, code: 0, linea: (r) => `collected #${issue}: ${r.done.map(hechoDe).join(', ')}` },
+    [CollectionOutcome.WOULD_COLLECT]: { decir: dieOut, code: 0, linea: (r) => `would collect #${issue}: ${r.pending.map((command) => command.line).join(' ; ')}` },
+    [CollectionOutcome.NOTHING_LEFT]: { decir: dieOut, code: 0, linea: () => `nothing left for #${issue}: en ${a.mainRoot} ya no queda ni el worktree .worktrees/${issue} ni la rama ${a.branch}` },
+    [CollectionOutcome.WAITING]: { decir: dieOut, code: 1, linea: (r) => `waiting on #${issue} (${r.delivery.state}): ${esperaPor(r.delivery)} — no se ha tocado nada` },
+    [CollectionOutcome.KEPT_DIRTY_TREE]: { decir: dieOut, code: 10, linea: () => `kept #${issue}: el worktree ${a.worktree} tiene cambios sin commitear — no se ha borrado nada` },
+    [CollectionOutcome.KEPT_TIP_NOT_MERGED]: { decir: dieOut, code: 10, linea: (r) => `kept #${issue}: la punta local de ${a.branch} no es el commit que mergeó la PR #${r.delivery.number} (${r.delivery.headRefOid}) — no se ha borrado nada` },
+    [CollectionOutcome.NOT_READ]: { decir: dieErr, code: 3, linea: (r) => `no se pudo leer el estado de #${issue}: ${r.read} falló (${r.detail}) — no se ha tocado nada, el siguiente barrido reintenta.` },
+    [CollectionOutcome.PARTIAL]: { decir: dieErr, code: 4, linea: (r) => `ATENCIÓN: cosecha a medias de #${issue}: ${r.done.length ? r.done.map(hechoDe).join(', ') : 'no se completó ningún paso'}. Falló: ${r.detail}. Pendiente a mano — ejecuta cada comando por separado: ${r.pending.map((command) => command.line).join(' ; ')}` },
+  }
+  const proyeccion = PROYECCION[report.outcome]
+  if (!proyeccion) throw new Error(`--collect no tiene proyección para el desenlace ${report.outcome}`)
+  proyeccion.decir(`${dryRun ? 'dry-run: ' : ''}${proyeccion.linea(report)}`, proyeccion.code)
+}
 // 1) colisión previa. Ningún fallo aquí ha mutado nada todavía: abortar es
 // seguro, no deja lock huérfano. Finding 4: exit 3 (fallo de lectura, no
 // mutación, no colisión real) — antes exit 1, indistinguible por código de

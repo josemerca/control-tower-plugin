@@ -23,4 +23,7 @@
   max-width: var(--layout-container-sm);
   margin: 0 auto;
   padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
 }

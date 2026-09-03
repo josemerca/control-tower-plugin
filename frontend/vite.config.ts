@@ -1,10 +1,11 @@
 /// <reference types="vitest/config" />
 import { fileURLToPath, URL } from 'node:url'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig, type HttpProxy } from 'vite'
 
 const BACKEND = 'http://127.0.0.1:8787'
 const ORIGIN_HEADER = 'origin'
+const API_PATHS = ['/start-plan', '/plan-events', '/implement-plan']
 
 const sourceRoot = (folder: string) => fileURLToPath(new URL(`./src/${folder}`, import.meta.url))
 
@@ -23,14 +24,17 @@ export default defineConfig({
     emptyOutDir: true,
   },
   server: {
-    proxy: {
-      '/start-plan': {
-        target: BACKEND,
-        configure: (proxy) => {
-          proxy.on('proxyReq', (proxied) => proxied.removeHeader(ORIGIN_HEADER))
+    proxy: Object.fromEntries(
+      API_PATHS.map((path) => [
+        path,
+        {
+          target: BACKEND,
+          configure: (proxy: HttpProxy.Server) => {
+            proxy.on('proxyReq', (proxied) => proxied.removeHeader(ORIGIN_HEADER))
+          },
         },
-      },
-    },
+      ]),
+    ),
   },
   test: {
     globals: true,
