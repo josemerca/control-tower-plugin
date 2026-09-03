@@ -163,6 +163,26 @@ describe('--release lanza el vigilante del merge', () => {
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
 
+  it('con --no-watch-merge no lanza nada, y el release sigue siendo un éxito', async () => {
+    const dir = repo()
+    try {
+      const r = release(dir, { args: ['--no-watch-merge'] })
+      expect(r.status).toBe(0)
+      expect(r.stdout).toMatch(/released #9/)
+      expect(await esperarArgv(r.watchLog, 600)).toBe(null)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
+  it('con --no-watch-merge se dice que la cosecha queda sin avisar, para que el silencio no se lea como entregado', async () => {
+    const dir = repo()
+    try {
+      const r = release(dir, { args: ['--no-watch-merge'] })
+
+      expect(r.stdout + r.stderr).toMatch(/--no-watch-merge/)
+      expect(r.stdout).not.toMatch(/vigilante del merge de #9 lanzado/)
+    } finally { rmSync(dir, { recursive: true, force: true }) }
+  })
+
   it('con --dry-run no lanza nada: nada se ha movido, así que no hay merge que esperar', async () => {
     const dir = repo()
     try {

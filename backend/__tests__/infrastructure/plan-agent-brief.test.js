@@ -86,7 +86,7 @@ describe('PlanAgentBrief resuming the agent', () => {
     dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
     conventions: '/plugin/conventions',
     ctStep: '/plugin/scripts/ct-step.mjs',
-  }).implementationErrandFor({ issueNumber: 42 })
+  }).implementationErrandFor({ issueNumber: 42, repository: new RepositoryName('owner/name') })
 
   it('it_is_one_single_line_because_a_newline_would_run_the_order_half_written', () => {
     expect(errand()).not.toContain('\n')
@@ -109,9 +109,21 @@ describe('PlanAgentBrief resuming the agent', () => {
     expect(composed.indexOf('.agent/SLICE.md')).toBeLessThan(composed.indexOf('Pregunta el paso'))
   })
 
-  it('it_waves_off_the_release_that_ct_step_will_suggest_so_the_agent_does_not_crash_into_exit_9', () => {
-    expect(errand()).toContain('dispatch-check --release')
-    expect(errand()).toMatch(/no ejecutes/i)
+  it('it_orders_the_release_that_moves_the_issue_to_review_instead_of_forbidding_it', () => {
+    expect(errand()).toContain(
+      'node /plugin/scripts/dispatch-check.mjs 42 --repo owner/name --release'
+    )
+    expect(errand()).not.toMatch(/no ejecutes/i)
+    expect(errand()).not.toContain('saldría por 9')
+  })
+
+  it('the_release_it_orders_waives_the_merge_watcher_because_this_flow_has_no_coordinator_to_notify', () => {
+    expect(errand()).toContain('--release --no-watch-merge')
+  })
+
+  it('it_still_stops_before_the_merge_because_that_is_the_second_human_decision', () => {
+    expect(errand()).toMatch(/no la mergees/i)
+    expect(errand()).toMatch(/PARA/)
   })
 
   it('a_brief_that_cannot_name_ct_step_refuses_to_exist_instead_of_shipping_the_word_undefined', () => {
