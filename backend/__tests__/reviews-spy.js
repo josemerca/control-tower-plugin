@@ -9,6 +9,6 @@ export class ReviewsSpy {
   }
 
   stop({ issue, repository }) {
-    this.stopped.push(`${repository.text}#${issue}`)
+    this.stopped.push({ issue, repository })
   }
 }

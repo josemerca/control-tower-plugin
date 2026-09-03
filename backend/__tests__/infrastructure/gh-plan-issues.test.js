@@ -570,12 +570,20 @@ describe('GhPlanIssues reading the changes asked for on the issue', () => {
     expect(nothing).toBeInstanceOf(PlanChangesNotUnderstood)
   })
 
-  it('a_comment_gh_did_not_name_is_not_counted_because_nobody_could_remember_attending_it', async () => {
+  it('a_comment_without_the_id_and_the_body_this_reads_is_not_understood_whatever_it_says', async () => {
     const nameless = await GhDouble.printing(
       JSON.stringify({ comments: [{ body: '-REVIEW parte la tarea 3' }] })
     ).changesRefusalFor()
+    const bodyless = await GhDouble.printing(
+      JSON.stringify({ comments: [{ id: 'IC_kwDOT9lB5c8AAAABRCF0GG' }] })
+    ).changesRefusalFor()
+    const nothing = await GhDouble.printing(
+      JSON.stringify({ comments: [null] })
+    ).changesRefusalFor()
 
     expect(nameless).toBeInstanceOf(PlanChangesNotUnderstood)
+    expect(bodyless).toBeInstanceOf(PlanChangesNotUnderstood)
+    expect(nothing).toBeInstanceOf(PlanChangesNotUnderstood)
   })
 
   it('a_blip_while_reading_them_is_retried_because_asking_twice_reads_the_same_issue', async () => {

@@ -31,15 +31,16 @@ export class PlanReviewWatch {
   async #follow(watch, key, attended) {
     for (;;) {
       await this.sleep()
-      if (this.live.get(key) !== attended) return
-      await this.#attend(watch, attended)
+      if (!this.live.has(key)) return
+      await this.#attend(watch, key, attended)
     }
   }
 
-  async #attend(watch, attended) {
+  async #attend(watch, key, attended) {
     const read = await this.#sound(watch)
     if (read === null) return
     for (const change of read.changes) {
+      if (!this.live.has(key)) return
       if (attended.has(change.id)) continue
       attended.add(change.id)
       await this.#deliver(watch, change)

@@ -158,6 +158,8 @@ describe('the issue body says how changes are asked for', () => {
     expect(body.split(GhPlanIssues.CHANGES_TOKEN)).toHaveLength(2)
     expect(PlanIssueBody.CHANGES_LINE).toMatch(/comenta/)
     expect(PlanIssueBody.CHANGES_LINE).toMatch(/cambios en el plan/)
+    expect(PlanIssueBody.CHANGES_LINE).toMatch(/lo que escribas detrás/)
+    expect(PlanIssueBody.CHANGES_LINE).toMatch(/plan rehecho/)
     expect(PlanIssueBody.CHANGES_LINE).toContain(`\`${GhPlanIssues.CHANGES_TOKEN}\``)
   })
 

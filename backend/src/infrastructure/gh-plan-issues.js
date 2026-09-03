@@ -128,9 +128,18 @@ export class GhPlanIssues extends PlanIssues {
   }
 
   static #changesIn(printed, issue) {
-    return GhPlanIssues.#commentsIn(printed, issue)
-      .filter((comment) => comment.body.startsWith(GhPlanIssues.CHANGES_TOKEN))
-      .map((comment) => GhPlanIssues.#changeFrom(comment, issue))
+    const asked = []
+    for (const comment of GhPlanIssues.#commentsIn(printed, issue)) {
+      GhPlanIssues.#demandRead(comment, issue)
+      if (!comment.body.startsWith(GhPlanIssues.CHANGES_TOKEN)) continue
+
+      asked.push(new ChangeAsked({
+        id: comment.id,
+        text: comment.body.slice(GhPlanIssues.CHANGES_TOKEN.length).trim(),
+      }))
+    }
+
+    return asked
   }
 
   static #commentsIn(printed, issue) {
@@ -151,17 +160,12 @@ export class GhPlanIssues extends PlanIssues {
     return parsed.comments
   }
 
-  static #changeFrom(comment, issue) {
-    if (typeof comment.id !== 'string') {
-      throw new PlanChangesNotUnderstood(
-        `${Gh.BIN} did not name a comment asking for changes on ${issue.number}, so attending it once could not be remembered`
-      )
-    }
+  static #demandRead(comment, issue) {
+    if (typeof comment?.id === 'string' && typeof comment?.body === 'string') return
 
-    return new ChangeAsked({
-      id: comment.id,
-      text: comment.body.slice(GhPlanIssues.CHANGES_TOKEN.length).trim(),
-    })
+    throw new PlanChangesNotUnderstood(
+      `${Gh.BIN} answered a comment of ${issue.number} without the id and the body this reads, it printed ${JSON.stringify(comment)}`
+    )
   }
 
   async answerGo({ issueNumber, repository, nonce }) {

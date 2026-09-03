@@ -260,7 +260,9 @@ describe('implementing the plan lifts the watch on its issue', () => {
     const response = await RunningApi.asking(RunningApi.ACCEPTED_BODY)
 
     expect(response.status).toBe(202)
-    expect(RunningApi.reviews.stopped).toEqual(['jjponz/repo-pulse#33'])
+    expect(RunningApi.reviews.stopped).toEqual([{
+      issue: 33, repository: RunningApi.WATCHED.repository,
+    }])
   })
 
   it('implementing_the_plan_forgets_the_session_so_nothing_keeps_reading_the_contract_of_a_plan_being_built', async () => {

@@ -31,9 +31,10 @@ class WatchDouble {
     id: 'IC_kwDOT9lB5c8AAAABRCF0HH', text: WatchDouble.A_CHANGE.text,
   })
 
-  constructor(soundings, { refusingTheDelivery = null, waits = null } = {}) {
+  constructor(soundings, { refusingTheDelivery = null, waits = null, stoppingOnDelivery = false } = {}) {
     this.soundings = soundings
     this.refusingTheDelivery = refusingTheDelivery
+    this.stoppingOnDelivery = stoppingOnDelivery
     this.waits = waits ?? soundings.length
     this.asked = []
     this.reviewed = []
@@ -48,6 +49,12 @@ class WatchDouble {
 
   static stoppedBeforeTheFirstWait() {
     return new WatchDouble([[WatchDouble.A_CHANGE]], { waits: 0 })
+  }
+
+  static stoppedWhileDelivering() {
+    return new WatchDouble([[WatchDouble.A_CHANGE, WatchDouble.ANOTHER_CHANGE]], {
+      stoppingOnDelivery: true,
+    })
   }
 
   static refusingTheDelivery(cause) {
@@ -70,6 +77,7 @@ class WatchDouble {
       },
       review: (params) => {
         this.reviewed.push(params)
+        if (this.stoppingOnDelivery) this.watch.stop(WatchDouble.STOPPING)
         if (this.refusingTheDelivery !== null) return Promise.reject(this.refusingTheDelivery)
 
         return Promise.resolve()
@@ -169,7 +177,9 @@ describe('PlanReviewWatch', () => {
   })
 
   it('a_defect_of_ours_ends_that_watch_instead_of_taking_the_whole_api_down', async () => {
-    const watched = WatchDouble.answering(new TypeError('changes is not iterable'))
+    const watched = WatchDouble.answering(
+      new TypeError('changes is not iterable'), [WatchDouble.A_CHANGE]
+    )
 
     await watched.run()
 
@@ -198,12 +208,22 @@ describe('PlanReviewWatch', () => {
     expect(watched.warnings[0]).toContain('agent is not a string')
   })
 
-  it('a_watch_that_died_is_no_longer_listed_as_live_so_the_map_cannot_promise_a_bucle_that_is_gone', async () => {
-    const watched = WatchDouble.answering(new TypeError('changes is not iterable'))
+  it('a_watch_that_died_is_no_longer_listed_as_live_so_the_map_cannot_promise_a_loop_that_is_gone', async () => {
+    const watched = WatchDouble.answering(
+      new TypeError('changes is not iterable'), [WatchDouble.A_CHANGE]
+    )
 
     await watched.run()
 
     expect(watched.watch.live.size).toBe(0)
+  })
+
+  it('a_stop_in_the_middle_of_a_round_is_honoured_before_the_next_change_is_typed', async () => {
+    const watched = WatchDouble.stoppedWhileDelivering()
+
+    await watched.run()
+
+    expect(watched.reviewed.map(({ changes }) => changes)).toEqual([WatchDouble.A_CHANGE.text])
   })
 
   it('a_stop_for_an_issue_nobody_is_watching_answers_the_same_as_one_that_was', async () => {
@@ -216,25 +236,31 @@ describe('PlanReviewWatch', () => {
 })
 
 describe('PlanReviewWatch telling two plans apart', () => {
-  const NUMBER = 7
-  const watchFor = (repo) => new PlanWatch({
-    issue: new PlanIssue({ number: NUMBER, url: `https://github.com/${repo}/issues/${NUMBER}` }),
-    located: new WorkspaceLocation({ path: `/repo/${repo}/.worktrees/7`, branch: 'feat/7' }),
+  const watchFor = (repo, number) => new PlanWatch({
+    issue: new PlanIssue({ number, url: `https://github.com/${repo}/issues/${number}` }),
+    located: new WorkspaceLocation({ path: `/repo/${repo}/.worktrees/${number}`, branch: `feat/${number}` }),
     repository: new RepositoryName(repo),
-    agent: 'workspace:1',
+    agent: `workspace:${number}`,
   })
 
-  const ALPHA = watchFor('owner/alpha')
-  const BETA = watchFor('owner/beta')
+  const ALPHA_7 = watchFor('owner/alpha', 7)
+  const BETA_7 = watchFor('owner/beta', 7)
+  const ALPHA_8 = watchFor('owner/alpha', 8)
   const ROUND_MS = 1
   const ROUNDS = 15
+  const BUDGET = ROUNDS * 6
 
   class TwoPlans {
     constructor() {
       this.sounded = []
+      this.rounds = 0
       this.reviews = new PlanReviewWatch({
         asked: (watch) => {
-          this.sounded.push(watch.repository.text)
+          this.rounds += 1
+          if (this.rounds > BUDGET) {
+            throw new Error(`the watches sounded ${this.rounds} times, past what this test allows`)
+          }
+          this.sounded.push(TwoPlans.#nameOf(watch))
 
           return Promise.resolve({ changes: [] })
         },
@@ -244,17 +270,26 @@ describe('PlanReviewWatch telling two plans apart', () => {
       })
     }
 
+    static #nameOf(watch) {
+      return `${watch.repository.text}#${watch.issue.number}`
+    }
+
     static #settling() {
       return new Promise((resolve) => setTimeout(resolve, ROUND_MS * ROUNDS))
     }
 
-    async soundedAfterStopping(stopping) {
-      this.reviews.start(ALPHA)
-      this.reviews.start(BETA)
+    static #stopping(watch) {
+      return { issue: watch.issue.number, repository: watch.repository }
+    }
+
+    async soundedAfterStopping(stopped, kept) {
+      this.reviews.start(stopped)
+      this.reviews.start(kept)
       await TwoPlans.#settling()
-      this.reviews.stop(stopping)
+      this.reviews.stop(TwoPlans.#stopping(stopped))
       this.sounded = []
       await TwoPlans.#settling()
+      this.reviews.stop(TwoPlans.#stopping(kept))
 
       return this.sounded
     }
@@ -263,11 +298,29 @@ describe('PlanReviewWatch telling two plans apart', () => {
   it('two_plans_sharing_an_issue_number_in_different_repositories_are_watched_apart', async () => {
     const two = new TwoPlans()
 
-    const sounded = await two.soundedAfterStopping({
-      issue: NUMBER, repository: ALPHA.repository,
-    })
+    const sounded = await two.soundedAfterStopping(ALPHA_7, BETA_7)
 
-    expect(sounded).not.toContain('owner/alpha')
-    expect(sounded).toContain('owner/beta')
+    expect(sounded).not.toContain('owner/alpha#7')
+    expect(sounded).toContain('owner/beta#7')
+  })
+
+  it('two_plans_of_the_same_repository_are_watched_apart_by_the_issue_they_plan', async () => {
+    const two = new TwoPlans()
+
+    const sounded = await two.soundedAfterStopping(ALPHA_8, ALPHA_7)
+
+    expect(sounded).not.toContain('owner/alpha#8')
+    expect(sounded).toContain('owner/alpha#7')
+  })
+
+  it('nothing_keeps_sounding_once_both_plans_have_been_stopped', async () => {
+    const two = new TwoPlans()
+
+    await two.soundedAfterStopping(ALPHA_7, BETA_7)
+    two.sounded = []
+    await new Promise((resolve) => setTimeout(resolve, ROUND_MS * ROUNDS))
+
+    expect(two.sounded).toEqual([])
+    expect(two.reviews.live.size).toBe(0)
   })
 })
