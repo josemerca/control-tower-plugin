@@ -27,6 +27,11 @@ describe('PlanAgentBrief', () => {
     expect(errand()).toContain('docs/superpowers/plans/YYYY-MM-DD-issue-42-<slug>.md')
   })
 
+  it('it_orders_the_plan_published_on_the_issue_because_that_is_where_a_human_reads_it_to_ask_for_changes', () => {
+    expect(errand()).toContain('gh issue comment 42 --repo owner/name')
+    expect(errand()).toMatch(/publ/i)
+  })
+
   it('it_orders_the_session_to_stop_after_committing_instead_of_starting_the_work', () => {
     expect(errand()).toMatch(/PARA/)
     expect(errand()).toMatch(/no implementes/i)

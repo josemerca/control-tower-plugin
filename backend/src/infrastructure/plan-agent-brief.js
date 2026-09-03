@@ -40,6 +40,7 @@ export class PlanAgentBrief {
       `Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${issue.number}-<slug>.md.`,
       `Valídalo con \`node ${dispatchCheck} ${issue.number} --repo ${named} --check-plan\` hasta exit 0.`,
       'Commitéalo: el plan viaja en el pull request, y sin commitear no cuenta como escrito.',
+      `Y publícalo como comentario del issue con \`gh issue comment ${issue.number} --repo ${named}\`: es donde una persona lo lee para darte el go o para pedirte cambios, así que sin publicarlo el plan no existe para nadie más que para ti.`,
       `Y entonces PARA. No implementes nada, no abras pull request, no mergees, ${PlanAgentBrief.NO_NEW_WORKTREES}: ya estás en el que te prepararon.`,
     ].join('\n')
   }
