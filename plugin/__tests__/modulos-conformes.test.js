@@ -30,6 +30,8 @@ class NacidosConformes {
     '__tests__/harvest-table.test.js',
     'scripts/bigquery-load.js',
     '__tests__/bigquery-load.test.js',
+    'scripts/harvest-ledger.js',
+    '__tests__/harvest-ledger.test.js',
     '__tests__/fixtures/fake-bq-bin/bq',
     '__tests__/ct-harvest-bq.test.js',
     'scripts/slice-harvest.js',
