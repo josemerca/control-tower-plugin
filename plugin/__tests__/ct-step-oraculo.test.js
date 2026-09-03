@@ -21,6 +21,8 @@ describe('next: la sesión pregunta y el oráculo contesta', () => {
     expect(r.stdout).toMatch(/tarea 1\/2 — la primera/)
     expect(r.stdout).toMatch(/paso: implement/)
     expect(r.stdout).toMatch(/DESPACHA UN IMPLEMENTADOR/)
+    // Y con qué modelo: omitirlo hereda el de la sesión, que es el más caro.
+    expect(r.stdout).toMatch(/modelo sonnet/)
     // Preguntar no avanza nada: el paso sigue siendo el mismo.
     expect(ct('next').stdout).toMatch(/paso: implement/)
     expect(estado().step).toBe('implement')

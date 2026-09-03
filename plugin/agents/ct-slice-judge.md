@@ -2,6 +2,7 @@
 name: ct-slice-judge
 description: Judges the WHOLE slice of a Control Tower plan — every task already committed, the plan's own end-to-end verification already green — for the three things no per-task judge ever looks at: whether the tasks together deliver the plan's desired end state, whether they are coherent with each other, and whether the observability signal the slice declared can be honoured by its accumulated diff. Has no shell on purpose. Dispatch it after `ct-step global`, before the pull request opens.
 tools: Read, Grep, Glob, Write
+model: opus
 ---
 
 You judge the SLICE ENTIRE, not one task. `ct-judge` already walked nine items

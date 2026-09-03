@@ -1162,3 +1162,22 @@ describe('el mensaje que compone el programa', () => {
   })
 })
 
+// ---------------------------------------------------------------------------
+// Con qué modelo corre cada subagente. Omitir el modelo no es neutral: hereda
+// el de la sesión, que es el más caro, y el implementador es el paso que más
+// veces se despacha en un run.
+// ---------------------------------------------------------------------------
+describe('el modelo de cada subagente', () => {
+  const modeloDeAgente = (fichero) => {
+    const m = /^model:\s*(.+)$/m.exec(readFileSync(fichero, 'utf8'))
+    return m ? m[1].trim() : null
+  }
+
+  it.each([
+    ['el juez de tarea', AGENTE_JUEZ],
+    ['el juez de slice', AGENTE_JUEZ_DE_SLICE],
+    ['el reconciliador', AGENTE_RECONCILIADOR],
+  ])('%s declara su modelo, no lo hereda de la sesión', (_, fichero) => {
+    expect(modeloDeAgente(fichero)).toBe('opus')
+  })
+})
