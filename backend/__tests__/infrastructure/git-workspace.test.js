@@ -360,6 +360,17 @@ describe('GitWorkspace', () => {
     expect(parseStateSafe(git.written[1][1]).meta.base_sha).toBe(GitDouble.CUT)
   })
 
+  it('the_state_it_seeds_names_the_gate_that_holds_this_slice_because_the_skill_reads_it_from_there', async () => {
+    const git = new GitDouble()
+
+    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+
+    const gates = parseStateSafe(git.written[1][1]).meta.gates
+    expect(gates).toContain(SliceSeed.PLAN_GATE)
+    expect(gates).toMatch(/-REVIEW/)
+    expect(gates).not.toMatch(/quien revisa el PR/)
+  })
+
   it('a_head_it_cannot_measure_stops_the_seeding_instead_of_writing_a_state_without_a_cut', async () => {
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({
