@@ -19,18 +19,13 @@ export class PlanReviewWatch {
     this.live.set(key, attended)
 
     return this.#follow(watch, key, attended).catch((cause) => {
-      this.#forget(key, attended)
+      this.stop({ issue: watch.issue.number, repository: watch.repository })
       this.#warn(watch, `is no longer watched: ${cause.message}`)
     })
   }
 
   stop({ issue, repository }) {
     this.live.delete(PlanReviewWatch.#keyFor(repository, issue))
-  }
-
-  #forget(key, attended) {
-    if (this.live.get(key) !== attended) return
-    this.live.delete(key)
   }
 
   async #follow(watch, key, attended) {
