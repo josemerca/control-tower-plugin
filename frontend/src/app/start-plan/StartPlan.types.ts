@@ -1,7 +1,22 @@
-export type StartPlanResult = {
-  status: 'started'
+export type StartPlanRequest = {
   id: string
-  session: string
+  repo: string
+}
+
+export type PlanIssue = {
+  number: number
+  url: string
+}
+
+export type StartedPlan = {
+  id: string
+  repo: string
+  issue: PlanIssue
+  agent: string
+}
+
+export type StartPlanResult = StartedPlan & {
+  status: 'started'
 }
 
 export type StartPlanRefusal = {
@@ -9,6 +24,6 @@ export type StartPlanRefusal = {
 }
 
 export type StartPlanOutcome =
-  | { kind: 'started'; session: string }
+  | { kind: 'started'; plan: StartedPlan }
   | { kind: 'refused'; error: string }
   | { kind: 'backend-unreachable' }

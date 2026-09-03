@@ -1,0 +1,8 @@
+.plan-progress {
+  display: flex;
+  flex-direction: column;
+}
+
+.plan-progress__facts code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
