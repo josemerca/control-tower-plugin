@@ -2,9 +2,10 @@ import { PlanBriefing } from '../../domain/value-objects/plan-briefing.js'
 import { PlanWatch } from '../../domain/value-objects/plan-watch.js'
 
 export class StartPlanParams {
-  constructor({ story, repository }) {
+  constructor({ story, repository, root }) {
     this.story = story
     this.repository = repository
+    this.root = root
     Object.freeze(this)
   }
 }

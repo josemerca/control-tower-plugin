@@ -2,6 +2,7 @@ import { Answer, JsonBody, Refusal } from './http.js'
 import { StartPlanParams } from '../application/actions/start-plan.js'
 import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
+import { CheckoutRoot } from '../domain/value-objects/checkout-root.js'
 import {
   PlanFailure,
   UserStoryNotRead, UserStoryNotUnderstood, PlanIssueNotCreated, PlanIssueNotNamed,
@@ -16,14 +17,16 @@ export const PlanRequestOutcome = Object.freeze({
   UNKNOWN_FIELD: 'unknown-field',
   MALFORMED_ID: 'malformed-id',
   MALFORMED_REPO: 'malformed-repo',
+  MALFORMED_ROOT: 'malformed-root',
 })
 
 export class PlanRequest {
   static ID_FIELD = 'id'
   static REPO_FIELD = 'repo'
-  static KNOWN_FIELDS = Object.freeze([PlanRequest.ID_FIELD, PlanRequest.REPO_FIELD])
+  static ROOT_FIELD = 'root'
+  static KNOWN_FIELDS = Object.freeze([PlanRequest.ID_FIELD, PlanRequest.REPO_FIELD, PlanRequest.ROOT_FIELD])
 
-  constructor({ outcome, story, repository, fields }) {
+  constructor({ outcome, story, repository, root, fields }) {
     if (!Object.values(PlanRequestOutcome).includes(outcome)) {
       throw new Error(`outcome must be a PlanRequestOutcome member, got ${outcome}`)
     }
@@ -32,6 +35,9 @@ export class PlanRequest {
     }
     if ((outcome === PlanRequestOutcome.ACCEPTED) === (repository === null)) {
       throw new Error(`outcome ${outcome} disagrees with its repository, got ${repository}`)
+    }
+    if ((outcome === PlanRequestOutcome.ACCEPTED) === (root === null)) {
+      throw new Error(`outcome ${outcome} disagrees with its root, got ${root}`)
     }
     if (outcome !== PlanRequestOutcome.UNKNOWN_FIELD && fields.length > 0) {
       throw new Error(`outcome ${outcome} must carry no fields, got ${fields.join(', ')}`)
@@ -42,21 +48,22 @@ export class PlanRequest {
     this.outcome = outcome
     this.story = story
     this.repository = repository
+    this.root = root
     this.fields = Object.freeze([...fields])
     Object.freeze(this)
   }
 
-  static accepted(story, repository) {
-    return new PlanRequest({ outcome: PlanRequestOutcome.ACCEPTED, story, repository, fields: [] })
+  static accepted(story, repository, root) {
+    return new PlanRequest({ outcome: PlanRequestOutcome.ACCEPTED, story, repository, root, fields: [] })
   }
 
   static refused(outcome) {
-    return new PlanRequest({ outcome, story: null, repository: null, fields: [] })
+    return new PlanRequest({ outcome, story: null, repository: null, root: null, fields: [] })
   }
 
   static withUnknownFields(fields) {
     return new PlanRequest({
-      outcome: PlanRequestOutcome.UNKNOWN_FIELD, story: null, repository: null, fields,
+      outcome: PlanRequestOutcome.UNKNOWN_FIELD, story: null, repository: null, root: null, fields,
     })
   }
 
@@ -82,7 +89,11 @@ export class PlanRequest {
     if (!RepositoryName.isWellFormed(asked)) {
       return PlanRequest.refused(PlanRequestOutcome.MALFORMED_REPO)
     }
-    return PlanRequest.accepted(new UserStoryKey(given), new RepositoryName(asked))
+    const where = parsed[PlanRequest.ROOT_FIELD]
+    if (!CheckoutRoot.isWellFormed(where)) {
+      return PlanRequest.refused(PlanRequestOutcome.MALFORMED_ROOT)
+    }
+    return PlanRequest.accepted(new UserStoryKey(given), new RepositoryName(asked), new CheckoutRoot(where))
   }
 }
 
@@ -97,6 +108,10 @@ export class PlanRefusal {
     [PlanRequestOutcome.MALFORMED_REPO]: () => new Refusal({
       status: 400,
       error: `${PlanRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
+    }),
+    [PlanRequestOutcome.MALFORMED_ROOT]: () => new Refusal({
+      status: 400,
+      error: `${PlanRequest.ROOT_FIELD} must be an absolute path to a local clone such as ${CheckoutRoot.EXAMPLE}`,
     }),
     [PlanRequestOutcome.UNKNOWN_FIELD]: (asked) => new Refusal({
       status: 400,
@@ -168,7 +183,7 @@ export class StartPlanRoute {
     let started
     try {
       started = await startPlan.execute(
-        new StartPlanParams({ story: asked.story, repository: asked.repository })
+        new StartPlanParams({ story: asked.story, repository: asked.repository, root: asked.root })
       )
     } catch (cause) {
       if (!(cause instanceof PlanFailure)) throw cause

@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { PlanRequest, PlanRequestOutcome } from '../../src/infrastructure/start-plan-route.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
+import { CheckoutRoot } from '../../src/domain/value-objects/checkout-root.js'
 
 describe('PlanRequest', () => {
   it('every_outcome_is_distinct_so_no_two_refusals_answered_differently_collapse_into_one', () => {
@@ -63,14 +64,14 @@ describe('PlanRequest', () => {
   })
 
   it('an_accepted_body_hands_back_the_story_as_a_domain_value_and_not_as_the_raw_string', () => {
-    const accepted = PlanRequest.from('{"id":"MO_SHOP-42","repo":"josemerca/ct-loop-sandbox"}')
+    const accepted = PlanRequest.from('{"id":"MO_SHOP-42","repo":"josemerca/ct-loop-sandbox","root":"/repo/checkout"}')
 
     expect(accepted.story).toBeInstanceOf(UserStoryKey)
     expect(accepted.story.text).toBe('MO_SHOP-42')
   })
 
   it('an_accepted_body_hands_back_the_repository_as_a_domain_value_too', () => {
-    const accepted = PlanRequest.from('{"id":"MO_SHOP-42","repo":"josemerca/ct-loop-sandbox"}')
+    const accepted = PlanRequest.from('{"id":"MO_SHOP-42","repo":"josemerca/ct-loop-sandbox","root":"/repo/checkout"}')
 
     expect(accepted.repository).toBeInstanceOf(RepositoryName)
     expect(accepted.repository.text).toBe('josemerca/ct-loop-sandbox')
@@ -82,5 +83,44 @@ describe('PlanRequest', () => {
 
   it('an_outcome_outside_the_vocabulary_raises_instead_of_travelling_on_as_a_string', () => {
     expect(() => PlanRequest.refused('invented')).toThrow(/PlanRequestOutcome member/)
+  })
+
+  it('an_accepted_request_cannot_be_built_without_the_root_the_worktree_is_cut_in', () => {
+    expect(() => PlanRequest.accepted(new UserStoryKey('ABC-123'), new RepositoryName('owner/name'), null))
+      .toThrow(/disagrees with its root/)
+  })
+
+  it('a_body_whose_root_is_not_an_absolute_path_comes_back_refused_and_not_as_a_malformed_repo', () => {
+    const refused = [
+      '{"id":"ABC-1","repo":"owner/name","root":"repos/name"}',
+      '{"id":"ABC-1","repo":"owner/name","root":"~/repos/name"}',
+      '{"id":"ABC-1","repo":"owner/name","root":"/repos/name/"}',
+      '{"id":"ABC-1","repo":"owner/name","root":"/repos//name"}',
+      '{"id":"ABC-1","repo":"owner/name","root":"/repos/name\\n"}',
+      '{"id":"ABC-1","repo":"owner/name","root":""}',
+      '{"id":"ABC-1","repo":"owner/name","root":123}',
+      '{"id":"ABC-1","repo":"owner/name"}',
+    ].map((raw) => PlanRequest.from(raw).outcome)
+
+    expect(refused).toEqual(Array(8).fill(PlanRequestOutcome.MALFORMED_ROOT))
+  })
+
+  it('a_malformed_repo_is_reported_before_the_root_so_the_first_thing_wrong_is_what_gets_named', () => {
+    expect(PlanRequest.from('{"id":"ABC-1","repo":"nope","root":"nope"}').outcome)
+      .toBe(PlanRequestOutcome.MALFORMED_REPO)
+  })
+
+  it('an_accepted_body_hands_back_the_root_as_a_domain_value_too', () => {
+    const accepted = PlanRequest.from(
+      '{"id":"MO_SHOP-42","repo":"josemerca/ct-loop-sandbox","root":"/Users/someone/repos/ct-loop-sandbox"}'
+    )
+
+    expect(accepted.root).toBeInstanceOf(CheckoutRoot)
+    expect(accepted.root.text).toBe('/Users/someone/repos/ct-loop-sandbox')
+  })
+
+  it('a_root_with_spaces_in_a_segment_is_still_a_path_because_a_home_directory_can_carry_one', () => {
+    expect(PlanRequest.from('{"id":"ABC-1","repo":"owner/name","root":"/Users/some one/repos/name"}').outcome)
+      .toBe(PlanRequestOutcome.ACCEPTED)
   })
 })

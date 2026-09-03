@@ -31,6 +31,7 @@ class StartPlanSpy {
   constructor({ failing = false } = {}) {
     this.asked = []
     this.repositories = []
+    this.roots = []
     this.failing = failing
   }
 
@@ -55,6 +56,7 @@ class StartPlanSpy {
   async execute(params) {
     this.asked.push(params.story.text)
     this.repositories.push(params.repository.text)
+    this.roots.push(params.root.text)
     if (this.failing) throw new PlanAgentNotLaunched('cmux is not reachable')
     return new StartPlanResult({ agent: StartPlanSpy.AGENT, watch: StartPlanSpy.WATCH })
   }
@@ -115,7 +117,8 @@ class RunningApi {
   static #started = []
   static STORY = 'ABC-123'
   static REPO = 'owner/name'
-  static ACCEPTED_BODY = `{"id":"ABC-123","repo":"owner/name"}`
+  static ROOT = '/repo/checkout'
+  static ACCEPTED_BODY = `{"id":"ABC-123","repo":"owner/name","root":"/repo/checkout"}`
   static ANSWER =
     '{"status":"started","id":"ABC-123","repo":"owner/name",' +
     '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"agent":"workspace:4"}'
@@ -334,7 +337,7 @@ describe('ApiServer', () => {
   it('the_id_that_reaches_the_agent_is_the_one_the_body_carried_and_not_a_default', async () => {
     const port = await RunningApi.listening()
 
-    const response = await RunningApi.post(port, '/start-plan', '{"id":"MO_SHOP-42","repo":"owner/name"}')
+    const response = await RunningApi.post(port, '/start-plan', '{"id":"MO_SHOP-42","repo":"owner/name","root":"/repo/checkout"}')
 
     expect(RunningApi.spy.asked).toEqual(['MO_SHOP-42'])
     expect(await response.text()).toBe(RunningApi.ANSWER.replace('ABC-123', 'MO_SHOP-42'))
@@ -557,9 +560,46 @@ describe('ApiServer', () => {
   it('the_repository_the_body_names_is_the_one_the_use_case_is_asked_to_open_the_issue_in', async () => {
     const port = await RunningApi.listening()
 
-    await RunningApi.post(port, '/start-plan', '{"id":"ABC-123","repo":"josemerca/ct-loop-sandbox"}')
+    await RunningApi.post(port, '/start-plan', '{"id":"ABC-123","repo":"josemerca/ct-loop-sandbox","root":"/repo/checkout"}')
 
     expect(RunningApi.spy.repositories).toEqual(['josemerca/ct-loop-sandbox'])
+  })
+
+  it('the_root_the_body_names_is_the_one_the_use_case_is_asked_to_cut_the_worktree_in', async () => {
+    const port = await RunningApi.listening()
+
+    await RunningApi.post(port, '/start-plan', '{"id":"ABC-123","repo":"owner/name","root":"/Users/someone/repos/name"}')
+
+    expect(RunningApi.spy.roots).toEqual(['/Users/someone/repos/name'])
+  })
+
+  it('a_body_with_no_root_is_refused_because_the_worktree_has_to_be_cut_somewhere', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.STORY}","repo":"${RunningApi.REPO}"}`)
+
+    expect(response.status).toBe(400)
+    expect(await response.text()).toBe(
+      '{"error":"root must be an absolute path to a local clone such as /Users/you/repos/name"}'
+    )
+  })
+
+  it('a_root_that_is_not_an_absolute_path_is_refused_before_it_ever_becomes_an_argument_of_git', async () => {
+    const port = await RunningApi.listening()
+
+    const refused = await Promise.all(
+      [
+        '{"id":"ABC-123","repo":"owner/name","root":"repos/name"}',
+        '{"id":"ABC-123","repo":"owner/name","root":"~/repos/name"}',
+        '{"id":"ABC-123","repo":"owner/name","root":"/repos/name/"}',
+        '{"id":"ABC-123","repo":"owner/name","root":"/repos/name; rm -rf ~"}',
+        '{"id":"ABC-123","repo":"owner/name","root":""}',
+        '{"id":"ABC-123","repo":"owner/name","root":123}',
+      ].map((body) => RunningApi.startPlan(port, body))
+    )
+
+    expect(refused.map((response) => response.status)).toEqual([400, 400, 400, 202, 400, 400])
+    expect(RunningApi.spy.asked).toEqual(['ABC-123'])
   })
 
   it('a_body_with_no_repo_is_refused_because_an_issue_has_to_be_opened_somewhere', async () => {
