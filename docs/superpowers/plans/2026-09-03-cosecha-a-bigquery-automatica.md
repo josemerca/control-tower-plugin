@@ -55,8 +55,8 @@ módulo que usan los dos caminos, y la carga con su identidad y su directorio te
 - Distinguir un 404 de un fallo transitorio al listar la telemetría: este repo no parsea códigos
   HTTP y no empieza aquí.
 - Un nuevo código de salida de `dispatch-check` o un nuevo `HarvestOutcome` en el backend.
-- Cambiar el esquema salvo `milestone` a `NULLABLE`; cambiar la versión (0.53.0 ya está en la rama,
-  sin publicar).
+- Cambiar el esquema salvo `milestone` a `NULLABLE`; cambiar la versión: la rama quedó en 0.55.0 al
+  mergear `main` y esa es la que se publica con las dos cosechas.
 - Tocar `ct-step.mjs` (su lector de versión sigue siendo deuda declarada).
 
 ## 2. Closed decisions (take as given)
@@ -357,10 +357,10 @@ grep -q "from './harvest-ledger.js'" plugin/scripts/ct-harvest.mjs
 
 **Files:** `plugin/scripts/dispatch-check.mjs` (modify), `plugin/__tests__/fixtures/fake-gh-bin/gh` (modify), `plugin/__tests__/dispatch-check-collect-bq.test.js` (create), `plugin/__tests__/modulos-conformes.test.js` (modify: alta del test)
 
-Current state (plugin/scripts/dispatch-check.mjs, lines 202-202):
+Current state (plugin/scripts/dispatch-check.mjs, lines 227-227):
 
 ```js
-const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release | --reopen | --requeue | --check-plan | --collect] [--dry-run]'
+const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release | --reopen | --requeue | --check-plan | --collect] [--dry-run] [--no-watch-merge]'
 ```
 
 Call site (plugin/scripts/dispatch-check.mjs):
@@ -372,7 +372,7 @@ const bqTable = bqArg === null ? null : BigQueryTable.parse(bqArg)
 if (bqArg !== null && !bqTable) dieErr(`--bq inválido: "${bqArg}" — debe tener la forma proyecto:dataset.tabla (p.ej. mi-proyecto:control_tower.harvest).`, 2)
 ```
 
-El `usage` termina en `[--dry-run] [--bq <proyecto:dataset.tabla>]`. El bloque va junto a los demás flags, antes de cualquier `gh`, con `import { BigQueryTable, LoadOutcome } from './bigquery-load.js'` arriba. En la proyección de `--collect`, la línea de `WOULD_COLLECT` añade `` ` ; y cargaría 1 fila en ${bqTable.id}` `` cuando hay tabla; nada más cambia en esta tarea. En el `gh` falso, dentro del bloque de `issue view`, una invocación que contiene `--json number,title` responde `process.env.FAKE_GH_ISSUE_VIEW_JSON || '{}'` antes del camino de `labels`.
+El `usage` termina en `[--no-watch-merge] [--bq <proyecto:dataset.tabla>]`. El bloque va junto a los demás flags, antes de cualquier `gh`, con `import { BigQueryTable, LoadOutcome } from './bigquery-load.js'` arriba. En la proyección de `--collect`, la línea de `WOULD_COLLECT` añade `` ` ; y cargaría 1 fila en ${bqTable.id}` `` cuando hay tabla; nada más cambia en esta tarea. En el `gh` falso, dentro del bloque de `issue view`, una invocación que contiene `--json number,title` responde `process.env.FAKE_GH_ISSUE_VIEW_JSON || '{}'` antes del camino de `labels`.
 
 **TDD:** `it('a_malformed_table_exits_2_before_any_gh_call')` — bancada `Bench` calcada de `dispatch-check-collect.test.js` (repo git real, `fake-gh-bin`, `fake-cmux-bin` y `fake-bq-bin` en PATH): `--collect --bq nope` sale 2, stderr `/--bq inválido/`, y no existe el log de argv de `gh`.
 
@@ -431,32 +431,39 @@ Va justo antes de las tres líneas citadas. `COLLECT_BQ_TIMEOUT_MS = 120_000` ju
 
 **Files:** `backend/src/infrastructure/invocation.js` (modify), `backend/__tests__/infrastructure/invocation.test.js` (modify)
 
-Current state (backend/src/infrastructure/invocation.js, lines 8-11):
+Current state (backend/src/infrastructure/invocation.js, lines 11-12):
 
 ```js
   static DEFAULT_PORT = 8787
   static PORT_VARIABLE = 'CT_API_PORT'
-  static CLAIM_PREFIX = 'CT_CLAIM_'
-  static CHILD_TIMEOUT_VARIABLE = 'CT_CLAIM_CHILD_TIMEOUT_MS'
+```
+
+Current state (backend/src/infrastructure/invocation.js, lines 41-43):
+
+```js
+  static #ready(port, stateRoot) {
+    return new Invocation({ outcome: InvocationOutcome.READY, port, stateRoot, reason: null })
+  }
 ```
 
 Contract (backend/src/infrastructure/invocation.js):
 
 ```js
 import { BigQueryTable } from '../../../plugin/scripts/bigquery-load.js'
-export const InvocationOutcome = Object.freeze({ READY, UNEXPECTED_ARGUMENT, MALFORMED_PORT, MALFORMED_HARVEST_TABLE: 'malformed-harvest-table' })
+export const InvocationOutcome = Object.freeze({ READY, UNEXPECTED_ARGUMENT, MALFORMED_PORT, UNKNOWN_STATE_HOME, MALFORMED_HARVEST_TABLE: 'malformed-harvest-table' })
 export class Invocation {
   static HARVEST_TABLE_VARIABLE = 'CT_HARVEST_BQ_TABLE'
-  constructor({ outcome, port, harvestTable, reason })   // harvestTable: BigQueryTable | null; null también en READY sin variable
-  static from(argv, environment)                         // lee el puerto como hoy y después la tabla
+  constructor({ outcome, port, stateRoot, harvestTable, reason })   // harvestTable: BigQueryTable | null, null también en READY sin variable
+  static #ready(port, stateRoot, harvestTable)
+  static from(argv, environment, home)                              // puerto, stateRoot y DESPUÉS la tabla
 }
 ```
 
-La tabla se lee después del puerto: `given === undefined || given === ''` → `harvestTable: null`; `BigQueryTable.parse(given)` nulo → `#refused(MALFORMED_HARVEST_TABLE, \`${HARVEST_TABLE_VARIABLE} must look like proyecto:dataset.tabla, got ${JSON.stringify(given)}\`)`; si parsea, `READY` con la instancia. Los rechazos siguen llevando `port: null` y `harvestTable: null`. `harvestEnvironment` no cambia: la variable viaja al hijo por el argv, no por el entorno.
+`#refused` pasa `harvestTable: null`. En `from`, tras resolver `stateRoot`: `given = environment[HARVEST_TABLE_VARIABLE]`; `given === undefined || given === ''` → tabla `null`; `BigQueryTable.parse(given)` nulo → `#refused(MALFORMED_HARVEST_TABLE, \`${HARVEST_TABLE_VARIABLE} must look like proyecto:dataset.tabla, got ${JSON.stringify(given)}\`)`; si parsea, `#ready(port, stateRoot, parsed)`. `harvestEnvironment`, `configuredIn` y `stateRootIn` no cambian: la tabla viaja al hijo por el argv, no por el entorno.
 
-**TDD:** `it('a_well_formed_harvest_table_in_the_environment_reaches_the_invocation_parsed')` — `Invocation.from([], { CT_HARVEST_BQ_TABLE: 'p:d.t' })` da `READY` y `harvestTable.id === 'p:d.t'`.
+**TDD:** `it('a_well_formed_harvest_table_in_the_environment_reaches_the_invocation_parsed')` — `Invoked.withHarvestTable('p:d.t')` es `READY`, `harvestTable.id === 'p:d.t'` y `stateRoot` sigue resuelto. Madre nueva `Invoked.withHarvestTable(given)` = `Invocation.from([], { [Invocation.HARVEST_TABLE_VARIABLE]: given }, Invoked.HOME)`.
 
-**Tests:** añadidos — el de arriba; `without_the_variable_or_with_it_empty_there_is_no_harvest_table_and_the_port_still_settles`; `a_malformed_harvest_table_refuses_the_start_naming_the_variable_and_what_it_got`. Madre `Invoked.withHarvestTable(given)`.
+**Tests:** añadidos — el de arriba; `without_the_variable_or_with_it_empty_there_is_no_harvest_table_and_the_port_still_settles`; `a_malformed_harvest_table_refuses_the_start_naming_the_variable_and_what_it_got`.
 
 **Verification:** los tests de `Invocation` pasan y el fichero importa el lector del plugin.
 
@@ -487,14 +494,14 @@ Contract (backend/src/infrastructure/dispatch-check-harvest.js):
   // con tabla: [...los cinco de hoy, '--bq', harvestTable.id]; sin tabla: los cinco de hoy
 ```
 
-Current state (backend/src/infrastructure/ct-api.mjs, lines 87-88):
+Current state (backend/src/infrastructure/ct-api.mjs, lines 92-93):
 
 ```js
   static #USAGE =
     `usage: ct-api.mjs (no arguments; set ${Invocation.PORT_VARIABLE} to pick a port, 0 for an ephemeral one)`
 ```
 
-El `usage` pasa a `… 0 for an ephemeral one; set ${Invocation.HARVEST_TABLE_VARIABLE} to proyecto:dataset.tabla so every harvest loads its row into BigQuery)`. `#harvestClock` recibe `asked.harvestTable` desde `run` y lo pasa al constructor de `DispatchCheckHarvest`; ningún otro cableado cambia.
+El `usage` pasa a `… 0 for an ephemeral one; set ${Invocation.HARVEST_TABLE_VARIABLE} to proyecto:dataset.tabla so every harvest loads its row into BigQuery)`. `#harvestClock({ workspace, root, environment, harvestTable })` recibe `asked.harvestTable` desde `run` — la llamada `CtApi.#harvestClock({ workspace, root, environment })` gana `harvestTable: asked.harvestTable` — y lo pasa al constructor de `DispatchCheckHarvest`; ningún otro cableado cambia.
 
 Final text (backend/conventions/domain.md):
 
