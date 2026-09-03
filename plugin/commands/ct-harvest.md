@@ -1,8 +1,8 @@
 ---
-description: Cosecha del epic — el coste real de cada slice, sacado del timeline de GitHub. Cero campos manuales. Sólo lee.
+description: Cosecha del epic — el coste real de cada slice, sacado del timeline de GitHub. Cero campos manuales. Sólo lee de GitHub; con --bq carga la cosecha en BigQuery.
 ---
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/ct-harvest.mjs --repo "<owner/repo>" --milestone "<título del epic>" [--json]
+node ${CLAUDE_PLUGIN_ROOT}/scripts/ct-harvest.mjs --repo "<owner/repo>" --milestone "<título del epic>" [--json] [--bq <proyecto:dataset.tabla>]
 ```
 
 Responde: **¿cuánto costó cada slice de este epic, según lo que GitHub ya escribió solo?** Una fila por slice con `ready→claim`, `claim→release`, `release→merge`, reopens, requeues, episodios `blocked` y tamaño del PR.
@@ -57,12 +57,18 @@ Se lee de GitHub, como todo lo demás: no hay checkout que suponer.
 
 Las líneas ilegibles de un `jsonl` se cuentan y se dicen; no tiran el fichero ni cambian el exit — una fila corrupta de hace tres semanas no se arregla repitiendo el comando.
 
+## A BigQuery, con la CLI de `bq`
+
+`--bq <proyecto:dataset.tabla>` carga la cosecha en esa tabla al terminar, con el `bq` que ya tienes autenticado (como `gh`): `bq load` de un NDJSON, una fila por slice y cosecha, con `harvest_id` y `harvested_at`. Cada corrida se **añade** como una foto; nada se sobrescribe. El esquema viaja en el plugin, la tabla se crea en la primera carga si no existe y una columna nueva de una versión posterior se añade sola (`ALLOW_FIELD_ADDITION`). El dataset y sus permisos son de quien posee el proyecto, no del comando.
+
+**Solo se carga una cosecha completa.** Con lecturas sin completar no se invoca `bq`: la cosecha se rehace desde GitHub, así que no se pierde nada. Todo `—` del informe llega como `NULL`, nunca como `0`. Si `bq` falla, el motivo trae el código, el diagnóstico, el directorio con los ficheros y el comando exacto para reintentar a mano. Todo lo de BigQuery va por stderr: stdout sigue siendo la tabla o el JSON. Sin el flag, nada cambia.
+
 ## Los códigos de salida
 
 | Código | Significa | Qué hacer |
 |---|---|---|
 | `0` | cosecha completa | leer la tabla |
-| `1` | **no se pudo completar**: falló una lectura de `gh` | mirar los motivos de stderr, arreglar y repetir — lo impreso es sólo lo que sí se sabe |
+| `1` | **no se pudo completar**: falló una lectura de `gh` o la carga en BigQuery | mirar los motivos de stderr, arreglar y repetir — lo impreso es sólo lo que sí se sabe |
 | `2` | argumentos mal | corregir la invocación |
 
 **El `1` nunca se degrada a `0`**, la misma regla que `/ct-status` y `/ct-groom`. Una cosecha parcial **no es un epic barato**: una tabla con huecos que se lea como «este slice no tuvo review», cuando lo que pasó es que falló la lectura, es un dato inventado entrando por la puerta de atrás en un pre-registro que prohíbe exactamente eso. **Un timeline que no se pudo leer no produce una fila de ceros: produce un motivo y ninguna fila.**
