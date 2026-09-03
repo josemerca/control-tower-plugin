@@ -459,7 +459,7 @@ export class Invocation {
 }
 ```
 
-`#refused` pasa `harvestTable: null`. En `from`, tras resolver `stateRoot`: `given = environment[HARVEST_TABLE_VARIABLE]`; `given === undefined || given === ''` → tabla `null`; `BigQueryTable.parse(given)` nulo → `#refused(MALFORMED_HARVEST_TABLE, \`${HARVEST_TABLE_VARIABLE} must look like proyecto:dataset.tabla, got ${JSON.stringify(given)}\`)`; si parsea, `#ready(port, stateRoot, parsed)`. `harvestEnvironment`, `configuredIn` y `stateRootIn` no cambian: la tabla viaja al hijo por el argv, no por el entorno.
+`#refused` pasa `harvestTable: null`. En `from`, tras resolver `stateRoot`: `given = environment[HARVEST_TABLE_VARIABLE]`; `given === undefined || given === ''` → tabla `null`; `BigQueryTable.parse(given)` nulo → `#refused(MALFORMED_HARVEST_TABLE, \`${HARVEST_TABLE_VARIABLE} must look like project:dataset.table, got ${JSON.stringify(given)}\`)`; si parsea, `#ready(port, stateRoot, parsed)`. `harvestEnvironment`, `configuredIn` y `stateRootIn` no cambian: la tabla viaja al hijo por el argv, no por el entorno.
 
 **TDD:** `it('a_well_formed_harvest_table_in_the_environment_reaches_the_invocation_parsed')` — `Invoked.withHarvestTable('p:d.t')` es `READY`, `harvestTable.id === 'p:d.t'` y `stateRoot` sigue resuelto. Madre nueva `Invoked.withHarvestTable(given)` = `Invocation.from([], { [Invocation.HARVEST_TABLE_VARIABLE]: given }, Invoked.HOME)`.
 
@@ -501,7 +501,7 @@ Current state (backend/src/infrastructure/ct-api.mjs, lines 92-93):
     `usage: ct-api.mjs (no arguments; set ${Invocation.PORT_VARIABLE} to pick a port, 0 for an ephemeral one)`
 ```
 
-El `usage` pasa a `… 0 for an ephemeral one; set ${Invocation.HARVEST_TABLE_VARIABLE} to proyecto:dataset.tabla so every harvest loads its row into BigQuery)`. `#harvestClock({ workspace, root, environment, harvestTable })` recibe `asked.harvestTable` desde `run` — la llamada `CtApi.#harvestClock({ workspace, root, environment })` gana `harvestTable: asked.harvestTable` — y lo pasa al constructor de `DispatchCheckHarvest`; ningún otro cableado cambia.
+El `usage` pasa a `… 0 for an ephemeral one; set ${Invocation.HARVEST_TABLE_VARIABLE} to project:dataset.table so every harvest loads its row into BigQuery)`. `#harvestClock({ workspace, root, environment, harvestTable })` recibe `asked.harvestTable` desde `run` — la llamada `CtApi.#harvestClock({ workspace, root, environment })` gana `harvestTable: asked.harvestTable` — y lo pasa al constructor de `DispatchCheckHarvest`; ningún otro cableado cambia.
 
 Final text (backend/conventions/domain.md):
 
