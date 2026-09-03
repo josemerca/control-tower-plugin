@@ -16,11 +16,11 @@ class NacidosConformes {
     'scripts/reconcile-outcome.js',
     '__tests__/modulos-conformes.test.js',
     '__tests__/branch-reconciliation.test.js',
-    '__tests__/branch-reconciliation-real-git.test.js',
-    '__tests__/branch-reconciliation-real-git-produccion.test.js',
-    '__tests__/branch-reconciliation-base-ilegible.test.js',
+    '__tests__/branch-reconciliation-real-process.test.js',
+    '__tests__/branch-reconciliation-produccion-real-process.test.js',
+    '__tests__/branch-reconciliation-base-ilegible-real-process.test.js',
     '__tests__/reconcile-outcome.test.js',
-    '__tests__/seccion-del-plan.test.js',
+    '__tests__/seccion-del-plan-real-process.test.js',
     '__tests__/frontera-de-distribucion.test.js',
     'scripts/slice-collection.js',
     '__tests__/slice-collection.test.js',
@@ -36,15 +36,15 @@ class NacidosConformes {
     '__tests__/plugin-manifest.test.js',
     '__tests__/fixtures/fake-bq-bin/bq',
     '__tests__/fixtures/scripted-runner.js',
-    '__tests__/ct-harvest-bq.test.js',
+    '__tests__/ct-harvest-bq-real-process.test.js',
     'scripts/slice-harvest.js',
     '__tests__/slice-harvest.test.js',
     'scripts/dispatch-gate.js',
     'hooks/dispatch-guard.js',
     '__tests__/dispatch-gate.test.js',
-    '__tests__/dispatch-guard.test.js',
+    '__tests__/dispatch-guard-real-process.test.js',
     '__tests__/ct-step-dispatch-seal.test.js',
-    '__tests__/dispatch-check-collect-bq.test.js',
+    '__tests__/dispatch-check-collect-bq-real-process.test.js',
   ]
 
   static PALABRAS_CASTELLANAS = [
@@ -52,6 +52,8 @@ class NacidosConformes {
     'encontrados', 'medir', 'medida', 'paso', 'pasos', 'regla', 'reglas', 'hallazgo', 'hallazgos',
     'intento', 'cuerpo', 'previos', 'comentario', 'comentarios', 'recorrido', 'alcance', 'sujeto',
   ]
+
+  static MARCADOR = '-real-process.test.js'
 
   static #numeradas(ruta) {
     return readFileSync(join(raiz, ruta), 'utf8')
@@ -114,6 +116,26 @@ class NacidosConformes {
       ))
       .map(([numero]) => numero)
   }
+
+  static lanzaProcesosReales(ruta) {
+    return /(?:from\s+['"]node:child_process['"]|require\(\s*['"]node:child_process['"]\s*\))/
+      .test(readFileSync(join(raiz, ruta), 'utf8'))
+  }
+
+  static sinMarcador() {
+    return NacidosConformes.RUTAS.filter((ruta) =>
+      ruta.endsWith('.test.js') &&
+      !ruta.endsWith(NacidosConformes.MARCADOR) &&
+      NacidosConformes.lanzaProcesosReales(ruta)
+    )
+  }
+
+  static marcadorDeAdorno() {
+    return NacidosConformes.RUTAS.filter((ruta) =>
+      ruta.endsWith(NacidosConformes.MARCADOR) &&
+      !NacidosConformes.lanzaProcesosReales(ruta)
+    )
+  }
 }
 
 describe('modules born under the yardstick keep being born conforming', () => {
@@ -170,4 +192,14 @@ describe('the language of test names, by two mechanical checks: no non-ASCII let
         .toEqual([])
     })
   }
+})
+
+describe('the marker of a real subprocess, in both directions', () => {
+  it('a_test_born_conforming_that_launches_a_real_process_carries_the_marker_in_its_file_name', () => {
+    expect(NacidosConformes.sinMarcador()).toEqual([])
+  })
+
+  it('a_test_born_conforming_that_carries_the_marker_really_launches_a_real_process', () => {
+    expect(NacidosConformes.marcadorDeAdorno()).toEqual([])
+  })
 })

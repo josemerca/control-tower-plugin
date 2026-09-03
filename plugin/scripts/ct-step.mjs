@@ -1206,7 +1206,7 @@ const esRutaDeLaMaquinaria = (path) => LOOP_ARTIFACT_PATTERNS.some((pat) => matc
 //
 // LA COPIA ESTÁ DECLARADA Y MEDIDA (`conventions/decisions.md`, "cuando la
 // copia es inevitable"): la regla vive en dos idiomas porque el script es bash
-// y esto es JavaScript, y `__tests__/seccion-del-plan.test.js` pasa los mismos
+// y esto es JavaScript, y `__tests__/seccion-del-plan-real-process.test.js` pasa los mismos
 // planes por las dos implementaciones y compara la salida byte a byte — así
 // reescribir las dos pasa y tocar una sola falla. Hasta que ese test existió,
 // las dos ya habían divergido en las comillas del mensaje de sección ausente.
