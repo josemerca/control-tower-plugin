@@ -9,7 +9,7 @@ import { ReviewsSpy } from '../reviews-spy.js'
 import { StartPlanResult } from '../../src/application/actions/start-plan.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
-import { PlanEvents, EventsRefusal } from '../../src/infrastructure/plan-events-route.js'
+import { PlanEvents, EventsRefusal, PlanSessions } from '../../src/infrastructure/plan-events-route.js'
 import {
   PlanAgentNotLaunched, UserStoryNotRead, PlanIssueNotCreated, PlanIssueNotNamed, WorkspaceNotPrepared,
   PlanProgressNotRead,
@@ -122,16 +122,24 @@ class RunningApi {
   static spy = null
   static reviews = null
 
-  static async listening(options = {}) {
+  static server(options = {}) {
     RunningApi.spy = new StartPlanSpy()
     RunningApi.reviews = new ReviewsSpy()
-    const server = new ApiServer({
+
+    return new ApiServer({
       port: 0,
       startPlan: RunningApi.spy,
       implementPlan: null,
       reviews: RunningApi.reviews,
+      planEvents: ProgressSpy.events(PlanState.WRITING).planEvents,
+      sessions: new PlanSessions(),
+      frontendRoot: FrontendFixture.missing(),
       ...options,
     })
+  }
+
+  static async listening(options = {}) {
+    const server = RunningApi.server(options)
     const port = await server.start()
     RunningApi.#started.push(server)
     return port
@@ -245,7 +253,7 @@ describe('ApiServer', () => {
 
   it('an_agent_that_cannot_be_launched_is_reported_as_such_instead_of_a_generic_failure', async () => {
     RunningApi.spy = new StartPlanSpy({ failing: true })
-    const server = new ApiServer({ port: 0, startPlan: RunningApi.spy, implementPlan: null })
+    const server = RunningApi.server({ startPlan: RunningApi.spy })
     const port = await server.start()
 
     try {
@@ -268,7 +276,7 @@ describe('ApiServer', () => {
     ]
 
     for (const cause of causes) {
-      const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.failingWith(cause), implementPlan: null })
+      const server = RunningApi.server({ startPlan: StartPlanSpy.failingWith(cause) })
       const port = await server.start()
 
       try {
@@ -283,8 +291,8 @@ describe('ApiServer', () => {
   })
 
   it('a_tool_that_answered_something_unreadable_is_not_offered_as_something_to_retry', async () => {
-    const server = new ApiServer({
-      port: 0, startPlan: StartPlanSpy.failingWith(new PlanIssueNotNamed('gh printed "done"')), implementPlan: null,
+    const server = RunningApi.server({
+      startPlan: StartPlanSpy.failingWith(new PlanIssueNotNamed('gh printed "done"')),
     })
     const port = await server.start()
 
@@ -299,7 +307,7 @@ describe('ApiServer', () => {
   })
 
   it('a_failure_that_is_not_a_refusal_to_start_is_not_dressed_up_as_one', async () => {
-    const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.buggy(), implementPlan: null })
+    const server = RunningApi.server({ startPlan: StartPlanSpy.buggy() })
     const port = await server.start()
     const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
 
@@ -315,7 +323,7 @@ describe('ApiServer', () => {
   })
 
   it('a_bug_of_ours_leaves_a_trace_on_the_error_channel_instead_of_vanishing_behind_that_400', async () => {
-    const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.buggy(), implementPlan: null })
+    const server = RunningApi.server({ startPlan: StartPlanSpy.buggy() })
     const port = await server.start()
     const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
 
@@ -643,7 +651,7 @@ describe('ApiServer', () => {
   })
 
   it('the_trace_of_a_failure_names_the_url_the_client_asked_for_and_not_the_one_routing_rewrote', async () => {
-    const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.buggy(), implementPlan: null })
+    const server = RunningApi.server({ startPlan: StartPlanSpy.buggy() })
     const port = await server.start()
     const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
 
@@ -679,7 +687,7 @@ describe('ApiServer', () => {
   })
 
   it('stop_closes_the_socket_so_a_later_request_cannot_reach_a_server_believed_dead', async () => {
-    const server = new ApiServer({ port: 0, startPlan: new StartPlanSpy(), implementPlan: null })
+    const server = RunningApi.server({ startPlan: new StartPlanSpy() })
     const port = await server.start()
 
     await server.stop()
@@ -688,7 +696,7 @@ describe('ApiServer', () => {
   })
 
   it('an_error_after_a_successful_listen_is_not_swallowed_by_the_promise_that_already_resolved', async () => {
-    const server = new ApiServer({ port: 0, startPlan: new StartPlanSpy(), implementPlan: null })
+    const server = RunningApi.server({ startPlan: new StartPlanSpy() })
     await server.start()
 
     try {
@@ -699,7 +707,7 @@ describe('ApiServer', () => {
   })
 
   it('starting_twice_is_refused_instead_of_leaking_the_first_server_out_of_reach', async () => {
-    const server = new ApiServer({ port: 0, startPlan: new StartPlanSpy(), implementPlan: null })
+    const server = RunningApi.server({ startPlan: new StartPlanSpy() })
     await server.start()
 
     try {

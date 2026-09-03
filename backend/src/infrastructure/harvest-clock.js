@@ -56,21 +56,13 @@ export class HarvestClock {
     this.harvest = harvest
     this.sleep = sleep
     this.stderr = stderr
-    this.sweeping = false
   }
 
   async start() {
-    this.sweeping = true
     for (;;) {
       await this.sweep()
-      if (!this.sweeping) return
       await this.sleep()
-      if (!this.sweeping) return
     }
-  }
-
-  stop() {
-    this.sweeping = false
   }
 
   async sweep() {

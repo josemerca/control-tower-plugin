@@ -4,7 +4,6 @@ import { Gh } from '../../src/infrastructure/gh.js'
 import { PlanIssueBody } from '../../src/infrastructure/gh-plan-issues.js'
 import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
 import { RetryPolicy, RetryBudget } from '../../src/domain/policies/retry-policy.js'
-import { Clock } from '../../src/domain/ports/clock.js'
 import { UserStory } from '../../src/domain/value-objects/user-story.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
@@ -14,14 +13,15 @@ import {
   PlanChangesNotRead, PlanChangesNotUnderstood,
 } from '../../src/domain/exceptions.js'
 
-class ClockDouble extends Clock {
+class SleepDouble {
   constructor() {
-    super()
     this.slept = []
   }
 
-  async sleep(seconds) {
+  sleep(seconds) {
     this.slept.push(seconds)
+
+    return Promise.resolve()
   }
 }
 
@@ -37,7 +37,7 @@ class GhDouble {
     this.answers = answers
     this.calls = []
     this.warnings = []
-    this.clock = new ClockDouble()
+    this.sleeping = new SleepDouble()
   }
 
   static created(printed = GhDouble.CREATED) {
@@ -71,7 +71,7 @@ class GhDouble {
           return Promise.resolve(answer)
         },
         policy: new RetryPolicy({ budget: new RetryBudget({ attempts, waitSeconds: 2 }) }),
-        clock: this.clock,
+        sleep: (seconds) => this.sleeping.sleep(seconds),
       }),
       stderr: (line) => this.warnings.push(line),
     })
@@ -252,7 +252,7 @@ describe('GhPlanIssues', () => {
     const refusal = await gh.refusalFor()
 
     expect(gh.calls).toHaveLength(1)
-    expect(gh.clock.slept).toEqual([])
+    expect(gh.sleeping.slept).toEqual([])
     expect(refusal).toBeInstanceOf(PlanIssueNotCreated)
   })
 
@@ -269,7 +269,7 @@ describe('GhPlanIssues', () => {
     expect(gh.commands).toEqual([
       'issue create --repo', 'label create gate:plan', 'label create gate:plan', 'issue create --repo',
     ])
-    expect(gh.clock.slept).toEqual([2])
+    expect(gh.sleeping.slept).toEqual([2])
     expect(issue.number).toBe(7)
   })
 
@@ -283,7 +283,7 @@ describe('GhPlanIssues', () => {
 
     await gh.openFor()
 
-    expect(gh.clock.slept).toEqual([2])
+    expect(gh.sleeping.slept).toEqual([2])
   })
 
   it('a_refusal_that_is_not_a_blip_is_not_retried_because_repeating_it_changes_nothing', async () => {
@@ -292,7 +292,7 @@ describe('GhPlanIssues', () => {
     await gh.refusalFor()
 
     expect(gh.calls).toHaveLength(1)
-    expect(gh.clock.slept).toEqual([])
+    expect(gh.sleeping.slept).toEqual([])
   })
 
   it('a_blip_that_never_clears_stops_at_the_budget_instead_of_calling_forever', async () => {
@@ -303,7 +303,7 @@ describe('GhPlanIssues', () => {
     await gh.refusalFor()
 
     expect(gh.commands.filter((command) => command.startsWith('label'))).toHaveLength(4)
-    expect(gh.clock.slept).toEqual([2, 2, 2])
+    expect(gh.sleeping.slept).toEqual([2, 2, 2])
   })
 
   it('a_rate_limit_is_not_a_blip_because_asking_again_two_seconds_later_makes_it_worse', async () => {
@@ -316,7 +316,7 @@ describe('GhPlanIssues', () => {
 
     await gh.refusalFor()
 
-    expect(gh.clock.slept).toEqual([])
+    expect(gh.sleeping.slept).toEqual([])
   })
 
   it('the_double_of_this_conversation_refuses_to_answer_a_call_nobody_wrote_an_answer_for', async () => {
@@ -438,7 +438,7 @@ describe('GhPlanIssues moving the status label of a claim', () => {
     await gh.claimFor()
 
     expect(gh.commands).toEqual(['label create status:in-review', 'issue edit 7', 'issue edit 7'])
-    expect(gh.clock.slept).toEqual([2])
+    expect(gh.sleeping.slept).toEqual([2])
   })
 
   it('a_blip_while_requeueing_is_retried_because_the_compensation_is_the_last_chance_to_free_the_issue', async () => {
@@ -488,7 +488,7 @@ describe('GhPlanIssues answering the go on the issue', () => {
     const refusal = await gh.goRefusalFor()
 
     expect(gh.calls).toHaveLength(1)
-    expect(gh.clock.slept).toEqual([])
+    expect(gh.sleeping.slept).toEqual([])
     expect(refusal).toBeInstanceOf(PlanGoNotAnswered)
   })
 
@@ -593,7 +593,7 @@ describe('GhPlanIssues reading the changes asked for on the issue', () => {
     const asked = await gh.changesAskedFor()
 
     expect(gh.calls).toHaveLength(2)
-    expect(gh.clock.slept).toEqual([2])
+    expect(gh.sleeping.slept).toEqual([2])
     expect(asked).toHaveLength(1)
   })
 
