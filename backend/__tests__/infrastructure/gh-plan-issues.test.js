@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { GhPlanIssues } from '../../src/infrastructure/gh-plan-issues.js'
+import { GhPlanIssues, ChangeAsked } from '../../src/infrastructure/gh-plan-issues.js'
 import { Gh } from '../../src/infrastructure/gh.js'
 import { PlanIssueBody } from '../../src/infrastructure/gh-plan-issues.js'
 import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
@@ -11,6 +11,7 @@ import { RepositoryName } from '../../src/domain/value-objects/repository-name.j
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import {
   PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueNotClaimed, PlanGoNotAnswered, PlanIssueFailure,
+  PlanChangesNotRead, PlanChangesNotUnderstood,
 } from '../../src/domain/exceptions.js'
 
 class ClockDouble extends Clock {
@@ -96,6 +97,44 @@ class GhDouble {
 
   async goRefusalFor(nonce = '7f3a91c2') {
     return this.answerGoFor(nonce).catch((cause) => cause)
+  }
+
+  static #COMMENT = {
+    author: { login: 'alcaptar' },
+    authorAssociation: 'COLLABORATOR',
+    createdAt: '2026-08-27T10:50:08Z',
+    includesCreatedEdit: false,
+    isMinimized: false,
+    minimizedReason: '',
+    reactionGroups: [],
+    url: 'https://github.com/jjponz/rust-monitoring/issues/7#issuecomment-5437929191',
+    viewerDidAuthor: true,
+  }
+
+  static commented(...bodies) {
+    return GhDouble.printing(JSON.stringify({
+      comments: bodies.map(({ id, body }) => ({ ...GhDouble.#COMMENT, id, body })),
+    }))
+  }
+
+  static printing(printed) {
+    return new GhDouble([new ProcessOutput({ code: 0, stdout: printed, stderr: '' })])
+  }
+
+  static THE_PLAN = { id: 'IC_kwDOT9lB5c8AAAABRB_tVQ', body: '## Plan del slice — gate `plan`\n\nCommiteado en...' }
+  static BARE_GO = { id: 'IC_kwDOT9lB5c8AAAABRCA25w', body: '-OK' }
+  static THE_GO = { id: 'IC_kwDOT9lB5c8AAAABRCF0FA', body: '-OK 3f9a1c2b' }
+  static A_CHANGE = {
+    id: 'IC_kwDOT9lB5c8AAAABRCF0GG',
+    body: '-REVIEW añade el caso de la issue sin descripción',
+  }
+
+  async changesAskedFor(issue = GhDouble.OPENED) {
+    return this.issues().changesAsked({ issue, repository: GhDouble.REPOSITORY })
+  }
+
+  async changesRefusalFor(issue = GhDouble.OPENED) {
+    return this.changesAskedFor(issue).catch((cause) => cause)
   }
 
   async openFor(story = GhDouble.story()) {
@@ -460,5 +499,105 @@ describe('GhPlanIssues answering the go on the issue', () => {
 
     expect(refusal).toBeInstanceOf(PlanGoNotAnswered)
     expect(refusal.message).toBe('gh issue comment failed: gh: not authenticated')
+  })
+})
+
+describe('GhPlanIssues reading the changes asked for on the issue', () => {
+  it('the_changes_asked_for_are_read_with_the_argv_gh_understands', async () => {
+    const gh = GhDouble.commented(GhDouble.A_CHANGE)
+
+    await gh.changesAskedFor()
+
+    expect(gh.calls).toEqual([[
+      'issue', 'view', '7', '--repo', 'josemerca/ct-loop-sandbox', '--json', 'comments',
+    ]])
+  })
+
+  it('only_the_comments_that_open_with_the_token_count_as_a_change_asked_for', async () => {
+    const gh = GhDouble.commented(
+      GhDouble.THE_PLAN, GhDouble.BARE_GO, GhDouble.THE_GO, GhDouble.A_CHANGE
+    )
+
+    const asked = await gh.changesAskedFor()
+
+    expect(asked).toEqual([
+      new ChangeAsked({
+        id: GhDouble.A_CHANGE.id, text: 'añade el caso de la issue sin descripción',
+      }),
+    ])
+  })
+
+  it('the_token_alone_is_a_change_asked_for_with_nothing_behind_it_and_not_a_comment_skipped', async () => {
+    const gh = GhDouble.commented({ id: GhDouble.A_CHANGE.id, body: '-REVIEW' })
+
+    const asked = await gh.changesAskedFor()
+
+    expect(asked).toEqual([new ChangeAsked({ id: GhDouble.A_CHANGE.id, text: '' })])
+  })
+
+  it('a_token_in_the_middle_of_a_comment_asks_for_nothing_because_only_the_opening_counts', async () => {
+    const gh = GhDouble.commented({
+      id: GhDouble.A_CHANGE.id, body: 'esto lo pediría con -REVIEW si me dejaran',
+    })
+
+    expect(await gh.changesAskedFor()).toEqual([])
+  })
+
+  it('what_it_hands_back_carries_the_id_and_the_text_and_nothing_else_of_the_eleven_fields', async () => {
+    const gh = GhDouble.commented(GhDouble.A_CHANGE)
+
+    const [change] = await gh.changesAskedFor()
+
+    expect(Object.keys(change)).toEqual(['id', 'text'])
+    expect(Object.isFrozen(change)).toBe(true)
+  })
+
+  it('a_gh_that_refused_is_told_apart_from_a_gh_that_answered_something_unreadable', async () => {
+    const refused = await GhDouble.refusing('gh: not authenticated', 3).changesRefusalFor()
+    const unreadable = await GhDouble.printing('<!DOCTYPE html>').changesRefusalFor()
+
+    expect(refused).toBeInstanceOf(PlanChangesNotRead)
+    expect(refused).not.toBeInstanceOf(PlanChangesNotUnderstood)
+    expect(refused.message).toMatch(/gh issue view failed: gh: not authenticated/)
+    expect(unreadable).toBeInstanceOf(PlanChangesNotUnderstood)
+    expect(unreadable).not.toBeInstanceOf(PlanChangesNotRead)
+    expect(unreadable.message).toMatch(/<!DOCTYPE html>/)
+  })
+
+  it('an_answer_without_the_comments_of_the_issue_is_not_read_as_nothing_asked_for', async () => {
+    const nothing = await GhDouble.printing('{"comments":null}').changesRefusalFor()
+
+    expect(nothing).toBeInstanceOf(PlanChangesNotUnderstood)
+  })
+
+  it('a_comment_without_the_id_and_the_body_this_reads_is_not_understood_whatever_it_says', async () => {
+    const nameless = await GhDouble.printing(
+      JSON.stringify({ comments: [{ body: '-REVIEW parte la tarea 3' }] })
+    ).changesRefusalFor()
+    const bodyless = await GhDouble.printing(
+      JSON.stringify({ comments: [{ id: 'IC_kwDOT9lB5c8AAAABRCF0GG' }] })
+    ).changesRefusalFor()
+    const nothing = await GhDouble.printing(
+      JSON.stringify({ comments: [null] })
+    ).changesRefusalFor()
+
+    expect(nameless).toBeInstanceOf(PlanChangesNotUnderstood)
+    expect(bodyless).toBeInstanceOf(PlanChangesNotUnderstood)
+    expect(nothing).toBeInstanceOf(PlanChangesNotUnderstood)
+  })
+
+  it('a_blip_while_reading_them_is_retried_because_asking_twice_reads_the_same_issue', async () => {
+    const blip = new ProcessOutput({ code: 1, stdout: '', stderr: 'error connecting to api.github.com' })
+    const gh = new GhDouble([blip, ...GhDouble.commented(GhDouble.A_CHANGE).answers])
+
+    const asked = await gh.changesAskedFor()
+
+    expect(gh.calls).toHaveLength(2)
+    expect(gh.clock.slept).toEqual([2])
+    expect(asked).toHaveLength(1)
+  })
+
+  it('an_issue_nobody_has_written_on_asks_for_nothing_instead_of_refusing', async () => {
+    expect(await GhDouble.printing('{"comments":[]}').changesAskedFor()).toEqual([])
   })
 })

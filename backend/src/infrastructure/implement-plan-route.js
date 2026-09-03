@@ -157,18 +157,18 @@ export class ImplementPlanRoute {
   static PATH = '/implement-plan'
   static METHOD = 'POST'
 
-  static handledBy(implementPlan) {
+  static handledBy(implementPlan, sessions, reviews) {
     return async (request, response) => {
       const asked = ImplementRequest.from(JsonBody.textOf(request))
       if (asked.outcome !== ImplementRequestOutcome.ACCEPTED) {
         Answer.refuseAs(response, ImplementRefusal.of(asked))
         return
       }
-      await ImplementPlanRoute.#accept(implementPlan, response, asked)
+      await ImplementPlanRoute.#accept(implementPlan, sessions, reviews, response, asked)
     }
   }
 
-  static async #accept(implementPlan, response, asked) {
+  static async #accept(implementPlan, sessions, reviews, response, asked) {
     try {
       await implementPlan.execute(new ImplementPlanParams({
         agent: asked.agent, issue: asked.issue, repository: asked.repository,
@@ -178,6 +178,8 @@ export class ImplementPlanRoute {
       Answer.refuseAs(response, ImplementCollapse.of(cause))
       return
     }
+    reviews.stop({ issue: asked.issue, repository: asked.repository })
+    sessions.forget(asked.issue)
     Answer.send(response, 202, {
       status: 'implementing',
       [ImplementRequest.AGENT_FIELD]: asked.agent,

@@ -37,7 +37,7 @@ describe('PlanRefusal', () => {
 describe('PlanCollapse', () => {
   const FAMILIES = [
     'PlanFailure', 'UserStoryFailure', 'PlanIssueFailure', 'PlanAgentFailure', 'WorkspaceFailure',
-    'PlanProgressFailure', 'GoFailure', 'HarvestFailure',
+    'PlanProgressFailure', 'PlanChangesFailure', 'GoFailure', 'HarvestFailure',
   ]
 
   const RESUMING_AN_AGENT = ImplementCollapse.declaredFailures()
@@ -47,12 +47,20 @@ describe('PlanCollapse', () => {
     !FAMILIES.includes(name) &&
     !RESUMING_AN_AGENT.includes(name) &&
     !(thrown.prototype instanceof exceptions.PlanProgressFailure) &&
+    !(thrown.prototype instanceof exceptions.PlanChangesFailure) &&
     !(thrown.prototype instanceof exceptions.HarvestFailure)
 
   it('every_way_the_plan_can_collapse_has_a_status_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
     const ways = Object.entries(exceptions).filter(startingAPlan).map(([name]) => name)
 
     expect(PlanCollapse.declaredFailures().sort()).toEqual(ways.sort())
+  })
+
+  it('a_failure_of_reading_the_changes_asked_for_has_no_status_here_because_it_only_reaches_stderr', () => {
+    expect(PlanCollapse.declaredFailures()).not.toContain('PlanChangesNotRead')
+    expect(PlanCollapse.declaredFailures()).not.toContain('PlanChangesNotUnderstood')
+    expect(() => PlanCollapse.of(new exceptions.PlanChangesNotRead('gh: not authenticated')))
+      .toThrow(/no status declared/)
   })
 
   it('a_failure_of_watching_a_plan_has_no_status_here_because_it_travels_down_the_stream_that_is_already_open', () => {

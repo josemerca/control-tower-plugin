@@ -209,6 +209,7 @@ describe('StartPlan', () => {
     expect(started.watch.issue).toBe(PlanIssuesDouble.OPENED)
     expect(started.watch.located).toBe(WorkspaceDouble.LOCATED)
     expect(started.watch.repository).toBe(Flow.REPOSITORY)
+    expect(started.watch.agent).toBe(started.agent)
   })
 
   it('a_watch_without_the_repository_the_progress_is_measured_against_refuses_to_exist', () => {

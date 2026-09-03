@@ -42,6 +42,10 @@ class EventsDouble {
     })
   }
 
+  cancellingWhenExhausted() {
+    return () => this.answers.length === 0
+  }
+
   async collected(cancelled) {
     const frames = []
     for await (const frame of this.events().stream(EventsDouble.SUBJECT, cancelled)) frames.push(frame)
@@ -85,22 +89,28 @@ describe('PlanEvents', () => {
   it('it_emits_the_first_state_it_reads_so_a_late_subscriber_is_not_left_blank', async () => {
     const events = new EventsDouble([PlanState.WRITING, PlanState.READY])
 
-    expect((await events.collected())[0]).toBe(PlanEvents.frameFor(PlanState.WRITING))
+    expect((await events.collected(events.cancellingWhenExhausted()))[0])
+      .toBe(PlanEvents.frameFor(PlanState.WRITING))
   })
 
-  it('it_stops_after_ready_because_there_is_nothing_left_to_watch', async () => {
-    const frames = await new EventsDouble([PlanState.WRITING, PlanState.READY]).collected()
+  it('the_stream_lives_on_after_ready_so_a_plan_that_is_being_reworked_can_say_so', async () => {
+    const events = new EventsDouble([PlanState.READY, PlanState.WRITING, PlanState.READY])
+
+    const frames = await events.collected(events.cancellingWhenExhausted())
 
     expect(frames).toEqual([
+      PlanEvents.frameFor(PlanState.READY),
       PlanEvents.frameFor(PlanState.WRITING),
       PlanEvents.frameFor(PlanState.READY),
     ])
   })
 
   it('a_state_that_did_not_change_is_not_repeated_down_the_wire', async () => {
-    const frames = await new EventsDouble([
+    const events = new EventsDouble([
       PlanState.WRITING, PlanState.WRITING, PlanState.WRITING, PlanState.READY,
-    ]).collected()
+    ])
+
+    const frames = await events.collected(events.cancellingWhenExhausted())
 
     expect(frames).toEqual([
       PlanEvents.frameFor(PlanState.WRITING),
@@ -111,19 +121,9 @@ describe('PlanEvents', () => {
   it('it_waits_between_reads_instead_of_spinning', async () => {
     const events = new EventsDouble([PlanState.WRITING, PlanState.WRITING, PlanState.READY])
 
-    await events.collected()
+    await events.collected(events.cancellingWhenExhausted())
 
-    expect(events.slept).toBe(2)
-  })
-
-  it('every_plan_state_says_whether_it_ends_the_watch_so_a_third_one_cannot_arrive_as_writing', () => {
-    expect(PlanEvents.declaredStates().sort()).toEqual(PlanState.declared().sort())
-  })
-
-  it('a_plan_state_nobody_declared_an_ending_for_raises_instead_of_being_polled_forever_as_if_unfinished', async () => {
-    const events = new EventsDouble(['stalled'])
-
-    await expect(events.collected()).rejects.toThrow(/no ending declared for plan state stalled/)
+    expect(events.slept).toBe(3)
   })
 
   it('a_progress_that_could_not_be_read_reaches_the_page_as_one_error_frame_and_not_as_a_state', async () => {

@@ -153,18 +153,18 @@ export class StartPlanRoute {
   static PATH = '/start-plan'
   static METHOD = 'POST'
 
-  static handledBy(startPlan, sessions) {
+  static handledBy(startPlan, sessions, reviews) {
     return async (request, response) => {
       const asked = PlanRequest.from(JsonBody.textOf(request))
       if (asked.outcome !== PlanRequestOutcome.ACCEPTED) {
         Answer.refuseAs(response, PlanRefusal.of(asked))
         return
       }
-      await StartPlanRoute.#accept(startPlan, sessions, response, asked)
+      await StartPlanRoute.#accept(startPlan, sessions, reviews, response, asked)
     }
   }
 
-  static async #accept(startPlan, sessions, response, asked) {
+  static async #accept(startPlan, sessions, reviews, response, asked) {
     let started
     try {
       started = await startPlan.execute(
@@ -176,6 +176,7 @@ export class StartPlanRoute {
       return
     }
     sessions.remember(started.watch)
+    reviews.start(started.watch)
     Answer.send(response, 202, {
       status: 'started',
       [PlanRequest.ID_FIELD]: asked.story.text,

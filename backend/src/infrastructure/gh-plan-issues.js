@@ -14,10 +14,12 @@ import { PlanIssues } from '../domain/ports/plan-issues.js'
 import { PlanIssue } from '../domain/value-objects/plan-issue.js'
 import {
   PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueNotClaimed, PlanGoNotAnswered,
+  PlanChangesNotRead, PlanChangesNotUnderstood,
 } from '../domain/exceptions.js'
 import { Gh } from './gh.js'
 
 export class GhPlanIssues extends PlanIssues {
+  static CHANGES_TOKEN = '-REVIEW'
   static IN_PROGRESS_LABEL = 'status:in-progress'
   static IN_REVIEW_LABEL = 'status:in-review'
   static GO_TOKEN = '-OK'
@@ -38,6 +40,14 @@ export class GhPlanIssues extends PlanIssues {
       'issue', 'comment', String(issueNumber),
       '--repo', repository.text,
       '--body', GhPlanIssues.goBodyFor(nonce),
+    ]
+  }
+
+  static changesArgvFor({ issue, repository }) {
+    return [
+      'issue', 'view', String(issue.number),
+      '--repo', repository.text,
+      '--json', 'comments',
     ]
   }
 
@@ -106,6 +116,58 @@ export class GhPlanIssues extends PlanIssues {
     if (outcome.failed) this.#warn({ issue, argv, said: outcome.stderr.trim() })
   }
 
+  async changesAsked({ issue, repository }) {
+    const outcome = await this.gh.run(
+      GhPlanIssues.changesArgvFor({ issue, repository }), { safeToRepeat: true }
+    )
+    if (outcome.failed) {
+      throw new PlanChangesNotRead(`${Gh.BIN} issue view failed: ${outcome.stderr.trim()}`)
+    }
+
+    return GhPlanIssues.#changesIn(outcome.stdout, issue)
+  }
+
+  static #changesIn(printed, issue) {
+    const asked = []
+    for (const comment of GhPlanIssues.#commentsIn(printed, issue)) {
+      GhPlanIssues.#demandRead(comment, issue)
+      if (!comment.body.startsWith(GhPlanIssues.CHANGES_TOKEN)) continue
+
+      asked.push(new ChangeAsked({
+        id: comment.id,
+        text: comment.body.slice(GhPlanIssues.CHANGES_TOKEN.length).trim(),
+      }))
+    }
+
+    return asked
+  }
+
+  static #commentsIn(printed, issue) {
+    let parsed
+    try {
+      parsed = JSON.parse(printed)
+    } catch {
+      throw new PlanChangesNotUnderstood(
+        `${Gh.BIN} answered something that is not json for the comments of ${issue.number}, it printed ${JSON.stringify(printed)}`
+      )
+    }
+    if (!Array.isArray(parsed?.comments)) {
+      throw new PlanChangesNotUnderstood(
+        `${Gh.BIN} answered without the comments of ${issue.number}, it printed ${JSON.stringify(printed)}`
+      )
+    }
+
+    return parsed.comments
+  }
+
+  static #demandRead(comment, issue) {
+    if (typeof comment?.id === 'string' && typeof comment?.body === 'string') return
+
+    throw new PlanChangesNotUnderstood(
+      `${Gh.BIN} answered a comment of ${issue.number} without the id and the body this reads, it printed ${JSON.stringify(comment)}`
+    )
+  }
+
   async answerGo({ issueNumber, repository, nonce }) {
     const outcome = await this.gh.run(
       GhPlanIssues.goArgvFor({ issueNumber, repository, nonce }), { safeToRepeat: false }
@@ -154,6 +216,14 @@ export class GhPlanIssues extends PlanIssues {
   }
 }
 
+export class ChangeAsked {
+  constructor({ id, text }) {
+    this.id = id
+    this.text = text
+    Object.freeze(this)
+  }
+}
+
 export class PlanIssueBody {
   static DESCRIPTION_HEADING = '## Descripción'
   static PROTECTED_HEADING = '## Out of scope / Protected'
@@ -162,6 +232,9 @@ export class PlanIssueBody {
     /((?<![\w])[\w.-]+\/[\w.-]+#\d+|(?<![\w])#\d+|(?<![\w.])@[A-Za-z0-9][A-Za-z0-9-]*|https?:\/\/\S*github\.com\/\S+)/g
   static #CODE_SPAN = /(`[^`]*`)/
   static READY_LABEL = 'status:ready'
+  static CHANGES_LINE =
+    `> Para pedir cambios en el plan, comenta en este issue empezando por \`${GhPlanIssues.CHANGES_TOKEN}\`: ` +
+    'lo que escribas detrás es lo que se le pide al agente, y publicará el plan rehecho aquí mismo.'
 
   static labels(story) {
     return [...gateLabels(gatesOf(PlanIssueBody.rowFor(story)).gates), PlanIssueBody.READY_LABEL]
@@ -204,6 +277,7 @@ export class PlanIssueBody {
 
     return [
       `> Historia de usuario: ${story.key}`,
+      PlanIssueBody.CHANGES_LINE,
       '',
       PlanIssueBody.DESCRIPTION_HEADING,
       renderDescripcion(row) ?? `_${story.key} no trae resumen en Jira._`,

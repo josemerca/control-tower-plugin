@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { PlanIssueBody } from '../../src/infrastructure/gh-plan-issues.js'
+import { PlanIssueBody, GhPlanIssues } from '../../src/infrastructure/gh-plan-issues.js'
 import { UserStory } from '../../src/domain/value-objects/user-story.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { mapGhIssue, extractAc, extractOrder } from '../../../plugin/scripts/gh-issue-map.js'
@@ -148,5 +148,25 @@ describe('PlanIssueBody', () => {
 
   it('the_gates_section_tells_the_human_how_to_answer_the_go_instead_of_naming_the_gate_alone', () => {
     expect(PlanIssueBody.of(Opened.story())).toContain('-OK <nonce>')
+  })
+})
+
+describe('the issue body says how changes are asked for', () => {
+  it('the_issue_body_tells_the_human_to_comment_the_token_instead_of_just_naming_it', () => {
+    const body = PlanIssueBody.of(Opened.story())
+
+    expect(body.split(GhPlanIssues.CHANGES_TOKEN)).toHaveLength(2)
+    expect(PlanIssueBody.CHANGES_LINE).toMatch(/comenta/)
+    expect(PlanIssueBody.CHANGES_LINE).toMatch(/cambios en el plan/)
+    expect(PlanIssueBody.CHANGES_LINE).toMatch(/lo que escribas detrás/)
+    expect(PlanIssueBody.CHANGES_LINE).toMatch(/plan rehecho/)
+    expect(PlanIssueBody.CHANGES_LINE).toContain(`\`${GhPlanIssues.CHANGES_TOKEN}\``)
+  })
+
+  it('what_it_says_is_the_second_line_of_the_issue_because_that_is_where_it_gets_read', () => {
+    const [story, asking] = PlanIssueBody.of(Opened.story()).split('\n')
+
+    expect(story).toBe(`> Historia de usuario: ${Opened.story().key}`)
+    expect(asking).toBe(PlanIssueBody.CHANGES_LINE)
   })
 })
