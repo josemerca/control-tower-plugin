@@ -117,12 +117,6 @@ describe('the status labels this backend writes and the plugin reads', () => {
 })
 
 describe('the sections the errand sends the agent to read', () => {
-  const brief = () => new PlanAgentBrief({
-    dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
-    conventions: '/plugin/conventions',
-    ctStep: '/plugin/scripts/ct-step.mjs',
-  })
-
   const body = () => PlanIssueBody.of(new UserStory({
     key: new UserStoryKey('XOP-4909'), summary: 'la métrica de los campeones', description: 'como analista quiero',
   }))
@@ -132,14 +126,5 @@ describe('the sections the errand sends the agent to read', () => {
 
     expect(headings).toContain(`## ${PlanAgentBrief.EPIC_CONTEXT}`)
     expect(headings).toContain(`## ${PlanAgentBrief.INHERITED_CONTEXT}`)
-  })
-
-  it('the_errand_sends_the_agent_to_the_sections_by_the_name_the_body_gives_them', () => {
-    const errand = brief().errandFor({
-      issue: { number: 40 }, repository: new RepositoryName('jjponz/repo-pulse'),
-    })
-
-    expect(errand).toContain(PlanAgentBrief.EPIC_CONTEXT)
-    expect(errand).toContain(PlanAgentBrief.INHERITED_CONTEXT)
   })
 })

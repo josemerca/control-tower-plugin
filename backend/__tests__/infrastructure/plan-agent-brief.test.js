@@ -39,20 +39,39 @@ describe('PlanAgentBrief', () => {
 
   it('it_carries_the_order_of_precedence_itself_because_the_repo_may_not_declare_it_anywhere', () => {
     expect(errand()).toContain('/plugin/conventions')
-    expect(errand()).toMatch(/preferencia/i)
-    expect(errand()).toMatch(/regla a regla/)
+    expect(errand()).toContain(
+      'Esa vara tiene PREFERENCIA sobre las convenciones de este repo, y se mide regla a regla, no por tema'
+    )
+    expect(errand()).toContain('la vara del repo no desaparece')
     expect(errand()).toMatch(/AGENTS\.md.*puede no traerla/)
   })
 
+  it('the_precedence_it_carries_cannot_be_read_the_other_way_round', () => {
+    expect(errand()).not.toMatch(/convenciones de este repo tienen PREFERENCIA/)
+    expect(errand()).not.toMatch(/las convenciones de este repo ganan/i)
+  })
+
   it('the_architecture_yardstick_binds_on_what_is_added_to_a_module_that_never_met_it', () => {
-    expect(errand()).toMatch(/arquitectura se aplica SIEMPRE/)
-    expect(errand()).toMatch(/deuda heredada/)
+    expect(errand()).toContain(
+      'la vara de arquitectura se aplica SIEMPRE, también a lo que añadas a un módulo que ya existía'
+    )
+    expect(errand()).toContain('Applies to: new modules')
+    expect(errand()).toMatch(/NO val[ea]n en este carril/)
+  })
+
+  it('the_only_rule_of_the_yardstick_this_errand_overrides_says_so_instead_of_leaving_a_silent_clash', () => {
+    expect(errand()).not.toMatch(/deuda heredada que exime|deuda heredada.*exime lo/)
+    expect(errand()).toMatch(/la única regla de la vara que este encargo cambia/i)
   })
 
   it('it_names_the_sections_that_carry_what_the_acceptance_criteria_cannot', () => {
     expect(errand()).toContain('Contexto del epic')
     expect(errand()).toContain('Contexto heredado')
     expect(errand()).toMatch(/no lo busques fuera del issue/)
+  })
+
+  it('it_does_not_send_the_agent_to_a_section_the_body_never_writes', () => {
+    expect(errand()).not.toMatch(/decisiones congeladas/i)
   })
 
   it('it_never_promises_a_permission_nobody_mints', () => {
