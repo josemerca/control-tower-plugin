@@ -117,7 +117,6 @@ class RunningApi {
   static #started = []
   static STORY = 'ABC-123'
   static REPO = 'owner/name'
-  static ROOT = '/repo/checkout'
   static ACCEPTED_BODY = `{"id":"ABC-123","repo":"owner/name","root":"/repo/checkout"}`
   static ANSWER =
     '{"status":"started","id":"ABC-123","repo":"owner/name",' +
