@@ -1462,28 +1462,29 @@ if (collect) {
     cmux: localRunner('cmux', COLLECT_CMUX_TIMEOUT_MS),
     findWorkspace: (cwd) => findWorkspaceByCwd(cwd),
   })
-  // F20/cosecha, Task 7: con `--bq` y la guarda diciendo COSECHAR, la fila
-  // viaja a BigQuery ANTES de que `collect()` (más abajo) borre nada. Un
-  // `rehearse()` aquí no muta nada — solo decide si tocaría algo — así que
-  // preguntarlo dos veces (aquí y en `collect()`, que lo repite por dentro)
-  // es redundante pero inocuo, y es lo único que permite decidir "cargaría"
-  // sin haber borrado todavía.
+  // F20/cosecha, Task 7 (corregida): con `--bq` y la guarda diciendo COSECHAR,
+  // la fila viaja a BigQuery ANTES de que `execute()` (más abajo) borre nada.
+  // El ensayo se hace UNA sola vez, arriba; tanto la decisión de cargar en
+  // BigQuery como la propia borradura reutilizan ese mismo `ensayo`, así que
+  // `--collect --bq` solo pide la PR a GitHub una vez por invocación.
   const espacioTemporal = {
     create: () => mkdtempSync(join(tmpdir(), 'ct-collect-bq-')),
     remove: (directory) => rmSync(directory, { recursive: true, force: true }),
   }
   const lecturaFallida = (c) => `${c.failures[0].read} falló (${c.failures[0].detail})`
+  const ensayo = collector.rehearse({ artifacts: a, repo })
+  let report = ensayo
   let cargada = ''
-  if (bqTable && !dryRun && collector.rehearse({ artifacts: a, repo }).outcome === CollectionOutcome.WOULD_COLLECT) {
-    const cosecha = new SliceHarvest({ gh: ghRunner }).harvestIssue({ repo, number: issue, index: TelemetryIndex.read({ gh: ghRunner, repo }) })
-    if (cosecha.outcome !== SliceHarvestOutcome.COMPLETE) dieErr(`no se pudo leer la cosecha de #${issue}: ${lecturaFallida(cosecha)} — no se ha tocado nada, el siguiente barrido reintenta.`, 3)
-    const ledger = new HarvestLedger({ table: bqTable, bq: localRunner('bq', COLLECT_BQ_TIMEOUT_MS), workspace: espacioTemporal, identity: LedgerIdentity.fromEnvironment() }).record({ repo, milestone: cosecha.row.milestone, rows: [cosecha.row] })
-    if (ledger.outcome === LoadOutcome.REJECTED) { espacioTemporal.remove(ledger.directory); dieOut(`kept #${issue}: BigQuery (${bqTable.id}) rechazó la fila: bq salió con ${ledger.code}: ${ledger.detail} — no se ha borrado nada, el siguiente barrido reintenta`, 10) }
-    cargada = ` ; 1 fila cargada en ${bqTable.id} (harvest_id ${ledger.harvestId})`
+  if (!dryRun && ensayo.outcome === CollectionOutcome.WOULD_COLLECT) {
+    if (bqTable) {
+      const cosecha = new SliceHarvest({ gh: ghRunner }).harvestIssue({ repo, number: issue, index: TelemetryIndex.read({ gh: ghRunner, repo }) })
+      if (cosecha.outcome !== SliceHarvestOutcome.COMPLETE) dieErr(`no se pudo leer la cosecha de #${issue}: ${lecturaFallida(cosecha)} — no se ha tocado nada, el siguiente barrido reintenta.`, 3)
+      const ledger = new HarvestLedger({ table: bqTable, bq: localRunner('bq', COLLECT_BQ_TIMEOUT_MS), workspace: espacioTemporal, identity: LedgerIdentity.fromEnvironment() }).record({ repo, milestone: cosecha.row.milestone, rows: [cosecha.row] })
+      if (ledger.outcome === LoadOutcome.REJECTED) { espacioTemporal.remove(ledger.directory); dieOut(`kept #${issue}: BigQuery (${bqTable.id}) rechazó la fila: bq salió con ${ledger.code}: ${ledger.detail} — no se ha borrado nada, el siguiente barrido reintenta`, 10) }
+      cargada = ` ; 1 fila cargada en ${bqTable.id} (harvest_id ${ledger.harvestId})`
+    }
+    report = collector.execute(ensayo)
   }
-  const report = dryRun
-    ? collector.rehearse({ artifacts: a, repo })
-    : collector.collect({ artifacts: a, repo })
   const hechoDe = (command) => {
     if (command.action === CollectionAction.CLOSE_WORKSPACE) return 'cerrada la workspace de cmux'
     if (command.action === CollectionAction.REMOVE_WORKTREE) return `borrado el worktree ${a.worktree}`

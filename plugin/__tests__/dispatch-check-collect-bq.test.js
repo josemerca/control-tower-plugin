@@ -147,6 +147,7 @@ describe('dispatch-check --collect --bq: the row travels before anything is dele
     })
     expect(result.status).toBe(0)
     expect(result.stdout).toContain(`; 1 fila cargada en ${Bench.TABLE_ID} (harvest_id `)
+    expect(bench.ghArgvLines().filter((line) => line.startsWith('pr list')).length).toBe(1)
     const rows = bench.capturedRows()
     expect(rows).toHaveLength(1)
     expect(rows[0].issue).toBe(Bench.ISSUE)

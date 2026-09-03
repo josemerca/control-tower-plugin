@@ -233,6 +233,24 @@ describe('what the policy refuses to collect is never touched', () => {
   })
 })
 
+describe('execute runs exactly the commands a rehearsal already decided', () => {
+  it('execute_runs_the_rehearsed_commands_without_asking_github_again', () => {
+    const conversation = CollectionCase.aMergedSliceThatIsSafeToCollect()
+    const rehearsed = CollectionCase.rehearsedFrom(conversation)
+    const report = conversation.collector.execute(rehearsed)
+    expect(report.outcome).toBe(CollectionOutcome.COLLECTED)
+    expect(conversation.spoken.filter((line) => line.startsWith('gh ')).length).toBe(1)
+  })
+
+  it('execute_refuses_a_report_that_is_not_would_collect', () => {
+    const conversation = CollectionCase.aMergedSliceThatIsSafeToCollect()
+    conversation.gh.answers[CollectionCase.PR_LIST] = RunnerAnswer.ok(GitHubTranscript.stillOpen())
+    const rehearsed = CollectionCase.rehearsedFrom(conversation)
+    expect(() => conversation.collector.execute(rehearsed))
+      .toThrow('SliceCollector.execute needs a would-collect report, got "waiting"')
+  })
+})
+
 describe('a read that failed is a read that failed, never an empty answer', () => {
   it('a_pull_request_list_that_could_not_be_read_is_not_a_branch_without_a_pull_request', () => {
     const conversation = CollectionCase.aMergedSliceThatIsSafeToCollect()
