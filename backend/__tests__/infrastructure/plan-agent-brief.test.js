@@ -117,6 +117,10 @@ describe('PlanAgentBrief resuming the agent', () => {
     expect(errand()).not.toContain('saldría por 9')
   })
 
+  it('the_release_it_orders_waives_the_merge_watcher_because_this_flow_has_no_coordinator_to_notify', () => {
+    expect(errand()).toContain('--release --no-watch-merge')
+  })
+
   it('it_still_stops_before_the_merge_because_that_is_the_second_human_decision', () => {
     expect(errand()).toMatch(/no la mergees/i)
     expect(errand()).toMatch(/PARA/)

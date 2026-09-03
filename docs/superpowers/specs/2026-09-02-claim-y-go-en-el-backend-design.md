@@ -106,12 +106,28 @@ idempotente por despacho y cierra el único agujero que dejaba morir el flujo en
 
 Lo que sigue fuera: sembrar desde dentro del plugin, que es otra decisión y otro slice.
 
-### 2.5 El vigilante del merge se deja correr
+### 2.5 El vigilante del merge se renuncia en voz alta, y el plugin gana la forma de decirlo
 
-`--release` lanza `ct-watch-merge.mjs`, que busca una sesión coordinadora en el checkout principal para
-avisarle del merge. En el flujo de la app no la hay: verá el merge, no encontrará a quién decírselo, lo
-escribirá en su log y saldrá con 1. Es ruido en `~/.claude/control-tower/log/`, no un fallo. Qué hacer con
-él es decisión de la cosecha, no de este slice.
+`--release` lanza `ct-watch-merge.mjs`, que busca la sesión coordinadora **por su directorio** en el
+checkout principal. La primera versión de esta sección lo dejó correr diciendo que sería «ruido en un log».
+Era falso, y lo era por un hecho de este flujo: la API **tiene que** correr en una pestaña de cmux abierta
+en la raíz del repo gobernado, porque cmux rechaza a los procesos que no nacen dentro de él. Así que la
+pestaña que casa es la de la propia API: el vigilante le teclearía a un programa un párrafo escrito para un
+agente, y su log lo anunciaría como entregado.
+
+El efecto medido es inofensivo —la línea muere en `command not found` si llega a un shell—, pero una
+entrega falsa por escrito es peor que no avisar.
+
+**Decisión: `dispatch-check` gana `--no-watch-merge`, y el encargo la pasa.** No se detecta, se declara:
+desde `--release` no hay forma de distinguir una coordinadora de un servidor, porque las dos son una
+workspace de cmux en el mismo directorio, y quien despacha sí lo sabe. La bandera no relaja ninguna de las
+cinco puertas ni cambia el movimiento del label; lo único que se pierde es el momento del aviso, que el
+`cosecha pendiente:` del siguiente `/ct-next` recupera. Se dice por stderr al liberar, para que el silencio
+no se lea como un vigilante que sí está.
+
+Descartado: apuntar `CT_WATCH_MERGE_BIN` a una ruta inexistente. Funciona hoy sin tocar el plugin, pero es
+un hueco cuyo propio comentario declara que existe para los tests y que no cambia ninguna decisión; meterlo
+en la línea del encargo dejaría una variable que dentro de tres meses nadie sabe por qué está.
 
 ---
 
@@ -257,5 +273,4 @@ entregado, la rama sin `STATE.md` y los recorridos e2e —que aquí pasan vacío
 `## E2E`.
 
 Fuera de este slice: la cosecha (merge, worktree, rama, pestaña); el front; el `STATE.md` de la
-coordinadora; comprobar que la pestaña siga viva; la siembra de `status:in-review` en el plugin (§2.4); y
-qué hacer con el vigilante del merge (§2.5).
+coordinadora; y comprobar que la pestaña siga viva.

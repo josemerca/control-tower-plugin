@@ -515,6 +515,45 @@ npx vitest run __tests__/yardstick.test.js   # exit 0: English, no prose, every 
 test "$(grep -c 'DiskGoRegistry' src/infrastructure/ct-api.mjs)" -eq 2
 ```
 
+### Task 8b — El plugin gana la forma de renunciar al vigilante del merge
+
+**Objective:** a release in a flow with no coordinator session waives the merge watcher instead of
+delivering its notice to whatever cmux tab happens to sit in the main checkout.
+
+**Files:**
+- Modify: `plugin/scripts/dispatch-check.mjs`
+- Modify: `plugin/__tests__/dispatch-check-watch-merge.test.js`
+- Modify: `plugin/commands/ct-next.md`, `plugin/README.md`
+- Modify: `backend/src/infrastructure/plan-agent-brief.js` and its test
+
+Contract (plugin/scripts/dispatch-check.mjs):
+
+```javascript
+const noWatchMerge = has('--no-watch-merge')
+// usage gains [--no-watch-merge]; the launch site becomes
+// if (noWatchMerge) errLine(<why nobody will be told>) else lanzarVigilanteDelMerge(issue)
+```
+
+The errand's release command becomes `--release --no-watch-merge`. `dispatch-check.mjs` is the
+repository's declared debt under `plugin/conventions/style.md`, and its host style documents every
+decision in prose, so the flag arrives with the reasoning beside it. The `dist/` rule does not
+apply: no hook references this script.
+
+**TDD:** red first — `it('con --no-watch-merge no lanza nada, y el release sigue siendo un éxito')`,
+asserting exit 0, `released #9`, and that the recorder log never appears; then
+`it('con --no-watch-merge se dice que la cosecha queda sin avisar, para que el silencio no se lea como entregado')`.
+On the backend side,
+`it('the_release_it_orders_waives_the_merge_watcher_because_this_flow_has_no_coordinator_to_notify')`.
+
+**Tests:** added: the three above.
+
+**Verification:** the watcher suite and every plugin suite that names a release still pass.
+
+```bash
+npx vitest run __tests__/dispatch-check-watch-merge.test.js   # exit 0, run from plugin/
+test "$(grep -c -- '--no-watch-merge' scripts/dispatch-check.mjs)" -ge 3
+```
+
 ### Task 8 — La raíz del estado se valida en la invocación y se mide contra el plugin
 
 **Objective:** the directory the go is written into arrives validated on `Invocation`, so a test can

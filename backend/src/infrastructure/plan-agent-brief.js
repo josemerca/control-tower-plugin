@@ -54,7 +54,7 @@ export class PlanAgentBrief {
       `La secuencia no la conduces con subagent-driven-development ni con su ledger: la dicta la máquina. Pregunta el paso con \`node ${ctStep} next --plan <tu plan de docs/superpowers/plans/> --issue ${issueNumber}\``,
       `y obedece literalmente lo que imprima, tarea a tarea (donde diga \`ct-step\`, es \`node ${ctStep}\`), volviendo a \`next\` tras cada paso hasta que diga "run delivered".`,
       `Entonces abre la pull request con \`Closes #${issueNumber}\` en el cuerpo y libera con`,
-      `\`node ${dispatchCheck} ${issueNumber} --repo ${repository.text} --release\`, que mueve el issue a revisión.`,
+      `\`node ${dispatchCheck} ${issueNumber} --repo ${repository.text} --release --no-watch-merge\`, que mueve el issue a revisión.`,
       `Y PARA ahí: no la mergees y ${PlanAgentBrief.NO_NEW_WORKTREES}.`,
     ].join(' ')
   }
