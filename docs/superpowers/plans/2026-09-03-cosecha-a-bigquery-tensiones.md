@@ -422,9 +422,63 @@ grep -q 'rubric_vara_ct_docs_legacy' plugin/commands/ct-harvest.md
 grep -q 'issue-closed' plugin/commands/ct-harvest.md
 ```
 
+### Task 6 — `PluginManifest.version` responde `null` también cuando el JSON del manifiesto es el literal `null`
+
+**Objective:** la regla «`version` no vacía, si no `null`» se cumple también para un manifiesto cuyo JSON no es un objeto: el getter no lanza nunca.
+
+**Files:** `plugin/scripts/plugin-manifest.js` (modify), `plugin/__tests__/plugin-manifest.test.js` (modify)
+
+El juez de la tarea 1 lo dejó como hallazgo bajo: la desestructuración vive fuera del `try`, así que
+`JSON.parse` de un fichero cuyo contenido es `null` (o un número, o una cadena) devuelve algo que no
+es un objeto y `const { version } = manifest` lanza en vez de responder `null`.
+
+Current state (plugin/scripts/plugin-manifest.js, lines 17-26):
+
+```js
+  get version() {
+    let manifest
+    try {
+      manifest = JSON.parse(readFileSync(this.#path, 'utf8'))
+    } catch {
+      return null
+    }
+    const { version } = manifest
+    return typeof version === 'string' && version.length > 0 ? version : null
+  }
+```
+
+Call site (plugin/scripts/plugin-manifest.js):
+
+```js
+  get version() {
+    try {
+      const { version } = JSON.parse(readFileSync(this.#path, 'utf8'))
+      return typeof version === 'string' && version.length > 0 ? version : null
+    } catch {
+      return null
+    }
+  }
+```
+
+Sustituye al bloque citado; nada más cambia en el módulo. La madre gana `Manifests.withRawJson(text)`,
+que escribe `text` tal cual en el `package.json` del `mkdtemp`.
+
+**TDD:** `it('a_manifest_whose_json_is_the_literal_null_answers_null_instead_of_raising')` — `new PluginManifest(Manifests.withRawJson('null')).version` es `null`; antes del cambio lanza `TypeError`.
+
+**Tests:** añadidos — el de arriba. Ninguno se retira; los cuatro de la tarea 1 siguen como están.
+
+**Verification:** el módulo y su test pasan, el módulo sigue conforme y la suite sigue verde.
+
+```bash
+(cd plugin && npx vitest run __tests__/plugin-manifest.test.js __tests__/modulos-conformes.test.js)
+test "$(grep -c 'a_manifest_whose_json_is_the_literal_null_answers_null_instead_of_raising' plugin/__tests__/plugin-manifest.test.js)" -eq 1
+test "$(grep -c 'let manifest' plugin/scripts/plugin-manifest.js)" -eq 0
+(cd plugin && npm test)
+```
+
 ## 8. Global verification
 
-Con las cinco tareas commiteadas: la suite entera en verde, el subset rápido corriendo por su
+Con las seis tareas commiteadas: la suite entera en verde, el subset rápido corriendo por su
 nombre, los ocho ficheros marcados, la frase vieja de la doc desaparecida y el árbol limpio. Lo
 que un programa no mide y hay que mirar con ojos: que `npm run test:fast` de verdad excluye ocho
 ficheros y no cero (comparar el recuento de ficheros de las dos corridas), y que el mapa de
@@ -455,3 +509,4 @@ test -z "$(git status --porcelain)"
 13. **La versión sigue en `0.55.0`** — las tres tensiones son correcciones de lo que esta misma rama introdujo y viajan en la misma pull request; subir la versión anunciaría una entrega que no existe.
 14. **El plan no lleva número de issue en el nombre** — misma convención que los dos planes anteriores de esta rama; se valida con `validatePlan` de `plugin/scripts/plan-contract.js` con rutas relativas a la raíz del repo.
 15. **La medida sigue el import sólo dentro de `__tests__/fixtures/`** — un fixture existe para montar el andamiaje de un test, y espawnear es su oficio: si él lanza procesos, el test que lo importa los lanza. Un módulo de `scripts/` que importe `node:child_process` (`cmux.js`, `liveness.js`, `go-channel.js`…) no convierte en spawn al test que lo importa, porque `plugin/conventions/architecture.md` manda que el test le inyecte un doble, y seguirlo marcaría tests que no lanzan nada. El juez de la tarea 2 declaró el hueco sobre `ct-step-dispatch-seal.test.js` y la tarea 3 lo cierra; la tarea 2 se ejecutó y se juzgó con la medida directa, tal y como su texto la fijaba.
+16. **El bajo de la tarea 1 se cierra en la tarea 6 y no antes de su commit** — el veredicto es sobre el paquete sellado con su token; tocar el índice tras el veredicto lo habría invalidado. La corrección va en su propia tarea, juzgada aparte, como los bajos de los dos planes anteriores.
