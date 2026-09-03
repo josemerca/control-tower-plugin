@@ -365,6 +365,20 @@ export const E2E_SCHEMA = Object.freeze({
 // esta herramienta esa primera línea es imposible de cumplir y el implementador
 // se queda sin el oficio que la rúbrica delega.
 export const IMPLEMENTER_TOOLS = 'Read, Write, Edit, Grep, Glob, Bash, Skill'
+// Con qué modelo se despacha. Omitirlo NO es neutral: el subagente hereda el
+// modelo de la sesión, que es el más caro, y el implementador es el paso que
+// más veces se despacha en un run —una vez por tarea, y otra por cada vuelta
+// que le devuelve el juez—. Los tres agentes declarados (`agents/*.md`) fijan
+// el suyo en su frontmatter y ahí lo impone el harness; al implementador no se
+// le dio fichero propio, así que su modelo viaja por la línea que `ct-step
+// next` imprime, y sostenerlo depende de que la sesión la obedezca.
+//
+// Fijo, y no escalado por complejidad como pide la costura 5 del fork
+// (`skills/subagent-driven-development/SKILL.md`, "Model Selection"): esa skill
+// ya no conduce aquí —lo dice `scripts/kickoff.js`—, y quien elegiría el tier
+// por tarea sería la misma sesión que se ahorra el gasto. El suelo se fija a
+// propósito.
+export const IMPLEMENTER_MODEL = 'sonnet'
 // El juez no puede EJECUTAR, y no es una promesa en prosa: se lo quita la
 // declaración del agente (`agents/ct-judge.md`), igual que antes se lo quitaba
 // el binario. Tampoco ve la SALIDA de los controles —se le pasan rutas— porque
