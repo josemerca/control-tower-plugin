@@ -3,42 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BigQueryLoad, BigQueryTable, LoadOutcome } from '../scripts/bigquery-load.js'
-
-class RunnerAnswer {
-  static ok() {
-    return { code: 0, stdout: '', stderr: '' }
-  }
-
-  static failed(code, stderr) {
-    return { code, stdout: '', stderr }
-  }
-
-  static failedSilently(code, stdout) {
-    return { code, stdout, stderr: '' }
-  }
-
-  static failedOnBothChannels(code) {
-    return { code, stdout: '', stderr: '' }
-  }
-}
-
-class ScriptedBq {
-  constructor(answers) {
-    this.answers = answers
-    this.spoken = []
-  }
-
-  get runner() {
-    return (argv) => {
-      this.spoken.push(argv)
-      const asked = argv.join(' ')
-      if (!Object.hasOwn(this.answers, asked)) {
-        throw new Error(`nobody wrote an answer for: bq ${asked}`)
-      }
-      return this.answers[asked]
-    }
-  }
-}
+import { RunnerAnswer, ScriptedRunner } from './fixtures/scripted-runner.js'
 
 class LoadCase {
   static TABLE_ID = 'p:d.t'
@@ -74,6 +39,10 @@ class LoadCase {
   static loadWith(bq, directory) {
     return new BigQueryLoad({ bq, directory }).load({ table: LoadCase.table(), rows: LoadCase.rows(), schemaJson: LoadCase.schemaJson() })
   }
+
+  static bq(answers) {
+    return new ScriptedRunner({ program: 'bq', answers, spoken: [] })
+  }
 }
 
 describe('BigQueryLoad writes the two files on disk and calls bq with the exact argv', () => {
@@ -89,22 +58,22 @@ describe('BigQueryLoad writes the two files on disk and calls bq with the exact 
 
   it('a_load_writes_one_line_per_row_the_schema_and_calls_bq_with_the_exact_argv', () => {
     const argv = LoadCase.argvFor(directory)
-    const bq = new ScriptedBq({ [argv.join(' ')]: RunnerAnswer.ok() })
+    const bq = LoadCase.bq({ [argv.join(' ')]: RunnerAnswer.ok() })
     const rows = LoadCase.rows()
 
-    const report = LoadCase.loadWith(bq.runner, directory)
+    const report = LoadCase.loadWith(bq.forArgv, directory)
 
     expect(report.outcome).toBe(LoadOutcome.LOADED)
-    expect(bq.spoken).toEqual([argv])
+    expect(bq.spoken).toEqual([`bq ${argv.join(' ')}`])
     expect(readFileSync(join(directory, 'rows.ndjson'), 'utf8')).toBe(`${JSON.stringify(rows[0])}\n${JSON.stringify(rows[1])}\n`)
     expect(readFileSync(join(directory, 'schema.json'), 'utf8')).toBe(LoadCase.schemaJson())
   })
 
   it('a_non_zero_exit_of_bq_is_a_rejected_report_that_carries_the_code_the_diagnosis_and_the_retry_command', () => {
     const argv = LoadCase.argvFor(directory)
-    const bq = new ScriptedBq({ [argv.join(' ')]: RunnerAnswer.failed(1, 'bq: permission denied\n') })
+    const bq = LoadCase.bq({ [argv.join(' ')]: RunnerAnswer.failed(1, 'bq: permission denied\n') })
 
-    const report = LoadCase.loadWith(bq.runner, directory)
+    const report = LoadCase.loadWith(bq.forArgv, directory)
 
     expect(report.outcome).toBe(LoadOutcome.REJECTED)
     expect(report.code).toBe(1)
@@ -114,9 +83,9 @@ describe('BigQueryLoad writes the two files on disk and calls bq with the exact 
 
   it('a_failure_with_silent_stderr_still_carries_the_exit_code_and_reads_stdout_as_the_diagnosis', () => {
     const argv = LoadCase.argvFor(directory)
-    const bq = new ScriptedBq({ [argv.join(' ')]: RunnerAnswer.failedSilently(2, 'fake-bq: load failed\n') })
+    const bq = LoadCase.bq({ [argv.join(' ')]: RunnerAnswer.failedSilently(2, 'fake-bq: load failed\n') })
 
-    const report = LoadCase.loadWith(bq.runner, directory)
+    const report = LoadCase.loadWith(bq.forArgv, directory)
 
     expect(report.outcome).toBe(LoadOutcome.REJECTED)
     expect(report.code).toBe(2)
@@ -125,9 +94,9 @@ describe('BigQueryLoad writes the two files on disk and calls bq with the exact 
 
   it('a_failure_silent_on_both_channels_still_yields_a_rejected_report_with_its_code', () => {
     const argv = LoadCase.argvFor(directory)
-    const bq = new ScriptedBq({ [argv.join(' ')]: RunnerAnswer.failedOnBothChannels(127) })
+    const bq = LoadCase.bq({ [argv.join(' ')]: RunnerAnswer.failedOnBothChannels(127) })
 
-    const report = LoadCase.loadWith(bq.runner, directory)
+    const report = LoadCase.loadWith(bq.forArgv, directory)
 
     expect(report.outcome).toBe(LoadOutcome.REJECTED)
     expect(report.code).toBe(127)

@@ -27,10 +27,7 @@ class Bench {
     return JSON.stringify([{ headRefOid, number: Bench.PULL_REQUEST_NUMBER, state: 'MERGED' }])
   }
 
-  // Un issue cerrado, con milestone, y closedByPullRequestsReferences vacío
-  // a propósito: así SliceHarvest nunca llama a `gh pr view` (que este stub
-  // no soporta), sin que eso deje de ejercitar la fila entera de la cosecha.
-  static closedIssueWithMilestoneJson() {
+  static closedIssueWithMilestoneAndNoClosingPullRequest() {
     return JSON.stringify({
       number: Bench.ISSUE,
       title: 'slice de prueba',
@@ -77,6 +74,10 @@ class Bench {
 
   cmuxInvocations() {
     return existsSync(this.invokedLog) ? readFileSync(this.invokedLog, 'utf8') : ''
+  }
+
+  sessions() {
+    return JSON.parse(readFileSync(this.stateFile, 'utf8'))
   }
 
   capturedRows() {
@@ -141,7 +142,7 @@ describe('dispatch-check --collect --bq: the row travels before anything is dele
     const bench = new Bench()
     const result = bench.run(['7', '--repo', Bench.REPO, '--collect', '--bq', Bench.TABLE_ID], {
       FAKE_GH_PR_LIST: Bench.mergedPullRequestList(bench.tip),
-      FAKE_GH_ISSUE_VIEW_JSON: Bench.closedIssueWithMilestoneJson(),
+      FAKE_GH_ISSUE_VIEW_JSON: Bench.closedIssueWithMilestoneAndNoClosingPullRequest(),
       FAKE_BQ_CAPTURE_DIR: bench.bqCaptureDir,
     })
     expect(result.status).toBe(0)
@@ -153,6 +154,8 @@ describe('dispatch-check --collect --bq: the row travels before anything is dele
     expect(bench.bqArgvLines()[0].startsWith('--project_id=p --headless load')).toBe(true)
     expect(existsSync(bench.worktree)).toBe(false)
     expect(bench.branchStillExists()).toBe(false)
+    expect(bench.cmuxInvocations()).toContain('close-workspace --workspace workspace:0')
+    expect(bench.sessions()).toEqual([])
     bench.cleanup()
   })
 
@@ -160,7 +163,7 @@ describe('dispatch-check --collect --bq: the row travels before anything is dele
     const bench = new Bench()
     const result = bench.run(['7', '--repo', Bench.REPO, '--collect', '--bq', Bench.TABLE_ID], {
       FAKE_GH_PR_LIST: Bench.mergedPullRequestList(bench.tip),
-      FAKE_GH_ISSUE_VIEW_JSON: Bench.closedIssueWithMilestoneJson(),
+      FAKE_GH_ISSUE_VIEW_JSON: Bench.closedIssueWithMilestoneAndNoClosingPullRequest(),
       FAKE_BQ_EXIT_CODE: '2',
     })
     expect(result.status).toBe(10)
@@ -175,7 +178,7 @@ describe('dispatch-check --collect --bq: the row travels before anything is dele
     const bench = new Bench()
     const result = bench.run(['7', '--repo', Bench.REPO, '--collect', '--bq', Bench.TABLE_ID], {
       FAKE_GH_PR_LIST: Bench.mergedPullRequestList(bench.tip),
-      FAKE_GH_ISSUE_VIEW_JSON: Bench.closedIssueWithMilestoneJson(),
+      FAKE_GH_ISSUE_VIEW_JSON: Bench.closedIssueWithMilestoneAndNoClosingPullRequest(),
       FAKE_GH_TIMELINE_FAIL: '1',
     })
     expect(result.status).toBe(3)

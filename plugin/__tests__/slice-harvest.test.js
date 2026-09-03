@@ -11,36 +11,7 @@ import {
   SliceReadFailure,
   TelemetryIndex,
 } from '../scripts/slice-harvest.js'
-
-class RunnerAnswer {
-  static ok(stdout) {
-    return { code: 0, stdout, stderr: '' }
-  }
-
-  static failed(code, stderr) {
-    return { code, stdout: '', stderr }
-  }
-}
-
-class ScriptedRunner {
-  constructor({ program, answers, spoken }) {
-    this.program = program
-    this.answers = answers
-    this.spoken = spoken
-  }
-
-  answerTo(asked) {
-    this.spoken.push(`${this.program} ${asked}`)
-    if (!Object.hasOwn(this.answers, asked)) {
-      throw new Error(`nobody wrote an answer for: ${this.program} ${asked}`)
-    }
-    return this.answers[asked]
-  }
-
-  get forArgv() {
-    return (argv) => this.answerTo(argv.join(' '))
-  }
-}
+import { RunnerAnswer, ScriptedRunner } from './fixtures/scripted-runner.js'
 
 class TelemetryTranscript {
   static REPO = 'o/r'

@@ -205,7 +205,7 @@ describe('Invocation resolving the BigQuery harvest table', () => {
 
     expect(refused.outcome).toBe(InvocationOutcome.MALFORMED_HARVEST_TABLE)
     expect(refused.reason).toBe(
-      'CT_HARVEST_BQ_TABLE must look like proyecto:dataset.tabla, got "not-a-table"'
+      'CT_HARVEST_BQ_TABLE must look like project:dataset.table, got "not-a-table"'
     )
   })
 })

@@ -5,36 +5,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { BigQueryTable, LoadOutcome } from '../scripts/bigquery-load.js'
 import { HarvestLedger, LedgerIdentity } from '../scripts/harvest-ledger.js'
-
-class RunnerAnswer {
-  static ok() {
-    return { code: 0, stdout: '', stderr: '' }
-  }
-
-  static failed(code, stderr) {
-    return { code, stdout: '', stderr }
-  }
-}
-
-class ScriptedRunner {
-  constructor({ program, answers, spoken }) {
-    this.program = program
-    this.answers = answers
-    this.spoken = spoken
-  }
-
-  answerTo(asked) {
-    this.spoken.push(`${this.program} ${asked}`)
-    if (!Object.hasOwn(this.answers, asked)) {
-      throw new Error(`nobody wrote an answer for: ${this.program} ${asked}`)
-    }
-    return this.answers[asked]
-  }
-
-  get forArgv() {
-    return (argv) => this.answerTo(argv.join(' '))
-  }
-}
+import { RunnerAnswer, ScriptedRunner } from './fixtures/scripted-runner.js'
 
 class RecordingWorkspace {
   constructor(directory) {

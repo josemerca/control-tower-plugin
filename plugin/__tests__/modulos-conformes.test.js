@@ -33,6 +33,7 @@ class NacidosConformes {
     'scripts/harvest-ledger.js',
     '__tests__/harvest-ledger.test.js',
     '__tests__/fixtures/fake-bq-bin/bq',
+    '__tests__/fixtures/scripted-runner.js',
     '__tests__/ct-harvest-bq.test.js',
     'scripts/slice-harvest.js',
     '__tests__/slice-harvest.test.js',

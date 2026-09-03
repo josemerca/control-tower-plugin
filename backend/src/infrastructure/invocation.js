@@ -107,7 +107,7 @@ export class Invocation {
     if (harvestTable === null) {
       return Invocation.#refused(
         InvocationOutcome.MALFORMED_HARVEST_TABLE,
-        `${Invocation.HARVEST_TABLE_VARIABLE} must look like proyecto:dataset.tabla, got ${JSON.stringify(given)}`
+        `${Invocation.HARVEST_TABLE_VARIABLE} must look like project:dataset.table, got ${JSON.stringify(given)}`
       )
     }
 
