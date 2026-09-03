@@ -45,6 +45,11 @@ Consecuencias para el front:
 
 ### 2.1 El contrato de `POST /start-plan`, copiado del backend
 
+> **Superado el mismo 2026-09-02**: `repo` pasó a ser obligatorio y el `202`
+> devuelve `issue` y `agent` en lugar de `session`. El contrato vigente está en
+> `2026-09-02-frontend-plan-events-design.md` §2.1. Lo de abajo queda como
+> registro de lo que había cuando nació el front.
+
 Petición: `Content-Type: application/json`, cuerpo `{ "id": "ABC-123" }`. El
 único campo admitido es `id`, y tiene que cumplir `^[A-Z][A-Z0-9_]*-\d+$`.
 

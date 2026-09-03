@@ -1,0 +1,9 @@
+.implement-plan-action {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.implement-plan-action__facts code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
