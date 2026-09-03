@@ -18,6 +18,12 @@ describe('PluginManifest reads the version key of the plugin manifest with a sin
     static unreadable() {
       return join(directory, 'package.json')
     }
+
+    static withRawJson(text) {
+      const path = join(directory, 'package.json')
+      writeFileSync(path, text)
+      return path
+    }
   }
 
   beforeEach(() => {
@@ -51,6 +57,12 @@ describe('PluginManifest reads the version key of the plugin manifest with a sin
 
   it('a_manifest_without_a_version_key_answers_null', () => {
     const manifest = new PluginManifest(Manifests.withVersion(undefined))
+
+    expect(manifest.version).toBeNull()
+  })
+
+  it('a_manifest_whose_json_is_the_literal_null_answers_null_instead_of_raising', () => {
+    const manifest = new PluginManifest(Manifests.withRawJson('null'))
 
     expect(manifest.version).toBeNull()
   })

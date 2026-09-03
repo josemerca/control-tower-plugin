@@ -15,13 +15,11 @@ export class PluginManifest {
   }
 
   get version() {
-    let manifest
     try {
-      manifest = JSON.parse(readFileSync(this.#path, 'utf8'))
+      const { version } = JSON.parse(readFileSync(this.#path, 'utf8'))
+      return typeof version === 'string' && version.length > 0 ? version : null
     } catch {
       return null
     }
-    const { version } = manifest
-    return typeof version === 'string' && version.length > 0 ? version : null
   }
 }
