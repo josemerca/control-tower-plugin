@@ -3,7 +3,9 @@ import { ApiServer } from '../../src/infrastructure/api-server.js'
 import {
   ImplementRequestOutcome, ImplementRefusal, ImplementCollapse,
 } from '../../src/infrastructure/implement-plan-route.js'
-import { PlanAgentNotResumed, PlanFailure } from '../../src/domain/exceptions.js'
+import {
+  PlanAgentNotResumed, PlanFailure, PlanGoNotAnswered, GoFailure, GoNotRecorded,
+} from '../../src/domain/exceptions.js'
 
 class ImplementPlanSpy {
   constructor() {
@@ -32,6 +34,7 @@ class ImplementPlanSpy {
     this.asked.push({
       agent: params.agent,
       issue: params.issue,
+      repository: params.repository.text,
     })
   }
 }
@@ -39,7 +42,7 @@ class ImplementPlanSpy {
 class RunningApi {
   static #started = []
   static PATH = '/implement-plan'
-  static ACCEPTED_BODY = '{"agent":"workspace:20","issue":33}'
+  static ACCEPTED_BODY = '{"agent":"workspace:20","issue":33,"repo":"jjponz/repo-pulse"}'
   static ANSWER = '{"status":"implementing","agent":"workspace:20","issue":33}'
   static spy = null
 
@@ -79,16 +82,26 @@ describe('ImplementPlanRoute', () => {
     expect(await response.text()).toBe(RunningApi.ANSWER)
   })
 
-  it('the_two_fields_reach_the_use_case_as_domain_values_and_not_as_the_raw_json', async () => {
+  it('the_three_fields_reach_the_use_case_as_domain_values_and_not_as_the_raw_json', async () => {
     await RunningApi.asking(RunningApi.ACCEPTED_BODY)
 
     expect(RunningApi.spy.asked).toEqual([
-      { agent: 'workspace:20', issue: 33 },
+      { agent: 'workspace:20', issue: 33, repository: 'jjponz/repo-pulse' },
     ])
   })
 
+  it('a_repository_that_is_not_owner_slash_name_is_refused_before_it_can_become_an_argument_of_gh', async () => {
+    const response = await RunningApi.asking('{"agent":"workspace:20","issue":33,"repo":"-oProxy"}')
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      error: 'repo must be a repository such as owner/name',
+    })
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
   it('an_agent_handle_with_whitespace_is_refused_before_it_can_become_an_argument_of_cmux', async () => {
-    const response = await RunningApi.asking('{"agent":"ct-plan XOP-4909","issue":33}')
+    const response = await RunningApi.asking('{"agent":"ct-plan XOP-4909","issue":33,"repo":"jjponz/repo-pulse"}')
 
     expect(response.status).toBe(400)
     expect((await response.json()).error).toMatch(/^agent must be the handle/)
@@ -191,13 +204,28 @@ describe('ImplementRefusal', () => {
 })
 
 describe('ImplementCollapse', () => {
-  const RESUMING_AN_AGENT = ['PlanAgentNotResumed']
+  const RESUMING_AN_AGENT = ['GoNotRecorded', 'PlanGoNotAnswered', 'PlanAgentNotResumed']
 
   it('every_way_resuming_an_agent_can_collapse_has_a_status_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
     expect(ImplementCollapse.declaredFailures().sort()).toEqual(RESUMING_AN_AGENT.sort())
   })
 
+  it('a_go_nobody_could_record_is_something_to_try_again_and_names_why', () => {
+    const collapse = ImplementCollapse.of(new GoNotRecorded('the directory is not writable'))
+
+    expect(collapse.status).toBe(503)
+    expect(collapse.error).toBe('could not implement the plan: the directory is not writable')
+  })
+
+  it('a_go_the_issue_did_not_take_is_something_to_try_again_and_names_what_gh_said', () => {
+    const collapse = ImplementCollapse.of(new PlanGoNotAnswered('gh issue comment failed: nope'))
+
+    expect(collapse.status).toBe(503)
+    expect(collapse.error).toBe('could not implement the plan: gh issue comment failed: nope')
+  })
+
   it('a_family_is_not_a_way_of_collapsing_so_answering_one_raises_instead_of_guessing', () => {
     expect(() => ImplementCollapse.of(new PlanFailure('nope'))).toThrow(/no status declared/)
+    expect(() => ImplementCollapse.of(new GoFailure('nope'))).toThrow(/no status declared/)
   })
 })

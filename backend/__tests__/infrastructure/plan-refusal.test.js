@@ -37,7 +37,7 @@ describe('PlanRefusal', () => {
 describe('PlanCollapse', () => {
   const FAMILIES = [
     'PlanFailure', 'UserStoryFailure', 'PlanIssueFailure', 'PlanAgentFailure', 'WorkspaceFailure',
-    'PlanProgressFailure',
+    'PlanProgressFailure', 'GoFailure',
   ]
 
   const RESUMING_AN_AGENT = ImplementCollapse.declaredFailures()
@@ -69,6 +69,13 @@ describe('PlanCollapse', () => {
     expect(PlanCollapse.of(new exceptions.PlanIssueNotCreated('nope')).status).toBe(503)
     expect(PlanCollapse.of(new exceptions.PlanAgentNotLaunched('nope')).status).toBe(503)
     expect(PlanCollapse.of(new exceptions.WorkspaceNotPrepared('branch is taken')).status).toBe(503)
+  })
+
+  it('an_issue_that_could_not_be_claimed_is_something_to_try_again_and_names_what_gh_said', () => {
+    const collapse = PlanCollapse.of(new exceptions.PlanIssueNotClaimed('gh issue edit failed: nope'))
+
+    expect(collapse.status).toBe(503)
+    expect(collapse.error).toBe('could not start the plan: gh issue edit failed: nope')
   })
 
   it('a_tool_that_answered_something_we_cannot_read_is_not_something_trying_again_would_fix', () => {

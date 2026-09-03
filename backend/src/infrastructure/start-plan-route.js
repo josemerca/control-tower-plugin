@@ -5,6 +5,7 @@ import { RepositoryName } from '../domain/value-objects/repository-name.js'
 import {
   PlanFailure,
   UserStoryNotRead, UserStoryNotUnderstood, PlanIssueNotCreated, PlanIssueNotNamed,
+  PlanIssueNotClaimed,
   PlanAgentNotLaunched, PlanAgentNotNamed, WorkspaceNotPrepared, WorkspaceNotUnderstood,
 } from '../domain/exceptions.js'
 
@@ -123,6 +124,7 @@ export class PlanCollapse {
   static #BY_FAILURE = [
     [UserStoryNotRead, PlanCollapse.#REFUSED],
     [PlanIssueNotCreated, PlanCollapse.#REFUSED],
+    [PlanIssueNotClaimed, PlanCollapse.#REFUSED],
     [PlanAgentNotLaunched, PlanCollapse.#REFUSED],
     [WorkspaceNotPrepared, PlanCollapse.#REFUSED],
     [UserStoryNotUnderstood, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
