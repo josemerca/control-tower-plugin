@@ -57,7 +57,9 @@ módulo que usan los dos caminos, y la carga con su identidad y su directorio te
 - Un nuevo código de salida de `dispatch-check` o un nuevo `HarvestOutcome` en el backend.
 - Cambiar el esquema salvo `milestone` a `NULLABLE`; cambiar la versión: la rama quedó en 0.55.0 al
   mergear `main` y esa es la que se publica con las dos cosechas.
-- Tocar `ct-step.mjs` (su lector de versión sigue siendo deuda declarada).
+- Tocar `ct-step.mjs`: su lector de versión quedó como deuda declarada al ejecutar este plan, y lo
+  cierra `docs/superpowers/plans/2026-09-03-cosecha-a-bigquery-tensiones.md` (tarea 1) con un solo
+  lector para los dos entrypoints.
 
 ## 2. Closed decisions (take as given)
 
@@ -605,6 +607,6 @@ test -z "$(git status --porcelain)"
 7. **Índice de telemetría no leído no es fallo** — mismo criterio que `/ct-harvest` hoy: un repo sin `docs/superpowers/metrics` lista con error y bloquearía la cosecha para siempre; la fila lo dice con `telemetry_status = no-leido`.
 8. **`INCOMPLETE` no se carga en `--collect`** — una fila con huecos por una lectura transitoria quedaría para siempre; el siguiente barrido lo reintenta gratis.
 9. **Un solo `gh pr list` también con `--bq`** — la versión inicial de este plan aceptaba dos lecturas (un `rehearse` para decidir si cargar y un `collect` que volvía a ensayar) para no abrir la API privada de `SliceCollector`; Juanjo pidió cerrarlo y una corrección posterior a la tarea 10 añadió el método público `SliceCollector.execute(rehearsed)`: el entrypoint ensaya una vez y ejecuta ese ensayo, con o sin `--bq`.
-10. **`LedgerIdentity` localiza el manifiesto desde su propio módulo** — así los dos entrypoints dejan de leer `package.json` cada uno por su lado; `ct-step.mjs` sigue con su lector, deuda declarada fuera de este plan.
+10. **`LedgerIdentity` localiza el manifiesto desde su propio módulo** — así los dos entrypoints dejan de leer `package.json` cada uno por su lado; `ct-step.mjs` siguió con su lector, deuda declarada fuera de este plan. El juez lo señaló como una decisión escrita dos veces y `docs/superpowers/plans/2026-09-03-cosecha-a-bigquery-tensiones.md` (tarea 1) la deja en un solo módulo, `PluginManifest`, al que `LedgerIdentity` y `ct-step.mjs` piden la versión.
 11. **Los textos de `--collect` siguen en castellano** — es el entrypoint de deuda declarada y el backend los repite tal cual en su stderr; cambiar de idioma ahí sería una decisión de producto, no de este plan.
 12. **El plan no lleva número de issue** — misma convención que `docs/superpowers/plans/2026-09-03-cosecha-a-bigquery.md`; se valida con `validatePlan` con rutas relativas a la raíz.
