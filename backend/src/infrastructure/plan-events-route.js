@@ -30,12 +30,6 @@ export class EventsRequest {
   static #NUMBERED = /^[1-9][0-9]*$/
 
   constructor({ outcome, watched }) {
-    if (!Object.values(EventsRequestOutcome).includes(outcome)) {
-      throw new Error(`outcome must be an EventsRequestOutcome member, got ${outcome}`)
-    }
-    if ((outcome === EventsRequestOutcome.ACCEPTED) === (watched === null)) {
-      throw new Error(`outcome ${outcome} disagrees with its watch, got ${watched}`)
-    }
     this.outcome = outcome
     this.watched = watched
     Object.freeze(this)

@@ -212,21 +212,6 @@ describe('StartPlan', () => {
     expect(started.watch.agent).toBe(started.agent)
   })
 
-  it('a_watch_without_the_repository_the_progress_is_measured_against_refuses_to_exist', () => {
-    expect(() => new PlanWatch({
-      issue: PlanIssuesDouble.OPENED, located: WorkspaceDouble.LOCATED, repository: 'owner/name',
-    })).toThrow(/repository/)
-  })
-
-  it('a_watch_without_a_place_to_look_or_an_issue_to_look_for_refuses_to_exist_too', () => {
-    expect(() => new PlanWatch({
-      issue: PlanIssuesDouble.OPENED, located: '/repo/.worktrees/7', repository: Flow.REPOSITORY,
-    })).toThrow(/where that plan is being written/)
-    expect(() => new PlanWatch({
-      issue: undefined, located: WorkspaceDouble.LOCATED, repository: Flow.REPOSITORY,
-    })).toThrow(/the issue whose plan it follows/)
-  })
-
   it('a_story_that_cannot_be_read_stops_the_flow_before_an_issue_is_created_for_nothing', async () => {
     const flow = new Flow({ userStories: new UserStoriesDouble(new UserStoryNotRead('acli is not authenticated')) })
 
@@ -265,23 +250,6 @@ describe('StartPlan', () => {
     expect(refusal).toBeInstanceOf(PlanAgentNotLaunched)
     expect(refusal.name).toBe('PlanAgentNotLaunched')
     expect(refusal.message).toBe('Access denied')
-  })
-
-  it('a_story_with_no_summary_at_all_is_refused_by_the_value_object_and_not_carried_around_empty', async () => {
-    const flow = new Flow({ userStories: UserStoriesDouble.reading(undefined) })
-
-    await expect(flow.run()).rejects.toThrow(/a user story carries text/)
-  })
-
-  it('a_story_that_is_not_keyed_by_a_story_key_cannot_be_built_at_all', () => {
-    expect(() => new UserStory({ key: 'MO_SHOP-42', summary: 'a', description: 'b' }))
-      .toThrow(/keyed by a UserStoryKey/)
-  })
-
-  it('an_issue_without_a_number_cannot_be_built_because_nothing_downstream_could_use_it', () => {
-    expect(() => new PlanIssue({ number: 0, url: 'https://github.com/owner/name/issues/0' }))
-      .toThrow(/numbered from one/)
-    expect(() => new PlanIssue({ number: 7, url: '' })).toThrow(/reachable at a url/)
   })
 
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {

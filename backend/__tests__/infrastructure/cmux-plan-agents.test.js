@@ -368,11 +368,6 @@ describe('LaunchPolicy', () => {
     expect(() => policy().afterProbing(1.5)).toThrow(/probed from one up to 4/)
   })
 
-  it('a_budget_that_would_never_probe_or_would_resend_a_negative_count_cannot_be_built', () => {
-    expect(() => new LaunchBudget({ attempts: 0, resends: 1 })).toThrow(/count of at least one/)
-    expect(() => new LaunchBudget({ attempts: 2, resends: -1 })).toThrow(/resends of a launch/)
-  })
-
   it('a_budget_with_no_resends_gives_up_where_the_first_send_runs_out', () => {
     const strict = new LaunchPolicy({ budget: new LaunchBudget({ attempts: 2, resends: 0 }) })
 

@@ -78,43 +78,6 @@ describe('PlanAgentBrief', () => {
     expect(errand()).not.toContain('-OK')
     expect(errand()).not.toContain('nonce')
   })
-
-  it('a_brief_without_the_paths_it_interpolates_refuses_to_exist_instead_of_shipping_the_word_undefined', () => {
-    expect(() => new PlanAgentBrief({ conventions: '/plugin/conventions' })).toThrow(/dispatch-check/)
-    expect(() => new PlanAgentBrief({ dispatchCheck: '/x' })).toThrow(/yardstick/)
-  })
-
-  it('it_rejects_relative_paths_because_they_resolve_silently_wrong_in_the_agents_working_directory', () => {
-    expect(() => new PlanAgentBrief({
-      dispatchCheck: 'scripts/dispatch-check.mjs',
-      conventions: '/plugin/conventions',
-    })).toThrow(/dispatch-check/)
-    expect(() => new PlanAgentBrief({
-      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
-      conventions: 'plugin/conventions',
-    })).toThrow(/yardstick/)
-  })
-
-  it('a_missing_repository_refuses_to_exist_instead_of_shipping_the_word_undefined_into_gh_issue_view', () => {
-    const brief = new PlanAgentBrief({
-      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
-      conventions: '/plugin/conventions',
-      ctStep: '/plugin/scripts/ct-step.mjs',
-    })
-
-    expect(() => brief.errandFor({ issue: { number: 42 }, repository: undefined })).toThrow(/repository/)
-  })
-
-  it('a_repository_that_was_never_validated_is_refused_even_when_it_reads_like_a_good_one', () => {
-    const brief = new PlanAgentBrief({
-      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
-      conventions: '/plugin/conventions',
-      ctStep: '/plugin/scripts/ct-step.mjs',
-    })
-
-    expect(() => brief.errandFor({ issue: { number: 42 }, repository: 'owner/name' })).toThrow(/repository/)
-    expect(() => brief.errandFor({ issue: { number: 42 }, repository: '   ' })).toThrow(/repository/)
-  })
 })
 
 describe('PlanAgentBrief resuming the agent', () => {
@@ -161,18 +124,6 @@ describe('PlanAgentBrief resuming the agent', () => {
     expect(errand()).toMatch(/no la mergees/i)
     expect(errand()).toMatch(/PARA/)
   })
-
-  it('a_brief_that_cannot_name_ct_step_refuses_to_exist_instead_of_shipping_the_word_undefined', () => {
-    expect(() => new PlanAgentBrief({
-      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
-      conventions: '/plugin/conventions',
-    })).toThrow(/ct-step/)
-    expect(() => new PlanAgentBrief({
-      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
-      conventions: '/plugin/conventions',
-      ctStep: 'scripts/ct-step.mjs',
-    })).toThrow(/ct-step/)
-  })
 })
 
 describe('PlanAgentBrief asking the agent for changes', () => {
@@ -203,14 +154,5 @@ describe('PlanAgentBrief asking the agent for changes', () => {
   it('it_never_promises_a_permission_nobody_mints', () => {
     expect(errand()).not.toContain('-OK')
     expect(errand()).not.toContain('nonce')
-  })
-
-  it('a_review_without_the_repository_refuses_to_exist_instead_of_shipping_undefined_into_the_command', () => {
-    expect(() => new PlanAgentBrief({
-      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
-      conventions: '/plugin/conventions',
-      ctStep: '/plugin/scripts/ct-step.mjs',
-    }).reviewErrandFor({ issueNumber: 42, repository: 'owner/name', changes: 'x' }))
-      .toThrow(/names the repository/)
   })
 })

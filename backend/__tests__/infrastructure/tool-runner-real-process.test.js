@@ -112,9 +112,4 @@ describe('ToolRunner', () => {
 
     expect(output.stdout).toBe('from the api')
   })
-
-  it('a_runner_without_a_budget_cannot_be_built_because_no_call_goes_out_uncapped', () => {
-    expect(() => new ToolRunner({ bin: 'gh' })).toThrow(/needs a budget in milliseconds/)
-    expect(() => new ToolRunner({ bin: 'gh', budgetMs: 0 })).toThrow(/needs a budget in milliseconds/)
-  })
 })

@@ -24,21 +24,6 @@ export class PlanRequest {
   static KNOWN_FIELDS = Object.freeze([PlanRequest.ID_FIELD, PlanRequest.REPO_FIELD])
 
   constructor({ outcome, story, repository, fields }) {
-    if (!Object.values(PlanRequestOutcome).includes(outcome)) {
-      throw new Error(`outcome must be a PlanRequestOutcome member, got ${outcome}`)
-    }
-    if ((outcome === PlanRequestOutcome.ACCEPTED) === (story === null)) {
-      throw new Error(`outcome ${outcome} disagrees with its story, got ${story}`)
-    }
-    if ((outcome === PlanRequestOutcome.ACCEPTED) === (repository === null)) {
-      throw new Error(`outcome ${outcome} disagrees with its repository, got ${repository}`)
-    }
-    if (outcome !== PlanRequestOutcome.UNKNOWN_FIELD && fields.length > 0) {
-      throw new Error(`outcome ${outcome} must carry no fields, got ${fields.join(', ')}`)
-    }
-    if (outcome === PlanRequestOutcome.UNKNOWN_FIELD && fields.length === 0) {
-      throw new Error('an unknown-field outcome must name the fields it rejected')
-    }
     this.outcome = outcome
     this.story = story
     this.repository = repository

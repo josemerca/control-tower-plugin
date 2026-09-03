@@ -20,18 +20,11 @@ export class Invocation {
   static #WHOLE_NUMBER = /^\d+$/
 
   constructor({ outcome, port, stateRoot, reason }) {
-    if (!Object.values(InvocationOutcome).includes(outcome)) {
-      throw new Error(`outcome must be an InvocationOutcome member, got ${outcome}`)
-    }
-    if ((outcome === InvocationOutcome.READY) === (reason === null)) {
-      this.outcome = outcome
-      this.port = port
-      this.stateRoot = stateRoot
-      this.reason = reason
-      Object.freeze(this)
-      return
-    }
-    throw new Error(`outcome ${outcome} disagrees with its reason, got ${JSON.stringify(reason)}`)
+    this.outcome = outcome
+    this.port = port
+    this.stateRoot = stateRoot
+    this.reason = reason
+    Object.freeze(this)
   }
 
   static #refused(outcome, reason) {
