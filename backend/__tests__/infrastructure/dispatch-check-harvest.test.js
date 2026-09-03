@@ -7,6 +7,7 @@ import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
 import { HarvestOutcome } from '../../src/domain/value-objects/harvest-outcome.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { HarvestFailure, HarvestNotRead, HarvestNotUnderstood } from '../../src/domain/exceptions.js'
+import { BigQueryTable } from '../../../plugin/scripts/bigquery-load.js'
 
 class HarvestDouble {
   static ROOT = '/repo/checkout'
@@ -38,15 +39,17 @@ class HarvestDouble {
     '',
   ].join('\n')
 
-  constructor({ code, stdout = '', stderr = '' }) {
+  constructor({ code, stdout = '', stderr = '', harvestTable = null }) {
     this.said = new ProcessOutput({ code, stdout, stderr })
     this.calls = []
+    this.harvestTable = harvestTable
   }
 
   harvest() {
     return new DispatchCheckHarvest({
       root: HarvestDouble.ROOT,
       dispatchCheck: HarvestDouble.CHECK,
+      harvestTable: this.harvestTable,
       node: (argv, options) => {
         this.calls.push([argv, options])
         return Promise.resolve(this.said)
@@ -128,6 +131,31 @@ describe('DispatchCheckHarvest', () => {
       '/plugin/scripts/dispatch-check.mjs', '7', '--repo', 'owner/name', '--collect',
     ])
     expect(asked.calls[0][1]).toEqual({ cwd: '/repo/checkout' })
+  })
+
+  it('without_a_harvest_table_the_argv_is_byte_for_byte_the_one_of_today', () => {
+    expect(DispatchCheckHarvest.argvFor({
+      dispatchCheck: HarvestDouble.CHECK,
+      issueNumber: HarvestDouble.ISSUE,
+      repository: HarvestDouble.REPOSITORY,
+      harvestTable: null,
+    })).toEqual([HarvestDouble.CHECK, '7', '--repo', 'owner/name', '--collect'])
+  })
+
+  it('with_a_harvest_table_the_command_asks_the_plugin_to_load_the_row_after_the_five_arguments_of_today', async () => {
+    const harvestTable = BigQueryTable.parse('p:d.t')
+
+    expect(DispatchCheckHarvest.argvFor({
+      dispatchCheck: HarvestDouble.CHECK,
+      issueNumber: HarvestDouble.ISSUE,
+      repository: HarvestDouble.REPOSITORY,
+      harvestTable,
+    })).toEqual([HarvestDouble.CHECK, '7', '--repo', 'owner/name', '--collect', '--bq', 'p:d.t'])
+
+    const asked = new HarvestDouble({ code: 0, stdout: HarvestDouble.COLLECTED_LINE, harvestTable })
+    await asked.asked()
+
+    expect(asked.calls[0][0]).toEqual([HarvestDouble.CHECK, '7', '--repo', 'owner/name', '--collect', '--bq', 'p:d.t'])
   })
 
   it('a_slice_whose_residue_the_plugin_removed_comes_back_collected', async () => {

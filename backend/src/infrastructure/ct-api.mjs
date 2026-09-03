@@ -90,7 +90,7 @@ class Disk {
 
 class CtApi {
   static #USAGE =
-    `usage: ct-api.mjs (no arguments; set ${Invocation.PORT_VARIABLE} to pick a port, 0 for an ephemeral one)`
+    `usage: ct-api.mjs (no arguments; set ${Invocation.PORT_VARIABLE} to pick a port, 0 for an ephemeral one; set ${Invocation.HARVEST_TABLE_VARIABLE} to project:dataset.table so every harvest loads its row into BigQuery)`
   static #BAD_USAGE = 2
   static #CANNOT_LISTEN = 1
   static #PROCESS_TIMEOUT_MS = 30_000
@@ -148,7 +148,7 @@ class CtApi {
     })
   }
 
-  static #harvestClock({ workspace, root, environment }) {
+  static #harvestClock({ workspace, root, environment, harvestTable }) {
     const surveyWorkspaces = new SurveyWorkspaces({ workspace })
     const harvestDelivery = new HarvestDelivery({
       harvest: new DispatchCheckHarvest({
@@ -160,6 +160,7 @@ class CtApi {
         }),
         dispatchCheck: PluginTree.dispatchCheck(),
         root,
+        harvestTable,
       }),
     })
 
@@ -264,7 +265,7 @@ class CtApi {
       CtApi.#refuseListen(`could not listen on ${LOOPBACK}: ${error.message}`)
     }
     process.stdout.write(`${JSON.stringify({ port })}\n`)
-    CtApi.#sweepUntilItBreaks(CtApi.#harvestClock({ workspace, root, environment }))
+    CtApi.#sweepUntilItBreaks(CtApi.#harvestClock({ workspace, root, environment, harvestTable: asked.harvestTable }))
   }
 }
 

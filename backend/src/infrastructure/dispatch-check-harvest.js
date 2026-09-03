@@ -28,15 +28,17 @@ export class DispatchCheckHarvest extends Harvest {
     [DispatchCheckHarvest.KEPT]: () => HarvestOutcome.KEPT,
   })
 
-  constructor({ node, dispatchCheck, root }) {
+  constructor({ node, dispatchCheck, root, harvestTable }) {
     super()
     this.node = node
     this.dispatchCheck = dispatchCheck
     this.root = root
+    this.harvestTable = harvestTable
   }
 
-  static argvFor({ dispatchCheck, issueNumber, repository }) {
-    return [dispatchCheck, String(issueNumber), '--repo', repository.text, '--collect']
+  static argvFor({ dispatchCheck, issueNumber, repository, harvestTable }) {
+    const argv = [dispatchCheck, String(issueNumber), '--repo', repository.text, '--collect']
+    return harvestTable === null ? argv : [...argv, '--bq', harvestTable.id]
   }
 
   static declaredCodes() {
@@ -45,7 +47,12 @@ export class DispatchCheckHarvest extends Harvest {
 
   async collect({ issueNumber, repository }) {
     const said = await this.node(
-      DispatchCheckHarvest.argvFor({ dispatchCheck: this.dispatchCheck, issueNumber, repository }),
+      DispatchCheckHarvest.argvFor({
+        dispatchCheck: this.dispatchCheck,
+        issueNumber,
+        repository,
+        harvestTable: this.harvestTable,
+      }),
       { cwd: this.root }
     )
     const projected = DispatchCheckHarvest.#BY_CODE[said.code]
