@@ -39,16 +39,35 @@ class ImplementPlanSpy {
   }
 }
 
+class ReviewsSpy {
+  constructor() {
+    this.started = []
+    this.stopped = []
+  }
+
+  start(watch) {
+    this.started.push(watch)
+  }
+
+  stop(issueNumber) {
+    this.stopped.push(issueNumber)
+  }
+}
+
 class RunningApi {
   static #started = []
   static PATH = '/implement-plan'
   static ACCEPTED_BODY = '{"agent":"workspace:20","issue":33,"repo":"jjponz/repo-pulse"}'
   static ANSWER = '{"status":"implementing","agent":"workspace:20","issue":33}'
   static spy = null
+  static reviews = null
 
   static async listening(spy = new ImplementPlanSpy()) {
     RunningApi.spy = spy
-    const server = new ApiServer({ port: 0, startPlan: null, implementPlan: spy })
+    RunningApi.reviews = new ReviewsSpy()
+    const server = new ApiServer({
+      port: 0, startPlan: null, implementPlan: spy, reviews: RunningApi.reviews,
+    })
     const port = await server.start()
     RunningApi.#started.push(server)
 
@@ -227,5 +246,32 @@ describe('ImplementCollapse', () => {
   it('a_family_is_not_a_way_of_collapsing_so_answering_one_raises_instead_of_guessing', () => {
     expect(() => ImplementCollapse.of(new PlanFailure('nope'))).toThrow(/no status declared/)
     expect(() => ImplementCollapse.of(new GoFailure('nope'))).toThrow(/no status declared/)
+  })
+})
+
+describe('implementing the plan lifts the watch on its issue', () => {
+  afterEach(RunningApi.stopAll)
+
+  it('implementing_the_plan_lifts_the_watch_because_there_is_nothing_left_to_ask_for', async () => {
+    const response = await RunningApi.asking(RunningApi.ACCEPTED_BODY)
+
+    expect(response.status).toBe(202)
+    expect(RunningApi.reviews.stopped).toEqual([33])
+  })
+
+  it('a_refused_request_to_implement_lifts_no_watch', async () => {
+    const response = await RunningApi.asking('{"agent":"workspace:20","issue":0,"repo":"a/b"}')
+
+    expect(response.status).toBe(400)
+    expect(RunningApi.reviews.stopped).toEqual([])
+  })
+
+  it('a_plan_the_agent_would_not_take_keeps_its_watch_so_the_changes_can_still_be_asked_for', async () => {
+    const spy = ImplementPlanSpy.failingWith(new PlanAgentNotResumed('no such workspace'))
+
+    const response = await RunningApi.post(await RunningApi.listening(spy), RunningApi.ACCEPTED_BODY)
+
+    expect(response.status).toBe(503)
+    expect(RunningApi.reviews.stopped).toEqual([])
   })
 })

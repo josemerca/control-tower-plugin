@@ -14,9 +14,12 @@ import { DiskGoRegistry } from './disk-go-registry.js'
 import { PlanAgentBrief } from './plan-agent-brief.js'
 import { PlanContractProgress } from './plan-contract-progress.js'
 import { PlanEvents } from './plan-events-route.js'
+import { PlanReviewWatch } from './plan-review-watch.js'
 import { StartPlan } from '../application/actions/start-plan.js'
 import { ImplementPlan } from '../application/actions/implement-plan.js'
 import { ReadPlanProgress, ReadPlanProgressParams } from '../application/queries/read-plan-progress.js'
+import { ReadChangesAsked, ReadChangesAskedParams } from '../application/queries/read-changes-asked.js'
+import { ReviewPlan, ReviewPlanParams } from '../application/actions/review-plan.js'
 import { ToolRunner } from './tool-runner.js'
 import { Gh } from './gh.js'
 import { SystemClock } from './system-clock.js'
@@ -93,6 +96,7 @@ class CtApi {
   static #RESENDS = 1
   static #SECONDS_BETWEEN_PROBES = 1
   static #SECONDS_BETWEEN_READS = 2
+  static #SECONDS_BETWEEN_ASKS = 30
   static #LAUNCH_DIRECTORY = 'ct-plan'
 
   static #refuseUsage(reason) {
@@ -157,6 +161,18 @@ class CtApi {
     })
   }
 
+  static #planReviews(planIssues, planAgents) {
+    const readChangesAsked = new ReadChangesAsked({ planIssues })
+    const reviewPlan = new ReviewPlan({ planAgents })
+
+    return new PlanReviewWatch({
+      asked: (watch) => readChangesAsked.execute(new ReadChangesAskedParams(watch)),
+      review: (params) => reviewPlan.execute(new ReviewPlanParams(params)),
+      sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_ASKS),
+      stderr: (line) => process.stderr.write(line),
+    })
+  }
+
   static async run(argv, environment) {
     const asked = Invocation.from(argv, environment, homedir())
     if (asked.outcome !== InvocationOutcome.READY) {
@@ -187,6 +203,7 @@ class CtApi {
     const server = new ApiServer({
       port: asked.port,
       startPlan: CtApi.#startPlan(git, planAgents, planIssues),
+      reviews: CtApi.#planReviews(planIssues, planAgents),
       implementPlan: new ImplementPlan({
         goRegistry: new DiskGoRegistry({
           random: randomBytes,

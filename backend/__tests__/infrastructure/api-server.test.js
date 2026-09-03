@@ -110,6 +110,21 @@ class FrontendFixture {
   }
 }
 
+class ReviewsSpy {
+  constructor() {
+    this.started = []
+    this.stopped = []
+  }
+
+  start(watch) {
+    this.started.push(watch)
+  }
+
+  stop(issueNumber) {
+    this.stopped.push(issueNumber)
+  }
+}
+
 class RunningApi {
   static #started = []
   static STORY = 'ABC-123'
@@ -119,10 +134,18 @@ class RunningApi {
     '{"status":"started","id":"ABC-123","repo":"owner/name",' +
     '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"agent":"workspace:4"}'
   static spy = null
+  static reviews = null
 
   static async listening(options = {}) {
     RunningApi.spy = new StartPlanSpy()
-    const server = new ApiServer({ port: 0, startPlan: RunningApi.spy, implementPlan: null, ...options })
+    RunningApi.reviews = new ReviewsSpy()
+    const server = new ApiServer({
+      port: 0,
+      startPlan: RunningApi.spy,
+      implementPlan: null,
+      reviews: RunningApi.reviews,
+      ...options,
+    })
     const port = await server.start()
     RunningApi.#started.push(server)
     return port
@@ -824,5 +847,21 @@ describe('ApiServer', () => {
 
     expect(askedRightAfterAbort).toBeGreaterThan(0)
     expect(spy.asked).toBe(askedRightAfterAbort)
+  })
+
+  it('a_plan_that_started_is_put_under_watch_so_a_change_asked_for_reaches_its_agent', async () => {
+    const port = await RunningApi.listening()
+
+    await RunningApi.accepted(port)
+
+    expect(RunningApi.reviews.started).toEqual([StartPlanSpy.WATCH])
+  })
+
+  it('a_start_that_was_refused_puts_nothing_under_watch', async () => {
+    const port = await RunningApi.listening()
+
+    await RunningApi.startPlan(port, '{"id":"nope","repo":"owner/name"}')
+
+    expect(RunningApi.reviews.started).toEqual([])
   })
 })
