@@ -149,6 +149,21 @@ class RunningApi {
     return RunningApi.startPlan(port, RunningApi.ACCEPTED_BODY)
   }
 
+  static async watching(port, headers = {}) {
+    return fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+      headers: { Origin: `http://127.0.0.1:${port}`, ...headers },
+      signal: AbortSignal.timeout(1000),
+    })
+  }
+
+  static async firstFrame(response) {
+    const reader = response.body.getReader()
+    const { value } = await reader.read()
+    await reader.cancel()
+
+    return new TextDecoder().decode(value)
+  }
+
   static ask(port, lines) {
     return new Promise((resolve) => {
       const socket = connect(port, '127.0.0.1', () => socket.write(lines))
@@ -707,29 +722,28 @@ describe('ApiServer', () => {
   })
 
   it('a_plan_that_started_is_remembered_so_the_page_can_watch_it_by_the_issue_it_opened', async () => {
-    const { planEvents } = ProgressSpy.events(PlanState.READY)
+    const { planEvents } = ProgressSpy.events(PlanState.READY, { sleepMs: 5 })
     const port = await RunningApi.listening({ planEvents })
 
     await RunningApi.accepted(port)
-    const response = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
-      headers: { Origin: `http://127.0.0.1:${port}` },
-    })
+    const opened = await RunningApi.watching(port)
 
-    expect(response.status).toBe(200)
-    expect(await response.text()).toBe(PlanEvents.frameFor(PlanState.READY))
-    expect(response.headers.get('access-control-allow-origin')).toBe(null)
+    expect(opened.status).toBe(200)
+    expect(await RunningApi.firstFrame(opened)).toBe(PlanEvents.frameFor(PlanState.READY))
+    expect(opened.headers.get('access-control-allow-origin')).toBe(null)
   })
 
-  it('a_second_subscription_after_ready_is_a_404_so_an_event_source_gives_up_instead_of_reconnecting_forever', async () => {
-    const { planEvents } = ProgressSpy.events(PlanState.READY)
+  it('a_watch_survives_ready_so_the_page_can_come_back_while_the_plan_is_reworked', async () => {
+    const { planEvents } = ProgressSpy.events(PlanState.READY, { sleepMs: 5 })
     const port = await RunningApi.listening({ planEvents })
 
     await RunningApi.accepted(port)
-    await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`)
-    const again = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`)
+    const opened = await RunningApi.watching(port)
+    await RunningApi.firstFrame(opened)
+    const again = await RunningApi.watching(port)
 
-    expect(again.status).toBe(404)
-    expect(await again.text()).toBe(`{"error":"${EventsRefusal.NOT_WATCHED}"}`)
+    expect(again.status).toBe(200)
+    expect(await RunningApi.firstFrame(again)).toBe(PlanEvents.frameFor(PlanState.READY))
   })
 
   it('a_subscription_after_a_progress_nobody_could_read_is_a_404_too_because_that_ending_is_final_as_well', async () => {
