@@ -275,7 +275,7 @@ scripts/vendor/  `yaml` bundleado — DERIVADO, trackeado, ver abajo
 hooks/        SessionStart (hidratación), Stop (estado al día), PreToolUse sobre Bash (guarda de commits) y sobre Task (puerta del despacho)
 dist/         bundles de los hooks — DERIVADO, trackeado, ver arriba
 skills/       los 11 skills forkados + writing-plans-prescriptive (propio) + LICENSE-superpowers + FORK.md
-__tests__/    120 ficheros, 2.997 tests
+__tests__/    126 ficheros, 3.177 tests
 ```
 
 Y un nivel más arriba, en el repo y **fuera** de lo que se distribuye (el `source` del

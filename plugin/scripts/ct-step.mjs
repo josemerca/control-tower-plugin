@@ -398,7 +398,7 @@ const senalDelSlice = (() => {
   const { meta } = parseStateSafe(readFileSync(join(repoRoot, '.agent', 'SLICE.md'), 'utf8'))
   return typeof meta.senal === 'string' && meta.senal.trim() ? meta.senal.trim() : null
 })()
-const intento = () => run.controlRetries + run.judgeRetries + run.correctionRetries + 1
+const intento = () => StepSeal.attemptOf(run)
 // Los dos campos de identidad que el módulo de la fila NO puede ir a buscar (es
 // puro): los aporta quien escribe. La versión sale del manifiesto del plugin —un
 // `ct-step` reescrito hace incomparables dos runs, igual que un plan reescrito— y
@@ -611,11 +611,14 @@ function verboNext() {
   // en campo, con el implementador y con el juez. El sello lo lee el hook del
   // tool `Task` (hooks/dispatch-guard.js), que sin él DENIEGA el despacho.
   //
-  // Se pone en UN sitio y no en los tres `case`, y la condición sale de la
-  // misma constante que nombra la entrada de cada paso: un paso al que `next`
-  // no le escribe nada no se sella, porque sellarlo afirmaría que allí hay un
-  // despacho protegido. Los `discards` NO entran en el sello a propósito — ver
-  // StepSeal en scripts/dispatch-gate.js.
+  // La condición sale de la misma constante que nombra la entrada de cada paso,
+  // así que un paso al que `next` no le escribe nada no se sella: sellarlo
+  // afirmaría que allí hay un despacho protegido.
+  //
+  // El sello NO cuenta los descartes, y por eso sobrevive a uno: al descartar,
+  // `consumirPaquete` no corre y el artefacto de ese intento sigue en disco, así
+  // que obligar a pasar otra vez por aquí sería pedir que se regenere lo que ya
+  // está. Los tres autobucles de `discarded` son los de run-machine.js.
   if (StepSeal.inputWrittenFor(run.step) !== null) {
     run = { ...run, nextSeal: StepSeal.of(run) }
     guardar()

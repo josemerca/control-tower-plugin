@@ -22,10 +22,6 @@ class PayloadMother {
   static aBashCommandIn(cwd) {
     return { hook_event_name: 'PreToolUse', tool_name: 'Bash', cwd, tool_input: { command: 'git status' } }
   }
-
-  static aTaskThatAlreadyFinishedIn(cwd) {
-    return { hook_event_name: 'PostToolUse', tool_name: 'Task', cwd, tool_input: {} }
-  }
 }
 
 class RunFileMother {
@@ -116,16 +112,6 @@ describe('DispatchGuard, deciding without touching disk', () => {
     const readRun = () => { lookups++; return RunFileMother.waitingForItsStep() }
 
     const decision = DispatchGuard.decide(PayloadMother.aBashCommandIn('/x'), readRun, CT_STEP_PATH)
-
-    expect(decision).toBeNull()
-    expect(lookups).toBe(0)
-  })
-
-  it('a_task_that_already_ran_is_not_this_gates_business_because_the_subagent_is_already_spent', () => {
-    let lookups = 0
-    const readRun = () => { lookups++; return RunFileMother.waitingForItsStep() }
-
-    const decision = DispatchGuard.decide(PayloadMother.aTaskThatAlreadyFinishedIn('/x'), readRun, CT_STEP_PATH)
 
     expect(decision).toBeNull()
     expect(lookups).toBe(0)

@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { Dispatch, DispatchGate } from '../scripts/dispatch-gate.js'
 
-export class RunFile {
+class RunFile {
   static #DIR = '.agent'
   static #SHAPE = /^run-\d+\.json$/
 
@@ -16,7 +16,7 @@ export class RunFile {
   }
 
   static #listedIn(cwd) {
-    if (typeof cwd !== 'string' || cwd === '') return []
+    if (cwd === '') return []
     try {
       return readdirSync(join(cwd, RunFile.#DIR))
         .filter((entry) => RunFile.#SHAPE.test(entry))
@@ -41,7 +41,7 @@ export class DispatchGuard {
 
   static decide(input, readRun, ctStepPath) {
     if (input?.hook_event_name !== DispatchGuard.#EVENT) return null
-    if (input?.tool_name !== DispatchGuard.#TOOL) return null
+    if (input.tool_name !== DispatchGuard.#TOOL) return null
     const run = readRun(input.cwd)
     if (run === null) return null
     const verdict = DispatchGate.verdictFor(run, ctStepPath)

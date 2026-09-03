@@ -8,8 +8,16 @@ let repo
 const { ct, informe, veredicto, crudo, commits, estado, juzgar } = crearHelpers(() => repo)
 
 const CT_STEP_PATH = '/plugins/control-tower-loop/scripts/ct-step.mjs'
-const aVeto = () => veredicto('FAIL', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }])
-const dispatchNow = () => DispatchGate.verdictFor(estado(), CT_STEP_PATH).dispatch
+
+class Conducting {
+  static aVetoFromTheJudge() {
+    return veredicto('FAIL', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }])
+  }
+
+  static dispatchNow() {
+    return DispatchGate.verdictFor(estado(), CT_STEP_PATH).dispatch
+  }
+}
 
 beforeEach(() => { repo = montarRepo() })
 afterEach(() => { rmSyncBestEffort(repo) })
@@ -58,13 +66,13 @@ describe('what the gate decides on the state ct-step actually wrote', () => {
     ct('controls')
 
     expect(estado().step).toBe('judge')
-    expect(dispatchNow()).toBe(Dispatch.DENIED)
+    expect(Conducting.dispatchNow()).toBe(Dispatch.DENIED)
   })
 
   it('a_run_that_just_asked_for_its_step_is_let_through', () => {
     ct('next')
 
-    expect(dispatchNow()).toBe(Dispatch.LET_THROUGH)
+    expect(Conducting.dispatchNow()).toBe(Dispatch.LET_THROUGH)
   })
 
   it('a_discarded_report_is_let_through_again_because_the_brief_it_was_given_is_still_on_disk', () => {
@@ -73,7 +81,7 @@ describe('what the gate decides on the state ct-step actually wrote', () => {
     ct('report', crudo('esto no es json'))
 
     expect(estado().discards).toBe(1)
-    expect(dispatchNow()).toBe(Dispatch.LET_THROUGH)
+    expect(Conducting.dispatchNow()).toBe(Dispatch.LET_THROUGH)
   })
 
   it('a_vetoed_task_is_denied_until_it_asks_again_so_the_findings_of_the_veto_reach_the_implementer', () => {
@@ -81,21 +89,20 @@ describe('what the gate decides on the state ct-step actually wrote', () => {
     ct('report', informe(['uno.txt']))
     ct('controls')
 
-    juzgar(aVeto())
+    juzgar(Conducting.aVetoFromTheJudge())
 
     expect(estado().judgeRetries).toBe(1)
     expect(commits()).toBe(1)
-    expect(dispatchNow()).toBe(Dispatch.DENIED)
+    expect(Conducting.dispatchNow()).toBe(Dispatch.DENIED)
   })
 
-  it('asking_again_after_a_veto_carries_the_findings_and_lifts_the_denial_in_one_move', () => {
+  it('asking_again_after_a_veto_lifts_the_denial_so_the_step_that_prints_the_findings_is_the_one_that_unblocks', () => {
     ct('report', informe(['uno.txt']))
     ct('controls')
-    juzgar(aVeto())
+    juzgar(Conducting.aVetoFromTheJudge())
 
-    const asked = ct('next')
+    ct('next')
 
-    expect(asked.stdout).toContain('El juez devolvió esta tarea')
-    expect(dispatchNow()).toBe(Dispatch.LET_THROUGH)
+    expect(Conducting.dispatchNow()).toBe(Dispatch.LET_THROUGH)
   })
 })

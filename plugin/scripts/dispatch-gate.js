@@ -31,14 +31,14 @@ export class StepSeal {
   static SEALED_STEPS = Object.freeze(Object.keys(StepSeal.#INPUT_OF))
 
   static of(run) {
-    return `${run.task}:${run.step}:${StepSeal.#attempt(run)}`
+    return `${run.task}:${run.step}:${StepSeal.attemptOf(run)}`
   }
 
   static inputWrittenFor(step) {
     return StepSeal.#INPUT_OF[step] ?? null
   }
 
-  static #attempt(run) {
+  static attemptOf(run) {
     return run.controlRetries + run.judgeRetries + run.correctionRetries + 1
   }
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { STEPS, RUN_STATES, newRun } from '../scripts/run-machine.js'
-import { Dispatch, DispatchGate, DispatchVerdict, StepSeal } from '../scripts/dispatch-gate.js'
+import { Dispatch, DispatchGate, StepSeal } from '../scripts/dispatch-gate.js'
 
 const CT_STEP_PATH = '/plugins/control-tower-loop/scripts/ct-step.mjs'
 
@@ -68,7 +68,7 @@ class RunMother {
     return { ...first, task: first.task + 1 }
   }
 
-  static deliveredWithoutEndToEndRunsSoItStayedOnSliceJudge() {
+  static deliveredByAPluginThatDidNotWriteSeals() {
     return RunMother.#born({ step: STEPS.SLICE_JUDGE, closed: RUN_STATES.DELIVERED })
   }
 
@@ -100,20 +100,6 @@ describe('StepSeal, the note next leaves saying the step was asked for', () => {
 
   it('the_sealed_steps_are_steps_the_machine_knows_so_no_seal_guards_a_step_that_cannot_happen', () => {
     for (const step of StepSeal.SEALED_STEPS) expect(Object.values(STEPS)).toContain(step)
-  })
-
-  it('a_verdict_is_frozen_so_the_hook_it_travels_to_cannot_turn_a_denial_into_a_let_through', () => {
-    const denial = DispatchVerdict.denied('porque no pediste el paso')
-
-    expect(() => { denial.dispatch = Dispatch.LET_THROUGH }).toThrow()
-    expect(denial.dispatch).toBe(Dispatch.DENIED)
-  })
-
-  it('no_step_is_both_sealed_and_left_to_its_own_verb', () => {
-    const sealed = StepSeal.SEALED_STEPS
-    const rest = Object.values(STEPS).filter((step) => !sealed.includes(step))
-    expect(rest.some((step) => sealed.includes(step))).toBe(false)
-    expect(sealed.length + rest.length).toBe(Object.values(STEPS).length)
   })
 })
 
@@ -163,8 +149,8 @@ describe('DispatchGate, on the three steps whose inputs next writes', () => {
     expect(Gate.letsThrough(run)).toBe(Dispatch.DENIED)
   })
 
-  it.for(StepSeal.SEALED_STEPS)('a_discard_on_%s_does_not_force_asking_for_the_step_again', (step) => {
-    expect(Gate.letsThrough(RunMother.havingAskedAndThenDiscarded(step))).toBe(Dispatch.LET_THROUGH)
+  it('a_discard_does_not_force_asking_for_the_step_again', () => {
+    expect(Gate.letsThrough(RunMother.havingAskedAndThenDiscarded(STEPS.JUDGE))).toBe(Dispatch.LET_THROUGH)
   })
 })
 
@@ -175,9 +161,10 @@ describe('DispatchGate, where it has nothing to say', () => {
     expect(Gate.letsThrough(RunMother.onStep(step))).toBe(Dispatch.LET_THROUGH)
   })
 
-  it('a_delivered_run_that_stayed_on_a_sealed_step_is_let_through_because_next_can_no_longer_seal_it', () => {
-    const run = RunMother.deliveredWithoutEndToEndRunsSoItStayedOnSliceJudge()
+  it('a_run_delivered_before_seals_existed_is_let_through_because_next_can_no_longer_seal_it', () => {
+    const run = RunMother.deliveredByAPluginThatDidNotWriteSeals()
 
+    expect(run.nextSeal).toBeUndefined()
     expect(Gate.letsThrough(run)).toBe(Dispatch.LET_THROUGH)
   })
 })

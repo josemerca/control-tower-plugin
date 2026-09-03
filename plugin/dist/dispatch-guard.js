@@ -102,12 +102,12 @@ var StepSeal = class _StepSeal {
   });
   static SEALED_STEPS = Object.freeze(Object.keys(_StepSeal.#INPUT_OF));
   static of(run) {
-    return `${run.task}:${run.step}:${_StepSeal.#attempt(run)}`;
+    return `${run.task}:${run.step}:${_StepSeal.attemptOf(run)}`;
   }
   static inputWrittenFor(step) {
     return _StepSeal.#INPUT_OF[step] ?? null;
   }
-  static #attempt(run) {
+  static attemptOf(run) {
     return run.controlRetries + run.judgeRetries + run.correctionRetries + 1;
   }
 };
@@ -143,7 +143,7 @@ var RunFile = class _RunFile {
     return _RunFile.#parsed(found[0]);
   }
   static #listedIn(cwd) {
-    if (typeof cwd !== "string" || cwd === "") return [];
+    if (cwd === "") return [];
     try {
       return readdirSync(join(cwd, _RunFile.#DIR)).filter((entry) => _RunFile.#SHAPE.test(entry)).map((entry) => join(cwd, _RunFile.#DIR, entry));
     } catch {
@@ -163,7 +163,7 @@ var DispatchGuard = class _DispatchGuard {
   static #TOOL = "Task";
   static decide(input, readRun, ctStepPath) {
     if (input?.hook_event_name !== _DispatchGuard.#EVENT) return null;
-    if (input?.tool_name !== _DispatchGuard.#TOOL) return null;
+    if (input.tool_name !== _DispatchGuard.#TOOL) return null;
     const run = readRun(input.cwd);
     if (run === null) return null;
     const verdict = DispatchGate.verdictFor(run, ctStepPath);
@@ -196,6 +196,5 @@ if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.ar
   else process.exit(0);
 }
 export {
-  DispatchGuard,
-  RunFile
+  DispatchGuard
 };
