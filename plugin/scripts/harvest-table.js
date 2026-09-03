@@ -75,10 +75,16 @@ export class HarvestTable {
   }
 
   static #BLOCKED_FIELDS = [
-    new HarvestColumn({ name: 'started_at', type: HarvestColumn.TIMESTAMP, mode: HarvestColumn.REQUIRED, valueOf: HarvestTable.#fromEpisode('from') }),
+    new HarvestColumn({ name: 'started_at', type: HarvestColumn.TIMESTAMP, mode: HarvestColumn.REQUIRED, valueOf: HarvestTable.#episodeStart }),
     new HarvestColumn({ name: 'ended_at', type: HarvestColumn.TIMESTAMP, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#fromEpisode('to') }),
     new HarvestColumn({ name: 'seconds', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#fromEpisode('seconds') }),
   ]
+
+  static #episodeStart(episode) {
+    const { from: startedAt } = episode
+    if (startedAt === undefined) HarvestTable.#missing('blocked.started_at')
+    return startedAt
+  }
 
   static #blockedRows(row) {
     return HarvestTable.#valueAt(row, 'blocked').map((episode) => Object.fromEntries(
