@@ -52,6 +52,7 @@ import { execFileSync } from 'node:child_process'
 import { harvestSlice, formatDuration, closingPrNumbers } from './harvest.js'
 import { parseRepoSlug } from './dispatch.js'
 import { aggregateVerdictMeasures, aggregateBriefMeasures, METRICS_REPO_DIR, metricsRepoRelPath } from './run-metrics.js'
+import { BigQueryTable } from './bigquery-load.js'
 
 // `arg()` endurecido: el MISMO de ct-next.mjs/ct-groom.mjs/ct-status.mjs,
 // palabra por palabra y por el mismo motivo medido — un flag colgante no puede
@@ -63,7 +64,7 @@ const arg = (f, d) => {
   return (typeof v === 'string' && !v.startsWith('--')) ? v : true
 }
 
-const usage = 'uso: ct-harvest.mjs --repo <owner/repo> --milestone <título> [--json]'
+const usage = 'uso: ct-harvest.mjs --repo <owner/repo> --milestone <título> [--json] [--bq <proyecto:dataset.tabla>]'
 
 const repo = arg('--repo')
 if (repo === true) { console.error(`--repo inválido: "(sin valor)" — ${usage}`); process.exit(2) }
@@ -76,6 +77,14 @@ if (!parseRepoSlug(repo)) {
 const milestone = arg('--milestone')
 if (milestone === true) { console.error(`--milestone inválido: "(sin valor)" — ${usage}`); process.exit(2) }
 if (typeof milestone !== 'string' || milestone.length === 0) { console.error(usage); process.exit(2) }
+
+const bqArg = arg('--bq', null)
+if (bqArg === true) { console.error(`--bq inválido: "(sin valor)" — ${usage}`); process.exit(2) }
+const bqTable = bqArg === null ? null : BigQueryTable.parse(bqArg)
+if (bqArg !== null && !bqTable) {
+  console.error(`--bq inválido: "${bqArg}" — debe tener la forma proyecto:dataset.tabla (p.ej. mi-proyecto:control_tower.harvest).`)
+  process.exit(2)
+}
 
 const comoJson = process.argv.includes('--json')
 

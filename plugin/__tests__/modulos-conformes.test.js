@@ -30,6 +30,8 @@ class NacidosConformes {
     '__tests__/harvest-table.test.js',
     'scripts/bigquery-load.js',
     '__tests__/bigquery-load.test.js',
+    '__tests__/fixtures/fake-bq-bin/bq',
+    '__tests__/ct-harvest-bq.test.js',
   ]
 
   static PALABRAS_CASTELLANAS = [
