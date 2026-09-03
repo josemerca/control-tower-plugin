@@ -43,6 +43,10 @@ class Invoked {
     return Invocation.from([], {}, given)
   }
 
+  static withHarvestTable(given) {
+    return Invocation.from([], { [Invocation.HARVEST_TABLE_VARIABLE]: given }, Invoked.HOME)
+  }
+
   static harvesting(environment) {
     return Invocation.harvestEnvironment(environment, { ghTimeoutMs: Invoked.SECONDS_FOR_GH * 1000 })
   }
@@ -177,5 +181,31 @@ describe('Invocation resolving where Control Tower keeps its state', () => {
   it('an_argument_is_refused_before_the_state_root_is_even_resolved', () => {
     expect(Invocation.from(['--port'], {}, '').outcome)
       .toBe(InvocationOutcome.UNEXPECTED_ARGUMENT)
+  })
+})
+
+describe('Invocation resolving the BigQuery harvest table', () => {
+  it('a_well_formed_harvest_table_in_the_environment_reaches_the_invocation_parsed', () => {
+    const ready = Invoked.withHarvestTable('p:d.t')
+
+    expect(ready.outcome).toBe(InvocationOutcome.READY)
+    expect(ready.harvestTable.id).toBe('p:d.t')
+    expect(ready.stateRoot).toBe('/home/someone/.claude/control-tower')
+  })
+
+  it('without_the_variable_or_with_it_empty_there_is_no_harvest_table_and_the_port_still_settles', () => {
+    expect(Invoked.bare().harvestTable).toBe(null)
+    expect(Invoked.bare().port).toBe(8787)
+    expect(Invoked.withHarvestTable('').harvestTable).toBe(null)
+    expect(Invoked.withHarvestTable('').port).toBe(8787)
+  })
+
+  it('a_malformed_harvest_table_refuses_the_start_naming_the_variable_and_what_it_got', () => {
+    const refused = Invoked.withHarvestTable('not-a-table')
+
+    expect(refused.outcome).toBe(InvocationOutcome.MALFORMED_HARVEST_TABLE)
+    expect(refused.reason).toBe(
+      'CT_HARVEST_BQ_TABLE must look like proyecto:dataset.tabla, got "not-a-table"'
+    )
   })
 })

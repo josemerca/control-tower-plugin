@@ -1,10 +1,12 @@
 import { isAbsolute, join } from 'node:path'
+import { BigQueryTable } from '../../../plugin/scripts/bigquery-load.js'
 
 export const InvocationOutcome = Object.freeze({
   READY: 'ready',
   UNEXPECTED_ARGUMENT: 'unexpected-argument',
   MALFORMED_PORT: 'malformed-port',
   UNKNOWN_STATE_HOME: 'unknown-state-home',
+  MALFORMED_HARVEST_TABLE: 'malformed-harvest-table',
 })
 
 export class Invocation {
@@ -16,10 +18,11 @@ export class Invocation {
   static HOME_VARIABLE = 'HOME'
   static CLAIM_PREFIX = 'CT_CLAIM_'
   static CHILD_TIMEOUT_VARIABLE = 'CT_CLAIM_CHILD_TIMEOUT_MS'
+  static HARVEST_TABLE_VARIABLE = 'CT_HARVEST_BQ_TABLE'
   static #MAX_PORT = 65535
   static #WHOLE_NUMBER = /^\d+$/
 
-  constructor({ outcome, port, stateRoot, reason }) {
+  constructor({ outcome, port, stateRoot, harvestTable, reason }) {
     if (!Object.values(InvocationOutcome).includes(outcome)) {
       throw new Error(`outcome must be an InvocationOutcome member, got ${outcome}`)
     }
@@ -27,6 +30,7 @@ export class Invocation {
       this.outcome = outcome
       this.port = port
       this.stateRoot = stateRoot
+      this.harvestTable = harvestTable
       this.reason = reason
       Object.freeze(this)
       return
@@ -35,11 +39,11 @@ export class Invocation {
   }
 
   static #refused(outcome, reason) {
-    return new Invocation({ outcome, port: null, stateRoot: null, reason })
+    return new Invocation({ outcome, port: null, stateRoot: null, harvestTable: null, reason })
   }
 
-  static #ready(port, stateRoot) {
-    return new Invocation({ outcome: InvocationOutcome.READY, port, stateRoot, reason: null })
+  static #ready(port, stateRoot, harvestTable) {
+    return new Invocation({ outcome: InvocationOutcome.READY, port, stateRoot, harvestTable, reason: null })
   }
 
   static configuredIn(environment, home) {
@@ -95,7 +99,18 @@ export class Invocation {
         `the home directory of whoever runs this could not be resolved, so there is no absolute path for the state Control Tower shares with its plugin: set ${Invocation.HOME_VARIABLE}, or ${Invocation.CONFIG_VARIABLE} to an absolute path`
       )
     }
+    const given = environment[Invocation.HARVEST_TABLE_VARIABLE]
+    if (given === undefined || given === '') {
+      return Invocation.#ready(port, stateRoot, null)
+    }
+    const harvestTable = BigQueryTable.parse(given)
+    if (harvestTable === null) {
+      return Invocation.#refused(
+        InvocationOutcome.MALFORMED_HARVEST_TABLE,
+        `${Invocation.HARVEST_TABLE_VARIABLE} must look like proyecto:dataset.tabla, got ${JSON.stringify(given)}`
+      )
+    }
 
-    return Invocation.#ready(port, stateRoot)
+    return Invocation.#ready(port, stateRoot, harvestTable)
   }
 }
