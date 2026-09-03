@@ -37,10 +37,22 @@ describe('PlanAgentBrief', () => {
     expect(errand()).toMatch(/no implementes/i)
   })
 
-  it('it_says_where_the_order_of_precedence_is_written_instead_of_restating_it_a_second_time', () => {
+  it('it_carries_the_order_of_precedence_itself_because_the_repo_may_not_declare_it_anywhere', () => {
     expect(errand()).toContain('/plugin/conventions')
-    expect(errand()).toContain('AGENTS.md')
-    expect(errand()).not.toMatch(/preferencia/i)
+    expect(errand()).toMatch(/preferencia/i)
+    expect(errand()).toMatch(/regla a regla/)
+    expect(errand()).toMatch(/AGENTS\.md.*puede no traerla/)
+  })
+
+  it('the_architecture_yardstick_binds_on_what_is_added_to_a_module_that_never_met_it', () => {
+    expect(errand()).toMatch(/arquitectura se aplica SIEMPRE/)
+    expect(errand()).toMatch(/deuda heredada/)
+  })
+
+  it('it_names_the_sections_that_carry_what_the_acceptance_criteria_cannot', () => {
+    expect(errand()).toContain('Contexto del epic')
+    expect(errand()).toContain('Contexto heredado')
+    expect(errand()).toMatch(/no lo busques fuera del issue/)
   })
 
   it('it_never_promises_a_permission_nobody_mints', () => {

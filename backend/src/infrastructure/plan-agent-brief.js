@@ -6,6 +6,8 @@ export class PlanAgentBrief {
   static DOCUMENTS = 'defects.md, style.md, decisions.md, architecture.md, testing.md'
   static NO_NEW_WORKTREES = 'no crees worktrees nuevos'
   static WHITESPACE = /\s+/g
+  static EPIC_CONTEXT = 'Contexto del epic'
+  static INHERITED_CONTEXT = 'Contexto heredado'
 
   constructor({ dispatchCheck, conventions, ctStep }) {
     if (typeof dispatchCheck !== 'string' || !isAbsolute(dispatchCheck)) {
@@ -35,7 +37,10 @@ export class PlanAgentBrief {
       `Escribes el PLAN del issue #${issue.number} del repo ${named}. No lo implementas.`,
       'Arranque verification-first: confirma pwd, rama y git log, y deja el baseline en verde ANTES de tocar nada.',
       `Hidrátate del issue: \`gh issue view ${issue.number} --repo ${named}\`. Sus criterios de aceptación, su sección "## Out of scope / Protected" y sus decisiones congeladas son la entrada del plan.`,
-      `Lee la vara de Control Tower: los cinco documentos de ${conventions} (${PlanAgentBrief.DOCUMENTS}), y el bloque de la vara del \`AGENTS.md\` de este repo, que dice qué manda y en qué orden.`,
+      `Lee también sus secciones "${PlanAgentBrief.EPIC_CONTEXT}" y "${PlanAgentBrief.INHERITED_CONTEXT}": traen lo que condiciona este trabajo y no cabe en los criterios de aceptación. Si están vacías o no aparecen, no hay nada que heredar y no lo busques fuera del issue.`,
+      `Lee la vara de Control Tower: los cinco documentos de ${conventions} (${PlanAgentBrief.DOCUMENTS}).`,
+      'Esa vara tiene PREFERENCIA sobre las convenciones de este repo, y se mide regla a regla, no por tema: donde una regla del repo manda lo que uno de esos cinco documentos prohíbe, o prohíbe lo que uno manda, no aplica; donde el repo habla de algo de lo que ninguno habla —mayúsculas, prefijos, nombres de fichero—, obliga entera y la sigues. No la busques en el `AGENTS.md` de este repo: puede no traerla, y entonces la que vale es esta línea.',
+      'Y la vara de arquitectura se aplica SIEMPRE, también a lo que añadas a un módulo que ya existía y nunca la cumplió: aquí no hay deuda heredada que exima, y eso lo decides al repartir los ficheros de cada tarea.',
       'Escribe el plan con control-tower-loop:writing-plans-prescriptive, usando el issue como spec.',
       `Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${issue.number}-<slug>.md.`,
       `Valídalo con \`node ${dispatchCheck} ${issue.number} --repo ${named} --check-plan\` hasta exit 0.`,

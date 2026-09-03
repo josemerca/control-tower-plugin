@@ -8,6 +8,9 @@ import { controlTowerDir } from '../../../plugin/scripts/run-metrics.js'
 import { LOOP_STATUS_LABELS } from '../../../plugin/scripts/groom.js'
 import { DiskGoRegistry } from '../../src/infrastructure/disk-go-registry.js'
 import { GhPlanIssues, PlanIssueBody } from '../../src/infrastructure/gh-plan-issues.js'
+import { PlanAgentBrief } from '../../src/infrastructure/plan-agent-brief.js'
+import { UserStory } from '../../src/domain/value-objects/user-story.js'
+import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { Invocation } from '../../src/infrastructure/invocation.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 
@@ -110,5 +113,33 @@ describe('the status labels this backend writes and the plugin reads', () => {
   it('both_ends_of_the_claim_are_labels_the_loop_declares_instead_of_names_invented_here', () => {
     expect(LOOP_STATUS_LABELS).toContain(GhPlanIssues.IN_PROGRESS_LABEL)
     expect(LOOP_STATUS_LABELS).toContain(PlanIssueBody.READY_LABEL)
+  })
+})
+
+describe('the sections the errand sends the agent to read', () => {
+  const brief = () => new PlanAgentBrief({
+    dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+    conventions: '/plugin/conventions',
+    ctStep: '/plugin/scripts/ct-step.mjs',
+  })
+
+  const body = () => PlanIssueBody.of(new UserStory({
+    key: new UserStoryKey('XOP-4909'), summary: 'la métrica de los campeones', description: 'como analista quiero',
+  }))
+
+  it('the_two_it_names_are_headings_the_plugin_really_renders_in_the_body_we_write', () => {
+    const headings = body().split('\n').filter((line) => line.startsWith('## '))
+
+    expect(headings).toContain(`## ${PlanAgentBrief.EPIC_CONTEXT}`)
+    expect(headings).toContain(`## ${PlanAgentBrief.INHERITED_CONTEXT}`)
+  })
+
+  it('the_errand_sends_the_agent_to_the_sections_by_the_name_the_body_gives_them', () => {
+    const errand = brief().errandFor({
+      issue: { number: 40 }, repository: new RepositoryName('jjponz/repo-pulse'),
+    })
+
+    expect(errand).toContain(PlanAgentBrief.EPIC_CONTEXT)
+    expect(errand).toContain(PlanAgentBrief.INHERITED_CONTEXT)
   })
 })
