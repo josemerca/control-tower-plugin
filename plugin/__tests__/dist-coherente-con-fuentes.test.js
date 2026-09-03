@@ -181,10 +181,17 @@ describe('el dist/ commiteado corresponde a los fuentes commiteados (F24)', () =
     // saca su lista de inputs del metafile en cada corrida, nunca de aquí.
     expect(inputs).toEqual([
       'hooks/commit-keyword-guard.js',
+      'hooks/dispatch-guard.js',
       'hooks/session-start.js',
       'hooks/stop.js',
       'scripts/closing-keywords.js',
+      'scripts/dispatch-gate.js',
       'scripts/governed-repo.js',
+      // La puerta del despacho decide con la tabla de la máquina, así que
+      // dist/dispatch-guard.js arrastra run-machine.js y, con él,
+      // reconcile-outcome.js. Son puros: ni disco, ni procesos, ni yaml.
+      'scripts/reconcile-outcome.js',
+      'scripts/run-machine.js',
       // scope.js y scope-check-cli.js entran por dist/scope-check.js, el gate
       // de conformidad que se vendoriza en el CI del repo destino (donde el
       // plugin no está instalado). closing-keywords.js ya estaba: scope.js lo

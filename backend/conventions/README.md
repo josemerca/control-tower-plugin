@@ -20,7 +20,7 @@ old module or new.
 
 | Task | Read |
 |---|---|
-| Any diff | `plugin/conventions/style.md`, `plugin/conventions/defects.md` |
+| Any diff | `simplicity.md` here, `plugin/conventions/style.md`, `plugin/conventions/defects.md` |
 | A new module or moving one | `architecture.md` here, `plugin/conventions/architecture.md` |
 | Touching `domain/` | `domain.md` here |
 | An adapter, a boundary, an endpoint | `infrastructure.md` here |

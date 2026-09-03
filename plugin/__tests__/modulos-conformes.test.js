@@ -34,6 +34,11 @@ class NacidosConformes {
     '__tests__/ct-harvest-bq.test.js',
     'scripts/slice-harvest.js',
     '__tests__/slice-harvest.test.js',
+    'scripts/dispatch-gate.js',
+    'hooks/dispatch-guard.js',
+    '__tests__/dispatch-gate.test.js',
+    '__tests__/dispatch-guard.test.js',
+    '__tests__/ct-step-dispatch-seal.test.js',
   ]
 
   static PALABRAS_CASTELLANAS = [

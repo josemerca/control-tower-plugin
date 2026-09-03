@@ -199,7 +199,32 @@ const requeue = has('--requeue')
 const checkPlan = has('--check-plan')
 const collect = has('--collect')
 const dryRun = has('--dry-run')
-const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release | --reopen | --requeue | --check-plan | --collect] [--dry-run]'
+// --no-watch-merge: no lances el vigilante del merge en este release.
+//
+// Lo pide un flujo que NO TIENE sesión coordinadora, y por eso no es un
+// interruptor de comodidad: sin él, el vigilante hace exactamente lo que sabe
+// hacer —localizar por DIRECTORIO la workspace de cmux del checkout principal— y
+// en ese flujo la única que hay ahí es la que corre el servidor que despachó el
+// slice. Le teclearía a un programa un párrafo pensado para un agente, y su log
+// lo anunciaría como entregado: una entrega falsa por escrito, que es peor que
+// no avisar.
+//
+// No se detecta, se declara. Desde aquí no hay forma de distinguir «esa pestaña
+// es una coordinadora» de «esa pestaña es un servidor»: las dos son una
+// workspace de cmux en el mismo directorio. Quien despacha sí lo sabe, así que
+// lo dice.
+//
+// NO cambia ninguna otra decisión del release, y en particular no lo relaja: las
+// cinco puertas se comprueban igual y el issue se mueve igual. Lo único que se
+// pierde es el aviso, que es justo lo que el vigilante aporta —el MOMENTO, no el
+// conocimiento— porque `/ct-next` sigue emitiendo `cosecha pendiente:` en cada
+// corrida. Y en el flujo que pide esta bandera se pierde aún menos: ahí quien
+// recoge es un reloj que llama a `--collect` por su cuenta, así que el aviso no
+// se queda sin destinatario, se queda sin función. Se dice en voz alta al
+// liberar, por la misma razón por la que el fallo al lanzarlo también se dice:
+// un silencio aquí es indistinguible de un vigilante que sí está.
+const noWatchMerge = has('--no-watch-merge')
+const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release | --reopen | --requeue | --check-plan | --collect] [--dry-run] [--no-watch-merge]'
 if (issue === null || issue < 1) {
   dieErr(`<issue#> inválido: ${process.argv[2] === undefined ? '(ausente)' : `"${process.argv[2]}"`} — debe ser un entero >= 1 escrito con dígitos a secas (nada de "42x", "1e3", "4.2", espacios, ni signo "+"/"-": un número aproximado aquí reclamaría un issue que no es el que pediste).\n${usage}`, 2)
 }
@@ -1041,7 +1066,17 @@ if (release) {
     // vigilante ahí convertiría una corrida en seco en un proceso de 48 horas.
     // Con `fx` (CT_CLAIM_FIXTURE) tampoco: el fixture modela la forma del claim,
     // no un repo real donde haya nada que cosechar.
-    lanzarVigilanteDelMerge(issue)
+    //
+    // Y con `--no-watch-merge` tampoco, pero por un motivo distinto de los dos
+    // anteriores y que hay que decir en voz alta: ahí SÍ hay un PR esperando un
+    // merge humano. Lo que no hay es a quién avisar (ver la cabecera de la
+    // bandera), así que el aviso se renuncia a propósito en vez de entregarse a
+    // quien no lo sabe leer.
+    if (noWatchMerge) {
+      errLine(`aviso: no se ha lanzado el vigilante del merge de #${issue} porque se pidió --no-watch-merge — el slice está entregado y el issue está en status:in-review, pero nadie te avisará cuando mergees su PR: la cosecha la seguirá detectando \`/ct-next\` en su próxima corrida.`)
+    } else {
+      lanzarVigilanteDelMerge(issue)
+    }
   }
   dieOut(`released #${issue} → in-review`, 0)
 }

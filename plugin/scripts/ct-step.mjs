@@ -68,7 +68,7 @@ import { PluginYardstick } from './plugin-yardstick.js'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage, findingLocation,
   readE2eReport, E2E_SCHEMA,
-  IMPLEMENTER_TOOLS, JUDGE_TOOLS, PACKAGE_SECTIONS,
+  IMPLEMENTER_TOOLS, IMPLEMENTER_MODEL, JUDGE_TOOLS, PACKAGE_SECTIONS,
   readSliceVerdict, outcomeOfSliceVerdict, sliceVerdictCommitMessage,
   SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS, RECONCILER_TOOLS,
   REVIEW_TOKEN_LABEL, reviewToken, reviewTokenLine, reviewTokenOf,
@@ -84,6 +84,7 @@ import { SENAL_AUSENTE } from './kickoff.js'
 import { SLICE_REL_PATH } from './state-paths.js'
 import { findClosingKeywords } from './closing-keywords.js'
 import { BaseBranch } from './slice-base.js'
+import { StepSeal } from './dispatch-gate.js'
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -397,7 +398,7 @@ const senalDelSlice = (() => {
   const { meta } = parseStateSafe(readFileSync(join(repoRoot, '.agent', 'SLICE.md'), 'utf8'))
   return typeof meta.senal === 'string' && meta.senal.trim() ? meta.senal.trim() : null
 })()
-const intento = () => run.controlRetries + run.judgeRetries + run.correctionRetries + 1
+const intento = () => StepSeal.attemptOf(run)
 // Los dos campos de identidad que el módulo de la fila NO puede ir a buscar (es
 // puro): los aporta quien escribe. La versión sale del manifiesto del plugin —un
 // `ct-step` reescrito hace incomparables dos runs, igual que un plan reescrito— y
@@ -483,7 +484,7 @@ function verboNext() {
       // La lista sale de la constante y no se teclea otra vez: la copia a mano
       // de las del juez ya divergió una vez, y `ct-step next` acabó anunciando
       // unas herramientas que no eran las del agente que se despachaba.
-      out(`DESPACHA UN IMPLEMENTADOR (subagente con ${IMPLEMENTER_TOOLS}) con:`)
+      out(`DESPACHA UN IMPLEMENTADOR (subagente con modelo ${IMPLEMENTER_MODEL} — herramientas: ${IMPLEMENTER_TOOLS}) con:`)
       out(`  - la rúbrica de ${join(PLUGIN_ROOT, 'prompts', 'task-implementer.md')}`)
       out(`  - el brief de la tarea: ${brief}`)
       out(`  - que escriba su informe en: ${informe}`)
@@ -603,6 +604,24 @@ function verboNext() {
       break
     default:
       die(`el estado tiene un paso que esta versión no conoce: ${run.step}`, EXIT.UNNAMED)
+  }
+  // EL SELLO DEL PASO. `next` acaba de escribir la entrada que el subagente de
+  // este paso va a leer —el brief, o el paquete del juez—, y eso es justo lo
+  // que un despacho que se salta este verbo deja sin escribir: medido dos veces
+  // en campo, con el implementador y con el juez. El sello lo lee el hook del
+  // tool `Task` (hooks/dispatch-guard.js), que sin él DENIEGA el despacho.
+  //
+  // La condición sale de la misma constante que nombra la entrada de cada paso,
+  // así que un paso al que `next` no le escribe nada no se sella: sellarlo
+  // afirmaría que allí hay un despacho protegido.
+  //
+  // El sello NO cuenta los descartes, y por eso sobrevive a uno: al descartar,
+  // `consumirPaquete` no corre y el artefacto de ese intento sigue en disco, así
+  // que obligar a pasar otra vez por aquí sería pedir que se regenere lo que ya
+  // está. Los tres autobucles de `discarded` son los de run-machine.js.
+  if (StepSeal.inputWrittenFor(run.step) !== null) {
+    run = { ...run, nextSeal: StepSeal.of(run) }
+    guardar()
   }
   process.exit(EXIT.OK)
 }

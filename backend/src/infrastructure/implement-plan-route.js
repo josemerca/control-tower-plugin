@@ -1,6 +1,9 @@
 import { Answer, JsonBody, Refusal } from './http.js'
 import { ImplementPlanParams } from '../application/actions/implement-plan.js'
-import { PlanFailure, PlanAgentNotResumed } from '../domain/exceptions.js'
+import { RepositoryName } from '../domain/value-objects/repository-name.js'
+import {
+  PlanFailure, PlanAgentNotResumed, PlanGoNotAnswered, GoNotRecorded,
+} from '../domain/exceptions.js'
 
 export const ImplementRequestOutcome = Object.freeze({
   ACCEPTED: 'accepted',
@@ -8,37 +11,42 @@ export const ImplementRequestOutcome = Object.freeze({
   UNKNOWN_FIELD: 'unknown-field',
   MALFORMED_AGENT: 'malformed-agent',
   MALFORMED_ISSUE: 'malformed-issue',
+  MALFORMED_REPO: 'malformed-repo',
 })
 
 class ImplementRequest {
   static AGENT_FIELD = 'agent'
   static ISSUE_FIELD = 'issue'
-  static KNOWN_FIELDS = Object.freeze([ImplementRequest.AGENT_FIELD, ImplementRequest.ISSUE_FIELD])
+  static REPO_FIELD = 'repo'
+  static KNOWN_FIELDS = Object.freeze([
+    ImplementRequest.AGENT_FIELD, ImplementRequest.ISSUE_FIELD, ImplementRequest.REPO_FIELD,
+  ])
 
-  constructor({ outcome, agent, issue, fields }) {
+  constructor({ outcome, agent, issue, repository, fields }) {
     this.outcome = outcome
     this.agent = agent
     this.issue = issue
+    this.repository = repository
     this.fields = Object.freeze([...fields])
     Object.freeze(this)
   }
 
-  static accepted({ agent, issue }) {
+  static accepted({ agent, issue, repository }) {
     return new ImplementRequest({
-      outcome: ImplementRequestOutcome.ACCEPTED, agent, issue, fields: [],
+      outcome: ImplementRequestOutcome.ACCEPTED, agent, issue, repository, fields: [],
     })
   }
 
   static refused(outcome) {
     return new ImplementRequest({
-      outcome, agent: null, issue: null, fields: [],
+      outcome, agent: null, issue: null, repository: null, fields: [],
     })
   }
 
   static withUnknownFields(fields) {
     return new ImplementRequest({
       outcome: ImplementRequestOutcome.UNKNOWN_FIELD,
-      agent: null, issue: null, fields,
+      agent: null, issue: null, repository: null, fields,
     })
   }
 
@@ -72,10 +80,14 @@ class ImplementRequest {
     if (!ImplementRequest.#isWellFormedIssue(parsed[ImplementRequest.ISSUE_FIELD])) {
       return ImplementRequest.refused(ImplementRequestOutcome.MALFORMED_ISSUE)
     }
+    if (!RepositoryName.isWellFormed(parsed[ImplementRequest.REPO_FIELD])) {
+      return ImplementRequest.refused(ImplementRequestOutcome.MALFORMED_REPO)
+    }
 
     return ImplementRequest.accepted({
       agent: parsed[ImplementRequest.AGENT_FIELD],
       issue: parsed[ImplementRequest.ISSUE_FIELD],
+      repository: new RepositoryName(parsed[ImplementRequest.REPO_FIELD]),
     })
   }
 }
@@ -91,6 +103,10 @@ export class ImplementRefusal {
     [ImplementRequestOutcome.MALFORMED_ISSUE]: () => new Refusal({
       status: 400,
       error: `${ImplementRequest.ISSUE_FIELD} must be a whole number from one`,
+    }),
+    [ImplementRequestOutcome.MALFORMED_REPO]: () => new Refusal({
+      status: 400,
+      error: `${ImplementRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
     }),
     [ImplementRequestOutcome.UNKNOWN_FIELD]: (asked) => new Refusal({
       status: 400,
@@ -115,7 +131,11 @@ export class ImplementRefusal {
 export class ImplementCollapse {
   static #REFUSED = 503
 
-  static #BY_FAILURE = [[PlanAgentNotResumed, ImplementCollapse.#REFUSED]]
+  static #BY_FAILURE = [
+    [GoNotRecorded, ImplementCollapse.#REFUSED],
+    [PlanGoNotAnswered, ImplementCollapse.#REFUSED],
+    [PlanAgentNotResumed, ImplementCollapse.#REFUSED],
+  ]
 
   static of(cause) {
     const declared = ImplementCollapse.#BY_FAILURE.find(([failure]) => cause.constructor === failure)
@@ -137,27 +157,29 @@ export class ImplementPlanRoute {
   static PATH = '/implement-plan'
   static METHOD = 'POST'
 
-  static handledBy(implementPlan) {
+  static handledBy(implementPlan, sessions, reviews) {
     return async (request, response) => {
       const asked = ImplementRequest.from(JsonBody.textOf(request))
       if (asked.outcome !== ImplementRequestOutcome.ACCEPTED) {
         Answer.refuseAs(response, ImplementRefusal.of(asked))
         return
       }
-      await ImplementPlanRoute.#accept(implementPlan, response, asked)
+      await ImplementPlanRoute.#accept(implementPlan, sessions, reviews, response, asked)
     }
   }
 
-  static async #accept(implementPlan, response, asked) {
+  static async #accept(implementPlan, sessions, reviews, response, asked) {
     try {
       await implementPlan.execute(new ImplementPlanParams({
-        agent: asked.agent, issue: asked.issue,
+        agent: asked.agent, issue: asked.issue, repository: asked.repository,
       }))
     } catch (cause) {
       if (!(cause instanceof PlanFailure)) throw cause
       Answer.refuseAs(response, ImplementCollapse.of(cause))
       return
     }
+    reviews.stop({ issue: asked.issue, repository: asked.repository })
+    sessions.forget(asked.issue)
     Answer.send(response, 202, {
       status: 'implementing',
       [ImplementRequest.AGENT_FIELD]: asked.agent,

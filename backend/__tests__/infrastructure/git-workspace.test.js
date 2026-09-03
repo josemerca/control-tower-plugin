@@ -360,6 +360,28 @@ describe('GitWorkspace', () => {
     expect(parseStateSafe(git.written[1][1]).meta.base_sha).toBe(GitDouble.CUT)
   })
 
+  it('the_state_it_seeds_names_the_gate_that_holds_this_slice_because_the_skill_reads_it_from_there', async () => {
+    const git = new GitDouble()
+
+    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+
+    const gates = parseStateSafe(git.written[1][1]).meta.gates
+    expect(gates).toContain('plan — GATE HUMANO pendiente')
+    expect(gates).toContain('lo cierra una persona desde la app')
+    expect(gates).toContain('`-REVIEW`')
+  })
+
+  it('the_gate_it_seeds_says_the_gates_section_of_the_issue_describes_another_flow', async () => {
+    const git = new GitDouble()
+
+    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+
+    const gates = parseStateSafe(git.written[1][1]).meta.gates
+    expect(gates).toContain('la sección "## Gates" del issue describe el carril de /ct-next')
+    expect(gates).not.toMatch(/revisa (el PR|la pull request)/)
+    expect(gates).not.toMatch(/-OK/)
+  })
+
   it('a_head_it_cannot_measure_stops_the_seeding_instead_of_writing_a_state_without_a_cut', async () => {
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({

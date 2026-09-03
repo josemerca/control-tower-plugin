@@ -28,13 +28,23 @@ export class StartPlan {
   async execute(params) {
     const story = await this.userStories.detail(params.story)
     const issue = await this.planIssues.open({ story, repository: params.repository })
-    const located = await this.workspace.prepare({ issue, repository: params.repository })
+    await this.planIssues.claim({ issue, repository: params.repository })
+    const located = await this.#prepare(params, issue)
     const agent = await this.#launch(params, issue, located)
 
     return new StartPlanResult({
       agent,
-      watch: new PlanWatch({ issue, located, repository: params.repository }),
+      watch: new PlanWatch({ issue, located, repository: params.repository, agent }),
     })
+  }
+
+  async #prepare(params, issue) {
+    try {
+      return await this.workspace.prepare({ issue, repository: params.repository })
+    } catch (failure) {
+      await this.#release(params, issue)
+      throw failure
+    }
   }
 
   async #launch(params, issue, located) {
@@ -47,6 +57,7 @@ export class StartPlan {
       }))
     } catch (failure) {
       await this.#abandon(located)
+      await this.#release(params, issue)
       throw failure
     }
   }
@@ -55,5 +66,9 @@ export class StartPlan {
     try {
       await this.workspace.undo(located)
     } catch {}
+  }
+
+  async #release(params, issue) {
+    await this.planIssues.requeue({ issue, repository: params.repository })
   }
 }

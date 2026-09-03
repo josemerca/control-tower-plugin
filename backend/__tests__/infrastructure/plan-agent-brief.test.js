@@ -27,15 +27,51 @@ describe('PlanAgentBrief', () => {
     expect(errand()).toContain('docs/superpowers/plans/YYYY-MM-DD-issue-42-<slug>.md')
   })
 
+  it('it_orders_the_plan_published_on_the_issue_because_that_is_where_a_human_reads_it_to_ask_for_changes', () => {
+    expect(errand()).toContain('gh issue comment 42 --repo owner/name')
+    expect(errand()).toMatch(/publ/i)
+  })
+
   it('it_orders_the_session_to_stop_after_committing_instead_of_starting_the_work', () => {
     expect(errand()).toMatch(/PARA/)
     expect(errand()).toMatch(/no implementes/i)
   })
 
-  it('it_says_where_the_order_of_precedence_is_written_instead_of_restating_it_a_second_time', () => {
+  it('it_carries_the_order_of_precedence_itself_because_the_repo_may_not_declare_it_anywhere', () => {
     expect(errand()).toContain('/plugin/conventions')
-    expect(errand()).toContain('AGENTS.md')
-    expect(errand()).not.toMatch(/preferencia/i)
+    expect(errand()).toContain(
+      'Esa vara tiene PREFERENCIA sobre las convenciones de este repo, y se mide regla a regla, no por tema'
+    )
+    expect(errand()).toContain('la vara del repo no desaparece')
+    expect(errand()).toMatch(/AGENTS\.md.*puede no traerla/)
+  })
+
+  it('the_precedence_it_carries_cannot_be_read_the_other_way_round', () => {
+    expect(errand()).not.toMatch(/convenciones de este repo tienen PREFERENCIA/)
+    expect(errand()).not.toMatch(/las convenciones de este repo ganan/i)
+  })
+
+  it('the_architecture_yardstick_binds_on_what_is_added_to_a_module_that_never_met_it', () => {
+    expect(errand()).toContain(
+      'la vara de arquitectura se aplica SIEMPRE, también a lo que añadas a un módulo que ya existía'
+    )
+    expect(errand()).toContain('Applies to: new modules')
+    expect(errand()).toMatch(/NO val[ea]n en este carril/)
+  })
+
+  it('the_only_rule_of_the_yardstick_this_errand_overrides_says_so_instead_of_leaving_a_silent_clash', () => {
+    expect(errand()).not.toMatch(/deuda heredada que exime|deuda heredada.*exime lo/)
+    expect(errand()).toMatch(/la única regla de la vara que este encargo cambia/i)
+  })
+
+  it('it_names_the_sections_that_carry_what_the_acceptance_criteria_cannot', () => {
+    expect(errand()).toContain('Contexto del epic')
+    expect(errand()).toContain('Contexto heredado')
+    expect(errand()).toMatch(/no lo busques fuera del issue/)
+  })
+
+  it('it_does_not_send_the_agent_to_a_section_the_body_never_writes', () => {
+    expect(errand()).not.toMatch(/decisiones congeladas/i)
   })
 
   it('it_never_promises_a_permission_nobody_mints', () => {
@@ -86,7 +122,7 @@ describe('PlanAgentBrief resuming the agent', () => {
     dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
     conventions: '/plugin/conventions',
     ctStep: '/plugin/scripts/ct-step.mjs',
-  }).implementationErrandFor({ issueNumber: 42 })
+  }).implementationErrandFor({ issueNumber: 42, repository: new RepositoryName('owner/name') })
 
   it('it_is_one_single_line_because_a_newline_would_run_the_order_half_written', () => {
     expect(errand()).not.toContain('\n')
@@ -109,9 +145,21 @@ describe('PlanAgentBrief resuming the agent', () => {
     expect(composed.indexOf('.agent/SLICE.md')).toBeLessThan(composed.indexOf('Pregunta el paso'))
   })
 
-  it('it_waves_off_the_release_that_ct_step_will_suggest_so_the_agent_does_not_crash_into_exit_9', () => {
-    expect(errand()).toContain('dispatch-check --release')
-    expect(errand()).toMatch(/no ejecutes/i)
+  it('it_orders_the_release_that_moves_the_issue_to_review_instead_of_forbidding_it', () => {
+    expect(errand()).toContain(
+      'node /plugin/scripts/dispatch-check.mjs 42 --repo owner/name --release'
+    )
+    expect(errand()).not.toMatch(/no ejecutes/i)
+    expect(errand()).not.toContain('saldría por 9')
+  })
+
+  it('the_release_it_orders_waives_the_merge_watcher_because_this_flow_has_no_coordinator_to_notify', () => {
+    expect(errand()).toContain('--release --no-watch-merge')
+  })
+
+  it('it_still_stops_before_the_merge_because_that_is_the_second_human_decision', () => {
+    expect(errand()).toMatch(/no la mergees/i)
+    expect(errand()).toMatch(/PARA/)
   })
 
   it('a_brief_that_cannot_name_ct_step_refuses_to_exist_instead_of_shipping_the_word_undefined', () => {
@@ -124,5 +172,45 @@ describe('PlanAgentBrief resuming the agent', () => {
       conventions: '/plugin/conventions',
       ctStep: 'scripts/ct-step.mjs',
     })).toThrow(/ct-step/)
+  })
+})
+
+describe('PlanAgentBrief asking the agent for changes', () => {
+  const CHANGES = 'añade el caso\nde la issue sin\tdescripción'
+  const errand = (changes = CHANGES) => new PlanAgentBrief({
+    dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+    conventions: '/plugin/conventions',
+    ctStep: '/plugin/scripts/ct-step.mjs',
+  }).reviewErrandFor({ issueNumber: 42, repository: new RepositoryName('owner/name'), changes })
+
+  it('the_errand_is_one_line_even_when_the_person_wrote_the_change_across_several', () => {
+    expect(errand()).not.toContain('\n')
+    expect(errand()).not.toContain('\t')
+    expect(errand()).toContain('añade el caso de la issue sin descripción')
+  })
+
+  it('the_errand_names_the_issue_the_plan_and_the_command_that_validates_it', () => {
+    expect(errand()).toContain('#42')
+    expect(errand()).toContain('node /plugin/scripts/dispatch-check.mjs 42 --repo owner/name --check-plan')
+    expect(errand()).toMatch(/no implementes/i)
+  })
+
+  it('the_errand_orders_the_reworked_plan_back_onto_the_issue_so_the_next_change_can_be_asked_for', () => {
+    expect(errand()).toMatch(/publica/i)
+    expect(errand()).toMatch(/comentario/i)
+  })
+
+  it('it_never_promises_a_permission_nobody_mints', () => {
+    expect(errand()).not.toContain('-OK')
+    expect(errand()).not.toContain('nonce')
+  })
+
+  it('a_review_without_the_repository_refuses_to_exist_instead_of_shipping_undefined_into_the_command', () => {
+    expect(() => new PlanAgentBrief({
+      dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+      conventions: '/plugin/conventions',
+      ctStep: '/plugin/scripts/ct-step.mjs',
+    }).reviewErrandFor({ issueNumber: 42, repository: 'owner/name', changes: 'x' }))
+      .toThrow(/names the repository/)
   })
 })
