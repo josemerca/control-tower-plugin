@@ -578,6 +578,17 @@ describe('GhPlanIssues reading the changes asked for on the issue', () => {
     expect(nameless).toBeInstanceOf(PlanChangesNotUnderstood)
   })
 
+  it('a_blip_while_reading_them_is_retried_because_asking_twice_reads_the_same_issue', async () => {
+    const blip = new ProcessOutput({ code: 1, stdout: '', stderr: 'error connecting to api.github.com' })
+    const gh = new GhDouble([blip, ...GhDouble.commented(GhDouble.A_CHANGE).answers])
+
+    const asked = await gh.changesAskedFor()
+
+    expect(gh.calls).toHaveLength(2)
+    expect(gh.clock.slept).toEqual([2])
+    expect(asked).toHaveLength(1)
+  })
+
   it('an_issue_nobody_has_written_on_asks_for_nothing_instead_of_refusing', async () => {
     expect(await GhDouble.printing('{"comments":[]}').changesAskedFor()).toEqual([])
   })

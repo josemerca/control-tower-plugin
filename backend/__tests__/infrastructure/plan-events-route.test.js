@@ -42,7 +42,7 @@ class EventsDouble {
     })
   }
 
-  get exhausted() {
+  cancellingWhenExhausted() {
     return () => this.answers.length === 0
   }
 
@@ -89,14 +89,14 @@ describe('PlanEvents', () => {
   it('it_emits_the_first_state_it_reads_so_a_late_subscriber_is_not_left_blank', async () => {
     const events = new EventsDouble([PlanState.WRITING, PlanState.READY])
 
-    expect((await events.collected(events.exhausted))[0])
+    expect((await events.collected(events.cancellingWhenExhausted()))[0])
       .toBe(PlanEvents.frameFor(PlanState.WRITING))
   })
 
   it('the_stream_lives_on_after_ready_so_a_plan_that_is_being_reworked_can_say_so', async () => {
     const events = new EventsDouble([PlanState.READY, PlanState.WRITING, PlanState.READY])
 
-    const frames = await events.collected(events.exhausted)
+    const frames = await events.collected(events.cancellingWhenExhausted())
 
     expect(frames).toEqual([
       PlanEvents.frameFor(PlanState.READY),
@@ -110,7 +110,7 @@ describe('PlanEvents', () => {
       PlanState.WRITING, PlanState.WRITING, PlanState.WRITING, PlanState.READY,
     ])
 
-    const frames = await events.collected(events.exhausted)
+    const frames = await events.collected(events.cancellingWhenExhausted())
 
     expect(frames).toEqual([
       PlanEvents.frameFor(PlanState.WRITING),
@@ -121,7 +121,7 @@ describe('PlanEvents', () => {
   it('it_waits_between_reads_instead_of_spinning', async () => {
     const events = new EventsDouble([PlanState.WRITING, PlanState.WRITING, PlanState.READY])
 
-    await events.collected(events.exhausted)
+    await events.collected(events.cancellingWhenExhausted())
 
     expect(events.slept).toBe(3)
   })

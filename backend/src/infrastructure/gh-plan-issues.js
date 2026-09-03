@@ -129,7 +129,7 @@ export class GhPlanIssues extends PlanIssues {
 
   static #changesIn(printed, issue) {
     return GhPlanIssues.#commentsIn(printed, issue)
-      .filter((comment) => String(comment?.body ?? '').startsWith(GhPlanIssues.CHANGES_TOKEN))
+      .filter((comment) => comment.body.startsWith(GhPlanIssues.CHANGES_TOKEN))
       .map((comment) => GhPlanIssues.#changeFrom(comment, issue))
   }
 
@@ -152,7 +152,7 @@ export class GhPlanIssues extends PlanIssues {
   }
 
   static #changeFrom(comment, issue) {
-    if (typeof comment.id !== 'string' || comment.id === '') {
+    if (typeof comment.id !== 'string') {
       throw new PlanChangesNotUnderstood(
         `${Gh.BIN} did not name a comment asking for changes on ${issue.number}, so attending it once could not be remembered`
       )
@@ -160,7 +160,7 @@ export class GhPlanIssues extends PlanIssues {
 
     return new ChangeAsked({
       id: comment.id,
-      text: String(comment.body).slice(GhPlanIssues.CHANGES_TOKEN.length).trim(),
+      text: comment.body.slice(GhPlanIssues.CHANGES_TOKEN.length).trim(),
     })
   }
 

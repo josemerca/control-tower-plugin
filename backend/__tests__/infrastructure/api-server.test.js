@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
+import { ReviewsSpy } from '../reviews-spy.js'
 import { StartPlanResult } from '../../src/application/actions/start-plan.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
@@ -107,21 +108,6 @@ class FrontendFixture {
 
   static missing() {
     return join(tmpdir(), 'ct-frontend-never-built')
-  }
-}
-
-class ReviewsSpy {
-  constructor() {
-    this.started = []
-    this.stopped = []
-  }
-
-  start(watch) {
-    this.started.push(watch)
-  }
-
-  stop({ issue, repository }) {
-    this.stopped.push(`${repository.text}#${issue}`)
   }
 }
 
@@ -769,7 +755,7 @@ describe('ApiServer', () => {
     expect(await RunningApi.firstFrame(again)).toBe(PlanEvents.frameFor(PlanState.READY))
   })
 
-  it('a_subscription_after_a_progress_nobody_could_read_is_a_404_too_because_that_ending_is_final_as_well', async () => {
+  it('a_subscription_after_a_progress_nobody_could_read_is_a_404_because_a_stream_that_broke_is_not_watched_any_more', async () => {
     const { planEvents } = ProgressSpy.unable()
     const port = await RunningApi.listening({ planEvents })
 

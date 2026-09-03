@@ -1,5 +1,11 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
+import { ReviewsSpy } from '../reviews-spy.js'
+import { PlanSessions } from '../../src/infrastructure/plan-events-route.js'
+import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
+import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
+import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
+import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import {
   ImplementRequestOutcome, ImplementRefusal, ImplementCollapse,
 } from '../../src/infrastructure/implement-plan-route.js'
@@ -39,21 +45,6 @@ class ImplementPlanSpy {
   }
 }
 
-class ReviewsSpy {
-  constructor() {
-    this.started = []
-    this.stopped = []
-  }
-
-  start(watch) {
-    this.started.push(watch)
-  }
-
-  stop({ issue, repository }) {
-    this.stopped.push(`${repository.text}#${issue}`)
-  }
-}
-
 class RunningApi {
   static #started = []
   static PATH = '/implement-plan'
@@ -61,12 +52,25 @@ class RunningApi {
   static ANSWER = '{"status":"implementing","agent":"workspace:20","issue":33}'
   static spy = null
   static reviews = null
+  static sessions = null
+  static WATCHED = new PlanWatch({
+    issue: new PlanIssue({ number: 33, url: 'https://github.com/jjponz/repo-pulse/issues/33' }),
+    located: new WorkspaceLocation({ path: '/repo/.worktrees/33', branch: 'feat/33' }),
+    repository: new RepositoryName('jjponz/repo-pulse'),
+    agent: 'workspace:20',
+  })
 
   static async listening(spy = new ImplementPlanSpy()) {
     RunningApi.spy = spy
     RunningApi.reviews = new ReviewsSpy()
+    RunningApi.sessions = new PlanSessions()
+    RunningApi.sessions.remember(RunningApi.WATCHED)
     const server = new ApiServer({
-      port: 0, startPlan: null, implementPlan: spy, reviews: RunningApi.reviews,
+      port: 0,
+      startPlan: null,
+      implementPlan: spy,
+      reviews: RunningApi.reviews,
+      sessions: RunningApi.sessions,
     })
     const port = await server.start()
     RunningApi.#started.push(server)
@@ -257,6 +261,18 @@ describe('implementing the plan lifts the watch on its issue', () => {
 
     expect(response.status).toBe(202)
     expect(RunningApi.reviews.stopped).toEqual(['jjponz/repo-pulse#33'])
+  })
+
+  it('implementing_the_plan_forgets_the_session_so_nothing_keeps_reading_the_contract_of_a_plan_being_built', async () => {
+    await RunningApi.asking(RunningApi.ACCEPTED_BODY)
+
+    expect(RunningApi.sessions.watching(33)).toBe(null)
+  })
+
+  it('a_refused_request_to_implement_forgets_no_session', async () => {
+    await RunningApi.asking('{"agent":"workspace:20","issue":0,"repo":"a/b"}')
+
+    expect(RunningApi.sessions.watching(33)).toBe(RunningApi.WATCHED)
   })
 
   it('a_refused_request_to_implement_lifts_no_watch', async () => {
