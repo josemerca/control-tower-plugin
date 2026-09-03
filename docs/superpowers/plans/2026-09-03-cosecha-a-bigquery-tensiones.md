@@ -31,16 +31,24 @@ El plan 2 declara en su §1 Out of scope y en su assumption 10 que el lector de 
 fuera de su alcance; la coordinadora enmendará esas dos frases para que apunten a este plan. Este
 plan **no toca el plan 2**.
 
+El juez de la tarea 2 declaró un hueco del plan, no del diff: `__tests__/ct-step-dispatch-seal.test.js`
+está en `RUTAS`, lanza `ct-step.mjs` y `git` a través de `__tests__/fixtures/ct-step-harness.js`
+—que es quien importa `node:child_process`— y la medida por import directo no lo veía. La tarea 3
+ensancha la medida para que siga el import a través de los fixtures y pone el marcador al octavo;
+las dos tareas de documentación pasan a ser la 4 y la 5.
+
 ### Desired end state
 
 - Un solo módulo lee el manifiesto del plugin: `plugin/scripts/plugin-manifest.js`, nacido
   conforme y dado de alta en `NacidosConformes.RUTAS`. `ct-step.mjs` y `LedgerIdentity` lo llaman;
   ninguno vuelve a abrir `package.json`. La regla es UNA: `version` no vacía, si no `null`.
-- El plugin adopta el marcador del backend, el sufijo `-real-process.test.js`. Los siete tests de
-  `RUTAS` que lanzan un proceso real lo llevan, y `plugin/__tests__/modulos-conformes.test.js` lo
-  mide en las dos direcciones: quien espawnea lo lleva, y quien lo lleva espawnea.
+- El plugin adopta el marcador del backend, el sufijo `-real-process.test.js`. Los ocho tests de
+  `RUTAS` que lanzan un proceso real —siete importando `node:child_process` y uno a través de
+  `__tests__/fixtures/ct-step-harness.js`— lo llevan, y `plugin/__tests__/modulos-conformes.test.js`
+  lo mide en las dos direcciones siguiendo el import a través de los fixtures: quien espawnea lo
+  lleva, y quien lo lleva espawnea.
 - `npm run test:fast` existe en `plugin/package.json` y el README lo documenta diciendo la verdad:
-  hoy sólo los tests nacidos conformes están marcados, los otros 67 son deuda declarada y por eso
+  hoy sólo los tests nacidos conformes están marcados, los otros 69 son deuda declarada y por eso
   el subset rápido todavía no es rápido.
 - `plugin/commands/ct-harvest.md` sustituye la frase de la celda por la regla de la COLUMNA y trae
   el mapa celda del informe → columnas de la tabla, incluida la celda combinada `vara ct`, que
@@ -49,8 +57,9 @@ plan **no toca el plan 2**.
 
 ### Out of scope
 
-- Renombrar los 67 ficheros de `plugin/__tests__/` que espawnean y no están en `RUTAS`: es una
-  barrida de repo que decide Juanjo, y meterla aquí haría ilegible el diff de estas tres tensiones.
+- Renombrar los 69 ficheros de `plugin/__tests__/` que espawnean —directamente o a través de un
+  fixture— y no están en `RUTAS`: es una barrida de repo que decide Juanjo, y meterla aquí haría
+  ilegible el diff de estas tres tensiones.
 - Traducir al inglés los nombres castellanos de los ficheros renombrados: el renombre cambia el
   marcador, no la deuda de idioma de los nombres.
 - Cambiar la versión del plugin: sigue `0.55.0`, porque esto es una corrección dentro de la misma
@@ -71,8 +80,9 @@ plan **no toca el plan 2**.
 | Cómo se prueba el manifiesto ilegible | la ruta entra por el constructor y `PluginManifest.installed()` da el instalado: ningún test toca el `package.json` real |
 | Lo que pierde `LedgerIdentity` | `MANIFEST`, `#pluginVersionFromManifest` y el import de `node:fs`; `fromEnvironment()` pide la versión al módulo nuevo |
 | Marcador de proceso real | el MISMO que el backend: sufijo de fichero `-real-process.test.js` (una decisión, un sitio, mismo repo) |
-| Quién lo mide | `plugin/__tests__/modulos-conformes.test.js`, sobre `RUTAS`, en las dos direcciones: quien importa `node:child_process` lleva el sufijo, y quien lleva el sufijo importa `node:child_process` |
-| Alcance del renombre | los siete tests de `RUTAS` que espawnean; los otros 67 quedan como deuda declarada |
+| Quién lo mide | `plugin/__tests__/modulos-conformes.test.js`, sobre `RUTAS`, en las dos direcciones: quien importa `node:child_process` —directamente, o a través de un módulo de `__tests__/fixtures/` que lo importe— lleva el sufijo, y quien lleva el sufijo lo importa por uno de esos dos caminos |
+| Hasta dónde sigue el import | sólo dentro de `__tests__/fixtures/`: un módulo de `scripts/` que importe `node:child_process` no hace que el test que lo importa lance un proceso, porque el test puede inyectarle un doble |
+| Alcance del renombre | los ocho tests de `RUTAS` que espawnean (siete en la tarea 2, `ct-step-dispatch-seal` en la tarea 3); los otros 69 quedan como deuda declarada |
 | El `-real-git` ad hoc | se suelta: el sufijo ya dice que lanza un proceso, y dos grafías de la misma decisión en el mismo nombre es lo que `plugin/conventions/decisions.md` prohíbe |
 | Subset rápido | `plugin/package.json` gana `"test:fast": "vitest run --exclude '**/*-real-process.test.js'"`; `npm test` no cambia |
 | Lo que el README declara | que el subset rápido todavía no es rápido, con el número de ficheros sin marcar |
@@ -115,6 +125,7 @@ ASCII porque ese mismo fichero lo mide.
 | `plugin/scripts/ct-step.mjs` | modify | el desarrollador | Current state / Call site / prose |
 | `plugin/__tests__/modulos-conformes.test.js` | modify | vitest | Current state / prose |
 | los siete tests de `RUTAS` que espawnean | modify + create | vitest | prose (`git mv`) |
+| `plugin/__tests__/ct-step-dispatch-seal.test.js` → `…-real-process.test.js` | modify + create | vitest | prose (`git mv`) |
 | `plugin/package.json` | modify | quien corre la suite | prose (config) |
 | `plugin/README.md` | modify | quien desarrolla | Current state / Final text |
 | `plugin/commands/ct-harvest.md` | modify | quien lee el comando | Current state / Final text |
@@ -130,7 +141,8 @@ Produces:
   manifiesto instalado), `PluginManifest.installed(): PluginManifest`,
   `new PluginManifest(path)`, `get version(): string | null`.
 - En `plugin/__tests__/modulos-conformes.test.js`, para su propio uso: `NacidosConformes.MARCADOR`,
-  `NacidosConformes.lanzaProcesosReales(ruta)`, `NacidosConformes.sinMarcador()`,
+  `NacidosConformes.IMPORT_RELATIVO`, `NacidosConformes.lanzaProcesosReales(ruta, vistos)` (verdadero
+  si importa `node:child_process` o si lo hace un fixture que importa), `NacidosConformes.sinMarcador()`,
   `NacidosConformes.marcadorDeAdorno()`.
 - El script `test:fast` de `plugin/package.json`.
 - Retirados: `LedgerIdentity.MANIFEST` y `LedgerIdentity.#pluginVersionFromManifest()`.
@@ -143,8 +155,10 @@ Produces:
 lee del manifiesto del plugin. El marcador de proceso real se mide mecánicamente en
 `plugin/__tests__/modulos-conformes.test.js`, como las otras reglas de ese fichero: dos estáticos
 que devuelven la lista de infractores y dos aserciones `toEqual([])`, que fallan nombrando los
-ficheros. Las tareas 3 y 4 no añaden comportamiento: la red es la suite entera, que corre al final
-de cada tarea. El test `the_identity_from_the_environment_reads_the_plugin_version_from_its_own_manifest`
+ficheros; la tarea 3 añade los dos casos de la medida (un test que espawnea sólo a través de un
+fixture cuenta, uno que no importa ni `node:child_process` ni un fixture que lo haga no cuenta),
+sobre ficheros reales del repo, como el resto de ese fichero. Las tareas 4 y 5 no añaden
+comportamiento: la red es la suite entera, que corre al final de cada tarea. El test `the_identity_from_the_environment_reads_the_plugin_version_from_its_own_manifest`
 de `plugin/__tests__/harvest-ledger.test.js` no se toca y tiene que seguir verde: es la prueba de
 que el refactor de la tarea 1 preserva el comportamiento. Cada aserción nueva se rompe a mano una
 vez y se ve caer por el motivo de su nombre. Ningún control clava el total de la suite.
@@ -270,7 +284,48 @@ test "$(grep -c 'seccion-del-plan-real-process.test.js' plugin/scripts/ct-step.m
 (cd plugin && npm test)
 ```
 
-### Task 3 — `npm run test:fast`, y el README dice cuánto vale hoy
+### Task 3 — la medida sigue el import a través de los fixtures, y el octavo test lleva el marcador
+
+**Objective:** un test nacido conforme que lanza un proceso real a través de un fixture cuenta como que lo lanza, y el único que lo hacía sin marcador lo lleva.
+
+**Files:** `plugin/__tests__/modulos-conformes.test.js` (modify), `plugin/__tests__/ct-step-dispatch-seal.test.js` (modify), `plugin/__tests__/ct-step-dispatch-seal-real-process.test.js` (create)
+
+Current state (plugin/__tests__/modulos-conformes.test.js, lines 120-123):
+
+```js
+  static lanzaProcesosReales(ruta) {
+    return /(?:from\s+['"]node:child_process['"]|require\(\s*['"]node:child_process['"]\s*\))/
+      .test(readFileSync(join(raiz, ruta), 'utf8'))
+  }
+```
+
+`NacidosConformes` gana `IMPORT_RELATIVO = /from\s+['"](\.{1,2}\/[^'"]+)['"]/g`, y
+`lanzaProcesosReales(ruta, vistos = new Set())` sigue siendo verdadero cuando la fuente importa
+`node:child_process`; si no, lo es cuando alguno de sus imports relativos (`IMPORT_RELATIVO`,
+resuelto con `join(dirname(ruta), especificador)` relativo a `raiz`) cae dentro de
+`__tests__/fixtures/` y a su vez lanza procesos reales, con `vistos` para no entrar dos veces en el
+mismo fichero. Un import relativo que resuelva
+fuera de `__tests__/fixtures/` no se sigue (§2). `sinMarcador()` y `marcadorDeAdorno()` no cambian:
+miden con la medida nueva. `git mv` de `plugin/__tests__/ct-step-dispatch-seal.test.js` a
+`plugin/__tests__/ct-step-dispatch-seal-real-process.test.js` sin tocar su contenido, y su entrada
+de `RUTAS` pasa al nombre nuevo, en su sitio.
+
+**TDD:** `it('a_test_born_conforming_that_launches_a_real_process_through_a_fixture_counts_as_launching_it')` — `lanzaProcesosReales('__tests__/ct-step-dispatch-seal-real-process.test.js')` es `true`; antes de ensanchar la medida es `false`, y tras el `git mv` `marcadorDeAdorno()` lo nombra hasta que la medida lo ve.
+
+**Tests:** añadidos — el de arriba y 'a_test_that_imports_neither_child_process_nor_a_spawning_fixture_does_not_count_as_launching_one' (`lanzaProcesosReales('__tests__/plugin-manifest.test.js')` es `false`), en el `describe` del marcador. Ninguno se retira: los dos de la tarea 2 siguen y ahora miden también el camino del fixture.
+
+**Verification:** los ocho llevan el marcador, el nombre viejo no queda, `RUTAS` está al día y la suite sigue verde.
+
+```bash
+(cd plugin && npx vitest run __tests__/modulos-conformes.test.js)
+test "$(ls plugin/__tests__/*-real-process.test.js | wc -l)" -eq 8
+test ! -e plugin/__tests__/ct-step-dispatch-seal.test.js
+test "$(grep -c "'__tests__/ct-step-dispatch-seal-real-process.test.js'," plugin/__tests__/modulos-conformes.test.js)" -eq 1
+test "$(grep -c "'__tests__/ct-step-dispatch-seal.test.js'" plugin/__tests__/modulos-conformes.test.js)" -eq 0
+(cd plugin && npm test)
+```
+
+### Task 4 — `npm run test:fast`, y el README dice cuánto vale hoy
 
 **Objective:** el marcador compra un subset rápido invocable, y quien lo lee sabe que todavía no es rápido y por qué.
 
@@ -303,12 +358,12 @@ Y un párrafo nuevo justo detrás del bloque, antes del encabezado «La regla de
 Final text (plugin/README.md):
 
 ```
-`npm run test:fast` corre la suite **sin los tests que lanzan un proceso de verdad**, marcados con el sufijo `-real-process.test.js` — el mismo marcador que usa el backend, porque es la misma decisión y este repo la escribe una vez. Hoy sólo lo llevan los tests nacidos conformes: de los 74 ficheros de `__tests__/` que importan `node:child_process` quedan **67 sin marcar**, así que el subset rápido **todavía no es rápido**. Es deuda declarada y se salda renombrando. Lo que ya está atado es que un test nacido conforme no puede espawnear sin su marcador ni llevarlo de adorno: lo mide `__tests__/modulos-conformes.test.js`.
+`npm run test:fast` corre la suite **sin los tests que lanzan un proceso de verdad**, marcados con el sufijo `-real-process.test.js` — el mismo marcador que usa el backend, porque es la misma decisión y este repo la escribe una vez. Hoy sólo lo llevan los tests nacidos conformes: de los 77 ficheros de `__tests__/` que lanzan un proceso —74 importan `node:child_process` y 3 lo hacen a través de `fixtures/ct-step-harness.js`— quedan **69 sin marcar**, así que el subset rápido **todavía no es rápido**. Es deuda declarada y se salda renombrando. Lo que ya está atado es que un test nacido conforme no puede espawnear sin su marcador ni llevarlo de adorno, ni esconder el proceso detrás de un fixture: lo mide `__tests__/modulos-conformes.test.js`.
 ```
 
 No code — configuración descrita en prosa y documentación cuyo texto literal es el entregable.
 
-**TDD:** No TDD — un script de npm y un párrafo del README no añaden comportamiento que poner en rojo; la regla del marcador ya la mide la tarea 2.
+**TDD:** No TDD — un script de npm y un párrafo del README no añaden comportamiento que poner en rojo; la regla del marcador ya la miden las tareas 2 y 3.
 
 **Tests:** N/A — ninguno añadido ni retirado.
 
@@ -319,11 +374,11 @@ No code — configuración descrita en prosa y documentación cuyo texto literal
 test "$(grep -c 'test:fast' plugin/package.json)" -eq 1
 grep -q 'npm run test:fast' plugin/README.md
 grep -q 'todavía no es rápido' plugin/README.md
-grep -q '67 sin marcar' plugin/README.md
+grep -q '69 sin marcar' plugin/README.md
 (cd plugin && npm test)
 ```
 
-### Task 4 — la doc de `/ct-harvest`: de la celda del informe a las columnas de la tabla
+### Task 5 — la doc de `/ct-harvest`: de la celda del informe a las columnas de la tabla
 
 **Objective:** quien lee `/ct-harvest --bq` sabe que la regla del `NULL` es de la columna y no de la celda, y tiene el mapa de celda a columnas.
 
@@ -369,16 +424,16 @@ grep -q 'issue-closed' plugin/commands/ct-harvest.md
 
 ## 8. Global verification
 
-Con las cuatro tareas commiteadas: la suite entera en verde, el subset rápido corriendo por su
-nombre, los siete ficheros marcados, la frase vieja de la doc desaparecida y el árbol limpio. Lo
-que un programa no mide y hay que mirar con ojos: que `npm run test:fast` de verdad excluye siete
+Con las cinco tareas commiteadas: la suite entera en verde, el subset rápido corriendo por su
+nombre, los ocho ficheros marcados, la frase vieja de la doc desaparecida y el árbol limpio. Lo
+que un programa no mide y hay que mirar con ojos: que `npm run test:fast` de verdad excluye ocho
 ficheros y no cero (comparar el recuento de ficheros de las dos corridas), y que el mapa de
 `plugin/commands/ct-harvest.md` nombra las mismas columnas que `HarvestTable.SCHEMA` declara.
 
 ```bash
 (cd plugin && npm test)
 (cd plugin && npm run test:fast)
-test "$(ls plugin/__tests__/*-real-process.test.js | wc -l)" -eq 7
+test "$(ls plugin/__tests__/*-real-process.test.js | wc -l)" -eq 8
 test "$(grep -c -F 'Todo `—` del informe llega como `NULL`' plugin/commands/ct-harvest.md)" -eq 0
 test -z "$(git status --porcelain)"
 ```
@@ -392,10 +447,11 @@ test -z "$(git status --porcelain)"
 5. **El plugin adopta el sufijo del backend y no inventa el suyo** — `plugin/conventions/testing.md` deja la forma a cada repo, y este repo ya la eligió en `backend/conventions/testing.md`. Dos marcadores en el mismo repo serían la misma decisión escrita dos veces, que es justo lo que `plugin/conventions/decisions.md` prohíbe.
 6. **Los `branch-reconciliation-real-git*` sueltan su `-real-git`** — ese trozo del nombre decía exactamente lo que el sufijo dice ahora, y conservarlo dejaría dos grafías de la misma decisión dentro del mismo nombre de fichero. Se conserva `produccion`, que sí distingue dos casos distintos.
 7. **Los nombres castellanos de los ficheros movidos no se traducen** — el renombre cambia el marcador; traducir los nombres sería una decisión de otra escala y ensuciaría el diff de esta corrección.
-8. **Los otros 67 no se renombran aquí** — es una barrida de repo que decide Juanjo. La regla mecánica se acota a `RUTAS` porque es la lista que este repo ya usa para «nacido conforme»; extenderla a los 132 ficheros pondría la suite en rojo hasta que la barrida esté hecha.
+8. **Los otros 69 no se renombran aquí** — es una barrida de repo que decide Juanjo. La regla mecánica se acota a `RUTAS` porque es la lista que este repo ya usa para «nacido conforme»; extenderla a los 133 ficheros pondría la suite en rojo hasta que la barrida esté hecha.
 9. **La regla se mide con dos listas de infractores y no con un bucle por ruta** — es el idiom que ya tiene `plugin/__tests__/modulos-conformes.test.js` (`prosaEn` y compañía devuelven la lista y el test afirma `toEqual([])`), y una lista nombra a los siete infractores de una vez en vez de repartirlos en siete fallos.
 10. **`test:fast` no reconstruye `dist/`** — es lo que lo hace rápido, y el precio está declarado: `npm test` sigue siendo el que construye y el que cierra cada tarea, tal y como manda «la regla del `dist/`» del README.
-11. **El README dice el número exacto de ficheros sin marcar** — medido el 2026-09-03: 74 de los 132 ficheros de `plugin/__tests__/*.test.js` importan `node:child_process`, siete de ellos en `RUTAS`. Un texto que dijera sólo «queda deuda» no le diría a nadie cuánto vale hoy el subset.
+11. **El README dice el número exacto de ficheros sin marcar** — medido el 2026-09-04, con la medida de la tarea 3: 77 de los 133 ficheros de `plugin/__tests__/*.test.js` lanzan un proceso (74 importan `node:child_process`; `ct-step-veredicto`, `ct-step-verificacion-global` y `ct-step-dispatch-seal` lo hacen a través de `fixtures/ct-step-harness.js`), ocho de ellos en `RUTAS`. Un texto que dijera sólo «queda deuda» no le diría a nadie cuánto vale hoy el subset.
 12. **La doc remite a «La telemetría del juez, por slice» y no la repite** — esa sección ya explica por qué se exigen las dos mitades; repetir el porqué dejaría dos textos que pueden divergir, y lo nuevo es sólo el mapa a las columnas.
 13. **La versión sigue en `0.55.0`** — las tres tensiones son correcciones de lo que esta misma rama introdujo y viajan en la misma pull request; subir la versión anunciaría una entrega que no existe.
 14. **El plan no lleva número de issue en el nombre** — misma convención que los dos planes anteriores de esta rama; se valida con `validatePlan` de `plugin/scripts/plan-contract.js` con rutas relativas a la raíz del repo.
+15. **La medida sigue el import sólo dentro de `__tests__/fixtures/`** — un fixture existe para montar el andamiaje de un test, y espawnear es su oficio: si él lanza procesos, el test que lo importa los lanza. Un módulo de `scripts/` que importe `node:child_process` (`cmux.js`, `liveness.js`, `go-channel.js`…) no convierte en spawn al test que lo importa, porque `plugin/conventions/architecture.md` manda que el test le inyecte un doble, y seguirlo marcaría tests que no lanzan nada. El juez de la tarea 2 declaró el hueco sobre `ct-step-dispatch-seal.test.js` y la tarea 3 lo cierra; la tarea 2 se ejecutó y se juzgó con la medida directa, tal y como su texto la fijaba.
