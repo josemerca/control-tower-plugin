@@ -8,7 +8,7 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 
 | | |
 |---|---|
-| Versión | `0.53.0` · contrato de la tabla de slices `v21` |
+| Versión | `0.54.0` · contrato de la tabla de slices `v21` |
 | Comandos | `/ct-init` · `/ct-groom` · `/ct-next` · `/ct-status` |
 | Puertas humanas | 3 por epic — congelación, `status:ready`, merge — más el gate `plan` en cada slice (renunciable por fila con `!plan`; su go es `-OK <nonce>` y `--release` se niega sin él) y el gate `e2e` cuando la fila declara recorridos en la columna `E2E` (derivado, no se escribe a mano) |
 | Skills | 11 forkados de superpowers 6.0.3 + 1 propio (`writing-plans-prescriptive`) |
@@ -258,7 +258,7 @@ npm run build       # sólo el bundle de los hooks
 
 ### La regla del `dist/`
 
-`hooks/hooks.json` arranca `dist/session-start.js`, `dist/stop.js` y `dist/commit-keyword-guard.js` — **los bundles, no los fuentes de `hooks/`**. `dist/` está trackeado, así que:
+`hooks/hooks.json` arranca `dist/session-start.js`, `dist/stop.js`, `dist/commit-keyword-guard.js` y `dist/dispatch-guard.js` — **los bundles, no los fuentes de `hooks/`**. `dist/` está trackeado, así que:
 
 > **Todo cambio en `hooks/`, o en cualquier módulo de `scripts/` que esos hooks importen, tiene que llevar un `dist/` reconstruido en el mismo commit.**
 
@@ -272,10 +272,10 @@ Si no, el repo sigue distribuyendo el hook viejo mientras la fuente ya dice otra
 commands/     los cuatro slash commands (Markdown + prosa larga: son la documentación)
 scripts/      la lógica — módulos puros y los ejecutables .mjs (los cuatro del loop y ct-step)
 scripts/vendor/  `yaml` bundleado — DERIVADO, trackeado, ver abajo
-hooks/        SessionStart (hidratación), Stop (estado al día), PreToolUse (guarda de commits)
+hooks/        SessionStart (hidratación), Stop (estado al día), PreToolUse sobre Bash (guarda de commits) y sobre Task (puerta del despacho)
 dist/         bundles de los hooks — DERIVADO, trackeado, ver arriba
 skills/       los 11 skills forkados + writing-plans-prescriptive (propio) + LICENSE-superpowers + FORK.md
-__tests__/    120 ficheros, 2.997 tests
+__tests__/    126 ficheros, 3.177 tests
 ```
 
 Y un nivel más arriba, en el repo y **fuera** de lo que se distribuye (el `source` del

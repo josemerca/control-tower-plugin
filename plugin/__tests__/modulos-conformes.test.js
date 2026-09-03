@@ -26,6 +26,11 @@ class NacidosConformes {
     '__tests__/slice-collection.test.js',
     'scripts/slice-collector.js',
     '__tests__/slice-collector.test.js',
+    'scripts/dispatch-gate.js',
+    'hooks/dispatch-guard.js',
+    '__tests__/dispatch-gate.test.js',
+    '__tests__/dispatch-guard.test.js',
+    '__tests__/ct-step-dispatch-seal.test.js',
   ]
 
   static PALABRAS_CASTELLANAS = [

@@ -27,6 +27,13 @@ describe('hooks.json', () => {
       expect(existsSync(join(root, rel))).toBe(true)
     }
   })
+  it('registra el PreToolUse de la puerta del despacho, sobre Task', () => {
+    const pre = h.hooks.PreToolUse
+    expect(pre).toBeTruthy()
+    const sobreTask = pre.filter((e) => e.matcher === 'Task')
+    expect(sobreTask.length).toBeGreaterThan(0)
+    expect(JSON.stringify(sobreTask)).toContain('dispatch-guard.js')
+  })
   it('registra el PreToolUse de la puerta de closing keywords, sobre Bash', () => {
     const pre = h.hooks.PreToolUse
     expect(pre).toBeTruthy()
