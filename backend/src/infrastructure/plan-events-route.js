@@ -1,4 +1,5 @@
 import { Answer, Refusal } from './http.js'
+import { Projection } from './projection.js'
 import { PlanProgressFailure } from '../domain/exceptions.js'
 
 export class PlanSessions {
@@ -58,26 +59,21 @@ export class EventsRequest {
 
 export class EventsRefusal {
   static NOT_WATCHED = 'no plan was started for that issue'
-  static #BY_OUTCOME = Object.freeze({
-    [EventsRequestOutcome.MALFORMED_ISSUE]: () => new Refusal({
+  static #BY_OUTCOME = new Projection('refusal', [
+    [EventsRequestOutcome.MALFORMED_ISSUE, () => new Refusal({
       status: 400,
       error: `the issue to watch is a number such as ${EventsRequest.EXAMPLE}`,
-    }),
-    [EventsRequestOutcome.NOT_WATCHED]: () =>
-      new Refusal({ status: 404, error: EventsRefusal.NOT_WATCHED }),
-  })
+    })],
+    [EventsRequestOutcome.NOT_WATCHED, () =>
+      new Refusal({ status: 404, error: EventsRefusal.NOT_WATCHED })],
+  ])
 
   static of(asked) {
-    const declared = EventsRefusal.#BY_OUTCOME[asked.outcome]
-    if (declared === undefined) {
-      throw new Error(`no refusal declared for outcome ${asked.outcome}`)
-    }
-
-    return declared(asked)
+    return EventsRefusal.#BY_OUTCOME.of(asked.outcome)(asked)
   }
 
   static declaredOutcomes() {
-    return Object.keys(EventsRefusal.#BY_OUTCOME)
+    return EventsRefusal.#BY_OUTCOME.members()
   }
 }
 

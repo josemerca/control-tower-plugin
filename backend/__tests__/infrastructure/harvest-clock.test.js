@@ -223,7 +223,7 @@ describe('SweepLine', () => {
   it('an_outcome_nobody_declared_a_line_for_raises_instead_of_being_swept_past_without_a_word', async () => {
     const broken = Sweeping.answering([[42, 'invented']])
 
-    expect((await broken.broke()).message).toBe('no sweep line declared for harvest outcome invented')
+    expect((await broken.broke()).message).toBe('no harvest outcome sweep line declared for invented')
   })
 
   it('every_harvest_failure_the_catalogue_declares_has_a_line_so_a_third_one_cannot_kill_the_server_unnamed', () => {
@@ -236,6 +236,6 @@ describe('SweepLine', () => {
   it('a_harvest_failure_nobody_declared_a_line_for_raises_instead_of_being_reported_as_one_of_the_two', async () => {
     const broken = Sweeping.answering([[42, new HarvestFailure('a family nobody projected')]])
 
-    expect((await broken.broke()).message).toBe('no sweep line declared for harvest failure HarvestFailure')
+    expect((await broken.broke()).message).toBe('no harvest failure sweep line declared for HarvestFailure')
   })
 })
