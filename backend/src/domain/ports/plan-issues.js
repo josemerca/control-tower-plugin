@@ -17,6 +17,12 @@ export class PlanIssues {
     )
   }
 
+  async changesAsked({ issue, repository }) {
+    throw new Error(
+      `${this.constructor.name} must implement changesAsked({ issue, repository }), asked for ${issue?.number} in ${repository}`
+    )
+  }
+
   async answerGo({ issueNumber, repository, nonce }) {
     throw new Error(
       `${this.constructor.name} must implement answerGo({ issueNumber, repository, nonce }), asked for ${issueNumber} in ${repository}`
