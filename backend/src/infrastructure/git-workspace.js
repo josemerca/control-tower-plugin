@@ -1,6 +1,7 @@
 import { isAbsolute } from 'node:path'
 import { SLICE_REL_PATH, excludeContentWith } from '../../../plugin/scripts/state-paths.js'
 import { renderState } from '../../../plugin/scripts/state.js'
+import { GhPlanIssues } from './gh-plan-issues.js'
 import { Workspace } from '../domain/ports/workspace.js'
 import { PreparedWorkspace } from '../domain/value-objects/prepared-workspace.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
@@ -12,6 +13,12 @@ import {
 
 export class SliceSeed {
   static RELATIVE_PATH = SLICE_REL_PATH
+  static PLAN_GATE = 'plan'
+  static GATES =
+    `${SliceSeed.PLAN_GATE} — GATE HUMANO pendiente: lo cierra una persona desde la app cuando pide ` +
+    'implementar el plan, NO tú. Y hasta entonces puede pedirte cambios comentando ' +
+    `\`${GhPlanIssues.CHANGES_TOKEN}\` en el issue. ` +
+    'Ojo: la sección "## Gates" del issue describe el carril de /ct-next y aquí no aplica.'
   static EXCLUDE_PATH = 'info/exclude'
   static EXCLUDE_RULE = SliceSeed.RELATIVE_PATH
 
@@ -25,6 +32,7 @@ export class SliceSeed {
         base,
         base_sha: cut,
         last_commit: cut,
+        gates: SliceSeed.GATES,
         github_issue: issue.number,
         you_are_here: 'worktree recién cortado, sin trabajo encima',
         next_action: 'escribe el plan prescriptivo, valídalo con --check-plan, commitéalo y para',
