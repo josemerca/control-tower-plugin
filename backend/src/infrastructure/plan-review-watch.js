@@ -1,19 +1,5 @@
 import { PlanFailure } from '../domain/exceptions.js'
 
-class Followed {
-  constructor() {
-    this.stopped = false
-    this.attended = new Set()
-  }
-
-  attend(change) {
-    if (this.attended.has(change.id)) return false
-    this.attended.add(change.id)
-
-    return true
-  }
-}
-
 export class PlanReviewWatch {
   constructor({ asked, review, sleep, stderr }) {
     this.asked = asked
@@ -23,35 +9,44 @@ export class PlanReviewWatch {
     this.live = new Map()
   }
 
-  start(watch) {
-    const followed = new Followed()
-    this.live.set(watch.issue.number, followed)
+  static #keyFor(repository, issueNumber) {
+    return `${repository.text}#${issueNumber}`
+  }
 
-    return this.#follow(watch, followed).catch((cause) => {
-      this.#warn(watch, `stopped watching it: ${cause.message}`)
+  start(watch) {
+    const key = PlanReviewWatch.#keyFor(watch.repository, watch.issue.number)
+    const attended = new Set()
+    this.live.set(key, attended)
+
+    return this.#follow(watch, key, attended).catch((cause) => {
+      this.#forget(key, attended)
+      this.#warn(watch, `is no longer watched: ${cause.message}`)
     })
   }
 
-  stop(issueNumber) {
-    const followed = this.live.get(issueNumber)
-    if (followed === undefined) return
-    followed.stopped = true
-    this.live.delete(issueNumber)
+  stop({ issue, repository }) {
+    this.live.delete(PlanReviewWatch.#keyFor(repository, issue))
   }
 
-  async #follow(watch, followed) {
-    while (!followed.stopped) {
+  #forget(key, attended) {
+    if (this.live.get(key) !== attended) return
+    this.live.delete(key)
+  }
+
+  async #follow(watch, key, attended) {
+    for (;;) {
       await this.sleep()
-      if (followed.stopped) return
-      await this.#attend(watch, followed)
+      if (this.live.get(key) !== attended) return
+      await this.#attend(watch, attended)
     }
   }
 
-  async #attend(watch, followed) {
+  async #attend(watch, attended) {
     const read = await this.#sound(watch)
     if (read === null) return
     for (const change of read.changes) {
-      if (!followed.attend(change)) continue
+      if (attended.has(change.id)) continue
+      attended.add(change.id)
       await this.#deliver(watch, change)
     }
   }

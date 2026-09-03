@@ -21,12 +21,14 @@ class WatchDouble {
     agent: WatchDouble.AGENT,
   })
 
+  static STOPPING = { issue: WatchDouble.NUMBER, repository: WatchDouble.REPOSITORY }
+
   static A_CHANGE = new ChangeAsked({
     id: 'IC_kwDOT9lB5c8AAAABRCF0GG', text: 'añade el caso de la issue sin descripción',
   })
 
   static ANOTHER_CHANGE = new ChangeAsked({
-    id: 'IC_kwDOT9lB5c8AAAABRCF0HH', text: 'y parte la tarea 3 en dos',
+    id: 'IC_kwDOT9lB5c8AAAABRCF0HH', text: WatchDouble.A_CHANGE.text,
   })
 
   constructor(soundings, { refusingTheDelivery = null, waits = null } = {}) {
@@ -74,7 +76,7 @@ class WatchDouble {
       },
       sleep: () => {
         this.slept += 1
-        if (this.slept > this.waits) this.watch.stop(WatchDouble.NUMBER)
+        if (this.slept > this.waits) this.watch.stop(WatchDouble.STOPPING)
 
         return Promise.resolve()
       },
@@ -174,5 +176,98 @@ describe('PlanReviewWatch', () => {
     expect(watched.warnings).toHaveLength(1)
     expect(watched.warnings[0]).toContain('changes is not iterable')
     expect(watched.asked).toHaveLength(1)
+  })
+
+  it('a_change_asked_for_twice_in_the_same_words_is_handed_over_twice_because_the_id_is_what_counts', async () => {
+    const watched = WatchDouble.answering(
+      [WatchDouble.A_CHANGE], [WatchDouble.A_CHANGE, WatchDouble.ANOTHER_CHANGE]
+    )
+
+    await watched.run()
+
+    expect(watched.reviewed).toHaveLength(2)
+  })
+
+  it('a_delivery_that_blew_up_on_a_defect_of_ours_ends_that_watch_instead_of_repeating_it', async () => {
+    const watched = WatchDouble.refusingTheDelivery(new TypeError('agent is not a string'))
+
+    await watched.run()
+
+    expect(watched.reviewed).toHaveLength(1)
+    expect(watched.asked).toHaveLength(1)
+    expect(watched.warnings[0]).toContain('agent is not a string')
+  })
+
+  it('a_watch_that_died_is_no_longer_listed_as_live_so_the_map_cannot_promise_a_bucle_that_is_gone', async () => {
+    const watched = WatchDouble.answering(new TypeError('changes is not iterable'))
+
+    await watched.run()
+
+    expect(watched.watch.live.size).toBe(0)
+  })
+
+  it('a_stop_for_an_issue_nobody_is_watching_answers_the_same_as_one_that_was', async () => {
+    const watched = WatchDouble.answering([])
+
+    await watched.run()
+
+    expect(() => watched.watch.stop(WatchDouble.STOPPING)).not.toThrow()
+  })
+})
+
+describe('PlanReviewWatch telling two plans apart', () => {
+  const NUMBER = 7
+  const watchFor = (repo) => new PlanWatch({
+    issue: new PlanIssue({ number: NUMBER, url: `https://github.com/${repo}/issues/${NUMBER}` }),
+    located: new WorkspaceLocation({ path: `/repo/${repo}/.worktrees/7`, branch: 'feat/7' }),
+    repository: new RepositoryName(repo),
+    agent: 'workspace:1',
+  })
+
+  const ALPHA = watchFor('owner/alpha')
+  const BETA = watchFor('owner/beta')
+  const ROUND_MS = 1
+  const ROUNDS = 15
+
+  class TwoPlans {
+    constructor() {
+      this.sounded = []
+      this.reviews = new PlanReviewWatch({
+        asked: (watch) => {
+          this.sounded.push(watch.repository.text)
+
+          return Promise.resolve({ changes: [] })
+        },
+        review: () => Promise.resolve(),
+        sleep: () => new Promise((resolve) => setTimeout(resolve, ROUND_MS)),
+        stderr: () => {},
+      })
+    }
+
+    static #settling() {
+      return new Promise((resolve) => setTimeout(resolve, ROUND_MS * ROUNDS))
+    }
+
+    async soundedAfterStopping(stopping) {
+      this.reviews.start(ALPHA)
+      this.reviews.start(BETA)
+      await TwoPlans.#settling()
+      this.reviews.stop(stopping)
+      this.sounded = []
+      await TwoPlans.#settling()
+
+      return this.sounded
+    }
+  }
+
+  it('two_plans_sharing_an_issue_number_in_different_repositories_are_watched_apart', async () => {
+    const two = new TwoPlans()
+
+    const sounded = await two.soundedAfterStopping({
+      issue: NUMBER, repository: ALPHA.repository,
+    })
+
+    expect(sounded).not.toContain('owner/alpha')
+    expect(sounded).toContain('owner/beta')
   })
 })

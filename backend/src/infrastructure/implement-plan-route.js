@@ -178,7 +178,7 @@ export class ImplementPlanRoute {
       Answer.refuseAs(response, ImplementCollapse.of(cause))
       return
     }
-    reviews.stop(asked.issue)
+    reviews.stop({ issue: asked.issue, repository: asked.repository })
     sessions.forget(asked.issue)
     Answer.send(response, 202, {
       status: 'implementing',

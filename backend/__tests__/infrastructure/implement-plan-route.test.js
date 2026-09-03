@@ -49,8 +49,8 @@ class ReviewsSpy {
     this.started.push(watch)
   }
 
-  stop(issueNumber) {
-    this.stopped.push(issueNumber)
+  stop({ issue, repository }) {
+    this.stopped.push(`${repository.text}#${issue}`)
   }
 }
 
@@ -256,7 +256,7 @@ describe('implementing the plan lifts the watch on its issue', () => {
     const response = await RunningApi.asking(RunningApi.ACCEPTED_BODY)
 
     expect(response.status).toBe(202)
-    expect(RunningApi.reviews.stopped).toEqual([33])
+    expect(RunningApi.reviews.stopped).toEqual(['jjponz/repo-pulse#33'])
   })
 
   it('a_refused_request_to_implement_lifts_no_watch', async () => {

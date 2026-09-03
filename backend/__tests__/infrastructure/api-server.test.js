@@ -120,8 +120,8 @@ class ReviewsSpy {
     this.started.push(watch)
   }
 
-  stop(issueNumber) {
-    this.stopped.push(issueNumber)
+  stop({ issue, repository }) {
+    this.stopped.push(`${repository.text}#${issue}`)
   }
 }
 
