@@ -14,6 +14,8 @@ export class Invocation {
   static STATE_DIRECTORY = 'control-tower'
   static DEFAULT_CONFIG_DIRECTORY = '.claude'
   static HOME_VARIABLE = 'HOME'
+  static CLAIM_PREFIX = 'CT_CLAIM_'
+  static CHILD_TIMEOUT_VARIABLE = 'CT_CLAIM_CHILD_TIMEOUT_MS'
   static #MAX_PORT = 65535
   static #WHOLE_NUMBER = /^\d+$/
 
@@ -60,6 +62,16 @@ export class Invocation {
     if (!Invocation.#WHOLE_NUMBER.test(given) || Number(given) > Invocation.#MAX_PORT) return null
 
     return Number(given)
+  }
+
+  static harvestEnvironment(environment, { ghTimeoutMs }) {
+    const inherited = Object.entries(environment)
+      .filter(([named]) => !named.startsWith(Invocation.CLAIM_PREFIX))
+
+    return {
+      ...Object.fromEntries(inherited),
+      [Invocation.CHILD_TIMEOUT_VARIABLE]: String(ghTimeoutMs),
+    }
   }
 
   static from(argv, environment, home) {

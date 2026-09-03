@@ -2,8 +2,13 @@ import { isAbsolute } from 'node:path'
 import { SLICE_REL_PATH, excludeContentWith } from '../../../plugin/scripts/state-paths.js'
 import { renderState } from '../../../plugin/scripts/state.js'
 import { Workspace } from '../domain/ports/workspace.js'
+import { PreparedWorkspace } from '../domain/value-objects/prepared-workspace.js'
+import { RepositoryName } from '../domain/value-objects/repository-name.js'
 import { WorkspaceLocation } from '../domain/value-objects/workspace-location.js'
-import { WorkspaceNotPrepared, WorkspaceNotUnderstood } from '../domain/exceptions.js'
+import { WorkspaceSurvey } from '../domain/value-objects/workspace-survey.js'
+import {
+  WorkspaceNotPrepared, WorkspaceNotRead, WorkspaceNotUnderstood,
+} from '../domain/exceptions.js'
 
 export class SliceSeed {
   static RELATIVE_PATH = SLICE_REL_PATH
@@ -31,6 +36,46 @@ export class SliceSeed {
         'Este fichero está fuera de la vista de git a propósito: no puede entrar en el pull request.',
       ].join('\n'),
     })
+  }
+}
+
+export class WorktreeListing {
+  static HEADING = 'worktree '
+  static BRANCH = 'branch refs/heads/'
+  static #NUMBERED = /^[1-9]\d*$/
+
+  static surveyOf({ printed, root, repository }) {
+    const blocks = printed.split('\n\n').map((block) => block.trim()).filter((block) => block.length > 0)
+    if (blocks.length === 0) {
+      throw new WorkspaceNotUnderstood(
+        `git worktree list --porcelain printed nothing for ${root}, and a checkout always lists at least itself`
+      )
+    }
+
+    return new WorkspaceSurvey({
+      repository,
+      prepared: blocks
+        .map((block) => WorktreeListing.#preparedIn(block, root))
+        .filter((found) => found !== null),
+    })
+  }
+
+  static #preparedIn(block, root) {
+    const lines = block.split('\n')
+    if (!lines[0].startsWith(WorktreeListing.HEADING)) {
+      throw new WorkspaceNotUnderstood(
+        `every block of git worktree list --porcelain names a worktree first, and ${root} answered ${JSON.stringify(lines[0])}`
+      )
+    }
+    const path = lines[0].slice(WorktreeListing.HEADING.length)
+    const numbered = path.split('/').at(-1)
+    if (!WorktreeListing.#NUMBERED.test(numbered)) return null
+    const issue = { number: Number(numbered) }
+    if (path !== GitWorkspace.pathFor(root, issue)) return null
+    const branch = GitWorkspace.branchFor(issue)
+    if (!lines.includes(`${WorktreeListing.BRANCH}${branch}`)) return null
+
+    return new PreparedWorkspace({ issueNumber: issue.number, located: new WorkspaceLocation({ path, branch }) })
   }
 }
 
@@ -71,6 +116,10 @@ export class GitWorkspace extends Workspace {
 
   static remoteArgvFor(root) {
     return ['-C', root, 'remote', 'get-url', GitWorkspace.REMOTE]
+  }
+
+  static surveyArgvFor(root) {
+    return ['-C', root, 'worktree', 'list', '--porcelain']
   }
 
   static defaultBranchArgvFor(root) {
@@ -114,23 +163,41 @@ export class GitWorkspace extends Workspace {
     return located
   }
 
-  async #confirmRoot(repository) {
+  async survey() {
+    const repository = await this.#repositoryOfRoot()
+    const listed = await this.run(GitWorkspace.surveyArgvFor(this.root))
+    if (listed.failed) {
+      throw new WorkspaceNotRead(
+        `git worktree list could not say what ${this.root} holds, so the checkout was not surveyed: ${listed.stderr.trim()}`
+      )
+    }
+
+    return WorktreeListing.surveyOf({ printed: listed.stdout, root: this.root, repository })
+  }
+
+  async #repositoryOfRoot() {
     const asked = await this.run(GitWorkspace.remoteArgvFor(this.root))
     if (asked.failed) {
-      throw new WorkspaceNotPrepared(
+      throw new WorkspaceNotRead(
         `${this.root} does not name a ${GitWorkspace.REMOTE} remote, so the repository it holds cannot be confirmed: ${asked.stderr.trim()}`
       )
     }
     const url = asked.stdout.trim()
     const named = url.match(GitWorkspace.#NAMED)
-    if (named === null) {
+    if (named === null || !RepositoryName.isWellFormed(named[1])) {
       throw new WorkspaceNotUnderstood(
         `the ${GitWorkspace.REMOTE} of ${this.root} is ${JSON.stringify(url)}, and no owner/name can be read out of it`
       )
     }
-    if (named[1] !== repository.text) {
+
+    return new RepositoryName(named[1])
+  }
+
+  async #confirmRoot(repository) {
+    const held = await this.#repositoryOfRoot()
+    if (held.text !== repository.text) {
       throw new WorkspaceNotPrepared(
-        `${this.root} holds ${named[1]} and the issue lives in ${repository.text}: cutting a worktree here would plan one repository inside another`
+        `${this.root} holds ${held.text} and the issue lives in ${repository.text}: cutting a worktree here would plan one repository inside another`
       )
     }
   }

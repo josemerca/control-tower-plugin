@@ -125,6 +125,10 @@ cinco puertas ni cambia el movimiento del label; lo único que se pierde es el m
 `cosecha pendiente:` del siguiente `/ct-next` recupera. Se dice por stderr al liberar, para que el silencio
 no se lea como un vigilante que sí está.
 
+Y tras mergear `main`, el argumento se refuerza: la cosecha ya existe como `--collect` y el backend
+la llama desde un reloj propio, así que el aviso del vigilante no se queda sin destinatario, se queda
+sin función.
+
 Descartado: apuntar `CT_WATCH_MERGE_BIN` a una ruta inexistente. Funciona hoy sin tocar el plugin, pero es
 un hueco cuyo propio comentario declara que existe para los tests y que no cambia ninguna decisión; meterlo
 en la línea del encargo dejaría una variable que dentro de tres meses nadie sabe por qué está.

@@ -1,10 +1,12 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { ToolRunner } from '../../src/infrastructure/tool-runner.js'
 
 class Node {
   static SLOW_MS = 5_000
+  static INHERITED = 'CT_TOOL_RUNNER_INHERITED'
+  static GIVEN = 'CT_TOOL_RUNNER_GIVEN'
 
   static running(budgetMs) {
     return new ToolRunner({ bin: process.execPath, budgetMs })
@@ -13,9 +15,29 @@ class Node {
   static sleeping() {
     return ['-e', `setTimeout(() => {}, ${Node.SLOW_MS})`]
   }
+
+  static withEnvironment(env) {
+    return new ToolRunner({ bin: process.execPath, budgetMs: 30_000, env })
+  }
+
+  static printing(variable) {
+    return ['-e', `process.stdout.write(String(process.env.${variable}))`]
+  }
+
+  static started() {
+    process.env[Node.INHERITED] = 'from the api'
+  }
+
+  static forgotten() {
+    delete process.env[Node.INHERITED]
+  }
 }
 
 describe('ToolRunner', () => {
+  afterEach(() => {
+    Node.forgotten()
+  })
+
   it('what_the_tool_prints_comes_back_with_the_code_that_says_it_went_well', async () => {
     const output = await Node.running(30_000).run(['-e', 'process.stdout.write("printed")'])
 
@@ -70,6 +92,25 @@ describe('ToolRunner', () => {
     const output = await Node.running(30_000).run(['-e', 'process.stdout.write(process.cwd())'])
 
     expect(output.stdout).toBe(process.cwd())
+  })
+
+  it('the_environment_the_caller_composed_is_what_the_tool_reads_and_the_one_the_api_inherited_is_gone', async () => {
+    Node.started()
+    const runner = Node.withEnvironment({ [Node.GIVEN]: 'from the caller' })
+
+    const given = await runner.run(Node.printing(Node.GIVEN))
+    const dropped = await runner.run(Node.printing(Node.INHERITED))
+
+    expect(given.stdout).toBe('from the caller')
+    expect(dropped.stdout).toBe('undefined')
+  })
+
+  it('a_runner_that_names_no_environment_hands_the_tool_the_one_the_api_was_started_with', async () => {
+    Node.started()
+
+    const output = await Node.running(30_000).run(Node.printing(Node.INHERITED))
+
+    expect(output.stdout).toBe('from the api')
   })
 
   it('a_runner_without_a_budget_cannot_be_built_because_no_call_goes_out_uncapped', () => {

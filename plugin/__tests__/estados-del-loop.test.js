@@ -299,7 +299,7 @@ describe('F13/H1 — un PR rechazado puede volver al loop', () => {
   it('la línea de uso anuncia --reopen (si no, nadie que lea el error se entera de que existe)', () => {
     const r = runCheck(['9', '--dry-run'])
     expect(r.code).toBe(2)
-    expect(r.out).toMatch(/\[--release \| --reopen \| --requeue \| --check-plan\]/)
+    expect(r.out).toMatch(/\[--release \| --reopen \| --requeue \| --check-plan \| --collect\]/)
   })
 })
 

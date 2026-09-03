@@ -37,7 +37,7 @@ describe('PlanRefusal', () => {
 describe('PlanCollapse', () => {
   const FAMILIES = [
     'PlanFailure', 'UserStoryFailure', 'PlanIssueFailure', 'PlanAgentFailure', 'WorkspaceFailure',
-    'PlanProgressFailure', 'PlanChangesFailure', 'GoFailure',
+    'PlanProgressFailure', 'PlanChangesFailure', 'GoFailure', 'HarvestFailure',
   ]
 
   const RESUMING_AN_AGENT = ImplementCollapse.declaredFailures()
@@ -47,7 +47,8 @@ describe('PlanCollapse', () => {
     !FAMILIES.includes(name) &&
     !RESUMING_AN_AGENT.includes(name) &&
     !(thrown.prototype instanceof exceptions.PlanProgressFailure) &&
-    !(thrown.prototype instanceof exceptions.PlanChangesFailure)
+    !(thrown.prototype instanceof exceptions.PlanChangesFailure) &&
+    !(thrown.prototype instanceof exceptions.HarvestFailure)
 
   it('every_way_the_plan_can_collapse_has_a_status_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
     const ways = Object.entries(exceptions).filter(startingAPlan).map(([name]) => name)
@@ -68,6 +69,13 @@ describe('PlanCollapse', () => {
       .toThrow(/no status declared/)
   })
 
+  it('a_failure_of_harvesting_has_no_status_here_because_the_sweep_answers_no_request', () => {
+    expect(PlanCollapse.declaredFailures()).not.toContain('HarvestNotRead')
+    expect(PlanCollapse.declaredFailures()).not.toContain('HarvestNotUnderstood')
+    expect(() => PlanCollapse.of(new exceptions.HarvestNotRead('gh refused')))
+      .toThrow(/no status declared/)
+  })
+
   it('a_tool_that_refused_the_call_is_something_to_try_again_and_says_so', () => {
     const collapse = PlanCollapse.of(new exceptions.UserStoryNotRead('acli is not authenticated'))
 
@@ -77,6 +85,7 @@ describe('PlanCollapse', () => {
     expect(PlanCollapse.of(new exceptions.PlanIssueNotCreated('nope')).status).toBe(503)
     expect(PlanCollapse.of(new exceptions.PlanAgentNotLaunched('nope')).status).toBe(503)
     expect(PlanCollapse.of(new exceptions.WorkspaceNotPrepared('branch is taken')).status).toBe(503)
+    expect(PlanCollapse.of(new exceptions.WorkspaceNotRead('no such remote')).status).toBe(503)
   })
 
   it('an_issue_that_could_not_be_claimed_is_something_to_try_again_and_names_what_gh_said', () => {
