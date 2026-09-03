@@ -92,34 +92,38 @@ correr `git worktree remove` y la cosecha sabe desde dónde correr `dispatch-che
 6. `checkouts.remember(root)`
 
 `checkouts` es el puerto nuevo **`CheckoutRegistry`** (`backend/src/domain/ports/checkout-registry.js`)
-con `remember(root)` y `known()`. Su adaptador de infraestructura es `MemoryCheckoutRegistry`: un `Set`
-por texto de ruta, sin duplicados.
+con `remember(root)` y `known()`. Su adaptador de infraestructura es `MemoryCheckoutRegistry`: un mapa por
+texto de ruta, sin duplicados.
 
-**`SurveyWorkspaces.execute`** recorre `checkouts.known()` y devuelve una encuesta por clon. El
-`HarvestClock` barre cada encuesta como hoy barre la única. **`HarvestDelivery`** pasa
-`params.prepared.located.root` al `collect`.
+**`SurveyWorkspaces.execute(params)`** recibe la raíz en `SurveyWorkspacesParams` y encuesta ese clon. Es
+el **`HarvestClock`** quien pregunta al registro qué clones conoce y encuesta cada uno por separado: un clon
+que no se puede encuestar deja su línea en stderr y el siguiente se encuesta igual, en vez de que un clon
+borrado bloquee la cosecha de todos. **`HarvestDelivery`** pasa `params.prepared.located.root` al `collect`.
 
 ## 6. Infraestructura
 
 **`PlanRequest`** (`backend/src/infrastructure/start-plan-route.js`): campo `root` en `KNOWN_FIELDS`,
 resultado `MALFORMED_ROOT` y su rechazo 400: `root must be an absolute path to a local clone such as
 /Users/you/repos/name`. Los fallos de `confirm` ya están mapeados a 503 en `PlanCollapse`. La respuesta 202
-devuelve `root` junto a `id` y `repo`.
+no cambia: nadie en el front lee la raíz de vuelta, y un campo sin lector no viaja.
 
 **`GitWorkspace`** pierde `root` del constructor. `#repositoryOfRoot(root)` y `#confirmRoot(root,
-repository)` se convierten en el `confirm` público. `pathFor`, `argvFor` y compañía ya reciben la raíz.
+repository)` se convierten en el `confirm` público, y `prepare` deja de confirmar por su cuenta: la
+comprobación ocurre una vez, en la puerta, y `prepare` sólo lo llama código propio que ya confirmó. `pathFor`,
+`argvFor` y compañía ya reciben la raíz.
 
 **`DispatchCheckHarvest`** pierde `root` del constructor y corre `dispatch-check` con `cwd: root` del
 `collect`.
 
 **`ct-api.mjs`** deja de leer `process.cwd()`. Construye `MemoryCheckoutRegistry` y se lo da a
-`StartPlan` y a `SurveyWorkspaces`. `Invocation` no cambia: el directorio de estado sigue saliendo de
+`StartPlan` y al `HarvestClock`. `Invocation` no cambia: el directorio de estado sigue saliendo de
 `CLAUDE_CONFIG_DIR`.
 
 **Front** (`frontend/src/app/start-plan/`): campo "Ruta del clon local" en `StartPlanForm`, `root` en
 `StartPlan.types.ts`, en el cliente y en `StartPlanMother`. El botón de arrancar sigue deshabilitado hasta
 que los tres campos tienen forma. La validación de forma en el front es la misma que en el back: ruta
-absoluta.
+absoluta, sin segmentos vacíos ni barra final, porque `git worktree list` imprime rutas normalizadas y una
+raíz con barra final haría que la encuesta no reconociera nunca sus propios worktrees.
 
 ## 7. Errores
 
@@ -132,18 +136,25 @@ absoluta.
 
 ## 8. Tests
 
-- `checkout-root.test.js`: formas válidas y rechazadas.
-- `plan-request.test.js` y `plan-refusal.test.js`: el campo nuevo, su 400 y que el 202 lo devuelve.
-- `git-workspace.test.js`: `confirm` con clon ajeno y con ruta sin git; `prepare` y `survey` con raíz por
-  llamada; `undo` desde `located.root`.
-- `start-plan.test.js`: `confirm` va antes de `open`; un `confirm` fallido no abre issue; una petición
-  aceptada queda en el registro.
-- `survey-workspaces.test.js` y `harvest-clock.test.js`: dos clones conocidos producen dos encuestas y se
-  cosechan ambos; ninguno conocido no barre nada.
-- `dispatch-check-harvest.test.js`: `cwd` es la raíz recibida.
+Siguen `backend/conventions/testing.md`: el dominio no tiene tests propios, se cubre desde la petición y
+desde el caso de uso.
+
+- `plan-request.test.js` y `api-server.test.js`: el campo nuevo, las formas rechazadas y su 400 literal, que
+  una petición rechazada no llega al caso de uso, y que la raíz aceptada llega al caso de uso como valor.
+- `start-plan.test.js`: `confirm` va antes de leer la historia; un `confirm` fallido no lee nada ni abre issue;
+  `prepare` recibe la raíz; una petición que arranca queda en el registro y una que falla no.
+- `git-workspace.test.js`: `confirm` con clon ajeno, con ruta sin git y con las dos formas de remoto;
+  `prepare` ya no pregunta por el remoto; `survey` y `undo` con la raíz que reciben; `located.root`.
+- `memory-checkout-registry.test.js`: nada conocido al arrancar; la misma raíz dos veces se conoce una.
+- `survey-workspaces.test.js`: la raíz de los parámetros es la que se encuesta.
+- `harvest-clock.test.js`: dos clones conocidos se encuestan y cosechan ambos; uno que no se puede encuestar
+  deja su línea y el siguiente se encuesta; ninguno conocido sólo duerme.
+- `harvest-delivery.test.js` y `dispatch-check-harvest.test.js`: `collect` recibe la raíz del worktree y
+  `dispatch-check` corre con ese `cwd`.
+- `ct-api-real-process.test.js`: la petición entera llega a git primero, con una raíz que no existe.
 - Front: el botón se habilita con los tres campos y la petición lleva `root`.
-- Prueba de punta a punta: API arrancada desde este repo, petición con `repo: jjponz/repo-pulse` y `root:
-  /Users/acapdev/repos/repo-pulse`, historia XOP-4909. Es exactamente el caso que hoy peta.
+- Prueba de punta a punta a mano: API arrancada desde este repo, petición con `repo: jjponz/repo-pulse` y
+  `root: /Users/acapdev/repos/repo-pulse`, historia XOP-4909. Es exactamente el caso que hoy peta.
 
 ## 9. Lo que este cambio no hace
 
