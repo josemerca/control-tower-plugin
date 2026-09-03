@@ -14,10 +14,12 @@ import { PlanIssues } from '../domain/ports/plan-issues.js'
 import { PlanIssue } from '../domain/value-objects/plan-issue.js'
 import {
   PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueNotClaimed, PlanGoNotAnswered,
+  PlanChangesNotRead, PlanChangesNotUnderstood,
 } from '../domain/exceptions.js'
 import { Gh } from './gh.js'
 
 export class GhPlanIssues extends PlanIssues {
+  static CHANGES_TOKEN = '-REVIEW'
   static IN_PROGRESS_LABEL = 'status:in-progress'
   static IN_REVIEW_LABEL = 'status:in-review'
   static GO_TOKEN = '-OK'
@@ -38,6 +40,14 @@ export class GhPlanIssues extends PlanIssues {
       'issue', 'comment', String(issueNumber),
       '--repo', repository.text,
       '--body', GhPlanIssues.goBodyFor(nonce),
+    ]
+  }
+
+  static changesArgvFor({ issue, repository }) {
+    return [
+      'issue', 'view', String(issue.number),
+      '--repo', repository.text,
+      '--json', 'comments',
     ]
   }
 
@@ -106,6 +116,54 @@ export class GhPlanIssues extends PlanIssues {
     if (outcome.failed) this.#warn({ issue, argv, said: outcome.stderr.trim() })
   }
 
+  async changesAsked({ issue, repository }) {
+    const outcome = await this.gh.run(
+      GhPlanIssues.changesArgvFor({ issue, repository }), { safeToRepeat: true }
+    )
+    if (outcome.failed) {
+      throw new PlanChangesNotRead(`${Gh.BIN} issue view failed: ${outcome.stderr.trim()}`)
+    }
+
+    return GhPlanIssues.#changesIn(outcome.stdout, issue)
+  }
+
+  static #changesIn(printed, issue) {
+    return GhPlanIssues.#commentsIn(printed, issue)
+      .filter((comment) => String(comment?.body ?? '').startsWith(GhPlanIssues.CHANGES_TOKEN))
+      .map((comment) => GhPlanIssues.#changeFrom(comment, issue))
+  }
+
+  static #commentsIn(printed, issue) {
+    let parsed
+    try {
+      parsed = JSON.parse(printed)
+    } catch {
+      throw new PlanChangesNotUnderstood(
+        `${Gh.BIN} answered something that is not json for the comments of ${issue.number}, it printed ${JSON.stringify(printed)}`
+      )
+    }
+    if (!Array.isArray(parsed?.comments)) {
+      throw new PlanChangesNotUnderstood(
+        `${Gh.BIN} answered without the comments of ${issue.number}, it printed ${JSON.stringify(printed)}`
+      )
+    }
+
+    return parsed.comments
+  }
+
+  static #changeFrom(comment, issue) {
+    if (typeof comment.id !== 'string' || comment.id === '') {
+      throw new PlanChangesNotUnderstood(
+        `${Gh.BIN} did not name a comment asking for changes on ${issue.number}, so attending it once could not be remembered`
+      )
+    }
+
+    return new ChangeAsked({
+      id: comment.id,
+      text: String(comment.body).slice(GhPlanIssues.CHANGES_TOKEN.length).trim(),
+    })
+  }
+
   async answerGo({ issueNumber, repository, nonce }) {
     const outcome = await this.gh.run(
       GhPlanIssues.goArgvFor({ issueNumber, repository, nonce }), { safeToRepeat: false }
@@ -151,6 +209,14 @@ export class GhPlanIssues extends PlanIssues {
     }
 
     return outcome
+  }
+}
+
+export class ChangeAsked {
+  constructor({ id, text }) {
+    this.id = id
+    this.text = text
+    Object.freeze(this)
   }
 }
 

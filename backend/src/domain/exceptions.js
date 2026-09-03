@@ -39,6 +39,12 @@ export class PlanProgressFailure extends PlanFailure {}
 
 export class PlanProgressNotRead extends PlanProgressFailure {}
 
+export class PlanChangesFailure extends PlanFailure {}
+
+export class PlanChangesNotRead extends PlanChangesFailure {}
+
+export class PlanChangesNotUnderstood extends PlanChangesFailure {}
+
 export class GoFailure extends PlanFailure {}
 
 export class GoNotRecorded extends GoFailure {}
