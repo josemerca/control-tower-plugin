@@ -253,8 +253,11 @@ Van en la plantilla del spec y no en el contrato, porque **las juzga un humano a
 ```bash
 npm install
 npm test            # construye dist/ y corre la suite (vitest)
+npm run test:fast   # la suite sin los tests que lanzan un proceso de verdad
 npm run build       # sólo el bundle de los hooks
 ```
+
+`npm run test:fast` corre la suite **sin los tests que lanzan un proceso de verdad**, marcados con el sufijo `-real-process.test.js` — el mismo marcador que usa el backend, porque es la misma decisión y este repo la escribe una vez. Hoy sólo lo llevan los tests nacidos conformes: de los 77 ficheros de `__tests__/` que lanzan un proceso —74 importan `node:child_process` y 3 lo hacen a través de `fixtures/ct-step-harness.js`— quedan **69 sin marcar**, así que el subset rápido **todavía no es rápido**. Es deuda declarada y se salda renombrando. Lo que ya está atado es que un test nacido conforme no puede espawnear sin su marcador ni llevarlo de adorno, ni esconder el proceso detrás de un fixture: lo mide `__tests__/modulos-conformes.test.js`.
 
 ### La regla del `dist/`
 
