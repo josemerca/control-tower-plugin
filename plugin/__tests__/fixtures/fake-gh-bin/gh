@@ -212,6 +212,16 @@ function main() {
       process.exitCode = 0
       return
     }
+    // FAKE_GH_ISSUE_VIEW_JSON (F20/cosecha, Task 6) — el camino de `--json
+    // number,title,state,closedAt,labels,milestone,closedByPullRequestsReferences`,
+    // que es la fila entera del slice que `SliceHarvest` lee en `--collect`. Va
+    // aparte de labels/comments/body por la misma razón que ellos: mismo
+    // subcomando, pregunta distinta.
+    if (joined.includes('--json number,title')) {
+      process.stdout.write(process.env.FAKE_GH_ISSUE_VIEW_JSON || '{}')
+      process.exitCode = 0
+      return
+    }
     process.stdout.write(process.env.FAKE_GH_VIEW_LABELS || '[]')
     process.exitCode = 0
     return

@@ -40,6 +40,7 @@ import { SliceBase, BaseBranch } from './slice-base.js'
 import { DeliveryState } from './slice-collection.js'
 import { CollectionAction, CollectionOutcome, SliceCollector } from './slice-collector.js'
 import { findWorkspaceByCwd } from './cmux.js'
+import { BigQueryTable, LoadOutcome } from './bigquery-load.js'
 
 const ctWatchMergePath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch-merge.mjs')
 
@@ -224,7 +225,15 @@ const dryRun = has('--dry-run')
 // liberar, por la misma razón por la que el fallo al lanzarlo también se dice:
 // un silencio aquí es indistinguible de un vigilante que sí está.
 const noWatchMerge = has('--no-watch-merge')
-const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release | --reopen | --requeue | --check-plan | --collect] [--dry-run] [--no-watch-merge]'
+const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release | --reopen | --requeue | --check-plan | --collect] [--dry-run] [--no-watch-merge] [--bq <proyecto:dataset.tabla>]'
+// --bq <proyecto:dataset.tabla>: solo dentro de --collect, dónde cargar la fila cosechada
+// del slice tras cerrar cmux, borrar el worktree y la rama. Se valida AQUÍ, junto a los
+// demás flags y antes de tocar `gh`, para que un valor mal formado salga con exit 2 sin
+// haber leído nada de GitHub — el mismo criterio que el resto de este bloque.
+const bqArg = arg('--bq', null)
+if (bqArg === true) dieErr(`--bq inválido: "(sin valor)" — ${usage}`, 2)
+const bqTable = bqArg === null ? null : BigQueryTable.parse(bqArg)
+if (bqArg !== null && !bqTable) dieErr(`--bq inválido: "${bqArg}" — debe tener la forma proyecto:dataset.tabla (p.ej. mi-proyecto:control_tower.harvest).`, 2)
 if (issue === null || issue < 1) {
   dieErr(`<issue#> inválido: ${process.argv[2] === undefined ? '(ausente)' : `"${process.argv[2]}"`} — debe ser un entero >= 1 escrito con dígitos a secas (nada de "42x", "1e3", "4.2", espacios, ni signo "+"/"-": un número aproximado aquí reclamaría un issue que no es el que pediste).\n${usage}`, 2)
 }
@@ -1469,7 +1478,7 @@ if (collect) {
   // nuevo sin fila aquí lanza en vez de salir con un código inventado.
   const PROYECCION = {
     [CollectionOutcome.COLLECTED]: { decir: dieOut, code: 0, linea: (r) => `collected #${issue}: ${r.done.map(hechoDe).join(', ')}` },
-    [CollectionOutcome.WOULD_COLLECT]: { decir: dieOut, code: 0, linea: (r) => `would collect #${issue}: ${r.pending.map((command) => command.line).join(' ; ')}` },
+    [CollectionOutcome.WOULD_COLLECT]: { decir: dieOut, code: 0, linea: (r) => `would collect #${issue}: ${r.pending.map((command) => command.line).join(' ; ')}${bqTable ? ` ; y cargaría 1 fila en ${bqTable.id}` : ''}` },
     [CollectionOutcome.NOTHING_LEFT]: { decir: dieOut, code: 0, linea: () => `nothing left for #${issue}: en ${a.mainRoot} ya no queda ni el worktree .worktrees/${issue} ni la rama ${a.branch}` },
     [CollectionOutcome.WAITING]: { decir: dieOut, code: 1, linea: (r) => `waiting on #${issue} (${r.delivery.state}): ${esperaPor(r.delivery)} — no se ha tocado nada` },
     [CollectionOutcome.KEPT_DIRTY_TREE]: { decir: dieOut, code: 10, linea: () => `kept #${issue}: el worktree ${a.worktree} tiene cambios sin commitear — no se ha borrado nada` },

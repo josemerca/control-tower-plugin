@@ -41,6 +41,7 @@ class NacidosConformes {
     '__tests__/dispatch-gate.test.js',
     '__tests__/dispatch-guard.test.js',
     '__tests__/ct-step-dispatch-seal.test.js',
+    '__tests__/dispatch-check-collect-bq.test.js',
   ]
 
   static PALABRAS_CASTELLANAS = [
