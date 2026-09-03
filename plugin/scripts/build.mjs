@@ -58,6 +58,7 @@ export const buildOptions = {
     'session-start': 'hooks/session-start.js',
     stop: 'hooks/stop.js',
     'commit-keyword-guard': 'hooks/commit-keyword-guard.js',
+    'dispatch-guard': 'hooks/dispatch-guard.js',
     'scope-check': 'scripts/scope-check-cli.js',
   },
   bundle: true,

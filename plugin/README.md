@@ -258,7 +258,7 @@ npm run build       # sólo el bundle de los hooks
 
 ### La regla del `dist/`
 
-`hooks/hooks.json` arranca `dist/session-start.js`, `dist/stop.js` y `dist/commit-keyword-guard.js` — **los bundles, no los fuentes de `hooks/`**. `dist/` está trackeado, así que:
+`hooks/hooks.json` arranca `dist/session-start.js`, `dist/stop.js`, `dist/commit-keyword-guard.js` y `dist/dispatch-guard.js` — **los bundles, no los fuentes de `hooks/`**. `dist/` está trackeado, así que:
 
 > **Todo cambio en `hooks/`, o en cualquier módulo de `scripts/` que esos hooks importen, tiene que llevar un `dist/` reconstruido en el mismo commit.**
 
@@ -272,7 +272,7 @@ Si no, el repo sigue distribuyendo el hook viejo mientras la fuente ya dice otra
 commands/     los cuatro slash commands (Markdown + prosa larga: son la documentación)
 scripts/      la lógica — módulos puros y los ejecutables .mjs (los cuatro del loop y ct-step)
 scripts/vendor/  `yaml` bundleado — DERIVADO, trackeado, ver abajo
-hooks/        SessionStart (hidratación), Stop (estado al día), PreToolUse (guarda de commits)
+hooks/        SessionStart (hidratación), Stop (estado al día), PreToolUse sobre Bash (guarda de commits) y sobre Task (puerta del despacho)
 dist/         bundles de los hooks — DERIVADO, trackeado, ver arriba
 skills/       los 11 skills forkados + writing-plans-prescriptive (propio) + LICENSE-superpowers + FORK.md
 __tests__/    120 ficheros, 2.997 tests

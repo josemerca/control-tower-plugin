@@ -84,6 +84,7 @@ import { SENAL_AUSENTE } from './kickoff.js'
 import { SLICE_REL_PATH } from './state-paths.js'
 import { findClosingKeywords } from './closing-keywords.js'
 import { BaseBranch } from './slice-base.js'
+import { StepSeal } from './dispatch-gate.js'
 
 const PLUGIN_ROOT = dirname(dirname(fileURLToPath(import.meta.url)))
 
@@ -603,6 +604,21 @@ function verboNext() {
       break
     default:
       die(`el estado tiene un paso que esta versión no conoce: ${run.step}`, EXIT.UNNAMED)
+  }
+  // EL SELLO DEL PASO. `next` acaba de escribir la entrada que el subagente de
+  // este paso va a leer —el brief, o el paquete del juez—, y eso es justo lo
+  // que un despacho que se salta este verbo deja sin escribir: medido dos veces
+  // en campo, con el implementador y con el juez. El sello lo lee el hook del
+  // tool `Task` (hooks/dispatch-guard.js), que sin él DENIEGA el despacho.
+  //
+  // Se pone en UN sitio y no en los tres `case`, y la condición sale de la
+  // misma constante que nombra la entrada de cada paso: un paso al que `next`
+  // no le escribe nada no se sella, porque sellarlo afirmaría que allí hay un
+  // despacho protegido. Los `discards` NO entran en el sello a propósito — ver
+  // StepSeal en scripts/dispatch-gate.js.
+  if (StepSeal.inputWrittenFor(run.step) !== null) {
+    run = { ...run, nextSeal: StepSeal.of(run) }
+    guardar()
   }
   process.exit(EXIT.OK)
 }
