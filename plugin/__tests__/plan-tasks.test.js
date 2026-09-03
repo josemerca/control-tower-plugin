@@ -413,6 +413,78 @@ describe('la vara tiene que poder medir lo que dice medir (verification-predicat
     expect(reglas(['test "$(git diff HEAD -- AGENTS.md | grep -c \'ct-init:slices-contract\')" -eq 0'])).toEqual([])
   })
 
+  it('el caso del slice 35 de repo-pulse, verbatim: `grep -c` con DOS ficheros dentro del predicado', () => {
+    const r = reglas(['test "$(grep -c \'Cargando…\' web/src/App.tsx web/src/App.test.tsx)" -eq 0'])
+    expect(r).toHaveLength(1)
+    expect(r[0].detail).toMatch(/dos o más ficheros/)
+    expect(r[0].detail).toMatch(/grep -l/)
+  })
+
+  it('un fichero dentro del predicado es la forma buena y sigue validando', () => {
+    expect(reglas(['test "$(grep -c \'^test(\' web/src/screen.test.ts)" -eq 7'])).toEqual([])
+  })
+
+  it('la frontera son dos: con uno vale, con dos no, y da igual que la cuenta sea cero o siete', () => {
+    expect(reglas(['test "$(grep -c \'x\' a.ts)" -eq 7'])).toEqual([])
+    expect(reglas(['test "$(grep -c \'x\' a.ts b.ts)" -eq 7'])).toHaveLength(1)
+    expect(reglas(['test "$(grep -c \'x\' a.ts b.ts c.ts)" -eq 0'])).toHaveLength(1)
+  })
+
+  it('un `grep -c` tras una tubería, sobre lo que llega por stdin, no tiene ficheros que contar', () => {
+    expect(reglas(['test "$(git diff --name-only | grep -c \'web/src/App.tsx\')" -eq 1'])).toEqual([])
+  })
+
+  it('la sustitución SÍ se trocea por tubería antes de contar: sin partir, el tramo de delante confundiría la cuenta', () => {
+    expect(reglas(['test "$(cat a.ts | grep -c \'x\' b.ts c.ts)" -eq 0'])).toHaveLength(1)
+  })
+
+  it('los patrones de `-e` no se cuentan como ficheros, o dos patrones y un fichero parecerían dos ficheros', () => {
+    expect(reglas(['test "$(grep -c -e p1 -e p2 a.ts)" -eq 0'])).toEqual([])
+    expect(reglas(['test "$(grep -c -e p1 a.ts b.ts)" -eq 0'])).toHaveLength(1)
+  })
+
+  it('las banderas de grep no se confunden con ficheros', () => {
+    expect(reglas(['test "$(grep -cE \'a|b\' --color=never web/src/screen.ts)" -eq 0'])).toEqual([])
+  })
+
+  it('una redirección tras el fichero no cuenta como un segundo fichero', () => {
+    expect(reglas(['test "$(grep -c \'x\' a.ts 2>/dev/null)" -eq 0'])).toEqual([])
+    expect(reglas(['test "$(grep -c \'x\' a.ts 2>&1)" -eq 0'])).toEqual([])
+  })
+
+  it('el argumento de una bandera con valor (`-m N`) no se cuenta como fichero', () => {
+    expect(reglas(['test "$(grep -c -m 1 \'x\' a.ts)" -eq 0'])).toEqual([])
+  })
+
+  it('un patrón entre comillas con un espacio dentro sigue siendo UN operando, no dos', () => {
+    expect(reglas(['test "$(grep -c \'dos palabras\' a.ts)" -eq 0'])).toEqual([])
+  })
+
+  it('un patrón con un paréntesis dentro y dos ficheros de verdad sigue acusándose', () => {
+    expect(reglas(['test "$(grep -c \'a)b\' a.ts b.ts)" -eq 0'])).toHaveLength(1)
+  })
+
+  it('un `$(...)` que es texto literal dentro de comillas simples no se lee como una sustitución real', () => {
+    expect(reglas(["grep -Fq '$(grep -c mark a.ts b.ts)' incidencias.md"])).toEqual([])
+  })
+
+  it('un `$(...)` dentro de comillas dobles SÍ se expande, porque en esa comilla el shell lo expande también', () => {
+    expect(reglas(['test -n "$(grep -c \'x\' a.ts b.ts)"'])).toHaveLength(1)
+  })
+
+  it('`rg -c` y `grep --count` con dos ficheros los caza la MISMA decisión que caza `grep -c`, no una copia que puede desentenderse', () => {
+    expect(reglas(['test "$(rg -c \'x\' a.ts b.ts)" -eq 0'])).toHaveLength(1)
+    expect(reglas(['test "$(grep --count \'x\' a.ts b.ts)" -eq 0'])).toHaveLength(1)
+  })
+
+  it('unas comillas dobles que se cierran dejan de suprimir, y una simple que abre justo después SÍ suprime lo que trae dentro', () => {
+    expect(reglas(['grep -Fq "prefix" \'$(grep -c mark a.ts b.ts)\' incidencias.md'])).toEqual([])
+  })
+
+  it('unas comillas simples que se cierran dejan de suprimir, y una sustitución real que viene después SÍ se inspecciona', () => {
+    expect(reglas(['grep -Fq \'note\' "$(grep -c \'x\' a.ts b.ts)" file.md'])).toHaveLength(1)
+  })
+
   it('`grep -q` y el `grep` pelado no se tocan: ahí el exit code ES la aserción', () => {
     expect(reglas(["grep -q 'cargo clippy' AGENTS.md"])).toEqual([])
     expect(reglas(["grep 'cargo clippy' AGENTS.md"])).toEqual([])
@@ -511,6 +583,23 @@ describe('la Global verification es del programa (§3.7-A)', () => {
     const plan = conTareaY(['## 8. Global verification', '', F + 'bash', 'wc -l AGENTS.md', F])
     const { problems } = extractTasks(plan)
     expect(problems.map((p) => p.rule)).toContain('global-verification-predicate')
+  })
+
+  it('§8 con `grep -c` de dos ficheros también es un problema de predicado: la regla del slice 35 no es sólo de las tareas', () => {
+    const plan = conTareaY([
+      '## 8. Global verification', '', F + 'bash', 'test "$(grep -c \'x\' a.ts b.ts)" -eq 0', F,
+    ])
+    const { problems } = extractTasks(plan)
+    expect(problems.map((p) => p.rule)).toContain('global-verification-predicate')
+  })
+
+  it('§8 también trocea sus palabras respetando comillas: un `-c` dentro de un literal no confunde a la regla de cabecera', () => {
+    const plan = conTareaY([
+      '## 8. Global verification', '', F + 'bash',
+      "grep -Fq '$(grep -c mark a.ts b.ts)' incidencias.md", F,
+    ])
+    const { problems } = extractTasks(plan)
+    expect(problems.map((p) => p.rule)).not.toContain('global-verification-predicate')
   })
 
   it('el fixture real extrae el único comando de su Global verification', () => {
