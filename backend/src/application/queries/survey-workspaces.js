@@ -1,3 +1,10 @@
+export class SurveyWorkspacesParams {
+  constructor(root) {
+    this.root = root
+    Object.freeze(this)
+  }
+}
+
 export class SurveyWorkspacesResult {
   constructor({ survey }) {
     this.survey = survey
@@ -10,7 +17,7 @@ export class SurveyWorkspaces {
     this.workspace = workspace
   }
 
-  async execute() {
-    return new SurveyWorkspacesResult({ survey: await this.workspace.survey() })
+  async execute(params) {
+    return new SurveyWorkspacesResult({ survey: await this.workspace.survey(params.root) })
   }
 }

@@ -3,12 +3,13 @@ import { Projection } from './projection.js'
 import { StartPlanParams } from '../application/actions/start-plan.js'
 import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
+import { CheckoutRoot } from '../domain/value-objects/checkout-root.js'
 import {
   PlanFailure,
   UserStoryNotRead, UserStoryNotUnderstood, PlanIssueNotCreated, PlanIssueNotNamed,
   PlanIssueNotClaimed,
   PlanAgentNotLaunched, PlanAgentNotNamed, WorkspaceNotPrepared, WorkspaceNotRead,
-  WorkspaceNotUnderstood,
+  WorkspaceNotUnderstood, CheckoutNotConfirmed,
 } from '../domain/exceptions.js'
 
 export const PlanRequestOutcome = Object.freeze({
@@ -17,32 +18,35 @@ export const PlanRequestOutcome = Object.freeze({
   UNKNOWN_FIELD: 'unknown-field',
   MALFORMED_ID: 'malformed-id',
   MALFORMED_REPO: 'malformed-repo',
+  MALFORMED_PATH: 'malformed-path',
 })
 
 export class PlanRequest {
   static ID_FIELD = 'id'
   static REPO_FIELD = 'repo'
-  static KNOWN_FIELDS = Object.freeze([PlanRequest.ID_FIELD, PlanRequest.REPO_FIELD])
+  static PATH_FIELD = 'path'
+  static KNOWN_FIELDS = Object.freeze([PlanRequest.ID_FIELD, PlanRequest.REPO_FIELD, PlanRequest.PATH_FIELD])
 
-  constructor({ outcome, story, repository, fields }) {
+  constructor({ outcome, story, repository, root, fields }) {
     this.outcome = outcome
     this.story = story
     this.repository = repository
+    this.root = root
     this.fields = Object.freeze([...fields])
     Object.freeze(this)
   }
 
-  static accepted(story, repository) {
-    return new PlanRequest({ outcome: PlanRequestOutcome.ACCEPTED, story, repository, fields: [] })
+  static accepted(story, repository, root) {
+    return new PlanRequest({ outcome: PlanRequestOutcome.ACCEPTED, story, repository, root, fields: [] })
   }
 
   static refused(outcome) {
-    return new PlanRequest({ outcome, story: null, repository: null, fields: [] })
+    return new PlanRequest({ outcome, story: null, repository: null, root: null, fields: [] })
   }
 
   static withUnknownFields(fields) {
     return new PlanRequest({
-      outcome: PlanRequestOutcome.UNKNOWN_FIELD, story: null, repository: null, fields,
+      outcome: PlanRequestOutcome.UNKNOWN_FIELD, story: null, repository: null, root: null, fields,
     })
   }
 
@@ -68,7 +72,11 @@ export class PlanRequest {
     if (!RepositoryName.isWellFormed(asked)) {
       return PlanRequest.refused(PlanRequestOutcome.MALFORMED_REPO)
     }
-    return PlanRequest.accepted(new UserStoryKey(given), new RepositoryName(asked))
+    const where = parsed[PlanRequest.PATH_FIELD]
+    if (!CheckoutRoot.isWellFormed(where)) {
+      return PlanRequest.refused(PlanRequestOutcome.MALFORMED_PATH)
+    }
+    return PlanRequest.accepted(new UserStoryKey(given), new RepositoryName(asked), new CheckoutRoot(where))
   }
 }
 
@@ -83,6 +91,10 @@ export class PlanRefusal {
     [PlanRequestOutcome.MALFORMED_REPO, () => new Refusal({
       status: 400,
       error: `${PlanRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
+    })],
+    [PlanRequestOutcome.MALFORMED_PATH, () => new Refusal({
+      status: 400,
+      error: `${PlanRequest.PATH_FIELD} must be an absolute path`,
     })],
     [PlanRequestOutcome.UNKNOWN_FIELD, (asked) => new Refusal({
       status: 400,
@@ -100,27 +112,33 @@ export class PlanRefusal {
 }
 
 export class PlanCollapse {
+  static #FIX_THE_REQUEST = 400
   static #REFUSED = 503
   static #ANSWERED_SOMETHING_ELSE = 502
 
+  static #collapsed(status) {
+    return (cause) => new Refusal({ status, error: `could not start the plan: ${cause.message}` })
+  }
+
   static #BY_FAILURE = new Projection('status', [
-    [UserStoryNotRead, PlanCollapse.#REFUSED],
-    [PlanIssueNotCreated, PlanCollapse.#REFUSED],
-    [PlanIssueNotClaimed, PlanCollapse.#REFUSED],
-    [PlanAgentNotLaunched, PlanCollapse.#REFUSED],
-    [WorkspaceNotPrepared, PlanCollapse.#REFUSED],
-    [WorkspaceNotRead, PlanCollapse.#REFUSED],
-    [UserStoryNotUnderstood, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
-    [PlanIssueNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
-    [PlanAgentNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
-    [WorkspaceNotUnderstood, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
+    [UserStoryNotRead, PlanCollapse.#collapsed(PlanCollapse.#REFUSED)],
+    [PlanIssueNotCreated, PlanCollapse.#collapsed(PlanCollapse.#REFUSED)],
+    [PlanIssueNotClaimed, PlanCollapse.#collapsed(PlanCollapse.#REFUSED)],
+    [PlanAgentNotLaunched, PlanCollapse.#collapsed(PlanCollapse.#REFUSED)],
+    [WorkspaceNotPrepared, PlanCollapse.#collapsed(PlanCollapse.#REFUSED)],
+    [WorkspaceNotRead, PlanCollapse.#collapsed(PlanCollapse.#REFUSED)],
+    [CheckoutNotConfirmed, (cause) => new Refusal({
+      status: PlanCollapse.#FIX_THE_REQUEST,
+      error: `${PlanRequest.PATH_FIELD} must be a git checkout of ${cause.message}`,
+    })],
+    [UserStoryNotUnderstood, PlanCollapse.#collapsed(PlanCollapse.#ANSWERED_SOMETHING_ELSE)],
+    [PlanIssueNotNamed, PlanCollapse.#collapsed(PlanCollapse.#ANSWERED_SOMETHING_ELSE)],
+    [PlanAgentNotNamed, PlanCollapse.#collapsed(PlanCollapse.#ANSWERED_SOMETHING_ELSE)],
+    [WorkspaceNotUnderstood, PlanCollapse.#collapsed(PlanCollapse.#ANSWERED_SOMETHING_ELSE)],
   ])
 
   static of(cause) {
-    return new Refusal({
-      status: PlanCollapse.#BY_FAILURE.of(cause.constructor),
-      error: `could not start the plan: ${cause.message}`,
-    })
+    return PlanCollapse.#BY_FAILURE.of(cause.constructor)(cause)
   }
 
   static declaredFailures() {
@@ -147,7 +165,7 @@ export class StartPlanRoute {
     let started
     try {
       started = await startPlan.execute(
-        new StartPlanParams({ story: asked.story, repository: asked.repository })
+        new StartPlanParams({ story: asked.story, repository: asked.repository, root: asked.root })
       )
     } catch (cause) {
       if (!(cause instanceof PlanFailure)) throw cause
@@ -162,6 +180,8 @@ export class StartPlanRoute {
       [PlanRequest.REPO_FIELD]: asked.repository.text,
       issue: { number: started.watch.issue.number, url: started.watch.issue.url },
       agent: started.agent,
+      branch: started.watch.located.branch,
+      worktree: started.watch.located.path,
     })
   }
 

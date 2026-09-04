@@ -1,7 +1,7 @@
 export class Harvest {
-  async collect({ issueNumber, repository }) {
+  async collect({ issueNumber, repository, root }) {
     throw new Error(
-      `${this.constructor.name} must implement collect({ issueNumber, repository }), asked for ${issueNumber} in ${repository}`
+      `${this.constructor.name} must implement collect({ issueNumber, repository, root }), asked for ${issueNumber} in ${repository} at ${root}`
     )
   }
 }

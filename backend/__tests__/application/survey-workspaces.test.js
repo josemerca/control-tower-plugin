@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { SurveyWorkspaces } from '../../src/application/queries/survey-workspaces.js'
+import { SurveyWorkspaces, SurveyWorkspacesParams } from '../../src/application/queries/survey-workspaces.js'
 import { Workspace } from '../../src/domain/ports/workspace.js'
+import { CheckoutRoot } from '../../src/domain/value-objects/checkout-root.js'
 import { PreparedWorkspace } from '../../src/domain/value-objects/prepared-workspace.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
@@ -9,18 +10,20 @@ import { WorkspaceNotRead } from '../../src/domain/exceptions.js'
 
 class WorkspaceDouble extends Workspace {
   static ROOT = '/repo/checkout'
+  static CHECKOUT = new CheckoutRoot(WorkspaceDouble.ROOT)
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
 
   constructor(answer) {
     super()
     this.answer = answer
-    this.surveys = 0
+    this.surveys = []
   }
 
   static preparedFor(issueNumber) {
     return new PreparedWorkspace({
       issueNumber,
       located: new WorkspaceLocation({
+        root: WorkspaceDouble.ROOT,
         path: `${WorkspaceDouble.ROOT}/.worktrees/${issueNumber}`,
         branch: `feat/${issueNumber}`,
       }),
@@ -38,15 +41,15 @@ class WorkspaceDouble extends Workspace {
     return new WorkspaceDouble(new WorkspaceNotRead(said))
   }
 
-  async survey() {
-    this.surveys += 1
+  async survey(root) {
+    this.surveys.push(root)
     if (this.answer instanceof Error) throw this.answer
 
     return this.answer
   }
 
-  asked() {
-    return new SurveyWorkspaces({ workspace: this }).execute()
+  asked(root = WorkspaceDouble.CHECKOUT) {
+    return new SurveyWorkspaces({ workspace: this }).execute(new SurveyWorkspacesParams(root))
   }
 
   refusal() {
@@ -65,12 +68,13 @@ describe('SurveyWorkspaces', () => {
     expect(surveyed.survey.repository).toBe(WorkspaceDouble.REPOSITORY)
   })
 
-  it('the_checkout_is_asked_once_and_told_nothing_because_the_checkout_is_what_decides', async () => {
+  it('the_clone_named_in_the_params_is_the_one_surveyed_and_it_is_asked_once', async () => {
     const workspace = WorkspaceDouble.holding(42)
+    const elsewhere = new CheckoutRoot('/elsewhere/clone')
 
-    await workspace.asked()
+    await workspace.asked(elsewhere)
 
-    expect(workspace.surveys).toBe(1)
+    expect(workspace.surveys).toEqual([elsewhere])
   })
 
   it('a_checkout_with_nothing_prepared_is_an_empty_survey_and_never_a_failure', async () => {
@@ -87,6 +91,6 @@ describe('SurveyWorkspaces', () => {
   })
 
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
-    await expect(new Workspace().survey()).rejects.toThrow(/must implement survey/)
+    await expect(new Workspace().survey(WorkspaceDouble.CHECKOUT)).rejects.toThrow(/must implement survey/)
   })
 })
