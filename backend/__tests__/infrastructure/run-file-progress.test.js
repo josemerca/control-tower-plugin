@@ -116,6 +116,7 @@ describe('RunFileProgress', () => {
     expect(state).toEqual(ImplementationState.of({
       step: 'implement', task: 1, totalTasks: 3, name: null, attempt: 1, discards: 0,
     }))
+    expect(asked.existsAsked).toEqual([RunFileDouble.WORKTREE])
     expect(asked.readAsked).toEqual([RunFileDouble.RUN_FILE, RunFileDouble.PLAN_FILE])
   })
 
