@@ -10,6 +10,7 @@ import { CmuxPlanAgents } from './cmux-plan-agents.js'
 import { AcliUserStories } from './acli-user-stories.js'
 import { GhPlanIssues } from './gh-plan-issues.js'
 import { GitWorkspace } from './git-workspace.js'
+import { MemoryCheckoutRegistry } from './memory-checkout-registry.js'
 import { DiskGoRegistry } from './disk-go-registry.js'
 import { DispatchCheckHarvest } from './dispatch-check-harvest.js'
 import { HarvestClock } from './harvest-clock.js'
@@ -22,7 +23,7 @@ import { ImplementPlan } from '../application/actions/implement-plan.js'
 import { ReadPlanProgress, ReadPlanProgressParams } from '../application/queries/read-plan-progress.js'
 import { ReadChangesAsked, ReadChangesAskedParams } from '../application/queries/read-changes-asked.js'
 import { ReviewPlan, ReviewPlanParams } from '../application/actions/review-plan.js'
-import { SurveyWorkspaces } from '../application/queries/survey-workspaces.js'
+import { SurveyWorkspaces, SurveyWorkspacesParams } from '../application/queries/survey-workspaces.js'
 import { HarvestDelivery, HarvestDeliveryParams } from '../application/actions/harvest-delivery.js'
 import { ToolRunner } from './tool-runner.js'
 import { Gh } from './gh.js'
@@ -89,7 +90,7 @@ class Disk {
 
 class CtApi {
   static #USAGE =
-    `usage: ct-api.mjs (no arguments; set ${Invocation.PORT_VARIABLE} to pick a port, 0 for an ephemeral one)`
+    `usage: ct-api.mjs (no arguments; set ${Invocation.PORT_VARIABLE} to pick a port, 0 for an ephemeral one; set ${Invocation.HARVEST_TABLE_VARIABLE} to ${Invocation.HARVEST_TABLE_SHAPE} so every harvest loads its row into BigQuery)`
   static #BAD_USAGE = 2
   static #CANNOT_LISTEN = 1
   static #PROCESS_TIMEOUT_MS = 30_000
@@ -138,16 +139,17 @@ class CtApi {
     return after(seconds * 1000)
   }
 
-  static #startPlan(workspace, planAgents, planIssues) {
+  static #startPlan(workspace, planAgents, planIssues, checkouts) {
     return new StartPlan({
       userStories: new AcliUserStories({ acli: CtApi.#talkingTo(AcliUserStories.BIN, ExternalTool) }),
       planIssues,
       workspace,
       planAgents,
+      checkouts,
     })
   }
 
-  static #harvestClock({ workspace, root, environment }) {
+  static #harvestClock({ workspace, checkouts, environment, harvestTable }) {
     const surveyWorkspaces = new SurveyWorkspaces({ workspace })
     const harvestDelivery = new HarvestDelivery({
       harvest: new DispatchCheckHarvest({
@@ -158,12 +160,13 @@ class CtApi {
           }),
         }),
         dispatchCheck: PluginTree.dispatchCheck(),
-        root,
+        harvestTable,
       }),
     })
 
     return new HarvestClock({
-      survey: () => surveyWorkspaces.execute(),
+      checkouts: () => checkouts.known(),
+      survey: (root) => surveyWorkspaces.execute(new SurveyWorkspacesParams(root)),
       harvest: (prepared, repository) =>
         harvestDelivery.execute(new HarvestDeliveryParams({ prepared, repository })),
       sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_SWEEPS),
@@ -211,14 +214,13 @@ class CtApi {
       CtApi.#refuseUsage(asked.reason)
     }
     const git = CtApi.#tool(GitWorkspace.BIN)
-    const root = process.cwd()
     const workspace = new GitWorkspace({
       run: git,
       write: Disk.write,
       read: Disk.read,
-      root,
       stderr: (line) => process.stderr.write(line),
     })
+    const checkouts = new MemoryCheckoutRegistry()
     const planAgents = new CmuxPlanAgents({
       run: CtApi.#tool(CmuxPlanAgents.BIN),
       write: Disk.write,
@@ -242,7 +244,7 @@ class CtApi {
     })
     const server = new ApiServer({
       port: asked.port,
-      startPlan: CtApi.#startPlan(workspace, planAgents, planIssues),
+      startPlan: CtApi.#startPlan(workspace, planAgents, planIssues, checkouts),
       reviews: CtApi.#planReviews(planIssues, planAgents),
       implementPlan: new ImplementPlan({
         goRegistry: new DiskGoRegistry({
@@ -264,7 +266,9 @@ class CtApi {
       CtApi.#refuseListen(`could not listen on ${LOOPBACK}: ${error.message}`)
     }
     process.stdout.write(`${JSON.stringify({ port })}\n`)
-    CtApi.#sweepUntilItBreaks(CtApi.#harvestClock({ workspace, root, environment }))
+    CtApi.#sweepUntilItBreaks(CtApi.#harvestClock({
+      workspace, checkouts, environment, harvestTable: asked.harvestTable,
+    }))
   }
 }
 

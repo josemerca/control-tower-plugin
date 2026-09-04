@@ -1,40 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { DeliveryState } from '../scripts/slice-collection.js'
 import { CollectionOutcome, CollectionRead, SliceCollector } from '../scripts/slice-collector.js'
-
-class RunnerAnswer {
-  static ok(stdout) {
-    return { code: 0, stdout, stderr: '' }
-  }
-
-  static failed(code, stderr) {
-    return { code, stdout: '', stderr }
-  }
-}
-
-class ScriptedRunner {
-  constructor({ program, answers, spoken }) {
-    this.program = program
-    this.answers = answers
-    this.spoken = spoken
-  }
-
-  answerTo(asked) {
-    this.spoken.push(`${this.program} ${asked}`)
-    if (!Object.hasOwn(this.answers, asked)) {
-      throw new Error(`nobody wrote an answer for: ${this.program} ${asked}`)
-    }
-    return this.answers[asked]
-  }
-
-  get forArgv() {
-    return (argv) => this.answerTo(argv.join(' '))
-  }
-
-  get forCwd() {
-    return (cwd) => this.answerTo(cwd)
-  }
-}
+import { RunnerAnswer, ScriptedRunner } from './fixtures/scripted-runner.js'
 
 class Conversation {
   constructor({ gh, git, cmux, workspace }) {
@@ -263,6 +230,24 @@ describe('what the policy refuses to collect is never touched', () => {
       'git -C /checkout rev-parse --verify --quiet refs/heads/feat/7',
       'find-workspace /checkout/.worktrees/7',
     ])
+  })
+})
+
+describe('execute runs exactly the commands a rehearsal already decided', () => {
+  it('execute_runs_the_rehearsed_commands_without_asking_github_again', () => {
+    const conversation = CollectionCase.aMergedSliceThatIsSafeToCollect()
+    const rehearsed = CollectionCase.rehearsedFrom(conversation)
+    const report = conversation.collector.execute(rehearsed)
+    expect(report.outcome).toBe(CollectionOutcome.COLLECTED)
+    expect(conversation.spoken.filter((line) => line.startsWith('gh ')).length).toBe(1)
+  })
+
+  it('execute_refuses_a_report_that_is_not_would_collect', () => {
+    const conversation = CollectionCase.aMergedSliceThatIsSafeToCollect()
+    conversation.gh.answers[CollectionCase.PR_LIST] = RunnerAnswer.ok(GitHubTranscript.stillOpen())
+    const rehearsed = CollectionCase.rehearsedFrom(conversation)
+    expect(() => conversation.collector.execute(rehearsed))
+      .toThrow('SliceCollector.execute needs a would-collect report, got "waiting"')
   })
 })
 

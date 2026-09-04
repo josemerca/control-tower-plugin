@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest'
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { BigQueryTable } from '../../../plugin/scripts/bigquery-load.js'
 import { readGoCommitment, goPath } from '../../../plugin/scripts/go-registry.js'
 import { matchesGo } from '../../../plugin/scripts/go-response.js'
 import { controlTowerDir } from '../../../plugin/scripts/run-metrics.js'
@@ -11,7 +12,7 @@ import { GhPlanIssues, PlanIssueBody } from '../../src/infrastructure/gh-plan-is
 import { PlanAgentBrief } from '../../src/infrastructure/plan-agent-brief.js'
 import { UserStory } from '../../src/domain/value-objects/user-story.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
-import { Invocation } from '../../src/infrastructure/invocation.js'
+import { Invocation, InvocationOutcome } from '../../src/infrastructure/invocation.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 
 class Both {
@@ -113,6 +114,28 @@ describe('the status labels this backend writes and the plugin reads', () => {
   it('both_ends_of_the_claim_are_labels_the_loop_declares_instead_of_names_invented_here', () => {
     expect(LOOP_STATUS_LABELS).toContain(GhPlanIssues.IN_PROGRESS_LABEL)
     expect(LOOP_STATUS_LABELS).toContain(PlanIssueBody.READY_LABEL)
+  })
+})
+
+describe('the harvest table this backend hands the plugin', () => {
+  const HOME = '/home/someone'
+  const WELL_FORMED = ['p:d.t', 'my-project:control_tower.harvest', 'proj123:ds_1.tbl_1']
+
+  const started = (given) => Invocation.from([], { [Invocation.HARVEST_TABLE_VARIABLE]: given }, HOME)
+
+  it('every_table_this_backend_starts_with_is_one_the_plugin_parses_back_into_the_very_same_table', () => {
+    const ours = WELL_FORMED.map((given) => started(given).harvestTable)
+    const theirs = ours.map((table) => BigQueryTable.parse(table))
+
+    expect(ours).toEqual(WELL_FORMED)
+    expect(theirs.map((table) => table === null ? null : table.id)).toEqual(WELL_FORMED)
+  })
+
+  it('a_table_this_backend_refuses_never_becomes_an_argument_of_the_plugin_at_all', () => {
+    const refused = started('not-a-table')
+
+    expect(refused.outcome).toBe(InvocationOutcome.MALFORMED_HARVEST_TABLE)
+    expect(refused.harvestTable).toBe(null)
   })
 })
 

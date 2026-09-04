@@ -196,7 +196,13 @@ export class SliceCollector {
 
   collect({ artifacts, repo }) {
     const rehearsed = this.rehearse({ artifacts, repo })
-    if (rehearsed.outcome !== CollectionOutcome.WOULD_COLLECT) return rehearsed
+    return rehearsed.outcome === CollectionOutcome.WOULD_COLLECT ? this.execute(rehearsed) : rehearsed
+  }
+
+  execute(rehearsed) {
+    if (rehearsed.outcome !== CollectionOutcome.WOULD_COLLECT) {
+      throw new Error(`SliceCollector.execute needs a would-collect report, got "${rehearsed.outcome}"`)
+    }
     return this.#ran(rehearsed)
   }
 

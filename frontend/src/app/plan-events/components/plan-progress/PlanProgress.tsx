@@ -40,7 +40,8 @@ const PlanProgress = ({ plan, whenReady = null }: PlanProgressProps) => {
       <a href={plan.issue.url} target="_blank" rel="noreferrer">
         #{plan.issue.number}
       </a>{' '}
-      en <code>{plan.repo}</code> · agente <code>{plan.agent}</code>
+      en <code>{plan.repo}</code> · agente <code>{plan.agent}</code> · rama <code>{plan.branch}</code> · worktree{' '}
+      <code>{plan.worktree}</code>
     </span>
   )
 

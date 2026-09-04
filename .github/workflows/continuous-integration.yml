@@ -12,10 +12,29 @@ concurrency:
 # and lockfile, so each job pins its working-directory and its npm cache to
 # the package it actually builds — a root-level `npm ci` has nothing to
 # install anymore.
+
+# Every job that runs `npm ci` gets 15 minutes, not 5. The install is the whole
+# cost of these jobs — the suites themselves take seconds — and it is the part
+# whose duration nobody controls. Measured on 2026-09-04, same lockfile, same
+# 156 packages, cold cache: 1m01s, 1m49s, and over 5m in three runs an hour
+# apart. A 5-minute budget turns the slow end of that spread into a cancelled
+# job, which the `ci` gate below then reports as a failure — so a slow registry
+# reads as a broken branch. It cost seven re-runs across four pull requests
+# that day.
+#
+# The cache that would make this moot is not reachable: `actions/cache` scopes
+# a cache to the branch that wrote it, only the default branch's caches are
+# readable from every pull request, and this workflow runs on `pull_request`
+# only. So no run ever writes a cache another branch can read, and every branch
+# installs cold. The frontend job could not even warm its own: it was killed
+# during the install, before the step that saves the cache.
+#
+# 15 minutes is not a target. It is the point past which a slow install is a
+# real problem worth failing on, rather than weather.
 jobs:
   dist:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       contents: read
     defaults:
@@ -103,7 +122,7 @@ jobs:
 
   backend:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       contents: read
     defaults:
@@ -132,7 +151,7 @@ jobs:
 
   frontend:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     permissions:
       contents: read
     defaults:

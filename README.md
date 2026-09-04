@@ -5,7 +5,7 @@ Tres piezas, un repo, y solo una de ellas se distribuye:
 | Directorio | Qué es | ¿Se distribuye? |
 |---|---|---|
 | [`plugin/`](plugin/) | El plugin **control-tower-loop** de Claude Code: el loop entero (hidratación, gates, dispatch, jueces) y su suite | **Sí** — es el `source` del marketplace |
-| [`backend/`](backend/) | La API HTTP local que la interfaz consume (`POST /start-plan`, `GET /plan-events/:issue`, `POST /implement-plan`); además barre el checkout cada minuto y cosecha con `dispatch-check --collect` lo que dejó cada slice cuya PR ya se mergeó | No |
+| [`backend/`](backend/) | La API HTTP local que la interfaz consume (`POST /start-plan`, `GET /plan-events/:issue`, `POST /implement-plan`); además barre cada minuto los clones que ha atendido y cosecha con `dispatch-check --collect` lo que dejó cada slice cuya PR ya se mergeó | No |
 | [`frontend/`](frontend/) | El front que consume esa API | No |
 
 La unidad de distribución de un plugin es el directorio `source` de
@@ -40,4 +40,6 @@ CI corre las dos por separado (`.github/workflows/continuous-integration.yml`).
 Y un `Makefile` en la raíz las junta sin sustituirlas. Cada objetivo nombra
 su paquete: `make test-backend`, `make build-frontend`, `make run-backend`…
 y `make run-frontend` construye el front y arranca el backend sirviéndolo en
-`http://127.0.0.1:8787/`. `make help` lista los objetivos.
+`http://127.0.0.1:8787/`. `CT_HARVEST_BQ_TABLE=proyecto:dataset.tabla make run-backend`
+hace además que cada slice recogido deje su fila en esa tabla de BigQuery; sin la
+variable, la cosecha no carga nada. `make help` lista los objetivos.

@@ -10,6 +10,7 @@ export class DispatchCheckHarvest extends Harvest {
   static NOT_READ = 3
   static PARTIAL = 4
   static KEPT = 10
+  static LEDGER_REFUSED = 11
 
   static #BY_CODE = Object.freeze({
     [DispatchCheckHarvest.COLLECTED]: () => HarvestOutcome.COLLECTED,
@@ -26,27 +27,38 @@ export class DispatchCheckHarvest extends Harvest {
     },
     [DispatchCheckHarvest.PARTIAL]: () => HarvestOutcome.PARTIAL,
     [DispatchCheckHarvest.KEPT]: () => HarvestOutcome.KEPT,
+    [DispatchCheckHarvest.LEDGER_REFUSED]: (said, issueNumber) => {
+      throw new HarvestNotRead(
+        `${DispatchCheckHarvest.COMMAND} could not load the harvest row of #${issueNumber} into the ledger, so the next sweep can try again: ${said.stderr.trim()}`
+      )
+    },
   })
 
-  constructor({ node, dispatchCheck, root }) {
+  constructor({ node, dispatchCheck, harvestTable }) {
     super()
     this.node = node
     this.dispatchCheck = dispatchCheck
-    this.root = root
+    this.harvestTable = harvestTable
   }
 
-  static argvFor({ dispatchCheck, issueNumber, repository }) {
-    return [dispatchCheck, String(issueNumber), '--repo', repository.text, '--collect']
+  static argvFor({ dispatchCheck, issueNumber, repository, harvestTable }) {
+    const argv = [dispatchCheck, String(issueNumber), '--repo', repository.text, '--collect']
+    return harvestTable === null ? argv : [...argv, '--bq', harvestTable]
   }
 
   static declaredCodes() {
     return Object.keys(DispatchCheckHarvest.#BY_CODE).map(Number)
   }
 
-  async collect({ issueNumber, repository }) {
+  async collect({ issueNumber, repository, root }) {
     const said = await this.node(
-      DispatchCheckHarvest.argvFor({ dispatchCheck: this.dispatchCheck, issueNumber, repository }),
-      { cwd: this.root }
+      DispatchCheckHarvest.argvFor({
+        dispatchCheck: this.dispatchCheck,
+        issueNumber,
+        repository,
+        harvestTable: this.harvestTable,
+      }),
+      { cwd: root }
     )
     const projected = DispatchCheckHarvest.#BY_CODE[said.code]
     if (projected === undefined) {

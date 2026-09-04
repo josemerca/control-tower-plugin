@@ -16,21 +16,35 @@ class NacidosConformes {
     'scripts/reconcile-outcome.js',
     '__tests__/modulos-conformes.test.js',
     '__tests__/branch-reconciliation.test.js',
-    '__tests__/branch-reconciliation-real-git.test.js',
-    '__tests__/branch-reconciliation-real-git-produccion.test.js',
-    '__tests__/branch-reconciliation-base-ilegible.test.js',
+    '__tests__/branch-reconciliation-real-process.test.js',
+    '__tests__/branch-reconciliation-produccion-real-process.test.js',
+    '__tests__/branch-reconciliation-base-ilegible-real-process.test.js',
     '__tests__/reconcile-outcome.test.js',
-    '__tests__/seccion-del-plan.test.js',
+    '__tests__/seccion-del-plan-real-process.test.js',
     '__tests__/frontera-de-distribucion.test.js',
     'scripts/slice-collection.js',
     '__tests__/slice-collection.test.js',
     'scripts/slice-collector.js',
     '__tests__/slice-collector.test.js',
+    'scripts/harvest-table.js',
+    '__tests__/harvest-table.test.js',
+    'scripts/bigquery-load.js',
+    '__tests__/bigquery-load.test.js',
+    'scripts/harvest-ledger.js',
+    '__tests__/harvest-ledger.test.js',
+    'scripts/plugin-manifest.js',
+    '__tests__/plugin-manifest.test.js',
+    '__tests__/fixtures/fake-bq-bin/bq',
+    '__tests__/fixtures/scripted-runner.js',
+    '__tests__/ct-harvest-bq-real-process.test.js',
+    'scripts/slice-harvest.js',
+    '__tests__/slice-harvest.test.js',
     'scripts/dispatch-gate.js',
     'hooks/dispatch-guard.js',
     '__tests__/dispatch-gate.test.js',
-    '__tests__/dispatch-guard.test.js',
-    '__tests__/ct-step-dispatch-seal.test.js',
+    '__tests__/dispatch-guard-real-process.test.js',
+    '__tests__/ct-step-dispatch-seal-real-process.test.js',
+    '__tests__/dispatch-check-collect-bq-real-process.test.js',
   ]
 
   static PALABRAS_CASTELLANAS = [
@@ -38,6 +52,10 @@ class NacidosConformes {
     'encontrados', 'medir', 'medida', 'paso', 'pasos', 'regla', 'reglas', 'hallazgo', 'hallazgos',
     'intento', 'cuerpo', 'previos', 'comentario', 'comentarios', 'recorrido', 'alcance', 'sujeto',
   ]
+
+  static MARCADOR = '-real-process.test.js'
+
+  static IMPORT_RELATIVO = /from\s+['"](\.{1,2}\/[^'"]+)['"]/g
 
   static #numeradas(ruta) {
     return readFileSync(join(raiz, ruta), 'utf8')
@@ -100,6 +118,34 @@ class NacidosConformes {
       ))
       .map(([numero]) => numero)
   }
+
+  static lanzaProcesosReales(ruta, vistos = new Set()) {
+    if (vistos.has(ruta)) return false
+    vistos.add(ruta)
+    const fuente = readFileSync(join(raiz, ruta), 'utf8')
+    if (/(?:from\s+['"]node:child_process['"]|require\(\s*['"]node:child_process['"]\s*\))/.test(fuente)) {
+      return true
+    }
+    return [...fuente.matchAll(NacidosConformes.IMPORT_RELATIVO)]
+      .map(([, especificador]) => join(dirname(ruta), especificador))
+      .filter((relativa) => relativa.startsWith('__tests__/fixtures/'))
+      .some((relativa) => NacidosConformes.lanzaProcesosReales(relativa, vistos))
+  }
+
+  static sinMarcador() {
+    return NacidosConformes.RUTAS.filter((ruta) =>
+      ruta.endsWith('.test.js') &&
+      !ruta.endsWith(NacidosConformes.MARCADOR) &&
+      NacidosConformes.lanzaProcesosReales(ruta)
+    )
+  }
+
+  static marcadorDeAdorno() {
+    return NacidosConformes.RUTAS.filter((ruta) =>
+      ruta.endsWith(NacidosConformes.MARCADOR) &&
+      !NacidosConformes.lanzaProcesosReales(ruta)
+    )
+  }
 }
 
 describe('modules born under the yardstick keep being born conforming', () => {
@@ -156,4 +202,22 @@ describe('the language of test names, by two mechanical checks: no non-ASCII let
         .toEqual([])
     })
   }
+})
+
+describe('the marker of a real subprocess, in both directions', () => {
+  it('a_test_born_conforming_that_launches_a_real_process_carries_the_marker_in_its_file_name', () => {
+    expect(NacidosConformes.sinMarcador()).toEqual([])
+  })
+
+  it('a_test_born_conforming_that_carries_the_marker_really_launches_a_real_process', () => {
+    expect(NacidosConformes.marcadorDeAdorno()).toEqual([])
+  })
+
+  it('a_test_born_conforming_that_launches_a_real_process_through_a_fixture_counts_as_launching_it', () => {
+    expect(NacidosConformes.lanzaProcesosReales('__tests__/ct-step-dispatch-seal-real-process.test.js')).toBe(true)
+  })
+
+  it('a_test_that_imports_neither_child_process_nor_a_spawning_fixture_does_not_count_as_launching_one', () => {
+    expect(NacidosConformes.lanzaProcesosReales('__tests__/plugin-manifest.test.js')).toBe(false)
+  })
 })
