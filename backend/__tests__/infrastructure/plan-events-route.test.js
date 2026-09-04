@@ -144,7 +144,7 @@ describe('PlanEvents', () => {
   it('a_progress_that_could_not_be_read_reaches_the_page_as_one_error_frame_and_not_as_a_state', async () => {
     const frames = await EventsDouble.unable('git status refused').collected()
 
-    expect(frames).toEqual(['event: error\ndata: {"error":"git status refused"}\n\n'])
+    expect(frames).toEqual(['event: error\ndata: {"code":"plan-progress-not-read","detail":"git status refused"}\n\n'])
   })
 
   it('a_progress_that_could_not_be_read_ends_the_stream_instead_of_launching_two_subprocesses_forever', async () => {

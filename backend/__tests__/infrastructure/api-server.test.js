@@ -883,7 +883,7 @@ describe('ApiServer', () => {
 
     expect(response.status).toBe(200)
     expect(await response.text())
-      .toBe(`event: error\ndata: {"error":"${ProgressSpy.UNREADABLE}"}\n\n`)
+      .toBe(PlanEvents.failureFrameFor(new PlanProgressNotRead(ProgressSpy.UNREADABLE)))
     expect(spy.asked).toBe(1)
   })
 

@@ -103,13 +103,14 @@ export class PlanEvents {
   }
 
   static ERROR_EVENT = 'error'
+  static PROGRESS_NOT_READ = 'plan-progress-not-read'
 
   static frameFor(state) {
     return `data: ${JSON.stringify({ state })}\n\n`
   }
 
   static failureFrameFor(cause) {
-    return `event: ${PlanEvents.ERROR_EVENT}\ndata: ${JSON.stringify({ error: cause.message })}\n\n`
+    return `event: ${PlanEvents.ERROR_EVENT}\ndata: ${JSON.stringify({ code: PlanEvents.PROGRESS_NOT_READ, detail: cause.message })}\n\n`
   }
 
   async *stream(session, cancelled) {

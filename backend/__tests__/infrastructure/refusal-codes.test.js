@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { PlanRequestOutcome, PlanCollapse } from '../../src/infrastructure/start-plan-route.js'
 import { ImplementRequestOutcome, ImplementCollapse } from '../../src/infrastructure/implement-plan-route.js'
-import { EventsRequestOutcome } from '../../src/infrastructure/plan-events-route.js'
+import { EventsRequestOutcome, PlanEvents } from '../../src/infrastructure/plan-events-route.js'
 
 class Vocabularies {
   static #ACCEPTED = 'accepted'
@@ -21,6 +21,10 @@ class Plumbing {
   ])
 }
 
+class EventStream {
+  static CODES = Object.freeze([PlanEvents.PROGRESS_NOT_READ])
+}
+
 describe('the codes the api can emit', () => {
   it('are_all_distinct_so_the_frontend_can_decide_by_code_alone', () => {
     const sharedByField = new Set(Vocabularies.requestCodes())
@@ -29,6 +33,7 @@ describe('the codes the api can emit', () => {
       ...PlanCollapse.declaredCodes(),
       ...ImplementCollapse.declaredCodes(),
       ...Plumbing.CODES,
+      ...EventStream.CODES,
     ]
 
     expect(new Set(codes).size).toBe(codes.length)
