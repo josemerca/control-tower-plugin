@@ -15,9 +15,22 @@ class Watched {
     repository: new RepositoryName('owner/name'),
   })
 
+  static IN_ANOTHER_REPOSITORY = new PlanWatch({
+    issue: new PlanIssue({ number: 42, url: 'https://github.com/other/name/issues/42' }),
+    located: new WorkspaceLocation({ path: '/other/.worktrees/42', branch: 'feat/42' }),
+    repository: new RepositoryName('other/name'),
+  })
+
   static sessions() {
     const sessions = new PlanSessions()
     sessions.remember(Watched.WATCH)
+
+    return sessions
+  }
+
+  static ambiguous() {
+    const sessions = Watched.sessions()
+    sessions.remember(Watched.IN_ANOTHER_REPOSITORY)
 
     return sessions
   }
@@ -60,6 +73,14 @@ describe('EventsRequest', () => {
     expect(asked.outcome).toBe(EventsRequestOutcome.NOT_WATCHED)
     expect(asked.watched).toBe(null)
   })
+
+  it('an_issue_number_planned_in_two_repositories_is_refused_instead_of_serving_one_at_random', () => {
+    const asked = EventsRequest.from('42', Watched.ambiguous())
+
+    expect(asked.outcome).toBe(EventsRequestOutcome.AMBIGUOUS_ISSUE)
+    expect(asked.watched).toBe(null)
+    expect(asked.conflicting).toEqual(['owner/name', 'other/name'])
+  })
 })
 
 describe('EventsRefusal', () => {
@@ -83,5 +104,13 @@ describe('EventsRefusal', () => {
     expect(malformed.status).toBe(400)
     expect(missing.status).toBe(404)
     expect(missing.error).toBe(EventsRefusal.NOT_WATCHED)
+  })
+
+  it('an_issue_planned_in_two_repositories_is_a_400_that_names_both_instead_of_lying_that_none_is_watched', () => {
+    const ambiguous = EventsRefusal.of(EventsRequest.from('42', Watched.ambiguous()))
+
+    expect(ambiguous.status).toBe(400)
+    expect(ambiguous.error).toContain('owner/name')
+    expect(ambiguous.error).toContain('other/name')
   })
 })

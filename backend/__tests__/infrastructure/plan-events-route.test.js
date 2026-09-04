@@ -65,19 +65,32 @@ class Watched {
 
 describe('PlanSessions', () => {
   it('what_it_hands_back_is_the_whole_watch_so_the_flow_cannot_lose_the_repository_on_the_way', () => {
-    expect(Watched.sessions().watching(42)).toBe(EventsDouble.SUBJECT)
+    expect(Watched.sessions().watching(42)).toEqual([EventsDouble.SUBJECT])
   })
 
   it('an_issue_nobody_started_a_plan_for_is_answered_with_nothing_instead_of_an_empty_watch', () => {
-    expect(new PlanSessions().watching(404)).toBe(null)
+    expect(new PlanSessions().watching(404)).toEqual([])
   })
 
   it('a_watch_it_was_told_to_forget_is_answered_with_nothing_the_same_as_one_that_never_started', () => {
     const sessions = Watched.sessions()
 
-    sessions.forget(42)
+    sessions.forget({ issue: 42, repository: EventsDouble.SUBJECT.repository })
 
-    expect(sessions.watching(42)).toBe(null)
+    expect(sessions.watching(42)).toEqual([])
+  })
+
+  it('two_repositories_planning_the_same_issue_number_are_both_kept_instead_of_one_overwriting_the_other', () => {
+    const sessions = Watched.sessions()
+    const inOtherRepository = new PlanWatch({
+      issue: new PlanIssue({ number: 42, url: 'https://github.com/other/name/issues/42' }),
+      located: new WorkspaceLocation({ path: '/other/.worktrees/42', branch: 'feat/42' }),
+      repository: new RepositoryName('other/name'),
+    })
+
+    sessions.remember(inOtherRepository)
+
+    expect(sessions.watching(42)).toEqual([EventsDouble.SUBJECT, inOtherRepository])
   })
 })
 

@@ -7,16 +7,20 @@ export class PlanSessions {
     this.live = new Map()
   }
 
+  static #keyFor(repository, issueNumber) {
+    return `${repository.text}#${issueNumber}`
+  }
+
   remember(watch) {
-    this.live.set(watch.issue.number, watch)
+    this.live.set(PlanSessions.#keyFor(watch.repository, watch.issue.number), watch)
   }
 
-  watching(number) {
-    return this.live.get(number) ?? null
+  watching(issueNumber) {
+    return [...this.live.values()].filter((watch) => watch.issue.number === issueNumber)
   }
 
-  forget(number) {
-    this.live.delete(number)
+  forget({ issue, repository }) {
+    this.live.delete(PlanSessions.#keyFor(repository, issue))
   }
 }
 
@@ -24,15 +28,17 @@ export const EventsRequestOutcome = Object.freeze({
   ACCEPTED: 'accepted',
   MALFORMED_ISSUE: 'malformed-issue',
   NOT_WATCHED: 'not-watched',
+  AMBIGUOUS_ISSUE: 'ambiguous-issue',
 })
 
 export class EventsRequest {
   static EXAMPLE = 42
   static #NUMBERED = /^[1-9][0-9]*$/
 
-  constructor({ outcome, watched }) {
+  constructor({ outcome, watched, conflicting = null }) {
     this.outcome = outcome
     this.watched = watched
+    this.conflicting = conflicting
     Object.freeze(this)
   }
 
@@ -44,16 +50,27 @@ export class EventsRequest {
     return new EventsRequest({ outcome, watched: null })
   }
 
+  static ambiguous(matches) {
+    return new EventsRequest({
+      outcome: EventsRequestOutcome.AMBIGUOUS_ISSUE,
+      watched: null,
+      conflicting: matches.map((watch) => watch.repository.text),
+    })
+  }
+
   static from(rawIssue, sessions) {
     if (typeof rawIssue !== 'string' || !EventsRequest.#NUMBERED.test(rawIssue)) {
       return EventsRequest.refused(EventsRequestOutcome.MALFORMED_ISSUE)
     }
-    const watched = sessions.watching(Number(rawIssue))
-    if (watched === null) {
+    const matches = sessions.watching(Number(rawIssue))
+    if (matches.length === 0) {
       return EventsRequest.refused(EventsRequestOutcome.NOT_WATCHED)
     }
+    if (matches.length > 1) {
+      return EventsRequest.ambiguous(matches)
+    }
 
-    return EventsRequest.accepted(watched)
+    return EventsRequest.accepted(matches[0])
   }
 }
 
@@ -66,6 +83,10 @@ export class EventsRefusal {
     })],
     [EventsRequestOutcome.NOT_WATCHED, () =>
       new Refusal({ status: 404, error: EventsRefusal.NOT_WATCHED })],
+    [EventsRequestOutcome.AMBIGUOUS_ISSUE, (asked) => new Refusal({
+      status: 400,
+      error: `more than one repository is planning that issue: ${asked.conflicting.join(', ')}`,
+    })],
   ])
 
   static of(asked) {
@@ -149,7 +170,7 @@ export class PlanEventsRoute {
       for await (const frame of events.stream(asked.watched, disconnected)) {
         response.write(frame)
       }
-      if (!disconnected()) sessions.forget(asked.watched.issue.number)
+      if (!disconnected()) sessions.forget({ issue: asked.watched.issue.number, repository: asked.watched.repository })
       response.end()
     }
   }
