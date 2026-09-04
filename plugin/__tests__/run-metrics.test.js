@@ -355,6 +355,94 @@ describe('el agregado de lo que el juez dejó escrito (§3.4)', () => {
     expect(aggregateVerdictMeasures(texto).findingsByRule).toEqual({ 'una-regla-retirada': 4 })
   })
 
+  // LA SEVERIDAD, que estaba escrita en cada fila desde que existe
+  // `verdictMeasures` y el agregado tiraba. `findings_by_rule` dice QUÉ regla
+  // produjo el hallazgo; la severidad dice si ese hallazgo VETÓ (`high` obliga
+  // a FAIL por el contrato de `readVerdict`), compró una vuelta al
+  // implementador (`medium`) o sólo se anotó (`low`). Sin ella, tres hallazgos
+  // de `alcance` en la tabla son indistinguibles de tres vetos.
+  it('las tres severidades se suman sobre todos los veredictos del fichero', () => {
+    const texto = [
+      veredicto({ ruling: 'FAIL', findings_high: 1, findings_medium: 0, findings_low: 2 }),
+      veredicto({ ruling: 'PASS', findings_high: 0, findings_medium: 1, findings_low: 1 }),
+    ].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.findingsHigh).toBe(1)
+    expect(r.findingsMedium).toBe(1)
+    expect(r.findingsLow).toBe(3)
+    expect(r.measuredSeverities).toBe(2)
+    expect(r.legacySeverities).toBe(0)
+  })
+
+  it('un PASS limpio suma tres ceros y son reales: se midió y no había hallazgos', () => {
+    const texto = veredicto({ ruling: 'PASS', findings_high: 0, findings_medium: 0, findings_low: 0 })
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.findingsHigh).toBe(0)
+    expect(r.findingsMedium).toBe(0)
+    expect(r.findingsLow).toBe(0)
+    expect(r.measuredSeverities).toBe(1)
+  })
+
+  it('un veredicto anterior a las columnas de severidad cuenta como viejo y NO como tres ceros', () => {
+    const texto = [
+      veredicto({ ruling: 'PASS', findings_high: 0, findings_medium: 1, findings_low: 0 }),
+      veredicto({ ruling: 'PASS' }),
+    ].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.measuredSeverities).toBe(1)
+    expect(r.legacySeverities).toBe(1)
+    expect(r.findingsMedium).toBe(1)
+  })
+
+  it('si ningún veredicto trae las severidades, las tres son null y no 0', () => {
+    const texto = [veredicto({ ruling: 'PASS' }), veredicto({ ruling: 'FAIL' })].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.findingsHigh).toBeNull()
+    expect(r.findingsMedium).toBeNull()
+    expect(r.findingsLow).toBeNull()
+    expect(r.legacySeverities).toBe(2)
+  })
+
+  it('las tres van juntas: una fila a la que le falte una sola de ellas es vieja entera', () => {
+    const texto = veredicto({ ruling: 'PASS', findings_high: 0, findings_low: 1 })
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.legacySeverities).toBe(1)
+    expect(r.findingsLow).toBeNull()
+  })
+
+  it('una severidad que no es entero no negativo trata la fila como vieja, igual que sin-vara', () => {
+    for (const basura of ['1', -1, 1.5, null]) {
+      const texto = veredicto({ ruling: 'PASS', findings_high: basura, findings_medium: 0, findings_low: 0 })
+      const r = aggregateVerdictMeasures(texto)
+      expect(r.measuredSeverities).toBe(0)
+      expect(r.legacySeverities).toBe(1)
+    }
+  })
+
+  // EL VETO SE CUENTA APARTE. `verdicts` dice cuántas veces se juzgó; esta dice
+  // cuántas de ellas el juez las paró. No se deriva de `findingsHigh`: un FAIL
+  // puede llegar sin ningún hallazgo alto (el juez lo firma), y un fichero de
+  // telemetría vieja tiene `ruling` siempre —es la clave que define la fila—
+  // así que esta cuenta nunca es legacy.
+  it('los FAIL se cuentan aparte, y un fichero sin severidades sigue sabiendo cuántos vetos hubo', () => {
+    const texto = [
+      veredicto({ ruling: 'FAIL' }),
+      veredicto({ ruling: 'PASS' }),
+      veredicto({ ruling: 'FAIL' }),
+    ].join('')
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.fails).toBe(2)
+    expect(r.verdicts).toBe(3)
+    expect(r.findingsHigh).toBeNull()
+  })
+
+  it('una fila de juez descartada no es un veto: sin ruling no cuenta ni como verdict ni como fail', () => {
+    const texto = pasoNoVeredicto('judge', { outcome: 'discarded', why: 'sin outcome' })
+    const r = aggregateVerdictMeasures(texto)
+    expect(r.verdicts).toBe(0)
+    expect(r.fails).toBe(0)
+  })
+
   it('una línea ilegible se cuenta y no tira el fichero: las buenas se siguen agregando', () => {
     const texto = [veredicto({ ruling: 'PASS', rubric_sin_vara: 1 }), '{no es json\n', veredicto({ ruling: 'PASS', rubric_sin_vara: 1 })].join('')
     const r = aggregateVerdictMeasures(texto)
@@ -389,9 +477,10 @@ describe('el agregado de lo que el juez dejó escrito (§3.4)', () => {
     for (const vacio of ['', undefined]) {
       const r = aggregateVerdictMeasures(vacio)
       expect(r).toEqual({
-        rows: 0, malformed: 0, verdicts: 0, measured: 0, legacy: 0, rubricSinVara: null, findingsByRule: {},
+        rows: 0, malformed: 0, verdicts: 0, fails: 0, measured: 0, legacy: 0, rubricSinVara: null, findingsByRule: {},
         measuredVaraCtDocs: 0, legacyVaraCtDocs: 0, varaCtDocs: null,
         measuredFindingsVaraCt: 0, legacyFindingsVaraCt: 0, findingsVaraCt: null,
+        measuredSeverities: 0, legacySeverities: 0, findingsHigh: null, findingsMedium: null, findingsLow: null,
       })
     }
   })

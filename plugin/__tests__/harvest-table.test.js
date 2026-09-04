@@ -50,9 +50,15 @@ class HarvestRows {
       rows: 5,
       malformed: 1,
       verdicts: 4,
+      fails: 1,
       measured: 4,
       legacy: 0,
       rubricSinVara: 2,
+      measuredSeverities: 4,
+      legacySeverities: 0,
+      findingsHigh: 1,
+      findingsMedium: 0,
+      findingsLow: 2,
       findingsByRule: { patrones: 2, alcance: 1 },
       measuredVaraCtDocs: 4,
       legacyVaraCtDocs: 0,
@@ -84,9 +90,15 @@ class HarvestRows {
         rows: 9,
         malformed: 9,
         verdicts: 9,
+        fails: 9,
         measured: 9,
         legacy: 9,
         rubricSinVara: 9,
+        measuredSeverities: 9,
+        legacySeverities: 9,
+        findingsHigh: 9,
+        findingsMedium: 9,
+        findingsLow: 9,
         findingsByRule: { patrones: 9 },
         measuredVaraCtDocs: 9,
         legacyVaraCtDocs: 9,
@@ -163,7 +175,12 @@ describe('a slice row projects to the wire object under the schema names', () =>
       telemetry_status: 'ok',
       telemetry_path: 'docs/superpowers/metrics/issue-7.jsonl',
       verdicts: 4,
+      verdicts_fail: 1,
       malformed_lines: 1,
+      findings_high: 1,
+      findings_medium: 0,
+      findings_low: 2,
+      findings_severity_legacy: 0,
       rubric_sin_vara: 2,
       rubric_sin_vara_legacy: 0,
       rubric_vara_ct_docs: 12,
@@ -233,12 +250,51 @@ describe('a slice row projects to the wire object under the schema names', () =>
     expect(someVerdicts.rubric_sin_vara).toBe(0)
   })
 
+  it('a_severity_no_verdict_carried_lands_as_null_even_when_the_aggregate_says_zero', () => {
+    const legacyOnly = HarvestTable.rowFor({
+      row: HarvestRows.withTelemetry({
+        measuredSeverities: 0, legacySeverities: 3, findingsHigh: null, findingsMedium: null, findingsLow: null,
+      }),
+      identity: Identities.today(),
+    })
+    expect(legacyOnly.findings_high).toBeNull()
+    expect(legacyOnly.findings_medium).toBeNull()
+    expect(legacyOnly.findings_low).toBeNull()
+    expect(legacyOnly.findings_severity_legacy).toBe(3)
+  })
+
+  it('a_clean_slice_the_judge_measured_lands_three_real_zeros_and_no_veto', () => {
+    const clean = HarvestTable.rowFor({
+      row: HarvestRows.withTelemetry({
+        fails: 0, measuredSeverities: 4, legacySeverities: 0, findingsHigh: 0, findingsMedium: 0, findingsLow: 0,
+      }),
+      identity: Identities.today(),
+    })
+    expect(clean.findings_high).toBe(0)
+    expect(clean.findings_medium).toBe(0)
+    expect(clean.findings_low).toBe(0)
+    expect(clean.verdicts_fail).toBe(0)
+  })
+
+  it('the_schema_admits_a_null_in_every_column_the_judge_may_not_have_measured', () => {
+    const schema = JSON.parse(HarvestTable.schemaJson())
+    const modes = Object.fromEntries(schema.map((column) => [column.name, column.mode]))
+    for (const column of ['verdicts_fail', 'findings_high', 'findings_medium', 'findings_low', 'findings_severity_legacy']) {
+      expect(modes[column]).toBe('NULLABLE')
+    }
+  })
+
   it('a_slice_without_telemetry_file_carries_its_status_and_null_in_every_count', () => {
     const row = HarvestTable.rowFor({ row: HarvestRows.withoutTelemetryFile(), identity: Identities.today() })
     expect(row.telemetry_status).toBe('sin-fichero')
     expect(row.telemetry_path).toBeNull()
     expect(row.verdicts).toBeNull()
+    expect(row.verdicts_fail).toBeNull()
     expect(row.malformed_lines).toBeNull()
+    expect(row.findings_high).toBeNull()
+    expect(row.findings_medium).toBeNull()
+    expect(row.findings_low).toBeNull()
+    expect(row.findings_severity_legacy).toBeNull()
     expect(row.rubric_sin_vara).toBeNull()
     expect(row.rubric_sin_vara_legacy).toBeNull()
     expect(row.rubric_vara_ct_docs).toBeNull()

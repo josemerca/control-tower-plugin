@@ -71,7 +71,57 @@ describe('/ct-harvest — la telemetría del juez, por slice', () => {
     })
     const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
     expect(res.status).toBe(0)
-    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 2 \| 2 \| patrones 2 · alcance 1 \|/)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 2 \(1 veto\) \| 2 \| patrones 2 · alcance 1 \|/)
+    limpiar(b)
+  })
+
+  // LA SEVERIDAD, en una sola celda y en el orden en que se lee: una alta veta
+  // (el contrato del veredicto no admite un PASS con una alta), una media
+  // compra una vuelta al implementador, una baja sólo se anota. Tres hallazgos
+  // de `alcance` sin esto son indistinguibles de tres vetos.
+  it('las tres severidades salen sumadas en una sola celda, en el orden alta/media/baja', () => {
+    const b = bancada()
+    const filesJson = JSON.stringify({
+      'issue-12.jsonl': veredicto({ ruling: 'FAIL', rubric_sin_vara: 0, findings_by_rule: { patrones: 2 }, findings_high: 1, findings_medium: 0, findings_low: 1 })
+        + veredicto({ ruling: 'PASS', rubric_sin_vara: 0, findings_by_rule: { alcance: 1 }, findings_high: 0, findings_medium: 1, findings_low: 0 }),
+    })
+    const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 2 \(1 veto\) \| 0 \| patrones 2 · alcance 1 \| 1\/1\/1 \|/)
+    limpiar(b)
+  })
+
+  it('un slice cuya telemetría es toda anterior a las severidades imprime «—», nunca 0/0/0', () => {
+    const b = bancada()
+    const filesJson = JSON.stringify({
+      'issue-12.jsonl': veredicto({ ruling: 'PASS', rubric_sin_vara: 0, findings_by_rule: {} }),
+    })
+    const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| \(ninguno\) \| — \|/)
+    expect(res.stdout).toMatch(/`—` en `alta\/media\/baja`: ningún veredicto de ese slice traía las severidades/)
+    limpiar(b)
+  })
+
+  it('un slice que el juez midió limpio imprime tres ceros de verdad y no anota ningún veto', () => {
+    const b = bancada()
+    const filesJson = JSON.stringify({
+      'issue-12.jsonl': veredicto({ ruling: 'PASS', rubric_sin_vara: 0, findings_by_rule: {}, findings_high: 0, findings_medium: 0, findings_low: 0 }),
+    })
+    const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| \(ninguno\) \| 0\/0\/0 \|/)
+    limpiar(b)
+  })
+
+  it('los vetos y las filas sin columna caben en la misma celda de veredictos, separados por coma', () => {
+    const b = bancada()
+    const filesJson = JSON.stringify({
+      'issue-12.jsonl': veredicto({ ruling: 'FAIL' }) + veredicto({ ruling: 'FAIL', rubric_sin_vara: 1 }),
+    })
+    const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 2 \(2 vetos, 1 sin columna\) \|/)
     limpiar(b)
   })
 
@@ -86,7 +136,7 @@ describe('/ct-harvest — la telemetría del juez, por slice', () => {
     })
     const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
     expect(res.status).toBe(0)
-    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 2 \| 0 \| patrones 3 \| 9 docs · 2 hallazgos \|/)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 2 \(2 vetos\) \| 0 \| patrones 3 \| — \| 9 docs · 2 hallazgos \|/)
     limpiar(b)
   })
 
@@ -97,7 +147,7 @@ describe('/ct-harvest — la telemetría del juez, por slice', () => {
     })
     const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
     expect(res.status).toBe(0)
-    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| patrones 2 \| — \|/)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \(1 veto\) \| 0 \| patrones 2 \| — \| — \|/)
     expect(res.stdout).toMatch(/`—` en `vara ct`: ningún veredicto de ese slice traía las columnas/)
     limpiar(b)
   })
@@ -109,7 +159,7 @@ describe('/ct-harvest — la telemetría del juez, por slice', () => {
     })
     const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
     expect(res.status).toBe(0)
-    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| patrones 2 \| — \|/)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \(1 veto\) \| 0 \| patrones 2 \| — \| — \|/)
     limpiar(b)
   })
 
@@ -126,7 +176,7 @@ describe('/ct-harvest — la telemetría del juez, por slice', () => {
     })
     const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
     expect(res.status).toBe(0)
-    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| \(ninguno\) \| — \| 8 docs · 1020B \|/)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| \(ninguno\) \| — \| — \| 8 docs · 1020B \|/)
     limpiar(b)
   })
 
@@ -137,7 +187,7 @@ describe('/ct-harvest — la telemetría del juez, por slice', () => {
     })
     const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
     expect(res.status).toBe(0)
-    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| \(ninguno\) \| — \| — \|/)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| \(ninguno\) \| — \| — \| — \|/)
     limpiar(b)
   })
 
@@ -149,7 +199,7 @@ describe('/ct-harvest — la telemetría del juez, por slice', () => {
     })
     const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
     expect(res.status).toBe(0)
-    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| \(ninguno\) \| — \| — \|/)
+    expect(res.stdout).toMatch(/\| #12 \| Slice 1 \| 1 \| 0 \| \(ninguno\) \| — \| — \| — \|/)
     expect(res.stdout).toMatch(/`—` en `brief`: ningún intento de `implement` de ese slice traía `brief_vara_ct_docs`\/`brief_bytes`/)
     limpiar(b)
   })

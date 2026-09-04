@@ -246,8 +246,8 @@ if (comoJson) {
   if (dirTelemetria.status === 'no-leido') {
     console.log(`no se pudo listar \`${METRICS_REPO_DIR}\` en ${repo} (${dirTelemetria.why}). Puede que este repo no tenga telemetría del juez o que la lectura fallara: **no se cuenta nada**, y el hueco NO es un cero.`)
   } else {
-    console.log('| Issue | Slice | Veredictos | sin-vara | Hallazgos por regla | vara ct | brief |')
-    console.log('|---|---|---|---|---|---|---|')
+    console.log('| Issue | Slice | Veredictos | sin-vara | Hallazgos por regla | alta/media/baja | vara ct | brief |')
+    console.log('|---|---|---|---|---|---|---|---|')
     for (const f of filas) {
       const t = f.telemetry
       let veredictos = '—'
@@ -265,6 +265,12 @@ if (comoJson) {
       // cifra. Sustituye a `patrones-ct`, que sólo miraba hallazgos del ítem
       // `patrones` y por eso no vio los dos que el slice #7 archivó en
       // `decisiones-cerradas`.
+      // LA SEVERIDAD, en una celda y en el orden en que se decide: una alta VETA
+      // —el contrato del veredicto no admite un PASS con una alta—, una media
+      // compra una vuelta pagada al implementador, una baja sólo se anota. Las
+      // tres juntas por lo mismo que `vara ct`: son el mismo reparto y una
+      // columna por severidad ensancharía la tabla sin añadir una pregunta.
+      let severidades = '—'
       let varaCt = '—'
       // Si la vara de ct llegó al brief del paso `implement`, y cuánto pesó —
       // sumado sobre TODOS los intentos de `implement` que el slice dejó
@@ -274,7 +280,20 @@ if (comoJson) {
       if (t.status === 'sin-fichero') porRegla = '(sin telemetría)'
       else if (t.status === 'no-leido') porRegla = '(no se pudo leer)'
       else {
-        veredictos = t.legacy > 0 ? `${t.verdicts} (${t.legacy} sin columna)` : String(t.verdicts)
+        // Las dos notas de la celda caben juntas y separadas por coma: cuántos
+        // de esos veredictos fueron un VETO, y cuántos son de telemetría vieja.
+        // Sólo se anotan si hay algo que anotar — un slice limpio se lee de un
+        // golpe, que es para lo que sirve la columna.
+        const notas = []
+        if (t.fails > 0) notas.push(`${t.fails} ${t.fails === 1 ? 'veto' : 'vetos'}`)
+        if (t.legacy > 0) notas.push(`${t.legacy} sin columna`)
+        veredictos = notas.length ? `${t.verdicts} (${notas.join(', ')})` : String(t.verdicts)
+        // Misma regla que todo lo demás de esta tabla: measuredSeverities === 0
+        // imprime «—» y jamás `0/0/0`, que afirmaría un reparto que nadie midió.
+        if (t.measuredSeverities > 0) {
+          severidades = `${t.findingsHigh}/${t.findingsMedium}/${t.findingsLow}`
+          if (t.legacySeverities > 0) severidades += ` (${t.legacySeverities} sin columna)`
+        }
         // measured === 0 imprime «—» y JAMÁS «0»: ningún veredicto de este slice
         // traía la columna, así que un cero afirmaría una medida que no se hizo.
         sinVara = t.measured > 0 ? String(t.rubricSinVara) : '—'
@@ -297,11 +316,14 @@ if (comoJson) {
           if (t.briefLegacy > 0) brief += ` (${t.briefLegacy} sin columna)`
         }
       }
-      console.log(`| #${f.issue} | ${f.title ?? '—'} | ${veredictos} | ${sinVara} | ${porRegla} | ${varaCt} | ${brief} |`)
+      console.log(`| #${f.issue} | ${f.title ?? '—'} | ${veredictos} | ${sinVara} | ${porRegla} | ${severidades} | ${varaCt} | ${brief} |`)
     }
     console.log('')
     if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.verdicts > 0 && f.telemetry.measured === 0)) {
       console.log('`—` en `sin-vara`: ningún veredicto de ese slice traía la columna (telemetría anterior a `rubric_sin_vara`). No es un cero.')
+    }
+    if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.verdicts > 0 && f.telemetry.measuredSeverities === 0)) {
+      console.log('`—` en `alta/media/baja`: ningún veredicto de ese slice traía las severidades `findings_high`/`findings_medium`/`findings_low` (telemetría anterior a esta medida). No es un cero.')
     }
     if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.verdicts > 0 && (f.telemetry.measuredVaraCtDocs === 0 || f.telemetry.measuredFindingsVaraCt === 0))) {
       console.log('`—` en `vara ct`: ningún veredicto de ese slice traía las columnas `rubric_vara_ct_docs`/`findings_vara_ct` (telemetría anterior a esta medida, o de la columna `findings_patrones_vara_ct` que sustituyeron). No es un cero.')
