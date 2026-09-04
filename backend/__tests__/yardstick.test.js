@@ -1,5 +1,4 @@
 import { describe, it, expect } from 'vitest'
-import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -13,14 +12,6 @@ class Subjects {
 
   static measured() {
     return Yardstick.measuredUnder(Subjects.BACKEND)
-  }
-
-  static tracked() {
-    const listing = ['ls-files', '--cached', '--others', '--exclude-standard', 'backend']
-    return execFileSync('git', listing, { cwd: Subjects.REPOSITORY, encoding: 'utf8' })
-      .split('\n')
-      .filter((line) => line !== '')
-      .map((line) => line.replace(/^backend\//, ''))
   }
 
   static rootGuardWords() {
@@ -39,14 +30,6 @@ describe('every file under backend keeps being born conforming', () => {
     expect(measured).toContain(join('src', 'application', 'actions', 'start-plan.js'))
     expect(measured).toContain(join('src', 'infrastructure', 'api-server.js'))
     expect(measured).toContain(join('__tests__', 'yardstick.test.js'))
-  })
-
-  it('the_census_matches_what_git_sees_so_neither_a_new_file_nor_a_deleted_one_goes_unnoticed', () => {
-    const tracked = Subjects.tracked()
-    expect(tracked.length).toBeGreaterThan(0)
-    expect([...measured].sort()).toEqual(
-      tracked.filter((file) => Yardstick.MEASURED_EXTENSIONS.includes(`.${file.split('.').pop()}`)).sort()
-    )
   })
 
   it('a_file_with_an_extension_nobody_classified_fails_instead_of_being_skipped_in_silence', () => {

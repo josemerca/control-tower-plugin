@@ -53,6 +53,16 @@ describe('the documents in conventions/', () => {
     expect(Documento.texto('style.md')).toContain('a new concept is a new module and is born conforming')
   })
 
+  it('every document it cites by name is a document that exists, so a split never leaves a citation nobody can follow', () => {
+    const citada = /`conventions\/([a-z-]+\.md)`/g
+    for (const nombre of Object.keys(ALCANCES)) {
+      const encontradas = [...Documento.texto(nombre).matchAll(citada)].map((found) => found[1])
+      for (const cita of encontradas) {
+        expect(Object.keys(ALCANCES), `${nombre} cita conventions/${cita}, que no existe`).toContain(cita)
+      }
+    }
+  })
+
   it('none repeats a rule that a rubric item already owns', () => {
     const todo = Object.keys(ALCANCES).map(Documento.texto).join('\n')
     for (const [item, terminos] of Object.entries({

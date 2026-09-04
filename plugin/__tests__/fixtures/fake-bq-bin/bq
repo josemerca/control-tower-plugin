@@ -1,0 +1,34 @@
+#!/usr/bin/env node
+import { appendFileSync, copyFileSync, existsSync, mkdirSync } from 'node:fs'
+import { basename, join } from 'node:path'
+
+class FakeBq {
+  static main(argv) {
+    if (process.env.FAKE_BQ_ARGV_LOG_FILE) {
+      appendFileSync(process.env.FAKE_BQ_ARGV_LOG_FILE, argv.join(' ') + '\n')
+    }
+    if (process.env.FAKE_BQ_CAPTURE_DIR) {
+      FakeBq.capture(argv, process.env.FAKE_BQ_CAPTURE_DIR)
+    }
+    const exitCode = Number(process.env.FAKE_BQ_EXIT_CODE || 0)
+    if (exitCode !== 0) {
+      process.stderr.write((process.env.FAKE_BQ_STDERR || 'fake-bq: load failed') + '\n')
+      process.exit(exitCode)
+    }
+    process.exit(0)
+  }
+
+  static capture(argv, captureDir) {
+    if (!existsSync(captureDir)) mkdirSync(captureDir, { recursive: true })
+    const schemaArg = argv.find((a) => a.startsWith('--schema='))
+    if (schemaArg) FakeBq.copyInto(schemaArg.slice('--schema='.length), captureDir)
+    const lastArg = argv[argv.length - 1]
+    if (lastArg) FakeBq.copyInto(lastArg, captureDir)
+  }
+
+  static copyInto(sourcePath, captureDir) {
+    if (existsSync(sourcePath)) copyFileSync(sourcePath, join(captureDir, basename(sourcePath)))
+  }
+}
+
+FakeBq.main(process.argv.slice(2))

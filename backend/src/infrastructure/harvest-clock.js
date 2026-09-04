@@ -15,7 +15,7 @@ export class SweepLine {
 
   static #BY_FAILURE = new Projection('harvest failure sweep line', [
     [HarvestNotRead, (prepared, failure) =>
-      `harvest #${prepared.issueNumber}: could not be read, the next sweep retries: ${failure.message}\n`],
+      `harvest #${prepared.issueNumber}: nothing was touched, the next sweep retries: ${failure.message}\n`],
     [HarvestNotUnderstood, (prepared, failure) =>
       `harvest #${prepared.issueNumber}: FAILED and retrying will not fix it: ${failure.message}\n`],
   ])

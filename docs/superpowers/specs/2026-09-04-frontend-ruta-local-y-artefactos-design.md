@@ -101,6 +101,14 @@ petición— y no `503` —fallo del sistema.
   usuario. Solo comprueba lo que puede comprobar sin tocar el disco: que la
   ruta no está vacía y empieza por `/`. Eso habilita el botón; el resto lo dice
   el backend con su `400`.
+
+  > **Nota (2026-09-04, tras la #84):** el backend valida la ruta con
+  > `CheckoutRoot`, que además rechaza la barra final, los segmentos vacíos y
+  > los saltos de línea. `LocalPath` copia esa forma, y normaliza la barra
+  > final y los espacios de los extremos antes de mandar: es lo que dan el
+  > autocompletado del shell y «Copiar como nombre de ruta» del Finder, y
+  > cobrar un `400` por eso sería mentir al usuario. Cierra el punto 8 de la
+  > deuda declarada en la #84 por el lado del front.
 - **No se recuerda la ruta entre sesiones.** Ni `localStorage` ni un endpoint
   de preferencias. Cuando haya más de un repo en juego, se decide entonces.
 - **`path` viaja solo en `/start-plan`.** La propuesta al backend es que lo

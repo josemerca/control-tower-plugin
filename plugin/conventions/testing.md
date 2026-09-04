@@ -4,7 +4,7 @@ Applies to: **every diff**.
 
 ## No prose here either
 
-Test code follows `conventions/code.md` like any production code, no-prose rule
+Test code follows `conventions/style.md` like any production code, no-prose rule
 included. What is specific to a test: **its name is the sentence**, and it says
 what is guaranteed and why, not which method is called:
 `a_finding_without_a_line_leaves_the_key_out_instead_of_emitting_null`, not
