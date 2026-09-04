@@ -8,7 +8,7 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 
 | | |
 |---|---|
-| Versión | `0.55.0` · contrato de la tabla de slices `v21` |
+| Versión | `0.56.0` · contrato de la tabla de slices `v21` |
 | Comandos | `/ct-init` · `/ct-groom` · `/ct-next` · `/ct-status` |
 | Puertas humanas | 3 por epic — congelación, `status:ready`, merge — más el gate `plan` en cada slice (renunciable por fila con `!plan`; su go es `-OK <nonce>` y `--release` se niega sin él) y el gate `e2e` cuando la fila declara recorridos en la columna `E2E` (derivado, no se escribe a mano) |
 | Skills | 11 forkados de superpowers 6.0.3 + 1 propio (`writing-plans-prescriptive`) |
@@ -257,7 +257,7 @@ npm run test:fast   # la suite sin los tests que lanzan un proceso de verdad
 npm run build       # sólo el bundle de los hooks
 ```
 
-`npm run test:fast` corre la suite **sin los tests que lanzan un proceso de verdad**, marcados con el sufijo `-real-process.test.js` — el mismo marcador que usa el backend, porque es la misma decisión y este repo la escribe una vez. Hoy sólo lo llevan los tests nacidos conformes: de los 77 ficheros de `__tests__/` que lanzan un proceso —74 importan `node:child_process` y 3 lo hacen a través de `fixtures/ct-step-harness.js`— quedan **69 sin marcar**, así que el subset rápido **todavía no es rápido**. Es deuda declarada y se salda renombrando. Lo que ya está atado es que un test nacido conforme no puede espawnear sin su marcador ni llevarlo de adorno, ni esconder el proceso detrás de un fixture: lo mide `__tests__/modulos-conformes.test.js`.
+`npm run test:fast` corre la suite **sin los tests que lanzan un proceso de verdad**, marcados con el sufijo `-real-process.test.js` — el mismo marcador que usa el backend, porque es la misma decisión y este repo la escribe una vez. Hoy sólo lo llevan los tests nacidos conformes: de los 77 ficheros de `__tests__/` que lanzan un proceso —74 importan `node:child_process` y 3 lo hacen a través de `fixtures/ct-step-harness.js`— quedan **68 sin marcar**, así que el subset rápido **todavía no es rápido**. Es deuda declarada y se salda renombrando. Lo que ya está atado es que un test nacido conforme no puede espawnear sin su marcador ni llevarlo de adorno, ni esconder el proceso detrás de un fixture: lo mide `__tests__/modulos-conformes.test.js`.
 
 ### La regla del `dist/`
 

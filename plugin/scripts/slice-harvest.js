@@ -125,7 +125,8 @@ export class SliceHarvest {
   static PULL_REQUEST_FIELDS = 'number,mergedAt,additions,deletions,changedFiles,reviews,comments'
   static RAW_ACCEPT = 'Accept: application/vnd.github.raw'
   static NO_COUNTS = Object.freeze({
-    rows: null, malformed: null, verdicts: null, measured: null, legacy: null, rubricSinVara: null, findingsByRule: null,
+    rows: null, malformed: null, verdicts: null, fails: null, measured: null, legacy: null, rubricSinVara: null, findingsByRule: null,
+    measuredSeverities: null, legacySeverities: null, findingsHigh: null, findingsMedium: null, findingsLow: null,
     measuredVaraCtDocs: null, legacyVaraCtDocs: null, varaCtDocs: null,
     measuredFindingsVaraCt: null, legacyFindingsVaraCt: null, findingsVaraCt: null,
     briefAttempts: null, briefMeasured: null, briefLegacy: null, briefVaraCtDocs: null, briefBytes: null,

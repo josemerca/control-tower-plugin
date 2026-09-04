@@ -270,9 +270,20 @@ export function aggregateVerdictMeasures(texto) {
   let rows = 0
   let malformed = 0
   let verdicts = 0
+  let fails = 0
   let measured = 0
   let legacy = 0
   let sinVara = 0
+  // LA SEVERIDAD, con sus propios contadores gemelos por el mismo motivo que
+  // los de la vara: nació después que `rubric_sin_vara` y una fila puede traer
+  // la una y no las otras. Las tres van JUNTAS —una fila a la que le falte una
+  // sola es vieja entera—, porque el reparto sólo se lee sumado: dos altas y
+  // una baja de una fila, con la media de otra perdida, no describe nada.
+  let measuredSeverities = 0
+  let legacySeverities = 0
+  let high = 0
+  let medium = 0
+  let low = 0
   // Contadores GEMELOS a `measured`/`legacy`, pero de las dos columnas de la
   // vara de ct y no de `rubric_sin_vara`: son medidas distintas, cada una con su
   // propia fecha de nacimiento en la telemetría, así que una fila puede traer la
@@ -303,6 +314,18 @@ export function aggregateVerdictMeasures(texto) {
     rows += 1
     if (!Object.hasOwn(fila, 'ruling')) continue
     verdicts += 1
+    // `FAIL` y no `!== 'PASS'`: el vocabulario lo cierra `readVerdict`, y contar
+    // como veto un ruling que este loop no sabe escribir sería adivinar.
+    if (fila.ruling === 'FAIL') fails += 1
+    const severidades = [fila.findings_high, fila.findings_medium, fila.findings_low]
+    if (severidades.every((cuantos) => Number.isInteger(cuantos) && cuantos >= 0)) {
+      measuredSeverities += 1
+      high += fila.findings_high
+      medium += fila.findings_medium
+      low += fila.findings_low
+    } else {
+      legacySeverities += 1
+    }
     const n = fila.rubric_sin_vara
     if (Number.isInteger(n) && n >= 0) { measured += 1; sinVara += n } else { legacy += 1 }
     const d = fila.rubric_vara_ct_docs
@@ -317,11 +340,15 @@ export function aggregateVerdictMeasures(texto) {
     }
   }
   return {
-    rows, malformed, verdicts, measured, legacy, rubricSinVara: measured ? sinVara : null, findingsByRule,
+    rows, malformed, verdicts, fails, measured, legacy, rubricSinVara: measured ? sinVara : null, findingsByRule,
     measuredVaraCtDocs, legacyVaraCtDocs,
     varaCtDocs: measuredVaraCtDocs ? varaCtDocs : null,
     measuredFindingsVaraCt, legacyFindingsVaraCt,
     findingsVaraCt: measuredFindingsVaraCt ? findingsVaraCt : null,
+    measuredSeverities, legacySeverities,
+    findingsHigh: measuredSeverities ? high : null,
+    findingsMedium: measuredSeverities ? medium : null,
+    findingsLow: measuredSeverities ? low : null,
   }
 }
 
