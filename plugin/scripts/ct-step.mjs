@@ -65,6 +65,7 @@ import { ReconcileOutcome, DiscardReason } from './reconcile-outcome.js'
 import { LOOP_ARTIFACT_PATTERNS, matchesPattern } from './scope.js'
 import { CONVENTIONS_FILE, seccionDeVara } from './vara.js'
 import { PluginYardstick } from './plugin-yardstick.js'
+import { PluginManifest } from './plugin-manifest.js'
 import {
   readVerdict, readReport, outcomeOfVerdict, commitMessage, findingLocation,
   readE2eReport, E2E_SCHEMA,
@@ -406,13 +407,7 @@ const intento = () => StepSeal.attemptOf(run)
 // cuanto las filas de dos máquinas se mezclen en la misma pull request. Los dos
 // degradan a su centinela si no se pueden leer: la fila sale igual, con la
 // ausencia declarada.
-const PLUGIN_VERSION = (() => {
-  try {
-    return JSON.parse(readFileSync(join(PLUGIN_ROOT, 'package.json'), 'utf8')).version || null
-  } catch {
-    return null
-  }
-})()
+const PLUGIN_VERSION = PluginManifest.installed().version
 const ACTOR = (git(['config', 'user.email'], { allowFail: true }) || '').trim() || null
 
 // La ruta la dicta run-metrics.js, que es quien también se la enseña a
@@ -1211,7 +1206,7 @@ const esRutaDeLaMaquinaria = (path) => LOOP_ARTIFACT_PATTERNS.some((pat) => matc
 //
 // LA COPIA ESTÁ DECLARADA Y MEDIDA (`conventions/decisions.md`, "cuando la
 // copia es inevitable"): la regla vive en dos idiomas porque el script es bash
-// y esto es JavaScript, y `__tests__/seccion-del-plan.test.js` pasa los mismos
+// y esto es JavaScript, y `__tests__/seccion-del-plan-real-process.test.js` pasa los mismos
 // planes por las dos implementaciones y compara la salida byte a byte — así
 // reescribir las dos pasa y tocar una sola falla. Hasta que ese test existió,
 // las dos ya habían divergido en las comillas del mensaje de sección ausente.

@@ -21,8 +21,8 @@
 // — hasta que eso aterrice, esta es la garantía real: ninguna bajo
 // concurrencia, sí bajo uso secuencial disciplinado.
 import { execFileSync, spawn } from 'node:child_process'
-import { writeSync, statSync, readFileSync, existsSync } from 'node:fs'
-import { homedir } from 'node:os'
+import { writeSync, statSync, readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { homedir, tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { detectCollisions, claimLost } from './claim.js'
@@ -40,6 +40,9 @@ import { SliceBase, BaseBranch } from './slice-base.js'
 import { DeliveryState } from './slice-collection.js'
 import { CollectionAction, CollectionOutcome, SliceCollector } from './slice-collector.js'
 import { findWorkspaceByCwd } from './cmux.js'
+import { BigQueryTable, LoadOutcome } from './bigquery-load.js'
+import { SliceHarvest, SliceHarvestOutcome, TelemetryIndex } from './slice-harvest.js'
+import { HarvestLedger, LedgerIdentity } from './harvest-ledger.js'
 
 const ctWatchMergePath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch-merge.mjs')
 
@@ -119,6 +122,16 @@ const ctWatchMergePath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch
 //       tocando eso", y borrar un worktree es irreversible: ante la duda se
 //       conserva y se dice. Sale sólo de `--collect`; como el 5, el 6 y el 9,
 //       nunca lo ve classifyClaimOutcome.
+//  11 = NUEVO (F20/cosecha a BigQuery) — `--collect --bq` leyó la cosecha del
+//       slice y BigQuery RECHAZÓ la fila. No se borra NADA (la fila viaja antes
+//       de borrar precisamente para esto) y el motivo que dio `bq` se imprime
+//       por el canal de error. Es un código PROPIO y no el 10 a propósito: el
+//       10 dice que el DISCO discrepa de la PR mergeada y se arregla en el
+//       worktree; esto se arregla en los permisos o el schema del dataset. Un
+//       solo código para las dos causas dejaba al backend proyectando la del
+//       disco sobre las dos, y a su lector mirando un worktree sano.
+//       Sale sólo de `--collect`; como el 5, el 6, el 9 y el 10, nunca lo ve
+//       classifyClaimOutcome.
 // El texto que este fichero imprime NO cambia de contenido (los mismos
 // detalles, incluido el comando manual de `--release`/revert) — solo deja
 // de ser la ÚNICA fuente de verdad para la decisión del caller.
@@ -224,7 +237,15 @@ const dryRun = has('--dry-run')
 // liberar, por la misma razón por la que el fallo al lanzarlo también se dice:
 // un silencio aquí es indistinguible de un vigilante que sí está.
 const noWatchMerge = has('--no-watch-merge')
-const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release | --reopen | --requeue | --check-plan | --collect] [--dry-run] [--no-watch-merge]'
+const usage = 'uso: dispatch-check.mjs <issue#> --repo <o/r> [--release | --reopen | --requeue | --check-plan | --collect] [--dry-run] [--no-watch-merge] [--bq <proyecto:dataset.tabla>]'
+// --bq <proyecto:dataset.tabla>: solo dentro de --collect, dónde cargar la fila cosechada
+// del slice tras cerrar cmux, borrar el worktree y la rama. Se valida AQUÍ, junto a los
+// demás flags y antes de tocar `gh`, para que un valor mal formado salga con exit 2 sin
+// haber leído nada de GitHub — el mismo criterio que el resto de este bloque.
+const bqArg = arg('--bq', null)
+if (bqArg === true) dieErr(`--bq inválido: "(sin valor)" — ${usage}`, 2)
+const bqTable = bqArg === null ? null : BigQueryTable.parse(bqArg)
+if (bqArg !== null && !bqTable) dieErr(`--bq inválido: "${bqArg}" — debe tener la forma proyecto:dataset.tabla (p.ej. mi-proyecto:control_tower.harvest).`, 2)
 if (issue === null || issue < 1) {
   dieErr(`<issue#> inválido: ${process.argv[2] === undefined ? '(ausente)' : `"${process.argv[2]}"`} — debe ser un entero >= 1 escrito con dígitos a secas (nada de "42x", "1e3", "4.2", espacios, ni signo "+"/"-": un número aproximado aquí reclamaría un issue que no es el que pediste).\n${usage}`, 2)
 }
@@ -1423,6 +1444,7 @@ if (requeue) {
 if (collect) {
   const COLLECT_GIT_TIMEOUT_MS = 30_000
   const COLLECT_CMUX_TIMEOUT_MS = 10_000
+  const COLLECT_BQ_TIMEOUT_MS = 120_000
   const a = localSliceArtifacts(issue)
   if (!a.known) {
     dieErr(`no se ha podido comprobar qué queda de #${issue} en esta máquina (no se pudo consultar git desde aquí): no se ha tocado nada. Corre esto desde dentro del checkout del repo.`, 3)
@@ -1450,9 +1472,29 @@ if (collect) {
     cmux: localRunner('cmux', COLLECT_CMUX_TIMEOUT_MS),
     findWorkspace: (cwd) => findWorkspaceByCwd(cwd),
   })
-  const report = dryRun
-    ? collector.rehearse({ artifacts: a, repo })
-    : collector.collect({ artifacts: a, repo })
+  // F20/cosecha, Task 7 (corregida): con `--bq` y la guarda diciendo COSECHAR,
+  // la fila viaja a BigQuery ANTES de que `execute()` (más abajo) borre nada.
+  // El ensayo se hace UNA sola vez, arriba; tanto la decisión de cargar en
+  // BigQuery como la propia borradura reutilizan ese mismo `ensayo`, así que
+  // `--collect --bq` solo pide la PR a GitHub una vez por invocación.
+  const espacioTemporal = {
+    create: () => mkdtempSync(join(tmpdir(), 'ct-collect-bq-')),
+    remove: (directory) => rmSync(directory, { recursive: true, force: true }),
+  }
+  const lecturaFallida = (c) => `${c.failures[0].read} falló (${c.failures[0].detail})`
+  const ensayo = collector.rehearse({ artifacts: a, repo })
+  let report = ensayo
+  let cargada = ''
+  if (!dryRun && ensayo.outcome === CollectionOutcome.WOULD_COLLECT) {
+    if (bqTable) {
+      const cosecha = new SliceHarvest({ gh: ghRunner }).harvestIssue({ repo, number: issue, index: TelemetryIndex.read({ gh: ghRunner, repo }) })
+      if (cosecha.outcome !== SliceHarvestOutcome.COMPLETE) dieErr(`no se pudo leer la cosecha de #${issue}: ${lecturaFallida(cosecha)} — no se ha tocado nada, el siguiente barrido reintenta.`, 3)
+      const ledger = new HarvestLedger({ table: bqTable, bq: localRunner('bq', COLLECT_BQ_TIMEOUT_MS), workspace: espacioTemporal, identity: LedgerIdentity.fromEnvironment() }).record({ repo, milestone: cosecha.row.milestone, rows: [cosecha.row] })
+      if (ledger.outcome === LoadOutcome.REJECTED) { espacioTemporal.remove(ledger.directory); dieErr(`no se pudo cargar la fila de #${issue} en BigQuery (${bqTable.id}): bq salió con ${ledger.code}: ${ledger.detail} — no se ha borrado nada, el siguiente barrido reintenta.`, 11) }
+      cargada = ` ; 1 fila cargada en ${bqTable.id} (harvest_id ${ledger.harvestId})`
+    }
+    report = collector.execute(ensayo)
+  }
   const hechoDe = (command) => {
     if (command.action === CollectionAction.CLOSE_WORKSPACE) return 'cerrada la workspace de cmux'
     if (command.action === CollectionAction.REMOVE_WORKTREE) return `borrado el worktree ${a.worktree}`
@@ -1468,8 +1510,8 @@ if (collect) {
   // Proyección EXHAUSTIVA desenlace → (canal, texto, exit code). Un desenlace
   // nuevo sin fila aquí lanza en vez de salir con un código inventado.
   const PROYECCION = {
-    [CollectionOutcome.COLLECTED]: { decir: dieOut, code: 0, linea: (r) => `collected #${issue}: ${r.done.map(hechoDe).join(', ')}` },
-    [CollectionOutcome.WOULD_COLLECT]: { decir: dieOut, code: 0, linea: (r) => `would collect #${issue}: ${r.pending.map((command) => command.line).join(' ; ')}` },
+    [CollectionOutcome.COLLECTED]: { decir: dieOut, code: 0, linea: (r) => `collected #${issue}: ${r.done.map(hechoDe).join(', ')}${cargada}` },
+    [CollectionOutcome.WOULD_COLLECT]: { decir: dieOut, code: 0, linea: (r) => `would collect #${issue}: ${r.pending.map((command) => command.line).join(' ; ')}${bqTable ? ` ; y cargaría 1 fila en ${bqTable.id}` : ''}` },
     [CollectionOutcome.NOTHING_LEFT]: { decir: dieOut, code: 0, linea: () => `nothing left for #${issue}: en ${a.mainRoot} ya no queda ni el worktree .worktrees/${issue} ni la rama ${a.branch}` },
     [CollectionOutcome.WAITING]: { decir: dieOut, code: 1, linea: (r) => `waiting on #${issue} (${r.delivery.state}): ${esperaPor(r.delivery)} — no se ha tocado nada` },
     [CollectionOutcome.KEPT_DIRTY_TREE]: { decir: dieOut, code: 10, linea: () => `kept #${issue}: el worktree ${a.worktree} tiene cambios sin commitear — no se ha borrado nada` },

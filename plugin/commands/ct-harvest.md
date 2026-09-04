@@ -1,8 +1,8 @@
 ---
-description: Cosecha del epic — el coste real de cada slice, sacado del timeline de GitHub. Cero campos manuales. Sólo lee.
+description: Cosecha del epic — el coste real de cada slice, sacado del timeline de GitHub. Cero campos manuales. Sólo lee de GitHub; con --bq carga la cosecha en BigQuery.
 ---
 ```
-node ${CLAUDE_PLUGIN_ROOT}/scripts/ct-harvest.mjs --repo "<owner/repo>" --milestone "<título del epic>" [--json]
+node ${CLAUDE_PLUGIN_ROOT}/scripts/ct-harvest.mjs --repo "<owner/repo>" --milestone "<título del epic>" [--json] [--bq <proyecto:dataset.tabla>]
 ```
 
 Responde: **¿cuánto costó cada slice de este epic, según lo que GitHub ya escribió solo?** Una fila por slice con `ready→claim`, `claim→release`, `release→merge`, reopens, requeues, episodios `blocked` y tamaño del PR.
@@ -57,12 +57,24 @@ Se lee de GitHub, como todo lo demás: no hay checkout que suponer.
 
 Las líneas ilegibles de un `jsonl` se cuentan y se dicen; no tiran el fichero ni cambian el exit — una fila corrupta de hace tres semanas no se arregla repitiendo el comando.
 
+## A BigQuery, con la CLI de `bq`
+
+`--bq <proyecto:dataset.tabla>` carga la cosecha en esa tabla al terminar, con el `bq` que ya tienes autenticado (como `gh`): `bq load` de un NDJSON, una fila por slice y cosecha, con `harvest_id` y `harvested_at`. Cada corrida se **añade** como una foto; nada se sobrescribe. El esquema viaja en el plugin, la tabla se crea en la primera carga si no existe y una columna nueva de una versión posterior se añade sola (`ALLOW_FIELD_ADDITION`). El dataset y sus permisos son de quien posee el proyecto, no del comando.
+
+**Solo se carga una cosecha completa.** Con lecturas sin completar no se invoca `bq`: la cosecha se rehace desde GitHub, así que no se pierde nada. **Ningún `—` del informe llega como `0`: la regla es de la COLUMNA, no de la celda**, y una celda combinada reparte un `NULL` por cada columna que la compone — el mapa está debajo. Si `bq` falla, el motivo trae el código, el diagnóstico, el directorio con los ficheros y el comando exacto para reintentar a mano. Todo lo de BigQuery va por stderr: stdout sigue siendo la tabla o el JSON. Sin el flag, nada cambia.
+
+**De la celda a la columna.** Uno a uno: cada `—` de una fase es `NULL` en su `*_seconds`, y un slice sin PR deja `pr`, `additions`, `deletions`, `changed_files`, `reviews` y `review_comments` en `NULL`; el `*` de `release→merge` no es columna, es `merge_source = 'issue-closed'`. Combinadas, en la telemetría: `Veredictos` son `verdicts` y `rubric_sin_vara_legacy`; `sin-vara` es `rubric_sin_vara`; `Hallazgos por regla` es `findings_by_rule` (registro repetido de `{rule, findings}`, que va `[]` y no `NULL` cuando no hay veredictos o no hay fichero); `vara ct` son `rubric_vara_ct_docs`, `findings_vara_ct`, `rubric_vara_ct_docs_legacy` y `findings_vara_ct_legacy`; `brief` son `brief_vara_ct_docs`, `brief_bytes`, `brief_legacy` y `brief_attempts`. Con `telemetry_status` distinto de `ok`, todas las cuentas van `NULL`.
+
+**Media celda puede ser un número y la otra media un `NULL`.** El informe exige las DOS mitades para imprimir `vara ct` o `brief` —el porqué está arriba, en «La telemetría del juez, por slice»—, pero la tabla no las junta: un `—` en `vara ct` puede ser en la fila `rubric_vara_ct_docs` con un número y `findings_vara_ct` en `NULL`, o al revés. Cada columna dice lo que se midió de ella, que es más de lo que decía la celda.
+
+Este comando carga un epic entero a posteriori. La carga de cada slice al recogerlo la hace la cosecha automática: `dispatch-check <n> --repo <o/r> --collect --bq <tabla>`, que el backend invoca cada minuto cuando arranca con `CT_HARVEST_BQ_TABLE`.
+
 ## Los códigos de salida
 
 | Código | Significa | Qué hacer |
 |---|---|---|
 | `0` | cosecha completa | leer la tabla |
-| `1` | **no se pudo completar**: falló una lectura de `gh` | mirar los motivos de stderr, arreglar y repetir — lo impreso es sólo lo que sí se sabe |
+| `1` | **no se pudo completar**: falló una lectura de `gh` o la carga en BigQuery | mirar los motivos de stderr, arreglar y repetir — lo impreso es sólo lo que sí se sabe |
 | `2` | argumentos mal | corregir la invocación |
 
 **El `1` nunca se degrada a `0`**, la misma regla que `/ct-status` y `/ct-groom`. Una cosecha parcial **no es un epic barato**: una tabla con huecos que se lea como «este slice no tuvo review», cuando lo que pasó es que falló la lectura, es un dato inventado entrando por la puerta de atrás en un pre-registro que prohíbe exactamente eso. **Un timeline que no se pudo leer no produce una fila de ceros: produce un motivo y ninguna fila.**

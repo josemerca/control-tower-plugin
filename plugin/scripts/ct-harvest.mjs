@@ -49,9 +49,15 @@
 // listado sí nombraba y no se pudo leer, en cambio, es una cosecha incompleta
 // de verdad: motivo y exit 1.
 import { execFileSync } from 'node:child_process'
-import { harvestSlice, formatDuration, closingPrNumbers } from './harvest.js'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { formatDuration } from './harvest.js'
 import { parseRepoSlug } from './dispatch.js'
-import { aggregateVerdictMeasures, aggregateBriefMeasures, METRICS_REPO_DIR, metricsRepoRelPath } from './run-metrics.js'
+import { METRICS_REPO_DIR } from './run-metrics.js'
+import { BigQueryTable, LoadOutcome } from './bigquery-load.js'
+import { HarvestLedger, LedgerIdentity } from './harvest-ledger.js'
+import { IndexOutcome, SliceHarvest, SliceRead, TelemetryIndex } from './slice-harvest.js'
 
 // `arg()` endurecido: el MISMO de ct-next.mjs/ct-groom.mjs/ct-status.mjs,
 // palabra por palabra y por el mismo motivo medido — un flag colgante no puede
@@ -63,7 +69,7 @@ const arg = (f, d) => {
   return (typeof v === 'string' && !v.startsWith('--')) ? v : true
 }
 
-const usage = 'uso: ct-harvest.mjs --repo <owner/repo> --milestone <título> [--json]'
+const usage = 'uso: ct-harvest.mjs --repo <owner/repo> --milestone <título> [--json] [--bq <proyecto:dataset.tabla>]'
 
 const repo = arg('--repo')
 if (repo === true) { console.error(`--repo inválido: "(sin valor)" — ${usage}`); process.exit(2) }
@@ -77,6 +83,14 @@ const milestone = arg('--milestone')
 if (milestone === true) { console.error(`--milestone inválido: "(sin valor)" — ${usage}`); process.exit(2) }
 if (typeof milestone !== 'string' || milestone.length === 0) { console.error(usage); process.exit(2) }
 
+const bqArg = arg('--bq', null)
+if (bqArg === true) { console.error(`--bq inválido: "(sin valor)" — ${usage}`); process.exit(2) }
+const bqTable = bqArg === null ? null : BigQueryTable.parse(bqArg)
+if (bqArg !== null && !bqTable) {
+  console.error(`--bq inválido: "${bqArg}" — debe tener la forma proyecto:dataset.tabla (p.ej. mi-proyecto:control_tower.harvest).`)
+  process.exit(2)
+}
+
 const comoJson = process.argv.includes('--json')
 
 const GH_MAX_BUFFER = 20 * 1024 * 1024
@@ -88,6 +102,17 @@ const gh = (a) => {
   } catch (e) {
     const detalle = (e && e.stderr ? String(e.stderr).trim() : '') || (e && e.message) || 'error desconocido'
     throw new Error(detalle)
+  }
+}
+
+// `bqRunner`: calcado de `localRunner` en dispatch-check.mjs. El adaptador
+// (BigQueryLoad) recibe el runner con el tope YA puesto — no elige él el
+// timeout, lo elige quien lo construye aquí.
+const bqRunner = (a) => {
+  try {
+    return { code: 0, stdout: execFileSync('bq', a, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: CHILD_TIMEOUT_MS, killSignal: 'SIGKILL' }), stderr: '' }
+  } catch (e) {
+    return { code: e.status ?? 1, stdout: String(e.stdout || ''), stderr: String(e.stderr || '') }
   }
 }
 
@@ -116,119 +141,66 @@ try {
   motivos.push(`no se pudieron listar los issues del milestone "${milestone}" en ${repo}: ${e.message}`)
 }
 
-// El timeline de un issue: la fuente de TODAS las transiciones. Pagina siempre
-// —un epic largo con muchos movimientos de label pasa de una página sin avisar,
-// y una página perdida no da error: da un slice que parece no haber sido nunca
-// reclamado.
-function timelineDe(n) {
-  return JSON.parse(gh(['api', `repos/${repo}/issues/${n}/timeline`, '--paginate', '--slurp']))
-    // `--slurp` devuelve un array de páginas (arrays); aplanarlo aquí evita que
-    // la capa pura tenga que saber nada de paginación.
-    .flat()
+// `ghRunner`: el mismo `gh` de arriba pero con la forma `{ code, stdout,
+// stderr }` que SliceHarvest y TelemetryIndex esperan de su dependencia
+// inyectada — el adaptador no sabe que detrás hay un `execFileSync` que
+// lanza.
+const ghRunner = (a) => {
+  try {
+    return { code: 0, stdout: gh(a), stderr: '' }
+  } catch (e) {
+    return { code: 1, stdout: '', stderr: e.message }
+  }
 }
 
-// Los datos del PR que cerró el issue. QUIÉN es ese PR no se deduce aquí: lo
-// dice GitHub (closingPrNumbers, harvest.js). Este trozo solo va a buscar sus
-// números.
-function datosDelPr(n) {
-  const pr = JSON.parse(gh(['pr', 'view', String(n), '--repo', repo, '--json', 'number,mergedAt,additions,deletions,changedFiles,reviews,comments']))
-  return {
-    number: pr.number,
-    mergedAt: pr.mergedAt,
-    additions: pr.additions,
-    deletions: pr.deletions,
-    changedFiles: pr.changedFiles,
-    reviews: (pr.reviews || []).length,
-    reviewComments: (pr.comments || []).length,
-  }
+// El listado del directorio: UNA llamada que decide qué hay, ANTES de cosechar
+// ningún slice. La ausencia de un fichero se deduce de un listado que sí se
+// leyó, nunca de interpretar el stderr de un 404 — este repo no parsea
+// códigos HTTP en ningún sitio y no empieza aquí. El listado que falla NO
+// baja el exit a 1: la causa casi siempre es que este repo no tiene
+// telemetría (todo epic anterior a 1422c67).
+const indice = TelemetryIndex.read({ gh: ghRunner, repo })
+const dirTelemetria = indice.outcome === IndexOutcome.NOT_READ
+  ? { status: 'no-leido', why: indice.detail }
+  : { status: 'ok', why: null }
+
+// motivoDe: reproduce los tres textos de siempre según qué lectura falló. Un
+// `read` que este comando no espera lanza en vez de perderse en un texto
+// genérico.
+function motivoDe(n, f) {
+  if (f.read === SliceRead.TIMELINE) return `no se pudo leer el timeline del issue #${n}: ${f.detail}`
+  if (f.read === SliceRead.PULL_REQUEST) return `no se pudieron leer los datos del ${f.subject} (issue #${n}): ${f.detail}`
+  if (f.read === SliceRead.TELEMETRY_FILE) return `no se pudo leer la telemetría ${f.subject} (issue #${n}): ${f.detail}`
+  throw new Error(`ct-harvest.mjs no sabe redactar un motivo para la lectura "${f.read}"`)
 }
 
 const filas = []
+const cosechador = new SliceHarvest({ gh: ghRunner })
 for (const issue of issues) {
-  let eventos
-  try {
-    eventos = timelineDe(issue.number)
-  } catch (e) {
-    // Un timeline que no se pudo leer NO produce una fila con ceros: produce un
-    // motivo y ninguna fila. Una fila de ceros aquí sería un slice inventado.
-    motivos.push(`no se pudo leer el timeline del issue #${issue.number}: ${e.message}`)
-    continue
-  }
-  let pr = null
-  const cerradores = closingPrNumbers(issue, repo)
+  const informe = cosechador.harvest({ repo, issue, index: indice })
   // Dos PRs cerrando el mismo issue es raro: se dice en voz alta y se cosecha
   // el primero, en vez de elegir en silencio y perder el hallazgo.
-  if (cerradores.length > 1) {
-    motivos.push(`el issue #${issue.number} lo cierran ${cerradores.length} PRs (${cerradores.map((n) => `#${n}`).join(', ')}); la fila cosecha solo el #${cerradores[0]}`)
-  }
-  if (cerradores.length) {
-    try {
-      pr = datosDelPr(cerradores[0])
-    } catch (e) {
-      motivos.push(`no se pudieron leer los datos del PR #${cerradores[0]} (issue #${issue.number}): ${e.message}`)
-    }
-  }
-  filas.push(harvestSlice({ events: eventos, issue, pr }))
+  if (informe.closers.length > 1) motivos.push(`el issue #${issue.number} lo cierran ${informe.closers.length} PRs (${informe.closers.map((n) => `#${n}`).join(', ')}); la fila cosecha solo el #${informe.closers[0]}`)
+  for (const f of informe.failures) motivos.push(motivoDe(issue.number, f))
+  if (informe.row) filas.push(informe.row)
 }
 
 filas.sort((a, b) => (a.issue ?? 0) - (b.issue ?? 0))
 
-// El listado del directorio: UNA llamada que decide qué hay. La ausencia de un
-// fichero se deduce de un listado que sí se leyó, nunca de interpretar el
-// stderr de un 404 — este repo no parsea códigos HTTP en ningún sitio y no
-// empieza aquí.
-//
-// Los issue-N.jsonl que no son de este milestone se ignoran sin decir nada: el
-// directorio acumula TODOS los epics del repo y nombrarlos sería ruido en cada
-// cosecha. (La API de contenidos lista hasta 1000 entradas por directorio; por
-// encima de eso un slice con fichero se leería como «sin telemetría». Está
-// dicho aquí y no resuelto: mil slices en un repo están muy lejos.)
-let dirTelemetria = { status: 'ok', why: null }
-const ficherosTelemetria = new Set()
-try {
-  const entradas = JSON.parse(gh(['api', `repos/${repo}/contents/${METRICS_REPO_DIR}`]))
-  if (!Array.isArray(entradas)) throw new Error('la respuesta no es un listado de directorio')
-  for (const e of entradas) if (e && e.type === 'file' && typeof e.name === 'string') ficherosTelemetria.add(e.name)
-} catch (e) {
-  dirTelemetria = { status: 'no-leido', why: e.message }
-}
-
-// Enum CERRADO, por el mismo motivo que RUBRIC_OUTCOMES: `sin-fichero` (nadie
-// midió) y `no-leido` (no se sabe) no son la misma cosa y ninguna de las dos es
-// un cero.
-const SIN_CUENTAS = {
-  rows: null, malformed: null, verdicts: null, measured: null, legacy: null, rubricSinVara: null, findingsByRule: null,
-  measuredVaraCtDocs: null, legacyVaraCtDocs: null, varaCtDocs: null,
-  measuredFindingsVaraCt: null, legacyFindingsVaraCt: null, findingsVaraCt: null,
-  // Los del agregador HERMANO (aggregateBriefMeasures, run-metrics.js): si la
-  // vara de ct llegó al brief del paso `implement`, y cuánto pesó. Nombres
-  // propios (`brief*`) y no `measured`/`legacy` a secas: ya están ocupados por
-  // los de arriba, y fundirlos confundiría dos medidas con fechas de
-  // nacimiento distintas en la telemetría.
-  briefAttempts: null, briefMeasured: null, briefLegacy: null, briefVaraCtDocs: null, briefBytes: null,
-}
-
-function telemetriaDe(n) {
-  if (dirTelemetria.status === 'no-leido' || n === null || n === undefined) {
-    return { status: dirTelemetria.status === 'no-leido' ? 'no-leido' : 'sin-fichero', path: null, ...SIN_CUENTAS }
+if (bqTable && motivos.length) console.error(`BigQuery: no se carga — la cosecha está incompleta (${motivos.length} lectura(s) sin completar)`)
+else if (bqTable && !filas.length) console.error('BigQuery: nada que cargar — el milestone no tiene slices')
+else if (bqTable) {
+  const ledger = new HarvestLedger({ table: bqTable, bq: bqRunner, workspace: { create: () => mkdtempSync(join(tmpdir(), 'ct-harvest-bq-')), remove: (d) => rmSync(d, { recursive: true, force: true }) }, identity: LedgerIdentity.fromEnvironment() })
+  const informe = ledger.record({ repo, milestone, rows: filas })
+  // Proyección EXHAUSTIVA del desenlace: un `LoadOutcome` sin clave aquí
+  // lanza (llamar a `undefined` como función), nunca cae en un catch-all
+  // silencioso.
+  const PROYECCION_BQ = {
+    [LoadOutcome.LOADED]: () => console.error(`BigQuery: ${informe.rowCount} filas cargadas en ${informe.table.id} (harvest_id ${informe.harvestId})`),
+    [LoadOutcome.REJECTED]: () => motivos.push(`no se pudo cargar en BigQuery (${informe.table.id}): bq salió con ${informe.code}: ${informe.detail}. Los ficheros quedan en ${informe.directory}; reintenta a mano: ${informe.retryCommand}`),
   }
-  const rel = metricsRepoRelPath(n)
-  if (!ficherosTelemetria.has(rel.slice(METRICS_REPO_DIR.length + 1))) {
-    return { status: 'sin-fichero', path: null, ...SIN_CUENTAS }
-  }
-  try {
-    const texto = gh(['api', `repos/${repo}/contents/${rel}`, '-H', 'Accept: application/vnd.github.raw'])
-    // Los dos agregadores leen el MISMO fichero (todos los pasos de la slice
-    // viajan juntos en docs/superpowers/metrics/issue-<n>.jsonl) y no
-    // colisionan: sus claves vienen prefijadas a propósito (ver SIN_CUENTAS).
-    return { status: 'ok', path: rel, ...aggregateVerdictMeasures(texto), ...aggregateBriefMeasures(texto) }
-  } catch (e) {
-    motivos.push(`no se pudo leer la telemetría ${rel} (issue #${n}): ${e.message}`)
-    return { status: 'no-leido', path: rel, ...SIN_CUENTAS }
-  }
+  PROYECCION_BQ[informe.outcome]()
 }
-
-for (const f of filas) f.telemetry = telemetriaDe(f.issue)
 
 if (comoJson) {
   console.log(JSON.stringify({ repo, milestone, filas, motivos, telemetry: { dir: METRICS_REPO_DIR, status: dirTelemetria.status, why: dirTelemetria.why } }, null, 2))
