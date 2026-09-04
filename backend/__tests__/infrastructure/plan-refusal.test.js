@@ -24,7 +24,8 @@ describe('PlanRefusal', () => {
 
     expect(refusal).toBeInstanceOf(Refusal)
     expect(refusal.status).toBe(400)
-    expect(refusal.error).toBe('unknown field: b, a')
+    expect(refusal.code).toBe(PlanRequestOutcome.UNKNOWN_FIELD)
+    expect(refusal.detail).toBe('unknown field: b, a')
   })
 })
 
@@ -50,6 +51,12 @@ describe('PlanCollapse', () => {
     expect(PlanCollapse.declaredFailures().sort()).toEqual(ways.sort())
   })
 
+  it('every_way_the_plan_can_collapse_has_a_code_distinct_from_every_other_one', () => {
+    const codes = PlanCollapse.declaredCodes()
+
+    expect(new Set(codes).size).toBe(codes.length)
+  })
+
   it('a_failure_of_reading_the_changes_asked_for_has_no_status_here_because_it_only_reaches_stderr', () => {
     expect(PlanCollapse.declaredFailures()).not.toContain('PlanChangesNotRead')
     expect(PlanCollapse.declaredFailures()).not.toContain('PlanChangesNotUnderstood')
@@ -70,38 +77,52 @@ describe('PlanCollapse', () => {
       .toThrow(/no status declared/)
   })
 
-  it('a_tool_that_refused_the_call_is_something_to_try_again_and_says_so', () => {
+  it('every_way_the_plan_can_collapse_answers_400_because_the_code_carries_the_distinction_now', () => {
+    const causes = [
+      new exceptions.UserStoryNotRead('acli is not authenticated'),
+      new exceptions.PlanIssueNotCreated('nope'),
+      new exceptions.PlanIssueNotClaimed('gh issue edit failed: nope'),
+      new exceptions.PlanAgentNotLaunched('nope'),
+      new exceptions.WorkspaceNotPrepared('branch is taken'),
+      new exceptions.WorkspaceNotRead('no such remote'),
+      new exceptions.CheckoutNotConfirmed('owner/name: /repo holds someone/else'),
+      new exceptions.UserStoryNotUnderstood('nope'),
+      new exceptions.PlanIssueNotNamed('nope'),
+      new exceptions.PlanAgentNotNamed('nope'),
+      new exceptions.WorkspaceNotUnderstood('nope'),
+    ]
+
+    expect(causes.map((cause) => PlanCollapse.of(cause).status)).toEqual(Array(causes.length).fill(400))
+  })
+
+  it('a_tool_that_refused_the_call_names_the_specific_way_it_refused_and_keeps_what_it_said', () => {
     const collapse = PlanCollapse.of(new exceptions.UserStoryNotRead('acli is not authenticated'))
 
     expect(collapse).toBeInstanceOf(Refusal)
-    expect(collapse.status).toBe(503)
-    expect(collapse.error).toBe('could not start the plan: acli is not authenticated')
-    expect(PlanCollapse.of(new exceptions.PlanIssueNotCreated('nope')).status).toBe(503)
-    expect(PlanCollapse.of(new exceptions.PlanAgentNotLaunched('nope')).status).toBe(503)
-    expect(PlanCollapse.of(new exceptions.WorkspaceNotPrepared('branch is taken')).status).toBe(503)
-    expect(PlanCollapse.of(new exceptions.WorkspaceNotRead('no such remote')).status).toBe(503)
+    expect(collapse.code).toBe('user-story-not-read')
+    expect(collapse.detail).toBe('acli is not authenticated')
   })
 
-  it('a_checkout_that_does_not_hold_the_repository_asked_for_is_something_the_user_can_fix', () => {
+  it('a_checkout_that_does_not_hold_the_repository_asked_for_keeps_what_git_said_as_its_detail', () => {
     const collapse = PlanCollapse.of(new exceptions.CheckoutNotConfirmed('owner/name: /repo holds someone/else'))
 
     expect(collapse).toBeInstanceOf(Refusal)
-    expect(collapse.status).toBe(400)
-    expect(collapse.error).toBe('path must be a git checkout of owner/name: /repo holds someone/else')
+    expect(collapse.code).toBe('checkout-not-confirmed')
+    expect(collapse.detail).toBe('owner/name: /repo holds someone/else')
   })
 
-  it('an_issue_that_could_not_be_claimed_is_something_to_try_again_and_names_what_gh_said', () => {
+  it('an_issue_that_could_not_be_claimed_names_what_gh_said', () => {
     const collapse = PlanCollapse.of(new exceptions.PlanIssueNotClaimed('gh issue edit failed: nope'))
 
-    expect(collapse.status).toBe(503)
-    expect(collapse.error).toBe('could not start the plan: gh issue edit failed: nope')
+    expect(collapse.code).toBe('plan-issue-not-claimed')
+    expect(collapse.detail).toBe('gh issue edit failed: nope')
   })
 
-  it('a_tool_that_answered_something_we_cannot_read_is_not_something_trying_again_would_fix', () => {
-    expect(PlanCollapse.of(new exceptions.UserStoryNotUnderstood('nope')).status).toBe(502)
-    expect(PlanCollapse.of(new exceptions.PlanIssueNotNamed('nope')).status).toBe(502)
-    expect(PlanCollapse.of(new exceptions.PlanAgentNotNamed('nope')).status).toBe(502)
-    expect(PlanCollapse.of(new exceptions.WorkspaceNotUnderstood('nope')).status).toBe(502)
+  it('a_tool_that_answered_something_we_cannot_read_has_its_own_code_too', () => {
+    expect(PlanCollapse.of(new exceptions.UserStoryNotUnderstood('nope')).code).toBe('user-story-not-understood')
+    expect(PlanCollapse.of(new exceptions.PlanIssueNotNamed('nope')).code).toBe('plan-issue-not-named')
+    expect(PlanCollapse.of(new exceptions.PlanAgentNotNamed('nope')).code).toBe('plan-agent-not-named')
+    expect(PlanCollapse.of(new exceptions.WorkspaceNotUnderstood('nope')).code).toBe('workspace-not-understood')
   })
 
   it('a_family_is_not_a_way_of_collapsing_so_answering_one_raises_instead_of_guessing', () => {

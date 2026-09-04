@@ -79,7 +79,9 @@ describe('ct-api entrypoint', () => {
       `{"id":"ZZZ-999999","repo":${JSON.stringify(HostCheckout.repository())},"path":${JSON.stringify(HostCheckout.path())}}`
     )
 
-    expect(response.status).toBe(503)
-    expect((await response.json()).error).toMatch(/^could not start the plan: acli jira failed: /)
+    expect(response.status).toBe(400)
+    const body = await response.json()
+    expect(body.code).toBe('user-story-not-read')
+    expect(body.detail).toMatch(/^acli jira failed: /)
   })
 })
