@@ -226,10 +226,10 @@ describe('the run machine and the run file this backend reads back', () => {
   it('the_task_names_we_read_are_the_ones_the_plugin_extracts', async () => {
     const planPath = join(
       dirname(fileURLToPath(import.meta.url)), '..', '..', '..',
-      'docs', 'superpowers', 'plans', '2026-09-04-progreso-de-la-implementacion.md'
+      'plugin', '__tests__', 'fixtures', 'plan-real-issue-5.md'
     )
     const planText = await readFile(planPath, 'utf8')
-    const relativePlan = 'docs/superpowers/plans/2026-09-04-progreso-de-la-implementacion.md'
+    const relativePlan = 'plugin/__tests__/fixtures/plan-real-issue-5.md'
     const extracted = extractTasks(planText)
 
     expect(extracted.tasks.length).toBeGreaterThan(0)
