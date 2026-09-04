@@ -1,6 +1,7 @@
 export type StartPlanRequest = {
   id: string
   repo: string
+  path: string
 }
 
 export type PlanIssue = {
@@ -13,6 +14,8 @@ export type StartedPlan = {
   repo: string
   issue: PlanIssue
   agent: string
+  branch: string
+  worktree: string
 }
 
 export type StartPlanResult = StartedPlan & {
