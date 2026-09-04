@@ -81,6 +81,16 @@ describe('Home · implement plan', () => {
     expect(screen.getByRole('button', IMPLEMENT_BUTTON)).toBeEnabled()
   })
 
+  it('should show the backend refusal text as it came for a malformed repo', async () => {
+    const { user } = await planReady()
+    backendAnswering(ImplementPlanMother.malformedRepo())
+
+    await pressImplement(user)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('repo must be a repository such as owner/name')
+    expect(screen.getByRole('button', IMPLEMENT_BUTTON)).toBeEnabled()
+  })
+
   it('should say the backend is unreachable when the network fails', async () => {
     const { user } = await planReady()
     backendUnreachable()
