@@ -10,7 +10,9 @@ import {
   pressStart,
   startPlan,
   streamFrame,
+  typePath,
   typeRepository,
+  typeTicket,
 } from './helpers'
 import { FakeEventSource } from './FakeEventSource'
 
@@ -138,13 +140,18 @@ describe('Home · implement plan', () => {
     await screen.findByRole('button', { name: 'Arrancar otro plan' })
     const oldStream = FakeEventSource.last()
 
-    backendAnswering(StartPlanMother.startedInAnotherRepo())
+    const fetching = backendAnswering(StartPlanMother.startedInAnotherRepo())
     await user.click(screen.getByRole('button', { name: 'Arrancar otro plan' }))
     expect(oldStream.closes).toBe(1)
-    expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeEnabled()
+    expect(screen.getByLabelText('Clave del ticket')).toHaveValue('')
+    expect(screen.getByLabelText('Repositorio')).toHaveValue('')
+    expect(screen.getByLabelText('Ruta local')).toHaveValue('')
+    expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeDisabled()
+    expect(fetching).not.toHaveBeenCalled()
 
-    await user.clear(screen.getByLabelText('Repositorio'))
+    await typeTicket(user, StartPlanMother.TICKET)
     await typeRepository(user, StartPlanMother.ANOTHER_REPO)
+    await typePath(user, StartPlanMother.PATH)
     await pressStart(user)
     await screen.findByRole('status')
     expect(FakeEventSource.last().url).toContain(encodeURIComponent(StartPlanMother.ANOTHER_REPO))

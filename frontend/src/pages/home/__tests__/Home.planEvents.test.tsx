@@ -54,6 +54,8 @@ describe('Home · plan events', () => {
     await streamFrame(PlanEventsMother.writing())
     await streamFrame(PlanEventsMother.ready())
 
+    expect(screen.getByText('Plan listo')).toHaveAttribute('role', 'status')
+    expect(screen.getByText('Plan listo')).toHaveAttribute('aria-live', 'polite')
     expect(screen.getByRole('button', { name: /Plan Completado/ })).toHaveAttribute('aria-expanded', 'false')
     expect(screen.getByRole('button', { name: /Implementación Activo/ })).toHaveAttribute('aria-expanded', 'true')
     expect(FakeEventSource.last().closes).toBe(1)

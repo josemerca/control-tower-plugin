@@ -15,6 +15,7 @@ const Home = () => {
   const [isPlanReady, setIsPlanReady] = useState(false)
   const [isImplementationStarted, setIsImplementationStarted] = useState(false)
   const [expandedStep, setExpandedStep] = useState<WorkflowStepName | null>('request')
+  const [requestFormVersion, setRequestFormVersion] = useState(0)
 
   const expand = (step: WorkflowStepName) => (isExpanded: boolean) => setExpandedStep(isExpanded ? step : null)
 
@@ -33,6 +34,7 @@ const Home = () => {
     setIsPlanReady(false)
     setIsImplementationStarted(false)
     setExpandedStep('request')
+    setRequestFormVersion((version) => version + 1)
   }
 
   const requestStatus: WorkflowStepStatus = started === null ? 'active' : 'completed'
@@ -44,7 +46,7 @@ const Home = () => {
       <TopBar productName="Control Tower" logo={<span className="home__logo">CT</span>} />
       <main className="home__content">
         <WorkflowStep title="Solicitud" status={requestStatus} isExpanded={expandedStep === 'request'} onExpandedChange={expand('request')}>
-          <StartPlanForm onStarted={planStarted} isLocked={started !== null} />
+          <StartPlanForm key={requestFormVersion} onStarted={planStarted} isLocked={started !== null} />
         </WorkflowStep>
         {started !== null && (
           <WorkflowStep title="Plan" status={planStatus} isExpanded={expandedStep === 'plan'} onExpandedChange={expand('plan')}>

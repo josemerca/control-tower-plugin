@@ -33,7 +33,7 @@ const PlanProgress = ({ plan, onReady }: PlanProgressProps) => {
     <section className="plan-progress" aria-label="Progreso del plan">
       {progress.phase === 'connecting' && <p className="plan-progress__state" role="status">Plan arrancado</p>}
       {progress.phase === 'writing' && <p className="plan-progress__state" role="status">Escribiendo el plan…</p>}
-      {progress.phase === 'ready' && <p className="plan-progress__state">Plan listo</p>}
+      {progress.phase === 'ready' && <p className="plan-progress__state" role="status" aria-live="polite">Plan listo</p>}
       {progress.phase === 'failed' && <Banner type="error" role="alert" title={progress.error} />}
       {progress.phase === 'unreachable' && <Banner type="error" role="alert" title={UNREACHABLE_MESSAGE} />}
       <p className="plan-progress__facts">{facts}</p>
