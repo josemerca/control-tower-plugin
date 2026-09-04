@@ -13,8 +13,8 @@ const LAST_STATE: PlanState = 'ready'
 
 const carriesData = (event: Event): event is MessageEvent<string> => 'data' in event
 
-const watch = (issue: number, listener: PlanEventsListener): PlanEventsSubscription => {
-  const source = new EventSource(`${PATH}/${issue}`)
+const watch = (issue: number, repo: string, listener: PlanEventsListener): PlanEventsSubscription => {
+  const source = new EventSource(`${PATH}/${issue}?repo=${encodeURIComponent(repo)}`)
   let settled = false
   const settle = () => {
     settled = true

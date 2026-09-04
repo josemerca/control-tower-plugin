@@ -30,7 +30,7 @@ type PlanProgressProps = {
 }
 
 const PlanProgress = ({ plan, whenReady = null }: PlanProgressProps) => {
-  const progress = usePlanProgress(plan.issue.number)
+  const progress = usePlanProgress(plan.issue.number, plan.repo)
   const look = lookFor(progress)
   const roleProps = look.role === null ? {} : { role: look.role }
 
