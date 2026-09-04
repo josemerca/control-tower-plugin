@@ -15,7 +15,7 @@ const Home = () => {
       <TopBar productName="Control Tower" logo={<span className="home__logo">CT</span>} />
       <main className="home__content">
         <Panel heading="Arrancar plan" level={1}>
-          <StartPlanForm onStarted={setStarted} />
+          <StartPlanForm onStarted={setStarted} isLocked={started !== null} />
         </Panel>
         {started !== null && (
           <PlanProgress

@@ -55,6 +55,19 @@ describe('Home · start plan', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('cmux is not reachable')
   })
 
+  it('should keep the form unlocked after a backend refusal', async () => {
+    backendAnswering(StartPlanMother.planNotStarted())
+    const { user } = openHome()
+
+    await startPlan(user)
+
+    await screen.findByRole('alert')
+    expect(screen.getByLabelText('Clave del ticket')).toBeEnabled()
+    expect(screen.getByLabelText('Repositorio')).toBeEnabled()
+    expect(screen.getByLabelText('Ruta local')).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeEnabled()
+  })
+
   it('should show the malformed path refusal text as it came', async () => {
     backendAnswering(StartPlanMother.malformedPath())
     const { user } = openHome()
@@ -184,5 +197,18 @@ describe('Home · start plan', () => {
     expect(screen.getByLabelText('Clave del ticket')).toHaveValue(StartPlanMother.TICKET)
     expect(screen.getByLabelText('Repositorio')).toHaveValue(StartPlanMother.REPO)
     expect(screen.getByLabelText('Ruta local')).toHaveValue(StartPlanMother.PATH)
+  })
+
+  it('should lock all form controls after a plan starts', async () => {
+    backendAnswering(StartPlanMother.started())
+    const { user } = openHome()
+
+    await startPlan(user)
+
+    await screen.findByRole('status')
+    expect(screen.getByLabelText('Clave del ticket')).toBeDisabled()
+    expect(screen.getByLabelText('Repositorio')).toBeDisabled()
+    expect(screen.getByLabelText('Ruta local')).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeDisabled()
   })
 })
