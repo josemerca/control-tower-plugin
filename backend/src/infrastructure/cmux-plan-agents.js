@@ -63,7 +63,7 @@ export class CmuxPlanAgents extends PlanAgents {
 
   async launch(briefing) {
     const errand = this.brief.errandFor({ issue: briefing.issue, repository: briefing.repository })
-    const directory = `${this.runsIn}/${briefing.issue.number}`
+    const directory = `${this.runsIn}/${briefing.repository.text.replace(/\//g, '__')}-${briefing.issue.number}`
     const launcherPath = `${directory}/${LAUNCHER_FILENAME}`
     const sentinelPath = `${directory}/${SENTINEL_FILENAME}`
     const typed = buildTypedCommand(launcherPath, shQuote)

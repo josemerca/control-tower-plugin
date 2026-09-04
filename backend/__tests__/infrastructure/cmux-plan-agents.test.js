@@ -33,12 +33,14 @@ class CmuxDouble {
   static WORKTREE_THROUGH_A_SYMLINK = '/private/repo/.worktrees/42'
   static ISSUE = new PlanIssue({ number: 42, url: 'https://github.com/owner/name/issues/42' })
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
+  static REPOSITORY_SLUG = 'josemerca__ct-loop-sandbox'
   static ERRAND = 'escribe el plan de #42 en josemerca/ct-loop-sandbox'
   static TAB = 'ct-plan-ABC-42'
   static PROBES_PER_SEND = 2
   static RESENDS = 1
-  static LAUNCHER = `${CmuxDouble.RUNS_IN}/42/${LAUNCHER_FILENAME}`
-  static SENTINEL = `${CmuxDouble.RUNS_IN}/42/${SENTINEL_FILENAME}`
+  static DIRECTORY = `${CmuxDouble.REPOSITORY_SLUG}-42`
+  static LAUNCHER = `${CmuxDouble.RUNS_IN}/${CmuxDouble.DIRECTORY}/${LAUNCHER_FILENAME}`
+  static SENTINEL = `${CmuxDouble.RUNS_IN}/${CmuxDouble.DIRECTORY}/${SENTINEL_FILENAME}`
   static TYPED = buildTypedCommand(CmuxDouble.LAUNCHER, shQuote)
 
   constructor({ printed, sentinels, realpaths = new Map(), step = null }) {
@@ -178,8 +180,8 @@ class CmuxDouble {
     })
   }
 
-  launch() {
-    return this.agents().launch(CmuxDouble.briefing())
+  launch(briefing = CmuxDouble.briefing()) {
+    return this.agents().launch(briefing)
   }
 
   refusal() {
@@ -208,6 +210,22 @@ describe('CmuxPlanAgents', () => {
       '--cwd', CmuxDouble.WORKTREE,
       '--command', CmuxDouble.TYPED,
     ]])
+  })
+
+  it('the_same_issue_number_planned_in_two_repositories_writes_its_launcher_to_a_directory_that_does_not_collide', async () => {
+    const first = CmuxDouble.launched()
+    const second = CmuxDouble.launched()
+    const inAnotherRepository = new PlanBriefing({
+      story: new UserStoryKey('ABC-42'),
+      issue: CmuxDouble.ISSUE,
+      located: new WorkspaceLocation({ path: CmuxDouble.WORKTREE, branch: 'feat/42' }),
+      repository: new RepositoryName('other/name'),
+    })
+
+    await first.launch()
+    await second.launch(inAnotherRepository)
+
+    expect(second.written[0][0]).not.toBe(first.written[0][0])
   })
 
   it('the_launcher_it_writes_is_the_one_the_plugin_renders_so_the_two_halves_cannot_drift_apart', async () => {
