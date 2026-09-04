@@ -17,6 +17,7 @@ import {
   metricRow, metricLine, metricsPath, planSha256, verdictMeasures, IDENTITY_FIELDS, aggregateVerdictMeasures,
   metricsRepoRelPath, METRICS_REPO_DIR, briefVaraCtMeasures, aggregateBriefMeasures,
 } from '../scripts/run-metrics.js'
+import { SEVERITIES } from '../scripts/step-contracts.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const SCRIPT = join(here, '..', 'scripts', 'ct-step.mjs')
@@ -372,6 +373,28 @@ describe('el agregado de lo que el juez dejó escrito (§3.4)', () => {
     expect(r.findingsLow).toBe(3)
     expect(r.measuredSeverities).toBe(2)
     expect(r.legacySeverities).toBe(0)
+  })
+
+  // LA PARTICIÓN DEL VOCABULARIO, atada a `SEVERITIES` en un solo sitio. Las
+  // tres claves se declaran a mano en cuatro lugares (el escritor, el agregado,
+  // las columnas de la tabla y la celda del informe) porque la FORMA de tres
+  // columnas la cierra el esquema de BigQuery: no se puede derivar del enum sin
+  // que un miembro nuevo cambie el esquema. Lo que sí se puede es que un cuarto
+  // miembro ponga esto rojo en vez de desaparecer del reparto en silencio —
+  // `decisions.md`: una copia inevitable de las dos mitades de un contrato pide
+  // el test que las compara.
+  it('cada severidad del vocabulario cerrado tiene su clave escrita y agregada: un cuarto miembro pone esto rojo', () => {
+    const escritas = verdictMeasures({
+      ruling: 'PASS',
+      findings: SEVERITIES.map((severity) => ({ rule: 'alcance', severity })),
+    })
+    for (const severidad of SEVERITIES) expect(escritas[`findings_${severidad}`]).toBe(1)
+    expect(escritas.findings_total).toBe(SEVERITIES.length)
+
+    const unaDeCada = Object.fromEntries(SEVERITIES.map((severidad) => [`findings_${severidad}`, 1]))
+    const r = aggregateVerdictMeasures(veredicto({ ruling: 'PASS', ...unaDeCada }))
+    expect(r.measuredSeverities).toBe(1)
+    expect(r.findingsHigh + r.findingsMedium + r.findingsLow).toBe(SEVERITIES.length)
   })
 
   it('un PASS limpio suma tres ceros y son reales: se midió y no había hallazgos', () => {

@@ -265,18 +265,18 @@ if (comoJson) {
       // cifra. Sustituye a `patrones-ct`, que sólo miraba hallazgos del ítem
       // `patrones` y por eso no vio los dos que el slice #7 archivó en
       // `decisiones-cerradas`.
-      // LA SEVERIDAD, en una celda y en el orden en que se decide: una alta VETA
-      // —el contrato del veredicto no admite un PASS con una alta—, una media
-      // compra una vuelta pagada al implementador, una baja sólo se anota. Las
-      // tres juntas por lo mismo que `vara ct`: son el mismo reparto y una
-      // columna por severidad ensancharía la tabla sin añadir una pregunta.
-      let severidades = '—'
       let varaCt = '—'
       // Si la vara de ct llegó al brief del paso `implement`, y cuánto pesó —
       // sumado sobre TODOS los intentos de `implement` que el slice dejó
       // escritos. Combinado en una sola columna, como el `#pr +a/-d Nf` de la
       // tabla de coste de arriba: son dos números de la misma medida.
       let brief = '—'
+      // LA SEVERIDAD, en una celda y en el orden en que se decide: una alta VETA
+      // —el contrato del veredicto no admite un PASS con una alta—, una media
+      // compra una vuelta pagada al implementador, una baja sólo se anota. Las
+      // tres juntas por lo mismo que `vara ct`: son el mismo reparto y una
+      // columna por severidad ensancharía la tabla sin añadir una pregunta.
+      let severidades = '—'
       if (t.status === 'sin-fichero') porRegla = '(sin telemetría)'
       else if (t.status === 'no-leido') porRegla = '(no se pudo leer)'
       else {
