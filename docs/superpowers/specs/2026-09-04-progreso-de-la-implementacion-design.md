@@ -15,9 +15,8 @@ Hoy la interfaz se queda muda justo después de pulsar «Implementar plan»: el
 termina todo lo que la persona delante sabe. La implementación de una slice
 dura horas y no emite nada hacia fuera.
 
-Este endpoint contesta a la pregunta «¿por dónde va?» con el vocabulario que la
-propia máquina de estados usa: **qué tarea de cuántas, qué paso de esa tarea, y
-cuántos intentos lleva**.
+Este endpoint contesta a la pregunta «¿por dónde va?»: **qué tarea de cuántas,
+qué paso de esa tarea, y cuántos intentos lleva**.
 
 No se le pregunta nada al agente. El progreso ya está escrito en disco.
 
@@ -78,8 +77,8 @@ GET /implement-progress/:issue?root=<ruta absoluta del checkout>
 | Código | Cuerpo | Cuándo |
 |---|---|---|
 | `200` | `{"step":"starting","task":null,"total_tasks":null,"name":null,"attempt":null,"discards":null}` | el worktree existe y `ct-step` todavía no ha creado el run |
-| `200` | `{"step":"judge","task":3,"total_tasks":7,"name":"el lector del plan","attempt":2,"discards":0}` | un paso de tarea |
-| `200` | `{"step":"global","task":null,"total_tasks":7,"name":null,"attempt":null,"discards":0}` | un paso de slice |
+| `200` | `{"step":"judging-task","task":3,"total_tasks":7,"name":"el lector del plan","attempt":2,"discards":0}` | un paso de tarea |
+| `200` | `{"step":"verifying-slice","task":null,"total_tasks":7,"name":null,"attempt":null,"discards":0}` | un paso de slice |
 | `200` | `{"step":"delivered","task":null,"total_tasks":7,"name":null,"attempt":null,"discards":0}` | `closed: "delivered"` |
 | `400` | `{"code":"malformed-issue","detail":"the issue to read is a number such as 42"}` | el issue de la ruta no es un número |
 | `400` | `{"code":"malformed-root","detail":"root is an absolute path such as /Users/you/repos/name"}` | falta `root` o no es absoluto |
@@ -88,33 +87,60 @@ GET /implement-progress/:issue?root=<ruta absoluta del checkout>
 
 Tres códigos y ni uno más. El recorte está razonado en el §4.
 
+### Cuándo se dan de verdad
+
+`implementation-progress-not-read` es el que va a saltar en producción, y por un
+camino que el consumidor tiene que conocer: **cuando la slice se mergea, su
+worktree se borra**, y a partir de ese momento un sondeo que siga vivo deja de
+recibir `delivered` y empieza a recibir este `400`. No es un fallo del backend —
+el sitio donde vivía la respuesta ya no está. Quien sondee debería parar en
+`delivered`, que es el estado final y no cambia nunca a otra cosa.
+
+Los otros dos son guardas de puerta y sólo los provoca un cliente que se
+equivoca. `malformed-root` tiene un camino concreto y previsible: hoy el `202`
+de `POST /start-plan` **no** devuelve la raíz del checkout, así que hasta que
+ese campo exista cualquier consumidor que intente reengancharse sin haberla
+guardado llamará sin `root`. `malformed-issue` sólo se alcanza a mano.
+
+Que sean improbables no los hace prescindibles: `simplicity.md` pone la guarda
+en la puerta por la que el valor entra de fuera, y esta ruta es esa puerta sea
+quien sea el cliente de hoy. Lo que sí desaconseja es la guarda *de más*, y por
+eso el catálogo son tres y no cinco.
+
 ### Los diez pasos
 
-Los ocho de `STEPS` (`plugin/scripts/run-machine.js:41`) más los dos bordes del
-run. Los cinco primeros ocurren **una vez por tarea**; los tres siguientes
-ocurren **una vez por slice**, cuando ya no queda ninguna tarea por comitear.
+Cinco ocurren **una vez por tarea**, tres **una vez por slice** —cuando ya no
+queda ninguna tarea por comitear— y dos son los bordes del run.
 
-| `step` | Qué está pasando |
-|---|---|
-| `starting` | El worktree existe pero `ct-step` aún no ha creado el run. No es un paso de la máquina |
-| `implement` | Un subagente implementador está escribiendo la tarea |
-| `controls` | El programa ejecuta los comandos de verificación que **esa tarea** declaró en el plan, y comprueba que los tests que prometió existen |
-| `judge` | Un subagente `ct-judge` juzga la tarea contra su plan, sin shell, para no poder convencerse a sí mismo de que está verde |
-| `commit` | El programa comitea la tarea. Comitea él y no el implementador, para que un veto no deje rastro que deshacer |
-| `reconcile` | El worktree se pone al día con su rama base. Va antes de `global` para que la punta a punta mida el árbol que se va a entregar y no uno que se quedó atrás |
-| `global` | El programa ejecuta el bloque `## 8. Global verification` del plan: la verificación de **la slice entera**, una sola vez, sobre el árbol con las N tareas ya comiteadas. Existe porque `controls` sólo mide el bloque de cada tarea por separado, y antes esto no lo corría nadie |
-| `slice-judge` | Un juez mira la slice **entera**: si las tareas juntas entregan lo que el plan prometía y si son coherentes entre sí. Ningún juez por tarea mira eso |
-| `e2e` | Los recorridos punta a punta, y sólo si la slice declara alguno. Es el único paso condicional |
-| `delivered` | El run cerró bien. Tampoco es un paso de la máquina: es el otro borde |
+| `step` | `STEPS` | Qué está pasando |
+|---|---|---|
+| `starting` | — | El worktree existe pero `ct-step` aún no ha creado el run |
+| `implementing` | `implement` | Un subagente implementador está escribiendo la tarea |
+| `verifying-task` | `controls` | El programa ejecuta los comandos de verificación que **esa tarea** declaró en el plan, y comprueba que los tests que prometió existen |
+| `judging-task` | `judge` | Un subagente `ct-judge` juzga la tarea contra su plan, sin shell, para no poder convencerse a sí mismo de que está verde |
+| `committing` | `commit` | El programa comitea la tarea. Comitea él y no el implementador, para que un veto no deje rastro que deshacer |
+| `reconciling` | `reconcile` | El worktree se pone al día con su rama base. Va antes de la verificación de slice para que ésta mida el árbol que se va a entregar y no uno que se quedó atrás |
+| `verifying-slice` | `global` | El programa ejecuta el bloque `## 8. Global verification` del plan: la verificación de **la slice entera**, una sola vez, sobre el árbol con las N tareas ya comiteadas. Existe porque el paso por tarea sólo mide el bloque de cada tarea por separado, y antes esto no lo corría nadie |
+| `judging-slice` | `slice-judge` | Un juez mira la slice **entera**: si las tareas juntas entregan lo que el plan prometía y si son coherentes entre sí. Ningún juez por tarea mira eso |
+| `verifying-journeys` | `e2e` | Los recorridos punta a punta, y sólo si la slice declara alguno. Es el único paso condicional |
+| `delivered` | — | El run cerró bien |
 
 ---
 
 ## 4. Las decisiones
 
-**El backend no traduce.** Emite el vocabulario de la máquina en inglés; el
-castellano lo pone quien dibuja, que es donde ya vive todo el castellano de este
-producto. Traducir aquí obligaría a mantener dos vocabularios sincronizados con
-`run-machine.js` en vez de uno.
+**El contrato tiene vocabulario propio, y no es el interno de la máquina.** Los
+nombres de `STEPS` son los de quien escribió la tabla de decisión, y dos de
+ellos no se explican solos fuera de ella: `global` no dice que sea la
+verificación de la slice entera, y `controls` no dice que sea la de una tarea.
+El contrato los nombra por lo que está pasando, en pares simétricos —
+`verifying-task` / `verifying-slice`, `judging-task` / `judging-slice` — y el
+mapa vive en un sitio, sujeto por el test de contrato del §6: el día que la
+máquina estrene un noveno paso, el mapa no lo cubre y el test cae.
+
+**El castellano no lo pone el backend.** El vocabulario del contrato es inglés,
+como el resto del backend; el castellano lo pone quien dibuja, que es donde ya
+vive todo el castellano de este producto.
 
 **Tres campos hablan de una tarea y dos del run, y sólo se rellenan cuando
 dicen la verdad.** `task`, `name` y `attempt` describen una tarea concreta, así
@@ -197,7 +223,8 @@ domain/exceptions.js                      + ImplementationProgressFailure
                                           + ImplementationProgressNotRead
 domain/ports/implementation-progress.js     ImplementationProgress.of({ root, issue })
 domain/value-objects/implementation-state.js
-                                            ImplementationState y su vocabulario de pasos
+                                            ImplementationState, el vocabulario de los diez
+                                            pasos y el mapa desde el de la máquina
 application/queries/read-implementation-progress.js
                                             ReadImplementationProgress, con Params y Result
 infrastructure/run-file-progress.js         el adaptador: el run-file y el lector de
@@ -213,9 +240,9 @@ Es el mismo reparto que la fase de plan ya tiene entre `plan-progress.js`
 (puerto), `plan-state.js` (valor), `plan-contract-progress.js` (adaptador) y
 `read-plan-progress.js` (query), y por eso no inventa ninguna forma nueva.
 
-El vocabulario de pasos vive dentro de `implementation-state.js` y no en un
-módulo propio: nadie lo construye por su cuenta y su único consumidor es el
-valor que lo usa.
+El vocabulario de los diez pasos y el mapa desde `STEPS` viven dentro de
+`implementation-state.js` y no en un módulo propio: nadie los construye por su
+cuenta y su único consumidor es el valor que los usa.
 
 ---
 
@@ -235,9 +262,9 @@ Según `backend/conventions/testing.md`, sin excepciones:
 - **Contrato con el escritor** — `run-machine.js` es puro y sin un solo import,
   así que el test puede construir runs con el `newRun` y el `after` **reales**
   del plugin, serializarlos como hace `ct-step`, y comprobar que nuestro lector
-  los entiende. El mismo test afirma que el vocabulario de pasos cubre `STEPS`
-  entero: el día que el plugin añada un noveno paso, este test cae en vez de
-  que el endpoint conteste un `step` que nadie sabe dibujar. Es la regla de
+  los entiende. El mismo test afirma que el mapa del §3 cubre `STEPS` entero: el
+  día que el plugin añada un noveno paso, este test cae en vez de que el
+  endpoint conteste un `step` que nadie sabe dibujar. Es la regla de
   payloads de frontera con el sentido invertido — allí escribimos nosotros y lee
   el plugin; aquí escribe el plugin y leemos nosotros.
 - **Entrypoint** — el camino feliz y sólo ése, un proceso real que atiende una
