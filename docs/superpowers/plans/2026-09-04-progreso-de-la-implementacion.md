@@ -194,6 +194,7 @@ export const ImplementationStep = Object.freeze({
 export class ImplementationState {
   // The steps that belong to the slice and to no task, plus the two edges of the run.
   // A step in here can carry no task, no task name and no attempt.
+  // Public: `RunFileProgress` asks it whether a step is worth opening the plan for.
   static TASKLESS = Object.freeze([
     ImplementationStep.STARTING, ImplementationStep.RECONCILE, ImplementationStep.GLOBAL,
     ImplementationStep.SLICE_JUDGE, ImplementationStep.E2E, ImplementationStep.DELIVERED,
@@ -206,7 +207,8 @@ export class ImplementationState {
 ```
 
 `of` is the **only** place the rule lives: when `step` is in `TASKLESS`, it nulls `task`, `name` and
-`attempt` whatever the caller passed, and keeps `totalTasks` and `discards`. Any other step keeps
+`attempt` whatever the caller passed, and keeps `totalTasks` and `discards`. T2 and T3 are where
+that rule is measured, through the adapter that feeds it raw run files. Any other step keeps
 the six as given. `starting()` is `of` with `step: STARTING` and the other five `null`.
 
 `TASKLESS` is not our reckoning: its four middle members are `PASOS_DE_SLICE` of `ct-step.mjs:201`
@@ -238,19 +240,14 @@ export class ReadImplementationProgress {
 
 **TDD:** red first —
 `it('the_query_hands_the_port_the_root_and_the_issue_it_was_asked_about')` with a double recording
-what it received; then
-`it('what_the_port_answers_travels_back_whole_inside_the_result')`,
-`it('a_step_of_the_slice_carries_no_task_no_name_and_no_attempt_however_the_caller_asked_for_it')`
-(build with `of({ step: GLOBAL, task: 7, totalTasks: 7, name: 'x', attempt: 3, discards: 1 })` and
-assert `task`, `name` and `attempt` are `null` while `totalTasks` is `7` and `discards` is `1`),
-`it('a_step_of_a_task_keeps_the_six_fields_it_was_given')`, and
-`it('a_run_that_has_not_been_born_knows_only_that_it_is_starting')` for `starting()`.
+what it received; then `it('what_the_port_answers_travels_back_whole_inside_the_result')`.
 
-The value object is reached through the use case, never imported by a test of its own: the last
-three cases build it via the double's answer, which is what `testing.md` means by the domain having
-no tests of its own.
+**Two cases and not five.** The normalising rule of `of` is not measured here: a double that
+fabricates an `ImplementationState` so the test can look at it is a test of the domain with another
+name, and `testing.md` forbids those. It is measured in T2 and T3, where there is raw data to
+normalise — a real run file whose `task` must not survive into a slice step.
 
-**Tests:** added: the five above.
+**Tests:** added: the two above.
 
 **Verification:**
 
@@ -277,9 +274,12 @@ export class RunFileProgress extends ImplementationProgress {
   static runFileFor(root, issue)    // `${worktree}/.agent/run-${issue}.json`
   static attemptOf(run)             // run.controlRetries + run.judgeRetries + run.correctionRetries + 1
   constructor({ read, exists })
-  async of({ root, issue })
+  async of({ root, issue })       // root is a CheckoutRoot; issue is a number
 }
 ```
+
+`root` arrives as the `CheckoutRoot` the route built, and the adapter passes `root.text` on — the
+same thing `GitWorkspace.prepare` does with it.
 
 `GitWorkspace.pathFor(root, issue)` is `${root}/.worktrees/${issue.number}` and takes the issue as
 an object with a `number`. It is imported from `./git-workspace.js` — one adapter reusing another
@@ -327,13 +327,17 @@ plus that `read` was asked for the literal path
   "sliceCommits": 1, "closed": "delivered"`, its huge `lastVerdict` cut down to `{"ruling":"PASS"}`
   because nothing reads it), expecting `{ step: 'delivered', task: null, totalTasks: 7, name: null,
   attempt: null, discards: 0 }`.
+- `it('a_step_of_the_slice_answers_the_total_but_no_task_and_no_attempt')` — a run with
+  `step: 'global', task: 7, tasksTotal: 7, discards: 1` and no `closed`, expecting
+  `{ step: 'global', task: null, totalTasks: 7, name: null, attempt: null, discards: 1 }`. This is
+  the case that proves `run.task`, frozen on the last task, does not reach the answer.
 - `it('the_attempt_counts_the_three_retries_that_reset_with_every_task')` — a run with
   `controlRetries: 1, judgeRetries: 2, correctionRetries: 0` on `step: 'judge'`, expecting
   `attempt: 4`.
 - `it('half_a_json_is_a_file_that_could_not_be_read_and_not_a_run_without_tasks')` — `read` answers
   `'{"task": 3, "tasksTot'`, expect `ImplementationProgressNotRead` whose message names the file.
 
-**Tests:** added: the six above.
+**Tests:** added: the seven above.
 
 **Verification:**
 
@@ -369,8 +373,10 @@ The separator in `HEADING` is an **em dash** (`—`, U+2014), copied from `TASK_
 heading on lines outside a fence. That is the whole of what `annotate` does in the plugin for this
 purpose; the rest of `extractTasks` validates the plan's contract, which no caller here needs.
 
-`RunFileProgress.of` gains one step, between 4 and 5 of Task 2: for a step of a task, read
-`${worktree}/${run.plan}` and look the name up by `run.task`. `run.plan` is a path **relative to the
+`RunFileProgress.of` gains one step, between 4 and 5 of Task 2: when
+`ImplementationState.TASKLESS` does **not** contain `run.step`, read `${worktree}/${run.plan}` and
+look the name up by `run.task`. Asking the value object is what keeps the list of slice steps in one
+place; do not write a second copy of it here. `run.plan` is a path **relative to the
 worktree** (`docs/superpowers/plans/2026-09-03-issue-99-el-banco.md` in the real file).
 
 Two absences are `null` and never a failure: a plan the disk does not hand back (`read` answers
@@ -462,6 +468,9 @@ export class ImplementProgressRoute {
   static handledBy(readImplementationProgress)
 }
 ```
+
+`handledBy` takes the query object and calls
+`readImplementationProgress.execute(new ReadImplementationProgressParams({ root: asked.root, issue: asked.issue }))`.
 
 `from` builds `root` with `new CheckoutRoot(rawRoot)` when `CheckoutRoot.isWellFormed(rawRoot)`, and
 refuses with `MALFORMED_ROOT` otherwise — the door guard of `simplicity.md`, and the same shape
@@ -629,11 +638,12 @@ Contract (`backend/src/infrastructure/ct-api.mjs`):
   `stat` from `node:fs/promises` beside `readFile`.
 - `Disk.read` is reused as it is — it already answers `null` on `ENOENT`, which is exactly the
   contract `RunFileProgress` was written against.
-- A private static `#implementProgress()` builds
-  `new ReadImplementationProgress({ implementationProgress: new RunFileProgress({ read: Disk.read, exists: Disk.exists }) })`
-  and hands `ApiServer` a function of the same shape as the other collaborators:
-  `(asked) => readImplementationProgress.execute(new ReadImplementationProgressParams(asked))`.
-- `ApiServer` receives it as `implementProgress`.
+- `ApiServer` receives `implementProgress`: the **query object**, not a function —
+  `new ReadImplementationProgress({ implementationProgress: new RunFileProgress({ read: Disk.read, exists: Disk.exists }) })`.
+  The route builds its own `ReadImplementationProgressParams`, exactly as `StartPlanRoute` and
+  `ImplementPlanRoute` build theirs. `PlanEvents` is handed a function instead because its stream
+  needs a loop; this endpoint has none.
+- `ReadImplementationProgressParams` is therefore imported by the route, not by `ct-api.mjs`.
 
 Contract (`backend/__tests__/infrastructure/plugin-contract.test.js`), one more `describe` beside the
 ones already there, importing from the plugin — the only place that may:
