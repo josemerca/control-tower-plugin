@@ -323,6 +323,15 @@ describe('GhPlanIssues', () => {
     expect(refusal.message).toContain('did not name the issue')
   })
 
+  it('an_issue_numbered_zero_is_gh_answering_something_unreadable_and_not_an_issue_we_can_use', async () => {
+    const refusal = await GhDouble.created(
+      'https://github.com/josemerca/ct-loop-sandbox/issues/0\n'
+    ).refusalFor()
+
+    expect(refusal).toBeInstanceOf(PlanIssueNotNamed)
+    expect(refusal.message).toContain('did not name the issue')
+  })
+
   it('gh_answering_something_unreadable_is_told_apart_from_gh_refusing_the_call', async () => {
     const unreadable = await GhDouble.created('done\n').refusalFor()
     const refused = await GhDouble.refusing('boom', 9).refusalFor()
