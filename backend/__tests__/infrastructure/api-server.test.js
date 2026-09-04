@@ -170,7 +170,7 @@ class RunningApi {
   }
 
   static eventsPath() {
-    return `/plan-events/${StartPlanSpy.ISSUE.number}?repo=${RunningApi.REPO}`
+    return `/plan-events/${StartPlanSpy.ISSUE.number}?repo=${encodeURIComponent(RunningApi.REPO)}`
   }
 
   static async watching(port, headers = {}) {
@@ -784,7 +784,7 @@ describe('ApiServer', () => {
     const { planEvents } = ProgressSpy.events(PlanState.READY)
     const port = await RunningApi.listening({ planEvents })
 
-    const response = await fetch(`http://127.0.0.1:${port}/plan-events/404?repo=${RunningApi.REPO}`)
+    const response = await fetch(`http://127.0.0.1:${port}/plan-events/404?repo=${encodeURIComponent(RunningApi.REPO)}`)
 
     expect(response.status).toBe(404)
     expect(await response.text()).toBe(`{"error":"${EventsRefusal.NOT_WATCHED}"}`)
