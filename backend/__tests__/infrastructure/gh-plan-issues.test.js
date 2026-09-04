@@ -4,6 +4,7 @@ import { Gh } from '../../src/infrastructure/gh.js'
 import { PlanIssueBody } from '../../src/infrastructure/gh-plan-issues.js'
 import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
 import { RetryPolicy, RetryBudget } from '../../src/domain/policies/retry-policy.js'
+import { SleepDouble } from '../sleep-double.js'
 import { UserStory } from '../../src/domain/value-objects/user-story.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
@@ -12,18 +13,6 @@ import {
   PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueNotClaimed, PlanGoNotAnswered, PlanIssueFailure,
   PlanChangesNotRead, PlanChangesNotUnderstood,
 } from '../../src/domain/exceptions.js'
-
-class SleepDouble {
-  constructor() {
-    this.slept = []
-  }
-
-  sleep(seconds) {
-    this.slept.push(seconds)
-
-    return Promise.resolve()
-  }
-}
 
 class GhDouble {
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')

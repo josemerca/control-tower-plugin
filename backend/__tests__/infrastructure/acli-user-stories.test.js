@@ -5,18 +5,7 @@ import { UserStoryNotRead, UserStoryNotUnderstood, UserStoryFailure } from '../.
 import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
 import { ExternalTool } from '../../src/infrastructure/external-tool.js'
 import { RetryPolicy, RetryBudget } from '../../src/domain/policies/retry-policy.js'
-
-class SleepDouble {
-  constructor() {
-    this.slept = []
-  }
-
-  sleep(seconds) {
-    this.slept.push(seconds)
-
-    return Promise.resolve()
-  }
-}
+import { SleepDouble } from '../sleep-double.js'
 
 class AcliDouble {
   constructor(printed) {

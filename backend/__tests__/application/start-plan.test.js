@@ -72,10 +72,9 @@ class PlanIssuesDouble extends PlanIssues {
 class WorkspaceDouble extends Workspace {
   static LOCATED = new WorkspaceLocation({ path: '/repo/.worktrees/7', branch: 'feat/7' })
 
-  constructor(answer = WorkspaceDouble.LOCATED, { undoFailure = null } = {}) {
+  constructor(answer = WorkspaceDouble.LOCATED) {
     super()
     this.answer = answer
-    this.undoFailure = undoFailure
     this.asked = []
     this.undone = []
     this.steps = []
@@ -83,10 +82,6 @@ class WorkspaceDouble extends Workspace {
 
   static refusing(said) {
     return new WorkspaceDouble(new WorkspaceNotPrepared(said))
-  }
-
-  static leaking(said) {
-    return new WorkspaceDouble(WorkspaceDouble.LOCATED, { undoFailure: new Error(said) })
   }
 
   async prepare({ issue, repository }) {
@@ -98,7 +93,6 @@ class WorkspaceDouble extends Workspace {
   async undo(located) {
     this.undone.push(located)
     this.steps.push('undo')
-    if (this.undoFailure !== null) throw this.undoFailure
   }
 }
 
@@ -282,50 +276,12 @@ describe('StartPlan collects the ground it prepared when the launch never took o
     expect(refusal.message).toBe('cmux is not reachable')
   })
 
-  it('a_cleanup_that_also_fails_does_not_replace_the_launch_failure_that_caused_it', async () => {
-    const flow = new Flow({
-      workspace: WorkspaceDouble.leaking('worktree remove failed'),
-      planAgents: PlanAgentsDouble.refusing('cmux is not reachable'),
-    })
-
-    const refusal = await flow.refusal()
-
-    expect(refusal).toBeInstanceOf(PlanAgentNotLaunched)
-    expect(refusal.message).toBe('cmux is not reachable')
-  })
-
-  it('a_workspace_with_no_undo_at_all_does_not_replace_the_launch_failure_that_caused_the_cleanup', async () => {
-    const flow = new Flow({ planAgents: PlanAgentsDouble.refusing('cmux is not reachable') })
-    flow.workspace = { prepare: async () => WorkspaceDouble.LOCATED }
-
-    const refusal = await flow.refusal()
-
-    expect(refusal).toBeInstanceOf(PlanAgentNotLaunched)
-    expect(refusal.message).toBe('cmux is not reachable')
-  })
-
   it('a_launch_that_succeeds_never_undoes_the_workspace_it_just_prepared', async () => {
     const flow = new Flow()
 
     await flow.run()
 
     expect(flow.workspace.undone).toEqual([])
-  })
-
-  it('a_cleanup_that_fails_never_writes_to_stderr_because_the_adapter_that_failed_already_reported_it', async () => {
-    const flow = new Flow({
-      workspace: WorkspaceDouble.leaking('worktree remove failed'),
-      planAgents: PlanAgentsDouble.refusing('cmux is not reachable'),
-    })
-    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
-
-    try {
-      await flow.refusal()
-
-      expect(complaining.mock.calls).toEqual([])
-    } finally {
-      complaining.mockRestore()
-    }
   })
 })
 

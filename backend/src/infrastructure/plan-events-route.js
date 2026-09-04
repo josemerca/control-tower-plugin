@@ -93,7 +93,7 @@ export class PlanEvents {
     return `event: ${PlanEvents.ERROR_EVENT}\ndata: ${JSON.stringify({ error: cause.message })}\n\n`
   }
 
-  async *stream(session, cancelled = () => false) {
+  async *stream(session, cancelled) {
     let last = null
     for (;;) {
       let read

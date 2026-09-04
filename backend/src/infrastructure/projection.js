@@ -7,7 +7,7 @@ export class Projection {
   of(member) {
     const projected = this.declared.get(member)
     if (projected === undefined) {
-      throw new Error(`no ${this.what} declared for ${member?.name ?? member}`)
+      throw new Error(`no ${this.what} declared for ${member.name ?? member}`)
     }
 
     return projected

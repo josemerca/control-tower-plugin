@@ -105,6 +105,10 @@ class GitDouble {
     return { failed: false, stdout: '', stderr: '' }
   }
 
+  static located() {
+    return new WorkspaceLocation({ path: GitDouble.WORKTREE, branch: 'feat/42' })
+  }
+
   static stillVisible() {
     return { failed: false, stdout: `?? ${SliceSeed.RELATIVE_PATH}\n`, stderr: '' }
   }
@@ -512,7 +516,7 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
   })
 
   it('a_cleanup_that_also_fails_after_a_common_dir_refusal_does_not_replace_the_original_failure', async () => {
-    const git = new GitDouble({ commonDir: null, removal: GitDouble.refused('fatal: worktree remove refused') })
+    const git = new GitDouble({ removal: GitDouble.refused('fatal: worktree remove refused') })
     git.answering = (argv) => {
       if (argv.includes('--git-common-dir')) return GitDouble.refused('not a git repository')
       if (argv.includes('remove')) return git.removal
@@ -529,12 +533,10 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
 })
 
 describe('GitWorkspace tells its diagnostic writer what git refused to undo, because a refusal comes back as an exit code and not as a throw', () => {
-  const located = () => new WorkspaceLocation({ path: GitDouble.WORKTREE, branch: 'feat/42' })
-
   it('a_worktree_git_refuses_to_remove_is_named_with_what_git_said_and_the_branch_is_still_deleted', async () => {
     const git = new GitDouble({ removal: GitDouble.refused('fatal: cannot remove a locked working tree') })
 
-    await git.workspace().undo(located())
+    await git.workspace().undo(GitDouble.located())
 
     const said = git.stderr.join('')
     expect(said).toContain(GitDouble.WORKTREE)
@@ -545,7 +547,7 @@ describe('GitWorkspace tells its diagnostic writer what git refused to undo, bec
   it('a_branch_git_refuses_to_delete_is_named_with_what_git_said', async () => {
     const git = new GitDouble({ deletion: GitDouble.refused("error: branch 'feat/42' not found") })
 
-    await git.workspace().undo(located())
+    await git.workspace().undo(GitDouble.located())
 
     const said = git.stderr.join('')
     expect(said).toContain('feat/42')
@@ -555,7 +557,7 @@ describe('GitWorkspace tells its diagnostic writer what git refused to undo, bec
   it('an_undo_git_carries_out_says_nothing', async () => {
     const git = new GitDouble()
 
-    await git.workspace().undo(located())
+    await git.workspace().undo(GitDouble.located())
 
     expect(git.stderr).toEqual([])
   })
