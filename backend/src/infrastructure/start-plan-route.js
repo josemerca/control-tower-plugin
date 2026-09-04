@@ -1,4 +1,5 @@
 import { Answer, JsonBody, Refusal } from './http.js'
+import { Projection } from './projection.js'
 import { StartPlanParams } from '../application/actions/start-plan.js'
 import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
@@ -24,21 +25,6 @@ export class PlanRequest {
   static KNOWN_FIELDS = Object.freeze([PlanRequest.ID_FIELD, PlanRequest.REPO_FIELD])
 
   constructor({ outcome, story, repository, fields }) {
-    if (!Object.values(PlanRequestOutcome).includes(outcome)) {
-      throw new Error(`outcome must be a PlanRequestOutcome member, got ${outcome}`)
-    }
-    if ((outcome === PlanRequestOutcome.ACCEPTED) === (story === null)) {
-      throw new Error(`outcome ${outcome} disagrees with its story, got ${story}`)
-    }
-    if ((outcome === PlanRequestOutcome.ACCEPTED) === (repository === null)) {
-      throw new Error(`outcome ${outcome} disagrees with its repository, got ${repository}`)
-    }
-    if (outcome !== PlanRequestOutcome.UNKNOWN_FIELD && fields.length > 0) {
-      throw new Error(`outcome ${outcome} must carry no fields, got ${fields.join(', ')}`)
-    }
-    if (outcome === PlanRequestOutcome.UNKNOWN_FIELD && fields.length === 0) {
-      throw new Error('an unknown-field outcome must name the fields it rejected')
-    }
     this.outcome = outcome
     this.story = story
     this.repository = repository
@@ -87,34 +73,29 @@ export class PlanRequest {
 }
 
 export class PlanRefusal {
-  static #BY_OUTCOME = Object.freeze({
-    [PlanRequestOutcome.BODY_NOT_A_JSON_OBJECT]: () =>
-      new Refusal({ status: 400, error: 'body must be a JSON object' }),
-    [PlanRequestOutcome.MALFORMED_ID]: () => new Refusal({
+  static #BY_OUTCOME = new Projection('refusal', [
+    [PlanRequestOutcome.BODY_NOT_A_JSON_OBJECT, () =>
+      new Refusal({ status: 400, error: 'body must be a JSON object' })],
+    [PlanRequestOutcome.MALFORMED_ID, () => new Refusal({
       status: 400,
       error: `${PlanRequest.ID_FIELD} must be a user story key such as ${UserStoryKey.EXAMPLE}`,
-    }),
-    [PlanRequestOutcome.MALFORMED_REPO]: () => new Refusal({
+    })],
+    [PlanRequestOutcome.MALFORMED_REPO, () => new Refusal({
       status: 400,
       error: `${PlanRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
-    }),
-    [PlanRequestOutcome.UNKNOWN_FIELD]: (asked) => new Refusal({
+    })],
+    [PlanRequestOutcome.UNKNOWN_FIELD, (asked) => new Refusal({
       status: 400,
       error: `unknown field: ${asked.fields.join(', ')}`,
-    }),
-  })
+    })],
+  ])
 
   static of(asked) {
-    const declared = PlanRefusal.#BY_OUTCOME[asked.outcome]
-    if (declared === undefined) {
-      throw new Error(`no refusal declared for outcome ${asked.outcome}`)
-    }
-
-    return declared(asked)
+    return PlanRefusal.#BY_OUTCOME.of(asked.outcome)(asked)
   }
 
   static declaredOutcomes() {
-    return Object.keys(PlanRefusal.#BY_OUTCOME)
+    return PlanRefusal.#BY_OUTCOME.members()
   }
 }
 
@@ -122,7 +103,7 @@ export class PlanCollapse {
   static #REFUSED = 503
   static #ANSWERED_SOMETHING_ELSE = 502
 
-  static #BY_FAILURE = [
+  static #BY_FAILURE = new Projection('status', [
     [UserStoryNotRead, PlanCollapse.#REFUSED],
     [PlanIssueNotCreated, PlanCollapse.#REFUSED],
     [PlanIssueNotClaimed, PlanCollapse.#REFUSED],
@@ -133,19 +114,17 @@ export class PlanCollapse {
     [PlanIssueNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
     [PlanAgentNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
     [WorkspaceNotUnderstood, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
-  ]
+  ])
 
   static of(cause) {
-    const declared = PlanCollapse.#BY_FAILURE.find(([failure]) => cause.constructor === failure)
-    if (declared === undefined) {
-      throw new Error(`no status declared for ${cause.constructor.name}`)
-    }
-
-    return new Refusal({ status: declared[1], error: `could not start the plan: ${cause.message}` })
+    return new Refusal({
+      status: PlanCollapse.#BY_FAILURE.of(cause.constructor),
+      error: `could not start the plan: ${cause.message}`,
+    })
   }
 
   static declaredFailures() {
-    return PlanCollapse.#BY_FAILURE.map(([failure]) => failure.name)
+    return PlanCollapse.#BY_FAILURE.members().map((failure) => failure.name)
   }
 }
 

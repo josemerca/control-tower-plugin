@@ -6,7 +6,7 @@ export class ReadChangesAskedParams {
   }
 }
 
-export class ReadChangesAskedResult {
+class ReadChangesAskedResult {
   constructor({ changes }) {
     this.changes = changes
     Object.freeze(this)

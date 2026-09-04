@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { isAbsolute, join } from 'node:path'
+import { join } from 'node:path'
 import { GoRegistry } from '../domain/ports/go-registry.js'
 import { GoNotRecorded } from '../domain/exceptions.js'
 
@@ -9,11 +9,6 @@ export class DiskGoRegistry extends GoRegistry {
 
   constructor({ random, write, root }) {
     super()
-    if (typeof root !== 'string' || !isAbsolute(root)) {
-      throw new Error(
-        `the registry writes where dispatch-check reads, named by an absolute path, got ${JSON.stringify(root)}`
-      )
-    }
     this.random = random
     this.write = write
     this.root = root

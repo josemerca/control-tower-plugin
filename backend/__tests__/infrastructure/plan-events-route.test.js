@@ -46,7 +46,7 @@ class EventsDouble {
     return () => this.answers.length === 0
   }
 
-  async collected(cancelled) {
+  async collected(cancelled = () => false) {
     const frames = []
     for await (const frame of this.events().stream(EventsDouble.SUBJECT, cancelled)) frames.push(frame)
 

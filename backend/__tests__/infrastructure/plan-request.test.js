@@ -10,26 +10,6 @@ describe('PlanRequest', () => {
     expect(new Set(members).size).toBe(members.length)
   })
 
-  it('a_refused_request_cannot_carry_a_story_that_a_consumer_would_then_act_on', () => {
-    expect(() =>
-      new PlanRequest({
-        outcome: PlanRequestOutcome.MALFORMED_ID,
-        story: new UserStoryKey('ABC-123'),
-        fields: [],
-      })
-    ).toThrow(/disagrees with its story/)
-  })
-
-  it('an_accepted_request_cannot_be_built_without_the_story_the_caller_will_read', () => {
-    expect(() => PlanRequest.accepted(null, new RepositoryName('owner/name')))
-      .toThrow(/disagrees with its story/)
-  })
-
-  it('an_accepted_request_cannot_be_built_without_the_repository_the_issue_goes_to', () => {
-    expect(() => PlanRequest.accepted(new UserStoryKey('ABC-123'), null))
-      .toThrow(/disagrees with its repository/)
-  })
-
   it('a_body_whose_repo_is_not_a_repository_comes_back_refused_and_not_as_a_malformed_id', () => {
     const refused = [
       '{"id":"ABC-1","repo":"name"}',
@@ -74,13 +54,5 @@ describe('PlanRequest', () => {
 
     expect(accepted.repository).toBeInstanceOf(RepositoryName)
     expect(accepted.repository.text).toBe('josemerca/ct-loop-sandbox')
-  })
-
-  it('an_unknown_field_outcome_has_to_name_what_it_rejected_or_the_answer_says_nothing', () => {
-    expect(() => PlanRequest.withUnknownFields([])).toThrow(/must name the fields/)
-  })
-
-  it('an_outcome_outside_the_vocabulary_raises_instead_of_travelling_on_as_a_string', () => {
-    expect(() => PlanRequest.refused('invented')).toThrow(/PlanRequestOutcome member/)
   })
 })

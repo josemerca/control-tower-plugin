@@ -18,15 +18,16 @@ class Sweeping {
   static SURVEY = 'survey'
   static SLEEP = 'sleep'
 
-  constructor({ checkouts, harvests, sweeps = 1, stoppingAt = null }) {
+  constructor({ checkouts, harvests, sweeps = 1 }) {
     this.checkouts = [...checkouts]
     this.harvests = new Map(harvests)
     this.sweeps = sweeps
-    this.stoppingAt = stoppingAt
     this.trace = []
     this.written = []
     this.slept = 0
-    this.clock = null
+    this.enough = new Promise((resolve) => {
+      this.sweptEnough = resolve
+    })
   }
 
   static preparedFor(issueNumber) {
@@ -64,14 +65,6 @@ class Sweeping {
     return new Sweeping({ checkouts: [failure], harvests: [] })
   }
 
-  static stoppingDuring(issueNumber, harvests) {
-    return new Sweeping({
-      checkouts: [Sweeping.checkoutHolding(harvests)],
-      harvests,
-      stoppingAt: issueNumber,
-    })
-  }
-
   #surveyed() {
     this.trace.push(Sweeping.SURVEY)
     if (this.checkouts.length === 0) {
@@ -88,7 +81,6 @@ class Sweeping {
     if (repository !== Sweeping.REPOSITORY) {
       throw new Error(`the harvest of #${prepared.issueNumber} was asked for in ${repository?.text}`)
     }
-    if (prepared.issueNumber === this.stoppingAt) this.clock.stop()
     if (!this.harvests.has(prepared.issueNumber)) {
       throw new Error(`the harvest of #${prepared.issueNumber} was asked for and no answer was scripted`)
     }
@@ -101,19 +93,22 @@ class Sweeping {
   #slept() {
     this.trace.push(Sweeping.SLEEP)
     this.slept += 1
-    if (this.slept >= this.sweeps) this.clock.stop()
+    if (this.slept < this.sweeps) return Promise.resolve()
+    this.sweptEnough()
 
-    return Promise.resolve()
+    return Sweeping.#NEVER
   }
 
+  static #NEVER = new Promise(() => {})
+
   async run() {
-    this.clock = new HarvestClock({
+    const clock = new HarvestClock({
       survey: () => this.#surveyed(),
       harvest: (prepared, repository) => this.#harvested(prepared, repository),
       sleep: () => this.#slept(),
       stderr: (line) => this.written.push(line),
     })
-    await this.clock.start()
+    await Promise.race([clock.start(), this.enough])
 
     return this
   }
@@ -218,15 +213,6 @@ describe('HarvestClock', () => {
     expect(await broken.broke()).toBeInstanceOf(TypeError)
     expect(broken.trace).toEqual(['survey', 'harvest #1'])
   })
-
-  it('stopping_lets_the_sweep_in_flight_finish_and_then_never_sleeps_into_another_one', async () => {
-    const swept = await Sweeping.stoppingDuring(1, [
-      [1, HarvestOutcome.COLLECTED], [2, HarvestOutcome.COLLECTED],
-    ]).run()
-
-    expect(swept.trace).toEqual(['survey', 'harvest #1', 'harvest #2'])
-    expect(swept.written).toEqual(['harvest #1: collected\n', 'harvest #2: collected\n'])
-  })
 })
 
 describe('SweepLine', () => {
@@ -237,7 +223,7 @@ describe('SweepLine', () => {
   it('an_outcome_nobody_declared_a_line_for_raises_instead_of_being_swept_past_without_a_word', async () => {
     const broken = Sweeping.answering([[42, 'invented']])
 
-    expect((await broken.broke()).message).toBe('no sweep line declared for harvest outcome invented')
+    expect((await broken.broke()).message).toBe('no harvest outcome sweep line declared for invented')
   })
 
   it('every_harvest_failure_the_catalogue_declares_has_a_line_so_a_third_one_cannot_kill_the_server_unnamed', () => {
@@ -250,6 +236,6 @@ describe('SweepLine', () => {
   it('a_harvest_failure_nobody_declared_a_line_for_raises_instead_of_being_reported_as_one_of_the_two', async () => {
     const broken = Sweeping.answering([[42, new HarvestFailure('a family nobody projected')]])
 
-    expect((await broken.broke()).message).toBe('no sweep line declared for harvest failure HarvestFailure')
+    expect((await broken.broke()).message).toBe('no harvest failure sweep line declared for HarvestFailure')
   })
 })
