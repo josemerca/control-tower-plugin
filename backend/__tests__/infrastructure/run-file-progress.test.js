@@ -4,11 +4,25 @@ import { CheckoutRoot } from '../../src/domain/value-objects/checkout-root.js'
 import { ImplementationState, ImplementationStep } from '../../src/domain/value-objects/implementation-state.js'
 import { ImplementationProgressNotRead } from '../../src/domain/exceptions.js'
 
+const FENCE = '`'.repeat(3)
+const PLAN = [
+  '# Un plan',
+  '',
+  '### Task 1 — el primero',
+  '### Task 2 — el lector del plan',
+  '',
+  FENCE,
+  '### Task 3 — el de dentro de un bloque',
+  FENCE,
+  '',
+].join('\n')
+
 class RunFileDouble {
   static ROOT = new CheckoutRoot('/checkout')
   static ISSUE = 99
   static WORKTREE = '/checkout/.worktrees/99'
   static RUN_FILE = '/checkout/.worktrees/99/.agent/run-99.json'
+  static PLAN_FILE = '/checkout/.worktrees/99/docs/superpowers/plans/2026-09-03-issue-99-el-banco.md'
 
   static BANCO_DE_LA_PUERTA = {
     plan: 'docs/superpowers/plans/2026-09-03-issue-99-el-banco.md',
@@ -45,15 +59,15 @@ class RunFileDouble {
     lastVerdict: { ruling: 'PASS' },
   }
 
-  constructor({ exists = true, text = null } = {}) {
+  constructor({ exists = true, texts = [] } = {}) {
     this.exists = exists
-    this.text = text
+    this.texts = [...texts]
     this.existsAsked = []
     this.readAsked = []
   }
 
-  static answering(run) {
-    return new RunFileDouble({ text: JSON.stringify(run) })
+  static answering(run, planText = null) {
+    return new RunFileDouble({ texts: [JSON.stringify(run), planText] })
   }
 
   static missingWorktree() {
@@ -61,11 +75,11 @@ class RunFileDouble {
   }
 
   static withoutRunFile() {
-    return new RunFileDouble({ text: null })
+    return new RunFileDouble({ texts: [null] })
   }
 
   static withText(text) {
-    return new RunFileDouble({ text })
+    return new RunFileDouble({ texts: [text] })
   }
 
   progress() {
@@ -76,7 +90,10 @@ class RunFileDouble {
       },
       read: async (path) => {
         this.readAsked.push(path)
-        return this.text
+        if (this.texts.length === 0) {
+          throw new Error(`read was asked for ${path} with no scripted answer left`)
+        }
+        return this.texts.shift()
       },
     })
   }
@@ -99,7 +116,7 @@ describe('RunFileProgress', () => {
     expect(state).toEqual(ImplementationState.of({
       step: 'implement', task: 1, totalTasks: 3, name: null, attempt: 1, discards: 0,
     }))
-    expect(asked.readAsked).toEqual([RunFileDouble.RUN_FILE])
+    expect(asked.readAsked).toEqual([RunFileDouble.RUN_FILE, RunFileDouble.PLAN_FILE])
   })
 
   it('a_run_the_step_program_has_not_created_yet_is_a_slice_that_is_starting', async () => {
@@ -158,5 +175,40 @@ describe('RunFileProgress', () => {
 
     expect(refusal).toBeInstanceOf(ImplementationProgressNotRead)
     expect(refusal.message).toContain(RunFileDouble.RUN_FILE)
+  })
+
+  it('the_name_of_the_task_comes_from_the_heading_of_that_number_in_the_plan', async () => {
+    const asked = RunFileDouble.answering({ ...RunFileDouble.BANCO_DE_LA_PUERTA, task: 2 }, PLAN)
+
+    const state = await asked.asked()
+
+    expect(state.name).toBe('el lector del plan')
+    expect(asked.readAsked).toEqual([RunFileDouble.RUN_FILE, RunFileDouble.PLAN_FILE])
+  })
+
+  it('a_heading_inside_a_fenced_block_is_not_a_task', async () => {
+    const asked = RunFileDouble.answering({ ...RunFileDouble.BANCO_DE_LA_PUERTA, task: 3 }, PLAN)
+
+    const state = await asked.asked()
+
+    expect(state.name).toBe(null)
+  })
+
+  it('a_plan_that_is_not_on_disk_costs_the_name_and_not_the_state', async () => {
+    const asked = RunFileDouble.answering({ ...RunFileDouble.BANCO_DE_LA_PUERTA, task: 1 })
+
+    const state = await asked.asked()
+
+    expect(state).toEqual(ImplementationState.of({
+      step: 'implement', task: 1, totalTasks: 3, name: null, attempt: 1, discards: 0,
+    }))
+  })
+
+  it('a_step_of_the_slice_does_not_go_looking_for_a_plan', async () => {
+    const asked = RunFileDouble.answering(RunFileDouble.REPO_PULSE_DELIVERED)
+
+    await asked.asked()
+
+    expect(asked.readAsked).toHaveLength(1)
   })
 })

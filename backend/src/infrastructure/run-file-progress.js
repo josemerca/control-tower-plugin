@@ -3,6 +3,26 @@ import { ImplementationState, ImplementationStep } from '../domain/value-objects
 import { ImplementationProgressNotRead } from '../domain/exceptions.js'
 import { GitWorkspace } from './git-workspace.js'
 
+class PlanTaskNames {
+  static HEADING = /^### Task (\d+) — (.*)$/
+  static FENCE = '```'
+
+  static of(markdown) {
+    const names = new Map()
+    let inFence = false
+    for (const line of String(markdown).split('\n')) {
+      if (line.startsWith(PlanTaskNames.FENCE)) {
+        inFence = !inFence
+        continue
+      }
+      if (inFence) continue
+      const matched = line.match(PlanTaskNames.HEADING)
+      if (matched !== null) names.set(Number(matched[1]), matched[2].trim())
+    }
+    return names
+  }
+}
+
 export class RunFileProgress extends ImplementationProgress {
   static AGENT_DIRECTORY = '.agent'
 
@@ -49,9 +69,19 @@ export class RunFileProgress extends ImplementationProgress {
       })
     }
 
+    const name = ImplementationState.TASKLESS.includes(run.step)
+      ? null
+      : await this.#taskName(worktree, run)
+
     return ImplementationState.of({
-      step: run.step, task: run.task, totalTasks: run.tasksTotal, name: null,
+      step: run.step, task: run.task, totalTasks: run.tasksTotal, name,
       attempt: RunFileProgress.attemptOf(run), discards: run.discards,
     })
+  }
+
+  async #taskName(worktree, run) {
+    const planText = await this.read(`${worktree}/${run.plan}`)
+    if (planText === null) return null
+    return PlanTaskNames.of(planText).get(run.task) ?? null
   }
 }
