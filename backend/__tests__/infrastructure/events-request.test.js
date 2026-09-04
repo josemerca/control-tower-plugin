@@ -112,14 +112,16 @@ describe('EventsRefusal', () => {
     expect(() => EventsRefusal.of({ outcome: 'invented' })).toThrow(/no refusal declared/)
   })
 
-  it('an_issue_the_caller_wrote_wrong_is_theirs_to_fix_and_a_plan_nobody_started_is_simply_not_there', () => {
+  it('an_issue_the_caller_wrote_wrong_and_a_plan_nobody_started_are_both_400_but_told_apart_by_code', () => {
     const malformed = EventsRefusal.of(EventsRequest.from('abc', Watched.REPO, Watched.none()))
     const missing = EventsRefusal.of(EventsRequest.from('42', Watched.REPO, Watched.none()))
 
     expect(malformed).toBeInstanceOf(Refusal)
     expect(malformed.status).toBe(400)
-    expect(missing.status).toBe(404)
-    expect(missing.error).toBe(EventsRefusal.NOT_WATCHED)
+    expect(malformed.code).toBe(EventsRequestOutcome.MALFORMED_ISSUE)
+    expect(missing.status).toBe(400)
+    expect(missing.code).toBe(EventsRequestOutcome.NOT_WATCHED)
+    expect(missing.detail).toBe(EventsRefusal.NOT_WATCHED)
   })
 
   it('a_repository_that_is_missing_or_malformed_is_refused_with_the_same_words_start_plan_uses_for_the_same_field', () => {
@@ -128,7 +130,8 @@ describe('EventsRefusal', () => {
     const startPlanMalformedRepo = PlanRefusal.of(PlanRequest.refused(PlanRequestOutcome.MALFORMED_REPO))
 
     expect(missing.status).toBe(400)
-    expect(missing.error).toBe(startPlanMalformedRepo.error)
-    expect(malformed.error).toBe(missing.error)
+    expect(missing.code).toBe(startPlanMalformedRepo.code)
+    expect(missing.detail).toBe(startPlanMalformedRepo.detail)
+    expect(malformed.detail).toBe(missing.detail)
   })
 })

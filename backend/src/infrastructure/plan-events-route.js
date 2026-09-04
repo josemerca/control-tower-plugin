@@ -72,14 +72,19 @@ export class EventsRefusal {
   static #BY_OUTCOME = new Projection('refusal', [
     [EventsRequestOutcome.MALFORMED_ISSUE, () => new Refusal({
       status: 400,
-      error: `the issue to watch is a number such as ${EventsRequest.EXAMPLE}`,
+      code: EventsRequestOutcome.MALFORMED_ISSUE,
+      detail: `the issue to watch is a number such as ${EventsRequest.EXAMPLE}`,
     })],
     [EventsRequestOutcome.MALFORMED_REPO, () => new Refusal({
       status: 400,
-      error: `${EventsRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
+      code: EventsRequestOutcome.MALFORMED_REPO,
+      detail: `${EventsRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
     })],
-    [EventsRequestOutcome.NOT_WATCHED, () =>
-      new Refusal({ status: 404, error: EventsRefusal.NOT_WATCHED })],
+    [EventsRequestOutcome.NOT_WATCHED, () => new Refusal({
+      status: 400,
+      code: EventsRequestOutcome.NOT_WATCHED,
+      detail: EventsRefusal.NOT_WATCHED,
+    })],
   ])
 
   static of(asked) {
