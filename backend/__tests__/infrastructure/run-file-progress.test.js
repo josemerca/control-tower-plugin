@@ -205,7 +205,7 @@ describe('RunFileProgress', () => {
   })
 
   it('a_step_of_the_slice_does_not_go_looking_for_a_plan', async () => {
-    const asked = RunFileDouble.answering(RunFileDouble.REPO_PULSE_DELIVERED)
+    const asked = RunFileDouble.answering({ ...RunFileDouble.BANCO_DE_LA_PUERTA, step: 'global', task: 7, tasksTotal: 7 })
 
     await asked.asked()
 
