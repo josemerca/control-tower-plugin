@@ -11,7 +11,8 @@ export type ImplementPlanResult = {
 }
 
 export type ImplementPlanRefusal = {
-  error: string
+  code: string
+  detail: string
 }
 
 export type ImplementPlanOutcome =

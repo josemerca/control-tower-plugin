@@ -24,7 +24,7 @@ const implement = async ({ agent, issue, repo }: ImplementPlanRequest): Promise<
     return { kind: 'implementing', agent: implementing.agent, issue: implementing.issue }
   }
   const refused = (await response.json()) as ImplementPlanRefusal
-  return { kind: 'refused', error: refused.error }
+  return { kind: 'refused', error: refused.detail }
 }
 
 export const ImplementPlanClient = {
