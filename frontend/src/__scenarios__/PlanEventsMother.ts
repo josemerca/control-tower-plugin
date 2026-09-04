@@ -4,7 +4,7 @@ const PATH_IN_ANOTHER_REPO = `/plan-events/${ISSUE}?repo=owner%2Fother-name`
 
 const writing = () => '{"state":"writing"}'
 const ready = () => '{"state":"ready"}'
-const unreadable = () => '{"error":"git status could not say whether the plan is committed"}'
+const unreadable = () => '{"code":"plan-progress-not-read","detail":"git status could not say whether the plan is committed"}'
 
 export const PlanEventsMother = {
   ISSUE,
