@@ -121,7 +121,7 @@ class RunningApi {
   static ANSWER =
     '{"status":"started","id":"ABC-123","repo":"owner/name",' +
     '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"agent":"workspace:4",' +
-    '"branch":"feat/7","worktree":"/repo/checkout/.worktrees/7"}'
+    '"branch":"feat/7","worktree":"/repo/checkout/.worktrees/7","root":"/repo/checkout"}'
   static spy = null
   static reviews = null
 
@@ -353,6 +353,16 @@ describe('ApiServer', () => {
 
     expect(RunningApi.spy.asked).toEqual(['MO_SHOP-42'])
     expect(await response.text()).toBe(RunningApi.ANSWER.replace('ABC-123', 'MO_SHOP-42'))
+  })
+
+  it('the_root_the_answer_carries_is_the_checkout_and_not_the_worktree', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.accepted(port)
+    const body = JSON.parse(await response.text())
+
+    expect(body.root).not.toBe(body.worktree)
+    expect(body.worktree).toMatch(new RegExp(`^${body.root}`))
   })
 
   it('a_refused_request_never_starts_a_process', async () => {

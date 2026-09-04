@@ -548,8 +548,10 @@ Then:
 - `it('an_issue_that_is_not_a_number_reaches_the_query_as_NaN_and_not_as_a_refusal')` —
   `/implement-progress/abc?root=%2Fcheckout`; assert the query **was** asked and that the `issue` it
   received is `NaN` (`Number.isNaN(spy.asked[0].issue)`).
-- `it('a_bug_of_ours_is_not_dressed_up_as_a_refusal')` — the query throws `TypeError`, expect `500`
-  through the last net, following the `buggy()` case `api-server.test.js` already has.
+- `it('a_bug_of_ours_is_not_dressed_up_as_a_refusal')` — the query throws `TypeError`, expect the
+  last net's answer, following the `buggy()` case `api-server.test.js` and
+  `implement-plan-route.test.js` already have. That answer is `400` with code `request-failed`:
+  this backend emits no `500` anywhere, so do not expect one.
 
 **Tests:** added: the eight above. Modified: none — the two in `refusal-codes.test.js` gain the new
 vocabulary in their inputs and keep their assertions.
