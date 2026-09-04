@@ -3,37 +3,58 @@ import { PlanRequestOutcome, PlanCollapse } from '../../src/infrastructure/start
 import { ImplementRequestOutcome, ImplementCollapse } from '../../src/infrastructure/implement-plan-route.js'
 import { EventsRequestOutcome, PlanEvents } from '../../src/infrastructure/plan-events-route.js'
 
-class Vocabularies {
+class RequestVocabularies {
   static #ACCEPTED = 'accepted'
 
-  static requestCodes() {
+  static codes() {
     return [
       ...Object.values(PlanRequestOutcome),
       ...Object.values(ImplementRequestOutcome),
       ...Object.values(EventsRequestOutcome),
-    ].filter((outcome) => outcome !== Vocabularies.#ACCEPTED)
+    ].filter((outcome) => outcome !== RequestVocabularies.#ACCEPTED)
   }
 }
 
-class Plumbing {
+class SharedOnPurposeAcrossRequestVocabularies {
   static CODES = Object.freeze([
+    PlanRequestOutcome.BODY_NOT_A_JSON_OBJECT,
+    PlanRequestOutcome.UNKNOWN_FIELD,
+    PlanRequestOutcome.MALFORMED_REPO,
+  ])
+}
+
+class Repeats {
+  static within(codes) {
+    const seen = new Map()
+    for (const code of codes) seen.set(code, (seen.get(code) ?? 0) + 1)
+    return [...seen.entries()].filter(([, count]) => count > 1).map(([code]) => code)
+  }
+}
+
+class CodesRememberedByHandFromHttpAndApiServer {
+  static VALUES = Object.freeze([
     'not-found', 'method-not-allowed', 'foreign-origin', 'unsupported-media-type', 'body-too-large', 'request-failed',
   ])
 }
 
-class EventStream {
-  static CODES = Object.freeze([PlanEvents.PROGRESS_NOT_READ])
+class EventStreamCodes {
+  static VALUES = Object.freeze([PlanEvents.PROGRESS_NOT_READ])
 }
 
 describe('the codes the api can emit', () => {
-  it('are_all_distinct_so_the_frontend_can_decide_by_code_alone', () => {
-    const sharedByField = new Set(Vocabularies.requestCodes())
+  it('a_code_repeated_across_request_vocabularies_is_a_finding_unless_it_is_declared_shared_on_purpose', () => {
+    const repeated = Repeats.within(RequestVocabularies.codes())
+
+    expect(repeated.sort()).toEqual([...SharedOnPurposeAcrossRequestVocabularies.CODES].sort())
+  })
+
+  it('every_code_the_api_emits_is_distinct_though_six_of_them_are_remembered_by_hand_and_not_watched_for_a_rename', () => {
     const codes = [
-      ...sharedByField,
+      ...new Set(RequestVocabularies.codes()),
       ...PlanCollapse.declaredCodes(),
       ...ImplementCollapse.declaredCodes(),
-      ...Plumbing.CODES,
-      ...EventStream.CODES,
+      ...CodesRememberedByHandFromHttpAndApiServer.VALUES,
+      ...EventStreamCodes.VALUES,
     ]
 
     expect(new Set(codes).size).toBe(codes.length)
