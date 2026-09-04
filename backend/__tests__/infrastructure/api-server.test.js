@@ -17,15 +17,20 @@ import {
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { PlanState } from '../../src/domain/value-objects/plan-state.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
+import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
+import { ActivePlans } from '../../src/infrastructure/active-plans-route.js'
+import { ActivePlanRecovery } from '../../src/infrastructure/active-plan-recovery.js'
 
 class StartPlanSpy {
   static AGENT = 'workspace:4'
   static ISSUE = new PlanIssue({ number: 7, url: 'https://github.com/owner/name/issues/7' })
   static LOCATED = new WorkspaceLocation({ root: '/repo/checkout', path: '/repo/checkout/.worktrees/7', branch: 'feat/7' })
   static WATCH = new PlanWatch({
+    story: new UserStoryKey('ABC-123'),
     issue: StartPlanSpy.ISSUE,
     located: StartPlanSpy.LOCATED,
     repository: new RepositoryName('owner/name'),
+    agent: StartPlanSpy.AGENT,
   })
 
   constructor({ failing = false } = {}) {
@@ -128,6 +133,8 @@ class RunningApi {
   static server(options = {}) {
     RunningApi.spy = new StartPlanSpy()
     RunningApi.reviews = new ReviewsSpy()
+    const sessions = options.sessions ?? new PlanSessions()
+    const activePlans = options.activePlans ?? new ActivePlans({ sessions })
 
     return new ApiServer({
       port: 0,
@@ -135,7 +142,8 @@ class RunningApi {
       implementPlan: null,
       reviews: RunningApi.reviews,
       planEvents: ProgressSpy.events(PlanState.WRITING).planEvents,
-      sessions: new PlanSessions(),
+      sessions,
+      activePlans,
       frontendRoot: FrontendFixture.missing(),
       ...options,
     })
@@ -921,5 +929,79 @@ describe('ApiServer', () => {
     await RunningApi.startPlan(port, '{"id":"nope","repo":"owner/name"}')
 
     expect(RunningApi.reviews.started).toEqual([])
+  })
+
+  it('active_plans_returns_the_exact_live_plan_started_by_the_ordinary_route', async () => {
+    const port = await RunningApi.listening()
+
+    await RunningApi.accepted(port)
+    const response = await fetch(`http://127.0.0.1:${port}/active-plans`)
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ plans: [{
+      phase: 'planning',
+      request: { id: 'ABC-123', repo: 'owner/name', path: '/repo/checkout' },
+      plan: {
+        id: 'ABC-123',
+        repo: 'owner/name',
+        issue: { number: 7, url: 'https://github.com/owner/name/issues/7' },
+        agent: 'workspace:4',
+        branch: 'feat/7',
+        worktree: '/repo/checkout/.worktrees/7',
+      },
+    }] })
+  })
+
+  it('active_plans_refuses_other_methods_and_declares_get', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.post(port, '/active-plans', '{}')
+
+    expect(response.status).toBe(405)
+    expect(response.headers.get('allow')).toBe('GET')
+    expect(await response.json()).toEqual({ code: 'method-not-allowed', detail: 'method not allowed' })
+  })
+
+  it('active_plans_turns_away_a_foreign_browser_origin', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await fetch(`http://127.0.0.1:${port}/active-plans`, {
+      headers: { Origin: 'https://evil.example' },
+    })
+
+    expect(response.status).toBe(403)
+    expect(await response.json()).toEqual({
+      code: 'foreign-origin', detail: 'this api only serves the page it hosts',
+    })
+  })
+
+  it('active_plans_retries_inconclusive_recovery_and_refuses_unknown_state', async () => {
+    const recovery = { recover: vi.fn().mockReturnValueOnce(false).mockReturnValueOnce(true) }
+    const port = await RunningApi.listening({ recovery })
+
+    const unknown = await fetch(`http://127.0.0.1:${port}/active-plans`)
+    const recovered = await fetch(`http://127.0.0.1:${port}/active-plans`)
+
+    expect(unknown.status).toBe(503)
+    expect(await unknown.json()).toEqual({
+      code: 'active-plans-recovery-inconclusive',
+      detail: 'active plans could not be recovered conclusively',
+    })
+    expect(recovered.status).toBe(200)
+    expect(await recovered.json()).toEqual({ plans: [] })
+    expect(recovery.recover).toHaveBeenCalledTimes(2)
+  })
+
+  it('active_plans_returns_503_when_the_cmux_workspace_list_is_null', async () => {
+    const recovery = new ActivePlanRecovery({ list: () => null })
+    const port = await RunningApi.listening({ recovery })
+
+    const response = await fetch(`http://127.0.0.1:${port}/active-plans`)
+
+    expect(response.status).toBe(503)
+    expect(await response.json()).toEqual({
+      code: 'active-plans-recovery-inconclusive',
+      detail: 'active plans could not be recovered conclusively',
+    })
   })
 })

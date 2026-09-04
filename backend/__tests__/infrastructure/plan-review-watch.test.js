@@ -47,6 +47,10 @@ class WatchDouble {
     return new WatchDouble(soundings)
   }
 
+  static recovering(...soundings) {
+    return new WatchDouble(soundings, { waits: soundings.length - 1 })
+  }
+
   static stoppedBeforeTheFirstWait() {
     return new WatchDouble([[WatchDouble.A_CHANGE]], { waits: 0 })
   }
@@ -96,6 +100,12 @@ class WatchDouble {
     this.watch = this.#reviews()
 
     return this.watch.start(WatchDouble.SUBJECT)
+  }
+
+  async runRecovered() {
+    this.watch = this.#reviews()
+
+    return this.watch.startRecovered(WatchDouble.SUBJECT)
   }
 }
 
@@ -232,6 +242,59 @@ describe('PlanReviewWatch', () => {
     await watched.run()
 
     expect(() => watched.watch.stop(WatchDouble.STOPPING)).not.toThrow()
+  })
+
+  it('a_recovered_watch_reads_its_baseline_before_the_first_wait', async () => {
+    const watched = WatchDouble.recovering([WatchDouble.A_CHANGE])
+
+    await watched.runRecovered()
+
+    expect(watched.asked).toEqual([WatchDouble.SUBJECT])
+    expect(watched.reviewed).toEqual([])
+  })
+
+  it('a_recovered_watch_delivers_changes_that_arrive_after_its_baseline', async () => {
+    const watched = WatchDouble.recovering(
+      [WatchDouble.A_CHANGE], [WatchDouble.A_CHANGE, WatchDouble.ANOTHER_CHANGE]
+    )
+
+    await watched.runRecovered()
+
+    expect(watched.reviewed.map(({ changes }) => changes)).toEqual([WatchDouble.ANOTHER_CHANGE.text])
+  })
+
+  it('a_recovered_watch_retries_a_failed_baseline_without_delivering_historical_changes', async () => {
+    const watched = WatchDouble.recovering(
+      new PlanChangesNotRead('gh issue view failed: gh: not authenticated'),
+      [WatchDouble.A_CHANGE],
+      [WatchDouble.A_CHANGE, WatchDouble.ANOTHER_CHANGE]
+    )
+
+    await watched.runRecovered()
+
+    expect(watched.warnings).toHaveLength(1)
+    expect(watched.reviewed.map(({ changes }) => changes)).toEqual([WatchDouble.ANOTHER_CHANGE.text])
+  })
+
+  it('stopping_a_recovered_watch_during_its_baseline_does_not_start_its_live_loop', async () => {
+    const baseline = Promise.withResolvers()
+    let slept = 0
+    let reviewed = 0
+    const watch = new PlanReviewWatch({
+      asked: () => baseline.promise,
+      review: () => { reviewed += 1 },
+      sleep: () => { slept += 1 },
+      stderr: () => {},
+    })
+
+    const following = watch.startRecovered(WatchDouble.SUBJECT)
+    watch.stop(WatchDouble.STOPPING)
+    baseline.resolve({ changes: [WatchDouble.A_CHANGE] })
+    await following
+
+    expect(slept).toBe(0)
+    expect(reviewed).toBe(0)
+    expect(watch.live.size).toBe(0)
   })
 })
 

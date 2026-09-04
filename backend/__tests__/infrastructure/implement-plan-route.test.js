@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
@@ -8,12 +8,14 @@ import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
+import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import {
   ImplementRequestOutcome, ImplementRefusal, ImplementCollapse,
 } from '../../src/infrastructure/implement-plan-route.js'
 import {
   PlanAgentNotResumed, PlanFailure, PlanGoNotAnswered, GoFailure, GoNotRecorded,
 } from '../../src/domain/exceptions.js'
+import { ActivePlans } from '../../src/infrastructure/active-plans-route.js'
 
 class ImplementPlanSpy {
   constructor() {
@@ -55,9 +57,13 @@ class RunningApi {
   static spy = null
   static reviews = null
   static sessions = null
+  static activePlans = null
+  static implementationStarts = null
+  static stderr = null
   static WATCHED = new PlanWatch({
+    story: new UserStoryKey('ABC-123'),
     issue: new PlanIssue({ number: 33, url: 'https://github.com/jjponz/repo-pulse/issues/33' }),
-    located: new WorkspaceLocation({ path: '/repo/.worktrees/33', branch: 'feat/33' }),
+    located: new WorkspaceLocation({ root: '/repo', path: '/repo/.worktrees/33', branch: 'feat/33' }),
     repository: new RepositoryName('jjponz/repo-pulse'),
     agent: 'workspace:20',
   })
@@ -68,17 +74,23 @@ class RunningApi {
     sleep: () => Promise.resolve(),
   })
 
-  static async listening(spy = new ImplementPlanSpy()) {
+  static async listening(spy = new ImplementPlanSpy(), options = {}) {
     RunningApi.spy = spy
     RunningApi.reviews = new ReviewsSpy()
     RunningApi.sessions = new PlanSessions()
     RunningApi.sessions.remember(RunningApi.WATCHED)
+    RunningApi.activePlans = new ActivePlans({ sessions: RunningApi.sessions })
+    RunningApi.implementationStarts = options.implementationStarts ?? { remember: vi.fn() }
+    RunningApi.stderr = options.stderr ?? vi.fn()
     const server = new ApiServer({
       port: 0,
       startPlan: null,
       implementPlan: spy,
       reviews: RunningApi.reviews,
       sessions: RunningApi.sessions,
+      activePlans: RunningApi.activePlans,
+      implementationStarts: RunningApi.implementationStarts,
+      stderr: RunningApi.stderr,
       planEvents: RunningApi.NO_EVENTS,
       frontendRoot: RunningApi.NO_FRONTEND,
     })
@@ -113,6 +125,18 @@ describe('ImplementPlanRoute', () => {
     expect(response.status).toBe(202)
     expect(response.headers.get('content-type')).toBe('application/json')
     expect(await response.text()).toBe(RunningApi.ANSWER)
+  })
+
+  it('a_duplicate_order_returns_the_same_answer_and_executes_only_once', async () => {
+    const port = await RunningApi.listening()
+
+    const first = await RunningApi.post(port, RunningApi.ACCEPTED_BODY)
+    const duplicate = await RunningApi.post(port, RunningApi.ACCEPTED_BODY)
+
+    expect([first.status, duplicate.status]).toEqual([202, 202])
+    expect(await duplicate.text()).toBe(RunningApi.ANSWER)
+    expect(RunningApi.spy.asked).toHaveLength(1)
+    expect(RunningApi.implementationStarts.remember).toHaveBeenCalledOnce()
   })
 
   it('the_three_fields_reach_the_use_case_as_domain_values_and_not_as_the_raw_json', async () => {
@@ -309,6 +333,67 @@ describe('implementing the plan lifts the watch on its issue', () => {
     expect(RunningApi.sessions.find({ repository: RunningApi.WATCHED.repository, issue: 33 })).toBe(null)
   })
 
+  it('implementing_the_plan_remains_active_after_its_planning_session_is_forgotten', async () => {
+    const port = await RunningApi.listening()
+    await RunningApi.post(port, RunningApi.ACCEPTED_BODY)
+    const response = await fetch(`http://127.0.0.1:${port}/active-plans`)
+
+    expect(await response.json()).toEqual({
+      plans: [expect.objectContaining({ phase: 'implementing' })],
+    })
+  })
+
+  it('a_successful_transition_writes_its_marker_and_remains_active', async () => {
+    const implementationStarts = { remember: vi.fn() }
+    const port = await RunningApi.listening(new ImplementPlanSpy(), { implementationStarts })
+
+    const response = await RunningApi.post(port, RunningApi.ACCEPTED_BODY)
+
+    expect(response.status).toBe(202)
+    expect(implementationStarts.remember).toHaveBeenCalledWith(RunningApi.WATCHED)
+    expect(RunningApi.activePlans.known()[0].phase).toBe('implementing')
+  })
+
+  it('a_marker_write_failure_keeps_the_accepted_answer_and_reports_a_warning', async () => {
+    const implementationStarts = { remember: vi.fn().mockRejectedValue(new Error('disk full')) }
+    const stderr = vi.fn()
+    const port = await RunningApi.listening(new ImplementPlanSpy(), { implementationStarts, stderr })
+
+    const response = await RunningApi.post(port, RunningApi.ACCEPTED_BODY)
+
+    expect(response.status).toBe(202)
+    expect(RunningApi.activePlans.known()[0].phase).toBe('implementing')
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining('disk full'))
+  })
+
+  it('implementing_an_unwatched_plan_is_refused_without_executing_stale_input', async () => {
+    const port = await RunningApi.listening()
+    RunningApi.sessions.forget({ repository: RunningApi.WATCHED.repository, issue: 33 })
+
+    const response = await RunningApi.post(port, RunningApi.ACCEPTED_BODY)
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({
+      code: 'no-live-planning-session', detail: 'no matching live planning session exists',
+    })
+    expect(RunningApi.spy.asked).toEqual([])
+    expect(RunningApi.activePlans.known()).toEqual([])
+  })
+
+  it('an_uncertain_plan_is_refused_without_retrying_implementation', async () => {
+    const port = await RunningApi.listening()
+    RunningApi.activePlans.rememberUncertain(RunningApi.WATCHED)
+
+    const response = await RunningApi.post(port, RunningApi.ACCEPTED_BODY)
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({
+      code: 'implementation-phase-uncertain',
+      detail: 'implementation may have started; inspect the plan before retrying',
+    })
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
   it('a_refused_request_to_implement_forgets_no_session', async () => {
     await RunningApi.asking('{"agent":"workspace:20","issue":0,"repo":"a/b"}')
 
@@ -324,10 +409,14 @@ describe('implementing the plan lifts the watch on its issue', () => {
 
   it('a_plan_the_agent_would_not_take_keeps_its_watch_so_the_changes_can_still_be_asked_for', async () => {
     const spy = ImplementPlanSpy.failingWith(new PlanAgentNotResumed('no such workspace'))
+    const implementationStarts = { remember: vi.fn() }
 
-    const response = await RunningApi.post(await RunningApi.listening(spy), RunningApi.ACCEPTED_BODY)
+    const response = await RunningApi.post(
+      await RunningApi.listening(spy, { implementationStarts }), RunningApi.ACCEPTED_BODY
+    )
 
     expect(response.status).toBe(400)
     expect(RunningApi.reviews.stopped).toEqual([])
+    expect(implementationStarts.remember).not.toHaveBeenCalled()
   })
 })

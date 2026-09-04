@@ -1,3 +1,4 @@
+import { StrictMode } from 'react'
 import { act, render, screen } from '@testing-library/react'
 import { userEvent } from '@testing-library/user-event'
 import { StartPlanMother } from '__scenarios__/StartPlanMother'
@@ -8,9 +9,24 @@ type Answer = { status: number; body: string }
 type User = ReturnType<typeof userEvent.setup>
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
+const NO_ACTIVE_PLANS = { status: 200, body: '{"plans":[]}' }
+
+const responseFor = (answer: Answer) => new Response(answer.body, { status: answer.status, headers: JSON_HEADERS })
 
 const backendAnswering = (answer: Answer) => {
-  const fetching = vi.fn(async () => new Response(answer.body, { status: answer.status, headers: JSON_HEADERS }))
+  const fetching = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => responseFor(answer))
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: string | URL | Request, init?: RequestInit) =>
+      input === '/active-plans' ? responseFor(NO_ACTIVE_PLANS) : fetching(input, init),
+    ),
+  )
+
+  return fetching
+}
+
+const backendRecovering = (answer: Answer) => {
+  const fetching = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => responseFor(answer))
   vi.stubGlobal('fetch', fetching)
 
   return fetching
@@ -19,28 +35,31 @@ const backendAnswering = (answer: Answer) => {
 const backendPending = () => {
   let answerWith: (answer: Answer) => void = () => undefined
   const pending = new Promise<Response>((resolve) => {
-    answerWith = (answer) => resolve(new Response(answer.body, { status: answer.status, headers: JSON_HEADERS }))
+    answerWith = (answer) => resolve(responseFor(answer))
   })
   vi.stubGlobal(
     'fetch',
-    vi.fn(() => pending),
+    vi.fn((input: string | URL | Request) => input === '/active-plans' ? responseFor(NO_ACTIVE_PLANS) : pending),
   )
 
   return { answerWith: async (answer: Answer) => act(async () => answerWith(answer)) }
 }
 
 const backendUnreachable = () => {
+  const fetching = vi.fn(async () => {
+    throw new TypeError('Failed to fetch')
+  })
   vi.stubGlobal(
     'fetch',
-    vi.fn(async () => {
-      throw new TypeError('Failed to fetch')
-    }),
+    fetching,
   )
+
+  return fetching
 }
 
 const openHome = () => {
   FakeEventSource.install()
-  const { unmount } = render(<Home />)
+  const { unmount } = render(<StrictMode><Home /></StrictMode>)
 
   return { user: userEvent.setup(), unmount }
 }
@@ -82,6 +101,7 @@ const dropStream = async () => {
 
 export {
   backendAnswering,
+  backendRecovering,
   backendPending,
   backendUnreachable,
   openHome,

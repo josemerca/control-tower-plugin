@@ -20,6 +20,10 @@ export class PlanSessions {
     return this.live.get(PlanSessions.#keyFor(repository, issue)) ?? null
   }
 
+  known() {
+    return [...this.live.values()]
+  }
+
   forget({ issue, repository }) {
     this.live.delete(PlanSessions.#keyFor(repository, issue))
   }
