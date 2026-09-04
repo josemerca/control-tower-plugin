@@ -43,6 +43,10 @@ export class PlanProgressFailure extends PlanFailure {}
 
 export class PlanProgressNotRead extends PlanProgressFailure {}
 
+export class ImplementationProgressFailure extends PlanFailure {}
+
+export class ImplementationProgressNotRead extends ImplementationProgressFailure {}
+
 export class PlanChangesFailure extends PlanFailure {}
 
 export class PlanChangesNotRead extends PlanChangesFailure {}

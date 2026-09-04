@@ -1,4 +1,4 @@
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { realpathSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { setTimeout as after } from 'node:timers/promises'
@@ -18,9 +18,11 @@ import { PlanAgentBrief } from './plan-agent-brief.js'
 import { PlanContractProgress } from './plan-contract-progress.js'
 import { PlanEvents, PlanSessions } from './plan-events-route.js'
 import { PlanReviewWatch } from './plan-review-watch.js'
+import { RunFileProgress } from './run-file-progress.js'
 import { StartPlan } from '../application/actions/start-plan.js'
 import { ImplementPlan } from '../application/actions/implement-plan.js'
 import { ReadPlanProgress, ReadPlanProgressParams } from '../application/queries/read-plan-progress.js'
+import { ReadImplementationProgress } from '../application/queries/read-implementation-progress.js'
 import { ReadChangesAsked, ReadChangesAskedParams } from '../application/queries/read-changes-asked.js'
 import { ReviewPlan, ReviewPlanParams } from '../application/actions/review-plan.js'
 import { SurveyWorkspaces, SurveyWorkspacesParams } from '../application/queries/survey-workspaces.js'
@@ -85,6 +87,15 @@ class Disk {
 
   static async remove(path) {
     await rm(path, { force: true })
+  }
+
+  static async exists(path) {
+    try {
+      await stat(path)
+      return true
+    } catch {
+      return false
+    }
   }
 }
 
@@ -254,6 +265,9 @@ class CtApi {
         }),
         planIssues,
         planAgents,
+      }),
+      implementProgress: new ReadImplementationProgress({
+        implementationProgress: new RunFileProgress({ read: Disk.read, exists: Disk.exists }),
       }),
       planEvents: CtApi.#planEvents(git),
       sessions: new PlanSessions(),
