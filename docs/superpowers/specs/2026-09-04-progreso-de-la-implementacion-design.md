@@ -114,8 +114,9 @@ ninguna guarda, porque cualquier cosa que no sea un número se vuelve `NaN`.
 
 ### Los diez pasos
 
-Cinco ocurren **una vez por tarea**, tres **una vez por slice** —cuando ya no
-queda ninguna tarea por comitear— y dos son los bordes del run.
+Cuatro ocurren **una vez por tarea**, cuatro **una vez por slice** —cuando ya no
+queda ninguna tarea por comitear— y dos son los bordes del run. El reparto no es
+nuestro: es la lista `PASOS_DE_SLICE` de `ct-step.mjs:201`.
 
 | `step` | Alcance | Qué está pasando |
 |---|---|---|
@@ -124,7 +125,7 @@ queda ninguna tarea por comitear— y dos son los bordes del run.
 | `controls` | tarea | El programa ejecuta los comandos de verificación que **esa tarea** declaró en el plan, y comprueba que los tests que prometió existen |
 | `judge` | tarea | Un subagente `ct-judge` juzga la tarea contra su plan, sin shell, para no poder convencerse a sí mismo de que está verde |
 | `commit` | tarea | El programa comitea la tarea. Comitea él y no el implementador, para que un veto no deje rastro que deshacer |
-| `reconcile` | tarea | El worktree se pone al día con su rama base. Va antes de `global` para que la punta a punta mida el árbol que se va a entregar y no uno que se quedó atrás |
+| `reconcile` | slice | El worktree se pone al día con su rama base. Va antes de `global` para que la punta a punta mida el árbol que se va a entregar y no uno que se quedó atrás |
 | `global` | slice | El programa ejecuta el bloque `## 8. Global verification` del plan: la verificación de **la slice entera**, una sola vez, sobre el árbol con las N tareas ya comiteadas. Existe porque `controls` sólo mide el bloque de cada tarea por separado, y antes esto no lo corría nadie. Es el nombre peor de los ocho, y se mantiene igualmente: ver §4 |
 | `slice-judge` | slice | Un juez mira la slice **entera**: si las tareas juntas entregan lo que el plan prometía y si son coherentes entre sí. Ningún juez por tarea mira eso |
 | `e2e` | slice | Los recorridos punta a punta, y sólo si la slice declara alguno. Es el único paso condicional |
@@ -154,13 +155,16 @@ vive todo el castellano de este producto.
 **Tres campos hablan de una tarea y dos del run, y sólo se rellenan cuando
 dicen la verdad.** `task`, `name` y `attempt` describen una tarea concreta, así
 que valen `null` en todo lo que no es un paso de tarea: en `starting`, en los
-tres pasos de slice y en `delivered`. `total_tasks` y `discards` son del run entero y
-sólo son `null` mientras el run no existe.
+cuatro pasos de slice y en `delivered`. `total_tasks` y `discards` son del run
+entero y sólo son `null` mientras el run no existe.
 
 Que `task` desaparezca en los pasos de slice es la misma decisión que `ct-step`
-ya toma al medir (`task: esDeSlice ? null : run.task`): en `global`,
-`slice-judge` y `e2e` el campo `run.task` se queda clavado en la última tarea, y
-atribuirles esa tarea sería una afirmación falsa. El intento va detrás por el
+ya toma al medir (`task: esDeSlice ? null : run.task`), y con la misma lista:
+en `reconcile`, `global`, `slice-judge` y `e2e` el campo `run.task` se queda
+clavado en la última tarea, y atribuirles esa tarea sería una afirmación falsa.
+El plugin ya pagó por tenerla escrita dos veces — cuando llegó `e2e`, la segunda
+copia se quedó atrás y cada fila de `e2e` se le atribuyó a la última tarea del
+plan. Por eso aquí la regla vive en un solo sitio (§5). El intento va detrás por el
 mismo motivo — los tres contadores de reintento se reinician al avanzar de
 tarea, así que en un paso de slice lo que quedaría en `attempt` es el intento de
 la última tarea, contado sobre un paso que además no tiene reintento propio. Y
