@@ -4,8 +4,12 @@ import { join } from 'node:path'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { ReviewsSpy } from '../reviews-spy.js'
 import { PlanEvents, PlanSessions } from '../../src/infrastructure/plan-events-route.js'
+import {
+  ProgressRequestOutcome, ProgressRefusal, ProgressCollapse,
+} from '../../src/infrastructure/implement-progress-route.js'
 import { ImplementationState, ImplementationStep } from '../../src/domain/value-objects/implementation-state.js'
 import { ImplementationProgressNotRead } from '../../src/domain/exceptions.js'
+import * as exceptions from '../../src/domain/exceptions.js'
 
 class ReadImplementationProgressSpy {
   constructor() {
@@ -191,5 +195,25 @@ describe('ImplementProgressRoute', () => {
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ code: 'request-failed', detail: 'request failed' })
+  })
+})
+
+describe('ProgressRefusal', () => {
+  it('every_refusable_outcome_has_an_answer_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
+    const refusable = Object.values(ProgressRequestOutcome).filter(
+      (outcome) => outcome !== ProgressRequestOutcome.ACCEPTED
+    )
+
+    expect(ProgressRefusal.declaredOutcomes().sort()).toEqual(refusable.sort())
+  })
+})
+
+describe('ProgressCollapse', () => {
+  it('every_way_the_progress_can_collapse_has_a_refusal_declared_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
+    const ways = Object.entries(exceptions)
+      .filter(([, thrown]) => thrown.prototype instanceof exceptions.ImplementationProgressFailure)
+      .map(([name]) => name)
+
+    expect(ProgressCollapse.declaredFailures().sort()).toEqual(ways.sort())
   })
 })
