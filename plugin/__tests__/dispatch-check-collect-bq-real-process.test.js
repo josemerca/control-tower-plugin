@@ -160,15 +160,15 @@ describe('dispatch-check --collect --bq: the row travels before anything is dele
     bench.cleanup()
   })
 
-  it('a_rejected_load_keeps_worktree_branch_and_session_and_exits_10_naming_bq', () => {
+  it('a_rejected_load_keeps_worktree_branch_and_session_and_exits_11_naming_bq', () => {
     const bench = new Bench()
     const result = bench.run(['7', '--repo', Bench.REPO, '--collect', '--bq', Bench.TABLE_ID], {
       FAKE_GH_PR_LIST: Bench.mergedPullRequestList(bench.tip),
       FAKE_GH_ISSUE_VIEW_JSON: Bench.closedIssueWithMilestoneAndNoClosingPullRequest(),
       FAKE_BQ_EXIT_CODE: '2',
     })
-    expect(result.status).toBe(10)
-    expect(result.stdout).toContain(`kept #${Bench.ISSUE}: BigQuery (${Bench.TABLE_ID}) rechazó la fila: bq salió con 2:`)
+    expect(result.status).toBe(11)
+    expect(result.stderr).toContain(`no se pudo cargar la fila de #${Bench.ISSUE} en BigQuery (${Bench.TABLE_ID}): bq salió con 2:`)
     expect(existsSync(bench.worktree)).toBe(true)
     expect(bench.branchStillExists()).toBe(true)
     expect(bench.cmuxInvocations()).not.toContain('close-workspace')

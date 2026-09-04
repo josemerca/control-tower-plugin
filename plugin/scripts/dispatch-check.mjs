@@ -122,6 +122,16 @@ const ctWatchMergePath = join(dirname(fileURLToPath(import.meta.url)), 'ct-watch
 //       tocando eso", y borrar un worktree es irreversible: ante la duda se
 //       conserva y se dice. Sale sólo de `--collect`; como el 5, el 6 y el 9,
 //       nunca lo ve classifyClaimOutcome.
+//  11 = NUEVO (F20/cosecha a BigQuery) — `--collect --bq` leyó la cosecha del
+//       slice y BigQuery RECHAZÓ la fila. No se borra NADA (la fila viaja antes
+//       de borrar precisamente para esto) y el motivo que dio `bq` se imprime
+//       por el canal de error. Es un código PROPIO y no el 10 a propósito: el
+//       10 dice que el DISCO discrepa de la PR mergeada y se arregla en el
+//       worktree; esto se arregla en los permisos o el schema del dataset. Un
+//       solo código para las dos causas dejaba al backend proyectando la del
+//       disco sobre las dos, y a su lector mirando un worktree sano.
+//       Sale sólo de `--collect`; como el 5, el 6, el 9 y el 10, nunca lo ve
+//       classifyClaimOutcome.
 // El texto que este fichero imprime NO cambia de contenido (los mismos
 // detalles, incluido el comando manual de `--release`/revert) — solo deja
 // de ser la ÚNICA fuente de verdad para la decisión del caller.
@@ -1480,7 +1490,7 @@ if (collect) {
       const cosecha = new SliceHarvest({ gh: ghRunner }).harvestIssue({ repo, number: issue, index: TelemetryIndex.read({ gh: ghRunner, repo }) })
       if (cosecha.outcome !== SliceHarvestOutcome.COMPLETE) dieErr(`no se pudo leer la cosecha de #${issue}: ${lecturaFallida(cosecha)} — no se ha tocado nada, el siguiente barrido reintenta.`, 3)
       const ledger = new HarvestLedger({ table: bqTable, bq: localRunner('bq', COLLECT_BQ_TIMEOUT_MS), workspace: espacioTemporal, identity: LedgerIdentity.fromEnvironment() }).record({ repo, milestone: cosecha.row.milestone, rows: [cosecha.row] })
-      if (ledger.outcome === LoadOutcome.REJECTED) { espacioTemporal.remove(ledger.directory); dieOut(`kept #${issue}: BigQuery (${bqTable.id}) rechazó la fila: bq salió con ${ledger.code}: ${ledger.detail} — no se ha borrado nada, el siguiente barrido reintenta`, 10) }
+      if (ledger.outcome === LoadOutcome.REJECTED) { espacioTemporal.remove(ledger.directory); dieErr(`no se pudo cargar la fila de #${issue} en BigQuery (${bqTable.id}): bq salió con ${ledger.code}: ${ledger.detail} — no se ha borrado nada, el siguiente barrido reintenta.`, 11) }
       cargada = ` ; 1 fila cargada en ${bqTable.id} (harvest_id ${ledger.harvestId})`
     }
     report = collector.execute(ensayo)

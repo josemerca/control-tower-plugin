@@ -176,7 +176,7 @@ describe('HarvestClock', () => {
     ]).run()
 
     expect(swept.written).toEqual([
-      'harvest #1: could not be read, the next sweep retries: dispatch-check --collect could not reach gh\n',
+      'harvest #1: nothing was touched, the next sweep retries: dispatch-check --collect could not reach gh\n',
       'harvest #2: collected\n',
     ])
   })

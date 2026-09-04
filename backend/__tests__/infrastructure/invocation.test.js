@@ -189,7 +189,7 @@ describe('Invocation resolving the BigQuery harvest table', () => {
     const ready = Invoked.withHarvestTable('p:d.t')
 
     expect(ready.outcome).toBe(InvocationOutcome.READY)
-    expect(ready.harvestTable.id).toBe('p:d.t')
+    expect(ready.harvestTable).toBe('p:d.t')
     expect(ready.stateRoot).toBe('/home/someone/.claude/control-tower')
   })
 
@@ -207,5 +207,18 @@ describe('Invocation resolving the BigQuery harvest table', () => {
     expect(refused.reason).toBe(
       'CT_HARVEST_BQ_TABLE must look like project:dataset.table, got "not-a-table"'
     )
+  })
+
+  it('a_project_that_starts_with_a_hyphen_is_refused_here_because_it_would_reach_the_plugin_as_a_flag', () => {
+    const refused = Invoked.withHarvestTable('-o:d.t')
+
+    expect(refused.outcome).toBe(InvocationOutcome.MALFORMED_HARVEST_TABLE)
+    expect(refused.reason).toBe('CT_HARVEST_BQ_TABLE must look like project:dataset.table, got "-o:d.t"')
+  })
+
+  it('a_table_whose_dataset_or_whose_name_is_missing_is_refused_before_it_can_reach_an_argv', () => {
+    expect(Invoked.withHarvestTable('p:d').outcome).toBe(InvocationOutcome.MALFORMED_HARVEST_TABLE)
+    expect(Invoked.withHarvestTable('p.d.t').outcome).toBe(InvocationOutcome.MALFORMED_HARVEST_TABLE)
+    expect(Invoked.withHarvestTable('p:d.t extra').outcome).toBe(InvocationOutcome.MALFORMED_HARVEST_TABLE)
   })
 })

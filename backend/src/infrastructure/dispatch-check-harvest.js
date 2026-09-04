@@ -10,6 +10,7 @@ export class DispatchCheckHarvest extends Harvest {
   static NOT_READ = 3
   static PARTIAL = 4
   static KEPT = 10
+  static LEDGER_REFUSED = 11
 
   static #BY_CODE = Object.freeze({
     [DispatchCheckHarvest.COLLECTED]: () => HarvestOutcome.COLLECTED,
@@ -26,6 +27,11 @@ export class DispatchCheckHarvest extends Harvest {
     },
     [DispatchCheckHarvest.PARTIAL]: () => HarvestOutcome.PARTIAL,
     [DispatchCheckHarvest.KEPT]: () => HarvestOutcome.KEPT,
+    [DispatchCheckHarvest.LEDGER_REFUSED]: (said, issueNumber) => {
+      throw new HarvestNotRead(
+        `${DispatchCheckHarvest.COMMAND} could not load the harvest row of #${issueNumber} into the ledger, so the next sweep can try again: ${said.stderr.trim()}`
+      )
+    },
   })
 
   constructor({ node, dispatchCheck, root, harvestTable }) {
@@ -38,7 +44,7 @@ export class DispatchCheckHarvest extends Harvest {
 
   static argvFor({ dispatchCheck, issueNumber, repository, harvestTable }) {
     const argv = [dispatchCheck, String(issueNumber), '--repo', repository.text, '--collect']
-    return harvestTable === null ? argv : [...argv, '--bq', harvestTable.id]
+    return harvestTable === null ? argv : [...argv, '--bq', harvestTable]
   }
 
   static declaredCodes() {

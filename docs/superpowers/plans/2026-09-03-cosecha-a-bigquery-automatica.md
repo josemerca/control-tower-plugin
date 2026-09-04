@@ -31,16 +31,22 @@ módulo que usan los dos caminos, y la carga con su identidad y su directorio te
   después cierra cmux y borra worktree y rama. stdout `collected #n: … ; 1 fila cargada en T
   (harvest_id <uuid>)`, exit 0.
 - Una lectura de GitHub que falla: exit 3, `no se pudo leer la cosecha de #n: <lectura> falló
-  (<detalle>) — no se ha tocado nada, el siguiente barrido reintenta.` Un `bq` que falla: exit 10,
-  `kept #n: BigQuery (T) rechazó la fila: bq salió con <c>: <detalle> — no se ha borrado nada, el
-  siguiente barrido reintenta`. Los códigos son los que el backend ya entiende: no cambia su contrato.
+  (<detalle>) — no se ha tocado nada, el siguiente barrido reintenta.` Un `bq` que falla: exit 11,
+  `no se pudo cargar la fila de #n en BigQuery (T): bq salió con <c>: <detalle> — no se ha borrado
+  nada, el siguiente barrido reintenta.` El 11 es un código NUEVO: el 10 dice que el disco discrepa
+  de la PR mergeada y el backend lo proyecta como `kept`, así que reusarlo aquí le hacía anunciar la
+  causa del disco ante un fallo de BigQuery. El backend gana su fila para el 11.
 - `--bq` mal formado en `dispatch-check`: exit 2. `--dry-run` con `--bq`: no lee ni carga, y la
   línea termina en `; y cargaría 1 fila en T`. Sin `--bq`, argv de `gh` y salida idénticos a hoy.
 - Una sola implementación de las lecturas por slice (`SliceHarvest`) y de la carga con identidad y
   directorio (`HarvestLedger`), usadas por `/ct-harvest` y por `--collect`. `/ct-harvest` no cambia
   de comportamiento: sus tests actuales siguen en verde sin tocarlos.
-- El backend valida `CT_HARVEST_BQ_TABLE` al arrancar con el mismo lector que el plugin
-  (`BigQueryTable.parse`), rechaza el arranque si está mal formada, y lo dice en su `usage`.
+- El backend valida `CT_HARVEST_BQ_TABLE` al arrancar con una forma PROPIA (`Invocation`, la misma
+  primera letra alfanumérica que `RepositoryName` exige, para que un proyecto que empiece por `-` no
+  llegue al argv del plugin pareciendo un flag), rechaza el arranque si está mal formada, y lo dice
+  en su `usage`. El plugin no se importa desde `backend/src/`: el acuerdo entre las dos formas se
+  mide en `plugin-contract.test.js`, alimentando al `BigQueryTable.parse` real lo que el backend
+  acepta — la regla de los payloads de frontera de `backend/conventions/testing.md`.
 - Una tabla para todos los equipos: cada fila lleva `repo`, `milestone` e `issue`; la clave natural
   de un slice es `(repo, issue)`. `milestone` pasa a `NULLABLE`: un slice sin milestone es un
   `NULL` honesto, no un arranque roto.
@@ -67,9 +73,9 @@ módulo que usan los dos caminos, y la carga con su identidad y su directorio te
 |---|---|
 | Disparo | dentro de `dispatch-check --collect`, tras `rehearse` y solo si su desenlace es `WOULD_COLLECT`; nunca en `--dry-run` |
 | Orden | primero la fila a BigQuery, después cmux, worktree y rama; si la carga falla no se borra nada |
-| Códigos | lectura de GitHub fallida o cosecha incompleta → exit 3 (`dieErr`); `bq` rechaza → exit 10 (`dieOut`); `--bq` mal formado → exit 2; sin código nuevo |
+| Códigos | lectura de GitHub fallida o cosecha incompleta → exit 3 (`dieErr`); `bq` rechaza → exit 11 (`dieErr`, código nuevo: el 10 es "el disco discrepa" y el backend lo proyecta como `kept`); `--bq` mal formado → exit 2 |
 | Directorio temporal tras un rechazo | en `--collect` se borra (el reintento es el siguiente barrido); en `/ct-harvest` se conserva y se imprime el comando de reintento, como hoy |
-| Dónde vive la tabla | `CT_HARVEST_BQ_TABLE` en el entorno del backend; `Invocation.from` la lee con `BigQueryTable.parse`; vacía o ausente = no configurada; mal formada = arranque rehusado (`MALFORMED_HARVEST_TABLE`) |
+| Dónde vive la tabla | `CT_HARVEST_BQ_TABLE` en el entorno del backend; `Invocation.from` la valida con su propia forma y la lleva como texto; vacía o ausente = no configurada; mal formada = arranque rehusado (`MALFORMED_HARVEST_TABLE`) |
 | Cómo llega al plugin | `DispatchCheckHarvest.argvFor` añade `'--bq', harvestTable.id` al final del argv cuando hay tabla; sin tabla, argv idéntico a hoy |
 | Lecturas por slice | `SliceHarvest` con `gh` inyectado `(argv) => { code, stdout, stderr }`; argv literalmente los de hoy (`--paginate --slurp`, campos de `pr view`, `Accept: application/vnd.github.raw`) |
 | El issue | `/ct-harvest` lo pasa del listado; `--collect` lo lee con `gh issue view <n> --repo <R> --json number,title,state,closedAt,labels,milestone,closedByPullRequestsReferences` |
@@ -390,7 +396,7 @@ node plugin/scripts/dispatch-check.mjs 7 --repo o/r --collect --bq nope >/dev/nu
 
 ### Task 7 — `dispatch-check --collect --bq`: la fila viaja antes de que se borre nada
 
-**Objective:** con `--bq` válido y la guarda diciendo cosechar, `dispatch-check` carga la fila del slice y solo después borra; una lectura fallida es exit 3 y un `bq` que rechaza es exit 10, sin borrar nada.
+**Objective:** con `--bq` válido y la guarda diciendo cosechar, `dispatch-check` carga la fila del slice y solo después borra; una lectura fallida es exit 3 y un `bq` que rechaza es exit 11 (código propio, no el 10 del disco), sin borrar nada.
 
 **Files:** `plugin/scripts/dispatch-check.mjs` (modify), `plugin/__tests__/dispatch-check-collect-bq.test.js` (modify)
 
@@ -410,7 +416,7 @@ Call site (plugin/scripts/dispatch-check.mjs):
     const cosecha = new SliceHarvest({ gh: ghRunner }).harvestIssue({ repo, number: issue, index: TelemetryIndex.read({ gh: ghRunner, repo }) })
     if (cosecha.outcome !== SliceHarvestOutcome.COMPLETE) dieErr(`no se pudo leer la cosecha de #${issue}: ${lecturaFallida(cosecha)} — no se ha tocado nada, el siguiente barrido reintenta.`, 3)
     const ledger = new HarvestLedger({ table: bqTable, bq: localRunner('bq', COLLECT_BQ_TIMEOUT_MS), workspace: espacioTemporal, identity: LedgerIdentity.fromEnvironment() }).record({ repo, milestone: cosecha.row.milestone, rows: [cosecha.row] })
-    if (ledger.outcome === LoadOutcome.REJECTED) { espacioTemporal.remove(ledger.directory); dieOut(`kept #${issue}: BigQuery (${bqTable.id}) rechazó la fila: bq salió con ${ledger.code}: ${ledger.detail} — no se ha borrado nada, el siguiente barrido reintenta`, 10) }
+    if (ledger.outcome === LoadOutcome.REJECTED) { espacioTemporal.remove(ledger.directory); dieErr(`no se pudo cargar la fila de #${issue} en BigQuery (${bqTable.id}): bq salió con ${ledger.code}: ${ledger.detail} — no se ha borrado nada, el siguiente barrido reintenta.`, 11) }
     cargada = ` ; 1 fila cargada en ${bqTable.id} (harvest_id ${ledger.harvestId})`
   }
 ```
@@ -461,7 +467,7 @@ export class Invocation {
 }
 ```
 
-`#refused` pasa `harvestTable: null`. En `from`, tras resolver `stateRoot`: `given = environment[HARVEST_TABLE_VARIABLE]`; `given === undefined || given === ''` → tabla `null`; `BigQueryTable.parse(given)` nulo → `#refused(MALFORMED_HARVEST_TABLE, \`${HARVEST_TABLE_VARIABLE} must look like project:dataset.table, got ${JSON.stringify(given)}\`)`; si parsea, `#ready(port, stateRoot, parsed)`. `harvestEnvironment`, `configuredIn` y `stateRootIn` no cambian: la tabla viaja al hijo por el argv, no por el entorno.
+`#refused` pasa `harvestTable: null`. En `from`, tras resolver `stateRoot`: `harvestTable = environment[HARVEST_TABLE_VARIABLE]`; `undefined` o `''` → tabla `null`; `#HARVEST_TABLE` (`/^[A-Za-z0-9][A-Za-z0-9-]*:[A-Za-z0-9_]+\.[A-Za-z0-9_]+$/`) no pasa → `#refused(MALFORMED_HARVEST_TABLE, \`${HARVEST_TABLE_VARIABLE} must look like ${HARVEST_TABLE_SHAPE}, got ${JSON.stringify(harvestTable)}\`)`; si pasa, `#ready(port, stateRoot, harvestTable)` con el texto tal cual. `harvestEnvironment`, `configuredIn` y `stateRootIn` no cambian: la tabla viaja al hijo por el argv, no por el entorno.
 
 **TDD:** `it('a_well_formed_harvest_table_in_the_environment_reaches_the_invocation_parsed')` — `Invoked.withHarvestTable('p:d.t')` es `READY`, `harvestTable.id === 'p:d.t'` y `stateRoot` sigue resuelto. Madre nueva `Invoked.withHarvestTable(given)` = `Invocation.from([], { [Invocation.HARVEST_TABLE_VARIABLE]: given }, Invoked.HOME)`.
 
@@ -513,7 +519,7 @@ Final text (backend/conventions/domain.md):
 
 Va como fila nueva de la tabla «Ubiquitous language», justo debajo de la fila **Harvest**.
 
-**TDD:** `it('with_a_harvest_table_the_command_asks_the_plugin_to_load_the_row_after_the_five_arguments_of_today')` — `argvFor` con `harvestTable: BigQueryTable.parse('p:d.t')` es `[CHECK, '7', '--repo', 'owner/name', '--collect', '--bq', 'p:d.t']`, y `collect()` corre exactamente ese argv.
+**TDD:** `it('with_a_harvest_table_the_command_asks_the_plugin_to_load_the_row_after_the_five_arguments_of_today')` — con `harvestTable: 'p:d.t'`, `collect()` corre exactamente `[CHECK, '7', '--repo', 'owner/name', '--collect', '--bq', 'p:d.t']`, medido por el doble y no por `argvFor` en caja blanca.
 
 **Tests:** añadidos — el de arriba; `without_a_harvest_table_the_argv_is_byte_for_byte_the_one_of_today`. `HarvestDouble` gana el parámetro `harvestTable` con `null` por defecto.
 

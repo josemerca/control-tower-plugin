@@ -7,10 +7,10 @@ import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
 import { HarvestOutcome } from '../../src/domain/value-objects/harvest-outcome.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { HarvestFailure, HarvestNotRead, HarvestNotUnderstood } from '../../src/domain/exceptions.js'
-import { BigQueryTable } from '../../../plugin/scripts/bigquery-load.js'
 
 class HarvestDouble {
   static ROOT = '/repo/checkout'
+  static TABLE = 'p:d.t'
   static CHECK = '/plugin/scripts/dispatch-check.mjs'
   static REPOSITORY = new RepositoryName('owner/name')
   static ISSUE = 7
@@ -26,6 +26,13 @@ class HarvestDouble {
   static NOT_READ_LINES = [
     'gh: could not connect to api.github.com',
     'no se pudo leer el estado de #7: gh pr list falló (exit code 1: Command failed: gh pr list --repo owner/name --head feat/7 --state all --json number,state,headRefOid --limit 10) — no se ha tocado nada, el siguiente barrido reintenta.',
+    '',
+  ].join('\n')
+  static BQ_DENIED =
+    `BigQuery error in load operation: Error processing job: Access Denied: Table ${HarvestDouble.TABLE}: User does not have bigquery.tables.updateData permission`
+  static LEDGER_REFUSED_LINE = [
+    HarvestDouble.BQ_DENIED,
+    `no se pudo cargar la fila de #7 en BigQuery (${HarvestDouble.TABLE}): bq salió con 1: ${HarvestDouble.BQ_DENIED} — no se ha borrado nada, el siguiente barrido reintenta.`,
     '',
   ].join('\n')
   static USAGE_LINE =
@@ -88,6 +95,12 @@ class HarvestDouble {
     return new HarvestDouble({ code: 3, stderr: HarvestDouble.NOT_READ_LINES })
   }
 
+  static ledgerRefused() {
+    return new HarvestDouble({
+      code: 11, stderr: HarvestDouble.LEDGER_REFUSED_LINE, harvestTable: HarvestDouble.TABLE,
+    })
+  }
+
   static invocationRefused() {
     return new HarvestDouble({ code: 2, stderr: HarvestDouble.USAGE_LINE })
   }
@@ -108,16 +121,38 @@ class PluginContract {
   static #COLLECT = /\nif \(collect\) \{\n([\s\S]*?)\n\}\n/
   static #TABLE = /\n {2}const PROYECCION = \{\n([\s\S]*?)\n {2}\}\n/
   static #CODE = /code: (\d+)/g
+  static #DIED = /\bdie(?:Err|Out)\(.*?,\s*(\d+)\)/g
 
-  static codesTheCollectTableProjects() {
+  static #collectBlock() {
     const source = readFileSync(PluginContract.SCRIPT, 'utf8')
     const collect = source.match(PluginContract.#COLLECT)
     if (collect === null) throw new Error(`${PluginContract.SCRIPT} no longer carries a collect block`)
-    const table = collect[1].match(PluginContract.#TABLE)
+
+    return collect[1]
+  }
+
+  static #ascending(codes) {
+    return [...new Set(codes)].sort((one, other) => one - other)
+  }
+
+  static codesProjectedInSource(block) {
+    const table = block.match(PluginContract.#TABLE)
     if (table === null) throw new Error(`the collect block no longer projects its outcomes with a table`)
 
-    return [...new Set([...table[1].matchAll(PluginContract.#CODE)].map((found) => Number(found[1])))]
-      .sort((one, other) => one - other)
+    return PluginContract.#ascending([...table[1].matchAll(PluginContract.#CODE)].map((found) => Number(found[1])))
+  }
+
+  static codesDyingInSource(block) {
+    return PluginContract.#ascending([...block.matchAll(PluginContract.#DIED)].map((found) => Number(found[1])))
+  }
+
+  static codesTheCollectBlockCanExitWith() {
+    const block = PluginContract.#collectBlock()
+
+    return PluginContract.#ascending([
+      ...PluginContract.codesProjectedInSource(block),
+      ...PluginContract.codesDyingInSource(block),
+    ])
   }
 }
 
@@ -133,29 +168,16 @@ describe('DispatchCheckHarvest', () => {
     expect(asked.calls[0][1]).toEqual({ cwd: '/repo/checkout' })
   })
 
-  it('without_a_harvest_table_the_argv_is_byte_for_byte_the_one_of_today', () => {
-    expect(DispatchCheckHarvest.argvFor({
-      dispatchCheck: HarvestDouble.CHECK,
-      issueNumber: HarvestDouble.ISSUE,
-      repository: HarvestDouble.REPOSITORY,
-      harvestTable: null,
-    })).toEqual([HarvestDouble.CHECK, '7', '--repo', 'owner/name', '--collect'])
-  })
-
   it('with_a_harvest_table_the_command_asks_the_plugin_to_load_the_row_after_the_five_arguments_of_today', async () => {
-    const harvestTable = BigQueryTable.parse('p:d.t')
+    const asked = new HarvestDouble({
+      code: 0, stdout: HarvestDouble.COLLECTED_LINE, harvestTable: HarvestDouble.TABLE,
+    })
 
-    expect(DispatchCheckHarvest.argvFor({
-      dispatchCheck: HarvestDouble.CHECK,
-      issueNumber: HarvestDouble.ISSUE,
-      repository: HarvestDouble.REPOSITORY,
-      harvestTable,
-    })).toEqual([HarvestDouble.CHECK, '7', '--repo', 'owner/name', '--collect', '--bq', 'p:d.t'])
-
-    const asked = new HarvestDouble({ code: 0, stdout: HarvestDouble.COLLECTED_LINE, harvestTable })
     await asked.asked()
 
-    expect(asked.calls[0][0]).toEqual([HarvestDouble.CHECK, '7', '--repo', 'owner/name', '--collect', '--bq', 'p:d.t'])
+    expect(asked.calls[0][0]).toEqual([
+      HarvestDouble.CHECK, '7', '--repo', 'owner/name', '--collect', '--bq', HarvestDouble.TABLE,
+    ])
   })
 
   it('a_slice_whose_residue_the_plugin_removed_comes_back_collected', async () => {
@@ -191,6 +213,15 @@ describe('DispatchCheckHarvest', () => {
     expect(refusal.message).toContain('the next sweep can try again')
   })
 
+  it('a_row_the_ledger_refused_is_told_apart_from_the_disk_disagreeing_and_carries_what_bq_answered', async () => {
+    const refusal = await HarvestDouble.ledgerRefused().refusal()
+
+    expect(refusal).toBeInstanceOf(HarvestNotRead)
+    expect(refusal.message).toContain('could not load the harvest row of #7 into the ledger')
+    expect(refusal.message).toContain('bigquery.tables.updateData permission')
+    expect(refusal.message).toContain('no se ha borrado nada')
+  })
+
   it('an_invocation_the_plugin_refuses_is_configuration_and_never_something_the_next_sweep_would_fix', async () => {
     const refusal = await HarvestDouble.invocationRefused().refusal()
 
@@ -222,14 +253,27 @@ describe('DispatchCheckHarvest', () => {
       DispatchCheckHarvest.declaredCodes().map((code) => HarvestDouble.exiting(code).refusal())
     )
 
-    expect(DispatchCheckHarvest.declaredCodes()).toEqual([0, 1, 2, 3, 4, 10])
+    expect(DispatchCheckHarvest.declaredCodes()).toEqual([0, 1, 2, 3, 4, 10, 11])
     expect(ended.filter((end) => HarvestOutcome.declared().includes(end))).toHaveLength(4)
-    expect(ended.filter((end) => end instanceof HarvestFailure)).toHaveLength(2)
+    expect(ended.filter((end) => end instanceof HarvestFailure)).toHaveLength(3)
   })
 
-  it('the_collect_block_of_the_plugin_projects_every_code_this_adapter_declares_except_the_one_it_refuses_a_bad_invocation_with', () => {
-    expect(PluginContract.codesTheCollectTableProjects()).toEqual(
+  it('every_code_the_collect_block_can_exit_with_is_one_this_adapter_declares_even_when_it_never_reaches_the_projection_table', () => {
+    expect(PluginContract.codesTheCollectBlockCanExitWith()).toEqual(
       DispatchCheckHarvest.declaredCodes().filter((code) => code !== DispatchCheckHarvest.USAGE_REFUSED)
     )
+  })
+
+  it('the_census_of_codes_really_sees_the_exit_that_short_circuits_above_the_projection_table', () => {
+    const block = [
+      '  if (rejected) { dieErr(`the ledger said no`, 11) }',
+      '  const PROYECCION = {',
+      "    [CollectionOutcome.COLLECTED]: { decir: dieOut, code: 0, linea: () => 'done' },",
+      '  }',
+      '',
+    ].join('\n')
+
+    expect(PluginContract.codesProjectedInSource(block)).toEqual([0])
+    expect(PluginContract.codesDyingInSource(block)).toEqual([11])
   })
 })

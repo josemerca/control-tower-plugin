@@ -1,5 +1,4 @@
 import { isAbsolute, join } from 'node:path'
-import { BigQueryTable } from '../../../plugin/scripts/bigquery-load.js'
 
 export const InvocationOutcome = Object.freeze({
   READY: 'ready',
@@ -19,8 +18,10 @@ export class Invocation {
   static CLAIM_PREFIX = 'CT_CLAIM_'
   static CHILD_TIMEOUT_VARIABLE = 'CT_CLAIM_CHILD_TIMEOUT_MS'
   static HARVEST_TABLE_VARIABLE = 'CT_HARVEST_BQ_TABLE'
+  static HARVEST_TABLE_SHAPE = 'project:dataset.table'
   static #MAX_PORT = 65535
   static #WHOLE_NUMBER = /^\d+$/
+  static #HARVEST_TABLE = /^[A-Za-z0-9][A-Za-z0-9-]*:[A-Za-z0-9_]+\.[A-Za-z0-9_]+$/
 
   constructor({ outcome, port, stateRoot, harvestTable, reason }) {
     if (!Object.values(InvocationOutcome).includes(outcome)) {
@@ -99,15 +100,14 @@ export class Invocation {
         `the home directory of whoever runs this could not be resolved, so there is no absolute path for the state Control Tower shares with its plugin: set ${Invocation.HOME_VARIABLE}, or ${Invocation.CONFIG_VARIABLE} to an absolute path`
       )
     }
-    const given = environment[Invocation.HARVEST_TABLE_VARIABLE]
-    if (given === undefined || given === '') {
+    const harvestTable = environment[Invocation.HARVEST_TABLE_VARIABLE]
+    if (harvestTable === undefined || harvestTable === '') {
       return Invocation.#ready(port, stateRoot, null)
     }
-    const harvestTable = BigQueryTable.parse(given)
-    if (harvestTable === null) {
+    if (!Invocation.#HARVEST_TABLE.test(harvestTable)) {
       return Invocation.#refused(
         InvocationOutcome.MALFORMED_HARVEST_TABLE,
-        `${Invocation.HARVEST_TABLE_VARIABLE} must look like project:dataset.table, got ${JSON.stringify(given)}`
+        `${Invocation.HARVEST_TABLE_VARIABLE} must look like ${Invocation.HARVEST_TABLE_SHAPE}, got ${JSON.stringify(harvestTable)}`
       )
     }
 
