@@ -31,8 +31,8 @@ const watch = (issue: number, repo: string, listener: PlanEventsListener): PlanE
     if (settled) return
     settle()
     if (carriesData(event)) {
-      const { error } = JSON.parse(event.data) as PlanFailure
-      listener.onFailure(error)
+      const { detail } = JSON.parse(event.data) as PlanFailure
+      listener.onFailure(detail)
       return
     }
     listener.onUnreachable()

@@ -16,8 +16,8 @@ export class PlanSessions {
     this.live.set(PlanSessions.#keyFor(watch.repository, watch.issue.number), watch)
   }
 
-  find(repository, issueNumber) {
-    return this.live.get(PlanSessions.#keyFor(repository, issueNumber)) ?? null
+  find({ issue, repository }) {
+    return this.live.get(PlanSessions.#keyFor(repository, issue)) ?? null
   }
 
   forget({ issue, repository }) {
@@ -27,7 +27,7 @@ export class PlanSessions {
 
 export const EventsRequestOutcome = Object.freeze({
   ACCEPTED: 'accepted',
-  MALFORMED_ISSUE: 'malformed-issue',
+  MALFORMED_ISSUE: 'malformed-watched-issue',
   MALFORMED_REPO: 'malformed-repo',
   NOT_WATCHED: 'not-watched',
 })
@@ -58,7 +58,7 @@ export class EventsRequest {
     if (!RepositoryName.isWellFormed(rawRepo)) {
       return EventsRequest.refused(EventsRequestOutcome.MALFORMED_REPO)
     }
-    const watched = sessions.find(new RepositoryName(rawRepo), Number(rawIssue))
+    const watched = sessions.find({ repository: new RepositoryName(rawRepo), issue: Number(rawIssue) })
     if (watched === null) {
       return EventsRequest.refused(EventsRequestOutcome.NOT_WATCHED)
     }
@@ -72,14 +72,19 @@ export class EventsRefusal {
   static #BY_OUTCOME = new Projection('refusal', [
     [EventsRequestOutcome.MALFORMED_ISSUE, () => new Refusal({
       status: 400,
-      error: `the issue to watch is a number such as ${EventsRequest.EXAMPLE}`,
+      code: EventsRequestOutcome.MALFORMED_ISSUE,
+      detail: `the issue to watch is a number such as ${EventsRequest.EXAMPLE}`,
     })],
     [EventsRequestOutcome.MALFORMED_REPO, () => new Refusal({
       status: 400,
-      error: `${EventsRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
+      code: EventsRequestOutcome.MALFORMED_REPO,
+      detail: `${EventsRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
     })],
-    [EventsRequestOutcome.NOT_WATCHED, () =>
-      new Refusal({ status: 404, error: EventsRefusal.NOT_WATCHED })],
+    [EventsRequestOutcome.NOT_WATCHED, () => new Refusal({
+      status: 400,
+      code: EventsRequestOutcome.NOT_WATCHED,
+      detail: EventsRefusal.NOT_WATCHED,
+    })],
   ])
 
   static of(asked) {
@@ -98,13 +103,14 @@ export class PlanEvents {
   }
 
   static ERROR_EVENT = 'error'
+  static PROGRESS_NOT_READ = 'plan-progress-not-read'
 
   static frameFor(state) {
     return `data: ${JSON.stringify({ state })}\n\n`
   }
 
   static failureFrameFor(cause) {
-    return `event: ${PlanEvents.ERROR_EVENT}\ndata: ${JSON.stringify({ error: cause.message })}\n\n`
+    return `event: ${PlanEvents.ERROR_EVENT}\ndata: ${JSON.stringify({ code: PlanEvents.PROGRESS_NOT_READ, detail: cause.message })}\n\n`
   }
 
   async *stream(session, cancelled) {

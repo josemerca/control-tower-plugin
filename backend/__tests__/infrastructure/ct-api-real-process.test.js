@@ -27,11 +27,6 @@ class Entrypoint {
   static #TIMEOUT_MS = 30_000
   static #spawned = []
 
-  static alive() {
-    const last = Entrypoint.#spawned.at(-1)
-    return last !== undefined && last.exitCode === null && last.signalCode === null
-  }
-
   static startPlan(port, body = '{"id":"ABC-123"}') {
     return fetch(`http://127.0.0.1:${port}/start-plan`, {
       method: 'POST',
@@ -84,7 +79,9 @@ describe('ct-api entrypoint', () => {
       `{"id":"ZZZ-999999","repo":${JSON.stringify(HostCheckout.repository())},"path":${JSON.stringify(HostCheckout.path())}}`
     )
 
-    expect(response.status).toBe(503)
-    expect((await response.json()).error).toMatch(/^could not start the plan: acli jira failed: /)
+    expect(response.status).toBe(400)
+    const body = await response.json()
+    expect(body.code).toBe('user-story-not-read')
+    expect(body.detail).toMatch(/^acli jira failed: /)
   })
 })

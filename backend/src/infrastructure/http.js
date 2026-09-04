@@ -1,15 +1,19 @@
 import express from 'express'
 
 export class Refusal {
-  constructor({ status, error }) {
+  constructor({ status, code, detail }) {
     if (!Number.isInteger(status) || status < 400 || status > 599) {
       throw new Error(`a refusal answers with a client or server status, got ${JSON.stringify(status)}`)
     }
-    if (typeof error !== 'string' || error.trim().length === 0) {
-      throw new Error(`a refusal says why, got ${JSON.stringify(error)}`)
+    if (typeof code !== 'string' || code.trim().length === 0) {
+      throw new Error(`a refusal names its code, got ${JSON.stringify(code)}`)
+    }
+    if (typeof detail !== 'string' || detail.trim().length === 0) {
+      throw new Error(`a refusal says why, got ${JSON.stringify(detail)}`)
     }
     this.status = status
-    this.error = error
+    this.code = code
+    this.detail = detail
     Object.freeze(this)
   }
 }
@@ -22,12 +26,12 @@ export class Answer {
     response.status(status).end(JSON.stringify(payload))
   }
 
-  static refuse(response, status, error) {
-    Answer.send(response, status, { error })
+  static refuse(response, status, code, detail) {
+    Answer.send(response, status, { code, detail })
   }
 
   static refuseAs(response, refusal) {
-    Answer.refuse(response, refusal.status, refusal.error)
+    Answer.refuse(response, refusal.status, refusal.code, refusal.detail)
   }
 }
 
@@ -65,7 +69,7 @@ export class Browsers {
       next()
       return
     }
-    Answer.refuse(response, 403, 'this api only serves the page it hosts')
+    Answer.refuse(response, 403, 'foreign-origin', 'this api only serves the page it hosts')
   }
 }
 
@@ -78,7 +82,7 @@ export class JsonBody {
   }
 
   static overflowRefusal() {
-    return new Refusal({ status: 413, error: `body must not exceed ${JsonBody.MAX_BYTES} bytes` })
+    return new Refusal({ status: 413, code: 'body-too-large', detail: `body must not exceed ${JsonBody.MAX_BYTES} bytes` })
   }
 
   static #declaredBy(request) {
@@ -92,7 +96,7 @@ export class JsonBody {
       next()
       return
     }
-    Answer.refuse(response, 415, `Content-Type must be ${Answer.JSON_MEDIA_TYPE}`)
+    Answer.refuse(response, 415, 'unsupported-media-type', `Content-Type must be ${Answer.JSON_MEDIA_TYPE}`)
   }
 
   static reader() {

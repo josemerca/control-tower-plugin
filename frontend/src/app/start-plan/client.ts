@@ -29,7 +29,7 @@ const start = async ({ id, repo, path }: StartPlanRequest): Promise<StartPlanOut
     }
   }
   const refused = (await response.json()) as StartPlanRefusal
-  return { kind: 'refused', error: refused.error }
+  return { kind: 'refused', error: refused.detail }
 }
 
 export const StartPlanClient = {

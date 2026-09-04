@@ -10,17 +10,17 @@ const implementing = () => ({
 
 const malformedAgent = () => ({
   status: 400,
-  body: '{"error":"agent must be the handle start-plan answered with"}',
+  body: '{"code":"malformed-agent","detail":"agent must be the handle start-plan answered with"}',
 })
 
 const malformedRepo = () => ({
   status: 400,
-  body: '{"error":"repo must be a repository such as owner/name"}',
+  body: '{"code":"malformed-repo","detail":"repo must be a repository such as owner/name"}',
 })
 
 const agentNotResumed = () => ({
-  status: 503,
-  body: '{"error":"could not implement the plan: cmux send failed: no such workspace"}',
+  status: 400,
+  body: '{"code":"plan-agent-not-resumed","detail":"cmux send failed: no such workspace"}',
 })
 
 export const ImplementPlanMother = {

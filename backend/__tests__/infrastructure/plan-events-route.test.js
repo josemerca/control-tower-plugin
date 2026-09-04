@@ -65,11 +65,11 @@ class Watched {
 
 describe('PlanSessions', () => {
   it('what_it_hands_back_is_the_whole_watch_so_the_flow_cannot_lose_the_repository_on_the_way', () => {
-    expect(Watched.sessions().find(EventsDouble.SUBJECT.repository, 42)).toBe(EventsDouble.SUBJECT)
+    expect(Watched.sessions().find({ repository: EventsDouble.SUBJECT.repository, issue: 42 })).toBe(EventsDouble.SUBJECT)
   })
 
   it('an_issue_nobody_started_a_plan_for_is_answered_with_nothing_instead_of_an_empty_watch', () => {
-    expect(new PlanSessions().find(EventsDouble.SUBJECT.repository, 404)).toBe(null)
+    expect(new PlanSessions().find({ repository: EventsDouble.SUBJECT.repository, issue: 404 })).toBe(null)
   })
 
   it('a_watch_it_was_told_to_forget_is_answered_with_nothing_the_same_as_one_that_never_started', () => {
@@ -77,7 +77,7 @@ describe('PlanSessions', () => {
 
     sessions.forget({ issue: 42, repository: EventsDouble.SUBJECT.repository })
 
-    expect(sessions.find(EventsDouble.SUBJECT.repository, 42)).toBe(null)
+    expect(sessions.find({ repository: EventsDouble.SUBJECT.repository, issue: 42 })).toBe(null)
   })
 
   it('two_repositories_planning_the_same_issue_number_are_told_apart_by_the_repository_asked', () => {
@@ -91,8 +91,8 @@ describe('PlanSessions', () => {
 
     sessions.remember(inOtherRepository)
 
-    expect(sessions.find(EventsDouble.SUBJECT.repository, 42)).toBe(EventsDouble.SUBJECT)
-    expect(sessions.find(otherRepository, 42)).toBe(inOtherRepository)
+    expect(sessions.find({ repository: EventsDouble.SUBJECT.repository, issue: 42 })).toBe(EventsDouble.SUBJECT)
+    expect(sessions.find({ repository: otherRepository, issue: 42 })).toBe(inOtherRepository)
   })
 })
 
@@ -144,7 +144,7 @@ describe('PlanEvents', () => {
   it('a_progress_that_could_not_be_read_reaches_the_page_as_one_error_frame_and_not_as_a_state', async () => {
     const frames = await EventsDouble.unable('git status refused').collected()
 
-    expect(frames).toEqual(['event: error\ndata: {"error":"git status refused"}\n\n'])
+    expect(frames).toEqual(['event: error\ndata: {"code":"plan-progress-not-read","detail":"git status refused"}\n\n'])
   })
 
   it('a_progress_that_could_not_be_read_ends_the_stream_instead_of_launching_two_subprocesses_forever', async () => {

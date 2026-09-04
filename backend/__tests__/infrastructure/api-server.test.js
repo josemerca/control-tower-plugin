@@ -266,38 +266,38 @@ describe('ApiServer', () => {
     try {
       const response = await RunningApi.accepted(port)
 
-      expect(response.status).toBe(503)
+      expect(response.status).toBe(400)
       expect(await response.text()).toBe(
-        '{"error":"could not start the plan: cmux is not reachable"}'
+        '{"code":"plan-agent-not-launched","detail":"cmux is not reachable"}'
       )
     } finally {
       await server.stop()
     }
   })
 
-  it('a_story_an_issue_or_a_worktree_the_tool_refuses_are_all_answered_as_worth_trying_again', async () => {
+  it('a_story_an_issue_or_a_worktree_the_tool_refuses_are_all_answered_as_a_400_naming_the_specific_code', async () => {
     const causes = [
-      new UserStoryNotRead('acli is not authenticated'),
-      new PlanIssueNotCreated('label not found'),
-      new WorkspaceNotPrepared('branch is taken'),
+      { cause: new UserStoryNotRead('acli is not authenticated'), code: 'user-story-not-read' },
+      { cause: new PlanIssueNotCreated('label not found'), code: 'plan-issue-not-created' },
+      { cause: new WorkspaceNotPrepared('branch is taken'), code: 'workspace-not-prepared' },
     ]
 
-    for (const cause of causes) {
+    for (const { cause, code } of causes) {
       const server = RunningApi.server({ startPlan: StartPlanSpy.failingWith(cause) })
       const port = await server.start()
 
       try {
         const response = await RunningApi.accepted(port)
 
-        expect(response.status).toBe(503)
-        expect(await response.text()).toBe(`{"error":"could not start the plan: ${cause.message}"}`)
+        expect(response.status).toBe(400)
+        expect(await response.text()).toBe(`{"code":"${code}","detail":"${cause.message}"}`)
       } finally {
         await server.stop()
       }
     }
   })
 
-  it('a_tool_that_answered_something_unreadable_is_not_offered_as_something_to_retry', async () => {
+  it('a_tool_that_answered_something_unreadable_is_a_400_too_but_with_a_code_of_its_own', async () => {
     const server = RunningApi.server({
       startPlan: StartPlanSpy.failingWith(new PlanIssueNotNamed('gh printed "done"')),
     })
@@ -306,8 +306,8 @@ describe('ApiServer', () => {
     try {
       const response = await RunningApi.accepted(port)
 
-      expect(response.status).toBe(502)
-      expect(await response.text()).toBe('{"error":"could not start the plan: gh printed \\"done\\""}')
+      expect(response.status).toBe(400)
+      expect(await response.text()).toBe('{"code":"plan-issue-not-named","detail":"gh printed \\"done\\""}')
     } finally {
       await server.stop()
     }
@@ -322,7 +322,7 @@ describe('ApiServer', () => {
       const response = await RunningApi.accepted(port)
 
       expect(response.status).toBe(400)
-      expect(await response.text()).toBe('{"error":"request failed"}')
+      expect(await response.text()).toBe('{"code":"request-failed","detail":"request failed"}')
     } finally {
       complaining.mockRestore()
       await server.stop()
@@ -395,7 +395,7 @@ describe('ApiServer', () => {
     const response = await RunningApi.post(port, '/whatever', RunningApi.ACCEPTED_BODY)
 
     expect(response.status).toBe(404)
-    expect(await response.text()).toBe('{"error":"not found"}')
+    expect(await response.text()).toBe('{"code":"not-found","detail":"not found"}')
   })
 
   it('a_request_from_a_foreign_page_is_refused_because_any_site_can_post_to_localhost', async () => {
@@ -406,7 +406,7 @@ describe('ApiServer', () => {
     })
 
     expect(response.status).toBe(403)
-    expect(await response.text()).toBe('{"error":"this api only serves the page it hosts"}')
+    expect(await response.text()).toBe('{"code":"foreign-origin","detail":"this api only serves the page it hosts"}')
     expect(RunningApi.spy.asked).toEqual([])
   })
 
@@ -517,7 +517,7 @@ describe('ApiServer', () => {
     const response = await RunningApi.startPlan(port, 'ABC-123')
 
     expect(response.status).toBe(400)
-    expect(await response.text()).toBe('{"error":"body must be a JSON object"}')
+    expect(await response.text()).toBe('{"code":"body-not-a-json-object","detail":"body must be a JSON object"}')
   })
 
   it('valid_json_that_is_not_an_object_is_refused_as_such_and_not_mistaken_for_a_missing_id', async () => {
@@ -528,7 +528,7 @@ describe('ApiServer', () => {
     )
 
     expect(await Promise.all(refused.map((response) => response.text()))).toEqual(
-      Array(4).fill('{"error":"body must be a JSON object"}')
+      Array(4).fill('{"code":"body-not-a-json-object","detail":"body must be a JSON object"}')
     )
   })
 
@@ -538,7 +538,7 @@ describe('ApiServer', () => {
     const response = await RunningApi.startPlan(port, '{}')
 
     expect(response.status).toBe(400)
-    expect(await response.text()).toBe('{"error":"id must be a user story key such as ABC-123"}')
+    expect(await response.text()).toBe('{"code":"malformed-id","detail":"id must be a user story key such as ABC-123"}')
   })
 
   it('an_id_that_is_not_shaped_like_a_story_key_is_refused_before_it_ever_becomes_a_branch_name', async () => {
@@ -566,7 +566,7 @@ describe('ApiServer', () => {
     const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.STORY}","repo":"owner/name","priority":"high"}`)
 
     expect(response.status).toBe(400)
-    expect(await response.text()).toBe('{"error":"unknown field: priority"}')
+    expect(await response.text()).toBe('{"code":"unknown-field","detail":"unknown field: priority"}')
   })
 
   it('the_repository_the_body_names_is_the_one_the_use_case_is_asked_to_open_the_issue_in', async () => {
@@ -592,7 +592,7 @@ describe('ApiServer', () => {
 
     expect(response.status).toBe(400)
     expect(await response.text()).toBe(
-      '{"error":"path must be an absolute path"}'
+      '{"code":"malformed-path","detail":"path must be an absolute path"}'
     )
   })
 
@@ -639,7 +639,7 @@ describe('ApiServer', () => {
     const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.STORY}"}`)
 
     expect(response.status).toBe(400)
-    expect(await response.text()).toBe('{"error":"repo must be a repository such as owner/name"}')
+    expect(await response.text()).toBe('{"code":"malformed-repo","detail":"repo must be a repository such as owner/name"}')
   })
 
   it('a_repo_that_is_not_shaped_like_one_is_refused_before_it_ever_becomes_an_argument_of_gh', async () => {
@@ -780,24 +780,24 @@ describe('ApiServer', () => {
     }
   })
 
-  it('a_plan_events_request_for_an_issue_nobody_started_is_a_404_instead_of_an_open_stream', async () => {
+  it('a_plan_events_request_for_an_issue_nobody_started_is_a_400_instead_of_an_open_stream', async () => {
     const { planEvents } = ProgressSpy.events(PlanState.READY)
     const port = await RunningApi.listening({ planEvents })
 
     const response = await fetch(`http://127.0.0.1:${port}/plan-events/404?repo=${encodeURIComponent(RunningApi.REPO)}`)
 
-    expect(response.status).toBe(404)
-    expect(await response.text()).toBe(`{"error":"${EventsRefusal.NOT_WATCHED}"}`)
+    expect(response.status).toBe(400)
+    expect(await response.text()).toBe(`{"code":"not-watched","detail":"${EventsRefusal.NOT_WATCHED}"}`)
   })
 
-  it('an_issue_that_is_not_a_number_is_a_400_the_caller_can_fix_and_not_a_404_for_a_lookup_of_nan', async () => {
+  it('an_issue_that_is_not_a_number_is_refused_by_its_own_code_and_not_mistaken_for_a_lookup_of_nan', async () => {
     const { spy, planEvents } = ProgressSpy.events(PlanState.READY)
     const port = await RunningApi.listening({ planEvents })
 
     const response = await fetch(`http://127.0.0.1:${port}/plan-events/abc`)
 
     expect(response.status).toBe(400)
-    expect(await response.text()).toBe('{"error":"the issue to watch is a number such as 42"}')
+    expect(await response.text()).toBe('{"code":"malformed-watched-issue","detail":"the issue to watch is a number such as 42"}')
     expect(spy.asked).toBe(0)
   })
 
@@ -826,7 +826,7 @@ describe('ApiServer', () => {
     expect(await RunningApi.firstFrame(again)).toBe(PlanEvents.frameFor(PlanState.READY))
   })
 
-  it('a_subscription_after_a_progress_nobody_could_read_is_a_404_because_a_stream_that_broke_is_not_watched_any_more', async () => {
+  it('a_subscription_after_a_progress_nobody_could_read_is_not_watched_any_more_because_the_stream_that_broke_forgot_it', async () => {
     const { planEvents } = ProgressSpy.unable()
     const port = await RunningApi.listening({ planEvents })
 
@@ -834,7 +834,8 @@ describe('ApiServer', () => {
     await fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`)
     const again = await fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`)
 
-    expect(again.status).toBe(404)
+    expect(again.status).toBe(400)
+    expect((await again.json()).code).toBe('not-watched')
   })
 
   it('a_page_that_hangs_up_while_the_plan_is_still_being_written_keeps_its_watch_so_it_can_come_back', async () => {
@@ -867,7 +868,7 @@ describe('ApiServer', () => {
     })
 
     expect(response.status).toBe(403)
-    expect(await response.text()).toBe('{"error":"this api only serves the page it hosts"}')
+    expect(await response.text()).toBe('{"code":"foreign-origin","detail":"this api only serves the page it hosts"}')
     expect(spy.asked).toBe(0)
   })
 
@@ -882,7 +883,7 @@ describe('ApiServer', () => {
 
     expect(response.status).toBe(200)
     expect(await response.text())
-      .toBe(`event: error\ndata: {"error":"${ProgressSpy.UNREADABLE}"}\n\n`)
+      .toBe(`event: error\ndata: {"code":"plan-progress-not-read","detail":"${ProgressSpy.UNREADABLE}"}\n\n`)
     expect(spy.asked).toBe(1)
   })
 

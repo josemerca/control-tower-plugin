@@ -15,7 +15,7 @@ class FrontendPages {
 }
 class Failures {
   static nothingMatched(request, response) {
-    Answer.refuse(response, 404, 'not found')
+    Answer.refuse(response, 404, 'not-found', 'not found')
   }
 
   static answer(cause, request, response, next) {
@@ -32,7 +32,7 @@ class Failures {
       return
     }
     response.once('finish', () => request.destroy())
-    Answer.refuse(response, 400, 'request failed')
+    Answer.refuse(response, 400, 'request-failed', 'request failed')
   }
 }
 

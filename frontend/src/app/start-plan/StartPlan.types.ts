@@ -23,7 +23,8 @@ export type StartPlanResult = StartedPlan & {
 }
 
 export type StartPlanRefusal = {
-  error: string
+  code: string
+  detail: string
 }
 
 export type StartPlanOutcome =

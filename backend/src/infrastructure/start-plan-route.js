@@ -82,23 +82,30 @@ export class PlanRequest {
 
 export class PlanRefusal {
   static #BY_OUTCOME = new Projection('refusal', [
-    [PlanRequestOutcome.BODY_NOT_A_JSON_OBJECT, () =>
-      new Refusal({ status: 400, error: 'body must be a JSON object' })],
+    [PlanRequestOutcome.BODY_NOT_A_JSON_OBJECT, () => new Refusal({
+      status: 400,
+      code: PlanRequestOutcome.BODY_NOT_A_JSON_OBJECT,
+      detail: 'body must be a JSON object',
+    })],
     [PlanRequestOutcome.MALFORMED_ID, () => new Refusal({
       status: 400,
-      error: `${PlanRequest.ID_FIELD} must be a user story key such as ${UserStoryKey.EXAMPLE}`,
+      code: PlanRequestOutcome.MALFORMED_ID,
+      detail: `${PlanRequest.ID_FIELD} must be a user story key such as ${UserStoryKey.EXAMPLE}`,
     })],
     [PlanRequestOutcome.MALFORMED_REPO, () => new Refusal({
       status: 400,
-      error: `${PlanRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
+      code: PlanRequestOutcome.MALFORMED_REPO,
+      detail: `${PlanRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
     })],
     [PlanRequestOutcome.MALFORMED_PATH, () => new Refusal({
       status: 400,
-      error: `${PlanRequest.PATH_FIELD} must be an absolute path`,
+      code: PlanRequestOutcome.MALFORMED_PATH,
+      detail: `${PlanRequest.PATH_FIELD} must be an absolute path`,
     })],
     [PlanRequestOutcome.UNKNOWN_FIELD, (asked) => new Refusal({
       status: 400,
-      error: `unknown field: ${asked.fields.join(', ')}`,
+      code: PlanRequestOutcome.UNKNOWN_FIELD,
+      detail: `unknown field: ${asked.fields.join(', ')}`,
     })],
   ])
 
@@ -112,29 +119,28 @@ export class PlanRefusal {
 }
 
 export class PlanCollapse {
-  static #FIX_THE_REQUEST = 400
-  static #REFUSED = 503
-  static #ANSWERED_SOMETHING_ELSE = 502
+  static #STATUS = 400
 
-  static #collapsed(status) {
-    return (cause) => new Refusal({ status, error: `could not start the plan: ${cause.message}` })
+  static #collapsed(code) {
+    return (cause) => new Refusal({ status: PlanCollapse.#STATUS, code, detail: cause.message })
   }
 
-  static #BY_FAILURE = new Projection('status', [
-    [UserStoryNotRead, PlanCollapse.#collapsed(PlanCollapse.#REFUSED)],
-    [PlanIssueNotCreated, PlanCollapse.#collapsed(PlanCollapse.#REFUSED)],
-    [PlanIssueNotClaimed, PlanCollapse.#collapsed(PlanCollapse.#REFUSED)],
-    [PlanAgentNotLaunched, PlanCollapse.#collapsed(PlanCollapse.#REFUSED)],
-    [WorkspaceNotPrepared, PlanCollapse.#collapsed(PlanCollapse.#REFUSED)],
-    [WorkspaceNotRead, PlanCollapse.#collapsed(PlanCollapse.#REFUSED)],
+  static #BY_FAILURE = new Projection('refusal', [
+    [UserStoryNotRead, PlanCollapse.#collapsed('user-story-not-read')],
+    [PlanIssueNotCreated, PlanCollapse.#collapsed('plan-issue-not-created')],
+    [PlanIssueNotClaimed, PlanCollapse.#collapsed('plan-issue-not-claimed')],
+    [PlanAgentNotLaunched, PlanCollapse.#collapsed('plan-agent-not-launched')],
+    [WorkspaceNotPrepared, PlanCollapse.#collapsed('workspace-not-prepared')],
+    [WorkspaceNotRead, PlanCollapse.#collapsed('workspace-not-read')],
     [CheckoutNotConfirmed, (cause) => new Refusal({
-      status: PlanCollapse.#FIX_THE_REQUEST,
-      error: `${PlanRequest.PATH_FIELD} must be a git checkout of ${cause.message}`,
+      status: PlanCollapse.#STATUS,
+      code: 'checkout-not-confirmed',
+      detail: `${PlanRequest.PATH_FIELD} must be a git checkout of ${cause.message}`,
     })],
-    [UserStoryNotUnderstood, PlanCollapse.#collapsed(PlanCollapse.#ANSWERED_SOMETHING_ELSE)],
-    [PlanIssueNotNamed, PlanCollapse.#collapsed(PlanCollapse.#ANSWERED_SOMETHING_ELSE)],
-    [PlanAgentNotNamed, PlanCollapse.#collapsed(PlanCollapse.#ANSWERED_SOMETHING_ELSE)],
-    [WorkspaceNotUnderstood, PlanCollapse.#collapsed(PlanCollapse.#ANSWERED_SOMETHING_ELSE)],
+    [UserStoryNotUnderstood, PlanCollapse.#collapsed('user-story-not-understood')],
+    [PlanIssueNotNamed, PlanCollapse.#collapsed('plan-issue-not-named')],
+    [PlanAgentNotNamed, PlanCollapse.#collapsed('plan-agent-not-named')],
+    [WorkspaceNotUnderstood, PlanCollapse.#collapsed('workspace-not-understood')],
   ])
 
   static of(cause) {
@@ -143,6 +149,10 @@ export class PlanCollapse {
 
   static declaredFailures() {
     return PlanCollapse.#BY_FAILURE.members().map((failure) => failure.name)
+  }
+
+  static declaredCodes() {
+    return PlanCollapse.#BY_FAILURE.members().map((failure) => PlanCollapse.of(new failure('x')).code)
   }
 }
 
@@ -187,6 +197,6 @@ export class StartPlanRoute {
 
   static refuseOtherMethods(request, response) {
     response.setHeader('Allow', StartPlanRoute.METHOD)
-    Answer.refuse(response, 405, 'method not allowed')
+    Answer.refuse(response, 405, 'method-not-allowed', 'method not allowed')
   }
 }

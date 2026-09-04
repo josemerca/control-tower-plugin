@@ -95,23 +95,30 @@ class ImplementRequest {
 
 export class ImplementRefusal {
   static #BY_OUTCOME = new Projection('refusal', [
-    [ImplementRequestOutcome.BODY_NOT_A_JSON_OBJECT, () =>
-      new Refusal({ status: 400, error: 'body must be a JSON object' })],
+    [ImplementRequestOutcome.BODY_NOT_A_JSON_OBJECT, () => new Refusal({
+      status: 400,
+      code: ImplementRequestOutcome.BODY_NOT_A_JSON_OBJECT,
+      detail: 'body must be a JSON object',
+    })],
     [ImplementRequestOutcome.MALFORMED_AGENT, () => new Refusal({
       status: 400,
-      error: `${ImplementRequest.AGENT_FIELD} must be the handle start-plan answered with`,
+      code: ImplementRequestOutcome.MALFORMED_AGENT,
+      detail: `${ImplementRequest.AGENT_FIELD} must be the handle start-plan answered with`,
     })],
     [ImplementRequestOutcome.MALFORMED_ISSUE, () => new Refusal({
       status: 400,
-      error: `${ImplementRequest.ISSUE_FIELD} must be a whole number from one`,
+      code: ImplementRequestOutcome.MALFORMED_ISSUE,
+      detail: `${ImplementRequest.ISSUE_FIELD} must be a whole number from one`,
     })],
     [ImplementRequestOutcome.MALFORMED_REPO, () => new Refusal({
       status: 400,
-      error: `${ImplementRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
+      code: ImplementRequestOutcome.MALFORMED_REPO,
+      detail: `${ImplementRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
     })],
     [ImplementRequestOutcome.UNKNOWN_FIELD, (asked) => new Refusal({
       status: 400,
-      error: `unknown field: ${asked.fields.join(', ')}`,
+      code: ImplementRequestOutcome.UNKNOWN_FIELD,
+      detail: `unknown field: ${asked.fields.join(', ')}`,
     })],
   ])
 
@@ -125,23 +132,28 @@ export class ImplementRefusal {
 }
 
 export class ImplementCollapse {
-  static #REFUSED = 503
+  static #STATUS = 400
 
-  static #BY_FAILURE = new Projection('status', [
-    [GoNotRecorded, ImplementCollapse.#REFUSED],
-    [PlanGoNotAnswered, ImplementCollapse.#REFUSED],
-    [PlanAgentNotResumed, ImplementCollapse.#REFUSED],
+  static #collapsed(code) {
+    return (cause) => new Refusal({ status: ImplementCollapse.#STATUS, code, detail: cause.message })
+  }
+
+  static #BY_FAILURE = new Projection('refusal', [
+    [GoNotRecorded, ImplementCollapse.#collapsed('go-not-recorded')],
+    [PlanGoNotAnswered, ImplementCollapse.#collapsed('plan-go-not-answered')],
+    [PlanAgentNotResumed, ImplementCollapse.#collapsed('plan-agent-not-resumed')],
   ])
 
   static of(cause) {
-    return new Refusal({
-      status: ImplementCollapse.#BY_FAILURE.of(cause.constructor),
-      error: `could not implement the plan: ${cause.message}`,
-    })
+    return ImplementCollapse.#BY_FAILURE.of(cause.constructor)(cause)
   }
 
   static declaredFailures() {
     return ImplementCollapse.#BY_FAILURE.members().map((failure) => failure.name)
+  }
+
+  static declaredCodes() {
+    return ImplementCollapse.#BY_FAILURE.members().map((failure) => ImplementCollapse.of(new failure('x')).code)
   }
 }
 
@@ -181,6 +193,6 @@ export class ImplementPlanRoute {
 
   static refuseOtherMethods(request, response) {
     response.setHeader('Allow', ImplementPlanRoute.METHOD)
-    Answer.refuse(response, 405, 'method not allowed')
+    Answer.refuse(response, 405, 'method-not-allowed', 'method not allowed')
   }
 }

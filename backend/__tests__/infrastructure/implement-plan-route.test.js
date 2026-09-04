@@ -128,7 +128,8 @@ describe('ImplementPlanRoute', () => {
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
-      error: 'repo must be a repository such as owner/name',
+      code: 'malformed-repo',
+      detail: 'repo must be a repository such as owner/name',
     })
     expect(RunningApi.spy.asked).toEqual([])
   })
@@ -137,7 +138,9 @@ describe('ImplementPlanRoute', () => {
     const response = await RunningApi.asking('{"agent":"ct-plan XOP-4909","issue":33,"repo":"jjponz/repo-pulse"}')
 
     expect(response.status).toBe(400)
-    expect((await response.json()).error).toMatch(/^agent must be the handle/)
+    const body = await response.json()
+    expect(body.code).toBe('malformed-agent')
+    expect(body.detail).toMatch(/^agent must be the handle/)
     expect(RunningApi.spy.asked).toEqual([])
   })
 
@@ -145,7 +148,10 @@ describe('ImplementPlanRoute', () => {
     const response = await RunningApi.asking('{"agent":"workspace:20","issue":"33"}')
 
     expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ error: 'issue must be a whole number from one' })
+    expect(await response.json()).toEqual({
+      code: 'malformed-issue',
+      detail: 'issue must be a whole number from one',
+    })
     expect(RunningApi.spy.asked).toEqual([])
   })
 
@@ -153,7 +159,10 @@ describe('ImplementPlanRoute', () => {
     const response = await RunningApi.asking('{"agent":"workspace:20","issue":0}')
 
     expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ error: 'issue must be a whole number from one' })
+    expect(await response.json()).toEqual({
+      code: 'malformed-issue',
+      detail: 'issue must be a whole number from one',
+    })
     expect(RunningApi.spy.asked).toEqual([])
   })
 
@@ -161,7 +170,7 @@ describe('ImplementPlanRoute', () => {
     const response = await RunningApi.asking('{"agent":"workspace:20","issue":33,"force":true}')
 
     expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ error: 'unknown field: force' })
+    expect(await response.json()).toEqual({ code: 'unknown-field', detail: 'unknown field: force' })
     expect(RunningApi.spy.asked).toEqual([])
   })
 
@@ -169,7 +178,7 @@ describe('ImplementPlanRoute', () => {
     const response = await RunningApi.asking('[]')
 
     expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ error: 'body must be a JSON object' })
+    expect(await response.json()).toEqual({ code: 'body-not-a-json-object', detail: 'body must be a JSON object' })
     expect(RunningApi.spy.asked).toEqual([])
   })
 
@@ -179,19 +188,21 @@ describe('ImplementPlanRoute', () => {
     const response = await RunningApi.post(port, `{"id":"${'A'.repeat(9000)}","issue":33}`)
 
     expect(response.status).toBe(413)
-    expect(await response.text()).toBe('{"error":"body must not exceed 8192 bytes"}')
+    expect(await response.text()).toBe('{"code":"body-too-large","detail":"body must not exceed 8192 bytes"}')
     expect(RunningApi.spy.asked).toEqual([])
   })
 
-  it('a_tool_that_refuses_to_write_in_the_tab_answers_that_trying_again_may_work', async () => {
+  it('a_tool_that_refuses_to_write_in_the_tab_names_the_specific_way_it_refused', async () => {
     const port = await RunningApi.listening(
       ImplementPlanSpy.failingWith(new PlanAgentNotResumed('cmux send failed: no such workspace'))
     )
 
     const response = await RunningApi.post(port, RunningApi.ACCEPTED_BODY)
 
-    expect(response.status).toBe(503)
-    expect((await response.json()).error).toMatch(/^could not implement the plan: /)
+    expect(response.status).toBe(400)
+    const body = await response.json()
+    expect(body.code).toBe('plan-agent-not-resumed')
+    expect(body.detail).toBe('cmux send failed: no such workspace')
   })
 
   it('a_bug_of_ours_is_not_dressed_up_as_the_tool_refusing', async () => {
@@ -200,7 +211,7 @@ describe('ImplementPlanRoute', () => {
     const response = await RunningApi.post(port, RunningApi.ACCEPTED_BODY)
 
     expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ error: 'request failed' })
+    expect(await response.json()).toEqual({ code: 'request-failed', detail: 'request failed' })
   })
 
   it('a_body_with_no_json_content_type_is_refused_before_it_is_read', async () => {
@@ -219,6 +230,7 @@ describe('ImplementPlanRoute', () => {
 
     expect(response.status).toBe(405)
     expect(response.headers.get('Allow')).toBe('POST')
+    expect(await response.json()).toEqual({ code: 'method-not-allowed', detail: 'method not allowed' })
   })
 })
 
@@ -239,27 +251,43 @@ describe('ImplementRefusal', () => {
 describe('ImplementCollapse', () => {
   const RESUMING_AN_AGENT = ['GoNotRecorded', 'PlanGoNotAnswered', 'PlanAgentNotResumed']
 
-  it('every_way_resuming_an_agent_can_collapse_has_a_status_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
+  it('every_way_resuming_an_agent_can_collapse_has_a_refusal_declared_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
     expect(ImplementCollapse.declaredFailures().sort()).toEqual(RESUMING_AN_AGENT.sort())
   })
 
-  it('a_go_nobody_could_record_is_something_to_try_again_and_names_why', () => {
-    const collapse = ImplementCollapse.of(new GoNotRecorded('the directory is not writable'))
+  it('every_way_resuming_an_agent_can_collapse_has_a_code_distinct_from_every_other_one', () => {
+    const codes = ImplementCollapse.declaredCodes()
 
-    expect(collapse.status).toBe(503)
-    expect(collapse.error).toBe('could not implement the plan: the directory is not writable')
+    expect(new Set(codes).size).toBe(codes.length)
   })
 
-  it('a_go_the_issue_did_not_take_is_something_to_try_again_and_names_what_gh_said', () => {
+  it('every_way_resuming_an_agent_can_collapse_answers_400_because_the_code_carries_the_distinction_now', () => {
+    const causes = [
+      new GoNotRecorded('the directory is not writable'),
+      new PlanGoNotAnswered('gh issue comment failed: nope'),
+      new PlanAgentNotResumed('cmux send failed: no such workspace'),
+    ]
+
+    expect(causes.map((cause) => ImplementCollapse.of(cause).status)).toEqual(Array(causes.length).fill(400))
+  })
+
+  it('a_go_nobody_could_record_names_the_specific_way_it_failed_and_keeps_why', () => {
+    const collapse = ImplementCollapse.of(new GoNotRecorded('the directory is not writable'))
+
+    expect(collapse.code).toBe('go-not-recorded')
+    expect(collapse.detail).toBe('the directory is not writable')
+  })
+
+  it('a_go_the_issue_did_not_take_names_what_gh_said', () => {
     const collapse = ImplementCollapse.of(new PlanGoNotAnswered('gh issue comment failed: nope'))
 
-    expect(collapse.status).toBe(503)
-    expect(collapse.error).toBe('could not implement the plan: gh issue comment failed: nope')
+    expect(collapse.code).toBe('plan-go-not-answered')
+    expect(collapse.detail).toBe('gh issue comment failed: nope')
   })
 
   it('a_family_is_not_a_way_of_collapsing_so_answering_one_raises_instead_of_guessing', () => {
-    expect(() => ImplementCollapse.of(new PlanFailure('nope'))).toThrow(/no status declared/)
-    expect(() => ImplementCollapse.of(new GoFailure('nope'))).toThrow(/no status declared/)
+    expect(() => ImplementCollapse.of(new PlanFailure('nope'))).toThrow(/no refusal declared/)
+    expect(() => ImplementCollapse.of(new GoFailure('nope'))).toThrow(/no refusal declared/)
   })
 })
 
@@ -278,13 +306,13 @@ describe('implementing the plan lifts the watch on its issue', () => {
   it('implementing_the_plan_forgets_the_session_so_nothing_keeps_reading_the_contract_of_a_plan_being_built', async () => {
     await RunningApi.asking(RunningApi.ACCEPTED_BODY)
 
-    expect(RunningApi.sessions.find(RunningApi.WATCHED.repository, 33)).toBe(null)
+    expect(RunningApi.sessions.find({ repository: RunningApi.WATCHED.repository, issue: 33 })).toBe(null)
   })
 
   it('a_refused_request_to_implement_forgets_no_session', async () => {
     await RunningApi.asking('{"agent":"workspace:20","issue":0,"repo":"a/b"}')
 
-    expect(RunningApi.sessions.find(RunningApi.WATCHED.repository, 33)).toBe(RunningApi.WATCHED)
+    expect(RunningApi.sessions.find({ repository: RunningApi.WATCHED.repository, issue: 33 })).toBe(RunningApi.WATCHED)
   })
 
   it('a_refused_request_to_implement_lifts_no_watch', async () => {
@@ -299,7 +327,7 @@ describe('implementing the plan lifts the watch on its issue', () => {
 
     const response = await RunningApi.post(await RunningApi.listening(spy), RunningApi.ACCEPTED_BODY)
 
-    expect(response.status).toBe(503)
+    expect(response.status).toBe(400)
     expect(RunningApi.reviews.stopped).toEqual([])
   })
 })

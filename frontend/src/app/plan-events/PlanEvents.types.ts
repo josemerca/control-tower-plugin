@@ -5,7 +5,8 @@ export type PlanEvent = {
 }
 
 export type PlanFailure = {
-  error: string
+  code: string
+  detail: string
 }
 
 export type PlanEventsListener = {
