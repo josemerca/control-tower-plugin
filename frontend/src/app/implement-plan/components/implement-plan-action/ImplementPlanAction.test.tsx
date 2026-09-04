@@ -53,7 +53,7 @@ describe('ImplementPlanAction', () => {
 
     await user.click(screen.getByRole('button', IMPLEMENT_BUTTON))
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('could not implement the plan: cmux send failed: no such workspace')
+    expect(await screen.findByRole('alert')).toHaveTextContent('Error: cmux send failed: no such workspace')
     expect(onImplementationStarted).not.toHaveBeenCalled()
   })
 
