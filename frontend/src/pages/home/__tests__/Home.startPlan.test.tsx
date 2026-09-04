@@ -52,7 +52,7 @@ describe('Home · start plan', () => {
 
     await startPlan(user)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('could not start the plan: cmux is not reachable')
+    expect(await screen.findByRole('alert')).toHaveTextContent('cmux is not reachable')
   })
 
   it('should show the malformed path refusal text as it came', async () => {
@@ -160,9 +160,7 @@ describe('Home · start plan', () => {
 
     await startPlan(user)
 
-    expect(await screen.findByRole('alert')).toHaveTextContent(
-      'path must be a git checkout of owner/name: /repo holds someone/else',
-    )
+    expect(await screen.findByRole('alert')).toHaveTextContent('owner/name: /repo holds someone/else')
   })
 
   it('should show the branch and the worktree the backend started', async () => {

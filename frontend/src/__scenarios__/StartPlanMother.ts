@@ -26,27 +26,27 @@ const startedInAnotherRepo = () => ({
 
 const malformedId = () => ({
   status: 400,
-  body: '{"error":"id must be a user story key such as ABC-123"}',
+  body: '{"code":"malformed-id","detail":"id must be a user story key such as ABC-123"}',
 })
 
 const malformedRepo = () => ({
   status: 400,
-  body: '{"error":"repo must be a repository such as owner/name"}',
+  body: '{"code":"malformed-repo","detail":"repo must be a repository such as owner/name"}',
 })
 
 const malformedPath = () => ({
   status: 400,
-  body: '{"error":"path must be an absolute path"}',
+  body: '{"code":"malformed-path","detail":"path must be an absolute path"}',
 })
 
 const notACheckout = () => ({
   status: 400,
-  body: '{"error":"path must be a git checkout of owner/name: /repo holds someone/else"}',
+  body: '{"code":"checkout-not-confirmed","detail":"owner/name: /repo holds someone/else"}',
 })
 
 const planNotStarted = () => ({
-  status: 503,
-  body: '{"error":"could not start the plan: cmux is not reachable"}',
+  status: 400,
+  body: '{"code":"plan-agent-not-launched","detail":"cmux is not reachable"}',
 })
 
 export const StartPlanMother = {
