@@ -25,7 +25,9 @@ class GitDouble {
   static WORKTREE = '/repo/checkout/.worktrees/42'
   static EXCLUDE_PATH = `${GitDouble.COMMON_DIR}/info/exclude`
 
-  constructor({ answer, status, existingExclude = null, commonDir, declared, remote, removal = null, deletion = null } = {}) {
+  constructor({
+    answer, status, existingExclude = null, commonDir, declared, remote, toplevel, removal = null, deletion = null,
+  } = {}) {
     this.answer = answer ?? GitDouble.ok()
     this.removal = removal
     this.deletion = deletion
@@ -34,6 +36,7 @@ class GitDouble {
     this.existingExclude = existingExclude
     this.commonDir = commonDir ?? GitDouble.COMMON_DIR
     this.declared = declared ?? GitDouble.declaring()
+    this.toplevel = toplevel ?? GitDouble.canonical()
     this.calls = []
     this.written = []
     this.reads = []
@@ -62,6 +65,7 @@ class GitDouble {
 
   answering(argv) {
     if (argv.includes('get-url')) return this.remote
+    if (argv.includes('--show-toplevel')) return this.toplevel
     if (argv.includes('symbolic-ref')) return this.declared
     if (argv.includes('--git-common-dir')) return { failed: false, stdout: `${this.commonDir}\n`, stderr: '' }
     if (argv.includes('HEAD')) return { failed: false, stdout: `${GitDouble.CUT}\n`, stderr: '' }
@@ -102,6 +106,10 @@ class GitDouble {
 
   static naming(url) {
     return { failed: false, stdout: `${url}\n`, stderr: '' }
+  }
+
+  static canonical(path = GitDouble.ROOT) {
+    return { failed: false, stdout: `${path}\n`, stderr: '' }
   }
 
   static declaringNothing(argv) {
@@ -223,12 +231,24 @@ describe('GitWorkspace', () => {
     expect(refused).toBeInstanceOf(WorkspaceFailure)
   })
 
-  it('confirming_asks_the_remote_of_the_root_it_was_given_and_nothing_else', async () => {
+  it('confirming_asks_the_remote_and_then_the_canonical_top_level_and_nothing_else', async () => {
     const git = new GitDouble()
 
     await git.confirmed()
 
-    expect(git.calls).toEqual([['-C', GitDouble.ROOT, 'remote', 'get-url', 'origin']])
+    expect(git.calls).toEqual([
+      ['-C', GitDouble.ROOT, 'remote', 'get-url', 'origin'],
+      ['-C', GitDouble.ROOT, 'rev-parse', '--show-toplevel'],
+    ])
+  })
+
+  it('confirming_answers_the_canonical_root_git_printed_and_not_the_one_it_was_asked_about', async () => {
+    const git = new GitDouble({ toplevel: GitDouble.canonical('/real/checkout') })
+
+    const confirmed = await git.confirmed()
+
+    expect(confirmed).toBeInstanceOf(CheckoutRoot)
+    expect(confirmed.text).toBe('/real/checkout')
   })
 
   it('a_root_that_is_a_different_repository_than_the_issue_is_a_checkout_not_confirmed_naming_both', async () => {
@@ -245,13 +265,17 @@ describe('GitWorkspace', () => {
   it('an_https_remote_names_the_same_repository_as_its_ssh_form_so_neither_checkout_is_refused', async () => {
     const git = new GitDouble({ remote: GitDouble.naming('https://github.com/owner/name.git') })
 
-    await expect(git.confirmed()).resolves.toBeUndefined()
+    const confirmed = await git.confirmed()
+
+    expect(confirmed.text).toBe(GitDouble.ROOT)
   })
 
   it('an_https_remote_without_the_git_suffix_names_the_same_repository_too', async () => {
     const git = new GitDouble({ remote: GitDouble.naming('https://github.com/owner/name') })
 
-    await expect(git.confirmed()).resolves.toBeUndefined()
+    const confirmed = await git.confirmed()
+
+    expect(confirmed.text).toBe(GitDouble.ROOT)
   })
 
   it('a_remote_url_nobody_can_read_a_repository_out_of_is_a_checkout_not_confirmed_too', async () => {
@@ -273,15 +297,38 @@ describe('GitWorkspace', () => {
     expect(refusal.message).toContain(GitDouble.ROOT)
   })
 
+  it('git_refusing_to_resolve_the_top_level_is_a_checkout_not_confirmed_too', async () => {
+    const git = new GitDouble({ toplevel: GitDouble.refused("fatal: not a git repository (or any of the parent directories): .git") })
+
+    const refusal = await git.refusedTo(git.confirmed())
+
+    expect(refusal).toBeInstanceOf(CheckoutNotConfirmed)
+    expect(refusal.message).toContain('not a git repository')
+    expect(refusal.message).toContain(GitDouble.ROOT)
+  })
+
+  it('git_show_toplevel_printing_nothing_is_our_contract_with_git_broken_not_a_mismatched_repository', async () => {
+    const git = new GitDouble({ toplevel: { failed: false, stdout: '', stderr: '' } })
+
+    const refusal = await git.refusedTo(git.confirmed())
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
+    expect(refusal.message).toContain(GitDouble.ROOT)
+  })
+
   it('every_way_confirming_can_fail_shares_the_one_type_a_caller_that_does_not_care_can_catch', async () => {
     const mismatched = new GitDouble({ remote: GitDouble.naming('git@github.com:someone/else.git') })
     const unreadable = new GitDouble({ remote: GitDouble.naming('/some/local/mirror') })
     const unread = new GitDouble({
       remote: GitDouble.refused("fatal: cannot change to '/repo/checkout': No such file or directory"),
     })
+    const notCanonicalised = new GitDouble({
+      toplevel: GitDouble.refused('fatal: not a git repository'),
+    })
+    const unprintable = new GitDouble({ toplevel: { failed: false, stdout: '', stderr: '' } })
 
     const refusals = await Promise.all(
-      [mismatched, unreadable, unread].map((git) => git.refusedTo(git.confirmed()))
+      [mismatched, unreadable, unread, notCanonicalised, unprintable].map((git) => git.refusedTo(git.confirmed()))
     )
 
     for (const refusal of refusals) expect(refusal).toBeInstanceOf(WorkspaceFailure)

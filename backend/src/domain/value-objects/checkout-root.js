@@ -1,5 +1,4 @@
 export class CheckoutRoot {
-  static #SHAPE = /^\/(?:[^/\n]+(?:\/[^/\n]+)*)?$/
   static EXAMPLE = '/Users/you/repos/name'
 
   constructor(text) {
@@ -11,7 +10,7 @@ export class CheckoutRoot {
   }
 
   static isWellFormed(text) {
-    return typeof text === 'string' && CheckoutRoot.#SHAPE.test(text)
+    return typeof text === 'string' && text.startsWith('/')
   }
 
   toString() {

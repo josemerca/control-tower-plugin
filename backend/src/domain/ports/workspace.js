@@ -1,7 +1,7 @@
 export class Workspace {
   async confirm({ root, repository }) {
     throw new Error(
-      `${this.constructor.name} must implement confirm({ root, repository }), asked whether ${root} holds ${repository}`
+      `${this.constructor.name} must implement confirm({ root, repository }) and answer the canonical checkout root, asked whether ${root} holds ${repository}`
     )
   }
 

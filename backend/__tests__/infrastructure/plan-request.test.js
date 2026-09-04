@@ -61,15 +61,22 @@ describe('PlanRequest', () => {
     const refused = [
       '{"id":"ABC-1","repo":"owner/name","path":"repos/name"}',
       '{"id":"ABC-1","repo":"owner/name","path":"~/repos/name"}',
-      '{"id":"ABC-1","repo":"owner/name","path":"/repos/name/"}',
-      '{"id":"ABC-1","repo":"owner/name","path":"/repos//name"}',
-      '{"id":"ABC-1","repo":"owner/name","path":"/repos/name\\n"}',
       '{"id":"ABC-1","repo":"owner/name","path":""}',
       '{"id":"ABC-1","repo":"owner/name","path":123}',
       '{"id":"ABC-1","repo":"owner/name"}',
     ].map((raw) => PlanRequest.from(raw).outcome)
 
-    expect(refused).toEqual(Array(8).fill(PlanRequestOutcome.MALFORMED_PATH))
+    expect(refused).toEqual(Array(5).fill(PlanRequestOutcome.MALFORMED_PATH))
+  })
+
+  it('a_trailing_slash_a_doubled_slash_or_a_trailing_newline_is_accepted_because_git_canonicalises_the_root_later', () => {
+    const accepted = [
+      '{"id":"ABC-1","repo":"owner/name","path":"/repos/name/"}',
+      '{"id":"ABC-1","repo":"owner/name","path":"/repos//name"}',
+      '{"id":"ABC-1","repo":"owner/name","path":"/repos/name\\n"}',
+    ].map((raw) => PlanRequest.from(raw).outcome)
+
+    expect(accepted).toEqual(Array(3).fill(PlanRequestOutcome.ACCEPTED))
   })
 
   it('a_malformed_repo_is_reported_before_the_path_so_the_first_thing_wrong_is_what_gets_named', () => {

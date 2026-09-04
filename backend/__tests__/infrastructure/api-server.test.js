@@ -599,14 +599,22 @@ describe('ApiServer', () => {
       [
         '{"id":"ABC-123","repo":"owner/name","path":"repos/name"}',
         '{"id":"ABC-123","repo":"owner/name","path":"~/repos/name"}',
-        '{"id":"ABC-123","repo":"owner/name","path":"/repos/name/"}',
         '{"id":"ABC-123","repo":"owner/name","path":""}',
         '{"id":"ABC-123","repo":"owner/name","path":123}',
       ].map((body) => RunningApi.startPlan(port, body))
     )
 
-    expect(refused.map((response) => response.status)).toEqual([400, 400, 400, 400, 400])
+    expect(refused.map((response) => response.status)).toEqual([400, 400, 400, 400])
     expect(RunningApi.spy.asked).toEqual([])
+  })
+
+  it('a_trailing_slash_reaches_the_use_case_because_git_absorbs_it_when_it_canonicalises_the_root', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, '{"id":"ABC-123","repo":"owner/name","path":"/repos/name/"}')
+
+    expect(response.status).toBe(202)
+    expect(RunningApi.spy.roots).toEqual(['/repos/name/'])
   })
 
   it('a_path_with_a_semicolon_in_a_segment_is_still_well_formed_because_nothing_ever_reaches_a_shell', async () => {
