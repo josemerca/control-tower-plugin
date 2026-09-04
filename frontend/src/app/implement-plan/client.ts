@@ -8,13 +8,13 @@ import {
 const PATH = '/implement-plan'
 const ACCEPTED = 202
 
-const implement = async ({ agent, issue }: ImplementPlanRequest): Promise<ImplementPlanOutcome> => {
+const implement = async ({ agent, issue, repo }: ImplementPlanRequest): Promise<ImplementPlanOutcome> => {
   let response: Response
   try {
     response = await fetch(PATH, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agent, issue }),
+      body: JSON.stringify({ agent, issue, repo }),
     })
   } catch {
     return { kind: 'backend-unreachable' }
