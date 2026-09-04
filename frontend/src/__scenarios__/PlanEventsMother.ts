@@ -1,6 +1,5 @@
 const ISSUE = 7
-const REPO = 'owner/name'
-const PATH = `/plan-events/7?repo=${encodeURIComponent(REPO)}`
+const PATH = `/plan-events/${ISSUE}?repo=owner%2Fname`
 
 const writing = () => '{"state":"writing"}'
 const ready = () => '{"state":"ready"}'
