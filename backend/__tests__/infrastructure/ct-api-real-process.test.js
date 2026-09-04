@@ -64,10 +64,12 @@ describe('ct-api entrypoint', () => {
 
     const response = await Entrypoint.startPlan(
       port,
-      `{"id":"ZZZ-999999","repo":"josemerca/nope","root":${JSON.stringify(nowhere)}}`
+      `{"id":"ZZZ-999999","repo":"josemerca/nope","path":${JSON.stringify(nowhere)}}`
     )
 
-    expect(response.status).toBe(503)
-    expect((await response.json()).error).toMatch(/^could not start the plan: .+ does not name a origin remote/)
+    expect(response.status).toBe(400)
+    expect((await response.json()).error).toMatch(
+      /^path must be a git checkout of josemerca\/nope: .+ does not name a origin remote/
+    )
   })
 })

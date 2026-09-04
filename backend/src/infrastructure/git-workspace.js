@@ -8,7 +8,7 @@ import { RepositoryName } from '../domain/value-objects/repository-name.js'
 import { WorkspaceLocation } from '../domain/value-objects/workspace-location.js'
 import { WorkspaceSurvey } from '../domain/value-objects/workspace-survey.js'
 import {
-  WorkspaceNotPrepared, WorkspaceNotRead, WorkspaceNotUnderstood,
+  WorkspaceNotPrepared, WorkspaceNotRead, WorkspaceNotUnderstood, CheckoutNotConfirmed,
 } from '../domain/exceptions.js'
 
 export class SliceSeed {
@@ -154,11 +154,14 @@ export class GitWorkspace extends Workspace {
   }
 
   async confirm({ root, repository }) {
-    const held = await this.#repositoryOfRoot(root.text)
+    let held
+    try {
+      held = await this.#repositoryOfRoot(root.text)
+    } catch (failure) {
+      throw new CheckoutNotConfirmed(`${repository.text}: ${failure.message}`)
+    }
     if (held.text !== repository.text) {
-      throw new WorkspaceNotPrepared(
-        `${root.text} holds ${held.text} and the issue lives in ${repository.text}: cutting a worktree here would plan one repository inside another`
-      )
+      throw new CheckoutNotConfirmed(`${repository.text}: ${root.text} holds ${held.text}`)
     }
   }
 

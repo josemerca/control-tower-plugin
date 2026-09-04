@@ -30,9 +30,11 @@ gobierna un único repo por proceso, y hay que arrancar un proceso dentro de cad
 ## 2. Qué se construye
 
 La raíz del clon deja de ser un dato de arranque y pasa a ser un dato de la petición. `POST /start-plan`
-recibe `{"id","repo","root"}`: la historia, el repo de GitHub y la ruta absoluta del clon local donde
-cortar el worktree. La API comprueba que esa ruta es un clon cuyo `origin` es `repo`, y de ahí en
-adelante todo lo que hoy sabe de la raíz lo saca del worktree que cortó.
+recibe `{"id","repo","path"}`: la historia, el repo de GitHub y la ruta absoluta del clon local donde
+cortar el worktree. En la petición el campo se llama `path` porque así lo fijó el contrato publicado por
+el front; el dominio sigue llamándolo `root`, como se ve en el §4. La API comprueba que esa ruta es un
+clon cuyo `origin` es `repo`, y de ahí en adelante todo lo que hoy sabe de la raíz lo saca del worktree
+que cortó.
 
 Con eso la API se arranca desde cualquier directorio y cada petición trae su repo.
 
@@ -50,8 +52,9 @@ convención sobre dónde viven los clones.
 
 **Confirmar el clon antes de abrir el issue.** Hoy `StartPlan` abre y reclama el issue antes de tocar el
 disco (`backend/src/application/actions/start-plan.js`), y por eso el #41 quedó huérfano. Se añade un paso
-previo `workspace.confirm({ root, repository })`: una ruta equivocada muere en 503 sin dejar rastro en
-GitHub. Es la mejora dirigida al flujo que este cambio ya toca.
+previo `workspace.confirm({ root, repository })`: una ruta equivocada muere en 400 sin dejar rastro en
+GitHub, porque es el usuario quien la escribió mal, no el sistema. Es la mejora dirigida al flujo que
+este cambio ya toca.
 
 **El registro de clones vive en memoria.** El reloj de cosecha necesita saber qué clones barrer. Los
 aprende de las peticiones aceptadas y los guarda en el proceso. Limitación asumida y declarada: tras
@@ -72,8 +75,10 @@ correr `git worktree remove` y la cosecha sabe desde dónde correr `dispatch-che
 
 **Puerto `Workspace`** (`backend/src/domain/ports/workspace.js`):
 
-- `confirm({ root, repository })`: comprueba que `root` es un clon de `repository`. Lanza
-  `WorkspaceNotRead` si la ruta no responde a git y `WorkspaceNotPrepared` si el `origin` es otro repo.
+- `confirm({ root, repository })`: comprueba que `root` es un clon de `repository`. Sus tres formas de
+  fallar —la ruta no responde a git, su `origin` no se puede leer como `owner/name`, o su `origin` es
+  otro repo— lanzan todas `CheckoutNotConfirmed`: las tres son la ruta que el usuario escribió, no el
+  sistema, quien está mal.
 - `prepare({ issue, repository, root })`: lo de hoy con la raíz por parámetro.
 - `survey(root)`: lo de hoy con la raíz por parámetro.
 - `undo(located)`: sin cambios de firma; lee `located.root`.
@@ -102,10 +107,15 @@ borrado bloquee la cosecha de todos. **`HarvestDelivery`** pasa `params.prepared
 
 ## 6. Infraestructura
 
-**`PlanRequest`** (`backend/src/infrastructure/start-plan-route.js`): campo `root` en `KNOWN_FIELDS`,
-resultado `MALFORMED_ROOT` y su rechazo 400: `root must be an absolute path to a local clone such as
-/Users/you/repos/name`. Los fallos de `confirm` ya están mapeados a 503 en `PlanCollapse`. La respuesta 202
-no cambia: nadie en el front lee la raíz de vuelta, y un campo sin lector no viaja.
+**`PlanRequest`** (`backend/src/infrastructure/start-plan-route.js`): campo `path` en `KNOWN_FIELDS`
+—el contrato del front fija ese nombre en el cable, y `PlanRequest.root` sigue llamando así al valor ya
+convertido en `CheckoutRoot`—, resultado `MALFORMED_PATH` y su rechazo 400: `path must be an absolute
+path`. `PlanCollapse` mapea `CheckoutNotConfirmed` a 400 con `path must be a git checkout of owner/name`
+seguido de lo que dijo git; el resto de fallos de `confirm` que hoy sigue habiendo en la familia
+`WorkspaceFailure` (`WorkspaceNotPrepared` por una rama ya ocupada, `WorkspaceNotUnderstood` en otros
+puntos) conservan sus estados de antes. La respuesta 202 gana `branch` y `worktree`: los lee de
+`started.watch.located.branch` y `.path`, porque el front los pidió para pintarlos y un campo sin lector
+no viaja.
 
 **`GitWorkspace`** pierde `root` del constructor. `#repositoryOfRoot(root)` y `#confirmRoot(root,
 repository)` se convierten en el `confirm` público, y `prepare` deja de confirmar por su cuenta: la
@@ -129,10 +139,18 @@ raíz con barra final haría que la encuesta no reconociera nunca sus propios wo
 
 | Situación | Dónde muere | Respuesta |
 |---|---|---|
-| `root` ausente o no absoluta | `PlanRequest` | 400, antes de tocar nada |
-| `root` no responde a `git remote get-url origin` | `confirm` | 503 `WorkspaceNotRead`, sin issue |
-| `origin` de `root` es otro repo | `confirm` | 503 `WorkspaceNotPrepared`, sin issue |
+| `path` ausente o no absoluta | `PlanRequest` | 400 `path must be an absolute path`, antes de tocar nada |
+| `path` no responde a `git remote get-url origin` | `confirm` | 400 `CheckoutNotConfirmed`, sin issue |
+| `origin` de `path` no se puede leer como `owner/name` | `confirm` | 400 `CheckoutNotConfirmed`, sin issue |
+| `origin` de `path` es otro repo | `confirm` | 400 `CheckoutNotConfirmed`, sin issue |
 | Fallos posteriores | como hoy | como hoy, con las compensaciones de hoy |
+
+Los tres primeros fallos de `confirm` responden con `path must be a git checkout of owner/name` seguido
+de lo que dijo git, porque las tres son la ruta que escribió el usuario, no el sistema. `confirm` ya no
+produce un 503: esa respuesta queda para lo que sí es el sistema fallando (un tool que se puede
+reintentar), y `survey` —que comparte con `confirm` el método privado que lee el remoto— sigue lanzando
+`WorkspaceNotRead`/`WorkspaceNotUnderstood`, porque una cosecha que no puede leer un clon tiene que
+seguir reintentando, no convertirse en un error de petición.
 
 ## 8. Tests
 
@@ -152,9 +170,9 @@ desde el caso de uso.
 - `harvest-delivery.test.js` y `dispatch-check-harvest.test.js`: `collect` recibe la raíz del worktree y
   `dispatch-check` corre con ese `cwd`.
 - `ct-api-real-process.test.js`: la petición entera llega a git primero, con una raíz que no existe.
-- Front: el botón se habilita con los tres campos y la petición lleva `root`.
+- Front: el botón se habilita con los tres campos y la petición lleva `path`.
 - Prueba de punta a punta a mano: API arrancada desde este repo, petición con `repo: jjponz/repo-pulse` y
-  `root: /Users/acapdev/repos/repo-pulse`, historia XOP-4909. Es exactamente el caso que hoy peta.
+  `path: /Users/acapdev/repos/repo-pulse`, historia XOP-4909. Es exactamente el caso que hoy peta.
 
 ## 9. Lo que este cambio no hace
 

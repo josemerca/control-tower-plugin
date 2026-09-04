@@ -8,7 +8,7 @@ import {
   UserStoryNotRead, UserStoryNotUnderstood, PlanIssueNotCreated, PlanIssueNotNamed,
   PlanIssueNotClaimed,
   PlanAgentNotLaunched, PlanAgentNotNamed, WorkspaceNotPrepared, WorkspaceNotRead,
-  WorkspaceNotUnderstood,
+  WorkspaceNotUnderstood, CheckoutNotConfirmed,
 } from '../domain/exceptions.js'
 
 export const PlanRequestOutcome = Object.freeze({
@@ -17,14 +17,14 @@ export const PlanRequestOutcome = Object.freeze({
   UNKNOWN_FIELD: 'unknown-field',
   MALFORMED_ID: 'malformed-id',
   MALFORMED_REPO: 'malformed-repo',
-  MALFORMED_ROOT: 'malformed-root',
+  MALFORMED_PATH: 'malformed-path',
 })
 
 export class PlanRequest {
   static ID_FIELD = 'id'
   static REPO_FIELD = 'repo'
-  static ROOT_FIELD = 'root'
-  static KNOWN_FIELDS = Object.freeze([PlanRequest.ID_FIELD, PlanRequest.REPO_FIELD, PlanRequest.ROOT_FIELD])
+  static PATH_FIELD = 'path'
+  static KNOWN_FIELDS = Object.freeze([PlanRequest.ID_FIELD, PlanRequest.REPO_FIELD, PlanRequest.PATH_FIELD])
 
   constructor({ outcome, story, repository, root, fields }) {
     if (!Object.values(PlanRequestOutcome).includes(outcome)) {
@@ -89,9 +89,9 @@ export class PlanRequest {
     if (!RepositoryName.isWellFormed(asked)) {
       return PlanRequest.refused(PlanRequestOutcome.MALFORMED_REPO)
     }
-    const where = parsed[PlanRequest.ROOT_FIELD]
+    const where = parsed[PlanRequest.PATH_FIELD]
     if (!CheckoutRoot.isWellFormed(where)) {
-      return PlanRequest.refused(PlanRequestOutcome.MALFORMED_ROOT)
+      return PlanRequest.refused(PlanRequestOutcome.MALFORMED_PATH)
     }
     return PlanRequest.accepted(new UserStoryKey(given), new RepositoryName(asked), new CheckoutRoot(where))
   }
@@ -109,9 +109,9 @@ export class PlanRefusal {
       status: 400,
       error: `${PlanRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
     }),
-    [PlanRequestOutcome.MALFORMED_ROOT]: () => new Refusal({
+    [PlanRequestOutcome.MALFORMED_PATH]: () => new Refusal({
       status: 400,
-      error: `${PlanRequest.ROOT_FIELD} must be an absolute path to a local clone such as ${CheckoutRoot.EXAMPLE}`,
+      error: `${PlanRequest.PATH_FIELD} must be an absolute path`,
     }),
     [PlanRequestOutcome.UNKNOWN_FIELD]: (asked) => new Refusal({
       status: 400,
@@ -134,6 +134,7 @@ export class PlanRefusal {
 }
 
 export class PlanCollapse {
+  static #FIX_THE_REQUEST = 400
   static #REFUSED = 503
   static #ANSWERED_SOMETHING_ELSE = 502
 
@@ -144,6 +145,7 @@ export class PlanCollapse {
     [PlanAgentNotLaunched, PlanCollapse.#REFUSED],
     [WorkspaceNotPrepared, PlanCollapse.#REFUSED],
     [WorkspaceNotRead, PlanCollapse.#REFUSED],
+    [CheckoutNotConfirmed, PlanCollapse.#FIX_THE_REQUEST],
     [UserStoryNotUnderstood, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
     [PlanIssueNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
     [PlanAgentNotNamed, PlanCollapse.#ANSWERED_SOMETHING_ELSE],
@@ -155,8 +157,12 @@ export class PlanCollapse {
     if (declared === undefined) {
       throw new Error(`no status declared for ${cause.constructor.name}`)
     }
+    const [, status] = declared
+    const error = cause.constructor === CheckoutNotConfirmed
+      ? `${PlanRequest.PATH_FIELD} must be a git checkout of ${cause.message}`
+      : `could not start the plan: ${cause.message}`
 
-    return new Refusal({ status: declared[1], error: `could not start the plan: ${cause.message}` })
+    return new Refusal({ status, error })
   }
 
   static declaredFailures() {
@@ -198,6 +204,8 @@ export class StartPlanRoute {
       [PlanRequest.REPO_FIELD]: asked.repository.text,
       issue: { number: started.watch.issue.number, url: started.watch.issue.url },
       agent: started.agent,
+      branch: started.watch.located.branch,
+      worktree: started.watch.located.path,
     })
   }
 

@@ -7,7 +7,7 @@ import { buildStateSeed } from '../../../plugin/scripts/kickoff.js'
 import { resolveStatePath } from '../../../plugin/scripts/state-paths.js'
 import { GitWorkspace, SliceSeed } from '../../src/infrastructure/git-workspace.js'
 import {
-  WorkspaceFailure, WorkspaceNotPrepared, WorkspaceNotRead, WorkspaceNotUnderstood,
+  WorkspaceFailure, WorkspaceNotPrepared, WorkspaceNotRead, WorkspaceNotUnderstood, CheckoutNotConfirmed,
 } from '../../src/domain/exceptions.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
@@ -223,12 +223,12 @@ describe('GitWorkspace', () => {
     expect(git.calls).toEqual([['-C', GitDouble.ROOT, 'remote', 'get-url', 'origin']])
   })
 
-  it('a_root_that_is_a_different_repository_than_the_issue_is_refused_naming_both', async () => {
+  it('a_root_that_is_a_different_repository_than_the_issue_is_a_checkout_not_confirmed_naming_both', async () => {
     const git = new GitDouble({ remote: GitDouble.naming('git@github.com:someone/else.git') })
 
     const refusal = await git.refusedTo(git.confirmed())
 
-    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(refusal).toBeInstanceOf(CheckoutNotConfirmed)
     expect(refusal.message).toContain('someone/else')
     expect(refusal.message).toContain('owner/name')
     expect(refusal.message).toContain(GitDouble.ROOT)
@@ -246,23 +246,37 @@ describe('GitWorkspace', () => {
     await expect(git.confirmed()).resolves.toBeUndefined()
   })
 
-  it('a_remote_url_nobody_can_read_a_repository_out_of_is_our_broken_contract_with_git_and_not_a_refusal', async () => {
+  it('a_remote_url_nobody_can_read_a_repository_out_of_is_a_checkout_not_confirmed_too', async () => {
     const git = new GitDouble({ remote: GitDouble.naming('/some/local/mirror') })
 
     const refusal = await git.refusedTo(git.confirmed())
 
-    expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
+    expect(refusal).toBeInstanceOf(CheckoutNotConfirmed)
     expect(refusal.message).toContain('/some/local/mirror')
   })
 
-  it('a_remote_git_refuses_to_name_at_all_is_a_root_that_cannot_be_read_and_names_the_root', async () => {
+  it('a_remote_git_refuses_to_name_at_all_is_a_checkout_not_confirmed_that_names_the_root', async () => {
     const git = new GitDouble({ remote: GitDouble.refused("fatal: cannot change to '/repo/checkout': No such file or directory") })
 
     const refusal = await git.refusedTo(git.confirmed())
 
-    expect(refusal).toBeInstanceOf(WorkspaceNotRead)
+    expect(refusal).toBeInstanceOf(CheckoutNotConfirmed)
     expect(refusal.message).toContain('No such file or directory')
     expect(refusal.message).toContain(GitDouble.ROOT)
+  })
+
+  it('every_way_confirming_can_fail_shares_the_one_type_a_caller_that_does_not_care_can_catch', async () => {
+    const mismatched = new GitDouble({ remote: GitDouble.naming('git@github.com:someone/else.git') })
+    const unreadable = new GitDouble({ remote: GitDouble.naming('/some/local/mirror') })
+    const unread = new GitDouble({
+      remote: GitDouble.refused("fatal: cannot change to '/repo/checkout': No such file or directory"),
+    })
+
+    const refusals = await Promise.all(
+      [mismatched, unreadable, unread].map((git) => git.refusedTo(git.confirmed()))
+    )
+
+    for (const refusal of refusals) expect(refusal).toBeInstanceOf(WorkspaceFailure)
   })
 
   it('preparing_never_asks_the_remote_again_because_the_root_was_confirmed_at_the_door', async () => {

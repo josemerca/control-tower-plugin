@@ -88,6 +88,14 @@ describe('PlanCollapse', () => {
     expect(PlanCollapse.of(new exceptions.WorkspaceNotRead('no such remote')).status).toBe(503)
   })
 
+  it('a_checkout_that_does_not_hold_the_repository_asked_for_is_something_the_user_can_fix', () => {
+    const collapse = PlanCollapse.of(new exceptions.CheckoutNotConfirmed('owner/name: /repo holds someone/else'))
+
+    expect(collapse).toBeInstanceOf(Refusal)
+    expect(collapse.status).toBe(400)
+    expect(collapse.error).toBe('path must be a git checkout of owner/name: /repo holds someone/else')
+  })
+
   it('an_issue_that_could_not_be_claimed_is_something_to_try_again_and_names_what_gh_said', () => {
     const collapse = PlanCollapse.of(new exceptions.PlanIssueNotClaimed('gh issue edit failed: nope'))
 
