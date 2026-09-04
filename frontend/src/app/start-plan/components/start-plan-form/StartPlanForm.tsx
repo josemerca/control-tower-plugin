@@ -46,6 +46,25 @@ const StartPlanForm = ({ onStarted, isLocked }: StartPlanFormProps) => {
     setRefusal(outcome)
   }
 
+  if (isLocked) {
+    return (
+      <dl className="start-plan-form__summary">
+        <div>
+          <dt>Ticket</dt>
+          <dd>{ticketKey}</dd>
+        </div>
+        <div>
+          <dt>Repositorio</dt>
+          <dd><code>{repository}</code></dd>
+        </div>
+        <div>
+          <dt>Ruta local</dt>
+          <dd><code>{LocalPath.normalize(path)}</code></dd>
+        </div>
+      </dl>
+    )
+  }
+
   return (
     <form className="start-plan-form" onSubmit={startPlan}>
       <FormField label="Clave del ticket" message={`Con la forma ${TicketKey.EXAMPLE}`}>

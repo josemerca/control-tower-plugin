@@ -45,7 +45,8 @@ describe('Home · plan events', () => {
     await streamFrame(PlanEventsMother.writing())
     await streamFrame(PlanEventsMother.ready())
 
-    expect(screen.getByRole('status')).toHaveTextContent('Plan listo')
+    expect(screen.getByRole('button', { name: /Plan Completado/ })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('button', { name: /Implementación Activo/ })).toHaveAttribute('aria-expanded', 'true')
     expect(FakeEventSource.last().closes).toBe(1)
   })
 
@@ -73,7 +74,7 @@ describe('Home · plan events', () => {
     await streamFrame(PlanEventsMother.ready())
     await dropStream()
 
-    expect(screen.getByRole('status')).toHaveTextContent('Plan listo')
+    expect(screen.getByRole('button', { name: /Plan Completado/ })).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByRole('alert')).toBeNull()
     expect(FakeEventSource.last().closes).toBe(1)
   })

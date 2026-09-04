@@ -17,6 +17,7 @@ const watch = (issue: number, repo: string, listener: PlanEventsListener): PlanE
   const source = new EventSource(`${PATH}/${issue}?repo=${encodeURIComponent(repo)}`)
   let settled = false
   const settle = () => {
+    if (settled) return
     settled = true
     source.close()
   }

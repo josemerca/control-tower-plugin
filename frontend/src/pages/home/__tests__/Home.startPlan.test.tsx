@@ -24,7 +24,7 @@ describe('Home · start plan', () => {
 
     const status = await screen.findByRole('status')
     expect(status).toHaveTextContent('Plan arrancado')
-    expect(status).toHaveTextContent(StartPlanMother.AGENT)
+    expect(screen.getByLabelText('Progreso del plan')).toHaveTextContent(StartPlanMother.AGENT)
     expect(screen.getByRole('link', { name: `#${StartPlanMother.ISSUE.number}` })).toHaveAttribute(
       'href',
       StartPlanMother.ISSUE.url,
@@ -182,33 +182,32 @@ describe('Home · start plan', () => {
 
     await startPlan(user)
 
-    const status = await screen.findByRole('status')
-    expect(status).toHaveTextContent(StartPlanMother.BRANCH)
-    expect(status).toHaveTextContent(StartPlanMother.WORKTREE)
+    await screen.findByRole('status')
+    expect(screen.getByLabelText('Progreso del plan')).toHaveTextContent(StartPlanMother.BRANCH)
+    expect(screen.getByLabelText('Progreso del plan')).toHaveTextContent(StartPlanMother.WORKTREE)
   })
 
-  it('should keep all three fields filled after a plan starts', async () => {
+  it('should show a compact read-only request summary when the completed request reopens', async () => {
     backendAnswering(StartPlanMother.started())
     const { user } = openHome()
 
     await startPlan(user)
 
     await screen.findByRole('status')
-    expect(screen.getByLabelText('Clave del ticket')).toHaveValue(StartPlanMother.TICKET)
-    expect(screen.getByLabelText('Repositorio')).toHaveValue(StartPlanMother.REPO)
-    expect(screen.getByLabelText('Ruta local')).toHaveValue(StartPlanMother.PATH)
+    await user.click(screen.getByRole('button', { name: /Solicitud Completado/ }))
+    expect(screen.getByText('Ticket').parentElement).toHaveTextContent(StartPlanMother.TICKET)
+    expect(screen.getByText('Repositorio').parentElement).toHaveTextContent(StartPlanMother.REPO)
+    expect(screen.getByText('Ruta local').parentElement).toHaveTextContent(StartPlanMother.PATH)
   })
 
-  it('should lock all form controls after a plan starts', async () => {
+  it('should prevent duplicate plan starts after a plan starts', async () => {
     backendAnswering(StartPlanMother.started())
     const { user } = openHome()
 
     await startPlan(user)
 
     await screen.findByRole('status')
-    expect(screen.getByLabelText('Clave del ticket')).toBeDisabled()
-    expect(screen.getByLabelText('Repositorio')).toBeDisabled()
-    expect(screen.getByLabelText('Ruta local')).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'Arrancar plan' })).toBeNull()
+    expect(screen.getByRole('button', { name: /Solicitud Completado/ })).toBeEnabled()
   })
 })

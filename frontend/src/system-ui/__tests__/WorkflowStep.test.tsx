@@ -65,4 +65,16 @@ describe('WorkflowStep', () => {
     expect(header).toHaveAttribute('aria-controls', 'implementation-step')
     expect(document.getElementById('implementation-step')).toHaveAttribute('hidden')
   })
+
+  it('should keep a pending step collapsed and unavailable', () => {
+    render(
+      <WorkflowStep status="pending" title="Implementar">
+        Esperando la implementación
+      </WorkflowStep>,
+    )
+
+    const header = screen.getByRole('button', { name: /Implementar/ })
+    expect(header).toBeDisabled()
+    expect(header).toHaveAttribute('aria-expanded', 'false')
+  })
 })

@@ -4,6 +4,14 @@
   gap: 16px;
 }
 
+.plan-progress__state {
+  margin: 0;
+}
+
+.plan-progress__facts {
+  margin: 0;
+}
+
 .plan-progress__facts code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   overflow-wrap: break-word;
