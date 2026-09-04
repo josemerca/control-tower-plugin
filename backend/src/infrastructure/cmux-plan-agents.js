@@ -30,14 +30,14 @@ export class CmuxPlanAgents extends PlanAgents {
     this.brief = brief
   }
 
-  static nameFor(story) {
-    return `ct-plan-${story}`
+  static nameFor(story, repository) {
+    return `ct-plan-${repository.text.replace(/\//g, '__')}-${story}`
   }
 
   static argvFor(briefing, typed) {
     return [
       'new-workspace',
-      '--name', CmuxPlanAgents.nameFor(briefing.story),
+      '--name', CmuxPlanAgents.nameFor(briefing.story, briefing.repository),
       '--cwd', briefing.located.path,
       '--command', typed,
     ]

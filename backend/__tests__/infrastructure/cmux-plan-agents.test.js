@@ -35,7 +35,7 @@ class CmuxDouble {
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
   static REPOSITORY_SLUG = 'josemerca__ct-loop-sandbox'
   static ERRAND = 'escribe el plan de #42 en josemerca/ct-loop-sandbox'
-  static TAB = 'ct-plan-ABC-42'
+  static TAB = `ct-plan-${CmuxDouble.REPOSITORY_SLUG}-ABC-42`
   static PROBES_PER_SEND = 2
   static RESENDS = 1
   static DIRECTORY = `${CmuxDouble.REPOSITORY_SLUG}-42`
@@ -226,6 +226,22 @@ describe('CmuxPlanAgents', () => {
     await second.launch(inAnotherRepository)
 
     expect(second.written[0][0]).not.toBe(first.written[0][0])
+  })
+
+  it('the_same_story_planned_in_two_repositories_opens_a_window_named_so_the_two_do_not_collide', async () => {
+    const first = CmuxDouble.launched()
+    const second = CmuxDouble.launched()
+    const inAnotherRepository = new PlanBriefing({
+      story: new UserStoryKey('ABC-42'),
+      issue: CmuxDouble.ISSUE,
+      located: new WorkspaceLocation({ path: CmuxDouble.WORKTREE, branch: 'feat/42' }),
+      repository: new RepositoryName('other/name'),
+    })
+
+    await first.launch()
+    await second.launch(inAnotherRepository)
+
+    expect(second.calls[0][2]).not.toBe(first.calls[0][2])
   })
 
   it('the_launcher_it_writes_is_the_one_the_plugin_renders_so_the_two_halves_cannot_drift_apart', async () => {
