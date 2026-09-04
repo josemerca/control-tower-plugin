@@ -38,7 +38,7 @@ export class StartPlan {
 
     return new StartPlanResult({
       agent,
-      watch: new PlanWatch({ issue, located, repository: params.repository, agent }),
+      watch: new PlanWatch({ story: params.story, issue, located, repository: params.repository, agent }),
     })
   }
 

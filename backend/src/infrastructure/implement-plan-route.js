@@ -2,6 +2,7 @@ import { Answer, JsonBody, Refusal } from './http.js'
 import { Projection } from './projection.js'
 import { ImplementPlanParams } from '../application/actions/implement-plan.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
+import { ActivePlanPhase } from './active-plans-route.js'
 import {
   PlanFailure, PlanAgentNotResumed, PlanGoNotAnswered, GoNotRecorded,
 } from '../domain/exceptions.js'
@@ -13,6 +14,8 @@ export const ImplementRequestOutcome = Object.freeze({
   MALFORMED_AGENT: 'malformed-agent',
   MALFORMED_ISSUE: 'malformed-issue',
   MALFORMED_REPO: 'malformed-repo',
+  NO_LIVE_SESSION: 'no-live-planning-session',
+  UNCERTAIN_PHASE: 'implementation-phase-uncertain',
 })
 
 class ImplementRequest {
@@ -120,6 +123,16 @@ export class ImplementRefusal {
       code: ImplementRequestOutcome.UNKNOWN_FIELD,
       detail: `unknown field: ${asked.fields.join(', ')}`,
     })],
+    [ImplementRequestOutcome.NO_LIVE_SESSION, () => new Refusal({
+      status: 409,
+      code: ImplementRequestOutcome.NO_LIVE_SESSION,
+      detail: 'no matching live planning session exists',
+    })],
+    [ImplementRequestOutcome.UNCERTAIN_PHASE, () => new Refusal({
+      status: 409,
+      code: ImplementRequestOutcome.UNCERTAIN_PHASE,
+      detail: 'implementation may have started; inspect the plan before retrying',
+    })],
   ])
 
   static of(asked) {
@@ -161,18 +174,43 @@ export class ImplementPlanRoute {
   static PATH = '/implement-plan'
   static METHOD = 'POST'
 
-  static handledBy(implementPlan, sessions, reviews) {
+  static handledBy(implementPlan, sessions, reviews, activePlans, implementationStarts, stderr) {
+    const transitions = new Map()
     return async (request, response) => {
       const asked = ImplementRequest.from(JsonBody.textOf(request))
       if (asked.outcome !== ImplementRequestOutcome.ACCEPTED) {
         Answer.refuseAs(response, ImplementRefusal.of(asked))
         return
       }
-      await ImplementPlanRoute.#accept(implementPlan, sessions, reviews, response, asked)
+      const key = `${asked.repository.text}#${asked.issue}`
+      const pending = transitions.get(key)
+      if (pending !== undefined) await pending
+      const transition = ImplementPlanRoute.#accept(
+        implementPlan, sessions, reviews, activePlans, implementationStarts, stderr, response, asked
+      )
+      transitions.set(key, transition)
+      try {
+        await transition
+      } finally {
+        if (transitions.get(key) === transition) transitions.delete(key)
+      }
     }
   }
 
-  static async #accept(implementPlan, sessions, reviews, response, asked) {
+  static async #accept(implementPlan, sessions, reviews, activePlans, implementationStarts, stderr, response, asked) {
+    const active = activePlans.find({ issue: asked.issue, repository: asked.repository })
+    if (active === null || active.watch.agent !== asked.agent) {
+      Answer.refuseAs(response, ImplementRefusal.of({ outcome: ImplementRequestOutcome.NO_LIVE_SESSION }))
+      return
+    }
+    if (active.phase === ActivePlanPhase.UNCERTAIN) {
+      Answer.refuseAs(response, ImplementRefusal.of({ outcome: ImplementRequestOutcome.UNCERTAIN_PHASE }))
+      return
+    }
+    if (active.phase === ActivePlanPhase.IMPLEMENTING) {
+      ImplementPlanRoute.#answerAccepted(response, asked)
+      return
+    }
     try {
       await implementPlan.execute(new ImplementPlanParams({
         agent: asked.agent, issue: asked.issue, repository: asked.repository,
@@ -182,8 +220,18 @@ export class ImplementPlanRoute {
       Answer.refuseAs(response, ImplementCollapse.of(cause))
       return
     }
+    const watch = active.watch
+    activePlans.rememberImplementing(watch)
+    try {
+      await implementationStarts.remember(watch)
+    } catch (failure) {
+      stderr(`could not persist implementation start for ${asked.repository.text}#${asked.issue}: ${failure.message}\n`)
+    }
     reviews.stop({ issue: asked.issue, repository: asked.repository })
-    sessions.forget({ issue: asked.issue, repository: asked.repository })
+    ImplementPlanRoute.#answerAccepted(response, asked)
+  }
+
+  static #answerAccepted(response, asked) {
     Answer.send(response, 202, {
       status: 'implementing',
       [ImplementRequest.AGENT_FIELD]: asked.agent,

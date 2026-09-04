@@ -45,6 +45,11 @@ export const CMUX_QUERY_TIMEOUT_MS = 5000
 // las ventanas. Devuelve un array de `{title, cwd, cwdKnown, ref}`, o `null` si
 // el resultado es NO CONCLUYENTE.
 //
+// By default, one failed window does not invalidate the other windows. This
+// preserves the contract for existing consumers. With `requireComplete: true`,
+// any failed window query returns `null`. Zero windows remains conclusive and
+// returns `[]`.
+//
 // LA DISTINCIÓN QUE SOSTIENE TODO: `null` (no se pudo saber) no es `[]` (cmux
 // contestó y de verdad no hay ninguna). De las dos se sigue algo distinto en
 // cada uno de los tres consumidores, y confundirlas es el defecto que este
@@ -84,7 +89,9 @@ export const CMUX_QUERY_TIMEOUT_MS = 5000
 // directorio. Quien consuma esto traduce `cwdKnown: false` a un estado propio
 // ('cwd-unknown' en `verifyCmuxLaunch`), jamás a 'wrong-cwd'.
 // ---------------------------------------------------------------------------
-export function listCmuxWorkspaces({ timeoutMs = CMUX_QUERY_TIMEOUT_MS, run = ejecutar } = {}) {
+export function listCmuxWorkspaces({
+  timeoutMs = CMUX_QUERY_TIMEOUT_MS, run = ejecutar, requireComplete = false,
+} = {}) {
   try {
     const windows = JSON.parse(run(['list-windows', '--json'], timeoutMs))
     const out = []
@@ -112,9 +119,9 @@ export function listCmuxWorkspaces({ timeoutMs = CMUX_QUERY_TIMEOUT_MS, run = ej
           }
         }
       } catch {
-        // Una ventana concreta que no se pueda consultar no invalida las
-        // demás — se sigue con el resto; solo una consulta INICIAL fallida
-        // (list-windows) marca el resultado global como no concluyente.
+        // The default mode keeps results from the other windows. Complete mode
+        // cannot reach a conclusion if one window is missing.
+        if (requireComplete) return null
       }
     }
     if (sawAnyWorkspaceEntry && !sawAnyRecognizedTitle) return null

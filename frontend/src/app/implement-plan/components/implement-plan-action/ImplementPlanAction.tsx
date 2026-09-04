@@ -11,9 +11,10 @@ const UNREACHABLE_MESSAGE = 'No se pudo contactar con el backend'
 type ImplementPlanActionProps = {
   plan: StartedPlan
   onImplementationStarted: () => void
+  isImplementationStarted?: boolean
 }
 
-const ImplementPlanAction = ({ plan, onImplementationStarted }: ImplementPlanActionProps) => {
+const ImplementPlanAction = ({ plan, onImplementationStarted, isImplementationStarted = false }: ImplementPlanActionProps) => {
   const [outcome, setOutcome] = useState<ImplementPlanOutcome | null>(null)
   const [isSending, setIsSending] = useState(false)
 
@@ -28,7 +29,7 @@ const ImplementPlanAction = ({ plan, onImplementationStarted }: ImplementPlanAct
     }
   }
 
-  if (outcome?.kind === 'implementing') {
+  if (isImplementationStarted || outcome?.kind === 'implementing') {
     return (
       <div className="implement-plan-action">
         <Banner
@@ -36,7 +37,7 @@ const ImplementPlanAction = ({ plan, onImplementationStarted }: ImplementPlanAct
           title="Implementación en curso"
           description={
             <span className="implement-plan-action__facts">
-              El agente <code>{outcome.agent}</code> implementa el plan
+              El agente <code>{outcome?.kind === 'implementing' ? outcome.agent : plan.agent}</code> implementa el plan
             </span>
           }
         />

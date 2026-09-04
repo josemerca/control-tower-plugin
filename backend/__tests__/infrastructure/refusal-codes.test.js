@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { PlanRequestOutcome, PlanCollapse } from '../../src/infrastructure/start-plan-route.js'
 import { ImplementRequestOutcome, ImplementCollapse } from '../../src/infrastructure/implement-plan-route.js'
 import { EventsRequestOutcome, PlanEvents } from '../../src/infrastructure/plan-events-route.js'
+import { ActivePlansOutcome } from '../../src/infrastructure/active-plans-route.js'
 
 class RequestVocabularies {
   static #ACCEPTED = 'accepted'
@@ -34,6 +35,7 @@ class Repeats {
 class CodesRememberedByHandFromHttpAndApiServer {
   static VALUES = Object.freeze([
     'not-found', 'method-not-allowed', 'foreign-origin', 'unsupported-media-type', 'body-too-large', 'request-failed',
+    ActivePlansOutcome.RECOVERY_INCONCLUSIVE,
   ])
 }
 
@@ -48,7 +50,7 @@ describe('the codes the api can emit', () => {
     expect(repeated.sort()).toEqual([...SharedOnPurposeAcrossRequestVocabularies.CODES].sort())
   })
 
-  it('every_code_the_api_emits_is_distinct_though_six_of_them_are_remembered_by_hand_and_not_watched_for_a_rename', () => {
+  it('every_code_the_api_emits_is_distinct_though_some_are_remembered_by_hand_and_not_watched_for_a_rename', () => {
     const codes = [
       ...new Set(RequestVocabularies.codes()),
       ...PlanCollapse.declaredCodes(),

@@ -34,6 +34,10 @@ export class CmuxPlanAgents extends PlanAgents {
     return `ct-plan-${repository.text.replace(/\//g, '__')}-${story}`
   }
 
+  static isHandle(value) {
+    return typeof value === 'string' && /^workspace:\d+$/.test(value)
+  }
+
   static argvFor(briefing, typed) {
     return [
       'new-workspace',

@@ -5,6 +5,7 @@ import { Answer, Route, Browsers, JsonBody } from './http.js'
 import { StartPlanRoute } from './start-plan-route.js'
 import { ImplementPlanRoute } from './implement-plan-route.js'
 import { PlanEventsRoute } from './plan-events-route.js'
+import { ActivePlansRoute } from './active-plans-route.js'
 
 export const LOOPBACK = '127.0.0.1'
 class FrontendPages {
@@ -37,13 +38,20 @@ class Failures {
 }
 
 export class ApiServer {
-  constructor({ port, startPlan, implementPlan, reviews, planEvents, sessions, frontendRoot }) {
+  constructor({
+    port, startPlan, implementPlan, reviews, planEvents, sessions, activePlans,
+    implementationStarts, recovery = null, stderr, frontendRoot,
+  }) {
     this.requestedPort = port
     this.startPlan = startPlan
     this.implementPlan = implementPlan
     this.reviews = reviews
     this.planEvents = planEvents
     this.sessions = sessions
+    this.activePlans = activePlans
+    this.implementationStarts = implementationStarts
+    this.recovery = recovery
+    this.stderr = stderr
     this.frontendRoot = frontendRoot
     this.server = null
   }
@@ -67,7 +75,10 @@ export class ApiServer {
       Browsers.turnAwayForeign,
       JsonBody.demandDeclared,
       JsonBody.reader(),
-      ImplementPlanRoute.handledBy(this.implementPlan, this.sessions, this.reviews)
+      ImplementPlanRoute.handledBy(
+        this.implementPlan, this.sessions, this.reviews, this.activePlans,
+        this.implementationStarts, this.stderr
+      )
     )
     app.all(ImplementPlanRoute.PATH, ImplementPlanRoute.refuseOtherMethods)
     app.get(
@@ -75,6 +86,12 @@ export class ApiServer {
       Browsers.turnAwayForeign,
       PlanEventsRoute.handledBy(this.sessions, this.planEvents)
     )
+    app.get(
+      ActivePlansRoute.PATH,
+      Browsers.turnAwayForeign,
+      ActivePlansRoute.handledBy(this.activePlans, this.recovery)
+    )
+    app.all(ActivePlansRoute.PATH, ActivePlansRoute.refuseOtherMethods)
     app.use(Failures.nothingMatched)
     app.use(Failures.answer)
 

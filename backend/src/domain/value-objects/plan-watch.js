@@ -1,5 +1,6 @@
 export class PlanWatch {
-  constructor({ issue, located, repository, agent }) {
+  constructor({ story, issue, located, repository, agent }) {
+    this.story = story
     this.issue = issue
     this.located = located
     this.repository = repository
