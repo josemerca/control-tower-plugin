@@ -16,8 +16,8 @@ export class PlanSessions {
     this.live.set(PlanSessions.#keyFor(watch.repository, watch.issue.number), watch)
   }
 
-  find(repository, issueNumber) {
-    return this.live.get(PlanSessions.#keyFor(repository, issueNumber)) ?? null
+  find({ issue, repository }) {
+    return this.live.get(PlanSessions.#keyFor(repository, issue)) ?? null
   }
 
   forget({ issue, repository }) {
@@ -58,7 +58,7 @@ export class EventsRequest {
     if (!RepositoryName.isWellFormed(rawRepo)) {
       return EventsRequest.refused(EventsRequestOutcome.MALFORMED_REPO)
     }
-    const watched = sessions.find(new RepositoryName(rawRepo), Number(rawIssue))
+    const watched = sessions.find({ repository: new RepositoryName(rawRepo), issue: Number(rawIssue) })
     if (watched === null) {
       return EventsRequest.refused(EventsRequestOutcome.NOT_WATCHED)
     }

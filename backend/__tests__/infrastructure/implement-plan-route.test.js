@@ -278,13 +278,13 @@ describe('implementing the plan lifts the watch on its issue', () => {
   it('implementing_the_plan_forgets_the_session_so_nothing_keeps_reading_the_contract_of_a_plan_being_built', async () => {
     await RunningApi.asking(RunningApi.ACCEPTED_BODY)
 
-    expect(RunningApi.sessions.find(RunningApi.WATCHED.repository, 33)).toBe(null)
+    expect(RunningApi.sessions.find({ repository: RunningApi.WATCHED.repository, issue: 33 })).toBe(null)
   })
 
   it('a_refused_request_to_implement_forgets_no_session', async () => {
     await RunningApi.asking('{"agent":"workspace:20","issue":0,"repo":"a/b"}')
 
-    expect(RunningApi.sessions.find(RunningApi.WATCHED.repository, 33)).toBe(RunningApi.WATCHED)
+    expect(RunningApi.sessions.find({ repository: RunningApi.WATCHED.repository, issue: 33 })).toBe(RunningApi.WATCHED)
   })
 
   it('a_refused_request_to_implement_lifts_no_watch', async () => {

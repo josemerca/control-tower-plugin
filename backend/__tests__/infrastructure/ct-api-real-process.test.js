@@ -27,11 +27,6 @@ class Entrypoint {
   static #TIMEOUT_MS = 30_000
   static #spawned = []
 
-  static alive() {
-    const last = Entrypoint.#spawned.at(-1)
-    return last !== undefined && last.exitCode === null && last.signalCode === null
-  }
-
   static startPlan(port, body = '{"id":"ABC-123"}') {
     return fetch(`http://127.0.0.1:${port}/start-plan`, {
       method: 'POST',
