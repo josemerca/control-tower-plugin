@@ -46,7 +46,10 @@ stretches to justify any grouping by habit.
   side.
 - **No suffix on the type**, on its parameters or on its result.
 - The main method takes a parameters object and returns a result object, both
-  immutable and declared beside it — never a raw map (`conventions/code.md`).
+  immutable and declared beside it — never a raw map (`conventions/defects.md`).
+  **The result object holds even when it carries a single field**, so every use
+  case of the program is read the same way and none of them has to be looked up
+  to know how its answer arrives.
 - **A configuration value enters as data, not behind a port.** A port whose only
   method returns a constant is indirection; what the object buys is that values
   which have to agree travel together and their coherence can be checked in one
@@ -76,6 +79,12 @@ domain object, not prose and not a conditional inside a use case. Immutable, wit
 Something that drives a flow end to end **invokes** its steps. Each dispatched
 step enters through its own use case, and whoever conducts does not talk to the
 ports that step needs to do its work.
+
+**A use case is not measured by its size.** One that only hands its parameters
+to a port earns its module the same as one that orchestrates five: what it buys
+is the seam — the conductor stops knowing which port that step needs, and the
+step can grow without the conductor changing — and that is worth the same
+whether its body is one line or twenty.
 
 The line, so it is not widened by precedent: **if its result projects to an
 outcome the flow receives, it is a step.** A prior check — asking whether what a

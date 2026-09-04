@@ -114,7 +114,7 @@ describe('AcliUserStories', () => {
     const refusal = await AcliDouble.answering({ summary: '   ' }).refusalFor()
 
     expect(refusal).toBeInstanceOf(UserStoryNotUnderstood)
-    expect(refusal.message).toContain('no summary in jira')
+    expect(refusal.message).toContain('carries no summary')
   })
 
   it('an_acli_that_refuses_the_call_arrives_typed_so_the_caller_can_tell_it_from_a_crash', async () => {

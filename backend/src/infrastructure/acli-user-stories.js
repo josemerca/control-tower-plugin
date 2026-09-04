@@ -42,7 +42,7 @@ export class AcliUserStories extends UserStories {
 
     return new UserStory({
       key,
-      summary: AcliUserStories.#summaryIn(fields, key),
+      summary: fields.summary,
       description: AcliUserStories.#plainText(fields.description),
     })
   }
@@ -63,15 +63,6 @@ export class AcliUserStories extends UserStories {
     }
 
     return parsed.fields
-  }
-
-  static #summaryIn(fields, key) {
-    const { summary } = fields
-    if (typeof summary !== 'string' || summary.trim().length === 0) {
-      throw new UserStoryNotUnderstood(`${key} has no summary in jira, so there is nothing to plan`)
-    }
-
-    return summary.trim()
   }
 
   static #plainText(description) {
