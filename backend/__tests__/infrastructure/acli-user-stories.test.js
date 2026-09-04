@@ -110,11 +110,22 @@ describe('AcliUserStories', () => {
     expect(story.hasDescription()).toBe(false)
   })
 
-  it('a_story_with_no_summary_is_refused_because_there_would_be_nothing_to_title_the_issue_with', async () => {
-    const refusal = await AcliDouble.answering({ summary: '   ' }).refusalFor()
+  it('a_story_with_no_summary_is_refused_quoting_what_acli_printed_so_the_answer_can_be_looked_at', async () => {
+    const acli = AcliDouble.answering({ summary: '   ' })
+
+    const refusal = await acli.refusalFor()
 
     expect(refusal).toBeInstanceOf(UserStoryNotUnderstood)
-    expect(refusal.message).toContain('no summary in jira')
+    expect(refusal.message).toContain('carries no summary')
+    expect(refusal.message).toContain(JSON.stringify(acli.printed))
+  })
+
+  it('a_summary_that_is_the_marker_for_nothing_is_refused_by_the_same_criterion_the_plugin_reads_cells_with', async () => {
+    for (const written of ['—', '-', '`–`', '**--**']) {
+      const refusal = await AcliDouble.answering({ summary: written }).refusalFor()
+
+      expect(refusal, written).toBeInstanceOf(UserStoryNotUnderstood)
+    }
   })
 
   it('an_acli_that_refuses_the_call_arrives_typed_so_the_caller_can_tell_it_from_a_crash', async () => {

@@ -23,7 +23,7 @@ export class GhPlanIssues extends PlanIssues {
   static IN_PROGRESS_LABEL = 'status:in-progress'
   static IN_REVIEW_LABEL = 'status:in-review'
   static GO_TOKEN = '-OK'
-  static #REF = /\/issues\/(\d+)\s*$/
+  static #REF = /\/issues\/([1-9]\d*)\s*$/
 
   constructor({ gh, stderr }) {
     super()

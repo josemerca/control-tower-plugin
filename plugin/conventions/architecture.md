@@ -46,7 +46,16 @@ stretches to justify any grouping by habit.
   side.
 - **No suffix on the type**, on its parameters or on its result.
 - The main method takes a parameters object and returns a result object, both
-  immutable and declared beside it — never a raw map (`conventions/code.md`).
+  immutable and declared beside it — never a raw map (`conventions/defects.md`).
+  **A use case that answers something declares its result object even when it
+  carries a single field**, so every answer of the program is read the same way
+  and none of them has to be opened to find out how its answer arrives; one
+  that answers nothing declares none.
+- **A use case is not measured by its size.** One that only hands its
+  parameters to a port earns its module the same as one that orchestrates five:
+  what it buys is the seam — whoever conducts stops knowing which port that
+  step needs, and the step can grow without the conductor changing — and that
+  is worth the same with a body of one line or of twenty.
 - **A configuration value enters as data, not behind a port.** A port whose only
   method returns a constant is indirection; what the object buys is that values
   which have to agree travel together and their coherence can be checked in one

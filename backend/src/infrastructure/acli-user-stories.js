@@ -1,3 +1,4 @@
+import { isNoValueCell } from '../../../plugin/scripts/cells.js'
 import { UserStories } from '../domain/ports/user-stories.js'
 import { UserStory } from '../domain/value-objects/user-story.js'
 import { UserStoryNotRead, UserStoryNotUnderstood } from '../domain/exceptions.js'
@@ -42,7 +43,7 @@ export class AcliUserStories extends UserStories {
 
     return new UserStory({
       key,
-      summary: AcliUserStories.#summaryIn(fields, key),
+      summary: AcliUserStories.#summaryIn(fields, key, printed),
       description: AcliUserStories.#plainText(fields.description),
     })
   }
@@ -65,13 +66,15 @@ export class AcliUserStories extends UserStories {
     return parsed.fields
   }
 
-  static #summaryIn(fields, key) {
-    const { summary } = fields
-    if (typeof summary !== 'string' || summary.trim().length === 0) {
-      throw new UserStoryNotUnderstood(`${key} has no summary in jira, so there is nothing to plan`)
+  static #summaryIn(fields, key, printed) {
+    const written = typeof fields.summary === 'string' ? fields.summary.trim() : ''
+    if (written.length === 0 || isNoValueCell(written)) {
+      throw new UserStoryNotUnderstood(
+        `${key} carries no summary to plan with, it printed ${JSON.stringify(printed)}`
+      )
     }
 
-    return summary.trim()
+    return written
   }
 
   static #plainText(description) {
