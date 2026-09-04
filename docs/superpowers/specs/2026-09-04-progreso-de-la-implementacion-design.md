@@ -77,17 +77,16 @@ GET /implement-progress/:issue?root=<ruta absoluta del checkout>
 | Código | Cuerpo | Cuándo |
 |---|---|---|
 | `200` | `{"step":"starting","task":null,"total_tasks":null,"name":null,"attempt":null,"discards":null}` | el worktree existe y `ct-step` todavía no ha creado el run |
-| `200` | `{"step":"judging-task","task":3,"total_tasks":7,"name":"el lector del plan","attempt":2,"discards":0}` | un paso de tarea |
-| `200` | `{"step":"verifying-slice","task":null,"total_tasks":7,"name":null,"attempt":null,"discards":0}` | un paso de slice |
+| `200` | `{"step":"judge","task":3,"total_tasks":7,"name":"el lector del plan","attempt":2,"discards":0}` | un paso de tarea |
+| `200` | `{"step":"global","task":null,"total_tasks":7,"name":null,"attempt":null,"discards":0}` | un paso de slice |
 | `200` | `{"step":"delivered","task":null,"total_tasks":7,"name":null,"attempt":null,"discards":0}` | `closed: "delivered"` |
-| `400` | `{"code":"malformed-issue","detail":"the issue to read is a number such as 42"}` | el issue de la ruta no es un número |
 | `400` | `{"code":"malformed-root","detail":"root is an absolute path such as /Users/you/repos/name"}` | falta `root` o no es absoluto |
 | `400` | `{"code":"implementation-progress-not-read","detail":"…"}` | no hay worktree ahí, o el fichero no se deja leer, o no es el JSON que conocemos |
 | `403` | — | origen ajeno; lo pone el middleware compartido, no esta ruta |
 
-Tres códigos y ni uno más. El recorte está razonado en el §4.
+Dos códigos, y los dos se dan de verdad.
 
-### Cuándo se dan de verdad
+### Cuándo se dan
 
 `implementation-progress-not-read` es el que va a saltar en producción, y por un
 camino que el consumidor tiene que conocer: **cuando la slice se mergea, su
@@ -96,47 +95,57 @@ recibir `delivered` y empieza a recibir este `400`. No es un fallo del backend �
 el sitio donde vivía la respuesta ya no está. Quien sondee debería parar en
 `delivered`, que es el estado final y no cambia nunca a otra cosa.
 
-Los otros dos son guardas de puerta y sólo los provoca un cliente que se
-equivoca. `malformed-root` tiene un camino concreto y previsible: hoy el `202`
-de `POST /start-plan` **no** devuelve la raíz del checkout, así que hasta que
-ese campo exista cualquier consumidor que intente reengancharse sin haberla
-guardado llamará sin `root`. `malformed-issue` sólo se alcanza a mano.
+`malformed-root` tiene un camino concreto: hoy el `202` de `POST /start-plan`
+**no** devuelve la raíz del checkout, así que hasta que ese campo exista
+cualquier consumidor que intente reengancharse sin haberla guardado llamará sin
+`root`.
 
-Que sean improbables no los hace prescindibles: `simplicity.md` pone la guarda
-en la puerta por la que el valor entra de fuera, y esta ruta es esa puerta sea
-quien sea el cliente de hoy. Lo que sí desaconseja es la guarda *de más*, y por
-eso el catálogo son tres y no cinco.
+**Un `issue` no numérico no tiene código propio.** Sólo lo consume el frontend y
+el frontend siempre manda el número que le dio el `202`; un rechazo para eso
+sería una rama sin llamada que la alcance. El modelo de petición lo convierte
+con `Number(…)` y sigue: un `issue` que no sea un número deriva la ruta
+`<root>/.worktrees/NaN/…`, no existe, y sale por `not-read` — que es la verdad,
+sin una rama de más.
+
+La conversión no es cosmética y por eso está aquí y no en el §5: `issue` es un
+**segmento de ruta** que compone un path de disco, así que interpolarlo crudo
+dejaría que un `..` saliera del checkout. `Number(…)` lo cierra sin añadir
+ninguna guarda, porque cualquier cosa que no sea un número se vuelve `NaN`.
 
 ### Los diez pasos
 
 Cinco ocurren **una vez por tarea**, tres **una vez por slice** —cuando ya no
 queda ninguna tarea por comitear— y dos son los bordes del run.
 
-| `step` | `STEPS` | Qué está pasando |
+| `step` | Alcance | Qué está pasando |
 |---|---|---|
 | `starting` | — | El worktree existe pero `ct-step` aún no ha creado el run |
-| `implementing` | `implement` | Un subagente implementador está escribiendo la tarea |
-| `verifying-task` | `controls` | El programa ejecuta los comandos de verificación que **esa tarea** declaró en el plan, y comprueba que los tests que prometió existen |
-| `judging-task` | `judge` | Un subagente `ct-judge` juzga la tarea contra su plan, sin shell, para no poder convencerse a sí mismo de que está verde |
-| `committing` | `commit` | El programa comitea la tarea. Comitea él y no el implementador, para que un veto no deje rastro que deshacer |
-| `reconciling` | `reconcile` | El worktree se pone al día con su rama base. Va antes de la verificación de slice para que ésta mida el árbol que se va a entregar y no uno que se quedó atrás |
-| `verifying-slice` | `global` | El programa ejecuta el bloque `## 8. Global verification` del plan: la verificación de **la slice entera**, una sola vez, sobre el árbol con las N tareas ya comiteadas. Existe porque el paso por tarea sólo mide el bloque de cada tarea por separado, y antes esto no lo corría nadie |
-| `judging-slice` | `slice-judge` | Un juez mira la slice **entera**: si las tareas juntas entregan lo que el plan prometía y si son coherentes entre sí. Ningún juez por tarea mira eso |
-| `verifying-journeys` | `e2e` | Los recorridos punta a punta, y sólo si la slice declara alguno. Es el único paso condicional |
+| `implement` | tarea | Un subagente implementador está escribiendo la tarea |
+| `controls` | tarea | El programa ejecuta los comandos de verificación que **esa tarea** declaró en el plan, y comprueba que los tests que prometió existen |
+| `judge` | tarea | Un subagente `ct-judge` juzga la tarea contra su plan, sin shell, para no poder convencerse a sí mismo de que está verde |
+| `commit` | tarea | El programa comitea la tarea. Comitea él y no el implementador, para que un veto no deje rastro que deshacer |
+| `reconcile` | tarea | El worktree se pone al día con su rama base. Va antes de `global` para que la punta a punta mida el árbol que se va a entregar y no uno que se quedó atrás |
+| `global` | slice | El programa ejecuta el bloque `## 8. Global verification` del plan: la verificación de **la slice entera**, una sola vez, sobre el árbol con las N tareas ya comiteadas. Existe porque `controls` sólo mide el bloque de cada tarea por separado, y antes esto no lo corría nadie. Es el nombre peor de los ocho, y se mantiene igualmente: ver §4 |
+| `slice-judge` | slice | Un juez mira la slice **entera**: si las tareas juntas entregan lo que el plan prometía y si son coherentes entre sí. Ningún juez por tarea mira eso |
+| `e2e` | slice | Los recorridos punta a punta, y sólo si la slice declara alguno. Es el único paso condicional |
 | `delivered` | — | El run cerró bien |
 
 ---
 
 ## 4. Las decisiones
 
-**El contrato tiene vocabulario propio, y no es el interno de la máquina.** Los
-nombres de `STEPS` son los de quien escribió la tabla de decisión, y dos de
-ellos no se explican solos fuera de ella: `global` no dice que sea la
-verificación de la slice entera, y `controls` no dice que sea la de una tarea.
-El contrato los nombra por lo que está pasando, en pares simétricos —
-`verifying-task` / `verifying-slice`, `judging-task` / `judging-slice` — y el
-mapa vive en un sitio, sujeto por el test de contrato del §6: el día que la
-máquina estrene un noveno paso, el mapa no lo cubre y el test cae.
+**El contrato emite `STEPS` tal cual, y se acopla a él a propósito.** Se
+consideró darle nombres propios —`global` no dice que sea la verificación de la
+slice entera, y `controls` no dice que sea la de una tarea— y se descartó: sería
+un tercer vocabulario que mantener sincronizado, entre el de la máquina y el
+castellano de la pantalla, y una traducción de más que hay que abrir cada vez
+que se lee una respuesta. El acoplamiento es la decisión, no el descuido: si un
+día molesta, el mapa se añade en un sitio. Mientras tanto, lo que hace falta
+para entender los ocho nombres es la tabla de arriba, no otro juego de nombres.
+
+Lo que sigue sujeto por el test de contrato del §6 es que el vocabulario esté
+**completo**: el día que la máquina estrene un noveno paso, el test cae en vez
+de que el endpoint conteste un `step` que nadie sabe dibujar.
 
 **El castellano no lo pone el backend.** El vocabulario del contrato es inglés,
 como el resto del backend; el castellano lo pone quien dibuja, que es donde ya
@@ -191,15 +200,17 @@ que aún no ha nacido son cosas distintas: la primera es un fallo (`400`) y la
 segunda un estado (`200`). El adaptador las separa mirando el directorio antes
 que el fichero.
 
-**Tres códigos de error, no cinco.** La pregunta de `simplicity.md` — *¿qué
+**Dos códigos de error, no cinco.** La pregunta de `simplicity.md` — *¿qué
 llamada se rompe sin esto? Nómbrala* — aplicada a un borrador que tenía cinco:
 
-- `malformed-issue` y `malformed-root` **se quedan**. Los dos valores entran de
-  fuera por la puerta de esta ruta, y `simplicity.md` pone ahí la guarda: sin
-  ellas, un `issue` no numérico deriva una ruta `…/run-NaN.json` y el fallo se
-  cuenta como «no se pudo leer ese fichero», que es un mensaje específico,
-  seguro y falso. `plan-events` tiene esos dos mismos rechazos por la misma
-  razón.
+- `malformed-root` **se queda**: el valor entra de fuera por la puerta de esta
+  ruta, y hay una llamada que lo alcanza mientras `POST /start-plan` no devuelva
+  la raíz del checkout.
+- `malformed-issue` **se va**. Es la misma pregunta con la respuesta contraria:
+  el único consumidor es el frontend, que manda el número que le dio el `202`, y
+  ninguna llamada de las que existen lo alcanza. Lo que sí queda es la
+  conversión a número — no como guarda, sino porque ese valor compone un path de
+  disco (§3).
 - `implementation-progress-not-understood` **se va**, fundido en `not-read`.
   Nadie distingue las dos: quien consuma el endpoint enseña el `detail` y hace
   lo mismo con cualquiera de ellas, y ninguna llamada se rompe si sólo hay una.
@@ -223,8 +234,7 @@ domain/exceptions.js                      + ImplementationProgressFailure
                                           + ImplementationProgressNotRead
 domain/ports/implementation-progress.js     ImplementationProgress.of({ root, issue })
 domain/value-objects/implementation-state.js
-                                            ImplementationState, el vocabulario de los diez
-                                            pasos y el mapa desde el de la máquina
+                                            ImplementationState y su vocabulario de diez pasos
 application/queries/read-implementation-progress.js
                                             ReadImplementationProgress, con Params y Result
 infrastructure/run-file-progress.js         el adaptador: el run-file y el lector de
@@ -240,9 +250,9 @@ Es el mismo reparto que la fase de plan ya tiene entre `plan-progress.js`
 (puerto), `plan-state.js` (valor), `plan-contract-progress.js` (adaptador) y
 `read-plan-progress.js` (query), y por eso no inventa ninguna forma nueva.
 
-El vocabulario de los diez pasos y el mapa desde `STEPS` viven dentro de
-`implementation-state.js` y no en un módulo propio: nadie los construye por su
-cuenta y su único consumidor es el valor que los usa.
+El vocabulario de los diez pasos vive dentro de `implementation-state.js` y no
+en un módulo propio: nadie lo construye por su cuenta y su único consumidor es
+el valor que lo usa.
 
 ---
 
@@ -262,9 +272,9 @@ Según `backend/conventions/testing.md`, sin excepciones:
 - **Contrato con el escritor** — `run-machine.js` es puro y sin un solo import,
   así que el test puede construir runs con el `newRun` y el `after` **reales**
   del plugin, serializarlos como hace `ct-step`, y comprobar que nuestro lector
-  los entiende. El mismo test afirma que el mapa del §3 cubre `STEPS` entero: el
-  día que el plugin añada un noveno paso, este test cae en vez de que el
-  endpoint conteste un `step` que nadie sabe dibujar. Es la regla de
+  los entiende. El mismo test afirma que el vocabulario del §3 cubre `STEPS`
+  entero: el día que el plugin añada un noveno paso, este test cae en vez de que
+  el endpoint conteste un `step` que nadie sabe dibujar. Es la regla de
   payloads de frontera con el sentido invertido — allí escribimos nosotros y lee
   el plugin; aquí escribe el plugin y leemos nosotros.
 - **Entrypoint** — el camino feliz y sólo ése, un proceso real que atiende una
