@@ -178,6 +178,15 @@ describe('RunFileProgress', () => {
     expect(refusal.message).toContain(RunFileDouble.RUN_FILE)
   })
 
+  it('a_json_array_is_not_a_run_without_tasks_either', async () => {
+    const asked = RunFileDouble.withText('[1,2,3]')
+
+    const refusal = await asked.refusal()
+
+    expect(refusal).toBeInstanceOf(ImplementationProgressNotRead)
+    expect(refusal.message).toContain(RunFileDouble.RUN_FILE)
+  })
+
   it('the_name_of_the_task_comes_from_the_heading_of_that_number_in_the_plan', async () => {
     const asked = RunFileDouble.answering({ ...RunFileDouble.BANCO_DE_LA_PUERTA, task: 2 }, PLAN)
 
