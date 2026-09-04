@@ -797,7 +797,7 @@ describe('ApiServer', () => {
     const response = await fetch(`http://127.0.0.1:${port}/plan-events/abc`)
 
     expect(response.status).toBe(400)
-    expect(await response.text()).toBe('{"code":"malformed-issue","detail":"the issue to watch is a number such as 42"}')
+    expect(await response.text()).toBe('{"code":"malformed-watched-issue","detail":"the issue to watch is a number such as 42"}')
     expect(spy.asked).toBe(0)
   })
 

@@ -27,7 +27,7 @@ export class PlanSessions {
 
 export const EventsRequestOutcome = Object.freeze({
   ACCEPTED: 'accepted',
-  MALFORMED_ISSUE: 'malformed-issue',
+  MALFORMED_ISSUE: 'malformed-watched-issue',
   MALFORMED_REPO: 'malformed-repo',
   NOT_WATCHED: 'not-watched',
 })
