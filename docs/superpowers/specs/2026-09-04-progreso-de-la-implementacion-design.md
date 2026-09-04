@@ -77,20 +77,35 @@ GET /implement-progress/:issue?root=<ruta absoluta del checkout>
 
 | Código | Cuerpo | Cuándo |
 |---|---|---|
-| `200` | `{"step":"starting","task":null,"tasks":null,"name":null,"attempt":null,"discards":null}` | el worktree existe y `ct-step` todavía no ha creado el run |
-| `200` | `{"step":"judge","task":3,"tasks":7,"name":"el lector del plan","attempt":2,"discards":0}` | un paso de tarea |
-| `200` | `{"step":"global","task":null,"tasks":7,"name":null,"attempt":null,"discards":0}` | un paso de slice |
-| `200` | `{"step":"delivered","task":null,"tasks":7,"name":null,"attempt":null,"discards":0}` | `closed: "delivered"` |
-| `400` | `{"code":"malformed-issue","detail":"the issue is a number such as 42"}` | |
-| `400` | `{"code":"malformed-root","detail":"root must be an absolute path such as /Users/you/repos/name"}` | |
-| `400` | `{"code":"implementation-progress-not-read","detail":"…"}` | no hay worktree, o el fichero no se pudo leer |
-| `400` | `{"code":"implementation-progress-not-understood","detail":"…"}` | el fichero no es el JSON que conocemos |
-| `403` | — | origen ajeno, como en las demás rutas |
-| `405` | `{"code":"method-not-allowed",…}` | cualquier verbo que no sea `GET` |
+| `200` | `{"step":"starting","task":null,"total_tasks":null,"name":null,"attempt":null,"discards":null}` | el worktree existe y `ct-step` todavía no ha creado el run |
+| `200` | `{"step":"judge","task":3,"total_tasks":7,"name":"el lector del plan","attempt":2,"discards":0}` | un paso de tarea |
+| `200` | `{"step":"global","task":null,"total_tasks":7,"name":null,"attempt":null,"discards":0}` | un paso de slice |
+| `200` | `{"step":"delivered","task":null,"total_tasks":7,"name":null,"attempt":null,"discards":0}` | `closed: "delivered"` |
+| `400` | `{"code":"malformed-issue","detail":"the issue to read is a number such as 42"}` | el issue de la ruta no es un número |
+| `400` | `{"code":"malformed-root","detail":"root is an absolute path such as /Users/you/repos/name"}` | falta `root` o no es absoluto |
+| `400` | `{"code":"implementation-progress-not-read","detail":"…"}` | no hay worktree ahí, o el fichero no se deja leer, o no es el JSON que conocemos |
+| `403` | — | origen ajeno; lo pone el middleware compartido, no esta ruta |
 
-`step` toma diez valores: los ocho de `STEPS` tal cual (`implement`, `controls`,
-`judge`, `commit`, `reconcile`, `global`, `slice-judge`, `e2e`) más `starting` y
-`delivered`, que no son pasos de la máquina sino los dos bordes del run.
+Tres códigos y ni uno más. El recorte está razonado en el §4.
+
+### Los diez pasos
+
+Los ocho de `STEPS` (`plugin/scripts/run-machine.js:41`) más los dos bordes del
+run. Los cinco primeros ocurren **una vez por tarea**; los tres siguientes
+ocurren **una vez por slice**, cuando ya no queda ninguna tarea por comitear.
+
+| `step` | Qué está pasando |
+|---|---|
+| `starting` | El worktree existe pero `ct-step` aún no ha creado el run. No es un paso de la máquina |
+| `implement` | Un subagente implementador está escribiendo la tarea |
+| `controls` | El programa ejecuta los comandos de verificación que **esa tarea** declaró en el plan, y comprueba que los tests que prometió existen |
+| `judge` | Un subagente `ct-judge` juzga la tarea contra su plan, sin shell, para no poder convencerse a sí mismo de que está verde |
+| `commit` | El programa comitea la tarea. Comitea él y no el implementador, para que un veto no deje rastro que deshacer |
+| `reconcile` | El worktree se pone al día con su rama base. Va antes de `global` para que la punta a punta mida el árbol que se va a entregar y no uno que se quedó atrás |
+| `global` | El programa ejecuta el bloque `## 8. Global verification` del plan: la verificación de **la slice entera**, una sola vez, sobre el árbol con las N tareas ya comiteadas. Existe porque `controls` sólo mide el bloque de cada tarea por separado, y antes esto no lo corría nadie |
+| `slice-judge` | Un juez mira la slice **entera**: si las tareas juntas entregan lo que el plan prometía y si son coherentes entre sí. Ningún juez por tarea mira eso |
+| `e2e` | Los recorridos punta a punta, y sólo si la slice declara alguno. Es el único paso condicional |
+| `delivered` | El run cerró bien. Tampoco es un paso de la máquina: es el otro borde |
 
 ---
 
@@ -104,7 +119,7 @@ producto. Traducir aquí obligaría a mantener dos vocabularios sincronizados co
 **Tres campos hablan de una tarea y dos del run, y sólo se rellenan cuando
 dicen la verdad.** `task`, `name` y `attempt` describen una tarea concreta, así
 que valen `null` en todo lo que no es un paso de tarea: en `starting`, en los
-tres pasos de slice y en `delivered`. `tasks` y `discards` son del run entero y
+tres pasos de slice y en `delivered`. `total_tasks` y `discards` son del run entero y
 sólo son `null` mientras el run no existe.
 
 Que `task` desaparezca en los pasos de slice es la misma decisión que `ct-step`
@@ -150,6 +165,29 @@ que aún no ha nacido son cosas distintas: la primera es un fallo (`400`) y la
 segunda un estado (`200`). El adaptador las separa mirando el directorio antes
 que el fichero.
 
+**Tres códigos de error, no cinco.** La pregunta de `simplicity.md` — *¿qué
+llamada se rompe sin esto? Nómbrala* — aplicada a un borrador que tenía cinco:
+
+- `malformed-issue` y `malformed-root` **se quedan**. Los dos valores entran de
+  fuera por la puerta de esta ruta, y `simplicity.md` pone ahí la guarda: sin
+  ellas, un `issue` no numérico deriva una ruta `…/run-NaN.json` y el fallo se
+  cuenta como «no se pudo leer ese fichero», que es un mensaje específico,
+  seguro y falso. `plan-events` tiene esos dos mismos rechazos por la misma
+  razón.
+- `implementation-progress-not-understood` **se va**, fundido en `not-read`.
+  Nadie distingue las dos: quien consuma el endpoint enseña el `detail` y hace
+  lo mismo con cualquiera de ellas, y ninguna llamada se rompe si sólo hay una.
+  El precedente manda en la misma dirección — el adaptador hermano de la fase de
+  plan, que además lanza procesos, tiene una sola `PlanProgressNotRead`. La
+  regla de `testing.md` que separa `NotRead` de `NotUnderstood` es para el
+  adaptador que habla con una herramienta que puede negarse o contestar basura;
+  aquí la herramienta es leer un fichero.
+- `405 method-not-allowed` **se va**. Lo había puesto por simetría con
+  `start-plan` e `implement-plan`, y era falso: `refuseOtherMethods` sólo lo
+  declaran las rutas POST, y `PlanEventsRoute` —la única GET del backend— no lo
+  tiene. Un POST aquí cae en `Failures.nothingMatched` como cae hoy en
+  `plan-events`.
+
 ---
 
 ## 5. Las piezas
@@ -157,7 +195,6 @@ que el fichero.
 ```
 domain/exceptions.js                      + ImplementationProgressFailure
                                           + ImplementationProgressNotRead
-                                          + ImplementationProgressNotUnderstood
 domain/ports/implementation-progress.js     ImplementationProgress.of({ root, issue })
 domain/value-objects/implementation-state.js
                                             ImplementationState y su vocabulario de pasos
@@ -192,9 +229,9 @@ Según `backend/conventions/testing.md`, sin excepciones:
 - **Query** — el puerto doblado por constructor; se afirma qué recibió y qué
   devolvió.
 - **Adaptador** — transcripciones literales: los dos run-file reales localizados
-  en el §2, no formas inventadas. Y las dos causas de fallo separadas, con la
-  prueba de que una no es instancia de la otra: el fichero que no se puede leer
-  (`NotRead`) y el fichero que no es lo que conocemos (`NotUnderstood`).
+  en el §2, no formas inventadas. Sus tres fallos (el directorio que no está, el
+  fichero que no se deja leer, el JSON a medias) comparten tipo y se distinguen
+  por el `detail`, que es lo único que alguien lee.
 - **Contrato con el escritor** — `run-machine.js` es puro y sin un solo import,
   así que el test puede construir runs con el `newRun` y el `after` **reales**
   del plugin, serializarlos como hace `ct-step`, y comprobar que nuestro lector
