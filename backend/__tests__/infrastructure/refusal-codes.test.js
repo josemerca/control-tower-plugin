@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { PlanRequestOutcome, PlanCollapse } from '../../src/infrastructure/start-plan-route.js'
 import { ImplementRequestOutcome, ImplementCollapse } from '../../src/infrastructure/implement-plan-route.js'
 import { EventsRequestOutcome, PlanEvents } from '../../src/infrastructure/plan-events-route.js'
+import { ProgressRequestOutcome, ProgressCollapse } from '../../src/infrastructure/implement-progress-route.js'
 
 class RequestVocabularies {
   static #ACCEPTED = 'accepted'
@@ -11,6 +12,7 @@ class RequestVocabularies {
       ...Object.values(PlanRequestOutcome),
       ...Object.values(ImplementRequestOutcome),
       ...Object.values(EventsRequestOutcome),
+      ...Object.values(ProgressRequestOutcome),
     ].filter((outcome) => outcome !== RequestVocabularies.#ACCEPTED)
   }
 }
@@ -53,6 +55,7 @@ describe('the codes the api can emit', () => {
       ...new Set(RequestVocabularies.codes()),
       ...PlanCollapse.declaredCodes(),
       ...ImplementCollapse.declaredCodes(),
+      ...ProgressCollapse.declaredCodes(),
       ...CodesRememberedByHandFromHttpAndApiServer.VALUES,
       ...EventStreamCodes.VALUES,
     ]
