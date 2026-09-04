@@ -1,5 +1,4 @@
 import { FormEvent, useState } from 'react'
-import { CheckoutRoot } from 'app/start-plan/CheckoutRoot'
 import { StartPlanClient } from 'app/start-plan/client'
 import { RepositoryName } from 'app/start-plan/RepositoryName'
 import { StartPlanOutcome, StartedPlan } from 'app/start-plan/StartPlan.types'
@@ -21,21 +20,16 @@ type StartPlanFormProps = {
 const StartPlanForm = ({ onStarted }: StartPlanFormProps) => {
   const [ticketKey, setTicketKey] = useState('')
   const [repository, setRepository] = useState('')
-  const [root, setRoot] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [refusal, setRefusal] = useState<StartPlanRefusal | null>(null)
 
-  const canStart =
-    TicketKey.isWellFormed(ticketKey) &&
-    RepositoryName.isWellFormed(repository) &&
-    CheckoutRoot.isWellFormed(root) &&
-    !isSending
+  const canStart = TicketKey.isWellFormed(ticketKey) && RepositoryName.isWellFormed(repository) && !isSending
 
   const startPlan = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setIsSending(true)
     setRefusal(null)
-    const outcome = await StartPlanClient.start({ id: ticketKey, repo: repository, root })
+    const outcome = await StartPlanClient.start({ id: ticketKey, repo: repository })
     setIsSending(false)
     if (outcome.kind === 'started') {
       onStarted(outcome.plan)
@@ -62,15 +56,6 @@ const StartPlanForm = ({ onStarted }: StartPlanFormProps) => {
           disabled={isSending}
           autoComplete="off"
           onChange={(event) => setRepository(event.target.value)}
-        />
-      </FormField>
-      <FormField label="Ruta del clon local" message={`Absoluta, con la forma ${CheckoutRoot.EXAMPLE}`}>
-        <Input
-          placeholder={CheckoutRoot.EXAMPLE}
-          value={root}
-          disabled={isSending}
-          autoComplete="off"
-          onChange={(event) => setRoot(event.target.value)}
         />
       </FormField>
       <div className="start-plan-form__actions">

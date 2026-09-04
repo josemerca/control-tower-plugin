@@ -53,10 +53,6 @@ const typeRepository = async (user: User, repository: string) => {
   await user.type(screen.getByLabelText('Repositorio'), repository)
 }
 
-const typeRoot = async (user: User, root: string) => {
-  await user.type(screen.getByLabelText('Ruta del clon local'), root)
-}
-
 const pressStart = async (user: User) => {
   await user.click(screen.getByRole('button', { name: 'Arrancar plan' }))
 }
@@ -64,7 +60,6 @@ const pressStart = async (user: User) => {
 const startPlan = async (user: User) => {
   await typeTicket(user, StartPlanMother.TICKET)
   await typeRepository(user, StartPlanMother.REPO)
-  await typeRoot(user, StartPlanMother.ROOT)
   await pressStart(user)
 }
 
@@ -87,7 +82,6 @@ export {
   openHome,
   typeTicket,
   typeRepository,
-  typeRoot,
   pressStart,
   startPlan,
   streamFrame,

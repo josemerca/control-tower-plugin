@@ -3,13 +3,13 @@ import { StartPlanOutcome, StartPlanRefusal, StartPlanRequest, StartPlanResult }
 const PATH = '/start-plan'
 const ACCEPTED = 202
 
-const start = async ({ id, repo, root }: StartPlanRequest): Promise<StartPlanOutcome> => {
+const start = async ({ id, repo }: StartPlanRequest): Promise<StartPlanOutcome> => {
   let response: Response
   try {
     response = await fetch(PATH, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, repo, root }),
+      body: JSON.stringify({ id, repo }),
     })
   } catch {
     return { kind: 'backend-unreachable' }
