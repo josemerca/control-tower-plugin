@@ -50,7 +50,12 @@ export class RunFileProgress extends ImplementationProgress {
       throw new ImplementationProgressNotRead(`the worktree ${worktree} is not there, so its run cannot be read`)
     }
     const path = RunFileProgress.runFileFor(root.text, issue)
-    const text = await this.read(path)
+    let text
+    try {
+      text = await this.read(path)
+    } catch (cause) {
+      throw new ImplementationProgressNotRead(`${path} could not be read: ${cause.message}`)
+    }
     if (text === null) return ImplementationState.starting()
 
     let run

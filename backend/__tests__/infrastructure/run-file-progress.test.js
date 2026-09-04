@@ -59,9 +59,10 @@ class RunFileDouble {
     lastVerdict: { ruling: 'PASS' },
   }
 
-  constructor({ exists = true, texts = [] } = {}) {
+  constructor({ exists = true, texts = [], runFileReadFails = null } = {}) {
     this.exists = exists
     this.texts = [...texts]
+    this.runFileReadFails = runFileReadFails
     this.existsAsked = []
     this.readAsked = []
   }
@@ -82,6 +83,10 @@ class RunFileDouble {
     return new RunFileDouble({ texts: [text] })
   }
 
+  static withUnreadableRunFile(cause = new Error('EACCES: permission denied')) {
+    return new RunFileDouble({ runFileReadFails: cause })
+  }
+
   progress() {
     return new RunFileProgress({
       exists: async (path) => {
@@ -90,6 +95,9 @@ class RunFileDouble {
       },
       read: async (path) => {
         this.readAsked.push(path)
+        if (path === RunFileDouble.RUN_FILE && this.runFileReadFails !== null) {
+          throw this.runFileReadFails
+        }
         if (this.texts.length === 0) {
           throw new Error(`read was asked for ${path} with no scripted answer left`)
         }
@@ -180,6 +188,15 @@ describe('RunFileProgress', () => {
 
   it('a_json_array_is_not_a_run_without_tasks_either', async () => {
     const asked = RunFileDouble.withText('[1,2,3]')
+
+    const refusal = await asked.refusal()
+
+    expect(refusal).toBeInstanceOf(ImplementationProgressNotRead)
+    expect(refusal.message).toContain(RunFileDouble.RUN_FILE)
+  })
+
+  it('a_run_file_that_exists_but_cannot_be_read_is_a_progress_that_could_not_be_read', async () => {
+    const asked = RunFileDouble.withUnreadableRunFile()
 
     const refusal = await asked.refusal()
 
