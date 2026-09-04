@@ -10,6 +10,7 @@ interface WorkflowStepProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
   children: ReactNode
   isExpanded: boolean
   onExpandedChange: (isExpanded: boolean) => void
+  canCollapse?: boolean
   contentId?: string
   isAvailable?: boolean
 }
@@ -32,6 +33,7 @@ const WorkflowStep = ({
   children,
   isExpanded,
   onExpandedChange,
+  canCollapse = true,
   contentId,
   isAvailable = status !== 'pending',
   className,
@@ -41,6 +43,7 @@ const WorkflowStep = ({
   const headerId = `${generatedId}-header`
   const titleId = `${generatedId}-title`
   const resolvedContentId = contentId ?? `${generatedId}-content`
+  const isCollapseDisabled = isExpanded && !canCollapse
   return (
     <section {...rest} className={classNames('workflow-step', STATUS_CLASS[status], className)}>
       <button
@@ -49,8 +52,11 @@ const WorkflowStep = ({
         className="workflow-step__header"
         aria-expanded={isExpanded}
         aria-controls={resolvedContentId}
+        aria-disabled={isCollapseDisabled || undefined}
         disabled={!isAvailable}
-        onClick={() => onExpandedChange(!isExpanded)}
+        onClick={() => {
+          if (!isCollapseDisabled) onExpandedChange(!isExpanded)
+        }}
       >
         <span className="workflow-step__indicator" aria-hidden="true">
           {status === 'completed' && (

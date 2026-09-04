@@ -47,11 +47,23 @@ const Home = () => {
     <div className="home">
       <TopBar productName="Control Tower" logo={<span className="home__logo">CT</span>} />
       <main className="home__content">
-        <WorkflowStep title="Solicitud" status={requestStatus} isExpanded={expandedStep === 'request'} onExpandedChange={expand('request')}>
+        <WorkflowStep
+          title="Solicitud"
+          status={requestStatus}
+          isExpanded={expandedStep === 'request'}
+          canCollapse={expandedStep !== 'request'}
+          onExpandedChange={expand('request')}
+        >
           <StartPlanForm key={requestFormVersion} onStarted={planStarted} isLocked={started !== null} />
         </WorkflowStep>
         {started !== null && (
-          <WorkflowStep title="Plan" status={planStatus} isExpanded={expandedStep === 'plan'} onExpandedChange={expand('plan')}>
+          <WorkflowStep
+            title="Plan"
+            status={planStatus}
+            isExpanded={expandedStep === 'plan'}
+            canCollapse={expandedStep !== 'plan'}
+            onExpandedChange={expand('plan')}
+          >
             <PlanProgress
               key={`${started.repo}:${started.issue.number}`}
               plan={started}
@@ -63,6 +75,7 @@ const Home = () => {
           title="Implementación"
           status={implementationStatus}
           isExpanded={expandedStep === 'implementation'}
+          canCollapse={expandedStep !== 'implementation'}
           onExpandedChange={expand('implementation')}
         >
           {started !== null && isPlanReady && (

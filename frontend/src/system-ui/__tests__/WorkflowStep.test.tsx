@@ -48,6 +48,24 @@ describe('WorkflowStep', () => {
     expect(onExpandedChange).toHaveBeenCalledWith(false)
   })
 
+  it('should keep an expanded non-collapsible step focusable without asking its parent to collapse', async () => {
+    const user = userEvent.setup()
+    const onExpandedChange = vi.fn()
+
+    render(
+      <WorkflowStep status="active" title="Plan preparado" isExpanded canCollapse={false} onExpandedChange={onExpandedChange}>
+        El plan está listo para implementar
+      </WorkflowStep>,
+    )
+
+    const header = screen.getByRole('button', { name: /Plan preparado/ })
+    await user.click(header)
+
+    expect(header).toHaveAttribute('aria-disabled', 'true')
+    expect(header).not.toBeDisabled()
+    expect(onExpandedChange).not.toHaveBeenCalled()
+  })
+
   it.each(['completed', 'active', 'pending'] as const)('should expose the %s state in its class', (status) => {
     const { container } = render(
       <WorkflowStep status={status} title="Paso" isExpanded={false} onExpandedChange={() => undefined}>

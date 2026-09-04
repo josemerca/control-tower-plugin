@@ -22,6 +22,7 @@ describe('Home · start plan', () => {
     await user.click(screen.getByRole('button', { name: /Solicitud Activo/ }))
 
     expect(screen.getByRole('button', { name: /Solicitud Activo/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: /Solicitud Activo/ })).toHaveAttribute('aria-disabled', 'true')
   })
 
   it('should show the plan the backend started with a link to its issue', async () => {
