@@ -42,7 +42,8 @@ export class SweepLine {
 }
 
 export class HarvestClock {
-  constructor({ survey, harvest, sleep, stderr }) {
+  constructor({ checkouts, survey, harvest, sleep, stderr }) {
+    this.checkouts = checkouts
     this.survey = survey
     this.harvest = harvest
     this.sleep = sleep
@@ -57,9 +58,15 @@ export class HarvestClock {
   }
 
   async sweep() {
+    for (const root of this.checkouts()) {
+      await this.#sweepCheckout(root)
+    }
+  }
+
+  async #sweepCheckout(root) {
     let checkout
     try {
-      checkout = (await this.survey()).survey
+      checkout = (await this.survey(root)).survey
     } catch (failure) {
       if (!(failure instanceof PlanFailure)) throw failure
       this.stderr(SweepLine.forSurvey(failure))

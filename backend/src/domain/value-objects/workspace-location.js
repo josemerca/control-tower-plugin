@@ -1,5 +1,6 @@
 export class WorkspaceLocation {
-  constructor({ path, branch }) {
+  constructor({ root, path, branch }) {
+    this.root = root
     this.path = path
     this.branch = branch
     Object.freeze(this)

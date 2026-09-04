@@ -28,11 +28,10 @@ export class DispatchCheckHarvest extends Harvest {
     [DispatchCheckHarvest.KEPT]: () => HarvestOutcome.KEPT,
   })
 
-  constructor({ node, dispatchCheck, root }) {
+  constructor({ node, dispatchCheck }) {
     super()
     this.node = node
     this.dispatchCheck = dispatchCheck
-    this.root = root
   }
 
   static argvFor({ dispatchCheck, issueNumber, repository }) {
@@ -43,10 +42,10 @@ export class DispatchCheckHarvest extends Harvest {
     return Object.keys(DispatchCheckHarvest.#BY_CODE).map(Number)
   }
 
-  async collect({ issueNumber, repository }) {
+  async collect({ issueNumber, repository, root }) {
     const said = await this.node(
       DispatchCheckHarvest.argvFor({ dispatchCheck: this.dispatchCheck, issueNumber, repository }),
-      { cwd: this.root }
+      { cwd: root }
     )
     const projected = DispatchCheckHarvest.#BY_CODE[said.code]
     if (projected === undefined) {
