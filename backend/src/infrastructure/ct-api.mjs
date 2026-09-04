@@ -166,7 +166,7 @@ class CtApi {
 
     return new HarvestClock({
       checkouts: () => checkouts.known(),
-      survey: (root) => surveyWorkspaces.execute(new SurveyWorkspacesParams(root)),
+      survey: (root) => surveyWorkspaces.execute(new SurveyWorkspacesParams({ root })),
       harvest: (prepared, repository) =>
         harvestDelivery.execute(new HarvestDeliveryParams({ prepared, repository })),
       sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_SWEEPS),

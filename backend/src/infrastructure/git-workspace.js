@@ -3,6 +3,7 @@ import { SLICE_REL_PATH, excludeContentWith } from '../../../plugin/scripts/stat
 import { renderState } from '../../../plugin/scripts/state.js'
 import { GhPlanIssues } from './gh-plan-issues.js'
 import { Workspace } from '../domain/ports/workspace.js'
+import { CheckoutRoot } from '../domain/value-objects/checkout-root.js'
 import { PreparedWorkspace } from '../domain/value-objects/prepared-workspace.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
 import { WorkspaceLocation } from '../domain/value-objects/workspace-location.js'
@@ -129,6 +130,10 @@ export class GitWorkspace extends Workspace {
     return ['-C', root, 'worktree', 'list', '--porcelain']
   }
 
+  static toplevelArgvFor(root) {
+    return ['-C', root, 'rev-parse', '--show-toplevel']
+  }
+
   static defaultBranchArgvFor(root) {
     return ['-C', root, 'symbolic-ref', GitWorkspace.REMOTE_HEAD]
   }
@@ -163,6 +168,23 @@ export class GitWorkspace extends Workspace {
     if (held.text !== repository.text) {
       throw new CheckoutNotConfirmed(`${repository.text}: ${root.text} holds ${held.text}`)
     }
+
+    return await this.#canonicalRootOf(root.text, repository.text)
+  }
+
+  async #canonicalRootOf(root, repository) {
+    const asked = await this.run(GitWorkspace.toplevelArgvFor(root))
+    if (asked.failed) {
+      throw new CheckoutNotConfirmed(`${repository}: ${root} could not be resolved to its git top level: ${asked.stderr.trim()}`)
+    }
+    const printed = asked.stdout.trim()
+    if (printed.length === 0) {
+      throw new WorkspaceNotUnderstood(
+        `git rev-parse --show-toplevel printed nothing for ${root}, and a checkout always has one`
+      )
+    }
+
+    return new CheckoutRoot(printed)
   }
 
   async prepare({ issue, repository, root }) {

@@ -1,33 +1,40 @@
 import { Answer, Refusal } from './http.js'
 import { Projection } from './projection.js'
 import { PlanProgressFailure } from '../domain/exceptions.js'
+import { RepositoryName } from '../domain/value-objects/repository-name.js'
 
 export class PlanSessions {
   constructor() {
     this.live = new Map()
   }
 
+  static #keyFor(repository, issueNumber) {
+    return `${repository.text}#${issueNumber}`
+  }
+
   remember(watch) {
-    this.live.set(watch.issue.number, watch)
+    this.live.set(PlanSessions.#keyFor(watch.repository, watch.issue.number), watch)
   }
 
-  watching(number) {
-    return this.live.get(number) ?? null
+  find(repository, issueNumber) {
+    return this.live.get(PlanSessions.#keyFor(repository, issueNumber)) ?? null
   }
 
-  forget(number) {
-    this.live.delete(number)
+  forget({ issue, repository }) {
+    this.live.delete(PlanSessions.#keyFor(repository, issue))
   }
 }
 
 export const EventsRequestOutcome = Object.freeze({
   ACCEPTED: 'accepted',
   MALFORMED_ISSUE: 'malformed-issue',
+  MALFORMED_REPO: 'malformed-repo',
   NOT_WATCHED: 'not-watched',
 })
 
 export class EventsRequest {
   static EXAMPLE = 42
+  static REPO_FIELD = 'repo'
   static #NUMBERED = /^[1-9][0-9]*$/
 
   constructor({ outcome, watched }) {
@@ -44,11 +51,14 @@ export class EventsRequest {
     return new EventsRequest({ outcome, watched: null })
   }
 
-  static from(rawIssue, sessions) {
+  static from(rawIssue, rawRepo, sessions) {
     if (typeof rawIssue !== 'string' || !EventsRequest.#NUMBERED.test(rawIssue)) {
       return EventsRequest.refused(EventsRequestOutcome.MALFORMED_ISSUE)
     }
-    const watched = sessions.watching(Number(rawIssue))
+    if (!RepositoryName.isWellFormed(rawRepo)) {
+      return EventsRequest.refused(EventsRequestOutcome.MALFORMED_REPO)
+    }
+    const watched = sessions.find(new RepositoryName(rawRepo), Number(rawIssue))
     if (watched === null) {
       return EventsRequest.refused(EventsRequestOutcome.NOT_WATCHED)
     }
@@ -63,6 +73,10 @@ export class EventsRefusal {
     [EventsRequestOutcome.MALFORMED_ISSUE, () => new Refusal({
       status: 400,
       error: `the issue to watch is a number such as ${EventsRequest.EXAMPLE}`,
+    })],
+    [EventsRequestOutcome.MALFORMED_REPO, () => new Refusal({
+      status: 400,
+      error: `${EventsRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
     })],
     [EventsRequestOutcome.NOT_WATCHED, () =>
       new Refusal({ status: 404, error: EventsRefusal.NOT_WATCHED })],
@@ -138,7 +152,7 @@ export class PlanEventsRoute {
 
   static handledBy(sessions, events) {
     return async (request, response) => {
-      const asked = EventsRequest.from(request.params.issue, sessions)
+      const asked = EventsRequest.from(request.params.issue, request.query[EventsRequest.REPO_FIELD], sessions)
       if (asked.outcome !== EventsRequestOutcome.ACCEPTED) {
         Answer.refuseAs(response, EventsRefusal.of(asked))
         return
@@ -149,7 +163,7 @@ export class PlanEventsRoute {
       for await (const frame of events.stream(asked.watched, disconnected)) {
         response.write(frame)
       }
-      if (!disconnected()) sessions.forget(asked.watched.issue.number)
+      if (!disconnected()) sessions.forget({ issue: asked.watched.issue.number, repository: asked.watched.repository })
       response.end()
     }
   }

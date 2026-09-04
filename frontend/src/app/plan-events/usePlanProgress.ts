@@ -10,19 +10,19 @@ type PlanProgress =
 
 const CONNECTING: PlanProgress = { phase: 'connecting' }
 
-const usePlanProgress = (issue: number): PlanProgress => {
+const usePlanProgress = (issue: number, repo: string): PlanProgress => {
   const [progress, setProgress] = useState<PlanProgress>(CONNECTING)
 
   useEffect(() => {
     setProgress(CONNECTING)
-    const subscription = PlanEventsClient.watch(issue, {
+    const subscription = PlanEventsClient.watch(issue, repo, {
       onState: (state) => setProgress({ phase: state }),
       onFailure: (error) => setProgress({ phase: 'failed', error }),
       onUnreachable: () => setProgress({ phase: 'unreachable' }),
     })
 
     return subscription.close
-  }, [issue])
+  }, [issue, repo])
 
   return progress
 }

@@ -49,7 +49,7 @@ class WorkspaceDouble extends Workspace {
   }
 
   asked(root = WorkspaceDouble.CHECKOUT) {
-    return new SurveyWorkspaces({ workspace: this }).execute(new SurveyWorkspacesParams(root))
+    return new SurveyWorkspaces({ workspace: this }).execute(new SurveyWorkspacesParams({ root }))
   }
 
   refusal() {

@@ -2,7 +2,16 @@ import { screen } from '@testing-library/react'
 import { PlanEventsMother } from '__scenarios__/PlanEventsMother'
 import { StartPlanMother } from '__scenarios__/StartPlanMother'
 import { FakeEventSource } from './FakeEventSource'
-import { backendAnswering, dropStream, openHome, startPlan, streamFailure, streamFrame } from './helpers'
+import {
+  backendAnswering,
+  dropStream,
+  openHome,
+  pressStart,
+  startPlan,
+  streamFailure,
+  streamFrame,
+  typeRepository,
+} from './helpers'
 
 describe('Home · plan events', () => {
   afterEach(() => {
@@ -77,5 +86,20 @@ describe('Home · plan events', () => {
     unmount()
 
     expect(FakeEventSource.last().closes).toBe(1)
+  })
+
+  it('should watch the new repository and close the previous stream when a second run reuses the same issue number', async () => {
+    const { user } = await planStarted()
+    const firstSubscription = FakeEventSource.last()
+
+    backendAnswering(StartPlanMother.startedInAnotherRepo())
+    await user.clear(screen.getByLabelText('Repositorio'))
+    await typeRepository(user, StartPlanMother.ANOTHER_REPO)
+    await pressStart(user)
+    await screen.findByRole('status')
+
+    expect(FakeEventSource.last()).not.toBe(firstSubscription)
+    expect(FakeEventSource.last().url).toBe(PlanEventsMother.PATH_IN_ANOTHER_REPO)
+    expect(firstSubscription.closes).toBe(1)
   })
 })

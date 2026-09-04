@@ -1,8 +1,26 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { spawn } from 'node:child_process'
-import { tmpdir } from 'node:os'
+import { execFileSync, spawn } from 'node:child_process'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+class HostCheckout {
+  static #HERE = dirname(fileURLToPath(import.meta.url))
+  static #NAMED = /^(?:git@github\.com:|https:\/\/github\.com\/)([^/]+\/[^/]+?)(?:\.git)?$/
+
+  static path() {
+    return HostCheckout.#HERE
+  }
+
+  static repository() {
+    const url = execFileSync('git', ['-C', HostCheckout.#HERE, 'remote', 'get-url', 'origin'], { encoding: 'utf8' }).trim()
+    const named = url.match(HostCheckout.#NAMED)
+    if (named === null) {
+      throw new Error(`the origin of this checkout is ${JSON.stringify(url)}, and no owner/name can be read out of it`)
+    }
+
+    return named[1]
+  }
+}
 
 class Entrypoint {
   static #PATH = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'src', 'infrastructure', 'ct-api.mjs')
@@ -58,18 +76,15 @@ describe('ct-api entrypoint', () => {
     expect(port).toBeGreaterThan(0)
   })
 
-  it('a_whole_request_reaches_git_first_so_no_story_is_read_for_a_clone_nobody_has', async () => {
+  it('a_whole_request_reaches_acli_so_a_typo_in_the_key_that_wires_the_user_stories_would_show_up_here_and_not_only_in_the_first_real_use', async () => {
     const port = await Entrypoint.listening({ CT_API_PORT: '0' })
-    const nowhere = join(tmpdir(), 'ct-api-never-cloned')
 
     const response = await Entrypoint.startPlan(
       port,
-      `{"id":"ZZZ-999999","repo":"josemerca/nope","path":${JSON.stringify(nowhere)}}`
+      `{"id":"ZZZ-999999","repo":${JSON.stringify(HostCheckout.repository())},"path":${JSON.stringify(HostCheckout.path())}}`
     )
 
-    expect(response.status).toBe(400)
-    expect((await response.json()).error).toMatch(
-      /^path must be a git checkout of josemerca\/nope: .+ does not name a origin remote/
-    )
+    expect(response.status).toBe(503)
+    expect((await response.json()).error).toMatch(/^could not start the plan: acli jira failed: /)
   })
 })

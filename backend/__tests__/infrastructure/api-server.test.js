@@ -169,8 +169,12 @@ class RunningApi {
     return RunningApi.startPlan(port, RunningApi.ACCEPTED_BODY)
   }
 
+  static eventsPath() {
+    return `/plan-events/${StartPlanSpy.ISSUE.number}?repo=${encodeURIComponent(RunningApi.REPO)}`
+  }
+
   static async watching(port, headers = {}) {
-    return fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+    return fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`, {
       headers: { Origin: `http://127.0.0.1:${port}`, ...headers },
       signal: AbortSignal.timeout(1000),
     })
@@ -599,14 +603,22 @@ describe('ApiServer', () => {
       [
         '{"id":"ABC-123","repo":"owner/name","path":"repos/name"}',
         '{"id":"ABC-123","repo":"owner/name","path":"~/repos/name"}',
-        '{"id":"ABC-123","repo":"owner/name","path":"/repos/name/"}',
         '{"id":"ABC-123","repo":"owner/name","path":""}',
         '{"id":"ABC-123","repo":"owner/name","path":123}',
       ].map((body) => RunningApi.startPlan(port, body))
     )
 
-    expect(refused.map((response) => response.status)).toEqual([400, 400, 400, 400, 400])
+    expect(refused.map((response) => response.status)).toEqual([400, 400, 400, 400])
     expect(RunningApi.spy.asked).toEqual([])
+  })
+
+  it('a_trailing_slash_reaches_the_use_case_because_git_absorbs_it_when_it_canonicalises_the_root', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, '{"id":"ABC-123","repo":"owner/name","path":"/repos/name/"}')
+
+    expect(response.status).toBe(202)
+    expect(RunningApi.spy.roots).toEqual(['/repos/name/'])
   })
 
   it('a_path_with_a_semicolon_in_a_segment_is_still_well_formed_because_nothing_ever_reaches_a_shell', async () => {
@@ -772,7 +784,7 @@ describe('ApiServer', () => {
     const { planEvents } = ProgressSpy.events(PlanState.READY)
     const port = await RunningApi.listening({ planEvents })
 
-    const response = await fetch(`http://127.0.0.1:${port}/plan-events/404`)
+    const response = await fetch(`http://127.0.0.1:${port}/plan-events/404?repo=${encodeURIComponent(RunningApi.REPO)}`)
 
     expect(response.status).toBe(404)
     expect(await response.text()).toBe(`{"error":"${EventsRefusal.NOT_WATCHED}"}`)
@@ -819,8 +831,8 @@ describe('ApiServer', () => {
     const port = await RunningApi.listening({ planEvents })
 
     await RunningApi.accepted(port)
-    await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`)
-    const again = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`)
+    await fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`)
+    const again = await fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`)
 
     expect(again.status).toBe(404)
   })
@@ -831,14 +843,14 @@ describe('ApiServer', () => {
 
     await RunningApi.accepted(port)
     const controller = new AbortController()
-    const opened = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+    const opened = await fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`, {
       signal: controller.signal,
     })
     await opened.body.getReader().read()
     controller.abort()
     await new Promise((resolve) => setTimeout(resolve, 30))
 
-    const again = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+    const again = await fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`, {
       signal: AbortSignal.timeout(50),
     }).catch((cause) => cause)
 
@@ -850,7 +862,7 @@ describe('ApiServer', () => {
     const port = await RunningApi.listening({ planEvents })
 
     await RunningApi.accepted(port)
-    const response = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+    const response = await fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`, {
       headers: { Origin: 'https://evil.example' },
     })
 
@@ -864,7 +876,7 @@ describe('ApiServer', () => {
     const port = await RunningApi.listening({ planEvents })
 
     await RunningApi.accepted(port)
-    const response = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+    const response = await fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`, {
       headers: { Origin: `http://127.0.0.1:${port}` },
     })
 
@@ -880,7 +892,7 @@ describe('ApiServer', () => {
 
     await RunningApi.accepted(port)
     const controller = new AbortController()
-    const opened = await fetch(`http://127.0.0.1:${port}/plan-events/${StartPlanSpy.ISSUE.number}`, {
+    const opened = await fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`, {
       signal: controller.signal,
     })
     await opened.body.getReader().read()

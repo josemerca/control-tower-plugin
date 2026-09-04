@@ -171,7 +171,7 @@ export class ImplementPlanRoute {
       return
     }
     reviews.stop({ issue: asked.issue, repository: asked.repository })
-    sessions.forget(asked.issue)
+    sessions.forget({ issue: asked.issue, repository: asked.repository })
     Answer.send(response, 202, {
       status: 'implementing',
       [ImplementRequest.AGENT_FIELD]: asked.agent,

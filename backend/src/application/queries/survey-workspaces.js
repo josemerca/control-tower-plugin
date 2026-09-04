@@ -1,5 +1,5 @@
 export class SurveyWorkspacesParams {
-  constructor(root) {
+  constructor({ root }) {
     this.root = root
     Object.freeze(this)
   }

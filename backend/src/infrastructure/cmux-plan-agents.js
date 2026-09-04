@@ -30,14 +30,14 @@ export class CmuxPlanAgents extends PlanAgents {
     this.brief = brief
   }
 
-  static nameFor(story) {
-    return `ct-plan-${story}`
+  static nameFor(story, repository) {
+    return `ct-plan-${repository.text.replace(/\//g, '__')}-${story}`
   }
 
   static argvFor(briefing, typed) {
     return [
       'new-workspace',
-      '--name', CmuxPlanAgents.nameFor(briefing.story),
+      '--name', CmuxPlanAgents.nameFor(briefing.story, briefing.repository),
       '--cwd', briefing.located.path,
       '--command', typed,
     ]
@@ -63,7 +63,7 @@ export class CmuxPlanAgents extends PlanAgents {
 
   async launch(briefing) {
     const errand = this.brief.errandFor({ issue: briefing.issue, repository: briefing.repository })
-    const directory = `${this.runsIn}/${briefing.issue.number}`
+    const directory = `${this.runsIn}/${briefing.repository.text.replace(/\//g, '__')}-${briefing.issue.number}`
     const launcherPath = `${directory}/${LAUNCHER_FILENAME}`
     const sentinelPath = `${directory}/${SENTINEL_FILENAME}`
     const typed = buildTypedCommand(launcherPath, shQuote)

@@ -74,10 +74,11 @@ class PlanIssuesDouble extends PlanIssues {
 class WorkspaceDouble extends Workspace {
   static LOCATED = new WorkspaceLocation({ root: '/repo', path: '/repo/.worktrees/7', branch: 'feat/7' })
 
-  constructor(answer = WorkspaceDouble.LOCATED, { confirmFailure = null } = {}) {
+  constructor(answer = WorkspaceDouble.LOCATED, { confirmFailure = null, confirmedRoot = null } = {}) {
     super()
     this.answer = answer
     this.confirmFailure = confirmFailure
+    this.confirmedRoot = confirmedRoot
     this.asked = []
     this.undone = []
     this.confirmed = []
@@ -92,10 +93,16 @@ class WorkspaceDouble extends Workspace {
     return new WorkspaceDouble(WorkspaceDouble.LOCATED, { confirmFailure: new WorkspaceNotPrepared(said) })
   }
 
+  static confirming(confirmedRoot) {
+    return new WorkspaceDouble(WorkspaceDouble.LOCATED, { confirmedRoot })
+  }
+
   async confirm({ root, repository }) {
     this.confirmed.push({ root, repository })
     this.steps.push('confirm')
     if (this.confirmFailure !== null) throw this.confirmFailure
+
+    return this.confirmedRoot ?? root
   }
 
   async prepare({ issue, repository, root }) {
@@ -325,6 +332,18 @@ describe('StartPlan confirms the clone before anything is read or created', () =
     await flow.run()
 
     expect(flow.checkouts.remembered).toEqual([Flow.ROOT])
+  })
+
+  it('the_canonical_root_confirm_answers_is_what_travels_onward_and_not_the_one_the_caller_typed', async () => {
+    const canonical = new CheckoutRoot('/real/repo')
+    const flow = new Flow({ workspace: WorkspaceDouble.confirming(canonical) })
+
+    await flow.run()
+
+    expect(flow.workspace.asked).toEqual([
+      { issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY, root: canonical },
+    ])
+    expect(flow.checkouts.remembered).toEqual([canonical])
   })
 
   it('the_clone_is_remembered_only_after_the_agent_launched_because_an_undone_worktree_leaves_nothing_to_harvest', async () => {
