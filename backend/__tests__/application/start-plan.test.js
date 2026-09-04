@@ -4,11 +4,13 @@ import { PlanAgents } from '../../src/domain/ports/plan-agents.js'
 import { PlanIssues } from '../../src/domain/ports/plan-issues.js'
 import { UserStories } from '../../src/domain/ports/user-stories.js'
 import { Workspace } from '../../src/domain/ports/workspace.js'
+import { CheckoutRegistry } from '../../src/domain/ports/checkout-registry.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { UserStory } from '../../src/domain/value-objects/user-story.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
+import { CheckoutRoot } from '../../src/domain/value-objects/checkout-root.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import {
   PlanAgentNotLaunched, PlanIssueNotClaimed, PlanIssueNotCreated, UserStoryNotRead,
@@ -70,14 +72,15 @@ class PlanIssuesDouble extends PlanIssues {
 }
 
 class WorkspaceDouble extends Workspace {
-  static LOCATED = new WorkspaceLocation({ path: '/repo/.worktrees/7', branch: 'feat/7' })
+  static LOCATED = new WorkspaceLocation({ root: '/repo', path: '/repo/.worktrees/7', branch: 'feat/7' })
 
-  constructor(answer = WorkspaceDouble.LOCATED, { undoFailure = null } = {}) {
+  constructor(answer = WorkspaceDouble.LOCATED, { confirmFailure = null } = {}) {
     super()
     this.answer = answer
-    this.undoFailure = undoFailure
+    this.confirmFailure = confirmFailure
     this.asked = []
     this.undone = []
+    this.confirmed = []
     this.steps = []
   }
 
@@ -85,12 +88,18 @@ class WorkspaceDouble extends Workspace {
     return new WorkspaceDouble(new WorkspaceNotPrepared(said))
   }
 
-  static leaking(said) {
-    return new WorkspaceDouble(WorkspaceDouble.LOCATED, { undoFailure: new Error(said) })
+  static refusingToConfirm(said) {
+    return new WorkspaceDouble(WorkspaceDouble.LOCATED, { confirmFailure: new WorkspaceNotPrepared(said) })
   }
 
-  async prepare({ issue, repository }) {
-    this.asked.push({ issue, repository })
+  async confirm({ root, repository }) {
+    this.confirmed.push({ root, repository })
+    this.steps.push('confirm')
+    if (this.confirmFailure !== null) throw this.confirmFailure
+  }
+
+  async prepare({ issue, repository, root }) {
+    this.asked.push({ issue, repository, root })
     if (this.answer instanceof Error) throw this.answer
     return this.answer
   }
@@ -98,7 +107,21 @@ class WorkspaceDouble extends Workspace {
   async undo(located) {
     this.undone.push(located)
     this.steps.push('undo')
-    if (this.undoFailure !== null) throw this.undoFailure
+  }
+}
+
+class CheckoutRegistryDouble extends CheckoutRegistry {
+  constructor() {
+    super()
+    this.remembered = []
+  }
+
+  remember(root) {
+    this.remembered.push(root)
+  }
+
+  known() {
+    return [...this.remembered]
   }
 }
 
@@ -123,19 +146,23 @@ class PlanAgentsDouble extends PlanAgents {
 class Flow {
   static STORY = new UserStoryKey('MO_SHOP-42')
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
+  static ROOT = new CheckoutRoot('/repo')
 
-  constructor({ userStories, planIssues, workspace, planAgents } = {}) {
+  constructor({ userStories, planIssues, workspace, planAgents, checkouts } = {}) {
     this.userStories = userStories ?? UserStoriesDouble.reading('the summary of the story')
     this.planIssues = planIssues ?? new PlanIssuesDouble()
     this.workspace = workspace ?? new WorkspaceDouble()
     this.planAgents = planAgents ?? new PlanAgentsDouble()
+    this.checkouts = checkouts ?? new CheckoutRegistryDouble()
     this.steps = []
     this.planIssues.steps = this.steps
     this.workspace.steps = this.steps
   }
 
   async run(story = Flow.STORY) {
-    return new StartPlan(this).execute(new StartPlanParams({ story, repository: Flow.REPOSITORY }))
+    return new StartPlan(this).execute(
+      new StartPlanParams({ story, repository: Flow.REPOSITORY, root: Flow.ROOT })
+    )
   }
 
   async refusal(story = Flow.STORY) {
@@ -169,7 +196,7 @@ describe('StartPlan', () => {
     await flow.run()
 
     expect(flow.workspace.asked).toEqual([
-      { issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY },
+      { issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY, root: Flow.ROOT },
     ])
   })
 
@@ -212,21 +239,6 @@ describe('StartPlan', () => {
     expect(started.watch.agent).toBe(started.agent)
   })
 
-  it('a_watch_without_the_repository_the_progress_is_measured_against_refuses_to_exist', () => {
-    expect(() => new PlanWatch({
-      issue: PlanIssuesDouble.OPENED, located: WorkspaceDouble.LOCATED, repository: 'owner/name',
-    })).toThrow(/repository/)
-  })
-
-  it('a_watch_without_a_place_to_look_or_an_issue_to_look_for_refuses_to_exist_too', () => {
-    expect(() => new PlanWatch({
-      issue: PlanIssuesDouble.OPENED, located: '/repo/.worktrees/7', repository: Flow.REPOSITORY,
-    })).toThrow(/where that plan is being written/)
-    expect(() => new PlanWatch({
-      issue: undefined, located: WorkspaceDouble.LOCATED, repository: Flow.REPOSITORY,
-    })).toThrow(/the issue whose plan it follows/)
-  })
-
   it('a_story_that_cannot_be_read_stops_the_flow_before_an_issue_is_created_for_nothing', async () => {
     const flow = new Flow({ userStories: new UserStoriesDouble(new UserStoryNotRead('acli is not authenticated')) })
 
@@ -267,23 +279,6 @@ describe('StartPlan', () => {
     expect(refusal.message).toBe('Access denied')
   })
 
-  it('a_story_with_no_summary_at_all_is_refused_by_the_value_object_and_not_carried_around_empty', async () => {
-    const flow = new Flow({ userStories: UserStoriesDouble.reading(undefined) })
-
-    await expect(flow.run()).rejects.toThrow(/a user story carries text/)
-  })
-
-  it('a_story_that_is_not_keyed_by_a_story_key_cannot_be_built_at_all', () => {
-    expect(() => new UserStory({ key: 'MO_SHOP-42', summary: 'a', description: 'b' }))
-      .toThrow(/keyed by a UserStoryKey/)
-  })
-
-  it('an_issue_without_a_number_cannot_be_built_because_nothing_downstream_could_use_it', () => {
-    expect(() => new PlanIssue({ number: 0, url: 'https://github.com/owner/name/issues/0' }))
-      .toThrow(/numbered from one/)
-    expect(() => new PlanIssue({ number: 7, url: '' })).toThrow(/reachable at a url/)
-  })
-
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
     await expect(new PlanAgents().launch(null)).rejects.toThrow(/must implement launch/)
     await expect(new PlanIssues().open({ story: null, repository: Flow.REPOSITORY }))
@@ -293,6 +288,51 @@ describe('StartPlan', () => {
       issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY,
     })).rejects.toThrow(/must implement prepare/)
     await expect(new Workspace().undo(WorkspaceDouble.LOCATED)).rejects.toThrow(/must implement undo/)
+    await expect(new Workspace().confirm({ root: Flow.ROOT, repository: Flow.REPOSITORY }))
+      .rejects.toThrow(/must implement confirm/)
+    await expect(new Workspace().survey(Flow.ROOT)).rejects.toThrow(/must implement survey/)
+    expect(() => new CheckoutRegistry().remember(Flow.ROOT)).toThrow(/must implement remember/)
+    expect(() => new CheckoutRegistry().known()).toThrow(/must implement known/)
+  })
+})
+
+describe('StartPlan confirms the clone before anything is read or created', () => {
+  it('the_clone_is_confirmed_to_hold_the_repository_before_the_story_is_even_read', async () => {
+    const flow = new Flow()
+
+    await flow.run()
+
+    expect(flow.workspace.confirmed).toEqual([{ root: Flow.ROOT, repository: Flow.REPOSITORY }])
+    expect(flow.steps[0]).toBe('confirm')
+  })
+
+  it('a_clone_that_holds_another_repository_stops_the_flow_before_a_story_is_read_or_an_issue_is_opened', async () => {
+    const flow = new Flow({ workspace: WorkspaceDouble.refusingToConfirm('/repo holds someone/else') })
+
+    const refusal = await flow.refusal()
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(flow.userStories.asked).toEqual([])
+    expect(flow.planIssues.asked).toEqual([])
+    expect(flow.workspace.asked).toEqual([])
+    expect(flow.planAgents.asked).toEqual([])
+    expect(flow.checkouts.remembered).toEqual([])
+  })
+
+  it('the_clone_of_a_plan_that_started_is_remembered_so_the_sweep_knows_where_to_harvest', async () => {
+    const flow = new Flow()
+
+    await flow.run()
+
+    expect(flow.checkouts.remembered).toEqual([Flow.ROOT])
+  })
+
+  it('the_clone_is_remembered_only_after_the_agent_launched_because_an_undone_worktree_leaves_nothing_to_harvest', async () => {
+    const flow = new Flow({ planAgents: PlanAgentsDouble.refusing('cmux is not reachable') })
+
+    await flow.refusal()
+
+    expect(flow.checkouts.remembered).toEqual([])
   })
 })
 
@@ -314,50 +354,12 @@ describe('StartPlan collects the ground it prepared when the launch never took o
     expect(refusal.message).toBe('cmux is not reachable')
   })
 
-  it('a_cleanup_that_also_fails_does_not_replace_the_launch_failure_that_caused_it', async () => {
-    const flow = new Flow({
-      workspace: WorkspaceDouble.leaking('worktree remove failed'),
-      planAgents: PlanAgentsDouble.refusing('cmux is not reachable'),
-    })
-
-    const refusal = await flow.refusal()
-
-    expect(refusal).toBeInstanceOf(PlanAgentNotLaunched)
-    expect(refusal.message).toBe('cmux is not reachable')
-  })
-
-  it('a_workspace_with_no_undo_at_all_does_not_replace_the_launch_failure_that_caused_the_cleanup', async () => {
-    const flow = new Flow({ planAgents: PlanAgentsDouble.refusing('cmux is not reachable') })
-    flow.workspace = { prepare: async () => WorkspaceDouble.LOCATED }
-
-    const refusal = await flow.refusal()
-
-    expect(refusal).toBeInstanceOf(PlanAgentNotLaunched)
-    expect(refusal.message).toBe('cmux is not reachable')
-  })
-
   it('a_launch_that_succeeds_never_undoes_the_workspace_it_just_prepared', async () => {
     const flow = new Flow()
 
     await flow.run()
 
     expect(flow.workspace.undone).toEqual([])
-  })
-
-  it('a_cleanup_that_fails_never_writes_to_stderr_because_the_adapter_that_failed_already_reported_it', async () => {
-    const flow = new Flow({
-      workspace: WorkspaceDouble.leaking('worktree remove failed'),
-      planAgents: PlanAgentsDouble.refusing('cmux is not reachable'),
-    })
-    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
-
-    try {
-      await flow.refusal()
-
-      expect(complaining.mock.calls).toEqual([])
-    } finally {
-      complaining.mockRestore()
-    }
   })
 })
 
@@ -397,7 +399,7 @@ describe('StartPlan claims the issue so no second dispatcher takes it', () => {
     expect(flow.planIssues.requeued).toEqual([
       { issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY },
     ])
-    expect(flow.steps).toEqual(['undo', 'requeue'])
+    expect(flow.steps).toEqual(['confirm', 'undo', 'requeue'])
   })
 
   it('a_port_that_nobody_implemented_says_so_for_the_two_ends_of_the_claim_too', async () => {

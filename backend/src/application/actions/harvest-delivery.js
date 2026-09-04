@@ -23,6 +23,7 @@ export class HarvestDelivery {
       outcome: await this.harvest.collect({
         issueNumber: params.prepared.issueNumber,
         repository: params.repository,
+        root: params.prepared.located.root,
       }),
     })
   }

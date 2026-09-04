@@ -5,24 +5,13 @@ import { UserStoryNotRead, UserStoryNotUnderstood, UserStoryFailure } from '../.
 import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
 import { ExternalTool } from '../../src/infrastructure/external-tool.js'
 import { RetryPolicy, RetryBudget } from '../../src/domain/policies/retry-policy.js'
-import { Clock } from '../../src/domain/ports/clock.js'
-
-class ClockDouble extends Clock {
-  constructor() {
-    super()
-    this.slept = []
-  }
-
-  async sleep(seconds) {
-    this.slept.push(seconds)
-  }
-}
+import { SleepDouble } from '../sleep-double.js'
 
 class AcliDouble {
   constructor(printed) {
     this.printed = printed
     this.calls = []
-    this.clock = new ClockDouble()
+    this.sleeping = new SleepDouble()
   }
 
   static answering(fields) {
@@ -42,7 +31,7 @@ class AcliDouble {
           return Promise.resolve(new ProcessOutput({ code: 0, stdout: this.printed, stderr: '' }))
         },
         policy: new RetryPolicy({ budget: new RetryBudget({ attempts: 3, waitSeconds: 2 }) }),
-        clock: this.clock,
+        sleep: (seconds) => this.sleeping.sleep(seconds),
       }),
     })
   }
@@ -141,7 +130,7 @@ describe('AcliUserStories', () => {
     const refusal = await acli.refusalFor()
 
     expect(acli.calls).toHaveLength(4)
-    expect(acli.clock.slept).toEqual([2, 2, 2])
+    expect(acli.sleeping.slept).toEqual([2, 2, 2])
     expect(refusal).toBeInstanceOf(UserStoryNotRead)
   })
 
@@ -151,7 +140,7 @@ describe('AcliUserStories', () => {
     await acli.refusalFor()
 
     expect(acli.calls).toHaveLength(1)
-    expect(acli.clock.slept).toEqual([])
+    expect(acli.sleeping.slept).toEqual([])
   })
 
   it('an_acli_that_is_not_logged_in_says_what_to_run_instead_of_repeating_its_own_wording', async () => {

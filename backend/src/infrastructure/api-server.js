@@ -4,12 +4,12 @@ import { createServer } from 'node:http'
 import { Answer, Route, Browsers, JsonBody } from './http.js'
 import { StartPlanRoute } from './start-plan-route.js'
 import { ImplementPlanRoute } from './implement-plan-route.js'
-import { PlanEventsRoute, PlanSessions } from './plan-events-route.js'
+import { PlanEventsRoute } from './plan-events-route.js'
 
 export const LOOPBACK = '127.0.0.1'
 class FrontendPages {
   static mountedOn(app, root) {
-    if (root === null || !existsSync(root)) return
+    if (!existsSync(root)) return
     app.use(express.static(root, { index: 'index.html', redirect: false, fallthrough: true }))
   }
 }
@@ -37,10 +37,7 @@ class Failures {
 }
 
 export class ApiServer {
-  constructor({
-    port, startPlan, implementPlan, reviews, planEvents = null,
-    sessions = new PlanSessions(), frontendRoot = null,
-  }) {
+  constructor({ port, startPlan, implementPlan, reviews, planEvents, sessions, frontendRoot }) {
     this.requestedPort = port
     this.startPlan = startPlan
     this.implementPlan = implementPlan

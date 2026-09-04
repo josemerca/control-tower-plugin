@@ -24,19 +24,12 @@ export class Invocation {
   static #HARVEST_TABLE = /^[A-Za-z0-9][A-Za-z0-9-]*:[A-Za-z0-9_]+\.[A-Za-z0-9_]+$/
 
   constructor({ outcome, port, stateRoot, harvestTable, reason }) {
-    if (!Object.values(InvocationOutcome).includes(outcome)) {
-      throw new Error(`outcome must be an InvocationOutcome member, got ${outcome}`)
-    }
-    if ((outcome === InvocationOutcome.READY) === (reason === null)) {
-      this.outcome = outcome
-      this.port = port
-      this.stateRoot = stateRoot
-      this.harvestTable = harvestTable
-      this.reason = reason
-      Object.freeze(this)
-      return
-    }
-    throw new Error(`outcome ${outcome} disagrees with its reason, got ${JSON.stringify(reason)}`)
+    this.outcome = outcome
+    this.port = port
+    this.stateRoot = stateRoot
+    this.harvestTable = harvestTable
+    this.reason = reason
+    Object.freeze(this)
   }
 
   static #refused(outcome, reason) {

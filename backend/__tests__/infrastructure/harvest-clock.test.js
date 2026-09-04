@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { HarvestClock, SweepLine } from '../../src/infrastructure/harvest-clock.js'
 import { HarvestDeliveryResult } from '../../src/application/actions/harvest-delivery.js'
 import { SurveyWorkspacesResult } from '../../src/application/queries/survey-workspaces.js'
+import { CheckoutRoot } from '../../src/domain/value-objects/checkout-root.js'
 import { HarvestOutcome } from '../../src/domain/value-objects/harvest-outcome.js'
 import { PreparedWorkspace } from '../../src/domain/value-objects/prepared-workspace.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
@@ -14,70 +15,83 @@ import * as exceptions from '../../src/domain/exceptions.js'
 
 class Sweeping {
   static ROOT = '/repo/checkout'
+  static CHECKOUT = new CheckoutRoot(Sweeping.ROOT)
+  static ELSEWHERE = new CheckoutRoot('/elsewhere/clone')
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
   static SURVEY = 'survey'
   static SLEEP = 'sleep'
 
-  constructor({ checkouts, harvests, sweeps = 1, stoppingAt = null }) {
-    this.checkouts = [...checkouts]
+  constructor({ checkouts, harvests, known = [Sweeping.CHECKOUT], sweeps = 1 }) {
+    this.checkouts = new Map(checkouts)
     this.harvests = new Map(harvests)
+    this.known = known
     this.sweeps = sweeps
-    this.stoppingAt = stoppingAt
     this.trace = []
     this.written = []
     this.slept = 0
-    this.clock = null
+    this.enough = new Promise((resolve) => {
+      this.sweptEnough = resolve
+    })
   }
 
-  static preparedFor(issueNumber) {
+  static preparedFor(issueNumber, root = Sweeping.ROOT) {
     return new PreparedWorkspace({
       issueNumber,
       located: new WorkspaceLocation({
-        path: `${Sweeping.ROOT}/.worktrees/${issueNumber}`,
+        root,
+        path: `${root}/.worktrees/${issueNumber}`,
         branch: `feat/${issueNumber}`,
       }),
     })
   }
 
-  static checkoutHolding(harvests) {
+  static checkoutHolding(harvests, root = Sweeping.ROOT) {
     return new SurveyWorkspacesResult({
       survey: new WorkspaceSurvey({
         repository: Sweeping.REPOSITORY,
-        prepared: harvests.map(([issueNumber]) => Sweeping.preparedFor(issueNumber)),
+        prepared: harvests.map(([issueNumber]) => Sweeping.preparedFor(issueNumber, root)),
       }),
     })
   }
 
   static answering(harvests) {
-    return new Sweeping({ checkouts: [Sweeping.checkoutHolding(harvests)], harvests })
+    return new Sweeping({ checkouts: [[Sweeping.ROOT, [Sweeping.checkoutHolding(harvests)]]], harvests })
   }
 
   static answeringTwice(harvests) {
     return new Sweeping({
-      checkouts: [Sweeping.checkoutHolding(harvests), Sweeping.checkoutHolding(harvests)],
+      checkouts: [[Sweeping.ROOT, [Sweeping.checkoutHolding(harvests), Sweeping.checkoutHolding(harvests)]]],
       harvests,
       sweeps: 2,
     })
   }
 
   static unableToSurvey(failure) {
-    return new Sweeping({ checkouts: [failure], harvests: [] })
+    return new Sweeping({ checkouts: [[Sweeping.ROOT, [failure]]], harvests: [] })
   }
 
-  static stoppingDuring(issueNumber, harvests) {
+  static knowingTwo({ here, there }) {
     return new Sweeping({
-      checkouts: [Sweeping.checkoutHolding(harvests)],
-      harvests,
-      stoppingAt: issueNumber,
+      known: [Sweeping.CHECKOUT, Sweeping.ELSEWHERE],
+      checkouts: [
+        [Sweeping.ROOT, [here instanceof Error ? here : Sweeping.checkoutHolding(here)]],
+        [Sweeping.ELSEWHERE.text, [Sweeping.checkoutHolding(there, Sweeping.ELSEWHERE.text)]],
+      ],
+      harvests: [...(here instanceof Error ? [] : here), ...there],
     })
   }
 
-  #surveyed() {
-    this.trace.push(Sweeping.SURVEY)
-    if (this.checkouts.length === 0) {
-      throw new Error('the checkout was surveyed more times than this test scripted an answer for')
+  static knowingNone() {
+    return new Sweeping({ known: [], checkouts: [], harvests: [] })
+  }
+
+  #surveyed(root) {
+    this.trace.push(`${Sweeping.SURVEY} ${root.text}`)
+    const answers = this.checkouts.get(root.text) ?? []
+    if (answers.length === 0) {
+      throw new Error(`${root.text} was surveyed more times than this test scripted an answer for`)
     }
-    const answer = this.checkouts.shift()
+    const answer = answers.shift()
     if (answer instanceof Error) return Promise.reject(answer)
 
     return Promise.resolve(answer)
@@ -88,7 +102,6 @@ class Sweeping {
     if (repository !== Sweeping.REPOSITORY) {
       throw new Error(`the harvest of #${prepared.issueNumber} was asked for in ${repository?.text}`)
     }
-    if (prepared.issueNumber === this.stoppingAt) this.clock.stop()
     if (!this.harvests.has(prepared.issueNumber)) {
       throw new Error(`the harvest of #${prepared.issueNumber} was asked for and no answer was scripted`)
     }
@@ -101,19 +114,23 @@ class Sweeping {
   #slept() {
     this.trace.push(Sweeping.SLEEP)
     this.slept += 1
-    if (this.slept >= this.sweeps) this.clock.stop()
+    if (this.slept < this.sweeps) return Promise.resolve()
+    this.sweptEnough()
 
-    return Promise.resolve()
+    return Sweeping.#NEVER
   }
 
+  static #NEVER = new Promise(() => {})
+
   async run() {
-    this.clock = new HarvestClock({
-      survey: () => this.#surveyed(),
+    const clock = new HarvestClock({
+      checkouts: () => this.known,
+      survey: (root) => this.#surveyed(root),
       harvest: (prepared, repository) => this.#harvested(prepared, repository),
       sleep: () => this.#slept(),
       stderr: (line) => this.written.push(line),
     })
-    await this.clock.start()
+    await Promise.race([clock.start(), this.enough])
 
     return this
   }
@@ -127,7 +144,7 @@ describe('HarvestClock', () => {
   it('the_first_sweep_happens_at_once_so_a_restarted_server_does_not_leave_a_merged_slice_lying_a_minute', async () => {
     const swept = await Sweeping.answering([[42, HarvestOutcome.COLLECTED]]).run()
 
-    expect(swept.trace).toEqual(['survey', 'harvest #42', 'sleep'])
+    expect(swept.trace).toEqual(['survey /repo/checkout', 'harvest #42', 'sleep'])
   })
 
   it('it_waits_only_after_the_sweep_is_over_so_two_sweeps_can_never_overlap', async () => {
@@ -136,8 +153,8 @@ describe('HarvestClock', () => {
     ]).run()
 
     expect(swept.trace).toEqual([
-      'survey', 'harvest #42', 'harvest #7', 'sleep',
-      'survey', 'harvest #42', 'harvest #7', 'sleep',
+      'survey /repo/checkout', 'harvest #42', 'harvest #7', 'sleep',
+      'survey /repo/checkout', 'harvest #42', 'harvest #7', 'sleep',
     ])
   })
 
@@ -199,14 +216,14 @@ describe('HarvestClock', () => {
     expect(swept.written).toEqual([
       'harvest sweep: could not survey the checkout: git worktree list refused\n',
     ])
-    expect(swept.trace).toEqual(['survey', 'sleep'])
+    expect(swept.trace).toEqual(['survey /repo/checkout', 'sleep'])
   })
 
   it('a_bug_of_ours_while_surveying_rises_instead_of_being_swallowed_as_one_more_failed_sweep', async () => {
     const broken = Sweeping.unableToSurvey(new TypeError('checkout.prepared is not iterable'))
 
     expect(await broken.broke()).toBeInstanceOf(TypeError)
-    expect(broken.trace).toEqual(['survey'])
+    expect(broken.trace).toEqual(['survey /repo/checkout'])
     expect(broken.written).toEqual([])
   })
 
@@ -216,16 +233,40 @@ describe('HarvestClock', () => {
     ])
 
     expect(await broken.broke()).toBeInstanceOf(TypeError)
-    expect(broken.trace).toEqual(['survey', 'harvest #1'])
+    expect(broken.trace).toEqual(['survey /repo/checkout', 'harvest #1'])
   })
 
-  it('stopping_lets_the_sweep_in_flight_finish_and_then_never_sleeps_into_another_one', async () => {
-    const swept = await Sweeping.stoppingDuring(1, [
-      [1, HarvestOutcome.COLLECTED], [2, HarvestOutcome.COLLECTED],
-    ]).run()
+  it('every_clone_the_registry_knows_is_surveyed_and_harvested_in_one_sweep', async () => {
+    const swept = await Sweeping.knowingTwo({
+      here: [[42, HarvestOutcome.COLLECTED]],
+      there: [[7, HarvestOutcome.WAITING]],
+    }).run()
 
-    expect(swept.trace).toEqual(['survey', 'harvest #1', 'harvest #2'])
-    expect(swept.written).toEqual(['harvest #1: collected\n', 'harvest #2: collected\n'])
+    expect(swept.trace).toEqual([
+      'survey /repo/checkout', 'harvest #42',
+      'survey /elsewhere/clone', 'harvest #7',
+      'sleep',
+    ])
+  })
+
+  it('a_clone_that_cannot_be_surveyed_leaves_its_line_and_the_next_clone_is_still_surveyed', async () => {
+    const swept = await Sweeping.knowingTwo({
+      here: new WorkspaceNotRead('/repo/checkout does not name a origin remote'),
+      there: [[7, HarvestOutcome.COLLECTED]],
+    }).run()
+
+    expect(swept.written).toEqual([
+      'harvest sweep: could not survey the checkout: /repo/checkout does not name a origin remote\n',
+      'harvest #7: collected\n',
+    ])
+    expect(swept.trace).toEqual(['survey /repo/checkout', 'survey /elsewhere/clone', 'harvest #7', 'sleep'])
+  })
+
+  it('a_server_that_knows_no_clone_yet_sweeps_nothing_and_just_waits_for_the_next_turn', async () => {
+    const swept = await Sweeping.knowingNone().run()
+
+    expect(swept.trace).toEqual(['sleep'])
+    expect(swept.written).toEqual([])
   })
 })
 
@@ -237,7 +278,7 @@ describe('SweepLine', () => {
   it('an_outcome_nobody_declared_a_line_for_raises_instead_of_being_swept_past_without_a_word', async () => {
     const broken = Sweeping.answering([[42, 'invented']])
 
-    expect((await broken.broke()).message).toBe('no sweep line declared for harvest outcome invented')
+    expect((await broken.broke()).message).toBe('no harvest outcome sweep line declared for invented')
   })
 
   it('every_harvest_failure_the_catalogue_declares_has_a_line_so_a_third_one_cannot_kill_the_server_unnamed', () => {
@@ -250,6 +291,6 @@ describe('SweepLine', () => {
   it('a_harvest_failure_nobody_declared_a_line_for_raises_instead_of_being_reported_as_one_of_the_two', async () => {
     const broken = Sweeping.answering([[42, new HarvestFailure('a family nobody projected')]])
 
-    expect((await broken.broke()).message).toBe('no sweep line declared for harvest failure HarvestFailure')
+    expect((await broken.broke()).message).toBe('no harvest failure sweep line declared for HarvestFailure')
   })
 })

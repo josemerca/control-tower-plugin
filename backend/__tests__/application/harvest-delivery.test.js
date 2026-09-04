@@ -12,7 +12,9 @@ class HarvestDouble extends Harvest {
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
   static PREPARED = new PreparedWorkspace({
     issueNumber: 42,
-    located: new WorkspaceLocation({ path: `${HarvestDouble.ROOT}/.worktrees/42`, branch: 'feat/42' }),
+    located: new WorkspaceLocation({
+      root: HarvestDouble.ROOT, path: `${HarvestDouble.ROOT}/.worktrees/42`, branch: 'feat/42',
+    }),
   })
 
   constructor(answer) {
@@ -58,7 +60,7 @@ describe('HarvestDelivery', () => {
 
     await harvest.harvested()
 
-    expect(harvest.asked).toEqual([{ issueNumber: 42, repository: HarvestDouble.REPOSITORY }])
+    expect(harvest.asked).toEqual([{ issueNumber: 42, repository: HarvestDouble.REPOSITORY, root: '/repo/checkout' }])
   })
 
   it('the_repository_the_survey_named_is_the_one_the_plugin_is_told_so_no_harvest_reaches_a_stranger', async () => {
@@ -74,10 +76,23 @@ describe('HarvestDelivery', () => {
 
     await harvest.harvested(new PreparedWorkspace({
       issueNumber: 7,
-      located: new WorkspaceLocation({ path: `${HarvestDouble.ROOT}/.worktrees/7`, branch: 'feat/7' }),
+      located: new WorkspaceLocation({
+        root: HarvestDouble.ROOT, path: `${HarvestDouble.ROOT}/.worktrees/7`, branch: 'feat/7',
+      }),
     }))
 
     expect(harvest.asked[0].issueNumber).toBe(7)
+  })
+
+  it('the_root_the_workspace_was_cut_from_is_the_one_the_plugin_is_told_to_run_in_so_two_clones_never_mix', async () => {
+    const harvest = HarvestDouble.answering(HarvestOutcome.WAITING)
+
+    await harvest.harvested(new PreparedWorkspace({
+      issueNumber: 7,
+      located: new WorkspaceLocation({ root: '/elsewhere/clone', path: '/elsewhere/clone/.worktrees/7', branch: 'feat/7' }),
+    }))
+
+    expect(harvest.asked[0].root).toBe('/elsewhere/clone')
   })
 
   it('a_harvest_that_could_not_be_read_travels_out_typed_instead_of_becoming_an_outcome', async () => {
@@ -88,7 +103,7 @@ describe('HarvestDelivery', () => {
   })
 
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
-    await expect(new Harvest().collect({ issueNumber: 42, repository: HarvestDouble.REPOSITORY }))
+    await expect(new Harvest().collect({ issueNumber: 42, repository: HarvestDouble.REPOSITORY, root: HarvestDouble.ROOT }))
       .rejects.toThrow(/must implement collect/)
   })
 })

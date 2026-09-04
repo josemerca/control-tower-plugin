@@ -1,12 +1,18 @@
 export class Workspace {
-  async prepare({ issue, repository }) {
+  async confirm({ root, repository }) {
     throw new Error(
-      `${this.constructor.name} must implement prepare({ issue, repository }), asked for ${issue?.number} in ${repository}`
+      `${this.constructor.name} must implement confirm({ root, repository }), asked whether ${root} holds ${repository}`
     )
   }
 
-  async survey() {
-    throw new Error(`${this.constructor.name} must implement survey()`)
+  async prepare({ issue, repository, root }) {
+    throw new Error(
+      `${this.constructor.name} must implement prepare({ issue, repository, root }), asked for ${issue?.number} in ${repository} at ${root}`
+    )
+  }
+
+  async survey(root) {
+    throw new Error(`${this.constructor.name} must implement survey(root), asked about ${root}`)
   }
 
   async undo(located) {

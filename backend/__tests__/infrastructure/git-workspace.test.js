@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, afterEach } from 'vitest'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -7,13 +7,15 @@ import { buildStateSeed } from '../../../plugin/scripts/kickoff.js'
 import { resolveStatePath } from '../../../plugin/scripts/state-paths.js'
 import { GitWorkspace, SliceSeed } from '../../src/infrastructure/git-workspace.js'
 import {
-  WorkspaceFailure, WorkspaceNotPrepared, WorkspaceNotRead, WorkspaceNotUnderstood,
+  WorkspaceFailure, WorkspaceNotPrepared, WorkspaceNotRead, WorkspaceNotUnderstood, CheckoutNotConfirmed,
 } from '../../src/domain/exceptions.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
+import { CheckoutRoot } from '../../src/domain/value-objects/checkout-root.js'
 
 class GitDouble {
   static ROOT = '/repo/checkout'
+  static CHECKOUT = new CheckoutRoot(GitDouble.ROOT)
   static REPOSITORY = new RepositoryName('owner/name')
   static REMOTE_URL = 'git@github.com:owner/name.git'
   static BASE = 'main'
@@ -23,8 +25,10 @@ class GitDouble {
   static WORKTREE = '/repo/checkout/.worktrees/42'
   static EXCLUDE_PATH = `${GitDouble.COMMON_DIR}/info/exclude`
 
-  constructor({ answer, status, existingExclude = null, commonDir, declared, remote } = {}) {
+  constructor({ answer, status, existingExclude = null, commonDir, declared, remote, removal = null, deletion = null } = {}) {
     this.answer = answer ?? GitDouble.ok()
+    this.removal = removal
+    this.deletion = deletion
     this.remote = remote ?? GitDouble.naming(GitDouble.REMOTE_URL)
     this.status = status ?? GitDouble.clean()
     this.existingExclude = existingExclude
@@ -38,7 +42,6 @@ class GitDouble {
 
   workspace() {
     return new GitWorkspace({
-      root: GitDouble.ROOT,
       read: (path) => {
         this.reads.push(path)
         return Promise.resolve(this.existingExclude)
@@ -63,12 +66,26 @@ class GitDouble {
     if (argv.includes('--git-common-dir')) return { failed: false, stdout: `${this.commonDir}\n`, stderr: '' }
     if (argv.includes('HEAD')) return { failed: false, stdout: `${GitDouble.CUT}\n`, stderr: '' }
     if (argv.includes('status')) return this.status
+    if (argv.includes('remove') && this.removal !== null) return this.removal
+    if (argv.includes('-D') && this.deletion !== null) return this.deletion
     if (argv.includes('worktree') || argv.includes('branch')) return this.answer
     throw new Error(`nobody wrote an answer for git ${argv.join(' ')}`)
   }
 
   asking(order) {
     return this.calls.find((argv) => argv.includes(order))
+  }
+
+  prepared(issue = { number: 42 }) {
+    return this.workspace().prepare({ issue, repository: GitDouble.REPOSITORY, root: GitDouble.CHECKOUT })
+  }
+
+  confirmed() {
+    return this.workspace().confirm({ root: GitDouble.CHECKOUT, repository: GitDouble.REPOSITORY })
+  }
+
+  refusedTo(asking) {
+    return asking.catch((cause) => cause)
   }
 
   cut() {
@@ -101,6 +118,10 @@ class GitDouble {
     return { failed: false, stdout: '', stderr: '' }
   }
 
+  static located() {
+    return new WorkspaceLocation({ root: GitDouble.ROOT, path: GitDouble.WORKTREE, branch: 'feat/42' })
+  }
+
   static stillVisible() {
     return { failed: false, stdout: `?? ${SliceSeed.RELATIVE_PATH}\n`, stderr: '' }
   }
@@ -110,7 +131,7 @@ describe('GitWorkspace', () => {
   it('it_cuts_the_branch_from_the_remote_base_so_the_session_starts_from_what_is_published', async () => {
     const git = new GitDouble()
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+    await git.prepared()
 
     expect(git.cut()).toEqual([
       '-C', '/repo/checkout',
@@ -124,7 +145,7 @@ describe('GitWorkspace', () => {
   it('the_base_it_cuts_from_is_the_one_the_remote_declares_and_never_a_name_the_backend_assumed', async () => {
     const git = new GitDouble({ declared: GitDouble.declaring('refs/remotes/origin/trunk\n') })
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+    await git.prepared()
 
     expect(git.asking('symbolic-ref')).toEqual([
       '-C', GitDouble.ROOT, 'symbolic-ref', 'refs/remotes/origin/HEAD',
@@ -135,7 +156,7 @@ describe('GitWorkspace', () => {
   it('the_base_the_remote_declares_is_the_one_the_seed_records_so_a_rehydrated_agent_reads_the_truth', async () => {
     const git = new GitDouble({ declared: GitDouble.declaring('refs/remotes/origin/trunk\n') })
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+    await git.prepared()
 
     expect(parseStateSafe(git.written[1][1]).meta.base).toBe('trunk')
   })
@@ -145,7 +166,7 @@ describe('GitWorkspace', () => {
       declared: GitDouble.refused('fatal: ref refs/remotes/origin/HEAD is not a symbolic ref'),
     })
 
-    const refusal = await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch((cause) => cause)
+    const refusal = await git.prepared().catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
     expect(refusal.message).toContain('does not declare a default branch')
@@ -155,7 +176,7 @@ describe('GitWorkspace', () => {
   it('git_answering_something_that_is_not_a_remote_head_is_not_guessed_into_a_branch_name', async () => {
     const git = new GitDouble({ declared: GitDouble.declaring('refs/heads/main\n') })
 
-    const refusal = await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch((cause) => cause)
+    const refusal = await git.prepared().catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
     expect(refusal.message).toContain('refs/remotes/origin/HEAD')
@@ -165,7 +186,7 @@ describe('GitWorkspace', () => {
   it('git_answering_no_common_directory_at_all_is_not_pasted_onto_the_root_as_a_dangling_path', async () => {
     const git = new GitDouble({ commonDir: '   ' })
 
-    const refusal = await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch((cause) => cause)
+    const refusal = await git.prepared().catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
     expect(refusal.message).toContain('--git-common-dir')
@@ -174,7 +195,7 @@ describe('GitWorkspace', () => {
   it('a_state_file_git_never_hid_after_the_rule_was_written_broke_our_contract_with_git_and_says_so', async () => {
     const git = new GitDouble({ status: GitDouble.stillVisible() })
 
-    const refusal = await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch((cause) => cause)
+    const refusal = await git.prepared().catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
     expect(refusal.message).toContain(SliceSeed.RELATIVE_PATH)
@@ -182,9 +203,9 @@ describe('GitWorkspace', () => {
 
   it('git_answering_something_unreadable_is_told_apart_from_git_refusing_the_call', async () => {
     const unreadable = await new GitDouble({ declared: GitDouble.declaring('refs/heads/main\n') })
-      .workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch((cause) => cause)
+      .prepared().catch((cause) => cause)
     const refused = await new GitDouble({ declared: GitDouble.refused('fatal: no such ref') })
-      .workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch((cause) => cause)
+      .prepared().catch((cause) => cause)
 
     expect(unreadable).toBeInstanceOf(WorkspaceNotUnderstood)
     expect(refused).toBeInstanceOf(WorkspaceNotPrepared)
@@ -194,78 +215,91 @@ describe('GitWorkspace', () => {
 
   it('both_ways_of_failing_share_a_type_so_a_caller_that_does_not_care_can_catch_one_thing', async () => {
     const unreadable = await new GitDouble({ declared: GitDouble.declaring('refs/heads/main\n') })
-      .workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch((cause) => cause)
+      .prepared().catch((cause) => cause)
     const refused = await new GitDouble({ declared: GitDouble.refused('fatal: no such ref') })
-      .workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch((cause) => cause)
+      .prepared().catch((cause) => cause)
 
     expect(unreadable).toBeInstanceOf(WorkspaceFailure)
     expect(refused).toBeInstanceOf(WorkspaceFailure)
   })
 
-  it('the_repository_under_the_root_is_asked_of_the_remote_before_a_worktree_is_cut_for_the_wrong_one', async () => {
+  it('confirming_asks_the_remote_of_the_root_it_was_given_and_nothing_else', async () => {
     const git = new GitDouble()
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+    await git.confirmed()
 
-    expect(git.calls[0]).toEqual(['-C', GitDouble.ROOT, 'remote', 'get-url', 'origin'])
+    expect(git.calls).toEqual([['-C', GitDouble.ROOT, 'remote', 'get-url', 'origin']])
   })
 
-  it('a_root_that_is_a_different_repository_than_the_issue_is_refused_naming_both', async () => {
+  it('a_root_that_is_a_different_repository_than_the_issue_is_a_checkout_not_confirmed_naming_both', async () => {
     const git = new GitDouble({ remote: GitDouble.naming('git@github.com:someone/else.git') })
 
-    const refusal = await git.workspace()
-      .prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
-      .catch((cause) => cause)
+    const refusal = await git.refusedTo(git.confirmed())
 
-    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(refusal).toBeInstanceOf(CheckoutNotConfirmed)
     expect(refusal.message).toContain('someone/else')
     expect(refusal.message).toContain('owner/name')
-    expect(git.calls.some((argv) => argv.includes('worktree'))).toBe(false)
+    expect(refusal.message).toContain(GitDouble.ROOT)
   })
 
   it('an_https_remote_names_the_same_repository_as_its_ssh_form_so_neither_checkout_is_refused', async () => {
     const git = new GitDouble({ remote: GitDouble.naming('https://github.com/owner/name.git') })
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
-
-    expect(git.calls.some((argv) => argv.includes('worktree'))).toBe(true)
+    await expect(git.confirmed()).resolves.toBeUndefined()
   })
 
   it('an_https_remote_without_the_git_suffix_names_the_same_repository_too', async () => {
     const git = new GitDouble({ remote: GitDouble.naming('https://github.com/owner/name') })
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
-
-    expect(git.calls.some((argv) => argv.includes('worktree'))).toBe(true)
+    await expect(git.confirmed()).resolves.toBeUndefined()
   })
 
-  it('a_remote_url_nobody_can_read_a_repository_out_of_is_our_broken_contract_with_git_and_not_a_refusal', async () => {
+  it('a_remote_url_nobody_can_read_a_repository_out_of_is_a_checkout_not_confirmed_too', async () => {
     const git = new GitDouble({ remote: GitDouble.naming('/some/local/mirror') })
 
-    const refusal = await git.workspace()
-      .prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
-      .catch((cause) => cause)
+    const refusal = await git.refusedTo(git.confirmed())
 
-    expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
+    expect(refusal).toBeInstanceOf(CheckoutNotConfirmed)
     expect(refusal.message).toContain('/some/local/mirror')
-    expect(git.calls.some((argv) => argv.includes('worktree'))).toBe(false)
   })
 
-  it('a_remote_git_refuses_to_name_at_all_stops_before_a_worktree_is_cut_for_nothing', async () => {
-    const git = new GitDouble({ remote: GitDouble.refused('fatal: No such remote origin') })
+  it('a_remote_git_refuses_to_name_at_all_is_a_checkout_not_confirmed_that_names_the_root', async () => {
+    const git = new GitDouble({ remote: GitDouble.refused("fatal: cannot change to '/repo/checkout': No such file or directory") })
 
-    const refusal = await git.workspace()
-      .prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
-      .catch((cause) => cause)
+    const refusal = await git.refusedTo(git.confirmed())
 
-    expect(refusal).toBeInstanceOf(WorkspaceNotRead)
-    expect(refusal.message).toContain('No such remote origin')
-    expect(git.calls.some((argv) => argv.includes('worktree'))).toBe(false)
+    expect(refusal).toBeInstanceOf(CheckoutNotConfirmed)
+    expect(refusal.message).toContain('No such file or directory')
+    expect(refusal.message).toContain(GitDouble.ROOT)
   })
 
-  it('the_location_it_answers_is_where_the_session_will_actually_run', async () => {
-    const located = await new GitDouble().workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+  it('every_way_confirming_can_fail_shares_the_one_type_a_caller_that_does_not_care_can_catch', async () => {
+    const mismatched = new GitDouble({ remote: GitDouble.naming('git@github.com:someone/else.git') })
+    const unreadable = new GitDouble({ remote: GitDouble.naming('/some/local/mirror') })
+    const unread = new GitDouble({
+      remote: GitDouble.refused("fatal: cannot change to '/repo/checkout': No such file or directory"),
+    })
 
+    const refusals = await Promise.all(
+      [mismatched, unreadable, unread].map((git) => git.refusedTo(git.confirmed()))
+    )
+
+    for (const refusal of refusals) expect(refusal).toBeInstanceOf(WorkspaceFailure)
+  })
+
+  it('preparing_never_asks_the_remote_again_because_the_root_was_confirmed_at_the_door', async () => {
+    const git = new GitDouble()
+
+    await git.prepared()
+
+    expect(git.calls.some((argv) => argv.includes('get-url'))).toBe(false)
+    expect(git.calls[0]).toEqual(['-C', GitDouble.ROOT, 'symbolic-ref', 'refs/remotes/origin/HEAD'])
+  })
+
+  it('the_location_it_answers_is_where_the_session_will_actually_run_and_the_root_it_was_cut_from', async () => {
+    const located = await new GitDouble().prepared()
+
+    expect(located.root).toBe('/repo/checkout')
     expect(located.path).toBe('/repo/checkout/.worktrees/42')
     expect(located.branch).toBe('feat/42')
   })
@@ -273,7 +307,7 @@ describe('GitWorkspace', () => {
   it('a_git_that_refuses_travels_out_typed_carrying_what_git_said', async () => {
     const git = new GitDouble({ answer: GitDouble.refused("fatal: 'feat/42' is already checked out") })
 
-    const refusal = await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch((cause) => cause)
+    const refusal = await git.prepared().catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
     expect(refusal.message).toContain("fatal: 'feat/42' is already checked out")
@@ -282,13 +316,13 @@ describe('GitWorkspace', () => {
   it('it_never_reuses_a_directory_it_did_not_create_because_git_is_the_one_that_refuses', async () => {
     const git = new GitDouble({ answer: GitDouble.refused('fatal: destination path already exists') })
 
-    await expect(git.workspace().prepare({ issue: { number: 7 }, repository: GitDouble.REPOSITORY })).rejects.toBeInstanceOf(WorkspaceNotPrepared)
+    await expect(git.prepared({ number: 7 })).rejects.toBeInstanceOf(WorkspaceNotPrepared)
   })
 
   it('the_rule_that_hides_the_state_is_written_before_the_state_itself_in_the_directory_git_actually_reads', async () => {
     const git = new GitDouble()
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+    await git.prepared()
 
     expect(git.written.map(([path]) => path)).toEqual([
       GitDouble.EXCLUDE_PATH,
@@ -299,7 +333,7 @@ describe('GitWorkspace', () => {
   it('the_exclude_rule_it_writes_is_exactly_the_path_of_the_state_file_and_nothing_else', async () => {
     const git = new GitDouble()
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+    await git.prepared()
 
     expect(git.written[0][1]).toBe(`${SliceSeed.RELATIVE_PATH}\n`)
   })
@@ -307,7 +341,7 @@ describe('GitWorkspace', () => {
   it('a_common_dir_git_answers_as_relative_is_resolved_against_the_root_and_not_kept_as_a_dangling_path', async () => {
     const git = new GitDouble({ commonDir: '.git' })
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+    await git.prepared()
 
     expect(git.written[0][0]).toBe(`${GitDouble.ROOT}/.git/info/exclude`)
   })
@@ -315,7 +349,7 @@ describe('GitWorkspace', () => {
   it('a_users_existing_exclude_rules_survive_the_seeding_instead_of_being_truncated', async () => {
     const git = new GitDouble({ existingExclude: 'node_modules/\n' })
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+    await git.prepared()
 
     expect(git.written[0][1]).toBe(`node_modules/\n${SliceSeed.RELATIVE_PATH}\n`)
   })
@@ -323,7 +357,7 @@ describe('GitWorkspace', () => {
   it('an_existing_exclude_file_missing_its_final_newline_does_not_get_the_new_rule_glued_onto_its_last_line', async () => {
     const git = new GitDouble({ existingExclude: 'node_modules/' })
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+    await git.prepared()
 
     expect(git.written[0][1]).toBe(`node_modules/\n${SliceSeed.RELATIVE_PATH}\n`)
   })
@@ -331,7 +365,7 @@ describe('GitWorkspace', () => {
   it('a_second_seeding_does_not_duplicate_the_rule_because_it_is_already_in_the_shared_exclude_file', async () => {
     const git = new GitDouble({ existingExclude: `node_modules/\n${SliceSeed.RELATIVE_PATH}\n` })
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+    await git.prepared()
 
     expect(git.written.map(([path]) => path)).toEqual([
       '/repo/checkout/.worktrees/42/.agent/SLICE.md',
@@ -341,7 +375,6 @@ describe('GitWorkspace', () => {
   it('a_common_dir_it_cannot_resolve_stops_the_seeding_because_the_state_would_be_visible_to_git', async () => {
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({
-      root: GitDouble.ROOT,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
       run: (argv) => Promise.resolve(GitDouble.declaringNothing(argv) ?? (argv.includes('--git-common-dir')
@@ -349,13 +382,13 @@ describe('GitWorkspace', () => {
         : GitDouble.ok())),
     })
 
-    await expect(git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })).rejects.toBeInstanceOf(WorkspaceNotPrepared)
+    await expect(git.prepared()).rejects.toBeInstanceOf(WorkspaceNotPrepared)
   })
 
   it('the_state_it_seeds_carries_the_cut_it_measured_in_the_worktree_and_not_the_one_it_guessed', async () => {
     const git = new GitDouble()
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+    await git.prepared()
 
     expect(parseStateSafe(git.written[1][1]).meta.base_sha).toBe(GitDouble.CUT)
   })
@@ -363,7 +396,7 @@ describe('GitWorkspace', () => {
   it('the_state_it_seeds_names_the_gate_that_holds_this_slice_because_the_skill_reads_it_from_there', async () => {
     const git = new GitDouble()
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+    await git.prepared()
 
     const gates = parseStateSafe(git.written[1][1]).meta.gates
     expect(gates).toContain('plan — GATE HUMANO pendiente')
@@ -374,7 +407,7 @@ describe('GitWorkspace', () => {
   it('the_gate_it_seeds_says_the_gates_section_of_the_issue_describes_another_flow', async () => {
     const git = new GitDouble()
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+    await git.prepared()
 
     const gates = parseStateSafe(git.written[1][1]).meta.gates
     expect(gates).toContain('la sección "## Gates" del issue describe el carril de /ct-next')
@@ -385,7 +418,6 @@ describe('GitWorkspace', () => {
   it('a_head_it_cannot_measure_stops_the_seeding_instead_of_writing_a_state_without_a_cut', async () => {
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({
-      root: GitDouble.ROOT,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
       run: (argv) => Promise.resolve(GitDouble.declaringNothing(argv) ?? (argv.includes('HEAD')
@@ -395,13 +427,13 @@ describe('GitWorkspace', () => {
           : GitDouble.ok()))
     })
 
-    await expect(git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })).rejects.toBeInstanceOf(WorkspaceNotPrepared)
+    await expect(git.prepared()).rejects.toBeInstanceOf(WorkspaceNotPrepared)
   })
 
   it('the_check_that_the_state_stays_hidden_asks_git_with_untracked_files_all_so_a_whole_untracked_directory_cannot_collapse_into_one_line', async () => {
     const git = new GitDouble()
 
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+    await git.prepared()
 
     expect(git.calls.at(-1)).toEqual([
       '-C', GitDouble.WORKTREE, 'status', '--porcelain', '--untracked-files=all',
@@ -411,12 +443,12 @@ describe('GitWorkspace', () => {
   it('a_status_check_that_git_refuses_to_answer_is_not_taken_for_a_clean_tree', async () => {
     const git = new GitDouble({ status: GitDouble.refused('git is not available') })
 
-    await expect(git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })).rejects.toBeInstanceOf(WorkspaceNotPrepared)
+    await expect(git.prepared()).rejects.toBeInstanceOf(WorkspaceNotPrepared)
   })
 
   it('undoing_a_location_removes_the_worktree_and_deletes_the_branch_it_was_cut_on', async () => {
     const git = new GitDouble()
-    const located = await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
+    const located = await git.prepared()
     git.calls = []
 
     await git.workspace().undo(located)
@@ -427,14 +459,16 @@ describe('GitWorkspace', () => {
     ])
   })
 
-  it('undoing_a_location_runs_both_orders_against_the_root_and_never_against_whatever_directory_the_process_happens_to_be_in', async () => {
+  it('undoing_a_location_runs_both_orders_against_the_root_the_location_carries_and_never_against_the_process_directory', async () => {
     const git = new GitDouble()
-    const located = await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
-    git.calls = []
+    const located = new WorkspaceLocation({ root: '/elsewhere/clone', path: '/elsewhere/clone/.worktrees/42', branch: 'feat/42' })
 
     await git.workspace().undo(located)
 
-    expect(git.calls.every((argv) => argv[0] === '-C' && argv[1] === GitDouble.ROOT)).toBe(true)
+    expect(git.calls).toEqual([
+      ['-C', '/elsewhere/clone', 'worktree', 'remove', '--force', '/elsewhere/clone/.worktrees/42'],
+      ['-C', '/elsewhere/clone', 'branch', '-D', 'feat/42'],
+    ])
   })
 })
 
@@ -447,7 +481,6 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
   it('a_common_dir_git_refuses_to_resolve_still_gets_the_worktree_and_branch_undone', async () => {
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({
-      root: GitDouble.ROOT,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
       run: (argv) => {
@@ -458,7 +491,7 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
       },
     })
 
-    const refusal = await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch((cause) => cause)
+    const refusal = await git.prepared().catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
     expect(refusal.message).toContain('could not resolve the common git directory')
@@ -468,7 +501,6 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
   it('a_head_git_cannot_measure_still_gets_the_worktree_and_branch_undone', async () => {
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({
-      root: GitDouble.ROOT,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
       run: (argv) => {
@@ -481,7 +513,7 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
       },
     })
 
-    const refusal = await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch((cause) => cause)
+    const refusal = await git.prepared().catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
     expect(refusal.message).toContain('could not measure the commit')
@@ -491,7 +523,7 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
   it('a_status_check_git_refuses_to_answer_still_gets_the_worktree_and_branch_undone', async () => {
     const git = new GitDouble({ status: GitDouble.refused('git is not available') })
 
-    const refusal = await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch((cause) => cause)
+    const refusal = await git.prepared().catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
     expect(git.calls.slice(-2)).toEqual(undone)
@@ -500,7 +532,7 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
   it('a_state_file_still_visible_to_git_after_seeding_still_gets_the_worktree_and_branch_undone', async () => {
     const git = new GitDouble({ status: GitDouble.stillVisible() })
 
-    const refusal = await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch((cause) => cause)
+    const refusal = await git.prepared().catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
     expect(refusal.message).toContain(SliceSeed.RELATIVE_PATH)
@@ -508,108 +540,50 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
   })
 
   it('a_cleanup_that_also_fails_after_a_common_dir_refusal_does_not_replace_the_original_failure', async () => {
-    const git = new GitDouble()
-    git.workspace = () => new GitWorkspace({
-      root: GitDouble.ROOT,
-      read: () => Promise.resolve(null),
-      write: () => Promise.resolve(),
-      run: (argv) => {
-        git.calls.push(argv)
-        if (argv.includes('get-url')) return Promise.resolve(GitDouble.naming(GitDouble.REMOTE_URL))
-        if (argv.includes('symbolic-ref')) return Promise.resolve(GitDouble.declaring())
-        if (argv.includes('--git-common-dir')) {
-          return Promise.resolve({ failed: true, stdout: '', stderr: 'not a git repository' })
-        }
-        if (argv.includes('remove')) return Promise.reject(new Error('worktree remove refused'))
+    const git = new GitDouble({ removal: GitDouble.refused('fatal: worktree remove refused') })
+    git.answering = (argv) => {
+      if (argv.includes('--git-common-dir')) return GitDouble.refused('not a git repository')
+      if (argv.includes('remove')) return git.removal
 
-        return Promise.resolve(GitDouble.ok())
-      },
-      stderr: (line) => git.stderr.push(line),
-    })
+      return GitDouble.declaringNothing(argv) ?? GitDouble.ok()
+    }
 
-    const refusal = await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch((cause) => cause)
+    const refusal = await git.prepared().catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
     expect(refusal.message).toContain('could not resolve the common git directory')
-    expect(git.stderr.join('')).toContain('worktree remove refused')
-  })
-
-  it('a_cleanup_that_fails_names_the_worktree_and_branch_it_could_not_collect', async () => {
-    const git = new GitDouble()
-    git.workspace = () => new GitWorkspace({
-      root: GitDouble.ROOT,
-      read: () => Promise.resolve(null),
-      write: () => Promise.resolve(),
-      run: (argv) => {
-        git.calls.push(argv)
-        if (argv.includes('get-url')) return Promise.resolve(GitDouble.naming(GitDouble.REMOTE_URL))
-        if (argv.includes('symbolic-ref')) return Promise.resolve(GitDouble.declaring())
-        if (argv.includes('--git-common-dir')) {
-          return Promise.resolve({ failed: true, stdout: '', stderr: 'not a git repository' })
-        }
-        if (argv.includes('remove')) return Promise.reject(new Error('worktree remove refused'))
-
-        return Promise.resolve(GitDouble.ok())
-      },
-      stderr: (line) => git.stderr.push(line),
-    })
-
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch(() => {})
-
-    const said = git.stderr.join('')
-    expect(said).toContain(GitDouble.WORKTREE)
-    expect(said).toContain('feat/42')
+    expect(git.stderr.join('')).toContain('fatal: worktree remove refused')
   })
 })
 
-describe('GitWorkspace tells its diagnostic writer when undo itself cannot collect what it created', () => {
-  it('a_direct_undo_that_git_refuses_reports_the_worktree_and_branch_left_behind_and_still_throws', async () => {
-    const git = new GitDouble()
-    const located = await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
-    git.calls = []
-    git.stderr = []
-    git.workspace = () => new GitWorkspace({
-      root: GitDouble.ROOT,
-      read: () => Promise.resolve(null),
-      write: () => Promise.resolve(),
-      run: (argv) => {
-        git.calls.push(argv)
-        if (argv.includes('remove')) return Promise.reject(new Error('worktree remove refused'))
+describe('GitWorkspace tells its diagnostic writer what git refused to undo, because a refusal comes back as an exit code and not as a throw', () => {
+  it('a_worktree_git_refuses_to_remove_is_named_with_what_git_said_and_the_branch_is_still_deleted', async () => {
+    const git = new GitDouble({ removal: GitDouble.refused('fatal: cannot remove a locked working tree') })
 
-        return Promise.resolve(GitDouble.ok())
-      },
-      stderr: (line) => git.stderr.push(line),
-    })
+    await git.workspace().undo(GitDouble.located())
 
-    const refusal = await git.workspace().undo(located).catch((cause) => cause)
-
-    expect(refusal).toBeInstanceOf(Error)
-    expect(refusal.message).toBe('worktree remove refused')
     const said = git.stderr.join('')
     expect(said).toContain(GitDouble.WORKTREE)
-    expect(said).toContain('feat/42')
+    expect(said).toContain('fatal: cannot remove a locked working tree')
+    expect(git.calls.at(-1)).toEqual(['-C', GitDouble.ROOT, 'branch', '-D', 'feat/42'])
   })
 
-  it('the_default_diagnostic_writer_still_writes_to_the_real_stderr_when_nobody_injects_one', async () => {
-    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
-    const located = new WorkspaceLocation({ path: GitDouble.WORKTREE, branch: 'feat/42' })
-    const workspace = new GitWorkspace({
-      root: GitDouble.ROOT,
-      read: () => Promise.resolve(null),
-      write: () => Promise.resolve(),
-      run: (argv) => (argv.includes('remove')
-        ? Promise.reject(new Error('worktree remove refused'))
-        : Promise.resolve(GitDouble.ok())),
-    })
+  it('a_branch_git_refuses_to_delete_is_named_with_what_git_said', async () => {
+    const git = new GitDouble({ deletion: GitDouble.refused("error: branch 'feat/42' not found") })
 
-    try {
-      await workspace.undo(located).catch(() => {})
+    await git.workspace().undo(GitDouble.located())
 
-      const said = complaining.mock.calls.map(([line]) => line).join('')
-      expect(said).toContain(GitDouble.WORKTREE)
-    } finally {
-      complaining.mockRestore()
-    }
+    const said = git.stderr.join('')
+    expect(said).toContain('feat/42')
+    expect(said).toContain("error: branch 'feat/42' not found")
+  })
+
+  it('an_undo_git_carries_out_says_nothing', async () => {
+    const git = new GitDouble()
+
+    await git.workspace().undo(GitDouble.located())
+
+    expect(git.stderr).toEqual([])
   })
 })
 
@@ -797,7 +771,7 @@ class SurveyDouble extends GitDouble {
   }
 
   surveyed() {
-    return this.workspace().survey()
+    return this.workspace().survey(GitDouble.CHECKOUT)
   }
 
   refusal() {
@@ -926,5 +900,11 @@ describe('GitWorkspace surveying the checkout', () => {
 
     expect(refusal).toBeInstanceOf(WorkspaceNotUnderstood)
     expect(refusal.message).toContain('ow ner/na me')
+  })
+
+  it('every_prepared_workspace_the_survey_answers_carries_the_root_it_was_surveyed_from', async () => {
+    const surveyed = await new SurveyDouble().surveyed()
+
+    expect(surveyed.prepared.map((prepared) => prepared.located.root)).toEqual(['/repo/checkout', '/repo/checkout'])
   })
 })

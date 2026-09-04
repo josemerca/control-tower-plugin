@@ -54,7 +54,6 @@ class HarvestDouble {
 
   harvest() {
     return new DispatchCheckHarvest({
-      root: HarvestDouble.ROOT,
       dispatchCheck: HarvestDouble.CHECK,
       harvestTable: this.harvestTable,
       node: (argv, options) => {
@@ -64,10 +63,11 @@ class HarvestDouble {
     })
   }
 
-  asked() {
+  asked(root = HarvestDouble.ROOT) {
     return this.harvest().collect({
       issueNumber: HarvestDouble.ISSUE,
       repository: HarvestDouble.REPOSITORY,
+      root,
     })
   }
 
@@ -157,15 +157,15 @@ class PluginContract {
 }
 
 describe('DispatchCheckHarvest', () => {
-  it('the_command_it_runs_is_the_one_the_plugin_publishes_and_it_runs_in_the_checkout_that_holds_the_worktrees', async () => {
+  it('the_command_it_runs_is_the_one_the_plugin_publishes_and_it_runs_in_the_root_the_worktree_was_cut_from', async () => {
     const asked = HarvestDouble.collected()
 
-    await asked.asked()
+    await asked.asked('/elsewhere/clone')
 
     expect(asked.calls[0][0]).toEqual([
       '/plugin/scripts/dispatch-check.mjs', '7', '--repo', 'owner/name', '--collect',
     ])
-    expect(asked.calls[0][1]).toEqual({ cwd: '/repo/checkout' })
+    expect(asked.calls[0][1]).toEqual({ cwd: '/elsewhere/clone' })
   })
 
   it('with_a_harvest_table_the_command_asks_the_plugin_to_load_the_row_after_the_five_arguments_of_today', async () => {

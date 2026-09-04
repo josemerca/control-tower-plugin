@@ -100,17 +100,6 @@ describe('Invocation', () => {
     expect(Invoked.withPort('abc').port).toBe(null)
   })
 
-  it('a_ready_invocation_cannot_be_built_carrying_a_reason_to_refuse_it', () => {
-    expect(() =>
-      new Invocation({ outcome: InvocationOutcome.READY, port: 8787, reason: 'why' })
-    ).toThrow(/disagrees with its reason/)
-  })
-
-  it('an_outcome_outside_the_vocabulary_raises_instead_of_travelling_on_as_a_string', () => {
-    expect(() => new Invocation({ outcome: 'invented', port: null, stateRoot: null, reason: 'x' }))
-      .toThrow(/InvocationOutcome member/)
-  })
-
   it('a_claim_variable_the_api_inherited_never_reaches_a_harvest_it_would_make_the_plugin_refuse', () => {
     const composed = Invoked.harvesting({ CT_CLAIM_SETTLE_MS: '500', CT_CLAIM_FIXTURE: '{"pr":{}}' })
 

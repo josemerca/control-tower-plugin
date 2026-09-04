@@ -25,7 +25,7 @@ export class GhPlanIssues extends PlanIssues {
   static GO_TOKEN = '-OK'
   static #REF = /\/issues\/(\d+)\s*$/
 
-  constructor({ gh, stderr = (line) => process.stderr.write(line) }) {
+  constructor({ gh, stderr }) {
     super()
     this.gh = gh
     this.stderr = stderr

@@ -9,7 +9,7 @@ import { ReviewsSpy } from '../reviews-spy.js'
 import { StartPlanResult } from '../../src/application/actions/start-plan.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
-import { PlanEvents, EventsRefusal } from '../../src/infrastructure/plan-events-route.js'
+import { PlanEvents, EventsRefusal, PlanSessions } from '../../src/infrastructure/plan-events-route.js'
 import {
   PlanAgentNotLaunched, UserStoryNotRead, PlanIssueNotCreated, PlanIssueNotNamed, WorkspaceNotPrepared,
   PlanProgressNotRead,
@@ -21,7 +21,7 @@ import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-loca
 class StartPlanSpy {
   static AGENT = 'workspace:4'
   static ISSUE = new PlanIssue({ number: 7, url: 'https://github.com/owner/name/issues/7' })
-  static LOCATED = new WorkspaceLocation({ path: '/repo/.worktrees/7', branch: 'feat/7' })
+  static LOCATED = new WorkspaceLocation({ root: '/repo/checkout', path: '/repo/checkout/.worktrees/7', branch: 'feat/7' })
   static WATCH = new PlanWatch({
     issue: StartPlanSpy.ISSUE,
     located: StartPlanSpy.LOCATED,
@@ -31,6 +31,7 @@ class StartPlanSpy {
   constructor({ failing = false } = {}) {
     this.asked = []
     this.repositories = []
+    this.roots = []
     this.failing = failing
   }
 
@@ -55,6 +56,7 @@ class StartPlanSpy {
   async execute(params) {
     this.asked.push(params.story.text)
     this.repositories.push(params.repository.text)
+    this.roots.push(params.root.text)
     if (this.failing) throw new PlanAgentNotLaunched('cmux is not reachable')
     return new StartPlanResult({ agent: StartPlanSpy.AGENT, watch: StartPlanSpy.WATCH })
   }
@@ -115,23 +117,32 @@ class RunningApi {
   static #started = []
   static STORY = 'ABC-123'
   static REPO = 'owner/name'
-  static ACCEPTED_BODY = `{"id":"ABC-123","repo":"owner/name"}`
+  static ACCEPTED_BODY = `{"id":"ABC-123","repo":"owner/name","path":"/repo/checkout"}`
   static ANSWER =
     '{"status":"started","id":"ABC-123","repo":"owner/name",' +
-    '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"agent":"workspace:4"}'
+    '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"agent":"workspace:4",' +
+    '"branch":"feat/7","worktree":"/repo/checkout/.worktrees/7"}'
   static spy = null
   static reviews = null
 
-  static async listening(options = {}) {
+  static server(options = {}) {
     RunningApi.spy = new StartPlanSpy()
     RunningApi.reviews = new ReviewsSpy()
-    const server = new ApiServer({
+
+    return new ApiServer({
       port: 0,
       startPlan: RunningApi.spy,
       implementPlan: null,
       reviews: RunningApi.reviews,
+      planEvents: ProgressSpy.events(PlanState.WRITING).planEvents,
+      sessions: new PlanSessions(),
+      frontendRoot: FrontendFixture.missing(),
       ...options,
     })
+  }
+
+  static async listening(options = {}) {
+    const server = RunningApi.server(options)
     const port = await server.start()
     RunningApi.#started.push(server)
     return port
@@ -245,7 +256,7 @@ describe('ApiServer', () => {
 
   it('an_agent_that_cannot_be_launched_is_reported_as_such_instead_of_a_generic_failure', async () => {
     RunningApi.spy = new StartPlanSpy({ failing: true })
-    const server = new ApiServer({ port: 0, startPlan: RunningApi.spy, implementPlan: null })
+    const server = RunningApi.server({ startPlan: RunningApi.spy })
     const port = await server.start()
 
     try {
@@ -268,7 +279,7 @@ describe('ApiServer', () => {
     ]
 
     for (const cause of causes) {
-      const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.failingWith(cause), implementPlan: null })
+      const server = RunningApi.server({ startPlan: StartPlanSpy.failingWith(cause) })
       const port = await server.start()
 
       try {
@@ -283,8 +294,8 @@ describe('ApiServer', () => {
   })
 
   it('a_tool_that_answered_something_unreadable_is_not_offered_as_something_to_retry', async () => {
-    const server = new ApiServer({
-      port: 0, startPlan: StartPlanSpy.failingWith(new PlanIssueNotNamed('gh printed "done"')), implementPlan: null,
+    const server = RunningApi.server({
+      startPlan: StartPlanSpy.failingWith(new PlanIssueNotNamed('gh printed "done"')),
     })
     const port = await server.start()
 
@@ -299,7 +310,7 @@ describe('ApiServer', () => {
   })
 
   it('a_failure_that_is_not_a_refusal_to_start_is_not_dressed_up_as_one', async () => {
-    const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.buggy(), implementPlan: null })
+    const server = RunningApi.server({ startPlan: StartPlanSpy.buggy() })
     const port = await server.start()
     const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
 
@@ -315,7 +326,7 @@ describe('ApiServer', () => {
   })
 
   it('a_bug_of_ours_leaves_a_trace_on_the_error_channel_instead_of_vanishing_behind_that_400', async () => {
-    const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.buggy(), implementPlan: null })
+    const server = RunningApi.server({ startPlan: StartPlanSpy.buggy() })
     const port = await server.start()
     const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
 
@@ -334,7 +345,7 @@ describe('ApiServer', () => {
   it('the_id_that_reaches_the_agent_is_the_one_the_body_carried_and_not_a_default', async () => {
     const port = await RunningApi.listening()
 
-    const response = await RunningApi.post(port, '/start-plan', '{"id":"MO_SHOP-42","repo":"owner/name"}')
+    const response = await RunningApi.post(port, '/start-plan', '{"id":"MO_SHOP-42","repo":"owner/name","path":"/repo/checkout"}')
 
     expect(RunningApi.spy.asked).toEqual(['MO_SHOP-42'])
     expect(await response.text()).toBe(RunningApi.ANSWER.replace('ABC-123', 'MO_SHOP-42'))
@@ -557,9 +568,57 @@ describe('ApiServer', () => {
   it('the_repository_the_body_names_is_the_one_the_use_case_is_asked_to_open_the_issue_in', async () => {
     const port = await RunningApi.listening()
 
-    await RunningApi.post(port, '/start-plan', '{"id":"ABC-123","repo":"josemerca/ct-loop-sandbox"}')
+    await RunningApi.post(port, '/start-plan', '{"id":"ABC-123","repo":"josemerca/ct-loop-sandbox","path":"/repo/checkout"}')
 
     expect(RunningApi.spy.repositories).toEqual(['josemerca/ct-loop-sandbox'])
+  })
+
+  it('the_path_the_body_names_is_the_root_the_use_case_is_asked_to_cut_the_worktree_in', async () => {
+    const port = await RunningApi.listening()
+
+    await RunningApi.post(port, '/start-plan', '{"id":"ABC-123","repo":"owner/name","path":"/Users/someone/repos/name"}')
+
+    expect(RunningApi.spy.roots).toEqual(['/Users/someone/repos/name'])
+  })
+
+  it('a_body_with_no_path_is_refused_because_the_worktree_has_to_be_cut_somewhere', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(port, `{"id":"${RunningApi.STORY}","repo":"${RunningApi.REPO}"}`)
+
+    expect(response.status).toBe(400)
+    expect(await response.text()).toBe(
+      '{"error":"path must be an absolute path"}'
+    )
+  })
+
+  it('a_path_that_is_not_absolute_is_refused_before_it_ever_becomes_an_argument_of_git', async () => {
+    const port = await RunningApi.listening()
+
+    const refused = await Promise.all(
+      [
+        '{"id":"ABC-123","repo":"owner/name","path":"repos/name"}',
+        '{"id":"ABC-123","repo":"owner/name","path":"~/repos/name"}',
+        '{"id":"ABC-123","repo":"owner/name","path":"/repos/name/"}',
+        '{"id":"ABC-123","repo":"owner/name","path":""}',
+        '{"id":"ABC-123","repo":"owner/name","path":123}',
+      ].map((body) => RunningApi.startPlan(port, body))
+    )
+
+    expect(refused.map((response) => response.status)).toEqual([400, 400, 400, 400, 400])
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
+  it('a_path_with_a_semicolon_in_a_segment_is_still_well_formed_because_nothing_ever_reaches_a_shell', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(
+      port,
+      '{"id":"ABC-123","repo":"owner/name","path":"/repos/name; rm -rf ~"}'
+    )
+
+    expect(response.status).toBe(202)
+    expect(RunningApi.spy.roots).toEqual(['/repos/name; rm -rf ~'])
   })
 
   it('a_body_with_no_repo_is_refused_because_an_issue_has_to_be_opened_somewhere', async () => {
@@ -643,7 +702,7 @@ describe('ApiServer', () => {
   })
 
   it('the_trace_of_a_failure_names_the_url_the_client_asked_for_and_not_the_one_routing_rewrote', async () => {
-    const server = new ApiServer({ port: 0, startPlan: StartPlanSpy.buggy(), implementPlan: null })
+    const server = RunningApi.server({ startPlan: StartPlanSpy.buggy() })
     const port = await server.start()
     const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
 
@@ -679,7 +738,7 @@ describe('ApiServer', () => {
   })
 
   it('stop_closes_the_socket_so_a_later_request_cannot_reach_a_server_believed_dead', async () => {
-    const server = new ApiServer({ port: 0, startPlan: new StartPlanSpy(), implementPlan: null })
+    const server = RunningApi.server({ startPlan: new StartPlanSpy() })
     const port = await server.start()
 
     await server.stop()
@@ -688,7 +747,7 @@ describe('ApiServer', () => {
   })
 
   it('an_error_after_a_successful_listen_is_not_swallowed_by_the_promise_that_already_resolved', async () => {
-    const server = new ApiServer({ port: 0, startPlan: new StartPlanSpy(), implementPlan: null })
+    const server = RunningApi.server({ startPlan: new StartPlanSpy() })
     await server.start()
 
     try {
@@ -699,7 +758,7 @@ describe('ApiServer', () => {
   })
 
   it('starting_twice_is_refused_instead_of_leaking_the_first_server_out_of_reach', async () => {
-    const server = new ApiServer({ port: 0, startPlan: new StartPlanSpy(), implementPlan: null })
+    const server = RunningApi.server({ startPlan: new StartPlanSpy() })
     await server.start()
 
     try {

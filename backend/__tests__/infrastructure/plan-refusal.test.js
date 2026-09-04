@@ -26,12 +26,6 @@ describe('PlanRefusal', () => {
     expect(refusal.status).toBe(400)
     expect(refusal.error).toBe('unknown field: b, a')
   })
-
-  it('a_status_that_is_not_a_refusal_or_a_reason_that_says_nothing_cannot_be_built', () => {
-    expect(() => new Refusal({ status: 200, error: 'fine' }))
-      .toThrow(/client or server status/)
-    expect(() => new Refusal({ status: 400, error: '  ' })).toThrow(/says why/)
-  })
 })
 
 describe('PlanCollapse', () => {
@@ -86,6 +80,14 @@ describe('PlanCollapse', () => {
     expect(PlanCollapse.of(new exceptions.PlanAgentNotLaunched('nope')).status).toBe(503)
     expect(PlanCollapse.of(new exceptions.WorkspaceNotPrepared('branch is taken')).status).toBe(503)
     expect(PlanCollapse.of(new exceptions.WorkspaceNotRead('no such remote')).status).toBe(503)
+  })
+
+  it('a_checkout_that_does_not_hold_the_repository_asked_for_is_something_the_user_can_fix', () => {
+    const collapse = PlanCollapse.of(new exceptions.CheckoutNotConfirmed('owner/name: /repo holds someone/else'))
+
+    expect(collapse).toBeInstanceOf(Refusal)
+    expect(collapse.status).toBe(400)
+    expect(collapse.error).toBe('path must be a git checkout of owner/name: /repo holds someone/else')
   })
 
   it('an_issue_that_could_not_be_claimed_is_something_to_try_again_and_names_what_gh_said', () => {

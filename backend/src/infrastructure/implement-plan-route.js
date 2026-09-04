@@ -1,4 +1,5 @@
 import { Answer, JsonBody, Refusal } from './http.js'
+import { Projection } from './projection.js'
 import { ImplementPlanParams } from '../application/actions/implement-plan.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
 import {
@@ -93,63 +94,54 @@ class ImplementRequest {
 }
 
 export class ImplementRefusal {
-  static #BY_OUTCOME = Object.freeze({
-    [ImplementRequestOutcome.BODY_NOT_A_JSON_OBJECT]: () =>
-      new Refusal({ status: 400, error: 'body must be a JSON object' }),
-    [ImplementRequestOutcome.MALFORMED_AGENT]: () => new Refusal({
+  static #BY_OUTCOME = new Projection('refusal', [
+    [ImplementRequestOutcome.BODY_NOT_A_JSON_OBJECT, () =>
+      new Refusal({ status: 400, error: 'body must be a JSON object' })],
+    [ImplementRequestOutcome.MALFORMED_AGENT, () => new Refusal({
       status: 400,
       error: `${ImplementRequest.AGENT_FIELD} must be the handle start-plan answered with`,
-    }),
-    [ImplementRequestOutcome.MALFORMED_ISSUE]: () => new Refusal({
+    })],
+    [ImplementRequestOutcome.MALFORMED_ISSUE, () => new Refusal({
       status: 400,
       error: `${ImplementRequest.ISSUE_FIELD} must be a whole number from one`,
-    }),
-    [ImplementRequestOutcome.MALFORMED_REPO]: () => new Refusal({
+    })],
+    [ImplementRequestOutcome.MALFORMED_REPO, () => new Refusal({
       status: 400,
       error: `${ImplementRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
-    }),
-    [ImplementRequestOutcome.UNKNOWN_FIELD]: (asked) => new Refusal({
+    })],
+    [ImplementRequestOutcome.UNKNOWN_FIELD, (asked) => new Refusal({
       status: 400,
       error: `unknown field: ${asked.fields.join(', ')}`,
-    }),
-  })
+    })],
+  ])
 
   static of(asked) {
-    const declared = ImplementRefusal.#BY_OUTCOME[asked.outcome]
-    if (declared === undefined) {
-      throw new Error(`no refusal declared for outcome ${asked.outcome}`)
-    }
-
-    return declared(asked)
+    return ImplementRefusal.#BY_OUTCOME.of(asked.outcome)(asked)
   }
 
   static declaredOutcomes() {
-    return Object.keys(ImplementRefusal.#BY_OUTCOME)
+    return ImplementRefusal.#BY_OUTCOME.members()
   }
 }
 
 export class ImplementCollapse {
   static #REFUSED = 503
 
-  static #BY_FAILURE = [
+  static #BY_FAILURE = new Projection('status', [
     [GoNotRecorded, ImplementCollapse.#REFUSED],
     [PlanGoNotAnswered, ImplementCollapse.#REFUSED],
     [PlanAgentNotResumed, ImplementCollapse.#REFUSED],
-  ]
+  ])
 
   static of(cause) {
-    const declared = ImplementCollapse.#BY_FAILURE.find(([failure]) => cause.constructor === failure)
-    if (declared === undefined) {
-      throw new Error(`no status declared for ${cause.constructor.name}`)
-    }
-
     return new Refusal({
-      status: declared[1], error: `could not implement the plan: ${cause.message}`,
+      status: ImplementCollapse.#BY_FAILURE.of(cause.constructor),
+      error: `could not implement the plan: ${cause.message}`,
     })
   }
 
   static declaredFailures() {
-    return ImplementCollapse.#BY_FAILURE.map(([failure]) => failure.name)
+    return ImplementCollapse.#BY_FAILURE.members().map((failure) => failure.name)
   }
 }
 
