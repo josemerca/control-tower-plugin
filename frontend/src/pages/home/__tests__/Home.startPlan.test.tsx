@@ -1,6 +1,14 @@
 import { screen } from '@testing-library/react'
 import { StartPlanMother } from '__scenarios__/StartPlanMother'
-import { backendAnswering, backendUnreachable, openHome, startPlan, typeRepository, typeTicket } from './helpers'
+import {
+  backendAnswering,
+  backendUnreachable,
+  openHome,
+  startPlan,
+  typeRepository,
+  typeRoot,
+  typeTicket,
+} from './helpers'
 
 describe('Home · start plan', () => {
   afterEach(() => {
@@ -59,6 +67,7 @@ describe('Home · start plan', () => {
     backendAnswering(StartPlanMother.started())
     const { user } = openHome()
     await typeRepository(user, StartPlanMother.REPO)
+    await typeRoot(user, StartPlanMother.ROOT)
 
     expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeDisabled()
     await typeTicket(user, 'abc-1')
@@ -72,6 +81,7 @@ describe('Home · start plan', () => {
     backendAnswering(StartPlanMother.started())
     const { user } = openHome()
     await typeTicket(user, StartPlanMother.TICKET)
+    await typeRoot(user, StartPlanMother.ROOT)
 
     expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeDisabled()
     await typeRepository(user, 'name')
@@ -81,7 +91,24 @@ describe('Home · start plan', () => {
     expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeEnabled()
   })
 
-  it('should keep both fields filled after a plan starts', async () => {
+  it('should keep the start button disabled until the clone root is an absolute path', async () => {
+    backendAnswering(StartPlanMother.started())
+    const { user } = openHome()
+    await typeTicket(user, StartPlanMother.TICKET)
+    await typeRepository(user, StartPlanMother.REPO)
+
+    expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeDisabled()
+    await typeRoot(user, 'repos/name')
+    expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeDisabled()
+    await user.clear(screen.getByLabelText('Ruta del clon local'))
+    await typeRoot(user, '/Users/you/repos/name/')
+    expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeDisabled()
+    await user.clear(screen.getByLabelText('Ruta del clon local'))
+    await typeRoot(user, '/Users/you/repos/name')
+    expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeEnabled()
+  })
+
+  it('should keep the three fields filled after a plan starts', async () => {
     backendAnswering(StartPlanMother.started())
     const { user } = openHome()
 
@@ -90,5 +117,17 @@ describe('Home · start plan', () => {
     await screen.findByRole('status')
     expect(screen.getByLabelText('Clave del ticket')).toHaveValue(StartPlanMother.TICKET)
     expect(screen.getByLabelText('Repositorio')).toHaveValue(StartPlanMother.REPO)
+    expect(screen.getByLabelText('Ruta del clon local')).toHaveValue(StartPlanMother.ROOT)
+  })
+
+  it('should show the backend refusal of a malformed root as it came', async () => {
+    backendAnswering(StartPlanMother.malformedRoot())
+    const { user } = openHome()
+
+    await startPlan(user)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'root must be an absolute path to a local clone such as /Users/you/repos/name',
+    )
   })
 })

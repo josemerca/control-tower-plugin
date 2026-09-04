@@ -1,6 +1,7 @@
 export type StartPlanRequest = {
   id: string
   repo: string
+  root: string
 }
 
 export type PlanIssue = {
