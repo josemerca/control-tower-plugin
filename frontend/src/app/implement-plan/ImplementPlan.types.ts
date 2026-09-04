@@ -1,6 +1,7 @@
 export type ImplementPlanRequest = {
   agent: string
   issue: number
+  repo: string
 }
 
 export type ImplementPlanResult = {
