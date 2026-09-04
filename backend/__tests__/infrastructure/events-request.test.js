@@ -9,16 +9,18 @@ import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-loca
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 
 class Watched {
+  static REPO = 'owner/name'
   static WATCH = new PlanWatch({
     issue: new PlanIssue({ number: 42, url: 'https://github.com/owner/name/issues/42' }),
     located: new WorkspaceLocation({ path: '/repo/.worktrees/42', branch: 'feat/42' }),
-    repository: new RepositoryName('owner/name'),
+    repository: new RepositoryName(Watched.REPO),
   })
 
+  static OTHER_REPO = 'other/name'
   static IN_ANOTHER_REPOSITORY = new PlanWatch({
     issue: new PlanIssue({ number: 42, url: 'https://github.com/other/name/issues/42' }),
     located: new WorkspaceLocation({ path: '/other/.worktrees/42', branch: 'feat/42' }),
-    repository: new RepositoryName('other/name'),
+    repository: new RepositoryName(Watched.OTHER_REPO),
   })
 
   static sessions() {
@@ -28,7 +30,7 @@ class Watched {
     return sessions
   }
 
-  static ambiguous() {
+  static inTwoRepositories() {
     const sessions = Watched.sessions()
     sessions.remember(Watched.IN_ANOTHER_REPOSITORY)
 
@@ -48,38 +50,51 @@ describe('EventsRequest', () => {
   })
 
   it('an_issue_that_is_watched_arrives_carrying_the_watch_so_the_route_never_looks_it_up_again', () => {
-    const asked = EventsRequest.from('42', Watched.sessions())
+    const asked = EventsRequest.from('42', Watched.REPO, Watched.sessions())
 
     expect(asked.outcome).toBe(EventsRequestOutcome.ACCEPTED)
     expect(asked.watched).toBe(Watched.WATCH)
   })
 
   it('an_issue_that_is_not_a_number_is_refused_by_name_instead_of_becoming_a_lookup_for_nan', () => {
-    const asked = EventsRequest.from('abc', Watched.sessions())
+    const asked = EventsRequest.from('abc', Watched.REPO, Watched.sessions())
 
     expect(asked.outcome).toBe(EventsRequestOutcome.MALFORMED_ISSUE)
     expect(asked.watched).toBe(null)
   })
 
   it('an_issue_numbered_from_zero_or_written_with_a_sign_is_malformed_because_no_issue_is_numbered_so', () => {
-    expect(EventsRequest.from('0', Watched.sessions()).outcome).toBe(EventsRequestOutcome.MALFORMED_ISSUE)
-    expect(EventsRequest.from('+7', Watched.sessions()).outcome).toBe(EventsRequestOutcome.MALFORMED_ISSUE)
-    expect(EventsRequest.from('4.2', Watched.sessions()).outcome).toBe(EventsRequestOutcome.MALFORMED_ISSUE)
+    expect(EventsRequest.from('0', Watched.REPO, Watched.sessions()).outcome).toBe(EventsRequestOutcome.MALFORMED_ISSUE)
+    expect(EventsRequest.from('+7', Watched.REPO, Watched.sessions()).outcome).toBe(EventsRequestOutcome.MALFORMED_ISSUE)
+    expect(EventsRequest.from('4.2', Watched.REPO, Watched.sessions()).outcome).toBe(EventsRequestOutcome.MALFORMED_ISSUE)
+  })
+
+  it('a_repository_that_is_missing_is_refused_instead_of_becoming_a_lookup_with_no_repository', () => {
+    const asked = EventsRequest.from('42', undefined, Watched.sessions())
+
+    expect(asked.outcome).toBe(EventsRequestOutcome.MALFORMED_REPO)
+    expect(asked.watched).toBe(null)
+  })
+
+  it('a_repository_not_shaped_like_owner_slash_name_is_refused_before_it_becomes_a_lookup_key', () => {
+    const asked = EventsRequest.from('42', 'nope', Watched.sessions())
+
+    expect(asked.outcome).toBe(EventsRequestOutcome.MALFORMED_REPO)
+    expect(asked.watched).toBe(null)
   })
 
   it('a_well_formed_issue_nobody_started_a_plan_for_is_told_apart_from_one_nobody_could_read', () => {
-    const asked = EventsRequest.from('42', Watched.none())
+    const asked = EventsRequest.from('42', Watched.REPO, Watched.none())
 
     expect(asked.outcome).toBe(EventsRequestOutcome.NOT_WATCHED)
     expect(asked.watched).toBe(null)
   })
 
-  it('an_issue_number_planned_in_two_repositories_is_refused_instead_of_serving_one_at_random', () => {
-    const asked = EventsRequest.from('42', Watched.ambiguous())
+  it('an_issue_number_planned_in_two_repositories_is_told_apart_by_the_repository_the_request_names', () => {
+    const sessions = Watched.inTwoRepositories()
 
-    expect(asked.outcome).toBe(EventsRequestOutcome.AMBIGUOUS_ISSUE)
-    expect(asked.watched).toBe(null)
-    expect(asked.conflicting).toEqual(['owner/name', 'other/name'])
+    expect(EventsRequest.from('42', Watched.REPO, sessions).watched).toBe(Watched.WATCH)
+    expect(EventsRequest.from('42', Watched.OTHER_REPO, sessions).watched).toBe(Watched.IN_ANOTHER_REPOSITORY)
   })
 })
 
@@ -97,8 +112,8 @@ describe('EventsRefusal', () => {
   })
 
   it('an_issue_the_caller_wrote_wrong_is_theirs_to_fix_and_a_plan_nobody_started_is_simply_not_there', () => {
-    const malformed = EventsRefusal.of(EventsRequest.from('abc', Watched.none()))
-    const missing = EventsRefusal.of(EventsRequest.from('42', Watched.none()))
+    const malformed = EventsRefusal.of(EventsRequest.from('abc', Watched.REPO, Watched.none()))
+    const missing = EventsRefusal.of(EventsRequest.from('42', Watched.REPO, Watched.none()))
 
     expect(malformed).toBeInstanceOf(Refusal)
     expect(malformed.status).toBe(400)
@@ -106,11 +121,12 @@ describe('EventsRefusal', () => {
     expect(missing.error).toBe(EventsRefusal.NOT_WATCHED)
   })
 
-  it('an_issue_planned_in_two_repositories_is_a_400_that_names_both_instead_of_lying_that_none_is_watched', () => {
-    const ambiguous = EventsRefusal.of(EventsRequest.from('42', Watched.ambiguous()))
+  it('a_repository_that_is_missing_or_malformed_is_refused_with_the_same_words_start_plan_uses_for_the_same_field', () => {
+    const missing = EventsRefusal.of(EventsRequest.from('42', undefined, Watched.none()))
+    const malformed = EventsRefusal.of(EventsRequest.from('42', 'nope', Watched.none()))
 
-    expect(ambiguous.status).toBe(400)
-    expect(ambiguous.error).toContain('owner/name')
-    expect(ambiguous.error).toContain('other/name')
+    expect(missing.status).toBe(400)
+    expect(missing.error).toBe('repo must be a repository such as owner/name')
+    expect(malformed.error).toBe(missing.error)
   })
 })
