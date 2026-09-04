@@ -329,7 +329,7 @@ describe('GhPlanIssues', () => {
     ).refusalFor()
 
     expect(refusal).toBeInstanceOf(PlanIssueNotNamed)
-    expect(refusal.message).toContain('did not name the issue')
+    expect(refusal.message).toContain('/issues/0')
   })
 
   it('gh_answering_something_unreadable_is_told_apart_from_gh_refusing_the_call', async () => {

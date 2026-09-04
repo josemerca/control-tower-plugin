@@ -17,18 +17,24 @@ cannot happen.
 
 ## The guard lives where the value enters from outside
 
-A value this code composes itself gets none. `domain.md` says which values are
-validated in the value object — the ones that cross into an argv, because of
-where they end up — and this is its converse, written down because that silence
-gets read as licence. The check happens once, where the outside value arrives:
-the model that reads the request, the value object that will end up in an argv.
-Downstream of that point every caller is our own code, and a second check there
-defends against a caller that does not exist — and brings tests that can only
-fail if the language does.
+The check on what a value **carries** happens once, at the door the outside
+value arrives through: the model that reads the request, the type built from
+what a tool printed. Downstream of that door every caller is our own code, and
+a second opinion about the same content defends against a caller that does not
+exist — and brings tests that can only fail if the language does.
 
-The question: **where does this value come from?** From a request, a tool's
-output or a file, the check belongs at that door. From a constructor, a factory
-or a port of ours, it has already been checked.
+**This is not the invariant a type keeps for itself.** `domain.md` says which
+guard belongs inside a value object: the one that makes it that value and not
+any value, so that a broken one cannot be constructed at all. That guard is the
+type's reason to exist, and it stays whether or not today's callers already
+satisfy it — the day one of them stops satisfying it is the day it earns its
+keep, and by then nobody is reading this document. What does not belong there
+is the check that re-verifies what the type of its own argument already
+guarantees.
+
+The question, then, is not where the value came from but **whose invariant this
+is**: the type being built keeps its own, and forms no second opinion about a
+value another type already vouched for.
 
 ## A field, a branch and a public symbol answer to a call that exists
 
@@ -76,14 +82,16 @@ human to decide, and is not implemented meanwhile.
 ## What other documents own, and this one does not repeat
 
 - A **new type or a new module**: `architecture.md`.
+- The **guard a value object keeps for itself**: `domain.md`.
 - A **guard no use case can reach**, and what is left unmeasured on purpose:
   `testing.md`.
 - **Markers, budgets and retries nobody measured**: `infrastructure.md`.
 
 ## Antipatterns
 
-- A guard on a value this code composes.
-- A check in a constructor whose every caller already satisfies it.
+- A second check on what a value carries, downstream of the door it came in by.
+- A check in a constructor that re-verifies what the type of its argument
+  already guarantees.
 - A field crossing a layer with no consumer at the other end.
 - An `export`, a public method, a parameter or a default with no caller.
 - A condition on a state the code cannot reach, with a test that can only fail

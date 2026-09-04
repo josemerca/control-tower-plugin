@@ -59,12 +59,12 @@ guarded here precisely because of where it ends up: the shape of
 before `gh` ever sees them.
 
 What does not belong inside is the check that **re-verifies what another type
-already guarantees**: asking whether the value received is an instance of the
-value object that the caller had to build in order to call at all, or whether
-two fields agree when the only constructors already make them agree. That
-check adds no invariant — the type it is asking about carries it — and every
-one of them shipped here had to be removed again. The line is which invariant
-is *this* type's own: guard that one, and only that one.
+already guarantees** — whether the value received is an instance of the value
+object the caller had to build in order to call at all. That one adds no
+invariant, because the type it asks about carries it. The line is which
+invariant is *this* type's own: guard that one, and only that one. What happens
+downstream of a door is `conventions/simplicity.md`'s business, and two fields
+that have to agree are `conventions/defects.md`'s.
 
 ## Exceptions: families of two causes
 
