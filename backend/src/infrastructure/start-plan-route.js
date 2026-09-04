@@ -132,7 +132,11 @@ export class PlanCollapse {
     [PlanAgentNotLaunched, PlanCollapse.#collapsed('plan-agent-not-launched')],
     [WorkspaceNotPrepared, PlanCollapse.#collapsed('workspace-not-prepared')],
     [WorkspaceNotRead, PlanCollapse.#collapsed('workspace-not-read')],
-    [CheckoutNotConfirmed, PlanCollapse.#collapsed('checkout-not-confirmed')],
+    [CheckoutNotConfirmed, (cause) => new Refusal({
+      status: PlanCollapse.#STATUS,
+      code: 'checkout-not-confirmed',
+      detail: `${PlanRequest.PATH_FIELD} must be a git checkout of ${cause.message}`,
+    })],
     [UserStoryNotUnderstood, PlanCollapse.#collapsed('user-story-not-understood')],
     [PlanIssueNotNamed, PlanCollapse.#collapsed('plan-issue-not-named')],
     [PlanAgentNotNamed, PlanCollapse.#collapsed('plan-agent-not-named')],
