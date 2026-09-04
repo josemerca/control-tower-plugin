@@ -1,4 +1,5 @@
 import { Answer, Refusal } from './http.js'
+import { Projection } from './projection.js'
 import { PlanProgressFailure } from '../domain/exceptions.js'
 
 export class PlanSessions {
@@ -30,12 +31,6 @@ export class EventsRequest {
   static #NUMBERED = /^[1-9][0-9]*$/
 
   constructor({ outcome, watched }) {
-    if (!Object.values(EventsRequestOutcome).includes(outcome)) {
-      throw new Error(`outcome must be an EventsRequestOutcome member, got ${outcome}`)
-    }
-    if ((outcome === EventsRequestOutcome.ACCEPTED) === (watched === null)) {
-      throw new Error(`outcome ${outcome} disagrees with its watch, got ${watched}`)
-    }
     this.outcome = outcome
     this.watched = watched
     Object.freeze(this)
@@ -64,26 +59,21 @@ export class EventsRequest {
 
 export class EventsRefusal {
   static NOT_WATCHED = 'no plan was started for that issue'
-  static #BY_OUTCOME = Object.freeze({
-    [EventsRequestOutcome.MALFORMED_ISSUE]: () => new Refusal({
+  static #BY_OUTCOME = new Projection('refusal', [
+    [EventsRequestOutcome.MALFORMED_ISSUE, () => new Refusal({
       status: 400,
       error: `the issue to watch is a number such as ${EventsRequest.EXAMPLE}`,
-    }),
-    [EventsRequestOutcome.NOT_WATCHED]: () =>
-      new Refusal({ status: 404, error: EventsRefusal.NOT_WATCHED }),
-  })
+    })],
+    [EventsRequestOutcome.NOT_WATCHED, () =>
+      new Refusal({ status: 404, error: EventsRefusal.NOT_WATCHED })],
+  ])
 
   static of(asked) {
-    const declared = EventsRefusal.#BY_OUTCOME[asked.outcome]
-    if (declared === undefined) {
-      throw new Error(`no refusal declared for outcome ${asked.outcome}`)
-    }
-
-    return declared(asked)
+    return EventsRefusal.#BY_OUTCOME.of(asked.outcome)(asked)
   }
 
   static declaredOutcomes() {
-    return Object.keys(EventsRefusal.#BY_OUTCOME)
+    return EventsRefusal.#BY_OUTCOME.members()
   }
 }
 
@@ -103,7 +93,7 @@ export class PlanEvents {
     return `event: ${PlanEvents.ERROR_EVENT}\ndata: ${JSON.stringify({ error: cause.message })}\n\n`
   }
 
-  async *stream(session, cancelled = () => false) {
+  async *stream(session, cancelled) {
     let last = null
     for (;;) {
       let read

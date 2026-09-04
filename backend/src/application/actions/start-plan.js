@@ -56,16 +56,10 @@ export class StartPlan {
         repository: params.repository,
       }))
     } catch (failure) {
-      await this.#abandon(located)
+      await this.workspace.undo(located)
       await this.#release(params, issue)
       throw failure
     }
-  }
-
-  async #abandon(located) {
-    try {
-      await this.workspace.undo(located)
-    } catch {}
   }
 
   async #release(params, issue) {

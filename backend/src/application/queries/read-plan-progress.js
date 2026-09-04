@@ -7,7 +7,7 @@ export class ReadPlanProgressParams {
   }
 }
 
-export class ReadPlanProgressResult {
+class ReadPlanProgressResult {
   constructor({ state }) {
     this.state = state
     Object.freeze(this)

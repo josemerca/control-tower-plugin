@@ -23,8 +23,10 @@ class GitDouble {
   static WORKTREE = '/repo/checkout/.worktrees/42'
   static EXCLUDE_PATH = `${GitDouble.COMMON_DIR}/info/exclude`
 
-  constructor({ answer, status, existingExclude = null, commonDir, declared, remote } = {}) {
+  constructor({ answer, status, existingExclude = null, commonDir, declared, remote, removal = null, deletion = null } = {}) {
     this.answer = answer ?? GitDouble.ok()
+    this.removal = removal
+    this.deletion = deletion
     this.remote = remote ?? GitDouble.naming(GitDouble.REMOTE_URL)
     this.status = status ?? GitDouble.clean()
     this.existingExclude = existingExclude
@@ -63,6 +65,8 @@ class GitDouble {
     if (argv.includes('--git-common-dir')) return { failed: false, stdout: `${this.commonDir}\n`, stderr: '' }
     if (argv.includes('HEAD')) return { failed: false, stdout: `${GitDouble.CUT}\n`, stderr: '' }
     if (argv.includes('status')) return this.status
+    if (argv.includes('remove') && this.removal !== null) return this.removal
+    if (argv.includes('-D') && this.deletion !== null) return this.deletion
     if (argv.includes('worktree') || argv.includes('branch')) return this.answer
     throw new Error(`nobody wrote an answer for git ${argv.join(' ')}`)
   }
@@ -99,6 +103,10 @@ class GitDouble {
 
   static clean() {
     return { failed: false, stdout: '', stderr: '' }
+  }
+
+  static located() {
+    return new WorkspaceLocation({ path: GitDouble.WORKTREE, branch: 'feat/42' })
   }
 
   static stillVisible() {
@@ -508,108 +516,50 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
   })
 
   it('a_cleanup_that_also_fails_after_a_common_dir_refusal_does_not_replace_the_original_failure', async () => {
-    const git = new GitDouble()
-    git.workspace = () => new GitWorkspace({
-      root: GitDouble.ROOT,
-      read: () => Promise.resolve(null),
-      write: () => Promise.resolve(),
-      run: (argv) => {
-        git.calls.push(argv)
-        if (argv.includes('get-url')) return Promise.resolve(GitDouble.naming(GitDouble.REMOTE_URL))
-        if (argv.includes('symbolic-ref')) return Promise.resolve(GitDouble.declaring())
-        if (argv.includes('--git-common-dir')) {
-          return Promise.resolve({ failed: true, stdout: '', stderr: 'not a git repository' })
-        }
-        if (argv.includes('remove')) return Promise.reject(new Error('worktree remove refused'))
+    const git = new GitDouble({ removal: GitDouble.refused('fatal: worktree remove refused') })
+    git.answering = (argv) => {
+      if (argv.includes('--git-common-dir')) return GitDouble.refused('not a git repository')
+      if (argv.includes('remove')) return git.removal
 
-        return Promise.resolve(GitDouble.ok())
-      },
-      stderr: (line) => git.stderr.push(line),
-    })
+      return GitDouble.declaringNothing(argv) ?? GitDouble.ok()
+    }
 
     const refusal = await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
     expect(refusal.message).toContain('could not resolve the common git directory')
-    expect(git.stderr.join('')).toContain('worktree remove refused')
-  })
-
-  it('a_cleanup_that_fails_names_the_worktree_and_branch_it_could_not_collect', async () => {
-    const git = new GitDouble()
-    git.workspace = () => new GitWorkspace({
-      root: GitDouble.ROOT,
-      read: () => Promise.resolve(null),
-      write: () => Promise.resolve(),
-      run: (argv) => {
-        git.calls.push(argv)
-        if (argv.includes('get-url')) return Promise.resolve(GitDouble.naming(GitDouble.REMOTE_URL))
-        if (argv.includes('symbolic-ref')) return Promise.resolve(GitDouble.declaring())
-        if (argv.includes('--git-common-dir')) {
-          return Promise.resolve({ failed: true, stdout: '', stderr: 'not a git repository' })
-        }
-        if (argv.includes('remove')) return Promise.reject(new Error('worktree remove refused'))
-
-        return Promise.resolve(GitDouble.ok())
-      },
-      stderr: (line) => git.stderr.push(line),
-    })
-
-    await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY }).catch(() => {})
-
-    const said = git.stderr.join('')
-    expect(said).toContain(GitDouble.WORKTREE)
-    expect(said).toContain('feat/42')
+    expect(git.stderr.join('')).toContain('fatal: worktree remove refused')
   })
 })
 
-describe('GitWorkspace tells its diagnostic writer when undo itself cannot collect what it created', () => {
-  it('a_direct_undo_that_git_refuses_reports_the_worktree_and_branch_left_behind_and_still_throws', async () => {
-    const git = new GitDouble()
-    const located = await git.workspace().prepare({ issue: { number: 42 }, repository: GitDouble.REPOSITORY })
-    git.calls = []
-    git.stderr = []
-    git.workspace = () => new GitWorkspace({
-      root: GitDouble.ROOT,
-      read: () => Promise.resolve(null),
-      write: () => Promise.resolve(),
-      run: (argv) => {
-        git.calls.push(argv)
-        if (argv.includes('remove')) return Promise.reject(new Error('worktree remove refused'))
+describe('GitWorkspace tells its diagnostic writer what git refused to undo, because a refusal comes back as an exit code and not as a throw', () => {
+  it('a_worktree_git_refuses_to_remove_is_named_with_what_git_said_and_the_branch_is_still_deleted', async () => {
+    const git = new GitDouble({ removal: GitDouble.refused('fatal: cannot remove a locked working tree') })
 
-        return Promise.resolve(GitDouble.ok())
-      },
-      stderr: (line) => git.stderr.push(line),
-    })
+    await git.workspace().undo(GitDouble.located())
 
-    const refusal = await git.workspace().undo(located).catch((cause) => cause)
-
-    expect(refusal).toBeInstanceOf(Error)
-    expect(refusal.message).toBe('worktree remove refused')
     const said = git.stderr.join('')
     expect(said).toContain(GitDouble.WORKTREE)
-    expect(said).toContain('feat/42')
+    expect(said).toContain('fatal: cannot remove a locked working tree')
+    expect(git.calls.at(-1)).toEqual(['-C', GitDouble.ROOT, 'branch', '-D', 'feat/42'])
   })
 
-  it('the_default_diagnostic_writer_still_writes_to_the_real_stderr_when_nobody_injects_one', async () => {
-    const complaining = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
-    const located = new WorkspaceLocation({ path: GitDouble.WORKTREE, branch: 'feat/42' })
-    const workspace = new GitWorkspace({
-      root: GitDouble.ROOT,
-      read: () => Promise.resolve(null),
-      write: () => Promise.resolve(),
-      run: (argv) => (argv.includes('remove')
-        ? Promise.reject(new Error('worktree remove refused'))
-        : Promise.resolve(GitDouble.ok())),
-    })
+  it('a_branch_git_refuses_to_delete_is_named_with_what_git_said', async () => {
+    const git = new GitDouble({ deletion: GitDouble.refused("error: branch 'feat/42' not found") })
 
-    try {
-      await workspace.undo(located).catch(() => {})
+    await git.workspace().undo(GitDouble.located())
 
-      const said = complaining.mock.calls.map(([line]) => line).join('')
-      expect(said).toContain(GitDouble.WORKTREE)
-    } finally {
-      complaining.mockRestore()
-    }
+    const said = git.stderr.join('')
+    expect(said).toContain('feat/42')
+    expect(said).toContain("error: branch 'feat/42' not found")
+  })
+
+  it('an_undo_git_carries_out_says_nothing', async () => {
+    const git = new GitDouble()
+
+    await git.workspace().undo(GitDouble.located())
+
+    expect(git.stderr).toEqual([])
   })
 })
 

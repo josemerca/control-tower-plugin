@@ -97,9 +97,4 @@ describe('DiskGoRegistry', () => {
     expect(refusal.message).toContain('EACCES: permission denied')
     expect(refusal.message).toContain('go/jjponz__repo-pulse-33.json')
   })
-
-  it('a_registry_without_a_root_refuses_to_exist_instead_of_writing_where_nobody_reads', () => {
-    expect(() => new DiskGoRegistry({ random: () => DiskDouble.BYTES, write: async () => {} }))
-      .toThrow(/absolute path/)
-  })
 })

@@ -1,7 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { ReviewsSpy } from '../reviews-spy.js'
-import { PlanSessions } from '../../src/infrastructure/plan-events-route.js'
+import { PlanEvents, PlanSessions } from '../../src/infrastructure/plan-events-route.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
@@ -60,6 +62,12 @@ class RunningApi {
     agent: 'workspace:20',
   })
 
+  static NO_FRONTEND = join(tmpdir(), 'ct-frontend-never-built')
+  static NO_EVENTS = new PlanEvents({
+    read: () => Promise.reject(new Error('this suite never streams plan events')),
+    sleep: () => Promise.resolve(),
+  })
+
   static async listening(spy = new ImplementPlanSpy()) {
     RunningApi.spy = spy
     RunningApi.reviews = new ReviewsSpy()
@@ -71,6 +79,8 @@ class RunningApi {
       implementPlan: spy,
       reviews: RunningApi.reviews,
       sessions: RunningApi.sessions,
+      planEvents: RunningApi.NO_EVENTS,
+      frontendRoot: RunningApi.NO_FRONTEND,
     })
     const port = await server.start()
     RunningApi.#started.push(server)
