@@ -16,6 +16,14 @@ describe('Home · start plan', () => {
     vi.unstubAllGlobals()
   })
 
+  it('should keep the active request expanded when its header is clicked', async () => {
+    const { user } = openHome()
+
+    await user.click(screen.getByRole('button', { name: /Solicitud Activo/ }))
+
+    expect(screen.getByRole('button', { name: /Solicitud Activo/ })).toHaveAttribute('aria-expanded', 'true')
+  })
+
   it('should show the plan the backend started with a link to its issue', async () => {
     backendAnswering(StartPlanMother.started())
     const { user } = openHome()

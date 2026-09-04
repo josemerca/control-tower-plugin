@@ -14,10 +14,12 @@ const Home = () => {
   const [started, setStarted] = useState<StartedPlan | null>(null)
   const [isPlanReady, setIsPlanReady] = useState(false)
   const [isImplementationStarted, setIsImplementationStarted] = useState(false)
-  const [expandedStep, setExpandedStep] = useState<WorkflowStepName | null>('request')
+  const [expandedStep, setExpandedStep] = useState<WorkflowStepName>('request')
   const [requestFormVersion, setRequestFormVersion] = useState(0)
 
-  const expand = (step: WorkflowStepName) => (isExpanded: boolean) => setExpandedStep(isExpanded ? step : null)
+  const expand = (step: WorkflowStepName) => (isExpanded: boolean) => {
+    if (isExpanded) setExpandedStep(step)
+  }
 
   const planStarted = useCallback((plan: StartedPlan) => {
     setStarted(plan)
