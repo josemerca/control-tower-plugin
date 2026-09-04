@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react'
 import { StartPlanClient } from 'app/start-plan/client'
+import { LocalPath } from 'app/start-plan/LocalPath'
 import { RepositoryName } from 'app/start-plan/RepositoryName'
 import { StartPlanOutcome, StartedPlan } from 'app/start-plan/StartPlan.types'
 import { TicketKey } from 'app/start-plan/TicketKey'
@@ -20,16 +21,21 @@ type StartPlanFormProps = {
 const StartPlanForm = ({ onStarted }: StartPlanFormProps) => {
   const [ticketKey, setTicketKey] = useState('')
   const [repository, setRepository] = useState('')
+  const [path, setPath] = useState('')
   const [isSending, setIsSending] = useState(false)
   const [refusal, setRefusal] = useState<StartPlanRefusal | null>(null)
 
-  const canStart = TicketKey.isWellFormed(ticketKey) && RepositoryName.isWellFormed(repository) && !isSending
+  const canStart =
+    TicketKey.isWellFormed(ticketKey) &&
+    RepositoryName.isWellFormed(repository) &&
+    LocalPath.isWellFormed(path) &&
+    !isSending
 
   const startPlan = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setIsSending(true)
     setRefusal(null)
-    const outcome = await StartPlanClient.start({ id: ticketKey, repo: repository })
+    const outcome = await StartPlanClient.start({ id: ticketKey, repo: repository, path: path.trim() })
     setIsSending(false)
     if (outcome.kind === 'started') {
       onStarted(outcome.plan)
@@ -56,6 +62,15 @@ const StartPlanForm = ({ onStarted }: StartPlanFormProps) => {
           disabled={isSending}
           autoComplete="off"
           onChange={(event) => setRepository(event.target.value)}
+        />
+      </FormField>
+      <FormField label="Ruta local" message={`Con la forma ${LocalPath.EXAMPLE}`}>
+        <Input
+          placeholder={LocalPath.EXAMPLE}
+          value={path}
+          disabled={isSending}
+          autoComplete="off"
+          onChange={(event) => setPath(event.target.value)}
         />
       </FormField>
       <div className="start-plan-form__actions">
