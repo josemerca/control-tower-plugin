@@ -215,6 +215,14 @@ describe('the run machine and the run file this backend reads back', () => {
     expect(RunFileProgress.attemptOf(run)).toBe(StepSeal.attemptOf(run))
   })
 
+  it('the_two_formulas_still_agree_when_every_retry_counter_is_distinct_and_non_zero', () => {
+    const run = {
+      ...RunDouble.freshRun(), controlRetries: 1, judgeRetries: 2, correctionRetries: 3, reconcileRetries: 5,
+    }
+
+    expect(RunFileProgress.attemptOf(run)).toBe(StepSeal.attemptOf(run))
+  })
+
   it('the_delivered_run_the_machine_closes_is_the_delivered_run_we_answer', async () => {
     const run = { ...RunDouble.freshRun(), closed: RUN_STATES.DELIVERED }
 
