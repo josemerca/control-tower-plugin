@@ -413,8 +413,10 @@ with `run.task: 2`, expecting `name: 'el lector del plan'`, and asserting `read`
   expect `name: null`.
 - `it('a_plan_that_is_not_on_disk_costs_the_name_and_not_the_state')` — `read` answers the run file
   and then `null`; expect the state whole with `name: null`.
-- `it('a_step_of_the_slice_does_not_go_looking_for_a_plan')` — a delivered run; assert `read` was
-  called **once**.
+- `it('a_step_of_the_slice_does_not_go_looking_for_a_plan')` — a run at `step: 'global'` **without**
+  `closed`, so it reaches the new gate instead of short-circuiting at the delivered check; assert
+  `read` was called **once**. A delivered run does not measure this: it returns before the gate, so
+  the test would pass with the gate deleted.
 
 **Tests:** added: the four above. The `name: null` of Task 2's first case becomes the real name in
 that test's plan, or stays `null` if its double answers no plan — either way the six earlier cases
@@ -424,7 +426,7 @@ keep asserting what they asserted.
 
 ```bash
 cd backend
-npx vitest run __tests__/infrastructure/run-file-progress.test.js   # exit 0: ten cases
+npx vitest run __tests__/infrastructure/run-file-progress.test.js   # exit 0: eleven cases
 test "$(grep -c 'plan-tasks' src/infrastructure/run-file-progress.js)" -eq 0   # nothing imported from the plugin
 ```
 
