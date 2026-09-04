@@ -10,7 +10,7 @@ arranque), `docs/superpowers/specs/2026-09-02-frontend-plan-events-design.md`
 (la implementación).
 
 Vite + React 19 + TypeScript. Hoy una pantalla sobre tres endpoints: la clave
-del ticket, el repositorio y la ruta del clon local, un botón que llama a `POST /start-plan`, el
+del ticket y el repositorio, un botón que llama a `POST /start-plan`, el
 progreso del plan que llega por `GET /plan-events/:issue` (Server-Sent Events)
 y, cuando el plan está listo, un botón que llama a `POST /implement-plan`.
 
