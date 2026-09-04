@@ -3,9 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { WorkflowStep } from 'system-ui/workflow-step'
 
 describe('WorkflowStep', () => {
-  it('should expose the active step header as an expanded button that controls its content', () => {
+  it('should expose a parent-expanded step header as an expanded button that controls its content', () => {
     render(
-      <WorkflowStep status="active" title="Preparar el plan">
+      <WorkflowStep status="active" title="Preparar el plan" isExpanded onExpandedChange={() => undefined}>
         El agente prepara el plan
       </WorkflowStep>,
     )
@@ -18,11 +18,12 @@ describe('WorkflowStep', () => {
     expect(content).not.toHaveAttribute('hidden')
   })
 
-  it('should let a completed step reopen and collapse its content', async () => {
+  it('should ask its parent to reopen and collapse a completed step', async () => {
     const user = userEvent.setup()
+    const onExpandedChange = vi.fn()
 
-    render(
-      <WorkflowStep status="completed" title="Plan preparado">
+    const { rerender } = render(
+      <WorkflowStep status="completed" title="Plan preparado" isExpanded={false} onExpandedChange={onExpandedChange}>
         El plan está listo para implementar
       </WorkflowStep>,
     )
@@ -35,17 +36,21 @@ describe('WorkflowStep', () => {
     expect(content).toHaveAttribute('hidden')
 
     await user.click(header)
-    expect(header).toHaveAttribute('aria-expanded', 'true')
-    expect(content).not.toHaveAttribute('hidden')
+    expect(onExpandedChange).toHaveBeenCalledWith(true)
 
+    rerender(
+      <WorkflowStep status="completed" title="Plan preparado" isExpanded onExpandedChange={onExpandedChange}>
+        El plan está listo para implementar
+      </WorkflowStep>,
+    )
+    onExpandedChange.mockClear()
     await user.click(header)
-    expect(header).toHaveAttribute('aria-expanded', 'false')
-    expect(content).toHaveAttribute('hidden')
+    expect(onExpandedChange).toHaveBeenCalledWith(false)
   })
 
   it.each(['completed', 'active', 'pending'] as const)('should expose the %s state in its class', (status) => {
     const { container } = render(
-      <WorkflowStep status={status} title="Paso">
+      <WorkflowStep status={status} title="Paso" isExpanded={false} onExpandedChange={() => undefined}>
         Contenido
       </WorkflowStep>,
     )
@@ -55,7 +60,7 @@ describe('WorkflowStep', () => {
 
   it('should use a caller supplied content identifier', () => {
     render(
-      <WorkflowStep status="pending" title="Implementar" contentId="implementation-step">
+      <WorkflowStep status="pending" title="Implementar" contentId="implementation-step" isExpanded={false} onExpandedChange={() => undefined}>
         Esperando la implementación
       </WorkflowStep>,
     )
@@ -68,7 +73,7 @@ describe('WorkflowStep', () => {
 
   it('should keep a pending step collapsed and unavailable', () => {
     render(
-      <WorkflowStep status="pending" title="Implementar">
+      <WorkflowStep status="pending" title="Implementar" isExpanded={false} onExpandedChange={() => undefined}>
         Esperando la implementación
       </WorkflowStep>,
     )

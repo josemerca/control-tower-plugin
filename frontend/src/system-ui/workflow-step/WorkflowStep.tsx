@@ -1,5 +1,5 @@
 import classNames from 'classnames'
-import { HTMLAttributes, ReactNode, useEffect, useId, useState } from 'react'
+import { HTMLAttributes, ReactNode, useId } from 'react'
 import './WorkflowStep.css'
 
 type WorkflowStepStatus = 'completed' | 'active' | 'pending'
@@ -8,7 +8,8 @@ interface WorkflowStepProps extends Omit<HTMLAttributes<HTMLElement>, 'title'> {
   title: ReactNode
   status: WorkflowStepStatus
   children: ReactNode
-  defaultExpanded?: boolean
+  isExpanded: boolean
+  onExpandedChange: (isExpanded: boolean) => void
   contentId?: string
   isAvailable?: boolean
 }
@@ -29,7 +30,8 @@ const WorkflowStep = ({
   title,
   status,
   children,
-  defaultExpanded = status === 'active',
+  isExpanded,
+  onExpandedChange,
   contentId,
   isAvailable = status !== 'pending',
   className,
@@ -39,12 +41,6 @@ const WorkflowStep = ({
   const headerId = `${generatedId}-header`
   const titleId = `${generatedId}-title`
   const resolvedContentId = contentId ?? `${generatedId}-content`
-  const [isExpanded, setIsExpanded] = useState(defaultExpanded)
-
-  useEffect(() => {
-    setIsExpanded(status === 'active')
-  }, [status])
-
   return (
     <section {...rest} className={classNames('workflow-step', STATUS_CLASS[status], className)}>
       <button
@@ -54,7 +50,7 @@ const WorkflowStep = ({
         aria-expanded={isExpanded}
         aria-controls={resolvedContentId}
         disabled={!isAvailable}
-        onClick={() => setIsExpanded((expanded) => !expanded)}
+        onClick={() => onExpandedChange(!isExpanded)}
       >
         <span className="workflow-step__indicator" aria-hidden="true">
           {status === 'completed' && (

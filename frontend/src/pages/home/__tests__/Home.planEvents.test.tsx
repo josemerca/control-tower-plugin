@@ -31,6 +31,15 @@ describe('Home · plan events', () => {
     expect(FakeEventSource.last().url).toBe(PlanEventsMother.PATH)
   })
 
+  it('should close the active plan when reopening the completed request', async () => {
+    const { user } = await planStarted()
+
+    await user.click(screen.getByRole('button', { name: /Solicitud Completado/ }))
+
+    expect(screen.getByRole('button', { name: /Solicitud Completado/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: /Plan Activo/ })).toHaveAttribute('aria-expanded', 'false')
+  })
+
   it('should say the plan is being written when the first frame arrives', async () => {
     await planStarted()
 

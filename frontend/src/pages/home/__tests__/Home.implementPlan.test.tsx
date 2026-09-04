@@ -51,6 +51,15 @@ describe('Home · implement plan', () => {
     expect(screen.getByRole('button', IMPLEMENT_BUTTON)).toBeEnabled()
   })
 
+  it('should close active implementation when reopening the completed plan', async () => {
+    const { user } = await planReady()
+
+    await user.click(screen.getByRole('button', { name: /Plan Completado/ }))
+
+    expect(screen.getByRole('button', { name: /Plan Completado/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: /Implementación Activo/ })).toHaveAttribute('aria-expanded', 'false')
+  })
+
   it('should send exactly the payload the backend contract declares', async () => {
     const { user } = await planReady()
     const fetching = backendAnswering(ImplementPlanMother.implementing())
