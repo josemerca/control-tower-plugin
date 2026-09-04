@@ -19,7 +19,7 @@ const ImplementPlanAction = ({ plan }: ImplementPlanActionProps) => {
   const implementPlan = async () => {
     setIsSending(true)
     setOutcome(null)
-    setOutcome(await ImplementPlanClient.implement({ agent: plan.agent, issue: plan.issue.number }))
+    setOutcome(await ImplementPlanClient.implement({ agent: plan.agent, issue: plan.issue.number, repo: plan.repo }))
     setIsSending(false)
   }
 

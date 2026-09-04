@@ -47,7 +47,7 @@ export class SliceSeed {
   }
 }
 
-export class WorktreeListing {
+class WorktreeListing {
   static HEADING = 'worktree '
   static BRANCH = 'branch refs/heads/'
   static #NUMBERED = /^[1-9]\d*$/
@@ -95,7 +95,7 @@ export class GitWorkspace extends Workspace {
   static #DECLARED = /^refs\/remotes\/origin\/(.+)$/
   static #NAMED = /^(?:git@github\.com:|https:\/\/github\.com\/)([^/]+\/[^/]+?)(?:\.git)?$/
 
-  constructor({ run, write, read, stderr = (line) => process.stderr.write(line) }) {
+  constructor({ run, write, read, stderr }) {
     super()
     this.run = run
     this.write = write
@@ -174,7 +174,7 @@ export class GitWorkspace extends Workspace {
     try {
       await this.#seed(located, issue, base)
     } catch (failure) {
-      await this.#compensate(located)
+      await this.undo(located)
       throw failure
     }
 
@@ -229,25 +229,14 @@ export class GitWorkspace extends Workspace {
   }
 
   async undo(located) {
-    try {
-      await this.run(GitWorkspace.removeArgvFor(located.root, located.path))
-      await this.run(GitWorkspace.deleteBranchArgvFor(located.root, located.branch))
-    } catch (failure) {
-      this.#warn(located, failure)
-      throw failure
-    }
+    const removed = await this.run(GitWorkspace.removeArgvFor(located.root, located.path))
+    if (removed.failed) this.#warn(`the worktree ${located.path}`, removed)
+    const deleted = await this.run(GitWorkspace.deleteBranchArgvFor(located.root, located.branch))
+    if (deleted.failed) this.#warn(`the branch ${located.branch}`, deleted)
   }
 
-  #warn(located, failure) {
-    this.stderr(
-      `git workspace: could not undo the worktree ${located.path} nor the branch ${located.branch}: ${failure.message}\n`
-    )
-  }
-
-  async #compensate(located) {
-    try {
-      await this.undo(located)
-    } catch {}
+  #warn(what, refused) {
+    this.stderr(`git workspace: could not undo ${what}, it stays behind: ${refused.stderr.trim()}\n`)
   }
 
   async #cut(root, issue, base) {

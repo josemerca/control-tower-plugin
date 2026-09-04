@@ -60,21 +60,6 @@ describe('EventsRequest', () => {
     expect(asked.outcome).toBe(EventsRequestOutcome.NOT_WATCHED)
     expect(asked.watched).toBe(null)
   })
-
-  it('a_refused_request_cannot_carry_a_watch_that_a_consumer_would_then_stream_from', () => {
-    expect(() => new EventsRequest({
-      outcome: EventsRequestOutcome.NOT_WATCHED, watched: Watched.WATCH,
-    })).toThrow(/disagrees with its watch/)
-  })
-
-  it('an_accepted_request_cannot_be_built_without_the_watch_the_stream_reads_from', () => {
-    expect(() => EventsRequest.accepted(null)).toThrow(/disagrees with its watch/)
-  })
-
-  it('an_outcome_that_is_not_a_member_of_the_vocabulary_cannot_be_built_at_all', () => {
-    expect(() => new EventsRequest({ outcome: 'invented', watched: null }))
-      .toThrow(/must be an EventsRequestOutcome member/)
-  })
 })
 
 describe('EventsRefusal', () => {

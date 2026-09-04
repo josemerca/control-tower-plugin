@@ -17,9 +17,6 @@ export class ToolRunner {
   static #UNKNOWN_EXIT = 1
 
   constructor({ bin, budgetMs, env }) {
-    if (!Number.isInteger(budgetMs) || budgetMs < 1) {
-      throw new Error(`${bin} needs a budget in milliseconds, got ${JSON.stringify(budgetMs)}`)
-    }
     this.bin = bin
     this.budgetMs = budgetMs
     this.env = env

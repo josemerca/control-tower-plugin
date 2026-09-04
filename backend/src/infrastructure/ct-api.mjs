@@ -16,7 +16,7 @@ import { DispatchCheckHarvest } from './dispatch-check-harvest.js'
 import { HarvestClock } from './harvest-clock.js'
 import { PlanAgentBrief } from './plan-agent-brief.js'
 import { PlanContractProgress } from './plan-contract-progress.js'
-import { PlanEvents } from './plan-events-route.js'
+import { PlanEvents, PlanSessions } from './plan-events-route.js'
 import { PlanReviewWatch } from './plan-review-watch.js'
 import { StartPlan } from '../application/actions/start-plan.js'
 import { ImplementPlan } from '../application/actions/implement-plan.js'
@@ -27,7 +27,6 @@ import { SurveyWorkspaces, SurveyWorkspacesParams } from '../application/queries
 import { HarvestDelivery, HarvestDeliveryParams } from '../application/actions/harvest-delivery.js'
 import { ToolRunner } from './tool-runner.js'
 import { Gh } from './gh.js'
-import { SystemClock } from './system-clock.js'
 import { ExternalTool } from './external-tool.js'
 import { RetryPolicy, RetryBudget } from '../domain/policies/retry-policy.js'
 import { LaunchPolicy, LaunchBudget } from '../domain/policies/launch-policy.js'
@@ -132,7 +131,7 @@ class CtApi {
           waitSeconds: CtApi.#SECONDS_BETWEEN_RETRIES,
         }),
       }),
-      clock: new SystemClock(),
+      sleep: (seconds) => CtApi.#waiting(seconds),
     })
   }
 
@@ -256,6 +255,7 @@ class CtApi {
         planAgents,
       }),
       planEvents: CtApi.#planEvents(git),
+      sessions: new PlanSessions(),
       frontendRoot: FrontendBuild.root(),
     })
     let port

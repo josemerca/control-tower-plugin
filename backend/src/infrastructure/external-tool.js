@@ -19,10 +19,10 @@ export class ExternalTool {
 
   static #SERVER_STATUS = /http 5\d\d/
 
-  constructor({ launch, policy, clock }) {
+  constructor({ launch, policy, sleep }) {
     this.launch = launch
     this.policy = policy
-    this.clock = clock
+    this.sleep = sleep
   }
 
   async run(argv, { safeToRepeat }) {
@@ -36,7 +36,7 @@ export class ExternalTool {
       })
       if (!decision.retry) break
 
-      await this.clock.sleep(decision.waitSeconds)
+      await this.sleep(decision.waitSeconds)
       output = await this.launch(argv)
       attempted += 1
     }

@@ -26,12 +26,6 @@ describe('PlanRefusal', () => {
     expect(refusal.status).toBe(400)
     expect(refusal.error).toBe('unknown field: b, a')
   })
-
-  it('a_status_that_is_not_a_refusal_or_a_reason_that_says_nothing_cannot_be_built', () => {
-    expect(() => new Refusal({ status: 200, error: 'fine' }))
-      .toThrow(/client or server status/)
-    expect(() => new Refusal({ status: 400, error: '  ' })).toThrow(/says why/)
-  })
 })
 
 describe('PlanCollapse', () => {

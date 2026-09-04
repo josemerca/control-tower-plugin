@@ -31,6 +31,12 @@ Petición: `Content-Type: application/json`, cuerpo `{"agent":"workspace:4","iss
 Los dos campos son obligatorios. `agent` es una cadena sin espacios; `issue` es
 un **número** JSON, entero, desde uno. Cualquier otro campo se rechaza.
 
+> **Nota (2026-09-04):** se revisó el contrato contra
+> `backend/src/infrastructure/implement-plan-route.js` y `repo` es un tercer
+> campo obligatorio (cuerpo real: `{"agent":…,"issue":…,"repo":…}`). El
+> frontend enviaba sólo `agent` e `issue` y el backend lo rechazaba con
+> `400`. Se corrigió el frontend para enviar los tres campos.
+
 | Código | Cuerpo | Cuándo |
 |---|---|---|
 | `202` | `{"status":"implementing","agent":"workspace:4","issue":7}` | el agente recibió la orden |
