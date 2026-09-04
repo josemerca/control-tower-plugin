@@ -49,9 +49,21 @@ Gh (idiom)      extends the trunk with what only that tool writes
 - **The projection from a vocabulary to HTTP is exhaustive and returns a value
   object**, never an object literal; an unmapped member throws instead of
   guessing.
-- **One status per decision of whoever receives it**: 4xx — fix the request;
-  503 — the tool refused, trying again may work; 502 — the tool answered
-  something we cannot read, trying again fixes nothing.
+- **This API is a backend for one frontend, and that frontend decides by
+  `code`, not by status.** Every refusal answers `{code, detail}` — one shape,
+  so the frontend has one thing to parse regardless of which door refused it.
+  A refusal our own application judged — the request was malformed, a tool
+  refused, a tool answered something we cannot read, nobody is watching that
+  issue — always answers 400: the status stopped being the signal, so it
+  stopped needing to vary. A refusal of the protocol itself — the wrong
+  method, an unreadable or oversized body, a foreign origin, a route that does
+  not exist — keeps the status HTTP already gives it, because that one is not
+  a decision about a request that reached the application; its body is
+  `{code, detail}` too, so the shape stays one across the whole API.
+- **A `code` is declared explicitly, in kebab-case, next to the `detail` it
+  comes with**, never derived from an exception's class name: deriving it
+  would wire the answer to a name that lives in the domain, and renaming that
+  exception would silently change what the frontend receives.
 - **An `Origin` is admitted only when it is the page this server hosts**,
   vouched by a loopback `Host`; any other page on any port is a foreign site.
 

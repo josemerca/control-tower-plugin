@@ -75,7 +75,8 @@ because they are repaired in different places: **the command failed** (`*NotRead
 `*NotCreated`, `*NotLaunched` — the reason is in its error channel) and **it
 answered something we cannot read** (`*NotUnderstood`, `*NotNamed` — our
 contract with the tool broke). A caller that does not care catches the family;
-the boundary projects the two causes to different statuses.
+the boundary projects each cause to its own `code`, which is where the
+distinction is told apart now (`infrastructure.md`).
 
 ## Antipatterns
 
