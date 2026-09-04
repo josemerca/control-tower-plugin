@@ -31,10 +31,10 @@ Gh (idiom)      extends the trunk with what only that tool writes
 
 ## Boundary models
 
-- **The conversion to the domain lives in the model, with one door**: raw text
-  in, domain object out (`#ticketFrom(printed, key)` → `UserStory`). A model
-  that keeps the domain object's fields and lets the adapter map by hand is the
-  same type written twice.
+- **The conversion to the domain lives in the model, with one door**: what the
+  tool printed goes in, the domain object comes out. A model that keeps the
+  domain object's fields and lets the adapter map by hand is the same type
+  written twice.
 - **Project only the keys you consume** (`--fields summary,description`); a
   foreign envelope is validated by projection, and an answer missing what we
   declared we read fails with the tool's own words quoted.
