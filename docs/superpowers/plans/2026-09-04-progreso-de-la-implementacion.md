@@ -700,11 +700,14 @@ the entrypoint's happy path and nothing else, which is all `testing.md` allows i
 cd backend
 npx vitest run __tests__/infrastructure/plugin-contract.test.js   # exit 0: the plugin and we agree
 npx vitest run __tests__/infrastructure/ct-api-real-process.test.js
-test "$(grep -rl 'plugin/scripts/' src/ | wc -l | tr -d ' ')" -eq 2   # only the two imports that predate the rule
+test "$(grep -rl 'plugin/scripts/' src/ | wc -l | tr -d ' ')" -eq 5   # only the imports that predate the rule
 ```
 
-The two that predate it are `cmux-plan-agents.js` (`launch-sentinel.js`, `shquote.js`) and
-`git-workspace.js` (`state-paths.js`). Nothing this slice adds appears in that list.
+**Five** files predate the rule, not two — measured, after this plan first guessed wrong:
+`cmux-plan-agents.js` (`launch-sentinel.js`, `shquote.js`), `git-workspace.js` (`state-paths.js`,
+`state.js`), `acli-user-stories.js` (`cells.js`), `plan-agent-brief.js` (`state-paths.js`) and
+`gh-plan-issues.js` (`groom.js`, `gates.js`). The rule is for what is added, and this slice adds
+none: the count must still read 5 when the slice lands.
 
 ## 8. Global verification
 
