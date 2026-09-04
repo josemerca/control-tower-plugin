@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   EventsRequest, EventsRequestOutcome, EventsRefusal, PlanSessions,
 } from '../../src/infrastructure/plan-events-route.js'
+import { PlanRequest, PlanRequestOutcome, PlanRefusal } from '../../src/infrastructure/start-plan-route.js'
 import { Refusal } from '../../src/infrastructure/http.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
@@ -124,9 +125,10 @@ describe('EventsRefusal', () => {
   it('a_repository_that_is_missing_or_malformed_is_refused_with_the_same_words_start_plan_uses_for_the_same_field', () => {
     const missing = EventsRefusal.of(EventsRequest.from('42', undefined, Watched.none()))
     const malformed = EventsRefusal.of(EventsRequest.from('42', 'nope', Watched.none()))
+    const startPlanMalformedRepo = PlanRefusal.of(PlanRequest.refused(PlanRequestOutcome.MALFORMED_REPO))
 
     expect(missing.status).toBe(400)
-    expect(missing.error).toBe('repo must be a repository such as owner/name')
+    expect(missing.error).toBe(startPlanMalformedRepo.error)
     expect(malformed.error).toBe(missing.error)
   })
 })
