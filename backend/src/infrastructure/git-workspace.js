@@ -83,7 +83,7 @@ export class WorktreeListing {
     const branch = GitWorkspace.branchFor(issue)
     if (!lines.includes(`${WorktreeListing.BRANCH}${branch}`)) return null
 
-    return new PreparedWorkspace({ issueNumber: issue.number, located: new WorkspaceLocation({ path, branch }) })
+    return new PreparedWorkspace({ issueNumber: issue.number, located: new WorkspaceLocation({ root, path, branch }) })
   }
 }
 
@@ -95,12 +95,11 @@ export class GitWorkspace extends Workspace {
   static #DECLARED = /^refs\/remotes\/origin\/(.+)$/
   static #NAMED = /^(?:git@github\.com:|https:\/\/github\.com\/)([^/]+\/[^/]+?)(?:\.git)?$/
 
-  constructor({ run, write, read, root, stderr = (line) => process.stderr.write(line) }) {
+  constructor({ run, write, read, stderr = (line) => process.stderr.write(line) }) {
     super()
     this.run = run
     this.write = write
     this.read = read
-    this.root = root
     this.stderr = stderr
   }
 
@@ -154,13 +153,21 @@ export class GitWorkspace extends Workspace {
     return ['-C', root, 'branch', '-D', branch]
   }
 
-  async prepare({ issue, repository }) {
-    await this.#confirmRoot(repository)
-    const base = await this.#declaredBase()
-    const path = GitWorkspace.pathFor(this.root, issue)
+  async confirm({ root, repository }) {
+    const held = await this.#repositoryOfRoot(root.text)
+    if (held.text !== repository.text) {
+      throw new WorkspaceNotPrepared(
+        `${root.text} holds ${held.text} and the issue lives in ${repository.text}: cutting a worktree here would plan one repository inside another`
+      )
+    }
+  }
+
+  async prepare({ issue, repository, root }) {
+    const base = await this.#declaredBase(root.text)
+    const path = GitWorkspace.pathFor(root.text, issue)
     const branch = GitWorkspace.branchFor(issue)
-    await this.#cut(issue, base)
-    const located = new WorkspaceLocation({ path, branch })
+    await this.#cut(root.text, issue, base)
+    const located = new WorkspaceLocation({ root: root.text, path, branch })
     try {
       await this.#seed(located, issue, base)
     } catch (failure) {
@@ -171,50 +178,41 @@ export class GitWorkspace extends Workspace {
     return located
   }
 
-  async survey() {
-    const repository = await this.#repositoryOfRoot()
-    const listed = await this.run(GitWorkspace.surveyArgvFor(this.root))
+  async survey(root) {
+    const repository = await this.#repositoryOfRoot(root.text)
+    const listed = await this.run(GitWorkspace.surveyArgvFor(root.text))
     if (listed.failed) {
       throw new WorkspaceNotRead(
-        `git worktree list could not say what ${this.root} holds, so the checkout was not surveyed: ${listed.stderr.trim()}`
+        `git worktree list could not say what ${root.text} holds, so the checkout was not surveyed: ${listed.stderr.trim()}`
       )
     }
 
-    return WorktreeListing.surveyOf({ printed: listed.stdout, root: this.root, repository })
+    return WorktreeListing.surveyOf({ printed: listed.stdout, root: root.text, repository })
   }
 
-  async #repositoryOfRoot() {
-    const asked = await this.run(GitWorkspace.remoteArgvFor(this.root))
+  async #repositoryOfRoot(root) {
+    const asked = await this.run(GitWorkspace.remoteArgvFor(root))
     if (asked.failed) {
       throw new WorkspaceNotRead(
-        `${this.root} does not name a ${GitWorkspace.REMOTE} remote, so the repository it holds cannot be confirmed: ${asked.stderr.trim()}`
+        `${root} does not name a ${GitWorkspace.REMOTE} remote, so the repository it holds cannot be confirmed: ${asked.stderr.trim()}`
       )
     }
     const url = asked.stdout.trim()
     const named = url.match(GitWorkspace.#NAMED)
     if (named === null || !RepositoryName.isWellFormed(named[1])) {
       throw new WorkspaceNotUnderstood(
-        `the ${GitWorkspace.REMOTE} of ${this.root} is ${JSON.stringify(url)}, and no owner/name can be read out of it`
+        `the ${GitWorkspace.REMOTE} of ${root} is ${JSON.stringify(url)}, and no owner/name can be read out of it`
       )
     }
 
     return new RepositoryName(named[1])
   }
 
-  async #confirmRoot(repository) {
-    const held = await this.#repositoryOfRoot()
-    if (held.text !== repository.text) {
-      throw new WorkspaceNotPrepared(
-        `${this.root} holds ${held.text} and the issue lives in ${repository.text}: cutting a worktree here would plan one repository inside another`
-      )
-    }
-  }
-
-  async #declaredBase() {
-    const asked = await this.run(GitWorkspace.defaultBranchArgvFor(this.root))
+  async #declaredBase(root) {
+    const asked = await this.run(GitWorkspace.defaultBranchArgvFor(root))
     if (asked.failed) {
       throw new WorkspaceNotPrepared(
-        `the remote of ${this.root} does not declare a default branch, so there is no base to cut from: ${asked.stderr.trim()}`
+        `the remote of ${root} does not declare a default branch, so there is no base to cut from: ${asked.stderr.trim()}`
       )
     }
     const declared = asked.stdout.trim().match(GitWorkspace.#DECLARED)
@@ -229,8 +227,8 @@ export class GitWorkspace extends Workspace {
 
   async undo(located) {
     try {
-      await this.run(GitWorkspace.removeArgvFor(this.root, located.path))
-      await this.run(GitWorkspace.deleteBranchArgvFor(this.root, located.branch))
+      await this.run(GitWorkspace.removeArgvFor(located.root, located.path))
+      await this.run(GitWorkspace.deleteBranchArgvFor(located.root, located.branch))
     } catch (failure) {
       this.#warn(located, failure)
       throw failure
@@ -249,8 +247,8 @@ export class GitWorkspace extends Workspace {
     } catch {}
   }
 
-  async #cut(issue, base) {
-    const argv = GitWorkspace.argvFor({ root: this.root, base, issue })
+  async #cut(root, issue, base) {
+    const argv = GitWorkspace.argvFor({ root, base, issue })
     const output = await this.run(argv)
     if (output.failed) {
       throw new WorkspaceNotPrepared(`${GitWorkspace.BIN} worktree add failed: ${output.stderr.trim()}`)
@@ -289,7 +287,7 @@ export class GitWorkspace extends Workspace {
       )
     }
 
-    return isAbsolute(answered) ? answered : `${this.root}/${answered}`
+    return isAbsolute(answered) ? answered : `${located.root}/${answered}`
   }
 
   async #cutOf(located) {
