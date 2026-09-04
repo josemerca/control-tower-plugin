@@ -70,7 +70,8 @@ export class RunFileProgress extends ImplementationProgress {
 
     if (run.closed === 'delivered') {
       return ImplementationState.of({
-        step: ImplementationStep.DELIVERED, totalTasks: run.tasksTotal, discards: run.discards,
+        step: ImplementationStep.DELIVERED, task: null, totalTasks: run.tasksTotal, name: null, attempt: null,
+        discards: run.discards,
       })
     }
 
