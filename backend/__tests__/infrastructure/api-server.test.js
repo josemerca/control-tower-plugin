@@ -591,14 +591,25 @@ describe('ApiServer', () => {
         '{"id":"ABC-123","repo":"owner/name","root":"repos/name"}',
         '{"id":"ABC-123","repo":"owner/name","root":"~/repos/name"}',
         '{"id":"ABC-123","repo":"owner/name","root":"/repos/name/"}',
-        '{"id":"ABC-123","repo":"owner/name","root":"/repos/name; rm -rf ~"}',
         '{"id":"ABC-123","repo":"owner/name","root":""}',
         '{"id":"ABC-123","repo":"owner/name","root":123}',
       ].map((body) => RunningApi.startPlan(port, body))
     )
 
-    expect(refused.map((response) => response.status)).toEqual([400, 400, 400, 202, 400, 400])
-    expect(RunningApi.spy.asked).toEqual(['ABC-123'])
+    expect(refused.map((response) => response.status)).toEqual([400, 400, 400, 400, 400])
+    expect(RunningApi.spy.asked).toEqual([])
+  })
+
+  it('a_root_with_a_semicolon_in_a_segment_is_still_a_path_because_nothing_ever_reaches_a_shell', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(
+      port,
+      '{"id":"ABC-123","repo":"owner/name","root":"/repos/name; rm -rf ~"}'
+    )
+
+    expect(response.status).toBe(202)
+    expect(RunningApi.spy.roots).toEqual(['/repos/name; rm -rf ~'])
   })
 
   it('a_body_with_no_repo_is_refused_because_an_issue_has_to_be_opened_somewhere', async () => {
