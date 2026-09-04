@@ -6,11 +6,9 @@ import {
   backendAnswering,
   dropStream,
   openHome,
-  pressStart,
   startPlan,
   streamFailure,
   streamFrame,
-  typeRepository,
 } from './helpers'
 
 describe('Home · plan events', () => {
@@ -33,6 +31,15 @@ describe('Home · plan events', () => {
     expect(FakeEventSource.last().url).toBe(PlanEventsMother.PATH)
   })
 
+  it('should close the active plan when reopening the completed request', async () => {
+    const { user } = await planStarted()
+
+    await user.click(screen.getByRole('button', { name: /Solicitud Completado/ }))
+
+    expect(screen.getByRole('button', { name: /Solicitud Completado/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: /Plan Activo/ })).toHaveAttribute('aria-expanded', 'false')
+  })
+
   it('should say the plan is being written when the first frame arrives', async () => {
     await planStarted()
 
@@ -47,7 +54,10 @@ describe('Home · plan events', () => {
     await streamFrame(PlanEventsMother.writing())
     await streamFrame(PlanEventsMother.ready())
 
-    expect(screen.getByRole('status')).toHaveTextContent('Plan listo')
+    expect(screen.getByText('Plan listo')).toHaveAttribute('role', 'status')
+    expect(screen.getByText('Plan listo')).toHaveAttribute('aria-live', 'polite')
+    expect(screen.getByRole('button', { name: /Plan Completado/ })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.getByRole('button', { name: /Implementación Activo/ })).toHaveAttribute('aria-expanded', 'true')
     expect(FakeEventSource.last().closes).toBe(1)
   })
 
@@ -75,7 +85,7 @@ describe('Home · plan events', () => {
     await streamFrame(PlanEventsMother.ready())
     await dropStream()
 
-    expect(screen.getByRole('status')).toHaveTextContent('Plan listo')
+    expect(screen.getByRole('button', { name: /Plan Completado/ })).toHaveAttribute('aria-expanded', 'false')
     expect(screen.queryByRole('alert')).toBeNull()
     expect(FakeEventSource.last().closes).toBe(1)
   })
@@ -86,20 +96,5 @@ describe('Home · plan events', () => {
     unmount()
 
     expect(FakeEventSource.last().closes).toBe(1)
-  })
-
-  it('should watch the new repository and close the previous stream when a second run reuses the same issue number', async () => {
-    const { user } = await planStarted()
-    const firstSubscription = FakeEventSource.last()
-
-    backendAnswering(StartPlanMother.startedInAnotherRepo())
-    await user.clear(screen.getByLabelText('Repositorio'))
-    await typeRepository(user, StartPlanMother.ANOTHER_REPO)
-    await pressStart(user)
-    await screen.findByRole('status')
-
-    expect(FakeEventSource.last()).not.toBe(firstSubscription)
-    expect(FakeEventSource.last().url).toBe(PlanEventsMother.PATH_IN_ANOTHER_REPO)
-    expect(firstSubscription.closes).toBe(1)
   })
 })

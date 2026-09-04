@@ -16,9 +16,10 @@ type StartPlanRefusal = Exclude<StartPlanOutcome, { kind: 'started' }>
 
 type StartPlanFormProps = {
   onStarted: (plan: StartedPlan) => void
+  isLocked: boolean
 }
 
-const StartPlanForm = ({ onStarted }: StartPlanFormProps) => {
+const StartPlanForm = ({ onStarted, isLocked }: StartPlanFormProps) => {
   const [ticketKey, setTicketKey] = useState('')
   const [repository, setRepository] = useState('')
   const [path, setPath] = useState('')
@@ -29,7 +30,8 @@ const StartPlanForm = ({ onStarted }: StartPlanFormProps) => {
     TicketKey.isWellFormed(ticketKey) &&
     RepositoryName.isWellFormed(repository) &&
     LocalPath.isWellFormed(path) &&
-    !isSending
+    !isSending &&
+    !isLocked
 
   const startPlan = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -44,13 +46,32 @@ const StartPlanForm = ({ onStarted }: StartPlanFormProps) => {
     setRefusal(outcome)
   }
 
+  if (isLocked) {
+    return (
+      <dl className="start-plan-form__summary">
+        <div>
+          <dt>Ticket</dt>
+          <dd>{ticketKey}</dd>
+        </div>
+        <div>
+          <dt>Repositorio</dt>
+          <dd><code>{repository}</code></dd>
+        </div>
+        <div>
+          <dt>Ruta local</dt>
+          <dd><code>{LocalPath.normalize(path)}</code></dd>
+        </div>
+      </dl>
+    )
+  }
+
   return (
     <form className="start-plan-form" onSubmit={startPlan}>
       <FormField label="Clave del ticket" message={`Con la forma ${TicketKey.EXAMPLE}`}>
         <Input
           placeholder={TicketKey.EXAMPLE}
           value={ticketKey}
-          disabled={isSending}
+          disabled={isSending || isLocked}
           autoComplete="off"
           onChange={(event) => setTicketKey(event.target.value)}
         />
@@ -59,7 +80,7 @@ const StartPlanForm = ({ onStarted }: StartPlanFormProps) => {
         <Input
           placeholder={RepositoryName.EXAMPLE}
           value={repository}
-          disabled={isSending}
+          disabled={isSending || isLocked}
           autoComplete="off"
           onChange={(event) => setRepository(event.target.value)}
         />
@@ -68,7 +89,7 @@ const StartPlanForm = ({ onStarted }: StartPlanFormProps) => {
         <Input
           placeholder={LocalPath.EXAMPLE}
           value={path}
-          disabled={isSending}
+          disabled={isSending || isLocked}
           autoComplete="off"
           onChange={(event) => setPath(event.target.value)}
         />

@@ -7,3 +7,35 @@
 .start-plan-form__actions {
   display: flex;
 }
+
+.start-plan-form__summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+.start-plan-form__summary div {
+  min-width: 0;
+}
+
+.start-plan-form__summary dt {
+  color: var(--foreground-secondary);
+  font: var(--typography-caption1-regular);
+}
+
+.start-plan-form__summary dd {
+  margin: 4px 0 0;
+  overflow-wrap: break-word;
+}
+
+.start-plan-form__summary code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+@media (max-width: 600px) {
+  .start-plan-form__summary {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+}
