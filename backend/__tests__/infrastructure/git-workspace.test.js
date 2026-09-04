@@ -288,7 +288,7 @@ describe('GitWorkspace', () => {
   })
 
   it('a_remote_git_refuses_to_name_at_all_is_a_checkout_not_confirmed_that_names_the_root', async () => {
-    const git = new GitDouble({ remote: GitDouble.refused("fatal: cannot change to '/repo/checkout': No such file or directory") })
+    const git = new GitDouble({ remote: GitDouble.refused("fatal: cannot change to '/somewhere/else': No such file or directory") })
 
     const refusal = await git.refusedTo(git.confirmed())
 
