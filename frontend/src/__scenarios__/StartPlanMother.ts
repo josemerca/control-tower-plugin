@@ -30,6 +30,11 @@ const malformedPath = () => ({
   body: '{"error":"path must be an absolute path"}',
 })
 
+const notACheckout = () => ({
+  status: 400,
+  body: '{"error":"path must be a git checkout of owner/name: /repo holds someone/else"}',
+})
+
 const planNotStarted = () => ({
   status: 503,
   body: '{"error":"could not start the plan: cmux is not reachable"}',
@@ -48,5 +53,6 @@ export const StartPlanMother = {
   malformedId,
   malformedRepo,
   malformedPath,
+  notACheckout,
   planNotStarted,
 }

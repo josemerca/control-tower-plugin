@@ -129,6 +129,42 @@ describe('Home · start plan', () => {
     expect(init.body).toBe(StartPlanMother.REQUEST_BODY)
   })
 
+  it('should send the local path without the trailing slash the shell adds', async () => {
+    const fetching = backendAnswering(StartPlanMother.started())
+    const { user } = openHome()
+    await typeTicket(user, StartPlanMother.TICKET)
+    await typeRepository(user, StartPlanMother.REPO)
+    await typePath(user, `${StartPlanMother.PATH}/`)
+
+    await pressStart(user)
+
+    await screen.findByRole('status')
+    const [, init] = fetching.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init.body).toBe(StartPlanMother.REQUEST_BODY)
+  })
+
+  it('should keep the start button disabled when the path holds an empty segment', async () => {
+    backendAnswering(StartPlanMother.started())
+    const { user } = openHome()
+    await typeTicket(user, StartPlanMother.TICKET)
+    await typeRepository(user, StartPlanMother.REPO)
+
+    await typePath(user, '/Users/pedro//code')
+
+    expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeDisabled()
+  })
+
+  it('should show the refusal text as it came when the path is not a checkout of the repository', async () => {
+    backendAnswering(StartPlanMother.notACheckout())
+    const { user } = openHome()
+
+    await startPlan(user)
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'path must be a git checkout of owner/name: /repo holds someone/else',
+    )
+  })
+
   it('should show the branch and the worktree the backend started', async () => {
     backendAnswering(StartPlanMother.started())
     const { user } = openHome()

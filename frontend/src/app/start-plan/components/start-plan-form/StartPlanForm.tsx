@@ -35,7 +35,7 @@ const StartPlanForm = ({ onStarted }: StartPlanFormProps) => {
     event.preventDefault()
     setIsSending(true)
     setRefusal(null)
-    const outcome = await StartPlanClient.start({ id: ticketKey, repo: repository, path: path.trim() })
+    const outcome = await StartPlanClient.start({ id: ticketKey, repo: repository, path: LocalPath.normalize(path) })
     setIsSending(false)
     if (outcome.kind === 'started') {
       onStarted(outcome.plan)
