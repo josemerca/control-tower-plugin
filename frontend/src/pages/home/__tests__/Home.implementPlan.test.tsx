@@ -47,7 +47,7 @@ describe('Home · implement plan', () => {
 
     await pressImplement(user)
 
-    await screen.findByText('Implementación arrancada')
+    await screen.findByText('Implementación en curso')
     expect(fetching).toHaveBeenCalledTimes(1)
     const [url, init] = fetching.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('/implement-plan')
@@ -62,7 +62,7 @@ describe('Home · implement plan', () => {
 
     await pressImplement(user)
 
-    const started = await screen.findByText('Implementación arrancada')
+    const started = await screen.findByText('Implementación en curso')
     const status = started.closest('[role="status"]')
     expect(status).not.toBeNull()
     expect(status).toHaveTextContent(ImplementPlanMother.AGENT)
@@ -107,6 +107,6 @@ describe('Home · implement plan', () => {
 
     expect(screen.getByRole('button', IMPLEMENT_BUTTON)).toBeDisabled()
     await backend.answerWith(ImplementPlanMother.implementing())
-    expect(await screen.findByText('Implementación arrancada')).toBeInTheDocument()
+    expect(await screen.findByText('Implementación en curso')).toBeInTheDocument()
   })
 })

@@ -21,7 +21,7 @@ const Home = () => {
           <PlanProgress
             key={started.issue.number}
             plan={started}
-            whenReady={<ImplementPlanAction plan={started} />}
+            whenReady={<ImplementPlanAction plan={started} onImplementationStarted={() => undefined} />}
           />
         )}
       </main>

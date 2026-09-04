@@ -10,25 +10,30 @@ const UNREACHABLE_MESSAGE = 'No se pudo contactar con el backend'
 
 type ImplementPlanActionProps = {
   plan: StartedPlan
+  onImplementationStarted: () => void
 }
 
-const ImplementPlanAction = ({ plan }: ImplementPlanActionProps) => {
+const ImplementPlanAction = ({ plan, onImplementationStarted }: ImplementPlanActionProps) => {
   const [outcome, setOutcome] = useState<ImplementPlanOutcome | null>(null)
   const [isSending, setIsSending] = useState(false)
 
   const implementPlan = async () => {
     setIsSending(true)
     setOutcome(null)
-    setOutcome(await ImplementPlanClient.implement({ agent: plan.agent, issue: plan.issue.number, repo: plan.repo }))
+    const outcome = await ImplementPlanClient.implement({ agent: plan.agent, issue: plan.issue.number, repo: plan.repo })
+    setOutcome(outcome)
     setIsSending(false)
+    if (outcome.kind === 'implementing') {
+      onImplementationStarted()
+    }
   }
 
   if (outcome?.kind === 'implementing') {
     return (
       <div className="implement-plan-action">
         <Banner
-          type="success"
-          title="Implementación arrancada"
+          type="informative"
+          title="Implementación en curso"
           description={
             <span className="implement-plan-action__facts">
               El agente <code>{outcome.agent}</code> implementa el plan
