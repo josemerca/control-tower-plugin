@@ -54,6 +54,7 @@ say, and §9.1 records why we do not guess.
 | Where the task name comes from | the `### Task <n> — <name>` headings of the file `run.plan` names |
 | Nothing is imported from `plugin/scripts/` | production writes its own readers; **tests** import the plugin's |
 | Caching the read by `mtime` | no. No measured problem |
+| Comments in `backend/src` | **none**. `__tests__/yardstick.js` has a prose detector that fails the suite on any. The `//` annotations in this plan's contract blocks are notes to the reader — they are not code to copy |
 
 ## 3. Reference patterns
 
@@ -82,6 +83,7 @@ boundary, measured against the plugin's own code).
 | `backend/src/domain/ports/implementation-progress.js` | create | `ReadImplementationProgress` | Contract (T1) |
 | `backend/src/domain/value-objects/implementation-state.js` | create | adapter, route | Contract (T1) |
 | `backend/src/application/queries/read-implementation-progress.js` | create | `ct-api.mjs` | Contract (T1) |
+| `backend/__tests__/infrastructure/plan-refusal.test.js` | modify | — | Current state (T1) |
 | `backend/src/infrastructure/run-file-progress.js` | create | `ct-api.mjs` | Contract (T2, T3) |
 | `backend/src/infrastructure/implement-progress-route.js` | create | `ApiServer` | Contract (T4) |
 | `backend/src/infrastructure/api-server.js` | modify | `ct-api.mjs` | Current state (T4) |
@@ -712,9 +714,14 @@ worktree. The by-hand run no command here replaces: start the API, `POST /start-
 cd backend
 npx vitest run                                                  # exit 0: the whole suite
 npx vitest run --exclude '**/*-real-process.test.js'            # exit 0: 29+ files
-npx eslint src __tests__                                        # exit 0
+npx vitest run __tests__/yardstick.test.js __tests__/yardstick-real-process.test.js
 test -z "$(git status --porcelain)"                             # exit 0: everything committed
 ```
+
+There is no `eslint` in this repository — no config, no dependency, no script.
+The linter's job is done by the yardstick above, which walks every file git
+knows about and fails on prose in `src`, loose functions, Spanish identifiers
+and Spanish test names.
 
 ## 9. Assumptions
 
