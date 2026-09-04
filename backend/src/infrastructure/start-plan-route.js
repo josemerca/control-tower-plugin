@@ -125,7 +125,7 @@ export class PlanCollapse {
     return (cause) => new Refusal({ status: PlanCollapse.#STATUS, code, detail: cause.message })
   }
 
-  static #BY_FAILURE = new Projection('status', [
+  static #BY_FAILURE = new Projection('refusal', [
     [UserStoryNotRead, PlanCollapse.#collapsed('user-story-not-read')],
     [PlanIssueNotCreated, PlanCollapse.#collapsed('plan-issue-not-created')],
     [PlanIssueNotClaimed, PlanCollapse.#collapsed('plan-issue-not-claimed')],

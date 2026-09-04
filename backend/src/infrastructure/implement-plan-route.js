@@ -138,7 +138,7 @@ export class ImplementCollapse {
     return (cause) => new Refusal({ status: ImplementCollapse.#STATUS, code, detail: cause.message })
   }
 
-  static #BY_FAILURE = new Projection('status', [
+  static #BY_FAILURE = new Projection('refusal', [
     [GoNotRecorded, ImplementCollapse.#collapsed('go-not-recorded')],
     [PlanGoNotAnswered, ImplementCollapse.#collapsed('plan-go-not-answered')],
     [PlanAgentNotResumed, ImplementCollapse.#collapsed('plan-agent-not-resumed')],

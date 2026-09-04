@@ -251,7 +251,7 @@ describe('ImplementRefusal', () => {
 describe('ImplementCollapse', () => {
   const RESUMING_AN_AGENT = ['GoNotRecorded', 'PlanGoNotAnswered', 'PlanAgentNotResumed']
 
-  it('every_way_resuming_an_agent_can_collapse_has_a_status_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
+  it('every_way_resuming_an_agent_can_collapse_has_a_refusal_declared_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
     expect(ImplementCollapse.declaredFailures().sort()).toEqual(RESUMING_AN_AGENT.sort())
   })
 
@@ -286,8 +286,8 @@ describe('ImplementCollapse', () => {
   })
 
   it('a_family_is_not_a_way_of_collapsing_so_answering_one_raises_instead_of_guessing', () => {
-    expect(() => ImplementCollapse.of(new PlanFailure('nope'))).toThrow(/no status declared/)
-    expect(() => ImplementCollapse.of(new GoFailure('nope'))).toThrow(/no status declared/)
+    expect(() => ImplementCollapse.of(new PlanFailure('nope'))).toThrow(/no refusal declared/)
+    expect(() => ImplementCollapse.of(new GoFailure('nope'))).toThrow(/no refusal declared/)
   })
 })
 

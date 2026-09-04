@@ -45,7 +45,7 @@ describe('PlanCollapse', () => {
     !(thrown.prototype instanceof exceptions.PlanChangesFailure) &&
     !(thrown.prototype instanceof exceptions.HarvestFailure)
 
-  it('every_way_the_plan_can_collapse_has_a_status_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
+  it('every_way_the_plan_can_collapse_has_a_refusal_declared_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
     const ways = Object.entries(exceptions).filter(startingAPlan).map(([name]) => name)
 
     expect(PlanCollapse.declaredFailures().sort()).toEqual(ways.sort())
@@ -57,24 +57,24 @@ describe('PlanCollapse', () => {
     expect(new Set(codes).size).toBe(codes.length)
   })
 
-  it('a_failure_of_reading_the_changes_asked_for_has_no_status_here_because_it_only_reaches_stderr', () => {
+  it('a_failure_of_reading_the_changes_asked_for_has_no_refusal_declared_here_because_it_only_reaches_stderr', () => {
     expect(PlanCollapse.declaredFailures()).not.toContain('PlanChangesNotRead')
     expect(PlanCollapse.declaredFailures()).not.toContain('PlanChangesNotUnderstood')
     expect(() => PlanCollapse.of(new exceptions.PlanChangesNotRead('gh: not authenticated')))
-      .toThrow(/no status declared/)
+      .toThrow(/no refusal declared/)
   })
 
-  it('a_failure_of_watching_a_plan_has_no_status_here_because_it_travels_down_the_stream_that_is_already_open', () => {
+  it('a_failure_of_watching_a_plan_has_no_refusal_declared_here_because_it_travels_down_the_stream_that_is_already_open', () => {
     expect(PlanCollapse.declaredFailures()).not.toContain('PlanProgressNotRead')
     expect(() => PlanCollapse.of(new exceptions.PlanProgressNotRead('git refused')))
-      .toThrow(/no status declared/)
+      .toThrow(/no refusal declared/)
   })
 
-  it('a_failure_of_harvesting_has_no_status_here_because_the_sweep_answers_no_request', () => {
+  it('a_failure_of_harvesting_has_no_refusal_declared_here_because_the_sweep_answers_no_request', () => {
     expect(PlanCollapse.declaredFailures()).not.toContain('HarvestNotRead')
     expect(PlanCollapse.declaredFailures()).not.toContain('HarvestNotUnderstood')
     expect(() => PlanCollapse.of(new exceptions.HarvestNotRead('gh refused')))
-      .toThrow(/no status declared/)
+      .toThrow(/no refusal declared/)
   })
 
   it('every_way_the_plan_can_collapse_answers_400_because_the_code_carries_the_distinction_now', () => {
@@ -126,6 +126,6 @@ describe('PlanCollapse', () => {
   })
 
   it('a_family_is_not_a_way_of_collapsing_so_answering_one_raises_instead_of_guessing', () => {
-    expect(() => PlanCollapse.of(new exceptions.PlanFailure('nope'))).toThrow(/no status declared/)
+    expect(() => PlanCollapse.of(new exceptions.PlanFailure('nope'))).toThrow(/no refusal declared/)
   })
 })
