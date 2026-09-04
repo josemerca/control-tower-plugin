@@ -1,5 +1,6 @@
 const TICKET = 'ABC-123'
 const REPO = 'owner/name'
+const ANOTHER_REPO = 'owner/other-name'
 const PATH = '/Users/pedro/code/name'
 const ISSUE = { number: 7, url: 'https://github.com/owner/name/issues/7' }
 const AGENT = 'workspace:4'
@@ -13,6 +14,14 @@ const started = () => ({
     '{"status":"started","id":"ABC-123","repo":"owner/name",' +
     '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"agent":"workspace:4",' +
     '"branch":"feat/7","worktree":"/Users/pedro/code/name/.worktrees/7"}',
+})
+
+const startedInAnotherRepo = () => ({
+  status: 202,
+  body:
+    '{"status":"started","id":"ABC-123","repo":"owner/other-name",' +
+    '"issue":{"number":7,"url":"https://github.com/owner/other-name/issues/7"},"agent":"workspace:9",' +
+    '"branch":"feat/7","worktree":"/Users/pedro/code/other-name/.worktrees/7"}',
 })
 
 const malformedId = () => ({
@@ -43,6 +52,7 @@ const planNotStarted = () => ({
 export const StartPlanMother = {
   TICKET,
   REPO,
+  ANOTHER_REPO,
   PATH,
   ISSUE,
   AGENT,
@@ -50,6 +60,7 @@ export const StartPlanMother = {
   WORKTREE,
   REQUEST_BODY,
   started,
+  startedInAnotherRepo,
   malformedId,
   malformedRepo,
   malformedPath,
