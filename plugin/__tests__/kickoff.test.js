@@ -387,10 +387,19 @@ describe('el primer acto nombra la vara de ct', () => {
     conventionsDir: '/plugin/conventions',
   }
 
-  it('manda leerla, y la nombra por su ruta absoluta', () => {
+  it('la nombra por su ruta absoluta, para que quien planifica pueda abrir el documento que necesite', () => {
     const k = renderKickoff(SLICE, OPTS_CON_VARA)
-    expect(k).toMatch(/LEE la vara de ct/)
     expect(k).toContain('/plugin/conventions')
+  })
+
+  // La orden de LEER LOS CINCO en crudo se quitó: son 24 KB delante de un plan
+  // que no los cita casi nunca, y lo que el plan tiene que seleccionar es la
+  // vara del REPO en el `Rules to obey:` de §3. La de ct la lleva el programa a
+  // cada tarea sin que el plan pueda quitarla.
+  it('no manda leer los cinco documentos antes de planificar', () => {
+    const k = renderKickoff(SLICE, OPTS_CON_VARA)
+    expect(k).not.toMatch(/LEE la vara de ct/)
+    expect(k).not.toMatch(/los cinco documentos de/)
   })
 
   it('la orden cae ANTES de la entrada que manda escribir el plan', () => {
@@ -402,16 +411,17 @@ describe('el primer acto nombra la vara de ct', () => {
     expect(k.indexOf('/plugin/conventions')).toBeLessThan(k.indexOf('Primer acto'))
   })
 
-  it('enuncia la precedencia con SUS DOS LADOS: es el único sitio donde la lee quien planifica', () => {
-    // `SKILL.md` ya no la enuncia (el presupuesto de la skill obligó a recortar
-    // la tercera copia), así que este texto es el único que llega a quien escribe
-    // el plan. Un enunciado que sólo dijera "gana ct" le haría anular las
-    // convenciones del repo que ct no toca, que es el fallo contrario.
+  // LA REGLA DE PRECEDENCIA TIENE UNA SOLA FUENTE: la cabecera que escribe
+  // `PluginYardstick`. El kickoff la CITA —dice dónde está y que no se
+  // reinterpreta— y no la enuncia: cinco copias de una regla en cinco ficheros
+  // es lo que la dejó divergir (la del backend decía que `architecture.md`
+  // aplica siempre). Quien la enunciaba aquí ya no la enuncia, y el test que
+  // lo comprueba es `precedencia-una-sola-fuente.test.js`.
+  it('cita la cabecera donde vive la regla, y no la vuelve a enunciar', () => {
     const k = renderKickoff(SLICE, OPTS_CON_VARA)
-    expect(k).toMatch(/preferencia/i)
-    expect(k).toMatch(/regla a regla/i)
-    expect(k).toMatch(/no por tema/i)
-    expect(k).toMatch(/prohíbe lo que uno de esos documentos manda/i)
-    expect(k).toMatch(/obliga entera/i)
+    expect(k).toMatch(/CABECERA/)
+    expect(k).not.toMatch(/regla a regla/i)
+    expect(k).not.toMatch(/no por tema/i)
+    expect(k).not.toMatch(/obliga entera/i)
   })
 })
