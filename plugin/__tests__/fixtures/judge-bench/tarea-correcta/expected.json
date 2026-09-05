@@ -1,0 +1,5 @@
+{
+  "ruling": "PASS",
+  "must_find": [],
+  "incident": "Control del banco: una tarea que hace exactamente lo que el plan pide, calcada del patrón que el plan nombra y conforme a la vara de ct. Un FAIL aquí, o un `high` inventado, es el veto defensivo que la rúbrica existe para impedir. Un `medium` no cuenta como fallo del banco pero sí aparece en la distribución de severidades: es una vuelta pagada al implementador sobre una tarea correcta."
+}
