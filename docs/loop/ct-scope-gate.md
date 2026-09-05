@@ -1,3 +1,10 @@
+# El gate de conformidad de alcance (`ct-scope-gate`)
+
+> Movido desde `plugin/templates/scope-gate.yml` (sub-issue #93). La plantilla no la copiaba ningún código —`ct-init` no la vendoriza y ningún hook la importa—, así que viajaba en cada instalación del plugin sin que nadie la leyera desde ahí. El workflow se instala a mano, y el sitio de una instrucción que se sigue a mano es la documentación del repo, no el paquete que se distribuye. El bundle que ejecuta, `plugin/dist/scope-check.js`, sigue construyéndose y trackeado como siempre (`plugin/scripts/build.mjs`, `plugin/__tests__/dist-coherente-con-fuentes.test.js`).
+
+El contenido, íntegro:
+
+```yaml
 # Gate de conformidad de alcance — Control Tower loop
 #
 # QUÉ HACE: falla el PR si toca ficheros FUERA del alcance que su epic declaró
@@ -53,3 +60,4 @@ jobs:
           node .github/ct/scope-check.js \
             --repo "${{ github.repository }}" \
             --pr "${{ github.event.pull_request.number }}"
+```

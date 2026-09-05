@@ -6,10 +6,14 @@ import { ROLE_BUDGETS, CODE_BUDGETS } from '../scripts/plan-contract.js'
 
 // F32 — el fork de superpowers 6.0.3 dentro del plugin (decisión cerrada en
 // F31 §5: los 11 skills usados se forkan a control-tower-loop:* y superpowers
-// se desinstala). Este test fija tres cosas:
+// se desinstala). La sub-issue #93 sacó `writing-skills` de `plugin/skills/` a
+// `docs/superpowers/skills/writing-skills/`: sigue forkado y sigue en el repo
+// para quien desarrolla el plugin, pero no se distribuye — lo lee un humano
+// escribiendo una skill, nunca un agente del loop. Quedan 10 dentro del
+// plugin. Este test fija tres cosas:
 //
-//   1. El ALCANCE del fork: exactamente los 11 skills decididos, ni más ni
-//      menos, cada uno con su SKILL.md.
+//   1. El ALCANCE del fork: exactamente los 10 skills distribuidos, ni más ni
+//      menos, cada uno con su SKILL.md, más el forkado que vive fuera.
 //   2. Que el fork está CERRADO sobre sí mismo: ninguna referencia al
 //      namespace superpowers:* ni a los dos skills descartados
 //      (requesting-code-review, using-superpowers) puede sobrevivir — un
@@ -22,10 +26,11 @@ import { ROLE_BUDGETS, CODE_BUDGETS } from '../scripts/plan-contract.js'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SKILLS = join(ROOT, 'skills')
 
-// Los 11 del barrido de uso real de F31 §5 (2.704 transcripts). Descartados:
-// dispatching-parallel-agents (0 usos; su hueco lo ocupa CT entre slices),
-// requesting-code-review (0 usos directos; su code-reviewer.md viaja como
-// fichero DENTRO de subagent-driven-development) y using-superpowers (meta).
+// Los del barrido de uso real de F31 §5 (2.704 transcripts) que SE
+// DISTRIBUYEN. Descartados: dispatching-parallel-agents (0 usos; su hueco lo
+// ocupa CT entre slices), requesting-code-review (0 usos directos) y
+// using-superpowers (meta). Fuera del paquete pero dentro del repo:
+// writing-skills (#93), en FUERA_DEL_PLUGIN.
 const FORKED = [
   'brainstorming',
   'executing-plans',
@@ -37,8 +42,12 @@ const FORKED = [
   'using-git-worktrees',
   'verification-before-completion',
   'writing-plans',
-  'writing-skills',
 ]
+
+// Forkados que viven en el repo y NO en el paquete: los lee quien desarrolla el
+// plugin, no ningún artefacto del loop.
+const SKILLS_FUERA_DEL_PLUGIN = join(ROOT, '..', 'docs', 'superpowers', 'skills')
+const FUERA_DEL_PLUGIN = ['writing-skills']
 
 function walk(dir) {
   return readdirSync(dir).flatMap((name) => {
@@ -49,13 +58,36 @@ function walk(dir) {
 
 const read = (...parts) => readFileSync(join(SKILLS, ...parts), 'utf8')
 
-describe('alcance del fork — los 11 skills de F31 §5, con su atribución', () => {
+describe('alcance del fork — los skills de F31 §5, con su atribución', () => {
   it.each(FORKED)('skills/%s/SKILL.md existe', (name) => {
     expect(existsSync(join(SKILLS, name, 'SKILL.md'))).toBe(true)
   })
 
-  it('code-reviewer.md viaja dentro de subagent-driven-development (huérfano de requesting-code-review)', () => {
-    expect(existsSync(join(SKILLS, 'subagent-driven-development', 'code-reviewer.md'))).toBe(true)
+  // #93 — sigue forkado y sigue en el repo, pero fuera de lo que se
+  // distribuye: `plugin/` es el `source` del marketplace, así que un skill que
+  // solo lee quien DESARROLLA el plugin no tiene por qué viajar a cada
+  // instalación. Se comprueba el sitio nuevo Y que el viejo está vacío: sin la
+  // segunda mitad, una copia olvidada dentro de `plugin/skills/` pasaría.
+  it.each(FUERA_DEL_PLUGIN)('%s vive fuera del plugin, en docs/superpowers/skills/', (name) => {
+    expect(existsSync(join(SKILLS_FUERA_DEL_PLUGIN, name, 'SKILL.md'))).toBe(true)
+    expect(existsSync(join(SKILLS, name))).toBe(false)
+  })
+
+  // #93 — los tres prompts que este skill traía (implementer, task reviewer,
+  // code reviewer) ya no existen: el kickoff de un slice despachado prohíbe
+  // conducir con este skill, y los agentes del loop viajan en `agents/` y
+  // `prompts/`. Lo que sí se usa cada tarea es su script `task-brief`.
+  it('los tres prompts bundleados están borrados y el script task-brief sigue', () => {
+    for (const f of ['implementer-prompt.md', 'task-reviewer-prompt.md', 'code-reviewer.md']) {
+      expect(existsSync(join(SKILLS, 'subagent-driven-development', f)), f).toBe(false)
+    }
+    expect(existsSync(join(SKILLS, 'subagent-driven-development', 'scripts', 'task-brief'))).toBe(true)
+    // Y el SKILL.md no puede seguir enlazándolos: un enlace a un fichero que no
+    // está manda al lector a buscar lo que se borró.
+    const s = read('subagent-driven-development', 'SKILL.md')
+    for (const f of ['implementer-prompt.md', 'task-reviewer-prompt.md', 'code-reviewer.md']) {
+      expect(s, f).not.toContain(f)
+    }
   })
 
   it('la licencia MIT de upstream acompaña al fork', () => {
@@ -74,14 +106,18 @@ describe('el fork es cerrado — nada apunta fuera de control-tower-loop', () =>
   // viejo y los dos skills no forkados no pueden aparecer en ningún fichero,
   // tampoco en los que hoy no los mencionan. Única exención: FORK.md, cuyo
   // trabajo es precisamente NOMBRAR lo descartado para cherry-picks futuros.
+  //
+  // #93: el barrido cubre también los forkados que viven FUERA del plugin.
+  // Sacar uno del paquete no lo saca del fork, y un cherry-pick sobre él
+  // reintroduce el namespace viejo igual de fácil.
   const FORBIDDEN = [
     'superpowers:', // namespace viejo — el fork se invoca como control-tower-loop:*
-    'requesting-code-review', // descartado; su prompt vive como ./code-reviewer.md
+    'requesting-code-review', // descartado (0 usos directos)
     'using-superpowers', // descartado (meta-skill de la instalación upstream)
   ]
 
   it.each(FORBIDDEN)('ningún fichero bajo skills/ contiene «%s»', (needle) => {
-    const offenders = walk(SKILLS)
+    const offenders = [...walk(SKILLS), ...walk(SKILLS_FUERA_DEL_PLUGIN)]
       .filter((p) => !p.endsWith('FORK.md'))
       .filter((p) => readFileSync(p, 'utf8').includes(needle))
     expect(offenders).toEqual([])

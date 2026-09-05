@@ -54,11 +54,11 @@ digraph process {
 
     subgraph cluster_per_task {
         label="Per Task";
-        "Dispatch implementer subagent (./implementer-prompt.md)" [shape=box];
+        "Dispatch implementer subagent" [shape=box];
         "Implementer subagent asks questions?" [shape=diamond];
         "Answer questions, provide context" [shape=box];
         "Implementer subagent implements, tests, commits, self-reviews" [shape=box];
-        "Write diff file, dispatch task reviewer subagent (./task-reviewer-prompt.md)" [shape=box];
+        "Write diff file, dispatch task reviewer subagent" [shape=box];
         "Task reviewer reports spec ✅ and quality approved?" [shape=diamond];
         "Dispatch fix subagent for Critical/Important findings" [shape=box];
         "Mark task complete in todo list and progress ledger" [shape=box];
@@ -66,23 +66,23 @@ digraph process {
 
     "Read plan, note context and global constraints, create todos" [shape=box];
     "More tasks remain?" [shape=diamond];
-    "Dispatch final code reviewer subagent (./code-reviewer.md)" [shape=box];
+    "Dispatch final code reviewer subagent" [shape=box];
     "Use control-tower-loop:finishing-a-development-branch" [shape=box style=filled fillcolor=lightgreen];
 
-    "Read plan, note context and global constraints, create todos" -> "Dispatch implementer subagent (./implementer-prompt.md)";
-    "Dispatch implementer subagent (./implementer-prompt.md)" -> "Implementer subagent asks questions?";
+    "Read plan, note context and global constraints, create todos" -> "Dispatch implementer subagent";
+    "Dispatch implementer subagent" -> "Implementer subagent asks questions?";
     "Implementer subagent asks questions?" -> "Answer questions, provide context" [label="yes"];
-    "Answer questions, provide context" -> "Dispatch implementer subagent (./implementer-prompt.md)";
+    "Answer questions, provide context" -> "Dispatch implementer subagent";
     "Implementer subagent asks questions?" -> "Implementer subagent implements, tests, commits, self-reviews" [label="no"];
-    "Implementer subagent implements, tests, commits, self-reviews" -> "Write diff file, dispatch task reviewer subagent (./task-reviewer-prompt.md)";
-    "Write diff file, dispatch task reviewer subagent (./task-reviewer-prompt.md)" -> "Task reviewer reports spec ✅ and quality approved?";
+    "Implementer subagent implements, tests, commits, self-reviews" -> "Write diff file, dispatch task reviewer subagent";
+    "Write diff file, dispatch task reviewer subagent" -> "Task reviewer reports spec ✅ and quality approved?";
     "Task reviewer reports spec ✅ and quality approved?" -> "Dispatch fix subagent for Critical/Important findings" [label="no"];
-    "Dispatch fix subagent for Critical/Important findings" -> "Write diff file, dispatch task reviewer subagent (./task-reviewer-prompt.md)" [label="re-review"];
+    "Dispatch fix subagent for Critical/Important findings" -> "Write diff file, dispatch task reviewer subagent" [label="re-review"];
     "Task reviewer reports spec ✅ and quality approved?" -> "Mark task complete in todo list and progress ledger" [label="yes"];
     "Mark task complete in todo list and progress ledger" -> "More tasks remain?";
-    "More tasks remain?" -> "Dispatch implementer subagent (./implementer-prompt.md)" [label="yes"];
-    "More tasks remain?" -> "Dispatch final code reviewer subagent (./code-reviewer.md)" [label="no"];
-    "Dispatch final code reviewer subagent (./code-reviewer.md)" -> "Use control-tower-loop:finishing-a-development-branch";
+    "More tasks remain?" -> "Dispatch implementer subagent" [label="yes"];
+    "More tasks remain?" -> "Dispatch final code reviewer subagent" [label="no"];
+    "Dispatch final code reviewer subagent" -> "Use control-tower-loop:finishing-a-development-branch";
 }
 ```
 
@@ -270,9 +270,16 @@ a ledger file, not only in todos.
 
 ## Prompt Templates
 
-- [implementer-prompt.md](implementer-prompt.md) - Dispatch implementer subagent
-- [task-reviewer-prompt.md](task-reviewer-prompt.md) - Dispatch task reviewer subagent (spec compliance + code quality)
-- Final whole-branch review: use the bundled [code-reviewer.md](./code-reviewer.md) template
+The three bundled prompt files (implementer, task reviewer, final code
+reviewer) are gone: in this fork the loop dispatches its own agents with its
+own prompts (`prompts/task-implementer.md`, `agents/ct-judge.md`,
+`agents/ct-slice-judge.md`), driven by `ct-step`, and the kickoff of a
+dispatched slice forbids conducting with this skill. What survives of this
+skill's tooling, and is used every task, is [`scripts/task-brief`](scripts/task-brief),
+which extracts one task from the plan.
+
+Write each dispatch prompt from the task itself: what the task says, what it
+must not touch, and the verification it has to pass.
 
 ## Example Workflow
 
@@ -413,7 +420,7 @@ Done!
 **Required workflow skills:**
 - **control-tower-loop:using-git-worktrees** - Ensures isolated workspace (creates one or verifies existing)
 - **control-tower-loop:writing-plans-prescriptive** - Creates the plan this skill executes
-- **[code-reviewer.md](./code-reviewer.md)** (bundled) - Code review template for the final whole-branch review
+- Final whole-branch review - in this fork it is `agents/ct-slice-judge.md`, dispatched by `ct-step`, not a bundled prompt template
 - **control-tower-loop:finishing-a-development-branch** - Complete development after all tasks
 
 **Subagents should use:**
