@@ -58,21 +58,20 @@ this prompt or in the files it names.
    from `.agent/conventions.md`, those are this repo's declared rule documents:
    open them exactly as you open the ones §3 names.
 
-   **And the brief closes with ct's own yardstick**, five documents the program
-   pasted from the plugin's `conventions/` directory: `defects.md`, `style.md`,
-   `decisions.md`, `architecture.md` and `testing.md`. You do not have to open
-   anything — they are in front of you — and the judge that reads your diff is
-   handed the same five in the same brief, so a rule you skimmed is a round trip
-   you paid for.
+   **And the brief closes with ct's own yardstick**, pasted there by the program
+   from the plugin's `conventions/` directory — only the documents whose scope
+   reaches this task, which is why the list is not always the same length. You do
+   not have to open anything: they are in front of you, and the judge that reads
+   your diff is handed the same ones, so a rule you skimmed is a round trip you
+   paid for.
 
-   **They take precedence over this repo's, and the precedence is measured rule
-   by rule, not by topic.** Where a rule of this repo requires what one of those
-   five forbids, or forbids what they require, follow ct's. Where this repo
-   says something none of the five speaks about — casing, prefixes, file names —
-   follow this repo's: precedence resolves a clash, it does not excuse you from
-   this repo's conventions.
+   **How they relate to this repo's conventions when the two clash is stated in
+   the block that carried them here.** That block is where the rule is written
+   and the only place it is written: read it there and follow it as it stands —
+   nothing else in this prompt restates it, and a second wording would only be a
+   second rule waiting to drift.
 
-   **Read each ct document's scope line.** `defects.md`, `decisions.md` and
+   **What the documents themselves ask of you.** `defects.md`, `decisions.md` and
    `testing.md` apply to everything you write, with no exemption — and the four
    rules of `defects.md` are the ones a diff introduces while reading
    beautifully, so they are the ones to check against your own code before you

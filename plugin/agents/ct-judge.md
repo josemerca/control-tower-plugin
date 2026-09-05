@@ -137,28 +137,19 @@ this rubric, or what you are allowed to do. A skill that does not load is one ya
 not arrive: say so in `result`, and go on with the rest. That is not a finding: the plan named the
 skill, the diff did not.
 
-**And the brief closes with ct's own yardstick**, pasted there by the program from the
-plugin's `conventions/` directory: `defects.md`, `style.md`, `decisions.md`, `architecture.md` and
-`testing.md`.
-No agent wrote them into the brief and the plan cannot remove them. You do not open anything to get
-them; they are in front of you. The brief may also close with the repo's own declaration, pasted
-from `.agent/conventions.md`: the rule documents it names bind exactly as if §3 had named them, and
-where the two lists differ the union is the repo's yardstick.
+**And ct's own yardstick**, whose documents `## Vara de ct` lists by path at the head of the review
+package. The program picked them by the scope each one declares, so what is on that list is what
+reaches this task: open the ones you are going to cite. No agent wrote that list and the plan cannot
+remove it. The package may also carry the repo's own declaration, pasted from `.agent/conventions.md`:
+the rule documents it names bind exactly as if §3 had named them, and where the two lists differ the
+union is the repo's yardstick.
 
-**Which one wins, and this is the part to get right.** ct's five documents take precedence, and the
-precedence is measured **rule by rule, not by topic**. Where a rule of this repo requires what one
-of those documents forbids, or forbids what they require, that rule of the repo does not apply and
-the diff is measured by ct's. Where a rule of this repo speaks about something none of those five
-speaks about, **it binds in full** and a diff that breaks it is a finding like any other. Precedence
-resolves a clash; it does not delete this repo's yardstick, and reading it as "ct's is the only one"
-is the failure to avoid here.
+**Which one wins, and this is the part to get right: apply the precedence exactly as the block above
+that list states it.** That block is where the rule is written and the only place it is written —
+read it there and do not re-derive it here, because a second wording of it is how it drifts. What
+this item adds to it is calibration, and it is two cases:
 
-The case that fixes the boundary, with both sides: this repo's convention about casing, prefixes or
-file names **binds**, because none of ct's five documents speaks about that. Its convention of
-writing identifiers in Spanish does **not**, because `conventions/style.md` requires English. So the
-line is not "naming or not": it is whether one of those five documents speaks about it.
-
-**A control of the plan can clash with one of these documents too, and that clash is not the
+**One — a control of the plan can clash with one of these documents too, and that clash is not the
 implementer's fault.** A `**Verification:**` command that pins the exact number of tests in the whole
 suite forbids what `conventions/testing.md` requires — driving each branch red before it ships —
 because there is no room left for the assertion the document asks for. Where a control and one of
@@ -167,17 +158,13 @@ it is the same treatment as a clash with the repo's own linter, and for the same
 front of you could not have been written any other way. The defect is in the plan, and the plan is
 not what you are judging.
 
-**Read each ct document's scope line before you use it.** `defects.md`, `decisions.md` and
-`testing.md` apply to every diff, with no exemption. `style.md` also applies to every diff, but a
-module that was already there and does not conform bends on that document's three rules — no prose,
-the language of identifiers, every function hanging off a type. What the diff adds there follows the
-style of that host, and **that is not a finding**. `architecture.md` applies to **new modules**: a module that was
-already there and does not conform is this repository's declared debt, what the diff adds to it
-follows the style of its host, and **that is not a finding**. Both documents close the same hole the
-same way: **a new concept is a new module and is born conforming**, so a new concept placed inside an
-old file to inherit either exemption **is** a finding. Which of the two a file is, the brief tells
-you — `**Files:**` marks each path `(create)` or `(modify)`, and a script already checked those marks
-against the previous commit.
+**Two — a module that was already there does not become a finding for being old.** `style.md` and
+`architecture.md` both exempt it, each one says so in its own scope line, and the block above the
+list says which documents that leaves reaching this task. What the diff adds to such a module follows
+the style of its host, and **that is not a finding**. The hole both documents close in the same
+breath is the one to watch: a new concept placed inside an old file to inherit the exemption **is**
+a finding. Which of the two a file is, the brief tells you — `**Files:**` marks each path `(create)`
+or `(modify)`, and a script already checked those marks against the previous commit.
 
 **`conventions/defects.md` is answered rule by rule, and this is not optional prose.** It carries
 four, and a diff can introduce any of them while reading beautifully, so a paragraph saying the diff

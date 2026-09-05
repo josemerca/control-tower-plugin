@@ -314,31 +314,29 @@ describe('the precedence header carries both sides of the rule', () => {
   })
 })
 
-describe('the same rule reaches both English texts: the judge and the implementer', () => {
+// LA REGLA NO SE REPITE EN NINGÚN TEXTO EN INGLÉS: se cita. Antes viajaba
+// entera en los dos —el juez la leía tres veces en una sola llamada— y lo que
+// dos copias compran es que diverjan; la del backend divergió de verdad. Cada
+// texto dice ahora DÓNDE está y que se aplica tal cual está escrita.
+describe('neither English text repeats the precedence rule: both point at the one place it is written', () => {
   const TARGET_FILES = {
     'agents/ct-judge.md': join(root, 'agents', 'ct-judge.md'),
     'prompts/task-implementer.md': join(root, 'prompts', 'task-implementer.md'),
   }
 
-  const CLAIMS = {
-    'ct takes precedence': /take precedence/i,
-    'it is measured rule by rule, not by topic': /rule by rule, not by topic/i,
-    'both directions of the clash: what the repo requires and what it forbids':
-      /forbids, or forbids what they require/i,
-    "the repo yardstick is not voided where ct stays silent": {
-      'agents/ct-judge.md': /it binds in full|does not delete this repo's yardstick/i,
-      'prompts/task-implementer.md': /does not excuse you from this repo's conventions/i,
-    },
-  }
-
   for (const [fileLabel, path] of Object.entries(TARGET_FILES)) {
     const text = readFileSync(path, 'utf8').replace(/\s+/g, ' ')
-    for (const [claim, pattern] of Object.entries(CLAIMS)) {
-      const regex = pattern instanceof RegExp ? pattern : pattern[fileLabel]
-      it(`${fileLabel} states: ${claim}`, () => {
-        expect(text, `${fileLabel} does not state: ${claim}`).toMatch(regex)
-      })
-    }
+
+    it(`${fileLabel} does not restate the rule`, () => {
+      expect(text, `${fileLabel} still states the rule instead of citing it`)
+        .not.toMatch(/rule by rule, not by topic/i)
+      expect(text).not.toMatch(/forbids, or forbids what they require/i)
+    })
+
+    it(`${fileLabel} says where the rule is written`, () => {
+      expect(text).toMatch(/the block (above that list|that carried them here)/i)
+      expect(text).toMatch(/the only place it is written/i)
+    })
   }
 })
 
@@ -356,18 +354,14 @@ describe('the patrones item measures both yardsticks', () => {
     return /^### 5\. `patrones`[\s\S]*?(?=^### |^## )/m.exec(text)[0]
   }
 
-  it('names_both_yardsticks_and_names_the_ct_one_by_the_plugin_directory', () => {
-    expect(item()).toContain("plugin's `conventions/` directory")
+  it('names_both_yardsticks_and_names_the_ct_one_by_the_section_that_lists_it', () => {
+    expect(item()).toContain(`## ${PluginYardstick.PATH_SECTION}`)
     expect(item()).toContain('.agent/conventions.md')
   })
 
-  it('states_precedence_is_measured_rule_by_rule_not_by_topic', () => {
-    expect(item()).toMatch(/rule by rule/i)
-  })
-
-  it('states_a_repo_rule_ct_does_not_address_still_binds_and_does_not_void_the_repo', () => {
-    expect(item()).toContain('it binds in full')
-    expect(item()).toContain("does not delete this repo's yardstick")
+  it('sends_the_judge_to_the_one_block_where_the_precedence_is_written_instead_of_restating_it', () => {
+    expect(item()).toMatch(/apply the precedence exactly as the block above\s+that list states it/)
+    expect(item()).not.toMatch(/rule by rule, not by topic/i)
   })
 
   it('declares_the_no_yardstick_outcome_can_no_longer_happen_instead_of_being_offered_as_an_outcome', () => {
@@ -379,13 +373,17 @@ describe('the patrones item measures both yardsticks', () => {
     expect(item()).toContain('no-aplica')
   })
 
-  it('names_the_four_documents_and_requires_citing_rule_and_path', () => {
-    for (const name of PluginYardstick.FILES) expect(item()).toContain(name)
+  // Los documentos ya no se enumeran aquí: los enumera el paquete, con la
+  // ruta de cada uno y sólo los que alcanzan a la tarea. Lo que este ítem
+  // sigue exigiendo es lo que no puede venir del paquete: que el hallazgo cite
+  // el documento y la regla.
+  it('requires_citing_the_document_and_the_rule_in_the_evidence', () => {
     expect(item()).toContain('evidence')
+    expect(item()).toContain(`${PluginYardstick.DIRECTORY}/`)
   })
 
-  it('closes_the_old_module_loophole_with_the_same_phrase_as_the_document', () => {
-    expect(item()).toContain('a new concept is a new module')
+  it('closes_the_old_module_loophole_instead_of_letting_an_old_file_shelter_a_new_concept', () => {
+    expect(item()).toContain('a new concept placed inside an old file to inherit the exemption')
   })
 })
 
@@ -422,19 +420,20 @@ describe('the implementer and the judge read the same text', () => {
     readFileSync(join(root, 'agents', 'ct-judge.md'), 'utf8'),
   ]
 
-  it('both_name_the_four_ct_documents', () => {
-    for (const text of readImplementerAndJudge()) {
-      for (const name of PluginYardstick.FILES) expect(text).toContain(name)
-    }
+  it('both_name_the_ct_yardstick_by_the_directory_it_lives_in', () => {
+    for (const text of readImplementerAndJudge()) expect(text).toContain(`${PluginYardstick.DIRECTORY}/`)
   })
 
   it('both_still_name_the_repo_declaration_because_there_are_two_yardsticks', () => {
     for (const text of readImplementerAndJudge()) expect(text).toContain('.agent/conventions.md')
   })
 
-  it('both_carry_the_full_phrase_that_closes_the_old_module_exemption', () => {
-    for (const text of readImplementerAndJudge()) {
-      expect(text).toContain('a new concept is a new module and is born conforming')
-    }
+  // El implementador ESCRIBE el módulo, así que a él se le dice entera la
+  // frase que cierra la exención; el juez la mide desde el otro lado (un
+  // concepto nuevo escondido en un fichero viejo ES hallazgo), y ninguno de
+  // los dos enuncia ya la precedencia.
+  it('the_implementer_carries_the_full_phrase_that_closes_the_old_module_exemption', () => {
+    const [implementador] = readImplementerAndJudge()
+    expect(implementador).toContain('a new concept is a new module and is born conforming')
   })
 })
