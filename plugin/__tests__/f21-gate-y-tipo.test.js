@@ -472,7 +472,7 @@ describe('F21 — el contrato §9 documenta los gates y la invariante', () => {
   it('la sección sembrada explica la columna Gate, la renuncia con `!` y el vocabulario', () => {
     const dir = mkdtempSync(join(tmpdir(), 'f21-init-'))
     execFileSync('bash', [initScript, dir], { encoding: 'utf8' })
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const agents = readFileSync(join(dir, 'docs', 'superpowers', 'CONTRATO-SLICES.md'), 'utf8')
     expect(agents).toContain('**Gate**')
     expect(agents).toContain('`!visual`')
     // Tarea 5 de "e2e al cierre del slice" cerró la deuda temporal que este
@@ -489,7 +489,7 @@ describe('F21 — el contrato §9 documenta los gates y la invariante', () => {
     // #-2" que el agente despachado nunca abre.
     const dir = mkdtempSync(join(tmpdir(), 'f21-init-'))
     execFileSync('bash', [initScript, dir], { encoding: 'utf8' })
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const agents = readFileSync(join(dir, 'docs', 'superpowers', 'CONTRATO-SLICES.md'), 'utf8')
     // F30: la sección dejó de llamarse "§9". Lo que este test defiende es la
     // FRASE, no el nombre — así que se ancla en lo invariante ("fuera de la
     // tabla … no llega al agente") y no en cómo se llame la tabla ese mes.

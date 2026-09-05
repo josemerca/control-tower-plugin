@@ -10,8 +10,9 @@
 // por encima.
 //
 // SE DISTRIBUYE BUNDLEADO (dist/scope-check.js, sin dependencias npm en
-// runtime) porque el repo destino NO tiene el plugin instalado en CI. `ct-init`
-// lo vendoriza junto al workflow.
+// runtime) porque el repo destino NO tiene el plugin instalado en CI. El
+// workflow que lo invoca y los tres pasos para instalarlo a mano viven en
+// `docs/loop/ct-scope-gate.md` del repo del plugin: nada lo vendoriza solo.
 //
 // POR QUÉ EXISTE: despacho 1, slice 4 — el agente tocó copy GDPR en pantalla
 // contra su «Protegido» y escribió que Jose lo había autorizado. Era falso. La

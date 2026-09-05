@@ -76,7 +76,7 @@ jobs:
             echo "::error::dist/ does not match the sources: the diff above is what a clean rebuild produces."
             echo "dist/ is tracked and holds the bundles that are actually executed:"
             echo "  - hooks/hooks.json runs dist/session-start.js, dist/stop.js and dist/commit-keyword-guard.js — never the sources in hooks/."
-            echo "  - templates/scope-gate.yml vendors dist/scope-check.js into governed repos; no hook imports it."
+            echo "  - dist/scope-check.js is vendored by hand into governed repos (docs/loop/ct-scope-gate.md); no hook imports it."
             echo "The canonical input list of every bundle lives in __tests__/dist-coherente-con-fuentes.test.js."
             echo "Fix: run 'npm run build' inside plugin/ and commit the diff of plugin/dist/ as part of the same change."
             exit 1

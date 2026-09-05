@@ -65,7 +65,13 @@ racional que el plan de cada slice necesita y no puede deducir.>
 
 ## Tabla de slices
 
-<!-- Contrato de la tabla v18 (la valida /ct-groom, exit != 0 si falla):
+<!-- EL CONTRATO COMPLETO DE ESTA TABLA está en `docs/superpowers/CONTRATO-SLICES.md`
+     de este mismo repo (lo siembra y lo versiona /ct-init): qué columnas lee
+     /ct-groom, qué genera cada una, qué aborta y qué hace /ct-next con lo que
+     escribas aquí. Léelo antes de rellenar la tabla — el resumen de abajo es
+     un recordatorio de las trampas, no el contrato.
+
+     Contrato de la tabla v18 (la valida /ct-groom, exit != 0 si falla):
      - Título del issue = "#N <Slice>": corto y legible, no una frase.
      - Tipo: ui | backend | infra | bugfix (decide el addendum del agente;
        ui implica gate visual, infra implica gate apply).

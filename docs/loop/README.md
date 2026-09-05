@@ -48,17 +48,41 @@ Para actualizarla sin cambiar la URL, hay que publicar **pasando esa URL**
 explícitamente: publicar sin ella crea un artifact nuevo en vez de actualizar el
 que ya se ha compartido.
 
+## Las referencias por comando
+
+Desde la sub-issue #93 cada `plugin/commands/*.md` se queda con lo que el modelo
+necesita al invocar el comando —la invocación, una tabla de códigos de salida y
+un enlace aquí— y la prosa larga (los mecanismos, sus límites y la historia de
+las decisiones, rondas F5…F38) vive en este directorio, un fichero por comando,
+movida íntegra y sin resumir:
+
+| Comando | Referencia |
+|---|---|
+| `/ct-init` | [`ct-init.md`](ct-init.md) |
+| `/ct-groom` | [`ct-groom.md`](ct-groom.md) |
+| `/ct-next` | [`ct-next.md`](ct-next.md) |
+| `/ct-status` | [`ct-status.md`](ct-status.md) |
+| `/ct-harvest` | [`ct-harvest.md`](ct-harvest.md) |
+
+Son documentos de este repo, no del plugin: no se distribuyen ni se cargan en el
+contexto de ninguna sesión. `__tests__/ct-init.test.js` lee `ct-groom.md` para
+comprobar que la regla de la columna `Señal` dice lo mismo aquí, en el contrato
+sembrado y en el juez de slice.
+
 ## Procedencia del contenido
 
 Cada formato de la página sale de la fuente que lo emite, no de una descripción
 de segunda mano:
 
-- los cuatro `commands/*.md` (`ct-init`, `ct-groom`, `ct-next`, `ct-status`);
+- los `commands/*.md` y, desde #93, sus referencias largas en este directorio
+  (`ct-init`, `ct-groom`, `ct-next`, `ct-status`, `ct-harvest`);
 - los skills forkados de `skills/` (`brainstorming`, `writing-plans`,
   `finishing-a-development-branch`, `subagent-driven-development`) y `skills/FORK.md`;
 - `scripts/groom.js` — `buildIssueTitle`, `buildLabels`, `buildIssueBody`;
 - `scripts/kickoff.js` — `renderKickoff`, `buildStateSeed`, `ADDENDA`;
-- `scripts/ct-init.sh` — el contrato de la tabla de slices, v16;
+- `scripts/ct-init.sh` — el contrato de la tabla de slices (v16 cuando se
+  escribió el documento; desde #93 se siembra en
+  `docs/superpowers/CONTRATO-SLICES.md` del repo destino, no en `AGENTS.md`);
 - `skills/state-template/STATE.template.md`;
 - `hooks/hooks.json`;
 - `templates/_TEMPLATE-execution-spec.md` — la plantilla del execution spec.

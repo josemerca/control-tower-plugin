@@ -8,10 +8,10 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 
 | | |
 |---|---|
-| Versión | `0.56.0` · contrato de la tabla de slices `v21` |
+| Versión | `0.56.0` · contrato de la tabla de slices `v23` |
 | Comandos | `/ct-init` · `/ct-groom` · `/ct-next` · `/ct-status` |
 | Puertas humanas | 3 por epic — congelación, `status:ready`, merge — más el gate `plan` en cada slice (renunciable por fila con `!plan`; su go es `-OK <nonce>` y `--release` se niega sin él) y el gate `e2e` cuando la fila declara recorridos en la columna `E2E` (derivado, no se escribe a mano) |
-| Skills | 11 forkados de superpowers 6.0.3 + 1 propio (`writing-plans-prescriptive`) |
+| Skills | 10 forkados de superpowers 6.0.3 que se distribuyen (11 forkados; `writing-skills` vive en el repo, fuera del paquete) + 1 propio (`writing-plans-prescriptive`) |
 | Requisitos | Node ≥ 24 · `gh` autenticado · `cmux` · git worktrees |
 | Licencia | [MIT](LICENSE) |
 
@@ -85,7 +85,7 @@ Luego, **una vez por repo que quieras gobernar**:
 /ct-init
 ```
 
-El scaffolder deja `.agent/STATE.md`, la sección del contrato de la tabla de slices dentro de `AGENTS.md`, y dos líneas en el `.gitignore`. No planifica nada: rellenar los comandos reales del repo (build, test, lint, CI) en `AGENTS.md` es cosa tuya.
+El scaffolder deja `.agent/STATE.md`, `.agent/conventions.md`, el contrato de la tabla de slices en `docs/superpowers/CONTRATO-SLICES.md`, una sección corta en `AGENTS.md` que enlaza a él, y las reglas del `.gitignore`. No planifica nada: rellenar los comandos reales del repo (build, test, lint, CI) en `AGENTS.md` es cosa tuya.
 
 Si `/ct-init` avisa de que el repo **ya traía sus propias convenciones** —otro protocolo de claim, otra ruta de worktrees, otro fichero de estado—, eso no lo resuelve el plugin: elegir cuál manda es una decisión tuya.
 
@@ -100,7 +100,7 @@ Si `/ct-init` avisa de que el repo **ya traía sus propias convenciones** —otr
 
 | Comando | Qué hace | Muta |
 |---|---|---|
-| **`/ct-init`** | Prepara un repo para el loop: estado, contrato en `AGENTS.md`, `.gitignore`. Detecta convenciones propias del repo que contradigan al loop. | el repo local |
+| **`/ct-init`** | Prepara un repo para el loop: estado, contrato de slices en `docs/superpowers/CONTRATO-SLICES.md`, sección corta en `AGENTS.md`, `.gitignore`. Detecta convenciones propias del repo que contradigan al loop. | el repo local |
 | **`/ct-groom`** | Lee la tabla de slices del spec **congelado** y crea milestone, labels, issues y altas en el Project. Idempotente por existencia; detecta divergencia pero **no la aplica** sin `--reconcile`. | GitHub |
 | **`/ct-next`** | Elige el siguiente slice despachable (orden, dependencias mergeadas, sin colisión de tokens, con hueco de `--cap`), lo reclama, crea worktree y rama, siembra el estado y lanza al agente **verificando que arrancó de verdad**. | GitHub + disco |
 | **`/ct-status`** | Responde de una vez: qué está en vuelo, qué ha entregado y qué es residuo. **No escribe una sola vez** — hay un test que lo comprueba mirando el `argv` real con el que se llamó a `gh`. | nada |
@@ -272,20 +272,21 @@ Si no, el repo sigue distribuyendo el hook viejo mientras la fuente ya dice otra
 ### Estructura
 
 ```
-commands/     los cuatro slash commands (Markdown + prosa larga: son la documentación)
+commands/     los slash commands: invocación, tabla de exit codes y enlace a su referencia en ../docs/loop/
 scripts/      la lógica — módulos puros y los ejecutables .mjs (los cuatro del loop y ct-step)
 scripts/vendor/  `yaml` bundleado — DERIVADO, trackeado, ver abajo
 hooks/        SessionStart (hidratación), Stop (estado al día), PreToolUse sobre Bash (guarda de commits) y sobre Task (puerta del despacho)
 dist/         bundles de los hooks — DERIVADO, trackeado, ver arriba
-skills/       los 11 skills forkados + writing-plans-prescriptive (propio) + LICENSE-superpowers + FORK.md
-__tests__/    126 ficheros, 3.177 tests
+skills/       los 10 skills forkados que se distribuyen + writing-plans-prescriptive (propio) + state-template + LICENSE-superpowers + FORK.md
+__tests__/    133 ficheros, ~3.350 tests
 ```
 
 Y un nivel más arriba, en el repo y **fuera** de lo que se distribuye (el `source` del
 marketplace es `./plugin`, así que nada de esto llega a una instalación):
 
 ```
-../docs/loop/  el documento del ciclo: fuente, HTML autocontenido y PDF
+../docs/loop/  el documento del ciclo (fuente, HTML autocontenido y PDF) y la referencia larga de cada comando: ct-init.md, ct-groom.md, ct-next.md, ct-status.md, ct-harvest.md, ct-scope-gate.md
+../docs/superpowers/skills/  los skills forkados que NO se distribuyen (hoy, writing-skills)
 ../docs/       los handoffs de cada ronda (prompt-fNN-*.md) — cómo se llegó hasta aquí
 ../backend/    la interfaz de programación local que consume el front
 ../frontend/   el front, todavía un hueco preparado
@@ -293,7 +294,7 @@ marketplace es `./plugin`, así que nada de esto llega a una instalación):
 
 ### El fork de superpowers
 
-Los skills de `skills/` (salvo `state-template`, propio) son un fork de **superpowers 6.0.3** (Jesse Vincent, MIT — ver [`skills/LICENSE-superpowers`](skills/LICENSE-superpowers)), invocables como `control-tower-loop:<nombre>`. Se forkaron los 11 que se usaban de verdad, medido sobre 2.704 transcripts.
+Los skills de `skills/` (salvo `state-template` y `writing-plans-prescriptive`, propios) son un fork de **superpowers 6.0.3** (Jesse Vincent, MIT — ver [`skills/LICENSE-superpowers`](skills/LICENSE-superpowers)), invocables como `control-tower-loop:<nombre>`. Se forkaron los 11 que se usaban de verdad, medido sobre 2.704 transcripts, y **se distribuyen 10**: `writing-skills` vive en `../docs/superpowers/skills/writing-skills/` — sigue forkado y sigue rigiendo cómo se escribe una skill de aquí, pero lo lee quien desarrolla el plugin, no un agente del loop.
 
 **Tres costuras están reescritas y no se pisan en un cherry-pick** (las vigila `__tests__/skills-fork.test.js`):
 
