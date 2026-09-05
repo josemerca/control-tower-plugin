@@ -9,7 +9,14 @@ export class PluginYardstick {
     '',
     '> **La vara de ct**, leída del directorio `conventions/` del plugin por el',
     '> programa: ningún agente la escribió en este brief y el plan no puede',
-    '> quitarla. Cada documento declara su alcance en su propia cabecera.',
+    '> quitarla. Cada documento declara su alcance en su propia cabecera',
+    '> (`Applies to:`) y el programa te da SÓLO los que alcanzan a esta tarea:',
+    '> `architecture.md` rige los MÓDULOS NUEVOS, así que viaja cuando la tarea',
+    '> declara alguna ruta `(create)` y no cuando sólo modifica lo que ya estaba;',
+    '> los demás alcanzan a todo diff. Un módulo que ya existía y no cumple es',
+    '> deuda declarada del repo: lo que le añadas sigue el estilo de su anfitrión',
+    '> y eso no es hallazgo — pero **un concepto nuevo es un módulo nuevo y nace',
+    '> cumpliendo**.',
     '>',
     '> **Tiene preferencia sobre las convenciones de este repo, y la preferencia se',
     '> mide regla a regla, no por tema.** Donde una regla del repo manda hacer algo',
@@ -32,6 +39,44 @@ export class PluginYardstick {
     '',
   ]
 
+  // EL ALCANCE LO DECLARA EL DOCUMENTO, no una tabla de este módulo. Cada
+  // documento de `conventions/` abre con una línea `Applies to:` —
+  // `architecture.md` dice **new modules**, los otros cuatro **every diff**—
+  // y eso es lo que se lee: una tabla aquí sería la misma decisión escrita dos
+  // veces (`conventions/decisions.md`), y el día que un documento nuevo
+  // declarara su alcance nadie se acordaría de venir a copiarlo.
+  //
+  // Se normaliza el énfasis y el punto final porque la cabecera se escribe en
+  // markdown ("Applies to: **new modules**.") y lo que decide es el texto, no
+  // los asteriscos.
+  static #SCOPE_LINE = /^Applies to:\s*(.+)$/m
+
+  static #NEW_MODULES = /new modules/i
+
+  static scopeOf(content) {
+    const match = PluginYardstick.#SCOPE_LINE.exec(String(content ?? ''))
+    if (!match) return null
+    const scope = match[1].replace(/[*`]/g, '').replace(/\.\s*$/, '').trim()
+    return scope === '' ? null : scope
+  }
+
+  // UN DOCUMENTO QUE NO DECLARA ALCANCE VIAJA SIEMPRE. La alternativa
+  // —dejarlo fuera— haría que añadir un documento sin cabecera lo dejara mudo
+  // en silencio, y este módulo aborta antes que medir contra nada.
+  static appliesToTask(document, { creates }) {
+    const scope = PluginYardstick.scopeOf(document?.content)
+    if (scope === null) return true
+    return PluginYardstick.#NEW_MODULES.test(scope) ? Boolean(creates) : true
+  }
+
+  // `creates`: si la tarea declara alguna ruta `(create)` en sus **Files:**.
+  // Es lo único de la tarea que este módulo necesita saber, y quien lo mide es
+  // quien tiene el plan delante (ct-step.mjs).
+  static forTask(documents, { creates }) {
+    return (Array.isArray(documents) ? documents : [])
+      .filter((document) => PluginYardstick.appliesToTask(document, { creates }))
+  }
+
   static missingDocuments(documents) {
     const contentByName = new Map()
     for (const document of Array.isArray(documents) ? documents : []) {
@@ -43,11 +88,27 @@ export class PluginYardstick {
     })
   }
 
+  // LO QUE LLEGA YA VIENE FILTRADO POR ALCANCE (`forTask`), así que componer
+  // cuatro documentos es el camino normal de una tarea que no crea ningún
+  // módulo — no media promesa. Lo que sigue siendo media promesa, y por eso
+  // sigue abortando, es un documento que se pide y llega vacío (medir contra
+  // nada no se distingue en silencio de medir contra la regla) y una lista sin
+  // ningún documento que componer: un encabezado que no lleva nada detrás.
+  //
+  // Que estén los CINCO en el plugin se comprueba aparte, con
+  // `missingDocuments`, y lo hace quien los lee del disco (ct-step.mjs): una
+  // instalación rota se aborta antes de filtrar nada.
+  static #blankDocuments(documents) {
+    return (Array.isArray(documents) ? documents : [])
+      .filter((document) => typeof document?.content !== 'string' || document.content.trim() === '')
+      .map((document) => document?.name ?? '(sin nombre)')
+  }
+
   static composeSection(documents) {
-    const missing = PluginYardstick.missingDocuments(documents)
-    if (missing.length) {
+    const blank = PluginYardstick.#blankDocuments(documents)
+    if (blank.length) {
       throw new Error(
-        `PluginYardstick.composeSection: cannot compose the ct yardstick without ${missing.join(', ')}. ` +
+        `PluginYardstick.composeSection: cannot compose the ct yardstick without ${blank.join(', ')}. ` +
           'Callers must ask `missingDocuments` first and decide what to do: this method never composes ' +
           'a header that promises documents it does not carry.'
       )
@@ -57,6 +118,13 @@ export class PluginYardstick {
     const orderedDocuments = [...(documents ?? [])]
       .filter((document) => orderByName.has(document?.name))
       .sort((a, b) => orderByName.get(a.name) - orderByName.get(b.name))
+    if (orderedDocuments.length === 0) {
+      throw new Error(
+        'PluginYardstick.composeSection: cannot compose the ct yardstick without any of ' +
+          `${PluginYardstick.FILES.join(', ')}. Callers must ask \`missingDocuments\` first and decide what ` +
+          'to do: this method never composes a header that promises documents it does not carry.'
+      )
+    }
 
     const sections = [...PluginYardstick.#PRECEDENCE_HEADER]
     for (const document of orderedDocuments) {

@@ -784,7 +784,12 @@ describe('la telemetría de un paso real', () => {
     // Los documentos de conventions/ del plugin, contados por cabecera y no
     // comparando contra PluginYardstick.FILES.length. Por eso el quinto
     // (defects.md, al partir code.md) no obligó a tocar briefVaraCtMeasures.
-    expect(f.brief_vara_ct_docs).toBe(5)
+    // CUATRO y no cinco: esta tarea no declara ninguna ruta `(create)`, así
+    // que `architecture.md` —que rige los módulos nuevos por su propia
+    // cabecera `Applies to:`— no viaja en su brief. La medida cuenta lo que el
+    // brief LLEVA, que desde el brief por alcance ya no es siempre la lista
+    // entera.
+    expect(f.brief_vara_ct_docs).toBe(4)
     expect(typeof f.brief_bytes).toBe('number')
     expect(f.brief_bytes).toBeGreaterThan(0)
   })

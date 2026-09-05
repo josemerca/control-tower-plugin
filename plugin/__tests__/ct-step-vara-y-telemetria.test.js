@@ -219,6 +219,37 @@ describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
     expect(brief.indexOf('La vara de ct')).toBeLessThan(brief.indexOf('leída directo de `.agent/conventions.md`'))
   })
 
+  // EL ALCANCE DE CADA DOCUMENTO decide si viaja. `architecture.md` rige los
+  // MÓDULOS NUEVOS —lo dice su propia cabecera `Applies to:`— así que a una
+  // tarea que sólo modifica lo que ya estaba no le llega: son 9,3 KB que el
+  // implementador lee en cada tarea sin que ninguno de sus párrafos pueda
+  // medir su diff.
+  const conLaUnoModificando = () => {
+    const plan = readFileSync(join(repo, 'plan.md'), 'utf8').replace('`uno.txt` (create)', '`uno.txt` (modify)')
+    writeFileSync(join(repo, 'plan.md'), plan)
+  }
+
+  it('una tarea que no estrena módulo no se lleva architecture.md, y sí los otros cuatro', () => {
+    conLaUnoModificando()
+    ct('next')
+    const brief = briefDeLaUno()
+    expect(brief).not.toContain('## Vara de ct: conventions/architecture.md')
+    for (const nombre of ['defects.md', 'style.md', 'decisions.md', 'testing.md']) {
+      expect(brief, `${nombre} tendría que seguir viajando`).toContain(`## Vara de ct: conventions/${nombre}`)
+    }
+  })
+
+  it('una tarea que estrena módulo sí se lleva architecture.md', () => {
+    ct('next')
+    expect(briefDeLaUno()).toContain('## Vara de ct: conventions/architecture.md')
+  })
+
+  it('la cabecera dice por qué architecture.md puede no estar, para que su ausencia no se lea como un olvido', () => {
+    conLaUnoModificando()
+    ct('next')
+    expect(briefDeLaUno()).toMatch(/MÓDULOS NUEVOS/)
+  })
+
   it('sin declaración del repo, la de ct viaja igual: son dos varas independientes', () => {
     ct('next')
     const brief = briefDeLaUno()

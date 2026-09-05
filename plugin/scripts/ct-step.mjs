@@ -664,6 +664,18 @@ function seccionVaraDelRepo(nombreDelArtefacto) {
   }
 }
 
+// SI LA TAREA ESTRENA MÓDULO, medido en lo que el plan declara y no en lo que
+// el implementador haga después: `**Files:**` reparte cada ruta entre
+// `(create)` y `(modify)`, y `dispatch-check --check-plan` ya comprueba esas
+// marcas contra el commit anterior. Es el único dato de la tarea que la vara
+// de ct necesita para saber qué documentos la alcanzan (`architecture.md` rige
+// los módulos nuevos, y lo dice su propia cabecera `Applies to:`).
+//
+// Una tarea sin **Files:** legibles (`files: []`) NO estrena módulo: pegarle
+// `architecture.md` por si acaso sería exactamente el material que este cambio
+// quita, y el aviso de que el plan no declaró rutas ya lo da `plan-tasks.js`.
+const creaModulo = (t) => (t?.files ?? []).some((f) => f.action === 'create')
+
 function escribirBrief() {
   const brief = join(workDir, `task-${run.task}-brief.md`)
   // Se comprueba antes de llamar a `task-brief` para no dejar en disco un
@@ -675,7 +687,7 @@ function escribirBrief() {
   } catch (e) {
     die(`no se pudo extraer el brief de la tarea ${run.task}: ${String(e.stderr || e.message).trim()}`, EXIT.PRECONDITION)
   }
-  appendFileSync(brief, PluginYardstick.composeSection(deCt))
+  appendFileSync(brief, PluginYardstick.composeSection(PluginYardstick.forTask(deCt, { creates: creaModulo(tarea()) })))
   appendFileSync(brief, seccionVaraDelRepo('el brief'))
   return brief
 }
