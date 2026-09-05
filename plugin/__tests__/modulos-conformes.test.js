@@ -45,6 +45,8 @@ class NacidosConformes {
     '__tests__/dispatch-guard-real-process.test.js',
     '__tests__/ct-step-dispatch-seal-real-process.test.js',
     '__tests__/dispatch-check-collect-bq-real-process.test.js',
+    'scripts/role-bytes.js',
+    '__tests__/role-bytes.test.js',
   ]
 
   static PALABRAS_CASTELLANAS = [
