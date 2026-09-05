@@ -54,6 +54,17 @@
 
 export const CONTRACT_MARKER_OPEN = '<!-- ct-init:slices-contract -->'
 export const CONTRACT_MARKER_CLOSE = '<!-- /ct-init:slices-contract -->'
+// #93 — la sección corta que el contrato dejó en su sitio dentro de AGENTS.md.
+// Se poda por el mismo motivo que el contrato: es texto del PLUGIN, y habla del
+// terreno que este escáner vigila (el claim, `.worktrees/<n>`, el fichero de
+// estado). Sin podarla, `/ct-init` y `/ct-next` se denunciarían a sí mismos en
+// cada corrida de un repo recién bootstrapeado.
+export const LOOP_MARKER_OPEN = '<!-- ct-init:loop -->'
+export const LOOP_MARKER_CLOSE = '<!-- /ct-init:loop -->'
+const BLOQUES_PROPIOS = [
+  [CONTRACT_MARKER_OPEN, CONTRACT_MARKER_CLOSE],
+  [LOOP_MARKER_OPEN, LOOP_MARKER_CLOSE],
+]
 
 // Rutas y nombres que el dispatcher del plugin ocupa. Se citan en los mensajes
 // para que la decisión que hay que tomar sea concreta, no "revisa tu setup".
@@ -137,12 +148,18 @@ function shape(raw) {
 export function docLines(content) {
   const original = String(content ?? '').split('\n')
   const stripped = new Set()
-  let inside = false
+  let cierreEsperado = null
   original.forEach((raw, i) => {
     const line = raw.replace(/\r$/, '')
-    if (!inside && line === CONTRACT_MARKER_OPEN) { inside = true; stripped.add(i); return }
-    if (inside) { stripped.add(i); if (line === CONTRACT_MARKER_CLOSE) inside = false }
+    if (cierreEsperado === null) {
+      const bloque = BLOQUES_PROPIOS.find(([abre]) => line === abre)
+      if (bloque) { cierreEsperado = bloque[1]; stripped.add(i) }
+      return
+    }
+    stripped.add(i)
+    if (line === cierreEsperado) cierreEsperado = null
   })
+  const inside = cierreEsperado !== null
   const build = (raw, i) => {
     const text = raw.replace(/\r$/, '')
     return { n: i + 1, text, ...shape(text) }

@@ -256,9 +256,9 @@ describe('F17/H2 — el motivo del bloqueo es PRODUCTO: stdout, en dry-run y en 
 function seed() {
   const dir = mkdtempSync(join(tmpdir(), 'ct-'))
   execFileSync('bash', [ctInit, dir], { encoding: 'utf8' })
-  const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+  const contrato = readFileSync(join(dir, 'docs', 'superpowers', 'CONTRATO-SLICES.md'), 'utf8')
   rmSync(dir, { recursive: true, force: true })
-  return agents
+  return contrato
 }
 const flat = (s) => s.replace(/\*/g, '').replace(/\s+/g, ' ')
 const V6 = () => readFileSync(join(root, '__tests__', 'fixtures', 'slices-contract-v6.md'), 'utf8')
@@ -316,7 +316,7 @@ describe('contrato §9 (F17): el cierre del issue y la trampa de la rama por def
     const a = seed()
     const declared = readFileSync(ctInit, 'utf8').match(/^SLICES_CONTRACT_VERSION=(\d+)$/m)
     const marker = a.match(/<!-- ct-init:slices-contract-version: (\d+) -->/)
-    const footer = a.match(/Esta sección la mantiene `\/ct-init` \(contrato v(\d+)\)/)
+    const footer = a.match(/Este contrato lo mantiene `\/ct-init` \(contrato v(\d+)\)/)
     expect(declared).not.toBeNull()
     expect(marker[1]).toBe(declared[1])
     expect(footer[1]).toBe(declared[1])

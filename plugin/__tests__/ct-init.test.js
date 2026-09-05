@@ -329,15 +329,46 @@ function exigirHistorialCompleto() {
 }
 
 // seedFreshAgentsMd: corre ct-init.sh en un dir vacío y devuelve el AGENTS.md
-// que siembra — el bloque de HOY, tal cual sale del script (no leído de su
-// fuente), que es contra lo que se validan tanto el registro de hashes como el
-// extractor textual de arriba.
+// que siembra.
 function seedFreshAgentsMd() {
   const dir = mkdtempSync(join(tmpdir(), 'ct-'))
   execFileSync('bash', [script, dir], { encoding: 'utf8' })
   const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
   rmSync(dir, { recursive: true, force: true })
   return agents
+}
+
+// #93 — el contrato salió de AGENTS.md a su propio fichero del repo gobernado.
+// El bloque es EL MISMO byte a byte (marcadores, línea de versión y cuerpo), y
+// por eso todo lo que este fichero vigila —el ledger de hashes, el extractor
+// textual del historial, la doctrina de versiones— sigue valiendo sin tocar una
+// sola entrada: lo único que cambia es en qué fichero se busca.
+const CONTRATO_REL = ['docs', 'superpowers', 'CONTRATO-SLICES.md']
+const contratoPath = (dir) => join(dir, ...CONTRATO_REL)
+const leerContrato = (dir) => readFileSync(contratoPath(dir), 'utf8')
+
+// seedFreshContrato: el bloque de HOY tal cual sale del script (no leído de su
+// fuente), que es contra lo que se validan el registro de hashes y el extractor
+// textual de arriba.
+function seedFreshContrato() {
+  const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+  execFileSync('bash', [script, dir], { encoding: 'utf8' })
+  const contrato = leerContrato(dir)
+  rmSync(dir, { recursive: true, force: true })
+  return contrato
+}
+
+// conContrato: un fichero de contrato con texto propio del repo alrededor del
+// bloque. Es el escenario que interesa en cada test de actualización: lo de
+// fuera del bloque no se toca nunca.
+const conContrato = (bloque, nota = 'mías') =>
+  `# Contrato de slices\n\n## Notas\n- ${nota}\n\n${bloque}\n## Después\n- intocable\n`
+
+// sembrarContrato: escribe ese fichero en el sitio donde ct-init lo busca.
+function sembrarContrato(dir, contenido) {
+  mkdirSync(dirname(contratoPath(dir)), { recursive: true })
+  writeFileSync(contratoPath(dir), contenido)
+  return contenido
 }
 
 // E2E_MARKER_OPEN/CLOSE + E2E_BLOCK: la tarea 5 de "e2e al cierre del slice"
@@ -363,18 +394,38 @@ function extractE2eBlock(agentsMd) {
 }
 const E2E_BLOCK = extractE2eBlock(seedFreshAgentsMd())
 
-// withE2eAppended: reproduce EXACTAMENTE lo que hace ct-init.sh al añadir la
-// sección de travesía a un AGENTS.md que no la trae todavía — asegura un
-// salto de línea final, añade una línea en blanco, y pega el bloque. `crlf`
-// hace lo mismo que `file_is_crlf`/`replace_slices_block` del script: si el
-// fichero de partida usa CRLF, la línea en blanco y el bloque se escriben
-// con los mismos saltos.
-function withE2eAppended(before, { crlf = false } = {}) {
+// #93 — la sección corta del loop, la que queda en AGENTS.md en el sitio que
+// dejó el contrato. Se calcula igual que E2E_BLOCK, ejecutando el script, para
+// que un cambio de su texto no haga divergir esta constante en silencio.
+const LOOP_MARKER_OPEN = '<!-- ct-init:loop -->'
+const LOOP_MARKER_CLOSE = '<!-- /ct-init:loop -->'
+function extractLoopBlock(agentsMd) {
+  const lines = agentsMd.split('\n')
+  const start = lines.indexOf(LOOP_MARKER_OPEN)
+  const end = lines.indexOf(LOOP_MARKER_CLOSE)
+  if (start === -1 || end === -1) return null
+  return lines.slice(start, end + 1).join('\n') + '\n'
+}
+const LOOP_BLOCK = extractLoopBlock(seedFreshAgentsMd())
+
+// withE2eAppended: reproduce EXACTAMENTE lo que hace ct-init.sh al añadir sus
+// secciones a un AGENTS.md que no las trae todavía — asegura un salto de línea
+// final, añade una línea en blanco, y pega el bloque. `crlf` hace lo mismo que
+// `file_is_crlf`/`replace_slices_block` del script: si el fichero de partida
+// usa CRLF, la línea en blanco y el bloque se escriben con los mismos saltos.
+// `loop: false` es para el caso en que el AGENTS.md ya lleva el contrato dentro
+// (uno bootstrapeado antes de #93): ahí la sección corta NO se añade, porque
+// sería una segunda copia de lo mismo, y en su lugar sale el aviso de migración.
+function withE2eAppended(before, { crlf = false, loop = true } = {}) {
   let out = before
   const nl = crlf ? '\r\n' : '\n'
-  if (out.length && !out.endsWith(nl)) out += nl
-  out += nl
-  out += crlf ? E2E_BLOCK.replace(/\n/g, '\r\n') : E2E_BLOCK
+  const pegar = (bloque) => {
+    if (out.length && !out.endsWith(nl)) out += nl
+    out += nl
+    out += crlf ? bloque.replace(/\n/g, '\r\n') : bloque
+  }
+  if (loop) pegar(LOOP_BLOCK)
+  pegar(E2E_BLOCK)
   return out
 }
 
@@ -455,9 +506,10 @@ describe('ct-init.sh', () => {
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     // El contenido del usuario no se toca ni se reordena...
     expect(agents.startsWith('MÍO-AGENTS')).toBe(true)
-    // ...pero, F2: la sección §9 (contrato con /ct-groom) se añade igual,
-    // porque este AGENTS.md no la traía.
-    expect(agents).toContain('<!-- ct-init:slices-contract -->')
+    // ...pero la sección corta del loop se añade igual, porque este AGENTS.md
+    // no la traía — y el contrato entero se siembra en su propio fichero.
+    expect(agents).toContain(LOOP_MARKER_OPEN)
+    expect(leerContrato(dir)).toContain(MARKER_OPEN)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -469,7 +521,7 @@ describe('ct-init.sh', () => {
   it('AGENTS.md nuevo: el esqueleto ya trae la sección §9 (contrato con /ct-groom)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const agents = leerContrato(dir)
     expect(agents).toContain('<!-- ct-init:slices-contract -->')
     expect(agents).toContain('| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca |')
     rmSync(dir, { recursive: true, force: true })
@@ -481,7 +533,7 @@ describe('ct-init.sh', () => {
   it('AGENTS.md nuevo: la sección §9 dice que "Slice" es obligatoria y alimenta el título, y que "Entrega" es opcional (Descripción)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const agents = leerContrato(dir)
     expect(agents).toMatch(/\*\*Slice\*\* \*\(obligatoria\)\*/)
     expect(agents).toMatch(/T.TULO/i)
     expect(agents).toMatch(/\*\*Entrega\*\* \*\(opcional\)\*/)
@@ -500,7 +552,7 @@ describe('ct-init.sh', () => {
   it('AGENTS.md nuevo: la sección §9 nombra TODOS los valores de "Tipo" reconocidos (derivado de ADDENDA, no una lista hardcodeada) y que deciden el addendum', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const agents = leerContrato(dir)
     expect(agents).toMatch(/addendum/i)
     expect(Object.keys(ADDENDA).length).toBeGreaterThan(0) // control: si ADDENDA quedara vacío, el .every() de abajo pasaría vacío y no probaría nada
     expect(Object.keys(ADDENDA).every((t) => agents.includes(`\`${t}\``))).toBe(true)
@@ -513,7 +565,7 @@ describe('ct-init.sh', () => {
   it('el ejemplo sembrado ("Ejemplo que parsea tal cual") parsea de verdad con ct-groom.mjs --dry-run: 3 issues, títulos desde "Slice"', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const agents = leerContrato(dir)
     const table = extractWorkedExample(agents)
     expect(table).toContain('| # | Slice | Tipo | Entrega | Dep | Acepta | Protegido | Área | Toca | Gate | Señal |')
     const specDir = mkdtempSync(join(tmpdir(), 'ct-example-'))
@@ -565,7 +617,7 @@ describe('ct-init.sh', () => {
   it('el contrato documenta la columna Señal: la exención N/A — <razón>, a dónde llega y que sin valor es sin-vara', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const agents = leerContrato(dir)
     expect(agents).toContain('**Señal** *(opcional)*')
     expect(agents).toContain('N/A — <razón>')
     expect(agents).toMatch(/exención sin razón|exención SIN razón/i)
@@ -588,7 +640,7 @@ describe('ct-init.sh', () => {
   it('el contrato dice que la señal no es un criterio de aceptación más, y ct-groom.md dice lo mismo', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const agents = leerContrato(dir)
     // La frase, en una sola línea (el bullet va envuelto a ~72 columnas: si el
     // reflow la partiera, este assert es lo que lo caza).
     expect(agents).toMatch(/no es un criterio de aceptación más/i)
@@ -597,11 +649,17 @@ describe('ct-init.sh', () => {
     expect(agents).toMatch(/EN PRODUCCIÓN/)
     expect(agents).toContain('`estado-final`')
     expect(agents).toContain('`observabilidad`')
-    // Control: el contrato ANTERIOR no decía nada de esto — este test no pasa
-    // por una coincidencia de prosa que ya estuviera ahí.
+    // Control: hasta el v21 el contrato no decía nada de esto — este test no
+    // pasa por una coincidencia de prosa que ya estuviera ahí. El control se
+    // ancla a ESA versión y no a `CONTRACT_VERSION - 1`: la frase entró con el
+    // v22, así que en cuanto un bump posterior trata de otra cosa (el v23 de
+    // #93, sin ir más lejos) «la versión anterior» ya la trae y deja de
+    // controlar nada.
+    const VERSION_SIN_LA_FRASE = 21
     const anterior = bloquesEmitidos().find(({ block }) =>
-      block.includes(`<!-- ct-init:slices-contract-version: ${CONTRACT_VERSION - 1} -->`)
+      block.includes(`<!-- ct-init:slices-contract-version: ${VERSION_SIN_LA_FRASE} -->`)
     )
+    expect(anterior, `no hay ningún bloque v${VERSION_SIN_LA_FRASE} ni en la historia ni en SQUASHED_BLOCK_FIXTURES`).toBeDefined()
     expect(anterior.block).not.toMatch(/no es un criterio de aceptación más/i)
     expect(anterior.block).not.toContain('`estado-final`')
     // El otro documento que enseña la columna no puede quedarse atrás: quien
@@ -642,7 +700,7 @@ describe('ct-init.sh', () => {
     expect(cita).not.toBeNull()
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const bloque = extractBlock(readFileSync(join(dir, 'AGENTS.md'), 'utf8'))
+    const bloque = extractBlock(leerContrato(dir))
     // Las DOS normalizadas: la cita del agente va envuelta a ~73 columnas y el
     // bullet del contrato a ~72, así que ninguna de las dos contiene a la otra
     // sin colapsar los saltos de línea. (Verificado: sin normalizar `cita[1]`,
@@ -673,7 +731,7 @@ describe('ct-init.sh', () => {
   it('el contrato dice que los issues nacen en status:backlog, que promoverlos a status:ready es un paso humano, y con qué comando', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const agents = leerContrato(dir)
     expect(agents).toContain('status:backlog')
     expect(agents).toContain('status:ready')
     expect(agents).toMatch(/humano/i)
@@ -688,7 +746,7 @@ describe('ct-init.sh', () => {
   it('el contrato explica que la coma separa siempre en "Acepta" y cómo escaparla', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const agents = leerContrato(dir)
     expect(agents).toContain('\\,')
     expect(agents).toMatch(/Protegido[\s\S]{0,400}la coma\s+\*\*no\*\*/i) // y dónde NO separa
     rmSync(dir, { recursive: true, force: true })
@@ -700,7 +758,7 @@ describe('ct-init.sh', () => {
   it('el contrato explica qué decisiones del autor dependen de --milestone/--section/--project', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const agents = leerContrato(dir)
     expect(agents).toContain('--milestone')
     expect(agents).toContain('--section')
     expect(agents).toContain('--project')
@@ -715,7 +773,7 @@ describe('ct-init.sh', () => {
   it('el contrato dice cómo comprobar qué labels existen ya en el repo', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const agents = leerContrato(dir)
     expect(agents).toContain('gh label list')
     rmSync(dir, { recursive: true, force: true })
   })
@@ -725,14 +783,14 @@ describe('ct-init.sh', () => {
   it('el contrato avisa de que el "#N" de merge-after es el orden de la tabla, no un issue de GitHub', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const agents = leerContrato(dir)
     expect(agents).toContain('merge-after `#N`')
     expect(agents).toMatch(/nunca un número de issue/i)
     expect(agents).toContain('ct-order')
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('AGENTS.md existente SIN la sección §9 → se añade sin tocar el resto (caso "muy editado a mano")', () => {
+  it('AGENTS.md existente SIN la sección del loop → se añade sin tocar el resto (caso "muy editado a mano")', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     const heavilyEdited = [
       '# AGENTS.md',
@@ -749,13 +807,16 @@ describe('ct-init.sh', () => {
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     expect(agents).toContain('Mi proyecto rarísimo con notas personales de Jose que no se deben perder.')
     expect(agents).toContain('ojo con el símbolo `#` en mis propias notas, no es un slice')
-    expect(agents).toContain('<!-- ct-init:slices-contract -->')
+    expect(agents).toContain(LOOP_MARKER_OPEN)
     // La sección añadida va DESPUÉS del contenido existente, no lo desplaza.
-    expect(agents.indexOf('notas personales')).toBeLessThan(agents.indexOf('<!-- ct-init:slices-contract -->'))
+    expect(agents.indexOf('notas personales')).toBeLessThan(agents.indexOf(LOOP_MARKER_OPEN))
+    // Y el contrato entero no entra en AGENTS.md: vive en su fichero.
+    expect(agents).not.toContain(MARKER_OPEN)
+    expect(leerContrato(dir)).toContain(MARKER_OPEN)
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('AGENTS.md existente SIN salto de línea final → añade la sección §9 sin corromper la última línea del usuario', () => {
+  it('AGENTS.md existente SIN salto de línea final → añade la sección del loop sin corromper la última línea del usuario', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     writeFileSync(join(dir, 'AGENTS.md'), '## Gotchas\n- última línea sin salto') // sin \n final, a propósito
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
@@ -763,11 +824,11 @@ describe('ct-init.sh', () => {
     expect(agents).toContain('- última línea sin salto')
     expect(agents).not.toMatch(/salto<!--/) // nunca fusionadas en la misma línea
     expect(agents).not.toMatch(/salto##/)
-    expect(agents).toContain('<!-- ct-init:slices-contract -->')
+    expect(agents).toContain(LOOP_MARKER_OPEN)
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('AGENTS.md ya trae la sección §9 (editada a mano por el usuario) → no se duplica ni se pisa', () => {
+  it('AGENTS.md ya trae el contrato dentro (editado a mano por el usuario) → no se duplica ni se pisa, y tampoco recibe la sección corta', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     const customSection = [
       '# AGENTS.md',
@@ -783,7 +844,9 @@ describe('ct-init.sh', () => {
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     // El contrato editado no se toca ni una letra; la sección de travesía SÍ
     // se añade (le faltaba, igual que a cualquier AGENTS.md que no la trae).
-    expect(agents).toBe(withE2eAppended(customSection))
+    // La del loop no: mientras el contrato siga ahí dentro, añadirla contaría
+    // el mismo tema dos veces — el aviso de migración dice cómo salir de ahí.
+    expect(agents).toBe(withE2eAppended(customSection, { loop: false }))
     const occurrences = agents.split('<!-- ct-init:slices-contract -->').length - 1
     expect(occurrences).toBe(1) // no duplicada
     rmSync(dir, { recursive: true, force: true })
@@ -833,22 +896,26 @@ describe('ct-init.sh', () => {
     const output = execFileSync('bash', ['-c', `bash '${script}' '${dir}' 2>&1`], { encoding: 'utf8' })
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     // Mismo motivo que en el caso de la apertura borrada: el contrato no se
-    // toca, pero la sección de travesía se añade porque le faltaba.
-    expect(agents).toBe(withE2eAppended(orphan))
+    // toca, pero la sección de travesía se añade porque le faltaba. La sección
+    // corta del loop NO: este AGENTS.md conserva el marcador de apertura del
+    // contrato, y añadirla dejaría el mismo tema contado dos veces.
+    expect(agents).toBe(withE2eAppended(orphan, { loop: false }))
     const headingOccurrences = agents.split('## Formato de la tabla §9').length - 1
     expect(headingOccurrences).toBe(1) // no duplicado
     expect(output.toLowerCase()).toMatch(/aviso|warning/)
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('correrlo tres veces seguidas es idempotente: la sección §9 aparece una sola vez', () => {
+  it('correrlo tres veces seguidas es idempotente: ni la sección del loop ni el contrato se duplican', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    const occurrences = agents.split('<!-- ct-init:slices-contract -->').length - 1
-    expect(occurrences).toBe(1)
+    expect(agents.split(LOOP_MARKER_OPEN).length - 1).toBe(1)
+    // Y el contrato, en su fichero, sigue siendo uno: ni el marcador ni el
+    // fichero se duplican por correr el scaffolder otra vez.
+    expect(leerContrato(dir).split(MARKER_OPEN).length - 1).toBe(1)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -858,11 +925,10 @@ describe('ct-init.sh', () => {
   // toca (correcto por defecto, para no pisar ediciones a mano), así que todo
   // lo arreglado aquí se quedaba en el plugin para siempre.
   // ==========================================================================
-  it('la sección sembrada declara su versión, y una segunda corrida dice que está al día (sin avisar de nada)', () => {
+  it('el contrato sembrado declara su versión, y una segunda corrida dice que está al día (sin avisar de nada)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    expect(agents).toMatch(/<!-- ct-init:slices-contract-version: \d+ -->/)
+    expect(leerContrato(dir)).toMatch(/<!-- ct-init:slices-contract-version: \d+ -->/)
     const again = spawnSync('bash', [script, dir], { encoding: 'utf8' })
     expect(again.status).toBe(0)
     expect(again.stdout).toMatch(/al día/)
@@ -870,28 +936,25 @@ describe('ct-init.sh', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('sección de una versión ANTERIOR (v1, sin línea de versión) → lo dice y explica cómo actualizarla; no toca nada', () => {
+  it('contrato de una versión ANTERIOR (v1, sin línea de versión) → lo dice y explica cómo actualizarlo; no toca nada', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
-    const before = `# AGENTS.md\n\n## Gotchas\n- mis notas\n\n${V1_BLOCK}`
-    writeFileSync(join(dir, 'AGENTS.md'), before)
+    const before = sembrarContrato(dir, conContrato(V1_BLOCK, 'mis notas'))
     const res = spawnSync('bash', [script, dir], { encoding: 'utf8' })
     expect(res.status).toBe(0) // avisar no es fallar
     expect(res.stderr).toMatch(/v1/)
     expect(res.stderr).toMatch(new RegExp(`v${CONTRACT_VERSION}`))
     expect(res.stderr).toContain('--update-slices-contract')
-    // El contrato v1 no se toca ni una letra; la sección de travesía sí se
-    // añade, porque este AGENTS.md no la traía.
-    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(withE2eAppended(before))
+    expect(leerContrato(dir)).toBe(before)
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('--update-slices-contract sobre una sección v1 SIN TOCAR → la reemplaza por la actual y deja intacto el resto del fichero', () => {
+  it('--update-slices-contract sobre un contrato v1 SIN TOCAR → lo reemplaza por el actual y deja intacto el resto del fichero', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
-    writeFileSync(join(dir, 'AGENTS.md'), `# AGENTS.md\n\n## Gotchas\n- mis notas irremplazables\n\n${V1_BLOCK}\n## Lo que va después\n- tampoco se toca\n`)
+    sembrarContrato(dir, conContrato(V1_BLOCK, 'mis notas irremplazables').replace('## Después\n- intocable', '## Lo que va después\n- tampoco se toca'))
     const res = spawnSync('bash', [script, dir, '--update-slices-contract'], { encoding: 'utf8' })
     expect(res.status).toBe(0)
-    expect(res.stdout).toMatch(/actualizada/)
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    expect(res.stdout).toMatch(/actualizado/)
+    const agents = leerContrato(dir)
     expect(agents).toContain('- mis notas irremplazables')
     expect(agents).toContain('## Lo que va después')
     expect(agents).toContain('- tampoco se toca')
@@ -930,18 +993,39 @@ describe('ct-init.sh', () => {
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('--update-slices-contract --force sobre un bloque no reconocido → lo sobrescribe, y avisa en condicional (no afirma que hubiera ediciones)', () => {
+  it('--update-slices-contract --force sobre un contrato no reconocido → lo sobrescribe, y avisa en condicional (no afirma que hubiera ediciones)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     const edited = V1_BLOCK.replace('- **Tipo** *(opcional)*', '- **Tipo** *(opcional; en ESTE repo también usamos `ios`)*')
-    writeFileSync(join(dir, 'AGENTS.md'), `# AGENTS.md\n\n${edited}`)
+    sembrarContrato(dir, `# Contrato de slices\n\n${edited}`)
     const res = spawnSync('bash', [script, dir, '--update-slices-contract', '--force'], { encoding: 'utf8' })
     expect(res.status).toBe(0)
     expect(res.stderr).toMatch(/no coincidía con ninguna versión que este ct-init sepa reconocer/)
     expect(res.stderr).toMatch(/Si había ediciones tuyas/) // condicional, no "tus cambios se han perdido"
     expect(res.stderr).not.toMatch(/EDITADA A MANO/)
+    const contrato = leerContrato(dir)
+    expect(contrato).not.toContain('en ESTE repo también usamos')
+    expect(contrato).toMatch(versionLineRe())
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // #93 — la otra mitad de ese mismo `--force`: un AGENTS.md que todavía lleva
+  // el contrato dentro y cuyo bloque no se reconoce. Lo que hace `--force` ahí
+  // no es actualizar el bloque en su sitio: es SACARLO, dejando en su lugar la
+  // sección corta que enlaza al contrato de verdad.
+  it('--update-slices-contract --force saca de AGENTS.md un contrato no reconocido y deja la sección corta', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    const edited = V1_BLOCK.replace('- **Tipo** *(opcional)*', '- **Tipo** *(opcional; en ESTE repo también usamos `ios`)*')
+    writeFileSync(join(dir, 'AGENTS.md'), `# AGENTS.md\n\n## Gotchas\n- mías\n\n${edited}`)
+    const res = spawnSync('bash', [script, dir, '--update-slices-contract', '--force'], { encoding: 'utf8' })
+    expect(res.status).toBe(0)
+    expect(res.stderr).toMatch(/Si había ediciones tuyas/)
     const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
     expect(agents).not.toContain('en ESTE repo también usamos')
-    expect(agents).toMatch(versionLineRe())
+    expect(agents).not.toContain(MARKER_OPEN)
+    expect(agents).toContain(LOOP_MARKER_OPEN)
+    expect(agents).toContain('- mías') // lo de alrededor no se toca
+    // Y el contrato de verdad está donde ahora vive, con la versión de hoy.
+    expect(leerContrato(dir)).toMatch(versionLineRe())
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -964,22 +1048,21 @@ describe('ct-init.sh', () => {
     // de trabajo que ya aplica "no registra hashes de bloques que no
     // existieron nunca" (known.add del bloque del árbol). En cuanto el bump
     // se comitea, la rama estricta vuelve a regir sola.
-    const bloqueDeHoy = extractBlock(seedFreshAgentsMd())
+    const bloqueDeHoy = extractBlock(seedFreshContrato())
     const current = historical.find((h) => sha256(h.block) === sha256(bloqueDeHoy))
     if (!current) expect(initScriptSrc).toContain(sha256(bloqueDeHoy))
     for (const { block, commit } of historical) {
       const dir = mkdtempSync(join(tmpdir(), 'ct-'))
-      const before = `# AGENTS.md\n\n## Gotchas\n- notas de ${commit}\n\n${block}\n## Después\n- intocable\n`
-      writeFileSync(join(dir, 'AGENTS.md'), before)
+      sembrarContrato(dir, conContrato(block, `notas de ${commit}`))
       const res = spawnSync('bash', [script, dir, '--update-slices-contract'], { encoding: 'utf8' })
       expect(res.status, `${commit}: ${res.stderr}`).toBe(0)
       expect(res.stderr, commit).not.toMatch(/editado a mano|EDITADA A MANO|no coincide/)
-      const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+      const contrato = leerContrato(dir)
       // Queda el contrato actual, y el resto del fichero sin tocar.
-      expect(agents, commit).toContain(`- notas de ${commit}`)
-      expect(agents, commit).toContain('- intocable')
-      expect(agents, commit).toMatch(versionLineRe())
-      expect(agents.split(MARKER_OPEN).length - 1, commit).toBe(1)
+      expect(contrato, commit).toContain(`- notas de ${commit}`)
+      expect(contrato, commit).toContain('- intocable')
+      expect(contrato, commit).toMatch(versionLineRe())
+      expect(contrato.split(MARKER_OPEN).length - 1, commit).toBe(1)
       rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -996,17 +1079,16 @@ describe('ct-init.sh', () => {
     )
     expect(anterior, `no hay ningún bloque v${CONTRACT_VERSION - 1} ni en la historia ni en SQUASHED_BLOCK_FIXTURES`).toBeDefined()
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
-    const before = `# AGENTS.md\n\n## Gotchas\n- mías\n\n${anterior.block}\n## Después\n- intocable\n`
-    writeFileSync(join(dir, 'AGENTS.md'), before)
+    sembrarContrato(dir, conContrato(anterior.block))
     const res = spawnSync('bash', [script, dir, '--update-slices-contract'], { encoding: 'utf8' })
     expect(res.status, res.stderr).toBe(0)
     expect(res.stdout).toMatch(new RegExp(`contrato v${CONTRACT_VERSION - 1} → v${CONTRACT_VERSION}`))
     expect(res.stderr).not.toMatch(/editad|no coincide|--force/i)
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    expect(agents).toMatch(versionLineRe())
-    expect(agents).toContain('- mías')
-    expect(agents).toContain('- intocable')
-    expect(agents.split(MARKER_OPEN).length - 1).toBe(1)
+    const contrato = leerContrato(dir)
+    expect(contrato).toMatch(versionLineRe())
+    expect(contrato).toContain('- mías')
+    expect(contrato).toContain('- intocable')
+    expect(contrato.split(MARKER_OPEN).length - 1).toBe(1)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1063,18 +1145,16 @@ describe('ct-init.sh', () => {
   // encuentra nada — ni apertura, ni cierre, ni heading. El script concluía
   // "aquí no hay sección" y añadía una SEGUNDA copia entera, en silencio.
   // ==========================================================================
-  it('un AGENTS.md con saltos CRLF no recibe una segunda copia de la sección: se reconoce la que ya tiene', () => {
+  it('un contrato con saltos CRLF no recibe una segunda copia del bloque: se reconoce el que ya tiene', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
-    const crlf = `# AGENTS.md\n\n## Gotchas\n- notas\n\n${V1_BLOCK}`.replace(/\n/g, '\r\n')
-    writeFileSync(join(dir, 'AGENTS.md'), crlf)
+    const crlf = `# Contrato de slices\n\n## Notas\n- notas\n\n${V1_BLOCK}`.replace(/\n/g, '\r\n')
+    sembrarContrato(dir, crlf)
     const res = spawnSync('bash', [script, dir], { encoding: 'utf8' })
     expect(res.status).toBe(0)
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    expect(agents.split(MARKER_OPEN).length - 1).toBe(1) // no una segunda copia
-    expect(agents.split('## Formato de la tabla §9').length - 1).toBe(1)
-    // El contrato no se toca; la sección de travesía sí se añade (con los
-    // mismos saltos CRLF, para no dejar el fichero a medias entre formatos).
-    expect(agents).toBe(withE2eAppended(crlf, { crlf: true }))
+    const contrato = leerContrato(dir)
+    expect(contrato.split(MARKER_OPEN).length - 1).toBe(1) // no una segunda copia
+    expect(contrato.split('## Formato de la tabla §9').length - 1).toBe(1)
+    expect(contrato).toBe(crlf) // no se toca nada
     // Y se da el aviso que le tocaba dar (antes se lo saltaba entero).
     expect(res.stderr).toMatch(/es del contrato v1/)
     rmSync(dir, { recursive: true, force: true })
@@ -1082,41 +1162,40 @@ describe('ct-init.sh', () => {
 
   it('un bloque intacto con CRLF se reconoce como intacto y se actualiza sin --force, conservando los saltos CRLF', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
-    const crlf = `# AGENTS.md\n\n## Gotchas\n- notas\n\n${V1_BLOCK}`.replace(/\n/g, '\r\n')
-    writeFileSync(join(dir, 'AGENTS.md'), crlf)
+    const crlf = `# Contrato de slices\n\n## Notas\n- notas\n\n${V1_BLOCK}`.replace(/\n/g, '\r\n')
+    sembrarContrato(dir, crlf)
     const res = spawnSync('bash', [script, dir, '--update-slices-contract'], { encoding: 'utf8' })
     expect(res.status).toBe(0)
-    expect(res.stdout).toMatch(/actualizada/)
+    expect(res.stdout).toMatch(/actualizado/)
     expect(res.stderr).not.toMatch(/no coincide|editad/i) // los saltos no son una edición
-    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    expect(agents.split(MARKER_OPEN).length - 1).toBe(1)
-    expect(agents).toContain('- notas')
-    expect(agents).toMatch(versionLineRe())
+    const contrato = leerContrato(dir)
+    expect(contrato.split(MARKER_OPEN).length - 1).toBe(1)
+    expect(contrato).toContain('- notas')
+    expect(contrato).toMatch(versionLineRe())
     // El bloque nuevo mantiene CRLF: nada de dejar el fichero a medias.
-    expect(agents).not.toMatch(/[^\r]\n/)
+    expect(contrato).not.toMatch(/[^\r]\n/)
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('una sección de una versión MÁS NUEVA que la del plugin no se llama "al día": se dice que el desactualizado es el plugin', () => {
+  it('un contrato de una versión MÁS NUEVA que la del plugin no se llama "al día": se dice que el desactualizado es el plugin', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const seeded = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const seeded = leerContrato(dir)
     const fromFuture = seeded.replace(`slices-contract-version: ${CONTRACT_VERSION}`, `slices-contract-version: ${CONTRACT_VERSION + 1}`)
-    writeFileSync(join(dir, 'AGENTS.md'), fromFuture)
+    writeFileSync(contratoPath(dir), fromFuture)
     const res = spawnSync('bash', [script, dir], { encoding: 'utf8' })
     expect(res.status).toBe(0)
     expect(res.stdout).not.toMatch(/al día/)
     expect(res.stderr).toMatch(new RegExp(`v${CONTRACT_VERSION + 1}`))
     expect(res.stderr).toMatch(/más nueva del plugin/)
-    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(fromFuture) // no se degrada
+    expect(leerContrato(dir)).toBe(fromFuture) // no se degrada
     rmSync(dir, { recursive: true, force: true })
   })
 
   it('la versión se lee del BLOQUE: una línea de versión citada más arriba en el AGENTS.md no secuestra el diagnóstico', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     // El usuario documenta el marcador en sus propias notas, más arriba.
-    const before = `# AGENTS.md\n\n## Gotchas\n- la sección §9 la marca \`<!-- ct-init:slices-contract-version: 99 -->\`\n\n${V1_BLOCK}`
-    writeFileSync(join(dir, 'AGENTS.md'), before)
+    const before = sembrarContrato(dir, `# Contrato de slices\n\n## Notas\n- el bloque lo marca \`<!-- ct-init:slices-contract-version: 99 -->\`\n\n${V1_BLOCK}`)
     const res = spawnSync('bash', [script, dir], { encoding: 'utf8' })
     expect(res.status).toBe(0)
     expect(res.stdout).not.toMatch(/v99/) // antes: "contrato v99, al día", sin mirar el bloque
@@ -1128,10 +1207,10 @@ describe('ct-init.sh', () => {
   it('un bloque que ya declara la versión actual pero con OTRO contenido no se despacha como "al día" cuando se pide actualizar', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const seeded = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    const seeded = leerContrato(dir)
     const tweaked = seeded.replace('status:backlog', 'status:backlog-de-la-casa')
     expect(tweaked).not.toBe(seeded)
-    writeFileSync(join(dir, 'AGENTS.md'), tweaked)
+    writeFileSync(contratoPath(dir), tweaked)
     // Corrida normal: se calla (el número de versión ES el actual y no hay
     // nada que ofrecer — avisar aquí sería ruido en cada sesión).
     const plain = spawnSync('bash', [script, dir], { encoding: 'utf8' })
@@ -1145,20 +1224,18 @@ describe('ct-init.sh', () => {
     expect(asked.stdout).not.toMatch(/al día/)
     expect(asked.stderr).toMatch(/no hay actualización de versión que hacer/)
     expect(asked.stderr).toMatch(/NO es el que emite este plugin/)
-    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(tweaked)
+    expect(leerContrato(dir)).toBe(tweaked)
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('sin --update-slices-contract, --force por sí solo no toca una sección desactualizada (el opt-in es el otro flag)', () => {
+  it('sin --update-slices-contract, --force por sí solo no toca un contrato desactualizado (el opt-in es el otro flag)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
-    const before = `# AGENTS.md\n\n${V1_BLOCK}`
-    writeFileSync(join(dir, 'AGENTS.md'), before)
+    const before = sembrarContrato(dir, `# Contrato de slices\n\n${V1_BLOCK}`)
     const res = spawnSync('bash', [script, dir, '--force'], { encoding: 'utf8' })
     expect(res.status).toBe(0)
-    // El contrato v1 no se toca (--force sin --update-slices-contract no
-    // hace nada sobre él); la sección de travesía sí se añade, porque
-    // faltaba y es independiente de estos dos flags.
-    expect(readFileSync(join(dir, 'AGENTS.md'), 'utf8')).toBe(withE2eAppended(before))
+    // El contrato v1 no se toca: --force sin --update-slices-contract no hace
+    // nada sobre él.
+    expect(leerContrato(dir)).toBe(before)
     rmSync(dir, { recursive: true, force: true })
   })
 
@@ -1178,7 +1255,7 @@ describe('ct-init.sh', () => {
   it('el hash del bloque que se siembra HOY está registrado en SLICES_PRISTINE_HASHES (y el del fixture v1 también)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     execFileSync('bash', [script, dir], { encoding: 'utf8' })
-    const block = extractBlock(readFileSync(join(dir, 'AGENTS.md'), 'utf8'))
+    const block = extractBlock(leerContrato(dir))
     expect(block).not.toBeNull()
     expect(initScriptSrc).toContain(sha256(block))
     expect(initScriptSrc).toContain(sha256(V1_BLOCK))
@@ -1227,7 +1304,7 @@ describe('ct-init.sh', () => {
     // ct-init.sh (entre marcadores, dentro de su heredoc) en vez de ejecutar
     // cada versión. Si ese atajo dejara de ser fiel, el guardián dejaría de
     // guardar nada sin que nadie se enterase.
-    const emitted = extractBlock(seedFreshAgentsMd())
+    const emitted = extractBlock(seedFreshContrato())
     expect(extractBlockFromSource(initScriptSrc)).toBe(emitted)
   })
 
@@ -1246,7 +1323,7 @@ describe('ct-init.sh', () => {
       .map((m) => m[1])
     expect(registered.length).toBeGreaterThanOrEqual(9)
     const known = new Set(historicalContractBlocks().map((h) => h.hash))
-    known.add(sha256(extractBlock(seedFreshAgentsMd()))) // el árbol de trabajo
+    known.add(sha256(extractBlock(seedFreshContrato()))) // el árbol de trabajo
     for (const { block } of squashedBlocks()) known.add(sha256(block))
     expect(
       registered.filter((h) => !known.has(h)),
@@ -1514,6 +1591,74 @@ describe('ct-init.sh', () => {
   // LOOP_ARTIFACT_PATTERNS (scripts/scope.js) exime `docs/superpowers/specs/**`
   // precisamente porque «el skill de brainstorming escribe aquí el design doc y
   // el execution spec». La misma ruta que documenta docs/loop/README.md.
+  // ==========================================================================
+  // #93 — el contrato sale de AGENTS.md. Lo que estos tests atan es el REPARTO:
+  // qué queda en el fichero que se relee en cada sesión y qué se va al que se
+  // lee una vez por epic. Sin ellos, el contrato podría volver a AGENTS.md sin
+  // que nada se pusiera rojo, y el ahorro entero se deshace en un commit.
+  // ==========================================================================
+  it('el AGENTS.md sembrado cabe en 3 KB y enlaza al contrato en vez de llevarlo dentro', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    expect(
+      Buffer.byteLength(agents),
+      'el AGENTS.md sembrado se ha pasado de 3 KB: es el fichero que cada agente de un repo gobernado relee en cada sesión, así que lo que crezca aquí se paga en cada hidratación. Si hace falta decir algo más, di si va en el contrato (docs/superpowers/CONTRATO-SLICES.md) o en la referencia del comando (docs/loop/), no aquí.'
+    ).toBeLessThan(3 * 1024)
+    expect(agents).toContain('docs/superpowers/CONTRATO-SLICES.md')
+    expect(agents).not.toContain(MARKER_OPEN)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el contrato sembrado es, byte a byte, el bloque que emite el script', () => {
+    // Que sea idéntico no es comodidad: es lo que hace que el ledger de hashes
+    // reconozca un bloque sembrado por cualquier versión anterior, y que la
+    // poda de conventions.js y el descuento de vara.js lo sigan viendo por sus
+    // marcadores sin una regla nueva. El fichero ES el bloque y nada más.
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    execFileSync('bash', [script, dir], { encoding: 'utf8' })
+    const contrato = leerContrato(dir)
+    expect(contrato).toBe(extractBlockFromSource(initScriptSrc))
+    expect(extractBlock(contrato)).toBe(contrato)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('un repo bootstrapeado ANTES: el contrato sigue en su AGENTS.md, se avisa y no se toca nada', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    const before = `# AGENTS.md\n\n## Gotchas\n- mías\n\n${V1_BLOCK}`
+    writeFileSync(join(dir, 'AGENTS.md'), before)
+    const res = spawnSync('bash', [script, dir], { encoding: 'utf8' })
+    expect(res.status).toBe(0) // avisar no es fallar
+    expect(res.stderr).toMatch(/todavía lleva DENTRO el contrato/)
+    expect(res.stderr).toContain('--update-slices-contract')
+    // Su bloque no se toca, y tampoco recibe la sección corta: mientras el
+    // contrato siga ahí, añadirla contaría el mismo tema dos veces.
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    expect(agents).toBe(withE2eAppended(before, { loop: false }))
+    // Pero el contrato de HOY ya está sembrado en su sitio: quien escriba un
+    // spec a partir de ahora lee el bueno, aunque nadie haya migrado nada.
+    expect(leerContrato(dir)).toMatch(versionLineRe())
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('--update-slices-contract migra ese repo: saca el bloque de AGENTS.md y deja la sección corta', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ct-'))
+    const before = `# AGENTS.md\n\n## Gotchas\n- mías\n\n${V1_BLOCK}\n## Después\n- intocable\n`
+    writeFileSync(join(dir, 'AGENTS.md'), before)
+    const res = spawnSync('bash', [script, dir, '--update-slices-contract'], { encoding: 'utf8' })
+    expect(res.status, res.stderr).toBe(0)
+    expect(res.stdout).toMatch(/el contrato de slices sale de/)
+    expect(res.stderr).not.toMatch(/editad|acusa/i) // estaba sin editar: no se acusa a nadie
+    const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+    expect(agents).not.toContain(MARKER_OPEN)
+    expect(agents).toContain(LOOP_MARKER_OPEN)
+    // Y lo que el usuario tenía alrededor sigue exactamente donde estaba.
+    expect(agents).toContain('- mías')
+    expect(agents).toContain('- intocable')
+    expect(leerContrato(dir)).toMatch(versionLineRe())
+    rmSync(dir, { recursive: true, force: true })
+  })
+
   it('siembra la plantilla del execution spec en docs/superpowers/specs/', () => {
     const dir = mkdtempSync(join(tmpdir(), 'ct-'))
     const out = execFileSync('bash', [script, dir], { encoding: 'utf8' })

@@ -157,6 +157,8 @@ function findClosingKeywords(text) {
 import { readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 var CONTRACT_MARKER = "<!-- ct-init:slices-contract -->";
+var LOOP_MARKER = "<!-- ct-init:loop -->";
+var GOVERNED_MARKERS = [CONTRACT_MARKER, LOOP_MARKER];
 var AGENTS = "AGENTS.md";
 function describirValor(v) {
   try {
@@ -199,7 +201,7 @@ function probeGovernedRepo(cwd) {
           if (e && (e.code === "ENOENT" || e.code === "ENOTDIR")) return { governed: false };
           return { error: `no se ha podido leer ${AGENTS} (${e.code || e.message})` };
         }
-        return { governed: texto.includes(CONTRACT_MARKER) };
+        return { governed: GOVERNED_MARKERS.some((m) => texto.includes(m)) };
       }
       const padre = dirname(dir);
       if (padre === dir) return { governed: false };
