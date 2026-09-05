@@ -426,3 +426,68 @@ export function aggregateBriefMeasures(texto) {
     briefBytes: briefMeasured ? bytes : null,
   }
 }
+
+// ---------------------------------------------------------------------------
+// EL LECTOR DE LO QUE `RoleBytes` ESCRIBE (scripts/role-bytes.js) en las filas
+// de los cuatro pasos que despachan a un subagente. Tercer hermano de los dos
+// agregadores de aquí arriba, y por el mismo motivo que tuvo el segundo: una
+// columna que viaja en la pull request sin nadie que la lea se contesta abriendo
+// ficheros `jsonl` a mano, que es exactamente el agujero que pagó
+// `rubric_sin_vara`.
+//
+// LA PREGUNTA QUE CONTESTA: cuánto material FIJO —el fichero del agente y las
+// skills que su prompt le ordena cargar— y cuánto material VARIABLE —el brief o
+// el paquete— leyó este slice en total. Las tres columnas se suman a la vez y no
+// por separado porque la comparación que motiva la medida (`brief_bytes +
+// agent_bytes + skill_bytes` antes y después) es una suma, no tres.
+//
+// QUIÉN CUENTA COMO INTENTO, y por qué no es "toda fila de esos cuatro pasos":
+//
+//  1. Una fila con los tres campos enteros es un papel MEDIDO, venga del paso
+//     que venga. Un `skill_bytes` a cero es una medida —el juez de slice no
+//     carga ninguna skill— y no una ausencia.
+//  2. Una fila de `implement`, o una de juez CON `ruling`, sin los tres campos
+//     es un papel que corrió y que nadie midió: telemetría anterior a esta
+//     medida. Cuenta como vieja, nunca como cero.
+//  3. TODO LO DEMÁS NO ENTRA. Un juez descartado no llegó a juzgar (la misma
+//     tolerancia nº3 de `aggregateVerdictMeasures`) y una ronda de `reconcile`
+//     sin paquete escrito no despachó a nadie: contarlas como viejas metería en
+//     el denominador llamadas al modelo que no se hicieron, y la cifra que sale
+//     de dividir por él es justo la que esta columna existe para hacer legible.
+export function aggregateRoleBytesMeasures(texto) {
+  let roleAttempts = 0
+  let roleMeasured = 0
+  let roleLegacy = 0
+  let agentBytes = 0
+  let skillBytes = 0
+  let packageBytes = 0
+  for (const linea of String(texto ?? '').split('\n')) {
+    if (linea.trim() === '') continue
+    let fila
+    try {
+      fila = JSON.parse(linea)
+    } catch {
+      continue
+    }
+    if (fila === null || typeof fila !== 'object' || Array.isArray(fila)) continue
+    const medidas = [fila.agent_bytes, fila.skill_bytes, fila.package_bytes]
+    if (medidas.every((cuantos) => Number.isInteger(cuantos) && cuantos >= 0)) {
+      roleAttempts += 1
+      roleMeasured += 1
+      agentBytes += fila.agent_bytes
+      skillBytes += fila.skill_bytes
+      packageBytes += fila.package_bytes
+      continue
+    }
+    if (fila.step === 'implement' || Object.hasOwn(fila, 'ruling')) {
+      roleAttempts += 1
+      roleLegacy += 1
+    }
+  }
+  return {
+    roleAttempts, roleMeasured, roleLegacy,
+    agentBytes: roleMeasured ? agentBytes : null,
+    skillBytes: roleMeasured ? skillBytes : null,
+    packageBytes: roleMeasured ? packageBytes : null,
+  }
+}

@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url'
 import {
   metricRow, metricLine, metricsPath, planSha256, verdictMeasures, IDENTITY_FIELDS, aggregateVerdictMeasures,
   metricsRepoRelPath, METRICS_REPO_DIR, briefVaraCtMeasures, aggregateBriefMeasures,
+  aggregateRoleBytesMeasures,
 } from '../scripts/run-metrics.js'
 import { SEVERITIES } from '../scripts/step-contracts.js'
 
@@ -681,6 +682,104 @@ describe('aggregateBriefMeasures — el lector de lo que el brief midió, herman
     const texto = [intento({ outcome: 'done', brief_vara_ct_docs: 4, brief_bytes: 500 }), '{no es json\n'].join('')
     expect(() => aggregateBriefMeasures(texto)).not.toThrow()
     expect(aggregateBriefMeasures(texto).briefAttempts).toBe(1)
+  })
+})
+
+// #92 — el lector de los tres campos que `RoleBytes` escribe. Tercer hermano de
+// los otros dos agregadores, y por el mismo motivo: las columnas viajaban en la
+// pull request y sin un lector propio no las miraría nadie.
+describe('aggregateRoleBytesMeasures — cuánto material fijo leyó cada papel del slice', () => {
+  const papel = (step, measures) => metricLine(metricRow({ ...IDENT, step }, measures, { now: AHORA }))
+  const bytes = (agent, skill, paquete) => ({ agent_bytes: agent, skill_bytes: skill, package_bytes: paquete })
+
+  it('suma los tres tamaños de todos los papeles despachados, sea cual sea el paso', () => {
+    const texto = [
+      papel('implement', { outcome: 'done', ...bytes(100, 50, 900) }),
+      papel('judge', { ruling: 'PASS', ...bytes(5000, 50, 300) }),
+      papel('slice-judge', { ruling: 'PASS', ...bytes(3000, 0, 400) }),
+      papel('reconcile', { outcome: 'conflicting', ...bytes(2000, 0, 100) }),
+    ].join('')
+    const r = aggregateRoleBytesMeasures(texto)
+    expect(r.roleAttempts).toBe(4)
+    expect(r.roleMeasured).toBe(4)
+    expect(r.roleLegacy).toBe(0)
+    expect(r.agentBytes).toBe(10100)
+    expect(r.skillBytes).toBe(100)
+    expect(r.packageBytes).toBe(1700)
+  })
+
+  it('los pasos que no despachan a nadie —controls, commit, global— no entran en la cuenta', () => {
+    const texto = [
+      papel('controls', { outcome: 'done', duration_ms: 3 }),
+      papel('commit', { outcome: 'done' }),
+      papel('global', { outcome: 'done' }),
+      papel('judge', { ruling: 'PASS', ...bytes(5000, 50, 300) }),
+    ].join('')
+    expect(aggregateRoleBytesMeasures(texto).roleAttempts).toBe(1)
+  })
+
+  it('un intento de implement anterior a la medida cuenta como viejo y NO como cero', () => {
+    const texto = [
+      papel('implement', { outcome: 'done', ...bytes(100, 50, 900) }),
+      papel('implement', { outcome: 'done', brief_bytes: 900 }),
+    ].join('')
+    const r = aggregateRoleBytesMeasures(texto)
+    expect(r.roleAttempts).toBe(2)
+    expect(r.roleMeasured).toBe(1)
+    expect(r.roleLegacy).toBe(1)
+    expect(r.agentBytes).toBe(100)
+  })
+
+  // La misma tolerancia nº3 de `aggregateVerdictMeasures`, por el mismo motivo:
+  // `ct-step` escribe filas de juez DESCARTADO sin ninguna medida, y contarlas
+  // como telemetría vieja diría que hubo un juicio que nadie midió cuando lo que
+  // hubo es un juicio que no se aceptó.
+  it('un juez descartado no es un papel sin medir: no entra ni como viejo', () => {
+    const texto = [
+      papel('judge', { outcome: 'discarded', why: 'el paquete no existe' }),
+      papel('slice-judge', { outcome: 'discarded', why: 'token ajeno' }),
+    ].join('')
+    const r = aggregateRoleBytesMeasures(texto)
+    expect(r.roleAttempts).toBe(0)
+    expect(r.roleLegacy).toBe(0)
+  })
+
+  // Una ronda de reconcile sin paquete escrito es una ronda en la que nadie
+  // despachó a `ct-reconciler`. Contarla como vieja inflaría el denominador con
+  // llamadas al modelo que nunca se hicieron.
+  it('una ronda de reconcile que no despachó a nadie no cuenta como papel sin medir', () => {
+    const texto = papel('reconcile', { outcome: 'up-to-date', files: [] })
+    const r = aggregateRoleBytesMeasures(texto)
+    expect(r.roleAttempts).toBe(0)
+    expect(r.roleLegacy).toBe(0)
+  })
+
+  it('un papel al que no se le ordena ninguna skill suma el cero que es, y no se confunde con no medido', () => {
+    const texto = papel('slice-judge', { ruling: 'PASS', ...bytes(3000, 0, 400) })
+    const r = aggregateRoleBytesMeasures(texto)
+    expect(r.roleMeasured).toBe(1)
+    expect(r.skillBytes).toBe(0)
+  })
+
+  it('si ningún papel trae las columnas, las tres sumas son null y no 0', () => {
+    const texto = papel('implement', { outcome: 'done', brief_bytes: 900 })
+    expect(aggregateRoleBytesMeasures(texto)).toEqual({
+      roleAttempts: 1, roleMeasured: 0, roleLegacy: 1, agentBytes: null, skillBytes: null, packageBytes: null,
+    })
+  })
+
+  it('un fichero vacío no revienta y no afirma nada', () => {
+    for (const vacio of ['', undefined]) {
+      expect(aggregateRoleBytesMeasures(vacio)).toEqual({
+        roleAttempts: 0, roleMeasured: 0, roleLegacy: 0, agentBytes: null, skillBytes: null, packageBytes: null,
+      })
+    }
+  })
+
+  it('una línea ilegible no revienta al agregador', () => {
+    const texto = [papel('judge', { ruling: 'PASS', ...bytes(5000, 50, 300) }), '{no es json\n'].join('')
+    expect(() => aggregateRoleBytesMeasures(texto)).not.toThrow()
+    expect(aggregateRoleBytesMeasures(texto).roleAttempts).toBe(1)
   })
 })
 
