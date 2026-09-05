@@ -72,6 +72,24 @@ Qué se compara, y en este orden:
 Guarda las dos salidas junto al cambio del agente. Una tasa sin la corrida que la produjo es una
 opinión.
 
+## La primera corrida, para tener con qué comparar
+
+`--agent plugin/agents/ct-judge.md --runs 1`, plugin 0.56.0, 2026-09-05:
+
+```
+caso                       runs  aciertos  descartes  no ejecutados  high  medium  low  coste USD
+-------------------------  ----  --------  ---------  -------------  ----  ------  ---  ---------
+concurrencia-sin-hallazgo  1     1 (100%)  0 (0%)     0 (0%)         1     0       0    0.7061
+tarea-correcta             1     1 (100%)  0 (0%)     0 (0%)         0     0       0    0.5249
+test-inexistente-en-verde  1     1 (100%)  0 (0%)     0 (0%)         1     0       0    0.5256
+total                      3     3 (100%)  0 (0%)     0 (0%)         2     0       0    1.7566
+```
+
+Lo que dice, y lo que no. Con N=1 por caso esto **no** es una tasa de acierto: es una corrida
+que salió bien y una cota de coste — del orden de 0,6 USD por juicio, unos 3 USD el banco entero
+con `--runs 5`. El criterio de aceptación de la issue pide 4 de 5 en el caso del test
+inexistente, y eso exige una corrida con `--runs 5` que todavía no se ha hecho.
+
 ## Añadir un caso
 
 Un caso es un directorio bajo `plugin/__tests__/fixtures/judge-bench/<nombre>/` con cuatro
