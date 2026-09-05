@@ -33,6 +33,7 @@ import { ExternalTool } from './external-tool.js'
 import { RetryPolicy, RetryBudget } from '../domain/policies/retry-policy.js'
 import { LaunchPolicy, LaunchBudget } from '../domain/policies/launch-policy.js'
 import { Invocation, InvocationOutcome } from './invocation.js'
+import { Baseline } from '../../../plugin/scripts/baseline.js'
 
 class FrontendBuild {
   static #HERE = dirname(fileURLToPath(import.meta.url))
@@ -106,6 +107,8 @@ class CtApi {
   static #CANNOT_LISTEN = 1
   static #PROCESS_TIMEOUT_MS = 30_000
   static #HARVEST_TIMEOUT_MS = 6 * 60 * 1000
+  static #BASELINE_TIMEOUT_MS = 10 * 60 * 1000
+  static #SHELL = 'sh'
   static #SECONDS_FOR_GH_IN_A_HARVEST = 60
   static #SECONDS_BETWEEN_SWEEPS = 60
   static #CLOCK_STOPPED = 1
@@ -131,6 +134,12 @@ class CtApi {
   static #tool(bin, { budgetMs = CtApi.#PROCESS_TIMEOUT_MS, env } = {}) {
     const runner = new ToolRunner({ bin, budgetMs, env })
     return (argv, options) => runner.run(argv, options)
+  }
+
+  static #baseline() {
+    const shell = CtApi.#tool(CtApi.#SHELL, { budgetMs: CtApi.#BASELINE_TIMEOUT_MS })
+
+    return new Baseline({ run: (command, cwd) => shell(['-c', command], { cwd }) })
   }
 
   static #talkingTo(bin, Tool) {
@@ -230,6 +239,7 @@ class CtApi {
       write: Disk.write,
       read: Disk.read,
       stderr: (line) => process.stderr.write(line),
+      baseline: CtApi.#baseline(),
     })
     const checkouts = new MemoryCheckoutRegistry()
     const planAgents = new CmuxPlanAgents({
