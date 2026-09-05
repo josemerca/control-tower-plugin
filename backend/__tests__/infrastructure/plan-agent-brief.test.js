@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { PlanAgentBrief } from '../../src/infrastructure/plan-agent-brief.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
+import { PluginYardstick } from '../../../plugin/scripts/plugin-yardstick.js'
 
 describe('PlanAgentBrief', () => {
   const errand = () => new PlanAgentBrief({
@@ -37,13 +38,9 @@ describe('PlanAgentBrief', () => {
     expect(errand()).toMatch(/no implementes/i)
   })
 
-  it('it_carries_the_order_of_precedence_itself_because_the_repo_may_not_declare_it_anywhere', () => {
+  it('it_carries_the_order_of_precedence_verbatim_from_the_plugin_instead_of_wording_it_again', () => {
     expect(errand()).toContain('/plugin/conventions')
-    expect(errand()).toContain(
-      'Esa vara tiene PREFERENCIA sobre las convenciones de este repo, y se mide regla a regla, no por tema'
-    )
-    expect(errand()).toContain('la vara del repo no desaparece')
-    expect(errand()).toMatch(/AGENTS\.md.*puede no traerla/)
+    expect(errand()).toContain(PluginYardstick.precedenceHeader())
   })
 
   it('the_precedence_it_carries_cannot_be_read_the_other_way_round', () => {
@@ -51,17 +48,14 @@ describe('PlanAgentBrief', () => {
     expect(errand()).not.toMatch(/las convenciones de este repo ganan/i)
   })
 
-  it('the_architecture_yardstick_binds_on_what_is_added_to_a_module_that_never_met_it', () => {
-    expect(errand()).toContain(
-      'la vara de arquitectura se aplica SIEMPRE, también a lo que añadas a un módulo que ya existía'
-    )
-    expect(errand()).toContain('Applies to: new modules')
-    expect(errand()).toMatch(/NO val[ea]n en este carril/)
+  it('it_does_not_override_the_scope_the_architecture_document_declares_for_itself', () => {
+    expect(errand()).not.toMatch(/la vara de arquitectura se aplica SIEMPRE/)
+    expect(errand()).not.toMatch(/la única regla de la vara que este encargo cambia/i)
   })
 
-  it('the_only_rule_of_the_yardstick_this_errand_overrides_says_so_instead_of_leaving_a_silent_clash', () => {
-    expect(errand()).not.toMatch(/deuda heredada que exime|deuda heredada.*exime lo/)
-    expect(errand()).toMatch(/la única regla de la vara que este encargo cambia/i)
+  it('it_does_not_order_the_five_documents_read_before_planning', () => {
+    expect(errand()).not.toMatch(/Lee la vara de Control Tower/)
+    expect(errand()).not.toContain(PluginYardstick.FILES.join(', '))
   })
 
   it('it_names_the_sections_that_carry_what_the_acceptance_criteria_cannot', () => {

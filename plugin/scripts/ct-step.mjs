@@ -57,7 +57,7 @@
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, writeSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS, outcomeOfReconcile, reconcileBudgetSpent } from './run-machine.js'
 import { extractTasks } from './plan-tasks.js'
 import { BranchReconciliation } from './branch-reconciliation.js'
@@ -508,11 +508,10 @@ function verboNext() {
       out(`  - el brief de la tarea: ${join(workDir, `task-${run.task}-brief.md`)}`)
       out(`  - los logs de los controles, YA en verde, por si los quiere: ${run.lastControlsLog ?? '(ninguno)'}`)
       out(`  - que escriba su veredicto en: ${veredicto}`)
-      // El token NO se imprime, sólo se dice de dónde se copia (D13): el sitio
-      // del que sale es el paquete que el juez lee, y poner el valor en la
-      // salida del conductor invita a parchear un veredicto en vez de
-      // redespachar al juez.
-      out(`  - y que COPIE en su veredicto, campo "review_token", el "${REVIEW_TOKEN_LABEL}:" con el que abre ese paquete: es lo que hace comprobable que su veredicto es sobre ESE código`)
+      // El `review_token` NO se le pide: lo escribe este programa al leer el
+      // veredicto, con el valor que él mismo calculó. Pedírselo al juez era
+      // pedirle que copiara 64 hex de una línea que el programa acaba de
+      // escribir, y un error de copia costaba un veredicto de opus entero.
       out('')
       out(`Cuando vuelva:  ct-step verdict ${veredicto} --plan ${planPath} --issue ${issue}`)
       out('No le pases la SALIDA de los controles: un lint sucio no debe ensuciarle el criterio.')
@@ -565,8 +564,7 @@ function verboNext() {
       out(`  - el log de la Global verification, YA en verde, por si lo quiere: ${run.lastGlobalLog ?? '(N/A declarado)'}`)
       out(`  - los veredictos de cada tarea, ya comiteados: docs/superpowers/verdicts/issue-${issue}-task-*.json`)
       out(`  - que escriba su veredicto en: ${veredicto}`)
-      out(`  - y que COPIE en su veredicto, campo "review_token", el "${REVIEW_TOKEN_LABEL}:" con el que abre ese paquete`)
-      out('')
+        out('')
       out(`Cuando vuelva:  ct-step slice-verdict ${veredicto} --plan ${planPath} --issue ${issue}`)
       break
     }
@@ -634,10 +632,11 @@ function verboNext() {
 // step-contracts.js).
 function cargarVaraDeCt() {
   const deCt = PluginYardstick.FILES.map((nombre) => {
+    const path = join(PLUGIN_ROOT, PluginYardstick.DIRECTORY, nombre)
     try {
-      return { name: nombre, content: readFileSync(join(PLUGIN_ROOT, PluginYardstick.DIRECTORY, nombre), 'utf8') }
+      return { name: nombre, path, content: readFileSync(path, 'utf8') }
     } catch {
-      return { name: nombre, content: null }
+      return { name: nombre, path, content: null }
     }
   })
   const faltas = PluginYardstick.missingDocuments(deCt)
@@ -664,6 +663,18 @@ function seccionVaraDelRepo(nombreDelArtefacto) {
   }
 }
 
+// SI LA TAREA ESTRENA MÓDULO, medido en lo que el plan declara y no en lo que
+// el implementador haga después: `**Files:**` reparte cada ruta entre
+// `(create)` y `(modify)`, y `dispatch-check --check-plan` ya comprueba esas
+// marcas contra el commit anterior. Es el único dato de la tarea que la vara
+// de ct necesita para saber qué documentos la alcanzan (`architecture.md` rige
+// los módulos nuevos, y lo dice su propia cabecera `Applies to:`).
+//
+// Una tarea sin **Files:** legibles (`files: []`) NO estrena módulo: pegarle
+// `architecture.md` por si acaso sería exactamente el material que este cambio
+// quita, y el aviso de que el plan no declaró rutas ya lo da `plan-tasks.js`.
+const creaModulo = (t) => (t?.files ?? []).some((f) => f.action === 'create')
+
 function escribirBrief() {
   const brief = join(workDir, `task-${run.task}-brief.md`)
   // Se comprueba antes de llamar a `task-brief` para no dejar en disco un
@@ -675,7 +686,7 @@ function escribirBrief() {
   } catch (e) {
     die(`no se pudo extraer el brief de la tarea ${run.task}: ${String(e.stderr || e.message).trim()}`, EXIT.PRECONDITION)
   }
-  appendFileSync(brief, PluginYardstick.composeSection(deCt))
+  appendFileSync(brief, PluginYardstick.composeSection(PluginYardstick.forTask(deCt, { creates: creaModulo(tarea()) })))
   appendFileSync(brief, seccionVaraDelRepo('el brief'))
   return brief
 }
@@ -727,8 +738,19 @@ function escribirPaquete() {
   // al que se juzga, no la verificaba nadie, y cuando venía mal no degradaba
   // el juicio: lo desactivaba. No se vuelva a añadir.
   const rutas = (run.lastPaths || []).map((p) => `- ${p}`).join('\n') || '(ninguna)'
-  const [SECCION_FILES, SECCION_RUTAS, SECCION_DIFF] = PACKAGE_SECTIONS
+  // El primer encabezado de PACKAGE_SECTIONS lo escribe `composePathSection`
+  // (es `PluginYardstick.PATH_SECTION`), así que aquí no se teclea: lo que se
+  // destructura son los tres que escribe este verbo.
+  const [, SECCION_FILES, SECCION_RUTAS, SECCION_DIFF] = PACKAGE_SECTIONS
   const diff = diffDeTarea()
+  // LA VARA DE CT, POR RUTA y con el mismo alcance que el brief: el juez tiene
+  // `Read` (JUDGE_TOOLS), y lo que necesita para citar una regla es saber qué
+  // documentos alcanzan a esta tarea y dónde están. La sección va DELANTE del
+  // diff por lo mismo que `Señal` en el paquete de slice: detrás de un `-U10`
+  // quedaría enterrada.
+  const varaDeCt = PluginYardstick.composePathSection(
+    PluginYardstick.forTask(cargarVaraDeCt(), { creates: creaModulo(tarea()) })
+  )
   writeFileSync(paquete, [
     `# Review package: task ${run.task}/${run.tasksTotal} of issue #${issue} (staged, not yet committed)`,
     // La CABECERA lleva el token: el sha256 de exactamente el diff que va
@@ -736,6 +758,7 @@ function escribirPaquete() {
     // PACKAGE_SECTIONS (que la rúbrica cita encabezado a encabezado) ni el
     // orden que el slice 10 decidió para el paquete de slice.
     reviewTokenLine(reviewToken(diff)),
+    varaDeCt,
     '', `## ${SECCION_FILES}`, git(['diff', '--cached', '--stat']) || '',
     '', `## ${SECCION_RUTAS}`, rutas,
     '', `## ${SECCION_DIFF}`, diff,
@@ -897,6 +920,57 @@ function medidaDeBrief() {
   }
 }
 
+// LO QUE LA TAREA TOCÓ, MEDIDO CONTRA EL ÁRBOL PREVIO. `git status` compara el
+// worktree con HEAD, y HEAD es el commit de la tarea anterior: cada tarea
+// comitea el suyo, así que "lo que cambió desde HEAD" es exactamente "lo que
+// hizo esta tarea".
+//
+// `-z` y no la salida por defecto: la porcelana normal ENTRECOMILLA una ruta
+// con espacios o acentos (`"src/a\303\261o.js"`) y quien la parsee a mano
+// stagearía una ruta que no existe. Con `-z` cada entrada es literal y va
+// separada por NUL. Un renombrado trae DOS entradas —destino y origen— y las
+// dos hacen falta: sin el origen, el borrado no entra en el commit.
+//
+// SE FILTRA LO DEL PROPIO LOOP. El run escribe bajo `.agent/run-<n>` y la
+// maquinaria bajo `docs/superpowers/**` (`LOOP_ARTIFACT_PATTERNS`, la misma
+// lista que ya usa la reconciliación), y nada de eso lo tocó el implementador:
+// stagearlo metería el estado del run dentro del commit de la tarea. El
+// veredicto y la telemetría los stagea este programa por su cuenta, cada uno
+// en su momento.
+//
+// Y SE MANTIENE EL FILTRO DE SEGURIDAD de rutas absolutas o con `..`: git no
+// las produce, pero lo que se pasa a `git add` no se deja de comprobar por
+// venir de donde se espera.
+const rutaSegura = (p) => p !== '' && !p.startsWith('/') && !p.split('/').includes('..')
+
+// EL PLAN TAMPOCO ES TRABAJO DE LA TAREA. En un run de verdad vive bajo
+// `docs/superpowers/plans/**` y ya lo cubre `esRutaDeLaMaquinaria`, pero la
+// ruta la elige quien despacha y puede estar en cualquier sitio: se nombra
+// aquí desde `planPath`, que es el único sitio donde este programa la sabe.
+const esDelRun = (p) => {
+  const suyo = `${relative(repoRoot, workDir)}/`
+  return p === relative(repoRoot, stateFile) ||
+    p === relative(repoRoot, resolve(planPath)) ||
+    p.startsWith(suyo)
+}
+
+const rutasTocadas = () => {
+  const trozos = (git(['status', '--porcelain', '-z', '--untracked-files=all']) || '').split('\0')
+  const rutas = []
+  for (let i = 0; i < trozos.length; i++) {
+    const entrada = trozos[i]
+    if (!entrada) continue
+    const estado = entrada.slice(0, 2)
+    const ruta = entrada.slice(3)
+    if (estado.startsWith('R') || estado.startsWith('C')) {
+      const origen = trozos[++i]
+      if (origen) rutas.push(origen)
+    }
+    if (ruta) rutas.push(ruta)
+  }
+  return [...new Set(rutas)].filter((p) => rutaSegura(p) && !esDelRun(p) && !esRutaDeLaMaquinaria(p))
+}
+
 function verboReport() {
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del informe')
   const { report, why } = porLeer ? { why: porLeer } : readReport(valor)
@@ -914,16 +988,43 @@ function verboReport() {
     out(`informe descartado: ${why}`)
     return OUTCOMES.DISCARDED
   }
-  // Se stagea ANTES de medir: un control que lee el índice no ve un fichero
-  // nuevo sin stagear. Y ANTES de stagear, el índice se VACÍA (reset mixto:
-  // el worktree no se toca) — entre intentos el índice acumula: el intento 1
-  // pudo stagear una ruta fuera de alcance que el veto devolvió, y sin este
-  // reset esa versión viajaría dentro del commit del intento 2 sin que
-  // ningún control volviera a verla. Tras reset+add, el índice es
-  // EXACTAMENTE lo que el último informe declara — que es lo que se comitea.
-  const rutas = report.paths
+  // LAS RUTAS LAS MIDE EL PROGRAMA, y la declaración del implementador es una
+  // comprobación cruzada. Antes se stageaba lo que el informe declaraba: una
+  // ruta olvidada no llegaba al commit, una ruta declarada y no tocada era una
+  // mentira que nada detectaba, y una repetida descartaba el informe entero.
+  // `git status` contra el árbol previo a la tarea —el commit anterior, porque
+  // cada tarea comitea el suyo— sabe exactamente qué cambió.
+  //
+  // LA DECLARACIÓN NO SE TIRA: si difiere, se AVISA. Que el implementador crea
+  // haber tocado otra cosa de lo que tocó es información sobre el intento, y
+  // callarla sería perder la única lectura que este paso tenía de él. Lo que ya
+  // no hace es decidir.
+  // EL ÍNDICE SE VACÍA PRIMERO, y ahora eso además ordena la medida. El reset
+  // (mixto: el worktree no se toca) estaba aquí porque entre intentos el
+  // índice acumula — el intento 1 pudo stagear una ruta fuera de alcance que
+  // el veto devolvió, y sin él esa versión viajaría dentro del commit del
+  // intento 2 sin que ningún control volviera a verla.
+  //
+  // Y va ANTES de medir porque `git status` mira el índice tanto como el
+  // worktree: con el índice del intento anterior todavía puesto, un fichero
+  // stageado entonces y BORRADO después se lee como "añadido y borrado" y
+  // entraría en la lista aunque ya no exista. Medido: `git add` de esa ruta
+  // falla con `pathspec did not match` y el paso muere por excepción.
   git(['reset', '-q'])
-  git(['add', '--', ...rutas])
+  const rutas = rutasTocadas()
+  const soloDeclaradas = report.paths.filter((p) => !rutas.includes(p))
+  const soloMedidas = rutas.filter((p) => !report.paths.includes(p))
+  if (soloDeclaradas.length || soloMedidas.length) {
+    err(`aviso: lo que el implementador declara y lo que el árbol dice no coinciden. Se stagea lo MEDIDO.${soloMedidas.length ? ` Tocado y no declarado: ${soloMedidas.join(', ')}.` : ''}${soloDeclaradas.length ? ` Declarado y no tocado: ${soloDeclaradas.join(', ')}.` : ''}`)
+  }
+  // Se stagea ANTES de medir los controles: uno que lee el índice no ve un
+  // fichero nuevo sin stagear. Tras reset+add, el índice es EXACTAMENTE lo que
+  // el árbol dice que cambió — que es lo que se comitea.
+  //
+  // Sin rutas no se llama a `git add`: `git add --` sin ruta detrás no añade
+  // nada y avisa por su cuenta, y el índice vacío ya es la respuesta correcta
+  // a una tarea que no tocó nada — los controles la miden igual.
+  if (rutas.length) git(['add', '--', ...rutas])
   // `lastPaths` alimenta el `--` de un `git grep` en `testsDeclarados`, que
   // acota el ámbito de esa comprobación a lo que la tarea stageó — la
   // propiedad más frágil de todo esto (ver el commit que la arregló, e4cc3dc).
@@ -1297,7 +1398,11 @@ function escribirPaqueteDeReconciliacion({ rama, ronda, intento }) {
     lineas.push('', '## Discard reason', ARREGLO_DE_DESCARTE[ronda.reason] ?? ronda.reason)
   }
   writeFileSync(paquete, lineas.join('\n'))
-  appendFileSync(paquete, PluginYardstick.composeSection(deCt))
+  // POR RUTA Y NO PEGADA: el reconciliador tiene `Read` (RECONCILER_TOOLS), y
+  // los cinco documentos enteros delante de un conflicto son 24 KB de material
+  // fijo que no dependen del conflicto. Sin tarea que acote el alcance, van
+  // los cinco: una fusión puede tocar cualquier fichero, incluido uno nuevo.
+  appendFileSync(paquete, PluginYardstick.composePathSection(deCt))
   appendFileSync(paquete, seccionVaraDelRepo('el paquete de reconciliación'))
   return paquete
 }
@@ -1462,6 +1567,22 @@ function verboGlobal() {
 // Un FAIL no deja veredicto trackeado, igual que en el juez de tarea: solo
 // viaja el que aprueba — el FAIL cierra el run y lo lee el humano en la
 // carpeta del run.
+// EL TOKEN LO ESCRIBE EL PROGRAMA, no el juez. `next` ya dicta la ruta del
+// veredicto y este verbo ya calculó el token del paquete y del corte de ahora:
+// pedirle al modelo que copie 64 hex de una línea que el programa acaba de
+// escribir era la cuarta cosa que sabía y aun así preguntaba, y un error de
+// copia descartaba un veredicto entero de opus y gastaba uno de los seis
+// descartes que matan el run.
+//
+// SE INYECTA SÓLO SI FALTA. Un veredicto que trae OTRO token se sigue
+// rechazando aguas abajo (`verdict.review_token !== token`): es defensa en
+// profundidad contra el fichero de un juicio anterior en la misma ruta, y
+// sobreescribirlo aquí desarmaría justo esa comprobación.
+const conTokenDelPrograma = (valor, token) =>
+  (valor && typeof valor === 'object' && !Array.isArray(valor) && valor.review_token === undefined)
+    ? { ...valor, review_token: token }
+    : valor
+
 function verboSliceVerdict() {
   // EL INSUMO ANTES QUE EL VEREDICTO, y por el mismo motivo que en
   // `verboVerdict` (ver el comentario largo de ahí, que es donde está el caso
@@ -1486,7 +1607,7 @@ function verboSliceVerdict() {
     return OUTCOMES.DISCARDED
   }
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del veredicto de slice')
-  const { verdict, why } = porLeer ? { why: porLeer } : readSliceVerdict(valor)
+  const { verdict, why } = porLeer ? { why: porLeer } : readSliceVerdict(conTokenDelPrograma(valor, token))
   if (!verdict) {
     medir('slice-judge', { outcome: 'discarded', why })
     out(`veredicto de slice descartado: ${why}`)
@@ -1627,7 +1748,7 @@ function verboVerdict() {
     return OUTCOMES.DISCARDED
   }
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del veredicto')
-  const { verdict, why } = porLeer ? { why: porLeer } : readVerdict(valor)
+  const { verdict, why } = porLeer ? { why: porLeer } : readVerdict(conTokenDelPrograma(valor, token))
   if (!verdict) {
     medir('judge', { outcome: 'discarded', why })
     out(`veredicto descartado: ${why}`)

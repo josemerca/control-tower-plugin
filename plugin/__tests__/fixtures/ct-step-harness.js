@@ -93,6 +93,15 @@ export function montarRepo({ e2e = null } = {}) {
     ? renderState({ meta: { issue: 7, epic: 12, e2e }, body: '# slice de mentira' })
     : '---\nissue: 7\nepic: 12\n---\n\n# slice de mentira\n')
   writeFileSync(join(d, 'plan.md'), PLAN)
+  // LO QUE ESTE FIXTURE ESCRIBE DENTRO DEL REPO Y NO ES TRABAJO DE NINGUNA
+  // TAREA: el JSON que hace de respuesta del subagente (en un run de verdad lo
+  // dicta `next` dentro de `.agent/run-<n>/`) y la telemetría, que aquí se
+  // desvía a `.telemetria/` para poder leerla y en un run de verdad vive en
+  // CLAUDE_CONFIG_DIR, fuera del repo. Desde que `ct-step report` mide el
+  // árbol con `git status`, un fichero del andamio contaría como trabajo de la
+  // tarea y el control de alcance la vetaría por algo que el implementador no
+  // escribió.
+  writeFileSync(join(d, '.gitignore'), '.telemetria/\n/*.json\n')
   g('add', '-A')
   g('commit', '-q', '-m', 'base del slice')
   // El paso `reconcile` (Fase B, Tarea 8) habla con git de verdad —
@@ -105,10 +114,12 @@ export function montarRepo({ e2e = null } = {}) {
   execFileSync('git', ['init', '-q', '--bare', '-b', 'main', origin], { stdio: 'ignore' })
   g('remote', 'add', 'origin', origin)
   g('push', '-q', 'origin', 'main')
-  // Los ficheros existen sin stagear, que es como deja el worktree un
-  // implementador de verdad.
-  writeFileSync(join(d, 'uno.txt'), 'uno\n')
-  writeFileSync(join(d, 'dos.txt'), 'dos\n')
+  // LOS FICHEROS NO SE SIEMBRAN AQUÍ. Los escribe `informe(...)`, que es el
+  // helper que hace de implementador: desde que `ct-step report` mide las
+  // rutas con `git status` en vez de creerse la declaración, sembrar los dos
+  // ficheros de las dos tareas al montar el repo dejaría el árbol de la tarea
+  // 1 con el trabajo de la 2 dentro — y el control de alcance la vetaría, con
+  // razón. Un implementador de verdad toca los ficheros de SU tarea.
   return d
 }
 
@@ -143,7 +154,15 @@ export function crearHelpers(ref) {
 
   // Lo que escribiría un subagente, a fichero. `paths` es una lista de rutas
   // simples: el informe no distingue producción de test (ver step-contracts.js).
+  // Escribe también los ficheros que declara, si no están: un implementador
+  // que declara una ruta la ha tocado, y desde que el programa mide el árbol
+  // en vez de creerse la lista, un fichero que no existe no se stagea. Lo que
+  // ya está escrito NO se pisa — hay tests que preparan el contenido antes.
   const informe = (paths, nombre = 'report.json', summary = 'hecho') => {
+    for (const ruta of paths) {
+      const destino = join(ref(), ruta)
+      if (!existsSync(destino)) writeFileSync(destino, `${ruta}\n`)
+    }
     const p = join(ref(), nombre)
     writeFileSync(p, JSON.stringify({ paths, summary }))
     return p

@@ -38,15 +38,50 @@ describe('el camino feliz', () => {
     expect(log()).toMatch(/Veredicto del slice entero \(#7\)/)
   })
 
-  it('sólo entra en el commit lo que el implementador declaró', () => {
-    // dos.txt existe desde el principio y la tarea 1 no lo declara.
+  // Lo que entra en el commit es lo que la tarea TOCÓ, medido por el programa:
+  // el fichero de la tarea 2 no está escrito todavía, así que no puede colarse
+  // en el commit de la 1 por mucho que el plan lo nombre más abajo.
+  it('sólo entra en el commit lo que esta tarea tocó', () => {
     tareaOk('uno.txt')
     const primero = execFileSync('git', ['show', '--name-only', '--format=', 'HEAD'], { cwd: repo, encoding: 'utf8' })
+    expect(primero).toMatch(/uno\.txt/)
     expect(primero).not.toMatch(/dos\.txt/)
   })
 
+  // LA DECLARACIÓN ES UNA COMPROBACIÓN CRUZADA: si difiere de lo que el árbol
+  // dice, se avisa y se stagea lo medido. Antes decidía ella, así que una ruta
+  // olvidada en la lista se quedaba fuera del commit sin que nada lo dijera.
+  it('una ruta tocada y no declarada entra en el commit, y el desajuste se avisa', () => {
+    writeFileSync(join(repo, 'uno.txt'), 'uno\n')
+    writeFileSync(join(repo, 'olvidado.txt'), 'esto lo toqué y no lo dije\n')
+    const r = ct('report', informe([]))
+    expect(r.status).toBe(0)
+    expect(r.stderr).toMatch(/Tocado y no declarado: olvidado\.txt, uno\.txt/)
+    expect(execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: repo, encoding: 'utf8' }))
+      .toMatch(/olvidado\.txt/)
+  })
+
+  // El otro lado del cruce: una ruta que se declara y no se tocó. Antes el
+  // programa hacía `git add` de ella y el paso moría por excepción; ahora se
+  // avisa y no se stagea nada por ella. El informe se escribe con `crudo`
+  // porque `informe` crea los ficheros que declara, y aquí el caso es
+  // justamente que no existe.
+  it('una ruta declarada y no tocada se avisa, y no tumba el paso', () => {
+    writeFileSync(join(repo, 'uno.txt'), 'uno\n')
+    const r = ct('report', crudo(JSON.stringify({ paths: ['uno.txt', 'inventado.txt'], summary: 'hecho' })))
+    expect(r.status).toBe(0)
+    expect(r.stderr).toMatch(/Declarado y no tocado: inventado\.txt/)
+    expect(execFileSync('git', ['diff', '--cached', '--name-only'], { cwd: repo, encoding: 'utf8' }).trim())
+      .toBe('uno.txt')
+  })
+
   it('el mensaje no lleva closing keywords aunque el plan las traiga', () => {
+    // El plan se COMITEA tras cambiarlo: en un run de verdad viene commiteado
+    // desde antes, y desde que `ct-step report` mide el árbol un plan
+    // modificado y sin commitear sería trabajo sin declarar de esta tarea.
     writeFileSync(join(repo, 'plan.md'), PLAN.replace('### Task 1 — la primera', '### Task 1 — fixes #451 la primera'))
+    execFileSync('git', ['add', 'plan.md'], { cwd: repo })
+    execFileSync('git', ['commit', '-q', '-m', 'el plan con la palabra de cierre dentro'], { cwd: repo })
     tareaOk('uno.txt')
     expect(log()).not.toMatch(/fixes\s*#451/i)
     expect(log()).toMatch(/issue 451/)

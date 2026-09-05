@@ -208,14 +208,20 @@ const RE_REVIEW_TOKEN_FORM = new RegExp(REVIEW_TOKEN_PATTERN)
 const schemaFor = (rules) => ({
   type: 'object',
   additionalProperties: false,
-  required: ['ruling', 'rubric', 'review_token', 'findings'],
+  required: ['ruling', 'rubric', 'findings'],
   properties: {
     ruling: { type: 'string', enum: ['PASS', 'FAIL'] },
-    // El token que el paquete de revisión declara en su cabecera, copiado. Va
-    // en el esquema y no sólo en el validador porque este objeto es el bloque
-    // que la rúbrica del juez le enseña: un campo obligatorio que el juez no
-    // ve descarta todos los veredictos de la corrida sin que ninguno sea culpa
-    // suya. Se admiten mayúsculas (ver readVerdict) y se normaliza al leer.
+    // EL TOKEN LO ESCRIBE EL PROGRAMA, no el juez. `ct-step verdict` lo
+    // inyecta antes de validar, con el valor que él mismo acaba de calcular
+    // del paquete y del corte de ahora, así que aquí NO es obligatorio: un
+    // veredicto que no lo trae se acepta. Lo que se sigue rechazando es uno
+    // que trae OTRO —defensa en profundidad, por si el fichero es de un juicio
+    // anterior— y por eso el campo sigue en el esquema con su forma.
+    //
+    // Era obligatorio y lo copiaba el juez a mano: 64 hex tecleados por un
+    // modelo, y un error de copia descartaba un veredicto entero de opus y
+    // gastaba uno de los seis descartes que matan el run. Un valor que el
+    // programa conoce no se le pide al modelo.
     review_token: { type: 'string', pattern: REVIEW_TOKEN_PATTERN },
     rubric: {
       type: 'array',
@@ -425,7 +431,13 @@ export const JUDGE_TOOLS = 'Read, Grep, Glob, Write, Skill'
 // de ejecución que lo delate — un encabezado renombrado en el script deja a
 // la rúbrica señalando una sección que no existe, y el juez sigue
 // contestando como si la hubiera leído.
-export const PACKAGE_SECTIONS = ['Files changed', 'Rutas tocadas', 'Diff']
+//
+// `Vara de ct` abre el paquete y la escribe `PluginYardstick.composePathSection`
+// (scripts/plugin-yardstick.js), no `escribirPaquete`: son las RUTAS de los
+// documentos que alcanzan a esta tarea, para un juez que tiene `Read`. Va
+// primero por lo mismo que `Señal` en el paquete de slice — detrás de un diff
+// `-U10` quedaría enterrada.
+export const PACKAGE_SECTIONS = ['Vara de ct', 'Files changed', 'Rutas tocadas', 'Diff']
 
 // El juez de SLICE (§3.7-B, `agents/ct-slice-judge.md`), SIN `Skill`: sus dos
 // ítems miden contra el plan (comiteado) y el diff acumulado de la slice
@@ -618,8 +630,21 @@ export function readVerdict(structured, rules = VERDICT_RULES) {
   // que no pase nada». Lo que este módulo NO puede decidir es si el token es
   // EL DEL PAQUETE: eso exige leer el paquete y volver a medir el corte, y lo
   // hace ct-step.mjs (`tokenVigente`).
+  // AUSENTE VALE, porque quien lo escribe es el programa: `ct-step verdict` lo
+  // inyecta con el valor que acaba de calcular antes de llamar aquí, así que
+  // en el camino real este campo llega siempre. Un veredicto que llega hasta
+  // aquí sin él es uno que nadie ató a ningún corte, y quien puede decidir eso
+  // no es este módulo (no lee el paquete): se devuelve `null` y lo resuelve
+  // ct-step, que es el que compara.
+  //
+  // Lo que sigue descartándose es un token con FORMA de token que no lo es:
+  // una cadena que no son 64 hex no se puede comparar con nada, y tolerarla
+  // sería telemetría sucia mañana.
+  if (token === undefined || token === null) {
+    return { verdict: { ruling, rubric, findings, review_token: null } }
+  }
   if (typeof token !== 'string' || !RE_REVIEW_TOKEN_FORM.test(token)) {
-    return { why: `el veredicto no copia el "${REVIEW_TOKEN_LABEL}" del paquete de revisión: es el sha256 (64 hex) de la línea con la que abre el paquete que se te dio a juzgar, y va tal cual en el campo "review_token" — sin él no se puede afirmar que este veredicto sea sobre ESE código` }
+    return { why: `el veredicto trae un "${REVIEW_TOKEN_LABEL}" que no tiene su forma (64 hex): ${JSON.stringify(token)}. El programa escribe ese campo por su cuenta, así que no hay nada que copiar — un valor que no es un token sólo puede venir de otro sitio` }
   }
   return { verdict: { ruling, rubric, findings, review_token: token.toLowerCase() } }
 }
@@ -674,13 +699,15 @@ export function readReport(structured) {
   // ataque, no un dato de confianza.
   const fuera = paths.filter((p) => p.startsWith('/') || p.split('/').includes('..'))
   if (fuera.length) return { why: `el informe declara rutas fuera del worktree: ${fuera.join(', ')}` }
-  // La misma ruta dos veces es un informe que no se entiende a sí mismo: no
-  // hay forma de decidir cuál de las dos declaraciones vale. Mismo criterio
-  // que una ruta fuera del worktree: se descarta el informe entero, no se
-  // decide por él.
-  const repetidas = [...new Set(paths.filter((ruta, i, todas) => todas.indexOf(ruta) !== i))]
-  if (repetidas.length) return { why: `el informe declara la misma ruta más de una vez: ${repetidas.join(', ')}` }
-  return { report: { paths, summary } }
+  // La misma ruta dos veces YA NO DESCARTA. Descartaba cuando esta lista era
+  // la fuente de lo que se stagea: dos declaraciones de la misma ruta no se
+  // podían arbitrar. Desde que las rutas las MIDE el programa contra el árbol
+  // previo a la tarea, la lista es una comprobación cruzada, y en una
+  // comprobación un duplicado no deja nada indecidible: dice lo mismo dos
+  // veces. Descartar el informe entero —y gastar uno de los seis descartes que
+  // matan el run— por una repetición que no cambia nada era el precio más caro
+  // por el defecto más barato.
+  return { report: { paths: [...new Set(paths)], summary } }
 }
 
 // readE2eReport: el informe -> un OUTCOME. Validación a mano y no con una
