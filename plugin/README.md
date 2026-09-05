@@ -8,7 +8,7 @@ No es un orquestador de agentes en paralelo. Es lo contrario: una máquina para 
 
 | | |
 |---|---|
-| Versión | `0.56.0` · contrato de la tabla de slices `v21` |
+| Versión | `0.56.0` · contrato de la tabla de slices `v23` |
 | Comandos | `/ct-init` · `/ct-groom` · `/ct-next` · `/ct-status` |
 | Puertas humanas | 3 por epic — congelación, `status:ready`, merge — más el gate `plan` en cada slice (renunciable por fila con `!plan`; su go es `-OK <nonce>` y `--release` se niega sin él) y el gate `e2e` cuando la fila declara recorridos en la columna `E2E` (derivado, no se escribe a mano) |
 | Skills | 10 forkados de superpowers 6.0.3 que se distribuyen (11 forkados; `writing-skills` vive en el repo, fuera del paquete) + 1 propio (`writing-plans-prescriptive`) |
@@ -85,7 +85,7 @@ Luego, **una vez por repo que quieras gobernar**:
 /ct-init
 ```
 
-El scaffolder deja `.agent/STATE.md`, la sección del contrato de la tabla de slices dentro de `AGENTS.md`, y dos líneas en el `.gitignore`. No planifica nada: rellenar los comandos reales del repo (build, test, lint, CI) en `AGENTS.md` es cosa tuya.
+El scaffolder deja `.agent/STATE.md`, `.agent/conventions.md`, el contrato de la tabla de slices en `docs/superpowers/CONTRATO-SLICES.md`, una sección corta en `AGENTS.md` que enlaza a él, y las reglas del `.gitignore`. No planifica nada: rellenar los comandos reales del repo (build, test, lint, CI) en `AGENTS.md` es cosa tuya.
 
 Si `/ct-init` avisa de que el repo **ya traía sus propias convenciones** —otro protocolo de claim, otra ruta de worktrees, otro fichero de estado—, eso no lo resuelve el plugin: elegir cuál manda es una decisión tuya.
 
@@ -100,7 +100,7 @@ Si `/ct-init` avisa de que el repo **ya traía sus propias convenciones** —otr
 
 | Comando | Qué hace | Muta |
 |---|---|---|
-| **`/ct-init`** | Prepara un repo para el loop: estado, contrato en `AGENTS.md`, `.gitignore`. Detecta convenciones propias del repo que contradigan al loop. | el repo local |
+| **`/ct-init`** | Prepara un repo para el loop: estado, contrato de slices en `docs/superpowers/CONTRATO-SLICES.md`, sección corta en `AGENTS.md`, `.gitignore`. Detecta convenciones propias del repo que contradigan al loop. | el repo local |
 | **`/ct-groom`** | Lee la tabla de slices del spec **congelado** y crea milestone, labels, issues y altas en el Project. Idempotente por existencia; detecta divergencia pero **no la aplica** sin `--reconcile`. | GitHub |
 | **`/ct-next`** | Elige el siguiente slice despachable (orden, dependencias mergeadas, sin colisión de tokens, con hueco de `--cap`), lo reclama, crea worktree y rama, siembra el estado y lanza al agente **verificando que arrancó de verdad**. | GitHub + disco |
 | **`/ct-status`** | Responde de una vez: qué está en vuelo, qué ha entregado y qué es residuo. **No escribe una sola vez** — hay un test que lo comprueba mirando el `argv` real con el que se llamó a `gh`. | nada |
@@ -278,7 +278,7 @@ scripts/vendor/  `yaml` bundleado — DERIVADO, trackeado, ver abajo
 hooks/        SessionStart (hidratación), Stop (estado al día), PreToolUse sobre Bash (guarda de commits) y sobre Task (puerta del despacho)
 dist/         bundles de los hooks — DERIVADO, trackeado, ver arriba
 skills/       los 10 skills forkados que se distribuyen + writing-plans-prescriptive (propio) + state-template + LICENSE-superpowers + FORK.md
-__tests__/    126 ficheros, 3.177 tests
+__tests__/    133 ficheros, ~3.350 tests
 ```
 
 Y un nivel más arriba, en el repo y **fuera** de lo que se distribuye (el `source` del

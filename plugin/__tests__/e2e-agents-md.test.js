@@ -32,8 +32,12 @@ function initIn(existingAgents) {
   if (existingAgents != null) writeFileSync(join(dir, 'AGENTS.md'), existingAgents)
   const r = spawnSync('bash', [INIT, dir], { encoding: 'utf8' })
   const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+  // #93 — el contrato salió de AGENTS.md a su propio fichero del repo
+  // gobernado. Esta suite mira las DOS cosas: la sección de travesía, que sigue
+  // en AGENTS.md, y la versión del contrato, que ya no está ahí.
+  const contrato = readFileSync(join(dir, 'docs', 'superpowers', 'CONTRATO-SLICES.md'), 'utf8')
   rmSync(dir, { recursive: true, force: true })
-  return { r, agents }
+  return { r, agents, contrato }
 }
 
 describe('la sección de travesía en AGENTS.md', () => {
@@ -81,9 +85,13 @@ describe('la sección de travesía en AGENTS.md', () => {
   // de número — un pase anterior la dejó en v20 sin bump y ningún repo
   // bootstrapeado con ese v20 podía recibirla. El test sigue clavando lo
   // mismo, ahora contra v21.
+  //
+  // #93: el contrato dejó de ser una sección de AGENTS.md, así que la versión
+  // se busca en su fichero. Lo que el test clava no cambia: que va por la
+  // versión que declara el script y que documenta la columna E2E.
   it('el contrato de la tabla de slices va por la versión que declara el script y documenta la columna E2E', () => {
-    const { agents } = initIn(null)
-    expect(agents).toContain(`<!-- ct-init:slices-contract-version: ${CONTRACT_VERSION} -->`)
-    expect(agents).toContain('E2E')
+    const { contrato } = initIn(null)
+    expect(contrato).toContain(`<!-- ct-init:slices-contract-version: ${CONTRACT_VERSION} -->`)
+    expect(contrato).toContain('E2E')
   })
 })
