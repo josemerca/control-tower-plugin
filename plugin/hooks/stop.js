@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { parseStateSafe, describeStopRelation, classifyStopState } from '../scripts/state.js'
+import { parseStateSafe, describeStopRelation, classifyStopState, withLastCommit } from '../scripts/state.js'
 import { resolveStatePath } from '../scripts/state-paths.js'
 
 let input
@@ -63,6 +63,18 @@ if (parseError) {
 // la cabecera de la sección en scripts/state.js).
 const relation = describeStopRelation({ headSha, lastCommit: meta.last_commit, git, branch })
 const verdict = classifyStopState({ relation, stopHookActive: input.stop_hook_active, stateRel })
+
+// #95/H5: el trabajo por encima lo comiteó ct-step, así que el sha que el guard
+// pedía al agente lo escribe el programa — en el fichero que `resolveStatePath`
+// resolvió, que en un worktree de slice es SLICE.md y nunca el STATE.md
+// trackeado de la coordinadora. Si la escritura falla, no se dice nada: el
+// turno cierra igual y el guard volverá a mirar en el siguiente.
+if (verdict.updateLastCommitTo) {
+  const { text, updated } = withLastCommit(readFileSync(statePath, 'utf8'), verdict.updateLastCommitTo)
+  if (updated) {
+    try { writeFileSync(statePath, text) } catch { /* el cierre de turno no depende de esto */ }
+  }
+}
 
 if (verdict.block) {
   process.stdout.write(JSON.stringify({ decision: 'block', reason: verdict.reason }))

@@ -7243,6 +7243,22 @@ function resolveStatePath(cwd2) {
   return { path: null, kind: "none", rel: null };
 }
 
+// scripts/ct-step-commit.js
+var CtStepCommit = class _CtStepCommit {
+  static TRAILER_KEY = "Committed-By";
+  static TRAILER_VALUE = "ct-step";
+  static TRAILER_LINE = `${_CtStepCommit.TRAILER_KEY}: ${_CtStepCommit.TRAILER_VALUE}`;
+  static TRAILER_FORMAT = `%(trailers:key=${_CtStepCommit.TRAILER_KEY},valueonly,separator=%x2C)`;
+  static wroteAllOf(trailerValuesByCommit) {
+    const commits = [...trailerValuesByCommit];
+    if (commits.length === 0) return false;
+    return commits.every((values) => _CtStepCommit.wrote(values));
+  }
+  static wrote(trailerValues) {
+    return String(trailerValues ?? "").split(",").some((value) => value.trim() === _CtStepCommit.TRAILER_VALUE);
+  }
+};
+
 // scripts/state.js
 var FM = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 function parseState(md) {

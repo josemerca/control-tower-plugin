@@ -2,7 +2,7 @@
 import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);
 
 // hooks/stop.js
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { execFileSync, spawnSync } from "node:child_process";
 
 // scripts/vendor/yaml.js
@@ -7243,6 +7243,22 @@ function resolveStatePath(cwd2) {
   return { path: null, kind: "none", rel: null };
 }
 
+// scripts/ct-step-commit.js
+var CtStepCommit = class _CtStepCommit {
+  static TRAILER_KEY = "Committed-By";
+  static TRAILER_VALUE = "ct-step";
+  static TRAILER_LINE = `${_CtStepCommit.TRAILER_KEY}: ${_CtStepCommit.TRAILER_VALUE}`;
+  static TRAILER_FORMAT = `%(trailers:key=${_CtStepCommit.TRAILER_KEY},valueonly,separator=%x2C)`;
+  static wroteAllOf(trailerValuesByCommit) {
+    const commits = [...trailerValuesByCommit];
+    if (commits.length === 0) return false;
+    return commits.every((values) => _CtStepCommit.wrote(values));
+  }
+  static wrote(trailerValues) {
+    return String(trailerValues ?? "").split(",").some((value) => value.trim() === _CtStepCommit.TRAILER_VALUE);
+  }
+};
+
 // scripts/state.js
 var FM = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 function parseState(md) {
@@ -7281,6 +7297,22 @@ function branchesContaining(git2, stateSha, currentBranch) {
 }
 var STATE_REL_PATH2 = ".agent/STATE.md";
 var WORK_SCAN_MAX = 200;
+function allWorkCommittedByCtStep(git2, stateSha, headSha2) {
+  const r = git2(["log", `--format=%H ${CtStepCommit.TRAILER_FORMAT}`, "--no-merges", `${stateSha}..${headSha2}`]);
+  if (r.status !== 0) return false;
+  const lines = String(r.stdout || "").split("\n").map((l) => l.trim()).filter(Boolean);
+  return CtStepCommit.wroteAllOf(lines.map((l) => l.slice(l.indexOf(" ") + 1)));
+}
+var LAST_COMMIT_LINE = /^([ \t]*last_commit[ \t]*:[ \t]*)(['"]?)([^'"\r\n]*)(\2)([ \t]*)$/m;
+function withLastCommit(stateText, sha) {
+  const s = stateText ?? "";
+  const m = s.match(FM);
+  if (!m) return { text: s, updated: false };
+  const frontmatter = m[1];
+  if (!LAST_COMMIT_LINE.test(frontmatter)) return { text: s, updated: false };
+  const nuevo = frontmatter.replace(LAST_COMMIT_LINE, (_, prefijo, comilla, __, cierre, cola) => `${prefijo}${comilla}${sha}${cierre}${cola}`);
+  return { text: s.replace(frontmatter, nuevo), updated: true };
+}
 function countWorkCommits(git2, stateSha, headSha2, total) {
   if (!(total > 0) || total > WORK_SCAN_MAX) return { work: total, bookkeeping: 0, known: false };
   const r = git2(["log", "--format=commit:%H", "--name-only", "--no-renames", `${stateSha}..${headSha2}`]);
@@ -7326,6 +7358,9 @@ function describeStopRelation({ headSha: headSha2, lastCommit, git: git2, branch
     if (known && work === 0 && bookkeeping > 0) {
       return { ...out, kind: "behind-bookkeeping", count: 0, bookkeeping, total };
     }
+    if (allWorkCommittedByCtStep(git2, stateSha, headSha2)) {
+      return { ...out, kind: "behind-ct-step", count: known ? work : total, bookkeeping: known ? bookkeeping : 0, total };
+    }
     return { ...out, kind: "behind", count: known ? work : total, bookkeeping: known ? bookkeeping : 0, total };
   }
   const headIsAncestor = git2(["merge-base", "--is-ancestor", headSha2, stateSha]).status;
@@ -7347,6 +7382,9 @@ function classifyStopState({ relation: relation2, stopHookActive, stateRel: stat
   const rel = relation2;
   if (rel.kind === "unset" || rel.kind === "same") return none;
   if (rel.kind === "behind-bookkeeping") return { ...none, kind: "behind-bookkeeping" };
+  if (rel.kind === "behind-ct-step") {
+    return { ...none, kind: "behind-ct-step", updateLastCommitTo: rel.headSha };
+  }
   if (rel.kind === "behind") {
     const n = rel.count;
     const cuantos = n === 1 ? "1 commit" : n > 1 ? `${n} commits` : "commits";
@@ -7436,6 +7474,15 @@ if (parseError) {
 }
 var relation = describeStopRelation({ headSha, lastCommit: meta.last_commit, git, branch });
 var verdict = classifyStopState({ relation, stopHookActive: input.stop_hook_active, stateRel });
+if (verdict.updateLastCommitTo) {
+  const { text, updated } = withLastCommit(readFileSync(statePath, "utf8"), verdict.updateLastCommitTo);
+  if (updated) {
+    try {
+      writeFileSync(statePath, text);
+    } catch {
+    }
+  }
+}
 if (verdict.block) {
   process.stdout.write(JSON.stringify({ decision: "block", reason: verdict.reason }));
 } else if (verdict.systemMessage) {

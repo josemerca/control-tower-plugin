@@ -1,5 +1,6 @@
 import { parse, stringify } from './vendor/yaml.js'
 import { STATE_REL_PATH as COORD_REL_PATH, SLICE_REL_PATH } from './state-paths.js'
+import { CtStepCommit } from './ct-step-commit.js'
 
 // ===========================================================================
 // F22 — `stateRel`: QUÉ FICHERO NOMBRAN LOS MENSAJES DE ESTE MÓDULO.
@@ -488,6 +489,54 @@ const STATE_REL_PATH = '.agent/STATE.md'
 // encima de él "te has quedado muy atrás" es cierto de todas formas.
 const WORK_SCAN_MAX = 200
 
+// ===========================================================================
+// #95/H5 — QUIÉN HIZO LOS COMMITS QUE HAY POR ENCIMA.
+//
+// En el camino `ct-step` comitea el PROGRAMA, no el agente. El agente no tocó
+// `last_commit` porque no hizo ningún commit, y el guard le bloqueaba el turno
+// pidiéndole que copiase a mano un valor que el hook ya tiene resuelto
+// (`headSha`) — el mismo defecto de familia que F15 arregló para los apuntes:
+// una orden al modelo donde cabía un mecanismo del programa.
+//
+// SE PREGUNTA POR EL TRAILER, NO POR EL MENSAJE. `%(trailers:key=…)` es un
+// campo que git parsea él mismo, así que ni hay que trocear el cuerpo del
+// commit ni un mensaje que contenga la frase por casualidad puede hacerse
+// pasar por uno de ct-step. La marca la declara `ct-step-commit.js`, que es
+// también quien la ESCRIBE (step-contracts.js la compone desde ahí): una sola
+// fuente para las dos mitades.
+//
+// FAIL CLOSED, igual que el conteo de trabajo: si git no contesta, o si UN
+// solo commit del rango no lleva la marca, no se atribuye nada y el bloqueo se
+// mantiene entero. Atribuir de más sería dejar pasar trabajo sin registrar.
+// ===========================================================================
+function allWorkCommittedByCtStep(git, stateSha, headSha) {
+  const r = git(['log', `--format=%H ${CtStepCommit.TRAILER_FORMAT}`, '--no-merges', `${stateSha}..${headSha}`])
+  if (r.status !== 0) return false
+  const lines = String(r.stdout || '').split('\n').map((l) => l.trim()).filter(Boolean)
+  return CtStepCommit.wroteAllOf(lines.map((l) => l.slice(l.indexOf(' ') + 1)))
+}
+
+// La línea `last_commit` del frontmatter, reescrita en su sitio. NO se
+// re-serializa el YAML (`parseState` + `renderState`) a propósito: eso se
+// llevaría por delante los comentarios del fichero, el orden de las claves y
+// cualquier campo que este módulo no conozca — y hay otro trabajo en vuelo
+// añadiendo campos nuevos al frontmatter. Se toca UNA línea y el resto del
+// fichero sale byte a byte igual que entró.
+//
+// `updated: false` cuando no hay línea que reescribir: quien llama mantiene el
+// bloqueo en vez de inventarse dónde va el campo.
+const LAST_COMMIT_LINE = /^([ \t]*last_commit[ \t]*:[ \t]*)(['"]?)([^'"\r\n]*)(\2)([ \t]*)$/m
+
+export function withLastCommit(stateText, sha) {
+  const s = stateText ?? ''
+  const m = s.match(FM)
+  if (!m) return { text: s, updated: false }
+  const frontmatter = m[1]
+  if (!LAST_COMMIT_LINE.test(frontmatter)) return { text: s, updated: false }
+  const nuevo = frontmatter.replace(LAST_COMMIT_LINE, (_, prefijo, comilla, __, cierre, cola) => `${prefijo}${comilla}${sha}${cierre}${cola}`)
+  return { text: s.replace(frontmatter, nuevo), updated: true }
+}
+
 function countWorkCommits(git, stateSha, headSha, total) {
   if (!(total > 0) || total > WORK_SCAN_MAX) return { work: total, bookkeeping: 0, known: false }
   // Sentinela propio (`commit:<sha>`) en vez de fiarse del formato por
@@ -545,6 +594,11 @@ export function describeStopRelation({ headSha, lastCommit, git, branch = '' }) 
     if (known && work === 0 && bookkeeping > 0) {
       return { ...out, kind: 'behind-bookkeeping', count: 0, bookkeeping, total }
     }
+    // #95/H5: hay trabajo por encima, y lo comiteó el programa. El sha que el
+    // guard pide ya está resuelto, así que no hay nada que ordenarle a nadie.
+    if (allWorkCommittedByCtStep(git, stateSha, headSha)) {
+      return { ...out, kind: 'behind-ct-step', count: known ? work : total, bookkeeping: known ? bookkeeping : 0, total }
+    }
     return { ...out, kind: 'behind', count: known ? work : total, bookkeeping: known ? bookkeeping : 0, total }
   }
 
@@ -599,6 +653,14 @@ export function classifyStopState({ relation, stopHookActive, stateRel = COORD_R
   // ruido puro, y `last_commit` apuntando al último commit de TRABAJO es
   // además la lectura más útil de ese campo, no una degradación.
   if (rel.kind === 'behind-bookkeeping') return { ...none, kind: 'behind-bookkeeping' }
+
+  // #95/H5: todo el trabajo por encima lo comiteó ct-step. Ni bloqueo ni aviso:
+  // el hook actualiza `last_commit` él mismo con el sha que ya tiene. Va como
+  // un campo de la decisión, y no como una escritura aquí dentro, porque este
+  // módulo no toca ficheros — quien resolvió la ruta es quien escribe.
+  if (rel.kind === 'behind-ct-step') {
+    return { ...none, kind: 'behind-ct-step', updateLastCommitTo: rel.headSha }
+  }
 
   if (rel.kind === 'behind') {
     const n = rel.count
