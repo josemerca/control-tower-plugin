@@ -23,6 +23,18 @@ describe('plugin manifest', () => {
     const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
     expect(pkg.version).toBe(plugin.version)
   })
+  // TERCER SITIO donde vive la misma version, y por el mismo motivo que los dos
+  // de arriba: `.release-please-manifest.json` es el estado desde el que
+  // release-please calcula el siguiente numero. Si ese fichero dijera una
+  // version distinta de la que el plugin declara, la primera release posterior
+  // saltaria desde un punto que nunca existio — y lo haria en silencio, porque
+  // release-please no lee `plugin.json`, lo ESCRIBE. El manifiesto vive en la
+  // raiz del repo, fuera de lo que se distribuye, igual que marketplace.json.
+  it('el manifiesto de release-please parte de la version que el plugin declara', () => {
+    const plugin = JSON.parse(readFileSync(join(root, '.claude-plugin/plugin.json'), 'utf8'))
+    const manifest = JSON.parse(readFileSync(join(root, '..', '.release-please-manifest.json'), 'utf8'))
+    expect(manifest.plugin).toBe(plugin.version)
+  })
   it('el README que se distribuye anuncia la version que se instala', () => {
     const plugin = JSON.parse(readFileSync(join(root, '.claude-plugin/plugin.json'), 'utf8'))
     const readme = readFileSync(join(root, 'README.md'), 'utf8')
