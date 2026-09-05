@@ -1,0 +1,5 @@
+{
+  "ruling": "FAIL",
+  "must_find": ["asercion-tdd"],
+  "incident": "El implementador dejó el test que el plan pedía como `it.todo` sin cuerpo. `node --test` lo reporta como TODO y sale 0, y el control mecánico de ct-step (grep del nombre en los ficheros stageados) lo encuentra. El único que puede verlo es el juez, leyendo el cuerpo del test contra la frase del **TDD:**."
+}

@@ -1,0 +1,5 @@
+{
+  "ruling": "FAIL",
+  "must_find": ["decisiones-cerradas"],
+  "incident": "El claim hace `existsSync` y después `writeFileSync`: dos despachadores a la vez pasan los dos la comprobación y el segundo pisa el lock del primero. La decisión cerrada exige `flag: 'wx'` con `EEXIST` como `already-taken`. El test secuencial del diff pasa igual con la carrera dentro, así que la suite en verde no dice nada; un PASS sin hallazgos aquí es el juez aprobando código con concurrencia real sin haberla mirado."
+}
