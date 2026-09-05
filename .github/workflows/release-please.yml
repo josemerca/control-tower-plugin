@@ -1,0 +1,62 @@
+name: Release Please
+
+# El changelog no se escribe a mano: lo deriva release-please de los mensajes
+# de commit, que este repo ya escribe en Conventional Commits con el paquete
+# como scope (`feat(plugin):`, `fix(backend):`). Un CHANGELOG.md a mano es un
+# fichero que se actualiza cuando alguien se acuerda; éste no puede divergir
+# del historial porque ES el historial.
+#
+# CÓMO FUNCIONA, en dos actos. Cada push a `main` recalcula qué versión tocaría
+# a cada paquete y deja UNA pull request abierta con los tres CHANGELOG.md y
+# los tres `package.json` ya subidos. Esa pull request se queda ahí, y se
+# actualiza sola con cada push, hasta que una persona la mergea: ese merge es
+# el que crea los tags y las releases de GitHub. Publicar sigue siendo una
+# decisión humana, como las otras tres puertas del loop.
+#
+# TRES PAQUETES, TRES VERSIONES. `plugin/` es lo único que se distribuye y su
+# versión viaja en la telemetría de cada run (`plugin_version`), así que no
+# puede moverse porque alguien toque el front. `backend/` y `frontend/` llevan
+# la suya. release-please reparte cada commit por los FICHEROS que toca, no por
+# el scope del mensaje, así que un commit que cruza dos paquetes sale en los dos
+# changelogs, que es lo correcto: cambió los dos.
+#
+# UNA SOLA PULL REQUEST para los tres (`separate-pull-requests: false`), y tres
+# releases al mergearla, una por paquete que haya cambiado. Con una pull request
+# por paquete la cola de release competiría con la cola de trabajo.
+#
+# POR QUÉ ESTA PULL REQUEST NO TRAE CHECKS. Los eventos que crea el
+# `GITHUB_TOKEN` por defecto no disparan otros workflows —GitHub lo impide para
+# que un workflow no se llame a sí mismo en bucle—, así que la CI no corre sobre
+# la pull request de release. Es asumible: sólo toca versiones y changelogs, y
+# la CI ya corrió sobre cada commit que la compone. Si algún día se quiere lo
+# contrario, se crea un PAT con `contents: write` y `pull-requests: write`, se
+# guarda como secreto y se añade `token: ${{ secrets.RELEASE_PLEASE_TOKEN }}`
+# al paso de abajo. No hace falta tocar nada más.
+
+on:
+  push:
+    branches: [main]
+
+# Sin permisos por defecto: los pide el job que los necesita, y sólo ésos. Mismo
+# criterio que continuous-integration.yml.
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Pinneada por SHA y con la versión al lado, como las cuatro acciones de
+      # continuous-integration.yml: un tag se puede mover, un SHA no.
+      - name: Release Please
+        uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
