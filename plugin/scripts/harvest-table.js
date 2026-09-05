@@ -181,6 +181,11 @@ export class HarvestTable {
     new HarvestColumn({ name: 'brief_legacy', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryIsOk('briefLegacy') }),
     new HarvestColumn({ name: 'brief_vara_ct_docs', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryMeasured('briefMeasured', 'briefVaraCtDocs') }),
     new HarvestColumn({ name: 'brief_bytes', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryMeasured('briefMeasured', 'briefBytes') }),
+    new HarvestColumn({ name: 'role_bytes_attempts', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryIsOk('roleAttempts') }),
+    new HarvestColumn({ name: 'role_bytes_legacy', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryIsOk('roleLegacy') }),
+    new HarvestColumn({ name: 'agent_bytes', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryMeasured('roleMeasured', 'agentBytes') }),
+    new HarvestColumn({ name: 'skill_bytes', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryMeasured('roleMeasured', 'skillBytes') }),
+    new HarvestColumn({ name: 'package_bytes', type: HarvestColumn.INTEGER, mode: HarvestColumn.NULLABLE, valueOf: HarvestTable.#whenTelemetryMeasured('roleMeasured', 'packageBytes') }),
   ]
 
   static schemaJson() {

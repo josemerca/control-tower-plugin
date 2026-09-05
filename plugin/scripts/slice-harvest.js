@@ -1,6 +1,6 @@
 import { closingPrNumbers, harvestSlice } from './harvest.js'
 import { TelemetryStatus } from './harvest-table.js'
-import { aggregateBriefMeasures, aggregateVerdictMeasures, METRICS_REPO_DIR, metricsRepoRelPath } from './run-metrics.js'
+import { aggregateBriefMeasures, aggregateRoleBytesMeasures, aggregateVerdictMeasures, METRICS_REPO_DIR, metricsRepoRelPath } from './run-metrics.js'
 
 export const SliceRead = Object.freeze({
   ISSUE: 'gh issue view',
@@ -130,6 +130,7 @@ export class SliceHarvest {
     measuredVaraCtDocs: null, legacyVaraCtDocs: null, varaCtDocs: null,
     measuredFindingsVaraCt: null, legacyFindingsVaraCt: null, findingsVaraCt: null,
     briefAttempts: null, briefMeasured: null, briefLegacy: null, briefVaraCtDocs: null, briefBytes: null,
+    roleAttempts: null, roleMeasured: null, roleLegacy: null, agentBytes: null, skillBytes: null, packageBytes: null,
   })
 
   constructor({ gh }) {
@@ -198,6 +199,7 @@ export class SliceHarvest {
             path: rel,
             ...aggregateVerdictMeasures(telemetryAnswer.stdout),
             ...aggregateBriefMeasures(telemetryAnswer.stdout),
+            ...aggregateRoleBytesMeasures(telemetryAnswer.stdout),
           }
         }
       }
