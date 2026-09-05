@@ -605,8 +605,11 @@ describe('ct-init.sh', () => {
     expect(anterior.block).not.toMatch(/no es un criterio de aceptación más/i)
     expect(anterior.block).not.toContain('`estado-final`')
     // El otro documento que enseña la columna no puede quedarse atrás: quien
-    // groomea lee commands/ct-groom.md, no el AGENTS.md del repo destino.
-    const groom = readFileSync(join(root, 'commands', 'ct-groom.md'), 'utf8')
+    // groomea lee la referencia de /ct-groom, no el contrato del repo destino.
+    // Desde #93 esa referencia vive fuera del plugin, en docs/loop/ct-groom.md
+    // del repo (commands/ct-groom.md se quedó con la invocación y los exit
+    // codes), así que se lee de ahí.
+    const groom = readFileSync(join(root, '..', 'docs', 'loop', 'ct-groom.md'), 'utf8')
     expect(groom).toMatch(/no es un criterio de aceptación más/i)
     expect(groom).toContain('`estado-final`')
     // Slice 7: y el JUEZ mide con la MISMA regla, con las mismas palabras. El
