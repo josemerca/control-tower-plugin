@@ -280,6 +280,22 @@ export function fieldReadingGuide(meta, { blocked = false } = {}) {
   return `## Cómo leer estos campos\n${lines.join('\n')}`
 }
 
+// #95/H10 — los comentarios `#` del frontmatter no viajan en la hidratación.
+// La plantilla trae ~1.200 B de comentarios que explican los campos a quien
+// EDITA el fichero; a quien se hidrata se lo explica `fieldReadingGuide`, y
+// solo cuando aplica. Se filtra por LÍNEA y solo dentro del frontmatter: un `#`
+// dentro de un valor no empieza la línea, y los encabezados markdown del cuerpo
+// quedan fuera del bloque.
+const YAML_COMMENT_LINE = /^\s*#/
+
+function stripFrontmatterComments(stateText) {
+  const s = stateText.replace(/^﻿/, '').trimStart()
+  const m = s.match(FM)
+  if (!m) return s
+  const frontmatter = m[1].split(/\r?\n/).filter((line) => !YAML_COMMENT_LINE.test(line)).join('\n')
+  return `---\n${frontmatter}\n---\n${m[2]}`
+}
+
 export function composeHydration(stateText, gitLog, { stateRel = COORD_REL_PATH } = {}) {
   if (!stateText || !stateText.trim()) return ''
   const { meta, error } = parseStateSafe(stateText)
@@ -295,7 +311,7 @@ export function composeHydration(stateText, gitLog, { stateRel = COORD_REL_PATH 
   // slice— abría cada hidratación con una etiqueta falsa: exactamente la
   // confusión de fichero que esta ronda arregla, en el otro sentido.
   const titulo = stateRel === SLICE_REL_PATH ? 'Estado del slice' : 'Estado del repo'
-  parts.push(`# ${titulo} (hidratación automática)\n\n${stateText.trim()}`)
+  parts.push(`# ${titulo} (hidratación automática)\n\n${stripFrontmatterComments(stateText).trim()}`)
 
   const guide = fieldReadingGuide(meta, { blocked: blocked.state === 'blocked' })
   if (guide) parts.push(guide)

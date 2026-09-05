@@ -7378,6 +7378,17 @@ function fieldReadingGuide(meta, { blocked = false } = {}) {
   return `## C\xF3mo leer estos campos
 ${lines.join("\n")}`;
 }
+var YAML_COMMENT_LINE = /^\s*#/;
+function stripFrontmatterComments(stateText) {
+  const s = stateText.replace(/^﻿/, "").trimStart();
+  const m = s.match(FM);
+  if (!m) return s;
+  const frontmatter = m[1].split(/\r?\n/).filter((line) => !YAML_COMMENT_LINE.test(line)).join("\n");
+  return `---
+${frontmatter}
+---
+${m[2]}`;
+}
 function composeHydration(stateText, gitLog, { stateRel: stateRel2 = STATE_REL_PATH } = {}) {
   if (!stateText || !stateText.trim()) return "";
   const { meta, error } = parseStateSafe(stateText);
@@ -7388,7 +7399,7 @@ function composeHydration(stateText, gitLog, { stateRel: stateRel2 = STATE_REL_P
   const titulo = stateRel2 === SLICE_REL_PATH ? "Estado del slice" : "Estado del repo";
   parts.push(`# ${titulo} (hidrataci\xF3n autom\xE1tica)
 
-${stateText.trim()}`);
+${stripFrontmatterComments(stateText).trim()}`);
   const guide = fieldReadingGuide(meta, { blocked: blocked.state === "blocked" });
   if (guide) parts.push(guide);
   const log = (gitLog || "").trim();
