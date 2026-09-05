@@ -1054,11 +1054,15 @@ describe('el informe del implementador', () => {
     expect(readReport({ summary: 'ya está' }).why).toMatch(/rutas tocadas/)
   })
 
-  it('rechaza la misma ruta declarada dos veces: es un informe que no se entiende a sí mismo', () => {
-    const paths = ['src/a.js', 'src/a.js']
-    const r = readReport({ paths, summary: 'hecho' })
-    expect(r.report).toBeUndefined()
-    expect(r.why).toMatch(/misma ruta/)
+  // La misma ruta dos veces DESCARTABA el informe entero. Ya no: lo que se
+  // stagea no sale de esta lista sino de lo que el programa mide del árbol,
+  // así que un duplicado no deja nada indecidible — se cuenta una vez y se
+  // sigue. Descartar aquí costaba un informe entero, y uno de los seis
+  // descartes que matan el run, por una repetición que no cambia nada.
+  it('la misma ruta declarada dos veces ya no descarta el informe: se cuenta una vez', () => {
+    const r = readReport({ paths: ['src/a.js', 'src/a.js'], summary: 'hecho' })
+    expect(r.why).toBeUndefined()
+    expect(r.report.paths).toEqual(['src/a.js'])
   })
 
   it('el esquema del informe pide rutas y resumen, y nada más', () => {

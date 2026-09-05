@@ -55,9 +55,6 @@ class YardstickDocumentMother {
     return [null, { name: 'style.md', content: 'x' }]
   }
 
-  // El alcance NO se declara en una tabla de este módulo: se lee de la
-  // cabecera `Applies to:` del propio documento, así que la madre escribe
-  // documentos con cabecera, que es lo que hay en `conventions/`.
   static withScopes(scopes) {
     return Object.entries(scopes).map(([name, scope]) => ({
       name,
@@ -209,10 +206,6 @@ describe('PluginYardstick.composeSection', () => {
   })
 })
 
-// La lista que llega ya viene FILTRADA por alcance (`forTask`), así que
-// componer cuatro documentos es el camino normal de una tarea que no crea
-// ningún módulo, no media promesa. Lo que sigue siendo media promesa es un
-// documento que se pide y llega vacío, y una lista sin ningún documento.
 describe('PluginYardstick.composeSection composes the documents it is handed, however many', () => {
   it('composes_the_four_documents_of_a_task_that_creates_no_module', () => {
     const documentos = PluginYardstick.forTask(YardstickDocumentMother.theRealOnesOnDisk(), { creates: false })
@@ -222,10 +215,6 @@ describe('PluginYardstick.composeSection composes the documents it is handed, ho
   })
 })
 
-// Quien tiene `Read` no necesita el texto pegado: le basta la RUTA. Es el
-// mismo criterio con el que ya viajan el diff y los logs, y es lo que separa
-// al implementador (que recibe el texto) del juez y del reconciliador (que
-// reciben la ruta y abren lo que van a citar).
 describe('PluginYardstick.composePathSection hands the documents by path to whoever can Read them', () => {
   const documentos = [
     { name: 'style.md', content: 'x', path: '/plugin/conventions/style.md' },
@@ -247,9 +236,6 @@ describe('PluginYardstick.composePathSection hands the documents by path to whoe
     expect(PluginYardstick.composePathSection(documentos)).toContain(header.trim())
   })
 
-  // Medido sobre las LÍNEAS DE LA LISTA y no sobre el texto entero: la
-  // cabecera de precedencia nombra `conventions/style.md` en su caso de
-  // calibración, y una búsqueda a pelo casaría con esa mención.
   it('keeps_the_declared_order', () => {
     const lista = PluginYardstick.composePathSection(documentos)
       .split('\n').filter((linea) => linea.startsWith('- `'))
@@ -314,10 +300,6 @@ describe('the precedence header carries both sides of the rule', () => {
   })
 })
 
-// LA REGLA NO SE REPITE EN NINGÚN TEXTO EN INGLÉS: se cita. Antes viajaba
-// entera en los dos —el juez la leía tres veces en una sola llamada— y lo que
-// dos copias compran es que diverjan; la del backend divergió de verdad. Cada
-// texto dice ahora DÓNDE está y que se aplica tal cual está escrita.
 describe('neither English text repeats the precedence rule: both point at the one place it is written', () => {
   const TARGET_FILES = {
     'agents/ct-judge.md': join(root, 'agents', 'ct-judge.md'),
@@ -373,10 +355,6 @@ describe('the patrones item measures both yardsticks', () => {
     expect(item()).toContain('no-aplica')
   })
 
-  // Los documentos ya no se enumeran aquí: los enumera el paquete, con la
-  // ruta de cada uno y sólo los que alcanzan a la tarea. Lo que este ítem
-  // sigue exigiendo es lo que no puede venir del paquete: que el hallazgo cite
-  // el documento y la regla.
   it('requires_citing_the_document_and_the_rule_in_the_evidence', () => {
     expect(item()).toContain('evidence')
     expect(item()).toContain(`${PluginYardstick.DIRECTORY}/`)
@@ -428,10 +406,6 @@ describe('the implementer and the judge read the same text', () => {
     for (const text of readImplementerAndJudge()) expect(text).toContain('.agent/conventions.md')
   })
 
-  // El implementador ESCRIBE el módulo, así que a él se le dice entera la
-  // frase que cierra la exención; el juez la mide desde el otro lado (un
-  // concepto nuevo escondido en un fichero viejo ES hallazgo), y ninguno de
-  // los dos enuncia ya la precedencia.
   it('the_implementer_carries_the_full_phrase_that_closes_the_old_module_exemption', () => {
     const [implementador] = readImplementerAndJudge()
     expect(implementador).toContain('a new concept is a new module and is born conforming')

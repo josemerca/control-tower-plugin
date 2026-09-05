@@ -57,7 +57,7 @@
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, writeSync, readdirSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative, resolve } from 'node:path'
 import { after, newRun, STEPS, OUTCOMES, RUN_STATES, DEFAULT_BUDGETS, outcomeOfReconcile, reconcileBudgetSpent } from './run-machine.js'
 import { extractTasks } from './plan-tasks.js'
 import { BranchReconciliation } from './branch-reconciliation.js'
@@ -920,6 +920,57 @@ function medidaDeBrief() {
   }
 }
 
+// LO QUE LA TAREA TOCÓ, MEDIDO CONTRA EL ÁRBOL PREVIO. `git status` compara el
+// worktree con HEAD, y HEAD es el commit de la tarea anterior: cada tarea
+// comitea el suyo, así que "lo que cambió desde HEAD" es exactamente "lo que
+// hizo esta tarea".
+//
+// `-z` y no la salida por defecto: la porcelana normal ENTRECOMILLA una ruta
+// con espacios o acentos (`"src/a\303\261o.js"`) y quien la parsee a mano
+// stagearía una ruta que no existe. Con `-z` cada entrada es literal y va
+// separada por NUL. Un renombrado trae DOS entradas —destino y origen— y las
+// dos hacen falta: sin el origen, el borrado no entra en el commit.
+//
+// SE FILTRA LO DEL PROPIO LOOP. El run escribe bajo `.agent/run-<n>` y la
+// maquinaria bajo `docs/superpowers/**` (`LOOP_ARTIFACT_PATTERNS`, la misma
+// lista que ya usa la reconciliación), y nada de eso lo tocó el implementador:
+// stagearlo metería el estado del run dentro del commit de la tarea. El
+// veredicto y la telemetría los stagea este programa por su cuenta, cada uno
+// en su momento.
+//
+// Y SE MANTIENE EL FILTRO DE SEGURIDAD de rutas absolutas o con `..`: git no
+// las produce, pero lo que se pasa a `git add` no se deja de comprobar por
+// venir de donde se espera.
+const rutaSegura = (p) => p !== '' && !p.startsWith('/') && !p.split('/').includes('..')
+
+// EL PLAN TAMPOCO ES TRABAJO DE LA TAREA. En un run de verdad vive bajo
+// `docs/superpowers/plans/**` y ya lo cubre `esRutaDeLaMaquinaria`, pero la
+// ruta la elige quien despacha y puede estar en cualquier sitio: se nombra
+// aquí desde `planPath`, que es el único sitio donde este programa la sabe.
+const esDelRun = (p) => {
+  const suyo = `${relative(repoRoot, workDir)}/`
+  return p === relative(repoRoot, stateFile) ||
+    p === relative(repoRoot, resolve(planPath)) ||
+    p.startsWith(suyo)
+}
+
+const rutasTocadas = () => {
+  const trozos = (git(['status', '--porcelain', '-z', '--untracked-files=all']) || '').split('\0')
+  const rutas = []
+  for (let i = 0; i < trozos.length; i++) {
+    const entrada = trozos[i]
+    if (!entrada) continue
+    const estado = entrada.slice(0, 2)
+    const ruta = entrada.slice(3)
+    if (estado.startsWith('R') || estado.startsWith('C')) {
+      const origen = trozos[++i]
+      if (origen) rutas.push(origen)
+    }
+    if (ruta) rutas.push(ruta)
+  }
+  return [...new Set(rutas)].filter((p) => rutaSegura(p) && !esDelRun(p) && !esRutaDeLaMaquinaria(p))
+}
+
 function verboReport() {
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del informe')
   const { report, why } = porLeer ? { why: porLeer } : readReport(valor)
@@ -937,16 +988,43 @@ function verboReport() {
     out(`informe descartado: ${why}`)
     return OUTCOMES.DISCARDED
   }
-  // Se stagea ANTES de medir: un control que lee el índice no ve un fichero
-  // nuevo sin stagear. Y ANTES de stagear, el índice se VACÍA (reset mixto:
-  // el worktree no se toca) — entre intentos el índice acumula: el intento 1
-  // pudo stagear una ruta fuera de alcance que el veto devolvió, y sin este
-  // reset esa versión viajaría dentro del commit del intento 2 sin que
-  // ningún control volviera a verla. Tras reset+add, el índice es
-  // EXACTAMENTE lo que el último informe declara — que es lo que se comitea.
-  const rutas = report.paths
+  // LAS RUTAS LAS MIDE EL PROGRAMA, y la declaración del implementador es una
+  // comprobación cruzada. Antes se stageaba lo que el informe declaraba: una
+  // ruta olvidada no llegaba al commit, una ruta declarada y no tocada era una
+  // mentira que nada detectaba, y una repetida descartaba el informe entero.
+  // `git status` contra el árbol previo a la tarea —el commit anterior, porque
+  // cada tarea comitea el suyo— sabe exactamente qué cambió.
+  //
+  // LA DECLARACIÓN NO SE TIRA: si difiere, se AVISA. Que el implementador crea
+  // haber tocado otra cosa de lo que tocó es información sobre el intento, y
+  // callarla sería perder la única lectura que este paso tenía de él. Lo que ya
+  // no hace es decidir.
+  // EL ÍNDICE SE VACÍA PRIMERO, y ahora eso además ordena la medida. El reset
+  // (mixto: el worktree no se toca) estaba aquí porque entre intentos el
+  // índice acumula — el intento 1 pudo stagear una ruta fuera de alcance que
+  // el veto devolvió, y sin él esa versión viajaría dentro del commit del
+  // intento 2 sin que ningún control volviera a verla.
+  //
+  // Y va ANTES de medir porque `git status` mira el índice tanto como el
+  // worktree: con el índice del intento anterior todavía puesto, un fichero
+  // stageado entonces y BORRADO después se lee como "añadido y borrado" y
+  // entraría en la lista aunque ya no exista. Medido: `git add` de esa ruta
+  // falla con `pathspec did not match` y el paso muere por excepción.
   git(['reset', '-q'])
-  git(['add', '--', ...rutas])
+  const rutas = rutasTocadas()
+  const soloDeclaradas = report.paths.filter((p) => !rutas.includes(p))
+  const soloMedidas = rutas.filter((p) => !report.paths.includes(p))
+  if (soloDeclaradas.length || soloMedidas.length) {
+    err(`aviso: lo que el implementador declara y lo que el árbol dice no coinciden. Se stagea lo MEDIDO.${soloMedidas.length ? ` Tocado y no declarado: ${soloMedidas.join(', ')}.` : ''}${soloDeclaradas.length ? ` Declarado y no tocado: ${soloDeclaradas.join(', ')}.` : ''}`)
+  }
+  // Se stagea ANTES de medir los controles: uno que lee el índice no ve un
+  // fichero nuevo sin stagear. Tras reset+add, el índice es EXACTAMENTE lo que
+  // el árbol dice que cambió — que es lo que se comitea.
+  //
+  // Sin rutas no se llama a `git add`: `git add --` sin ruta detrás no añade
+  // nada y avisa por su cuenta, y el índice vacío ya es la respuesta correcta
+  // a una tarea que no tocó nada — los controles la miden igual.
+  if (rutas.length) git(['add', '--', ...rutas])
   // `lastPaths` alimenta el `--` de un `git grep` en `testsDeclarados`, que
   // acota el ámbito de esa comprobación a lo que la tarea stageó — la
   // propiedad más frágil de todo esto (ver el commit que la arregló, e4cc3dc).

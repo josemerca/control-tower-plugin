@@ -3,10 +3,6 @@ export class PluginYardstick {
 
   static FILES = ['defects.md', 'style.md', 'decisions.md', 'architecture.md', 'testing.md']
 
-  // El encabezado con el que la vara por ruta entra en un paquete. Es una
-  // constante y no una cadena tecleada dos veces por lo mismo que
-  // PACKAGE_SECTIONS: la rúbrica del juez lo cita por su nombre, y un
-  // encabezado renombrado aquí lo dejaría señalando una sección que no existe.
   static PATH_SECTION = 'Vara de ct'
 
   static #PRECEDENCE_HEADER = [
@@ -38,21 +34,10 @@ export class PluginYardstick {
     '> resuelve dejando la tarea en rojo.',
   ]
 
-  // La cabecera tal cual entra en un artefacto: separada de lo que venía antes.
   static #headerLines() {
     return ['', '---', '', ...PluginYardstick.#PRECEDENCE_HEADER, '']
   }
 
-  // EL ALCANCE LO DECLARA EL DOCUMENTO, no una tabla de este módulo. Cada
-  // documento de `conventions/` abre con una línea `Applies to:` —
-  // `architecture.md` dice **new modules**, los otros cuatro **every diff**—
-  // y eso es lo que se lee: una tabla aquí sería la misma decisión escrita dos
-  // veces (`conventions/decisions.md`), y el día que un documento nuevo
-  // declarara su alcance nadie se acordaría de venir a copiarlo.
-  //
-  // Se normaliza el énfasis y el punto final porque la cabecera se escribe en
-  // markdown ("Applies to: **new modules**.") y lo que decide es el texto, no
-  // los asteriscos.
   static #SCOPE_LINE = /^Applies to:\s*(.+)$/m
 
   static #NEW_MODULES = /new modules/i
@@ -64,18 +49,12 @@ export class PluginYardstick {
     return scope === '' ? null : scope
   }
 
-  // UN DOCUMENTO QUE NO DECLARA ALCANCE VIAJA SIEMPRE. La alternativa
-  // —dejarlo fuera— haría que añadir un documento sin cabecera lo dejara mudo
-  // en silencio, y este módulo aborta antes que medir contra nada.
   static appliesToTask(document, { creates }) {
     const scope = PluginYardstick.scopeOf(document?.content)
     if (scope === null) return true
     return PluginYardstick.#NEW_MODULES.test(scope) ? Boolean(creates) : true
   }
 
-  // `creates`: si la tarea declara alguna ruta `(create)` en sus **Files:**.
-  // Es lo único de la tarea que este módulo necesita saber, y quien lo mide es
-  // quien tiene el plan delante (ct-step.mjs).
   static forTask(documents, { creates }) {
     return (Array.isArray(documents) ? documents : [])
       .filter((document) => PluginYardstick.appliesToTask(document, { creates }))
@@ -92,28 +71,12 @@ export class PluginYardstick {
     })
   }
 
-  // LO QUE LLEGA YA VIENE FILTRADO POR ALCANCE (`forTask`), así que componer
-  // cuatro documentos es el camino normal de una tarea que no crea ningún
-  // módulo — no media promesa. Lo que sigue siendo media promesa, y por eso
-  // sigue abortando, es un documento que se pide y llega vacío (medir contra
-  // nada no se distingue en silencio de medir contra la regla) y una lista sin
-  // ningún documento que componer: un encabezado que no lleva nada detrás.
-  //
-  // Que estén los CINCO en el plugin se comprueba aparte, con
-  // `missingDocuments`, y lo hace quien los lee del disco (ct-step.mjs): una
-  // instalación rota se aborta antes de filtrar nada.
   static #blankDocuments(documents) {
     return (Array.isArray(documents) ? documents : [])
       .filter((document) => typeof document?.content !== 'string' || document.content.trim() === '')
-      .map((document) => document?.name ?? '(sin nombre)')
+      .map((document) => document?.name ?? '(unnamed)')
   }
 
-  // LA CABECERA, EXPORTADA. Es la ÚNICA fuente de la regla de precedencia y de
-  // qué documentos alcanzan a qué, y quien la necesita fuera de un brief la
-  // pide aquí en vez de volver a escribirla: el kickoff del backend
-  // (`backend/src/infrastructure/plan-agent-brief.js`) la escribía por su
-  // cuenta y su copia acabó diciendo lo contrario que ésta sobre
-  // `architecture.md`. Una regla, un sitio.
   static precedenceHeader() {
     return PluginYardstick.#PRECEDENCE_HEADER.join('\n')
   }
@@ -146,21 +109,10 @@ export class PluginYardstick {
     return sections.join('\n')
   }
 
-  // LA MISMA VARA, POR RUTA. Quien la recibe así —el juez y el
-  // reconciliador— tiene `Read`, que es el mismo criterio con el que ya le
-  // llegan el plan y los ficheros que el diff toca: pegarle 24 KB que puede
-  // abrir por su cuenta es material fijo delante del diff, no vara que llegue
-  // mejor.
-  //
-  // La CABECERA es la misma —una regla, una fuente— y por eso esto vive aquí
-  // y no en quien escribe cada paquete.
-  //
-  // La ruta la trae cada documento, no se compone aquí: este módulo es puro y
-  // no sabe dónde está instalado el plugin.
   static composePathSection(documents) {
     const ordered = PluginYardstick.#ordered(documents)
-    const sinRuta = ordered.filter((document) => typeof document.path !== 'string' || document.path.trim() === '')
-    if (sinRuta.length) PluginYardstick.#refuse(sinRuta.map((document) => document.name))
+    const withoutPath = ordered.filter((document) => typeof document.path !== 'string' || document.path.trim() === '')
+    if (withoutPath.length) PluginYardstick.#refuse(withoutPath.map((document) => document.name))
     return [
       ...PluginYardstick.#headerLines(),
       `## ${PluginYardstick.PATH_SECTION}`,

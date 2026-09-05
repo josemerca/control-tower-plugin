@@ -699,13 +699,15 @@ export function readReport(structured) {
   // ataque, no un dato de confianza.
   const fuera = paths.filter((p) => p.startsWith('/') || p.split('/').includes('..'))
   if (fuera.length) return { why: `el informe declara rutas fuera del worktree: ${fuera.join(', ')}` }
-  // La misma ruta dos veces es un informe que no se entiende a sí mismo: no
-  // hay forma de decidir cuál de las dos declaraciones vale. Mismo criterio
-  // que una ruta fuera del worktree: se descarta el informe entero, no se
-  // decide por él.
-  const repetidas = [...new Set(paths.filter((ruta, i, todas) => todas.indexOf(ruta) !== i))]
-  if (repetidas.length) return { why: `el informe declara la misma ruta más de una vez: ${repetidas.join(', ')}` }
-  return { report: { paths, summary } }
+  // La misma ruta dos veces YA NO DESCARTA. Descartaba cuando esta lista era
+  // la fuente de lo que se stagea: dos declaraciones de la misma ruta no se
+  // podían arbitrar. Desde que las rutas las MIDE el programa contra el árbol
+  // previo a la tarea, la lista es una comprobación cruzada, y en una
+  // comprobación un duplicado no deja nada indecidible: dice lo mismo dos
+  // veces. Descartar el informe entero —y gastar uno de los seis descartes que
+  // matan el run— por una repetición que no cambia nada era el precio más caro
+  // por el defecto más barato.
+  return { report: { paths: [...new Set(paths)], summary } }
 }
 
 // readE2eReport: el informe -> un OUTCOME. Validación a mano y no con una

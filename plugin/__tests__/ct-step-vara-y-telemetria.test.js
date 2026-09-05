@@ -2,7 +2,7 @@
 // por qué son nueve ficheros y no uno— está en fixtures/ct-step-harness.js.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { spawnSync, execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, cpSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync, cpSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -101,7 +101,7 @@ describe('un fallo de la telemetría no puede tumbar la tarea', () => {
     // veredicto que no puede viajar degrada el contrato de F37 y hay que verlo,
     // pero un run atascado no lo arregla — y el veredicto sigue en disco, en la
     // carpeta del run.
-    writeFileSync(join(repo, '.gitignore'), 'docs/superpowers/verdicts/\n')
+    appendFileSync(join(repo, '.gitignore'), 'docs/superpowers/verdicts/\n')
     execFileSync('git', ['add', '--', '.gitignore'], { cwd: repo })
     execFileSync('git', ['commit', '-q', '-m', 'ignora los veredictos'], { cwd: repo })
     const r = tareaOk('uno.txt')
@@ -119,7 +119,7 @@ describe('un fallo de la telemetría no puede tumbar la tarea', () => {
     // ignorado el que revienta primero es el `git add` del VEREDICTO, que es
     // código anterior a este cambio y tiene el mismo defecto — sale por 9 y deja
     // el run atascado. Ese hallazgo se reporta aparte; este test mide lo mío.
-    writeFileSync(join(repo, '.gitignore'), 'docs/superpowers/metrics/\n')
+    appendFileSync(join(repo, '.gitignore'), 'docs/superpowers/metrics/\n')
     // Solo el .gitignore: un `git add -A` se llevaría también `uno.txt`, y
     // entonces el control de ALCANCE vetaría la tarea (un `(create)` de un
     // fichero que ya está en el commit anterior) y el fallo sería otro.
@@ -137,7 +137,7 @@ describe('un fallo de la telemetría no puede tumbar la tarea', () => {
     // telemetría se pueden stagear — no hay commit del veredicto, pero el run
     // entrega: la evidencia que no viaja avisa, nunca bloquea un slice cuyo
     // trabajo ya está comiteado entero.
-    writeFileSync(join(repo, '.gitignore'), 'docs/superpowers/\n')
+    appendFileSync(join(repo, '.gitignore'), 'docs/superpowers/\n')
     execFileSync('git', ['add', '--', '.gitignore'], { cwd: repo })
     execFileSync('git', ['commit', '-q', '-m', 'ignora la evidencia'], { cwd: repo })
     tareaOk('uno.txt')
