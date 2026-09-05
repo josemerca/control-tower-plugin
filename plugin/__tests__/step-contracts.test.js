@@ -429,12 +429,18 @@ describe('quién puede qué', () => {
   // Slice 11 — el campo obligatorio tiene que estar en lo que el juez lee: un
   // campo que sólo vive en el validador descarta la corrida entera sin que
   // ninguno de los veredictos sea culpa del juez.
-  it('el bloque json de ct-judge.md enseña review_token: un campo que sólo vive en el validador descarta la corrida entera', () => {
-    expect(esquemaDelAgente()).toMatch(/"review_token"/)
+  // El campo lo escribe `ct-step verdict`, así que el bloque que el juez copia
+  // NO lo lleva: enseñárselo era pedirle 64 hex tecleados a mano, y un error
+  // de copia descartaba un veredicto entero de opus.
+  it('el bloque json de ct-judge.md ya no le pide el review_token: lo escribe el programa', () => {
+    expect(esquemaDelAgente()).not.toMatch(/"review_token"/)
   })
 
-  it('la rúbrica del juez dice de DÓNDE se copia el token, con la etiqueta exacta del paquete', () => {
-    expect(readFileSync(AGENTE_JUEZ, 'utf8')).toContain(`${REVIEW_TOKEN_LABEL}:`)
+  it('la rúbrica del juez le dice que ese campo no es suyo, nombrando la línea del paquete que ya no copia', () => {
+    const texto = readFileSync(AGENTE_JUEZ, 'utf8')
+    expect(texto).toContain(`${REVIEW_TOKEN_LABEL}:`)
+    expect(texto).toMatch(/There is no `review_token` for you to write/)
+    expect(texto).not.toMatch(/copied verbatim/)
   })
 
   it('PACKAGE_SECTIONS no puede divergir de los encabezados que la rúbrica cita por su nombre', () => {
@@ -522,9 +528,11 @@ describe('el juez de slice (§3.7-B)', () => {
     expect(esquema).toMatch(/"path"/)
   })
 
-  it('el bloque json de ct-slice-judge.md enseña review_token, y su rúbrica nombra la etiqueta', () => {
-    expect(esquemaDeAgente(AGENTE_JUEZ_DE_SLICE)).toMatch(/"review_token"/)
-    expect(readFileSync(AGENTE_JUEZ_DE_SLICE, 'utf8')).toContain(`${REVIEW_TOKEN_LABEL}:`)
+  it('el bloque json de ct-slice-judge.md tampoco le pide el review_token, y le dice quién lo escribe', () => {
+    expect(esquemaDeAgente(AGENTE_JUEZ_DE_SLICE)).not.toMatch(/"review_token"/)
+    const texto = readFileSync(AGENTE_JUEZ_DE_SLICE, 'utf8')
+    expect(texto).toContain(`${REVIEW_TOKEN_LABEL}:`)
+    expect(texto).toMatch(/There is no `review_token` for you to write/)
   })
 
   it('SLICE_PACKAGE_SECTIONS abre con Señal y no puede divergir de la rúbrica', () => {
@@ -555,8 +563,9 @@ describe('el juez de slice (§3.7-B)', () => {
 
   // Slice 11: mismo campo, mismo validador — `readSliceVerdict` es
   // `readVerdict` con otra rúbrica dentro, así que el token se exige igual.
-  it('el juez de slice valida el mismo campo, con el mismo readVerdict', () => {
-    expect(readSliceVerdict({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [] }).verdict).toBeUndefined()
+  it('el juez de slice valida el mismo campo, con el mismo readVerdict: ausente vale, con otra forma no', () => {
+    expect(readSliceVerdict({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [] }).verdict.review_token).toBeNull()
+    expect(readSliceVerdict({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [], review_token: 'x' }).verdict).toBeUndefined()
   })
 
   it('readSliceVerdict descarta un veredicto con una regla de TAREA (p. ej. "alcance")', () => {
@@ -950,15 +959,18 @@ describe('el veredicto', () => {
     expect(reviewTokenOf(null)).toBeNull()
   })
 
-  it('readVerdict exige el review_token, y el motivo nombra la línea de la que se copia', () => {
+  // EL TOKEN LO ESCRIBE EL PROGRAMA (`ct-step verdict` lo inyecta antes de
+  // validar), así que un veredicto que no lo trae NO se descarta: se acepta
+  // con el campo a null, y quien decide si ata a algún corte es ct-step, que
+  // es el único que puede leer el paquete.
+  it('un veredicto sin review_token se acepta: el campo lo escribe el programa, no el juez', () => {
     const r = readVerdict({ ruling: 'PASS', rubric: recorridoCompleto(), findings: [] })
-    expect(r.verdict).toBeUndefined()
-    expect(r.why).toContain(REVIEW_TOKEN_LABEL)
-    expect(r.why).toContain('review_token')
+    expect(r.why).toBeUndefined()
+    expect(r.verdict.review_token).toBeNull()
   })
 
-  it('un review_token que no es un sha256 de 64 hex se descarta', () => {
-    for (const malo of ['12', 'a'.repeat(63), 'z'.repeat(64), 123, null, undefined]) {
+  it('un review_token que no es un sha256 de 64 hex se descarta: no se puede comparar con nada', () => {
+    for (const malo of ['12', 'a'.repeat(63), 'z'.repeat(64), 123]) {
       expect(readVerdict({ ruling: 'PASS', rubric: recorridoCompleto(), findings: [], review_token: malo }).verdict).toBeUndefined()
     }
   })
@@ -974,9 +986,10 @@ describe('el veredicto', () => {
     expect(v('PASS').verdict.review_token).toBe(TOKEN)
   })
 
-  it('review_token está en VERDICT_SCHEMA.required, no sólo en el validador', () => {
-    expect(VERDICT_SCHEMA.required).toContain('review_token')
-    expect(SLICE_VERDICT_SCHEMA.required).toContain('review_token')
+  it('review_token NO está en el required del esquema: es campo del programa, no del juez', () => {
+    expect(VERDICT_SCHEMA.required).not.toContain('review_token')
+    expect(SLICE_VERDICT_SCHEMA.required).not.toContain('review_token')
+    expect(VERDICT_SCHEMA.properties.review_token).toBeDefined()
   })
 
   it('la FORMA del token la declara UNA constante: el pattern del esquema y el validador no divergen', () => {
@@ -988,6 +1001,10 @@ describe('el veredicto', () => {
     const pattern = VERDICT_SCHEMA.properties.review_token.pattern
     expect(SLICE_VERDICT_SCHEMA.properties.review_token.pattern).toBe(pattern)
     const re = new RegExp(pattern)
+    // `undefined` y `null` quedan fuera de la muestra a propósito: el esquema
+    // los trata como campo ausente (ya no es `required`) y el validador los
+    // acepta como el hueco que el programa rellena, así que no son un caso de
+    // la FORMA del token.
     for (const muestra of ['a'.repeat(64), 'A'.repeat(64), 'aB3'.repeat(21) + 'f', 'a'.repeat(63),
                            'a'.repeat(65), 'z'.repeat(64), '', `${'a'.repeat(64)}\n`, ` ${'a'.repeat(64)}`]) {
       const loDiceElEsquema = re.test(muestra)

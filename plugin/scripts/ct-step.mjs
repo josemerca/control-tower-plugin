@@ -508,11 +508,10 @@ function verboNext() {
       out(`  - el brief de la tarea: ${join(workDir, `task-${run.task}-brief.md`)}`)
       out(`  - los logs de los controles, YA en verde, por si los quiere: ${run.lastControlsLog ?? '(ninguno)'}`)
       out(`  - que escriba su veredicto en: ${veredicto}`)
-      // El token NO se imprime, sólo se dice de dónde se copia (D13): el sitio
-      // del que sale es el paquete que el juez lee, y poner el valor en la
-      // salida del conductor invita a parchear un veredicto en vez de
-      // redespachar al juez.
-      out(`  - y que COPIE en su veredicto, campo "review_token", el "${REVIEW_TOKEN_LABEL}:" con el que abre ese paquete: es lo que hace comprobable que su veredicto es sobre ESE código`)
+      // El `review_token` NO se le pide: lo escribe este programa al leer el
+      // veredicto, con el valor que él mismo calculó. Pedírselo al juez era
+      // pedirle que copiara 64 hex de una línea que el programa acaba de
+      // escribir, y un error de copia costaba un veredicto de opus entero.
       out('')
       out(`Cuando vuelva:  ct-step verdict ${veredicto} --plan ${planPath} --issue ${issue}`)
       out('No le pases la SALIDA de los controles: un lint sucio no debe ensuciarle el criterio.')
@@ -565,8 +564,7 @@ function verboNext() {
       out(`  - el log de la Global verification, YA en verde, por si lo quiere: ${run.lastGlobalLog ?? '(N/A declarado)'}`)
       out(`  - los veredictos de cada tarea, ya comiteados: docs/superpowers/verdicts/issue-${issue}-task-*.json`)
       out(`  - que escriba su veredicto en: ${veredicto}`)
-      out(`  - y que COPIE en su veredicto, campo "review_token", el "${REVIEW_TOKEN_LABEL}:" con el que abre ese paquete`)
-      out('')
+        out('')
       out(`Cuando vuelva:  ct-step slice-verdict ${veredicto} --plan ${planPath} --issue ${issue}`)
       break
     }
@@ -1491,6 +1489,22 @@ function verboGlobal() {
 // Un FAIL no deja veredicto trackeado, igual que en el juez de tarea: solo
 // viaja el que aprueba — el FAIL cierra el run y lo lee el humano en la
 // carpeta del run.
+// EL TOKEN LO ESCRIBE EL PROGRAMA, no el juez. `next` ya dicta la ruta del
+// veredicto y este verbo ya calculó el token del paquete y del corte de ahora:
+// pedirle al modelo que copie 64 hex de una línea que el programa acaba de
+// escribir era la cuarta cosa que sabía y aun así preguntaba, y un error de
+// copia descartaba un veredicto entero de opus y gastaba uno de los seis
+// descartes que matan el run.
+//
+// SE INYECTA SÓLO SI FALTA. Un veredicto que trae OTRO token se sigue
+// rechazando aguas abajo (`verdict.review_token !== token`): es defensa en
+// profundidad contra el fichero de un juicio anterior en la misma ruta, y
+// sobreescribirlo aquí desarmaría justo esa comprobación.
+const conTokenDelPrograma = (valor, token) =>
+  (valor && typeof valor === 'object' && !Array.isArray(valor) && valor.review_token === undefined)
+    ? { ...valor, review_token: token }
+    : valor
+
 function verboSliceVerdict() {
   // EL INSUMO ANTES QUE EL VEREDICTO, y por el mismo motivo que en
   // `verboVerdict` (ver el comentario largo de ahí, que es donde está el caso
@@ -1515,7 +1529,7 @@ function verboSliceVerdict() {
     return OUTCOMES.DISCARDED
   }
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del veredicto de slice')
-  const { verdict, why } = porLeer ? { why: porLeer } : readSliceVerdict(valor)
+  const { verdict, why } = porLeer ? { why: porLeer } : readSliceVerdict(conTokenDelPrograma(valor, token))
   if (!verdict) {
     medir('slice-judge', { outcome: 'discarded', why })
     out(`veredicto de slice descartado: ${why}`)
@@ -1656,7 +1670,7 @@ function verboVerdict() {
     return OUTCOMES.DISCARDED
   }
   const { valor, why: porLeer } = leerJson(process.argv[3], 'del veredicto')
-  const { verdict, why } = porLeer ? { why: porLeer } : readVerdict(valor)
+  const { verdict, why } = porLeer ? { why: porLeer } : readVerdict(conTokenDelPrograma(valor, token))
   if (!verdict) {
     medir('judge', { outcome: 'discarded', why })
     out(`veredicto descartado: ${why}`)
