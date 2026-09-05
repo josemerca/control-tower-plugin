@@ -625,6 +625,48 @@ export function describeStopRelation({ headSha, lastCommit, git, branch = '' }) 
   return { ...out, kind: 'diverged', containers, containersKnown, mergeBase: mb.status === 0 ? String(mb.stdout || '').trim() : '' }
 }
 
+// ===========================================================================
+// #95/H8 — UN AVISO QUE SALE SIEMPRE ES UN AVISO QUE NADIE LEE.
+//
+// Los cuatro avisos no bloqueantes (`ahead`, `diverged`, `orphan`, `unknown`)
+// salían en CADA cierre de turno mientras durase la anomalía. La insistencia
+// era deliberada —una condición estructural que alguien tiene que resolver— y
+// el precio se pagaba en brevedad. Pero la sentencia que la desmonta ya estaba
+// escrita en este mismo módulo, en la cabecera de `blocked`: la prosa que
+// siempre está se ignora, así que el turno 40 de una divergencia no informa de
+// nada, sólo cuesta.
+//
+// LO QUE SE CONSERVA: la anomalía no se hace invisible. El aviso vuelve al
+// cumplirse el periodo, y CUALQUIER cambio de la relación lo saca de nuevo sin
+// esperar — porque entonces es otra cosa lo que hay que contar.
+//
+// LA RELACIÓN ES EL PAR (tipo, commit del estado), no el tipo a secas: pasar de
+// divergir contra una rama a divergir contra otra es una anomalía distinta
+// aunque las dos se llamen `diverged`.
+//
+// FAIL OPEN, al revés que el guard de frescura, y la asimetría es a propósito:
+// aquí el fallo caro es CALLAR. Un marcador que no se puede leer, que trae otra
+// forma o que no se ha podido escribir se resuelve avisando.
+// ===========================================================================
+export const NOTICE_REPEAT_EVERY_TURNS = 10
+
+export const STOP_NOTICE_REL_NAME = 'stop-notice.json'
+
+export function noticeDecision({ relation, previous }) {
+  const next = (turns) => ({ kind: relation.kind, stateSha: relation.stateSha || '', turns })
+  const misma = previous
+    && typeof previous === 'object'
+    && !Array.isArray(previous)
+    && previous.kind === relation.kind
+    && (previous.stateSha || '') === (relation.stateSha || '')
+    && Number.isInteger(previous.turns)
+    && previous.turns > 0
+  if (!misma) return { emit: true, next: next(1) }
+  const turns = previous.turns + 1
+  if (turns > NOTICE_REPEAT_EVERY_TURNS) return { emit: true, next: next(1) }
+  return { emit: false, next: next(turns) }
+}
+
 const whereAmI = (rel) => (rel.branch ? `la rama \`${rel.branch}\`` : `HEAD (desprendido en ${shortSha(rel.headSha)})`)
 const livesIn = (rel) => (rel.containers?.length ? rel.containers.map((b) => `\`${b}\``).join(', ') : '')
 

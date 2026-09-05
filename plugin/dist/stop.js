@@ -2,7 +2,8 @@
 import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);
 
 // hooks/stop.js
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { dirname, join as join2, isAbsolute } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 
 // scripts/vendor/yaml.js
@@ -7242,6 +7243,13 @@ function resolveStatePath(cwd2) {
   if (existsSync(state)) return { path: state, kind: "coordinator", rel: STATE_REL_PATH };
   return { path: null, kind: "none", rel: null };
 }
+function excludeContentWith(current, rule) {
+  const text = current || "";
+  if (text.split("\n").some((l) => l.trim() === rule)) return { content: text, added: false };
+  const sep = text === "" || text.endsWith("\n") ? "" : "\n";
+  return { content: `${text}${sep}${rule}
+`, added: true };
+}
 
 // scripts/ct-step-commit.js
 var CtStepCommit = class _CtStepCommit {
@@ -7373,6 +7381,16 @@ function describeStopRelation({ headSha: headSha2, lastCommit, git: git2, branch
   const mb = git2(["merge-base", stateSha, headSha2]);
   return { ...out, kind: "diverged", containers, containersKnown, mergeBase: mb.status === 0 ? String(mb.stdout || "").trim() : "" };
 }
+var NOTICE_REPEAT_EVERY_TURNS = 10;
+var STOP_NOTICE_REL_NAME = "stop-notice.json";
+function noticeDecision({ relation: relation2, previous }) {
+  const next = (turns2) => ({ kind: relation2.kind, stateSha: relation2.stateSha || "", turns: turns2 });
+  const misma = previous && typeof previous === "object" && !Array.isArray(previous) && previous.kind === relation2.kind && (previous.stateSha || "") === (relation2.stateSha || "") && Number.isInteger(previous.turns) && previous.turns > 0;
+  if (!misma) return { emit: true, next: next(1) };
+  const turns = previous.turns + 1;
+  if (turns > NOTICE_REPEAT_EVERY_TURNS) return { emit: true, next: next(1) };
+  return { emit: false, next: next(turns) };
+}
 var whereAmI = (rel) => rel.branch ? `la rama \`${rel.branch}\`` : `HEAD (desprendido en ${shortSha(rel.headSha)})`;
 var livesIn = (rel) => rel.containers?.length ? rel.containers.map((b) => `\`${b}\``).join(", ") : "";
 function classifyStopState({ relation: relation2, stopHookActive, stateRel: stateRel2 = STATE_REL_PATH }) {
@@ -7483,8 +7501,47 @@ if (verdict.updateLastCommitTo) {
     }
   }
 }
+var noticeRel = `${dirname(stateRel)}/${STOP_NOTICE_REL_NAME}`;
+var noticePath = join2(dirname(statePath), STOP_NOTICE_REL_NAME);
+var noticeExcluded = () => {
+  const probe = git(["rev-parse", "--git-common-dir"]);
+  if (probe.status !== 0) return false;
+  const raw = probe.stdout.trim();
+  if (!raw) return false;
+  const base = isAbsolute(raw) ? raw : join2(cwd, raw);
+  try {
+    mkdirSync(join2(base, "info"), { recursive: true });
+    const excludePath = join2(base, "info", "exclude");
+    let current = "";
+    try {
+      current = readFileSync(excludePath, "utf8");
+    } catch {
+      current = "";
+    }
+    const next = excludeContentWith(current, noticeRel);
+    if (next.added) writeFileSync(excludePath, next.content);
+    return true;
+  } catch {
+    return false;
+  }
+};
+var readNotice = () => {
+  try {
+    return JSON.parse(readFileSync(noticePath, "utf8"));
+  } catch {
+    return null;
+  }
+};
 if (verdict.block) {
   process.stdout.write(JSON.stringify({ decision: "block", reason: verdict.reason }));
 } else if (verdict.systemMessage) {
-  process.stdout.write(JSON.stringify({ systemMessage: verdict.systemMessage }));
+  const { emit, next } = noticeDecision({ relation, previous: readNotice() });
+  if (noticeExcluded()) {
+    try {
+      writeFileSync(noticePath, `${JSON.stringify(next)}
+`);
+    } catch {
+    }
+  }
+  if (emit) process.stdout.write(JSON.stringify({ systemMessage: verdict.systemMessage }));
 }
