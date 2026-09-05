@@ -10,9 +10,6 @@ export class PluginYardstick {
   static PATH_SECTION = 'Vara de ct'
 
   static #PRECEDENCE_HEADER = [
-    '',
-    '---',
-    '',
     '> **La vara de ct**, leída del directorio `conventions/` del plugin por el',
     '> programa: ningún agente la escribió en este brief y el plan no puede',
     '> quitarla. Cada documento declara su alcance en su propia cabecera',
@@ -39,8 +36,12 @@ export class PluginYardstick {
     '> documentos diga otra cosa: seguir a ct y dejar la verificación en rojo no es',
     '> una salida. Un choque real de ese tipo se **declara en el informe**, no se',
     '> resuelve dejando la tarea en rojo.',
-    '',
   ]
+
+  // La cabecera tal cual entra en un artefacto: separada de lo que venía antes.
+  static #headerLines() {
+    return ['', '---', '', ...PluginYardstick.#PRECEDENCE_HEADER, '']
+  }
 
   // EL ALCANCE LO DECLARA EL DOCUMENTO, no una tabla de este módulo. Cada
   // documento de `conventions/` abre con una línea `Applies to:` —
@@ -107,6 +108,16 @@ export class PluginYardstick {
       .map((document) => document?.name ?? '(sin nombre)')
   }
 
+  // LA CABECERA, EXPORTADA. Es la ÚNICA fuente de la regla de precedencia y de
+  // qué documentos alcanzan a qué, y quien la necesita fuera de un brief la
+  // pide aquí en vez de volver a escribirla: el kickoff del backend
+  // (`backend/src/infrastructure/plan-agent-brief.js`) la escribía por su
+  // cuenta y su copia acabó diciendo lo contrario que ésta sobre
+  // `architecture.md`. Una regla, un sitio.
+  static precedenceHeader() {
+    return PluginYardstick.#PRECEDENCE_HEADER.join('\n')
+  }
+
   static #refuse(missing) {
     throw new Error(
       `PluginYardstick.composeSection: cannot compose the ct yardstick without ${missing.join(', ')}. ` +
@@ -127,7 +138,7 @@ export class PluginYardstick {
   }
 
   static composeSection(documents) {
-    const sections = [...PluginYardstick.#PRECEDENCE_HEADER]
+    const sections = PluginYardstick.#headerLines()
     for (const document of PluginYardstick.#ordered(documents)) {
       const body = document.content.endsWith('\n') ? document.content : `${document.content}\n`
       sections.push(`## Vara de ct: ${PluginYardstick.DIRECTORY}/${document.name}`, '', body)
@@ -151,7 +162,7 @@ export class PluginYardstick {
     const sinRuta = ordered.filter((document) => typeof document.path !== 'string' || document.path.trim() === '')
     if (sinRuta.length) PluginYardstick.#refuse(sinRuta.map((document) => document.name))
     return [
-      ...PluginYardstick.#PRECEDENCE_HEADER,
+      ...PluginYardstick.#headerLines(),
       `## ${PluginYardstick.PATH_SECTION}`,
       '',
       'No van pegados: ábrelos con `Read`, y cita el documento y la regla de la que hables.',

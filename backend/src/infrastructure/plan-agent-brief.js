@@ -1,7 +1,7 @@
 import { SLICE_REL_PATH } from '../../../plugin/scripts/state-paths.js'
+import { PluginYardstick } from '../../../plugin/scripts/plugin-yardstick.js'
 
 export class PlanAgentBrief {
-  static DOCUMENTS = 'defects.md, style.md, decisions.md, architecture.md, testing.md'
   static NO_NEW_WORKTREES = 'no crees worktrees nuevos'
   static WHITESPACE = /\s+/g
   static EPIC_CONTEXT = 'Contexto del epic'
@@ -24,9 +24,9 @@ export class PlanAgentBrief {
       'Arranque verification-first: confirma pwd, rama y git log, y deja el baseline en verde ANTES de tocar nada.',
       `Hidrátate del issue: \`gh issue view ${issue.number} --repo ${named}\`. Sus criterios de aceptación y su sección "## Out of scope / Protected" son la entrada del plan.`,
       `Lee también sus secciones "${PlanAgentBrief.EPIC_CONTEXT}" y "${PlanAgentBrief.INHERITED_CONTEXT}": traen lo que condiciona este trabajo y no cabe en los criterios de aceptación. Si están vacías o no aparecen, no hay nada que heredar y no lo busques fuera del issue.`,
-      `Lee la vara de Control Tower: los cinco documentos de ${conventions} (${PlanAgentBrief.DOCUMENTS}).`,
-      'Esa vara tiene PREFERENCIA sobre las convenciones de este repo, y se mide regla a regla, no por tema: donde una regla del repo manda lo que uno de esos cinco documentos prohíbe, o prohíbe lo que uno manda, no aplica; donde el repo habla de algo de lo que ninguno habla —mayúsculas, prefijos, nombres de fichero—, obliga entera y la sigues. Y la vara del repo no desaparece: la sigues seleccionando en el `Rules to obey:` de la §3 de tu plan. No busques esta regla en el `AGENTS.md` de este repo: puede no traerla, y entonces la que vale es esta línea.',
-      'Con una excepción, y es la única regla de la vara que este encargo cambia: la vara de arquitectura se aplica SIEMPRE, también a lo que añadas a un módulo que ya existía y nunca la cumplió. Su cabecera `Applies to: new modules` y su deuda declarada NO valen en este carril —esta línea las pisa—, y eso lo decides al repartir los ficheros de cada tarea.',
+      `La vara de Control Tower vive en ${conventions} y el programa la lleva a cada tarea: al implementador pegada, al juez por ruta. Lo que tu plan selecciona es la vara del REPO, en el \`Rules to obey:\` de su §3; de ${conventions} abre el documento que necesites para decidir algo concreto, no los cinco por delante.`,
+      'Cómo se relacionan las dos cuando chocan lo dice la cabecera con la que esa vara viaja, y va aquí entera porque el `AGENTS.md` de este repo puede no traerla. Es el único sitio donde esa regla está escrita: aplícala tal cual, no la reinterpretes ni la reescribas en tu plan.',
+      PluginYardstick.precedenceHeader(),
       'Escribe el plan con control-tower-loop:writing-plans-prescriptive, usando el issue como spec.',
       `Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${issue.number}-<slug>.md.`,
       `Valídalo con \`node ${dispatchCheck} ${issue.number} --repo ${named} --check-plan\` hasta exit 0.`,
