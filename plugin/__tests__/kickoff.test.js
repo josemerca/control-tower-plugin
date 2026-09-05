@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { renderKickoff, buildStateSeed, ADDENDA, SENAL_AUSENTE } from '../scripts/kickoff.js'
+import { BaselineOutcome, BaselineResult } from '../scripts/baseline.js'
 import { parseState } from '../scripts/state.js'
 
 const SLICE = { n: 7, name: 'refresh token', type: 'backend', ac: ['AC-7.1'], deps: [1], issue: '#7' }
@@ -413,5 +414,37 @@ describe('el primer acto nombra la vara de ct', () => {
     expect(k).toMatch(/no por tema/i)
     expect(k).toMatch(/prohíbe lo que uno de esos documentos manda/i)
     expect(k).toMatch(/obliga entera/i)
+  })
+})
+
+// #96 — el baseline lo mide el programa (scripts/baseline.js) al preparar el
+// worktree, y viaja en la semilla como DATO: el agente lo lee, no lo ejecuta
+// para afirmarlo. El kickoff deja de ordenarlo y pasa a señalar dónde está.
+describe('buildStateSeed — baseline medido por el dispatcher, no afirmado por el agente (#96)', () => {
+  it('siembra `baseline:` con el resultado, el comando y el resumen que le pasan', () => {
+    const baseline = new BaselineResult({ outcome: BaselineOutcome.RED, command: 'npm test', summary: 'exit 1 · 2 failed' })
+    const seed = buildStateSeed(SLICE, { branch: 'feat/7', base: 'main', baseSha: 'abc', baseline })
+    expect(seed).toMatch(/^baseline:$/m)
+    expect(parseState(seed).meta.baseline).toEqual({ outcome: 'rojo', command: 'npm test', summary: 'exit 1 · 2 failed' })
+  })
+
+  it('sin baseline medido, el campo declara la ausencia como no-verificado en vez de omitirse', () => {
+    const { meta } = parseState(buildStateSeed(SLICE, { branch: 'feat/7', base: 'main' }))
+    expect(meta.baseline.outcome).toBe(BaselineOutcome.UNVERIFIED)
+    expect(meta.baseline.command).toBe(null)
+    expect(meta.baseline.summary).toMatch(/nadie/)
+  })
+})
+
+describe('renderKickoff — el baseline está en la semilla, no en una orden al agente (#96)', () => {
+  const kickoff = () => renderKickoff(SLICE, { repo: 'o/r', dispatchCheckPath: '/x/d.mjs', conventionsDir: '/plugin/conventions' })
+
+  it('ya no manda confirmar pwd/rama ni dejar el baseline en verde antes de tocar nada', () => {
+    expect(kickoff()).not.toMatch(/baseline verde ANTES/)
+    expect(kickoff()).not.toMatch(/confirma pwd\/rama/)
+  })
+
+  it('señala el campo `baseline:` de .agent/SLICE.md como el sitio donde ya está medido', () => {
+    expect(kickoff()).toMatch(/`baseline:`.*\.agent\/SLICE\.md/)
   })
 })

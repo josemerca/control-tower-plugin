@@ -247,6 +247,15 @@ function main() {
     // un artefacto del stub, no del git real que simula.
     const wt = argv[argv.indexOf('-b') + 2]
     mkdirSync(wt, { recursive: true })
+    // FAKE_GIT_WORKTREE_ADD_AGENTS_MD (#96): el contenido del AGENTS.md que el
+    // checkout del worktree traería consigo. El git real deja ahí el árbol
+    // entero del repo; este stub solo materializa el fichero del que
+    // ct-next.mjs lee el comando de test del baseline (scripts/baseline.js),
+    // que es lo único del árbol que ese paso mira. Sin la variable no hay
+    // AGENTS.md, que es el caso "repo sin comando de test declarado".
+    if (process.env.FAKE_GIT_WORKTREE_ADD_AGENTS_MD) {
+      writeFileSync(`${wt}/AGENTS.md`, process.env.FAKE_GIT_WORKTREE_ADD_AGENTS_MD)
+    }
     process.exit(0)
   }
 
