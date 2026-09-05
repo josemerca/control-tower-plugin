@@ -2,17 +2,19 @@
 // por qué son nueve ficheros y no uno— está en fixtures/ct-step-harness.js.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { spawnSync, execFileSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, cpSync, symlinkSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, cpSync, symlinkSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { PluginYardstick } from '../scripts/plugin-yardstick.js'
+import { RoleBytes } from '../scripts/role-bytes.js'
+import { STEPS } from '../scripts/run-machine.js'
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
 import { crearHelpers, montarRepo, PLUGIN_ROOT_TEST } from './fixtures/ct-step-harness.js'
 
 let repo
 const { ct, informe, veredicto, veredictoDeSlice, log, commits, estado, juzgar,
-  juzgarSlice, tareaOk } = crearHelpers(() => repo)
+  juzgarSlice, tareaOk, paqueteDeTarea, paqueteDeSlice, filasDeJuez, sellar } = crearHelpers(() => repo)
 
 beforeEach(() => { repo = montarRepo() })
 afterEach(() => { rmSyncBestEffort(repo) })
@@ -252,5 +254,90 @@ describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
     } finally {
       rmSyncBestEffort(fake)
     }
+  })
+})
+
+// H7a (#92): la telemetría anotaba `brief_bytes` del paso `implement` y nada
+// más. El tamaño del agente despachado, el de las skills que su prompt le manda
+// cargar y el del paquete que recibe no se medían, así que el ahorro de
+// contexto por slice era una opinión. Los tres campos se miden sobre el fichero
+// que EXISTE en disco, nunca sobre lo que el programa pretendía escribir.
+describe('cada papel despachado anota lo que le costó leer, en bytes', () => {
+  const bytesEnElPlugin = (relativa) => statSync(join(PLUGIN_ROOT_TEST, relativa)).size
+  const delAgente = (paso) => bytesEnElPlugin(RoleBytes.filesOf(paso)[0])
+  const deLasSkills = (paso) => RoleBytes.filesOf(paso).slice(1).reduce((suma, r) => suma + bytesEnElPlugin(r), 0)
+
+  it('la fila de `implement` trae el agente, las skills que su prompt ordena cargar y el brief que se le entregó', () => {
+    ct('next')
+    const brief = join(repo, '.agent', 'run-7', 'task-1-brief.md')
+    const bytesDelBrief = statSync(brief).size
+    ct('report', informe(['uno.txt']))
+    const fila = filasDeJuez('implement').at(-1)
+    expect(fila.agent_bytes).toBe(delAgente(STEPS.IMPLEMENT))
+    expect(fila.skill_bytes).toBe(deLasSkills(STEPS.IMPLEMENT))
+    expect(fila.package_bytes).toBe(bytesDelBrief)
+    expect(fila.agent_bytes).toBeGreaterThan(0)
+    expect(fila.skill_bytes).toBeGreaterThan(0)
+  })
+
+  // La copia inevitable de `conventions/decisions.md`: `brief_bytes` y
+  // `package_bytes` miden el MISMO fichero del paso `implement`, uno leyendo su
+  // contenido y el otro preguntándole el tamaño al sistema de ficheros. Se
+  // declara aquí y se mide, para que el día que una de las dos deje de mirar el
+  // brief falle este test y no una lectura de la tabla tres meses después.
+  it('en `implement`, el paquete es el brief: las dos columnas miden el mismo fichero y no pueden divergir', () => {
+    ct('report', informe(['uno.txt']))
+    const fila = filasDeJuez('implement').at(-1)
+    expect(fila.package_bytes).toBe(fila.brief_bytes)
+  })
+
+  it('la fila del juez trae el agente, su skill y el paquete de revisión que juzgó', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    const bytesDelPaquete = statSync(paqueteDeTarea()).size
+    const v = veredicto('PASS')
+    sellar(v, paqueteDeTarea())
+    expect(ct('verdict', v).status).toBe(0)
+    const fila = filasDeJuez('judge').at(-1)
+    expect(fila.agent_bytes).toBe(delAgente(STEPS.JUDGE))
+    expect(fila.skill_bytes).toBe(deLasSkills(STEPS.JUDGE))
+    expect(fila.package_bytes).toBe(bytesDelPaquete)
+    expect(fila.agent_bytes).toBeGreaterThan(0)
+    expect(fila.skill_bytes).toBeGreaterThan(0)
+    expect(fila.package_bytes).toBeGreaterThan(0)
+  })
+
+  it('el juez de slice no carga ninguna skill: su fila anota cero, que no es lo mismo que no haberlo medido', () => {
+    tareaOk('uno.txt')
+    tareaOk('dos.txt')
+    ct('reconcile')
+    ct('global')
+    ct('next')
+    const bytesDelPaquete = statSync(paqueteDeSlice()).size
+    const v = veredictoDeSlice('PASS')
+    sellar(v, paqueteDeSlice())
+    expect(ct('slice-verdict', v).status).toBe(0)
+    const fila = filasDeJuez('slice-judge').at(-1)
+    expect(fila.agent_bytes).toBe(delAgente(STEPS.SLICE_JUDGE))
+    expect(fila.skill_bytes).toBe(0)
+    expect(fila.package_bytes).toBe(bytesDelPaquete)
+  })
+
+  it('un veredicto descartado no nombra ningún insumo, tampoco su tamaño', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('verdict', veredicto('PASS'))
+    const fila = filasDeJuez('judge').at(-1)
+    expect(fila.outcome).toBe('discarded')
+    expect(Object.hasOwn(fila, 'agent_bytes')).toBe(false)
+  })
+
+  it('sin paquete de reconciliación en el directorio del run, la fila de `reconcile` no inventa el coste de un papel que nadie despachó', () => {
+    tareaOk('uno.txt')
+    tareaOk('dos.txt')
+    expect(ct('reconcile').status).toBe(0)
+    const fila = filasDeJuez('reconcile').at(-1)
+    expect(Object.hasOwn(fila, 'agent_bytes')).toBe(false)
   })
 })

@@ -54,7 +54,7 @@
 //   (`agents/ct-judge.md`, declarado sin `Bash`), no porque un flag se lo quite.
 // ============================================================================
 
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, writeSync, readdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, unlinkSync, writeSync, readdirSync, statSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { dirname, join } from 'node:path'
@@ -75,6 +75,7 @@ import {
   REVIEW_TOKEN_LABEL, reviewToken, reviewTokenLine, reviewTokenOf,
 } from './step-contracts.js'
 import { metricRow, metricLine, metricsPath, planSha256, verdictMeasures, metricsRepoRelPath, briefVaraCtMeasures } from './run-metrics.js'
+import { RoleBytes } from './role-bytes.js'
 // Slice 10: parseStateSafe lee el campo `senal:` del SLICE.md (ver
 // senalDelSlice, abajo, para por qué NO vale la regex de `epic:`), y
 // SENAL_AUSENTE es la constante ÚNICA con la que los dos escritores del canal
@@ -888,13 +889,66 @@ function leerJson(ruta, quien) {
 // Si el brief no se puede leer, los dos campos van a `null`, nunca a `0`: un
 // cero afirmaría un brief sin vara, y lo que ha pasado es que no se ha podido
 // mirar.
+function rutaDelBrief() {
+  return join(workDir, `task-${run.task}-brief.md`)
+}
+
 function medidaDeBrief() {
   try {
-    const brief = join(workDir, `task-${run.task}-brief.md`)
-    return briefVaraCtMeasures(readFileSync(brief, 'utf8'))
+    return briefVaraCtMeasures(readFileSync(rutaDelBrief(), 'utf8'))
   } catch {
     return { brief_vara_ct_docs: null, brief_bytes: null }
   }
+}
+
+// LO QUE LE COSTÓ AL PAPEL LEER LO QUE SE LE MANDÓ (#92). `brief_bytes` medía
+// una sola de las cuatro llamadas al modelo, así que la mitad fija del contexto
+// —el fichero del agente y las skills que su prompt le ordena cargar— no estaba
+// en ninguna columna: el ahorro por slice se afirmaba sin medida.
+//
+// Misma doctrina que `medidaDeBrief`: se mide el fichero que EXISTE en disco,
+// nunca lo que el programa pretendía escribir, y un fichero que no se puede
+// medir vale `null` y jamás `0` — un cero afirmaría un papel despachado sin
+// material. Por eso el puerto que RoleBytes recibe devuelve `null` en vez de
+// lanzar: quien decide qué significa la ausencia es la medida, no `statSync`.
+const roleBytes = new RoleBytes({
+  pluginRoot: PLUGIN_ROOT,
+  sizeOf: (ruta) => {
+    try {
+      return statSync(ruta).size
+    } catch {
+      return null
+    }
+  },
+})
+
+function medidaDePapel(step, paquete) {
+  return { ...roleBytes.measuresOf({ step, packagePath: paquete }) }
+}
+
+// Los paquetes de reconciliación que este run ya escribió, del primero al
+// último. Los lee `proximoIntentoDeReconciliacion` para numerar el siguiente y
+// la medida del paso para saber CUÁL leyó el reconciliador de esta ronda: el
+// último escrito. Una sola lista y no dos recorridos del directorio con la
+// misma expresión, que es la copia que acabaría numerando por un criterio y
+// midiendo por otro.
+function paquetesDeReconciliacion() {
+  try {
+    return readdirSync(workDir).filter((f) => /^reconcile-package-\d+\.md$/.test(f))
+      .sort((a, b) => Number(/(\d+)/.exec(a)[1]) - Number(/(\d+)/.exec(b)[1]))
+  } catch {
+    return []
+  }
+}
+
+// Una ronda de reconcile en la que todavía no hay paquete es una ronda en la
+// que NADIE despachó a `ct-reconciler`: la fila no lleva los tres campos, y no
+// los lleva a `null` sino AUSENTES, porque un null aquí diría "se intentó medir
+// el material de un papel que corrió" y lo que pasó es que el papel no corrió.
+function medidaDePapelDeReconcile() {
+  const previos = paquetesDeReconciliacion()
+  if (previos.length === 0) return {}
+  return medidaDePapel(STEPS.RECONCILE, join(workDir, previos.at(-1)))
 }
 
 function verboReport() {
@@ -909,6 +963,9 @@ function verboReport() {
     why: report ? null : why,
     summary: report ? report.summary : null,
     ...medidaDeBrief(),
+    // También cuando el informe se descarta: el implementador SE DESPACHÓ y
+    // leyó su material igual, así que ese coste existió y la fila lo dice.
+    ...medidaDePapel(STEPS.IMPLEMENT, rutaDelBrief()),
   })
   if (!report) {
     out(`informe descartado: ${why}`)
@@ -1260,8 +1317,7 @@ function logDeLaBase(rama) {
 // llamada que va a dispatchar a `ct-reconciler` escribe uno, y el siguiente
 // número es simplemente cuántos hay ya en el directorio del run.
 function proximoIntentoDeReconciliacion() {
-  const previos = readdirSync(workDir).filter((f) => /^reconcile-package-\d+\.md$/.test(f))
-  return previos.length + 1
+  return paquetesDeReconciliacion().length + 1
 }
 
 // El texto de arreglo de cada `DiscardReason`, para el paquete y para el
@@ -1336,6 +1392,7 @@ function verboReconcile() {
   medir('reconcile', {
     outcome: ronda.outcome, files: ronda.files, reason: ronda.reason,
     duration_ms: Date.now() - arranque,
+    ...medidaDePapelDeReconcile(),
   })
   // El presupuesto que decide el mensaje es el de ESTA ronda, ANTES de que
   // `after()` (más abajo, en el despacho final) lo consuma. La pregunta la
@@ -1499,7 +1556,7 @@ function verboSliceVerdict() {
     return OUTCOMES.DISCARDED
   }
   const outcome = outcomeOfSliceVerdict(verdict)
-  medir('slice-judge', { outcome, review_package: paquete, review_token: token, ...verdictMeasures(verdict) })
+  medir('slice-judge', { outcome, review_package: paquete, review_token: token, ...verdictMeasures(verdict), ...medidaDePapel(STEPS.SLICE_JUDGE, paquete) })
   // Aquí y no más abajo: DESPUÉS de medir (la fila nombra el paquete que el juez
   // de slice leyó, y se escribe mientras eso sigue siendo cierto) y ANTES de la
   // rama del PASS, que escribe, stagea y COMITEA. Cualquiera de esos writes
@@ -1649,7 +1706,7 @@ function verboVerdict() {
   // es justo lo que en las dos vías era indistinguible en el JSONL. No se
   // deriva de `verdictMeasures` porque no es una medida del juicio: es la del
   // insumo, y va donde ya vive la del insumo.
-  medir('judge', { outcome, review_package: paquete, review_token: token, ...verdictMeasures(verdict) })
+  medir('judge', { outcome, review_package: paquete, review_token: token, ...verdictMeasures(verdict), ...medidaDePapel(STEPS.JUDGE, paquete) })
   // El consumo va AQUÍ por lo mismo que en el gemelo de slice: la fila que
   // nombra el paquete se escribe primero, y todo lo que viene después
   // —`mkdirSync`, `writeFileSync` y el `git add` del veredicto que viaja en el
