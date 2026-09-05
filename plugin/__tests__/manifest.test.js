@@ -35,6 +35,18 @@ describe('plugin manifest', () => {
     const manifest = JSON.parse(readFileSync(join(root, '..', '.release-please-manifest.json'), 'utf8'))
     expect(manifest.plugin).toBe(plugin.version)
   })
+  // Y un CUARTO fichero del propio plugin la repite: `package-lock.json` copia
+  // la version de `package.json` en dos sitios, y npm no la sincroniza sola —
+  // se quedo en 0.54.0 mientras el plugin ya iba por la 0.56.0, dos releases
+  // por detras, sin que nada se quejara. A release-please le da igual (reescribe
+  // los tres), pero un lockfile que miente es lo que lee quien clona el repo
+  // hoy, antes de la primera release.
+  it('el lockfile copia la version del package.json que lo genero', () => {
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+    const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'))
+    expect(lock.version).toBe(pkg.version)
+    expect(lock.packages[''].version).toBe(pkg.version)
+  })
   it('el README que se distribuye anuncia la version que se instala', () => {
     const plugin = JSON.parse(readFileSync(join(root, '.claude-plugin/plugin.json'), 'utf8'))
     const readme = readFileSync(join(root, 'README.md'), 'utf8')
