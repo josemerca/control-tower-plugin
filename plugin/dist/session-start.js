@@ -7243,6 +7243,22 @@ function resolveStatePath(cwd2) {
   return { path: null, kind: "none", rel: null };
 }
 
+// scripts/ct-step-commit.js
+var CtStepCommit = class _CtStepCommit {
+  static TRAILER_KEY = "Committed-By";
+  static TRAILER_VALUE = "ct-step";
+  static TRAILER_LINE = `${_CtStepCommit.TRAILER_KEY}: ${_CtStepCommit.TRAILER_VALUE}`;
+  static TRAILER_FORMAT = `%(trailers:key=${_CtStepCommit.TRAILER_KEY},valueonly,separator=%x2C)`;
+  static wroteAllOf(trailerValuesByCommit) {
+    const commits = [...trailerValuesByCommit];
+    if (commits.length === 0) return false;
+    return commits.every((values) => _CtStepCommit.wrote(values));
+  }
+  static wrote(trailerValues) {
+    return String(trailerValues ?? "").split(",").some((value) => value.trim() === _CtStepCommit.TRAILER_VALUE);
+  }
+};
+
 // scripts/state.js
 var FM = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/;
 function parseState(md) {
@@ -7378,6 +7394,17 @@ function fieldReadingGuide(meta, { blocked = false } = {}) {
   return `## C\xF3mo leer estos campos
 ${lines.join("\n")}`;
 }
+var YAML_COMMENT_LINE = /^\s*#/;
+function stripFrontmatterComments(stateText) {
+  const s = stateText.replace(/^﻿/, "").trimStart();
+  const m = s.match(FM);
+  if (!m) return s;
+  const frontmatter = m[1].split(/\r?\n/).filter((line) => !YAML_COMMENT_LINE.test(line)).join("\n");
+  return `---
+${frontmatter}
+---
+${m[2]}`;
+}
 function composeHydration(stateText, gitLog, { stateRel: stateRel2 = STATE_REL_PATH } = {}) {
   if (!stateText || !stateText.trim()) return "";
   const { meta, error } = parseStateSafe(stateText);
@@ -7388,7 +7415,7 @@ function composeHydration(stateText, gitLog, { stateRel: stateRel2 = STATE_REL_P
   const titulo = stateRel2 === SLICE_REL_PATH ? "Estado del slice" : "Estado del repo";
   parts.push(`# ${titulo} (hidrataci\xF3n autom\xE1tica)
 
-${stateText.trim()}`);
+${stripFrontmatterComments(stateText).trim()}`);
   const guide = fieldReadingGuide(meta, { blocked: blocked.state === "blocked" });
   if (guide) parts.push(guide);
   const log = (gitLog || "").trim();

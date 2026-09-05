@@ -18,6 +18,7 @@
 // ============================================================================
 
 import { findClosingKeywords } from './closing-keywords.js'
+import { CtStepCommit } from './ct-step-commit.js'
 import { OUTCOMES } from './run-machine.js'
 // `node:crypto` no rompe el «módulo PURO» de la cabecera, y el precedente está
 // escrito en go-response.js: `createHash` es una función determinista de su
@@ -790,6 +791,13 @@ export function commitMessage({ issue, task, tasksTotal, name }) {
     '',
     `Tarea ${task} de ${tasksTotal} del plan del slice, implementada y juzgada paso a paso con ct-step.`,
     '',
+    // #95/H5: la marca por la que el hook `Stop` reconoce que este commit lo
+    // hizo el PROGRAMA y no el agente — y entonces actualiza `last_commit` él
+    // mismo en vez de bloquear el turno pidiendo que se copie un sha que ya
+    // tiene. Es un trailer y no una frase del cuerpo porque git lo parsea él
+    // (`%(trailers:key=…)`), así que ningún mensaje puede hacerse pasar por
+    // uno de éstos por casualidad.
+    CtStepCommit.TRAILER_LINE,
     'Co-Authored-By: Claude <noreply@anthropic.com>',
   ].join('\n')
   const mensaje = titulo + '\n' + cuerpo
@@ -820,6 +828,7 @@ export function sliceVerdictCommitMessage({ issue, tasksTotal }) {
     '',
     `Las ${tasksTotal} tareas comiteadas, la Global verification en verde y el slice juzgado de una vez por ct-slice-judge.`,
     '',
+    CtStepCommit.TRAILER_LINE,
     'Co-Authored-By: Claude <noreply@anthropic.com>',
   ].join('\n')
   const mensaje = titulo + '\n' + cuerpo
