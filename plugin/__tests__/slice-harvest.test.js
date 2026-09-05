@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { harvestSlice } from '../scripts/harvest.js'
 import { TelemetryStatus } from '../scripts/harvest-table.js'
-import { METRICS_REPO_DIR, aggregateBriefMeasures, aggregateVerdictMeasures, metricsRepoRelPath } from '../scripts/run-metrics.js'
+import { METRICS_REPO_DIR, aggregateBriefMeasures, aggregateRoleBytesMeasures, aggregateVerdictMeasures, metricsRepoRelPath } from '../scripts/run-metrics.js'
 import {
   IndexOutcome,
   SliceHarvest,
@@ -235,6 +235,7 @@ describe('SliceHarvest reproduces, by an injected gh, the reads ct-harvest.mjs d
       path: metricsRepoRelPath(GitHubAnswers.ISSUE_NUMBER),
       ...aggregateVerdictMeasures(GitHubAnswers.telemetryText()),
       ...aggregateBriefMeasures(GitHubAnswers.telemetryText()),
+      ...aggregateRoleBytesMeasures(GitHubAnswers.telemetryText()),
     }
 
     expect(report.outcome).toBe(SliceHarvestOutcome.COMPLETE)

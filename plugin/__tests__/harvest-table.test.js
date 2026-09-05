@@ -71,6 +71,12 @@ class HarvestRows {
       briefLegacy: 0,
       briefVaraCtDocs: 8,
       briefBytes: 5000,
+      roleAttempts: 6,
+      roleMeasured: 6,
+      roleLegacy: 0,
+      agentBytes: 30000,
+      skillBytes: 18000,
+      packageBytes: 9000,
     }
   }
 
@@ -111,6 +117,12 @@ class HarvestRows {
         briefLegacy: 9,
         briefVaraCtDocs: 9,
         briefBytes: 9,
+        roleAttempts: 9,
+        roleMeasured: 9,
+        roleLegacy: 9,
+        agentBytes: 9,
+        skillBytes: 9,
+        packageBytes: 9,
       },
     }
   }
@@ -195,6 +207,11 @@ describe('a slice row projects to the wire object under the schema names', () =>
       brief_legacy: 0,
       brief_vara_ct_docs: 8,
       brief_bytes: 5000,
+      role_bytes_attempts: 6,
+      role_bytes_legacy: 0,
+      agent_bytes: 30000,
+      skill_bytes: 18000,
+      package_bytes: 9000,
     })
   })
 
@@ -248,6 +265,27 @@ describe('a slice row projects to the wire object under the schema names', () =>
       identity: Identities.today(),
     })
     expect(someVerdicts.rubric_sin_vara).toBe(0)
+  })
+
+  it('the_bytes_no_dispatched_role_carried_land_as_null_even_when_the_aggregate_says_zero', () => {
+    const legacyOnly = HarvestTable.rowFor({
+      row: HarvestRows.withTelemetry({
+        roleAttempts: 3, roleMeasured: 0, roleLegacy: 3, agentBytes: null, skillBytes: null, packageBytes: null,
+      }),
+      identity: Identities.today(),
+    })
+    expect(legacyOnly.agent_bytes).toBeNull()
+    expect(legacyOnly.skill_bytes).toBeNull()
+    expect(legacyOnly.package_bytes).toBeNull()
+    expect(legacyOnly.role_bytes_legacy).toBe(3)
+  })
+
+  it('a_role_ordered_no_skill_lands_its_zero_instead_of_being_read_as_unmeasured', () => {
+    const measured = HarvestTable.rowFor({
+      row: HarvestRows.withTelemetry({ roleMeasured: 2, skillBytes: 0 }),
+      identity: Identities.today(),
+    })
+    expect(measured.skill_bytes).toBe(0)
   })
 
   it('a_severity_no_verdict_carried_lands_as_null_even_when_the_aggregate_says_zero', () => {
@@ -306,6 +344,11 @@ describe('a slice row projects to the wire object under the schema names', () =>
     expect(row.brief_legacy).toBeNull()
     expect(row.brief_vara_ct_docs).toBeNull()
     expect(row.brief_bytes).toBeNull()
+    expect(row.role_bytes_attempts).toBeNull()
+    expect(row.role_bytes_legacy).toBeNull()
+    expect(row.agent_bytes).toBeNull()
+    expect(row.skill_bytes).toBeNull()
+    expect(row.package_bytes).toBeNull()
   })
 
   it('findings_by_rule_land_as_repeated_records_sorted_by_rule', () => {

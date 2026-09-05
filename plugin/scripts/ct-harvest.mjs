@@ -246,8 +246,8 @@ if (comoJson) {
   if (dirTelemetria.status === 'no-leido') {
     console.log(`no se pudo listar \`${METRICS_REPO_DIR}\` en ${repo} (${dirTelemetria.why}). Puede que este repo no tenga telemetría del juez o que la lectura fallara: **no se cuenta nada**, y el hueco NO es un cero.`)
   } else {
-    console.log('| Issue | Slice | Veredictos | sin-vara | Hallazgos por regla | alta/media/baja | vara ct | brief |')
-    console.log('|---|---|---|---|---|---|---|---|')
+    console.log('| Issue | Slice | Veredictos | sin-vara | Hallazgos por regla | alta/media/baja | vara ct | brief | bytes por papel |')
+    console.log('|---|---|---|---|---|---|---|---|---|')
     for (const f of filas) {
       const t = f.telemetry
       let veredictos = '—'
@@ -271,6 +271,13 @@ if (comoJson) {
       // escritos. Combinado en una sola columna, como el `#pr +a/-d Nf` de la
       // tabla de coste de arriba: son dos números de la misma medida.
       let brief = '—'
+      // #92 — LO QUE COSTÓ EL MATERIAL FIJO, en una celda y en tres números:
+      // el fichero del agente despachado, las skills que su prompt le ordena
+      // cargar y el paquete que recibió, sumados sobre todos los papeles del
+      // slice. Juntos por lo mismo que `vara ct`: son la misma medida, y la
+      // pregunta que motivó la columna (cuánto material fijo se ahorra por
+      // slice) es su suma, no cada uno por su lado.
+      let bytesPorPapel = '—'
       // LA SEVERIDAD, en una celda y en el orden en que se decide: una alta VETA
       // —el contrato del veredicto no admite un PASS con una alta—, una media
       // compra una vuelta pagada al implementador, una baja sólo se anota. Las
@@ -315,8 +322,14 @@ if (comoJson) {
           brief = `${t.briefVaraCtDocs} docs · ${t.briefBytes}B`
           if (t.briefLegacy > 0) brief += ` (${t.briefLegacy} sin columna)`
         }
+        // Y otra vez la misma: roleMeasured === 0 imprime «—» y jamás tres
+        // ceros, que afirmarían papeles despachados sin material.
+        if (t.roleMeasured > 0) {
+          bytesPorPapel = `agente ${t.agentBytes}B · skills ${t.skillBytes}B · paquete ${t.packageBytes}B`
+          if (t.roleLegacy > 0) bytesPorPapel += ` (${t.roleLegacy} sin columna)`
+        }
       }
-      console.log(`| #${f.issue} | ${f.title ?? '—'} | ${veredictos} | ${sinVara} | ${porRegla} | ${severidades} | ${varaCt} | ${brief} |`)
+      console.log(`| #${f.issue} | ${f.title ?? '—'} | ${veredictos} | ${sinVara} | ${porRegla} | ${severidades} | ${varaCt} | ${brief} | ${bytesPorPapel} |`)
     }
     console.log('')
     if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.verdicts > 0 && f.telemetry.measured === 0)) {
@@ -330,6 +343,9 @@ if (comoJson) {
     }
     if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.briefAttempts > 0 && f.telemetry.briefMeasured === 0)) {
       console.log('`—` en `brief`: ningún intento de `implement` de ese slice traía `brief_vara_ct_docs`/`brief_bytes` (telemetría anterior a esta medida, o el brief no se pudo leer en su momento). No es un cero.')
+    }
+    if (filas.some((f) => f.telemetry.status === 'ok' && f.telemetry.roleAttempts > 0 && f.telemetry.roleMeasured === 0)) {
+      console.log('`—` en `bytes por papel`: ningún papel despachado de ese slice traía `agent_bytes`/`skill_bytes`/`package_bytes` (telemetría anterior a esta medida). No es un cero.')
     }
     if (filas.some((f) => f.telemetry.status === 'sin-fichero')) {
       console.log(`\`(sin telemetría)\`: el repo no trae \`${METRICS_REPO_DIR}/issue-<n>.jsonl\` para ese slice. Nadie midió — no es un cero.`)
