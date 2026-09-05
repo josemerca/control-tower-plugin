@@ -7,7 +7,8 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
-import { crearHelpers, montarRepo, recorridoDeSlice } from './fixtures/ct-step-harness.js'
+import { crearHelpers, montarRepo, recorridoDeSlice, PLUGIN_ROOT_TEST } from './fixtures/ct-step-harness.js'
+import { PluginYardstick } from '../scripts/plugin-yardstick.js'
 
 let repo
 const { ct, informe, veredicto, crudo, veredictoDeSlice, commits, estado,
@@ -16,6 +17,47 @@ const { ct, informe, veredicto, crudo, veredictoDeSlice, commits, estado,
 
 beforeEach(() => { repo = montarRepo() })
 afterEach(() => { rmSyncBestEffort(repo) })
+
+// El juez tiene `Read` (JUDGE_TOOLS), así que la vara de ct le llega por RUTA
+// y no pegada: es el mismo criterio con el que ya le llegan el plan y los
+// ficheros que el diff toca. Lo que la ruta compra sobre el texto es que el
+// juez abra sólo lo que va a citar, en vez de leer 24 KB delante del diff.
+describe('el paquete de revisión da la vara de ct por ruta, no pegada', () => {
+  const paquete = () => readFileSync(paqueteDeTarea(), 'utf8')
+
+  it('la sección abre el paquete y lista la ruta de cada documento que alcanza a la tarea', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    const texto = paquete()
+    expect(texto).toContain('## Vara de ct')
+    for (const nombre of PluginYardstick.FILES) {
+      expect(texto, `${nombre} no llega ni por ruta`).toContain(join(PLUGIN_ROOT_TEST, 'conventions', nombre))
+    }
+    expect(texto.indexOf('## Vara de ct')).toBeLessThan(texto.indexOf('## Diff'))
+  })
+
+  it('no pega el texto de ningún documento', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    const style = readFileSync(join(PLUGIN_ROOT_TEST, 'conventions', 'style.md'), 'utf8')
+    expect(paquete()).not.toContain(style.trim())
+  })
+
+  // Sin `(create)` en sus **Files:** — aquí sin acción declarada, que es lo
+  // que este fixture puede escribir sin que el control de alcance vete la
+  // tarea: el fichero se crea de verdad, así que declararlo `(modify)` sería
+  // un plan que miente.
+  it('la tarea que no estrena módulo tampoco recibe la ruta de architecture.md', () => {
+    const plan = readFileSync(join(repo, 'plan.md'), 'utf8').replace('`uno.txt` (create)', '`uno.txt`')
+    writeFileSync(join(repo, 'plan.md'), plan)
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    expect(paquete()).not.toContain(join(PLUGIN_ROOT_TEST, 'conventions', 'architecture.md'))
+  })
+})
 
 // Slice 6 de los apuntes de Capde — el hallazgo ALTO del review de la PR #36,
 // reproducido con un ataque real. La guarda del slice 3 cubría el intento 1 y

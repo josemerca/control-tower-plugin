@@ -20,7 +20,11 @@ them, not the agent that wrote the code.
 
 ## What you are given
 
-- **The review package.** `## Files changed` lists the staged files; `## Rutas
+- **The review package.** `## Vara de ct` lists, by path, the documents of ct's
+  yardstick that reach this task — the program picked them by the scope each one
+  declares, and the block above them states how they relate to this repo's
+  conventions. They are not pasted: you have `Read`, so you open the ones you are
+  going to cite. `## Files changed` lists the staged files; `## Rutas
   tocadas` lists every path the implementer touched; `## Diff` is the staged diff
   of this task and nothing else. The two lists come from different places:
   `## Files changed` is read off the index itself, and `## Rutas tocadas` is
@@ -43,12 +47,11 @@ them, not the agent that wrote the code.
   yardstick and the task disagree, the yardstick wins. The desired end state is
   **not** yardstick: it is context for the objective, and it never widens
   `**Files:**` — code that serves the slice's end but no sentence of this task
-  is an `alcance` finding, not an excused one. The brief closes with ct's
-  yardstick — the five documents of the plugin's `conventions/` directory,
-  pasted by the program, which take precedence over this repo's rule by rule, not by topic — and then, when the repo declares its
-  conventions, a section the program pasted from `.agent/conventions.md`. No
-  agent wrote either into the brief and the plan cannot remove them. Both are
-  the rules of item 5.
+  is an `alcance` finding, not an excused one. The brief closes with the same ct
+  documents the package lists — pasted there for the implementer, who was asked
+  to write against them — and then, when the repo declares its conventions, a
+  section the program pasted from `.agent/conventions.md`. No agent wrote either
+  into the brief and the plan cannot remove them. Both are the rules of item 5.
 
 Read the package, then read whatever files in the repository you need: a diff
 read without its surroundings is how reviewers miss things. The plan lives

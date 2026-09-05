@@ -634,10 +634,11 @@ function verboNext() {
 // step-contracts.js).
 function cargarVaraDeCt() {
   const deCt = PluginYardstick.FILES.map((nombre) => {
+    const path = join(PLUGIN_ROOT, PluginYardstick.DIRECTORY, nombre)
     try {
-      return { name: nombre, content: readFileSync(join(PLUGIN_ROOT, PluginYardstick.DIRECTORY, nombre), 'utf8') }
+      return { name: nombre, path, content: readFileSync(path, 'utf8') }
     } catch {
-      return { name: nombre, content: null }
+      return { name: nombre, path, content: null }
     }
   })
   const faltas = PluginYardstick.missingDocuments(deCt)
@@ -739,8 +740,19 @@ function escribirPaquete() {
   // al que se juzga, no la verificaba nadie, y cuando venía mal no degradaba
   // el juicio: lo desactivaba. No se vuelva a añadir.
   const rutas = (run.lastPaths || []).map((p) => `- ${p}`).join('\n') || '(ninguna)'
-  const [SECCION_FILES, SECCION_RUTAS, SECCION_DIFF] = PACKAGE_SECTIONS
+  // El primer encabezado de PACKAGE_SECTIONS lo escribe `composePathSection`
+  // (es `PluginYardstick.PATH_SECTION`), así que aquí no se teclea: lo que se
+  // destructura son los tres que escribe este verbo.
+  const [, SECCION_FILES, SECCION_RUTAS, SECCION_DIFF] = PACKAGE_SECTIONS
   const diff = diffDeTarea()
+  // LA VARA DE CT, POR RUTA y con el mismo alcance que el brief: el juez tiene
+  // `Read` (JUDGE_TOOLS), y lo que necesita para citar una regla es saber qué
+  // documentos alcanzan a esta tarea y dónde están. La sección va DELANTE del
+  // diff por lo mismo que `Señal` en el paquete de slice: detrás de un `-U10`
+  // quedaría enterrada.
+  const varaDeCt = PluginYardstick.composePathSection(
+    PluginYardstick.forTask(cargarVaraDeCt(), { creates: creaModulo(tarea()) })
+  )
   writeFileSync(paquete, [
     `# Review package: task ${run.task}/${run.tasksTotal} of issue #${issue} (staged, not yet committed)`,
     // La CABECERA lleva el token: el sha256 de exactamente el diff que va
@@ -748,6 +760,7 @@ function escribirPaquete() {
     // PACKAGE_SECTIONS (que la rúbrica cita encabezado a encabezado) ni el
     // orden que el slice 10 decidió para el paquete de slice.
     reviewTokenLine(reviewToken(diff)),
+    varaDeCt,
     '', `## ${SECCION_FILES}`, git(['diff', '--cached', '--stat']) || '',
     '', `## ${SECCION_RUTAS}`, rutas,
     '', `## ${SECCION_DIFF}`, diff,
@@ -1309,7 +1322,11 @@ function escribirPaqueteDeReconciliacion({ rama, ronda, intento }) {
     lineas.push('', '## Discard reason', ARREGLO_DE_DESCARTE[ronda.reason] ?? ronda.reason)
   }
   writeFileSync(paquete, lineas.join('\n'))
-  appendFileSync(paquete, PluginYardstick.composeSection(deCt))
+  // POR RUTA Y NO PEGADA: el reconciliador tiene `Read` (RECONCILER_TOOLS), y
+  // los cinco documentos enteros delante de un conflicto son 24 KB de material
+  // fijo que no dependen del conflicto. Sin tarea que acote el alcance, van
+  // los cinco: una fusión puede tocar cualquier fichero, incluido uno nuevo.
+  appendFileSync(paquete, PluginYardstick.composePathSection(deCt))
   appendFileSync(paquete, seccionVaraDelRepo('el paquete de reconciliación'))
   return paquete
 }

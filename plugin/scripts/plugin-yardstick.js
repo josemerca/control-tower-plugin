@@ -3,6 +3,12 @@ export class PluginYardstick {
 
   static FILES = ['defects.md', 'style.md', 'decisions.md', 'architecture.md', 'testing.md']
 
+  // El encabezado con el que la vara por ruta entra en un paquete. Es una
+  // constante y no una cadena tecleada dos veces por lo mismo que
+  // PACKAGE_SECTIONS: la rúbrica del juez lo cita por su nombre, y un
+  // encabezado renombrado aquí lo dejaría señalando una sección que no existe.
+  static PATH_SECTION = 'Vara de ct'
+
   static #PRECEDENCE_HEADER = [
     '',
     '---',
@@ -104,33 +110,57 @@ export class PluginYardstick {
       .map((document) => document?.name ?? '(sin nombre)')
   }
 
-  static composeSection(documents) {
-    const blank = PluginYardstick.#blankDocuments(documents)
-    if (blank.length) {
-      throw new Error(
-        `PluginYardstick.composeSection: cannot compose the ct yardstick without ${blank.join(', ')}. ` +
-          'Callers must ask `missingDocuments` first and decide what to do: this method never composes ' +
-          'a header that promises documents it does not carry.'
-      )
-    }
+  static #refuse(missing) {
+    throw new Error(
+      `PluginYardstick.composeSection: cannot compose the ct yardstick without ${missing.join(', ')}. ` +
+        'Callers must ask `missingDocuments` first and decide what to do: this method never composes ' +
+        'a header that promises documents it does not carry.'
+    )
+  }
 
+  static #ordered(documents) {
+    const blank = PluginYardstick.#blankDocuments(documents)
+    if (blank.length) PluginYardstick.#refuse(blank)
     const orderByName = new Map(PluginYardstick.FILES.map((name, index) => [name, index]))
     const orderedDocuments = [...(documents ?? [])]
       .filter((document) => orderByName.has(document?.name))
       .sort((a, b) => orderByName.get(a.name) - orderByName.get(b.name))
-    if (orderedDocuments.length === 0) {
-      throw new Error(
-        'PluginYardstick.composeSection: cannot compose the ct yardstick without any of ' +
-          `${PluginYardstick.FILES.join(', ')}. Callers must ask \`missingDocuments\` first and decide what ` +
-          'to do: this method never composes a header that promises documents it does not carry.'
-      )
-    }
+    if (orderedDocuments.length === 0) PluginYardstick.#refuse([`any of ${PluginYardstick.FILES.join(', ')}`])
+    return orderedDocuments
+  }
 
+  static composeSection(documents) {
     const sections = [...PluginYardstick.#PRECEDENCE_HEADER]
-    for (const document of orderedDocuments) {
+    for (const document of PluginYardstick.#ordered(documents)) {
       const body = document.content.endsWith('\n') ? document.content : `${document.content}\n`
       sections.push(`## Vara de ct: ${PluginYardstick.DIRECTORY}/${document.name}`, '', body)
     }
     return sections.join('\n')
+  }
+
+  // LA MISMA VARA, POR RUTA. Quien la recibe así —el juez y el
+  // reconciliador— tiene `Read`, que es el mismo criterio con el que ya le
+  // llegan el plan y los ficheros que el diff toca: pegarle 24 KB que puede
+  // abrir por su cuenta es material fijo delante del diff, no vara que llegue
+  // mejor.
+  //
+  // La CABECERA es la misma —una regla, una fuente— y por eso esto vive aquí
+  // y no en quien escribe cada paquete.
+  //
+  // La ruta la trae cada documento, no se compone aquí: este módulo es puro y
+  // no sabe dónde está instalado el plugin.
+  static composePathSection(documents) {
+    const ordered = PluginYardstick.#ordered(documents)
+    const sinRuta = ordered.filter((document) => typeof document.path !== 'string' || document.path.trim() === '')
+    if (sinRuta.length) PluginYardstick.#refuse(sinRuta.map((document) => document.name))
+    return [
+      ...PluginYardstick.#PRECEDENCE_HEADER,
+      `## ${PluginYardstick.PATH_SECTION}`,
+      '',
+      'No van pegados: ábrelos con `Read`, y cita el documento y la regla de la que hables.',
+      '',
+      ...ordered.map((document) => `- \`${document.path}\``),
+      '',
+    ].join('\n')
   }
 }

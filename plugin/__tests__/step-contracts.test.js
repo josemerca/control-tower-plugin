@@ -20,6 +20,7 @@ import {
   REVIEW_TOKEN_LABEL, reviewToken, reviewTokenLine, reviewTokenOf,
 } from '../scripts/step-contracts.js'
 import { findClosingKeywords } from '../scripts/closing-keywords.js'
+import { PluginYardstick } from '../scripts/plugin-yardstick.js'
 
 const AGENTE_JUEZ = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-judge.md')
 const AGENTE_JUEZ_DE_SLICE = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-slice-judge.md')
@@ -443,6 +444,15 @@ describe('quién puede qué', () => {
     // sigue recibiendo instrucciones para leer una sección que no existe, y
     // nada se entera salvo este test.
     expect(PACKAGE_SECTIONS).toEqual(seccionesDelPaquete())
+  })
+
+  // La primera sección del paquete no la escribe `escribirPaquete`: la escribe
+  // `PluginYardstick.composePathSection`, con su propia constante. Dos cadenas
+  // a mano para el mismo encabezado son el desacople que ya sufrieron
+  // JUDGE_TOOLS y PACKAGE_SECTIONS, y aquí sería mudo: el juez leería una
+  // sección que el paquete titula de otra forma.
+  it('la sección de la vara la titula el módulo que la escribe, y PACKAGE_SECTIONS no puede divergir de él', () => {
+    expect(PACKAGE_SECTIONS[0]).toBe(PluginYardstick.PATH_SECTION)
   })
 })
 

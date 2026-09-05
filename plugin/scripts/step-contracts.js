@@ -425,7 +425,13 @@ export const JUDGE_TOOLS = 'Read, Grep, Glob, Write, Skill'
 // de ejecución que lo delate — un encabezado renombrado en el script deja a
 // la rúbrica señalando una sección que no existe, y el juez sigue
 // contestando como si la hubiera leído.
-export const PACKAGE_SECTIONS = ['Files changed', 'Rutas tocadas', 'Diff']
+//
+// `Vara de ct` abre el paquete y la escribe `PluginYardstick.composePathSection`
+// (scripts/plugin-yardstick.js), no `escribirPaquete`: son las RUTAS de los
+// documentos que alcanzan a esta tarea, para un juez que tiene `Read`. Va
+// primero por lo mismo que `Señal` en el paquete de slice — detrás de un diff
+// `-U10` quedaría enterrada.
+export const PACKAGE_SECTIONS = ['Vara de ct', 'Files changed', 'Rutas tocadas', 'Diff']
 
 // El juez de SLICE (§3.7-B, `agents/ct-slice-judge.md`), SIN `Skill`: sus dos
 // ítems miden contra el plan (comiteado) y el diff acumulado de la slice
