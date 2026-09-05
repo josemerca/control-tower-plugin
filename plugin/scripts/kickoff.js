@@ -1,6 +1,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { renderState } from './state.js'
+import { BaselineResult } from './baseline.js'
 import { resolveGatesForAgent, renderGateKickoffLines, resolveE2e } from './gates.js'
 // F22: el kickoff SOLO lo recibe un agente de slice, así que aquí no hay
 // ambigüedad que resolver — su fichero de estado es siempre `.agent/SLICE.md`.
@@ -190,7 +191,10 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conv
     // "al terminar deja el PR listo y PARA" que cerraba esta línea se fue a
     // cambio: lo dice ya, con el comando literal, la línea de cierre de abajo.
     `Es human-gated: NO mergees el PR (el merge es de la sesión coordinadora), NO empieces el siguiente slice, y NO crees worktrees nuevos — ya estás en el que te preparó el dispatcher.`,
-    `Arranque verification-first: confirma pwd/rama, git log, y baseline verde ANTES de tocar nada.`,
+    // #96 — el baseline lo mide el dispatcher (scripts/baseline.js) al preparar
+    // el worktree y lo siembra como DATO en la semilla: pwd, rama y corte ya
+    // los verificó el programa. Esta línea señala dónde está; no lo ordena.
+    `El baseline ya está medido: su resultado (verde, rojo o no-verificado), el comando y el resumen están en el campo \`baseline:\` de ${SLICE_REL_PATH}. Léelo ahí; no lo vuelvas a ejecutar para afirmarlo.`,
     // F21, segundo hallazgo de la misma lente ("ninguna exigencia que el spec
     // le haga al agente puede depender de que el agente lea el spec"): la
     // columna `Protegido` SÍ llega al cuerpo del issue, pero este kickoff
@@ -343,7 +347,15 @@ function renderStateSenal(senal) {
   return (senal || '').trim() || SENAL_AUSENTE
 }
 
-export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
+// #96 — `baseline`: el resultado de `Baseline.measure` (scripts/baseline.js)
+// sobre el worktree recién cortado. Quien siembra sin haberlo medido (el
+// dry-run, que no tiene worktree; los tests) recibe la ausencia DECLARADA,
+// nunca un hueco: `no-verificado` es un miembro del vocabulario, no un
+// opcional — el agente que se hidrata tiene que poder distinguir "nadie lo
+// midió" de "se midió y salió rojo".
+export const BASELINE_NOT_MEASURED = BaselineResult.notMeasured('nadie ejecutó el baseline al sembrar esta semilla')
+
+export function buildStateSeed(slice, { branch, base, baseSha = '', baseline = BASELINE_NOT_MEASURED }) {
   const issueNum = slice.issue != null ? parseInt(String(slice.issue).replace('#', ''), 10) : null
   return renderState({
     meta: {
@@ -463,6 +475,14 @@ export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
       // de tu last_commit" dejaría de significar nada. Si no se pudo resolver,
       // se siembra vacío a propósito — un sha inventado sería peor que ninguno.
       last_commit: baseSha,
+      // baseline (#96) — el comando de test del repo, EJECUTADO por el
+      // dispatcher en este worktree antes de lanzar al agente, con su
+      // resultado (verde | rojo | no-verificado), el comando y un resumen de
+      // la salida. Sustituye a la orden del kickoff «baseline verde ANTES de
+      // tocar nada»: el incidente 5 del catálogo es un agente que afirmó un
+      // verde que no ejecutó. Es un mapa y no una frase por la misma razón que
+      // `blocked`: sus tres partes son campos que un programa puede leer.
+      baseline: baseline.seedField,
       // D-4 — el epic, sembrado en el despacho y no preguntado en cada run.
       // La ausencia se DECLARA con la constante que ya existe, no se rellena
       // ni se deja vacía: es la misma regla que impidió que ct-next asumiera
