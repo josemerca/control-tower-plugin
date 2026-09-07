@@ -21,7 +21,7 @@ export class PlanAgentBrief {
 
     return [
       `Escribes el PLAN del issue #${issue.number} del repo ${named}. No lo implementas.`,
-      'Arranque verification-first: confirma pwd, rama y git log, y deja el baseline en verde ANTES de tocar nada.',
+      `El baseline ya está medido: su resultado (verde, rojo o no-verificado), el comando y el resumen están en el campo \`baseline:\` de ${SLICE_REL_PATH}. Léelo ahí; no lo vuelvas a ejecutar para afirmarlo.`,
       `Hidrátate del issue: \`gh issue view ${issue.number} --repo ${named}\`. Sus criterios de aceptación y su sección "## Out of scope / Protected" son la entrada del plan.`,
       `Lee también sus secciones "${PlanAgentBrief.EPIC_CONTEXT}" y "${PlanAgentBrief.INHERITED_CONTEXT}": traen lo que condiciona este trabajo y no cabe en los criterios de aceptación. Si están vacías o no aparecen, no hay nada que heredar y no lo busques fuera del issue.`,
       `La vara de Control Tower vive en ${conventions} y el programa la lleva a cada tarea: al implementador pegada, al juez por ruta. Lo que tu plan selecciona es la vara del REPO, en el \`Rules to obey:\` de su §3; de ${conventions} abre el documento que necesites para decidir algo concreto, no los cinco por delante.`,
