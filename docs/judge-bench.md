@@ -40,8 +40,10 @@ Un run cae en una de cuatro clases, y la diferencia importa:
   equivocada. Lo segundo cuenta como fallo a propósito: la telemetría del loop cuenta hallazgos
   por regla, y un FAIL por `alcance` sobre un defecto de `asercion-tdd` no es el mismo juez.
 - **descarte** — el veredicto no pasa `VERDICT_SCHEMA` (el mismo `readVerdict` que aplica
-  `ct-step verdict`, no una copia), o no copia el `Review token:` del paquete. En un run de
-  verdad esto cuesta una vuelta pagada; aquí es una columna.
+  `ct-step verdict`, no una copia), o trae un `review_token` que no es el del paquete. Que **no
+  lo traiga** no es un descarte, igual que en el camino real: ese campo lo escribe el programa y
+  `ct-judge.md` le dice al juez que no lo copie. En un run de verdad un descarte cuesta una
+  vuelta pagada; aquí es una columna.
 - **no ejecutado** — `claude` no llegó a contestar (autenticación, cuota, tope de gasto). No es
   un dato sobre el juez y no se mezcla con los otros tres.
 
@@ -72,7 +74,15 @@ Qué se compara, y en este orden:
 Guarda las dos salidas junto al cambio del agente. Una tasa sin la corrida que la produjo es una
 opinión.
 
-## La primera corrida, para tener con qué comparar
+## La línea base
+
+Está en [`judge-bench-linea-base-2026-09.md`](judge-bench-linea-base-2026-09.md): `--runs 5`
+sobre `ct-judge.md` en el commit `c5b3659`, 15 de 15 aciertos, cero descartes, 8,3644 USD. Es la
+corrida contra la que se compara cualquier cambio de la rúbrica, y el documento dice también
+qué **no** se puede concluir de ella: con el banco en el techo, sirve de barandilla contra la
+regresión y no de vara para la mejora.
+
+### La corrida anterior, de N=1
 
 `--agent plugin/agents/ct-judge.md --runs 1`, plugin 0.56.0, 2026-09-05:
 
@@ -86,9 +96,9 @@ total                      3     3 (100%)  0 (0%)     0 (0%)         2     0    
 ```
 
 Lo que dice, y lo que no. Con N=1 por caso esto **no** es una tasa de acierto: es una corrida
-que salió bien y una cota de coste — del orden de 0,6 USD por juicio, unos 3 USD el banco entero
-con `--runs 5`. El criterio de aceptación de la issue pide 4 de 5 en el caso del test
-inexistente, y eso exige una corrida con `--runs 5` que todavía no se ha hecho.
+que salió bien y una cota de coste — del orden de 0,6 USD por juicio. La cuenta de «unos 3 USD
+el banco entero con `--runs 5`» que llevaba aquí estaba mal por un factor de tres: `--runs 5`
+son cinco juicios **por caso**, quince llamadas, 8,4 USD.
 
 ## Añadir un caso
 

@@ -72,6 +72,10 @@ class Verdicts {
   static withAnotherToken() {
     return JSON.stringify({ ruling: 'PASS', review_token: reviewToken('another diff'), rubric: Verdicts.rubric(), findings: [] })
   }
+
+  static withoutToken() {
+    return JSON.stringify({ ruling: 'PASS', rubric: Verdicts.rubric(), findings: [] })
+  }
 }
 
 class ClaudeSaid {
@@ -284,13 +288,14 @@ describe('JudgeDispatch', () => {
     expect(agents['ct-judge'].prompt).toBe(Agents.judge().prompt)
   })
 
-  it('the prompt tells the judge the same three paths ct-step next announces and where the token comes from', () => {
+  it('the prompt tells the judge the same three paths ct-step next announces, and does not ask him for the token that ct-step writes itself', () => {
     const judgeRun = dispatch().compose({ benchCase: Cases.correct(), attempt: 2, runDirectory: '/work/tarea-correcta/2' })
     const paths = new RunPaths({ issue: 52, task: 3 })
     expect(judgeRun.prompt).toContain(`el paquete de revisión: ${paths.reviewPackage}`)
     expect(judgeRun.prompt).toContain(`el brief de la tarea: ${paths.brief}`)
     expect(judgeRun.prompt).toContain(`escribe tu veredicto en: ${paths.verdict}`)
-    expect(judgeRun.prompt).toContain(`"${REVIEW_TOKEN_LABEL}:"`)
+    expect(judgeRun.prompt).not.toContain(REVIEW_TOKEN_LABEL)
+    expect(judgeRun.prompt).not.toContain('review_token')
     expect(judgeRun.verdictPath).toBe('/work/tarea-correcta/2/.agent/run-52/task-3-verdict.json')
     expect(judgeRun.cwd).toBe('/work/tarea-correcta/2')
   })
@@ -420,6 +425,13 @@ describe('JudgeBench', () => {
     const [result] = bench.run({ cases: [benchCase], runs: 1 }).results
     expect(result.outcome).toBe(RunOutcome.DISCARDED)
     expect(result.detail).toMatch(/^el veredicto copia el token [0-9a-f]{12}… y el paquete declara [0-9a-f]{12}…$/)
+  })
+
+  it('a verdict without the token is judged like any other, because who writes that field is the program', () => {
+    const benchCase = Cases.correct()
+    const { bench } = Benches.over({ root, answers: { 'tarea-correcta#1': JudgeAnswer.writing(Verdicts.withoutToken()) } })
+    const [result] = bench.run({ cases: [benchCase], runs: 1 }).results
+    expect(result.outcome).toBe(RunOutcome.HIT)
   })
 
   it('claude exiting non-zero without json is a run that did not happen, with no cost to sum and the stderr tail as detail', () => {

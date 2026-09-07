@@ -205,7 +205,7 @@ export class JudgeBench {
     }
     const read = readVerdict(structured)
     if (read.why) return discarded(read.why)
-    if (read.verdict.review_token !== benchCase.token) {
+    if (read.verdict.review_token !== null && read.verdict.review_token !== benchCase.token) {
       return discarded(`el veredicto copia el token ${read.verdict.review_token.slice(0, 12)}… y el paquete declara ${benchCase.token.slice(0, 12)}…`)
     }
     const comparison = benchCase.expected.compare(read.verdict)
