@@ -149,9 +149,12 @@ describe('the harvest table this backend hands the plugin', () => {
 })
 
 describe('the sections the errand sends the agent to read', () => {
-  const body = () => PlanIssueBody.of(new UserStory({
-    key: new UserStoryKey('XOP-4909'), summary: 'la métrica de los campeones', description: 'como analista quiero',
-  }))
+  const body = () => PlanIssueBody.of({
+    story: new UserStory({
+      key: new UserStoryKey('XOP-4909'), summary: 'la métrica de los campeones', description: 'como analista quiero',
+    }),
+    comment: null,
+  })
 
   it('the_two_it_names_are_headings_the_plugin_really_renders_in_the_body_we_write', () => {
     const headings = body().split('\n').filter((line) => line.startsWith('## '))

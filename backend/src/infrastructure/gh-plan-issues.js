@@ -60,13 +60,13 @@ export class GhPlanIssues extends PlanIssues {
     ]
   }
 
-  static argvFor({ story, repository }) {
+  static argvFor({ story, comment, repository }) {
     return [
       'issue', 'create',
       '--repo', repository.text,
-      '--title', PlanIssueBody.titleFor(story),
-      '--body', PlanIssueBody.of(story),
-      ...PlanIssueBody.labels(story).flatMap((label) => ['--label', label]),
+      '--title', PlanIssueBody.titleFor({ story, comment }),
+      '--body', PlanIssueBody.of({ story, comment }),
+      ...PlanIssueBody.labels({ story, comment }).flatMap((label) => ['--label', label]),
     ]
   }
 
@@ -74,10 +74,10 @@ export class GhPlanIssues extends PlanIssues {
     return ['label', 'create', label, '--repo', repository.text, '--force']
   }
 
-  async open({ story, repository }) {
+  async open({ story, comment, repository }) {
     const outcome = await this.#sowing({
-      argv: GhPlanIssues.argvFor({ story, repository }),
-      ours: PlanIssueBody.labels(story),
+      argv: GhPlanIssues.argvFor({ story, comment, repository }),
+      ours: PlanIssueBody.labels({ story, comment }),
       repository,
       safeToRepeat: false,
     })
@@ -228,6 +228,8 @@ export class PlanIssueBody {
   static DESCRIPTION_HEADING = '## Descripción'
   static PROTECTED_HEADING = '## Out of scope / Protected'
   static AC_HEADING = '## Acceptance criteria (EARS, 1:1 con tests)'
+  static COMMENT_SECTION = 'Comentario de quien pide el plan'
+  static COMMENT_HEADING = `## ${PlanIssueBody.COMMENT_SECTION}`
   static #ACTIVE =
     /((?<![\w])[\w.-]+\/[\w.-]+#\d+|(?<![\w])#\d+|(?<![\w.])@[A-Za-z0-9][A-Za-z0-9-]*|https?:\/\/\S*github\.com\/\S+)/g
   static #CODE_SPAN = /(`[^`]*`)/
@@ -236,15 +238,15 @@ export class PlanIssueBody {
     `> Para pedir cambios en el plan, comenta en este issue empezando por \`${GhPlanIssues.CHANGES_TOKEN}\`: ` +
     'lo que escribas detrás es lo que se le pide al agente, y publicará el plan rehecho aquí mismo.'
 
-  static labels(story) {
-    return [...gateLabels(gatesOf(PlanIssueBody.rowFor(story)).gates), PlanIssueBody.READY_LABEL]
+  static labels({ story, comment }) {
+    return [...gateLabels(gatesOf(PlanIssueBody.rowFor({ story, comment })).gates), PlanIssueBody.READY_LABEL]
   }
 
-  static titleFor(story) {
+  static titleFor({ story, comment }) {
     return `${story.key} ${story.summary}`
   }
 
-  static rowFor(story) {
+  static rowFor({ story, comment }) {
     return {
       n: null,
       name: story.summary,
@@ -272,8 +274,8 @@ export class PlanIssueBody {
       .join('')
   }
 
-  static of(story) {
-    const row = PlanIssueBody.rowFor(story)
+  static of({ story, comment }) {
+    const row = PlanIssueBody.rowFor({ story, comment })
 
     return [
       `> Historia de usuario: ${story.key}`,
@@ -282,6 +284,7 @@ export class PlanIssueBody {
       PlanIssueBody.DESCRIPTION_HEADING,
       renderDescripcion(row) ?? `_${story.key} no trae resumen en Jira._`,
       '',
+      ...(comment === null ? [] : [PlanIssueBody.COMMENT_HEADING, PlanIssueBody.quieted(comment.text), '']),
       EPIC_CONTEXT_HEADING,
       PlanIssueBody.#epicContextOf(story),
       '',

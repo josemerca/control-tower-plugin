@@ -224,6 +224,7 @@ and the epic context.
 - Modify: `backend/src/infrastructure/gh-plan-issues.js`
 - Modify: `backend/__tests__/infrastructure/plan-issue-body.test.js`
 - Modify: `backend/__tests__/infrastructure/gh-plan-issues.test.js`
+- Modify: `backend/__tests__/infrastructure/plugin-contract.test.js`
 
 Current state (backend/src/infrastructure/gh-plan-issues.js, lines 275-284):
 
@@ -270,6 +271,9 @@ asserting the section is absent.
 passes a comment; `every_section_the_plugin_writes_and_we_can_fill_is_there_in_the_order_it_writes_them`
 keeps its six headings for a story with no comment, and a new
 `it('the_section_of_the_comment_sits_between_the_description_and_the_epic_context')` pins the seven.
+The one call of `PlanIssueBody.of` in `plugin-contract.test.js` (the errand's headings measured
+against the body) takes `{ story, comment: null }` too — the third caller of the old signature,
+found by the fast subset going red.
 
 **Verification:** the body suite and the adapter suite pass, and the heading is declared once.
 
