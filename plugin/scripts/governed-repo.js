@@ -13,6 +13,14 @@ import { readFileSync, statSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
 export const CONTRACT_MARKER = '<!-- ct-init:slices-contract -->'
+// #93 — el contrato salió de AGENTS.md a su propio fichero, y en su sitio quedó
+// la sección corta del loop con SU marcador. La señal de «este repo lo gobierna
+// el loop» pasa a ser cualquiera de los dos, no uno: con solo el nuevo, todos
+// los repos bootstrapeados hasta hoy dejarían de estar gobernados y la puerta
+// de closing keywords se apagaría en ellos sin que nadie lo pidiera; con solo
+// el viejo, se apagaría en todos los que se bootstrapeen a partir de ahora.
+export const LOOP_MARKER = '<!-- ct-init:loop -->'
+export const GOVERNED_MARKERS = [CONTRACT_MARKER, LOOP_MARKER]
 
 const AGENTS = 'AGENTS.md'
 
@@ -71,7 +79,7 @@ export function probeGovernedRepo(cwd) {
           if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) return { governed: false }
           return { error: `no se ha podido leer ${AGENTS} (${e.code || e.message})` }
         }
-        return { governed: texto.includes(CONTRACT_MARKER) }
+        return { governed: GOVERNED_MARKERS.some((m) => texto.includes(m)) }
       }
       const padre = dirname(dir)
       if (padre === dir) return { governed: false }

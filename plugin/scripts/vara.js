@@ -210,9 +210,16 @@ export function declaradasEn(contenido) {
 // campos que nadie ha rellenado todavía. Tampoco es una convención de código:
 // es cómo se levanta el repo, que es lo que consume el paso `e2e` de
 // `ct-step`.
+// Y el mismo razonamiento otra vez para el TERCER bloque, el que #93 puso en
+// el sitio que dejó el contrato: la sección corta del loop. Es prosa del
+// plugin, no una convención de código de este repo — y sus huecos (los comandos
+// de build/test/lint) los rellena el usuario, así que sin descontarla un
+// AGENTS.md recién creado dejaría de parecer esqueleto por un texto que no
+// escribió nadie de aquí.
 const CT_INIT_BLOCKS = [
   ['<!-- ct-init:slices-contract -->', '<!-- /ct-init:slices-contract -->'],
   ['<!-- ct-init:e2e-howto -->', '<!-- /ct-init:e2e-howto -->'],
+  ['<!-- ct-init:loop -->', '<!-- /ct-init:loop -->'],
 ]
 
 function sinBloquesDeCtInit(contenido) {
