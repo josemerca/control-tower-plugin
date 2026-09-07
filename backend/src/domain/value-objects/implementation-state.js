@@ -3,6 +3,7 @@ export const ImplementationStep = Object.freeze({
   IMPLEMENT: 'implement',
   CONTROLS: 'controls',
   JUDGE: 'judge',
+  ADVISE: 'advise',
   COMMIT: 'commit',
   RECONCILE: 'reconcile',
   GLOBAL: 'global',

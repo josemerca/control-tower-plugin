@@ -205,6 +205,17 @@ describe('the run machine and the run file this backend reads back', () => {
     expect(Object.values(ImplementationStep).length).toBe(Object.values(STEPS).length + 2)
   })
 
+  it('a_run_the_machine_parked_at_advise_is_read_back_as_a_step_of_the_task_it_advises_on', async () => {
+    let run = RunDouble.freshRun()
+    run = after({ ...run, step: STEPS.JUDGE, judgeRetries: 1 }, OUTCOMES.FAILED, DEFAULT_BUDGETS).run
+
+    const state = await RunDouble.read(run)
+
+    expect(state.step).toBe('advise')
+    expect(state.task).toBe(1)
+    expect(state.attempt).toBe(3)
+  })
+
   it('a_run_the_machine_just_created_is_read_as_the_first_task_about_to_be_implemented', async () => {
     const state = await RunDouble.read(RunDouble.freshRun())
 

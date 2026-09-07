@@ -20,6 +20,8 @@ const DESCRITOS = new Set([
   'implement/done', 'implement/discarded',
   'controls/done', 'controls/failed', 'controls/indeterminate',
   'judge/done', 'judge/failed', 'judge/corrections-ordered', 'judge/discarded',
+  // H9: el segundo veto no vuelve a implementar a ciegas — pasa por el consejero.
+  'advise/done', 'advise/discarded',
   'commit/done', 'commit/failed',
   // §3.7: los pasos que corren tras la última tarea comiteada.
   'reconcile/done', 'reconcile/failed', 'reconcile/discarded',
@@ -104,7 +106,17 @@ describe('judge', () => {
 
   it('failed —el veto— vuelve a implement, y agotado cierra en blocked-judge', () => {
     expect(after(enJuez(), OUTCOMES.FAILED).run.judgeRetries).toBe(1)
+    expect(after(enJuez(), OUTCOMES.FAILED).run.step).toBe(STEPS.IMPLEMENT)
     expect(after(enJuez({ judgeRetries: 2 }), OUTCOMES.FAILED).state).toBe(RUN_STATES.BLOCKED_JUDGE)
+  })
+
+  it('el SEGUNDO veto no vuelve a implementar a ciegas: abre advise, gastando su reintento', () => {
+    // H9. El reintento que este veto concede es el ÚLTIMO, y es el que el
+    // patrón advisor-strategy manda escalar en vez de repetir.
+    const { run: r, state } = after(enJuez({ judgeRetries: 1 }), OUTCOMES.FAILED)
+    expect(r.step).toBe(STEPS.ADVISE)
+    expect(r.judgeRetries).toBe(2)
+    expect(state).toBe(RUN_STATES.OPEN)
   })
 
   it('corrections-ordered —el refunfuño— vuelve a implement con presupuesto PROPIO', () => {
@@ -129,6 +141,29 @@ describe('judge', () => {
     expect(r.step).toBe(STEPS.JUDGE)
     expect(r.discards).toBe(1)
     expect(r.judgeRetries).toBe(1)
+  })
+})
+
+describe('el paso advise', () => {
+  const enConsejo = (over) => run({ step: STEPS.ADVISE, judgeRetries: 2, ...over })
+
+  it('done → el tercer intento de implement, sin gastar nada más', () => {
+    const { run: r, state } = after(enConsejo(), OUTCOMES.DONE)
+    expect(r.step).toBe(STEPS.IMPLEMENT)
+    expect(r.judgeRetries).toBe(2)
+    expect(r.discards).toBe(0)
+    expect(state).toBe(RUN_STATES.OPEN)
+  })
+
+  it('discarded → volver a preguntar al consejero, con un descarte más y SIN gastar reintento', () => {
+    // Un consejo que incumple el esquema no costó un intento de implementación:
+    // el árbol no se tocó. Mismo trato que el veredicto ilegible del juez, y con
+    // el mismo respaldo — el tope de descartes de la slice.
+    const { run: r, state } = after(enConsejo({ discards: 1 }), OUTCOMES.DISCARDED)
+    expect(r.step).toBe(STEPS.ADVISE)
+    expect(r.discards).toBe(2)
+    expect(r.judgeRetries).toBe(2)
+    expect(state).toBe(RUN_STATES.OPEN)
   })
 })
 
