@@ -127,10 +127,14 @@ describe('buildStateSeed', () => {
     expect(meta.blocked).toBe(null)
   })
 
-  it('el kickoff le dice al agente cómo marcar un bloqueo, y que NO lo escriba en next_action', () => {
+  // #99 — la línea era «NO en prosa dentro de next_action». Dice lo mismo
+  // señalando el canal correcto: el CAMPO es lo que sobrevive a una
+  // re-hidratación, que es el motivo por el que `blocked` existe (F7).
+  it('el kickoff le dice al agente cómo marcar un bloqueo: el campo `blocked`, que sobrevive a la re-hidratación', () => {
     const k = renderKickoff(SLICE, { repo: 'o/r', dispatchCheckPath: '/x/d.mjs' , conventionsDir: '/plugin/conventions' })
     expect(k).toMatch(/`blocked: \{reason:/)
-    expect(k).toMatch(/NO en prosa dentro de next_action/)
+    expect(k).toMatch(/ese campo es el canal/)
+    expect(k).toMatch(/sobrevive a una re-hidrataci[óo]n/)
   })
 
   it('handles empty ac array → next_action falls back to "ver issue"', () => {
@@ -287,11 +291,15 @@ describe('renderKickoff — F32, modelo de dos niveles (skills propios, plan pri
     expect(k).toMatch(/cuerpos/i)
   })
 
-  it('prohibiciones explícitas: NO mergear (el merge es humano) y NO crear worktrees nuevos', () => {
+  // #99 — eran tres prohibiciones en mayúsculas («NO mergees», «NO empieces
+  // el siguiente slice», «NO crees worktrees nuevos»). Ahora es el REPARTO:
+  // de quién es cada acto. Lo que de verdad impide el merge y el despacho
+  // ajeno es el hook con `deny`, no este prompt.
+  it('reparto explícito: el merge y el siguiente slice son de la coordinadora, y el worktree ya está puesto', () => {
     const k = renderKickoff(SLICE, OPTS)
-    expect(k).toMatch(/NO mergees/)
-    expect(k).toMatch(/NO crees worktrees/)
-    // La razón de la prohibición del worktree viaja con ella: ya está en uno.
+    expect(k).toMatch(/el merge del PR y el arranque del siguiente slice son de la sesión coordinadora/)
+    expect(k).toMatch(/worktree que te preparó el dispatcher/)
+    // La razón por la que no se crea uno viaja con ella: ya está en uno.
     expect(k).toMatch(/ya estás en/i)
   })
 
@@ -361,7 +369,7 @@ describe('la señal en el despacho (Slice 10)', () => {
 
   it('renderKickoff nombra la señal cuando el issue la declara', () => {
     const k = renderKickoff({ ...SLICE, senal: 'métrica x' }, OPTS)
-    expect(k).toContain('Este slice declara una SEÑAL DE OBSERVABILIDAD (sección "## Señal de observabilidad" del issue): lo que esa señal promete tiene que emitirlo el código de PRODUCCIÓN de este slice, instrumentado como ya instrumenta este repo y sin labels de cardinalidad ilimitada — el juez del slice entero lo comprueba contra el diff acumulado antes del PR.')
+    expect(k).toContain('Este slice declara una SEÑAL DE OBSERVABILIDAD (sección "## Señal de observabilidad" del issue): lo que esa señal promete tiene que emitirlo el código de PRODUCCIÓN de este slice, instrumentado como ya instrumenta este repo y con todas sus labels acotadas — el juez del slice entero lo comprueba contra el diff acumulado antes del PR.')
     // Tras la línea de "Lee también las secciones…" — la zona de "qué leer
     // del issue", antes del primer acto.
     expect(k.indexOf('Lee también las secciones')).toBeLessThan(k.indexOf('SEÑAL DE OBSERVABILIDAD'))
