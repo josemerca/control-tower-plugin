@@ -475,3 +475,23 @@ checkouts, then check that each repository got its own issue and its own cmux ta
    request whose every target failed answers 202 with an empty `started`. Task 4 is the next commit
    and closes it. The alternative was a branch no body could reach, which
    `backend/conventions/simplicity.md` refuses outright. Provenance: own call.
+9. **Two repositories that differ only in case are two targets, and the slice ships that way.**
+   `repo-listed-twice` compares the entry's `repo` as a string, and `RepositoryName` stores what it
+   was given, so `[{repo: 'owner/name'}, {repo: 'Owner/Name'}]` fans out two plans against what
+   GitHub considers one repository — which is the very thing that refusal exists to prevent. Found
+   by the task-3 judge, which correctly declined to fix it here: normalising the case inside the
+   duplicate loop or inside `PlanTarget` would be exactly the second opinion about a
+   `RepositoryName` that `backend/conventions/domain.md` and `simplicity.md` forbid. Where "the same
+   repository" is decided is the value object, and Juanjo chose the domain fix — `RepositoryName`
+   canonicalising its case at construction, with the precedent of `PlanComment.trim()` — as a slice
+   of its own, because it changes the `repo#issue` identity everywhere and its real cost is the
+   migration of names already written to disk and to cmux tab titles. Provenance: judge finding,
+   human's call on the remedy.
+10. **`NO_PLAN_STARTED` is a member of `PlanRequestOutcome` that `PlanRequest.from` never returns.**
+   The rest of that vocabulary means "how parsing the request resolved"; this one is decided by the
+   route after the use case answered, so the route builds a throwaway `PlanRequest` to project it.
+   It is safe — the outcome cannot collide with the parsing dispatch, because nothing produces it
+   there — but `plan-refusal.test.js`'s exhaustiveness test cannot catch the drift: it proves every
+   member has a `Refusal`, not that every member is reachable from `from()`. This plan's §7 Task 4
+   Contract block dictated that shape, so it is the plan's call and not the implementer's, and the
+   task-4 judge flagged it as plan-mandated. Provenance: judge finding on a decision this plan made.
