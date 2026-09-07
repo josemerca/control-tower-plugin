@@ -93,8 +93,6 @@ describe('simplicity.md carries the burden of proof, and says where it ends', ()
       () => expect(Documento.texto('simplicity.md')).toContain('Nothing here authorises skipping a layer'),
     'declara su frontera con el item alcance de la rubrica, que pregunta otra cosa':
       () => expect(Documento.texto('simplicity.md')).toContain('What the plan asked for is a different question from this one'),
-    'no invade el territorio de la guarda propia del value object, y lo dice':
-      () => expect(Documento.texto('simplicity.md')).toContain('`conventions/domain.md`'),
   }
 
   for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
@@ -142,7 +140,7 @@ objects son cómo se construye, no complejidad que recortar]
 
 Reglas de redacción de esta tarea:
 
-- La sección de la guarda dice que el chequeo de lo que un valor **carries** ocurre una vez, en la puerta por la que entra de fuera, y que aguas abajo todo llamante es código propio. Cierra remitiendo a `conventions/domain.md` para la guarda que un value object mantiene para sí — eso es de ese documento y aquí no se repite.
+- La sección de la guarda dice que el chequeo de lo que un valor **carries** ocurre una vez, en la puerta por la que entra de fuera, y que aguas abajo todo llamante es código propio. **No cita `conventions/domain.md` todavía**: ese documento nace en la Tarea 2 y el test `every document it cites by name is a document that exists` caería. La remisión a la guarda propia del value object la añade la Tarea 2, que es cuando el documento existe.
 - La sección del campo cierra con la pregunta literal: `which call breaks without it`.
 - La sección del check inalcanzable dice que una mutación que sobrevive tiene dos reparaciones y que cuál de las dos lo decide `conventions/testing.md`.
 - La sección de observabilidad cierra con la pregunta literal: `who reads this, and where`.
@@ -177,6 +175,7 @@ git commit -m "feat(conventions): la vara de ct mide lo que un diff no añade"
 
 **Files:**
 - Create: `plugin/conventions/domain.md`
+- Modify: `plugin/conventions/simplicity.md` (la remisión que la Tarea 1 no pudo escribir)
 - Modify: `plugin/scripts/plugin-yardstick.js:3` (`FILES`)
 - Test: `plugin/__tests__/conventions-vara.test.js`
 
@@ -209,6 +208,8 @@ describe('domain.md keeps the tools out of the domain', () => {
       () => expect(Documento.texto('domain.md')).toContain('they are repaired in different places'),
     'remite a simplicity.md para lo que pasa aguas abajo de una puerta':
       () => expect(Documento.texto('domain.md')).toContain('`conventions/simplicity.md`'),
+    'y simplicity.md ya remite aqui para la guarda propia del value object':
+      () => expect(Documento.texto('simplicity.md')).toContain('`conventions/domain.md`'),
   }
 
   for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
@@ -248,6 +249,7 @@ Reglas de redacción de esta tarea:
 - La primera sección lleva la frase del test y el criterio que lo decide: si cambiar el adaptador por otra implementación `makes the name a lie`, el nombre pertenece al adaptador. Los dos casos que lo pagaron van **sin los nombres de este repositorio**: un tipo nombrado por lo que reparte una herramienta de sesiones cuando el dominio necesitaba *quien planifica*, y otro nombrado por lo que vende un gestor de incidencias cuando el dominio necesitaba *la historia a planificar*.
 - La sección del port dice que corta por quién está al otro lado, `never by step of the flow`, que el colaborador está `identified by what is asked of it` y no por el ejecutable ni el servicio que contesta, que dos preguntas distintas son dos ports, y cierra con `Repeated shape is not the subject; repeated intent is.` remitiendo a `conventions/decisions.md`.
 - La sección del value object dice que queda congelado en construcción y que guarda `what makes them this value and not any value`, citando lo que recibió; que esa guarda se queda aunque los llamantes de hoy ya la satisfagan; y que lo que no le corresponde es el chequeo que `re-verifies what another type already guarantees`. Remite a `conventions/simplicity.md` para lo que pasa aguas abajo de una puerta.
+- **Y se cierra la remisión que la Tarea 1 no pudo escribir:** en `simplicity.md`, la sección de la guarda gana la línea que remite a `conventions/domain.md` para la guarda que un value object mantiene para sí — eso es de ese documento y `simplicity.md` no lo repite. Ahora el documento existe y la cita se puede seguir.
 - La sección de las excepciones separa las dos causas —el sistema externo falló, con la razón en su canal de error; y contestó algo que no sabemos leer, con nuestro contrato roto— porque `they are repaired in different places`, y remite a `conventions/boundaries.md` para la proyección de cada causa hacia fuera. **Esa cita obliga a que la Tarea 3 exista**: el test de citas cruzadas del fichero falla si `boundaries.md` no está. Por eso esta cita se escribe aquí y no antes.
 
 - [ ] **Step 4: Añadir el nombre a `FILES`**
@@ -264,7 +266,7 @@ Esperado: FAIL en un solo test — `every document it cites by name is a documen
 - [ ] **Step 6: Commit**
 
 ```bash
-git add plugin/conventions/domain.md plugin/scripts/plugin-yardstick.js plugin/__tests__/conventions-vara.test.js
+git add plugin/conventions/domain.md plugin/conventions/simplicity.md plugin/scripts/plugin-yardstick.js plugin/__tests__/conventions-vara.test.js
 git commit -m "feat(conventions): la vara de ct mide el nombre, el port y el value object"
 ```
 
@@ -331,9 +333,12 @@ describe('boundaries.md owns the outer edge, in both shapes a program has', () =
 })
 
 describe('architecture.md kept nothing of the edge, so no rule is written twice', () => {
-  const FRASES_DEL_BORDE = [
-    '## The boundary',
-    '## The entrypoint',
+  // Dos listas y no una: los encabezados DESAPARECEN de architecture.md y
+  // boundaries.md tiene los suyos propios, así que de ellos sólo se comprueba la
+  // ausencia. Las reglas se comprueban en los dos lados: ausentes allí, presentes aquí.
+  const ENCABEZADOS_QUE_DESAPARECEN = ['## The boundary', '## The entrypoint']
+
+  const REGLAS_QUE_SE_MUDAN = [
     'exit codes',
     'assembles the dependency graph',
     'An unknown key is a rejection',
@@ -345,14 +350,19 @@ describe('architecture.md kept nothing of the edge, so no rule is written twice'
     'An adapter does not decide policy',
   ]
 
-  for (const frase of FRASES_DEL_BORDE) {
-    it(`no queda en architecture.md: ${frase}`, () => {
-      expect(Documento.texto('architecture.md')).not.toContain(frase)
+  for (const encabezado of ENCABEZADOS_QUE_DESAPARECEN) {
+    it(`architecture.md ya no tiene la seccion ${encabezado}`, () => {
+      expect(Documento.texto('architecture.md')).not.toContain(encabezado)
+    })
+  }
+
+  for (const regla of REGLAS_QUE_SE_MUDAN) {
+    it(`no queda en architecture.md: ${regla}`, () => {
+      expect(Documento.texto('architecture.md')).not.toContain(regla)
     })
 
-    it(`y esta en boundaries.md: ${frase}`, () => {
-      const esperado = frase.startsWith('## ') ? frase.replace('## ', '') : frase
-      expect(Documento.texto('boundaries.md')).toContain(esperado)
+    it(`y esta en boundaries.md: ${regla}`, () => {
+      expect(Documento.texto('boundaries.md')).toContain(regla)
     })
   }
 })
@@ -378,7 +388,7 @@ it('los tres documentos nuevos alcanzan a una tarea que no crea ninguna ruta, y 
 - [ ] **Step 2: Correr los tests y verlos fallar**
 
 Desde `plugin/`: `npx vitest run __tests__/conventions-vara.test.js __tests__/plugin-yardstick.test.js`
-Esperado: FAIL — `ENOENT` en los tests de `boundaries.md`, los once `no queda en architecture.md: ...` porque todas esas frases están hoy en `architecture.md`, y el del alcance porque `boundaries.md` no existe.
+Esperado: FAIL — `ENOENT` en los tests de `boundaries.md`, los dos `architecture.md ya no tiene la seccion ...` y los nueve `no queda en architecture.md: ...` porque todo eso está hoy en `architecture.md`, y el del alcance porque `boundaries.md` no existe.
 
 - [ ] **Step 3: Escribir `plugin/conventions/boundaries.md`**
 
