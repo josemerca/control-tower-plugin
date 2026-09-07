@@ -8,7 +8,9 @@ import { readGoCommitment, goPath } from '../../../plugin/scripts/go-registry.js
 import { matchesGo } from '../../../plugin/scripts/go-response.js'
 import { controlTowerDir } from '../../../plugin/scripts/run-metrics.js'
 import { LOOP_STATUS_LABELS } from '../../../plugin/scripts/groom.js'
-import { STEPS, RUN_STATES, OUTCOMES, DEFAULT_BUDGETS, newRun, after } from '../../../plugin/scripts/run-machine.js'
+import {
+  STEPS, RUN_STATES, OUTCOMES, DEFAULT_BUDGETS, newRun, after, deliveredRun,
+} from '../../../plugin/scripts/run-machine.js'
 import { StepSeal } from '../../../plugin/scripts/dispatch-gate.js'
 import { extractTasks } from '../../../plugin/scripts/plan-tasks.js'
 import { DiskGoRegistry } from '../../src/infrastructure/disk-go-registry.js'
@@ -179,9 +181,12 @@ class RunDouble {
     })
   }
 
+  static bytesOf(run) {
+    return JSON.stringify(run, null, 2) + '\n'
+  }
+
   static async read(run, extraFiles = {}) {
-    const serialized = JSON.stringify(run, null, 2) + '\n'
-    const files = { [RunDouble.path()]: serialized, ...extraFiles }
+    const files = { [RunDouble.path()]: RunDouble.bytesOf(run), ...extraFiles }
     const progress = new RunFileProgress({
       exists: async (candidate) => candidate === RunDouble.worktree(),
       read: async (candidate) => (candidate in files ? files[candidate] : null),
@@ -223,13 +228,23 @@ describe('the run machine and the run file this backend reads back', () => {
     expect(RunFileProgress.attemptOf(run)).toBe(StepSeal.attemptOf(run))
   })
 
-  it('the_delivered_run_the_machine_closes_is_the_delivered_run_we_answer', async () => {
-    const run = { ...RunDouble.freshRun(), closed: RUN_STATES.DELIVERED }
+  it.each([
+    ['the machine closed it as delivered', { closed: RUN_STATES.DELIVERED }, true],
+    ['it closed some other way', { closed: 'blocked-judge' }, false],
+    ['it is still open', {}, false],
+  ])(
+    'the_two_readers_agree_on_whether_the_run_is_delivered: %s',
+    async (_, closure, delivered) => {
+      const run = { ...RunDouble.freshRun(), ...closure }
+      const bytes = RunDouble.bytesOf(run)
 
-    const state = await RunDouble.read(run)
+      const theirs = deliveredRun(bytes, RunDouble.ISSUE)
+      const ours = await RunDouble.read(run)
 
-    expect(state.step).toBe('delivered')
-  })
+      expect(theirs.ok).toBe(delivered)
+      expect(ours.step === 'delivered').toBe(delivered)
+    },
+  )
 
   it('the_task_names_we_read_are_the_ones_the_plugin_extracts', async () => {
     const planPath = join(

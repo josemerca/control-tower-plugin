@@ -80,7 +80,6 @@ export class ProgressCollapse {
 
 export class ImplementProgressRoute {
   static PATH = '/implement-progress/:issue'
-  static METHOD = 'GET'
 
   static handledBy(readImplementationProgress) {
     return async (request, response) => {

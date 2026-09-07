@@ -86,7 +86,12 @@ export class RunFileProgress extends ImplementationProgress {
   }
 
   async #taskName(worktree, run) {
-    const planText = await this.read(`${worktree}/${run.plan}`)
+    let planText
+    try {
+      planText = await this.read(`${worktree}/${run.plan}`)
+    } catch {
+      return null
+    }
     if (planText === null) return null
     return PlanTaskNames.of(planText).get(run.task) ?? null
   }

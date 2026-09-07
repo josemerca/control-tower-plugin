@@ -59,10 +59,11 @@ class RunFileDouble {
     lastVerdict: { ruling: 'PASS' },
   }
 
-  constructor({ exists = true, texts = [], runFileReadFails = null } = {}) {
+  constructor({ exists = true, texts = [], runFileReadFails = null, planReadFails = null } = {}) {
     this.exists = exists
     this.texts = [...texts]
     this.runFileReadFails = runFileReadFails
+    this.planReadFails = planReadFails
     this.existsAsked = []
     this.readAsked = []
   }
@@ -87,6 +88,10 @@ class RunFileDouble {
     return new RunFileDouble({ runFileReadFails: cause })
   }
 
+  static withUnreadablePlan(run, cause = new Error('EISDIR: illegal operation on a directory, read')) {
+    return new RunFileDouble({ texts: [JSON.stringify(run)], planReadFails: cause })
+  }
+
   progress() {
     return new RunFileProgress({
       exists: async (path) => {
@@ -97,6 +102,9 @@ class RunFileDouble {
         this.readAsked.push(path)
         if (path === RunFileDouble.RUN_FILE && this.runFileReadFails !== null) {
           throw this.runFileReadFails
+        }
+        if (path === RunFileDouble.PLAN_FILE && this.planReadFails !== null) {
+          throw this.planReadFails
         }
         if (this.texts.length === 0) {
           throw new Error(`read was asked for ${path} with no scripted answer left`)
@@ -154,17 +162,20 @@ describe('RunFileProgress', () => {
     }))
   })
 
-  it('a_step_of_the_slice_answers_the_total_but_no_task_and_no_attempt', async () => {
-    const asked = RunFileDouble.answering({
-      ...RunFileDouble.BANCO_DE_LA_PUERTA, step: 'global', task: 7, tasksTotal: 7, discards: 1,
-    })
+  it.each(['reconcile', 'global', 'slice-judge', 'e2e'])(
+    'a_step_of_the_slice_answers_the_total_but_no_task_and_no_attempt: %s',
+    async (step) => {
+      const asked = RunFileDouble.answering({
+        ...RunFileDouble.BANCO_DE_LA_PUERTA, step, task: 7, tasksTotal: 7, discards: 1,
+      })
 
-    const state = await asked.asked()
+      const state = await asked.asked()
 
-    expect(state).toEqual(ImplementationState.of({
-      step: 'global', task: null, totalTasks: 7, name: null, attempt: null, discards: 1,
-    }))
-  })
+      expect(state).toEqual(ImplementationState.of({
+        step, task: null, totalTasks: 7, name: null, attempt: null, discards: 1,
+      }))
+    },
+  )
 
   it('the_attempt_counts_the_three_retries_that_reset_with_every_task', async () => {
     const asked = RunFileDouble.answering({
@@ -193,6 +204,17 @@ describe('RunFileProgress', () => {
 
     expect(refusal).toBeInstanceOf(ImplementationProgressNotRead)
     expect(refusal.message).toContain(RunFileDouble.RUN_FILE)
+  })
+
+  it('a_plan_that_cannot_be_read_costs_the_name_and_not_the_state', async () => {
+    const asked = RunFileDouble.withUnreadablePlan(RunFileDouble.BANCO_DE_LA_PUERTA)
+
+    const state = await asked.asked()
+
+    expect(state).toEqual(ImplementationState.of({
+      step: 'implement', task: 1, totalTasks: 3, name: null, attempt: 1, discards: 0,
+    }))
+    expect(asked.readAsked).toEqual([RunFileDouble.RUN_FILE, RunFileDouble.PLAN_FILE])
   })
 
   it('a_run_file_that_exists_but_cannot_be_read_is_a_progress_that_could_not_be_read', async () => {
