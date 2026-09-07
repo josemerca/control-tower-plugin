@@ -34,7 +34,7 @@ const ALCANCES = {
 }
 
 describe('the documents in conventions/', () => {
-  it('ALCANCES nombra exactamente lo que PluginYardstick.FILES declara, ni uno más ni uno menos', () => {
+  it('ALCANCES nombra exactamente lo que PluginYardstick.FILES declara, ni uno mas ni uno menos', () => {
     expect(Object.keys(ALCANCES).sort()).toEqual([...PluginYardstick.FILES].sort())
   })
 
@@ -366,7 +366,7 @@ describe('the yardstick names no language and no tool', () => {
     }
   }
 
-  it('donde la vara habla de un codigo de salida, nombra tambien la otra forma del borde', () => {
+  it('cuando se habla de un codigo de salida, se nombra tambien la otra forma del borde', () => {
     for (const nombre of Object.keys(ALCANCES)) {
       const texto = Documento.texto(nombre)
       if (!/exit code/i.test(texto)) continue
@@ -375,7 +375,7 @@ describe('the yardstick names no language and no tool', () => {
     }
   })
 
-  it('nadie en el plugin sigue diciendo que la vara son cinco documentos', () => {
+  it('nadie en el plugin sigue diciendo que esto son cinco piezas', () => {
     const fuentes = ['scripts/run-metrics.js', 'scripts/ct-next.mjs', 'scripts/kickoff.js', 'scripts/ct-step.mjs',
       'agents/ct-reconciler.md', 'skills/writing-plans-prescriptive/SKILL.md']
     for (const ruta of fuentes) {
