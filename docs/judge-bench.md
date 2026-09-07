@@ -82,6 +82,16 @@ corrida contra la que se compara cualquier cambio de la rúbrica, y el documento
 qué **no** se puede concluir de ella: con el banco en el techo, sirve de barandilla contra la
 regresión y no de vara para la mejora.
 
+### La corrida de #99: la rúbrica en positivo
+
+`--runs 5` sobre el `ct-judge.md` reescrito en positivo (sha256 `432eb0fb…`, commit `17b13c3`):
+15 de 15 aciertos, cero descartes, cero severidades sobre `tarea-correcta` y 8,8829 USD — un 6,2 %
+más por juicio. La comparación de las dos tablas, con lo que se puede y lo que no se puede concluir
+de ellas, está en
+[`judge-bench-99-rubrica-en-positivo.md`](judge-bench-99-rubrica-en-positivo.md). Es también el
+ejemplo de cómo se documenta un cambio de rúbrica: las dos tablas juntas y el sha256 del agente que
+produjo cada una.
+
 ### La corrida anterior, de N=1
 
 `--agent plugin/agents/ct-judge.md --runs 1`, plugin 0.56.0, 2026-09-05:

@@ -142,6 +142,12 @@ lee «nueve ítems que se sostienen» también en los intentos en los que el jue
 No se arregla aquí: el enum es cerrado, lo comparte el juez de slice y lo agrega la telemetría, y
 la rúbrica es justo lo que #99 va a reescribir. Queda anotado como insumo de esa issue.
 
+**Y #99 tampoco lo arregla, a propósito.** Su corrida lo reprodujo con la rúbrica reescrita —los
+diez veredictos que archivan un `high` siguen diciendo `conforme` en el paso de esa misma regla— y
+decidió dejarlo fuera para no meter dos variables en una sola medida de 8,9 USD. El razonamiento
+completo, y lo que debería recoger la issue que lo tome, están en
+[`judge-bench-99-rubrica-en-positivo.md`](judge-bench-99-rubrica-en-positivo.md).
+
 ## Qué significa esta línea base para #99
 
 #99 reescribe las nueve reglas en positivo y su criterio de aceptación es que la tasa de acierto
@@ -165,6 +171,14 @@ no baje. Con esta línea base en el techo, ese criterio se lee así:
 Dicho de una vez: **este banco es hoy una barandilla contra la regresión, no una vara para la
 mejora.** Es exactamente lo que #99 necesita para no mergear a ciegas, y no basta para poder
 afirmar que la reescritura mejoró nada.
+
+**Lo que pasó después.** #99 se midió contra esta línea base el mismo día: 15/15 aciertos, cero
+descartes, cero severidades sobre `tarea-correcta` y 0,5922 USD por juicio (0,5576 aquí). La
+comparación caso a caso, regla a regla y en coste está en
+[`judge-bench-99-rubrica-en-positivo.md`](judge-bench-99-rubrica-en-positivo.md), con el sha256 del
+agente que produjo cada tabla. El pronóstico de esta sección se cumplió por los dos lados: no
+empeoró nada, y el único eje que podía demostrar una mejora —el coste— se movió en la dirección
+contraria.
 
 ## Cómo reproducirla
 

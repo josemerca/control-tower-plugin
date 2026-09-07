@@ -337,7 +337,10 @@ describe('los textos del gate', () => {
     // Un agente que crea que puede saltarse el gate hace el trabajo dos veces.
     expect(GATES.plan.kickoff).toMatch(/no puedes fabricarlo/)
     expect(GATES.plan.kickoff).toMatch(/exit 9/)
-    expect(GATES.plan.kickoff).toMatch(/NO está en este kickoff/)
+    // #99 — la frase era «NO está en este kickoff, ni en el issue, ni en tu
+    // worktree». Dice el MISMO hecho en positivo: dónde vive el nonce, que es
+    // lo que lo convierte en un permiso humano.
+    expect(GATES.plan.kickoff).toMatch(/vive fuera de este kickoff, del issue y de tu worktree/)
   })
 
   it('el del HUMANO dice qué teclear y de dónde sale, sin escribir el nonce en el issue', async () => {
