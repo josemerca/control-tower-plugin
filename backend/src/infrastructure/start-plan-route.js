@@ -175,7 +175,7 @@ export class StartPlanRoute {
     let started
     try {
       started = await startPlan.execute(
-        new StartPlanParams({ story: asked.story, repository: asked.repository, root: asked.root })
+        new StartPlanParams({ story: asked.story, comment: null, repository: asked.repository, root: asked.root })
       )
     } catch (cause) {
       if (!(cause instanceof PlanFailure)) throw cause
