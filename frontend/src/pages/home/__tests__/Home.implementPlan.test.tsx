@@ -68,7 +68,7 @@ describe('Home · implement plan', () => {
 
     await pressImplement(user)
 
-    await screen.findByText('Implementación en curso')
+    await screen.findByText('Agente asignado')
     expect(fetching).toHaveBeenCalledTimes(1)
     const [url, init] = fetching.mock.calls[0] as unknown as [string, RequestInit]
     expect(url).toBe('/implement-plan')
@@ -83,7 +83,7 @@ describe('Home · implement plan', () => {
 
     await pressImplement(user)
 
-    const started = await screen.findByText('Implementación en curso')
+    const started = await screen.findByText('Agente asignado')
     const status = started.closest('[role="status"]')
     expect(status).not.toBeNull()
     expect(status).toHaveTextContent(ImplementPlanMother.AGENT)
@@ -129,7 +129,7 @@ describe('Home · implement plan', () => {
 
     expect(screen.getByRole('button', IMPLEMENT_BUTTON)).toBeDisabled()
     await backend.answerWith(ImplementPlanMother.implementing())
-    expect(await screen.findByText('Implementación en curso')).toBeInTheDocument()
+    expect(await screen.findByText('Agente asignado')).toBeInTheDocument()
   })
 
   it('should only allow another repository after implementation starts and close the old stream', async () => {
