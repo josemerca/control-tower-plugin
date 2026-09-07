@@ -195,7 +195,7 @@ Outside-in, según `backend/conventions/testing.md`:
 - **Dominio:** nada propio. `DeliveryPolicy` se mide a través de las dos queries que la llevan.
 - **Frontend:** a través de `Home`, con `FakeEventSource` y los frames de `PlanEventsMother`.
 
-**Las transcripciones tienen que ser reales.** La Tarea 2 empieza capturándolas de una pull request de verdad con los tres casos que llegan. Un fichero de transcripciones inventadas es un fallo de la tarea.
+**La forma que lee el adaptador se declara, no se captura.** El test la escribe y no llega a GitHub para tenerla: `testing.md` lo pide así porque un test que necesita el servicio para existir depende de su estado, sus límites de llamadas y sus caídas. Quien contrasta esa forma con la realidad es el smoke test de la sección 8.
 
 ---
 
@@ -284,18 +284,28 @@ git commit -m "refactor: move ChangeAsked to the domain for its second construct
 - Consumes: `ChangeAsked` de la Tarea 1.
 - Produces: `PullRequests` con `openOf` y `fixesAsked`; `OpenPullRequest { number, url }`; `PullRequestNotRead` y `PullRequestNotUnderstood`.
 
-- [ ] **Step 1: Capturar las transcripciones reales**
+- [ ] **Step 1: Declarar la forma que el adaptador lee**
 
-Sobre una pull request de verdad —vale la de este trabajo— dejar los tres casos que llegan: una review con cuerpo, una review con dos comentarios de línea, y un comentario de línea suelto sin abrir review. Luego:
+`backend/conventions/testing.md` pide una **forma declarada**, escrita en el test y nunca traída del servicio mientras corre: un test que necesita llegar a GitHub para existir hereda el estado de GitHub. La forma se escribe a mano, con los campos que el adaptador lee y ni uno más, y quien la contrasta con la realidad es el smoke test del final (sección 8), no la suite.
 
-```bash
-gh api repos/<owner>/<repo>/pulls/<n>/reviews  > /tmp/reviews.json
-gh api repos/<owner>/<repo>/pulls/<n>/comments > /tmp/comments.json
+En `backend/__tests__/fixtures/gh-pull-request-reviews.json`, los tres casos que llegan juntos en una sola conversación:
+
+```json
+{
+  "reviews": [
+    { "id": 101, "state": "CHANGES_REQUESTED", "body": "varias cosas que arreglar" },
+    { "id": 102, "state": "COMMENTED", "body": "" },
+    { "id": 103, "state": "APPROVED", "body": "por mi parte bien" }
+  ],
+  "comments": [
+    { "body": "revienta con []", "path": "src/foo.js", "line": 42, "pull_request_review_id": 101 },
+    { "body": "esto sobra", "path": "src/bar.js", "line": 17, "pull_request_review_id": 101 },
+    { "body": "esta linea sobra", "path": "src/baz.js", "line": 9, "pull_request_review_id": 102 }
+  ]
+}
 ```
 
-Guardar en `backend/__tests__/fixtures/gh-pull-request-reviews.json` un objeto con las dos respuestas tal como salieron, recortando sólo los campos que el adaptador lee (`id`, `state`, `body` en reviews; `body`, `path`, `line`, `pull_request_review_id` en comments) y anonimizando nombres de persona. Anotar en el mensaje del commit el número de la pull request de la que salieron.
-
-Si no hay forma de capturarlas, **parar y decirlo**: `testing.md` prohíbe las formas inventadas y esta tarea no se puede cerrar sin ellas.
+La review `102` con cuerpo vacío y un comentario es el caso del comentario de línea suelto: GitHub lo envuelve en una review implícita `COMMENTED` sin cuerpo. La `103` está para que el test compruebe que una aprobación no pide nada aunque venga en la misma respuesta.
 
 - [ ] **Step 2: Escribir los tests que fallan**
 
@@ -2827,14 +2837,17 @@ git commit -m "feat: show where the delivery of a plan stands and link its pull 
 
 ---
 
-## 8. La prueba de punta a punta, a mano
+## 8. El smoke test
 
-Los tests no cubren el bucle entero contra GitHub y cmux de verdad. Antes de abrir la pull request de este trabajo, correrlo una vez sobre un repo de pruebas:
+Lo que los dobles no pueden probar: que la forma declarada en los tests del adaptador es la que GitHub manda de verdad. `testing.md` lo sitúa aquí — al final del trabajo, una vez, con una persona mirando, y su resultado viaja en el cuerpo de la pull request.
+
+Antes de abrir la pull request de este trabajo, correr el bucle entero sobre un repositorio de pruebas:
 
 - [ ] Arrancar la interfaz de programación de aplicaciones y la interfaz, y lanzar un plan sobre una historia de prueba.
 - [ ] Dar el go, dejar que el agente implemente y abra su pull request.
 - [ ] Comprobar que el cuarto paso pasa a "Pull request #N en revisión" con su enlace.
 - [ ] Dejar una review con cuerpo y dos comentarios de línea. Comprobar que el issue vuelve a `status:in-progress`, que el cuarto paso dice "Corrigiendo lo pedido…", y que el agente recibe el encargo con las dos anclas `fichero:línea`.
+- [ ] **Contrastar la forma declarada con la real:** guardar la salida de `gh api repos/O/R/pulls/N/reviews` y `.../comments` de esa review y compararla campo a campo con `backend/__tests__/fixtures/gh-pull-request-reviews.json`. Si difieren, la forma declarada es la que está mal y sus tests son los que cambian.
 - [ ] **Confirmar que el segundo `--release` pasa la puerta del go** (código 9). En el papel pasa —el compromiso no se borra y el comentario `-OK <nonce>` sigue en el issue—, pero nadie lo ha visto ocurrir. Si falla, parar: el bucle no se cierra y hay que decidir qué hacer con esa puerta.
 - [ ] Añadir un comentario de línea suelto, sin abrir review, y comprobar que también llega.
 - [ ] Pedir una segunda review mientras el agente corrige, y comprobar que no se le teclea encima y que se atiende cuando vuelve a `in-review`.

@@ -436,11 +436,13 @@ como su mother:
 El dominio no tiene tests propios: `DeliveryPolicy` se mide a través de las dos
 queries que la llevan.
 
-**Las transcripciones tienen que ser reales.** `testing.md` pide *"real
-transcripts, not invented shapes"*, así que hay que capturar salidas de verdad de
-`gh api .../pulls/<n>/reviews` y `.../comments` sobre una pull request real, con
-los tres casos que llegan — cuerpo, comentarios agrupados y comentario de línea
-suelto.
+**La forma que lee el adaptador se declara en su test**, con los tres casos que
+llegan — cuerpo, comentarios agrupados y comentario de línea suelto. No se
+captura del servicio: un test que necesita llegar a GitHub para existir depende
+de su estado, sus límites de llamadas y sus caídas. Quien contrasta esa forma con
+la realidad es el smoke test del final, una vez, y su resultado viaja en el
+cuerpo de la pull request. `backend/conventions/testing.md` se modificó en este
+trabajo para decirlo así.
 
 ## 8. Límites conocidos
 
