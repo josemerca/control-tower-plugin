@@ -38,6 +38,10 @@ class Opened {
   static asTheDispatcherReadsIt(story = Opened.story()) {
     return mapGhIssue(Opened.asGithubSees({ story }))
   }
+
+  static commentOnly(text = 'lo que pide el humano') {
+    return { story: null, comment: new PlanComment(text) }
+  }
 }
 
 describe('PlanIssueBody', () => {
@@ -202,6 +206,41 @@ describe('PlanIssueBody', () => {
 
   it('the_gates_section_tells_the_human_how_to_answer_the_go_instead_of_naming_the_gate_alone', () => {
     expect(PlanIssueBody.of({ story: Opened.story(), comment: null })).toContain('-OK <nonce>')
+  })
+})
+
+describe('an issue with no user story is born from the comment alone', () => {
+  it('an_issue_with_no_user_story_is_titled_by_the_first_line_of_the_comment', () => {
+    const { story, comment } = Opened.commentOnly('arreglar el buscador\ny quitar el filtro roto')
+
+    expect(PlanIssueBody.titleFor({ story, comment })).toBe('arreglar el buscador')
+  })
+
+  it('a_first_line_longer_than_a_github_title_is_cut_and_says_it_was_cut', () => {
+    const exactly72 = 'a'.repeat(72)
+    const oneOver = 'a'.repeat(73)
+
+    expect(PlanIssueBody.titleFor(Opened.commentOnly(exactly72))).toBe(exactly72)
+    expect(PlanIssueBody.titleFor(Opened.commentOnly(oneOver)))
+      .toBe(`${'a'.repeat(71)}${PlanIssueBody.HEADLINE_CUT}`)
+  })
+
+  it('the_first_line_of_a_body_with_no_story_says_the_plan_was_asked_by_hand_instead_of_naming_a_key', () => {
+    const [firstLine] = PlanIssueBody.of(Opened.commentOnly()).split('\n')
+
+    expect(firstLine).toBe(PlanIssueBody.NO_STORY_LINE)
+  })
+
+  it('a_body_with_no_story_says_there_is_no_jira_story_where_the_epic_context_goes', () => {
+    const body = PlanIssueBody.of(Opened.commentOnly())
+
+    expect(body).toContain(`## Contexto del epic\n${PlanIssueBody.NO_STORY_EPIC_CONTEXT}`)
+  })
+
+  it('a_comment_whose_first_line_carries_no_words_says_so_instead_of_leaving_the_description_blank', () => {
+    const body = PlanIssueBody.of(Opened.commentOnly('—'))
+
+    expect(body).toContain(`## Descripción\n${PlanIssueBody.NO_HEADLINE}`)
   })
 })
 

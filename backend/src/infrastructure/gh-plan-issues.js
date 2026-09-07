@@ -230,6 +230,11 @@ export class PlanIssueBody {
   static AC_HEADING = '## Acceptance criteria (EARS, 1:1 con tests)'
   static COMMENT_SECTION = 'Comentario de quien pide el plan'
   static COMMENT_HEADING = `## ${PlanIssueBody.COMMENT_SECTION}`
+  static NO_STORY_LINE = '> Plan pedido a mano: no hay historia de usuario en Jira.'
+  static NO_STORY_EPIC_CONTEXT = '_El plan no viene de una historia de usuario de Jira._'
+  static NO_HEADLINE = '_El comentario no trae una primera línea que resuma lo que se pide._'
+  static HEADLINE_LIMIT = 72
+  static HEADLINE_CUT = '…'
   static #ACTIVE =
     /((?<![\w])[\w.-]+\/[\w.-]+#\d+|(?<![\w])#\d+|(?<![\w.])@[A-Za-z0-9][A-Za-z0-9-]*|https?:\/\/\S*github\.com\/\S+)/g
   static #CODE_SPAN = /(`[^`]*`)/
@@ -243,14 +248,25 @@ export class PlanIssueBody {
   }
 
   static titleFor({ story, comment }) {
-    return `${story.key} ${story.summary}`
+    return story === null ? PlanIssueBody.headlineOf(comment) : `${story.key} ${story.summary}`
+  }
+
+  static headlineOf(comment) {
+    const line = comment.text.split('\n').find((candidate) => candidate.trim().length > 0)
+    const collapsed = line.replace(/\s+/g, ' ').trim()
+
+    return collapsed.length > PlanIssueBody.HEADLINE_LIMIT
+      ? `${collapsed.slice(0, PlanIssueBody.HEADLINE_LIMIT - 1)}${PlanIssueBody.HEADLINE_CUT}`
+      : collapsed
   }
 
   static rowFor({ story, comment }) {
+    const name = story === null ? PlanIssueBody.headlineOf(comment) : story.summary
+
     return {
       n: null,
-      name: story.summary,
-      entrega: PlanIssueBody.quieted(story.summary),
+      name,
+      entrega: PlanIssueBody.quieted(name),
       type: '',
       e2e: '',
       ac: [],
@@ -260,6 +276,8 @@ export class PlanIssueBody {
   }
 
   static #epicContextOf(story) {
+    if (story === null) return PlanIssueBody.NO_STORY_EPIC_CONTEXT
+
     return story.hasDescription()
       ? PlanIssueBody.quieted(story.description)
       : `_${story.key} no trae descripción en Jira: la historia de usuario está sin escribir._`
@@ -278,11 +296,12 @@ export class PlanIssueBody {
     const row = PlanIssueBody.rowFor({ story, comment })
 
     return [
-      `> Historia de usuario: ${story.key}`,
+      story === null ? PlanIssueBody.NO_STORY_LINE : `> Historia de usuario: ${story.key}`,
       PlanIssueBody.CHANGES_LINE,
       '',
       PlanIssueBody.DESCRIPTION_HEADING,
-      renderDescripcion(row) ?? `_${story.key} no trae resumen en Jira._`,
+      renderDescripcion(row) ??
+        (story === null ? PlanIssueBody.NO_HEADLINE : `_${story.key} no trae resumen en Jira._`),
       '',
       ...(comment === null ? [] : [PlanIssueBody.COMMENT_HEADING, PlanIssueBody.quieted(comment.text), '']),
       EPIC_CONTEXT_HEADING,
