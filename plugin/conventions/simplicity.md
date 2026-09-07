@@ -6,10 +6,10 @@ One rule, and the rest of this document is the shapes it takes: **the burden of 
 it is discharged against the problem being solved today**. "It might one day"
 does not discharge it.
 
-**Nothing here authorises dropping a layer.** The boundaries between the parts
-of a system, the ports between them and the types that make a value what it is
-are how a system is built, not complexity to trim. What is trimmed is what
-defends against what cannot happen.
+**Nothing here authorises dropping a layer.** The layers between the parts
+of a system, the ports between them and the value objects are how a system
+is built, not complexity to trim. What is trimmed is what defends against
+what cannot happen.
 
 ## The guard lives where the value enters from outside
 
@@ -24,12 +24,12 @@ system already vouched for.
 
 ## A field, a branch and a public symbol answer to a call that exists
 
-Not to one that could exist. A field that crosses a boundary, a parameter with
-a default, a branch for a state, a symbol made visible outside its own part of
-the system: each is justified by a caller that exists today and by nothing
-else. What is added for a consumer that has not arrived is carried by every
-part it crosses until someone removes it, and that someone has to prove first
-that nobody uses it.
+Not to one that could exist. A field that crosses a layer, a parameter with a
+default, a branch for a state, a method made public, an export: each is
+justified by a caller that exists today and by nothing else. What is added
+for a consumer that has not arrived is carried by every layer it crosses
+until someone removes it, and that someone has to prove first that nobody
+uses it.
 
 The question: **which call breaks without it?** Name it. If none does, it goes.
 
@@ -38,8 +38,8 @@ The question: **which call breaks without it?** Name it. If none does, it goes.
 A condition on a state that cannot occur — a key that cannot repeat, a value
 that cannot be missing at that point, a case the branch beside it already
 handles — protects nothing and reads as if it did. A surviving mutant at that
-line has two possible repairs, not one: the check nobody exercises, or the
-line nobody needs. Which of the two, `conventions/testing.md` decides.
+line has two possible repairs, not one: the test nobody wrote, or the line
+nobody needs. Which of the two, `conventions/testing.md` decides.
 
 ## Observability answers to a reader who exists
 
@@ -52,15 +52,17 @@ The question: **who reads this, and where?**
 
 ## A request from a review or a judgement is not exempt
 
-The burden of proof does not move when the addition is asked for by a reviewer, a verifier or a judge.
-A review that looks for what is missing finds it, and complying costs less
-than answering — which is how these accumulate, each one reasonable on its own.
+The burden of proof does not move when the addition is asked for by a reviewer,
+a verifier or a judge. Nothing about a review makes a guard reachable or gives
+a field a caller. A review that looks for what is missing finds it, and
+complying costs less than answering — which is how these accumulate, each one
+reasonable on its own.
 
 Where the burden cannot be discharged, the request goes back as a finding for a human to decide, and is not implemented meanwhile.
 
 ## What other documents own, and this one does not repeat
 
-- A **new part of the system**: `conventions/architecture.md`.
+- A **new module**: `conventions/architecture.md`.
 - **What a check is missing, and what is left unmeasured on purpose**:
   `conventions/testing.md`.
 - **What the plan asked for is a different question from this one.** That
@@ -71,7 +73,7 @@ Where the burden cannot be discharged, the request goes back as a finding for a 
 ## Antipatterns
 
 - A second check on what a value carries, downstream of the door it came in by.
-- A field crossing a boundary with no consumer at the other end.
+- A field crossing a layer with no consumer at the other end.
 - A public symbol, a parameter or a default with no caller.
 - A condition on a state that cannot occur, with a check that can only fail if
   the boundary above it changes.
