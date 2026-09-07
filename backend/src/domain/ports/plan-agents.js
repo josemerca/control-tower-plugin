@@ -16,4 +16,10 @@ export class PlanAgents {
       `${this.constructor.name} must implement review({ agent, issue, repository, changes }), asked for ${agent} on ${issue} in ${repository}`
     )
   }
+
+  async fix({ agent, issue, repository, changes }) {
+    throw new Error(
+      `${this.constructor.name} must implement fix({ agent, issue, repository, changes }), asked for ${agent} on ${issue} in ${repository}`
+    )
+  }
 }

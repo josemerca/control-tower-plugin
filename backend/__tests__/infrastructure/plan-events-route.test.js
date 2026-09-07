@@ -5,7 +5,8 @@ import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-loca
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
-import { PlanProgressNotRead } from '../../src/domain/exceptions.js'
+import { PlanProgressNotRead, PullRequestNotRead } from '../../src/domain/exceptions.js'
+import { DeliveryState } from '../../src/domain/policies/delivery-policy.js'
 
 class EventsDouble {
   static SUBJECT = new PlanWatch({
@@ -14,13 +15,31 @@ class EventsDouble {
     repository: new RepositoryName('owner/name'),
   })
 
+  static DELIVERING = new PlanWatch({
+    issue: new PlanIssue({ number: 42, url: 'https://github.com/owner/name/issues/42' }),
+    located: new WorkspaceLocation({ path: '/repo/.worktrees/42', branch: 'feat/42' }),
+    repository: new RepositoryName('owner/name'),
+    delivering: true,
+  })
+
+  static PULL_REQUEST = { number: 42, url: 'https://github.com/owner/name/pull/42' }
+
   constructor(answers) {
     this.answers = [...answers]
     this.slept = 0
+    this.planReads = 0
   }
 
   static unable(said) {
     return new EventsDouble([new PlanProgressNotRead(said)])
+  }
+
+  static delivering(...answers) {
+    return new EventsDouble(answers)
+  }
+
+  static inReview() {
+    return { state: DeliveryState.IN_REVIEW, pullRequest: EventsDouble.PULL_REQUEST }
   }
 
   events() {
@@ -30,6 +49,7 @@ class EventsDouble {
         return Promise.resolve()
       },
       read: () => {
+        this.planReads += 1
         if (this.answers.length === 0) {
           throw new Error('the progress was read more times than this test scripted an answer for')
         }
@@ -38,6 +58,16 @@ class EventsDouble {
         if (answer instanceof Error) return Promise.reject(answer)
 
         return Promise.resolve({ state: answer })
+      },
+      readDelivery: () => {
+        if (this.answers.length === 0) {
+          throw new Error('the delivery was read more times than this test scripted an answer for')
+        }
+
+        const answer = this.answers.shift()
+        if (answer instanceof Error) return Promise.reject(answer)
+
+        return Promise.resolve(answer)
       },
     })
   }
@@ -49,6 +79,13 @@ class EventsDouble {
   async collected(cancelled = () => false) {
     const frames = []
     for await (const frame of this.events().stream(EventsDouble.SUBJECT, cancelled)) frames.push(frame)
+
+    return frames
+  }
+
+  async collectedDelivering(cancelled = () => false) {
+    const frames = []
+    for await (const frame of this.events().stream(EventsDouble.DELIVERING, cancelled)) frames.push(frame)
 
     return frames
   }
@@ -70,14 +107,6 @@ describe('PlanSessions', () => {
 
   it('an_issue_nobody_started_a_plan_for_is_answered_with_nothing_instead_of_an_empty_watch', () => {
     expect(new PlanSessions().find({ repository: EventsDouble.SUBJECT.repository, issue: 404 })).toBe(null)
-  })
-
-  it('a_watch_it_was_told_to_forget_is_answered_with_nothing_the_same_as_one_that_never_started', () => {
-    const sessions = Watched.sessions()
-
-    sessions.forget({ issue: 42, repository: EventsDouble.SUBJECT.repository })
-
-    expect(sessions.find({ repository: EventsDouble.SUBJECT.repository, issue: 42 })).toBe(null)
   })
 
   it('two_repositories_planning_the_same_issue_number_are_told_apart_by_the_repository_asked', () => {
@@ -142,19 +171,26 @@ describe('PlanEvents', () => {
   })
 
   it('a_progress_that_could_not_be_read_reaches_the_page_as_one_error_frame_and_not_as_a_state', async () => {
-    const frames = await EventsDouble.unable('git status refused').collected()
+    const events = EventsDouble.unable('git status refused')
+
+    const frames = await events.collected(events.cancellingWhenExhausted())
 
     expect(frames).toEqual(['event: error\ndata: {"code":"plan-progress-not-read","detail":"git status refused"}\n\n'])
   })
 
-  it('a_progress_that_could_not_be_read_ends_the_stream_instead_of_launching_two_subprocesses_forever', async () => {
+  it('a_progress_that_could_not_be_read_does_not_end_the_stream_so_a_transient_failure_recovers_on_the_next_tick', async () => {
     const events = new EventsDouble([
-      PlanState.WRITING, new PlanProgressNotRead('git status refused'),
+      PlanState.WRITING, new PlanProgressNotRead('git status refused'), PlanState.READY,
     ])
 
-    const frames = await events.collected()
+    const frames = await events.collected(events.cancellingWhenExhausted())
 
-    expect(frames).toHaveLength(2)
+    expect(frames).toEqual([
+      PlanEvents.frameFor(PlanState.WRITING),
+      'event: error\ndata: {"code":"plan-progress-not-read","detail":"git status refused"}\n\n',
+      PlanEvents.frameFor(PlanState.READY),
+    ])
+    expect(events.slept).toBe(3)
     expect(events.answers).toEqual([])
   })
 
@@ -177,4 +213,15 @@ describe('PlanEvents', () => {
     expect(frames).toEqual([PlanEvents.frameFor(PlanState.WRITING)])
     expect(events.slept).toBe(2)
   })
+
+
+
+  it('the_frame_of_a_plan_still_carries_the_state_alone', async () => {
+    const frames = await new EventsDouble([PlanState.WRITING]).collected(() => true)
+
+    expect(frames[0]).toBe('data: {"state":"writing"}\n\n')
+  })
+
+
+
 })

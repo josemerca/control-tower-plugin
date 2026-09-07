@@ -17,8 +17,11 @@ import { HarvestClock } from './harvest-clock.js'
 import { PlanAgentBrief } from './plan-agent-brief.js'
 import { PlanContractProgress } from './plan-contract-progress.js'
 import { PlanEvents, PlanSessions } from './plan-events-route.js'
-import { PlanReviewWatch } from './plan-review-watch.js'
+import { ReviewWatch } from './review-watch.js'
+import { GhPullRequests } from './gh-pull-requests.js'
+import { DispatchCheckWorkbench } from './dispatch-check-workbench.js'
 import { RunFileProgress } from './run-file-progress.js'
+import { ReviewedImplementationProgress } from './reviewed-implementation-progress.js'
 import { ActivePlans } from './active-plans-route.js'
 import { ActivePlanRecovery } from './active-plan-recovery.js'
 import { DiskImplementationStartRegistry } from './disk-implementation-start-registry.js'
@@ -28,7 +31,9 @@ import { ImplementPlan } from '../application/actions/implement-plan.js'
 import { ReadPlanProgress, ReadPlanProgressParams } from '../application/queries/read-plan-progress.js'
 import { ReadImplementationProgress } from '../application/queries/read-implementation-progress.js'
 import { ReadChangesAsked, ReadChangesAskedParams } from '../application/queries/read-changes-asked.js'
+import { ReadFixesAsked, ReadFixesAskedParams } from '../application/queries/read-fixes-asked.js'
 import { ReviewPlan, ReviewPlanParams } from '../application/actions/review-plan.js'
+import { RequestFixes, RequestFixesParams } from '../application/actions/request-fixes.js'
 import { SurveyWorkspaces, SurveyWorkspacesParams } from '../application/queries/survey-workspaces.js'
 import { HarvestDelivery, HarvestDeliveryParams } from '../application/actions/harvest-delivery.js'
 import { ToolRunner } from './tool-runner.js'
@@ -235,11 +240,25 @@ class CtApi {
     const readChangesAsked = new ReadChangesAsked({ planIssues })
     const reviewPlan = new ReviewPlan({ planAgents })
 
-    return new PlanReviewWatch({
+    return new ReviewWatch({
       asked: (watch) => readChangesAsked.execute(new ReadChangesAskedParams(watch)),
       review: (params) => reviewPlan.execute(new ReviewPlanParams(params)),
       sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_ASKS),
       stderr: (line) => process.stderr.write(line),
+      label: 'plan review watch',
+    })
+  }
+
+  static #pullRequestReviews(pullRequests, planIssues, planAgents, workbench) {
+    const readFixesAsked = new ReadFixesAsked({ pullRequests, planIssues })
+    const requestFixes = new RequestFixes({ workbench, planAgents })
+
+    return new ReviewWatch({
+      asked: (watch) => readFixesAsked.execute(new ReadFixesAskedParams(watch)),
+      review: (params) => requestFixes.execute(new RequestFixesParams(params)),
+      sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_ASKS),
+      stderr: (line) => process.stderr.write(line),
+      label: 'pull request review watch',
     })
   }
 
@@ -274,9 +293,15 @@ class CtApi {
         ctStep: PluginTree.ctStep(),
       }),
     })
+    const gh = CtApi.#talkingTo(Gh.BIN, Gh)
     const planIssues = new GhPlanIssues({
-      gh: CtApi.#talkingTo(Gh.BIN, Gh),
+      gh,
       stderr: (line) => process.stderr.write(line),
+    })
+    const pullRequests = new GhPullRequests({ gh })
+    const workbench = new DispatchCheckWorkbench({
+      node: CtApi.#tool(process.execPath),
+      dispatchCheck: PluginTree.dispatchCheck(),
     })
     const sessions = new PlanSessions()
     const reviews = CtApi.#planReviews(planIssues, planAgents)
@@ -310,13 +335,18 @@ class CtApi {
       port: asked.port,
       startPlan: CtApi.#startPlan(workspace, planAgents, planIssues, checkouts),
       reviews,
+      pullRequestReviews: CtApi.#pullRequestReviews(pullRequests, planIssues, planAgents, workbench),
       implementPlan: new ImplementPlan({
         goRegistry,
         planIssues,
         planAgents,
       }),
       implementProgress: new ReadImplementationProgress({
-        implementationProgress: runFileProgress,
+        implementationProgress: new ReviewedImplementationProgress({
+          implemented: runFileProgress,
+          pullRequests,
+          planIssues,
+        }),
       }),
       planEvents: CtApi.#planEvents(git),
       sessions,

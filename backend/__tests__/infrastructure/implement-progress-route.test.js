@@ -110,16 +110,16 @@ afterEach(async () => {
 
 describe('ImplementProgressRoute', () => {
   it('a_run_in_the_middle_of_a_task_answers_the_step_the_task_and_its_name', async () => {
-    const { response } = await RunningApi.asking(`${RunningApi.PATH}?root=%2Fcheckout`)
+    const { response } = await RunningApi.asking(`${RunningApi.PATH}?root=%2Fcheckout&repo=owner%2Fname`)
 
     expect(response.status).toBe(200)
     expect(await response.text()).toBe(
-      '{"step":"judge","task":3,"total_tasks":7,"name":"el lector del plan","attempt":2,"discards":0}'
+      '{"step":"judge","task":3,"total_tasks":7,"name":"el lector del plan","attempt":2,"discards":0,"pull_request":null}'
     )
   })
 
   it('the_wire_says_total_tasks_and_the_value_object_says_totalTasks', async () => {
-    const { response } = await RunningApi.asking(`${RunningApi.PATH}?root=%2Fcheckout`)
+    const { response } = await RunningApi.asking(`${RunningApi.PATH}?root=%2Fcheckout&repo=owner%2Fname`)
 
     const body = await response.json()
 
@@ -130,11 +130,11 @@ describe('ImplementProgressRoute', () => {
   it('a_slice_that_has_not_started_answers_starting_with_nothing_filled_in', async () => {
     const spy = ReadImplementationProgressSpy.answering(ImplementationState.starting())
 
-    const { response } = await RunningApi.asking(`${RunningApi.PATH}?root=%2Fcheckout`, spy)
+    const { response } = await RunningApi.asking(`${RunningApi.PATH}?root=%2Fcheckout&repo=owner%2Fname`, spy)
 
     expect(response.status).toBe(200)
     expect(await response.text()).toBe(
-      '{"step":"starting","task":null,"total_tasks":null,"name":null,"attempt":null,"discards":null}'
+      '{"step":"starting","task":null,"total_tasks":null,"name":null,"attempt":null,"discards":null,"pull_request":null}'
     )
   })
 
@@ -154,7 +154,7 @@ describe('ImplementProgressRoute', () => {
   it('a_relative_root_is_refused_the_same_way', async () => {
     const spy = ReadImplementationProgressSpy.answering(RunningApi.IN_THE_MIDDLE_OF_A_TASK)
 
-    const { response } = await RunningApi.asking(`${RunningApi.PATH}?root=repos/name`, spy)
+    const { response } = await RunningApi.asking(`${RunningApi.PATH}?root=repos/name&repo=owner%2Fname`, spy)
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
@@ -169,7 +169,7 @@ describe('ImplementProgressRoute', () => {
       new ImplementationProgressNotRead('no worktree at /checkout/.worktrees/99')
     )
 
-    const { response } = await RunningApi.asking(`${RunningApi.PATH}?root=%2Fcheckout`, spy)
+    const { response } = await RunningApi.asking(`${RunningApi.PATH}?root=%2Fcheckout&repo=owner%2Fname`, spy)
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
@@ -181,7 +181,7 @@ describe('ImplementProgressRoute', () => {
   it('an_issue_that_is_not_a_number_reaches_the_query_as_NaN_and_not_as_a_refusal', async () => {
     const spy = ReadImplementationProgressSpy.answering(RunningApi.IN_THE_MIDDLE_OF_A_TASK)
 
-    const { response } = await RunningApi.asking('/implement-progress/abc?root=%2Fcheckout', spy)
+    const { response } = await RunningApi.asking('/implement-progress/abc?root=%2Fcheckout&repo=owner%2Fname', spy)
 
     expect(response.status).toBe(200)
     expect(spy.asked).toHaveLength(1)
@@ -191,7 +191,7 @@ describe('ImplementProgressRoute', () => {
   it('a_bug_of_ours_is_not_dressed_up_as_a_refusal', async () => {
     const spy = ReadImplementationProgressSpy.buggy()
 
-    const { response } = await RunningApi.asking(`${RunningApi.PATH}?root=%2Fcheckout`, spy)
+    const { response } = await RunningApi.asking(`${RunningApi.PATH}?root=%2Fcheckout&repo=owner%2Fname`, spy)
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ code: 'request-failed', detail: 'request failed' })
@@ -201,7 +201,7 @@ describe('ImplementProgressRoute', () => {
     const running = await RunningApi.listening()
 
     const response = await fetch(
-      `http://127.0.0.1:${running.port}${RunningApi.PATH}?root=${encodeURIComponent(RunningApi.ROOT)}`,
+      `http://127.0.0.1:${running.port}${RunningApi.PATH}?root=${encodeURIComponent(RunningApi.ROOT)}&repo=owner%2Fname`,
       { method: 'POST' },
     )
 

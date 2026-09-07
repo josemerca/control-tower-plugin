@@ -28,4 +28,10 @@ export class PlanIssues {
       `${this.constructor.name} must implement answerGo({ issueNumber, repository, nonce }), asked for ${issueNumber} in ${repository}`
     )
   }
+
+  async isInReview({ issueNumber, repository }) {
+    throw new Error(
+      `${this.constructor.name} must implement isInReview({ issueNumber, repository }), asked for ${issueNumber} in ${repository}`
+    )
+  }
 }

@@ -105,6 +105,12 @@ export class CmuxPlanAgents extends PlanAgents {
     await this.#type(CmuxPlanAgents.enterArgvFor(agent))
   }
 
+  async fix({ agent, issue, repository, changes }) {
+    const errand = this.brief.fixErrandFor({ issueNumber: issue, repository, changes })
+    await this.#type(CmuxPlanAgents.sendArgvFor(agent, errand))
+    await this.#type(CmuxPlanAgents.enterArgvFor(agent))
+  }
+
   async #type(argv) {
     const output = await this.run(argv)
     if (output.failed) {

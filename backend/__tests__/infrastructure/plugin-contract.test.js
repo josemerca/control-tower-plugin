@@ -199,10 +199,24 @@ class RunDouble {
   }
 }
 
+class StepsNoRunFileReports {
+  static VALUES = Object.freeze([
+    ImplementationStep.STARTING,
+    ImplementationStep.DELIVERED,
+    ImplementationStep.IN_REVIEW,
+    ImplementationStep.FIXING,
+  ])
+}
+
 describe('the run machine and the run file this backend reads back', () => {
   it('every_step_the_machine_can_reach_is_a_step_our_vocabulary_declares', () => {
     expect(Object.values(STEPS).every((step) => Object.values(ImplementationStep).includes(step))).toBe(true)
-    expect(Object.values(ImplementationStep).length).toBe(Object.values(STEPS).length + 2)
+  })
+
+  it('the_only_steps_our_vocabulary_adds_are_the_ones_the_machine_never_reports', () => {
+    const added = Object.values(ImplementationStep).filter((step) => !Object.values(STEPS).includes(step))
+
+    expect(added.sort()).toEqual([...StepsNoRunFileReports.VALUES].sort())
   })
 
   it('a_run_the_machine_parked_at_advise_is_read_back_as_a_step_of_the_task_it_advises_on', async () => {
