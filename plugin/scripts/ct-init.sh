@@ -454,7 +454,22 @@ SLICES_HEADING_LEGACY='## Formato de la tabla §9 (contrato con /ct-groom)'
 # columna se rellena, el juez la puntúa, y nadie aprende nada de lo que va a
 # pasar en producción. El v22 lo dice: la señal no es un criterio de
 # aceptación más.
-SLICES_CONTRACT_VERSION=22
+#
+# El contrato sube de 22 a 23 por dos cosas que un repo con el v22 no puede
+# deducir, y por el mismo criterio de siempre: el número no mide el tamaño del
+# cambio, mide si el texto que tiene el repo es el que shippea el plugin.
+#   - el v22 dice que él mismo es «esta sección» de `AGENTS.md`. Ya no lo es:
+#     desde #93 el contrato vive en `docs/superpowers/CONTRATO-SLICES.md` y en
+#     `AGENTS.md` queda una sección corta que enlaza a él. Un repo con el v22
+#     manda a quien escribe un spec al fichero equivocado, y su nota de pie
+#     describe una actualización que ya no ocurre donde dice;
+#   - el v22 remite tres veces a `commands/ct-groom.md` y `commands/ct-next.md`
+#     «en el plugin» para el detalle. Esos dos ficheros se quedaron con la
+#     invocación y su tabla de códigos de salida: la referencia larga está en
+#     `docs/loop/ct-groom.md` y `docs/loop/ct-next.md` del repo del plugin. Las
+#     tres citas del v22 apuntan hoy a un fichero que ya no contiene lo que
+#     promete, que es la peor forma de una referencia: parece viva.
+SLICES_CONTRACT_VERSION=23
 SLICES_VERSION_LINE_RE='<!-- ct-init:slices-contract-version: [0-9]\{1,\} -->'
 # SLICES_PRISTINE_HASHES: sha256 del bloque COMPLETO (marcador de apertura a
 # marcador de cierre, ambos incluidos) tal cual lo emitió cada versión de este
@@ -534,6 +549,7 @@ b0eb79ab8fd89f83ce7159e9c2a9c32812ee35b76ad6f4c78c2829c9d9891c0b  v20, 585 líne
 86a73c49d2b8ed904f5aaddb86b71536b160a17dfa281b2886729ea82fba9221  v21, 586 líneas — la aclaración de los DOS tokens de "no aplica" sube de número: el v20 la dejó sin bump y ningún repo bootstrapeado con el v20 anterior podía recibirla
 40440bc510e0832695cbd73bc5912cb5bba8c16d89cb0cde0249b64b043dbafe  v20, 575 líneas — Slice 4 apuntes de Capde (la señal no es un criterio de aceptación más: promete lo que se verá en producción, que los criterios funcionales no cubren; v20 nunca publicado, main ya tenía otro v20 y la rama se re-sentó como v22)
 65e788421d42aaf40a33d9dadcd563762503637dd2ff5ab2d352abc2263e96f6  v22, 599 líneas — merge con main tras la segunda carrera de números (el bloque v21 de main + el párrafo del Slice 4: la señal no es un criterio de aceptación más)
+6b7ec30ff95a331542932b199b3b5d2f171e197c61efee0fce0c36fd5def2b6c  v23, 600 líneas — #93 (el contrato deja de ser una sección de AGENTS.md y pasa a docs/superpowers/CONTRATO-SLICES.md; sus tres referencias al detalle apuntan a docs/loop/, no a commands/)
 '
 
 # emit_slices_contract: el bloque, en un solo sitio (lo usan tanto el camino
@@ -541,7 +557,7 @@ b0eb79ab8fd89f83ce7159e9c2a9c32812ee35b76ad6f4c78c2829c9d9891c0b  v20, 585 líne
 emit_slices_contract() {
   cat <<'EOF'
 <!-- ct-init:slices-contract -->
-<!-- ct-init:slices-contract-version: 22 -->
+<!-- ct-init:slices-contract-version: 23 -->
 ## Formato de la tabla de slices (contrato con /ct-groom)
 `/ct-groom` lee esta tabla del spec del epic y crea un issue de GitHub por
 fila — es la única parte de un spec que un programa parsea. Cabecera exacta,
@@ -818,17 +834,17 @@ otro epic, o `/ct-groom` se para en seco con **exit 1** sin crear ni modificar
 nada, o crea un issue nuevo para ese slice avisando de que puede estar
 duplicándolo. Consecuencia práctica de ese mismo alcance: **la tabla de slices de
 cada spec puede empezar en `1`** sin pisar los issues de un epic anterior.
-Ver "El alcance de un groom es su epic, no el repo" en `commands/ct-groom.md`.
+Ver "El alcance de un groom es su epic, no el repo" en `docs/loop/ct-groom.md` (repo del plugin).
 
 Detalle completo (todas las condiciones de abort, columnas opcionales,
 avisos no fatales, el reporte de divergencia, sus límites, y `--reconcile`):
-`commands/ct-groom.md` en el plugin `control-tower-loop`.
+`docs/loop/ct-groom.md` en el repo del plugin `control-tower-loop` (el comando `commands/ct-groom.md` se quedó con la invocación y sus códigos de salida).
 
 ### Qué hace `/ct-next` con esto
 
-Lo de abajo NO es la referencia de invocación (esa es `commands/ct-next.md` en
-el plugin): es lo que cambia cómo escribes la tabla y cómo convives con el
-loop una vez hay slices en vuelo.
+Lo de abajo NO es la referencia de invocación (esa es `docs/loop/ct-next.md`,
+en el repo del plugin): es lo que cambia cómo escribes la tabla y cómo convives
+con el loop una vez hay slices en vuelo.
 
 - **`Área`/`Toca` no avisan: BLOQUEAN.** Un slice que comparta **un solo
   token** con un issue en `status:in-progress` **o `status:in-review`**
@@ -969,7 +985,7 @@ loop una vez hay slices en vuelo.
   reclamar el mismo token compartido y arrancar los dos, saltándose tanto la
   regla de colisión como el cap. No hay espera ni reintento que cierre ese
   hueco hoy. **La mitigación es operativa: no lances dos dispatchers a la vez
-  sobre el mismo repo.** (Detalle y evidencia: `commands/ct-next.md`.)
+  sobre el mismo repo.** (Detalle y evidencia: `docs/loop/ct-next.md`.)
 - **`/ct-next` no acota por epic.** Acepta `--repo`, `--cap`, `--base` y
   `--dry-run`; **no hay `--milestone`**. Barre todos los issues abiertos del
   repo y elige por el `#` más bajo de la tabla, venga del epic que venga (ese
@@ -1134,10 +1150,11 @@ siempre**, y con él todo lo que dependiera de él: `/ct-next` solo despacha
   mergear, no sólo para los gates: si lo compruebas a mano, que el resultado
   mande.
 
-<sub>Esta sección la mantiene `/ct-init` (contrato v22). Si el plugin trae una
-versión más nueva, `/ct-init` lo avisa al correr; para adoptarla:
-`bash <plugin>/scripts/ct-init.sh <dir-repo> --update-slices-contract`, que
-solo la reemplaza si no la has editado a mano.</sub>
+<sub>Este contrato lo mantiene `/ct-init` (contrato v23) y vive en
+`docs/superpowers/CONTRATO-SLICES.md` de este repo; `AGENTS.md` solo enlaza a
+él. Si el plugin trae una versión más nueva, `/ct-init` lo avisa al correr;
+para adoptarla: `bash <plugin>/scripts/ct-init.sh <dir-repo>
+--update-slices-contract`, que solo lo reemplaza si no lo has editado a mano.</sub>
 <!-- /ct-init:slices-contract -->
 EOF
 }
@@ -1244,13 +1261,18 @@ file_is_crlf() {
 # replace_slices_block: sustituye el bloque entero (marcadores incluidos) por
 # la versión actual, dejando intacto TODO lo que haya antes y después — el
 # AGENTS.md del usuario no se regenera, solo se empalma esta sección.
+# Recibe el fichero como parámetro (#93): el contrato vive ahora en su propio
+# fichero del repo gobernado, y esta misma función es la que sustituye, dentro
+# de un AGENTS.md bootstrapeado antes, el bloque viejo por la sección corta.
+# `$2` es el nombre de la función que emite el texto de sustitución.
 replace_slices_block() {
-  local newblock outfile
+  local target emitter newblock outfile
+  target="$1"; emitter="${2:-emit_slices_contract}"
   newblock="$(mktemp)"; outfile="$(mktemp)"
-  if slices_block_is_crlf "$AGENTS_MD"; then
-    emit_slices_contract | awk '{ printf "%s\r\n", $0 }' > "$newblock"
+  if slices_block_is_crlf "$target"; then
+    "$emitter" | awk '{ printf "%s\r\n", $0 }' > "$newblock"
   else
-    emit_slices_contract > "$newblock"
+    "$emitter" > "$newblock"
   fi
   awk -v nf="$newblock" -v om="$SLICES_MARKER_OPEN" -v cm="$SLICES_MARKER_CLOSE" '
     { line = $0; sub(/\r$/, "", line) }
@@ -1258,8 +1280,8 @@ replace_slices_block() {
     inb && line == cm { inb = 0; next }
     inb { next }
     { print }
-  ' "$AGENTS_MD" > "$outfile"
-  mv "$outfile" "$AGENTS_MD"
+  ' "$target" > "$outfile"
+  mv "$outfile" "$target"
   rm -f "$newblock"
 }
 
@@ -1271,7 +1293,7 @@ SLICES_BLOCK_HASH=''
 compute_slices_block_hash() {
   local blockfile
   blockfile="$(mktemp)"
-  extract_slices_block "$AGENTS_MD" > "$blockfile"
+  extract_slices_block "$1" > "$blockfile"
   SLICES_BLOCK_HASH="$(sha256_of "$blockfile")"
   rm -f "$blockfile"
 }
@@ -1295,6 +1317,130 @@ slices_block_status() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# #93 — EL CONTRATO SALE DE AGENTS.md Y PASA A TENER FICHERO PROPIO.
+#
+# El bloque son ~39 KB de los ~40 KB que pesaba el AGENTS.md sembrado, y lo lee
+# quien ESCRIBE un spec: una vez por epic, deliberadamente. El AGENTS.md, en
+# cambio, lo lee cada agente al hidratarse, cada sesión, todo el rato — y ahí
+# esos 39 KB compiten por la atención con las veinte líneas que sí gobiernan lo
+# que ese agente va a hacer. Se parte en dos:
+#
+#   - `docs/superpowers/CONTRATO-SLICES.md`: el bloque, byte a byte el mismo que
+#     antes se insertaba en AGENTS.md —marcadores, línea de versión y cuerpo—,
+#     con la MISMA maquinaria de versión, hashes pristine,
+#     `--update-slices-contract` y `--force`. Que sea idéntico no es comodidad:
+#     es lo que hace que el ledger de hashes históricos siga reconociendo un
+#     bloque sembrado por cualquier versión anterior, y que la poda de
+#     `conventions.js` y el descuento de `vara.js` lo sigan viendo por sus
+#     marcadores sin una regla nueva. El fichero ES el bloque y nada más.
+#   - `AGENTS.md`: una sección corta (`<!-- ct-init:loop -->`) con lo que un
+#     agente necesita —los comandos del repo, dónde está la vara, que el estado
+#     de un slice es `.agent/SLICE.md`— y un enlace al contrato.
+#
+# Migración de un repo bootstrapeado antes: su AGENTS.md lleva el contrato
+# dentro. No se le toca por defecto (puede llevar ediciones suyas, misma
+# doctrina de siempre); se AVISA, y `--update-slices-contract` sustituye el
+# bloque por la sección corta si estaba sin editar.
+CONTRATO_DIR="$TARGET/docs/superpowers"
+CONTRATO_MD="$CONTRATO_DIR/CONTRATO-SLICES.md"
+LOOP_MARKER_OPEN='<!-- ct-init:loop -->'
+LOOP_MARKER_CLOSE='<!-- /ct-init:loop -->'
+
+# emit_loop_section: las ~20 líneas del loop que sí lee un agente. Sin versión
+# ni hash pristine, por el mismo motivo que la sección de travesía e2e: trae
+# huecos que el repo TIENE que rellenar (los comandos), así que detectar "el
+# texto cambió" detectaría el uso correcto.
+emit_loop_section() {
+  cat <<'EOF'
+<!-- ct-init:loop -->
+## Control Tower loop
+
+Este repo lo gobierna el loop Control Tower: **un issue = un slice = una sesión**.
+
+- **Comandos de este repo** (rellénalos una vez): build `…` · test `…` · lint `…`.
+- **La vara de este repo** —los documentos de reglas del código que `ct-step`
+  pega en el brief de cada tarea— se declara en `.agent/conventions.md`. La vara
+  de ct viaja con el plugin y manda donde las dos hablen de lo mismo; donde ct
+  calla, la del repo obliga entera.
+- **El estado de un slice despachado es `.agent/SLICE.md`**, el de SU worktree
+  (ignorado por git, nunca producto). `.agent/STATE.md` es el de la sesión
+  coordinadora del checkout principal y un slice no lo toca. Si te quedas
+  parado, escribe `blocked: {reason, unblock}` en tu `SLICE.md` y PARA.
+- **Cada slice trabaja en `.worktrees/<n>` sobre `feat/<n>`**, y su claim
+  (`status:ready` → `status:in-progress`) lo hace `/ct-next` en código: no
+  muevas esas labels a mano. Al abrir el PR, `Closes #N` en el cuerpo.
+- **Lo que no llega al cuerpo del issue no llega al agente**: no recibe el spec.
+- **El formato de la tabla de slices —el contrato con `/ct-groom`— está en
+  [`docs/superpowers/CONTRATO-SLICES.md`](docs/superpowers/CONTRATO-SLICES.md)**:
+  qué columnas lee, qué genera cada una y qué hace `/ct-next` con ellas. Es lo
+  que lee quien escribe un spec para este repo. Lo mantiene `/ct-init`, lleva su
+  propia versión y no se edita a mano.
+- **Cómo se levanta este repo** para atravesarlo de punta a punta: la sección
+  «Cómo se atraviesa este repo (e2e)», más abajo. Rellénala una vez.
+<!-- /ct-init:loop -->
+EOF
+}
+
+# --- El contrato, en su fichero ---------------------------------------------
+mkdir -p "$CONTRATO_DIR"
+if [ ! -f "$CONTRATO_MD" ]; then
+  emit_slices_contract > "$CONTRATO_MD"
+  echo "creado $CONTRATO_MD (contrato /ct-groom v$SLICES_CONTRACT_VERSION)"
+else
+  contrato_open=0; has_line "$SLICES_MARKER_OPEN" "$CONTRATO_MD" && contrato_open=1 || true
+  contrato_close=0; has_line "$SLICES_MARKER_CLOSE" "$CONTRATO_MD" && contrato_close=1 || true
+  if [ "$contrato_open" -eq 1 ] && [ "$contrato_close" -eq 1 ]; then
+    found_version="$(extract_slices_block "$CONTRATO_MD" | grep -o "$SLICES_VERSION_LINE_RE" | head -n1 | grep -o '[0-9]\{1,\}' || true)"
+    [ -z "$found_version" ] && found_version=1
+    compute_slices_block_hash "$CONTRATO_MD"
+    block_status="$(slices_block_status)"
+    hash_note="hash del bloque presente: ${SLICES_BLOCK_HASH:-no calculable en esta máquina}"
+    if [ "$found_version" -gt "$SLICES_CONTRACT_VERSION" ]; then
+      echo "aviso: el contrato de slices de $CONTRATO_MD es del contrato v$found_version, y este plugin solo llega a la v$SLICES_CONTRACT_VERSION — lo sembró una versión más nueva del plugin. No se toca (degradarlo sería perder lo que ya tienes). Si /ct-groom no se comporta como describe ese fichero, el desactualizado es el plugin: actualízalo." >&2
+    elif [ "$found_version" -eq "$SLICES_CONTRACT_VERSION" ]; then
+      if [ "$UPDATE_SLICES_CONTRACT" -eq 1 ] && [ "$block_status" = unknown ]; then
+        if [ "$FORCE" -eq 1 ]; then
+          replace_slices_block "$CONTRATO_MD"
+          echo "aviso: el contrato de slices de $CONTRATO_MD ya declaraba v$found_version pero su contenido no coincidía con el que trae este plugin ($hash_note); se ha reemplazado por el actual porque lo pediste con --force. Si había ediciones tuyas en ese fichero, ya no están." >&2
+        else
+          echo "aviso: el contrato de slices de $CONTRATO_MD ya declara la v$found_version (la actual), así que no hay actualización de versión que hacer, pero su contenido NO es el que emite este plugin ($hash_note). Puede ser una edición tuya, o una variante distinta que se publicó con el mismo número de versión. No se toca nada; con --force se reemplazaría por el bloque v$SLICES_CONTRACT_VERSION de este plugin." >&2
+        fi
+      else
+        echo "contrato de slices ya está en $CONTRATO_MD (contrato v$found_version, al día), no se duplica"
+      fi
+    elif [ "$UPDATE_SLICES_CONTRACT" -eq 1 ]; then
+      if [ "$block_status" = pristine ]; then
+        replace_slices_block "$CONTRATO_MD"
+        echo "contrato de slices actualizado en $CONTRATO_MD: contrato v$found_version → v$SLICES_CONTRACT_VERSION (estaba sin editar)"
+      elif [ "$block_status" = unverifiable ] && [ "$FORCE" -eq 0 ]; then
+        echo "aviso: no se ha podido comprobar si el contrato de slices de $CONTRATO_MD sigue tal cual lo dejó ct-init: esta máquina no tiene ni \`shasum\` ni \`sha256sum\`, y esa comprobación es lo único que impide pisar ediciones tuyas. No se toca nada — el bloque puede estar perfectamente intacto, simplemente no se sabe. Instala uno de los dos (coreutils trae \`sha256sum\`; \`shasum\` viene con perl) y repite, o pasa --force si te consta que ese fichero no lo has editado." >&2
+        exit 3
+      elif [ "$FORCE" -eq 1 ]; then
+        replace_slices_block "$CONTRATO_MD"
+        if [ "$block_status" = unverifiable ]; then
+          echo "aviso: el contrato de slices de $CONTRATO_MD se ha sobrescrito con el contrato v$SLICES_CONTRACT_VERSION porque lo pediste con --force, SIN haber podido comprobar si estaba sin editar (esta máquina no tiene \`shasum\` ni \`sha256sum\`). Si había ediciones tuyas, ya no están: recupéralas del control de versiones." >&2
+        else
+          echo "aviso: el contrato de slices de $CONTRATO_MD no coincidía con ninguna versión que este ct-init sepa reconocer ($hash_note) y se ha sobrescrito con el contrato v$SLICES_CONTRACT_VERSION porque lo pediste con --force. Si había ediciones tuyas, ya no están: recupéralas del control de versiones." >&2
+        fi
+      else
+        echo "aviso: el contrato de slices de $CONTRATO_MD es del contrato v$found_version (el actual es v$SLICES_CONTRACT_VERSION), pero su contenido no coincide con ninguno de los bloques que este ct-init sabe reconocer ($hash_note). Eso puede ser (a) una edición a mano, o (b) un bloque intacto sembrado por una versión del plugin cuyo hash este ct-init no lleva registrado — desde aquí NO hay forma de distinguirlas, así que no se toca nada por si es (a). Para salir de dudas, mira el historial de $CONTRATO_MD (\`git log -p -- docs/superpowers/CONTRATO-SLICES.md\`): si no se ha tocado desde que se creó, es (b) — repórtalo con ese hash para que quede registrado, y mientras tanto pasa --force junto a --update-slices-contract para adoptar el contrato v$SLICES_CONTRACT_VERSION (si SÍ había ediciones tuyas, se pierden)." >&2
+        exit 3
+      fi
+    else
+      case "$block_status" in
+        pristine) update_note="Está exactamente como lo dejó ct-init, así que actualizarlo no pierde nada:" ;;
+        unverifiable) update_note="No se ha podido comprobar si está sin editar (esta máquina no tiene ni \`shasum\` ni \`sha256sum\`), así que la actualización se negará hasta que lo instales:" ;;
+        *) update_note="Su contenido no coincide con ningún bloque que este ct-init reconozca ($hash_note) — puede ser una edición tuya o una versión que no tiene registrada, así que la actualización se negará sin --force:" ;;
+      esac
+      echo "aviso: el contrato de slices de $CONTRATO_MD es del contrato v$found_version, y este plugin trae la v$SLICES_CONTRACT_VERSION — no se toca nada por defecto. $update_note bash $HERE/scripts/ct-init.sh $TARGET --update-slices-contract" >&2
+    fi
+  else
+    echo "aviso: $CONTRATO_MD existe pero no lleva los marcadores del contrato ($SLICES_MARKER_OPEN … $SLICES_MARKER_CLOSE); no se toca nada para no pisar lo que sea que haya ahí. Si querías el contrato de este plugin, mueve ese fichero y vuelve a correr /ct-init." >&2
+  fi
+fi
+
+# --- AGENTS.md: la sección corta, y la migración del contrato viejo ---------
 has_open=0; has_line "$SLICES_MARKER_OPEN" "$AGENTS_MD" && has_open=1 || true
 has_close=0; has_line "$SLICES_MARKER_CLOSE" "$AGENTS_MD" && has_close=1 || true
 has_heading=0
@@ -1304,94 +1450,61 @@ has_line "$SLICES_HEADING" "$AGENTS_MD" && has_heading=1 || true
 # una segunda copia entera (el fallo que cerró la review de F2).
 has_line "$SLICES_HEADING_LEGACY" "$AGENTS_MD" && has_heading=1 || true
 if [ "$has_open" -eq 1 ] && [ "$has_close" -eq 1 ]; then
-  # F6, menor 6: hasta ahora esto era un "ya está, no se duplica" a secas —
-  # que es exactamente lo que hacía invisible que la sección presente pudiera
-  # ser de una versión anterior del contrato.
-  # F9: la versión se lee del BLOQUE, no del fichero entero. Con `grep` sobre
-  # todo el AGENTS.md, cualquier línea de versión citada más arriba (el propio
-  # marcador copiado en una nota, un ejemplo dentro de un fence) ganaba por
-  # `head -n1` y el script anunciaba "contrato vNN, al día" sobre un bloque que
-  # ni siquiera había mirado — callándose el aviso que le tocaba dar.
+  # Un AGENTS.md bootstrapeado ANTES de #93: lleva el contrato entero dentro.
+  # No se le toca por defecto —puede llevar ediciones suyas, la doctrina de
+  # siempre— pero tampoco se calla: son ~39 KB que cada agente de este repo
+  # relee en cada sesión y que ya están, íntegros, en su fichero propio.
   found_version="$(extract_slices_block "$AGENTS_MD" | grep -o "$SLICES_VERSION_LINE_RE" | head -n1 | grep -o '[0-9]\{1,\}' || true)"
   [ -z "$found_version" ] && found_version=1 # sin línea de versión = el contrato original (pre-F6)
-  compute_slices_block_hash
+  compute_slices_block_hash "$AGENTS_MD"
   block_status="$(slices_block_status)"
-  # `hash: …` para los mensajes que hablan de un bloque no reconocido: es el
-  # único dato con el que quien lo reporte puede conseguir que se registre.
   hash_note="hash del bloque presente: ${SLICES_BLOCK_HASH:-no calculable en esta máquina}"
-  if [ "$found_version" -gt "$SLICES_CONTRACT_VERSION" ]; then
-    # F9: esto antes caía en el "al día" de abajo. No es al día: el bloque es
-    # de un plugin MÁS NUEVO que el que lo está mirando, así que describe un
-    # contrato que este ct-init/ct-groom puede no cumplir. Decirlo.
-    echo "aviso: la sección del contrato de slices de $AGENTS_MD es del contrato v$found_version, y este plugin solo llega a la v$SLICES_CONTRACT_VERSION — la sembró una versión más nueva del plugin. No se toca (degradarla sería perder lo que ya tienes). Si /ct-groom no se comporta como describe esa sección, el desactualizado es el plugin: actualízalo." >&2
-  elif [ "$found_version" -eq "$SLICES_CONTRACT_VERSION" ]; then
-    if [ "$UPDATE_SLICES_CONTRACT" -eq 1 ] && [ "$block_status" = unknown ]; then
-      # Se pidió sincronizar y el número de versión ya es el actual, pero el
-      # contenido no es el que emite este plugin. No es "al día" a secas: el
-      # número coincide y el texto no. Pasó de verdad — el contenido del
-      # bloque cambió nueve veces bajo el mismo "v1". (Con el hash sin poder
-      # calcular no se entra aquí: no habría nada que actualizar de todos
-      # modos, y afirmar que el contenido difiere sería inventárselo.)
-      if [ "$FORCE" -eq 1 ]; then
-        replace_slices_block
-        echo "aviso: la sección del contrato de slices de $AGENTS_MD ya declaraba v$found_version pero su contenido no coincidía con el que trae este plugin ($hash_note); se ha reemplazado por el actual porque lo pediste con --force. Si había ediciones tuyas en esa sección, ya no están." >&2
-      else
-        echo "aviso: la sección del contrato de slices de $AGENTS_MD ya declara la v$found_version (la actual), así que no hay actualización de versión que hacer, pero su contenido NO es el que emite este plugin ($hash_note). Puede ser una edición tuya, o una variante distinta que se publicó con el mismo número de versión. No se toca nada; con --force se reemplazaría por el bloque v$SLICES_CONTRACT_VERSION de este plugin." >&2
-      fi
-    else
-      echo "sección del contrato de slices ya está en $AGENTS_MD (contrato v$found_version, al día), no se duplica"
-    fi
+  if [ "$UPDATE_SLICES_CONTRACT" -eq 1 ] && [ "$block_status" = pristine ]; then
+    replace_slices_block "$AGENTS_MD" emit_loop_section
+    echo "el contrato de slices sale de $AGENTS_MD (estaba sin editar, contrato v$found_version): vive ahora en $CONTRATO_MD y en su sitio queda la sección corta del loop, que enlaza a él. El resto del fichero no se ha tocado."
+  elif [ "$UPDATE_SLICES_CONTRACT" -eq 1 ] && [ "$FORCE" -eq 1 ]; then
+    replace_slices_block "$AGENTS_MD" emit_loop_section
+    echo "aviso: el contrato de slices que llevaba $AGENTS_MD se ha sustituido por la sección corta del loop porque lo pediste con --force, sin haber podido dar por bueno su contenido ($hash_note). El contrato vive ahora en $CONTRATO_MD. Si había ediciones tuyas en ese bloque, ya no están: recupéralas del control de versiones." >&2
+  elif [ "$UPDATE_SLICES_CONTRACT" -eq 1 ] && [ "$block_status" = unverifiable ]; then
+    echo "aviso: no se ha podido comprobar si la sección del contrato de slices de $AGENTS_MD sigue tal cual la dejó ct-init: esta máquina no tiene ni \`shasum\` ni \`sha256sum\`, y esa comprobación es lo único que impide pisar ediciones tuyas. No se toca nada — el bloque puede estar perfectamente intacto, simplemente no se sabe. Instala uno de los dos (coreutils trae \`sha256sum\`; \`shasum\` viene con perl) y repite, o pasa --force si te consta que esa sección no la has editado." >&2
+    exit 3
   elif [ "$UPDATE_SLICES_CONTRACT" -eq 1 ]; then
-    if [ "$block_status" = pristine ]; then
-      replace_slices_block
-      echo "sección del contrato de slices actualizada en $AGENTS_MD: contrato v$found_version → v$SLICES_CONTRACT_VERSION (estaba sin editar; el resto del fichero no se ha tocado)"
-    elif [ "$block_status" = unverifiable ] && [ "$FORCE" -eq 0 ]; then
-      # F9: antes esto caía en el "la has editado a mano" de abajo — la
-      # acusación más falsa de todas, porque aquí no se ha llegado a comparar
-      # nada. Categoría propia, con su propia salida.
-      echo "aviso: no se ha podido comprobar si la sección del contrato de slices de $AGENTS_MD sigue tal cual la dejó ct-init: esta máquina no tiene ni \`shasum\` ni \`sha256sum\`, y esa comprobación es lo único que impide pisar ediciones tuyas. No se toca nada — el bloque puede estar perfectamente intacto, simplemente no se sabe. Instala uno de los dos (coreutils trae \`sha256sum\`; \`shasum\` viene con perl) y repite, o pasa --force si te consta que esa sección no la has editado." >&2
-      exit 3
-    elif [ "$FORCE" -eq 1 ]; then
-      replace_slices_block
-      if [ "$block_status" = unverifiable ]; then
-        echo "aviso: la sección del contrato de slices de $AGENTS_MD se ha sobrescrito con el contrato v$SLICES_CONTRACT_VERSION porque lo pediste con --force, SIN haber podido comprobar si estaba sin editar (esta máquina no tiene \`shasum\` ni \`sha256sum\`). Si había ediciones tuyas en esa sección, ya no están: recupéralas del control de versiones." >&2
-      else
-        echo "aviso: la sección del contrato de slices de $AGENTS_MD no coincidía con ninguna versión que este ct-init sepa reconocer ($hash_note) y se ha sobrescrito con el contrato v$SLICES_CONTRACT_VERSION porque lo pediste con --force. Si había ediciones tuyas en esa sección, ya no están: recupéralas del control de versiones." >&2
-      fi
-    else
-      # F9: este mensaje decía "la has editado a mano". No lo sabe. Lo único
-      # que sabe es que el hash no está en su lista, y esa lista solo cubre
-      # los bloques que ESTE ct-init conoce: un bloque sembrado por una
-      # versión del plugin que no tiene registrada (pasó con ocho de las nueve
-      # variantes del contrato v1) es indistinguible de una edición a mano.
-      # No se elige la interpretación que culpa al usuario.
-      echo "aviso: la sección del contrato de slices de $AGENTS_MD es del contrato v$found_version (el actual es v$SLICES_CONTRACT_VERSION), pero su contenido no coincide con ninguno de los bloques que este ct-init sabe reconocer ($hash_note). Eso puede ser (a) una edición a mano de esa sección, o (b) un bloque intacto sembrado por una versión del plugin cuyo hash este ct-init no lleva registrado — desde aquí NO hay forma de distinguirlas, así que no se toca nada por si es (a). Para salir de dudas, mira el historial de $AGENTS_MD (\`git log -p -- AGENTS.md\`): si esa sección no se ha tocado desde que se creó, es (b) — repórtalo con ese hash para que quede registrado, y mientras tanto pasa --force junto a --update-slices-contract para adoptar el contrato v$SLICES_CONTRACT_VERSION (si SÍ había ediciones tuyas, se pierden)." >&2
-      exit 3
-    fi
+    echo "aviso: la sección del contrato de slices de $AGENTS_MD (contrato v$found_version) no coincide con ninguno de los bloques que este ct-init sabe reconocer ($hash_note), así que no se saca de ahí. Eso puede ser (a) una edición a mano de esa sección, o (b) un bloque intacto sembrado por una versión del plugin cuyo hash este ct-init no lleva registrado — desde aquí NO hay forma de distinguirlas, así que no se toca nada por si es (a). Para salir de dudas, mira el historial de $AGENTS_MD (\`git log -p -- AGENTS.md\`): si esa sección no se ha tocado desde que se creó, es (b) — repórtalo con ese hash para que quede registrado, y mientras tanto pasa --force junto a --update-slices-contract para sustituirla por la sección corta (si SÍ había ediciones tuyas, se pierden)." >&2
+    exit 3
   else
-    # Corrida normal (sin el flag): solo se avisa. F9 — el estado del bloque ya
-    # está calculado, así que el aviso puede decir si actualizar es seguro en
-    # vez de dejar al usuario con el "podrías tenerla editada a mano" genérico.
     case "$block_status" in
-      pristine) update_note="Está exactamente como la dejó ct-init, así que actualizarla no pierde nada:" ;;
-      unverifiable) update_note="No se ha podido comprobar si está sin editar (esta máquina no tiene ni \`shasum\` ni \`sha256sum\`), así que la actualización se negará hasta que lo instales:" ;;
-      *) update_note="Su contenido no coincide con ningún bloque que este ct-init reconozca ($hash_note) — puede ser una edición tuya o una versión que no tiene registrada, así que la actualización se negará sin --force:" ;;
+      pristine) update_note="Está exactamente como la dejó ct-init, así que sacarla no pierde nada:" ;;
+      unverifiable) update_note="No se ha podido comprobar si está sin editar (esta máquina no tiene ni \`shasum\` ni \`sha256sum\`), así que la sustitución se negará hasta que lo instales:" ;;
+      *) update_note="Su contenido no coincide con ningún bloque que este ct-init reconozca ($hash_note) — puede ser una edición tuya o una versión que no tiene registrada, así que la sustitución se negará sin --force:" ;;
     esac
-    echo "aviso: la sección del contrato de slices de $AGENTS_MD es del contrato v$found_version, y este plugin trae la v$SLICES_CONTRACT_VERSION — no se toca nada por defecto. $update_note bash $HERE/scripts/ct-init.sh $TARGET --update-slices-contract" >&2
+    echo "aviso: $AGENTS_MD todavía lleva DENTRO el contrato de la tabla de slices (contrato v$found_version). Desde esta versión el contrato vive en su propio fichero, $CONTRATO_MD —ya sembrado, con la versión de este plugin— y en AGENTS.md basta con la sección corta que enlaza a él: lo que hay ahí dentro son decenas de KB que cada agente de este repo relee en cada sesión sin necesitarlos. No se toca nada por defecto. $update_note bash $HERE/scripts/ct-init.sh $TARGET --update-slices-contract" >&2
   fi
 elif [ "$has_open" -eq 1 ] || [ "$has_close" -eq 1 ] || [ "$has_heading" -eq 1 ]; then
   echo "aviso: $AGENTS_MD parece tener restos parciales de la sección del contrato de slices (contrato /ct-groom) — falta el marcador de apertura, el de cierre, o ambos no acompañan al heading; no se añade nada para no duplicar contenido. Revisa $AGENTS_MD a mano: si la sección sigue siendo válida, complétala con '$SLICES_MARKER_OPEN' antes del heading y '$SLICES_MARKER_CLOSE' al final." >&2
+fi
+
+# La sección corta del loop. Se añade si falta, con el mismo idiom que el resto
+# de siembras de este script (salto de línea final asegurado antes del `>>`,
+# CRLF si el fichero ya es CRLF). No se añade cuando el AGENTS.md todavía lleva
+# el contrato entero dentro: ahí la sección corta sería una segunda copia de la
+# misma información, y ese caso ya tiene su aviso arriba con su remedio.
+if has_line "$LOOP_MARKER_OPEN" "$AGENTS_MD"; then
+  echo "sección del loop ya está en $AGENTS_MD, no se duplica"
+elif has_line "$SLICES_MARKER_OPEN" "$AGENTS_MD"; then
+  : # el contrato viejo sigue dentro; el aviso de arriba dice cómo salir de ahí
 else
-  # Mismo idiom que el bloque de .gitignore de arriba (y el mismo bug que
-  # evita: un `.gitignore`/`AGENTS.md` con contenido que NO termina en `\n`
-  # haría que un `>>` crudo fusionara nuestra primera línea con la última
-  # línea del usuario, corrompiéndola).
+  loop_crlf=0
+  if [ -s "$AGENTS_MD" ] && file_is_crlf "$AGENTS_MD"; then loop_crlf=1; fi
   if [ -s "$AGENTS_MD" ] && [ "$(tail -c1 "$AGENTS_MD" | wc -l)" -eq 0 ]; then
-    echo >> "$AGENTS_MD"
+    if [ "$loop_crlf" -eq 1 ]; then printf '\r\n' >> "$AGENTS_MD"; else echo >> "$AGENTS_MD"; fi
   fi
-  echo >> "$AGENTS_MD"
-  emit_slices_contract >> "$AGENTS_MD"
-  echo "añadida sección del contrato de slices (contrato /ct-groom v$SLICES_CONTRACT_VERSION) a $AGENTS_MD"
+  if [ "$loop_crlf" -eq 1 ]; then printf '\r\n' >> "$AGENTS_MD"; else echo >> "$AGENTS_MD"; fi
+  if [ "$loop_crlf" -eq 1 ]; then
+    emit_loop_section | awk '{ printf "%s\r\n", $0 }' >> "$AGENTS_MD"
+  else
+    emit_loop_section >> "$AGENTS_MD"
+  fi
+  echo "añadida sección del loop (enlaza al contrato de slices) a $AGENTS_MD"
 fi
 
 # Sección "Cómo se atraviesa este repo (e2e)" — tarea 5 de "e2e al cierre del

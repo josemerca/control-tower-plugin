@@ -20,12 +20,15 @@ const script = join(root, 'scripts', 'ct-init.sh')
 // en el código; los tests que cierran el fichero atan las afirmaciones que
 // tienen una fuente de verdad ejecutable (los touches serializantes) para que
 // no puedan divergir en silencio.
+// #93 — el contrato salió de AGENTS.md a `docs/superpowers/CONTRATO-SLICES.md`
+// del repo gobernado. Lo que este fichero vigila es el TEXTO del contrato, no
+// en qué fichero se pega, así que lo único que cambia es de dónde se lee.
 function seed() {
   const dir = mkdtempSync(join(tmpdir(), 'ct-'))
   execFileSync('bash', [script, dir], { encoding: 'utf8' })
-  const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+  const contrato = readFileSync(join(dir, 'docs', 'superpowers', 'CONTRATO-SLICES.md'), 'utf8')
   rmSync(dir, { recursive: true, force: true })
-  return agents
+  return contrato
 }
 
 const V1 = readFileSync(join(root, '__tests__', 'fixtures', 'slices-contract-v1.md'), 'utf8')
@@ -155,9 +158,15 @@ describe('contrato §9: qué hace /ct-next con lo que groomeas', () => {
     expect(a).toMatch(/Acceptance criteria|criterios de aceptaci/i)
   })
 
-  it('sigue siendo una sección, no un manual: remite a commands/ct-next.md para la referencia de invocación', () => {
+  // #93 — la referencia larga de `/ct-next` ya no está en `commands/ct-next.md`
+  // (que se quedó con la invocación y su tabla de códigos de salida): está en
+  // `docs/loop/ct-next.md` del repo del plugin. El contrato tiene que mandar
+  // ahí, porque una referencia que apunta a un fichero que ya no contiene lo
+  // que promete es peor que ninguna: parece viva.
+  it('sigue siendo una sección, no un manual: remite a docs/loop/ct-next.md para la referencia de invocación', () => {
     const a = seed()
-    expect(a).toMatch(/commands\/ct-next\.md/)
+    expect(a).toMatch(/docs\/loop\/ct-next\.md/)
+    expect(a).not.toMatch(/`commands\/ct-next\.md`/)
   })
 })
 
@@ -269,7 +278,7 @@ describe('contrato §9 (F13): lo que promete coincide con lo que el código hace
     // script llevaban desincronizados una versión entera.
     const a = seed()
     const marker = a.match(/<!-- ct-init:slices-contract-version: (\d+) -->/)
-    const footer = a.match(/Esta sección la mantiene `\/ct-init` \(contrato v(\d+)\)/)
+    const footer = a.match(/Este contrato lo mantiene `\/ct-init` \(contrato v(\d+)\)/)
     expect(marker).not.toBeNull()
     expect(footer).not.toBeNull()
     expect(footer[1]).toBe(marker[1])

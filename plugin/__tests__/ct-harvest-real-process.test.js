@@ -218,6 +218,33 @@ describe('/ct-harvest — la telemetría del juez, por slice', () => {
     limpiar(b)
   })
 
+  // MEDIDA 3 (#92): cuánto material fijo leyó cada papel despachado. Sumado
+  // sobre los cuatro pasos que llaman a un subagente, no sólo sobre `implement`.
+  it('bytes por papel suma el agente, las skills y el paquete de todos los papeles despachados del slice', () => {
+    const b = bancada()
+    const bytes = { agent_bytes: 5000, skill_bytes: 18000, package_bytes: 1000 }
+    const filesJson = JSON.stringify({
+      'issue-12.jsonl':
+        intentoImplement({ outcome: 'done', brief_vara_ct_docs: 4, brief_bytes: 1000, ...bytes })
+        + veredicto({ ruling: 'PASS', rubric_sin_vara: 0, ...bytes }),
+    })
+    const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/\| agente 10000B · skills 36000B · paquete 2000B \|/)
+    limpiar(b)
+  })
+
+  it('un slice cuyos papeles son todos anteriores a la medida dice «—» en bytes por papel, nunca 0, y lo dice en voz alta', () => {
+    const b = bancada()
+    const filesJson = JSON.stringify({
+      'issue-12.jsonl': intentoImplement({ outcome: 'done' }) + veredicto({ ruling: 'PASS', rubric_sin_vara: 0 }),
+    })
+    const res = correr(b, { FAKE_GH_METRICS_DIR_JSON: DIR_JSON, FAKE_GH_METRICS_FILES: filesJson })
+    expect(res.status).toBe(0)
+    expect(res.stdout).toMatch(/`—` en `bytes por papel`: ningún papel despachado de ese slice traía `agent_bytes`\/`skill_bytes`\/`package_bytes`/)
+    limpiar(b)
+  })
+
   it('un slice sin fichero de telemetría dice «(sin telemetría)» y jamás un cero', () => {
     const b = bancada()
     const filesJson = JSON.stringify({
