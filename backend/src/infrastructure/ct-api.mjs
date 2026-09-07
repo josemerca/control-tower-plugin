@@ -17,7 +17,7 @@ import { HarvestClock } from './harvest-clock.js'
 import { PlanAgentBrief } from './plan-agent-brief.js'
 import { PlanContractProgress } from './plan-contract-progress.js'
 import { PlanEvents, PlanSessions } from './plan-events-route.js'
-import { PlanReviewWatch } from './plan-review-watch.js'
+import { ReviewWatch } from './review-watch.js'
 import { StartPlan } from '../application/actions/start-plan.js'
 import { ImplementPlan } from '../application/actions/implement-plan.js'
 import { ReadPlanProgress, ReadPlanProgressParams } from '../application/queries/read-plan-progress.js'
@@ -200,11 +200,12 @@ class CtApi {
     const readChangesAsked = new ReadChangesAsked({ planIssues })
     const reviewPlan = new ReviewPlan({ planAgents })
 
-    return new PlanReviewWatch({
+    return new ReviewWatch({
       asked: (watch) => readChangesAsked.execute(new ReadChangesAskedParams(watch)),
       review: (params) => reviewPlan.execute(new ReviewPlanParams(params)),
       sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_ASKS),
       stderr: (line) => process.stderr.write(line),
+      label: 'plan review watch',
     })
   }
 

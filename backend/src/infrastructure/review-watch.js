@@ -1,11 +1,12 @@
 import { PlanFailure } from '../domain/exceptions.js'
 
-export class PlanReviewWatch {
-  constructor({ asked, review, sleep, stderr }) {
+export class ReviewWatch {
+  constructor({ asked, review, sleep, stderr, label }) {
     this.asked = asked
     this.review = review
     this.sleep = sleep
     this.stderr = stderr
+    this.label = label
     this.live = new Map()
   }
 
@@ -14,7 +15,7 @@ export class PlanReviewWatch {
   }
 
   start(watch) {
-    const key = PlanReviewWatch.#keyFor(watch.repository, watch.issue.number)
+    const key = ReviewWatch.#keyFor(watch.repository, watch.issue.number)
     const attended = new Set()
     this.live.set(key, attended)
 
@@ -25,7 +26,7 @@ export class PlanReviewWatch {
   }
 
   stop({ issue, repository }) {
-    this.live.delete(PlanReviewWatch.#keyFor(repository, issue))
+    this.live.delete(ReviewWatch.#keyFor(repository, issue))
   }
 
   async #follow(watch, key, attended) {
@@ -73,6 +74,6 @@ export class PlanReviewWatch {
   }
 
   #warn(watch, said) {
-    this.stderr(`plan review watch: ${watch.repository.text}#${watch.issue.number} ${said}\n`)
+    this.stderr(`${this.label}: ${watch.repository.text}#${watch.issue.number} ${said}\n`)
   }
 }

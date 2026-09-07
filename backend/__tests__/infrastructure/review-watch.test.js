@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { PlanReviewWatch } from '../../src/infrastructure/plan-review-watch.js'
+import { ReviewWatch } from '../../src/infrastructure/review-watch.js'
 import { ChangeAsked } from '../../src/domain/value-objects/change-asked.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
@@ -8,6 +8,7 @@ import { RepositoryName } from '../../src/domain/value-objects/repository-name.j
 import { PlanChangesNotRead, PlanAgentNotResumed } from '../../src/domain/exceptions.js'
 
 class WatchDouble {
+  static LABEL = 'plan review watch'
   static AGENT = 'workspace:20'
   static NUMBER = 7
   static ISSUE = new PlanIssue({
@@ -31,11 +32,12 @@ class WatchDouble {
     id: 'IC_kwDOT9lB5c8AAAABRCF0HH', text: WatchDouble.A_CHANGE.text,
   })
 
-  constructor(soundings, { refusingTheDelivery = null, waits = null, stoppingOnDelivery = false } = {}) {
+  constructor(soundings, { refusingTheDelivery = null, waits = null, stoppingOnDelivery = false, label = WatchDouble.LABEL } = {}) {
     this.soundings = soundings
     this.refusingTheDelivery = refusingTheDelivery
     this.stoppingOnDelivery = stoppingOnDelivery
     this.waits = waits ?? soundings.length
+    this.label = label
     this.asked = []
     this.reviewed = []
     this.warnings = []
@@ -63,8 +65,12 @@ class WatchDouble {
     })
   }
 
+  static labelled(label) {
+    return new WatchDouble([new PlanChangesNotRead('HTTP 502')], { label })
+  }
+
   #reviews() {
-    return new PlanReviewWatch({
+    return new ReviewWatch({
       asked: (watch) => {
         this.asked.push(watch)
         const answer = this.soundings[this.asked.length - 1]
@@ -89,6 +95,7 @@ class WatchDouble {
         return Promise.resolve()
       },
       stderr: (line) => this.warnings.push(line),
+      label: this.label,
     })
   }
 
@@ -99,7 +106,7 @@ class WatchDouble {
   }
 }
 
-describe('PlanReviewWatch', () => {
+describe('ReviewWatch', () => {
   it('a_change_asked_for_is_handed_to_the_agent_that_wrote_that_plan', async () => {
     const watched = WatchDouble.answering([WatchDouble.A_CHANGE])
 
@@ -233,9 +240,25 @@ describe('PlanReviewWatch', () => {
 
     expect(() => watched.watch.stop(WatchDouble.STOPPING)).not.toThrow()
   })
+
+  it('the_label_it_was_given_prefixes_what_it_writes_so_two_watches_can_be_told_apart', async () => {
+    const watched = WatchDouble.labelled('pull request review watch')
+
+    await watched.run()
+
+    expect(watched.warnings.join('')).toContain('pull request review watch: josemerca/ct-loop-sandbox#7')
+  })
+
+  it('the_watch_of_the_plan_keeps_saying_which_one_it_is', async () => {
+    const watched = WatchDouble.answering(new PlanChangesNotRead('HTTP 502'))
+
+    await watched.run()
+
+    expect(watched.warnings.join('')).toContain('plan review watch:')
+  })
 })
 
-describe('PlanReviewWatch telling two plans apart', () => {
+describe('ReviewWatch telling two plans apart', () => {
   const watchFor = (repo, number) => new PlanWatch({
     issue: new PlanIssue({ number, url: `https://github.com/${repo}/issues/${number}` }),
     located: new WorkspaceLocation({ path: `/repo/${repo}/.worktrees/${number}`, branch: `feat/${number}` }),
@@ -254,7 +277,7 @@ describe('PlanReviewWatch telling two plans apart', () => {
     constructor() {
       this.sounded = []
       this.rounds = 0
-      this.reviews = new PlanReviewWatch({
+      this.reviews = new ReviewWatch({
         asked: (watch) => {
           this.rounds += 1
           if (this.rounds > BUDGET) {
@@ -267,6 +290,7 @@ describe('PlanReviewWatch telling two plans apart', () => {
         review: () => Promise.resolve(),
         sleep: () => new Promise((resolve) => setTimeout(resolve, ROUND_MS)),
         stderr: () => {},
+        label: 'plan review watch',
       })
     }
 
