@@ -256,7 +256,7 @@ describe('F27 — findClosingKeywords', () => {
 import { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { probeGovernedRepo, CONTRACT_MARKER } from '../scripts/governed-repo.js'
+import { probeGovernedRepo, CONTRACT_MARKER, LOOP_MARKER } from '../scripts/governed-repo.js'
 
 describe('F27 — probeGovernedRepo', () => {
   const hechos = []
@@ -267,6 +267,19 @@ describe('F27 — probeGovernedRepo', () => {
     const d = tmp()
     mkdirSync(join(d, '.git'))
     writeFileSync(join(d, 'AGENTS.md'), `# AGENTS\n${CONTRACT_MARKER}\ncosas\n`)
+    expect(probeGovernedRepo(d)).toEqual({ governed: true })
+  })
+
+  // #93 — el contrato salió de AGENTS.md a su propio fichero, y en su sitio
+  // quedó la sección corta del loop con SU marcador. La señal de «gobernado»
+  // tiene que ser cualquiera de los dos: con solo el nuevo, todos los repos
+  // bootstrapeados hasta hoy se quedan sin puerta; con solo el viejo, se
+  // quedan sin ella todos los que se bootstrapeen a partir de ahora. Y ninguno
+  // de los dos apagones se vería: el commit pasa, sin más.
+  it('un repo sembrado por #93, con solo el marcador de la seccion del loop, tambien esta gobernado', () => {
+    const d = tmp()
+    mkdirSync(join(d, '.git'))
+    writeFileSync(join(d, 'AGENTS.md'), `# AGENTS\n${LOOP_MARKER}\ncosas\n`)
     expect(probeGovernedRepo(d)).toEqual({ governed: true })
   })
 

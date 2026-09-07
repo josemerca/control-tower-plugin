@@ -192,14 +192,20 @@ describe('pareceEsqueleto', () => {
   // prosa). Este test corre `ct-init.sh` de verdad y mide sobre su salida,
   // para que una regresión en el descuento del bloque del contrato (ver
   // `sinBloquesDeCtInit` en scripts/vara.js) se note aquí.
-  it('el AGENTS.md que ct-init.sh deja REALMENTE en disco es esqueleto, pese a que el propio script le añade el contrato de slices', () => {
+  it('el AGENTS.md que ct-init.sh deja REALMENTE en disco es esqueleto, pese a las secciones que el propio script le añade', () => {
     const dir = tmp()
     execFileSync('bash', [initScript, dir], { encoding: 'utf8' })
     const contenido = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
-    // Confirma que el escenario es el real y no un caso degenerado: el
-    // fichero de verdad trae mucha prosa (el contrato de slices), no un
-    // puñado de encabezados sueltos.
-    expect(contenido.split('\n').length).toBeGreaterThan(100)
+    // Confirma que el escenario es el real y no un caso degenerado: el fichero
+    // de verdad trae prosa del plugin —desde #93, la sección corta del loop y
+    // la de travesía; antes, además, el contrato entero— y no un puñado de
+    // encabezados sueltos. El umbral bajó de 100 líneas a 20 justamente por ese
+    // reparto: lo que se mide aquí es que el descuento de `sinBloquesDeCtInit`
+    // sigue cubriendo TODOS los bloques que ct-init siembra, y hoy son tres.
+    expect(contenido.split('\n').length).toBeGreaterThan(20)
+    for (const marcador of ['<!-- ct-init:loop -->', '<!-- ct-init:e2e-howto -->']) {
+      expect(contenido, marcador).toContain(marcador)
+    }
     expect(pareceEsqueleto(contenido)).toBe(true)
   })
 
