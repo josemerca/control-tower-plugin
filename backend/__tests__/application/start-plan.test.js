@@ -523,6 +523,7 @@ describe('StartPlan plans for a list of targets', () => {
 
     expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
     expect(flow.planIssues.asked).toEqual([])
+    expect(flow.workspace.confirmed).toHaveLength(2)
   })
 
   it('a_repository_that_fails_while_starting_does_not_stop_the_ones_behind_it', async () => {
@@ -536,6 +537,6 @@ describe('StartPlan plans for a list of targets', () => {
     expect(result.started).toHaveLength(1)
     expect(result.failed).toHaveLength(1)
     expect(result.failed[0].repository).toBe(failing.repository)
-    expect(result.started[0].repository).toBe(Flow.REPOSITORY)
+    expect(result.started[0].watch.repository).toBe(Flow.REPOSITORY)
   })
 })

@@ -311,11 +311,12 @@ export class StartPlanRoute {
   }
 
   static #sendListed(sessions, reviews, response, result) {
-    const started = result.started.map((one) => {
+    const started = []
+    for (const one of result.started) {
       sessions.remember(one.watch)
       reviews.start(one.watch)
-      return StartPlanRoute.#startedAnswer(one)
-    })
+      started.push(StartPlanRoute.#startedAnswer(one))
+    }
     const failed = result.failed.map((notStarted) => {
       const collapse = PlanCollapse.of(notStarted.cause)
       return { [PlanRequest.REPO_FIELD]: notStarted.repository.text, code: collapse.code, detail: collapse.detail }

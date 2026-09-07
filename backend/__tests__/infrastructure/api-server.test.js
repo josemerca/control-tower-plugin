@@ -325,7 +325,8 @@ describe('ApiServer', () => {
   })
 
   it('a_plan_asked_for_across_two_repositories_answers_what_started_and_what_did_not', async () => {
-    const server = RunningApi.server({ startPlan: StartPlanSpy.failingOne() })
+    const sessions = new PlanSessions()
+    const server = RunningApi.server({ startPlan: StartPlanSpy.failingOne(), sessions })
     const port = await server.start()
 
     try {
@@ -345,6 +346,8 @@ describe('ApiServer', () => {
           '"branch":"feat/7","worktree":"/repo/checkout/.worktrees/7","root":"/repo/checkout"}],' +
           '"failed":[{"repo":"owner/other","code":"workspace-not-prepared","detail":"branch is taken"}]}'
       )
+      expect(RunningApi.reviews.started).toEqual([StartPlanSpy.WATCH])
+      expect(sessions.known()).toEqual([StartPlanSpy.WATCH])
     } finally {
       await server.stop()
     }
@@ -416,7 +419,6 @@ describe('ApiServer', () => {
     const causes = [
       { cause: new UserStoryNotRead('acli is not authenticated'), code: 'user-story-not-read' },
       { cause: new PlanIssueNotCreated('label not found'), code: 'plan-issue-not-created' },
-      { cause: new WorkspaceNotPrepared('branch is taken'), code: 'workspace-not-prepared' },
     ]
 
     for (const { cause, code } of causes) {
@@ -431,6 +433,50 @@ describe('ApiServer', () => {
       } finally {
         await server.stop()
       }
+    }
+  })
+
+  it('a_plan_issue_that_could_not_be_created_after_the_preflight_is_answered_by_its_own_code', async () => {
+    const spy = new StartPlanSpy()
+    spy.execute = async () => new StartPlanResult({
+      started: [],
+      failed: [new PlanNotStarted({
+        repository: new RepositoryName(RunningApi.REPO),
+        cause: new PlanIssueNotCreated('label not found'),
+      })],
+    })
+    const server = RunningApi.server({ startPlan: spy })
+    const port = await server.start()
+
+    try {
+      const response = await RunningApi.accepted(port)
+
+      expect(response.status).toBe(400)
+      expect(await response.text()).toBe('{"code":"plan-issue-not-created","detail":"label not found"}')
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('a_workspace_that_cannot_be_prepared_after_the_preflight_is_answered_by_its_own_code', async () => {
+    const spy = new StartPlanSpy()
+    spy.execute = async () => new StartPlanResult({
+      started: [],
+      failed: [new PlanNotStarted({
+        repository: new RepositoryName(RunningApi.REPO),
+        cause: new WorkspaceNotPrepared('branch is taken'),
+      })],
+    })
+    const server = RunningApi.server({ startPlan: spy })
+    const port = await server.start()
+
+    try {
+      const response = await RunningApi.accepted(port)
+
+      expect(response.status).toBe(400)
+      expect(await response.text()).toBe('{"code":"workspace-not-prepared","detail":"branch is taken"}')
+    } finally {
+      await server.stop()
     }
   })
 
@@ -802,6 +848,23 @@ describe('ApiServer', () => {
 
     expect(response.status).toBe(400)
     expect(await response.text()).toBe('{"code":"malformed-repo","detail":"repo must be a repository such as owner/name"}')
+  })
+
+  it('a_malformed_repo_inside_a_listed_request_is_refused_naming_its_position', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(
+      port,
+      '{"id":"ABC-123","repo_list":[' +
+        '{"repo":"owner/name","path":"/repo/checkout"},' +
+        '{"repo":"nope","path":"/repo/other-checkout"}' +
+        ']}'
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.text()).toBe(
+      '{"code":"malformed-repo","detail":"repo_list[1].repo must be a repository such as owner/name"}'
+    )
   })
 
   it('a_repo_that_is_not_shaped_like_one_is_refused_before_it_ever_becomes_an_argument_of_gh', async () => {

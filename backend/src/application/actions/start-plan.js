@@ -13,8 +13,7 @@ export class StartPlanParams {
 }
 
 export class PlanStarted {
-  constructor({ repository, agent, watch }) {
-    this.repository = repository
+  constructor({ agent, watch }) {
     this.agent = agent
     this.watch = watch
     Object.freeze(this)
@@ -76,7 +75,6 @@ export class StartPlan {
     this.checkouts.remember(target.root)
 
     return new PlanStarted({
-      repository: target.repository,
       agent,
       watch: new PlanWatch({ story, issue, located, repository: target.repository, agent }),
     })

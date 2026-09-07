@@ -162,9 +162,10 @@ describe('PlanRequest', () => {
       '{"id":"ABC-1","repo_list":[{"repo":"owner/name"}]}',
       '{"id":"ABC-1","repo_list":[{"repo":"owner/name","path":"/repo/checkout","extra":true}]}',
       '{"id":"ABC-1","repo_list":[{"repo":"owner/name","path":"/repo/checkout"},"nope"]}',
+      '{"id":"ABC-1","repo_list":[{"repo":"owner/name","bogus":true}]}',
     ].map((raw) => PlanRequest.from(raw).outcome)
 
-    expect(refused).toEqual(Array(7).fill(PlanRequestOutcome.MALFORMED_REPO_LIST))
+    expect(refused).toEqual(Array(8).fill(PlanRequestOutcome.MALFORMED_REPO_LIST))
 
     expect(
       PlanRequest.from('{"id":"ABC-1","repo_list":[{"repo":"owner/name","path":"/repo/checkout"}]}').outcome
