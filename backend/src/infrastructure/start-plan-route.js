@@ -5,6 +5,7 @@ import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
 import { PlanComment } from '../domain/value-objects/plan-comment.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
 import { CheckoutRoot } from '../domain/value-objects/checkout-root.js'
+import { PlanTarget } from '../domain/value-objects/plan-target.js'
 import {
   PlanFailure,
   UserStoryNotRead, UserStoryNotUnderstood, PlanIssueNotCreated, PlanIssueNotNamed,
@@ -203,22 +204,31 @@ export class StartPlanRoute {
   }
 
   static async #accept(startPlan, sessions, reviews, response, asked) {
-    let started
+    let result
     try {
-      started = await startPlan.execute(
-        new StartPlanParams({ story: asked.story, comment: asked.comment, repository: asked.repository, root: asked.root })
+      result = await startPlan.execute(
+        new StartPlanParams({
+          story: asked.story,
+          comment: asked.comment,
+          targets: [new PlanTarget({ repository: asked.repository, root: asked.root })],
+        })
       )
     } catch (cause) {
       if (!(cause instanceof PlanFailure)) throw cause
       Answer.refuseAs(response, PlanCollapse.of(cause))
       return
     }
+    if (result.failed.length > 0) {
+      Answer.refuseAs(response, PlanCollapse.of(result.failed[0].cause))
+      return
+    }
+    const [started] = result.started
     sessions.remember(started.watch)
     reviews.start(started.watch)
     Answer.send(response, 202, {
       status: 'started',
       [PlanRequest.ID_FIELD]: started.watch.storyText(),
-      [PlanRequest.REPO_FIELD]: asked.repository.text,
+      [PlanRequest.REPO_FIELD]: started.watch.repository.text,
       issue: { number: started.watch.issue.number, url: started.watch.issue.url },
       agent: started.agent,
       branch: started.watch.located.branch,

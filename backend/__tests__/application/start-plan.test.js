@@ -12,6 +12,7 @@ import { PlanComment } from '../../src/domain/value-objects/plan-comment.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 import { CheckoutRoot } from '../../src/domain/value-objects/checkout-root.js'
+import { PlanTarget } from '../../src/domain/value-objects/plan-target.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import {
   PlanAgentNotLaunched, PlanIssueNotClaimed, PlanIssueNotCreated, UserStoryNotRead,
@@ -39,10 +40,11 @@ class UserStoriesDouble extends UserStories {
 class PlanIssuesDouble extends PlanIssues {
   static OPENED = new PlanIssue({ number: 7, url: 'https://github.com/owner/name/issues/7' })
 
-  constructor(answer = PlanIssuesDouble.OPENED, { claimFailure = null } = {}) {
+  constructor(answer = PlanIssuesDouble.OPENED, { claimFailure = null, claimFailureRepository = null } = {}) {
     super()
     this.answer = answer
     this.claimFailure = claimFailure
+    this.claimFailureRepository = claimFailureRepository
     this.asked = []
     this.claimed = []
     this.requeued = []
@@ -55,6 +57,13 @@ class PlanIssuesDouble extends PlanIssues {
     })
   }
 
+  static refusingToClaimFor(repository, said) {
+    return new PlanIssuesDouble(PlanIssuesDouble.OPENED, {
+      claimFailure: new PlanIssueNotClaimed(said),
+      claimFailureRepository: repository,
+    })
+  }
+
   async open({ story, comment, repository }) {
     this.asked.push({ story, comment, repository })
     if (this.answer instanceof Error) throw this.answer
@@ -63,7 +72,8 @@ class PlanIssuesDouble extends PlanIssues {
 
   async claim({ issue, repository }) {
     this.claimed.push({ issue, repository })
-    if (this.claimFailure !== null) throw this.claimFailure
+    const targeted = this.claimFailureRepository === null || this.claimFailureRepository === repository
+    if (this.claimFailure !== null && targeted) throw this.claimFailure
   }
 
   async requeue({ issue, repository }) {
@@ -75,11 +85,15 @@ class PlanIssuesDouble extends PlanIssues {
 class WorkspaceDouble extends Workspace {
   static LOCATED = new WorkspaceLocation({ root: '/repo', path: '/repo/.worktrees/7', branch: 'feat/7' })
 
-  constructor(answer = WorkspaceDouble.LOCATED, { confirmFailure = null, confirmedRoot = null } = {}) {
+  constructor(
+    answer = WorkspaceDouble.LOCATED,
+    { confirmFailure = null, confirmedRoot = null, confirmFailureRoot = null } = {}
+  ) {
     super()
     this.answer = answer
     this.confirmFailure = confirmFailure
     this.confirmedRoot = confirmedRoot
+    this.confirmFailureRoot = confirmFailureRoot
     this.asked = []
     this.undone = []
     this.confirmed = []
@@ -94,6 +108,13 @@ class WorkspaceDouble extends Workspace {
     return new WorkspaceDouble(WorkspaceDouble.LOCATED, { confirmFailure: new WorkspaceNotPrepared(said) })
   }
 
+  static refusingToConfirmRoot(root, said) {
+    return new WorkspaceDouble(WorkspaceDouble.LOCATED, {
+      confirmFailure: new WorkspaceNotPrepared(said),
+      confirmFailureRoot: root,
+    })
+  }
+
   static confirming(confirmedRoot) {
     return new WorkspaceDouble(WorkspaceDouble.LOCATED, { confirmedRoot })
   }
@@ -101,7 +122,8 @@ class WorkspaceDouble extends Workspace {
   async confirm({ root, repository }) {
     this.confirmed.push({ root, repository })
     this.steps.push('confirm')
-    if (this.confirmFailure !== null) throw this.confirmFailure
+    const targeted = this.confirmFailureRoot === null || this.confirmFailureRoot === root
+    if (this.confirmFailure !== null && targeted) throw this.confirmFailure
 
     return this.confirmedRoot ?? root
   }
@@ -156,6 +178,10 @@ class Flow {
   static COMMENT = new PlanComment('añade un modo oscuro al panel')
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
   static ROOT = new CheckoutRoot('/repo')
+  static OTHER_TARGET = new PlanTarget({
+    repository: new RepositoryName('josemerca/other-sandbox'),
+    root: new CheckoutRoot('/other-repo'),
+  })
 
   constructor({ userStories, planIssues, workspace, planAgents, checkouts } = {}) {
     this.userStories = userStories ?? UserStoriesDouble.reading('the summary of the story')
@@ -169,9 +195,15 @@ class Flow {
   }
 
   async run(story = Flow.STORY, comment = null) {
-    return new StartPlan(this).execute(
-      new StartPlanParams({ story, comment, repository: Flow.REPOSITORY, root: Flow.ROOT })
+    const result = await this.runAcross(
+      [new PlanTarget({ repository: Flow.REPOSITORY, root: Flow.ROOT })], story, comment
     )
+    if (result.failed.length > 0) throw result.failed[0].cause
+    return result.started[0]
+  }
+
+  async runAcross(targets, story = Flow.STORY, comment = null) {
+    return new StartPlan(this).execute(new StartPlanParams({ story, comment, targets }))
   }
 
   async runWithComment() {
@@ -468,5 +500,42 @@ describe('StartPlan plans from a comment when there is no user story', () => {
 
     const [asked] = flow.planIssues.asked
     expect(asked.comment).toBe(null)
+  })
+})
+
+describe('StartPlan plans for a list of targets', () => {
+  it('the_story_is_read_once_however_many_repositories_were_asked_for', async () => {
+    const flow = new Flow()
+    const target = new PlanTarget({ repository: Flow.REPOSITORY, root: Flow.ROOT })
+
+    await flow.runAcross([target, Flow.OTHER_TARGET])
+
+    expect(flow.userStories.asked).toEqual([Flow.STORY])
+    expect(flow.planIssues.asked).toHaveLength(2)
+  })
+
+  it('no_issue_is_opened_when_the_second_checkout_cannot_be_confirmed', async () => {
+    const target = new PlanTarget({ repository: Flow.REPOSITORY, root: Flow.ROOT })
+    const workspace = WorkspaceDouble.refusingToConfirmRoot(Flow.OTHER_TARGET.root, '/other-repo holds someone/else')
+    const flow = new Flow({ workspace })
+
+    const refusal = await flow.runAcross([target, Flow.OTHER_TARGET]).catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(WorkspaceNotPrepared)
+    expect(flow.planIssues.asked).toEqual([])
+  })
+
+  it('a_repository_that_fails_while_starting_does_not_stop_the_ones_behind_it', async () => {
+    const failing = Flow.OTHER_TARGET
+    const target = new PlanTarget({ repository: Flow.REPOSITORY, root: Flow.ROOT })
+    const planIssues = PlanIssuesDouble.refusingToClaimFor(failing.repository, 'gh issue edit failed: nope')
+    const flow = new Flow({ planIssues })
+
+    const result = await flow.runAcross([failing, target])
+
+    expect(result.started).toHaveLength(1)
+    expect(result.failed).toHaveLength(1)
+    expect(result.failed[0].repository).toBe(failing.repository)
+    expect(result.started[0].repository).toBe(Flow.REPOSITORY)
   })
 })

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { ReviewsSpy } from '../reviews-spy.js'
-import { StartPlanResult } from '../../src/application/actions/start-plan.js'
+import { StartPlanResult, PlanStarted } from '../../src/application/actions/start-plan.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { PlanEvents, EventsRefusal, PlanSessions } from '../../src/infrastructure/plan-events-route.js'
@@ -60,18 +60,23 @@ class StartPlanSpy {
 
   async execute(params) {
     this.asked.push(params.story === null ? null : params.story.text)
-    this.repositories.push(params.repository.text)
-    this.roots.push(params.root.text)
+    const [target] = params.targets
+    this.repositories.push(target.repository.text)
+    this.roots.push(target.root.text)
     if (this.failing) throw new PlanAgentNotLaunched('cmux is not reachable')
     return new StartPlanResult({
-      agent: StartPlanSpy.AGENT,
-      watch: new PlanWatch({
-        story: params.story,
-        issue: StartPlanSpy.ISSUE,
-        located: StartPlanSpy.LOCATED,
-        repository: params.repository,
+      started: [new PlanStarted({
+        repository: target.repository,
         agent: StartPlanSpy.AGENT,
-      }),
+        watch: new PlanWatch({
+          story: params.story,
+          issue: StartPlanSpy.ISSUE,
+          located: StartPlanSpy.LOCATED,
+          repository: target.repository,
+          agent: StartPlanSpy.AGENT,
+        }),
+      })],
+      failed: [],
     })
   }
 }
