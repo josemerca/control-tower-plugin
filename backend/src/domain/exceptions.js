@@ -64,3 +64,9 @@ export class PullRequestFailure extends PlanFailure {}
 export class PullRequestNotRead extends PullRequestFailure {}
 
 export class PullRequestNotUnderstood extends PullRequestFailure {}
+
+export class WorkbenchFailure extends PlanFailure {}
+
+export class SliceNotReopened extends WorkbenchFailure {}
+
+export class ReopenNotUnderstood extends WorkbenchFailure {}
