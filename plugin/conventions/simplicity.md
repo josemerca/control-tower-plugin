@@ -20,7 +20,8 @@ diff already trusts, so a second opinion about the same content defends
 against a caller that does not exist. The question is not where the value came
 from but whose responsibility this is: the thing built at the door owns its
 own check, and forms no second opinion about a value another part of the
-system already vouched for.
+system already vouched for. The guard a value object keeps for itself, once
+it exists, is `conventions/domain.md`'s business, not this one's.
 
 ## A field, a branch and a public symbol answer to a call that exists
 

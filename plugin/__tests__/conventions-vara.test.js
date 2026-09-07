@@ -28,6 +28,7 @@ const ALCANCES = {
   'decisions.md': 'every diff',
   'testing.md': 'every diff',
   'architecture.md': 'new modules',
+  'domain.md': 'every diff',
 }
 
 describe('the documents in conventions/', () => {
@@ -207,6 +208,37 @@ describe('simplicity.md carries the burden of proof, and says where it ends', ()
 
   for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
     it(`simplicity.md ${afirmacion}`, () => {
+      comprobar()
+    })
+  }
+})
+
+describe('domain.md keeps the tools out of the domain', () => {
+  const AFIRMACIONES = {
+    'declara que el port dice lo que el dominio necesita, no lo que el adaptador sabe hacer':
+      () => expect(Documento.texto('domain.md')).toContain('The port declares what the domain needs, not what the adapter knows how to do'),
+    'da el test que decide un nombre: cambiar el adaptador convierte el nombre en mentira':
+      () => expect(Documento.texto('domain.md')).toContain('makes the name a lie'),
+    'corta el port por quien esta al otro lado y no por paso del flujo':
+      () => expect(Documento.texto('domain.md')).toContain('never by step of the flow'),
+    'identifica al colaborador por lo que se le pide, no por lo que responde':
+      () => expect(Documento.texto('domain.md')).toContain('identified by what is asked of it'),
+    'dice que lo que nunca se duplica es la intencion, no la forma':
+      () => expect(Documento.texto('domain.md')).toContain('Repeated shape is not the subject'),
+    'dice cual es la guarda del value object, y que se queda aunque hoy nadie la necesite':
+      () => expect(Documento.texto('domain.md')).toContain('what makes them this value and not any value'),
+    'excluye la segunda opinion sobre lo que otro tipo ya garantiza':
+      () => expect(Documento.texto('domain.md')).toContain('re-verifies what another type already guarantees'),
+    'separa las dos causas de fallo porque se reparan en sitios distintos':
+      () => expect(Documento.texto('domain.md')).toContain('they are repaired in different places'),
+    'remite a simplicity.md para lo que pasa aguas abajo de una puerta':
+      () => expect(Documento.texto('domain.md')).toContain('`conventions/simplicity.md`'),
+    'y simplicity.md ya remite aqui para la guarda propia del value object':
+      () => expect(Documento.texto('simplicity.md')).toContain('`conventions/domain.md`'),
+  }
+
+  for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
+    it(`domain.md ${afirmacion}`, () => {
       comprobar()
     })
   }

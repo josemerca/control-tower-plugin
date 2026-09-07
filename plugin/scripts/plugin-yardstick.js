@@ -1,7 +1,7 @@
 export class PluginYardstick {
   static DIRECTORY = 'conventions'
 
-  static FILES = ['defects.md', 'style.md', 'simplicity.md', 'decisions.md', 'architecture.md', 'testing.md']
+  static FILES = ['defects.md', 'style.md', 'simplicity.md', 'decisions.md', 'domain.md', 'architecture.md', 'testing.md']
 
   static PATH_SECTION = 'Vara de ct'
 
