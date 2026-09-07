@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { PlanReviewWatch } from '../../src/infrastructure/plan-review-watch.js'
-import { ChangeAsked } from '../../src/infrastructure/gh-plan-issues.js'
+import { ChangeAsked } from '../../src/domain/value-objects/change-asked.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { GhPlanIssues, ChangeAsked } from '../../src/infrastructure/gh-plan-issues.js'
+import { GhPlanIssues } from '../../src/infrastructure/gh-plan-issues.js'
+import { ChangeAsked } from '../../src/domain/value-objects/change-asked.js'
 import { Gh } from '../../src/infrastructure/gh.js'
 import { PlanIssueBody } from '../../src/infrastructure/gh-plan-issues.js'
 import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'

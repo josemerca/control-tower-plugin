@@ -12,6 +12,7 @@ import { gatesOf } from '../../../plugin/scripts/groom.js'
 import { gateLabels } from '../../../plugin/scripts/gates.js'
 import { PlanIssues } from '../domain/ports/plan-issues.js'
 import { PlanIssue } from '../domain/value-objects/plan-issue.js'
+import { ChangeAsked } from '../domain/value-objects/change-asked.js'
 import {
   PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueNotClaimed, PlanGoNotAnswered,
   PlanChangesNotRead, PlanChangesNotUnderstood,
@@ -216,13 +217,7 @@ export class GhPlanIssues extends PlanIssues {
   }
 }
 
-export class ChangeAsked {
-  constructor({ id, text }) {
-    this.id = id
-    this.text = text
-    Object.freeze(this)
-  }
-}
+export { ChangeAsked }
 
 export class PlanIssueBody {
   static DESCRIPTION_HEADING = '## Descripción'
