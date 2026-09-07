@@ -8,7 +8,10 @@
 
 **Spec:** none — there is no separate design document; every decision is closed in §2 of this plan.
 
-**Branch:** `feat/user-comment-en-start-plan`, cut from `main` at 1ad63b9.
+**Branch:** `feat/user-comment-en-start-plan`, cut from `main` at 1ad63b9 and rebased onto 4ffc0fe
+(PRs #104, #107, #108, #114, #115, #116 and #118) before the pull request; the one conflict was Task 6's
+line landing beside the yardstick lines PR #108 replaced in `plan-agent-brief.js`, resolved keeping both.
+Every `Current state` block below still reads verbatim at both bases.
 
 **Tech stack:** Node 24 ESM, express 5, vitest 4. No new dependency.
 
