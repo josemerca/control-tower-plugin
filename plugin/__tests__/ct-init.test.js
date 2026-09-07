@@ -106,8 +106,8 @@ const sha256 = (s) => createHash('sha256').update(s).digest('hex')
 // el propio historial de git TODOS los bloques que ct-init.sh llegó a emitir:
 // es la lista que la suite compara contra la registrada, para que registrar el
 // hash nuevo (o no borrar uno viejo) no dependa de que alguien se acuerde.
-function git(args) {
-  return execFileSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 })
+function git(args, input = undefined) {
+  return execFileSync('git', args, { cwd: root, encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024 })
 }
 
 const prefijoDeArbolDe = (cwd) =>
@@ -143,6 +143,25 @@ function extractBlockFromSource(src) {
 // cinco bloques distintos convivieron bajo el mismo plugin.json 0.6.0.
 // No cubre el árbol de trabajo sin commitear: de eso se encarga el test del
 // hash del bloque de HOY.
+// oidsDelLedger: el blob del ledger en cada commit, en UNA sola invocación de
+// git. Antes eran hasta dos `git rev-parse` por commit —cerca de 1.900 procesos
+// en esta historia—, unos 20 s de puro spawn que con otra suite en marcha se
+// comían el timeout de 120 s del test que estrena la caché (#109). `cat-file
+// --batch-check` contesta una línea por línea de entrada y en el mismo orden,
+// así que la respuesta se empareja por posición; la de un objeto que no existe
+// termina en `missing` y no nombra ningún tipo.
+function oidsDelLedger(commits, rutas) {
+  const consulta = commits.flatMap((c) => rutas.map((r) => `${c}:${r}`)).join('\n') + '\n'
+  const respuestas = git(['cat-file', '--batch-check'], consulta).split('\n')
+  return commits.map((commit, i) => {
+    for (let j = 0; j < rutas.length; j++) {
+      const [oid, tipo] = (respuestas[i * rutas.length + j] || '').split(' ')
+      if (tipo === 'blob') return { commit, oid }
+    }
+    return { commit, oid: '' }
+  })
+}
+
 let historicalCache = null
 function historicalContractBlocks() {
   if (historicalCache) return historicalCache
@@ -162,17 +181,8 @@ function historicalContractBlocks() {
   const oids = []
   const seenOid = new Set()
   const rutasDelLedger = rutasDeArbolPara(root, RUTA_LEDGER)
-  for (const c of commits) {
-    let oid = ''
-    for (const ruta of rutasDelLedger) {
-      try {
-        oid = git(['rev-parse', '--verify', '--quiet', `${c}:${ruta}`]).trim()
-      } catch {
-        oid = '' // el fichero no vivía todavía en esa ruta en ese commit
-      }
-      if (oid) break
-    }
-    if (oid && !seenOid.has(oid)) { seenOid.add(oid); oids.push({ oid, commit: c }) }
+  for (const { commit, oid } of oidsDelLedger(commits, rutasDelLedger)) {
+    if (oid && !seenOid.has(oid)) { seenOid.add(oid); oids.push({ oid, commit }) }
   }
   const blocks = []
   const seenBlock = new Set()
