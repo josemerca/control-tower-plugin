@@ -31,24 +31,6 @@ describe('ImplementProgress', () => {
     expect(status).not.toHaveTextContent('null')
   })
 
-  it('should link the pull request a review step is waiting on so a person can reach it', async () => {
-    answerWith(ImplementProgressMother.inReview())
-
-    renderProgress()
-
-    const link = await screen.findByRole('link', { name: 'Ver la pull request #31' })
-    expect(link).toHaveAttribute('href', 'https://github.com/owner/name/pull/31')
-  })
-
-  it('should link no pull request while the run is still implementing', async () => {
-    answerWith(ImplementProgressMother.progress())
-
-    renderProgress()
-
-    await screen.findByText(/Tarea 3 de 7/)
-    expect(screen.queryByRole('link')).toBeNull()
-  })
-
   it('should show a worktree without a run yet as a wait, not an error', async () => {
     answerWith(ImplementProgressMother.notRead())
 

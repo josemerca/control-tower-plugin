@@ -6,7 +6,6 @@ import './ImplementProgress.css'
 const UNREACHABLE_MESSAGE = 'No se pudo contactar con el backend'
 const WAITING_MESSAGE = 'Esperando a que arranque la implementación…'
 const CONNECTING_MESSAGE = 'Comprobando el progreso de la implementación…'
-const PULL_REQUEST_LABEL = (number: number) => `Ver la pull request #${number}`
 
 const STEP_LABELS: Record<ImplementationStep, string> = {
   [ImplementationStep.STARTING]: 'Arrancando',
@@ -49,16 +48,6 @@ const ImplementProgress = ({ issue, root, repo }: ImplementProgressProps) => {
           {progress.attempt !== null && ` · Intento ${progress.attempt}`}
           {progress.discards !== null && ` · Descartes: ${progress.discards}`}
         </p>
-      )}
-      {progress.phase === 'progress' && progress.pullRequest !== null && (
-        <a
-          className="implement-progress__pull-request"
-          href={progress.pullRequest.url}
-          target="_blank"
-          rel="noreferrer"
-        >
-          {PULL_REQUEST_LABEL(progress.pullRequest.number)}
-        </a>
       )}
       {progress.phase === 'failed' && <Banner type="error" role="alert" title={progress.error} />}
       {progress.phase === 'unreachable' && <Banner type="error" role="alert" title={UNREACHABLE_MESSAGE} />}

@@ -21,10 +21,7 @@ describe('ImplementProgressClient', () => {
 
     expect(outcome).toEqual({
       kind: 'read',
-      state: {
-        step: 'judge', task: 3, totalTasks: 7, name: 'el lector del plan', attempt: 2, discards: 0,
-        pullRequest: null,
-      },
+      state: { step: 'judge', task: 3, totalTasks: 7, name: 'el lector del plan', attempt: 2, discards: 0 },
     })
   })
 
@@ -35,34 +32,8 @@ describe('ImplementProgressClient', () => {
 
     expect(outcome).toEqual({
       kind: 'read',
-      state: {
-        step: 'implement', task: 1, totalTasks: 8, name: null, attempt: 1, discards: 0, pullRequest: null,
-      },
+      state: { step: 'implement', task: 1, totalTasks: 8, name: null, attempt: 1, discards: 0 },
     })
-  })
-
-  it('should read the pull request the review steps carry instead of dropping it at the boundary', async () => {
-    answerWith(ImplementProgressMother.inReview())
-
-    const outcome = await get()
-
-    expect(outcome).toEqual({
-      kind: 'read',
-      state: {
-        step: 'in-review', task: null, totalTasks: 7, name: null, attempt: null, discards: 0,
-        pullRequest: { number: 31, url: 'https://github.com/owner/name/pull/31' },
-      },
-    })
-  })
-
-  it('should refuse a pull request without the number and the url this reads instead of passing it on', async () => {
-    answerWith({
-      status: 200,
-      body: '{"step":"in-review","task":null,"total_tasks":7,"name":null,"attempt":null,"discards":0,'
-        + '"pull_request":{"url":"https://github.com/owner/name/pull/31"}}',
-    })
-
-    expect(await get()).toEqual({ kind: 'backend-unreachable' })
   })
 
   it('should treat a worktree without a run yet as not read instead of a refusal', async () => {
