@@ -30,6 +30,7 @@ export class RoleBytes {
     [STEPS.JUDGE, { agent: 'agents/ct-judge.md', skills: RoleBytes.#TEST_DRIVEN_DEVELOPMENT }],
     [STEPS.SLICE_JUDGE, { agent: 'agents/ct-slice-judge.md', skills: RoleBytes.#NO_SKILL }],
     [STEPS.RECONCILE, { agent: 'agents/ct-reconciler.md', skills: RoleBytes.#NO_SKILL }],
+    [STEPS.ADVISE, { agent: 'agents/ct-advisor.md', skills: RoleBytes.#NO_SKILL }],
   ])
 
   static STEPS = Object.freeze([...RoleBytes.#MATERIAL.keys()])

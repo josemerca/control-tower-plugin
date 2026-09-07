@@ -18,6 +18,7 @@ import {
   readSliceVerdict, outcomeOfSliceVerdict, sliceVerdictCommitMessage,
   SLICE_VERDICT_RULES, SLICE_VERDICT_SCHEMA, SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS, RECONCILER_TOOLS,
   REVIEW_TOKEN_LABEL, reviewToken, reviewTokenLine, reviewTokenOf,
+  readAdvice, ADVICE_SCHEMA, ADVISOR_TOOLS, ADVICE_PACKAGE_SECTIONS,
 } from '../scripts/step-contracts.js'
 import { findClosingKeywords } from '../scripts/closing-keywords.js'
 import { PluginYardstick } from '../scripts/plugin-yardstick.js'
@@ -25,6 +26,7 @@ import { PluginYardstick } from '../scripts/plugin-yardstick.js'
 const AGENTE_JUEZ = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-judge.md')
 const AGENTE_JUEZ_DE_SLICE = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-slice-judge.md')
 const AGENTE_RECONCILIADOR = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-reconciler.md')
+const AGENTE_CONSEJERO = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-advisor.md')
 
 // La línea `tools:` del frontmatter del reconciliador (Reconciliación de
 // ramas, Tarea 9) — mismo patrón que `toolsDelAgente()`/`toolsDelJuezDeSlice()`,
@@ -1208,7 +1210,90 @@ describe('el modelo de cada subagente', () => {
     ['el juez de tarea', AGENTE_JUEZ],
     ['el juez de slice', AGENTE_JUEZ_DE_SLICE],
     ['el reconciliador', AGENTE_RECONCILIADOR],
+    ['el consejero', AGENTE_CONSEJERO],
   ])('%s declara su modelo, no lo hereda de la sesión', (_, fichero) => {
     expect(modeloDeAgente(fichero)).toBe('opus')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// EL CONSEJERO (H9, `agents/ct-advisor.md`): el paso que el SEGUNDO veto abre.
+// Su respuesta es un JSON con un enfoque y las rutas a reconsiderar, y lo que
+// decide si se acepta es este esquema — igual que con el veredicto, un consejo
+// que no lo cumple es un DESCARTE y se vuelve a preguntar.
+// ---------------------------------------------------------------------------
+describe('el consejero del segundo veto', () => {
+  const toolsDelConsejero = () => {
+    const m = /^tools:\s*(.+)$/m.exec(readFileSync(AGENTE_CONSEJERO, 'utf8'))
+    return m ? m[1].trim() : null
+  }
+
+  const seccionesDelPaqueteDeConsejo = () => {
+    const texto = readFileSync(AGENTE_CONSEJERO, 'utf8')
+    const parrafo = /- \*\*The advice package\.\*\*([\s\S]*?)\n\n/.exec(texto)
+    if (!parrafo) return []
+    const normalizado = parrafo[1].replace(/\s+/g, ' ')
+    const regex = /`## ([^`]+)`/g
+    const secciones = []
+    let m
+    while ((m = regex.exec(normalizado)) !== null) {
+      const seccion = m[1].trim()
+      if (!secciones.includes(seccion)) secciones.push(seccion)
+    }
+    return secciones
+  }
+
+  const consejo = (over = {}) => ({ approach: 'tíralo y empieza por el puerto', files_to_reconsider: ['src/uno.js'], ...over })
+
+  it('el consejero no puede tocar nada: sólo lee', () => {
+    expect(ADVISOR_TOOLS).toBe('Read')
+    expect(toolsDelConsejero()).toBe(ADVISOR_TOOLS)
+  })
+
+  it('un consejo con enfoque y rutas se acepta, y las rutas repetidas no lo descartan', () => {
+    const { advice, why } = readAdvice(consejo({ files_to_reconsider: ['src/uno.js', 'src/uno.js'] }))
+    expect(why).toBeUndefined()
+    expect(advice.approach).toBe('tíralo y empieza por el puerto')
+    expect(advice.files_to_reconsider).toEqual(['src/uno.js'])
+  })
+
+  it('un consejo sin lista de rutas se acepta con la lista vacía: no reconsiderar ninguna es una respuesta', () => {
+    expect(readAdvice(consejo({ files_to_reconsider: [] })).advice.files_to_reconsider).toEqual([])
+  })
+
+  it.each([
+    ['sin approach', { approach: undefined }, /enfoque/],
+    ['con un approach vacío', { approach: '   ' }, /enfoque/],
+    ['con las rutas en prosa', { files_to_reconsider: 'src/uno.js' }, /rutas/],
+    ['con una ruta que no es texto', { files_to_reconsider: [7] }, /rutas/],
+  ])('un consejo %s se descarta, y el porqué lo nombra', (_, over, motivo) => {
+    const { advice, why } = readAdvice(consejo(over))
+    expect(advice).toBeUndefined()
+    expect(why).toMatch(motivo)
+  })
+
+  it('un consejo que nombra rutas fuera del worktree se descarta', () => {
+    expect(readAdvice(consejo({ files_to_reconsider: ['/etc/passwd'] })).why).toMatch(/fuera del worktree/)
+  })
+
+  it('sin structured_output no hay consejo', () => {
+    expect(readAdvice(null).why).toMatch(/structured_output/)
+  })
+
+  it('ADVICE_SCHEMA exige los dos campos que el programa consume', () => {
+    expect(ADVICE_SCHEMA.required).toEqual(['approach', 'files_to_reconsider'])
+    expect(ADVICE_SCHEMA.additionalProperties).toBe(false)
+  })
+
+  it('ADVICE_PACKAGE_SECTIONS no puede divergir de los encabezados que el consejero cita por su nombre', () => {
+    expect(ADVICE_PACKAGE_SECTIONS).toEqual(seccionesDelPaqueteDeConsejo())
+    expect(ADVICE_PACKAGE_SECTIONS).toEqual(['Brief', 'Intentos', 'Veredictos'])
+  })
+
+  it('el bloque json de ct-advisor.md enseña los dos campos y ninguno más', () => {
+    const esquema = esquemaDeAgente(AGENTE_CONSEJERO)
+    expect(esquema).toMatch(/"approach"/)
+    expect(esquema).toMatch(/"files_to_reconsider"/)
+    expect(esquema).not.toMatch(/"review_token"/)
   })
 })

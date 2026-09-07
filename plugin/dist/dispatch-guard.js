@@ -113,6 +113,7 @@ var StepSeal = class _StepSeal {
   static #INPUT_OF = Object.freeze({
     [STEPS.IMPLEMENT]: "el brief de la tarea",
     [STEPS.JUDGE]: "el paquete de revisi\xF3n de la tarea",
+    [STEPS.ADVISE]: "el paquete del consejero",
     [STEPS.SLICE_JUDGE]: "el paquete de revisi\xF3n del slice"
   });
   static SEALED_STEPS = Object.freeze(Object.keys(_StepSeal.#INPUT_OF));

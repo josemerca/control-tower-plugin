@@ -131,6 +131,7 @@ ct-step next                     # "toca implementar la tarea 3; el brief está 
 ct-step report informe.json      # valida las rutas, las stagea, transiciona
 ct-step controls                 # ejecuta los comandos de **Verification:** y MIDE
 ct-step verdict veredicto.json   # valida contra el esquema, transiciona
+ct-step advice consejo.json      # tras el SEGUNDO veto: el consejo de ct-advisor, antes del tercer intento
 ct-step commit                   # valida el mensaje y comitea
 ct-step reconcile                # tras la última tarea: fusiona la base del slice, o resuelve un conflicto con ct-reconciler
 ct-step global                   # tras la última tarea: corre ## 8. Global verification
@@ -150,6 +151,7 @@ Lo que cambia respecto de hoy, en una línea por propiedad:
 | Quién comitea | el implementador | el programa, y valida su propio mensaje contra las closing keywords |
 | Qué puede ejecutar el reconciliador | — no existía | nada tampoco: `agents/ct-reconciler.md` se declara `Read, Grep, Glob, Edit` — sin `Bash` y **sin `Write`**. No es cautela, es el mecanismo: git no da por resuelto un fichero en conflicto hasta que alguien lo stagea, y el único que stagea es el programa, que conoce una única lista |
 | Quién ejecuta `## 8. Global verification` | nadie — el plan la declaraba y ningún programa la corría | `ct-step global`, tras la última tarea; en rojo no se abre la pull request (exit `11`/`12`) |
+| Qué pasa tras el SEGUNDO veto de la misma tarea | el tercer intento repetía a ciegas, encima de dos capas de parches | el paso `advise`: `agents/ct-advisor.md` (opus, **sólo `Read`**) ve los dos intentos y los dos vetos y dicta un enfoque; el programa devuelve el árbol al último commit y el brief del tercer intento lleva ese enfoque dentro |
 | Quién juzga el slice ENTERO | nadie — el juicio era por tarea | `agents/ct-slice-judge.md` (sin `Bash`): el fin del slice y la coherencia entre tareas, con veredicto que viaja en su propio commit |
 
 **Es el camino por defecto desde `0.36.0`**: el kickoff que compone `/ct-next`
