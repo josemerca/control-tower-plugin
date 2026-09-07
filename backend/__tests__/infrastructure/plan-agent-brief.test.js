@@ -156,3 +156,35 @@ describe('PlanAgentBrief asking the agent for changes', () => {
     expect(errand()).not.toContain('nonce')
   })
 })
+
+describe('PlanAgentBrief asking the agent to fix its pull request', () => {
+  const CHANGES = 'varias cosas\nsrc/foo.js:42: revienta\tcon []'
+  const errand = (changes = CHANGES) => new PlanAgentBrief({
+    dispatchCheck: '/plugin/scripts/dispatch-check.mjs',
+    conventions: '/plugin/conventions',
+    ctStep: '/plugin/scripts/ct-step.mjs',
+  }).fixErrandFor({ issueNumber: 42, repository: new RepositoryName('owner/name'), changes })
+
+  it('the_errand_is_one_line_even_when_the_review_spread_the_anchors_across_several', () => {
+    expect(errand()).not.toContain('\n')
+    expect(errand()).not.toContain('\t')
+    expect(errand()).toContain('varias cosas src/foo.js:42: revienta con []')
+  })
+
+  it('the_errand_orders_correcting_over_the_branch_and_the_pull_request_that_already_exist', () => {
+    expect(errand()).toContain('sin rehacer el plan')
+    expect(errand()).toContain('sin abrir otra pull request')
+    expect(errand()).toContain(PlanAgentBrief.NO_NEW_WORKTREES)
+  })
+
+  it('the_errand_orders_the_release_that_puts_the_issue_back_in_review', () => {
+    expect(errand()).toContain('#42')
+    expect(errand()).toContain(
+      'node /plugin/scripts/dispatch-check.mjs 42 --repo owner/name --release --no-watch-merge'
+    )
+  })
+
+  it('the_errand_forbids_merging_because_that_gate_stays_human', () => {
+    expect(errand()).toMatch(/no la mergees/i)
+  })
+})

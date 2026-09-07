@@ -66,4 +66,19 @@ export class PlanAgentBrief {
       `Y PARA ahí: no la mergees y ${PlanAgentBrief.NO_NEW_WORKTREES}.`,
     ].join(' ')
   }
+
+  fixErrandFor({ issueNumber, repository, changes }) {
+    const dispatchCheck = this.dispatchCheck
+    const named = repository.text
+
+    return [
+      `Un humano ha revisado la pull request del issue #${issueNumber} y pide estos cambios:`,
+      `«${String(changes).replace(PlanAgentBrief.WHITESPACE, ' ').trim()}».`,
+      'Corrígelos sobre la rama y el worktree que ya tienes, sin rehacer el plan,',
+      `${PlanAgentBrief.NO_NEW_WORKTREES} y sin abrir otra pull request: la que hay sigue abierta y recoge lo que pushees.`,
+      'Cuando lo tengas en verde, vuelve a liberar con',
+      `\`node ${dispatchCheck} ${issueNumber} --repo ${named} --release --no-watch-merge\`, que devuelve el issue a revisión.`,
+      'Y entonces PARA: no la mergees.',
+    ].join(' ')
+  }
 }
