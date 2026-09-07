@@ -7,7 +7,8 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
-import { crearHelpers, montarRepo, recorridoDeSlice } from './fixtures/ct-step-harness.js'
+import { crearHelpers, montarRepo, recorridoCompleto, recorridoDeSlice, PLUGIN_ROOT_TEST } from './fixtures/ct-step-harness.js'
+import { PluginYardstick } from '../scripts/plugin-yardstick.js'
 
 let repo
 const { ct, informe, veredicto, crudo, veredictoDeSlice, commits, estado,
@@ -16,6 +17,47 @@ const { ct, informe, veredicto, crudo, veredictoDeSlice, commits, estado,
 
 beforeEach(() => { repo = montarRepo() })
 afterEach(() => { rmSyncBestEffort(repo) })
+
+// El juez tiene `Read` (JUDGE_TOOLS), así que la vara de ct le llega por RUTA
+// y no pegada: es el mismo criterio con el que ya le llegan el plan y los
+// ficheros que el diff toca. Lo que la ruta compra sobre el texto es que el
+// juez abra sólo lo que va a citar, en vez de leer 24 KB delante del diff.
+describe('el paquete de revisión da la vara de ct por ruta, no pegada', () => {
+  const paquete = () => readFileSync(paqueteDeTarea(), 'utf8')
+
+  it('la sección abre el paquete y lista la ruta de cada documento que alcanza a la tarea', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    const texto = paquete()
+    expect(texto).toContain('## Vara de ct')
+    for (const nombre of PluginYardstick.FILES) {
+      expect(texto, `${nombre} no llega ni por ruta`).toContain(join(PLUGIN_ROOT_TEST, 'conventions', nombre))
+    }
+    expect(texto.indexOf('## Vara de ct')).toBeLessThan(texto.indexOf('## Diff'))
+  })
+
+  it('no pega el texto de ningún documento', () => {
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    const style = readFileSync(join(PLUGIN_ROOT_TEST, 'conventions', 'style.md'), 'utf8')
+    expect(paquete()).not.toContain(style.trim())
+  })
+
+  // Sin `(create)` en sus **Files:** — aquí sin acción declarada, que es lo
+  // que este fixture puede escribir sin que el control de alcance vete la
+  // tarea: el fichero se crea de verdad, así que declararlo `(modify)` sería
+  // un plan que miente.
+  it('la tarea que no estrena módulo tampoco recibe la ruta de architecture.md', () => {
+    const plan = readFileSync(join(repo, 'plan.md'), 'utf8').replace('`uno.txt` (create)', '`uno.txt`')
+    writeFileSync(join(repo, 'plan.md'), plan)
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    ct('next')
+    expect(paquete()).not.toContain(join(PLUGIN_ROOT_TEST, 'conventions', 'architecture.md'))
+  })
+})
 
 // Slice 6 de los apuntes de Capde — el hallazgo ALTO del review de la PR #36,
 // reproducido con un ataque real. La guarda del slice 3 cubría el intento 1 y
@@ -264,30 +306,36 @@ describe('el veredicto se ata al paquete: el token content-addressed que el juez
     expect(existsSync(paqueteDeTarea())).toBe(false)
   })
 
-  it('un veredicto sin review_token se descarta, y el motivo nombra la línea de la que se copia', () => {
+  // EL TOKEN LO ESCRIBE EL PROGRAMA. Un veredicto sin el campo era un descarte
+  // —de un veredicto de opus entero, y uno de los seis que matan el run— por
+  // no haber copiado 64 hex de una línea que el propio programa acababa de
+  // escribir. Ahora se acepta y el programa rellena lo que ya sabía.
+  it('un veredicto sin review_token se acepta: el programa escribe el token que él mismo calculó', () => {
     ct('report', informe(['uno.txt']))
     ct('controls')
     ct('next')
-    const r = ct('verdict', veredicto('PASS'))    // nadie lo sella: el juez no copió el token
+    const r = ct('verdict', veredicto('PASS'))    // nadie lo sella: el juez no escribe el token
     expect(r.status).toBe(0)
-    expect(r.stdout).toMatch(/veredicto descartado: el veredicto no copia el "Review token"/)
-    expect(r.stdout).toContain('review_token')
-    expect(estado().step).toBe('judge')
-    expect(estado().discards).toBe(1)
+    expect(r.stdout).toMatch(/veredicto PASS/)
+    expect(estado().step).toBe('commit')
+    expect(estado().discards ?? 0).toBe(0)
+    // Y lo que se comitea y lo que se mide llevan el token del paquete, igual
+    // que cuando lo copiaba el juez: el campo no se pierde, cambia de autor.
+    expect(filasDeJuez().at(-1).review_token).toMatch(/^[0-9a-f]{64}$/)
+    const guardado = JSON.parse(readFileSync(join(repo, 'docs', 'superpowers', 'verdicts', 'issue-7-task-1.json'), 'utf8'))
+    expect(guardado.verdict.review_token).toBe(filasDeJuez().at(-1).review_token)
   })
 
-  it('un juez que NUNCA copia el token no cuela nada y para por 3: atascado se ve, mudo no', () => {
-    // El riesgo principal del diseño, fijado como propiedad: el pipeline se
-    // detiene con el exit de "no hay veredicto de fiar" y el motivo escrito en
-    // seis filas, no se queda colgado ni deja pasar nada.
+  it('un veredicto con el token de OTRO paquete se sigue descartando: la defensa en profundidad no se toca', () => {
     ct('report', informe(['uno.txt']))
     ct('controls')
-    let r
-    for (let i = 0; i < 7; i++) { ct('next'); r = ct('verdict', veredicto('PASS')) }
-    expect(r.status).toBe(3)
-    expect(r.stderr).toMatch(/descartes en este run/)
-    expect(commits()).toBe(1)
-    expect(filasDeJuez().every((f) => f.outcome === 'discarded')).toBe(true)
+    ct('next')
+    const p = join(repo, 'ajeno.json')
+    writeFileSync(p, JSON.stringify({ ruling: 'PASS', rubric: recorridoCompleto(), findings: [], review_token: 'f'.repeat(64) }))
+    const r = ct('verdict', p)
+    expect(r.stdout).toMatch(/veredicto descartado: el veredicto no es de este paquete/)
+    expect(estado().step).toBe('judge')
+    expect(estado().discards).toBe(1)
   })
 
   it('un paquete sin la línea del token (plugin anterior, o editado) se descarta y manda a next', () => {
@@ -316,6 +364,17 @@ describe('el veredicto se ata al paquete: el token content-addressed que el juez
     const guardado = JSON.parse(execFileSync('git', ['show', 'HEAD:docs/superpowers/verdicts/issue-7-slice.json'], { cwd: repo, encoding: 'utf8' }))
     expect(guardado.verdict.review_token).toBe(token)
     expect(filasDeJuez('slice-judge').at(-1).review_token).toBe(token)
+  })
+
+  it('EL GEMELO DE SLICE: un veredicto de slice sin review_token se acepta, y el token comiteado es el del paquete', () => {
+    tareaOk('uno.txt'); tareaOk('dos.txt'); ct('reconcile'); ct('global')
+    ct('next')
+    const token = tokenDelPaquete(paqueteDeSlice())
+    const r = ct('slice-verdict', veredictoDeSlice('PASS'))
+    expect(r.status).toBe(0)
+    expect(estado().closed).toBe('delivered')
+    const guardado = JSON.parse(execFileSync('git', ['show', 'HEAD:docs/superpowers/verdicts/issue-7-slice.json'], { cwd: repo, encoding: 'utf8' }))
+    expect(guardado.verdict.review_token).toBe(token)
   })
 
   it('EL GEMELO DE SLICE: un veredicto de slice con el token de otro paquete no entrega el run', () => {

@@ -26,12 +26,11 @@ agent, and not you.
   task, `-U10`. This is the whole slice at once — not the staged change of one
   task, because none of it is staged any more: it is all committed.
   The package opens with a `Review token:` line: the sha256 of exactly the
-  accumulated diff printed below it. You copy that token verbatim into your
-  verdict — it is what makes your verdict checkably a verdict on THIS slice.
-  `ct-step slice-verdict` recomputes it from the commit range at the moment your
-  verdict is read, so a verdict carrying some other package's token, or a package
-  whose commits were rewritten after it was written, is discarded instead of
-  accepted.
+  accumulated diff printed below it. It is not yours to copy — `ct-step
+  slice-verdict` writes that field into your verdict itself, recomputing the
+  token from the commit range at the moment it reads you. If the commits were
+  rewritten after this package was written, your verdict is discarded and the
+  judgement is asked again on the slice that is actually there.
 - **The plan.** The same file every task's brief was cut from, but here you
   read the whole thing: `### Desired end state` under `## 1. Context and
   goal`, `## 2. Closed decisions`, and every `### Task N` of `## 7. Tasks` with
@@ -224,7 +223,6 @@ prose around it, no markdown fence:
 
 ```json
 {"ruling": "PASS" | "FAIL",
- "review_token": "the 64-hex token the slice review package declares on its `Review token:` line",
  "rubric": [{"rule": "estado-final",
              "result": "what this item gave, or why it does not apply",
              "outcome": "conforme|no-aplica|sin-vara"}],
@@ -236,12 +234,11 @@ prose around it, no markdown fence:
                "evidence": "the line or sentence you are citing, quoted"}]}
 ```
 
-- `review_token` is the 64-character hex token of the `Review token:` line the
-  slice review package opens with, copied verbatim. It is mandatory, and there is
-  nothing for you to compute: the line is in the file you were given. A verdict
-  without it is discarded, and so is one whose token is not the one the package
-  declares: it is the only thing that ties your verdict to a specific state of
-  the slice, and this verdict is the last gate before the pull request opens.
+- **There is no `review_token` for you to write.** The package opens with a
+  `Review token:` line, and what ties your verdict to that exact accumulated
+  diff is the program: `ct-step slice-verdict` writes that field itself, with
+  the token it recomputed at the moment it reads you. Do not copy it, and do not
+  add the field.
 - `rubric` is the walk: the three identifiers, in the order above, **each one
   exactly once**, each with what it gave — "does not apply, because X" is a
   result. A missing, repeated or unknown item, or an empty `result`, discards
