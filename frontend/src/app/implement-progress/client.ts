@@ -1,4 +1,4 @@
-import { ImplementationProgressState, ImplementationStep, ImplementProgressOutcome } from 'app/implement-progress/ImplementProgress.types'
+import { ImplementationProgressState, ImplementationStep, ImplementProgressOutcome, PullRequest } from 'app/implement-progress/ImplementProgress.types'
 
 const PATH = (issue: number) => `/implement-progress/${issue}`
 const ROOT_FIELD = 'root'
@@ -20,6 +20,7 @@ type ImplementationProgressWire = {
   name: string | null
   attempt: number | null
   discards: number | null
+  pull_request?: unknown
 }
 
 const isImplementationProgressWire = (value: unknown): value is ImplementationProgressWire =>
@@ -32,6 +33,11 @@ const isImplementationProgressWire = (value: unknown): value is ImplementationPr
   isNumberOrNull(value.attempt) &&
   isNumberOrNull(value.discards)
 
+const isPullRequestWire = (value: unknown): value is PullRequest =>
+  isRecord(value) && typeof value.number === 'number' && typeof value.url === 'string'
+
+const toPullRequest = (value: unknown): PullRequest | null => (isPullRequestWire(value) ? { number: value.number, url: value.url } : null)
+
 const toState = (wire: ImplementationProgressWire): ImplementationProgressState => ({
   step: wire.step,
   task: wire.task,
@@ -39,6 +45,7 @@ const toState = (wire: ImplementationProgressWire): ImplementationProgressState 
   name: wire.name,
   attempt: wire.attempt,
   discards: wire.discards,
+  pullRequest: toPullRequest(wire.pull_request),
 })
 
 const isRefusal = (value: unknown): value is { code: string; detail: string } =>

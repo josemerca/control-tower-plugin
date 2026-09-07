@@ -66,6 +66,45 @@ describe('ImplementProgress', () => {
     expect(await screen.findByText(/En revisión/)).toHaveAttribute('role', 'status')
   })
 
+  it('should link the pull request once the plan is in review', async () => {
+    answerWith(ImplementProgressMother.inReview())
+
+    renderProgress()
+
+    const link = await screen.findByRole('link', { name: /#31/ })
+    expect(link).toHaveAttribute('href', 'https://github.com/owner/name/pull/31')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noreferrer')
+  })
+
+  it('should show no pull request link before the backend knows one', async () => {
+    answerWith(ImplementProgressMother.progress())
+
+    renderProgress()
+
+    await screen.findByText(/Tarea 3 de 7/)
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it('should show no pull request link when it arrives malformed instead of breaking', async () => {
+    answerWith(ImplementProgressMother.inReviewWithMalformedPullRequest())
+
+    renderProgress()
+
+    await screen.findByText(/En revisión/)
+    expect(screen.queryByRole('link')).toBeNull()
+  })
+
+  it('should show the real backend answer for a plan whose pull request is in review', async () => {
+    answerWith(ImplementProgressMother.realWorldInReview())
+
+    renderProgress()
+
+    expect(await screen.findByText(/En revisión/)).toHaveAttribute('role', 'status')
+    const link = await screen.findByRole('link', { name: /#46/ })
+    expect(link).toHaveAttribute('href', 'https://github.com/jjponz/repo-pulse/pull/46')
+  })
+
   it('should name the work of fixing what the review asked for', async () => {
     answerWith(ImplementProgressMother.fixing())
 

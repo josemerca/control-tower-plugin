@@ -16,6 +16,11 @@ const ImplementationStep = Object.freeze({
 
 type ImplementationStep = (typeof ImplementationStep)[keyof typeof ImplementationStep]
 
+type PullRequest = {
+  number: number
+  url: string
+}
+
 type ImplementationProgressState = {
   step: ImplementationStep
   task: number | null
@@ -23,6 +28,7 @@ type ImplementationProgressState = {
   name: string | null
   attempt: number | null
   discards: number | null
+  pullRequest: PullRequest | null
 }
 
 type ImplementProgressOutcome =
@@ -32,4 +38,4 @@ type ImplementProgressOutcome =
   | { kind: 'backend-unreachable' }
 
 export { ImplementationStep }
-export type { ImplementationProgressState, ImplementProgressOutcome }
+export type { ImplementationProgressState, ImplementProgressOutcome, PullRequest }

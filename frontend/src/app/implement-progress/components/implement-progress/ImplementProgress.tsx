@@ -49,6 +49,14 @@ const ImplementProgress = ({ issue, root, repo }: ImplementProgressProps) => {
           {progress.discards !== null && ` · Descartes: ${progress.discards}`}
         </p>
       )}
+      {progress.phase === 'progress' && progress.pullRequest !== null && (
+        <p className="implement-progress__facts">
+          Pull request{' '}
+          <a href={progress.pullRequest.url} target="_blank" rel="noreferrer">
+            #{progress.pullRequest.number}
+          </a>
+        </p>
+      )}
       {progress.phase === 'failed' && <Banner type="error" role="alert" title={progress.error} />}
       {progress.phase === 'unreachable' && <Banner type="error" role="alert" title={UNREACHABLE_MESSAGE} />}
     </section>

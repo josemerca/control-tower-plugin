@@ -21,6 +21,18 @@ const fixing = () => ({
     '"pull_request":{"number":31,"url":"https://github.com/owner/name/pull/31"}}',
 })
 
+const inReviewWithMalformedPullRequest = () => ({
+  status: 200,
+  body: '{"step":"in-review","task":null,"total_tasks":7,"name":null,"attempt":null,"discards":0,' +
+    '"pull_request":{"number":"31"}}',
+})
+
+const realWorldInReview = () => ({
+  status: 200,
+  body: '{"step":"in-review","task":null,"total_tasks":8,"name":null,"attempt":null,"discards":0,' +
+    '"pull_request":{"number":46,"url":"https://github.com/jjponz/repo-pulse/pull/46"}}',
+})
+
 const delivered = () => ({
   status: 200,
   body: '{"step":"delivered","task":null,"total_tasks":8,"name":null,"attempt":null,"discards":1}',
@@ -50,6 +62,8 @@ export const ImplementProgressMother = {
   progress,
   inReview,
   fixing,
+  inReviewWithMalformedPullRequest,
+  realWorldInReview,
   delivered,
   withoutTaskName,
   notRead,
