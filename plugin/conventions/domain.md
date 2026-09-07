@@ -25,17 +25,17 @@ gains a method; a port per step would multiply seams without adding one thing
 that can be swapped.
 
 **A collaborator is identified by what is asked of it, not by the executable
-that answers.** Two ports that end up launching the same binary are one
-collaborator only if they ask it the same thing; when the questions are
-different, they are two, and folding them into one port with two methods
-would join what has nothing to share but a path on disk. What may never be
-duplicated is the intent: the same question asked from two places, or the
-same rule decided twice (`conventions/decisions.md`).
+or the service that answers.** Two ports that end up reaching the same
+system are one collaborator only if they ask it the same thing; when the
+questions are different, they are two, and folding them into one port with
+two methods would join what has nothing to share but where it lives. What
+may never be duplicated is the intent: the same question asked from two
+places, or the same rule decided twice (`conventions/decisions.md`).
 Repeated shape is not the subject; repeated intent is.
 
 ## Value objects
 
-Frozen at construction, and guarding, for itself,
+Frozen at construction, and guarding, for themselves,
 **what makes them this value and not any value**: the shape they demand,
 quoting what they got. That guard is the whole point of the type — it is
 what makes a broken one impossible to construct, so no consumer downstream

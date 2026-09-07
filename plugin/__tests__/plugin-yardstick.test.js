@@ -150,7 +150,7 @@ describe('PluginYardstick.FILES', () => {
 })
 
 describe('PluginYardstick.missingDocuments', () => {
-  it('reports_nothing_missing_when_all_four_arrive_with_content', () => {
+  it('reports_nothing_missing_when_every_document_arrives_with_content', () => {
     expect(PluginYardstick.missingDocuments(YardstickDocumentMother.withContentForEach())).toEqual([])
   })
 
@@ -169,7 +169,7 @@ describe('PluginYardstick.missingDocuments', () => {
       .toEqual(['simplicity.md', 'decisions.md', 'domain.md', 'architecture.md', 'testing.md'])
   })
 
-  it('reports_all_five_missing_when_nothing_is_received', () => {
+  it('reports_every_document_missing_when_nothing_is_received', () => {
     expect(PluginYardstick.missingDocuments(YardstickDocumentMother.none())).toEqual([...PluginYardstick.FILES])
   })
 
@@ -217,7 +217,7 @@ describe('PluginYardstick.composeSection', () => {
 })
 
 describe('PluginYardstick.composeSection composes the documents it is handed, however many', () => {
-  it('composes_the_four_documents_of_a_task_that_creates_no_module', () => {
+  it('composes_the_documents_of_a_task_that_creates_no_module', () => {
     const documentos = PluginYardstick.forTask(YardstickDocumentMother.theRealOnesOnDisk(), { creates: false })
     const section = PluginYardstick.composeSection(documentos)
     expect(section).toContain('## Vara de ct: conventions/style.md')
