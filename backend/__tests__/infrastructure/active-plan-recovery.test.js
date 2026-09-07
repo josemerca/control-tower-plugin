@@ -73,6 +73,7 @@ describe('ActivePlanRecovery', () => {
     const sessions = new PlanSessions()
     const activePlans = new ActivePlans({ sessions })
     const reviews = { startRecovered: vi.fn() }
+    const pullRequestReviews = { startRecovered: vi.fn() }
     const checkouts = new MemoryCheckoutRegistry()
     const implementationStarts = new DiskImplementationStartRegistry({
       read: vi.fn(() => {
@@ -93,11 +94,12 @@ describe('ActivePlanRecovery', () => {
       implementationProgress,
       sessions,
       reviews,
+      pullRequestReviews,
       activePlans,
       checkouts,
     })
 
-    return { recovery, sessions, activePlans, reviews, checkouts }
+    return { recovery, sessions, activePlans, reviews, pullRequestReviews, checkouts }
   }
 
   it('a_plan_with_no_go_and_no_implementation_marker_recovers_as_planning', async () => {
@@ -168,7 +170,7 @@ describe('ActivePlanRecovery', () => {
     expect(recovered.activePlans.known()[0].phase).toBe('uncertain')
   })
 
-  it('exposes_a_plan_with_a_matching_marker_as_implementing_without_restarting_its_watches', async () => {
+  it('a_plan_with_a_matching_marker_recovers_as_implementing_and_its_plan_watch_stays_off', async () => {
     const recovered = fixture({ marker: VALID_MARKER })
 
     await recovered.recovery.recover()
@@ -177,6 +179,37 @@ describe('ActivePlanRecovery', () => {
     expect(recovered.reviews.startRecovered).not.toHaveBeenCalled()
     expect(recovered.activePlans.known()[0].phase).toBe('implementing')
     expect(recovered.checkouts.known().map((root) => root.text)).toEqual(['/repo'])
+  })
+
+  it('a_plan_that_was_already_implementing_gets_its_pull_request_watched_again', async () => {
+    const recovered = fixture({ marker: VALID_MARKER })
+
+    await recovered.recovery.recover()
+
+    expect(recovered.pullRequestReviews.startRecovered).toHaveBeenCalledOnce()
+    expect(recovered.pullRequestReviews.startRecovered).toHaveBeenCalledWith(CmuxActivePlan.parse(CURRENT))
+  })
+
+  it('a_go_whose_run_file_shows_work_underway_gets_its_pull_request_watched_too', async () => {
+    const runState = ImplementationState.of({
+      step: ImplementationStep.SLICE_JUDGE, task: 8, totalTasks: 8, name: null, attempt: 1, discards: 0,
+    })
+    const recovered = fixture({ go: true, implementationProgress: { of: vi.fn(async () => runState) } })
+
+    await recovered.recovery.recover()
+
+    expect(recovered.pullRequestReviews.startRecovered).toHaveBeenCalledWith(CmuxActivePlan.parse(CURRENT))
+  })
+
+  it('a_plan_that_never_started_implementing_gets_no_pull_request_watch', async () => {
+    const planning = fixture()
+    const uncertain = fixture({ go: true })
+
+    await planning.recovery.recover()
+    await uncertain.recovery.recover()
+
+    expect(planning.pullRequestReviews.startRecovered).not.toHaveBeenCalled()
+    expect(uncertain.pullRequestReviews.startRecovered).not.toHaveBeenCalled()
   })
 
   it.each([

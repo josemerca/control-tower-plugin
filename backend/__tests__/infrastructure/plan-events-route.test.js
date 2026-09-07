@@ -15,13 +15,6 @@ class EventsDouble {
     repository: new RepositoryName('owner/name'),
   })
 
-  static DELIVERING = new PlanWatch({
-    issue: new PlanIssue({ number: 42, url: 'https://github.com/owner/name/issues/42' }),
-    located: new WorkspaceLocation({ path: '/repo/.worktrees/42', branch: 'feat/42' }),
-    repository: new RepositoryName('owner/name'),
-    delivering: true,
-  })
-
   static PULL_REQUEST = { number: 42, url: 'https://github.com/owner/name/pull/42' }
 
   constructor(answers) {
@@ -32,10 +25,6 @@ class EventsDouble {
 
   static unable(said) {
     return new EventsDouble([new PlanProgressNotRead(said)])
-  }
-
-  static delivering(...answers) {
-    return new EventsDouble(answers)
   }
 
   static inReview() {
@@ -83,12 +72,6 @@ class EventsDouble {
     return frames
   }
 
-  async collectedDelivering(cancelled = () => false) {
-    const frames = []
-    for await (const frame of this.events().stream(EventsDouble.DELIVERING, cancelled)) frames.push(frame)
-
-    return frames
-  }
 }
 
 class Watched {

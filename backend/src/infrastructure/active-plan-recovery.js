@@ -48,7 +48,8 @@ export class CmuxActivePlan {
 
 export class ActivePlanRecovery {
   constructor({
-    list, implementationStarts, goRegistry, implementationProgress, sessions, reviews, activePlans, checkouts,
+    list, implementationStarts, goRegistry, implementationProgress,
+    sessions, reviews, pullRequestReviews, activePlans, checkouts,
   }) {
     this.list = list
     this.implementationStarts = implementationStarts
@@ -56,6 +57,7 @@ export class ActivePlanRecovery {
     this.implementationProgress = implementationProgress
     this.sessions = sessions
     this.reviews = reviews
+    this.pullRequestReviews = pullRequestReviews
     this.activePlans = activePlans
     this.checkouts = checkouts
     this.conclusive = false
@@ -75,6 +77,11 @@ export class ActivePlanRecovery {
     return state.step !== ImplementationStep.STARTING
   }
 
+  #rememberImplementing(watch) {
+    this.activePlans.rememberImplementing(watch)
+    this.pullRequestReviews.startRecovered(watch)
+  }
+
   async recover() {
     if (this.conclusive) return true
     const entries = this.list()
@@ -89,12 +96,12 @@ export class ActivePlanRecovery {
       this.checkouts.remember(new CheckoutRoot(watch.located.root))
       if (this.activePlans.find({ issue: watch.issue.number, repository: watch.repository }) !== null) continue
       if (this.implementationStarts.matches(watch)) {
-        this.activePlans.rememberImplementing(watch)
+        this.#rememberImplementing(watch)
         continue
       }
       if (this.goRegistry.matches(watch)) {
         if (await this.#workIsUnderway(watch)) {
-          this.activePlans.rememberImplementing(watch)
+          this.#rememberImplementing(watch)
         } else {
           this.activePlans.rememberUncertain(watch)
         }

@@ -319,6 +319,7 @@ class CtApi {
       write: Disk.write,
       root: asked.stateRoot,
     })
+    const pullRequestReviews = CtApi.#pullRequestReviews(pullRequests, planIssues, planAgents, workbench)
     const runFileProgress = new RunFileProgress({ read: Disk.read, exists: Disk.exists })
     const recovery = new ActivePlanRecovery({
       list: () => listCmuxWorkspaces({ requireComplete: true }),
@@ -327,6 +328,7 @@ class CtApi {
       implementationProgress: runFileProgress,
       sessions,
       reviews,
+      pullRequestReviews,
       activePlans,
       checkouts,
     })
@@ -335,7 +337,7 @@ class CtApi {
       port: asked.port,
       startPlan: CtApi.#startPlan(workspace, planAgents, planIssues, checkouts),
       reviews,
-      pullRequestReviews: CtApi.#pullRequestReviews(pullRequests, planIssues, planAgents, workbench),
+      pullRequestReviews,
       implementPlan: new ImplementPlan({
         goRegistry,
         planIssues,
