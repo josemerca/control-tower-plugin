@@ -114,9 +114,28 @@ describe('GhPullRequests', () => {
     await gh.fixesAsked()
 
     expect(gh.calls).toEqual([
-      ['api', 'repos/josemerca/ct-loop-sandbox/pulls/42/reviews', '-f', 'per_page=100', '--paginate', '--slurp'],
-      ['api', 'repos/josemerca/ct-loop-sandbox/pulls/42/comments', '-f', 'per_page=100', '--paginate', '--slurp'],
+      [
+        'api', 'repos/josemerca/ct-loop-sandbox/pulls/42/reviews',
+        '-f', 'per_page=100', '--paginate', '--slurp', '--method', 'GET',
+      ],
+      [
+        'api', 'repos/josemerca/ct-loop-sandbox/pulls/42/comments',
+        '-f', 'per_page=100', '--paginate', '--slurp', '--method', 'GET',
+      ],
     ])
+  })
+
+  it('every_gh_api_call_that_carries_a_parameter_pins_the_method_to_get_because_gh_api_turns_post_the_moment_one_is_added', async () => {
+    const gh = GhDouble.declaring()
+
+    await gh.fixesAsked()
+
+    const withAParameter = gh.calls.filter((argv) => argv[0] === 'api' && argv.includes('-f'))
+
+    expect(withAParameter.length).toBeGreaterThan(0)
+    for (const argv of withAParameter) {
+      expect(argv).toEqual(expect.arrayContaining(['--method', 'GET']))
+    }
   })
 
   it('a_review_with_a_body_and_its_line_comments_is_flattened_into_one_change', async () => {

@@ -35,14 +35,14 @@ export class GhPullRequests extends PullRequests {
   static #reviewsArgvFor({ pullRequest, repository }) {
     return [
       'api', `repos/${repository.text}/pulls/${pullRequest.number}/reviews`,
-      '-f', GhPullRequests.#PAGE_SIZE, '--paginate', '--slurp',
+      '-f', GhPullRequests.#PAGE_SIZE, '--paginate', '--slurp', '--method', 'GET',
     ]
   }
 
   static #commentsArgvFor({ pullRequest, repository }) {
     return [
       'api', `repos/${repository.text}/pulls/${pullRequest.number}/comments`,
-      '-f', GhPullRequests.#PAGE_SIZE, '--paginate', '--slurp',
+      '-f', GhPullRequests.#PAGE_SIZE, '--paginate', '--slurp', '--method', 'GET',
     ]
   }
 

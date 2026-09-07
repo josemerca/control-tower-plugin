@@ -3,9 +3,10 @@ import { ReviewWatch } from '../../src/infrastructure/review-watch.js'
 import { DispatchCheckWorkbench } from '../../src/infrastructure/dispatch-check-workbench.js'
 import { CmuxPlanAgents } from '../../src/infrastructure/cmux-plan-agents.js'
 import { PlanAgentBrief } from '../../src/infrastructure/plan-agent-brief.js'
-import { PullRequests } from '../../src/domain/ports/pull-requests.js'
-import { PlanIssues } from '../../src/domain/ports/plan-issues.js'
-import { OpenPullRequest } from '../../src/infrastructure/gh-pull-requests.js'
+import { GhPullRequests } from '../../src/infrastructure/gh-pull-requests.js'
+import { GhPlanIssues } from '../../src/infrastructure/gh-plan-issues.js'
+import { Gh } from '../../src/infrastructure/gh.js'
+import { RetryPolicy, RetryBudget } from '../../src/domain/policies/retry-policy.js'
 import { ChangeAsked } from '../../src/domain/value-objects/change-asked.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
@@ -15,25 +16,20 @@ import { ReadFixesAsked, ReadFixesAskedParams } from '../../src/application/quer
 import { RequestFixes, RequestFixesParams } from '../../src/application/actions/request-fixes.js'
 import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
 
-class PullRequestsDouble extends PullRequests {
-  constructor({ pullRequest, changes }) {
-    super()
-    this.pullRequest = pullRequest
-    this.changes = changes
+class GhProcessDouble {
+  constructor(answers) {
+    this.answers = answers
+    this.calls = []
   }
 
-  async openOf() {
-    return this.pullRequest
-  }
+  launch(argv) {
+    this.calls.push(argv)
+    const answer = this.answers[this.calls.length - 1]
+    if (answer === undefined) {
+      throw new Error(`nobody wrote an answer for gh call ${this.calls.length}: ${argv.join(' ')}`)
+    }
 
-  async fixesAsked() {
-    return this.changes
-  }
-}
-
-class PlanIssuesDouble extends PlanIssues {
-  async isInReview() {
-    return true
+    return Promise.resolve(answer)
   }
 }
 
@@ -83,9 +79,14 @@ class PullRequestReviewLoop {
   })
   static AGENT = 'workspace:9'
   static CHANGE = new ChangeAsked({ id: '101', text: 'arregla el guard de []' })
-  static PULL_REQUEST = new OpenPullRequest({
-    number: 42, url: 'https://github.com/josemerca/ct-loop-sandbox/pull/42',
-  })
+  static PULL_REQUEST_LISTED = JSON.stringify([
+    { number: 42, url: 'https://github.com/josemerca/ct-loop-sandbox/pull/42' },
+  ])
+  static IN_REVIEW_LABELS = JSON.stringify({ labels: [{ name: GhPlanIssues.IN_REVIEW_LABEL }] })
+  static REVIEWS_PAGE = JSON.stringify([[
+    { id: 101, state: 'CHANGES_REQUESTED', body: 'arregla el guard de []' },
+  ]])
+  static COMMENTS_PAGE = '[[]]'
   static SUBJECT = new PlanWatch({
     issue: PullRequestReviewLoop.ISSUE,
     located: new WorkspaceLocation({ path: '/repo/.worktrees/7', branch: 'feat/7' }),
@@ -96,11 +97,19 @@ class PullRequestReviewLoop {
   constructor() {
     this.node = new NodeDouble()
     this.cmux = new CmuxDouble()
-    this.pullRequests = new PullRequestsDouble({
-      pullRequest: PullRequestReviewLoop.PULL_REQUEST,
-      changes: [PullRequestReviewLoop.CHANGE],
+    this.ghProcess = new GhProcessDouble([
+      new ProcessOutput({ code: 0, stdout: PullRequestReviewLoop.PULL_REQUEST_LISTED, stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: PullRequestReviewLoop.IN_REVIEW_LABELS, stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: PullRequestReviewLoop.REVIEWS_PAGE, stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: PullRequestReviewLoop.COMMENTS_PAGE, stderr: '' }),
+    ])
+    const gh = new Gh({
+      launch: (argv) => this.ghProcess.launch(argv),
+      policy: new RetryPolicy({ budget: new RetryBudget({ attempts: 3, waitSeconds: 2 }) }),
+      sleep: () => Promise.resolve(),
     })
-    this.planIssues = new PlanIssuesDouble()
+    this.pullRequests = new GhPullRequests({ gh })
+    this.planIssues = new GhPlanIssues({ gh, stderr: () => {} })
     this.brief = new PlanAgentBrief({
       dispatchCheck: PullRequestReviewLoop.DISPATCH_CHECK,
       conventions: '/plugin/conventions',
@@ -134,7 +143,7 @@ class PullRequestReviewLoop {
   }
 }
 
-describe('the pull request review loop composed end to end, only node and cmux doubled', () => {
+describe('the pull request review loop composed end to end, only gh, node and cmux doubled', () => {
   it('reopens_the_exact_issue_the_review_named_instead_of_sending_undefined_to_dispatch_check', async () => {
     const loop = new PullRequestReviewLoop()
 
@@ -161,5 +170,32 @@ describe('the pull request review loop composed end to end, only node and cmux d
     ])
     expect(expectedErrand).toContain('#7')
     expect(expectedErrand).not.toContain('undefined')
+  })
+
+  it('the_real_gh_pull_requests_adapter_reads_the_reviews_and_the_comments_as_a_get_and_never_as_a_write', async () => {
+    const loop = new PullRequestReviewLoop()
+
+    await loop.run()
+
+    expect(loop.ghProcess.calls).toEqual([
+      [
+        'pr', 'list', '--repo', 'josemerca/ct-loop-sandbox',
+        '--head', 'feat/7', '--state', 'open', '--json', 'number,url', '--limit', '1',
+      ],
+      [
+        'issue', 'view', '7', '--repo', 'josemerca/ct-loop-sandbox', '--json', 'labels',
+      ],
+      [
+        'api', 'repos/josemerca/ct-loop-sandbox/pulls/42/reviews',
+        '-f', 'per_page=100', '--paginate', '--slurp', '--method', 'GET',
+      ],
+      [
+        'api', 'repos/josemerca/ct-loop-sandbox/pulls/42/comments',
+        '-f', 'per_page=100', '--paginate', '--slurp', '--method', 'GET',
+      ],
+    ])
+    for (const argv of loop.ghProcess.calls) {
+      if (argv[0] === 'api' && argv.includes('-f')) expect(argv).toEqual(expect.arrayContaining(['--method', 'GET']))
+    }
   })
 })
