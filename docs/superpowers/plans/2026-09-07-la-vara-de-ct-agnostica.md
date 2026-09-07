@@ -165,6 +165,7 @@ static FILES = ['defects.md', 'style.md', 'simplicity.md', 'decisions.md', 'arch
 
 Desde `plugin/`:
 - `npx vitest run __tests__/conventions-vara.test.js` → PASS
+- `npx vitest run __tests__/plugin-yardstick.test.js` → PASS. **Toda tarea que toca `FILES` corre este fichero**: su fixture y tres de sus aserciones enumeran los documentos por su nombre, y una lista que se queda corta rompe seis tests sin que nada más lo note.
 - `npx vitest run __tests__/ct-step-vara-y-telemetria.test.js` → PASS. Este itera `PluginYardstick.FILES`, así que ya exige que `simplicity.md` viaje pegado y verbatim en el brief; es la prueba de que el transporte no necesitó cambios.
 - `npx vitest run __tests__/run-metrics.test.js` → PASS. Es la prueba de que `briefVaraCtMeasures` cuenta cabeceras y no depende del número de documentos.
 
@@ -266,7 +267,7 @@ static FILES = ['defects.md', 'style.md', 'simplicity.md', 'decisions.md', 'doma
 
 - [ ] **Step 5: Correr los tests**
 
-Desde `plugin/`: `npx vitest run __tests__/conventions-vara.test.js`
+Desde `plugin/`: `npx vitest run __tests__/conventions-vara.test.js __tests__/plugin-yardstick.test.js` — el segundo porque esta tarea toca `FILES` y ese fichero enumera los documentos en su fixture y en tres aserciones.
 Esperado: FAIL en un solo test — `every document it cites by name is a document that exists`, porque `domain.md` cita `conventions/boundaries.md`, que aún no existe. **Ese fallo es el esperado y es la costura con la Tarea 3.** Si prefieres no dejar rojo entre tareas, la cita a `boundaries.md` se escribe en el Step 3 de la Tarea 3 en vez de aquí; en ese caso este Step 5 debe salir en verde.
 
 - [ ] **Step 6: Commit**
