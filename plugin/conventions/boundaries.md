@@ -19,8 +19,8 @@ crosses the edge is this document's subject.
 - **No external system is called without a cap**, and
   **the adapter does not choose the cap**: it arrives through the constructor with
   no default, because applying one is this layer's work and choosing it is
-  policy — the time a call may take, the time a query may hold what it borrowed.
-  On exhaustion it fails closed and what was half written is discarded.
+  policy — the time a call may take, the time a query may hold a lock. On
+  exhaustion it fails closed and what was half written is discarded.
 - **The trunk knows the network's idiom; the subclass knows the tool's.** A
   reset connection, a timeout, a name that does not resolve, a server error:
   measured once in the shared type. What only one system writes lives in its own
@@ -46,16 +46,19 @@ crosses the edge is this document's subject.
 - **Project only the keys you consume**, and a foreign format with an open
   vocabulary is **validated by projection**: rejecting unknown keys over the
   whole object breaks the read with every field the other side adds, which is
-  that reader's whole job. A key we declared that arrives missing or wrongly
-  typed still breaks the read, quoting the other system's own words; an input
-  that is not the expected format is corruption and raises.
+  that reader's whole job. Project by hand a structure with exactly the keys
+  you consume and validate that, still rejecting the unknown inside it. A key we
+  declared that arrives missing or wrongly typed still breaks the read, quoting
+  the other system's own words; an input that is not the expected format is
+  corruption and raises.
 - **How tight to validate a field:** what wrong value would pass for good, and
   what decision would be taken with it? "None that matters" licenses lax.
-- **A validation error does not leave this layer**: it is translated to the
-  domain error the outer edge knows how to map.
+- **A validation error does not leave the boundary layer**: it is translated to
+  the domain error the outer edge knows how to map.
 - **An adapter is named after its implementation, not after its port**, so the
   pair reads in the name and two implementations fit without renaming anything.
-- **An adapter does not decide policy** — retries, budgets, what a failure costs.
+- **An adapter does not decide policy** — retries, budgets, what to do with a
+  failure and what it costs.
 - **Text from another system gets its active syntax quieted** before it enters
   a document of a third one. Measured: a description carrying `#7` autolinked
   our record into a stranger's timeline, and an `@handle` would have notified a
@@ -93,7 +96,7 @@ crosses the edge is this document's subject.
 - A boundary model that ignores unknown keys.
 - An adapter that decides policy.
 - A call to an external system with no cap, or an adapter that picks its own.
-- A validation error leaving this layer.
+- A validation error leaving the boundary layer.
 - A catch around a call whose failure already comes back as data.
 - A non-idempotent write declared safe to repeat.
 - Outside text reaching another system's document unquieted.

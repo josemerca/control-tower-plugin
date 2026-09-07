@@ -66,6 +66,8 @@ Where the burden cannot be discharged, the request goes back as a finding for a 
 - A **new module**: `conventions/architecture.md`.
 - **What a check is missing, and what is left unmeasured on purpose**:
   `conventions/testing.md`.
+- **What the door itself owes to what arrives through it**:
+  `conventions/boundaries.md`.
 - **What the plan asked for is a different question from this one.** That
   question is about the sentence a task traces back to; this one is about the
   caller that would break without the addition. A plan can ask for a field
@@ -77,7 +79,7 @@ Where the burden cannot be discharged, the request goes back as a finding for a 
 - A field crossing a layer with no consumer at the other end.
 - A public symbol, a parameter or a default with no caller.
 - A condition on a state that cannot occur, with a check that can only fail if
-  the boundary above it changes.
+  the layer above it changes.
 - A log line, a trace or a field of an answer with no reader named.
 - An addition implemented because a review asked for it, with the burden of
   proof undischarged.
