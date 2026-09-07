@@ -7,6 +7,7 @@ import { randomBytes } from 'node:crypto'
 import { dirname, join, isAbsolute, delimiter as pathDelimiter } from 'node:path'
 import { planDispatch, parseRepoSlug, buildCmuxArgv, buildCmuxSendArgv, buildCmuxSendKeyArgv, cmuxSessionName, collectFinishedResidue, formatFinishedResidueWarning } from './dispatch.js'
 import { renderKickoff, buildStateSeed, AGENT_BIN } from './kickoff.js'
+import { Baseline, BaselineOutcome, BaselineResult, ShellBaselineRunner } from './baseline.js'
 import { parseStrictInt } from './argnum.js'
 import { resolveGatesForAgent } from './gates.js'
 import { GO_TOKEN, newGoNonce, goCommitment, goBody } from './go-response.js'
@@ -2338,6 +2339,35 @@ if (claudePath) {
 // Una sola consulta al registro de worktrees para toda la tanda (no una por
 // slice): la lista es la misma para todos.
 const registeredWorktrees = registeredWorktreePaths()
+// ============================================================================
+// #96 — EL BASELINE LO MIDE EL PROGRAMA, NO LO AFIRMA EL AGENTE.
+//
+// El kickoff ordenaba «baseline verde ANTES de tocar nada» y el agente lo
+// afirmaba (incidente 5 del catálogo: el informe sustituía a la evidencia).
+// Ahora, en cuanto el worktree existe, este script ejecuta el comando de test
+// que declara el repo (`test: \`<comando>\`` en AGENTS.md o en
+// .agent/conventions.md — ver scripts/baseline.js) DENTRO del worktree y
+// siembra el resultado en `.agent/SLICE.md` como campo `baseline:`.
+//
+// Con rojo o no-verificado se AVISA por stderr y se sigue: despachar sobre un
+// baseline rojo es una decisión humana, no de este script. Un verde no se
+// anuncia — un aviso que sale siempre es un aviso que nadie lee.
+//
+// La cota es la misma de los demás subprocesos (CT_NEXT_CHILD_TIMEOUT_MS): una
+// suite que la agota queda como no-verificado, no como rojo — no terminó, así
+// que no midió nada.
+// ============================================================================
+const BASELINE_WITHOUT_WORKTREE = BaselineResult.notMeasured(
+  'dry-run: sin worktree no hay dónde ejecutar el comando de test; la corrida real lo mide en el worktree recién cortado'
+)
+const baselineMeter = new Baseline({ run: new ShellBaselineRunner({ timeoutMs: childTimeoutFor() }).run })
+async function measureBaseline(s, wt) {
+  const measured = await baselineMeter.measure(wt)
+  if (measured.outcome !== BaselineOutcome.GREEN) {
+    console.error(`aviso: baseline de #${s.n}: ${measured.outcome}${measured.command ? ` (\`${measured.command}\` en ${wt})` : ''} — ${measured.summary}. Queda sembrado así en ${SLICE_REL_PATH}; despachar sobre un baseline que no está en verde es decisión tuya, y este script sigue.`)
+  }
+  return measured
+}
 // D5, hallazgo H: cuántos de los fallos acumulados hasta aquí son de TANDA
 // (no de un slice concreto) — `cmux` ausente del PATH y el binario del agente
 // inexistente. Se distinguen en el resumen final porque su remedio y su
@@ -2365,7 +2395,11 @@ for (let idx = 0; idx < selected.length; idx++) {
     // rama por defecto del repo — con `--base <otra-rama>`, un diff que no es
     // el suyo.
     kickoff = renderKickoff(sliceForKickoff, { repo, dispatchCheckPath, ctStepPath, conventionsDir, base: resolvedBase })
-    stateSeed = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase, baseSha: resolvedBaseSha })
+    // #96: esta semilla es la del --dry-run y la de reserva de la corrida
+    // real (si el rev-parse del corte falla). El baseline se mide en el
+    // WORKTREE, que aquí todavía no existe: se declara no medido, y la
+    // corrida real vuelve a sembrar con la medida en cuanto lo tiene.
+    stateSeed = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase, baseSha: resolvedBaseSha, baseline: BASELINE_WITHOUT_WORKTREE })
   } catch (e) {
     failSlice(idx, `no se pudo renderizar el kickoff/SLICE.md de #${s.n}: ${e.message}. El agente se lanzaría sin prompt utilizable — antes, esto solo se descubría en el run real.`)
     continue
@@ -3471,12 +3505,16 @@ for (let idx = 0; idx < plans.length; idx++) {
   // donde había un sha razonable, no. La omisión sigue reservada al caso en
   // que no hay NINGÚN sha, que es el del aviso de la resolución de arriba.
   // ==========================================================================
-  let seedToWrite = stateSeed
+  // #96: el baseline se mide AQUÍ, con el worktree ya cortado y antes de
+  // sembrar — la semilla lo lleva dentro. Si el rev-parse de abajo falla, la
+  // semilla de reserva lo lleva igual: el baseline no depende del corte.
+  const baseline = await measureBaseline(s, wt)
+  let seedToWrite = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase, baseSha: resolvedBaseSha, baseline })
   try {
     const cutSha = execFileSync('git', ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'], {
       cwd: wt, encoding: 'utf8', timeout: childTimeoutFor(), killSignal: 'SIGKILL',
     }).trim()
-    if (cutSha) seedToWrite = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase, baseSha: cutSha })
+    if (cutSha) seedToWrite = buildStateSeed(sliceForKickoff, { branch, base: resolvedBase, baseSha: cutSha, baseline })
   } catch (e) {
     console.error(`aviso: no se pudo medir el corte real en el worktree de #${s.n} (\`git rev-parse HEAD\` en ${wt} falló: ${e.message}). La semilla se siembra con el sha que se resolvió de "origin/${resolvedBase}" antes de la tanda${resolvedBaseSha ? ` (${resolvedBaseSha.slice(0, 12)}…)` : ', que tampoco se pudo resolver: irá sin `base_sha` y con `last_commit` vacío'} — el comportamiento anterior a esta mejora: puede ser el corte, o puede haberse quedado atrás si algo movió origin/${resolvedBase} entre medias.`)
   }

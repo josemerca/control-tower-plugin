@@ -1,6 +1,6 @@
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { realpathSync } from 'node:fs'
-import { randomBytes } from 'node:crypto'
+import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { readFileSync, realpathSync, statSync } from 'node:fs'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { setTimeout as after } from 'node:timers/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -19,6 +19,10 @@ import { PlanContractProgress } from './plan-contract-progress.js'
 import { PlanEvents, PlanSessions } from './plan-events-route.js'
 import { PlanReviewWatch } from './plan-review-watch.js'
 import { RunFileProgress } from './run-file-progress.js'
+import { ActivePlans } from './active-plans-route.js'
+import { ActivePlanRecovery } from './active-plan-recovery.js'
+import { DiskImplementationStartRegistry } from './disk-implementation-start-registry.js'
+import { listCmuxWorkspaces } from '../../../plugin/scripts/cmux.js'
 import { StartPlan } from '../application/actions/start-plan.js'
 import { ImplementPlan } from '../application/actions/implement-plan.js'
 import { ReadPlanProgress, ReadPlanProgressParams } from '../application/queries/read-plan-progress.js'
@@ -33,6 +37,7 @@ import { ExternalTool } from './external-tool.js'
 import { RetryPolicy, RetryBudget } from '../domain/policies/retry-policy.js'
 import { LaunchPolicy, LaunchBudget } from '../domain/policies/launch-policy.js'
 import { Invocation, InvocationOutcome } from './invocation.js'
+import { Baseline } from '../../../plugin/scripts/baseline.js'
 
 class FrontendBuild {
   static #HERE = dirname(fileURLToPath(import.meta.url))
@@ -76,6 +81,17 @@ class Disk {
     await writeFile(path, text)
   }
 
+  static async atomicWrite(path, text) {
+    await mkdir(dirname(path), { recursive: true })
+    const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`
+    try {
+      await writeFile(temporary, text)
+      await rename(temporary, path)
+    } finally {
+      await rm(temporary, { force: true })
+    }
+  }
+
   static async read(path) {
     try {
       return await readFile(path, 'utf8')
@@ -106,6 +122,8 @@ class CtApi {
   static #CANNOT_LISTEN = 1
   static #PROCESS_TIMEOUT_MS = 30_000
   static #HARVEST_TIMEOUT_MS = 6 * 60 * 1000
+  static #BASELINE_TIMEOUT_MS = 10 * 60 * 1000
+  static #SHELL = 'sh'
   static #SECONDS_FOR_GH_IN_A_HARVEST = 60
   static #SECONDS_BETWEEN_SWEEPS = 60
   static #CLOCK_STOPPED = 1
@@ -131,6 +149,12 @@ class CtApi {
   static #tool(bin, { budgetMs = CtApi.#PROCESS_TIMEOUT_MS, env } = {}) {
     const runner = new ToolRunner({ bin, budgetMs, env })
     return (argv, options) => runner.run(argv, options)
+  }
+
+  static #baseline() {
+    const shell = CtApi.#tool(CtApi.#SHELL, { budgetMs: CtApi.#BASELINE_TIMEOUT_MS })
+
+    return new Baseline({ run: (command, cwd) => shell(['-c', command], { cwd }) })
   }
 
   static #talkingTo(bin, Tool) {
@@ -230,6 +254,7 @@ class CtApi {
       write: Disk.write,
       read: Disk.read,
       stderr: (line) => process.stderr.write(line),
+      baseline: CtApi.#baseline(),
     })
     const checkouts = new MemoryCheckoutRegistry()
     const planAgents = new CmuxPlanAgents({
@@ -253,16 +278,38 @@ class CtApi {
       gh: CtApi.#talkingTo(Gh.BIN, Gh),
       stderr: (line) => process.stderr.write(line),
     })
+    const sessions = new PlanSessions()
+    const reviews = CtApi.#planReviews(planIssues, planAgents)
+    const activePlans = new ActivePlans({ sessions })
+    const implementationStarts = new DiskImplementationStartRegistry({
+      read: (path) => readFileSync(path, 'utf8'),
+      stat: statSync,
+      write: Disk.atomicWrite,
+      root: asked.stateRoot,
+    })
+    const goRegistry = new DiskGoRegistry({
+      random: randomBytes,
+      read: (path) => readFileSync(path, 'utf8'),
+      stat: statSync,
+      write: Disk.write,
+      root: asked.stateRoot,
+    })
+    const recovery = new ActivePlanRecovery({
+      list: () => listCmuxWorkspaces({ requireComplete: true }),
+      implementationStarts,
+      goRegistry,
+      sessions,
+      reviews,
+      activePlans,
+      checkouts,
+    })
+    recovery.recover()
     const server = new ApiServer({
       port: asked.port,
       startPlan: CtApi.#startPlan(workspace, planAgents, planIssues, checkouts),
-      reviews: CtApi.#planReviews(planIssues, planAgents),
+      reviews,
       implementPlan: new ImplementPlan({
-        goRegistry: new DiskGoRegistry({
-          random: randomBytes,
-          write: Disk.write,
-          root: asked.stateRoot,
-        }),
+        goRegistry,
         planIssues,
         planAgents,
       }),
@@ -270,7 +317,11 @@ class CtApi {
         implementationProgress: new RunFileProgress({ read: Disk.read, exists: Disk.exists }),
       }),
       planEvents: CtApi.#planEvents(git),
-      sessions: new PlanSessions(),
+      sessions,
+      activePlans,
+      implementationStarts,
+      recovery,
+      stderr: (line) => process.stderr.write(line),
       frontendRoot: FrontendBuild.root(),
     })
     let port

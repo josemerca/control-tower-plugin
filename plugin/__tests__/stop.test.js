@@ -1,9 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+
+import { NOTICE_REPEAT_EVERY_TURNS, STOP_NOTICE_REL_NAME } from '../scripts/state.js'
 
 const hook = join(dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'stop.js')
 
@@ -171,9 +173,11 @@ describe('stop hook — relación entre last_commit y HEAD', () => {
     git(dir, 'checkout', '-q', 'main')
     commit(dir, 'c.txt')
     writeState(dir, otro)
+    // #95: el segundo turno ya no repite el aviso (sale vacío), y eso también
+    // es "no bloquea" — lo que este test protege es que no hay `decision`.
     for (const _ of [1, 2]) {
-      const out = JSON.parse(run(dir))
-      expect(out.decision).toBeUndefined()
+      const salida = run(dir)
+      expect(salida ? JSON.parse(salida).decision : undefined).toBeUndefined()
     }
     rmSync(dir, { recursive: true, force: true })
   })
@@ -503,6 +507,216 @@ describe('F15/H4 — obedecer el guard de frescura tiene que dejarlo verde', () 
     expect(bloqueado.reason).toMatch(/no es ningún commit de este repositorio/)
     commitState(dir, head(dir))
     expect(run(dir)).toBe('')
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// ===========================================================================
+// #95/H5 — EL AGENTE NO COMITEÓ, PERO HEAD AVANZÓ: EL PROGRAMA SABE EL SHA.
+//
+// En el camino `ct-step`, quien comitea es el PROGRAMA. El agente no tocó
+// `last_commit` porque no hizo ningún commit, y el guard le bloqueaba el turno
+// pidiéndole que copiase un valor que el propio hook ya tiene en la mano
+// (`headSha`). Cuando los commits por encima llevan el trailer que `ct-step`
+// escribe, el hook los reconoce como suyos, actualiza el fichero de estado él
+// mismo y deja cerrar. Lo que no puede atribuir sigue bloqueando.
+// ===========================================================================
+function ctStepCommit(dir, name) {
+  writeFileSync(join(dir, name), name)
+  execFileSync('git', ['add', '-A'], { cwd: dir })
+  execFileSync('git', ['commit', '-qm', `${name} (#42, tarea 1/3)\n\nTarea 1 de 3 del plan del slice.\n\nCommitted-By: ct-step`], { cwd: dir })
+  return head(dir)
+}
+function lastCommitOf(dir, rel = '.agent/STATE.md') {
+  return /^last_commit:\s*(.*)$/m.exec(readFileSync(join(dir, rel), 'utf8'))[1].trim()
+}
+
+describe('#95 — los commits que hizo ct-step no bloquean el cierre del turno', () => {
+  it('tras un ct-step commit el cierre NO bloquea y el fichero de estado queda con el sha de HEAD', () => {
+    const dir = initRepo()
+    const base = head(dir)
+    writeState(dir, base)
+    const nuevo = ctStepCommit(dir, 'b.txt')
+    const out = run(dir)
+    expect(out).toBe('')
+    expect(lastCommitOf(dir)).toBe(nuevo)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('varios commits seguidos de ct-step se atribuyen todos y el estado salta al último', () => {
+    const dir = initRepo()
+    writeState(dir, head(dir))
+    ctStepCommit(dir, 'b.txt')
+    const ultimo = ctStepCommit(dir, 'c.txt')
+    expect(run(dir)).toBe('')
+    expect(lastCommitOf(dir)).toBe(ultimo)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // LO QUE NO SE PUEDE PERDER: un commit que ct-step NO hizo sigue bloqueando,
+  // aunque venga acompañado de otros que sí.
+  it('un commit sin el trailer entre los de ct-step devuelve el bloqueo y NO toca el fichero', () => {
+    const dir = initRepo()
+    const base = head(dir)
+    writeState(dir, base)
+    ctStepCommit(dir, 'b.txt')
+    commit(dir, 'a-mano.txt')
+    const out = JSON.parse(run(dir))
+    expect(out.decision).toBe('block')
+    expect(lastCommitOf(dir)).toBe(base)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('un commit hecho a mano, sin ningún trailer, sigue bloqueando igual que antes', () => {
+    const dir = initRepo()
+    const base = head(dir)
+    writeState(dir, base)
+    commit(dir, 'a-mano.txt')
+    expect(JSON.parse(run(dir)).decision).toBe('block')
+    expect(lastCommitOf(dir)).toBe(base)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // La precedencia de state-paths: en un worktree de slice el fichero que se
+  // escribe es SLICE.md, que es el que el hook leyó — nunca el STATE.md
+  // trackeado de la coordinadora.
+  it('en un worktree de slice se escribe SLICE.md, y el STATE.md de la coordinadora no se toca', () => {
+    const dir = initRepo()
+    const base = head(dir)
+    mkdirSync(join(dir, '.agent'), { recursive: true })
+    writeFileSync(join(dir, '.agent', 'STATE.md'), '---\nlast_commit: intacto\n---\nc')
+    writeFileSync(join(dir, '.agent', 'SLICE.md'), `---\nlast_commit: ${base}\n---\ns`)
+    const nuevo = ctStepCommit(dir, 'b.txt')
+    expect(run(dir)).toBe('')
+    expect(lastCommitOf(dir, '.agent/SLICE.md')).toBe(nuevo)
+    expect(lastCommitOf(dir, '.agent/STATE.md')).toBe('intacto')
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // El resto del fichero es del agente: comentarios, campos que este hook no
+  // conoce y el cuerpo en prosa. Se reescribe UNA línea, no se re-serializa.
+  it('solo cambia la línea de last_commit: los comentarios, los campos ajenos y el cuerpo quedan intactos', () => {
+    const dir = initRepo()
+    const base = head(dir)
+    mkdirSync(join(dir, '.agent'), { recursive: true })
+    const antes = [
+      '---',
+      '# un comentario que explica el campo',
+      'task: "algo"',
+      `last_commit: ${base}`,
+      'baseline: "un campo que este hook no conoce"',
+      '---',
+      '## Current State',
+      'prosa del agente',
+      '',
+    ].join('\n')
+    writeFileSync(join(dir, '.agent', 'STATE.md'), antes)
+    const nuevo = ctStepCommit(dir, 'b.txt')
+    expect(run(dir)).toBe('')
+    const despues = readFileSync(join(dir, '.agent', 'STATE.md'), 'utf8')
+    expect(despues).toBe(antes.replace(base, nuevo))
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // El valor entrecomillado es la forma que escribe `buildStateSeed`: se
+  // reescribe el VALOR, no la línea entera, y las comillas siguen ahí.
+  it('un last_commit entrecomillado conserva sus comillas al actualizarse', () => {
+    const dir = initRepo()
+    const base = head(dir)
+    mkdirSync(join(dir, '.agent'), { recursive: true })
+    writeFileSync(join(dir, '.agent', 'STATE.md'), `---\nlast_commit: "${base}"\n---\nx`)
+    const nuevo = ctStepCommit(dir, 'b.txt')
+    expect(run(dir)).toBe('')
+    expect(readFileSync(join(dir, '.agent', 'STATE.md'), 'utf8')).toContain(`last_commit: "${nuevo}"`)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('con stop_hook_active no se escribe nada (anti-bucle)', () => {
+    const dir = initRepo()
+    const base = head(dir)
+    writeState(dir, base)
+    ctStepCommit(dir, 'b.txt')
+    expect(run(dir, true)).toBe('')
+    expect(lastCommitOf(dir)).toBe(base)
+    rmSync(dir, { recursive: true, force: true })
+  })
+})
+
+// ===========================================================================
+// #95/H8 — el aviso no bloqueante salía en CADA turno mientras durase la
+// anomalía. Sale en el primero, cuando la relación cambia, y cada N turnos.
+// ===========================================================================
+function repoAdelantado() {
+  const dir = initRepo()
+  git(dir, 'checkout', '-qb', 'adelantada')
+  const delante = commit(dir, 'b.txt')
+  git(dir, 'checkout', '-q', 'main')
+  writeState(dir, delante)
+  return dir
+}
+const avisosEn = (dir, turnos) => {
+  const out = []
+  for (let i = 0; i < turnos; i++) {
+    const salida = run(dir)
+    if (salida) out.push(JSON.parse(salida).systemMessage)
+  }
+  return out.filter(Boolean)
+}
+
+describe('#95 — el aviso no bloqueante deja de salir en cada turno', () => {
+  it('cinco turnos seguidos en `ahead` dan UN solo aviso, no cinco', () => {
+    const dir = repoAdelantado()
+    const avisos = avisosEn(dir, 5)
+    expect(avisos).toHaveLength(1)
+    expect(avisos[0]).toMatch(/descendiente de HEAD/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el aviso vuelve a salir al cumplirse el periodo, para que la anomalía no se haga invisible', () => {
+    const dir = repoAdelantado()
+    expect(avisosEn(dir, NOTICE_REPEAT_EVERY_TURNS * 2)).toHaveLength(2)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('si la relación cambia, el aviso nuevo sale sin esperar al periodo', () => {
+    const dir = repoAdelantado()
+    expect(avisosEn(dir, 1)).toHaveLength(1)
+    expect(avisosEn(dir, 1)).toHaveLength(0)
+    // La misma sesión pasa de `ahead` a `diverged`: es otra anomalía.
+    commit(dir, 'c.txt')
+    const avisos = avisosEn(dir, 1)
+    expect(avisos).toHaveLength(1)
+    expect(avisos[0]).toMatch(/divergentes/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // El marcador es bookkeeping del hook: no puede acabar dentro de un PR.
+  it('el marcador vive en .agent/ y git no lo ve', () => {
+    const dir = repoAdelantado()
+    avisosEn(dir, 1)
+    expect(existsSync(join(dir, '.agent', STOP_NOTICE_REL_NAME))).toBe(true)
+    expect(git(dir, 'status', '--porcelain', '--ignored=no')).not.toMatch(/stop-notice/)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  // Un aviso callado por error es peor que uno repetido: si el marcador no se
+  // puede leer o no se puede excluir de git, se avisa igual.
+  it('un marcador corrupto no silencia el aviso', () => {
+    const dir = repoAdelantado()
+    avisosEn(dir, 1)
+    writeFileSync(join(dir, '.agent', STOP_NOTICE_REL_NAME), 'esto no es json')
+    expect(avisosEn(dir, 1)).toHaveLength(1)
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('el bloqueo de `behind` no pasa por el marcador: sale siempre', () => {
+    const dir = initRepo()
+    const viejo = head(dir)
+    commit(dir, 'b.txt')
+    writeState(dir, viejo)
+    for (const _ of [1, 2, 3]) {
+      expect(JSON.parse(run(dir)).decision).toBe('block')
+    }
     rmSync(dir, { recursive: true, force: true })
   })
 })

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { dirname, join, isAbsolute } from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { parseStateSafe, describeStopRelation, classifyStopState } from '../scripts/state.js'
-import { resolveStatePath } from '../scripts/state-paths.js'
+import { parseStateSafe, describeStopRelation, classifyStopState, withLastCommit, noticeDecision, STOP_NOTICE_REL_NAME } from '../scripts/state.js'
+import { resolveStatePath, excludeContentWith } from '../scripts/state-paths.js'
 
 let input
 try { input = JSON.parse(readFileSync(0, 'utf8')) } catch { process.exit(0) }
@@ -64,10 +65,61 @@ if (parseError) {
 const relation = describeStopRelation({ headSha, lastCommit: meta.last_commit, git, branch })
 const verdict = classifyStopState({ relation, stopHookActive: input.stop_hook_active, stateRel })
 
+// #95/H5: el trabajo por encima lo comiteó ct-step, así que el sha que el guard
+// pedía al agente lo escribe el programa — en el fichero que `resolveStatePath`
+// resolvió, que en un worktree de slice es SLICE.md y nunca el STATE.md
+// trackeado de la coordinadora. Si la escritura falla, no se dice nada: el
+// turno cierra igual y el guard volverá a mirar en el siguiente.
+if (verdict.updateLastCommitTo) {
+  const { text, updated } = withLastCommit(readFileSync(statePath, 'utf8'), verdict.updateLastCommitTo)
+  if (updated) {
+    try { writeFileSync(statePath, text) } catch { /* el cierre de turno no depende de esto */ }
+  }
+}
+
+// #95/H8: el marcador de qué anomalía se avisó por última vez y cuántos turnos
+// lleva. Vive junto al fichero de estado que este hook acaba de resolver, y se
+// excluye de git por el mismo camino que `/ct-next` usa para `.agent/SLICE.md`:
+// `info/exclude` del directorio COMÚN, que no se commitea jamás y cubre de una
+// vez al checkout principal y a todos sus worktrees.
+//
+// FAIL OPEN: si no se puede excluir, no se escribe el marcador — y entonces se
+// avisa en cada turno, como antes. Un fichero de bookkeeping colado dentro de
+// un PR cuesta más que un aviso repetido.
+const noticeRel = `${dirname(stateRel)}/${STOP_NOTICE_REL_NAME}`
+const noticePath = join(dirname(statePath), STOP_NOTICE_REL_NAME)
+
+const noticeExcluded = () => {
+  const probe = git(['rev-parse', '--git-common-dir'])
+  if (probe.status !== 0) return false
+  const raw = probe.stdout.trim()
+  if (!raw) return false
+  const base = isAbsolute(raw) ? raw : join(cwd, raw)
+  try {
+    mkdirSync(join(base, 'info'), { recursive: true })
+    const excludePath = join(base, 'info', 'exclude')
+    let current = ''
+    try { current = readFileSync(excludePath, 'utf8') } catch { current = '' }
+    const next = excludeContentWith(current, noticeRel)
+    if (next.added) writeFileSync(excludePath, next.content)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const readNotice = () => {
+  try { return JSON.parse(readFileSync(noticePath, 'utf8')) } catch { return null }
+}
+
 if (verdict.block) {
   process.stdout.write(JSON.stringify({ decision: 'block', reason: verdict.reason }))
 } else if (verdict.systemMessage) {
+  const { emit, next } = noticeDecision({ relation, previous: readNotice() })
+  if (noticeExcluded()) {
+    try { writeFileSync(noticePath, `${JSON.stringify(next)}\n`) } catch { /* se avisará de más, nunca de menos */ }
+  }
   // No bloquea, pero tampoco calla: `systemMessage` es el canal no bloqueante
   // de la salida JSON de los hooks. El turno cierra igual.
-  process.stdout.write(JSON.stringify({ systemMessage: verdict.systemMessage }))
+  if (emit) process.stdout.write(JSON.stringify({ systemMessage: verdict.systemMessage }))
 }

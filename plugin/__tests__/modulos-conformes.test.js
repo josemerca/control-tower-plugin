@@ -39,12 +39,21 @@ class NacidosConformes {
     '__tests__/ct-harvest-bq-real-process.test.js',
     'scripts/slice-harvest.js',
     '__tests__/slice-harvest.test.js',
+    'scripts/ct-step-commit.js',
     'scripts/dispatch-gate.js',
     'hooks/dispatch-guard.js',
     '__tests__/dispatch-gate.test.js',
     '__tests__/dispatch-guard-real-process.test.js',
     '__tests__/ct-step-dispatch-seal-real-process.test.js',
     '__tests__/dispatch-check-collect-bq-real-process.test.js',
+    'scripts/judge-agent-definition.js',
+    'scripts/judge-bench-case.js',
+    'scripts/judge-bench-workspace.js',
+    'scripts/judge-dispatch.js',
+    'scripts/judge-bench.js',
+    'scripts/judge-bench.mjs',
+    '__tests__/judge-bench.test.js',
+    '__tests__/judge-bench-real-process.test.js',
   ]
 
   static PALABRAS_CASTELLANAS = [

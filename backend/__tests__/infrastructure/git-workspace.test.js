@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import { parseStateSafe } from '../../../plugin/scripts/state.js'
 import { buildStateSeed } from '../../../plugin/scripts/kickoff.js'
 import { resolveStatePath } from '../../../plugin/scripts/state-paths.js'
+import { BaselineOutcome, BaselineResult } from '../../../plugin/scripts/baseline.js'
 import { GitWorkspace, SliceSeed } from '../../src/infrastructure/git-workspace.js'
 import {
   WorkspaceFailure, WorkspaceNotPrepared, WorkspaceNotRead, WorkspaceNotUnderstood, CheckoutNotConfirmed,
@@ -12,6 +13,34 @@ import {
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { CheckoutRoot } from '../../src/domain/value-objects/checkout-root.js'
+
+class BaselineDouble {
+  constructor(result = BaselineDouble.green()) {
+    this.result = result
+    this.measured = []
+  }
+
+  measure(worktree) {
+    this.measured.push(worktree)
+    return Promise.resolve(this.result)
+  }
+
+  static green() {
+    return new BaselineResult({ outcome: BaselineOutcome.GREEN, command: 'npm test', summary: 'exit 0 · 12 passed' })
+  }
+
+  static red() {
+    return new BaselineResult({ outcome: BaselineOutcome.RED, command: 'npm test', summary: 'exit 1 · 2 failed' })
+  }
+
+  static unverified() {
+    return BaselineResult.notMeasured('sin comando de test declarado en AGENTS.md ni en .agent/conventions.md')
+  }
+
+  static answering(result) {
+    return new BaselineDouble(result)
+  }
+}
 
 class GitDouble {
   static ROOT = '/repo/checkout'
@@ -27,7 +56,9 @@ class GitDouble {
 
   constructor({
     answer, status, existingExclude = null, commonDir, declared, remote, toplevel, removal = null, deletion = null,
+    baseline,
   } = {}) {
+    this.baseline = baseline ?? new BaselineDouble()
     this.answer = answer ?? GitDouble.ok()
     this.removal = removal
     this.deletion = deletion
@@ -45,6 +76,7 @@ class GitDouble {
 
   workspace() {
     return new GitWorkspace({
+      baseline: this.baseline,
       read: (path) => {
         this.reads.push(path)
         return Promise.resolve(this.existingExclude)
@@ -422,6 +454,7 @@ describe('GitWorkspace', () => {
   it('a_common_dir_it_cannot_resolve_stops_the_seeding_because_the_state_would_be_visible_to_git', async () => {
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({
+      baseline: this.baseline,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
       run: (argv) => Promise.resolve(GitDouble.declaringNothing(argv) ?? (argv.includes('--git-common-dir')
@@ -438,6 +471,49 @@ describe('GitWorkspace', () => {
     await git.prepared()
 
     expect(parseStateSafe(git.written[1][1]).meta.base_sha).toBe(GitDouble.CUT)
+  })
+
+  it('the_baseline_is_measured_in_the_worktree_it_just_cut_and_not_in_the_checkout_it_cut_it_from', async () => {
+    const git = new GitDouble()
+
+    await git.prepared()
+
+    expect(git.baseline.measured).toEqual([GitDouble.WORKTREE])
+  })
+
+  it('the_state_it_seeds_carries_the_baseline_the_program_measured_so_the_agent_reads_it_instead_of_claiming_one', async () => {
+    const git = new GitDouble({ baseline: BaselineDouble.answering(BaselineDouble.red()) })
+
+    await git.prepared()
+
+    expect(parseStateSafe(git.written[1][1]).meta.baseline).toEqual({
+      outcome: 'rojo', command: 'npm test', summary: 'exit 1 · 2 failed',
+    })
+  })
+
+  it('a_baseline_that_is_not_green_is_said_on_the_error_channel_because_starting_on_one_is_a_human_decision', async () => {
+    const git = new GitDouble({ baseline: BaselineDouble.answering(BaselineDouble.unverified()) })
+
+    await git.prepared()
+
+    expect(git.stderr.join('')).toContain(BaselineOutcome.UNVERIFIED)
+    expect(git.stderr.join('')).toContain('sin comando de test declarado')
+  })
+
+  it('a_green_baseline_says_nothing_because_a_line_that_is_always_printed_is_a_line_nobody_reads', async () => {
+    const git = new GitDouble()
+
+    await git.prepared()
+
+    expect(git.stderr).toEqual([])
+  })
+
+  it('the_baseline_is_measured_after_the_cut_because_there_is_no_worktree_to_run_it_in_before', async () => {
+    const git = new GitDouble({ answer: GitDouble.refused('fatal: destination path already exists') })
+
+    await git.prepared().catch((cause) => cause)
+
+    expect(git.baseline.measured).toEqual([])
   })
 
   it('the_state_it_seeds_names_the_gate_that_holds_this_slice_because_the_skill_reads_it_from_there', async () => {
@@ -465,6 +541,7 @@ describe('GitWorkspace', () => {
   it('a_head_it_cannot_measure_stops_the_seeding_instead_of_writing_a_state_without_a_cut', async () => {
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({
+      baseline: this.baseline,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
       run: (argv) => Promise.resolve(GitDouble.declaringNothing(argv) ?? (argv.includes('HEAD')
@@ -528,6 +605,7 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
   it('a_common_dir_git_refuses_to_resolve_still_gets_the_worktree_and_branch_undone', async () => {
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({
+      baseline: this.baseline,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
       run: (argv) => {
@@ -548,6 +626,7 @@ describe('GitWorkspace undoes what it already created when preparing the ground 
   it('a_head_git_cannot_measure_still_gets_the_worktree_and_branch_undone', async () => {
     const git = new GitDouble()
     git.workspace = () => new GitWorkspace({
+      baseline: this.baseline,
       read: () => Promise.resolve(null),
       write: () => Promise.resolve(),
       run: (argv) => {

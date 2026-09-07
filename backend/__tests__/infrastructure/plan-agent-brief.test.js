@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { SLICE_REL_PATH } from '../../../plugin/scripts/state-paths.js'
 import { PlanAgentBrief } from '../../src/infrastructure/plan-agent-brief.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 
@@ -9,9 +10,14 @@ describe('PlanAgentBrief', () => {
     ctStep: '/plugin/scripts/ct-step.mjs',
   }).errandFor({ issue: { number: 42 }, repository: new RepositoryName('owner/name') })
 
-  it('it_starts_by_asking_for_the_ground_to_be_checked_before_anything_is_touched', () => {
-    expect(errand()).toMatch(/pwd/)
+  it('it_points_at_the_baseline_already_measured_in_the_state_file_instead_of_ordering_one', () => {
     expect(errand()).toMatch(/baseline/)
+    expect(errand()).toContain(`campo \`baseline:\` de ${SLICE_REL_PATH}`)
+  })
+
+  it('it_no_longer_orders_the_ground_checked_because_the_program_cut_and_measured_the_worktree_itself', () => {
+    expect(errand()).not.toMatch(/pwd/)
+    expect(errand()).not.toMatch(/baseline en verde ANTES/)
   })
 
   it('it_names_the_skill_that_writes_the_plan_instead_of_describing_the_shape_of_one', () => {
