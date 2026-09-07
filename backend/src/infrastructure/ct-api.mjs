@@ -18,11 +18,16 @@ import { PlanAgentBrief } from './plan-agent-brief.js'
 import { PlanContractProgress } from './plan-contract-progress.js'
 import { PlanEvents, PlanSessions } from './plan-events-route.js'
 import { ReviewWatch } from './review-watch.js'
+import { GhPullRequests } from './gh-pull-requests.js'
+import { DispatchCheckWorkbench } from './dispatch-check-workbench.js'
 import { StartPlan } from '../application/actions/start-plan.js'
 import { ImplementPlan } from '../application/actions/implement-plan.js'
 import { ReadPlanProgress, ReadPlanProgressParams } from '../application/queries/read-plan-progress.js'
 import { ReadChangesAsked, ReadChangesAskedParams } from '../application/queries/read-changes-asked.js'
+import { ReadFixesAsked, ReadFixesAskedParams } from '../application/queries/read-fixes-asked.js'
+import { ReadDeliveryProgress, ReadDeliveryProgressParams } from '../application/queries/read-delivery-progress.js'
 import { ReviewPlan, ReviewPlanParams } from '../application/actions/review-plan.js'
+import { RequestFixes, RequestFixesParams } from '../application/actions/request-fixes.js'
 import { SurveyWorkspaces, SurveyWorkspacesParams } from '../application/queries/survey-workspaces.js'
 import { HarvestDelivery, HarvestDeliveryParams } from '../application/actions/harvest-delivery.js'
 import { ToolRunner } from './tool-runner.js'
@@ -181,7 +186,7 @@ class CtApi {
     })
   }
 
-  static #planEvents(git) {
+  static #planEvents(git, pullRequests, planIssues) {
     const readPlanProgress = new ReadPlanProgress({
       planProgress: new PlanContractProgress({
         node: CtApi.#tool(process.execPath),
@@ -189,9 +194,11 @@ class CtApi {
         dispatchCheck: PluginTree.dispatchCheck(),
       }),
     })
+    const readDeliveryProgress = new ReadDeliveryProgress({ pullRequests, planIssues })
 
     return new PlanEvents({
       read: (session) => readPlanProgress.execute(new ReadPlanProgressParams(session)),
+      readDelivery: (session) => readDeliveryProgress.execute(new ReadDeliveryProgressParams(session)),
       sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_READS),
     })
   }
@@ -206,6 +213,19 @@ class CtApi {
       sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_ASKS),
       stderr: (line) => process.stderr.write(line),
       label: 'plan review watch',
+    })
+  }
+
+  static #pullRequestReviews(pullRequests, planIssues, planAgents, workbench) {
+    const readFixesAsked = new ReadFixesAsked({ pullRequests, planIssues })
+    const requestFixes = new RequestFixes({ workbench, planAgents })
+
+    return new ReviewWatch({
+      asked: (watch) => readFixesAsked.execute(new ReadFixesAskedParams(watch)),
+      review: (params) => requestFixes.execute(new RequestFixesParams(params)),
+      sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_ASKS),
+      stderr: (line) => process.stderr.write(line),
+      label: 'pull request review watch',
     })
   }
 
@@ -243,10 +263,16 @@ class CtApi {
       gh: CtApi.#talkingTo(Gh.BIN, Gh),
       stderr: (line) => process.stderr.write(line),
     })
+    const pullRequests = new GhPullRequests({ gh: CtApi.#talkingTo(Gh.BIN, Gh) })
+    const workbench = new DispatchCheckWorkbench({
+      node: CtApi.#tool(process.execPath),
+      dispatchCheck: PluginTree.dispatchCheck(),
+    })
     const server = new ApiServer({
       port: asked.port,
       startPlan: CtApi.#startPlan(workspace, planAgents, planIssues, checkouts),
       reviews: CtApi.#planReviews(planIssues, planAgents),
+      pullRequestReviews: CtApi.#pullRequestReviews(pullRequests, planIssues, planAgents, workbench),
       implementPlan: new ImplementPlan({
         goRegistry: new DiskGoRegistry({
           random: randomBytes,
@@ -256,7 +282,7 @@ class CtApi {
         planIssues,
         planAgents,
       }),
-      planEvents: CtApi.#planEvents(git),
+      planEvents: CtApi.#planEvents(git, pullRequests, planIssues),
       sessions: new PlanSessions(),
       frontendRoot: FrontendBuild.root(),
     })
