@@ -6,6 +6,13 @@
 **Estado:** investigación cerrada con medida; **una decisión de arquitectura sin tomar** (§7)
 **Alcance:** ningún código. Este documento sustituye una suposición por una medida y deja la decisión donde estaba.
 
+> **Nota de publicación.** Este repositorio es público. El endpoint del colector
+> que la organización impone por managed settings remotos aparecía aquí literal
+> y se ha **redactado**: el hecho de que exista esa política es parte del
+> hallazgo, la dirección concreta de una máquina interna no. Quien necesite el
+> valor lo tiene en su propio log de depuración, con
+> `CLAUDE_CODE_ENABLE_TELEMETRY=1` y el flag de trazas a consola.
+
 ---
 
 ## 0. Cómo se ha medido, para que se pueda repetir
@@ -306,7 +313,7 @@ a otro sitio. El log de depuración, literal:
 [3P telemetry] Remote managed settings fetch settled, initializing telemetry
 [3P telemetry] isTelemetryEnabled=true (CLAUDE_CODE_ENABLE_TELEMETRY=1)
 [3P telemetry] getOtlpReaders: types=["otlp"], interval=60000, protocol=http/json,
-               endpoint=https://mo-otel-935892119678.europe-west1.run.app
+               endpoint=https://<colector de la organización, redactado>
 [3P telemetry] getOtlpLogExporters: types=["otlp"], ...
 [3P telemetry] First logs export: SUCCESS
 [3P telemetry] First metrics export: SUCCESS
@@ -333,7 +340,7 @@ Tres consecuencias:
 | opción | qué da | contras |
 |---|---|---|
 | **A. Ningún colector.** El hook `SubagentStop` lee el transcript del §3 y `ct-step` escribe tokens por papel en la fila que ya escribe | tokens por subagente, por tarea y por intento; sin red, sin flag beta, sin dependencias | no da dinero sin una tabla de precios propia (§6.1); un hook nuevo (§4.2) |
-| **B. El colector de empresa** (`mo-otel-…run.app`) | `cost_usd` real por llamada, ya exportándose | no lleva `agent_id` ni el papel (`agent.name: "custom"`); no es de este proyecto, y consultarlo es un acceso que hoy el loop no tiene; agrega por `session.id`, que es la misma para todos los papeles |
+| **B. El colector de empresa** (el colector de la organización) | `cost_usd` real por llamada, ya exportándose | no lleva `agent_id` ni el papel (`agent.name: "custom"`); no es de este proyecto, y consultarlo es un acceso que hoy el loop no tiene; agrega por `session.id`, que es la misma para todos los papeles |
 | **C. Colector propio** (fichero o proceso local, con trazas activadas) | `agent_id` + tokens + posible unión con el dinero por `trace_id` (§2.2, inferido) | infraestructura nueva; exige el flag beta `CLAUDE_CODE_ENHANCED_TELEMETRY_BETA`, sin contrato de estabilidad; y para métricas/logs choca con la política remota (§5.1) |
 
 **Recomendación: A**, y B como control cruzado cuando alguien quiera comprobar
