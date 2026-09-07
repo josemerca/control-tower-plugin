@@ -1,10 +1,45 @@
 import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'fs'
+import { dirname, join } from 'path'
+import { fileURLToPath } from 'url'
 import { DispatchCheckWorkbench } from '../../src/infrastructure/dispatch-check-workbench.js'
 import { Workbench } from '../../src/domain/ports/workbench.js'
 import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { SliceNotReopened, ReopenNotUnderstood } from '../../src/domain/exceptions.js'
+
+class PluginContract {
+  static SCRIPT = join(
+    dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'plugin', 'scripts', 'dispatch-check.mjs'
+  )
+  static #REOPEN = /\nif \(reopen\) \{\n([\s\S]*?)\n\}\n/
+  static #DIED = /\bdie(?:Err|Out)[\s\S]*?,\s*(\d+)\s*\)/g
+
+  static #reopenBlock() {
+    const source = readFileSync(PluginContract.SCRIPT, 'utf8')
+    const reopen = source.match(PluginContract.#REOPEN)
+    if (reopen === null) throw new Error(`${PluginContract.SCRIPT} no longer carries a reopen block`)
+
+    return reopen[1]
+  }
+
+  static #ascending(codes) {
+    return [...new Set(codes)].sort((one, other) => one - other)
+  }
+
+  static codesDyingInSource(block) {
+    return PluginContract.#ascending([...block.matchAll(PluginContract.#DIED)].map((found) => Number(found[1])))
+  }
+
+  static codesTheReopenBlockCanExitWith() {
+    const block = PluginContract.#reopenBlock()
+    const died = PluginContract.codesDyingInSource(block)
+    const hasExit0 = /process\.exit\(0\)/.test(block)
+
+    return hasExit0 ? PluginContract.#ascending([...died, 0]) : died
+  }
+}
 
 class NodeDouble {
   static DISPATCH_CHECK = '/plugin/scripts/dispatch-check.mjs'
@@ -88,6 +123,13 @@ describe('DispatchCheckWorkbench', () => {
 
   it('the_declared_codes_are_the_four_the_reopen_contract_names', () => {
     expect(DispatchCheckWorkbench.declaredCodes().sort()).toEqual([0, 1, 2, 3])
+  })
+
+  it('every_code_the_reopen_block_can_exit_with_is_one_this_adapter_declares', () => {
+    const scriptCodes = PluginContract.codesTheReopenBlockCanExitWith()
+    const declaredCodes = DispatchCheckWorkbench.declaredCodes()
+
+    expect(declaredCodes.sort()).toEqual(scriptCodes.sort())
   })
 
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
