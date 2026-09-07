@@ -100,19 +100,19 @@ describe('Home · plan events', () => {
   it('should complete the implementation step once the backend accepts it', async () => {
     await implementationStarted()
 
-    expect(screen.getByRole('button', { name: /Implementación Completado/ })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /Implementación Completado/ })).toBeInTheDocument()
   })
 
   it('should focus the review step once implementation starts', async () => {
     await implementationStarted()
 
-    expect(screen.getByRole('button', { name: /Revisión Activo/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(await screen.findByRole('button', { name: /Revisión Activo/ })).toHaveAttribute('aria-expanded', 'true')
   })
 
   it('should offer to start another plan as soon as implementation starts', async () => {
     await implementationStarted()
 
-    expect(screen.getByRole('button', { name: 'Arrancar otro plan' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: 'Arrancar otro plan' })).toBeInTheDocument()
   })
 
   it('should say the agent is implementing while there is no pull request yet', async () => {
