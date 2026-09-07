@@ -80,6 +80,7 @@ export class ProgressCollapse {
 
 export class ImplementProgressRoute {
   static PATH = '/implement-progress/:issue'
+  static METHOD = 'GET'
 
   static handledBy(readImplementationProgress) {
     return async (request, response) => {
@@ -107,5 +108,10 @@ export class ImplementProgressRoute {
         discards: read.state.discards,
       })
     }
+  }
+
+  static refuseOtherMethods(request, response) {
+    response.setHeader('Allow', ImplementProgressRoute.METHOD)
+    Answer.refuse(response, 405, 'method-not-allowed', 'method not allowed')
   }
 }

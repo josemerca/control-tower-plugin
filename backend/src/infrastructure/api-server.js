@@ -99,6 +99,7 @@ export class ApiServer {
       Browsers.turnAwayForeign,
       ImplementProgressRoute.handledBy(this.implementProgress)
     )
+    app.all(ImplementProgressRoute.PATH, ImplementProgressRoute.refuseOtherMethods)
     app.use(Failures.nothingMatched)
     app.use(Failures.answer)
 
