@@ -50,6 +50,13 @@ class DispatchedRole {
     })
   }
 
+  static advising() {
+    return DispatchedRole.#reading({
+      '/plugin/agents/ct-advisor.md': 4000,
+      [DispatchedRole.PACKAGE]: 42,
+    })
+  }
+
   static withAnUnreadableAgent() {
     return DispatchedRole.#reading({
       '/plugin/agents/ct-judge.md': null,
@@ -108,8 +115,14 @@ describe('what a dispatched role reads, in bytes', () => {
       .measuresOf({ step: STEPS.CONTROLS, packagePath: null })).toThrow(RoleMaterialUndeclared)
   })
 
-  it('the described steps are exactly the four that hand work to a subagent', () => {
-    expect(RoleBytes.STEPS).toEqual([STEPS.IMPLEMENT, STEPS.JUDGE, STEPS.SLICE_JUDGE, STEPS.RECONCILE])
+  it('the described steps are exactly the five that hand work to a subagent', () => {
+    expect(RoleBytes.STEPS).toEqual([STEPS.IMPLEMENT, STEPS.JUDGE, STEPS.SLICE_JUDGE, STEPS.RECONCILE, STEPS.ADVISE])
+  })
+
+  it('an adviser is charged its agent file and the package, and zero skill because it is ordered none', () => {
+    const measured = DispatchedRole.advising()
+      .measuresOf({ step: STEPS.ADVISE, packagePath: DispatchedRole.PACKAGE })
+    expect({ ...measured }).toEqual({ agent_bytes: 4000, skill_bytes: 0, package_bytes: 42 })
   })
 })
 

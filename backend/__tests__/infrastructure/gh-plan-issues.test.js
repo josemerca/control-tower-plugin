@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { GhPlanIssues, ChangeAsked } from '../../src/infrastructure/gh-plan-issues.js'
+import { GhPlanIssues } from '../../src/infrastructure/gh-plan-issues.js'
+import { ChangeAsked } from '../../src/domain/value-objects/change-asked.js'
 import { Gh } from '../../src/infrastructure/gh.js'
 import { PlanIssueBody } from '../../src/infrastructure/gh-plan-issues.js'
 import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
@@ -126,12 +127,20 @@ class GhDouble {
     return this.changesAskedFor(issue).catch((cause) => cause)
   }
 
-  async openFor(story = GhDouble.story()) {
-    return this.issues().open({ story, repository: GhDouble.REPOSITORY })
+  async openFor({ story = GhDouble.story(), comment = null } = {}) {
+    return this.issues().open({ story, comment, repository: GhDouble.REPOSITORY })
   }
 
-  async refusalFor(story = GhDouble.story()) {
-    return this.openFor(story).catch((cause) => cause)
+  async refusalFor({ story = GhDouble.story(), comment = null } = {}) {
+    return this.openFor({ story, comment }).catch((cause) => cause)
+  }
+
+  static labelled(...names) {
+    return GhDouble.created(JSON.stringify({ labels: names.map((name) => ({ name })) }))
+  }
+
+  async inReviewFor(issue = GhDouble.OPENED) {
+    return this.issues().isInReview({ issueNumber: issue.number, repository: GhDouble.REPOSITORY })
   }
 
   get commands() {
@@ -144,13 +153,13 @@ describe('GhPlanIssues', () => {
     const gh = GhDouble.created()
     const story = GhDouble.story()
 
-    await gh.openFor(story)
+    await gh.openFor({ story })
 
     expect(gh.calls).toEqual([[
       'issue', 'create',
       '--repo', 'josemerca/ct-loop-sandbox',
       '--title', 'MO_SHOP-42 El buscador acepta acentos',
-      '--body', PlanIssueBody.of(story),
+      '--body', PlanIssueBody.of({ story, comment: null }),
       '--label', 'gate:plan',
       '--label', 'status:ready',
     ]])
@@ -597,5 +606,46 @@ describe('GhPlanIssues reading the changes asked for on the issue', () => {
 
   it('an_issue_nobody_has_written_on_asks_for_nothing_instead_of_refusing', async () => {
     expect(await GhDouble.printing('{"comments":[]}').changesAskedFor()).toEqual([])
+  })
+
+  it('asking_whether_an_issue_is_in_review_reads_its_labels_and_nothing_else', async () => {
+    const gh = GhDouble.labelled('status:in-review')
+
+    await gh.inReviewFor()
+
+    expect(gh.calls).toEqual([[
+      'issue', 'view', '7', '--repo', 'josemerca/ct-loop-sandbox', '--json', 'labels',
+    ]])
+  })
+
+  it('an_issue_carrying_only_the_in_review_label_is_in_review', async () => {
+    expect(await GhDouble.labelled('status:in-review').inReviewFor()).toBe(true)
+  })
+
+  it('an_issue_in_progress_is_not_in_review_so_the_gate_stays_shut_while_it_is_being_fixed', async () => {
+    expect(await GhDouble.labelled('status:in-progress').inReviewFor()).toBe(false)
+  })
+
+  it('an_issue_carrying_two_status_labels_at_once_is_not_in_review_because_that_state_is_ambiguous', async () => {
+    expect(await GhDouble.labelled('status:in-review', 'status:in-progress').inReviewFor()).toBe(false)
+  })
+
+  it('an_issue_with_no_status_label_is_not_in_review', async () => {
+    expect(await GhDouble.labelled('area:plan').inReviewFor()).toBe(false)
+  })
+
+  it('gh_refusing_to_read_the_labels_travels_out_typed_instead_of_answering_false', async () => {
+    const refusal = await GhDouble.refusing('HTTP 404').inReviewFor().catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(PlanChangesNotRead)
+    expect(refusal).not.toBeInstanceOf(PlanChangesNotUnderstood)
+    expect(refusal.message).toMatch(/gh issue view --json labels failed: HTTP 404/)
+  })
+
+  it('labels_gh_sent_in_a_shape_this_cannot_read_travel_out_as_not_understood', async () => {
+    const refusal = await GhDouble.created('{"labels":"ninguna"}').inReviewFor().catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(PlanChangesNotUnderstood)
+    expect(refusal).not.toBeInstanceOf(PlanChangesNotRead)
   })
 })

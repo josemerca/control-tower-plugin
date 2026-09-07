@@ -2,8 +2,9 @@ import { PlanBriefing } from '../../domain/value-objects/plan-briefing.js'
 import { PlanWatch } from '../../domain/value-objects/plan-watch.js'
 
 export class StartPlanParams {
-  constructor({ story, repository, root }) {
+  constructor({ story, comment, repository, root }) {
     this.story = story
+    this.comment = comment
     this.repository = repository
     this.root = root
     Object.freeze(this)
@@ -29,8 +30,8 @@ export class StartPlan {
 
   async execute(params) {
     const root = await this.workspace.confirm({ root: params.root, repository: params.repository })
-    const story = await this.userStories.detail(params.story)
-    const issue = await this.planIssues.open({ story, repository: params.repository })
+    const story = params.story === null ? null : await this.userStories.detail(params.story)
+    const issue = await this.planIssues.open({ story, comment: params.comment, repository: params.repository })
     await this.planIssues.claim({ issue, repository: params.repository })
     const located = await this.#prepare(params, issue, root)
     const agent = await this.#launch(params, issue, located)

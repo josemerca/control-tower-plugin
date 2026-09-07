@@ -1,5 +1,6 @@
 import { SLICE_REL_PATH } from '../../../plugin/scripts/state-paths.js'
 import { PluginYardstick } from '../../../plugin/scripts/plugin-yardstick.js'
+import { PlanIssueBody } from './gh-plan-issues.js'
 
 export class PlanAgentBrief {
   static NO_NEW_WORKTREES = 'no crees worktrees nuevos'
@@ -24,6 +25,7 @@ export class PlanAgentBrief {
       `El baseline ya está medido: su resultado (verde, rojo o no-verificado), el comando y el resumen están en el campo \`baseline:\` de ${SLICE_REL_PATH}. Léelo ahí; no lo vuelvas a ejecutar para afirmarlo.`,
       `Hidrátate del issue: \`gh issue view ${issue.number} --repo ${named}\`. Sus criterios de aceptación y su sección "## Out of scope / Protected" son la entrada del plan.`,
       `Lee también sus secciones "${PlanAgentBrief.EPIC_CONTEXT}" y "${PlanAgentBrief.INHERITED_CONTEXT}": traen lo que condiciona este trabajo y no cabe en los criterios de aceptación. Si están vacías o no aparecen, no hay nada que heredar y no lo busques fuera del issue.`,
+      `Si el issue trae la sección "${PlanIssueBody.COMMENT_SECTION}", eso es lo que una persona pidió a mano y es entrada del plan igual que los criterios de aceptación. Y si el issue no declara ningún criterio de aceptación, esa sección es TODA la entrada: no hay spec de donde rellenarlos, así que los criterios los propones tú en el plan y no te pares a buscarlos fuera del issue.`,
       `La vara de Control Tower vive en ${conventions} y el programa la lleva a cada tarea: al implementador pegada, al juez por ruta. Lo que tu plan selecciona es la vara del REPO, en el \`Rules to obey:\` de su §3; de ${conventions} abre el documento que necesites para decidir algo concreto, no los cinco por delante.`,
       'Cómo se relacionan las dos cuando chocan lo dice la cabecera con la que esa vara viaja, y va aquí entera porque el `AGENTS.md` de este repo puede no traerla. Es el único sitio donde esa regla está escrita: aplícala tal cual, no la reinterpretes ni la reescribas en tu plan.',
       PluginYardstick.precedenceHeader(),
@@ -64,6 +66,21 @@ export class PlanAgentBrief {
       `Entonces abre la pull request con \`Closes #${issueNumber}\` en el cuerpo y libera con`,
       `\`node ${dispatchCheck} ${issueNumber} --repo ${repository.text} --release --no-watch-merge\`, que mueve el issue a revisión.`,
       `Y PARA ahí: no la mergees y ${PlanAgentBrief.NO_NEW_WORKTREES}.`,
+    ].join(' ')
+  }
+
+  fixErrandFor({ issueNumber, repository, changes }) {
+    const dispatchCheck = this.dispatchCheck
+    const named = repository.text
+
+    return [
+      `Un humano ha revisado la pull request del issue #${issueNumber} y pide estos cambios:`,
+      `«${String(changes).replace(PlanAgentBrief.WHITESPACE, ' ').trim()}».`,
+      'Corrígelos sobre la rama y el worktree que ya tienes, sin rehacer el plan,',
+      `${PlanAgentBrief.NO_NEW_WORKTREES} y sin abrir otra pull request: la que hay sigue abierta y recoge lo que pushees.`,
+      'Cuando lo tengas en verde, vuelve a liberar con',
+      `\`node ${dispatchCheck} ${issueNumber} --repo ${named} --release --no-watch-merge\`, que devuelve el issue a revisión.`,
+      'Y entonces PARA: no la mergees.',
     ].join(' ')
   }
 }

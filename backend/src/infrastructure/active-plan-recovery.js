@@ -5,9 +5,12 @@ import { PlanWatch } from '../domain/value-objects/plan-watch.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
 import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
 import { WorkspaceLocation } from '../domain/value-objects/workspace-location.js'
+import { ImplementationProgressFailure } from '../domain/exceptions.js'
+import { ImplementationStep } from '../domain/value-objects/implementation-state.js'
 
 export class CmuxActivePlan {
-  static #TITLE = /^ct-plan-(.+)-([A-Z][A-Z0-9_]*-\d+)$/
+  static #TITLE = new RegExp(`^ct-plan-(.+)-(${CmuxPlanAgents.NO_STORY_PREFIX}[1-9]\\d*|[A-Z][A-Z0-9_]*-\\d+)$`)
+  static #NO_STORY = new RegExp(`^${CmuxPlanAgents.NO_STORY_PREFIX}[1-9]\\d*$`)
   static #WORKTREE = /^(.+)\/\.worktrees\/([1-9]\d*)$/
 
   static parse(entry) {
@@ -18,14 +21,17 @@ export class CmuxActivePlan {
     if (named === null || located === null) return null
 
     const repositoryText = named[1].replace('__', '/')
-    if (!RepositoryName.isWellFormed(repositoryText) || !UserStoryKey.isWellFormed(named[2])) return null
+    if (!RepositoryName.isWellFormed(repositoryText)) return null
     const repository = new RepositoryName(repositoryText)
-    const story = new UserStoryKey(named[2])
-    if (CmuxPlanAgents.nameFor(story, repository) !== entry.title) return null
+    const tail = named[2]
+    const hasNoStory = CmuxActivePlan.#NO_STORY.test(tail)
+    if (!hasNoStory && !UserStoryKey.isWellFormed(tail)) return null
+    const story = hasNoStory ? null : new UserStoryKey(tail)
     if (!CheckoutRoot.isWellFormed(located[1])) return null
     const root = new CheckoutRoot(located[1])
     const issueNumber = Number(located[2])
     if (!Number.isInteger(issueNumber)) return null
+    if (CmuxPlanAgents.nameFor({ story, repository, issueNumber }) !== entry.title) return null
 
     return new PlanWatch({
       story,
@@ -41,10 +47,13 @@ export class CmuxActivePlan {
 }
 
 export class ActivePlanRecovery {
-  constructor({ list, implementationStarts, goRegistry, sessions, reviews, activePlans, checkouts }) {
+  constructor({
+    list, implementationStarts, goRegistry, implementationProgress, sessions, reviews, activePlans, checkouts,
+  }) {
     this.list = list
     this.implementationStarts = implementationStarts
     this.goRegistry = goRegistry
+    this.implementationProgress = implementationProgress
     this.sessions = sessions
     this.reviews = reviews
     this.activePlans = activePlans
@@ -52,7 +61,21 @@ export class ActivePlanRecovery {
     this.conclusive = false
   }
 
-  recover() {
+  async #workIsUnderway(watch) {
+    let state
+    try {
+      state = await this.implementationProgress.of({
+        root: new CheckoutRoot(watch.located.root), issue: watch.issue.number,
+      })
+    } catch (cause) {
+      if (cause instanceof ImplementationProgressFailure) return false
+      throw cause
+    }
+
+    return state.step !== ImplementationStep.STARTING
+  }
+
+  async recover() {
     if (this.conclusive) return true
     const entries = this.list()
     if (entries === null) return false
@@ -70,7 +93,11 @@ export class ActivePlanRecovery {
         continue
       }
       if (this.goRegistry.matches(watch)) {
-        this.activePlans.rememberUncertain(watch)
+        if (await this.#workIsUnderway(watch)) {
+          this.activePlans.rememberImplementing(watch)
+        } else {
+          this.activePlans.rememberUncertain(watch)
+        }
         continue
       }
       this.sessions.remember(watch)

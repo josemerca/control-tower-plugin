@@ -1,7 +1,7 @@
 export class PlanIssues {
-  async open({ story, repository }) {
+  async open({ story, comment, repository }) {
     throw new Error(
-      `${this.constructor.name} must implement open({ story, repository }), asked for ${story?.key} in ${repository}`
+      `${this.constructor.name} must implement open({ story, comment, repository }), asked for ${story?.key} in ${repository}`
     )
   }
 
@@ -26,6 +26,12 @@ export class PlanIssues {
   async answerGo({ issueNumber, repository, nonce }) {
     throw new Error(
       `${this.constructor.name} must implement answerGo({ issueNumber, repository, nonce }), asked for ${issueNumber} in ${repository}`
+    )
+  }
+
+  async isInReview({ issueNumber, repository }) {
+    throw new Error(
+      `${this.constructor.name} must implement isInReview({ issueNumber, repository }), asked for ${issueNumber} in ${repository}`
     )
   }
 }

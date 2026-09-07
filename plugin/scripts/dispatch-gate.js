@@ -25,6 +25,7 @@ export class StepSeal {
   static #INPUT_OF = Object.freeze({
     [STEPS.IMPLEMENT]: 'el brief de la tarea',
     [STEPS.JUDGE]: 'el paquete de revisión de la tarea',
+    [STEPS.ADVISE]: 'el paquete del consejero',
     [STEPS.SLICE_JUDGE]: 'el paquete de revisión del slice',
   })
 

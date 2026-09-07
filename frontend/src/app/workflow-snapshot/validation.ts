@@ -9,10 +9,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim() !== ''
 
+const isTicketOrAbsent = (id: unknown): id is string | null =>
+  id === null || (typeof id === 'string' && TicketKey.isWellFormed(id))
+
 const isRequest = (value: unknown): value is StartPlanRequest =>
   isRecord(value) &&
-  typeof value.id === 'string' &&
-  TicketKey.isWellFormed(value.id) &&
+  isTicketOrAbsent(value.id) &&
   typeof value.repo === 'string' &&
   RepositoryName.isWellFormed(value.repo) &&
   typeof value.path === 'string' &&
@@ -26,10 +28,12 @@ const isWorktreeUnder = (worktree: string, path: string): boolean => {
   return normalizedWorktree !== normalizedPath && normalizedWorktree.startsWith(prefix)
 }
 
+const isWellFormedRoot = (value: unknown): value is string | undefined =>
+  value === undefined || (typeof value === 'string' && LocalPath.isWellFormed(value))
+
 const isPlanForRequest = (value: unknown, request: StartPlanRequest): value is StartedPlan =>
   isRecord(value) &&
-  typeof value.id === 'string' &&
-  TicketKey.isWellFormed(value.id) &&
+  isTicketOrAbsent(value.id) &&
   value.id === request.id &&
   typeof value.repo === 'string' &&
   RepositoryName.isWellFormed(value.repo) &&
@@ -43,6 +47,7 @@ const isPlanForRequest = (value: unknown, request: StartPlanRequest): value is S
   isNonEmptyString(value.branch) &&
   isNonEmptyString(value.worktree) &&
   LocalPath.isWellFormed(value.worktree) &&
-  isWorktreeUnder(value.worktree, request.path)
+  isWellFormedRoot(value.root) &&
+  isWorktreeUnder(value.worktree, typeof value.root === 'string' ? value.root : request.path)
 
 export { isPlanForRequest, isRecord, isRequest }

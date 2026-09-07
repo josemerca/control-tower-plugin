@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ActivePlan } from 'app/active-plans/ActivePlan.types'
 import { ActivePlansClient } from 'app/active-plans/client'
 import { ImplementPlanAction } from 'app/implement-plan/components/implement-plan-action'
+import { ImplementProgress } from 'app/implement-progress/components/implement-progress'
 import { PlanProgress } from 'app/plan-events/components/plan-progress'
 import { StartPlanForm } from 'app/start-plan/components/start-plan-form'
 import { StartedPlan, StartPlanRequest } from 'app/start-plan/StartPlan.types'
@@ -333,6 +334,13 @@ const Home = () => {
           )}
           {showRestoredDiscard && workflow?.phase === 'ready' && (
             <Button className="home__discard" variant="secondary" onClick={discardWorkflow}>Descartar estado</Button>
+          )}
+          {workflow?.phase === 'implementing' && restoredIsConfirmed && (
+            <ImplementProgress
+              key={`${workflow.plan.repo}:${workflow.plan.issue.number}`}
+              issue={workflow.plan.issue.number}
+              root={workflow.plan.root ?? workflow.request.path}
+            />
           )}
           {workflow?.phase === 'implementing' && restoredIsConfirmed && (
             <Button className="home__start-another" type="button" variant="secondary" onClick={discardWorkflow}>

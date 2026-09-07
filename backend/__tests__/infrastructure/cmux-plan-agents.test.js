@@ -36,12 +36,17 @@ class CmuxDouble {
   static REPOSITORY_SLUG = 'josemerca__ct-loop-sandbox'
   static ERRAND = 'escribe el plan de #42 en josemerca/ct-loop-sandbox'
   static TAB = `ct-plan-${CmuxDouble.REPOSITORY_SLUG}-ABC-42`
+  static NO_STORY_ISSUE = new PlanIssue({ number: 7, url: 'https://github.com/josemerca/ct-loop-sandbox/issues/7' })
+  static NO_STORY_TAB = `ct-plan-${CmuxDouble.REPOSITORY_SLUG}-issue-7`
+  static NO_STORY_DIRECTORY = `${CmuxDouble.REPOSITORY_SLUG}-7`
   static PROBES_PER_SEND = 2
   static RESENDS = 1
   static DIRECTORY = `${CmuxDouble.REPOSITORY_SLUG}-42`
   static LAUNCHER = `${CmuxDouble.RUNS_IN}/${CmuxDouble.DIRECTORY}/${LAUNCHER_FILENAME}`
   static SENTINEL = `${CmuxDouble.RUNS_IN}/${CmuxDouble.DIRECTORY}/${SENTINEL_FILENAME}`
   static TYPED = buildTypedCommand(CmuxDouble.LAUNCHER, shQuote)
+  static NO_STORY_LAUNCHER = `${CmuxDouble.RUNS_IN}/${CmuxDouble.NO_STORY_DIRECTORY}/${LAUNCHER_FILENAME}`
+  static NO_STORY_TYPED = buildTypedCommand(CmuxDouble.NO_STORY_LAUNCHER, shQuote)
 
   constructor({ printed, sentinels, realpaths = new Map(), step = null }) {
     this.printed = printed
@@ -138,6 +143,15 @@ class CmuxDouble {
     })
   }
 
+  static briefingWithNoStory() {
+    return new PlanBriefing({
+      story: null,
+      issue: CmuxDouble.NO_STORY_ISSUE,
+      located: new WorkspaceLocation({ path: CmuxDouble.WORKTREE, branch: 'feat/7' }),
+      repository: CmuxDouble.REPOSITORY,
+    })
+  }
+
   agents() {
     return new CmuxPlanAgents({
       runsIn: CmuxDouble.RUNS_IN,
@@ -209,6 +223,19 @@ describe('CmuxPlanAgents', () => {
       '--name', CmuxDouble.TAB,
       '--cwd', CmuxDouble.WORKTREE,
       '--command', CmuxDouble.TYPED,
+    ]])
+  })
+
+  it('the_tab_of_a_plan_with_no_user_story_is_named_after_its_issue_instead_of_the_word_null', async () => {
+    const cmux = CmuxDouble.launched()
+
+    await cmux.launch(CmuxDouble.briefingWithNoStory())
+
+    expect(cmux.calls).toEqual([[
+      'new-workspace',
+      '--name', CmuxDouble.NO_STORY_TAB,
+      '--cwd', CmuxDouble.WORKTREE,
+      '--command', CmuxDouble.NO_STORY_TYPED,
     ]])
   })
 
@@ -409,6 +436,8 @@ class ResumeDouble {
   static REPOSITORY = new RepositoryName('owner/name')
   static CHANGES = 'parte la tarea 3 en dos'
   static REVIEW_ERRAND = 'rehaz el plan de #42'
+  static FIX_ERRAND = 'corrige la pull request de #42'
+  static FIXES = 'src/foo.js:42: revienta con []'
 
   constructor(answers) {
     this.answers = answers
@@ -416,6 +445,7 @@ class ResumeDouble {
     this.brief = {
       asked: [],
       reviewed: [],
+      fixed: [],
       implementationErrandFor: ({ issueNumber }) => {
         this.brief.asked.push({ issueNumber })
 
@@ -425,6 +455,11 @@ class ResumeDouble {
         this.brief.reviewed.push({ issueNumber, repository, changes })
 
         return ResumeDouble.REVIEW_ERRAND
+      },
+      fixErrandFor: ({ issueNumber, repository, changes }) => {
+        this.brief.fixed.push({ issueNumber, repository, changes })
+
+        return ResumeDouble.FIX_ERRAND
       },
     }
   }
@@ -481,6 +516,19 @@ class ResumeDouble {
 
   async reviewRefusal() {
     return this.review().catch((cause) => cause)
+  }
+
+  async fix() {
+    return this.agents().fix({
+      agent: ResumeDouble.AGENT,
+      issue: ResumeDouble.ISSUE,
+      repository: ResumeDouble.REPOSITORY,
+      changes: ResumeDouble.FIXES,
+    })
+  }
+
+  async fixRefusal() {
+    return this.fix().catch((cause) => cause)
   }
 }
 
@@ -549,5 +597,42 @@ describe('CmuxPlanAgents asking a parked agent for changes', () => {
 
     expect(refusal).toBeInstanceOf(PlanAgentNotResumed)
     expect(refusal.message).toContain('no such workspace')
+  })
+})
+
+describe('CmuxPlanAgents typing the fixes of a pull request', () => {
+  it('it_types_the_fix_errand_on_the_handle_it_was_given_and_then_presses_enter', async () => {
+    const cmux = ResumeDouble.accepting()
+
+    await cmux.fix()
+
+    expect(cmux.calls).toEqual([
+      ['send', '--workspace', ResumeDouble.AGENT, ResumeDouble.FIX_ERRAND],
+      ['send-key', '--workspace', ResumeDouble.AGENT, 'Enter'],
+    ])
+  })
+
+  it('the_errand_it_types_is_the_one_the_brief_composed_for_those_changes', async () => {
+    const cmux = ResumeDouble.accepting()
+
+    await cmux.fix()
+
+    expect(cmux.brief.fixed).toEqual([{
+      issueNumber: ResumeDouble.ISSUE,
+      repository: ResumeDouble.REPOSITORY,
+      changes: ResumeDouble.FIXES,
+    }])
+  })
+
+  it('a_fix_that_could_not_be_typed_travels_out_typed', async () => {
+    const refusal = await ResumeDouble.refusing('no such workspace').fixRefusal()
+
+    expect(refusal).toBeInstanceOf(PlanAgentNotResumed)
+  })
+
+  it('an_enter_that_failed_travels_out_typed_because_the_errand_sits_unrun', async () => {
+    const refusal = await ResumeDouble.refusingTheEnter('lost the session').fixRefusal()
+
+    expect(refusal).toBeInstanceOf(PlanAgentNotResumed)
   })
 })

@@ -60,12 +60,12 @@ export class ActivePlans {
     return {
       phase,
       request: {
-        id: watch.story.text,
+        id: watch.storyText(),
         repo: watch.repository.text,
         path: watch.located.root,
       },
       plan: {
-        id: watch.story.text,
+        id: watch.storyText(),
         repo: watch.repository.text,
         issue: { number: watch.issue.number, url: watch.issue.url },
         agent: watch.agent,
@@ -81,8 +81,8 @@ export class ActivePlansRoute {
   static METHOD = 'GET'
 
   static handledBy(activePlans, recovery = null) {
-    return (request, response) => {
-      if (recovery !== null && !recovery.recover()) {
+    return async (request, response) => {
+      if (recovery !== null && !(await recovery.recover())) {
         Answer.refuse(
           response,
           503,

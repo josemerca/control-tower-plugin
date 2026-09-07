@@ -1,0 +1,9 @@
+.implement-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.implement-progress__state {
+  margin: 0;
+}

@@ -449,8 +449,11 @@ describe('renderKickoff — nombra las dos secciones', () => {
     expect(K()).toMatch(/vacía/)
   })
 
+  // #99 — la frase era «Si alguna está vacía o no aparece, no hay nada que
+  // heredar». Dice lo mismo en positivo: el issue es la fuente entera, y una
+  // sección ausente significa que lo heredado es nada.
   it('anuncia explícitamente el caso «ausente»: issue previo a esta ronda nunca recibe la sección heredada', () => {
-    expect(K()).toMatch(/no está|no aparece/)
+    expect(K()).toMatch(/ausente/)
   })
 
   it('sigue nombrando Out of scope / Protected — no lo desplaza', () => {

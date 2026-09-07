@@ -149,9 +149,12 @@ describe('the harvest table this backend hands the plugin', () => {
 })
 
 describe('the sections the errand sends the agent to read', () => {
-  const body = () => PlanIssueBody.of(new UserStory({
-    key: new UserStoryKey('XOP-4909'), summary: 'la métrica de los campeones', description: 'como analista quiero',
-  }))
+  const body = () => PlanIssueBody.of({
+    story: new UserStory({
+      key: new UserStoryKey('XOP-4909'), summary: 'la métrica de los campeones', description: 'como analista quiero',
+    }),
+    comment: null,
+  })
 
   it('the_two_it_names_are_headings_the_plugin_really_renders_in_the_body_we_write', () => {
     const headings = body().split('\n').filter((line) => line.startsWith('## '))
@@ -196,10 +199,35 @@ class RunDouble {
   }
 }
 
+class StepsNoRunFileReports {
+  static VALUES = Object.freeze([
+    ImplementationStep.STARTING,
+    ImplementationStep.DELIVERED,
+    ImplementationStep.IN_REVIEW,
+    ImplementationStep.FIXING,
+  ])
+}
+
 describe('the run machine and the run file this backend reads back', () => {
   it('every_step_the_machine_can_reach_is_a_step_our_vocabulary_declares', () => {
     expect(Object.values(STEPS).every((step) => Object.values(ImplementationStep).includes(step))).toBe(true)
-    expect(Object.values(ImplementationStep).length).toBe(Object.values(STEPS).length + 2)
+  })
+
+  it('the_only_steps_our_vocabulary_adds_are_the_ones_the_machine_never_reports', () => {
+    const added = Object.values(ImplementationStep).filter((step) => !Object.values(STEPS).includes(step))
+
+    expect(added.sort()).toEqual([...StepsNoRunFileReports.VALUES].sort())
+  })
+
+  it('a_run_the_machine_parked_at_advise_is_read_back_as_a_step_of_the_task_it_advises_on', async () => {
+    let run = RunDouble.freshRun()
+    run = after({ ...run, step: STEPS.JUDGE, judgeRetries: 1 }, OUTCOMES.FAILED, DEFAULT_BUDGETS).run
+
+    const state = await RunDouble.read(run)
+
+    expect(state.step).toBe('advise')
+    expect(state.task).toBe(1)
+    expect(state.attempt).toBe(3)
   })
 
   it('a_run_the_machine_just_created_is_read_as_the_first_task_about_to_be_implemented', async () => {

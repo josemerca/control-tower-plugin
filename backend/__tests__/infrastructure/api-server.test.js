@@ -59,11 +59,20 @@ class StartPlanSpy {
   }
 
   async execute(params) {
-    this.asked.push(params.story.text)
+    this.asked.push(params.story === null ? null : params.story.text)
     this.repositories.push(params.repository.text)
     this.roots.push(params.root.text)
     if (this.failing) throw new PlanAgentNotLaunched('cmux is not reachable')
-    return new StartPlanResult({ agent: StartPlanSpy.AGENT, watch: StartPlanSpy.WATCH })
+    return new StartPlanResult({
+      agent: StartPlanSpy.AGENT,
+      watch: new PlanWatch({
+        story: params.story,
+        issue: StartPlanSpy.ISSUE,
+        located: StartPlanSpy.LOCATED,
+        repository: params.repository,
+        agent: StartPlanSpy.AGENT,
+      }),
+    })
   }
 }
 
@@ -550,13 +559,28 @@ describe('ApiServer', () => {
     )
   })
 
-  it('a_body_with_no_id_is_refused_because_there_is_nothing_to_plan_without_one', async () => {
+  it('a_body_with_neither_an_id_nor_a_comment_is_refused_because_nothing_says_what_to_plan', async () => {
     const port = await RunningApi.listening()
 
     const response = await RunningApi.startPlan(port, '{}')
 
     expect(response.status).toBe(400)
-    expect(await response.text()).toBe('{"code":"malformed-id","detail":"id must be a user story key such as ABC-123"}')
+    expect(await response.text()).toBe(
+      '{"code":"nothing-to-plan","detail":"either id or user_comment must say what to plan"}'
+    )
+  })
+
+  it('a_body_with_only_a_comment_is_accepted_with_a_null_id_because_there_is_no_user_story', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(
+      port,
+      '{"user_comment":"añade el endpoint de salud","repo":"owner/name","path":"/repo/checkout"}'
+    )
+
+    expect(response.status).toBe(202)
+    expect(await response.text()).toBe(RunningApi.ANSWER.replace('"id":"ABC-123"', '"id":null'))
+    expect(RunningApi.spy.asked).toEqual([null])
   })
 
   it('an_id_that_is_not_shaped_like_a_story_key_is_refused_before_it_ever_becomes_a_branch_name', async () => {
@@ -857,16 +881,16 @@ describe('ApiServer', () => {
     expect(await RunningApi.firstFrame(again)).toBe(PlanEvents.frameFor(PlanState.READY))
   })
 
-  it('a_subscription_after_a_progress_nobody_could_read_is_not_watched_any_more_because_the_stream_that_broke_forgot_it', async () => {
-    const { planEvents } = ProgressSpy.unable()
+  it('a_subscription_after_a_progress_that_could_not_be_read_still_finds_its_watch_because_a_transient_failure_does_not_forget_the_session', async () => {
+    const { planEvents } = ProgressSpy.unable({ sleepMs: 5 })
     const port = await RunningApi.listening({ planEvents })
 
     await RunningApi.accepted(port)
-    await fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`)
-    const again = await fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`)
+    const first = await RunningApi.watching(port)
+    await RunningApi.firstFrame(first)
+    const again = await RunningApi.watching(port)
 
-    expect(again.status).toBe(400)
-    expect((await again.json()).code).toBe('not-watched')
+    expect(again.status).toBe(200)
   })
 
   it('a_page_that_hangs_up_while_the_plan_is_still_being_written_keeps_its_watch_so_it_can_come_back', async () => {
@@ -903,19 +927,17 @@ describe('ApiServer', () => {
     expect(spy.asked).toBe(0)
   })
 
-  it('a_progress_nobody_could_read_reaches_the_page_as_an_error_frame_and_closes_instead_of_hanging_open', async () => {
-    const { spy, planEvents } = ProgressSpy.unable()
+  it('a_progress_nobody_could_read_reaches_the_page_as_an_error_frame_and_the_page_is_the_one_that_disconnects', async () => {
+    const { spy, planEvents } = ProgressSpy.unable({ sleepMs: 5 })
     const port = await RunningApi.listening({ planEvents })
 
     await RunningApi.accepted(port)
-    const response = await fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`, {
-      headers: { Origin: `http://127.0.0.1:${port}` },
-    })
+    const response = await RunningApi.watching(port)
+    const frame = await RunningApi.firstFrame(response)
 
     expect(response.status).toBe(200)
-    expect(await response.text())
-      .toBe(`event: error\ndata: {"code":"plan-progress-not-read","detail":"${ProgressSpy.UNREADABLE}"}\n\n`)
-    expect(spy.asked).toBe(1)
+    expect(frame).toBe(`event: error\ndata: {"code":"plan-progress-not-read","detail":"${ProgressSpy.UNREADABLE}"}\n\n`)
+    expect(spy.asked).toBeGreaterThanOrEqual(1)
   })
 
   it('closing_the_connection_from_the_client_stops_the_progress_port_from_being_asked_again', async () => {

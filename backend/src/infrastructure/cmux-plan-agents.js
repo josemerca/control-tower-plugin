@@ -30,8 +30,12 @@ export class CmuxPlanAgents extends PlanAgents {
     this.brief = brief
   }
 
-  static nameFor(story, repository) {
-    return `ct-plan-${repository.text.replace(/\//g, '__')}-${story}`
+  static NO_STORY_PREFIX = 'issue-'
+
+  static nameFor({ story, repository, issueNumber }) {
+    return `ct-plan-${repository.text.replace(/\//g, '__')}-${
+      story === null ? `${CmuxPlanAgents.NO_STORY_PREFIX}${issueNumber}` : story
+    }`
   }
 
   static isHandle(value) {
@@ -41,7 +45,11 @@ export class CmuxPlanAgents extends PlanAgents {
   static argvFor(briefing, typed) {
     return [
       'new-workspace',
-      '--name', CmuxPlanAgents.nameFor(briefing.story, briefing.repository),
+      '--name', CmuxPlanAgents.nameFor({
+        story: briefing.story,
+        repository: briefing.repository,
+        issueNumber: briefing.issue.number,
+      }),
       '--cwd', briefing.located.path,
       '--command', typed,
     ]
@@ -93,6 +101,12 @@ export class CmuxPlanAgents extends PlanAgents {
 
   async review({ agent, issue, repository, changes }) {
     const errand = this.brief.reviewErrandFor({ issueNumber: issue, repository, changes })
+    await this.#type(CmuxPlanAgents.sendArgvFor(agent, errand))
+    await this.#type(CmuxPlanAgents.enterArgvFor(agent))
+  }
+
+  async fix({ agent, issue, repository, changes }) {
+    const errand = this.brief.fixErrandFor({ issueNumber: issue, repository, changes })
     await this.#type(CmuxPlanAgents.sendArgvFor(agent, errand))
     await this.#type(CmuxPlanAgents.enterArgvFor(agent))
   }

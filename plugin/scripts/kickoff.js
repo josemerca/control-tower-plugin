@@ -178,19 +178,24 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conv
   // de más abajo la descarta.
   const e2eRuns = resolveE2eRunsForAgent(slice)
   const e2eLine = e2eRuns.length
-    ? `Recorridos e2e de este slice (ejecútalos tal cual, ni uno más ni uno menos): ${e2eRuns.map((r) => `"${r}"`).join('; ')}. Al terminarlos, cierra el paso con \`ct-step e2e\` — es el comando que registra el veredicto, no una descripción.`
+    ? `Recorridos e2e de este slice (ejecútalos tal cual, ni uno más ni uno menos): ${e2eRuns.map((r) => `"${r}"`).join('; ')}. Al terminarlos, cierra el paso con \`ct-step e2e\`, tecleado tal cual: es el comando que registra el veredicto.`
     : ''
   return [
     `Estás implementando UN slice (${slice.name}) del repo ${repo}, issue ${issueRefOf(slice)}${orderSuffixOf(slice)}.`,
-    // F32 — las dos prohibiciones nuevas viven AQUÍ y no solo en los skills
-    // forkados, porque el kickoff es el único texto que el agente despachado
-    // lee SEGURO (la costura 3 de finishing-a-development-branch impone lo
-    // mismo, pero solo si el agente llega a invocar ese skill). "NO crees
-    // worktrees nuevos" existe porque using-git-worktrees viaja en el fork y
-    // le diría que se cree uno: el aislamiento ya lo puso el dispatcher. El
-    // "al terminar deja el PR listo y PARA" que cerraba esta línea se fue a
-    // cambio: lo dice ya, con el comando literal, la línea de cierre de abajo.
-    `Es human-gated: NO mergees el PR (el merge es de la sesión coordinadora), NO empieces el siguiente slice, y NO crees worktrees nuevos — ya estás en el que te preparó el dispatcher.`,
+    // F32 — el reparto de roles vive AQUÍ y no solo en los skills forkados,
+    // porque el kickoff es el único texto que el agente despachado lee SEGURO
+    // (la costura 3 de finishing-a-development-branch impone lo mismo, pero
+    // solo si el agente llega a invocar ese skill). El worktree se nombra
+    // porque using-git-worktrees viaja en el fork y le ofrecería crearse uno:
+    // el aislamiento ya lo puso el dispatcher, y decirle DÓNDE está es lo que
+    // cierra esa oferta. El "al terminar deja el PR listo y PARA" que cerraba
+    // esta línea se fue a cambio: lo dice ya, con el comando literal, la línea
+    // de cierre de abajo.
+    //
+    // #99 — la línea era tres prohibiciones en mayúsculas. Dice lo mismo como
+    // reparto de trabajo: de quién es cada acto. Lo que de verdad impide el
+    // merge y el despacho ajeno es el hook con `deny`, no este prompt.
+    `Es human-gated y el reparto es éste: el merge del PR y el arranque del siguiente slice son de la sesión coordinadora; lo tuyo es este slice, en el worktree que te preparó el dispatcher — ya estás en él.`,
     // #96 — el baseline lo mide el dispatcher (scripts/baseline.js) al preparar
     // el worktree y lo siembra como DATO en la semilla: pwd, rama y corte ya
     // los verificó el programa. Esta línea señala dónde está; no lo ordena.
@@ -205,7 +210,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conv
     // (a diferencia de los AC) porque `Protegido` es prosa de longitud
     // arbitraria y el kickoff se teclea entero en un pty; se nombra la sección
     // exacta, que es lo que hace falta para que la busque.
-    `Hidrátate de ${SLICE_REL_PATH} y del issue de GitHub; los criterios de aceptación son ${slice.ac.join(', ') || '(ver issue)'}. Lee además la sección "## Out of scope / Protected" del issue: lo que hay ahí NO se toca, aunque parezca parte del trabajo.`,
+    `Hidrátate de ${SLICE_REL_PATH} y del issue de GitHub; los criterios de aceptación son ${slice.ac.join(', ') || '(ver issue)'}. Lee además la sección "## Out of scope / Protected" del issue: lo que hay ahí se queda tal cual está, aunque parezca parte del trabajo.`,
     // Mismo criterio que la línea de "Out of scope / Protected", justo encima,
     // y por los mismos dos motivos: se NOMBRAN las secciones y no se interpola
     // su texto —es prosa de longitud arbitraria y esto se teclea entero en un
@@ -218,8 +223,8 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conv
     // creado antes de que estas secciones existieran nunca recibe la
     // heredada). Sin ella, un agente que no encuentra lo que se le acaba de
     // nombrar lo busca fuera del issue, que es justo lo que no puede hacer.
-    `Lee también las secciones "${EPIC_CONTEXT_HEADING}" y "${INHERITED_CONTEXT_HEADING}" del issue: traen lo que el spec y los slices ya mergeados condicionan sobre este trabajo y que no cabe en los criterios de aceptación. Si alguna está vacía o no aparece, no hay nada que heredar — no lo busques fuera del issue.`,
-    `Lee también la sección "${FROZEN_DECISIONS_HEADING}" del issue: son decisiones del epic con consecuencia sobre este trabajo, que DEBES respetar (no las reinterpretes ni las cambies) y que van a "## 2. Closed decisions" de tu plan. Si no aparece, no hay ninguna — no la busques fuera del issue.`,
+    `Lee también las secciones "${EPIC_CONTEXT_HEADING}" y "${INHERITED_CONTEXT_HEADING}" del issue: traen lo que el spec y los slices ya mergeados condicionan sobre este trabajo y que queda fuera de los criterios de aceptación. El issue es la fuente entera de lo heredado: una sección vacía o ausente significa que lo heredado es nada.`,
+    `Lee también la sección "${FROZEN_DECISIONS_HEADING}" del issue: son decisiones del epic con consecuencia sobre este trabajo, que DEBES respetar tal como están escritas y que van a "## 2. Closed decisions" de tu plan, con las mismas palabras. El issue es la fuente entera: si la sección falta, las decisiones congeladas son cero.`,
     // Slice 10 — la señal, NOMBRADA cuando el issue la declara: "ninguna
     // exigencia que el spec le haga al agente puede depender de que el agente
     // lea el spec" — sin esta línea, el juez de slice exigiría lo que al
@@ -229,7 +234,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conv
     // líneas que sí salen). El discriminador es parseSenalCell, el MISMO del
     // groom — no una segunda lectura de la celda que pueda divergir.
     parseSenalCell(slice.senal || '').kind === 'senal'
-      ? 'Este slice declara una SEÑAL DE OBSERVABILIDAD (sección "## Señal de observabilidad" del issue): lo que esa señal promete tiene que emitirlo el código de PRODUCCIÓN de este slice, instrumentado como ya instrumenta este repo y sin labels de cardinalidad ilimitada — el juez del slice entero lo comprueba contra el diff acumulado antes del PR.'
+      ? 'Este slice declara una SEÑAL DE OBSERVABILIDAD (sección "## Señal de observabilidad" del issue): lo que esa señal promete tiene que emitirlo el código de PRODUCCIÓN de este slice, instrumentado como ya instrumenta este repo y con todas sus labels acotadas — el juez del slice entero lo comprueba contra el diff acumulado antes del PR.'
       : '',
     // F32 — el modelo de dos niveles (§4.3 del handoff): nivel epic = CT,
     // nivel slice = los skills FORKADOS en este plugin (control-tower-loop:*,
@@ -253,18 +258,18 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conv
     // `.agent/conventions.md` y seleccionar en §3.
     // Un plan que prescribe un campo, una guarda o un símbolo público sin
     // haber leído `simplicity.md` prescribe exactamente lo que el juez
-    // marcará después — y el implementador tiene orden de no desviarse del
-    // plan, así que el defecto entra armado por el contrato. La invitación a
-    // no leer nada ("no hace falta que abras los documentos ahora") era
-    // razonable cuando la vara no decía nada sobre lo que un diff añade; ya
-    // no lo es. Se nombran sólo los dos que el plan no puede no haber
-    // abierto: `simplicity.md` decide si lo que el plan pide se necesita, y
-    // `decisions.md` es dónde vive una decisión ya tomada, para no escribirla
-    // dos veces. Los demás siguen disponibles por ruta, a demanda.
-    `La vara de ct vive en ${conventionsDir} y el programa la lleva a cada tarea: al implementador pegada, al juez por ruta. Cómo se relaciona con las convenciones de este repo cuando chocan lo dice la CABECERA con la que viaja, que es donde está escrita esa regla y el único sitio donde está — no la repitas en el plan ni la reinterpretes. Antes de escribir el plan abre dos de ellos, porque el plan decide justo lo que miden: \`simplicity.md\` (la carga de la prueba está en lo que se añade, y que el plan lo pida no la descarga) y \`decisions.md\` (dónde vive una decisión, para que no la escribas dos veces). Los demás, el que necesites para decidir algo concreto. Lo que el plan tiene que seleccionar sigue siendo la vara del REPO, en el \`Rules to obey:\` de §3.`,
-    `Y una de ellas decide cómo reparten trabajo tus tareas: \`architecture.md\` rige los MÓDULOS NUEVOS. Un módulo que ya existía y no cumple es deuda declarada del repo —lo que le añadas sigue el estilo de su anfitrión y eso no es hallazgo—, pero un concepto nuevo es un módulo nuevo y nace cumpliendo. De qué lado cae cada cosa lo decides tú al repartir \`**Files:**\` entre \`(create)\` y \`(modify)\`.`,
-    `Primer acto, con el baseline verde: escribe el plan del slice con control-tower-loop:writing-plans-prescriptive usando el issue como spec (sus AC, "Protegido", "${EPIC_CONTEXT_HEADING}" y "${FROZEN_DECISIONS_HEADING}" son la entrada que la skill pide; vuelca cada decisión congelada en "## 2. Closed decisions" del plan — son del epic y las DEBES respetar, no reinterpretar). SOLO bloques esenciales, cada uno con su etiqueta de rol: contratos, call sites y el tramo que cambia — los cuerpos de los módulos y los ficheros de test los escribe el implementador con TDD, y la configuración se describe en prosa. Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${slice.n}-<slug>.md, valídalo con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --check-plan\` hasta exit 0, y commitéalo: viaja en el PR, y el --release del final se negará (exit 6) sin un plan válido commiteado.`,
-    `Con el plan commiteado y el gate 'plan' con OK humano, la implementación NO la conduces con subagent-driven-development ni con su ledger: la secuencia la dicta la máquina. Pregunta el paso con \`node ${ctStepPath} next --plan docs/superpowers/plans/<el-plan-que-commiteaste>.md --issue ${slice.n}\` y obedece LITERALMENTE lo que imprima en cada paso (donde diga \`ct-step\`, es \`node ${ctStepPath}\`): despacha el implementador como subagente con la rúbrica y el brief que te indique, luego \`ct-step report\`, \`ct-step controls\`, despacha el juez como subagente ct-judge (declarado sin Bash), \`ct-step verdict\` y \`ct-step commit\` — comitea ct-step, nunca tú ni el implementador. Tras el commit de la última tarea quedan tres pasos más, que \`next\` también dicta: \`ct-step reconcile\` (fusiona la rama con su base; si hay conflicto, despacha ct-reconciler como subagente, declarado sin Bash y sin Write — el programa stagea, comitea y aborta la fusión, nunca tú ni el implementador), \`ct-step global\` (la Global verification del plan la ejecuta el programa, no un agente) y el juicio del slice entero — despacha ct-slice-judge como subagente (declarado sin Bash) y entrega su JSON con \`ct-step slice-verdict\`. Vuelve a \`next\` tras cada paso hasta "run delivered".`,
+    // marcará después — y el implementador tiene orden de seguir el plan, así
+    // que el defecto entra armado por el contrato. Dejar la lectura entera a
+    // demanda ("el documento que necesites, cuando lo necesites") era
+    // razonable cuando la vara callaba sobre lo que un diff añade; ya dice
+    // algo. Se nombran sólo los dos que el plan tiene abiertos siempre:
+    // `simplicity.md` decide si lo que el plan pide se necesita, y
+    // `decisions.md` es dónde vive una decisión ya tomada, para escribirla
+    // una sola vez. Los demás siguen disponibles por ruta, a demanda.
+    `La vara de ct vive en ${conventionsDir} y el programa la lleva a cada tarea: al implementador pegada, al juez por ruta. Cómo se relaciona con las convenciones de este repo cuando chocan lo dice la CABECERA con la que viaja, que es donde está escrita esa regla y el único sitio donde está — léela ahí y sigue lo que dice tal cual. Antes de escribir el plan abre dos de ellos, porque el plan decide justo lo que miden: \`simplicity.md\` (la carga de la prueba está en lo que se añade, y que el plan lo pida la deja donde estaba) y \`decisions.md\` (dónde vive una decisión ya tomada, para escribirla una sola vez). Los demás quedan a mano por ruta, el que necesites para decidir algo concreto. Lo que el plan tiene que seleccionar sigue siendo la vara del REPO, en el \`Rules to obey:\` de §3, como hasta ahora.`,
+    `Y una de ellas decide cómo reparten trabajo tus tareas: \`architecture.md\` rige los MÓDULOS NUEVOS. Un módulo que ya existía es deuda declarada del repo —lo que le añadas cumple siguiendo el estilo de su anfitrión—, y un concepto nuevo es un módulo nuevo que nace cumpliendo. De qué lado cae cada cosa lo decides tú al repartir \`**Files:**\` entre \`(create)\` y \`(modify)\`.`,
+    `Primer acto, con el baseline verde: escribe el plan del slice con control-tower-loop:writing-plans-prescriptive usando el issue como spec (sus AC, "Protegido", "${EPIC_CONTEXT_HEADING}" y "${FROZEN_DECISIONS_HEADING}" son la entrada que la skill pide; vuelca cada decisión congelada en "## 2. Closed decisions" del plan — son del epic y las DEBES respetar con sus mismas palabras). SOLO bloques esenciales, cada uno con su etiqueta de rol: contratos, call sites y el tramo que cambia — los cuerpos de los módulos y los ficheros de test los escribe el implementador con TDD, y la configuración se describe en prosa. Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${slice.n}-<slug>.md, valídalo con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --check-plan\` hasta exit 0, y commitéalo: viaja en el PR, y el --release del final se negará (exit 6) sin un plan válido commiteado.`,
+    `Con el plan commiteado y el gate 'plan' con OK humano, la secuencia de la implementación la dicta la máquina. Pregunta el paso con \`node ${ctStepPath} next --plan docs/superpowers/plans/<el-plan-que-commiteaste>.md --issue ${slice.n}\` y obedece LITERALMENTE lo que imprima en cada paso (donde diga \`ct-step\`, es \`node ${ctStepPath}\`): despacha el implementador como subagente con la rúbrica y el brief que te indique, luego \`ct-step report\`, \`ct-step controls\`, despacha el juez como subagente ct-judge (declarado sin Bash), \`ct-step verdict\` y \`ct-step commit\` — quien comitea es ct-step. Tras el commit de la última tarea quedan tres pasos más, que \`next\` también dicta: \`ct-step reconcile\` (fusiona la rama con su base; si hay conflicto, despacha ct-reconciler como subagente, declarado sin Bash y sin Write — quien stagea, comitea y aborta la fusión es el programa), \`ct-step global\` (la Global verification del plan la ejecuta el programa) y el juicio del slice entero — despacha ct-slice-judge como subagente (declarado sin Bash) y entrega su JSON con \`ct-step slice-verdict\`. Vuelve a \`next\` tras cada paso hasta "run delivered".`,
     addendum,
     ...gateLines,
     e2eLine,
@@ -287,7 +292,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conv
     // estado, y hasta ahora no tenía forma de decir "esto no puede continuar"
     // salvo prosa dentro de `next_action` — que la siguiente sesión lee como
     // una orden vigente. El campo existe; hay que nombrárselo aquí o no lo usará.
-    `Si el trabajo queda BLOQUEADO (no puedes continuar, y no es solo "no terminado"), márcalo en ${SLICE_REL_PATH} como \`blocked: {reason: "por qué", unblock: "qué haría falta"}\` — NO en prosa dentro de next_action. El hook de SessionStart lo anuncia y suspende el next_action en la siguiente sesión.`,
+    `Si el trabajo queda BLOQUEADO (hace falta algo de fuera para seguir, más allá de que quede trabajo por hacer), márcalo en ${SLICE_REL_PATH} como \`blocked: {reason: "por qué", unblock: "qué haría falta"}\`: ese campo es el canal, y es lo que sobrevive a una re-hidratación. El hook de SessionStart lo anuncia y suspende el next_action en la siguiente sesión.`,
     // F17 — EL KICKOFF FABRICABA EL DEADLOCK QUE EL PROPIO LOOP DESCRIBE COMO
     // AVERÍA. Esta línea decía "abre PR" y nada más: no pedía `Closes #N`. La
     // cadena, entera y verificable en este repo:
@@ -323,7 +328,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conv
     // que el comando de `--release` de esta línea. Nunca `slice.order` (ver
     // el bloque de issueRefOf, arriba): un `Closes #<orden>` cerraría el issue
     // equivocado, o ninguno.
-    `Al acabar: commit refs al issue, actualiza ${SLICE_REL_PATH}, abre el PR contra ${baseRefOf(base)} con \`Closes #${slice.n}\` en el CUERPO del PR (no en el título, no en un comentario), libera el claim con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --release\`, deja el estado mergeable y PARA.`,
+    `Al acabar: commit refs al issue, actualiza ${SLICE_REL_PATH}, abre el PR contra ${baseRefOf(base)} con \`Closes #${slice.n}\` en el CUERPO del PR (el cuerpo es el único sitio donde GitHub lee las closing keywords), libera el claim con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --release\`, deja el estado mergeable y PARA.`,
     // El porqué va aparte y no dentro de la línea de arriba a propósito: esa
     // línea es una lista de seis órdenes, y una orden sin motivo dentro de una
     // lista de seis es la primera que se cae cuando el agente va justo de
@@ -332,7 +337,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conv
     // `## Dependencias` lo escribe en espacio de ORDEN §9, no de issue, y
     // escribir aquí "merge-after #<número de issue>" sería justo la confusión
     // entre los dos espacios de identificadores que este fichero ya combate.
-    `Ese \`Closes #${slice.n}\` no es cosmético ni opcional: es lo ÚNICO que cierra el issue al mergear el PR. Un PR mergeado con su issue abierto deja este slice reteniendo sus tokens de \`area:\`/\`touches:\` para siempre — ningún slice vecino se despacha, el carril serializante (\`migration\`/\`ci\`/\`pbxproj\`) se queda tapado, y ningún dependiente con un \`merge-after\` sobre este slice lo ve satisfecho jamás. Si abres el PR a mano, o alguien edita su cuerpo después, comprueba que la línea sigue ahí.`,
+    `Ese \`Closes #${slice.n}\` es lo ÚNICO que cierra el issue al mergear el PR, y de ese cierre depende el resto del epic: un PR mergeado con su issue abierto deja este slice reteniendo sus tokens de \`area:\`/\`touches:\` para siempre — el vecino que comparta uno se queda en la cola, el carril serializante (\`migration\`/\`ci\`/\`pbxproj\`) sigue tapado, y cualquier dependiente con un \`merge-after\` sobre este slice sigue esperando. Si abres el PR a mano, o alguien edita su cuerpo después, comprueba que la línea sigue ahí.`,
   ].filter(Boolean).join('\n')
 }
 

@@ -1,6 +1,6 @@
 import { Answer, Refusal } from './http.js'
 import { Projection } from './projection.js'
-import { PlanProgressFailure } from '../domain/exceptions.js'
+import { PlanFailure } from '../domain/exceptions.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
 
 export class PlanSessions {
@@ -109,28 +109,31 @@ export class PlanEvents {
   static ERROR_EVENT = 'error'
   static PROGRESS_NOT_READ = 'plan-progress-not-read'
 
-  static frameFor(state) {
-    return `data: ${JSON.stringify({ state })}\n\n`
+  static frameFor(state, pullRequest = null) {
+    const said = pullRequest === null
+      ? { state }
+      : { state, pullRequest: { number: pullRequest.number, url: pullRequest.url } }
+
+    return `data: ${JSON.stringify(said)}\n\n`
   }
 
-  static failureFrameFor(cause) {
-    return `event: ${PlanEvents.ERROR_EVENT}\ndata: ${JSON.stringify({ code: PlanEvents.PROGRESS_NOT_READ, detail: cause.message })}\n\n`
+  static failureFrameFor(cause, code) {
+    return `event: ${PlanEvents.ERROR_EVENT}\ndata: ${JSON.stringify({ code, detail: cause.message })}\n\n`
   }
 
   async *stream(session, cancelled) {
     let last = null
     for (;;) {
-      let read
+      let read = null
       try {
         read = await this.read(session)
       } catch (cause) {
-        if (!(cause instanceof PlanProgressFailure)) throw cause
-        yield PlanEvents.failureFrameFor(cause)
-        return
+        if (!(cause instanceof PlanFailure)) throw cause
+        yield PlanEvents.failureFrameFor(cause, PlanEvents.PROGRESS_NOT_READ)
       }
-      if (read.state !== last) {
+      if (read !== null && read.state !== last) {
         last = read.state
-        yield PlanEvents.frameFor(read.state)
+        yield PlanEvents.frameFor(read.state, read.pullRequest ?? null)
       }
       await this.sleep()
       if (cancelled()) return
@@ -173,7 +176,6 @@ export class PlanEventsRoute {
       for await (const frame of events.stream(asked.watched, disconnected)) {
         response.write(frame)
       }
-      if (!disconnected()) sessions.forget({ issue: asked.watched.issue.number, repository: asked.watched.repository })
       response.end()
     }
   }

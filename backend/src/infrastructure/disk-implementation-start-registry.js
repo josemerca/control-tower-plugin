@@ -20,7 +20,7 @@ export class DiskImplementationStartRegistry {
       repo: watch.repository.text,
       issue: watch.issue.number,
       agent: watch.agent,
-      story: watch.story.text,
+      story: watch.storyText(),
       root: watch.located.root,
       branch: watch.located.branch,
       worktree: watch.located.path,

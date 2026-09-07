@@ -1,0 +1,77 @@
+import { ImplementProgressMother } from '__scenarios__/ImplementProgressMother'
+import { ImplementProgressClient } from 'app/implement-progress/client'
+
+const answerWith = (answer: { status: number; body: string }) => {
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(answer.body, { status: answer.status })))
+}
+
+const get = () => ImplementProgressClient.get({ issue: ImplementProgressMother.ISSUE, root: ImplementProgressMother.ROOT })
+
+describe('ImplementProgressClient', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('should read the step, the task, the name, the attempt and the discards of a run in progress', async () => {
+    answerWith(ImplementProgressMother.progress())
+
+    const outcome = await get()
+
+    expect(outcome).toEqual({
+      kind: 'read',
+      state: { step: 'judge', task: 3, totalTasks: 7, name: 'el lector del plan', attempt: 2, discards: 0 },
+    })
+  })
+
+  it('should keep a task whose name the backend could not read as null instead of hiding it', async () => {
+    answerWith(ImplementProgressMother.withoutTaskName())
+
+    const outcome = await get()
+
+    expect(outcome).toEqual({
+      kind: 'read',
+      state: { step: 'implement', task: 1, totalTasks: 8, name: null, attempt: 1, discards: 0 },
+    })
+  })
+
+  it('should treat a worktree without a run yet as not read instead of a refusal', async () => {
+    answerWith(ImplementProgressMother.notRead())
+
+    const outcome = await get()
+
+    expect(outcome).toEqual({ kind: 'not-read' })
+  })
+
+  it('should keep the backend refusal text for a refusal other than not-read', async () => {
+    answerWith(ImplementProgressMother.malformedRoot())
+
+    const outcome = await get()
+
+    expect(outcome).toEqual({ kind: 'refused', error: ImplementProgressMother.MALFORMED_ROOT_DETAIL })
+  })
+
+  it('should say the backend is unreachable when the network fails', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new TypeError('Failed to fetch')
+    }))
+
+    const outcome = await get()
+
+    expect(outcome).toEqual({ kind: 'backend-unreachable' })
+  })
+
+  it('should say the backend is unreachable instead of crashing on an unknown step', async () => {
+    answerWith({ status: 200, body: '{"step":"unknown-step","task":1,"total_tasks":1,"name":null,"attempt":1,"discards":0}' })
+
+    const outcome = await get()
+
+    expect(outcome).toEqual({ kind: 'backend-unreachable' })
+  })
+
+  it('should ask with the issue in the path and the canonical root as query', async () => {
+    const fetching = vi.fn(async () => new Response(ImplementProgressMother.progress().body, { status: 200 }))
+    vi.stubGlobal('fetch', fetching)
+
+    await ImplementProgressClient.get({ issue: 7, root: '/Users/pedro/code/name' })
+
+    expect(fetching).toHaveBeenCalledWith('/implement-progress/7?root=%2FUsers%2Fpedro%2Fcode%2Fname')
+  })
+})

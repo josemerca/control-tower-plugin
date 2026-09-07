@@ -488,6 +488,75 @@ export const RECONCILER_TOOLS = 'Read, Grep, Glob, Edit'
 // test que los ata obliga a que paquete y agente cambien en la MISMA tarea.
 export const SLICE_PACKAGE_SECTIONS = ['Vara', 'Señal', 'Commits', 'Files changed', 'Diff']
 
+// EL CONSEJERO (H9, `agents/ct-advisor.md`), con UNA sola herramienta: `Read`.
+// No escribe su respuesta a un fichero como los dos jueces —la devuelve por
+// `structured_output`, que es todo lo que `ct-step advice` necesita leer— así
+// que darle `Write` sería concederle alcance sobre el árbol justo en el paso
+// cuyo sentido es que el árbol vuelva a estar limpio. Sin `Grep` ni `Glob` por
+// el mismo motivo por el que el juez de slice no lleva `Skill`: lo que tiene
+// que mirar se lo pone delante el paquete, y darle más «por si acaso» es la
+// indirección que este módulo ya se quitó del `kind` del informe.
+//
+// Copia del frontmatter de `agents/ct-advisor.md`, atada por
+// `step-contracts.test.js` con el mismo criterio que JUDGE_TOOLS: este módulo
+// es puro y no lee disco, así que lo que impide que las dos diverjan es el
+// test.
+export const ADVISOR_TOOLS = 'Read'
+
+// Los tres encabezados del paquete del consejero que escribe
+// `escribirPaqueteDeConsejo` en `scripts/ct-step.mjs`, en el orden en que
+// aparecen: el brief de la tarea (lo que se pidió), los informes de los dos
+// intentos vetados (lo que se hizo) y los dos veredictos (por qué no valió).
+// Mismo cruce y mismo test que `PACKAGE_SECTIONS`: la rúbrica del agente los
+// cita por su nombre, y sin la atadura un encabezado renombrado deja al
+// consejero señalando una sección que no existe.
+export const ADVICE_PACKAGE_SECTIONS = ['Brief', 'Intentos', 'Veredictos']
+
+// EL CONSEJO. Dos campos y ninguno más: el ENFOQUE, que es lo que el brief del
+// tercer intento va a llevar dentro, y las RUTAS a reconsiderar, que es lo que
+// hace accionable el enfoque. Nada de severidades ni de rúbrica: el consejero
+// no juzga —de eso ya hay dos veredictos en su paquete— y no se le pide un
+// diagnóstico que nadie consumiría.
+export const ADVICE_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  required: ['approach', 'files_to_reconsider'],
+  properties: {
+    approach: { type: 'string' },
+    files_to_reconsider: {
+      type: 'array',
+      items: { type: 'string' },
+    },
+  },
+})
+
+// Validación a mano, como las otras tres de este módulo y por lo mismo: cero
+// dependencias nuevas y cabe aquí.
+//
+// La lista VACÍA vale y no descarta: «ninguna ruta que reconsiderar» es una
+// respuesta —el enfoque puede ser rehacer lo mismo por otro camino sobre los
+// mismos ficheros— y gastar por ella uno de los seis descartes que matan el
+// run sería el precio más caro por el defecto más barato, que es el
+// razonamiento que `readReport` ya escribió para la ruta repetida.
+//
+// Las rutas se deduplican y se comprueban igual que en `readReport`: aquí no
+// se stagea nada con ellas, pero viajan al brief del tercer intento, y una
+// ruta absoluta o que sube de directorio ahí sólo puede mandar al
+// implementador fuera de su alcance.
+export function readAdvice(structured) {
+  if (!structured || typeof structured !== 'object' || Array.isArray(structured)) {
+    return { why: 'el consejero no devolvió structured_output' }
+  }
+  const { approach, files_to_reconsider: files } = structured
+  if (!esTexto(approach)) return { why: 'el consejo no dice qué enfoque tomar: falta `approach`' }
+  if (!Array.isArray(files) || !files.every(esTexto)) {
+    return { why: 'el consejo no trae la lista de rutas a reconsiderar: `files_to_reconsider` es una lista de rutas, vacía si no hay ninguna' }
+  }
+  const fuera = files.filter((p) => p.startsWith('/') || p.split('/').includes('..'))
+  if (fuera.length) return { why: `el consejo nombra rutas fuera del worktree: ${fuera.join(', ')}` }
+  return { advice: { approach: approach.trim(), files_to_reconsider: [...new Set(files)] } }
+}
+
 // ---------------------------------------------------------------------------
 // EL TOKEN DEL PAQUETE — el paquete ata su PRODUCTO, no sólo su insumo.
 //
