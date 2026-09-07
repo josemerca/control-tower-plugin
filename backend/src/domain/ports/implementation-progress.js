@@ -1,7 +1,7 @@
 export class ImplementationProgress {
-  async of({ root, issue }) {
+  async of({ root, issue, repository }) {
     throw new Error(
-      `${this.constructor.name} must implement of({ root, issue }), asked for ${issue} at ${root}`
+      `${this.constructor.name} must implement of({ root, issue, repository }), asked for ${issue} of ${repository} at ${root}`
     )
   }
 }

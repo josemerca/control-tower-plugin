@@ -120,7 +120,7 @@ describe('ct-api entrypoint', () => {
 
     try {
       const response = await fetch(
-        `http://127.0.0.1:${port}/implement-progress/${RunFileFixture.ISSUE}?root=${encodeURIComponent(root)}`
+        `http://127.0.0.1:${port}/implement-progress/${RunFileFixture.ISSUE}?root=${encodeURIComponent(root)}&repo=owner%2Fname`
       )
 
       expect(response.status).toBe(200)
@@ -140,7 +140,7 @@ describe('ct-api entrypoint', () => {
 
     try {
       const response = await fetch(
-        `http://127.0.0.1:${port}/implement-progress/${RunFileFixture.ISSUE}?root=${encodeURIComponent(root)}`
+        `http://127.0.0.1:${port}/implement-progress/${RunFileFixture.ISSUE}?root=${encodeURIComponent(root)}&repo=owner%2Fname`
       )
 
       expect(response.status).toBe(200)

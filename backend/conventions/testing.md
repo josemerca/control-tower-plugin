@@ -19,11 +19,15 @@ fast subset per change and the whole suite before handing anything over.
    case can reach is not a test waiting to be written — it is either dead or an
    invariant that defends itself.
 2. **An adapter is tested by cutting right before the external system** and
-   asserting the interaction: the literal argv sent, and the parse of literal
-   recorded output. The one exception is an adapter that *is* the call — a
-   database repository, or here `ToolRunner`, twenty lines around `execFile`
-   with nothing left to assert once the process is doubled. Those run the real
-   thing, and are the only tests that do.
+   asserting the interaction: the literal argv sent, and the parse of a
+   declared output shape. The shape is written in the test and never fetched
+   while it runs: a suite that has to reach a service in order to have a case
+   is a suite that depends on that service's state, its rate limits and its
+   outages. What the declared shape owes the real thing is settled once, by
+   the smoke test below, and not by every run. The one exception is an adapter
+   that *is* the call — a database repository, or here `ToolRunner`, twenty
+   lines around `execFile` with nothing left to assert once the process is
+   doubled. Those run the real thing, and are the only tests that do.
 3. **Integration from the entrypoint covers the happy path, and only that.** A
    real process, one whole request reaching the first real tool. Refusals,
    collisions and cuts are measured in-process at the layer that owns them, or
@@ -42,7 +46,7 @@ Outside-in, and each layer has its own kind of assertion:
 | Controller (HTTP) | the use case, by constructor | the status and the **literal JSON body** of the answer, through a listening server and `fetch` — never calling the handler as a function |
 | Application (actions) | every port, by constructor | what each port **received** and what the use case returned; order is pinned by cut points — when a step fails, the later ports were never asked |
 | Domain | — | **nothing**: it is covered along the two paths above, with no exception |
-| Adapters | the tool, as a scripted conversation | the **literal argv** sent, and the parse of **literal recorded output** — real transcripts, not invented shapes |
+| Adapters | the tool, as a scripted conversation | the **literal argv** sent, and the parse of a **declared output shape**, written in the test and never fetched while it runs |
 | Boundary payloads | nothing | fed to the **real reader on the other side** when it lives in this repository: what we write for the plugin is read back with the plugin's own `mapGhIssue`, `extractAc`, `parseScope` |
 | Entrypoint | nothing | a real process, **happy path only**: see below |
 
@@ -76,6 +80,24 @@ Two kinds, and no third:
 
 Every spawned child is killed in `afterEach`, not after the assertion: a failing
 test must not leak a process.
+
+## The smoke test settles what a double cannot
+
+A doubled tool proves the interaction: the argv we send, and what we make of
+what comes back. It cannot prove that the shape we declared is the shape the
+service really sends, and nothing inside the suite can — a suite that reached
+for a service to answer that question would inherit the service's state, its
+rate limits and its outages, and would fail for reasons that are not ours.
+
+So the question is answered once, out of band. When the development is done,
+the flow runs against the real service and what it returns is compared against
+the shape the adapter's tests declare. Where the two disagree the declared
+shape is the one that is wrong, and its tests are what changes.
+
+It runs at the end of the work and not per commit, one person watching it, and
+its result travels in the body of the pull request. It is not a test file, it
+earns no place in the suite, and it is not what the section above calls a
+real-process test.
 
 ## The mutation sweep
 

@@ -15,7 +15,7 @@ import {
 import {
   PlanAgentNotResumed, PlanFailure, PlanGoNotAnswered, GoFailure, GoNotRecorded,
 } from '../../src/domain/exceptions.js'
-import { ActivePlans } from '../../src/infrastructure/active-plans-route.js'
+import { ActivePlans, ActivePlanPhase } from '../../src/infrastructure/active-plans-route.js'
 
 class ImplementPlanSpy {
   constructor() {
@@ -56,6 +56,7 @@ class RunningApi {
   static ANSWER = '{"status":"implementing","agent":"workspace:20","issue":33}'
   static spy = null
   static reviews = null
+  static pullRequestReviews = null
   static sessions = null
   static activePlans = null
   static implementationStarts = null
@@ -71,14 +72,16 @@ class RunningApi {
   static NO_FRONTEND = join(tmpdir(), 'ct-frontend-never-built')
   static NO_EVENTS = new PlanEvents({
     read: () => Promise.reject(new Error('this suite never streams plan events')),
+    readDelivery: () => Promise.reject(new Error('this suite never streams delivery events')),
     sleep: () => Promise.resolve(),
   })
 
   static async listening(spy = new ImplementPlanSpy(), options = {}) {
     RunningApi.spy = spy
     RunningApi.reviews = new ReviewsSpy()
+    RunningApi.pullRequestReviews = new ReviewsSpy()
     RunningApi.sessions = new PlanSessions()
-    RunningApi.sessions.remember(RunningApi.WATCHED)
+    if (options.watched ?? true) RunningApi.sessions.remember(RunningApi.WATCHED)
     RunningApi.activePlans = new ActivePlans({ sessions: RunningApi.sessions })
     RunningApi.implementationStarts = options.implementationStarts ?? { remember: vi.fn() }
     RunningApi.stderr = options.stderr ?? vi.fn()
@@ -87,6 +90,7 @@ class RunningApi {
       startPlan: null,
       implementPlan: spy,
       reviews: RunningApi.reviews,
+      pullRequestReviews: RunningApi.pullRequestReviews,
       sessions: RunningApi.sessions,
       activePlans: RunningApi.activePlans,
       implementationStarts: RunningApi.implementationStarts,
@@ -318,19 +322,47 @@ describe('ImplementCollapse', () => {
 describe('implementing the plan lifts the watch on its issue', () => {
   afterEach(RunningApi.stopAll)
 
-  it('implementing_the_plan_lifts_the_watch_because_there_is_nothing_left_to_ask_for', async () => {
-    const response = await RunningApi.asking(RunningApi.ACCEPTED_BODY)
+  it('accepting_the_implementation_stops_watching_the_plan_because_that_gate_is_closed', async () => {
+    await RunningApi.post(await RunningApi.listening(), RunningApi.ACCEPTED_BODY)
 
-    expect(response.status).toBe(202)
-    expect(RunningApi.reviews.stopped).toEqual([{
-      issue: 33, repository: RunningApi.WATCHED.repository,
-    }])
+    expect(RunningApi.reviews.stopped).toEqual([
+      { issue: 33, repository: RunningApi.WATCHED.repository },
+    ])
   })
 
-  it('implementing_the_plan_forgets_the_session_so_nothing_keeps_reading_the_contract_of_a_plan_being_built', async () => {
-    await RunningApi.asking(RunningApi.ACCEPTED_BODY)
+  it('accepting_the_implementation_starts_watching_the_pull_request_that_does_not_exist_yet', async () => {
+    await RunningApi.post(await RunningApi.listening(), RunningApi.ACCEPTED_BODY)
 
-    expect(RunningApi.sessions.find({ repository: RunningApi.WATCHED.repository, issue: 33 })).toBe(null)
+    expect(RunningApi.pullRequestReviews.started).toHaveLength(1)
+    expect(RunningApi.pullRequestReviews.started[0].issue.number).toBe(33)
+  })
+
+  it('the_plan_moves_to_the_implementing_phase_so_the_plan_stream_stops_answering_for_it', async () => {
+    await RunningApi.post(await RunningApi.listening(), RunningApi.ACCEPTED_BODY)
+
+    const active = RunningApi.activePlans.find({ issue: 33, repository: RunningApi.WATCHED.repository })
+
+    expect(active.phase).toBe(ActivePlanPhase.IMPLEMENTING)
+    expect(RunningApi.sessions.find({ issue: 33, repository: RunningApi.WATCHED.repository })).toBeNull()
+  })
+
+  it('the_watch_it_starts_is_the_one_the_active_plan_carries_and_not_a_fresh_one', async () => {
+    await RunningApi.post(await RunningApi.listening(), RunningApi.ACCEPTED_BODY)
+
+    const active = RunningApi.activePlans.find({ issue: 33, repository: RunningApi.WATCHED.repository })
+
+    expect(RunningApi.pullRequestReviews.started[0]).toBe(active.watch)
+    expect(RunningApi.pullRequestReviews.started[0].agent).toBe(RunningApi.WATCHED.agent)
+  })
+
+  it('an_implementation_of_an_issue_nobody_is_watching_is_refused_and_starts_nothing', async () => {
+    const port = await RunningApi.listening(new ImplementPlanSpy(), { watched: false })
+
+    const answered = await RunningApi.post(port, RunningApi.ACCEPTED_BODY)
+
+    expect(answered.status).toBe(409)
+    expect((await answered.json()).code).toBe(ImplementRequestOutcome.NO_LIVE_SESSION)
+    expect(RunningApi.pullRequestReviews.started).toEqual([])
   })
 
   it('implementing_the_plan_remains_active_after_its_planning_session_is_forgotten', async () => {
@@ -418,5 +450,6 @@ describe('implementing the plan lifts the watch on its issue', () => {
     expect(response.status).toBe(400)
     expect(RunningApi.reviews.stopped).toEqual([])
     expect(implementationStarts.remember).not.toHaveBeenCalled()
+    expect(RunningApi.pullRequestReviews.started).toEqual([])
   })
 })

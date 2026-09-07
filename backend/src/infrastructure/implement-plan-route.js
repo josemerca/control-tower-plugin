@@ -174,7 +174,9 @@ export class ImplementPlanRoute {
   static PATH = '/implement-plan'
   static METHOD = 'POST'
 
-  static handledBy(implementPlan, sessions, reviews, activePlans, implementationStarts, stderr) {
+  static handledBy(
+    implementPlan, sessions, reviews, pullRequestReviews, activePlans, implementationStarts, stderr
+  ) {
     const transitions = new Map()
     return async (request, response) => {
       const asked = ImplementRequest.from(JsonBody.textOf(request))
@@ -186,7 +188,8 @@ export class ImplementPlanRoute {
       const pending = transitions.get(key)
       if (pending !== undefined) await pending
       const transition = ImplementPlanRoute.#accept(
-        implementPlan, sessions, reviews, activePlans, implementationStarts, stderr, response, asked
+        implementPlan, sessions, reviews, pullRequestReviews, activePlans,
+        implementationStarts, stderr, response, asked
       )
       transitions.set(key, transition)
       try {
@@ -197,7 +200,10 @@ export class ImplementPlanRoute {
     }
   }
 
-  static async #accept(implementPlan, sessions, reviews, activePlans, implementationStarts, stderr, response, asked) {
+  static async #accept(
+    implementPlan, sessions, reviews, pullRequestReviews, activePlans,
+    implementationStarts, stderr, response, asked
+  ) {
     const active = activePlans.find({ issue: asked.issue, repository: asked.repository })
     if (active === null || active.watch.agent !== asked.agent) {
       Answer.refuseAs(response, ImplementRefusal.of({ outcome: ImplementRequestOutcome.NO_LIVE_SESSION }))
@@ -228,6 +234,7 @@ export class ImplementPlanRoute {
       stderr(`could not persist implementation start for ${asked.repository.text}#${asked.issue}: ${failure.message}\n`)
     }
     reviews.stop({ issue: asked.issue, repository: asked.repository })
+    pullRequestReviews.start(watch)
     ImplementPlanRoute.#answerAccepted(response, asked)
   }
 

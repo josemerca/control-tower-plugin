@@ -12,6 +12,7 @@ import { gatesOf } from '../../../plugin/scripts/groom.js'
 import { gateLabels } from '../../../plugin/scripts/gates.js'
 import { PlanIssues } from '../domain/ports/plan-issues.js'
 import { PlanIssue } from '../domain/value-objects/plan-issue.js'
+import { ChangeAsked } from '../domain/value-objects/change-asked.js'
 import {
   PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueNotClaimed, PlanGoNotAnswered,
   PlanChangesNotRead, PlanChangesNotUnderstood,
@@ -72,6 +73,10 @@ export class GhPlanIssues extends PlanIssues {
 
   static labelArgvFor(repository, label) {
     return ['label', 'create', label, '--repo', repository.text, '--force']
+  }
+
+  static labelsArgvFor({ issueNumber, repository }) {
+    return ['issue', 'view', String(issueNumber), '--repo', repository.text, '--json', 'labels']
   }
 
   async open({ story, comment, repository }) {
@@ -168,6 +173,27 @@ export class GhPlanIssues extends PlanIssues {
     )
   }
 
+  static #onlyStatusIn(printed, issueNumber) {
+    let parsed
+    try {
+      parsed = JSON.parse(printed)
+    } catch {
+      throw new PlanChangesNotUnderstood(
+        `${Gh.BIN} answered something that is not json for the labels of ${issueNumber}, it printed ${JSON.stringify(printed)}`
+      )
+    }
+    if (!Array.isArray(parsed?.labels)) {
+      throw new PlanChangesNotUnderstood(
+        `${Gh.BIN} answered without the labels of ${issueNumber}, it printed ${JSON.stringify(printed)}`
+      )
+    }
+    const status = parsed.labels
+      .map((label) => label?.name)
+      .filter((name) => typeof name === 'string' && name.startsWith('status:'))
+
+    return status.length === 1 ? status[0] : null
+  }
+
   async answerGo({ issueNumber, repository, nonce }) {
     const outcome = await this.gh.run(
       GhPlanIssues.goArgvFor({ issueNumber, repository, nonce }), { safeToRepeat: false }
@@ -175,6 +201,17 @@ export class GhPlanIssues extends PlanIssues {
     if (outcome.failed) {
       throw new PlanGoNotAnswered(`${Gh.BIN} issue comment failed: ${outcome.stderr.trim()}`)
     }
+  }
+
+  async isInReview({ issueNumber, repository }) {
+    const outcome = await this.gh.run(
+      GhPlanIssues.labelsArgvFor({ issueNumber, repository }), { safeToRepeat: true }
+    )
+    if (outcome.failed) {
+      throw new PlanChangesNotRead(`${Gh.BIN} issue view --json labels failed: ${outcome.stderr.trim()}`)
+    }
+
+    return GhPlanIssues.#onlyStatusIn(outcome.stdout, issueNumber) === GhPlanIssues.IN_REVIEW_LABEL
   }
 
   async #sowForTheRelease(repository) {
@@ -216,13 +253,7 @@ export class GhPlanIssues extends PlanIssues {
   }
 }
 
-export class ChangeAsked {
-  constructor({ id, text }) {
-    this.id = id
-    this.text = text
-    Object.freeze(this)
-  }
-}
+export { ChangeAsked }
 
 export class PlanIssueBody {
   static DESCRIPTION_HEADING = '## Descripción'
