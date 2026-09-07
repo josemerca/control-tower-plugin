@@ -88,16 +88,18 @@ reason its name gives, and if it could not, that is the finding.
    The domain has no tests of its own beyond the exception already named
    above: every value object and policy is reached through the use case
    that carries it.
-2. **An adapter is tested by cutting right before the external system**
-   and asserting the interaction: the literal request sent, and the parse
-   of a declared output shape. The shape is written in the test and never
-   fetched while the suite runs: a suite that has to reach a service in
-   order to have a case depends on that service's state, its rate limits
-   and its outages. And the shape it declares comes from a real capture,
-   never from imagination: a shape nobody ever saw come back proves the
-   parse of a fiction. The one exception is an adapter that *is* the call
-   — a database repository, where once the external system is doubled
-   there is nothing left to assert. That one runs the real thing, and is
+2. **An adapter is tested by cutting right before the external system** and
+   asserting the interaction: the literal request sent, and the parse of a
+   declared output shape. The shape is written in the test and never requested
+   while the suite runs: a suite that has to reach a service in order to have a
+   case depends on that service's state, its rate limits and its outages. And
+   the shape it declares comes from a real capture, never from imagination — a
+   shape nobody ever saw come back proves the parse of a fiction — so the test
+   names where its capture came from. Provenance leaves no trace in a diff, so
+   whoever judges reads that declaration, the same way the mutation sweep and
+   the assertion seen to fail are read. The one exception is an adapter that
+   *is* the call — a database repository, where once the external system is
+   doubled there is nothing left to assert. That one runs the real thing, and is
    the only one that does.
 3. **Integration from the edge covers the happy path, and only that.** One
    whole request reaches the first real collaborator; every refusal,
@@ -110,7 +112,7 @@ reason its name gives, and if it could not, that is the finding.
 | Controller | the use case, by construction | the status and the literal body of the answer, through a real server that is listening and a real client — never calling the handler as a function |
 | Application | every port, by construction | what each port received and what the use case returned; the order is pinned by cut points |
 | Domain | — | nothing |
-| Adapters | the external system, as a scripted conversation | the literal request sent, and the parse of a declared output shape — written in the test from a real capture, and never fetched while the suite runs |
+| Adapters | the external system, as a scripted conversation | the literal request sent, and the parse of a declared output shape — written in the test from a real capture it names, and never requested while the suite runs |
 | Boundary payloads | nothing | fed to the real reader on the other side, when it lives in this repository |
 
 - **A refusal never reaches a double**: every controller test of a refused

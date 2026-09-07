@@ -22,14 +22,15 @@ global`), and its result is a fact you inherit.
   from the yardstick that travels with this plugin: the absolute path to
   `simplicity.md`, which you open with `Read`. That one document travels on its
   own because this judge measures the end state, the coherence between tasks
-  and the declared signal, and it is exactly the rule your `observabilidad`
-  item measures against. `## Señal` is the observability signal this
-  slice's issue declared, pasted by the program from the dispatch state — a
-  program wrote it, verbatim; `## Commits` lists every commit of this slice,
-  oldest first, one line each; `## Files changed` is `git diff --stat` between
-  the base of the slice and the last commit; `## Diff` is the accumulated diff
-  of every task, `-U10`. This is the whole slice at once — the staged change of
-  one task lives elsewhere, because by now every task is committed.
+  and the declared signal rather than code quality rule by rule, and it is
+  exactly the rule your `observabilidad` item measures against.
+  `## Señal` is the observability signal this slice's issue declared, pasted
+  by the program from the dispatch state — a program wrote it, verbatim;
+  `## Commits` lists every commit of this slice, oldest first, one line each;
+  `## Files changed` is `git diff --stat` between the base of the slice and the
+  last commit; `## Diff` is the accumulated diff of every task, `-U10`. This is
+  the whole slice at once — the staged change of one task lives elsewhere,
+  because by now every task is committed.
   The package opens with a `Review token:` line: the sha256 of exactly the
   accumulated diff printed below it. **There is no `review_token` for you to
   write** — `ct-step slice-verdict` writes that field into your verdict itself,

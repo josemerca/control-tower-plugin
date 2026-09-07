@@ -195,6 +195,10 @@ describe('testing.md separates "seen to fail for its reason" from the cycle\'s r
 })
 
 describe('testing.md pins how each layer is measured, and hunts what no test watches', () => {
+  const tresReglas = () =>
+    Documento.clausulaDe('testing.md', '## Three rules, and everything below follows from them')
+  const tabla = () => Documento.clausulaDe('testing.md', '## How each layer is tested')
+
   const AFIRMACIONES = {
     'el caso de uso es una caja negra y el dominio no tiene tests propios':
       () => expect(Documento.texto('testing.md')).toContain('A use case is a black box'),
@@ -202,18 +206,38 @@ describe('testing.md pins how each layer is measured, and hunts what no test wat
       () => expect(Documento.texto('testing.md')).toContain('cutting right before the external system'),
     'la salida del adaptador se declara en el test y sale de una captura real, sin pedirsela al servicio mientras corre la suite':
       () => {
-        const tresReglas = Documento.clausulaDe('testing.md', '## Three rules, and everything below follows from them')
         expect(
-          tresReglas,
+          tresReglas(),
           'testing.md no dice que la forma declarada se escribe en el test y jamas se pide mientras corre la suite'
-        ).toContain('The shape is written in the test and never fetched while the suite runs')
+        ).toContain('The shape is written in the test and never requested while the suite runs')
         expect(
-          tresReglas,
+          tresReglas(),
           'testing.md no exige que la forma declarada venga de una captura real y no de la imaginacion'
         ).toContain('the shape it declares comes from a real capture, never from imagination')
       },
+    'el test dice de donde sale su captura, para que quien lee el diff juzgue esa declaracion':
+      () => {
+        expect(
+          tresReglas(),
+          'testing.md no obliga al test a decir de donde sale la captura de su forma declarada'
+        ).toContain('the test names where its capture came from')
+        expect(
+          tresReglas(),
+          'testing.md no dice que quien juzga lee esa declaracion, como en la barrida y en la asercion vista fallar'
+        ).toContain('whoever judges reads that declaration, the same way the mutation sweep and the assertion seen to fail are read')
+      },
+    'la tabla mide el adaptador contra la misma forma declarada, con su captura y sin pedirsela al servicio mientras corre la suite':
+      () =>
+        expect(
+          tabla(),
+          'la tabla ya no mide el adaptador contra la forma declarada, su captura y el servicio al que no se le pide'
+        ).toContain(
+          '| Adapters | the external system, as a scripted conversation | the literal request sent, ' +
+            'and the parse of a declared output shape — written in the test from a real capture it names, ' +
+            'and never requested while the suite runs |'
+        ),
     'declara la excepcion del adaptador que ES la llamada':
-      () => expect(Documento.texto('testing.md')).toContain('an adapter that *is* the call'),
+      () => expect(tresReglas()).toContain('an adapter that *is* the call'),
     'la integracion desde el borde cubre solo el camino feliz':
       () => expect(Documento.texto('testing.md')).toContain('covers the happy path, and only that'),
     'el controlador se mide por un servidor de verdad, no llamando al handler':

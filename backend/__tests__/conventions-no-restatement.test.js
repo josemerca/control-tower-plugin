@@ -23,6 +23,7 @@ class Subjects {
 
   static RULES_NO_OTHER_REPOSITORY_CAN_RECOVER = [
     'no declared debt in `backend/`',
+    "From `backend/`, never the repository root. The fast subset is `npx vitest run --exclude '**/*-real-process.test.js'`",
     'never sow a label that is not ours',
     'killed in `afterEach`, not after the assertion',
     'Every family under `PlanFailure` names its two causes',
