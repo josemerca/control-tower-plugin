@@ -84,10 +84,10 @@ reason its name gives, and if it could not, that is the finding.
 
 ## Three rules, and everything below follows from them
 
-1. **A use case is a black box.** Its ports are doubled at construction,
-   and the assertion is on what each port received and what it returned.
-   The domain has no tests of its own: every value object and policy is
-   reached through the use case that carries it.
+1. **A use case is a black box.** Its ports are doubled at construction.
+   The domain has no tests of its own beyond the exception already named
+   above: every value object and policy is reached through the use case
+   that carries it.
 2. **An adapter is tested by cutting right before the external system.**
    The one exception is an adapter that *is* the call — a database
    repository, where once the external system is doubled there is nothing
@@ -105,7 +105,7 @@ reason its name gives, and if it could not, that is the finding.
 | Application | every port, by construction | what each port received and what the use case returned; the order is pinned by cut points |
 | Domain | — | nothing |
 | Adapters | the external system, as a scripted conversation | the literal request sent, and the parse of literal recorded output |
-| Edge payloads | nothing | fed to the real reader on the other side, when it lives in this repository |
+| Boundary payloads | nothing | fed to the real reader on the other side, when it lives in this repository |
 
 - **A refusal never reaches a double**: every controller test of a refused
   request also asserts that the use case was not asked.
@@ -119,7 +119,7 @@ After each round, mutate the production code **one change at a time**, run
 the whole suite, and hunt **the mutations that leave it green**: each one
 is a line no test is watching.
 
-The discipline, learned from its own false negatives:
+The sweep's discipline, learned from its own false negatives:
 
 - A substitution that does not take must fail loudly;
   a silent miss is a green that measured nothing.
@@ -131,8 +131,15 @@ The discipline, learned from its own false negatives:
   that would have caught it.
 
 A surviving mutation has two possible repairs, not one:
-**the test nobody wrote, or the line nobody needs.** Deciding between them
-is what this sweep is for.
+**the test nobody wrote, or the line nobody needs.** What decides between
+them: a guard no use case can reach is not a test waiting to be written —
+it is either dead or an invariant that defends itself.
+
+Whoever mutates by hand runs the suite and watches what happens. Whoever
+judges the diff has nothing to run, so applies this by reading a
+declaration: which line was mutated, whether it survived, and — if it did
+— which of the two repairs above was chosen for it. That declaration is
+what gets judged, never whether a sweep ran.
 
 ## What stays unmeasured, on purpose
 
