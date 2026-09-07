@@ -58,3 +58,9 @@ export class HarvestFailure extends PlanFailure {}
 export class HarvestNotRead extends HarvestFailure {}
 
 export class HarvestNotUnderstood extends HarvestFailure {}
+
+export class PullRequestFailure extends PlanFailure {}
+
+export class PullRequestNotRead extends PullRequestFailure {}
+
+export class PullRequestNotUnderstood extends PullRequestFailure {}
