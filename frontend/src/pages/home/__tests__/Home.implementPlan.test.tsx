@@ -137,6 +137,7 @@ describe('Home · implement plan', () => {
     backendAnswering(ImplementPlanMother.implementing())
 
     await pressImplement(user)
+    await streamFrame(PlanEventsMother.inReview())
     await screen.findByRole('button', { name: 'Arrancar otro plan' })
     const oldStream = FakeEventSource.last()
 
