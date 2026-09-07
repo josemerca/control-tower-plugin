@@ -54,6 +54,7 @@ class RunningApi {
   static ANSWER = '{"status":"implementing","agent":"workspace:20","issue":33}'
   static spy = null
   static reviews = null
+  static pullRequestReviews = null
   static sessions = null
   static WATCHED = new PlanWatch({
     issue: new PlanIssue({ number: 33, url: 'https://github.com/jjponz/repo-pulse/issues/33' }),
@@ -65,12 +66,14 @@ class RunningApi {
   static NO_FRONTEND = join(tmpdir(), 'ct-frontend-never-built')
   static NO_EVENTS = new PlanEvents({
     read: () => Promise.reject(new Error('this suite never streams plan events')),
+    readDelivery: () => Promise.reject(new Error('this suite never streams delivery events')),
     sleep: () => Promise.resolve(),
   })
 
   static async listening(spy = new ImplementPlanSpy()) {
     RunningApi.spy = spy
     RunningApi.reviews = new ReviewsSpy()
+    RunningApi.pullRequestReviews = new ReviewsSpy()
     RunningApi.sessions = new PlanSessions()
     RunningApi.sessions.remember(RunningApi.WATCHED)
     const server = new ApiServer({
@@ -78,6 +81,7 @@ class RunningApi {
       startPlan: null,
       implementPlan: spy,
       reviews: RunningApi.reviews,
+      pullRequestReviews: RunningApi.pullRequestReviews,
       sessions: RunningApi.sessions,
       planEvents: RunningApi.NO_EVENTS,
       frontendRoot: RunningApi.NO_FRONTEND,
@@ -294,19 +298,51 @@ describe('ImplementCollapse', () => {
 describe('implementing the plan lifts the watch on its issue', () => {
   afterEach(RunningApi.stopAll)
 
-  it('implementing_the_plan_lifts_the_watch_because_there_is_nothing_left_to_ask_for', async () => {
-    const response = await RunningApi.asking(RunningApi.ACCEPTED_BODY)
+  it('accepting_the_implementation_stops_watching_the_plan_because_that_gate_is_closed', async () => {
+    await RunningApi.post(await RunningApi.listening(), RunningApi.ACCEPTED_BODY)
 
-    expect(response.status).toBe(202)
-    expect(RunningApi.reviews.stopped).toEqual([{
-      issue: 33, repository: RunningApi.WATCHED.repository,
-    }])
+    expect(RunningApi.reviews.stopped).toEqual([
+      { issue: 33, repository: RunningApi.WATCHED.repository },
+    ])
   })
 
-  it('implementing_the_plan_forgets_the_session_so_nothing_keeps_reading_the_contract_of_a_plan_being_built', async () => {
-    await RunningApi.asking(RunningApi.ACCEPTED_BODY)
+  it('accepting_the_implementation_starts_watching_the_pull_request_that_does_not_exist_yet', async () => {
+    await RunningApi.post(await RunningApi.listening(), RunningApi.ACCEPTED_BODY)
 
-    expect(RunningApi.sessions.find({ repository: RunningApi.WATCHED.repository, issue: 33 })).toBe(null)
+    expect(RunningApi.pullRequestReviews.started).toHaveLength(1)
+    expect(RunningApi.pullRequestReviews.started[0].issue.number).toBe(33)
+  })
+
+  it('the_session_it_keeps_is_marked_as_delivering_so_the_stream_reads_the_delivery', async () => {
+    await RunningApi.post(await RunningApi.listening(), RunningApi.ACCEPTED_BODY)
+
+    const kept = RunningApi.sessions.find({ issue: 33, repository: RunningApi.WATCHED.repository })
+
+    expect(kept.delivering).toBe(true)
+    expect(kept.agent).toBe(RunningApi.WATCHED.agent)
+  })
+
+  it('the_watch_it_starts_is_the_session_it_kept_and_not_a_fresh_one', async () => {
+    await RunningApi.post(await RunningApi.listening(), RunningApi.ACCEPTED_BODY)
+
+    expect(RunningApi.pullRequestReviews.started[0])
+      .toBe(RunningApi.sessions.find({ issue: 33, repository: RunningApi.WATCHED.repository }))
+  })
+
+  it('a_refused_implementation_neither_starts_the_pull_request_watch_nor_marks_the_session', async () => {
+    await RunningApi.post(await RunningApi.listening(), '{"agent":"workspace:20","issue":33,"repo":"no-soy-un-repo"}')
+
+    expect(RunningApi.pullRequestReviews.started).toEqual([])
+  })
+
+  it('an_implementation_of_an_issue_nobody_is_watching_answers_the_same_and_starts_nothing', async () => {
+    const port = await RunningApi.listening()
+    RunningApi.sessions.forget({ issue: 33, repository: RunningApi.WATCHED.repository })
+
+    const answered = await RunningApi.post(port, RunningApi.ACCEPTED_BODY)
+
+    expect(answered.status).toBe(202)
+    expect(RunningApi.pullRequestReviews.started).toEqual([])
   })
 
   it('a_refused_request_to_implement_forgets_no_session', async () => {

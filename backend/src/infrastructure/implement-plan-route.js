@@ -2,6 +2,7 @@ import { Answer, JsonBody, Refusal } from './http.js'
 import { Projection } from './projection.js'
 import { ImplementPlanParams } from '../application/actions/implement-plan.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
+import { PlanWatch } from '../domain/value-objects/plan-watch.js'
 import {
   PlanFailure, PlanAgentNotResumed, PlanGoNotAnswered, GoNotRecorded,
 } from '../domain/exceptions.js'
@@ -161,18 +162,18 @@ export class ImplementPlanRoute {
   static PATH = '/implement-plan'
   static METHOD = 'POST'
 
-  static handledBy(implementPlan, sessions, reviews) {
+  static handledBy(implementPlan, sessions, reviews, pullRequestReviews) {
     return async (request, response) => {
       const asked = ImplementRequest.from(JsonBody.textOf(request))
       if (asked.outcome !== ImplementRequestOutcome.ACCEPTED) {
         Answer.refuseAs(response, ImplementRefusal.of(asked))
         return
       }
-      await ImplementPlanRoute.#accept(implementPlan, sessions, reviews, response, asked)
+      await ImplementPlanRoute.#accept(implementPlan, sessions, reviews, pullRequestReviews, response, asked)
     }
   }
 
-  static async #accept(implementPlan, sessions, reviews, response, asked) {
+  static async #accept(implementPlan, sessions, reviews, pullRequestReviews, response, asked) {
     try {
       await implementPlan.execute(new ImplementPlanParams({
         agent: asked.agent, issue: asked.issue, repository: asked.repository,
@@ -183,12 +184,21 @@ export class ImplementPlanRoute {
       return
     }
     reviews.stop({ issue: asked.issue, repository: asked.repository })
-    sessions.forget({ issue: asked.issue, repository: asked.repository })
+    ImplementPlanRoute.#deliver(sessions, pullRequestReviews, asked)
     Answer.send(response, 202, {
       status: 'implementing',
       [ImplementRequest.AGENT_FIELD]: asked.agent,
       [ImplementRequest.ISSUE_FIELD]: asked.issue,
     })
+  }
+
+  static #deliver(sessions, pullRequestReviews, asked) {
+    const watched = sessions.find({ issue: asked.issue, repository: asked.repository })
+    if (watched === null) return
+
+    const delivering = new PlanWatch({ ...watched, delivering: true })
+    sessions.remember(delivering)
+    pullRequestReviews.start(delivering)
   }
 
   static refuseOtherMethods(request, response) {
