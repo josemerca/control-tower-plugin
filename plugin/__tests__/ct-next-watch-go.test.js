@@ -52,10 +52,29 @@ function repoRootNuevo() {
 // El hijo va DESPRENDIDO y sin `unref` no se espera a nadie, así que ct-next
 // puede terminar antes de que la grabadora escriba. Se sondea el fichero en vez
 // de leerlo una vez: si no, el test sería intermitente por construcción.
+//
+// Y la condición que se espera es que el log esté COMPLETO, no que exista. Un
+// `appendFileSync` es abrir, escribir y cerrar: entre lo primero y lo segundo el
+// fichero existe con cero bytes, y ahí `JSON.parse('')` reventaba con «Unexpected
+// end of JSON input» — el rojo intermitente de #109, que se veía en la CI y no en
+// local porque depende de cómo caiga la carga. La línea sólo se da por buena
+// cuando el salto de línea que la cierra ya está escrito Y parsea.
+function argvCompleto(ruta) {
+  if (!existsSync(ruta)) return null
+  const crudo = readFileSync(ruta, 'utf8')
+  if (!crudo.endsWith('\n')) return null
+  try {
+    return crudo.trim().split('\n').map((l) => JSON.parse(l))
+  } catch {
+    return null
+  }
+}
+
 async function esperarArgv(ruta, ms = 5000) {
   const fin = Date.now() + ms
   while (Date.now() < fin) {
-    if (existsSync(ruta)) return readFileSync(ruta, 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+    const llamadas = argvCompleto(ruta)
+    if (llamadas) return llamadas
     await new Promise((r) => setTimeout(r, 25))
   }
   return null
