@@ -101,7 +101,23 @@ va a usar el botón de siempre.
 
 ## 4. Dominio y puertos
 
-### 4.1 Puerto nuevo
+### 4.1 Puertos nuevos
+
+Dos colaboradores nuevos, porque son dos herramientas distintas: uno habla con
+`gh` y el otro con `node dispatch-check.mjs`. Meter los dos en el mismo puerto
+obligaría a un adaptador a invocar dos binarios, y la vara pide un adaptador por
+puerto y un cliente por herramienta.
+
+`domain/ports/workbench.js`, la vuelta al banco de trabajo:
+
+```js
+export class Workbench {
+  async reopen({ issue, repository })   // in-review -> in-progress
+}
+```
+
+Es el hermano exacto de `Harvest.collect()`, que también es un `dispatch-check`
+detrás de un puerto propio.
 
 `domain/ports/pull-requests.js`, un colaborador con dos preguntas:
 
@@ -127,7 +143,6 @@ un tipo que ya existe:
 | Puerto | Método | Su consumidor |
 |---|---|---|
 | `PlanIssues` | `isInReview({ issue, repository })` | la puerta del vigilante y la política de estado |
-| `PlanIssues` | `reopen({ issue, repository })` | la acción que entrega el fix |
 | `PlanAgents` | `fix({ agent, issue, repository, changes })` | la acción que entrega el fix |
 
 `isInReview` devuelve un booleano y no la etiqueta, y eso es deliberado: la
@@ -207,7 +222,9 @@ Bajo `PlanFailure`, para que el vigilante las trate como recuperables:
 PullRequestFailure
   PullRequestNotRead          gh falló
   PullRequestNotUnderstood    gh contestó algo que no se sabe leer
-PlanIssueNotReopened          dispatch-check --reopen no pudo mover la etiqueta
+WorkbenchFailure
+  SliceNotReopened            dispatch-check --reopen no pudo mover la etiqueta
+  ReopenNotUnderstood         dispatch-check --reopen salió con un código no declarado
 ```
 
 El par `NotRead` y `NotUnderstood` no es mimetismo: `testing.md` lo exige —
@@ -267,7 +284,7 @@ siguiente, cuando el agente haya liberado. No se atropella y no se pierde.
 `application/actions/request-fixes.js`:
 
 ```js
-await planIssues.reopen({ issue, repository })                 // in-review -> in-progress
+await workbench.reopen({ issue, repository })                  // in-review -> in-progress
 await planAgents.fix({ agent, issue, repository, changes })    // cmux send + Enter
 ```
 
@@ -285,17 +302,17 @@ gh api repos/<o/r>/pulls/<n>/reviews
 gh api repos/<o/r>/pulls/<n>/comments
 ```
 
-`infrastructure/dispatch-check-reopen.js` sigue el molde de
+`infrastructure/dispatch-check-workbench.js` implementa `Workbench` siguiendo el molde de
 `DispatchCheckHarvest`, proyectando cada código declarado y negándose a
 interpretar uno que no lo esté:
 
 | Código | Significado | Proyección |
 |---|---|---|
 | 0 | reabierto | sigue, teclea el encargo |
-| 1 | no se pudo escribir la etiqueta, sigue en `in-review` | `PlanIssueNotReopened` |
-| 2 | precondición no cumplida, sin mutar nada | `PlanIssueNotReopened` |
-| 3 | no se pudo leer el estado, sin mutar nada | `PlanIssueNotReopened` |
-| otro | no declarado | `PlanIssueNotReopened` |
+| 1 | no se pudo escribir la etiqueta, sigue en `in-review` | `SliceNotReopened` |
+| 2 | precondición no cumplida, sin mutar nada | `SliceNotReopened` |
+| 3 | no se pudo leer el estado, sin mutar nada | `SliceNotReopened` |
+| otro | no declarado | `ReopenNotUnderstood` |
 
 El 2 sólo puede llegar por una carrera, porque la puerta ya garantiza el estado.
 No se le da trato especial.
@@ -411,7 +428,7 @@ como su mother:
 | `read-fixes-asked.test.js` | qué recibió cada puerto y qué devolvió; que sin pull request no se pregunta por reviews, y que con el issue en `in-progress` tampoco | `noPullRequestYet()`, `inReview(...)`, `fixing()`, `askedInALineComment()` |
 | `request-fixes.test.js` | el orden: cuando el `--reopen` falla, al agente no se le tecleó nada | `reopened()`, `refusingTheReopen(code)` |
 | `gh-pull-requests.test.js` | el argv literal y el parseo de salida grabada real | conversación scriptada |
-| `dispatch-check-reopen.test.js` | un escenario por código, y que `NotRead` no es instancia de `NotUnderstood` | uno por código |
+| `dispatch-check-workbench.test.js` | un escenario por código, y que `NotRead` no es instancia de `NotUnderstood` | uno por código |
 | `review-watch.test.js` | los de hoy, más que las dos instancias no se pisan | `WatchDouble` |
 | `plan-events-route.test.js` | los cinco estados y el frame con la pull request | `PlanEventsMother` |
 | `Home.planEvents.test.tsx` | el cuarto paso y una sola suscripción | `PlanEventsMother.ts` |
