@@ -20,8 +20,8 @@ resemblance: no duplicate detector pairs them.
 
 ## What does not count
 
-The idiom of a boundary is not a rule. Checking a response's status in every
-adapter that calls an external system, or the shape of an envelope in every
+The idiom of a boundary is not a rule. Checking the outcome of every call an
+adapter makes to an external system, or the shape of an envelope in every
 model that validates one, is the same sentence, not the same decision, and
 each place answers for its own.
 

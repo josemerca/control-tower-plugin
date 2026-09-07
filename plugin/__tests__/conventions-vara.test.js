@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { PluginYardstick } from '../scripts/plugin-yardstick.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -33,6 +34,10 @@ const ALCANCES = {
 }
 
 describe('the documents in conventions/', () => {
+  it('ALCANCES nombra exactamente lo que PluginYardstick.FILES declara, ni uno más ni uno menos', () => {
+    expect(Object.keys(ALCANCES).sort()).toEqual([...PluginYardstick.FILES].sort())
+  })
+
   for (const [nombre, alcance] of Object.entries(ALCANCES)) {
     it(`${nombre} declares its scope in the header`, () => {
       const cabecera = Documento.cabeceraDe(nombre)
@@ -321,8 +326,11 @@ describe('architecture.md kept nothing of the edge, so no rule is written twice'
 
 describe('the yardstick names no language and no tool', () => {
   const PROHIBIDOS = [
-    /vitest/i, /pytest/i, /execFile/, /\bnpx\b/, /Object\.freeze/, /\bfetch\b/,
-    /\.m?jsx?\b/, /\.tsx?\b/, /\bnode_modules\b/,
+    /vitest/i, /pytest/i, /jest/i, /execFile/, /\bnpx\b/, /\bnpm\b/, /\bnode\b/i,
+    /Object\.freeze/, /\bfetch\b/, /\.m?jsx?\b/, /\.tsx?\b/, /\bnode_modules\b/,
+    /\bpython\b/i, /\bjavascript\b/i, /\btypescript\b/i, /\bruby\b/i, /\brust\b/i,
+    /\bjava\b/i, /\bkotlin\b/i, /\bswift\b/i, /\bgolang\b/i, /\bphp\b/i, /\bperl\b/i,
+    /c\+\+/i, /\bc#/i,
   ]
 
   for (const nombre of Object.keys(ALCANCES)) {
