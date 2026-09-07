@@ -318,3 +318,36 @@ describe('architecture.md kept nothing of the edge, so no rule is written twice'
     })
   }
 })
+
+describe('the yardstick names no language and no tool', () => {
+  const PROHIBIDOS = [
+    /vitest/i, /pytest/i, /execFile/, /\bnpx\b/, /Object\.freeze/, /\bfetch\b/,
+    /\.m?jsx?\b/, /\.tsx?\b/, /\bnode_modules\b/,
+  ]
+
+  for (const nombre of Object.keys(ALCANCES)) {
+    for (const prohibido of PROHIBIDOS) {
+      it(`${nombre} no nombra ${prohibido}`, () => {
+        expect(Documento.texto(nombre)).not.toMatch(prohibido)
+      })
+    }
+  }
+
+  it('donde la vara habla de un codigo de salida, nombra tambien la otra forma del borde', () => {
+    for (const nombre of Object.keys(ALCANCES)) {
+      const texto = Documento.texto(nombre)
+      if (!/exit code/i.test(texto)) continue
+      expect(texto, `${nombre} habla de exit code sin nombrar el servicio que atiende`)
+        .toContain('a service that answers')
+    }
+  })
+
+  it('nadie en el plugin sigue diciendo que la vara son cinco documentos', () => {
+    const fuentes = ['scripts/run-metrics.js', 'scripts/ct-next.mjs', 'scripts/kickoff.js', 'scripts/ct-step.mjs',
+      'agents/ct-reconciler.md', 'skills/writing-plans-prescriptive/SKILL.md']
+    for (const ruta of fuentes) {
+      const texto = readFileSync(join(root, ruta), 'utf8')
+      expect(texto, `${ruta} sigue diciendo cinco`).not.toMatch(/cinco documentos|five documents/i)
+    }
+  })
+})

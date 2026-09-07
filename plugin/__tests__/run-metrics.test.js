@@ -18,6 +18,7 @@ import {
   metricsRepoRelPath, METRICS_REPO_DIR, briefVaraCtMeasures, aggregateBriefMeasures,
   aggregateRoleBytesMeasures,
 } from '../scripts/run-metrics.js'
+import { PluginYardstick } from '../scripts/plugin-yardstick.js'
 import { SEVERITIES } from '../scripts/step-contracts.js'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -881,15 +882,15 @@ describe('la telemetría de un paso real', () => {
       .trim().split('\n').map((l) => JSON.parse(l))
     const f = filas[0]
     // Los documentos de conventions/ del plugin, contados por cabecera y no
-    // comparando contra PluginYardstick.FILES.length. Por eso el quinto
-    // (defects.md, al partir code.md) no obligó a tocar briefVaraCtMeasures,
-    // y tampoco lo obligó el sexto (simplicity.md).
-    // CINCO y no seis: esta tarea no declara ninguna ruta `(create)`, así
-    // que `architecture.md` —que rige los módulos nuevos por su propia
+    // comparando contra PluginYardstick.FILES.length. Por eso ni el quinto
+    // (defects.md, al partir code.md) ni los que llegaron después obligaron a
+    // tocar briefVaraCtMeasures.
+    // Uno MENOS que el total: esta tarea no declara ninguna ruta `(create)`,
+    // así que `architecture.md` —que rige los módulos nuevos por su propia
     // cabecera `Applies to:`— no viaja en su brief. La medida cuenta lo que el
     // brief LLEVA, que desde el brief por alcance ya no es siempre la lista
     // entera.
-    expect(f.brief_vara_ct_docs).toBe(5)
+    expect(f.brief_vara_ct_docs).toBe(PluginYardstick.FILES.length - 1)
     expect(typeof f.brief_bytes).toBe('number')
     expect(f.brief_bytes).toBeGreaterThan(0)
   })

@@ -1456,9 +1456,10 @@ function escribirPaqueteDeReconciliacion({ rama, ronda, intento }) {
   }
   writeFileSync(paquete, lineas.join('\n'))
   // POR RUTA Y NO PEGADA: el reconciliador tiene `Read` (RECONCILER_TOOLS), y
-  // los cinco documentos enteros delante de un conflicto son 24 KB de material
-  // fijo que no dependen del conflicto. Sin tarea que acote el alcance, van
-  // los cinco: una fusión puede tocar cualquier fichero, incluido uno nuevo.
+  // los ocho documentos enteros delante de un conflicto son unos 35 KB de
+  // material fijo que no dependen del conflicto. Sin tarea que acote el
+  // alcance, van todos: una fusión puede tocar cualquier fichero, incluido
+  // uno nuevo.
   appendFileSync(paquete, PluginYardstick.composePathSection(deCt))
   appendFileSync(paquete, seccionVaraDelRepo('el paquete de reconciliación'))
   return paquete

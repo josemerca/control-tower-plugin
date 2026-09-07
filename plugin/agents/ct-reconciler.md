@@ -43,10 +43,10 @@ could stage or create files could also hide a bad resolution behind a green
   slice is for, not which line wins: a conflict that has nothing to do with
   the slice's own change is still resolved by keeping both intentions, never
   by reading this section for permission to prefer one.
-- **The yardstick**: under `## Vara de ct`, the five documents of the plugin's
+- **The yardstick**: under `## Vara de ct`, the documents of the plugin's
   `conventions/` directory **by path**, listed there by the program — you have
-  `Read`, so you open the one you need instead of being handed 24 KB you did
-  not ask for — and — when this repo declares one — the section pasted from
+  `Read`, so you open the one you need instead of being handed the whole
+  yardstick pasted in — and — when this repo declares one — the section pasted from
   `.agent/conventions.md`. No agent wrote either into the package, and
   neither is yours to remove or to argue with; they bind the resolution the
   same way they bind any other diff in this repo. The block above the list

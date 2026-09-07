@@ -195,7 +195,7 @@ describe('la vara del repo viaja en el brief, sin agente en medio', () => {
 describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
   const briefDeLaUno = () => readFileSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'), 'utf8')
 
-  it('el brief termina con los cinco documentos, DETRÁS de la tarea', () => {
+  it('el brief termina con los documentos de la vara, DETRÁS de la tarea', () => {
     ct('next')
     const brief = briefDeLaUno()
     expect(brief).toMatch(/\*\*La vara de ct\*\*/)
@@ -231,12 +231,12 @@ describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
     writeFileSync(join(repo, 'plan.md'), plan)
   }
 
-  it('una tarea que no estrena módulo no se lleva architecture.md, y sí los otros cuatro', () => {
+  it('una tarea que no estrena módulo no se lleva architecture.md, y sí el resto de la vara', () => {
     conLaUnoModificando()
     ct('next')
     const brief = briefDeLaUno()
     expect(brief).not.toContain('## Vara de ct: conventions/architecture.md')
-    for (const nombre of ['defects.md', 'style.md', 'decisions.md', 'testing.md']) {
+    for (const nombre of PluginYardstick.FILES.filter((f) => f !== 'architecture.md')) {
       expect(brief, `${nombre} tendría que seguir viajando`).toContain(`## Vara de ct: conventions/${nombre}`)
     }
   })

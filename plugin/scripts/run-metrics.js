@@ -209,8 +209,9 @@ export function verdictMeasures(verdict) {
     // se archivó el hallazgo y no qué lo produjo.
     //
     //   `rubric_vara_ct_docs` — CUÁNTOS de los documentos llegaron a usarse,
-    //     contados sobre el `result` de TODOS los ítems. Es "la leyeron". Con
-    //     los cinco documentos de hoy el techo es 5, y un número por debajo dice
+    //     contados sobre el `result` de TODOS los ítems. Es "la leyeron". El
+    //     techo es el número de documentos que la vara declara
+    //     (`PluginYardstick.FILES.length`), y un número por debajo dice
     //     cuál sobra o cuál no se está mirando. Este es el hueco que costó el
     //     #7: `conventions/code.md` se citó por sus reglas de estilo y ninguna
     //     de sus cuatro reglas de defecto se preguntó, lo que llevó a partirlo
