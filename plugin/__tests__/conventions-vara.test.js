@@ -200,6 +200,18 @@ describe('testing.md pins how each layer is measured, and hunts what no test wat
       () => expect(Documento.texto('testing.md')).toContain('A use case is a black box'),
     'el adaptador se corta justo antes del sistema externo':
       () => expect(Documento.texto('testing.md')).toContain('cutting right before the external system'),
+    'la salida del adaptador se declara en el test y sale de una captura real, sin pedirsela al servicio mientras corre la suite':
+      () => {
+        const tresReglas = Documento.clausulaDe('testing.md', '## Three rules, and everything below follows from them')
+        expect(
+          tresReglas,
+          'testing.md no dice que la forma declarada se escribe en el test y jamas se pide mientras corre la suite'
+        ).toContain('The shape is written in the test and never fetched while the suite runs')
+        expect(
+          tresReglas,
+          'testing.md no exige que la forma declarada venga de una captura real y no de la imaginacion'
+        ).toContain('the shape it declares comes from a real capture, never from imagination')
+      },
     'declara la excepcion del adaptador que ES la llamada':
       () => expect(Documento.texto('testing.md')).toContain('an adapter that *is* the call'),
     'la integracion desde el borde cubre solo el camino feliz':
