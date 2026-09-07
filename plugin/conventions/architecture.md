@@ -24,7 +24,17 @@ knows nobody.
   domain and the input/output behind a port.
 - **Infrastructure** — adapters, boundary models and entrypoints. The only layer
   that knows there is a subprocess, a filesystem or another service on the other
-  side.
+  side. What it owes at that edge is `conventions/boundaries.md`.
+
+The layers and what lives inside them **show in the tree**: one folder per
+layer, and inside each layer one folder per kind of inhabitant — the value
+objects, the ports and the policies apart from each other inside domain; the
+actions apart from the queries inside application; the adapters apart from
+the controllers inside infrastructure. A kind whose inhabitants are one
+catalogue, declared together on purpose, does not need a folder of its own.
+Which name the root folder gets and what a file is called is the
+repository's own choice; what this rule fixes is that
+**the folder is the discriminator, never a suffix on the name.**
 
 ## One concept per module
 
@@ -38,6 +48,37 @@ its own module, even if today it is only used beside the other one. It has a lif
 of its own if something else constructs it, if another layer consumes it, or if
 it carries its own algebra. Without that half, "does not exist without it"
 stretches to justify any grouping by habit.
+
+## A new type has the burden of proof
+
+New behaviour defaults to **a method on a type that already exists**, and a
+new type defaults to **inside the module that consumes it**; only a life of
+its own, by the test above, earns it one. And "the tests build it" grants
+nothing: **a test double is not a consumer**, and tests are not a layer.
+
+This was paid for, so it is a rule and not a taste: three types once shipped
+in their own modules and had to come back home, and the count of classes
+said "over-designed" while the count of concepts did not.
+
+The calls already made, kept so they are not relitigated:
+
+- **The payload only its owner constructs shares the owner's file.**
+- **A boundary model shares its adapter's file while the adapter is its
+  only consumer.** The day a second adapter needs the same conversion, it
+  is extracted along that line, and the split is declared in the history.
+- **A class nobody instantiates is a namespace**, tolerated only because
+  `conventions/style.md` bans loose functions — never a reason to grant it
+  a module of its own. A namespace with one consumer lives inside it.
+- **One client per external system, never a client per call.**
+
+## One controller per endpoint
+
+The route, its request model with the closed vocabulary of outcomes, and the
+projections that turn each outcome and each failure into an answer travel
+together in one module — the same relation a parameters object and a
+result object keep with their use case. The next endpoint is one new file
+and one line that wires it in. What every endpoint would otherwise repeat
+lives in a module of its own, never inside an endpoint's own file.
 
 ## The shape of a use case
 
@@ -61,8 +102,8 @@ stretches to justify any grouping by habit.
   which have to agree travel together and their coherence can be checked in one
   place.
 - **What it does not do**: it does not translate to external formats, it does not
-  catch errors to turn them into exit codes, and it does not decide retry or
-  budget policy.
+  catch errors to turn them into what its invoker receives
+  (`conventions/boundaries.md`), and it does not decide retry or budget policy.
 - **Mutation and reading are told apart by where they live**, not by a suffix on
   the type. Something that mutates and also returns data is still a mutation:
   what classifies it is that it mutates, not that it answers.
@@ -105,67 +146,18 @@ other. The rule bites once the conductor would have to name telemetry types in
 order to build them; while it only passes data to a port, there is nothing to
 extract.
 
-## The boundary
-
-- **What comes from outside is validated on entry, with no exceptions and no
-  forced cast**: a cast checks nothing, it only silences the type checker.
-- **An unknown key is a rejection, not a field to ignore.** It means the other
-  side changed shape and our assumptions may be stale.
-- **You enter by the contract's name, not by the field's name**, and everything
-  the other side sees comes from there: the schema sent to it, the validation of
-  what it returns, and what gets emitted.
-- **A foreign format with an open vocabulary is validated by projection.** When
-  what arrives is not a contract this program defines, rejecting unknown keys
-  over the whole object breaks the read with every field the other side adds,
-  which is the very job that reader has. Project by hand a structure with exactly
-  the keys you consume and validate that, still rejecting the unknown. A key you
-  do claim to know that is missing or arrives with the wrong type still breaks.
-  And an input that is not the expected format is corruption, not one more
-  variant: it raises instead of being swallowed.
-- **How tight to validate a field:** what wrong value would pass for good, and
-  what decision would be taken with it? If the answer is "none that matters", lax
-  is fine.
-- **The conversion to the domain lives in the boundary model**, both ways. Never
-  a mapping helper in the use case.
-- **A validation error does not leave the layer**: it is translated to the domain
-  error the entrypoint knows how to map.
-- **An adapter is named after its implementation, not after its port**, so the
-  pair reads in the name and two implementations fit without renaming anything.
-- **An adapter does not decide policy** — retries, budgets, what to do with a
-  failure.
-- **No call to an external process is launched without a cap, and the adapter
-  does not choose the cap**: it arrives through the constructor with no default,
-  because applying a cap is this layer's work and deciding which one is policy.
-  On exhaustion it fails closed and whatever the process had written is
-  discarded: half an answer is not an answer.
-- **A non-zero exit code is data, not an exception**: it gets interpreted,
-  because the reason is on the diagnostic channel and an exception erases it.
-- **A port for a constant value is indirection; an invariant among several values
-  asks for an object.**
-
-## The entrypoint
-
-- **It is the only place that assembles the dependency graph**: it picks the
-  concrete adapters and injects them. There is no injection container — one
-  adapter per port — and the test seam is the constructor.
-- **It maps the domain's errors to exit codes**, with the result on the standard
-  channel and the diagnosis on the error channel, always separate.
-- **One code per decision of whoever invokes, not one per error.** The yardstick
-  is what the receiver does differently.
-
 ## Antipatterns
 
 - A new concept placed inside a non-conforming old file to inherit its exemption.
 - The domain importing from application or from infrastructure.
 - A use case importing from infrastructure, or depending on an adapter.
 - A use case with a suffix on its type, its parameters or its result.
-- A mapping helper in the use case instead of in the boundary model.
 - A conditional in the conductor that translates a step's result.
 - A policy that returns a boolean instead of the whole effect.
 - A policy with a catch-all branch for an input it does not describe.
-- A cast at the boundary.
-- A boundary model that ignores unknown keys.
-- An adapter that decides policy.
-- A call to an external process with no cap, or an adapter that picks its own.
-- A validation error leaving the boundary layer.
 - A port whose only method returns a constant.
+- A suffix doing a folder's job.
+- A new type for what a method on an existing type could carry.
+- A module whose only consumer is one other module, with no second
+  constructor and no algebra of its own.
+- A second endpoint's parsing or refusals inside what its endpoints share.

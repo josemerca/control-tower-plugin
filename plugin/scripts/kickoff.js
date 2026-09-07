@@ -151,7 +151,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conv
   // `dispatchCheckPath` y `ctStepPath` van dentro de comandos que el agente
   // EJECUTA: si el llamador los omite, el fallo es ruidoso (un comando que no
   // arranca). `conventionsDir` en cambio solo se interpola en una frase de
-  // prosa — omitido, produciría "los cinco documentos de undefined" y nadie
+  // prosa — omitido, produciría "los documentos de undefined" y nadie
   // lo vería fallar. Se cierra la asimetría en el origen: sin este dato no
   // hay kickoff, y el error es de quien llama (ct-next.mjs debe resolverlo
   // como ruta absoluta, igual que sus dos hermanas), no de renderKickoff.
@@ -256,7 +256,17 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conv
     // juez y el del control de alcance. Aquí es donde alcanza al que planifica.
     // La del REPO ya le llegaba: la skill le manda arrancar de
     // `.agent/conventions.md` y seleccionar en §3.
-    `La vara de ct vive en ${conventionsDir} y el programa la lleva a cada tarea: al implementador pegada, al juez por ruta. Cómo se relaciona con las convenciones de este repo cuando chocan lo dice la CABECERA con la que viaja, que es donde está escrita esa regla y el único sitio donde está — léela ahí y sigue lo que dice tal cual. Lo que el plan tiene que seleccionar es la vara del REPO, en el \`Rules to obey:\` de §3, como hasta ahora. De ${conventionsDir} abre el documento que necesites para decidir algo concreto del plan, cuando lo necesites.`,
+    // Un plan que prescribe un campo, una guarda o un símbolo público sin
+    // haber leído `simplicity.md` prescribe exactamente lo que el juez
+    // marcará después — y el implementador tiene orden de seguir el plan, así
+    // que el defecto entra armado por el contrato. Dejar la lectura entera a
+    // demanda ("el documento que necesites, cuando lo necesites") era
+    // razonable cuando la vara callaba sobre lo que un diff añade; ya dice
+    // algo. Se nombran sólo los dos que el plan tiene abiertos siempre:
+    // `simplicity.md` decide si lo que el plan pide se necesita, y
+    // `decisions.md` es dónde vive una decisión ya tomada, para escribirla
+    // una sola vez. Los demás siguen disponibles por ruta, a demanda.
+    `La vara de ct vive en ${conventionsDir} y el programa la lleva a cada tarea: al implementador pegada, al juez por ruta. Cómo se relaciona con las convenciones de este repo cuando chocan lo dice la CABECERA con la que viaja, que es donde está escrita esa regla y el único sitio donde está — léela ahí y sigue lo que dice tal cual. Antes de escribir el plan abre dos de ellos, porque el plan decide justo lo que miden: \`simplicity.md\` (la carga de la prueba está en lo que se añade, y que el plan lo pida la deja donde estaba) y \`decisions.md\` (dónde vive una decisión ya tomada, para escribirla una sola vez). Los demás quedan a mano por ruta, el que necesites para decidir algo concreto. Lo que el plan tiene que seleccionar sigue siendo la vara del REPO, en el \`Rules to obey:\` de §3, como hasta ahora.`,
     `Y una de ellas decide cómo reparten trabajo tus tareas: \`architecture.md\` rige los MÓDULOS NUEVOS. Un módulo que ya existía es deuda declarada del repo —lo que le añadas cumple siguiendo el estilo de su anfitrión—, y un concepto nuevo es un módulo nuevo que nace cumpliendo. De qué lado cae cada cosa lo decides tú al repartir \`**Files:**\` entre \`(create)\` y \`(modify)\`.`,
     `Primer acto, con el baseline verde: escribe el plan del slice con control-tower-loop:writing-plans-prescriptive usando el issue como spec (sus AC, "Protegido", "${EPIC_CONTEXT_HEADING}" y "${FROZEN_DECISIONS_HEADING}" son la entrada que la skill pide; vuelca cada decisión congelada en "## 2. Closed decisions" del plan — son del epic y las DEBES respetar con sus mismas palabras). SOLO bloques esenciales, cada uno con su etiqueta de rol: contratos, call sites y el tramo que cambia — los cuerpos de los módulos y los ficheros de test los escribe el implementador con TDD, y la configuración se describe en prosa. Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${slice.n}-<slug>.md, valídalo con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --check-plan\` hasta exit 0, y commitéalo: viaja en el PR, y el --release del final se negará (exit 6) sin un plan válido commiteado.`,
     `Con el plan commiteado y el gate 'plan' con OK humano, la secuencia de la implementación la dicta la máquina. Pregunta el paso con \`node ${ctStepPath} next --plan docs/superpowers/plans/<el-plan-que-commiteaste>.md --issue ${slice.n}\` y obedece LITERALMENTE lo que imprima en cada paso (donde diga \`ct-step\`, es \`node ${ctStepPath}\`): despacha el implementador como subagente con la rúbrica y el brief que te indique, luego \`ct-step report\`, \`ct-step controls\`, despacha el juez como subagente ct-judge (declarado sin Bash), \`ct-step verdict\` y \`ct-step commit\` — quien comitea es ct-step. Tras el commit de la última tarea quedan tres pasos más, que \`next\` también dicta: \`ct-step reconcile\` (fusiona la rama con su base; si hay conflicto, despacha ct-reconciler como subagente, declarado sin Bash y sin Write — quien stagea, comitea y aborta la fusión es el programa), \`ct-step global\` (la Global verification del plan la ejecuta el programa) y el juicio del slice entero — despacha ct-slice-judge como subagente (declarado sin Bash) y entrega su JSON con \`ct-step slice-verdict\`. Vuelve a \`next\` tras cada paso hasta "run delivered".`,

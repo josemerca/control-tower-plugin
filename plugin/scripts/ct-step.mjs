@@ -824,18 +824,25 @@ function escribirPaquete() {
 // se ve en el orden de los commits, no en el diff acumulado por sí solo.
 function escribirPaqueteDeSlice() {
   const paquete = join(workDir, 'slice-review.diff')
-  const [SECCION_SENAL, SECCION_COMMITS, SECCION_FILES, SECCION_DIFF] = SLICE_PACKAGE_SECTIONS
+  const [SECCION_VARA, SECCION_SENAL, SECCION_COMMITS, SECCION_FILES, SECCION_DIFF] = SLICE_PACKAGE_SECTIONS
   const diff = diffDeSlice()
+  // Tarea 8: el juez de slice mide estado final, coherencia y señal — no
+  // código regla a regla —, así que no se le pega la vara entera: se le da
+  // UNA sola ruta, la de `simplicity.md`, que es exactamente la regla que su
+  // ítem `observabilidad` mide (una traza nombra a su lector). PRIMERA
+  // sección, delante incluso de `Señal`, por el mismo motivo que `Señal` va
+  // delante del diff: detrás de un `-U10` quedaría enterrada.
+  const rutaSimplicity = join(PLUGIN_ROOT, PluginYardstick.DIRECTORY, 'simplicity.md')
   // Slice 10: la señal cruza el embudo AQUÍ, leída del disco (el campo
   // `senal:` que el despacho sembró en el SLICE.md) y sin agente en medio —
   // la misma doctrina del §3.3 con la que la vara del repo viaja en el brief.
-  // PRIMERA sección porque es la vara del ítem `observabilidad`: detrás del
-  // diff -U10 quedaría enterrada. El fallback SENAL_AUSENTE cubre un SLICE.md
-  // sembrado por un plugin anterior a la columna: la ausencia se declara, no
-  // se omite, y su texto es exactamente lo que la rúbrica lee como sin-vara.
+  // El fallback SENAL_AUSENTE cubre un SLICE.md sembrado por un plugin
+  // anterior a la columna: la ausencia se declara, no se omite, y su texto es
+  // exactamente lo que la rúbrica lee como sin-vara.
   writeFileSync(paquete, [
     `# Slice review package: issue #${issue} — ${run.tasksTotal} tasks committed since ${run.baseSha.slice(0, 7)}`,
     reviewTokenLine(reviewToken(diff)),
+    '', `## ${SECCION_VARA}`, `Ábrela con \`Read\`: \`${rutaSimplicity}\``,
     '', `## ${SECCION_SENAL}`, senalDelSlice ?? SENAL_AUSENTE,
     '', `## ${SECCION_COMMITS}`, git(['log', '--reverse', '--format=%h %s', `${run.baseSha}..HEAD`]) || '',
     '', `## ${SECCION_FILES}`, git(['diff', '--stat', run.baseSha, 'HEAD']) || '',
@@ -1589,9 +1596,10 @@ function escribirPaqueteDeReconciliacion({ rama, ronda, intento }) {
   }
   writeFileSync(paquete, lineas.join('\n'))
   // POR RUTA Y NO PEGADA: el reconciliador tiene `Read` (RECONCILER_TOOLS), y
-  // los cinco documentos enteros delante de un conflicto son 24 KB de material
-  // fijo que no dependen del conflicto. Sin tarea que acote el alcance, van
-  // los cinco: una fusión puede tocar cualquier fichero, incluido uno nuevo.
+  // los ocho documentos enteros delante de un conflicto son unos 41 KB de
+  // material fijo que no dependen del conflicto. Sin tarea que acote el
+  // alcance, van todos: una fusión puede tocar cualquier fichero, incluido
+  // uno nuevo.
   appendFileSync(paquete, PluginYardstick.composePathSection(deCt))
   appendFileSync(paquete, seccionVaraDelRepo('el paquete de reconciliación'))
   return paquete
