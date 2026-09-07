@@ -1,13 +1,7 @@
-export type PlanState = 'writing' | 'ready' | 'implementing' | 'in-review' | 'fixing'
-
-export type PullRequest = {
-  number: number
-  url: string
-}
+export type PlanState = 'writing' | 'ready'
 
 export type PlanEvent = {
   state: PlanState
-  pullRequest?: PullRequest
 }
 
 export type PlanFailure = {
@@ -16,7 +10,7 @@ export type PlanFailure = {
 }
 
 export type PlanEventsListener = {
-  onState: (state: PlanState, pullRequest: PullRequest | null) => void
+  onState: (state: PlanState) => void
   onFailure: (error: string) => void
   onUnreachable: () => void
 }

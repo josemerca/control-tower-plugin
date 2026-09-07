@@ -19,6 +19,14 @@ export class PlanSessions {
   find({ issue, repository }) {
     return this.live.get(PlanSessions.#keyFor(repository, issue)) ?? null
   }
+
+  known() {
+    return [...this.live.values()]
+  }
+
+  forget({ issue, repository }) {
+    this.live.delete(PlanSessions.#keyFor(repository, issue))
+  }
 }
 
 export const EventsRequestOutcome = Object.freeze({
@@ -174,5 +182,10 @@ export class PlanEventsRoute {
       }
       response.end()
     }
+  }
+
+  static refuseOtherMethods(request, response) {
+    response.setHeader('Allow', PlanEventsRoute.METHOD)
+    Answer.refuse(response, 405, 'method-not-allowed', 'method not allowed')
   }
 }

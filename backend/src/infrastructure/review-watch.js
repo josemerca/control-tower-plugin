@@ -15,11 +15,19 @@ export class ReviewWatch {
   }
 
   start(watch) {
+    return this.#start(watch, false)
+  }
+
+  startRecovered(watch) {
+    return this.#start(watch, true)
+  }
+
+  #start(watch, recovered) {
     const key = ReviewWatch.#keyFor(watch.repository, watch.issue.number)
     const attended = new Set()
     this.live.set(key, attended)
 
-    return this.#follow(watch, key, attended).catch((cause) => {
+    return this.#follow(watch, key, attended, recovered).catch((cause) => {
       this.stop({ issue: watch.issue.number, repository: watch.repository })
       this.#warn(watch, `is no longer watched: ${cause.message}`)
     })
@@ -29,12 +37,29 @@ export class ReviewWatch {
     this.live.delete(ReviewWatch.#keyFor(repository, issue))
   }
 
-  async #follow(watch, key, attended) {
+  async #follow(watch, key, attended, recovering) {
+    if (recovering) {
+      recovering = !(await this.#baseline(watch, attended))
+      if (!this.live.has(key)) return
+    }
     for (;;) {
       await this.sleep()
       if (!this.live.has(key)) return
+      if (recovering) {
+        recovering = !(await this.#baseline(watch, attended))
+        if (!this.live.has(key)) return
+        continue
+      }
       await this.#attend(watch, key, attended)
     }
+  }
+
+  async #baseline(watch, attended) {
+    const read = await this.#sound(watch)
+    if (read === null) return false
+    for (const change of read.changes) attended.add(change.id)
+
+    return true
   }
 
   async #attend(watch, key, attended) {

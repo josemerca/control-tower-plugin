@@ -363,9 +363,9 @@ const ctInit = join(here, '..', 'scripts', 'ct-init.sh')
 function seedContract() {
   const dir = mkdtemp2(join(tmpdir(), 'ct-f18-init-'))
   execFileSync('bash', [ctInit, dir], { encoding: 'utf8' })
-  const agents = readFileSync(join(dir, 'AGENTS.md'), 'utf8')
+  const contrato = readFileSync(join(dir, 'docs', 'superpowers', 'CONTRATO-SLICES.md'), 'utf8')
   rmSync(dir, { recursive: true, force: true })
-  return agents
+  return contrato
 }
 const flat = (s) => s.replace(/\*/g, '').replace(/\s+/g, ' ')
 // El fixture v7 no es una transcripción: su sha256 es 8730d7be…, exactamente

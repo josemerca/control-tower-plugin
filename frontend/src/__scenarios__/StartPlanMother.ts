@@ -1,4 +1,5 @@
 const TICKET = 'ABC-123'
+const COMMENT = 'revisar la caché de precios en el checkout'
 const REPO = 'owner/name'
 const ANOTHER_REPO = 'owner/other-name'
 const PATH = '/Users/pedro/code/name'
@@ -7,13 +8,29 @@ const AGENT = 'workspace:4'
 const BRANCH = 'feat/7'
 const WORKTREE = '/Users/pedro/code/name/.worktrees/7'
 const REQUEST_BODY = '{"id":"ABC-123","repo":"owner/name","path":"/Users/pedro/code/name"}'
+const NON_CANONICAL_ROOT = '/private/var/code/name'
+const NON_CANONICAL_WORKTREE = '/private/var/code/name/.worktrees/7'
+const REQUEST_BODY_COMMENT_ONLY =
+  '{"user_comment":"revisar la caché de precios en el checkout","repo":"owner/name","path":"/Users/pedro/code/name"}'
+const REQUEST_BODY_WITH_COMMENT =
+  '{"id":"ABC-123","user_comment":"revisar la caché de precios en el checkout","repo":"owner/name",' +
+  '"path":"/Users/pedro/code/name"}'
 
 const started = () => ({
   status: 202,
   body:
     '{"status":"started","id":"ABC-123","repo":"owner/name",' +
     '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"agent":"workspace:4",' +
-    '"branch":"feat/7","worktree":"/Users/pedro/code/name/.worktrees/7"}',
+    '"branch":"feat/7","worktree":"/Users/pedro/code/name/.worktrees/7",' +
+    '"root":"/Users/pedro/code/name"}',
+})
+
+const startedWithoutStory = () => ({
+  status: 202,
+  body:
+    '{"status":"started","id":null,"repo":"owner/name",' +
+    '"issue":{"number":9,"url":"https://github.com/owner/name/issues/9"},"agent":"workspace:5",' +
+    '"branch":"feat/9","worktree":"/Users/pedro/code/name/.worktrees/9"}',
 })
 
 const startedInAnotherRepo = () => ({
@@ -21,7 +38,17 @@ const startedInAnotherRepo = () => ({
   body:
     '{"status":"started","id":"ABC-123","repo":"owner/other-name",' +
     '"issue":{"number":7,"url":"https://github.com/owner/other-name/issues/7"},"agent":"workspace:9",' +
-    '"branch":"feat/7","worktree":"/Users/pedro/code/other-name/.worktrees/7"}',
+    '"branch":"feat/7","worktree":"/Users/pedro/code/other-name/.worktrees/7",' +
+    '"root":"/Users/pedro/code/other-name"}',
+})
+
+const startedFromNonCanonicalPath = () => ({
+  status: 202,
+  body:
+    '{"status":"started","id":"ABC-123","repo":"owner/name",' +
+    '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"agent":"workspace:4",' +
+    '"branch":"feat/7","worktree":"/private/var/code/name/.worktrees/7",' +
+    '"root":"/private/var/code/name"}',
 })
 
 const malformedId = () => ({
@@ -51,6 +78,7 @@ const planNotStarted = () => ({
 
 export const StartPlanMother = {
   TICKET,
+  COMMENT,
   REPO,
   ANOTHER_REPO,
   PATH,
@@ -59,8 +87,14 @@ export const StartPlanMother = {
   BRANCH,
   WORKTREE,
   REQUEST_BODY,
+  NON_CANONICAL_ROOT,
+  NON_CANONICAL_WORKTREE,
+  REQUEST_BODY_COMMENT_ONLY,
+  REQUEST_BODY_WITH_COMMENT,
   started,
+  startedWithoutStory,
   startedInAnotherRepo,
+  startedFromNonCanonicalPath,
   malformedId,
   malformedRepo,
   malformedPath,

@@ -1,9 +1,0 @@
-.delivery-progress {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.delivery-progress__state {
-  margin: 0;
-}

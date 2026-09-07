@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, statSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -607,6 +607,24 @@ describe('ct-step reconcile', () => {
         expect(contenido).toMatch(/markers-left/)
         expect(contenido).toMatch(/quedaron marcas de conflicto/)
         expect(r.stdout).toContain(segundo)
+      } finally { rmSync(dir, { recursive: true, force: true }) }
+    })
+
+    // #92 — el coste del papel de reconciliación. La fila mide el paquete que
+    // `ct-reconciler` LEYÓ en esta ronda (el último escrito), no el que la ronda
+    // escribe después para el siguiente intento: al revés, la columna diría el
+    // coste de una llamada que todavía no se ha hecho.
+    it('ROUND_DISCARDED: la fila anota el agente reconciliador y el paquete que leyó, no el que se escribe después', () => {
+      const dir = worktreeEnConflicto({ reconcileRetries: 0 })
+      try {
+        step(dir, ['reconcile'])
+        const bytesDelPrimero = statSync(join(dir, '.agent', 'run-4', 'reconcile-package-1.md')).size
+        step(dir, ['reconcile'])
+        const filas = readFileSync(join(dir, 'docs', 'superpowers', 'metrics', 'issue-4.jsonl'), 'utf8')
+          .trim().split('\n').map((l) => JSON.parse(l)).filter((f) => f.step === 'reconcile')
+        expect(filas.at(-1).package_bytes).toBe(bytesDelPrimero)
+        expect(filas.at(-1).agent_bytes).toBeGreaterThan(0)
+        expect(filas.at(-1).skill_bytes).toBe(0)
       } finally { rmSync(dir, { recursive: true, force: true }) }
     })
   })

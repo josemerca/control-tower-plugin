@@ -36,12 +36,17 @@ class CmuxDouble {
   static REPOSITORY_SLUG = 'josemerca__ct-loop-sandbox'
   static ERRAND = 'escribe el plan de #42 en josemerca/ct-loop-sandbox'
   static TAB = `ct-plan-${CmuxDouble.REPOSITORY_SLUG}-ABC-42`
+  static NO_STORY_ISSUE = new PlanIssue({ number: 7, url: 'https://github.com/josemerca/ct-loop-sandbox/issues/7' })
+  static NO_STORY_TAB = `ct-plan-${CmuxDouble.REPOSITORY_SLUG}-issue-7`
+  static NO_STORY_DIRECTORY = `${CmuxDouble.REPOSITORY_SLUG}-7`
   static PROBES_PER_SEND = 2
   static RESENDS = 1
   static DIRECTORY = `${CmuxDouble.REPOSITORY_SLUG}-42`
   static LAUNCHER = `${CmuxDouble.RUNS_IN}/${CmuxDouble.DIRECTORY}/${LAUNCHER_FILENAME}`
   static SENTINEL = `${CmuxDouble.RUNS_IN}/${CmuxDouble.DIRECTORY}/${SENTINEL_FILENAME}`
   static TYPED = buildTypedCommand(CmuxDouble.LAUNCHER, shQuote)
+  static NO_STORY_LAUNCHER = `${CmuxDouble.RUNS_IN}/${CmuxDouble.NO_STORY_DIRECTORY}/${LAUNCHER_FILENAME}`
+  static NO_STORY_TYPED = buildTypedCommand(CmuxDouble.NO_STORY_LAUNCHER, shQuote)
 
   constructor({ printed, sentinels, realpaths = new Map(), step = null }) {
     this.printed = printed
@@ -138,6 +143,15 @@ class CmuxDouble {
     })
   }
 
+  static briefingWithNoStory() {
+    return new PlanBriefing({
+      story: null,
+      issue: CmuxDouble.NO_STORY_ISSUE,
+      located: new WorkspaceLocation({ path: CmuxDouble.WORKTREE, branch: 'feat/7' }),
+      repository: CmuxDouble.REPOSITORY,
+    })
+  }
+
   agents() {
     return new CmuxPlanAgents({
       runsIn: CmuxDouble.RUNS_IN,
@@ -209,6 +223,19 @@ describe('CmuxPlanAgents', () => {
       '--name', CmuxDouble.TAB,
       '--cwd', CmuxDouble.WORKTREE,
       '--command', CmuxDouble.TYPED,
+    ]])
+  })
+
+  it('the_tab_of_a_plan_with_no_user_story_is_named_after_its_issue_instead_of_the_word_null', async () => {
+    const cmux = CmuxDouble.launched()
+
+    await cmux.launch(CmuxDouble.briefingWithNoStory())
+
+    expect(cmux.calls).toEqual([[
+      'new-workspace',
+      '--name', CmuxDouble.NO_STORY_TAB,
+      '--cwd', CmuxDouble.WORKTREE,
+      '--command', CmuxDouble.NO_STORY_TYPED,
     ]])
   })
 

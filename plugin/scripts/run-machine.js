@@ -41,6 +41,21 @@ export const STEPS = Object.freeze({
   IMPLEMENT: 'implement',
   CONTROLS: 'controls',
   JUDGE: 'judge',
+  // ADVISE (H9) — entre el SEGUNDO veto y el TERCER intento, y en ningún otro
+  // sitio. Los dos primeros intentos son el patrón feedback-flip: el
+  // implementador hereda el árbol vetado y el veredicto que lo vetó, y eso es
+  // lo correcto mientras la corrección sea local. El tercero ya no lo es —
+  // parchea dos capas de parches— así que aquí se cambia de estrategia en vez
+  // de repetir la misma a ciegas: un consejero de tier superior, sin más
+  // herramienta que `Read`, mira los dos intentos y los dos vetos y dicta un
+  // enfoque, y el programa devuelve el árbol al último commit antes de que el
+  // tercer implementador empiece (happy-to-delete).
+  //
+  // SIN CONTADOR PROPIO, y es una decisión: el reintento que este paso ocupa ya
+  // lo gastó el veto que lo abrió (`judgeRetries`), así que el intento sigue
+  // siendo `controlRetries + judgeRetries + correctionRetries + 1` — la misma
+  // fórmula que cuentan el sello del despacho y el backend que lee este fichero.
+  ADVISE: 'advise',
   COMMIT: 'commit',
   // RECONCILE va ANTES de GLOBAL y no después: la punta a punta del plan
   // (`global`) tiene que correr sobre el árbol ya puesto al día con su base,
@@ -148,6 +163,7 @@ export function after(run, outcome, budgets = DEFAULT_BUDGETS) {
     case STEPS.IMPLEMENT: return trasImplementar(run, outcome)
     case STEPS.CONTROLS: return trasLosControles(run, outcome, budgets)
     case STEPS.JUDGE: return trasElJuez(run, outcome, budgets)
+    case STEPS.ADVISE: return trasElConsejo(run, outcome)
     case STEPS.COMMIT: return trasElCommit(run, outcome)
     case STEPS.RECONCILE: return trasReconciliar(run, outcome, budgets)
     case STEPS.GLOBAL: return trasLaGlobal(run, outcome)
@@ -194,9 +210,15 @@ function trasElJuez(run, outcome, budgets) {
     case OUTCOMES.DONE:
       return abierto(run, { step: STEPS.COMMIT })
     case OUTCOMES.FAILED:
-      return run.judgeRetries < budgets.judgeRetries
-        ? abierto(run, { step: STEPS.IMPLEMENT, judgeRetries: run.judgeRetries + 1 })
-        : cerrado(run, RUN_STATES.BLOCKED_JUDGE)
+      if (run.judgeRetries >= budgets.judgeRetries) return cerrado(run, RUN_STATES.BLOCKED_JUDGE)
+      // EL ÚLTIMO REINTENTO NO SE CONCEDE A CIEGAS. Que el que se está
+      // concediendo sea el último es la única pregunta que separa los dos
+      // caminos, y se hace con el presupuesto delante en vez de con un `2`
+      // tecleado: quien suba `judgeRetries` a tres mueve el consejero al tercer
+      // veto sin tocar esta línea.
+      return esElUltimoReintentoDeVeto(run, budgets)
+        ? abierto(run, { step: STEPS.ADVISE, judgeRetries: run.judgeRetries + 1 })
+        : abierto(run, { step: STEPS.IMPLEMENT, judgeRetries: run.judgeRetries + 1 })
     // La diferencia entre un juez que VETA y un juez que REFUNFUÑA: un PASA con
     // hallazgos que no son de severidad baja vuelve al implementador con
     // presupuesto propio, y agotarlo ENTREGA IGUAL. Sin esta distinción, cada
@@ -210,6 +232,28 @@ function trasElJuez(run, outcome, budgets) {
     // no se tocó el código, así que no gasta reintento.
     case OUTCOMES.DISCARDED:
       return abierto(run, { step: STEPS.JUDGE, discards: run.discards + 1 })
+    default:
+      return imposible(run, outcome)
+  }
+}
+
+// H9 — el consejo, entre el segundo veto y el tercer intento. Sólo dos
+// resultados: el consejo que cumple el esquema (y con él el árbol limpio y el
+// brief del tercer intento) o el que no.
+//
+// El DESCARTE no gasta reintento, y es el mismo razonamiento que ya rige en
+// `implement` y en el juez: el consejero no toca el código, así que un JSON que
+// incumple el esquema no puede costar un intento de implementación — igual que
+// un veredicto ilegible no es un veto. Lo que respalda este autobucle es el tope
+// de descartes de la slice, no un presupuesto propio; y a diferencia de
+// `reconcile`, aquí no queda ningún estado a medias que haga que la ronda
+// siguiente vuelva a descartar por lo mismo.
+function trasElConsejo(run, outcome) {
+  switch (outcome) {
+    case OUTCOMES.DONE:
+      return abierto(run, { step: STEPS.IMPLEMENT })
+    case OUTCOMES.DISCARDED:
+      return abierto(run, { step: STEPS.ADVISE, discards: run.discards + 1 })
     default:
       return imposible(run, outcome)
   }
@@ -289,6 +333,15 @@ function trasReconciliar(run, outcome, budgets) {
 // slice— y la tabla la hace para decidir si retiene el paso o cierra en
 // BLOCKED_RECONCILE: es UNA decisión, y las dos mitades tienen que contestar lo
 // mismo o el verbo anuncia una cosa y la máquina hace otra.
+// La pregunta del último reintento de veto, con el dato — exportada por el
+// mismo motivo que `reconcileBudgetSpent`: `ct-step` la hace para nombrar en el
+// mensaje del veto a quién se despacha después, y la tabla la hace para decidir
+// el paso. Es UNA decisión, y las dos mitades tienen que contestar lo mismo o el
+// verbo anuncia una cosa y la máquina hace otra.
+export function esElUltimoReintentoDeVeto(run, budgets = DEFAULT_BUDGETS) {
+  return run.judgeRetries + 1 === budgets.judgeRetries
+}
+
 export function reconcileBudgetSpent(run, budgets = DEFAULT_BUDGETS) {
   return run.reconcileRetries >= budgets.reconcileRetries
 }

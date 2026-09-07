@@ -18,12 +18,15 @@ import {
   readSliceVerdict, outcomeOfSliceVerdict, sliceVerdictCommitMessage,
   SLICE_VERDICT_RULES, SLICE_VERDICT_SCHEMA, SLICE_JUDGE_TOOLS, SLICE_PACKAGE_SECTIONS, RECONCILER_TOOLS,
   REVIEW_TOKEN_LABEL, reviewToken, reviewTokenLine, reviewTokenOf,
+  readAdvice, ADVICE_SCHEMA, ADVISOR_TOOLS, ADVICE_PACKAGE_SECTIONS,
 } from '../scripts/step-contracts.js'
 import { findClosingKeywords } from '../scripts/closing-keywords.js'
+import { PluginYardstick } from '../scripts/plugin-yardstick.js'
 
 const AGENTE_JUEZ = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-judge.md')
 const AGENTE_JUEZ_DE_SLICE = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-slice-judge.md')
 const AGENTE_RECONCILIADOR = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-reconciler.md')
+const AGENTE_CONSEJERO = join(dirname(fileURLToPath(import.meta.url)), '..', 'agents', 'ct-advisor.md')
 
 // La línea `tools:` del frontmatter del reconciliador (Reconciliación de
 // ramas, Tarea 9) — mismo patrón que `toolsDelAgente()`/`toolsDelJuezDeSlice()`,
@@ -428,12 +431,18 @@ describe('quién puede qué', () => {
   // Slice 11 — el campo obligatorio tiene que estar en lo que el juez lee: un
   // campo que sólo vive en el validador descarta la corrida entera sin que
   // ninguno de los veredictos sea culpa del juez.
-  it('el bloque json de ct-judge.md enseña review_token: un campo que sólo vive en el validador descarta la corrida entera', () => {
-    expect(esquemaDelAgente()).toMatch(/"review_token"/)
+  // El campo lo escribe `ct-step verdict`, así que el bloque que el juez copia
+  // NO lo lleva: enseñárselo era pedirle 64 hex tecleados a mano, y un error
+  // de copia descartaba un veredicto entero de opus.
+  it('el bloque json de ct-judge.md ya no le pide el review_token: lo escribe el programa', () => {
+    expect(esquemaDelAgente()).not.toMatch(/"review_token"/)
   })
 
-  it('la rúbrica del juez dice de DÓNDE se copia el token, con la etiqueta exacta del paquete', () => {
-    expect(readFileSync(AGENTE_JUEZ, 'utf8')).toContain(`${REVIEW_TOKEN_LABEL}:`)
+  it('la rúbrica del juez le dice que ese campo no es suyo, nombrando la línea del paquete que ya no copia', () => {
+    const texto = readFileSync(AGENTE_JUEZ, 'utf8')
+    expect(texto).toContain(`${REVIEW_TOKEN_LABEL}:`)
+    expect(texto).toMatch(/There is no `review_token` for you to write/)
+    expect(texto).not.toMatch(/copied verbatim/)
   })
 
   it('PACKAGE_SECTIONS no puede divergir de los encabezados que la rúbrica cita por su nombre', () => {
@@ -443,6 +452,15 @@ describe('quién puede qué', () => {
     // sigue recibiendo instrucciones para leer una sección que no existe, y
     // nada se entera salvo este test.
     expect(PACKAGE_SECTIONS).toEqual(seccionesDelPaquete())
+  })
+
+  // La primera sección del paquete no la escribe `escribirPaquete`: la escribe
+  // `PluginYardstick.composePathSection`, con su propia constante. Dos cadenas
+  // a mano para el mismo encabezado son el desacople que ya sufrieron
+  // JUDGE_TOOLS y PACKAGE_SECTIONS, y aquí sería mudo: el juez leería una
+  // sección que el paquete titula de otra forma.
+  it('la sección de la vara la titula el módulo que la escribe, y PACKAGE_SECTIONS no puede divergir de él', () => {
+    expect(PACKAGE_SECTIONS[0]).toBe(PluginYardstick.PATH_SECTION)
   })
 })
 
@@ -512,9 +530,11 @@ describe('el juez de slice (§3.7-B)', () => {
     expect(esquema).toMatch(/"path"/)
   })
 
-  it('el bloque json de ct-slice-judge.md enseña review_token, y su rúbrica nombra la etiqueta', () => {
-    expect(esquemaDeAgente(AGENTE_JUEZ_DE_SLICE)).toMatch(/"review_token"/)
-    expect(readFileSync(AGENTE_JUEZ_DE_SLICE, 'utf8')).toContain(`${REVIEW_TOKEN_LABEL}:`)
+  it('el bloque json de ct-slice-judge.md tampoco le pide el review_token, y le dice quién lo escribe', () => {
+    expect(esquemaDeAgente(AGENTE_JUEZ_DE_SLICE)).not.toMatch(/"review_token"/)
+    const texto = readFileSync(AGENTE_JUEZ_DE_SLICE, 'utf8')
+    expect(texto).toContain(`${REVIEW_TOKEN_LABEL}:`)
+    expect(texto).toMatch(/There is no `review_token` for you to write/)
   })
 
   it('SLICE_PACKAGE_SECTIONS abre con Señal y no puede divergir de la rúbrica', () => {
@@ -545,8 +565,9 @@ describe('el juez de slice (§3.7-B)', () => {
 
   // Slice 11: mismo campo, mismo validador — `readSliceVerdict` es
   // `readVerdict` con otra rúbrica dentro, así que el token se exige igual.
-  it('el juez de slice valida el mismo campo, con el mismo readVerdict', () => {
-    expect(readSliceVerdict({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [] }).verdict).toBeUndefined()
+  it('el juez de slice valida el mismo campo, con el mismo readVerdict: ausente vale, con otra forma no', () => {
+    expect(readSliceVerdict({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [] }).verdict.review_token).toBeNull()
+    expect(readSliceVerdict({ ruling: 'PASS', rubric: recorridoDeSlice(), findings: [], review_token: 'x' }).verdict).toBeUndefined()
   })
 
   it('readSliceVerdict descarta un veredicto con una regla de TAREA (p. ej. "alcance")', () => {
@@ -940,15 +961,18 @@ describe('el veredicto', () => {
     expect(reviewTokenOf(null)).toBeNull()
   })
 
-  it('readVerdict exige el review_token, y el motivo nombra la línea de la que se copia', () => {
+  // EL TOKEN LO ESCRIBE EL PROGRAMA (`ct-step verdict` lo inyecta antes de
+  // validar), así que un veredicto que no lo trae NO se descarta: se acepta
+  // con el campo a null, y quien decide si ata a algún corte es ct-step, que
+  // es el único que puede leer el paquete.
+  it('un veredicto sin review_token se acepta: el campo lo escribe el programa, no el juez', () => {
     const r = readVerdict({ ruling: 'PASS', rubric: recorridoCompleto(), findings: [] })
-    expect(r.verdict).toBeUndefined()
-    expect(r.why).toContain(REVIEW_TOKEN_LABEL)
-    expect(r.why).toContain('review_token')
+    expect(r.why).toBeUndefined()
+    expect(r.verdict.review_token).toBeNull()
   })
 
-  it('un review_token que no es un sha256 de 64 hex se descarta', () => {
-    for (const malo of ['12', 'a'.repeat(63), 'z'.repeat(64), 123, null, undefined]) {
+  it('un review_token que no es un sha256 de 64 hex se descarta: no se puede comparar con nada', () => {
+    for (const malo of ['12', 'a'.repeat(63), 'z'.repeat(64), 123]) {
       expect(readVerdict({ ruling: 'PASS', rubric: recorridoCompleto(), findings: [], review_token: malo }).verdict).toBeUndefined()
     }
   })
@@ -964,9 +988,10 @@ describe('el veredicto', () => {
     expect(v('PASS').verdict.review_token).toBe(TOKEN)
   })
 
-  it('review_token está en VERDICT_SCHEMA.required, no sólo en el validador', () => {
-    expect(VERDICT_SCHEMA.required).toContain('review_token')
-    expect(SLICE_VERDICT_SCHEMA.required).toContain('review_token')
+  it('review_token NO está en el required del esquema: es campo del programa, no del juez', () => {
+    expect(VERDICT_SCHEMA.required).not.toContain('review_token')
+    expect(SLICE_VERDICT_SCHEMA.required).not.toContain('review_token')
+    expect(VERDICT_SCHEMA.properties.review_token).toBeDefined()
   })
 
   it('la FORMA del token la declara UNA constante: el pattern del esquema y el validador no divergen', () => {
@@ -978,6 +1003,10 @@ describe('el veredicto', () => {
     const pattern = VERDICT_SCHEMA.properties.review_token.pattern
     expect(SLICE_VERDICT_SCHEMA.properties.review_token.pattern).toBe(pattern)
     const re = new RegExp(pattern)
+    // `undefined` y `null` quedan fuera de la muestra a propósito: el esquema
+    // los trata como campo ausente (ya no es `required`) y el validador los
+    // acepta como el hueco que el programa rellena, así que no son un caso de
+    // la FORMA del token.
     for (const muestra of ['a'.repeat(64), 'A'.repeat(64), 'aB3'.repeat(21) + 'f', 'a'.repeat(63),
                            'a'.repeat(65), 'z'.repeat(64), '', `${'a'.repeat(64)}\n`, ` ${'a'.repeat(64)}`]) {
       const loDiceElEsquema = re.test(muestra)
@@ -1027,11 +1056,15 @@ describe('el informe del implementador', () => {
     expect(readReport({ summary: 'ya está' }).why).toMatch(/rutas tocadas/)
   })
 
-  it('rechaza la misma ruta declarada dos veces: es un informe que no se entiende a sí mismo', () => {
-    const paths = ['src/a.js', 'src/a.js']
-    const r = readReport({ paths, summary: 'hecho' })
-    expect(r.report).toBeUndefined()
-    expect(r.why).toMatch(/misma ruta/)
+  // La misma ruta dos veces DESCARTABA el informe entero. Ya no: lo que se
+  // stagea no sale de esta lista sino de lo que el programa mide del árbol,
+  // así que un duplicado no deja nada indecidible — se cuenta una vez y se
+  // sigue. Descartar aquí costaba un informe entero, y uno de los seis
+  // descartes que matan el run, por una repetición que no cambia nada.
+  it('la misma ruta declarada dos veces ya no descarta el informe: se cuenta una vez', () => {
+    const r = readReport({ paths: ['src/a.js', 'src/a.js'], summary: 'hecho' })
+    expect(r.why).toBeUndefined()
+    expect(r.report.paths).toEqual(['src/a.js'])
   })
 
   it('el esquema del informe pide rutas y resumen, y nada más', () => {
@@ -1177,7 +1210,90 @@ describe('el modelo de cada subagente', () => {
     ['el juez de tarea', AGENTE_JUEZ],
     ['el juez de slice', AGENTE_JUEZ_DE_SLICE],
     ['el reconciliador', AGENTE_RECONCILIADOR],
+    ['el consejero', AGENTE_CONSEJERO],
   ])('%s declara su modelo, no lo hereda de la sesión', (_, fichero) => {
     expect(modeloDeAgente(fichero)).toBe('opus')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// EL CONSEJERO (H9, `agents/ct-advisor.md`): el paso que el SEGUNDO veto abre.
+// Su respuesta es un JSON con un enfoque y las rutas a reconsiderar, y lo que
+// decide si se acepta es este esquema — igual que con el veredicto, un consejo
+// que no lo cumple es un DESCARTE y se vuelve a preguntar.
+// ---------------------------------------------------------------------------
+describe('el consejero del segundo veto', () => {
+  const toolsDelConsejero = () => {
+    const m = /^tools:\s*(.+)$/m.exec(readFileSync(AGENTE_CONSEJERO, 'utf8'))
+    return m ? m[1].trim() : null
+  }
+
+  const seccionesDelPaqueteDeConsejo = () => {
+    const texto = readFileSync(AGENTE_CONSEJERO, 'utf8')
+    const parrafo = /- \*\*The advice package\.\*\*([\s\S]*?)\n\n/.exec(texto)
+    if (!parrafo) return []
+    const normalizado = parrafo[1].replace(/\s+/g, ' ')
+    const regex = /`## ([^`]+)`/g
+    const secciones = []
+    let m
+    while ((m = regex.exec(normalizado)) !== null) {
+      const seccion = m[1].trim()
+      if (!secciones.includes(seccion)) secciones.push(seccion)
+    }
+    return secciones
+  }
+
+  const consejo = (over = {}) => ({ approach: 'tíralo y empieza por el puerto', files_to_reconsider: ['src/uno.js'], ...over })
+
+  it('el consejero no puede tocar nada: sólo lee', () => {
+    expect(ADVISOR_TOOLS).toBe('Read')
+    expect(toolsDelConsejero()).toBe(ADVISOR_TOOLS)
+  })
+
+  it('un consejo con enfoque y rutas se acepta, y las rutas repetidas no lo descartan', () => {
+    const { advice, why } = readAdvice(consejo({ files_to_reconsider: ['src/uno.js', 'src/uno.js'] }))
+    expect(why).toBeUndefined()
+    expect(advice.approach).toBe('tíralo y empieza por el puerto')
+    expect(advice.files_to_reconsider).toEqual(['src/uno.js'])
+  })
+
+  it('un consejo sin lista de rutas se acepta con la lista vacía: no reconsiderar ninguna es una respuesta', () => {
+    expect(readAdvice(consejo({ files_to_reconsider: [] })).advice.files_to_reconsider).toEqual([])
+  })
+
+  it.each([
+    ['sin approach', { approach: undefined }, /enfoque/],
+    ['con un approach vacío', { approach: '   ' }, /enfoque/],
+    ['con las rutas en prosa', { files_to_reconsider: 'src/uno.js' }, /rutas/],
+    ['con una ruta que no es texto', { files_to_reconsider: [7] }, /rutas/],
+  ])('un consejo %s se descarta, y el porqué lo nombra', (_, over, motivo) => {
+    const { advice, why } = readAdvice(consejo(over))
+    expect(advice).toBeUndefined()
+    expect(why).toMatch(motivo)
+  })
+
+  it('un consejo que nombra rutas fuera del worktree se descarta', () => {
+    expect(readAdvice(consejo({ files_to_reconsider: ['/etc/passwd'] })).why).toMatch(/fuera del worktree/)
+  })
+
+  it('sin structured_output no hay consejo', () => {
+    expect(readAdvice(null).why).toMatch(/structured_output/)
+  })
+
+  it('ADVICE_SCHEMA exige los dos campos que el programa consume', () => {
+    expect(ADVICE_SCHEMA.required).toEqual(['approach', 'files_to_reconsider'])
+    expect(ADVICE_SCHEMA.additionalProperties).toBe(false)
+  })
+
+  it('ADVICE_PACKAGE_SECTIONS no puede divergir de los encabezados que el consejero cita por su nombre', () => {
+    expect(ADVICE_PACKAGE_SECTIONS).toEqual(seccionesDelPaqueteDeConsejo())
+    expect(ADVICE_PACKAGE_SECTIONS).toEqual(['Brief', 'Intentos', 'Veredictos'])
+  })
+
+  it('el bloque json de ct-advisor.md enseña los dos campos y ninguno más', () => {
+    const esquema = esquemaDeAgente(AGENTE_CONSEJERO)
+    expect(esquema).toMatch(/"approach"/)
+    expect(esquema).toMatch(/"files_to_reconsider"/)
+    expect(esquema).not.toMatch(/"review_token"/)
   })
 })

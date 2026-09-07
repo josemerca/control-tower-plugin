@@ -1,7 +1,7 @@
 // Un trozo de la máquina de estados de scripts/ct-step.mjs. El preámbulo —y
 // por qué son nueve ficheros y no uno— está en fixtures/ct-step-harness.js.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
-import { readFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
@@ -15,12 +15,23 @@ afterEach(() => { rmSyncBestEffort(repo) })
 
 describe('el veto no deja rastro que deshacer', () => {
   const veta = () => juzgar(veredicto('FAIL', [{ severity: 'high', what: 'mal', path: 'uno.txt', line: 1 }]))
+  // El consejero del segundo veto, por el camino feliz: lo que este describe
+  // mide es el veto, no el consejo (eso está en ct-step-consejo.test.js).
+  const aconsejar = () => {
+    ct('next')
+    const p = join(repo, 'advice.json')
+    writeFileSync(p, JSON.stringify({ approach: 'por otro camino', files_to_reconsider: [] }))
+    return ct('advice', p)
+  }
 
   it('tres vetos agotan el presupuesto, salen por 1 y NO comitean', () => {
+    // H9: entre el segundo veto y el tercer intento el run pasa por `advise`,
+    // así que el tercer intento no empieza hasta que hay consejo aceptado.
     for (let i = 0; i < 3; i++) {
       ct('report', informe(['uno.txt']))
       ct('controls')
       var r = veta()
+      if (estado().step === 'advise') aconsejar()
     }
     expect(r.status).toBe(1)
     expect(commits()).toBe(1)

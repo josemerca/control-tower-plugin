@@ -1,6 +1,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { renderState } from './state.js'
+import { BaselineResult } from './baseline.js'
 import { resolveGatesForAgent, renderGateKickoffLines, resolveE2e } from './gates.js'
 // F22: el kickoff SOLO lo recibe un agente de slice, así que aquí no hay
 // ambigüedad que resolver — su fichero de estado es siempre `.agent/SLICE.md`.
@@ -190,7 +191,10 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conv
     // "al terminar deja el PR listo y PARA" que cerraba esta línea se fue a
     // cambio: lo dice ya, con el comando literal, la línea de cierre de abajo.
     `Es human-gated: NO mergees el PR (el merge es de la sesión coordinadora), NO empieces el siguiente slice, y NO crees worktrees nuevos — ya estás en el que te preparó el dispatcher.`,
-    `Arranque verification-first: confirma pwd/rama, git log, y baseline verde ANTES de tocar nada.`,
+    // #96 — el baseline lo mide el dispatcher (scripts/baseline.js) al preparar
+    // el worktree y lo siembra como DATO en la semilla: pwd, rama y corte ya
+    // los verificó el programa. Esta línea señala dónde está; no lo ordena.
+    `El baseline ya está medido: su resultado (verde, rojo o no-verificado), el comando y el resumen están en el campo \`baseline:\` de ${SLICE_REL_PATH}. Léelo ahí; no lo vuelvas a ejecutar para afirmarlo.`,
     // F21, segundo hallazgo de la misma lente ("ninguna exigencia que el spec
     // le haga al agente puede depender de que el agente lea el spec"): la
     // columna `Protegido` SÍ llega al cuerpo del issue, pero este kickoff
@@ -247,7 +251,7 @@ export function renderKickoff(slice, { repo, dispatchCheckPath, ctStepPath, conv
     // juez y el del control de alcance. Aquí es donde alcanza al que planifica.
     // La del REPO ya le llegaba: la skill le manda arrancar de
     // `.agent/conventions.md` y seleccionar en §3.
-    `Antes de escribir el plan, LEE la vara de ct: los cinco documentos de ${conventionsDir} (defects.md, style.md, decisions.md, architecture.md, testing.md). El programa se los pega al implementador y al juez en cada tarea, así que un plan que no las respete produce tareas que el juez va a bloquear. TIENEN PREFERENCIA sobre las convenciones de este repo, y la preferencia se mide regla a regla, no por tema: donde una regla del repo manda lo que uno de esos documentos prohíbe, o prohíbe lo que uno de esos documentos manda, no aplica; donde el repo habla de algo de lo que ninguno habla —mayúsculas, prefijos, nombres de fichero—, obliga entera y la sigues. La vara del repo no desaparece: la sigues seleccionando en el \`Rules to obey:\` de §3 como hasta ahora.`,
+    `La vara de ct vive en ${conventionsDir} y el programa la lleva a cada tarea: al implementador pegada, al juez por ruta. Cómo se relaciona con las convenciones de este repo cuando chocan lo dice la CABECERA con la que viaja, que es donde está escrita esa regla y el único sitio donde está — no la repitas en el plan ni la reinterpretes. No hace falta que abras los cinco documentos ahora: lo que el plan tiene que seleccionar es la vara del REPO, en el \`Rules to obey:\` de §3, como hasta ahora. Abre de ${conventionsDir} el que necesites para decidir algo concreto del plan.`,
     `Y una de ellas decide cómo reparten trabajo tus tareas: \`architecture.md\` rige los MÓDULOS NUEVOS. Un módulo que ya existía y no cumple es deuda declarada del repo —lo que le añadas sigue el estilo de su anfitrión y eso no es hallazgo—, pero un concepto nuevo es un módulo nuevo y nace cumpliendo. De qué lado cae cada cosa lo decides tú al repartir \`**Files:**\` entre \`(create)\` y \`(modify)\`.`,
     `Primer acto, con el baseline verde: escribe el plan del slice con control-tower-loop:writing-plans-prescriptive usando el issue como spec (sus AC, "Protegido", "${EPIC_CONTEXT_HEADING}" y "${FROZEN_DECISIONS_HEADING}" son la entrada que la skill pide; vuelca cada decisión congelada en "## 2. Closed decisions" del plan — son del epic y las DEBES respetar, no reinterpretar). SOLO bloques esenciales, cada uno con su etiqueta de rol: contratos, call sites y el tramo que cambia — los cuerpos de los módulos y los ficheros de test los escribe el implementador con TDD, y la configuración se describe en prosa. Guárdalo como docs/superpowers/plans/YYYY-MM-DD-issue-${slice.n}-<slug>.md, valídalo con \`node ${dispatchCheckPath} ${slice.n} --repo ${repo} --check-plan\` hasta exit 0, y commitéalo: viaja en el PR, y el --release del final se negará (exit 6) sin un plan válido commiteado.`,
     `Con el plan commiteado y el gate 'plan' con OK humano, la implementación NO la conduces con subagent-driven-development ni con su ledger: la secuencia la dicta la máquina. Pregunta el paso con \`node ${ctStepPath} next --plan docs/superpowers/plans/<el-plan-que-commiteaste>.md --issue ${slice.n}\` y obedece LITERALMENTE lo que imprima en cada paso (donde diga \`ct-step\`, es \`node ${ctStepPath}\`): despacha el implementador como subagente con la rúbrica y el brief que te indique, luego \`ct-step report\`, \`ct-step controls\`, despacha el juez como subagente ct-judge (declarado sin Bash), \`ct-step verdict\` y \`ct-step commit\` — comitea ct-step, nunca tú ni el implementador. Tras el commit de la última tarea quedan tres pasos más, que \`next\` también dicta: \`ct-step reconcile\` (fusiona la rama con su base; si hay conflicto, despacha ct-reconciler como subagente, declarado sin Bash y sin Write — el programa stagea, comitea y aborta la fusión, nunca tú ni el implementador), \`ct-step global\` (la Global verification del plan la ejecuta el programa, no un agente) y el juicio del slice entero — despacha ct-slice-judge como subagente (declarado sin Bash) y entrega su JSON con \`ct-step slice-verdict\`. Vuelve a \`next\` tras cada paso hasta "run delivered".`,
@@ -343,7 +347,15 @@ function renderStateSenal(senal) {
   return (senal || '').trim() || SENAL_AUSENTE
 }
 
-export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
+// #96 — `baseline`: el resultado de `Baseline.measure` (scripts/baseline.js)
+// sobre el worktree recién cortado. Quien siembra sin haberlo medido (el
+// dry-run, que no tiene worktree; los tests) recibe la ausencia DECLARADA,
+// nunca un hueco: `no-verificado` es un miembro del vocabulario, no un
+// opcional — el agente que se hidrata tiene que poder distinguir "nadie lo
+// midió" de "se midió y salió rojo".
+export const BASELINE_NOT_MEASURED = BaselineResult.notMeasured('nadie ejecutó el baseline al sembrar esta semilla')
+
+export function buildStateSeed(slice, { branch, base, baseSha = '', baseline = BASELINE_NOT_MEASURED }) {
   const issueNum = slice.issue != null ? parseInt(String(slice.issue).replace('#', ''), 10) : null
   return renderState({
     meta: {
@@ -463,6 +475,14 @@ export function buildStateSeed(slice, { branch, base, baseSha = '' }) {
       // de tu last_commit" dejaría de significar nada. Si no se pudo resolver,
       // se siembra vacío a propósito — un sha inventado sería peor que ninguno.
       last_commit: baseSha,
+      // baseline (#96) — el comando de test del repo, EJECUTADO por el
+      // dispatcher en este worktree antes de lanzar al agente, con su
+      // resultado (verde | rojo | no-verificado), el comando y un resumen de
+      // la salida. Sustituye a la orden del kickoff «baseline verde ANTES de
+      // tocar nada»: el incidente 5 del catálogo es un agente que afirmó un
+      // verde que no ejecutó. Es un mapa y no una frase por la misma razón que
+      // `blocked`: sus tres partes son campos que un programa puede leer.
+      baseline: baseline.seedField,
       // D-4 — el epic, sembrado en el despacho y no preguntado en cada run.
       // La ausencia se DECLARA con la constante que ya existe, no se rellena
       // ni se deja vacía: es la misma regla que impidió que ct-next asumiera

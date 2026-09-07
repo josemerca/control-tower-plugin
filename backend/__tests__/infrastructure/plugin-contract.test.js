@@ -1,19 +1,28 @@
 import { describe, it, expect, afterEach } from 'vitest'
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { BigQueryTable } from '../../../plugin/scripts/bigquery-load.js'
 import { readGoCommitment, goPath } from '../../../plugin/scripts/go-registry.js'
 import { matchesGo } from '../../../plugin/scripts/go-response.js'
 import { controlTowerDir } from '../../../plugin/scripts/run-metrics.js'
 import { LOOP_STATUS_LABELS } from '../../../plugin/scripts/groom.js'
+import {
+  STEPS, RUN_STATES, OUTCOMES, DEFAULT_BUDGETS, newRun, after, deliveredRun,
+} from '../../../plugin/scripts/run-machine.js'
+import { StepSeal } from '../../../plugin/scripts/dispatch-gate.js'
+import { extractTasks } from '../../../plugin/scripts/plan-tasks.js'
 import { DiskGoRegistry } from '../../src/infrastructure/disk-go-registry.js'
 import { GhPlanIssues, PlanIssueBody } from '../../src/infrastructure/gh-plan-issues.js'
 import { PlanAgentBrief } from '../../src/infrastructure/plan-agent-brief.js'
+import { RunFileProgress } from '../../src/infrastructure/run-file-progress.js'
 import { UserStory } from '../../src/domain/value-objects/user-story.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { Invocation, InvocationOutcome } from '../../src/infrastructure/invocation.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
+import { ImplementationStep } from '../../src/domain/value-objects/implementation-state.js'
+import { CheckoutRoot } from '../../src/domain/value-objects/checkout-root.js'
 
 class Both {
   static ISSUE = 33
@@ -140,14 +149,136 @@ describe('the harvest table this backend hands the plugin', () => {
 })
 
 describe('the sections the errand sends the agent to read', () => {
-  const body = () => PlanIssueBody.of(new UserStory({
-    key: new UserStoryKey('XOP-4909'), summary: 'la métrica de los campeones', description: 'como analista quiero',
-  }))
+  const body = () => PlanIssueBody.of({
+    story: new UserStory({
+      key: new UserStoryKey('XOP-4909'), summary: 'la métrica de los campeones', description: 'como analista quiero',
+    }),
+    comment: null,
+  })
 
   it('the_two_it_names_are_headings_the_plugin_really_renders_in_the_body_we_write', () => {
     const headings = body().split('\n').filter((line) => line.startsWith('## '))
 
     expect(headings).toContain(`## ${PlanAgentBrief.EPIC_CONTEXT}`)
     expect(headings).toContain(`## ${PlanAgentBrief.INHERITED_CONTEXT}`)
+  })
+})
+
+class RunDouble {
+  static ISSUE = 7
+  static ROOT = new CheckoutRoot('/repo')
+  static PLAN = 'docs/superpowers/plans/p.md'
+
+  static worktree() {
+    return RunFileProgress.worktreeFor(RunDouble.ROOT.text, RunDouble.ISSUE)
+  }
+
+  static path() {
+    return RunFileProgress.runFileFor(RunDouble.ROOT.text, RunDouble.ISSUE)
+  }
+
+  static freshRun(overrides = {}) {
+    return newRun({
+      plan: RunDouble.PLAN, issue: RunDouble.ISSUE, baseSha: 'a'.repeat(40), tasksTotal: 3, e2eRuns: [],
+      ...overrides,
+    })
+  }
+
+  static bytesOf(run) {
+    return JSON.stringify(run, null, 2) + '\n'
+  }
+
+  static async read(run, extraFiles = {}) {
+    const files = { [RunDouble.path()]: RunDouble.bytesOf(run), ...extraFiles }
+    const progress = new RunFileProgress({
+      exists: async (candidate) => candidate === RunDouble.worktree(),
+      read: async (candidate) => (candidate in files ? files[candidate] : null),
+    })
+
+    return progress.of({ root: RunDouble.ROOT, issue: RunDouble.ISSUE })
+  }
+}
+
+describe('the run machine and the run file this backend reads back', () => {
+  it('every_step_the_machine_can_reach_is_a_step_our_vocabulary_declares', () => {
+    expect(Object.values(STEPS).every((step) => Object.values(ImplementationStep).includes(step))).toBe(true)
+    expect(Object.values(ImplementationStep).length).toBe(Object.values(STEPS).length + 2)
+  })
+
+  it('a_run_the_machine_parked_at_advise_is_read_back_as_a_step_of_the_task_it_advises_on', async () => {
+    let run = RunDouble.freshRun()
+    run = after({ ...run, step: STEPS.JUDGE, judgeRetries: 1 }, OUTCOMES.FAILED, DEFAULT_BUDGETS).run
+
+    const state = await RunDouble.read(run)
+
+    expect(state.step).toBe('advise')
+    expect(state.task).toBe(1)
+    expect(state.attempt).toBe(3)
+  })
+
+  it('a_run_the_machine_just_created_is_read_as_the_first_task_about_to_be_implemented', async () => {
+    const state = await RunDouble.read(RunDouble.freshRun())
+
+    expect(state.step).toBe('implement')
+    expect(state.task).toBe(1)
+    expect(state.totalTasks).toBe(3)
+    expect(state.attempt).toBe(1)
+  })
+
+  it('our_attempt_is_the_one_the_dispatch_gate_counts', () => {
+    let run = after(RunDouble.freshRun(), OUTCOMES.DONE, DEFAULT_BUDGETS).run
+    while (run.controlRetries + run.judgeRetries + run.correctionRetries === 0) {
+      run = after(run, OUTCOMES.FAILED, DEFAULT_BUDGETS).run
+    }
+
+    expect(RunFileProgress.attemptOf(run)).toBe(StepSeal.attemptOf(run))
+  })
+
+  it('the_two_formulas_still_agree_when_every_retry_counter_is_distinct_and_non_zero', () => {
+    const run = {
+      ...RunDouble.freshRun(), controlRetries: 1, judgeRetries: 2, correctionRetries: 3, reconcileRetries: 5,
+    }
+
+    expect(RunFileProgress.attemptOf(run)).toBe(StepSeal.attemptOf(run))
+  })
+
+  it.each([
+    ['the machine closed it as delivered', { closed: RUN_STATES.DELIVERED }, true],
+    ['it closed some other way', { closed: 'blocked-judge' }, false],
+    ['it is still open', {}, false],
+  ])(
+    'the_two_readers_agree_on_whether_the_run_is_delivered: %s',
+    async (_, closure, delivered) => {
+      const run = { ...RunDouble.freshRun(), ...closure }
+      const bytes = RunDouble.bytesOf(run)
+
+      const theirs = deliveredRun(bytes, RunDouble.ISSUE)
+      const ours = await RunDouble.read(run)
+
+      expect(theirs.ok).toBe(delivered)
+      expect(ours.step === 'delivered').toBe(delivered)
+    },
+  )
+
+  it('the_task_names_we_read_are_the_ones_the_plugin_extracts', async () => {
+    const planPath = join(
+      dirname(fileURLToPath(import.meta.url)), '..', '..', '..',
+      'plugin', '__tests__', 'fixtures', 'plan-real-issue-5.md'
+    )
+    const planText = await readFile(planPath, 'utf8')
+    const relativePlan = 'plugin/__tests__/fixtures/plan-real-issue-5.md'
+    const extracted = extractTasks(planText)
+
+    expect(extracted.tasks.length).toBeGreaterThan(0)
+
+    for (const task of extracted.tasks) {
+      const run = { ...RunDouble.freshRun({ plan: relativePlan, tasksTotal: extracted.tasks.length }), task: task.n }
+
+      const state = await RunDouble.read(run, {
+        [`${RunDouble.worktree()}/${relativePlan}`]: planText,
+      })
+
+      expect(state.name).toBe(task.name)
+    }
   })
 })

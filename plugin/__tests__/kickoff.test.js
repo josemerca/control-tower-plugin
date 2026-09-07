@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { renderKickoff, buildStateSeed, ADDENDA, SENAL_AUSENTE } from '../scripts/kickoff.js'
+import { BaselineOutcome, BaselineResult } from '../scripts/baseline.js'
 import { parseState } from '../scripts/state.js'
 
 const SLICE = { n: 7, name: 'refresh token', type: 'backend', ac: ['AC-7.1'], deps: [1], issue: '#7' }
@@ -387,10 +388,19 @@ describe('el primer acto nombra la vara de ct', () => {
     conventionsDir: '/plugin/conventions',
   }
 
-  it('manda leerla, y la nombra por su ruta absoluta', () => {
+  it('la nombra por su ruta absoluta, para que quien planifica pueda abrir el documento que necesite', () => {
     const k = renderKickoff(SLICE, OPTS_CON_VARA)
-    expect(k).toMatch(/LEE la vara de ct/)
     expect(k).toContain('/plugin/conventions')
+  })
+
+  // La orden de LEER LOS CINCO en crudo se quitó: son 24 KB delante de un plan
+  // que no los cita casi nunca, y lo que el plan tiene que seleccionar es la
+  // vara del REPO en el `Rules to obey:` de §3. La de ct la lleva el programa a
+  // cada tarea sin que el plan pueda quitarla.
+  it('no manda leer los cinco documentos antes de planificar', () => {
+    const k = renderKickoff(SLICE, OPTS_CON_VARA)
+    expect(k).not.toMatch(/LEE la vara de ct/)
+    expect(k).not.toMatch(/los cinco documentos de/)
   })
 
   it('la orden cae ANTES de la entrada que manda escribir el plan', () => {
@@ -402,16 +412,49 @@ describe('el primer acto nombra la vara de ct', () => {
     expect(k.indexOf('/plugin/conventions')).toBeLessThan(k.indexOf('Primer acto'))
   })
 
-  it('enuncia la precedencia con SUS DOS LADOS: es el único sitio donde la lee quien planifica', () => {
-    // `SKILL.md` ya no la enuncia (el presupuesto de la skill obligó a recortar
-    // la tercera copia), así que este texto es el único que llega a quien escribe
-    // el plan. Un enunciado que sólo dijera "gana ct" le haría anular las
-    // convenciones del repo que ct no toca, que es el fallo contrario.
+  // LA REGLA DE PRECEDENCIA TIENE UNA SOLA FUENTE: la cabecera que escribe
+  // `PluginYardstick`. El kickoff la CITA —dice dónde está y que no se
+  // reinterpreta— y no la enuncia: cinco copias de una regla en cinco ficheros
+  // es lo que la dejó divergir (la del backend decía que `architecture.md`
+  // aplica siempre). Quien la enunciaba aquí ya no la enuncia, y el test que
+  // lo comprueba es `precedencia-una-sola-fuente.test.js`.
+  it('cita la cabecera donde vive la regla, y no la vuelve a enunciar', () => {
     const k = renderKickoff(SLICE, OPTS_CON_VARA)
-    expect(k).toMatch(/preferencia/i)
-    expect(k).toMatch(/regla a regla/i)
-    expect(k).toMatch(/no por tema/i)
-    expect(k).toMatch(/prohíbe lo que uno de esos documentos manda/i)
-    expect(k).toMatch(/obliga entera/i)
+    expect(k).toMatch(/CABECERA/)
+    expect(k).not.toMatch(/regla a regla/i)
+    expect(k).not.toMatch(/no por tema/i)
+    expect(k).not.toMatch(/obliga entera/i)
+  })
+})
+
+// #96 — el baseline lo mide el programa (scripts/baseline.js) al preparar el
+// worktree, y viaja en la semilla como DATO: el agente lo lee, no lo ejecuta
+// para afirmarlo. El kickoff deja de ordenarlo y pasa a señalar dónde está.
+describe('buildStateSeed — baseline medido por el dispatcher, no afirmado por el agente (#96)', () => {
+  it('siembra `baseline:` con el resultado, el comando y el resumen que le pasan', () => {
+    const baseline = new BaselineResult({ outcome: BaselineOutcome.RED, command: 'npm test', summary: 'exit 1 · 2 failed' })
+    const seed = buildStateSeed(SLICE, { branch: 'feat/7', base: 'main', baseSha: 'abc', baseline })
+    expect(seed).toMatch(/^baseline:$/m)
+    expect(parseState(seed).meta.baseline).toEqual({ outcome: 'rojo', command: 'npm test', summary: 'exit 1 · 2 failed' })
+  })
+
+  it('sin baseline medido, el campo declara la ausencia como no-verificado en vez de omitirse', () => {
+    const { meta } = parseState(buildStateSeed(SLICE, { branch: 'feat/7', base: 'main' }))
+    expect(meta.baseline.outcome).toBe(BaselineOutcome.UNVERIFIED)
+    expect(meta.baseline.command).toBe(null)
+    expect(meta.baseline.summary).toMatch(/nadie/)
+  })
+})
+
+describe('renderKickoff — el baseline está en la semilla, no en una orden al agente (#96)', () => {
+  const kickoff = () => renderKickoff(SLICE, { repo: 'o/r', dispatchCheckPath: '/x/d.mjs', conventionsDir: '/plugin/conventions' })
+
+  it('ya no manda confirmar pwd/rama ni dejar el baseline en verde antes de tocar nada', () => {
+    expect(kickoff()).not.toMatch(/baseline verde ANTES/)
+    expect(kickoff()).not.toMatch(/confirma pwd\/rama/)
+  })
+
+  it('señala el campo `baseline:` de .agent/SLICE.md como el sitio donde ya está medido', () => {
+    expect(kickoff()).toMatch(/`baseline:`.*\.agent\/SLICE\.md/)
   })
 })

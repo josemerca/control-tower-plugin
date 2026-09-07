@@ -102,6 +102,7 @@ describe('el plan y el entorno', () => {
   })
 
   it('con el índice sucio de antes y el run nuevo sale por 8', () => {
+    writeFileSync(join(repo, 'uno.txt'), 'uno\n')
     execFileSync('git', ['add', 'uno.txt'], { cwd: repo })
     expect(ct('next').status).toBe(8)
   })

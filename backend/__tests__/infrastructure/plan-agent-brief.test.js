@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest'
+import { SLICE_REL_PATH } from '../../../plugin/scripts/state-paths.js'
 import { PlanAgentBrief } from '../../src/infrastructure/plan-agent-brief.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
+import { PluginYardstick } from '../../../plugin/scripts/plugin-yardstick.js'
 
 describe('PlanAgentBrief', () => {
   const errand = () => new PlanAgentBrief({
@@ -9,9 +11,14 @@ describe('PlanAgentBrief', () => {
     ctStep: '/plugin/scripts/ct-step.mjs',
   }).errandFor({ issue: { number: 42 }, repository: new RepositoryName('owner/name') })
 
-  it('it_starts_by_asking_for_the_ground_to_be_checked_before_anything_is_touched', () => {
-    expect(errand()).toMatch(/pwd/)
+  it('it_points_at_the_baseline_already_measured_in_the_state_file_instead_of_ordering_one', () => {
     expect(errand()).toMatch(/baseline/)
+    expect(errand()).toContain(`campo \`baseline:\` de ${SLICE_REL_PATH}`)
+  })
+
+  it('it_no_longer_orders_the_ground_checked_because_the_program_cut_and_measured_the_worktree_itself', () => {
+    expect(errand()).not.toMatch(/pwd/)
+    expect(errand()).not.toMatch(/baseline en verde ANTES/)
   })
 
   it('it_names_the_skill_that_writes_the_plan_instead_of_describing_the_shape_of_one', () => {
@@ -37,13 +44,9 @@ describe('PlanAgentBrief', () => {
     expect(errand()).toMatch(/no implementes/i)
   })
 
-  it('it_carries_the_order_of_precedence_itself_because_the_repo_may_not_declare_it_anywhere', () => {
+  it('it_carries_the_order_of_precedence_verbatim_from_the_plugin_instead_of_wording_it_again', () => {
     expect(errand()).toContain('/plugin/conventions')
-    expect(errand()).toContain(
-      'Esa vara tiene PREFERENCIA sobre las convenciones de este repo, y se mide regla a regla, no por tema'
-    )
-    expect(errand()).toContain('la vara del repo no desaparece')
-    expect(errand()).toMatch(/AGENTS\.md.*puede no traerla/)
+    expect(errand()).toContain(PluginYardstick.precedenceHeader())
   })
 
   it('the_precedence_it_carries_cannot_be_read_the_other_way_round', () => {
@@ -51,17 +54,14 @@ describe('PlanAgentBrief', () => {
     expect(errand()).not.toMatch(/las convenciones de este repo ganan/i)
   })
 
-  it('the_architecture_yardstick_binds_on_what_is_added_to_a_module_that_never_met_it', () => {
-    expect(errand()).toContain(
-      'la vara de arquitectura se aplica SIEMPRE, también a lo que añadas a un módulo que ya existía'
-    )
-    expect(errand()).toContain('Applies to: new modules')
-    expect(errand()).toMatch(/NO val[ea]n en este carril/)
+  it('it_does_not_override_the_scope_the_architecture_document_declares_for_itself', () => {
+    expect(errand()).not.toMatch(/la vara de arquitectura se aplica SIEMPRE/)
+    expect(errand()).not.toMatch(/la única regla de la vara que este encargo cambia/i)
   })
 
-  it('the_only_rule_of_the_yardstick_this_errand_overrides_says_so_instead_of_leaving_a_silent_clash', () => {
-    expect(errand()).not.toMatch(/deuda heredada que exime|deuda heredada.*exime lo/)
-    expect(errand()).toMatch(/la única regla de la vara que este encargo cambia/i)
+  it('it_does_not_order_the_five_documents_read_before_planning', () => {
+    expect(errand()).not.toMatch(/Lee la vara de Control Tower/)
+    expect(errand()).not.toContain(PluginYardstick.FILES.join(', '))
   })
 
   it('it_names_the_sections_that_carry_what_the_acceptance_criteria_cannot', () => {
@@ -77,6 +77,15 @@ describe('PlanAgentBrief', () => {
   it('it_never_promises_a_permission_nobody_mints', () => {
     expect(errand()).not.toContain('-OK')
     expect(errand()).not.toContain('nonce')
+  })
+
+  it('it_sends_the_agent_to_the_section_where_a_person_wrote_by_hand_what_they_want_planned', () => {
+    expect(errand()).toContain('Comentario de quien pide el plan')
+    expect(errand()).toContain('entrada del plan')
+  })
+
+  it('it_says_the_criteria_are_the_agents_to_propose_when_the_issue_declares_none_instead_of_leaving_it_stuck', () => {
+    expect(errand()).toContain('no hay spec de donde rellenarlos')
   })
 })
 

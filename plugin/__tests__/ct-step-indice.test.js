@@ -2,7 +2,7 @@
 // por qué son nueve ficheros y no uno— está en fixtures/ct-step-harness.js.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { writeFileSync, readFileSync } from 'node:fs'
+import { writeFileSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { deliveredRun } from '../scripts/run-machine.js'
@@ -56,7 +56,7 @@ describe('lo que se comitea es lo que se aprobó: el sello del índice', () => {
     execFileSync('git', ['read-tree', m[1]], { cwd: repo })
     expect(ct('commit').status).toBe(0)
     // Lo comiteado es lo que el juez leyó...
-    expect(execFileSync('git', ['show', 'HEAD:uno.txt'], { cwd: repo, encoding: 'utf8' })).toBe('uno\n')
+    expect(execFileSync('git', ['show', 'HEAD:uno.txt'], { cwd: repo, encoding: 'utf8' })).toBe('uno.txt\n')
     // ...y el worktree conserva el trabajo que se colgó después: no se pierde.
     expect(readFileSync(join(repo, 'uno.txt'), 'utf8')).toBe('otra versión\n')
   })
@@ -187,8 +187,13 @@ describe('el índice no acumula entre intentos', () => {
     // Intento 1: el implementador toca de más; se stagea y el control lo caza.
     ct('report', informe(['uno.txt', 'dos.txt']))
     expect(ct('controls').stdout).toMatch(/controles: failed/)
-    // Intento 2: reporta solo lo legítimo. El reset de `report` vacía el
-    // índice, así que el dos.txt del intento 1 no queda stageado a escondidas.
+    // Intento 2: el implementador RETIRA lo que tocó de más y reporta solo lo
+    // legítimo. Retirarlo del worktree y no sólo de la declaración es lo que el
+    // veto pide desde que las rutas las mide el programa: un fichero que sigue
+    // ahí sigue siendo trabajo de esta tarea, lo declare quien lo declare. El
+    // reset de `report` vacía además el índice, así que el dos.txt del intento
+    // 1 tampoco queda stageado a escondidas.
+    rmSync(join(repo, 'dos.txt'))
     ct('report', informe(['uno.txt']))
     expect(ct('controls').stdout).toMatch(/controles: done/)
     juzgar(veredicto('PASS'))
@@ -200,7 +205,8 @@ describe('el índice no acumula entre intentos', () => {
 
   it('el alcance mide el ÍNDICE, no la lista del informe: lo stageado sin declarar es rojo', () => {
     ct('report', informe(['uno.txt']))
-    // Algo stagea dos.txt por fuera del informe — da igual quién.
+    // Algo escribe y stagea dos.txt por fuera del informe — da igual quién.
+    writeFileSync(join(repo, 'dos.txt'), 'dos\n')
     execFileSync('git', ['add', 'dos.txt'], { cwd: repo })
     expect(ct('controls').stdout).toMatch(/controles: failed/)
     const registro = readFileSync(join(repo, '.agent', 'run-7', 'task-1-controls-1.log'), 'utf8')

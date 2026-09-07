@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { PlanProgress as PlanProgressState } from 'app/plan-events/usePlanProgress'
+import { usePlanProgress } from 'app/plan-events/usePlanProgress'
 import { StartedPlan } from 'app/start-plan/StartPlan.types'
 import { Banner } from 'system-ui/banner'
 import './PlanProgress.css'
@@ -8,11 +8,12 @@ const UNREACHABLE_MESSAGE = 'No se pudo contactar con el backend'
 
 type PlanProgressProps = {
   plan: StartedPlan
-  progress: PlanProgressState
   onReady: () => void
 }
 
-const PlanProgress = ({ plan, progress, onReady }: PlanProgressProps) => {
+const PlanProgress = ({ plan, onReady }: PlanProgressProps) => {
+  const progress = usePlanProgress(plan.issue.number, plan.repo)
+
   useEffect(() => {
     if (progress.phase === 'ready') onReady()
   }, [onReady, progress.phase])

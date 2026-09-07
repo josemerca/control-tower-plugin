@@ -54,7 +54,70 @@ class YardstickDocumentMother {
   static withLeadingNullEntry() {
     return [null, { name: 'style.md', content: 'x' }]
   }
+
+  static withScopes(scopes) {
+    return Object.entries(scopes).map(([name, scope]) => ({
+      name,
+      content: scope === null
+        ? `# ${name}\n\nUna regla sin cabecera de alcance.\n`
+        : `# ${name}\n\nApplies to: **${scope}**.\n\nUna regla.\n`,
+    }))
+  }
+
+  static theRealOnesOnDisk() {
+    return PluginYardstick.FILES.map((name) => ({
+      name,
+      content: readFileSync(join(root, PluginYardstick.DIRECTORY, name), 'utf8'),
+    }))
+  }
 }
+
+describe('PluginYardstick.scopeOf reads the document its own header declares', () => {
+  it('reads_the_scope_line_of_the_document', () => {
+    const [documento] = YardstickDocumentMother.withScopes({ 'architecture.md': 'new modules' })
+    expect(PluginYardstick.scopeOf(documento.content)).toBe('new modules')
+  })
+
+  it('a_document_that_declares_no_scope_has_none', () => {
+    const [documento] = YardstickDocumentMother.withScopes({ 'style.md': null })
+    expect(PluginYardstick.scopeOf(documento.content)).toBeNull()
+  })
+})
+
+describe('PluginYardstick.forTask pastes only the documents whose scope reaches the task', () => {
+  const nombres = (documentos) => documentos.map((d) => d.name)
+
+  it('a_task_that_creates_no_module_does_not_carry_the_new_modules_document', () => {
+    const documentos = YardstickDocumentMother.withScopes({
+      'style.md': 'every diff',
+      'architecture.md': 'new modules',
+    })
+    expect(nombres(PluginYardstick.forTask(documentos, { creates: false }))).toEqual(['style.md'])
+  })
+
+  it('a_task_that_creates_a_module_carries_the_new_modules_document', () => {
+    const documentos = YardstickDocumentMother.withScopes({
+      'style.md': 'every diff',
+      'architecture.md': 'new modules',
+    })
+    expect(nombres(PluginYardstick.forTask(documentos, { creates: true }))).toEqual(['style.md', 'architecture.md'])
+  })
+
+  it('a_document_that_declares_no_scope_travels_with_every_task', () => {
+    const documentos = YardstickDocumentMother.withScopes({ 'naming.md': null })
+    expect(nombres(PluginYardstick.forTask(documentos, { creates: false }))).toEqual(['naming.md'])
+  })
+
+  it('on_the_documents_that_are_really_on_disk_only_architecture_is_left_out_of_a_task_that_creates_nothing', () => {
+    const documentos = PluginYardstick.forTask(YardstickDocumentMother.theRealOnesOnDisk(), { creates: false })
+    expect(nombres(documentos)).toEqual(['defects.md', 'style.md', 'decisions.md', 'testing.md'])
+  })
+
+  it('on_the_documents_that_are_really_on_disk_a_task_that_creates_carries_all_five', () => {
+    const documentos = PluginYardstick.forTask(YardstickDocumentMother.theRealOnesOnDisk(), { creates: true })
+    expect(nombres(documentos)).toEqual([...PluginYardstick.FILES])
+  })
+})
 
 describe('PluginYardstick.FILES', () => {
   it('lists_the_five_yardstick_documents_in_paste_order', () => {
@@ -143,6 +206,48 @@ describe('PluginYardstick.composeSection', () => {
   })
 })
 
+describe('PluginYardstick.composeSection composes the documents it is handed, however many', () => {
+  it('composes_the_four_documents_of_a_task_that_creates_no_module', () => {
+    const documentos = PluginYardstick.forTask(YardstickDocumentMother.theRealOnesOnDisk(), { creates: false })
+    const section = PluginYardstick.composeSection(documentos)
+    expect(section).toContain('## Vara de ct: conventions/style.md')
+    expect(section).not.toContain('## Vara de ct: conventions/architecture.md')
+  })
+})
+
+describe('PluginYardstick.composePathSection hands the documents by path to whoever can Read them', () => {
+  const documentos = [
+    { name: 'style.md', content: 'x', path: '/plugin/conventions/style.md' },
+    { name: 'defects.md', content: 'y', path: '/plugin/conventions/defects.md' },
+  ]
+
+  it('lists_each_document_by_its_path', () => {
+    const section = PluginYardstick.composePathSection(documentos)
+    expect(section).toContain('/plugin/conventions/style.md')
+    expect(section).toContain('/plugin/conventions/defects.md')
+  })
+
+  it('does_not_paste_the_content_of_any_document', () => {
+    expect(PluginYardstick.composePathSection(documentos)).not.toContain('## Vara de ct: conventions/style.md')
+  })
+
+  it('carries_the_same_precedence_header_as_the_pasted_section_because_the_rule_has_one_source', () => {
+    const header = PluginYardstick.composeSection(YardstickDocumentMother.withContentForEach()).split('## Vara de ct')[0]
+    expect(PluginYardstick.composePathSection(documentos)).toContain(header.trim())
+  })
+
+  it('keeps_the_declared_order', () => {
+    const lista = PluginYardstick.composePathSection(documentos)
+      .split('\n').filter((linea) => linea.startsWith('- `'))
+    expect(lista).toEqual(['- `/plugin/conventions/defects.md`', '- `/plugin/conventions/style.md`'])
+  })
+
+  it('throws_instead_of_promising_a_document_it_cannot_locate', () => {
+    expect(() => PluginYardstick.composePathSection([{ name: 'style.md', content: 'x' }]))
+      .toThrow(/style\.md/)
+  })
+})
+
 describe('PluginYardstick.composeSection refuses to compose half a promise', () => {
   it('throws_instead_of_returning_only_the_header_when_the_list_is_empty', () => {
     expect(() => PluginYardstick.composeSection(YardstickDocumentMother.none()))
@@ -195,31 +300,25 @@ describe('the precedence header carries both sides of the rule', () => {
   })
 })
 
-describe('the same rule reaches both English texts: the judge and the implementer', () => {
+describe('neither English text repeats the precedence rule: both point at the one place it is written', () => {
   const TARGET_FILES = {
     'agents/ct-judge.md': join(root, 'agents', 'ct-judge.md'),
     'prompts/task-implementer.md': join(root, 'prompts', 'task-implementer.md'),
   }
 
-  const CLAIMS = {
-    'ct takes precedence': /take precedence/i,
-    'it is measured rule by rule, not by topic': /rule by rule, not by topic/i,
-    'both directions of the clash: what the repo requires and what it forbids':
-      /forbids, or forbids what they require/i,
-    "the repo yardstick is not voided where ct stays silent": {
-      'agents/ct-judge.md': /it binds in full|does not delete this repo's yardstick/i,
-      'prompts/task-implementer.md': /does not excuse you from this repo's conventions/i,
-    },
-  }
-
   for (const [fileLabel, path] of Object.entries(TARGET_FILES)) {
     const text = readFileSync(path, 'utf8').replace(/\s+/g, ' ')
-    for (const [claim, pattern] of Object.entries(CLAIMS)) {
-      const regex = pattern instanceof RegExp ? pattern : pattern[fileLabel]
-      it(`${fileLabel} states: ${claim}`, () => {
-        expect(text, `${fileLabel} does not state: ${claim}`).toMatch(regex)
-      })
-    }
+
+    it(`${fileLabel} does not restate the rule`, () => {
+      expect(text, `${fileLabel} still states the rule instead of citing it`)
+        .not.toMatch(/rule by rule, not by topic/i)
+      expect(text).not.toMatch(/forbids, or forbids what they require/i)
+    })
+
+    it(`${fileLabel} says where the rule is written`, () => {
+      expect(text).toMatch(/the block (above that list|that carried them here)/i)
+      expect(text).toMatch(/the only place it is written/i)
+    })
   }
 })
 
@@ -237,18 +336,14 @@ describe('the patrones item measures both yardsticks', () => {
     return /^### 5\. `patrones`[\s\S]*?(?=^### |^## )/m.exec(text)[0]
   }
 
-  it('names_both_yardsticks_and_names_the_ct_one_by_the_plugin_directory', () => {
-    expect(item()).toContain("plugin's `conventions/` directory")
+  it('names_both_yardsticks_and_names_the_ct_one_by_the_section_that_lists_it', () => {
+    expect(item()).toContain(`## ${PluginYardstick.PATH_SECTION}`)
     expect(item()).toContain('.agent/conventions.md')
   })
 
-  it('states_precedence_is_measured_rule_by_rule_not_by_topic', () => {
-    expect(item()).toMatch(/rule by rule/i)
-  })
-
-  it('states_a_repo_rule_ct_does_not_address_still_binds_and_does_not_void_the_repo', () => {
-    expect(item()).toContain('it binds in full')
-    expect(item()).toContain("does not delete this repo's yardstick")
+  it('sends_the_judge_to_the_one_block_where_the_precedence_is_written_instead_of_restating_it', () => {
+    expect(item()).toMatch(/apply the precedence exactly as the block above\s+that list states it/)
+    expect(item()).not.toMatch(/rule by rule, not by topic/i)
   })
 
   it('declares_the_no_yardstick_outcome_can_no_longer_happen_instead_of_being_offered_as_an_outcome', () => {
@@ -260,13 +355,13 @@ describe('the patrones item measures both yardsticks', () => {
     expect(item()).toContain('no-aplica')
   })
 
-  it('names_the_four_documents_and_requires_citing_rule_and_path', () => {
-    for (const name of PluginYardstick.FILES) expect(item()).toContain(name)
+  it('requires_citing_the_document_and_the_rule_in_the_evidence', () => {
     expect(item()).toContain('evidence')
+    expect(item()).toContain(`${PluginYardstick.DIRECTORY}/`)
   })
 
-  it('closes_the_old_module_loophole_with_the_same_phrase_as_the_document', () => {
-    expect(item()).toContain('a new concept is a new module')
+  it('closes_the_old_module_loophole_instead_of_letting_an_old_file_shelter_a_new_concept', () => {
+    expect(item()).toContain('a new concept placed inside an old file to inherit the exemption')
   })
 })
 
@@ -303,19 +398,16 @@ describe('the implementer and the judge read the same text', () => {
     readFileSync(join(root, 'agents', 'ct-judge.md'), 'utf8'),
   ]
 
-  it('both_name_the_four_ct_documents', () => {
-    for (const text of readImplementerAndJudge()) {
-      for (const name of PluginYardstick.FILES) expect(text).toContain(name)
-    }
+  it('both_name_the_ct_yardstick_by_the_directory_it_lives_in', () => {
+    for (const text of readImplementerAndJudge()) expect(text).toContain(`${PluginYardstick.DIRECTORY}/`)
   })
 
   it('both_still_name_the_repo_declaration_because_there_are_two_yardsticks', () => {
     for (const text of readImplementerAndJudge()) expect(text).toContain('.agent/conventions.md')
   })
 
-  it('both_carry_the_full_phrase_that_closes_the_old_module_exemption', () => {
-    for (const text of readImplementerAndJudge()) {
-      expect(text).toContain('a new concept is a new module and is born conforming')
-    }
+  it('the_implementer_carries_the_full_phrase_that_closes_the_old_module_exemption', () => {
+    const [implementador] = readImplementerAndJudge()
+    expect(implementador).toContain('a new concept is a new module and is born conforming')
   })
 })

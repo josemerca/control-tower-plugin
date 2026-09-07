@@ -1,15 +1,22 @@
-import { StartPlanOutcome, StartPlanRefusal, StartPlanRequest, StartPlanResult } from 'app/start-plan/StartPlan.types'
+import { StartPlanOutcome, StartPlanRefusal, StartPlanResult, StartPlanSubmission } from 'app/start-plan/StartPlan.types'
 
 const PATH = '/start-plan'
 const ACCEPTED = 202
 
-const start = async ({ id, repo, path }: StartPlanRequest): Promise<StartPlanOutcome> => {
+const bodyFor = ({ id, userComment, repo, path }: StartPlanSubmission): Record<string, string> => ({
+  ...(id !== null ? { id } : {}),
+  ...(userComment !== null ? { user_comment: userComment } : {}),
+  repo,
+  path,
+})
+
+const start = async (submission: StartPlanSubmission): Promise<StartPlanOutcome> => {
   let response: Response
   try {
     response = await fetch(PATH, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id, repo, path }),
+      body: JSON.stringify(bodyFor(submission)),
     })
   } catch {
     return { kind: 'backend-unreachable' }
@@ -25,6 +32,7 @@ const start = async ({ id, repo, path }: StartPlanRequest): Promise<StartPlanOut
         agent: started.agent,
         branch: started.branch,
         worktree: started.worktree,
+        root: started.root,
       },
     }
   }
