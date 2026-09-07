@@ -18,8 +18,8 @@ What binds here and does not travel with the plugin.
 
 There is no declared debt in `backend/`: every rule that binds here binds on
 every diff, old module or new. `plugin/conventions/style.md` and
-`plugin/conventions/defects.md` grant a declared-debt exemption to a module
-that was already there — the one exemption in the whole travelling
+`plugin/conventions/architecture.md` grant a declared-debt exemption to a
+module that was already there — the one exemption in the whole travelling
 yardstick — and this repository does not take it.
 
 ## Ubiquitous language
@@ -38,15 +38,12 @@ yardstick — and this repository does not take it.
 
 ## Naming an exception family
 
-Every family under `PlanFailure` separates the two things a tool can do
-wrong, because they are repaired in different places: **the command failed**
-(`*NotRead`, `*NotCreated`, `*NotLaunched` — the reason is in its error
-channel) and **it answered something we cannot read** (`*NotUnderstood`,
-`*NotNamed` — our contract with the tool broke). A caller that does not care
-catches the family; the boundary projects each cause to its own `code`.
+Every family under `PlanFailure` names its two causes: **the command
+failed** (`*NotRead`, `*NotCreated`, `*NotLaunched`) and **it answered
+something we cannot read** (`*NotUnderstood`, `*NotNamed`). The boundary
+projects each cause to its own `code`.
 
-Jira, GitHub, cmux, acli and gh exist only in `infrastructure/`: none of
-their nouns belongs in a port, a value object or an exception name.
+Jira, GitHub, cmux, acli and gh exist only in `infrastructure/`.
 
 ## The backend leans on the plugin, never the reverse
 
@@ -64,23 +61,18 @@ declared-copy rule for the one contract that crosses this boundary.
 Four steps, each with one job — the concrete types of this backend:
 
 ```
-ToolRunner      launches a binary with its budget; never throws: the exit code is data
+ToolRunner      launches a binary with its budget
 ExternalTool    the conversation: asks the policy whether a failure is worth retrying
-Gh (idiom)      extends the trunk with what only that tool writes
+Gh (idiom)      what only `gh` writes
 <tool>-<port>   the adapter: the argv, the parsing, the typed errors
 ```
 
-- **The caller declares whether its call is safe to repeat**, with a named
-  flag (`safeToRepeat: true`). A read is; `gh issue create` is not — a lost
-  answer may be an answer that created the issue, and the retry opens a
-  second one.
+- **The flag is named `safeToRepeat`.** `gh issue create` never gets `true`.
 - **A missing label is a datum, not a failure**: read which one, sow it with
   `--force` (the benign-race argument is `ct-groom.mjs`'s), retry the
   creation, and never sow a label that is not ours.
-- **Text from another system gets its active syntax quieted before it
-  reaches GitHub.** Bare `#N`, `owner/repo#N`, GitHub URLs and `@handles` are
-  fenced as code; what was already code stays; an email does not split at
-  its `@`.
+- **Bare `#N`, `owner/repo#N`, GitHub URLs and `@handles` are fenced as
+  code** before text from another system reaches an issue.
 
 ## The layout
 
@@ -94,8 +86,8 @@ infrastructure/
   http.js            generic plumbing: answering, routing hygiene, the origin filter, the body reader
   harvest-clock.js   the sweep: every minute, asks a registry which clones
                       it served a plan for and surveys each in turn
-  invocation.js      logic that can be observed without a process, moved out
-                      of the entrypoint until it can be — the reason it exists
+  invocation.js      moved out of the entrypoint until it is observable
+                      without spawning a process — the reason it exists
 ```
 
 ## Answering HTTP in this API
@@ -112,8 +104,7 @@ infrastructure/
   that does not exist. That one is not a decision about a request that reached
   the application; its body is `{code, detail}` too, so the shape stays one
   across the whole API.
-- **A `code` is declared explicitly, in kebab-case**, next to the `detail` it
-  comes with.
+- **The wire format of a `code` is kebab-case.**
 - **An `Origin` is admitted only when it is the page this server hosts**,
   vouched by a loopback `Host`; any other page on any port is a foreign site.
 

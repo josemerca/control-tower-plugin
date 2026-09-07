@@ -25,14 +25,14 @@ class Subjects {
     'no declared debt in `backend/`',
     'never sow a label that is not ours',
     'killed in `afterEach`, not after the assertion',
-    'PlanFailure',
-    'kebab-case',
-    'invocation.js',
-    'backend-best-practices',
+    'Every family under `PlanFailure` names its two causes',
+    'The wire format of a `code` is kebab-case',
+    'invocation.js      moved out of the entrypoint until it is observable',
+    'The `backend-best-practices` skill — general guidance; it yields to both.',
     'owner/repo#N',
     'Jira, GitHub, cmux, acli and gh exist only in',
-    'ToolRunner',
-    'safeToRepeat',
+    'ToolRunner      launches a binary with its budget',
+    'The flag is named `safeToRepeat`.** `gh issue create` never gets `true`.',
   ]
 
   static ownDocument() {
@@ -74,6 +74,13 @@ describe('this repository declares only what no other repository inherits', () =
   it('it_keeps_every_rule_no_other_repository_could_recover', () => {
     for (const rule of Subjects.RULES_NO_OTHER_REPOSITORY_CAN_RECOVER) {
       expect(Subjects.ownDocument(), `${rule} left the repository with nothing to replace it`).toContain(rule)
+    }
+  })
+
+  it('no_rule_it_keeps_is_one_the_travelling_yardstick_could_have_written_itself', () => {
+    const everyRule = Subjects.everyTravellingRule()
+    for (const rule of Subjects.RULES_NO_OTHER_REPOSITORY_CAN_RECOVER) {
+      expect(everyRule, `the travelling yardstick already carries this: ${rule}`).not.toContain(rule)
     }
   })
 })
