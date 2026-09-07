@@ -139,7 +139,7 @@ Produces:
 `PlanTarget` — `new PlanTarget({ repository, root })`, read through `.repository` and `.root`.
 `StartPlanParams` — `new StartPlanParams({ story, comment, targets })`, `targets` a non-empty list
 of `PlanTarget`.
-`StartPlanResult` — `.started`, a list of `PlanStarted` (`.repository`, `.agent`, `.watch`), and
+`StartPlanResult` — `.started`, a list of `PlanStarted` (`.agent`, `.watch`; see §9 item 11), and
 `.failed`, a list of `PlanNotStarted` (`.repository`, `.cause`).
 `PlanRequest` — `.targets` (list of `PlanTarget`), `.listed` (boolean), `.named` (the field a
 refusal is about, or `null`).
@@ -485,8 +485,15 @@ checkouts, then check that each repository got its own issue and its own cmux ta
    repository" is decided is the value object, and Juanjo chose the domain fix — `RepositoryName`
    canonicalising its case at construction, with the precedent of `PlanComment.trim()` — as a slice
    of its own, because it changes the `repo#issue` identity everywhere and its real cost is the
-   migration of names already written to disk and to cmux tab titles. Provenance: judge finding,
-   human's call on the remedy.
+   migration of names already written to disk and to cmux tab titles.
+   **Corrected by the whole-branch review, and the correction matters for sizing that slice:** the
+   parser accepts the two entries, but `GitWorkspace.confirm` compares the `origin` it read against
+   the given name with exact string equality (`git-workspace.js:172`), so the miscased target is
+   refused at pre-flight and the whole call becomes a 400 with nothing started — *unless that
+   clone's own `origin` URL literally spells the same miscasing*. Two plans against one GitHub
+   repository therefore need a miscased **clone**, not merely a miscased request. The remedy is
+   still the right one; the urgency is lower than this item first claimed. Provenance: judge
+   finding, human's call on the remedy, exposure corrected by the branch review.
 10. **`NO_PLAN_STARTED` is a member of `PlanRequestOutcome` that `PlanRequest.from` never returns.**
    The rest of that vocabulary means "how parsing the request resolved"; this one is decided by the
    route after the use case answered, so the route builds a throwaway `PlanRequest` to project it.
@@ -495,3 +502,25 @@ checkouts, then check that each repository got its own issue and its own cmux ta
    member has a `Refusal`, not that every member is reachable from `from()`. This plan's §7 Task 4
    Contract block dictated that shape, so it is the plan's call and not the implementer's, and the
    task-4 judge flagged it as plan-mandated. Provenance: judge finding on a decision this plan made.
+11. **This plan mandated a field with no reader, and the branch review removed it.** §5 declared
+   `PlanStarted` as `(.repository, .agent, .watch)`, but the route reads the repository off the
+   watch (`started.watch.repository.text`), so `PlanStarted.repository` crossed a layer with no
+   consumer at the other end — `backend/conventions/simplicity.md`'s own antipattern, mandated by
+   the plan rather than added by the implementer. Dropped in the review's fix wave; only
+   `PlanNotStarted.repository`, which the `failed` entries do read, remains. Provenance: judge
+   finding on a decision this plan made.
+12. **"Simultaneously" in §1 means "in one call", not "in parallel".** The fan-out starts its
+   targets one after another, so a listed request holds the connection for the sum of its launches
+   (`gh issue create`, `gh issue edit`, `git worktree`, cmux, per repository). Sequential is the
+   deliberate choice: it is what makes "a repository that fails does not stop the ones behind it"
+   meaningful, and it avoids concurrent `gh` and cmux races. Worth knowing before asking for a plan
+   across five repositories. Provenance: judge finding on this plan's wording.
+13. **Two things this plan's own format got wrong, for the next plan of this shape.** First, §7's
+   `**Tests:**` enumerations were read by the task gates as closed sets, which manufactured two
+   findings against work the plan actually wanted (a test double that had to gain a method to make
+   a mandated test writable). They are a floor, not a ceiling — say so, or stop writing them at
+   that granularity. Second, §8's global verification proved the *happy-path* bytes of the
+   single-repository 202 and nothing about its **failure** answers, which is exactly where the
+   branch review found the one branch of the route that no test watched. A slice that promises
+   "byte-identical" owes §8 a predicate over the refusals too. Provenance: judge findings on this
+   plan's format.
