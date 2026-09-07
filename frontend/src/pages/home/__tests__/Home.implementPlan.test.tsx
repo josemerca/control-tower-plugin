@@ -88,7 +88,8 @@ describe('Home · implement plan', () => {
     expect(status).not.toBeNull()
     expect(status).toHaveTextContent(ImplementPlanMother.AGENT)
     expect(screen.queryByRole('button', IMPLEMENT_BUTTON)).toBeNull()
-    expect(screen.getByRole('button', { name: /Implementación Activo/ })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('button', { name: /Implementación Completado/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /Revisión Activo/ })).toHaveAttribute('aria-expanded', 'true')
   })
 
   it('should show the backend refusal text as it came and keep offering the button', async () => {
@@ -137,7 +138,6 @@ describe('Home · implement plan', () => {
     backendAnswering(ImplementPlanMother.implementing())
 
     await pressImplement(user)
-    await streamFrame(PlanEventsMother.inReview())
     await screen.findByRole('button', { name: 'Arrancar otro plan' })
     const oldStream = FakeEventSource.last()
 

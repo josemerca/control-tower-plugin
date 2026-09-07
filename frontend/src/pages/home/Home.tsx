@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { ImplementPlanAction } from 'app/implement-plan/components/implement-plan-action'
 import { DeliveryProgress } from 'app/plan-events/components/delivery-progress'
 import { PlanProgress } from 'app/plan-events/components/plan-progress'
-import { PlanProgress as PlanProgressState, usePlanProgress } from 'app/plan-events/usePlanProgress'
+import { usePlanProgress } from 'app/plan-events/usePlanProgress'
 import { StartPlanForm } from 'app/start-plan/components/start-plan-form'
 import { StartedPlan } from 'app/start-plan/StartPlan.types'
 import { Button } from 'system-ui/button'
@@ -12,11 +12,10 @@ import './Home.css'
 
 type WorkflowStepName = 'request' | 'plan' | 'implementation' | 'review'
 
-const DELIVERED: PlanProgressState['phase'][] = ['in-review', 'fixing']
-
 const Home = () => {
   const [started, setStarted] = useState<StartedPlan | null>(null)
   const [isPlanReady, setIsPlanReady] = useState(false)
+  const [isImplementationStarted, setIsImplementationStarted] = useState(false)
   const [expandedStep, setExpandedStep] = useState<WorkflowStepName>('request')
   const [requestFormVersion, setRequestFormVersion] = useState(0)
   const progress = usePlanProgress(started?.issue.number ?? null, started?.repo ?? null)
@@ -35,26 +34,28 @@ const Home = () => {
     setExpandedStep('implementation')
   }, [])
 
+  const implementationStarted = useCallback(() => {
+    setIsImplementationStarted(true)
+  }, [])
+
   const startAnotherPlan = () => {
     setStarted(null)
     setIsPlanReady(false)
+    setIsImplementationStarted(false)
     setExpandedStep('request')
     setRequestFormVersion((version) => version + 1)
   }
 
-  const isDelivered = DELIVERED.includes(progress.phase)
-  const showsDelivery = isPlanReady && progress.phase !== 'ready'
-
   useEffect(() => {
-    if (showsDelivery) setExpandedStep('review')
-  }, [showsDelivery])
+    if (isImplementationStarted) setExpandedStep('review')
+  }, [isImplementationStarted])
 
   const requestStatus: WorkflowStepStatus = started === null ? 'active' : 'completed'
   const planStatus: WorkflowStepStatus = started === null ? 'pending' : isPlanReady ? 'completed' : 'active'
   const implementationStatus: WorkflowStepStatus = !isPlanReady
     ? 'pending'
-    : isDelivered ? 'completed' : 'active'
-  const reviewStatus: WorkflowStepStatus = isDelivered ? 'active' : 'pending'
+    : isImplementationStarted ? 'completed' : 'active'
+  const reviewStatus: WorkflowStepStatus = isImplementationStarted ? 'active' : 'pending'
 
   return (
     <div className="home">
@@ -93,7 +94,7 @@ const Home = () => {
           onExpandedChange={expand('implementation')}
         >
           {started !== null && isPlanReady && (
-            <ImplementPlanAction plan={started} onImplementationStarted={() => undefined} />
+            <ImplementPlanAction plan={started} onImplementationStarted={implementationStarted} />
           )}
         </WorkflowStep>
         <WorkflowStep
@@ -104,7 +105,7 @@ const Home = () => {
           onExpandedChange={expand('review')}
         >
           <DeliveryProgress progress={progress} />
-          {isDelivered && (
+          {isImplementationStarted && (
             <Button className="home__start-another" type="button" variant="secondary" onClick={startAnotherPlan}>
               Arrancar otro plan
             </Button>

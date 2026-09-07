@@ -18,8 +18,8 @@ const usePlanProgress = (issue: number | null, repo: string | null): PlanProgres
   const [progress, setProgress] = useState<PlanProgress>(CONNECTING)
 
   useEffect(() => {
-    if (issue === null || repo === null) return
     setProgress(CONNECTING)
+    if (issue === null || repo === null) return
     const subscription = PlanEventsClient.watch(issue, repo, {
       onState: (state, pullRequest) => setProgress(
         pullRequest === null

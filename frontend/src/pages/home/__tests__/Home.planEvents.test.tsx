@@ -97,12 +97,30 @@ describe('Home · plan events', () => {
     expect(FakeEventSource.last().closes).toBe(1)
   })
 
+  it('should complete the implementation step once the backend accepts it', async () => {
+    await implementationStarted()
+
+    expect(screen.getByRole('button', { name: /Implementación Completado/ })).toBeInTheDocument()
+  })
+
+  it('should focus the review step once implementation starts', async () => {
+    await implementationStarted()
+
+    expect(screen.getByRole('button', { name: /Revisión Activo/ })).toHaveAttribute('aria-expanded', 'true')
+  })
+
+  it('should offer to start another plan as soon as implementation starts', async () => {
+    await implementationStarted()
+
+    expect(screen.getByRole('button', { name: 'Arrancar otro plan' })).toBeInTheDocument()
+  })
+
   it('should say the agent is implementing while there is no pull request yet', async () => {
     await implementationStarted()
 
     await streamFrame(PlanEventsMother.implementing())
 
-    expect(screen.getByText('Implementando…')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Implementando…')
   })
 
   it('should link the pull request once it is open and waiting for a review', async () => {
@@ -121,7 +139,7 @@ describe('Home · plan events', () => {
     await streamFrame(PlanEventsMother.inReview())
     await streamFrame(PlanEventsMother.fixing())
 
-    expect(screen.getByText('Corrigiendo lo pedido…')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('Corrigiendo lo pedido…')
   })
 
   it('should go back to waiting for a review once the fixes are released', async () => {
@@ -130,15 +148,8 @@ describe('Home · plan events', () => {
     await streamFrame(PlanEventsMother.fixing())
     await streamFrame(PlanEventsMother.inReview())
 
-    expect(document.querySelector('.delivery-progress__state')).toHaveTextContent('Pull request #42 en revisión')
-  })
-
-  it('should complete the implementation step once the pull request exists', async () => {
-    await implementationStarted()
-
-    await streamFrame(PlanEventsMother.inReview())
-
-    expect(screen.getByRole('button', { name: /Implementación Completado/ })).toBeInTheDocument()
+    const link = screen.getByRole('link', { name: 'Pull request #42' })
+    expect(link.parentElement).toHaveTextContent('Pull request #42 en revisión')
   })
 
   it('should say so when the delivery cannot be read', async () => {
@@ -147,6 +158,15 @@ describe('Home · plan events', () => {
     await streamFailure(PlanEventsMother.deliveryUnreadable())
 
     expect(screen.getByRole('alert')).toHaveTextContent('HTTP 502')
+  })
+
+  it('should say the backend is unreachable when the connection drops during delivery', async () => {
+    await implementationStarted()
+
+    await streamFrame(PlanEventsMother.implementing())
+    await dropStream()
+
+    expect(screen.getByRole('alert')).toHaveTextContent('No se pudo contactar con el backend')
   })
 
   it('should watch the issue through a single subscription however many steps read it', async () => {
