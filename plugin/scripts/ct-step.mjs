@@ -707,7 +707,37 @@ function escribirBrief() {
   }
   appendFileSync(brief, PluginYardstick.composeSection(PluginYardstick.forTask(deCt, { creates: creaModulo(tarea()) })))
   appendFileSync(brief, seccionVaraDelRepo('el brief'))
+  // H9: el consejo del tercer intento, dentro del brief y no en una línea suelta
+  // de `next`. El brief es lo que el subagente recibe —lo dice el propio
+  // mensaje del despacho—, así que un enfoque anunciado fuera de él es un
+  // enfoque que depende de que la sesión lo copie. Va AL FINAL, después de la
+  // vara: es lo último que se decidió sobre esta tarea.
+  if (run.lastAdvice) appendFileSync(brief, seccionDeConsejo(run.lastAdvice))
   return brief
+}
+
+// El consejo, en la lengua del brief (el resto lo escribe `task-brief` desde un
+// plan en inglés). Las rutas se listan aunque el enfoque ya las nombre: es lo
+// que hace accionable el párrafo sin releerlo.
+function seccionDeConsejo(advice) {
+  const rutas = advice.files_to_reconsider.length
+    ? advice.files_to_reconsider.map((p) => `- \`${p}\``).join('\n')
+    : '(none in particular)'
+  return [
+    '',
+    '## Advice for this attempt',
+    '',
+    'The judge vetoed the two previous attempts at this task. An adviser read both attempts and both verdicts and answered with the approach this one should take instead. The tree was reset to the last commit before you were dispatched, so nothing either of them wrote is still there: you are not continuing them.',
+    '',
+    advice.approach,
+    '',
+    '**Files to reconsider before editing:**',
+    '',
+    rutas,
+    '',
+    'This does not widen the task: `**Files:**` above is still its scope.',
+    '',
+  ].join('\n')
 }
 
 // LOS DOS DIFFS, cada uno en una expresión y no en dos. Los llaman el escritor
@@ -1048,9 +1078,16 @@ const esDelRun = (p) => {
     p.startsWith(suyo)
 }
 
-const rutasTocadas = () => {
+//
+// LO QUE MIDE ESTA FUNCIÓN LO CONSUMEN DOS: `report`, que stagea lo medido, y
+// `advice`, que devuelve lo medido al último commit. Por eso devuelve la
+// ENTRADA entera y no sólo la ruta: quién limpia necesita saber si git conoce
+// ese fichero (`git checkout --`) o si no lo ha visto nunca (`git clean`), y
+// derivarlo por segunda vez con otro `git status` sería la segunda lectura que
+// contesta distinto el día que una de las dos cambie de flags.
+const entradasDelArbol = () => {
   const trozos = (git(['status', '--porcelain', '-z', '--untracked-files=all']) || '').split('\0')
-  const rutas = []
+  const entradas = []
   for (let i = 0; i < trozos.length; i++) {
     const entrada = trozos[i]
     if (!entrada) continue
@@ -1058,12 +1095,19 @@ const rutasTocadas = () => {
     const ruta = entrada.slice(3)
     if (estado.startsWith('R') || estado.startsWith('C')) {
       const origen = trozos[++i]
-      if (origen) rutas.push(origen)
+      if (origen) entradas.push({ estado, ruta: origen })
     }
-    if (ruta) rutas.push(ruta)
+    if (ruta) entradas.push({ estado, ruta })
   }
-  return [...new Set(rutas)].filter((p) => rutaSegura(p) && !esDelRun(p) && !esRutaDeLaMaquinaria(p))
+  const vistas = new Set()
+  return entradas.filter(({ ruta }) => {
+    if (vistas.has(ruta)) return false
+    vistas.add(ruta)
+    return rutaSegura(ruta) && !esDelRun(ruta) && !esRutaDeLaMaquinaria(ruta)
+  })
 }
+
+const rutasTocadas = () => entradasDelArbol().map(({ ruta }) => ruta)
 
 // LO QUE LE COSTÓ AL PAPEL LEER LO QUE SE LE MANDÓ (#92). `brief_bytes` medía
 // una sola de las cuatro llamadas al modelo, así que la mitad fija del contexto
@@ -2026,8 +2070,38 @@ function verboAdvice() {
     return OUTCOMES.DISCARDED
   }
   run = { ...run, lastAdvice: advice }
-  out(`consejo aceptado: ${advice.files_to_reconsider.length} ruta(s) a reconsiderar`)
+  // HAPPY-TO-DELETE: el tercer intento no arranca encima de dos capas de
+  // parches. Va DESPUÉS de la fila de telemetría y de aceptar el consejo, para
+  // que un fallo de git al limpiar no se lleve por delante el consejo que sí se
+  // pudo leer.
+  const limpiadas = limpiarElArbolDeLaTarea()
+  out(`consejo aceptado: ${advice.files_to_reconsider.length} ruta(s) a reconsiderar; el árbol vuelve al último commit en ${limpiadas} ruta(s)`)
   return OUTCOMES.DONE
+}
+
+// EL ÁRBOL DE VUELTA AL ÚLTIMO COMMIT (H9). No es una limpieza general: son
+// exactamente las rutas que `entradasDelArbol` mide como trabajo de la tarea, y
+// eso ya excluye el fichero del run, su carpeta, el plan y la maquinaria
+// (`LOOP_ARTIFACT_PATTERNS`, donde vive la telemetría que viaja en el repo). Un
+// `git checkout -- .` a secas se llevaría por delante el paquete que el
+// consejero acaba de leer y la fila que este mismo verbo acaba de escribir.
+//
+// Se reutiliza el mecanismo que `report` ya usa para saber qué tocó la tarea, y
+// no uno nuevo: dos definiciones de "las rutas de la tarea" son dos respuestas
+// que divergen, y aquí la divergencia se paga borrando lo que no era.
+//
+// El índice se vacía primero por lo mismo que en `report`: con el índice del
+// intento anterior puesto, `git status` lee como "añadido y borrado" lo que
+// sólo estaba stageado, y lo rastreado se decide sobre un estado que ya no es.
+function limpiarElArbolDeLaTarea() {
+  git(['reset', '-q'])
+  const entradas = entradasDelArbol()
+  const esNueva = ({ estado }) => estado === '??'
+  const rastreadas = entradas.filter((e) => !esNueva(e)).map(({ ruta }) => ruta)
+  const nuevas = entradas.filter(esNueva).map(({ ruta }) => ruta)
+  if (rastreadas.length) git(['checkout', '--', ...rastreadas])
+  if (nuevas.length) git(['clean', '-q', '-f', '-d', '--', ...nuevas])
+  return entradas.length
 }
 
 function verboCommit() {
@@ -2095,7 +2169,11 @@ function verboCommit() {
   }
   if (git(['commit', '-m', mensaje], { allowFail: true }) === null) return OUTCOMES.FAILED
   const sha = headSha()
-  run = { ...run, lastFindings: null, lastPaths: null, lastSummary: null }
+  // `lastAdvice` se va con la tarea comiteada, como lo demás que la nombraba: el
+  // consejo lo dictó un consejero que leyó los dos vetos de ESTA tarea, y
+  // heredarlo metería en el brief de la siguiente un enfoque sobre un problema
+  // que ya no existe.
+  run = { ...run, lastFindings: null, lastPaths: null, lastSummary: null, lastAdvice: null }
   out(`commiteada la tarea ${run.task}/${run.tasksTotal}: ${sha.slice(0, 7)}`)
   return OUTCOMES.DONE
 }

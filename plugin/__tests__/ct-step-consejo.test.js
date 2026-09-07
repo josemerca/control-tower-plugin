@@ -9,6 +9,7 @@
 // intento que le queda.
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import { readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { join } from 'node:path'
 
 import { rmSyncBestEffort } from './fixtures/cleanup.js'
@@ -151,6 +152,62 @@ describe('el consejo aceptado abre el tercer intento', () => {
 
     expect(r.status).toBe(1)
     expect(estado().step).toBe('judge')
+  })
+})
+
+// AC 2 y 3 del issue: el tercer intento no arranca encima de los dos anteriores,
+// y no arranca sin el consejo.
+describe('el tercer intento arranca con el árbol limpio y con el consejo delante', () => {
+  // Lo que se mira es el estado de las rutas DE LA TAREA: el fichero del run,
+  // su carpeta y la maquinaria siguen sin trackear a propósito, y contarlos aquí
+  // mediría el andamio en vez del árbol que el tercer intento hereda.
+  const estadoDeGit = (...rutas) =>
+    execFileSync('git', ['status', '--porcelain', '--', ...rutas], { cwd: repo, encoding: 'utf8' })
+
+  it('el árbol vuelve al último commit para las rutas de la tarea', () => {
+    dosVetos()
+    writeFileSync(join(repo, 'uno.txt'), 'lo que dejó el segundo intento')
+    writeFileSync(join(repo, 'sobra.txt'), 'un fichero que el segundo intento se inventó')
+
+    aconsejar(consejo())
+
+    expect(estadoDeGit('uno.txt', 'sobra.txt')).toBe('')
+    expect(existsSync(join(repo, 'sobra.txt'))).toBe(false)
+  })
+
+  it('lo que limpia son las rutas de la tarea: el fichero del run y su carpeta siguen ahí', () => {
+    dosVetos()
+    writeFileSync(join(repo, 'uno.txt'), 'lo que dejó el segundo intento')
+
+    aconsejar(consejo())
+
+    expect(existsSync(join(repo, '.agent', 'run-7.json'))).toBe(true)
+    expect(existsSync(paqueteDeConsejo())).toBe(true)
+    expect(estado().step).toBe('implement')
+  })
+
+  it('el brief del tercer intento lleva dentro el enfoque del consejero', () => {
+    dosVetos()
+    aconsejar(consejo())
+
+    ct('next')
+    const brief = readFileSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'), 'utf8')
+    expect(brief).toContain('saca la decisión a un tipo propio')
+    expect(brief).toContain('uno.txt')
+  })
+
+  it('el consejo no se hereda: la tarea siguiente estrena brief sin él', () => {
+    dosVetos()
+    aconsejar(consejo())
+    ct('next')
+    ct('report', informe(['uno.txt']))
+    ct('controls')
+    juzgar(veredicto('PASS'))
+    ct('commit')
+
+    ct('next')
+    const brief = readFileSync(join(repo, '.agent', 'run-7', 'task-2-brief.md'), 'utf8')
+    expect(brief).not.toContain('saca la decisión a un tipo propio')
   })
 })
 
