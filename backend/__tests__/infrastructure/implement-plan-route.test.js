@@ -329,12 +329,6 @@ describe('implementing the plan lifts the watch on its issue', () => {
       .toBe(RunningApi.sessions.find({ issue: 33, repository: RunningApi.WATCHED.repository }))
   })
 
-  it('a_refused_implementation_neither_starts_the_pull_request_watch_nor_marks_the_session', async () => {
-    await RunningApi.post(await RunningApi.listening(), '{"agent":"workspace:20","issue":33,"repo":"no-soy-un-repo"}')
-
-    expect(RunningApi.pullRequestReviews.started).toEqual([])
-  })
-
   it('an_implementation_of_an_issue_nobody_is_watching_answers_the_same_and_starts_nothing', async () => {
     const port = await RunningApi.listening()
     RunningApi.sessions.forget({ issue: 33, repository: RunningApi.WATCHED.repository })
@@ -365,5 +359,7 @@ describe('implementing the plan lifts the watch on its issue', () => {
 
     expect(response.status).toBe(400)
     expect(RunningApi.reviews.stopped).toEqual([])
+    expect(RunningApi.pullRequestReviews.started).toEqual([])
+    expect(RunningApi.sessions.find({ issue: 33, repository: RunningApi.WATCHED.repository }).delivering).toBe(false)
   })
 })
