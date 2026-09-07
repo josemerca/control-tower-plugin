@@ -639,6 +639,7 @@ describe('GhPlanIssues reading the changes asked for on the issue', () => {
 
     expect(refusal).toBeInstanceOf(PlanChangesNotRead)
     expect(refusal).not.toBeInstanceOf(PlanChangesNotUnderstood)
+    expect(refusal.message).toMatch(/gh issue view --json labels failed: HTTP 404/)
   })
 
   it('labels_gh_sent_in_a_shape_this_cannot_read_travel_out_as_not_understood', async () => {

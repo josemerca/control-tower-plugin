@@ -259,11 +259,12 @@ class CtApi {
         ctStep: PluginTree.ctStep(),
       }),
     })
+    const gh = CtApi.#talkingTo(Gh.BIN, Gh)
     const planIssues = new GhPlanIssues({
-      gh: CtApi.#talkingTo(Gh.BIN, Gh),
+      gh,
       stderr: (line) => process.stderr.write(line),
     })
-    const pullRequests = new GhPullRequests({ gh: CtApi.#talkingTo(Gh.BIN, Gh) })
+    const pullRequests = new GhPullRequests({ gh })
     const workbench = new DispatchCheckWorkbench({
       node: CtApi.#tool(process.execPath),
       dispatchCheck: PluginTree.dispatchCheck(),

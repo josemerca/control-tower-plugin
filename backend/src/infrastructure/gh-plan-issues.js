@@ -208,7 +208,7 @@ export class GhPlanIssues extends PlanIssues {
       GhPlanIssues.labelsArgvFor({ issue, repository }), { safeToRepeat: true }
     )
     if (outcome.failed) {
-      throw new PlanChangesNotRead(`${Gh.BIN} issue view failed: ${outcome.stderr.trim()}`)
+      throw new PlanChangesNotRead(`${Gh.BIN} issue view --json labels failed: ${outcome.stderr.trim()}`)
     }
 
     return GhPlanIssues.#onlyStatusIn(outcome.stdout, issue) === GhPlanIssues.IN_REVIEW_LABEL
