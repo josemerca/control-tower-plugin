@@ -81,8 +81,8 @@ export class ActivePlansRoute {
   static METHOD = 'GET'
 
   static handledBy(activePlans, recovery = null) {
-    return (request, response) => {
-      if (recovery !== null && !recovery.recover()) {
+    return async (request, response) => {
+      if (recovery !== null && !(await recovery.recover())) {
         Answer.refuse(
           response,
           503,
