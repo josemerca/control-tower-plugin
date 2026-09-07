@@ -116,6 +116,18 @@ falta algún día" no la descarga.
   son cómo se construye, no complejidad que recortar. Lo que se recorta es lo
   que defiende de lo que no puede pasar.
 
+**Y una frontera que este documento tiene que declarar, porque si no la declara
+el juez cuenta el mismo defecto dos veces.** El ítem `alcance` de la rúbrica ya
+pregunta qué frase de la tarea pide cada cosa; este documento pregunta qué
+llamada se rompe sin ella. Son dos preguntas distintas —un plan puede pedir un
+campo que ningún llamante usa, y ése es de este documento— pero se solapan en la
+superficie, y `agents/ct-judge.md` prohíbe expresamente archivar un defecto en
+dos ítems porque falsea la cuenta por regla. La declaración va en la sección de
+lo que otros documentos poseen. Hay además una restricción mecánica que la
+redacción tiene que respetar: `conventions-vara.test.js` prohíbe que cualquier
+documento de la vara contenga las palabras con las que la rúbrica describe ese
+ítem, así que la frontera se escribe sin ellas.
+
 ### 3.2 `conventions/domain.md` — nuevo, todo diff
 
 - **El dominio no habla el idioma de ninguna herramienta.** El port declara lo
