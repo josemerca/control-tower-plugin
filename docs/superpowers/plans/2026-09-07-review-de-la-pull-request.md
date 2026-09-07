@@ -1175,7 +1175,7 @@ git commit -m "feat: send a reviewed slice back to the workbench"
 - Create: `backend/__tests__/application/read-fixes-asked.test.js`
 
 **Interfaces:**
-- Consumes: `PullRequests` y `OpenPullRequest` (Tarea 2), `PlanIssues.isInReview` (Tarea 3), `ChangeAsked` (Tarea 1).
+- Consumes: `PullRequests` (Tarea 2), `PlanIssues.isInReview` (Tarea 3), `ChangeAsked` (Tarea 1). El contrato de `openOf` se dobla como objeto literal con `number` y `url`, sin importar la clase del adaptador: un test de aplicación no importa de infraestructura.
 - Produces: `ReadFixesAsked` con `execute` que devuelve `{ changes }`; `DeliveryState.IMPLEMENTING`, `DeliveryState.IN_REVIEW`, `DeliveryState.FIXING`; `DeliveryPolicy.of({ pullRequest, inReview })`.
 
 - [ ] **Step 1: Escribir los tests que fallan**
@@ -1186,7 +1186,6 @@ import { describe, it, expect } from 'vitest'
 import { ReadFixesAsked, ReadFixesAskedParams } from '../../src/application/queries/read-fixes-asked.js'
 import { PullRequests } from '../../src/domain/ports/pull-requests.js'
 import { PlanIssues } from '../../src/domain/ports/plan-issues.js'
-import { OpenPullRequest } from '../../src/infrastructure/gh-pull-requests.js'
 import { ChangeAsked } from '../../src/domain/value-objects/change-asked.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
@@ -1235,7 +1234,7 @@ class Flow {
     number: 7, url: 'https://github.com/josemerca/ct-loop-sandbox/issues/7',
   })
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
-  static PULL_REQUEST = new OpenPullRequest({
+  static PULL_REQUEST = Object.freeze({
     number: 42, url: 'https://github.com/josemerca/ct-loop-sandbox/pull/42',
   })
   static A_CHANGE = new ChangeAsked({ id: '101', text: 'src/foo.js:42: revienta con []' })
@@ -1958,7 +1957,6 @@ import {
 import { DeliveryState } from '../../src/domain/policies/delivery-policy.js'
 import { PullRequests } from '../../src/domain/ports/pull-requests.js'
 import { PlanIssues } from '../../src/domain/ports/plan-issues.js'
-import { OpenPullRequest } from '../../src/infrastructure/gh-pull-requests.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { PullRequestNotRead } from '../../src/domain/exceptions.js'
@@ -1993,7 +1991,7 @@ class Flow {
     number: 7, url: 'https://github.com/josemerca/ct-loop-sandbox/issues/7',
   })
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
-  static PULL_REQUEST = new OpenPullRequest({
+  static PULL_REQUEST = Object.freeze({
     number: 42, url: 'https://github.com/josemerca/ct-loop-sandbox/pull/42',
   })
 
