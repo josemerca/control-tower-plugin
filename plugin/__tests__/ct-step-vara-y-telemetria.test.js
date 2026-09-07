@@ -304,8 +304,9 @@ describe('el paquete de slice trae la ruta de simplicity.md, no el documento ent
     const paquete = readFileSync(join(repo, '.agent', 'run-7', 'slice-review.diff'), 'utf8')
     expect(paquete).toMatch(/## Vara/)
     expect(paquete.indexOf('## Vara')).toBeLessThan(paquete.indexOf('## Señal'))
+    const seccionVara = paquete.slice(paquete.indexOf('## Vara'), paquete.indexOf('## Señal'))
     const ruta = join(PLUGIN_ROOT_TEST, PluginYardstick.DIRECTORY, 'simplicity.md')
-    expect(paquete).toContain(ruta)
+    expect(seccionVara).toContain(ruta)
   })
 })
 

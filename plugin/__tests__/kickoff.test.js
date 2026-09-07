@@ -400,7 +400,7 @@ describe('el primer acto nombra la vara de ct', () => {
   it('no manda leer la vara entera, pero nombra los dos que el plan no puede no haber abierto', () => {
     const k = renderKickoff(SLICE, OPTS_CON_VARA)
     expect(k).not.toMatch(/LEE la vara de ct/)
-    expect(k).not.toMatch(/los ocho documentos de/)
+    expect(k).not.toMatch(/No hace falta que abras los documentos de la vara ahora/)
     expect(k).toContain('simplicity.md')
     expect(k).toContain('decisions.md')
   })

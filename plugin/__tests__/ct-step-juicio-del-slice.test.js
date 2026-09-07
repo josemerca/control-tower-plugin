@@ -94,9 +94,10 @@ describe('el juicio del slice entero (§3.7-B)', () => {
 
   // Slice 10 — la señal cruza el embudo en el paquete: ct-step la lee del
   // campo `senal:` del SLICE.md (disco, sin agente en medio — la doctrina del
-  // §3.3) y la pega como PRIMERA sección `## Señal`, delante del diff -U10
-  // donde quedaría enterrada. El fallback SENAL_AUSENTE cubre un SLICE.md
-  // sembrado por un plugin anterior a la columna.
+  // §3.3) y la pega en `## Señal`, delante del diff -U10 donde quedaría
+  // enterrada (Tarea 8: delante de ella sólo va `## Vara`). El fallback
+  // SENAL_AUSENTE cubre un SLICE.md sembrado por un plugin anterior a la
+  // columna.
   const sembrarSenalEnSliceMd = (senal) => {
     const g = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
     // Por el MISMO camino que buildStateSeed (renderState): es lo que hace
@@ -107,7 +108,7 @@ describe('el juicio del slice entero (§3.7-B)', () => {
     g('commit', '-q', '-m', 'siembra la senal del slice')
   }
 
-  it('el paquete de slice trae "## Señal" como PRIMERA sección, con el texto del campo senal: del SLICE.md', () => {
+  it('el paquete de slice trae "## Señal" delante de Commits/Files changed/Diff, con el texto del campo senal: del SLICE.md', () => {
     sembrarSenalEnSliceMd('métrica `backfill_progress` con label `estado`')
     enJuezDeSlice()
     ct('next')

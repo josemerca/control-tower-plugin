@@ -544,11 +544,6 @@ describe('el juez de slice (§3.7-B)', () => {
     expect(SLICE_PACKAGE_SECTIONS).toEqual(['Vara', 'Señal', 'Commits', 'Files changed', 'Diff'])
   })
 
-  it('el paquete del juez de slice abre con la ruta de simplicity.md, que es la vara de su ítem observabilidad', () => {
-    expect(SLICE_PACKAGE_SECTIONS[0]).toBe('Vara')
-    expect(SLICE_PACKAGE_SECTIONS).toEqual(['Vara', 'Señal', 'Commits', 'Files changed', 'Diff'])
-  })
-
   it('el esquema del recorrido de slice no duplica los identificadores: los toma de SLICE_VERDICT_RULES', () => {
     expect(SLICE_VERDICT_SCHEMA.properties.rubric.items.properties.rule.enum).toBe(SLICE_VERDICT_RULES)
   })
