@@ -16,6 +16,7 @@ export type StartedPlan = {
   agent: string
   branch: string
   worktree: string
+  root?: string
 }
 
 export type StartPlanResult = StartedPlan & {

@@ -26,6 +26,9 @@ const isWorktreeUnder = (worktree: string, path: string): boolean => {
   return normalizedWorktree !== normalizedPath && normalizedWorktree.startsWith(prefix)
 }
 
+const isWellFormedRoot = (value: unknown): value is string | undefined =>
+  value === undefined || (typeof value === 'string' && LocalPath.isWellFormed(value))
+
 const isPlanForRequest = (value: unknown, request: StartPlanRequest): value is StartedPlan =>
   isRecord(value) &&
   typeof value.id === 'string' &&
@@ -43,6 +46,7 @@ const isPlanForRequest = (value: unknown, request: StartPlanRequest): value is S
   isNonEmptyString(value.branch) &&
   isNonEmptyString(value.worktree) &&
   LocalPath.isWellFormed(value.worktree) &&
-  isWorktreeUnder(value.worktree, request.path)
+  isWellFormedRoot(value.root) &&
+  isWorktreeUnder(value.worktree, typeof value.root === 'string' ? value.root : request.path)
 
 export { isPlanForRequest, isRecord, isRequest }

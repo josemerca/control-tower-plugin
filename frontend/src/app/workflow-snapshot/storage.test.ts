@@ -54,6 +54,32 @@ describe('WorkflowSnapshotStorage', () => {
     expect(WorkflowSnapshotStorage.load()).toBeNull()
   })
 
+  it('should accept a worktree under the root the backend answered with, even outside the typed path', () => {
+    const nonCanonical = workflow()
+    nonCanonical.plan.root = '/private/var/code/name'
+    nonCanonical.plan.worktree = '/private/var/code/name/.worktrees/7'
+    localStorage.setItem(WORKFLOW_SNAPSHOT_KEY, JSON.stringify({ version: 1, workflow: nonCanonical }))
+
+    expect(WorkflowSnapshotStorage.load()).toEqual(nonCanonical)
+  })
+
+  it('should reject a worktree outside the root when the root differs from the typed path', () => {
+    const nonCanonical = workflow()
+    nonCanonical.plan.root = '/private/var/code/name'
+    nonCanonical.plan.worktree = '/Users/pedro/code/name/.worktrees/7'
+    localStorage.setItem(WORKFLOW_SNAPSHOT_KEY, JSON.stringify({ version: 1, workflow: nonCanonical }))
+
+    expect(WorkflowSnapshotStorage.load()).toBeNull()
+  })
+
+  it('should reject a malformed root', () => {
+    const invalid = workflow()
+    invalid.plan.root = 'relative/path'
+    localStorage.setItem(WORKFLOW_SNAPSHOT_KEY, JSON.stringify({ version: 1, workflow: invalid }))
+
+    expect(WorkflowSnapshotStorage.load()).toBeNull()
+  })
+
   it('should treat unavailable storage as empty', () => {
     const reading = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new DOMException('Storage is unavailable')
