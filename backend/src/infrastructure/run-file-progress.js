@@ -44,7 +44,7 @@ export class RunFileProgress extends ImplementationProgress {
     return run.controlRetries + run.judgeRetries + run.correctionRetries + 1
   }
 
-  async of({ root, issue }) {
+  async of({ root, issue, repository }) {
     const worktree = RunFileProgress.worktreeFor(root.text, issue)
     if (!(await this.exists(worktree))) {
       throw new ImplementationProgressNotRead(`the worktree ${worktree} is not there, so its run cannot be read`)

@@ -140,7 +140,7 @@ class GhDouble {
   }
 
   async inReviewFor(issue = GhDouble.OPENED) {
-    return this.issues().isInReview({ issue, repository: GhDouble.REPOSITORY })
+    return this.issues().isInReview({ issueNumber: issue.number, repository: GhDouble.REPOSITORY })
   }
 
   get commands() {

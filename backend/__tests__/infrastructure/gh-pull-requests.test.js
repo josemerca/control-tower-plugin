@@ -61,7 +61,7 @@ class GhDouble {
   }
 
   async openOf() {
-    return this.pullRequests().openOf({ issue: GhDouble.ISSUE, repository: GhDouble.REPOSITORY })
+    return this.pullRequests().openOf({ issueNumber: GhDouble.ISSUE.number, repository: GhDouble.REPOSITORY })
   }
 
   async fixesAsked() {

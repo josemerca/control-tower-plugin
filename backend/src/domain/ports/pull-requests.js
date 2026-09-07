@@ -1,7 +1,7 @@
 export class PullRequests {
-  async openOf({ issue, repository }) {
+  async openOf({ issueNumber, repository }) {
     throw new Error(
-      `${this.constructor.name} must implement openOf({ issue, repository }), asked for ${issue?.number} in ${repository}`
+      `${this.constructor.name} must implement openOf({ issueNumber, repository }), asked for ${issueNumber} in ${repository}`
     )
   }
 

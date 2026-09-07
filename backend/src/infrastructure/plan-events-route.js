@@ -101,15 +101,13 @@ export class EventsRefusal {
 }
 
 export class PlanEvents {
-  constructor({ read, readDelivery, sleep }) {
+  constructor({ read, sleep }) {
     this.read = read
-    this.readDelivery = readDelivery
     this.sleep = sleep
   }
 
   static ERROR_EVENT = 'error'
   static PROGRESS_NOT_READ = 'plan-progress-not-read'
-  static DELIVERY_NOT_READ = 'delivery-progress-not-read'
 
   static frameFor(state, pullRequest = null) {
     const said = pullRequest === null
@@ -128,12 +126,10 @@ export class PlanEvents {
     for (;;) {
       let read = null
       try {
-        read = session.delivering ? await this.readDelivery(session) : await this.read(session)
+        read = await this.read(session)
       } catch (cause) {
         if (!(cause instanceof PlanFailure)) throw cause
-        yield PlanEvents.failureFrameFor(cause, session.delivering
-          ? PlanEvents.DELIVERY_NOT_READ
-          : PlanEvents.PROGRESS_NOT_READ)
+        yield PlanEvents.failureFrameFor(cause, PlanEvents.PROGRESS_NOT_READ)
       }
       if (read !== null && read.state !== last) {
         last = read.state

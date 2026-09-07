@@ -75,8 +75,8 @@ export class GhPlanIssues extends PlanIssues {
     return ['label', 'create', label, '--repo', repository.text, '--force']
   }
 
-  static labelsArgvFor({ issue, repository }) {
-    return ['issue', 'view', String(issue.number), '--repo', repository.text, '--json', 'labels']
+  static labelsArgvFor({ issueNumber, repository }) {
+    return ['issue', 'view', String(issueNumber), '--repo', repository.text, '--json', 'labels']
   }
 
   async open({ story, comment, repository }) {
@@ -173,18 +173,18 @@ export class GhPlanIssues extends PlanIssues {
     )
   }
 
-  static #onlyStatusIn(printed, issue) {
+  static #onlyStatusIn(printed, issueNumber) {
     let parsed
     try {
       parsed = JSON.parse(printed)
     } catch {
       throw new PlanChangesNotUnderstood(
-        `${Gh.BIN} answered something that is not json for the labels of ${issue.number}, it printed ${JSON.stringify(printed)}`
+        `${Gh.BIN} answered something that is not json for the labels of ${issueNumber}, it printed ${JSON.stringify(printed)}`
       )
     }
     if (!Array.isArray(parsed?.labels)) {
       throw new PlanChangesNotUnderstood(
-        `${Gh.BIN} answered without the labels of ${issue.number}, it printed ${JSON.stringify(printed)}`
+        `${Gh.BIN} answered without the labels of ${issueNumber}, it printed ${JSON.stringify(printed)}`
       )
     }
     const status = parsed.labels
@@ -203,15 +203,15 @@ export class GhPlanIssues extends PlanIssues {
     }
   }
 
-  async isInReview({ issue, repository }) {
+  async isInReview({ issueNumber, repository }) {
     const outcome = await this.gh.run(
-      GhPlanIssues.labelsArgvFor({ issue, repository }), { safeToRepeat: true }
+      GhPlanIssues.labelsArgvFor({ issueNumber, repository }), { safeToRepeat: true }
     )
     if (outcome.failed) {
       throw new PlanChangesNotRead(`${Gh.BIN} issue view --json labels failed: ${outcome.stderr.trim()}`)
     }
 
-    return GhPlanIssues.#onlyStatusIn(outcome.stdout, issue) === GhPlanIssues.IN_REVIEW_LABEL
+    return GhPlanIssues.#onlyStatusIn(outcome.stdout, issueNumber) === GhPlanIssues.IN_REVIEW_LABEL
   }
 
   async #sowForTheRelease(repository) {

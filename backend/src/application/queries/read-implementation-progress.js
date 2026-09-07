@@ -1,7 +1,8 @@
 export class ReadImplementationProgressParams {
-  constructor({ root, issue }) {
+  constructor({ root, issue, repository }) {
     this.root = root
     this.issue = issue
+    this.repository = repository
     Object.freeze(this)
   }
 }
@@ -23,6 +24,7 @@ export class ReadImplementationProgress {
       state: await this.implementationProgress.of({
         root: params.root,
         issue: params.issue,
+        repository: params.repository,
       }),
     })
   }

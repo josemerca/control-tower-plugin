@@ -21,6 +21,7 @@ import { ReviewWatch } from './review-watch.js'
 import { GhPullRequests } from './gh-pull-requests.js'
 import { DispatchCheckWorkbench } from './dispatch-check-workbench.js'
 import { RunFileProgress } from './run-file-progress.js'
+import { ReviewedImplementationProgress } from './reviewed-implementation-progress.js'
 import { ActivePlans } from './active-plans-route.js'
 import { ActivePlanRecovery } from './active-plan-recovery.js'
 import { DiskImplementationStartRegistry } from './disk-implementation-start-registry.js'
@@ -31,7 +32,6 @@ import { ReadPlanProgress, ReadPlanProgressParams } from '../application/queries
 import { ReadImplementationProgress } from '../application/queries/read-implementation-progress.js'
 import { ReadChangesAsked, ReadChangesAskedParams } from '../application/queries/read-changes-asked.js'
 import { ReadFixesAsked, ReadFixesAskedParams } from '../application/queries/read-fixes-asked.js'
-import { ReadDeliveryProgress, ReadDeliveryProgressParams } from '../application/queries/read-delivery-progress.js'
 import { ReviewPlan, ReviewPlanParams } from '../application/actions/review-plan.js'
 import { RequestFixes, RequestFixesParams } from '../application/actions/request-fixes.js'
 import { SurveyWorkspaces, SurveyWorkspacesParams } from '../application/queries/survey-workspaces.js'
@@ -221,7 +221,7 @@ class CtApi {
     })
   }
 
-  static #planEvents(git, pullRequests, planIssues) {
+  static #planEvents(git) {
     const readPlanProgress = new ReadPlanProgress({
       planProgress: new PlanContractProgress({
         node: CtApi.#tool(process.execPath),
@@ -229,11 +229,9 @@ class CtApi {
         dispatchCheck: PluginTree.dispatchCheck(),
       }),
     })
-    const readDeliveryProgress = new ReadDeliveryProgress({ pullRequests, planIssues })
 
     return new PlanEvents({
       read: (session) => readPlanProgress.execute(new ReadPlanProgressParams(session)),
-      readDelivery: (session) => readDeliveryProgress.execute(new ReadDeliveryProgressParams(session)),
       sleep: () => CtApi.#waiting(CtApi.#SECONDS_BETWEEN_READS),
     })
   }
@@ -342,7 +340,11 @@ class CtApi {
         planAgents,
       }),
       implementProgress: new ReadImplementationProgress({
-        implementationProgress: new RunFileProgress({ read: Disk.read, exists: Disk.exists }),
+        implementationProgress: new ReviewedImplementationProgress({
+          implemented: new RunFileProgress({ read: Disk.read, exists: Disk.exists }),
+          pullRequests,
+          planIssues,
+        }),
       }),
       planEvents: CtApi.#planEvents(git),
       sessions,

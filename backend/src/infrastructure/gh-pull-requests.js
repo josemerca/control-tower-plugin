@@ -20,14 +20,14 @@ export class GhPullRequests extends PullRequests {
     this.gh = gh
   }
 
-  static #branchOf(issue) {
-    return `feat/${issue.number}`
+  static #branchOf(issueNumber) {
+    return `feat/${issueNumber}`
   }
 
-  static #listArgvFor({ issue, repository }) {
+  static #listArgvFor({ issueNumber, repository }) {
     return [
       'pr', 'list', '--repo', repository.text,
-      '--head', GhPullRequests.#branchOf(issue),
+      '--head', GhPullRequests.#branchOf(issueNumber),
       '--state', 'open', '--json', 'number,url', '--limit', '1',
     ]
   }
@@ -46,9 +46,9 @@ export class GhPullRequests extends PullRequests {
     ]
   }
 
-  async openOf({ issue, repository }) {
-    const printed = await this.#read(GhPullRequests.#listArgvFor({ issue, repository }))
-    const listed = GhPullRequests.#arrayIn(printed, `the pull requests of ${GhPullRequests.#branchOf(issue)}`)
+  async openOf({ issueNumber, repository }) {
+    const printed = await this.#read(GhPullRequests.#listArgvFor({ issueNumber, repository }))
+    const listed = GhPullRequests.#arrayIn(printed, `the pull requests of ${GhPullRequests.#branchOf(issueNumber)}`)
     if (listed.length === 0) return null
 
     const found = listed[0]

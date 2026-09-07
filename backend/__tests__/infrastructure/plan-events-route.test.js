@@ -214,23 +214,7 @@ describe('PlanEvents', () => {
     expect(events.slept).toBe(2)
   })
 
-  it('a_session_that_is_delivering_is_read_by_the_delivery_reader_and_never_by_the_plan_one', async () => {
-    const double = EventsDouble.delivering(EventsDouble.inReview())
 
-    const frames = await double.collectedDelivering(double.cancellingWhenExhausted())
-
-    expect(double.planReads).toBe(0)
-    expect(frames[0]).toContain('"state":"in-review"')
-  })
-
-  it('the_frame_of_a_delivery_carries_the_number_and_the_url_of_its_pull_request', async () => {
-    const double = EventsDouble.delivering(EventsDouble.inReview())
-
-    const frames = await double.collectedDelivering(double.cancellingWhenExhausted())
-
-    expect(frames[0]).toContain('"number":42')
-    expect(frames[0]).toContain('"url":"https://github.com/owner/name/pull/42"')
-  })
 
   it('the_frame_of_a_plan_still_carries_the_state_alone', async () => {
     const frames = await new EventsDouble([PlanState.WRITING]).collected(() => true)
@@ -238,33 +222,6 @@ describe('PlanEvents', () => {
     expect(frames[0]).toBe('data: {"state":"writing"}\n\n')
   })
 
-  it('a_delivery_that_could_not_be_read_reaches_the_page_with_its_own_code', async () => {
-    const double = EventsDouble.delivering(new PullRequestNotRead('HTTP 502'))
 
-    const frames = await double.collectedDelivering(double.cancellingWhenExhausted())
 
-    expect(frames.at(-1)).toContain(PlanEvents.DELIVERY_NOT_READ)
-    expect(frames.at(-1)).toContain('HTTP 502')
-  })
-
-  it('the_same_delivery_state_twice_running_is_sent_once', async () => {
-    const double = EventsDouble.delivering(EventsDouble.inReview(), EventsDouble.inReview())
-
-    const frames = await double.collectedDelivering(double.cancellingWhenExhausted())
-
-    expect(frames.filter((frame) => frame.includes('"state":"in-review"'))).toHaveLength(1)
-  })
-
-  it('a_pull_request_that_appears_moves_the_delivery_on_without_a_second_frame_of_the_old_state', async () => {
-    const double = EventsDouble.delivering(
-      { state: DeliveryState.IMPLEMENTING, pullRequest: null },
-      EventsDouble.inReview(),
-    )
-
-    const frames = await double.collectedDelivering(double.cancellingWhenExhausted())
-
-    expect(frames).toHaveLength(2)
-    expect(frames[0]).toContain('"state":"implementing"')
-    expect(frames[1]).toContain('"state":"in-review"')
-  })
 })

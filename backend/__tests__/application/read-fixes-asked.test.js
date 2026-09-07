@@ -91,7 +91,7 @@ describe('ReadFixesAsked', () => {
 
     await flow.run()
 
-    expect(flow.pullRequests.located).toEqual([{ issue: Flow.ISSUE, repository: Flow.REPOSITORY }])
+    expect(flow.pullRequests.located).toEqual([{ issueNumber: Flow.ISSUE.number, repository: Flow.REPOSITORY }])
   })
 
   it('a_branch_with_no_pull_request_yet_asks_for_no_reviews_because_there_is_nothing_to_review', async () => {
@@ -135,7 +135,7 @@ describe('ReadFixesAsked', () => {
 
     await flow.run()
 
-    expect(flow.planIssues.asked).toEqual([{ issue: Flow.ISSUE, repository: Flow.REPOSITORY }])
+    expect(flow.planIssues.asked).toEqual([{ issueNumber: Flow.ISSUE.number, repository: Flow.REPOSITORY }])
   })
 
   it('a_pull_request_that_could_not_be_located_travels_out_typed_instead_of_looking_like_no_pull_request', async () => {
@@ -150,9 +150,9 @@ describe('ReadFixesAsked', () => {
   })
 
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
-    await expect(new PullRequests().openOf({ issue: Flow.ISSUE, repository: Flow.REPOSITORY }))
+    await expect(new PullRequests().openOf({ issueNumber: Flow.ISSUE.number, repository: Flow.REPOSITORY }))
       .rejects.toThrow(/must implement openOf/)
-    await expect(new PlanIssues().isInReview({ issue: Flow.ISSUE, repository: Flow.REPOSITORY }))
+    await expect(new PlanIssues().isInReview({ issueNumber: Flow.ISSUE.number, repository: Flow.REPOSITORY }))
       .rejects.toThrow(/must implement isInReview/)
   })
 })

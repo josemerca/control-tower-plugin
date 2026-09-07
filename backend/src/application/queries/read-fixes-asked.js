@@ -23,12 +23,12 @@ export class ReadFixesAsked {
 
   async execute(params) {
     const pullRequest = await this.pullRequests.openOf({
-      issue: params.issue, repository: params.repository,
+      issueNumber: params.issue.number, repository: params.repository,
     })
     if (pullRequest === null) return new ReadFixesAskedResult({ changes: [] })
 
     const inReview = await this.planIssues.isInReview({
-      issue: params.issue, repository: params.repository,
+      issueNumber: params.issue.number, repository: params.repository,
     })
     if (DeliveryPolicy.of({ pullRequest, inReview }) !== DeliveryState.IN_REVIEW) {
       return new ReadFixesAskedResult({ changes: [] })
