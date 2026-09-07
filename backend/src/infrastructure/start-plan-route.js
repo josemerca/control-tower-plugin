@@ -21,8 +21,11 @@ export const PlanRequestOutcome = Object.freeze({
   MALFORMED_ID: 'malformed-id',
   MALFORMED_USER_COMMENT: 'malformed-user-comment',
   NOTHING_TO_PLAN: 'nothing-to-plan',
+  TARGET_SAID_TWICE: 'target-said-twice',
+  MALFORMED_REPO_LIST: 'malformed-repo-list',
   MALFORMED_REPO: 'malformed-repo',
   MALFORMED_PATH: 'malformed-path',
+  REPO_LISTED_TWICE: 'repo-listed-twice',
 })
 
 export class PlanRequest {
@@ -30,34 +33,37 @@ export class PlanRequest {
   static COMMENT_FIELD = 'user_comment'
   static REPO_FIELD = 'repo'
   static PATH_FIELD = 'path'
+  static REPO_LIST_FIELD = 'repo_list'
+  static ENTRY_FIELDS = Object.freeze([PlanRequest.REPO_FIELD, PlanRequest.PATH_FIELD])
   static KNOWN_FIELDS = Object.freeze([
     PlanRequest.ID_FIELD, PlanRequest.COMMENT_FIELD, PlanRequest.REPO_FIELD, PlanRequest.PATH_FIELD,
+    PlanRequest.REPO_LIST_FIELD,
   ])
 
-  constructor({ outcome, story, comment, repository, root, fields, named = null }) {
+  constructor({ outcome, story, comment, targets, fields, named = null, listed = false }) {
     this.outcome = outcome
     this.story = story
     this.comment = comment
-    this.repository = repository
-    this.root = root
+    this.targets = targets === null ? null : Object.freeze([...targets])
+    this.listed = listed
     this.fields = Object.freeze([...fields])
     this.named = named
     Object.freeze(this)
   }
 
-  static accepted(story, comment, repository, root) {
-    return new PlanRequest({ outcome: PlanRequestOutcome.ACCEPTED, story, comment, repository, root, fields: [] })
+  static accepted(story, comment, targets, listed = false) {
+    return new PlanRequest({ outcome: PlanRequestOutcome.ACCEPTED, story, comment, targets, listed, fields: [] })
   }
 
   static refused(outcome, named = null) {
     return new PlanRequest({
-      outcome, story: null, comment: null, repository: null, root: null, fields: [], named,
+      outcome, story: null, comment: null, targets: null, fields: [], named,
     })
   }
 
   static withUnknownFields(fields) {
     return new PlanRequest({
-      outcome: PlanRequestOutcome.UNKNOWN_FIELD, story: null, comment: null, repository: null, root: null, fields,
+      outcome: PlanRequestOutcome.UNKNOWN_FIELD, story: null, comment: null, targets: null, fields,
     })
   }
 
@@ -88,6 +94,19 @@ export class PlanRequest {
     if (!idGiven && !commentGiven) {
       return PlanRequest.refused(PlanRequestOutcome.NOTHING_TO_PLAN)
     }
+    const story = idGiven ? new UserStoryKey(given) : null
+    const comment = commentGiven ? new PlanComment(saidByHand) : null
+
+    const listGiven = Object.hasOwn(parsed, PlanRequest.REPO_LIST_FIELD)
+    const repoGiven = Object.hasOwn(parsed, PlanRequest.REPO_FIELD)
+    const pathGiven = Object.hasOwn(parsed, PlanRequest.PATH_FIELD)
+    if (listGiven && (repoGiven || pathGiven)) {
+      return PlanRequest.refused(PlanRequestOutcome.TARGET_SAID_TWICE)
+    }
+    if (listGiven) {
+      return PlanRequest.#fromList(parsed[PlanRequest.REPO_LIST_FIELD], story, comment)
+    }
+
     const asked = parsed[PlanRequest.REPO_FIELD]
     if (!RepositoryName.isWellFormed(asked)) {
       return PlanRequest.refused(PlanRequestOutcome.MALFORMED_REPO, PlanRequest.REPO_FIELD)
@@ -96,12 +115,49 @@ export class PlanRequest {
     if (!CheckoutRoot.isWellFormed(where)) {
       return PlanRequest.refused(PlanRequestOutcome.MALFORMED_PATH, PlanRequest.PATH_FIELD)
     }
-    return PlanRequest.accepted(
-      idGiven ? new UserStoryKey(given) : null,
-      commentGiven ? new PlanComment(saidByHand) : null,
-      new RepositoryName(asked),
-      new CheckoutRoot(where)
-    )
+    return PlanRequest.accepted(story, comment, [
+      new PlanTarget({ repository: new RepositoryName(asked), root: new CheckoutRoot(where) }),
+    ])
+  }
+
+  static #isEntryShaped(entry) {
+    return entry !== null && typeof entry === 'object' && !Array.isArray(entry) &&
+      Object.keys(entry).length === PlanRequest.ENTRY_FIELDS.length &&
+      PlanRequest.ENTRY_FIELDS.every((field) => Object.hasOwn(entry, field))
+  }
+
+  static #fromList(list, story, comment) {
+    if (!Array.isArray(list) || list.length === 0 || !list.every(PlanRequest.#isEntryShaped)) {
+      return PlanRequest.refused(PlanRequestOutcome.MALFORMED_REPO_LIST)
+    }
+    for (const [index, entry] of list.entries()) {
+      const repo = entry[PlanRequest.REPO_FIELD]
+      if (!RepositoryName.isWellFormed(repo)) {
+        return PlanRequest.refused(
+          PlanRequestOutcome.MALFORMED_REPO, `${PlanRequest.REPO_LIST_FIELD}[${index}].${PlanRequest.REPO_FIELD}`
+        )
+      }
+      const path = entry[PlanRequest.PATH_FIELD]
+      if (!CheckoutRoot.isWellFormed(path)) {
+        return PlanRequest.refused(
+          PlanRequestOutcome.MALFORMED_PATH, `${PlanRequest.REPO_LIST_FIELD}[${index}].${PlanRequest.PATH_FIELD}`
+        )
+      }
+    }
+    const seen = new Set()
+    for (const entry of list) {
+      const repo = entry[PlanRequest.REPO_FIELD]
+      if (seen.has(repo)) {
+        return PlanRequest.refused(PlanRequestOutcome.REPO_LISTED_TWICE, repo)
+      }
+      seen.add(repo)
+    }
+    const targets = list.map((entry) => new PlanTarget({
+      repository: new RepositoryName(entry[PlanRequest.REPO_FIELD]),
+      root: new CheckoutRoot(entry[PlanRequest.PATH_FIELD]),
+    }))
+
+    return PlanRequest.accepted(story, comment, targets, true)
   }
 }
 
@@ -127,6 +183,18 @@ export class PlanRefusal {
       code: PlanRequestOutcome.NOTHING_TO_PLAN,
       detail: `either ${PlanRequest.ID_FIELD} or ${PlanRequest.COMMENT_FIELD} must say what to plan`,
     })],
+    [PlanRequestOutcome.TARGET_SAID_TWICE, () => new Refusal({
+      status: 400,
+      code: PlanRequestOutcome.TARGET_SAID_TWICE,
+      detail: `${PlanRequest.REPO_LIST_FIELD} already says where to plan, so `
+        + `${PlanRequest.REPO_FIELD} and ${PlanRequest.PATH_FIELD} must not be given beside it`,
+    })],
+    [PlanRequestOutcome.MALFORMED_REPO_LIST, () => new Refusal({
+      status: 400,
+      code: PlanRequestOutcome.MALFORMED_REPO_LIST,
+      detail: `${PlanRequest.REPO_LIST_FIELD} must be a non-empty list of `
+        + `{ ${PlanRequest.REPO_FIELD}, ${PlanRequest.PATH_FIELD} }`,
+    })],
     [PlanRequestOutcome.MALFORMED_REPO, (asked) => new Refusal({
       status: 400,
       code: PlanRequestOutcome.MALFORMED_REPO,
@@ -136,6 +204,11 @@ export class PlanRefusal {
       status: 400,
       code: PlanRequestOutcome.MALFORMED_PATH,
       detail: `${asked.named} must be an absolute path`,
+    })],
+    [PlanRequestOutcome.REPO_LISTED_TWICE, (asked) => new Refusal({
+      status: 400,
+      code: PlanRequestOutcome.REPO_LISTED_TWICE,
+      detail: `${PlanRequest.REPO_LIST_FIELD} names ${asked.named} twice`,
     })],
     [PlanRequestOutcome.UNKNOWN_FIELD, (asked) => new Refusal({
       status: 400,
@@ -210,15 +283,15 @@ export class StartPlanRoute {
     let result
     try {
       result = await startPlan.execute(
-        new StartPlanParams({
-          story: asked.story,
-          comment: asked.comment,
-          targets: [new PlanTarget({ repository: asked.repository, root: asked.root })],
-        })
+        new StartPlanParams({ story: asked.story, comment: asked.comment, targets: asked.targets })
       )
     } catch (cause) {
       if (!(cause instanceof PlanFailure)) throw cause
       Answer.refuseAs(response, PlanCollapse.of(cause))
+      return
+    }
+    if (asked.listed) {
+      StartPlanRoute.#sendListed(sessions, reviews, response, result)
       return
     }
     if (result.failed.length > 0) {
@@ -228,8 +301,25 @@ export class StartPlanRoute {
     const [started] = result.started
     sessions.remember(started.watch)
     reviews.start(started.watch)
-    Answer.send(response, 202, {
-      status: 'started',
+    Answer.send(response, 202, { status: 'started', ...StartPlanRoute.#startedAnswer(started) })
+  }
+
+  static #sendListed(sessions, reviews, response, result) {
+    const started = result.started.map((one) => {
+      sessions.remember(one.watch)
+      reviews.start(one.watch)
+      return StartPlanRoute.#startedAnswer(one)
+    })
+    const failed = result.failed.map((notStarted) => {
+      const collapse = PlanCollapse.of(notStarted.cause)
+      return { [PlanRequest.REPO_FIELD]: notStarted.repository.text, code: collapse.code, detail: collapse.detail }
+    })
+
+    Answer.send(response, 202, { status: 'started', started, failed })
+  }
+
+  static #startedAnswer(started) {
+    return {
       [PlanRequest.ID_FIELD]: started.watch.storyText(),
       [PlanRequest.REPO_FIELD]: started.watch.repository.text,
       issue: { number: started.watch.issue.number, url: started.watch.issue.url },
@@ -237,7 +327,7 @@ export class StartPlanRoute {
       branch: started.watch.located.branch,
       worktree: started.watch.located.path,
       root: started.watch.located.root,
-    })
+    }
   }
 
   static refuseOtherMethods(request, response) {

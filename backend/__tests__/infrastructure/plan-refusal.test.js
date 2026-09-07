@@ -27,6 +27,22 @@ describe('PlanRefusal', () => {
     expect(refusal.code).toBe(PlanRequestOutcome.UNKNOWN_FIELD)
     expect(refusal.detail).toBe('unknown field: b, a')
   })
+
+  it('the_three_refusals_a_repo_list_can_earn_carry_the_literal_words_the_decision_closed', () => {
+    const targetSaidTwice = PlanRefusal.of(PlanRequest.refused(PlanRequestOutcome.TARGET_SAID_TWICE))
+    expect(targetSaidTwice.code).toBe('target-said-twice')
+    expect(targetSaidTwice.detail).toBe(
+      'repo_list already says where to plan, so repo and path must not be given beside it'
+    )
+
+    const malformedList = PlanRefusal.of(PlanRequest.refused(PlanRequestOutcome.MALFORMED_REPO_LIST))
+    expect(malformedList.code).toBe('malformed-repo-list')
+    expect(malformedList.detail).toBe('repo_list must be a non-empty list of { repo, path }')
+
+    const listedTwice = PlanRefusal.of(PlanRequest.refused(PlanRequestOutcome.REPO_LISTED_TWICE, 'owner/name'))
+    expect(listedTwice.code).toBe('repo-listed-twice')
+    expect(listedTwice.detail).toBe('repo_list names owner/name twice')
+  })
 })
 
 describe('PlanCollapse', () => {

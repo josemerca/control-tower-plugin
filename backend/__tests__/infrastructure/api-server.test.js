@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { ReviewsSpy } from '../reviews-spy.js'
-import { StartPlanResult, PlanStarted } from '../../src/application/actions/start-plan.js'
+import { StartPlanResult, PlanStarted, PlanNotStarted } from '../../src/application/actions/start-plan.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { PlanEvents, EventsRefusal, PlanSessions } from '../../src/infrastructure/plan-events-route.js'
@@ -53,6 +53,33 @@ class StartPlanSpy {
     const spy = new StartPlanSpy()
     spy.execute = async () => {
       throw new TypeError('a bug of ours')
+    }
+
+    return spy
+  }
+
+  static failingOne() {
+    const spy = new StartPlanSpy()
+    spy.execute = async (params) => {
+      const [succeeding, failing] = params.targets
+
+      return new StartPlanResult({
+        started: [new PlanStarted({
+          repository: succeeding.repository,
+          agent: StartPlanSpy.AGENT,
+          watch: new PlanWatch({
+            story: params.story,
+            issue: StartPlanSpy.ISSUE,
+            located: StartPlanSpy.LOCATED,
+            repository: succeeding.repository,
+            agent: StartPlanSpy.AGENT,
+          }),
+        })],
+        failed: [new PlanNotStarted({
+          repository: failing.repository,
+          cause: new WorkspaceNotPrepared('branch is taken'),
+        })],
+      })
     }
 
     return spy
@@ -278,6 +305,32 @@ describe('ApiServer', () => {
     expect(response.status).toBe(202)
     expect(response.headers.get('content-type')).toBe('application/json')
     expect(await response.text()).toBe(RunningApi.ANSWER)
+  })
+
+  it('a_plan_asked_for_across_two_repositories_answers_what_started_and_what_did_not', async () => {
+    const server = RunningApi.server({ startPlan: StartPlanSpy.failingOne() })
+    const port = await server.start()
+
+    try {
+      const response = await RunningApi.post(
+        port,
+        '/start-plan',
+        '{"id":"ABC-123","repo_list":[' +
+          '{"repo":"owner/name","path":"/repo/checkout"},' +
+          '{"repo":"owner/other","path":"/repo/other-checkout"}' +
+          ']}'
+      )
+
+      expect(response.status).toBe(202)
+      expect(await response.text()).toBe(
+        '{"status":"started","started":[{"id":"ABC-123","repo":"owner/name",' +
+          '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"agent":"workspace:4",' +
+          '"branch":"feat/7","worktree":"/repo/checkout/.worktrees/7","root":"/repo/checkout"}],' +
+          '"failed":[{"repo":"owner/other","code":"workspace-not-prepared","detail":"branch is taken"}]}'
+      )
+    } finally {
+      await server.stop()
+    }
   })
 
   it('an_agent_that_cannot_be_launched_is_reported_as_such_instead_of_a_generic_failure', async () => {
