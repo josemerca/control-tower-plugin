@@ -5,7 +5,7 @@ description: Cosecha del epic — el coste real de cada slice, sacado del timeli
 node ${CLAUDE_PLUGIN_ROOT}/scripts/ct-harvest.mjs --repo "<owner/repo>" --milestone "<título del epic>" [--json] [--bq <proyecto:dataset.tabla>]
 ```
 
-Una fila por slice (`ready→claim`, `claim→release`, `release→merge`, reopens, requeues, `blocked`, tamaño del PR) más la telemetría del juez por slice. Todo sale del timeline que GitHub escribe solo; no pide ningún campo a mano. **No muta nada.** Una fase que no ocurrió se imprime `—`, nunca `0`; el resumen va por familia (`Tipo`) y cada familia enseña su N. La tabla o el JSON van por stdout; los motivos y todo lo de BigQuery, por stderr.
+Una fila por slice (`ready→claim`, `claim→release`, `release→merge`, reopens, requeues, `blocked`, tamaño del PR) más la telemetría del juez por slice y, por cada papel que el loop despacha a un subagente, cuánto material fijo leyó (`agent_bytes`, `skill_bytes`, `package_bytes`, resumidos en la columna `bytes por papel`). Todo sale del timeline que GitHub escribe solo; no pide ningún campo a mano. **No muta nada.** Una fase que no ocurrió se imprime `—`, nunca `0`; el resumen va por familia (`Tipo`) y cada familia enseña su N. La tabla o el JSON van por stdout; los motivos y todo lo de BigQuery, por stderr.
 
 | Exit | Significa | Qué hacer |
 |---|---|---|
