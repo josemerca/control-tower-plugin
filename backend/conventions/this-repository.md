@@ -120,7 +120,7 @@ infrastructure/
 
 ## Where the suite runs
 
-From `backend/`, never the repository root. The fast subset is `npx vitest run --exclude '**/*-real-process.test.js'`, and those excluded files are the only ones that launch a real process: two kinds of test earn one — the entrypoint's happy path, and the adapter that *is* the call. During a working session, run the fast subset per change and the whole suite before handing anything over.
+From `backend/`, never the repository root. The fast subset is `npx vitest run --exclude '**/*-real-process.test.js'`. During a working session, run the fast subset per change and the whole suite before handing anything over.
 
 ## Testing: a failing test must not leak a process
 
