@@ -16,6 +16,8 @@
 - **Cada documento declara su alcance en las seis primeras líneas**, con la forma literal `Applies to: **every diff**.` o `Applies to: **new modules**.` — `PluginYardstick.scopeOf` lee esa línea con `/^Applies to:\s*(.+)$/m` y `appliesToTask` sólo trata distinto el alcance que contiene `new modules`.
 - **Los tres documentos nuevos son cortos: del orden de sesenta líneas cada uno.** Viajan pegados en el brief de toda tarea, y hoy los cinco enteros son 24 KB.
 - **Ningún token de lenguaje ni de herramienta en la vara**: nada de `vitest`, `pytest`, `execFile`, `npx`, `Object.freeze`, `fetch`, ni extensiones de fichero. La Tarea 4 clava esto con un test.
+- **Agnóstica de lenguaje y de herramienta, NO de arquitectura.** Es la restricción que se lee mal, así que queda escrita: `layer`, `port`, `value object`, `use case`, `adapter`, `export` y `test` son el vocabulario que la vara **impone** — `architecture.md` define las tres capas, los ports y la forma de un caso de uso, y `testing.md` dice qué clava un test —, así que se usan tal cual. Un circunloquio que los evite es un defecto: hace que el documento se lea como una paráfrasis de la vara en vez de como parte de ella, y rompe el vocabulario común por el que el juez cita.
+- **La palabra `boundary` está reservada** para el documento del borde exterior que nace en la Tarea 3. Lo que un campo cruza es un `layer`, nunca un `boundary`.
 - **Palabras que la vara NO puede contener**, porque `conventions-vara.test.js` ya prohíbe que repita una regla que un ítem de la rúbrica posee: `skip`, `xfail`, `pre-existing test`, `flaky`, `deterministic`, `isolated`, `call count`, `real behaviour`, `real behavior`, `no sentence of the task`, `speculative`, `scaffolding`. Al redactar, se dice lo mismo con otras palabras o no se dice.
 - **Cada tarea verifica corriendo SÓLO sus ficheros de test.** La suite entera del plugin tarda unos seis minutos: `npx vitest run __tests__/<fichero>` desde `plugin/`, nunca `npm test`.
 - **Un commit por tarea**, y lo comitea quien implementa la tarea.
@@ -90,7 +92,7 @@ describe('simplicity.md carries the burden of proof, and says where it ends', ()
     'dice que lo que no se puede descargar vuelve como hallazgo y no se implementa':
       () => expect(Documento.texto('simplicity.md')).toContain('goes back as a finding for a human to decide, and is not implemented meanwhile'),
     'lleva el cortafuegos, para que no se lea como permiso para saltarse una capa':
-      () => expect(Documento.texto('simplicity.md')).toContain('Nothing here authorises skipping a layer'),
+      () => expect(Documento.texto('simplicity.md')).toContain('Nothing here authorises dropping a layer'),
     'declara su frontera con el item alcance de la rubrica, que pregunta otra cosa':
       () => expect(Documento.texto('simplicity.md')).toContain('What the plan asked for is a different question from this one'),
   }
@@ -120,8 +122,11 @@ Applies to: **every diff**.
 [la regla única: "the burden of proof is on what is added", y que se descarga
 contra el problema que se resuelve hoy; "It might one day" no la descarga]
 
-**Nothing here authorises skipping a layer.** [las capas, los ports y los value
-objects son cómo se construye, no complejidad que recortar]
+**Nothing here authorises dropping a layer.** [las capas, los ports y los value
+objects son cómo se construye, no complejidad que recortar. **Dice `dropping` y no
+`skipping` a propósito: el guardián de la vara prohíbe el término `skip`, que es del
+ítem `manipulacion-tests` de la rúbrica, y la frase original lo contenía dentro de
+una palabra. Se cambia la frase, nunca el guardián.**]
 
 ## The guard lives where the value enters from outside
 
