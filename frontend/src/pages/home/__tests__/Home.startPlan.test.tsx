@@ -1,6 +1,6 @@
 import { screen, waitFor } from '@testing-library/react'
 import { StartPlanMother } from '__scenarios__/StartPlanMother'
-import { WorkflowSnapshotStorage } from 'app/workflow-snapshot/storage'
+import { WorkflowSnapshot, WorkflowSnapshotStorage } from 'app/workflow-snapshot/storage'
 import {
   backendAnswering,
   backendPending,
@@ -11,6 +11,7 @@ import {
   typePath,
   typeRepository,
   typeTicket,
+  typeUserComment,
 } from './helpers'
 
 describe('Home · start plan', () => {
@@ -344,5 +345,77 @@ describe('Home · start plan', () => {
     expect(fetch).toHaveBeenCalledTimes(2)
     expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeDisabled()
     await backend.answerWith(StartPlanMother.started())
+  })
+
+  it('should keep the start button disabled when neither a ticket nor a comment is given', async () => {
+    backendAnswering(StartPlanMother.started())
+    const { user } = openHome()
+    await typeRepository(user, StartPlanMother.REPO)
+    await typePath(user, StartPlanMother.PATH)
+
+    expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeDisabled()
+  })
+
+  it('should enable the start button with only a well formed comment and no ticket', async () => {
+    backendAnswering(StartPlanMother.started())
+    const { user } = openHome()
+    await typeRepository(user, StartPlanMother.REPO)
+    await typePath(user, StartPlanMother.PATH)
+
+    expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeDisabled()
+    await typeUserComment(user, StartPlanMother.COMMENT)
+    expect(screen.getByRole('button', { name: 'Arrancar plan' })).toBeEnabled()
+  })
+
+  it('should send a plan asked for with only a comment', async () => {
+    const fetching = backendAnswering(StartPlanMother.started())
+    const { user } = openHome()
+    await typeUserComment(user, StartPlanMother.COMMENT)
+    await typeRepository(user, StartPlanMother.REPO)
+    await typePath(user, StartPlanMother.PATH)
+
+    await pressStart(user)
+
+    await screen.findByRole('status')
+    const [, init] = fetching.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init.body).toBe(StartPlanMother.REQUEST_BODY_COMMENT_ONLY)
+  })
+
+  it('should send a plan asked for with both a ticket and a comment', async () => {
+    const fetching = backendAnswering(StartPlanMother.started())
+    const { user } = openHome()
+    await typeTicket(user, StartPlanMother.TICKET)
+    await typeUserComment(user, StartPlanMother.COMMENT)
+    await typeRepository(user, StartPlanMother.REPO)
+    await typePath(user, StartPlanMother.PATH)
+
+    await pressStart(user)
+
+    await screen.findByRole('status')
+    const [, init] = fetching.mock.calls[0] as unknown as [string, RequestInit]
+    expect(init.body).toBe(StartPlanMother.REQUEST_BODY_WITH_COMMENT)
+  })
+
+  it('should show a plan with no user story, keeping its null id through the summary and a reload', async () => {
+    backendAnswering(StartPlanMother.startedWithoutStory())
+    const { user } = openHome()
+    await typeUserComment(user, StartPlanMother.COMMENT)
+    await typeRepository(user, StartPlanMother.REPO)
+    await typePath(user, StartPlanMother.PATH)
+
+    await pressStart(user)
+
+    await screen.findByRole('status')
+    await user.click(screen.getByRole('button', { name: /Solicitud Completado/ }))
+    expect(screen.queryByText('Ticket')).toBeNull()
+    expect(screen.getByText('Comentario').parentElement).toHaveTextContent(StartPlanMother.COMMENT)
+
+    const stored = WorkflowSnapshotStorage.load() as WorkflowSnapshot
+    expect(stored.request.id).toBeNull()
+    expect(stored.plan.id).toBeNull()
+
+    const reloaded = WorkflowSnapshotStorage.load()
+    expect(reloaded).not.toBeNull()
+    expect(reloaded?.plan.id).toBeNull()
   })
 })
