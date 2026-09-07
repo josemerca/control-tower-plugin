@@ -6,6 +6,7 @@ import { RepositoryName } from '../domain/value-objects/repository-name.js'
 import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
 import { WorkspaceLocation } from '../domain/value-objects/workspace-location.js'
 import { ImplementationProgressFailure } from '../domain/exceptions.js'
+import { ImplementationStep } from '../domain/value-objects/implementation-state.js'
 
 export class CmuxActivePlan {
   static #TITLE = new RegExp(`^ct-plan-(.+)-(${CmuxPlanAgents.NO_STORY_PREFIX}[1-9]\\d*|[A-Z][A-Z0-9_]*-\\d+)$`)
@@ -61,14 +62,17 @@ export class ActivePlanRecovery {
   }
 
   async #workIsUnderway(watch) {
+    let state
     try {
-      await this.implementationProgress.of({ root: new CheckoutRoot(watch.located.root), issue: watch.issue.number })
-
-      return true
+      state = await this.implementationProgress.of({
+        root: new CheckoutRoot(watch.located.root), issue: watch.issue.number,
+      })
     } catch (cause) {
       if (cause instanceof ImplementationProgressFailure) return false
       throw cause
     }
+
+    return state.step !== ImplementationStep.STARTING
   }
 
   async recover() {

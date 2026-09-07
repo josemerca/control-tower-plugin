@@ -147,6 +147,27 @@ describe('ActivePlanRecovery', () => {
     expect(recovered.activePlans.known()[0].phase).toBe('uncertain')
   })
 
+  it('a_go_whose_worktree_exists_but_has_no_run_file_yet_stays_uncertain_instead_of_being_assumed_clean', async () => {
+    const implementationProgress = { of: vi.fn(async () => ImplementationState.starting()) }
+    const recovered = fixture({ go: true, implementationProgress })
+
+    expect(await recovered.recovery.recover()).toBe(true)
+
+    expect(recovered.activePlans.known()[0].phase).toBe('uncertain')
+  })
+
+  it('a_go_whose_run_file_explicitly_says_starting_stays_uncertain_instead_of_being_assumed_clean', async () => {
+    const runState = ImplementationState.of({
+      step: ImplementationStep.STARTING, task: null, totalTasks: null, name: null, attempt: null, discards: null,
+    })
+    const implementationProgress = { of: vi.fn(async () => runState) }
+    const recovered = fixture({ go: true, implementationProgress })
+
+    expect(await recovered.recovery.recover()).toBe(true)
+
+    expect(recovered.activePlans.known()[0].phase).toBe('uncertain')
+  })
+
   it('exposes_a_plan_with_a_matching_marker_as_implementing_without_restarting_its_watches', async () => {
     const recovered = fixture({ marker: VALID_MARKER })
 
