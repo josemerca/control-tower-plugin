@@ -7,13 +7,16 @@ const AGENT = 'workspace:4'
 const BRANCH = 'feat/7'
 const WORKTREE = '/Users/pedro/code/name/.worktrees/7'
 const REQUEST_BODY = '{"id":"ABC-123","repo":"owner/name","path":"/Users/pedro/code/name"}'
+const NON_CANONICAL_ROOT = '/private/var/code/name'
+const NON_CANONICAL_WORKTREE = '/private/var/code/name/.worktrees/7'
 
 const started = () => ({
   status: 202,
   body:
     '{"status":"started","id":"ABC-123","repo":"owner/name",' +
     '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"agent":"workspace:4",' +
-    '"branch":"feat/7","worktree":"/Users/pedro/code/name/.worktrees/7"}',
+    '"branch":"feat/7","worktree":"/Users/pedro/code/name/.worktrees/7",' +
+    '"root":"/Users/pedro/code/name"}',
 })
 
 const startedInAnotherRepo = () => ({
@@ -21,7 +24,17 @@ const startedInAnotherRepo = () => ({
   body:
     '{"status":"started","id":"ABC-123","repo":"owner/other-name",' +
     '"issue":{"number":7,"url":"https://github.com/owner/other-name/issues/7"},"agent":"workspace:9",' +
-    '"branch":"feat/7","worktree":"/Users/pedro/code/other-name/.worktrees/7"}',
+    '"branch":"feat/7","worktree":"/Users/pedro/code/other-name/.worktrees/7",' +
+    '"root":"/Users/pedro/code/other-name"}',
+})
+
+const startedFromNonCanonicalPath = () => ({
+  status: 202,
+  body:
+    '{"status":"started","id":"ABC-123","repo":"owner/name",' +
+    '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"agent":"workspace:4",' +
+    '"branch":"feat/7","worktree":"/private/var/code/name/.worktrees/7",' +
+    '"root":"/private/var/code/name"}',
 })
 
 const malformedId = () => ({
@@ -59,8 +72,11 @@ export const StartPlanMother = {
   BRANCH,
   WORKTREE,
   REQUEST_BODY,
+  NON_CANONICAL_ROOT,
+  NON_CANONICAL_WORKTREE,
   started,
   startedInAnotherRepo,
+  startedFromNonCanonicalPath,
   malformedId,
   malformedRepo,
   malformedPath,

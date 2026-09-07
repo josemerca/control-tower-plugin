@@ -25,6 +25,7 @@ const start = async ({ id, repo, path }: StartPlanRequest): Promise<StartPlanOut
         agent: started.agent,
         branch: started.branch,
         worktree: started.worktree,
+        root: started.root,
       },
     }
   }
