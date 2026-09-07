@@ -47,7 +47,7 @@
 
 ---
 
-### Tarea 1: `simplicity.md`, y su frontera con el ítem `alcance`
+### Task 1: `simplicity.md`, y su frontera con el ítem `alcance`
 
 El primero porque es el que no tiene equivalente en la vara y el que más cambia lo que el juez caza. Y el que necesita una frontera declarada: el ítem `alcance` de la rúbrica ya pregunta *qué frase de la tarea pide esto*, y este documento pregunta *qué llamada se rompe sin esto*. Son dos preguntas distintas — un plan puede pedir un campo que ningún llamante usa — pero se solapan en la superficie, y el juez tiene prohibido contar el mismo defecto en dos ítems.
 
@@ -171,7 +171,7 @@ git commit -m "feat(conventions): la vara de ct mide lo que un diff no añade"
 
 ---
 
-### Tarea 2: `domain.md`
+### Task 2: `domain.md`
 
 **Files:**
 - Create: `plugin/conventions/domain.md`
@@ -272,7 +272,7 @@ git commit -m "feat(conventions): la vara de ct mide el nombre, el port y el val
 
 ---
 
-### Tarea 3: `boundaries.md` nace y `architecture.md` se vacía
+### Task 3: `boundaries.md` nace y `architecture.md` se vacía
 
 La tarea con más riesgo, y las dos mitades son una sola operación: si las reglas del borde se escriben en `boundaries.md` sin quitarlas de `architecture.md`, quedan escritas dos veces. Se hace en un commit para que ningún estado intermedio tenga la duplicación.
 
@@ -453,7 +453,7 @@ git commit -m "feat(conventions): el borde sale de architecture.md y rige en tod
 
 ---
 
-### Tarea 4: la vara deja de presuponer la forma del programa, y nadie dice "cinco"
+### Task 4: la vara deja de presuponer la forma del programa, y nadie dice "cinco"
 
 **Files:**
 - Modify: `plugin/scripts/run-metrics.js:213`, `plugin/scripts/ct-next.mjs:53`, `plugin/scripts/kickoff.js:154`, `plugin/scripts/ct-step.mjs:1459`, `plugin/agents/ct-reconciler.md:46`, `plugin/skills/writing-plans-prescriptive/SKILL.md:59,248`
@@ -543,7 +543,7 @@ git commit -m "fix(conventions): la vara no presupone la forma del programa ni s
 
 ---
 
-### Tarea 5: `architecture.md` gana el árbol y la carga de la prueba del tipo nuevo
+### Task 5: `architecture.md` gana el árbol y la carga de la prueba del tipo nuevo
 
 **Files:**
 - Modify: `plugin/conventions/architecture.md`
@@ -611,7 +611,7 @@ git commit -m "feat(conventions): las capas se ven en el árbol y un tipo nuevo 
 
 ---
 
-### Tarea 6: `testing.md` gana las tres reglas y la barrida de mutación
+### Task 6: `testing.md` gana las tres reglas y la barrida de mutación
 
 **Files:**
 - Modify: `plugin/conventions/testing.md`
@@ -692,7 +692,7 @@ git commit -m "feat(conventions): la vara mide cada capa y exige la barrida de m
 
 ---
 
-### Tarea 7: el plan deja de estar invitado a no leer
+### Task 7: el plan deja de estar invitado a no leer
 
 **Files:**
 - Modify: `plugin/scripts/kickoff.js:254`
@@ -746,7 +746,7 @@ git commit -m "feat(kickoff): el plan abre simplicity y decisions antes de presc
 
 ---
 
-### Tarea 8: el juez de slice recibe una sola ruta
+### Task 8: el juez de slice recibe una sola ruta
 
 **Files:**
 - Modify: `plugin/scripts/step-contracts.js:484` (`SLICE_PACKAGE_SECTIONS`)
@@ -797,7 +797,7 @@ git commit -m "feat(slice-judge): la señal se juzga con la regla que nombra a s
 
 ---
 
-### Tarea 9: `backend/conventions/` se queda con lo que sólo decide este repositorio
+### Task 9: `backend/conventions/` se queda con lo que sólo decide este repositorio
 
 **Files:**
 - Create: `backend/conventions/this-repository.md`
