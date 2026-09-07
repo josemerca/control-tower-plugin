@@ -2,6 +2,7 @@ import { Answer, JsonBody, Refusal } from './http.js'
 import { Projection } from './projection.js'
 import { StartPlanParams } from '../application/actions/start-plan.js'
 import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
+import { PlanComment } from '../domain/value-objects/plan-comment.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
 import { CheckoutRoot } from '../domain/value-objects/checkout-root.js'
 import {
@@ -17,36 +18,42 @@ export const PlanRequestOutcome = Object.freeze({
   BODY_NOT_A_JSON_OBJECT: 'body-not-a-json-object',
   UNKNOWN_FIELD: 'unknown-field',
   MALFORMED_ID: 'malformed-id',
+  MALFORMED_USER_COMMENT: 'malformed-user-comment',
+  NOTHING_TO_PLAN: 'nothing-to-plan',
   MALFORMED_REPO: 'malformed-repo',
   MALFORMED_PATH: 'malformed-path',
 })
 
 export class PlanRequest {
   static ID_FIELD = 'id'
+  static COMMENT_FIELD = 'user_comment'
   static REPO_FIELD = 'repo'
   static PATH_FIELD = 'path'
-  static KNOWN_FIELDS = Object.freeze([PlanRequest.ID_FIELD, PlanRequest.REPO_FIELD, PlanRequest.PATH_FIELD])
+  static KNOWN_FIELDS = Object.freeze([
+    PlanRequest.ID_FIELD, PlanRequest.COMMENT_FIELD, PlanRequest.REPO_FIELD, PlanRequest.PATH_FIELD,
+  ])
 
-  constructor({ outcome, story, repository, root, fields }) {
+  constructor({ outcome, story, comment, repository, root, fields }) {
     this.outcome = outcome
     this.story = story
+    this.comment = comment
     this.repository = repository
     this.root = root
     this.fields = Object.freeze([...fields])
     Object.freeze(this)
   }
 
-  static accepted(story, repository, root) {
-    return new PlanRequest({ outcome: PlanRequestOutcome.ACCEPTED, story, repository, root, fields: [] })
+  static accepted(story, comment, repository, root) {
+    return new PlanRequest({ outcome: PlanRequestOutcome.ACCEPTED, story, comment, repository, root, fields: [] })
   }
 
   static refused(outcome) {
-    return new PlanRequest({ outcome, story: null, repository: null, root: null, fields: [] })
+    return new PlanRequest({ outcome, story: null, comment: null, repository: null, root: null, fields: [] })
   }
 
   static withUnknownFields(fields) {
     return new PlanRequest({
-      outcome: PlanRequestOutcome.UNKNOWN_FIELD, story: null, repository: null, root: null, fields,
+      outcome: PlanRequestOutcome.UNKNOWN_FIELD, story: null, comment: null, repository: null, root: null, fields,
     })
   }
 
@@ -64,9 +71,18 @@ export class PlanRequest {
     if (unknown.length > 0) {
       return PlanRequest.withUnknownFields(unknown.sort())
     }
+    const idGiven = Object.hasOwn(parsed, PlanRequest.ID_FIELD)
     const given = parsed[PlanRequest.ID_FIELD]
-    if (!UserStoryKey.isWellFormed(given)) {
+    if (idGiven && !UserStoryKey.isWellFormed(given)) {
       return PlanRequest.refused(PlanRequestOutcome.MALFORMED_ID)
+    }
+    const commentGiven = Object.hasOwn(parsed, PlanRequest.COMMENT_FIELD)
+    const saidByHand = parsed[PlanRequest.COMMENT_FIELD]
+    if (commentGiven && !PlanComment.isWellFormed(saidByHand)) {
+      return PlanRequest.refused(PlanRequestOutcome.MALFORMED_USER_COMMENT)
+    }
+    if (!idGiven && !commentGiven) {
+      return PlanRequest.refused(PlanRequestOutcome.NOTHING_TO_PLAN)
     }
     const asked = parsed[PlanRequest.REPO_FIELD]
     if (!RepositoryName.isWellFormed(asked)) {
@@ -76,7 +92,12 @@ export class PlanRequest {
     if (!CheckoutRoot.isWellFormed(where)) {
       return PlanRequest.refused(PlanRequestOutcome.MALFORMED_PATH)
     }
-    return PlanRequest.accepted(new UserStoryKey(given), new RepositoryName(asked), new CheckoutRoot(where))
+    return PlanRequest.accepted(
+      idGiven ? new UserStoryKey(given) : null,
+      commentGiven ? new PlanComment(saidByHand) : null,
+      new RepositoryName(asked),
+      new CheckoutRoot(where)
+    )
   }
 }
 
@@ -91,6 +112,16 @@ export class PlanRefusal {
       status: 400,
       code: PlanRequestOutcome.MALFORMED_ID,
       detail: `${PlanRequest.ID_FIELD} must be a user story key such as ${UserStoryKey.EXAMPLE}`,
+    })],
+    [PlanRequestOutcome.MALFORMED_USER_COMMENT, () => new Refusal({
+      status: 400,
+      code: PlanRequestOutcome.MALFORMED_USER_COMMENT,
+      detail: `${PlanRequest.COMMENT_FIELD} must be text saying what to plan`,
+    })],
+    [PlanRequestOutcome.NOTHING_TO_PLAN, () => new Refusal({
+      status: 400,
+      code: PlanRequestOutcome.NOTHING_TO_PLAN,
+      detail: `either ${PlanRequest.ID_FIELD} or ${PlanRequest.COMMENT_FIELD} must say what to plan`,
     })],
     [PlanRequestOutcome.MALFORMED_REPO, () => new Refusal({
       status: 400,
@@ -175,7 +206,7 @@ export class StartPlanRoute {
     let started
     try {
       started = await startPlan.execute(
-        new StartPlanParams({ story: asked.story, comment: null, repository: asked.repository, root: asked.root })
+        new StartPlanParams({ story: asked.story, comment: asked.comment, repository: asked.repository, root: asked.root })
       )
     } catch (cause) {
       if (!(cause instanceof PlanFailure)) throw cause
