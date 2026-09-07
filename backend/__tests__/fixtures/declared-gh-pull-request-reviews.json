@@ -1,4 +1,5 @@
 {
+  "captured": "gh api repos/jjponz/repo-pulse/pulls/46/reviews and /comments, --method GET --paginate --slurp, on 2026-09-07: the smoke test of pull request #126 compared this shape field by field against what GitHub answered, and the review with an empty body and a CHANGES_REQUESTED state is the lone line comment it caught",
   "reviews": [
     { "id": 101, "state": "CHANGES_REQUESTED", "body": "varias cosas que arreglar" },
     { "id": 102, "state": "COMMENTED", "body": "" },
