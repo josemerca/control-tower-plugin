@@ -78,6 +78,15 @@ describe('PlanAgentBrief', () => {
     expect(errand()).not.toContain('-OK')
     expect(errand()).not.toContain('nonce')
   })
+
+  it('it_sends_the_agent_to_the_section_where_a_person_wrote_by_hand_what_they_want_planned', () => {
+    expect(errand()).toContain('Comentario de quien pide el plan')
+    expect(errand()).toContain('entrada del plan')
+  })
+
+  it('it_says_the_criteria_are_the_agents_to_propose_when_the_issue_declares_none_instead_of_leaving_it_stuck', () => {
+    expect(errand()).toContain('no hay spec de donde rellenarlos')
+  })
 })
 
 describe('PlanAgentBrief resuming the agent', () => {
