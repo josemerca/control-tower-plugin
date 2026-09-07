@@ -7,3 +7,9 @@
 .implement-progress__state {
   margin: 0;
 }
+
+.implement-progress__pull-request {
+  display: inline-block;
+  margin-top: 0.25rem;
+  font-size: 0.875rem;
+}

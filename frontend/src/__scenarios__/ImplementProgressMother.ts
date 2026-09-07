@@ -6,7 +6,8 @@ const MALFORMED_ROOT_DETAIL = 'root is an absolute path such as /Users/you/repos
 
 const progress = () => ({
   status: 200,
-  body: '{"step":"judge","task":3,"total_tasks":7,"name":"el lector del plan","attempt":2,"discards":0}',
+  body: '{"step":"judge","task":3,"total_tasks":7,"name":"el lector del plan","attempt":2,"discards":0,' +
+    '"pull_request":null}',
 })
 
 const inReview = () => ({
@@ -23,12 +24,14 @@ const fixing = () => ({
 
 const delivered = () => ({
   status: 200,
-  body: '{"step":"delivered","task":null,"total_tasks":8,"name":null,"attempt":null,"discards":1}',
+  body: '{"step":"delivered","task":null,"total_tasks":8,"name":null,"attempt":null,"discards":1,' +
+    '"pull_request":null}',
 })
 
 const withoutTaskName = () => ({
   status: 200,
-  body: '{"step":"implement","task":1,"total_tasks":8,"name":null,"attempt":1,"discards":0}',
+  body: '{"step":"implement","task":1,"total_tasks":8,"name":null,"attempt":1,"discards":0,' +
+    '"pull_request":null}',
 })
 
 const notRead = () => ({
