@@ -5,7 +5,11 @@ const answerWith = (answer: { status: number; body: string }) => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(answer.body, { status: answer.status })))
 }
 
-const get = () => ImplementProgressClient.get({ issue: ImplementProgressMother.ISSUE, root: ImplementProgressMother.ROOT })
+const get = () => ImplementProgressClient.get({
+  issue: ImplementProgressMother.ISSUE,
+  root: ImplementProgressMother.ROOT,
+  repo: ImplementProgressMother.REPO,
+})
 
 describe('ImplementProgressClient', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -66,12 +70,14 @@ describe('ImplementProgressClient', () => {
     expect(outcome).toEqual({ kind: 'backend-unreachable' })
   })
 
-  it('should ask with the issue in the path and the canonical root as query', async () => {
+  it('should ask with the issue in the path and the canonical root and the repository as query', async () => {
     const fetching = vi.fn(async () => new Response(ImplementProgressMother.progress().body, { status: 200 }))
     vi.stubGlobal('fetch', fetching)
 
-    await ImplementProgressClient.get({ issue: 7, root: '/Users/pedro/code/name' })
+    await ImplementProgressClient.get({ issue: 7, root: '/Users/pedro/code/name', repo: 'owner/name' })
 
-    expect(fetching).toHaveBeenCalledWith('/implement-progress/7?root=%2FUsers%2Fpedro%2Fcode%2Fname')
+    expect(fetching).toHaveBeenCalledWith(
+      '/implement-progress/7?root=%2FUsers%2Fpedro%2Fcode%2Fname&repo=owner%2Fname',
+    )
   })
 })
