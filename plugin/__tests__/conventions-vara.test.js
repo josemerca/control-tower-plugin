@@ -299,6 +299,7 @@ describe('architecture.md kept nothing of the edge, so no rule is written twice'
     'is data, not an exception',
     'An adapter is named after its implementation',
     'An adapter does not decide policy',
+    "the contract's name",
   ]
 
   for (const encabezado of ENCABEZADOS_QUE_DESAPARECEN) {

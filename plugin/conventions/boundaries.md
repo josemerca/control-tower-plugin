@@ -36,6 +36,9 @@ crosses the edge is this document's subject.
   what the other side sent goes in, the domain object comes out, and back the
   same way; a model that leaves the adapter to map field by field is that type
   written twice.
+- **You enter by the contract's name, not by the field's name**, and everything
+  the other side sees comes from there: the schema sent to it, the validation of
+  what it returns, and what gets emitted.
 - **What comes from outside is validated on entry, with no exceptions and no
   forced cast**: a cast checks nothing, it only silences the type checker.
 - **An unknown key is a rejection, not a field to ignore**: the other side
