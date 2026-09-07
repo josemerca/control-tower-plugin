@@ -10,16 +10,24 @@ type User = ReturnType<typeof userEvent.setup>
 
 const JSON_HEADERS = { 'Content-Type': 'application/json' }
 const NO_ACTIVE_PLANS = { status: 200, body: '{"plans":[]}' }
+const NO_IMPLEMENTATION_RUN_YET = {
+  status: 400,
+  body: '{"code":"implementation-progress-not-read","detail":"the worktree is not there yet"}',
+}
 
 const responseFor = (answer: Answer) => new Response(answer.body, { status: answer.status, headers: JSON_HEADERS })
+
+const isImplementProgressPath = (input: string | URL | Request) => String(input).startsWith('/implement-progress/')
 
 const backendAnswering = (answer: Answer) => {
   const fetching = vi.fn(async (_input: string | URL | Request, _init?: RequestInit) => responseFor(answer))
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (input: string | URL | Request, init?: RequestInit) =>
-      input === '/active-plans' ? responseFor(NO_ACTIVE_PLANS) : fetching(input, init),
-    ),
+    vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (input === '/active-plans') return responseFor(NO_ACTIVE_PLANS)
+      if (isImplementProgressPath(input)) return responseFor(NO_IMPLEMENTATION_RUN_YET)
+      return fetching(input, init)
+    }),
   )
 
   return fetching
@@ -39,7 +47,11 @@ const backendPending = () => {
   })
   vi.stubGlobal(
     'fetch',
-    vi.fn((input: string | URL | Request) => input === '/active-plans' ? responseFor(NO_ACTIVE_PLANS) : pending),
+    vi.fn((input: string | URL | Request) => {
+      if (input === '/active-plans') return responseFor(NO_ACTIVE_PLANS)
+      if (isImplementProgressPath(input)) return responseFor(NO_IMPLEMENTATION_RUN_YET)
+      return pending
+    }),
   )
 
   return { answerWith: async (answer: Answer) => act(async () => answerWith(answer)) }
