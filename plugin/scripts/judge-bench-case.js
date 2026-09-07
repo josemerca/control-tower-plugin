@@ -150,8 +150,10 @@ export class BenchCase {
     })
   }
 
+  static DIFF_SECTION = PACKAGE_SECTIONS.at(-1)
+
   static diffOf(reviewPackage) {
-    const marker = `\n## ${PACKAGE_SECTIONS[2]}\n`
+    const marker = `\n## ${BenchCase.DIFF_SECTION}\n`
     const at = reviewPackage.indexOf(marker)
     return at === -1 ? null : reviewPackage.slice(at + marker.length)
   }

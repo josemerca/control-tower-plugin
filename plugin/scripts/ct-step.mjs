@@ -84,6 +84,7 @@ import { parseStateSafe } from './state.js'
 import { SENAL_AUSENTE } from './kickoff.js'
 import { SLICE_REL_PATH } from './state-paths.js'
 import { findClosingKeywords } from './closing-keywords.js'
+import { CtStepCommit } from './ct-step-commit.js'
 import { BaseBranch } from './slice-base.js'
 import { StepSeal } from './dispatch-gate.js'
 
@@ -2030,6 +2031,7 @@ function comprometerInformeE2e() {
 
 Generado por ct-step tras el paso e2e de la slice. No cierra el issue.
 
+${CtStepCommit.TRAILER_LINE}
 Co-Authored-By: Claude <noreply@anthropic.com>`
   // El MISMO cuidado que en el veredicto del slice y por el mismo motivo: este
   // `git commit` tampoco lleva pathspec. Medido igual (`git add colado.txt` antes
