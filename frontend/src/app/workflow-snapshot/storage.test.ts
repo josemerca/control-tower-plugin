@@ -17,11 +17,30 @@ const workflow = (): WorkflowSnapshot => ({
   },
 })
 
+const workflowWithoutStory = (): WorkflowSnapshot => ({
+  phase: 'planning',
+  request: { id: null, repo: 'owner/name', path: '/Users/pedro/code/name' },
+  plan: {
+    id: null,
+    repo: 'owner/name',
+    issue: { number: 9, url: 'https://github.com/owner/name/issues/9' },
+    agent: 'workspace:5',
+    branch: 'feat/9',
+    worktree: '/Users/pedro/code/name/.worktrees/9',
+  },
+})
+
 describe('WorkflowSnapshotStorage', () => {
   it('should load a saved versioned workflow', () => {
     WorkflowSnapshotStorage.save(workflow())
 
     expect(WorkflowSnapshotStorage.load()).toEqual(workflow())
+  })
+
+  it('should load a saved workflow whose plan has no user story with a null id', () => {
+    WorkflowSnapshotStorage.save(workflowWithoutStory())
+
+    expect(WorkflowSnapshotStorage.load()).toEqual(workflowWithoutStory())
   })
 
   it.each([
@@ -44,6 +63,10 @@ describe('WorkflowSnapshotStorage', () => {
     ['an empty branch', (value: WorkflowSnapshot) => { value.plan.branch = '' }],
     ['an empty worktree', (value: WorkflowSnapshot) => { value.plan.worktree = '' }],
     ['a mismatched ticket', (value: WorkflowSnapshot) => { value.plan.id = 'XYZ-456' }],
+    ['a plan id present when the request has none', (value: WorkflowSnapshot) => {
+      value.request.id = null
+      value.plan.id = 'XYZ-456'
+    }],
     ['a mismatched repository', (value: WorkflowSnapshot) => { value.plan.repo = 'owner/other' }],
     ['a worktree outside the request path', (value: WorkflowSnapshot) => { value.plan.worktree = '/tmp/worktree' }],
   ])('should reject %s', (_case, makeInvalid) => {

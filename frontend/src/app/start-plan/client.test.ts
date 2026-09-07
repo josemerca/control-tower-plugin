@@ -1,7 +1,12 @@
 import { StartPlanMother } from '__scenarios__/StartPlanMother'
 import { StartPlanClient } from 'app/start-plan/client'
 
-const request = () => ({ id: StartPlanMother.TICKET, repo: StartPlanMother.REPO, path: StartPlanMother.PATH })
+const request = () => ({
+  id: StartPlanMother.TICKET,
+  userComment: null,
+  repo: StartPlanMother.REPO,
+  path: StartPlanMother.PATH,
+})
 
 const answerWith = (answer: { status: number; body: string }) => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(answer.body, { status: answer.status })))

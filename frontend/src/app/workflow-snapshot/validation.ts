@@ -9,10 +9,12 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isNonEmptyString = (value: unknown): value is string =>
   typeof value === 'string' && value.trim() !== ''
 
+const isTicketOrAbsent = (id: unknown): id is string | null =>
+  id === null || (typeof id === 'string' && TicketKey.isWellFormed(id))
+
 const isRequest = (value: unknown): value is StartPlanRequest =>
   isRecord(value) &&
-  typeof value.id === 'string' &&
-  TicketKey.isWellFormed(value.id) &&
+  isTicketOrAbsent(value.id) &&
   typeof value.repo === 'string' &&
   RepositoryName.isWellFormed(value.repo) &&
   typeof value.path === 'string' &&
@@ -31,8 +33,7 @@ const isWellFormedRoot = (value: unknown): value is string | undefined =>
 
 const isPlanForRequest = (value: unknown, request: StartPlanRequest): value is StartedPlan =>
   isRecord(value) &&
-  typeof value.id === 'string' &&
-  TicketKey.isWellFormed(value.id) &&
+  isTicketOrAbsent(value.id) &&
   value.id === request.id &&
   typeof value.repo === 'string' &&
   RepositoryName.isWellFormed(value.repo) &&

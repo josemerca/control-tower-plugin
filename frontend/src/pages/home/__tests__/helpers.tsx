@@ -68,6 +68,10 @@ const typeTicket = async (user: User, ticket: string) => {
   await user.type(screen.getByLabelText('Clave del ticket'), ticket)
 }
 
+const typeUserComment = async (user: User, comment: string) => {
+  await user.type(screen.getByLabelText('Comentario'), comment)
+}
+
 const typeRepository = async (user: User, repository: string) => {
   await user.type(screen.getByLabelText('Repositorio'), repository)
 }
@@ -106,6 +110,7 @@ export {
   backendUnreachable,
   openHome,
   typeTicket,
+  typeUserComment,
   typeRepository,
   typePath,
   pressStart,

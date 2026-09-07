@@ -1,7 +1,11 @@
 export type StartPlanRequest = {
-  id: string
+  id: string | null
   repo: string
   path: string
+}
+
+export type StartPlanSubmission = StartPlanRequest & {
+  userComment: string | null
 }
 
 export type PlanIssue = {
@@ -10,7 +14,7 @@ export type PlanIssue = {
 }
 
 export type StartedPlan = {
-  id: string
+  id: string | null
   repo: string
   issue: PlanIssue
   agent: string
