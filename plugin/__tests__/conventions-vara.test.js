@@ -29,6 +29,7 @@ const ALCANCES = {
   'testing.md': 'every diff',
   'architecture.md': 'new modules',
   'domain.md': 'every diff',
+  'boundaries.md': 'every diff',
 }
 
 describe('the documents in conventions/', () => {
@@ -240,6 +241,79 @@ describe('domain.md keeps the tools out of the domain', () => {
   for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
     it(`domain.md ${afirmacion}`, () => {
       comprobar()
+    })
+  }
+})
+
+describe('boundaries.md owns the outer edge, in both shapes a program has', () => {
+  const AFIRMACIONES = {
+    'quien llama declara si su llamada es segura de repetir':
+      () => expect(Documento.texto('boundaries.md')).toContain('The caller declares whether its call is safe to repeat'),
+    'el tronco sabe el idioma de la red y la especializacion el de su sistema':
+      () => expect(Documento.texto('boundaries.md')).toContain("the subclass knows the tool's"),
+    'un sistema sin idioma medido hereda el tronco desnudo':
+      () => expect(Documento.texto('boundaries.md')).toContain('inventing markers nobody measured is a preference dressed as a rule'),
+    'un rate limit no es un blip':
+      () => expect(Documento.texto('boundaries.md')).toContain('A rate limit is not a blip'),
+    'el fallo del sistema externo vuelve como dato':
+      () => expect(Documento.texto('boundaries.md')).toContain('is data, not an exception'),
+    'ningun sistema externo se llama sin tope, y el adaptador no lo elige':
+      () => expect(Documento.texto('boundaries.md')).toContain('the adapter does not choose the cap'),
+    'la conversion al dominio vive en el modelo del borde, con una puerta':
+      () => expect(Documento.texto('boundaries.md')).toContain('The conversion to the domain lives in the'),
+    'el texto de otro sistema entra con su sintaxis activa aquietada':
+      () => expect(Documento.texto('boundaries.md')).toContain('gets its active syntax quieted'),
+    'la proyeccion del vocabulario hacia fuera es exhaustiva y devuelve un value object':
+      () => expect(Documento.texto('boundaries.md')).toContain('is exhaustive and returns a value object'),
+    'el codigo de una respuesta se declara y no se deriva del nombre de una clase':
+      () => expect(Documento.texto('boundaries.md')).toContain("never derived from an exception's class name"),
+    'el borde exterior es el unico que ensambla el grafo':
+      () => expect(Documento.texto('boundaries.md')).toContain('the only place that assembles the dependency graph'),
+    'nombra las DOS formas del borde, no solo el programa que termina':
+      () => {
+        const texto = Documento.texto('boundaries.md')
+        expect(texto).toContain('a program that ends')
+        expect(texto).toContain('a service that answers')
+      },
+    'conserva la regla que vale en las dos formas':
+      () => expect(Documento.texto('boundaries.md')).toContain('One code per decision of whoever receives'),
+  }
+
+  for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
+    it(`boundaries.md ${afirmacion}`, () => {
+      comprobar()
+    })
+  }
+})
+
+describe('architecture.md kept nothing of the edge, so no rule is written twice', () => {
+  const ENCABEZADOS_QUE_DESAPARECEN = ['## The boundary', '## The entrypoint']
+
+  const REGLAS_QUE_SE_MUDAN = [
+    'exit codes',
+    'assembles the dependency graph',
+    'An unknown key is a rejection',
+    'validated by projection',
+    'a cast checks nothing',
+    'without a cap',
+    'is data, not an exception',
+    'An adapter is named after its implementation',
+    'An adapter does not decide policy',
+  ]
+
+  for (const encabezado of ENCABEZADOS_QUE_DESAPARECEN) {
+    it(`architecture.md ya no tiene la seccion ${encabezado}`, () => {
+      expect(Documento.texto('architecture.md')).not.toContain(encabezado)
+    })
+  }
+
+  for (const regla of REGLAS_QUE_SE_MUDAN) {
+    it(`no queda en architecture.md: ${regla}`, () => {
+      expect(Documento.texto('architecture.md')).not.toContain(regla)
+    })
+
+    it(`y esta en boundaries.md: ${regla}`, () => {
+      expect(Documento.texto('boundaries.md')).toContain(regla)
     })
   }
 })

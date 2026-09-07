@@ -19,6 +19,7 @@ class YardstickDocumentMother {
       { name: 'decisions.md', content: '# Where a decision lives\nonce\n' },
       { name: 'domain.md', content: '# The domain and its words\nport not adapter\n' },
       { name: 'architecture.md', content: '# Where each thing lives\nthree layers\n' },
+      { name: 'boundaries.md', content: '# The outer edge\nnothing without a cap\n' },
       { name: 'testing.md', content: '# What a test pins\nthe name is the sentence\n' },
     ]
   }
@@ -105,6 +106,15 @@ describe('PluginYardstick.forTask pastes only the documents whose scope reaches 
     expect(nombres(PluginYardstick.forTask(documentos, { creates: true }))).toEqual(['style.md', 'architecture.md'])
   })
 
+  it('the_three_new_documents_reach_a_task_that_creates_no_path_and_architecture_does_not', () => {
+    const documentos = ['simplicity.md', 'domain.md', 'boundaries.md', 'architecture.md'].map((name) => ({
+      name,
+      content: readFileSync(join(root, 'conventions', name), 'utf8'),
+    }))
+    const alcanzan = PluginYardstick.forTask(documentos, { creates: false }).map((d) => d.name)
+    expect(alcanzan).toEqual(['simplicity.md', 'domain.md', 'boundaries.md'])
+  })
+
   it('a_document_that_declares_no_scope_travels_with_every_task', () => {
     const documentos = YardstickDocumentMother.withScopes({ 'naming.md': null })
     expect(nombres(PluginYardstick.forTask(documentos, { creates: false }))).toEqual(['naming.md'])
@@ -112,17 +122,17 @@ describe('PluginYardstick.forTask pastes only the documents whose scope reaches 
 
   it('on_the_documents_that_are_really_on_disk_only_architecture_is_left_out_of_a_task_that_creates_nothing', () => {
     const documentos = PluginYardstick.forTask(YardstickDocumentMother.theRealOnesOnDisk(), { creates: false })
-    expect(nombres(documentos)).toEqual(['defects.md', 'style.md', 'simplicity.md', 'decisions.md', 'domain.md', 'testing.md'])
+    expect(nombres(documentos)).toEqual(['defects.md', 'style.md', 'simplicity.md', 'decisions.md', 'domain.md', 'boundaries.md', 'testing.md'])
   })
 
-  it('on_the_documents_that_are_really_on_disk_a_task_that_creates_carries_all_seven', () => {
+  it('on_the_documents_that_are_really_on_disk_a_task_that_creates_carries_all_eight', () => {
     const documentos = PluginYardstick.forTask(YardstickDocumentMother.theRealOnesOnDisk(), { creates: true })
     expect(nombres(documentos)).toEqual([...PluginYardstick.FILES])
   })
 })
 
 describe('PluginYardstick.FILES', () => {
-  it('lists_the_seven_yardstick_documents_in_paste_order', () => {
+  it('lists_the_eight_yardstick_documents_in_paste_order', () => {
     expect(PluginYardstick.FILES).toEqual([
       'defects.md',
       'style.md',
@@ -130,6 +140,7 @@ describe('PluginYardstick.FILES', () => {
       'decisions.md',
       'domain.md',
       'architecture.md',
+      'boundaries.md',
       'testing.md',
     ])
   })
@@ -166,7 +177,7 @@ describe('PluginYardstick.missingDocuments', () => {
 
   it('names_the_document_absent_from_the_received_list', () => {
     expect(PluginYardstick.missingDocuments(YardstickDocumentMother.onlyTheFirstTwo()))
-      .toEqual(['simplicity.md', 'decisions.md', 'domain.md', 'architecture.md', 'testing.md'])
+      .toEqual(['simplicity.md', 'decisions.md', 'domain.md', 'architecture.md', 'boundaries.md', 'testing.md'])
   })
 
   it('reports_every_document_missing_when_nothing_is_received', () => {
@@ -186,7 +197,7 @@ describe('PluginYardstick.missingDocuments', () => {
 
   it('a_null_entry_inside_the_list_does_not_break_the_count_of_the_rest', () => {
     expect(PluginYardstick.missingDocuments(YardstickDocumentMother.withLeadingNullEntry()))
-      .toEqual(['defects.md', 'simplicity.md', 'decisions.md', 'domain.md', 'architecture.md', 'testing.md'])
+      .toEqual(['defects.md', 'simplicity.md', 'decisions.md', 'domain.md', 'architecture.md', 'boundaries.md', 'testing.md'])
   })
 })
 

@@ -24,7 +24,7 @@ knows nobody.
   domain and the input/output behind a port.
 - **Infrastructure** — adapters, boundary models and entrypoints. The only layer
   that knows there is a subprocess, a filesystem or another service on the other
-  side.
+  side. What it owes at that edge is `conventions/boundaries.md`.
 
 ## One concept per module
 
@@ -61,8 +61,8 @@ stretches to justify any grouping by habit.
   which have to agree travel together and their coherence can be checked in one
   place.
 - **What it does not do**: it does not translate to external formats, it does not
-  catch errors to turn them into exit codes, and it does not decide retry or
-  budget policy.
+  catch errors to turn them into what its invoker receives
+  (`conventions/boundaries.md`), and it does not decide retry or budget policy.
 - **Mutation and reading are told apart by where they live**, not by a suffix on
   the type. Something that mutates and also returns data is still a mutation:
   what classifies it is that it mutates, not that it answers.
@@ -105,54 +105,6 @@ other. The rule bites once the conductor would have to name telemetry types in
 order to build them; while it only passes data to a port, there is nothing to
 extract.
 
-## The boundary
-
-- **What comes from outside is validated on entry, with no exceptions and no
-  forced cast**: a cast checks nothing, it only silences the type checker.
-- **An unknown key is a rejection, not a field to ignore.** It means the other
-  side changed shape and our assumptions may be stale.
-- **You enter by the contract's name, not by the field's name**, and everything
-  the other side sees comes from there: the schema sent to it, the validation of
-  what it returns, and what gets emitted.
-- **A foreign format with an open vocabulary is validated by projection.** When
-  what arrives is not a contract this program defines, rejecting unknown keys
-  over the whole object breaks the read with every field the other side adds,
-  which is the very job that reader has. Project by hand a structure with exactly
-  the keys you consume and validate that, still rejecting the unknown. A key you
-  do claim to know that is missing or arrives with the wrong type still breaks.
-  And an input that is not the expected format is corruption, not one more
-  variant: it raises instead of being swallowed.
-- **How tight to validate a field:** what wrong value would pass for good, and
-  what decision would be taken with it? If the answer is "none that matters", lax
-  is fine.
-- **The conversion to the domain lives in the boundary model**, both ways. Never
-  a mapping helper in the use case.
-- **A validation error does not leave the layer**: it is translated to the domain
-  error the entrypoint knows how to map.
-- **An adapter is named after its implementation, not after its port**, so the
-  pair reads in the name and two implementations fit without renaming anything.
-- **An adapter does not decide policy** — retries, budgets, what to do with a
-  failure.
-- **No call to an external process is launched without a cap, and the adapter
-  does not choose the cap**: it arrives through the constructor with no default,
-  because applying a cap is this layer's work and deciding which one is policy.
-  On exhaustion it fails closed and whatever the process had written is
-  discarded: half an answer is not an answer.
-- **A non-zero exit code is data, not an exception**: it gets interpreted,
-  because the reason is on the diagnostic channel and an exception erases it.
-- **A port for a constant value is indirection; an invariant among several values
-  asks for an object.**
-
-## The entrypoint
-
-- **It is the only place that assembles the dependency graph**: it picks the
-  concrete adapters and injects them. There is no injection container — one
-  adapter per port — and the test seam is the constructor.
-- **It maps the domain's errors to exit codes**, with the result on the standard
-  channel and the diagnosis on the error channel, always separate.
-- **One code per decision of whoever invokes, not one per error.** The yardstick
-  is what the receiver does differently.
-
 ## Antipatterns
 
 - A new concept placed inside a non-conforming old file to inherit its exemption.
@@ -163,9 +115,4 @@ extract.
 - A conditional in the conductor that translates a step's result.
 - A policy that returns a boolean instead of the whole effect.
 - A policy with a catch-all branch for an input it does not describe.
-- A cast at the boundary.
-- A boundary model that ignores unknown keys.
-- An adapter that decides policy.
-- A call to an external process with no cap, or an adapter that picks its own.
-- A validation error leaving the boundary layer.
 - A port whose only method returns a constant.
