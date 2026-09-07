@@ -319,16 +319,18 @@ class CtApi {
       write: Disk.write,
       root: asked.stateRoot,
     })
+    const runFileProgress = new RunFileProgress({ read: Disk.read, exists: Disk.exists })
     const recovery = new ActivePlanRecovery({
       list: () => listCmuxWorkspaces({ requireComplete: true }),
       implementationStarts,
       goRegistry,
+      implementationProgress: runFileProgress,
       sessions,
       reviews,
       activePlans,
       checkouts,
     })
-    recovery.recover()
+    await recovery.recover()
     const server = new ApiServer({
       port: asked.port,
       startPlan: CtApi.#startPlan(workspace, planAgents, planIssues, checkouts),
@@ -341,7 +343,7 @@ class CtApi {
       }),
       implementProgress: new ReadImplementationProgress({
         implementationProgress: new ReviewedImplementationProgress({
-          implemented: new RunFileProgress({ read: Disk.read, exists: Disk.exists }),
+          implemented: runFileProgress,
           pullRequests,
           planIssues,
         }),
