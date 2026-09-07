@@ -10,8 +10,8 @@ import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { PullRequestNotRead, PullRequestNotUnderstood } from '../../src/domain/exceptions.js'
 
-const RECORDED = JSON.parse(
-  readFileSync(new URL('../fixtures/gh-pull-request-reviews.json', import.meta.url), 'utf8')
+const DECLARED = JSON.parse(
+  readFileSync(new URL('../fixtures/declared-gh-pull-request-reviews.json', import.meta.url), 'utf8')
 )
 
 class GhDouble {
@@ -38,8 +38,8 @@ class GhDouble {
     return new GhDouble([new ProcessOutput({ code: 1, stdout: '', stderr: said })])
   }
 
-  static reading() {
-    return GhDouble.answering(JSON.stringify(RECORDED.reviews), JSON.stringify(RECORDED.comments))
+  static declaring() {
+    return GhDouble.answering(JSON.stringify([DECLARED.reviews]), JSON.stringify([DECLARED.comments]))
   }
 
   pullRequests() {
@@ -108,14 +108,14 @@ describe('GhPullRequests', () => {
     expect(refusal).not.toBeInstanceOf(PullRequestNotRead)
   })
 
-  it('it_reads_the_reviews_and_the_line_comments_of_that_pull_request', async () => {
-    const gh = GhDouble.reading()
+  it('it_reads_the_reviews_and_the_line_comments_of_that_pull_request_one_full_page_at_a_time', async () => {
+    const gh = GhDouble.declaring()
 
     await gh.fixesAsked()
 
     expect(gh.calls).toEqual([
-      ['api', 'repos/josemerca/ct-loop-sandbox/pulls/42/reviews'],
-      ['api', 'repos/josemerca/ct-loop-sandbox/pulls/42/comments'],
+      ['api', 'repos/josemerca/ct-loop-sandbox/pulls/42/reviews', '-f', 'per_page=100', '--paginate', '--slurp'],
+      ['api', 'repos/josemerca/ct-loop-sandbox/pulls/42/comments', '-f', 'per_page=100', '--paginate', '--slurp'],
     ])
   })
 
@@ -123,15 +123,15 @@ describe('GhPullRequests', () => {
     const gh = new GhDouble([
       new ProcessOutput({
         code: 0,
-        stdout: JSON.stringify([{ id: 101, state: 'CHANGES_REQUESTED', body: 'varias cosas' }]),
+        stdout: JSON.stringify([[{ id: 101, state: 'CHANGES_REQUESTED', body: 'varias cosas' }]]),
         stderr: '',
       }),
       new ProcessOutput({
         code: 0,
-        stdout: JSON.stringify([
+        stdout: JSON.stringify([[
           { body: 'revienta con []', path: 'src/foo.js', line: 42, pull_request_review_id: 101 },
           { body: 'esto sobra', path: 'src/bar.js', line: 17, pull_request_review_id: 101 },
-        ]),
+        ]]),
         stderr: '',
       }),
     ])
@@ -148,14 +148,14 @@ describe('GhPullRequests', () => {
     const gh = new GhDouble([
       new ProcessOutput({
         code: 0,
-        stdout: JSON.stringify([{ id: 102, state: 'COMMENTED', body: '' }]),
+        stdout: JSON.stringify([[{ id: 102, state: 'COMMENTED', body: '' }]]),
         stderr: '',
       }),
       new ProcessOutput({
         code: 0,
-        stdout: JSON.stringify([
+        stdout: JSON.stringify([[
           { body: 'esta linea sobra', path: 'src/foo.js', line: 9, pull_request_review_id: 102 },
-        ]),
+        ]]),
         stderr: '',
       }),
     ])
@@ -169,14 +169,14 @@ describe('GhPullRequests', () => {
     const gh = new GhDouble([
       new ProcessOutput({
         code: 0,
-        stdout: JSON.stringify([{ id: 103, state: 'COMMENTED', body: '' }]),
+        stdout: JSON.stringify([[{ id: 103, state: 'COMMENTED', body: '' }]]),
         stderr: '',
       }),
       new ProcessOutput({
         code: 0,
-        stdout: JSON.stringify([
+        stdout: JSON.stringify([[
           { body: 'este fichero entero', path: 'src/foo.js', line: null, pull_request_review_id: 103 },
-        ]),
+        ]]),
         stderr: '',
       }),
     ])
@@ -190,14 +190,14 @@ describe('GhPullRequests', () => {
     const gh = new GhDouble([
       new ProcessOutput({
         code: 0,
-        stdout: JSON.stringify([
+        stdout: JSON.stringify([[
           { id: 1, state: 'APPROVED', body: 'se ve bien' },
           { id: 2, state: 'PENDING', body: 'todavia lo escribo' },
           { id: 3, state: 'DISMISSED', body: 'descartada' },
-        ]),
+        ]]),
         stderr: '',
       }),
-      new ProcessOutput({ code: 0, stdout: '[]', stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: '[[]]', stderr: '' }),
     ])
 
     expect(await gh.fixesAsked()).toEqual([])
@@ -207,10 +207,10 @@ describe('GhPullRequests', () => {
     const gh = new GhDouble([
       new ProcessOutput({
         code: 0,
-        stdout: JSON.stringify([{ id: 4, state: 'COMMENTED', body: '   ' }]),
+        stdout: JSON.stringify([[{ id: 4, state: 'COMMENTED', body: '   ' }]]),
         stderr: '',
       }),
-      new ProcessOutput({ code: 0, stdout: '[]', stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: '[[]]', stderr: '' }),
     ])
 
     expect(await gh.fixesAsked()).toEqual([])
@@ -220,13 +220,13 @@ describe('GhPullRequests', () => {
     const gh = new GhDouble([
       new ProcessOutput({
         code: 0,
-        stdout: JSON.stringify([
+        stdout: JSON.stringify([[
           { id: 150, state: 'CHANGES_REQUESTED', body: 'la segunda vuelta' },
           { id: 101, state: 'CHANGES_REQUESTED', body: 'la primera' },
-        ]),
+        ]]),
         stderr: '',
       }),
-      new ProcessOutput({ code: 0, stdout: '[]', stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: '[[]]', stderr: '' }),
     ])
 
     const asked = await gh.fixesAsked()
@@ -234,10 +234,28 @@ describe('GhPullRequests', () => {
     expect(asked.map((change) => change.text)).toEqual(['la primera', 'la segunda vuelta'])
   })
 
+  it('the_changes_split_across_two_pages_are_read_whole_instead_of_being_cut_at_the_first_thirty', async () => {
+    const gh = new GhDouble([
+      new ProcessOutput({
+        code: 0,
+        stdout: JSON.stringify([
+          [{ id: 101, state: 'CHANGES_REQUESTED', body: 'la primera pagina' }],
+          [{ id: 202, state: 'CHANGES_REQUESTED', body: 'la segunda pagina' }],
+        ]),
+        stderr: '',
+      }),
+      new ProcessOutput({ code: 0, stdout: '[[],[]]', stderr: '' }),
+    ])
+
+    const asked = await gh.fixesAsked()
+
+    expect(asked.map((change) => change.text)).toEqual(['la primera pagina', 'la segunda pagina'])
+  })
+
   it('a_review_gh_sent_without_the_fields_this_reads_travels_out_as_not_understood', async () => {
     const gh = new GhDouble([
-      new ProcessOutput({ code: 0, stdout: JSON.stringify([{ id: 101 }]), stderr: '' }),
-      new ProcessOutput({ code: 0, stdout: '[]', stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: JSON.stringify([[{ id: 101 }]]), stderr: '' }),
+      new ProcessOutput({ code: 0, stdout: '[[]]', stderr: '' }),
     ])
 
     const refusal = await gh.fixesAsked().catch((cause) => cause)
@@ -245,10 +263,15 @@ describe('GhPullRequests', () => {
     expect(refusal).toBeInstanceOf(PullRequestNotUnderstood)
   })
 
-  it('the_recorded_transcript_of_a_real_pull_request_is_read_without_being_rejected', async () => {
-    const asked = await GhDouble.reading().fixesAsked()
+  it('the_shape_declared_by_this_fixture_flattens_the_body_and_the_two_reviews_it_carries_comments_for', async () => {
+    const asked = await GhDouble.declaring().fixesAsked()
 
-    expect(asked.length).toBeGreaterThan(0)
-    expect(asked.every((change) => change instanceof ChangeAsked)).toBe(true)
+    expect(asked).toEqual([
+      new ChangeAsked({
+        id: '101',
+        text: 'varias cosas que arreglar\nsrc/foo.js:42: revienta con []\nsrc/bar.js:17: esto sobra',
+      }),
+      new ChangeAsked({ id: '102', text: 'src/baz.js:9: esta linea sobra' }),
+    ])
   })
 })

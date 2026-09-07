@@ -12,36 +12,43 @@ export class OpenPullRequest {
 }
 
 export class GhPullRequests extends PullRequests {
-  static ASKS = Object.freeze(['CHANGES_REQUESTED', 'COMMENTED'])
+  static #ASKS = Object.freeze(['CHANGES_REQUESTED', 'COMMENTED'])
+  static #PAGE_SIZE = 'per_page=100'
 
   constructor({ gh }) {
     super()
     this.gh = gh
   }
 
-  static branchOf(issue) {
+  static #branchOf(issue) {
     return `feat/${issue.number}`
   }
 
-  static listArgvFor({ issue, repository }) {
+  static #listArgvFor({ issue, repository }) {
     return [
       'pr', 'list', '--repo', repository.text,
-      '--head', GhPullRequests.branchOf(issue),
+      '--head', GhPullRequests.#branchOf(issue),
       '--state', 'open', '--json', 'number,url', '--limit', '1',
     ]
   }
 
-  static reviewsArgvFor({ pullRequest, repository }) {
-    return ['api', `repos/${repository.text}/pulls/${pullRequest.number}/reviews`]
+  static #reviewsArgvFor({ pullRequest, repository }) {
+    return [
+      'api', `repos/${repository.text}/pulls/${pullRequest.number}/reviews`,
+      '-f', GhPullRequests.#PAGE_SIZE, '--paginate', '--slurp',
+    ]
   }
 
-  static commentsArgvFor({ pullRequest, repository }) {
-    return ['api', `repos/${repository.text}/pulls/${pullRequest.number}/comments`]
+  static #commentsArgvFor({ pullRequest, repository }) {
+    return [
+      'api', `repos/${repository.text}/pulls/${pullRequest.number}/comments`,
+      '-f', GhPullRequests.#PAGE_SIZE, '--paginate', '--slurp',
+    ]
   }
 
   async openOf({ issue, repository }) {
-    const printed = await this.#read(GhPullRequests.listArgvFor({ issue, repository }))
-    const listed = GhPullRequests.#arrayIn(printed, `the pull requests of ${GhPullRequests.branchOf(issue)}`)
+    const printed = await this.#read(GhPullRequests.#listArgvFor({ issue, repository }))
+    const listed = GhPullRequests.#arrayIn(printed, `the pull requests of ${GhPullRequests.#branchOf(issue)}`)
     if (listed.length === 0) return null
 
     const found = listed[0]
@@ -55,12 +62,12 @@ export class GhPullRequests extends PullRequests {
   }
 
   async fixesAsked({ pullRequest, repository }) {
-    const reviews = GhPullRequests.#arrayIn(
-      await this.#read(GhPullRequests.reviewsArgvFor({ pullRequest, repository })),
+    const reviews = GhPullRequests.#pagesIn(
+      await this.#read(GhPullRequests.#reviewsArgvFor({ pullRequest, repository })),
       `the reviews of #${pullRequest.number}`
     )
-    const comments = GhPullRequests.#arrayIn(
-      await this.#read(GhPullRequests.commentsArgvFor({ pullRequest, repository })),
+    const comments = GhPullRequests.#pagesIn(
+      await this.#read(GhPullRequests.#commentsArgvFor({ pullRequest, repository })),
       `the comments of #${pullRequest.number}`
     )
     const anchored = GhPullRequests.#byReview(comments, pullRequest)
@@ -87,7 +94,7 @@ export class GhPullRequests extends PullRequests {
         `${Gh.BIN} sent a review of #${pullRequest.number} without the state and the body this reads, it printed ${JSON.stringify(review)}`
       )
     }
-    if (!GhPullRequests.ASKS.includes(review.state)) return false
+    if (!GhPullRequests.#ASKS.includes(review.state)) return false
 
     return review.body.trim().length > 0 || carried.length > 0
   }
@@ -147,6 +154,10 @@ export class GhPullRequests extends PullRequests {
     }
 
     return parsed
+  }
+
+  static #pagesIn(printed, what) {
+    return GhPullRequests.#arrayIn(printed, what).flat()
   }
 
   async #read(argv) {
