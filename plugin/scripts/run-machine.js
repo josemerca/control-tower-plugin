@@ -41,6 +41,21 @@ export const STEPS = Object.freeze({
   IMPLEMENT: 'implement',
   CONTROLS: 'controls',
   JUDGE: 'judge',
+  // ADVISE (H9) — entre el SEGUNDO veto y el TERCER intento, y en ningún otro
+  // sitio. Los dos primeros intentos son el patrón feedback-flip: el
+  // implementador hereda el árbol vetado y el veredicto que lo vetó, y eso es
+  // lo correcto mientras la corrección sea local. El tercero ya no lo es —
+  // parchea dos capas de parches— así que aquí se cambia de estrategia en vez
+  // de repetir la misma a ciegas: un consejero de tier superior, sin más
+  // herramienta que `Read`, mira los dos intentos y los dos vetos y dicta un
+  // enfoque, y el programa devuelve el árbol al último commit antes de que el
+  // tercer implementador empiece (happy-to-delete).
+  //
+  // SIN CONTADOR PROPIO, y es una decisión: el reintento que este paso ocupa ya
+  // lo gastó el veto que lo abrió (`judgeRetries`), así que el intento sigue
+  // siendo `controlRetries + judgeRetries + correctionRetries + 1` — la misma
+  // fórmula que cuentan el sello del despacho y el backend que lee este fichero.
+  ADVISE: 'advise',
   COMMIT: 'commit',
   // RECONCILE va ANTES de GLOBAL y no después: la punta a punta del plan
   // (`global`) tiene que correr sobre el árbol ya puesto al día con su base,

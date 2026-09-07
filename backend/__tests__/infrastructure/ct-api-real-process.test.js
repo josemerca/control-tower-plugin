@@ -65,7 +65,7 @@ class Entrypoint {
 class RunFileFixture {
   static ISSUE = 7
 
-  static async inATemporaryRoot() {
+  static async inATemporaryRoot(step = 'implement') {
     const root = await mkdtemp(join(tmpdir(), 'ct-api-progress-'))
     const worktree = join(root, '.worktrees', String(RunFileFixture.ISSUE))
     await mkdir(join(worktree, '.agent'), { recursive: true })
@@ -74,7 +74,7 @@ class RunFileFixture {
       issue: RunFileFixture.ISSUE,
       task: 1,
       tasksTotal: 1,
-      step: 'implement',
+      step,
       controlRetries: 0,
       judgeRetries: 0,
       correctionRetries: 0,
@@ -129,6 +129,24 @@ describe('ct-api entrypoint', () => {
       expect(body.task).toBe(1)
       expect(body.total_tasks).toBe(1)
       expect(body.attempt).toBe(1)
+    } finally {
+      await RunFileFixture.remove(root)
+    }
+  })
+
+  it('a_slice_whose_second_veto_sent_it_to_the_adviser_is_served_as_that_step', async () => {
+    const port = await Entrypoint.listening({ CT_API_PORT: '0' })
+    const root = await RunFileFixture.inATemporaryRoot('advise')
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${port}/implement-progress/${RunFileFixture.ISSUE}?root=${encodeURIComponent(root)}`
+      )
+
+      expect(response.status).toBe(200)
+      const body = await response.json()
+      expect(body.step).toBe('advise')
+      expect(body.task).toBe(1)
     } finally {
       await RunFileFixture.remove(root)
     }
