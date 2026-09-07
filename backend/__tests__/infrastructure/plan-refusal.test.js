@@ -32,7 +32,7 @@ describe('PlanRefusal', () => {
 describe('PlanCollapse', () => {
   const FAMILIES = [
     'PlanFailure', 'UserStoryFailure', 'PlanIssueFailure', 'PlanAgentFailure', 'WorkspaceFailure',
-    'PlanProgressFailure', 'PlanChangesFailure', 'GoFailure', 'HarvestFailure', 'PullRequestFailure',
+    'PlanProgressFailure', 'PlanChangesFailure', 'GoFailure', 'HarvestFailure', 'PullRequestFailure', 'WorkbenchFailure',
   ]
 
   const RESUMING_AN_AGENT = ImplementCollapse.declaredFailures()
@@ -44,7 +44,8 @@ describe('PlanCollapse', () => {
     !(thrown.prototype instanceof exceptions.PlanProgressFailure) &&
     !(thrown.prototype instanceof exceptions.PlanChangesFailure) &&
     !(thrown.prototype instanceof exceptions.HarvestFailure) &&
-    !(thrown.prototype instanceof exceptions.PullRequestFailure)
+    !(thrown.prototype instanceof exceptions.PullRequestFailure) &&
+    !(thrown.prototype instanceof exceptions.WorkbenchFailure)
 
   it('every_way_the_plan_can_collapse_has_a_refusal_declared_so_adding_one_cannot_reach_the_client_as_a_crash', () => {
     const ways = Object.entries(exceptions).filter(startingAPlan).map(([name]) => name)
@@ -82,6 +83,13 @@ describe('PlanCollapse', () => {
     expect(PlanCollapse.declaredFailures()).not.toContain('HarvestNotRead')
     expect(PlanCollapse.declaredFailures()).not.toContain('HarvestNotUnderstood')
     expect(() => PlanCollapse.of(new exceptions.HarvestNotRead('gh refused')))
+      .toThrow(/no refusal declared/)
+  })
+
+  it('a_failure_of_reopening_has_no_refusal_declared_here_because_the_watcher_reads_it_from_the_error_log_not_from_a_request', () => {
+    expect(PlanCollapse.declaredFailures()).not.toContain('SliceNotReopened')
+    expect(PlanCollapse.declaredFailures()).not.toContain('ReopenNotUnderstood')
+    expect(() => PlanCollapse.of(new exceptions.SliceNotReopened('dispatch-check refused')))
       .toThrow(/no refusal declared/)
   })
 
