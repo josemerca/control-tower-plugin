@@ -7,9 +7,11 @@ export class DiskGoRegistry extends GoRegistry {
   static NONCE_BYTES = 4
   static DIRECTORY = 'go'
 
-  constructor({ random, write, root }) {
+  constructor({ random, read = null, stat = null, write, root }) {
     super()
     this.random = random
+    this.read = read
+    this.stat = stat
     this.write = write
     this.root = root
   }
@@ -48,5 +50,24 @@ export class DiskGoRegistry extends GoRegistry {
     }
 
     return nonce
+  }
+
+  matches(watch) {
+    if (this.read === null || this.stat === null) return false
+    const path = DiskGoRegistry.pathFor({
+      issueNumber: watch.issue.number,
+      repository: watch.repository,
+      root: this.root,
+    })
+    try {
+      if (!this.stat(path).isFile()) return false
+      const record = JSON.parse(this.read(path))
+
+      return record !== null && typeof record === 'object' && !Array.isArray(record) &&
+        record.repo === watch.repository.text && record.issue === watch.issue.number &&
+        typeof record.commitment === 'string' && /^[0-9a-f]{64}$/.test(record.commitment)
+    } catch {
+      return false
+    }
   }
 }

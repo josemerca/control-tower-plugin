@@ -185,6 +185,10 @@ describe('el dist/ commiteado corresponde a los fuentes commiteados (F24)', () =
       'hooks/session-start.js',
       'hooks/stop.js',
       'scripts/closing-keywords.js',
+      // La marca por la que el hook `Stop` reconoce un commit de ct-step
+      // (#95). Entra por state.js, y es también quien la escribe del otro
+      // lado, en step-contracts.js: una sola fuente para las dos mitades.
+      'scripts/ct-step-commit.js',
       'scripts/dispatch-gate.js',
       'scripts/governed-repo.js',
       // La puerta del despacho decide con la tabla de la máquina, así que

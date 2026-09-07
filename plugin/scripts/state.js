@@ -1,5 +1,6 @@
 import { parse, stringify } from './vendor/yaml.js'
 import { STATE_REL_PATH as COORD_REL_PATH, SLICE_REL_PATH } from './state-paths.js'
+import { CtStepCommit } from './ct-step-commit.js'
 
 // ===========================================================================
 // F22 — `stateRel`: QUÉ FICHERO NOMBRAN LOS MENSAJES DE ESTE MÓDULO.
@@ -280,6 +281,22 @@ export function fieldReadingGuide(meta, { blocked = false } = {}) {
   return `## Cómo leer estos campos\n${lines.join('\n')}`
 }
 
+// #95/H10 — los comentarios `#` del frontmatter no viajan en la hidratación.
+// La plantilla trae ~1.200 B de comentarios que explican los campos a quien
+// EDITA el fichero; a quien se hidrata se lo explica `fieldReadingGuide`, y
+// solo cuando aplica. Se filtra por LÍNEA y solo dentro del frontmatter: un `#`
+// dentro de un valor no empieza la línea, y los encabezados markdown del cuerpo
+// quedan fuera del bloque.
+const YAML_COMMENT_LINE = /^\s*#/
+
+function stripFrontmatterComments(stateText) {
+  const s = stateText.replace(/^﻿/, '').trimStart()
+  const m = s.match(FM)
+  if (!m) return s
+  const frontmatter = m[1].split(/\r?\n/).filter((line) => !YAML_COMMENT_LINE.test(line)).join('\n')
+  return `---\n${frontmatter}\n---\n${m[2]}`
+}
+
 export function composeHydration(stateText, gitLog, { stateRel = COORD_REL_PATH } = {}) {
   if (!stateText || !stateText.trim()) return ''
   const { meta, error } = parseStateSafe(stateText)
@@ -295,7 +312,7 @@ export function composeHydration(stateText, gitLog, { stateRel = COORD_REL_PATH 
   // slice— abría cada hidratación con una etiqueta falsa: exactamente la
   // confusión de fichero que esta ronda arregla, en el otro sentido.
   const titulo = stateRel === SLICE_REL_PATH ? 'Estado del slice' : 'Estado del repo'
-  parts.push(`# ${titulo} (hidratación automática)\n\n${stateText.trim()}`)
+  parts.push(`# ${titulo} (hidratación automática)\n\n${stripFrontmatterComments(stateText).trim()}`)
 
   const guide = fieldReadingGuide(meta, { blocked: blocked.state === 'blocked' })
   if (guide) parts.push(guide)
@@ -472,6 +489,54 @@ const STATE_REL_PATH = '.agent/STATE.md'
 // encima de él "te has quedado muy atrás" es cierto de todas formas.
 const WORK_SCAN_MAX = 200
 
+// ===========================================================================
+// #95/H5 — QUIÉN HIZO LOS COMMITS QUE HAY POR ENCIMA.
+//
+// En el camino `ct-step` comitea el PROGRAMA, no el agente. El agente no tocó
+// `last_commit` porque no hizo ningún commit, y el guard le bloqueaba el turno
+// pidiéndole que copiase a mano un valor que el hook ya tiene resuelto
+// (`headSha`) — el mismo defecto de familia que F15 arregló para los apuntes:
+// una orden al modelo donde cabía un mecanismo del programa.
+//
+// SE PREGUNTA POR EL TRAILER, NO POR EL MENSAJE. `%(trailers:key=…)` es un
+// campo que git parsea él mismo, así que ni hay que trocear el cuerpo del
+// commit ni un mensaje que contenga la frase por casualidad puede hacerse
+// pasar por uno de ct-step. La marca la declara `ct-step-commit.js`, que es
+// también quien la ESCRIBE (step-contracts.js la compone desde ahí): una sola
+// fuente para las dos mitades.
+//
+// FAIL CLOSED, igual que el conteo de trabajo: si git no contesta, o si UN
+// solo commit del rango no lleva la marca, no se atribuye nada y el bloqueo se
+// mantiene entero. Atribuir de más sería dejar pasar trabajo sin registrar.
+// ===========================================================================
+function allWorkCommittedByCtStep(git, stateSha, headSha) {
+  const r = git(['log', `--format=%H ${CtStepCommit.TRAILER_FORMAT}`, '--no-merges', `${stateSha}..${headSha}`])
+  if (r.status !== 0) return false
+  const lines = String(r.stdout || '').split('\n').map((l) => l.trim()).filter(Boolean)
+  return CtStepCommit.wroteAllOf(lines.map((l) => l.slice(l.indexOf(' ') + 1)))
+}
+
+// La línea `last_commit` del frontmatter, reescrita en su sitio. NO se
+// re-serializa el YAML (`parseState` + `renderState`) a propósito: eso se
+// llevaría por delante los comentarios del fichero, el orden de las claves y
+// cualquier campo que este módulo no conozca — y hay otro trabajo en vuelo
+// añadiendo campos nuevos al frontmatter. Se toca UNA línea y el resto del
+// fichero sale byte a byte igual que entró.
+//
+// `updated: false` cuando no hay línea que reescribir: quien llama mantiene el
+// bloqueo en vez de inventarse dónde va el campo.
+const LAST_COMMIT_LINE = /^([ \t]*last_commit[ \t]*:[ \t]*)(['"]?)([^'"\r\n]*)(\2)([ \t]*)$/m
+
+export function withLastCommit(stateText, sha) {
+  const s = stateText ?? ''
+  const m = s.match(FM)
+  if (!m) return { text: s, updated: false }
+  const frontmatter = m[1]
+  if (!LAST_COMMIT_LINE.test(frontmatter)) return { text: s, updated: false }
+  const nuevo = frontmatter.replace(LAST_COMMIT_LINE, (_, prefijo, comilla, __, cierre, cola) => `${prefijo}${comilla}${sha}${cierre}${cola}`)
+  return { text: s.replace(frontmatter, nuevo), updated: true }
+}
+
 function countWorkCommits(git, stateSha, headSha, total) {
   if (!(total > 0) || total > WORK_SCAN_MAX) return { work: total, bookkeeping: 0, known: false }
   // Sentinela propio (`commit:<sha>`) en vez de fiarse del formato por
@@ -529,6 +594,11 @@ export function describeStopRelation({ headSha, lastCommit, git, branch = '' }) 
     if (known && work === 0 && bookkeeping > 0) {
       return { ...out, kind: 'behind-bookkeeping', count: 0, bookkeeping, total }
     }
+    // #95/H5: hay trabajo por encima, y lo comiteó el programa. El sha que el
+    // guard pide ya está resuelto, así que no hay nada que ordenarle a nadie.
+    if (allWorkCommittedByCtStep(git, stateSha, headSha)) {
+      return { ...out, kind: 'behind-ct-step', count: known ? work : total, bookkeeping: known ? bookkeeping : 0, total }
+    }
     return { ...out, kind: 'behind', count: known ? work : total, bookkeeping: known ? bookkeeping : 0, total }
   }
 
@@ -553,6 +623,48 @@ export function describeStopRelation({ headSha, lastCommit, git, branch = '' }) 
 
   const mb = git(['merge-base', stateSha, headSha])
   return { ...out, kind: 'diverged', containers, containersKnown, mergeBase: mb.status === 0 ? String(mb.stdout || '').trim() : '' }
+}
+
+// ===========================================================================
+// #95/H8 — UN AVISO QUE SALE SIEMPRE ES UN AVISO QUE NADIE LEE.
+//
+// Los cuatro avisos no bloqueantes (`ahead`, `diverged`, `orphan`, `unknown`)
+// salían en CADA cierre de turno mientras durase la anomalía. La insistencia
+// era deliberada —una condición estructural que alguien tiene que resolver— y
+// el precio se pagaba en brevedad. Pero la sentencia que la desmonta ya estaba
+// escrita en este mismo módulo, en la cabecera de `blocked`: la prosa que
+// siempre está se ignora, así que el turno 40 de una divergencia no informa de
+// nada, sólo cuesta.
+//
+// LO QUE SE CONSERVA: la anomalía no se hace invisible. El aviso vuelve al
+// cumplirse el periodo, y CUALQUIER cambio de la relación lo saca de nuevo sin
+// esperar — porque entonces es otra cosa lo que hay que contar.
+//
+// LA RELACIÓN ES EL PAR (tipo, commit del estado), no el tipo a secas: pasar de
+// divergir contra una rama a divergir contra otra es una anomalía distinta
+// aunque las dos se llamen `diverged`.
+//
+// FAIL OPEN, al revés que el guard de frescura, y la asimetría es a propósito:
+// aquí el fallo caro es CALLAR. Un marcador que no se puede leer, que trae otra
+// forma o que no se ha podido escribir se resuelve avisando.
+// ===========================================================================
+export const NOTICE_REPEAT_EVERY_TURNS = 10
+
+export const STOP_NOTICE_REL_NAME = 'stop-notice.json'
+
+export function noticeDecision({ relation, previous }) {
+  const next = (turns) => ({ kind: relation.kind, stateSha: relation.stateSha || '', turns })
+  const misma = previous
+    && typeof previous === 'object'
+    && !Array.isArray(previous)
+    && previous.kind === relation.kind
+    && (previous.stateSha || '') === (relation.stateSha || '')
+    && Number.isInteger(previous.turns)
+    && previous.turns > 0
+  if (!misma) return { emit: true, next: next(1) }
+  const turns = previous.turns + 1
+  if (turns > NOTICE_REPEAT_EVERY_TURNS) return { emit: true, next: next(1) }
+  return { emit: false, next: next(turns) }
 }
 
 const whereAmI = (rel) => (rel.branch ? `la rama \`${rel.branch}\`` : `HEAD (desprendido en ${shortSha(rel.headSha)})`)
@@ -583,6 +695,14 @@ export function classifyStopState({ relation, stopHookActive, stateRel = COORD_R
   // ruido puro, y `last_commit` apuntando al último commit de TRABAJO es
   // además la lectura más útil de ese campo, no una degradación.
   if (rel.kind === 'behind-bookkeeping') return { ...none, kind: 'behind-bookkeeping' }
+
+  // #95/H5: todo el trabajo por encima lo comiteó ct-step. Ni bloqueo ni aviso:
+  // el hook actualiza `last_commit` él mismo con el sha que ya tiene. Va como
+  // un campo de la decisión, y no como una escritura aquí dentro, porque este
+  // módulo no toca ficheros — quien resolvió la ruta es quien escribe.
+  if (rel.kind === 'behind-ct-step') {
+    return { ...none, kind: 'behind-ct-step', updateLastCommitTo: rel.headSha }
+  }
 
   if (rel.kind === 'behind') {
     const n = rel.count
