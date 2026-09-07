@@ -1,5 +1,7 @@
 import { describe, it, expect, afterEach } from 'vitest'
 import { execFileSync, spawn } from 'node:child_process'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -60,6 +62,33 @@ class Entrypoint {
   }
 }
 
+class RunFileFixture {
+  static ISSUE = 7
+
+  static async inATemporaryRoot() {
+    const root = await mkdtemp(join(tmpdir(), 'ct-api-progress-'))
+    const worktree = join(root, '.worktrees', String(RunFileFixture.ISSUE))
+    await mkdir(join(worktree, '.agent'), { recursive: true })
+    await writeFile(join(worktree, '.agent', `run-${RunFileFixture.ISSUE}.json`), JSON.stringify({
+      plan: 'plan.md',
+      issue: RunFileFixture.ISSUE,
+      task: 1,
+      tasksTotal: 1,
+      step: 'implement',
+      controlRetries: 0,
+      judgeRetries: 0,
+      correctionRetries: 0,
+      discards: 0,
+    }, null, 2) + '\n')
+
+    return root
+  }
+
+  static async remove(root) {
+    await rm(root, { recursive: true, force: true })
+  }
+}
+
 describe('ct-api entrypoint', () => {
   afterEach(() => {
     Entrypoint.killAll()
@@ -83,5 +112,25 @@ describe('ct-api entrypoint', () => {
     const body = await response.json()
     expect(body.code).toBe('user-story-not-read')
     expect(body.detail).toMatch(/^acli jira failed: /)
+  })
+
+  it('the_progress_of_a_slice_is_served_by_the_running_api', async () => {
+    const port = await Entrypoint.listening({ CT_API_PORT: '0' })
+    const root = await RunFileFixture.inATemporaryRoot()
+
+    try {
+      const response = await fetch(
+        `http://127.0.0.1:${port}/implement-progress/${RunFileFixture.ISSUE}?root=${encodeURIComponent(root)}`
+      )
+
+      expect(response.status).toBe(200)
+      const body = await response.json()
+      expect(body.step).toBe('implement')
+      expect(body.task).toBe(1)
+      expect(body.total_tasks).toBe(1)
+      expect(body.attempt).toBe(1)
+    } finally {
+      await RunFileFixture.remove(root)
+    }
   })
 })

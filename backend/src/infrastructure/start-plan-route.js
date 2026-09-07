@@ -192,6 +192,7 @@ export class StartPlanRoute {
       agent: started.agent,
       branch: started.watch.located.branch,
       worktree: started.watch.located.path,
+      root: started.watch.located.root,
     })
   }
 

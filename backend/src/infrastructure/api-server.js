@@ -6,6 +6,7 @@ import { StartPlanRoute } from './start-plan-route.js'
 import { ImplementPlanRoute } from './implement-plan-route.js'
 import { PlanEventsRoute } from './plan-events-route.js'
 import { ActivePlansRoute } from './active-plans-route.js'
+import { ImplementProgressRoute } from './implement-progress-route.js'
 
 export const LOOPBACK = '127.0.0.1'
 class FrontendPages {
@@ -39,12 +40,13 @@ class Failures {
 
 export class ApiServer {
   constructor({
-    port, startPlan, implementPlan, reviews, planEvents, sessions, activePlans,
+    port, startPlan, implementPlan, implementProgress, reviews, planEvents, sessions, activePlans,
     implementationStarts, recovery = null, stderr, frontendRoot,
   }) {
     this.requestedPort = port
     this.startPlan = startPlan
     this.implementPlan = implementPlan
+    this.implementProgress = implementProgress
     this.reviews = reviews
     this.planEvents = planEvents
     this.sessions = sessions
@@ -92,6 +94,11 @@ export class ApiServer {
       ActivePlansRoute.handledBy(this.activePlans, this.recovery)
     )
     app.all(ActivePlansRoute.PATH, ActivePlansRoute.refuseOtherMethods)
+    app.get(
+      ImplementProgressRoute.PATH,
+      Browsers.turnAwayForeign,
+      ImplementProgressRoute.handledBy(this.implementProgress)
+    )
     app.use(Failures.nothingMatched)
     app.use(Failures.answer)
 
