@@ -15,13 +15,19 @@ const usePlanProgress = (issue: number, repo: string): PlanProgress => {
 
   useEffect(() => {
     setProgress(CONNECTING)
-    const subscription = PlanEventsClient.watch(issue, repo, {
-      onState: (state) => setProgress({ phase: state }),
-      onFailure: (error) => setProgress({ phase: 'failed', error }),
-      onUnreachable: () => setProgress({ phase: 'unreachable' }),
+    let close: (() => void) | undefined
+    const connection = window.setTimeout(() => {
+      close = PlanEventsClient.watch(issue, repo, {
+        onState: (state) => setProgress({ phase: state }),
+        onFailure: (error) => setProgress({ phase: 'failed', error }),
+        onUnreachable: () => setProgress({ phase: 'unreachable' }),
+      }).close
     })
 
-    return subscription.close
+    return () => {
+      window.clearTimeout(connection)
+      close?.()
+    }
   }, [issue, repo])
 
   return progress

@@ -32,8 +32,50 @@
   align-self: flex-start;
 }
 
+.home__recovery {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.home__recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.home__discard {
+  align-self: flex-start;
+  margin-top: 12px;
+}
+
+.home__active-plans {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0;
+  margin: 0 0 24px;
+  list-style: none;
+}
+
+.home__active-plan {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px;
+  border: 1px solid var(--border-secondary);
+  border-radius: var(--shape-container-xs);
+}
+
 @media (max-width: 600px) {
   .home__content {
     padding: 16px;
+  }
+
+  .home__active-plan {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { createHash } from 'node:crypto'
 import { DiskGoRegistry } from '../../src/infrastructure/disk-go-registry.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
@@ -96,5 +96,45 @@ describe('DiskGoRegistry', () => {
     expect(refusal).toBeInstanceOf(GoNotRecorded)
     expect(refusal.message).toContain('EACCES: permission denied')
     expect(refusal.message).toContain('go/jjponz__repo-pulse-33.json')
+  })
+
+  it('matches_a_valid_go_record_for_the_same_repository_and_issue', () => {
+    const repository = new RepositoryName('jjponz/repo-pulse')
+    const registry = new DiskGoRegistry({
+      random: null,
+      read: vi.fn(() => JSON.stringify({
+        repo: repository.text, issue: 33, commitment: 'a'.repeat(64),
+      })),
+      stat: vi.fn(() => ({ isFile: () => true })),
+      write: null,
+      root: DiskDouble.ROOT,
+    })
+
+    expect(registry.matches({ repository, issue: { number: 33 } })).toBe(true)
+  })
+
+  it.each([
+    null,
+    '{',
+    JSON.stringify({ repo: 'other/repo', issue: 33, commitment: 'a'.repeat(64) }),
+    JSON.stringify({ repo: 'jjponz/repo-pulse', issue: 34, commitment: 'a'.repeat(64) }),
+    JSON.stringify({ repo: 'jjponz/repo-pulse', issue: 33, commitment: 'not-a-digest' }),
+  ])('does_not_match_an_absent_or_invalid_go_record %#', (record) => {
+    const repository = new RepositoryName('jjponz/repo-pulse')
+    const registry = new DiskGoRegistry({
+      random: null,
+      read: vi.fn(() => {
+        if (record === null) throw new Error('ENOENT')
+        return record
+      }),
+      stat: vi.fn(() => {
+        if (record === null) throw new Error('ENOENT')
+        return { isFile: () => true }
+      }),
+      write: null,
+      root: DiskDouble.ROOT,
+    })
+
+    expect(registry.matches({ repository, issue: { number: 33 } })).toBe(false)
   })
 })
