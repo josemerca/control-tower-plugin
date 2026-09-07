@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { PlanRequest, PlanRequestOutcome } from '../../src/infrastructure/start-plan-route.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
+import { PlanComment } from '../../src/domain/value-objects/plan-comment.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { CheckoutRoot } from '../../src/domain/value-objects/checkout-root.js'
 
@@ -96,5 +97,44 @@ describe('PlanRequest', () => {
   it('a_path_with_spaces_in_a_segment_is_still_well_formed_because_a_home_directory_can_carry_one', () => {
     expect(PlanRequest.from('{"id":"ABC-1","repo":"owner/name","path":"/Users/some one/repos/name"}').outcome)
       .toBe(PlanRequestOutcome.ACCEPTED)
+  })
+
+  it('a_body_with_neither_an_id_nor_a_comment_is_refused_by_naming_both_fields', () => {
+    expect(PlanRequest.from('{"repo":"owner/name","path":"/repo/checkout"}').outcome)
+      .toBe(PlanRequestOutcome.NOTHING_TO_PLAN)
+  })
+
+  it('a_body_with_a_comment_and_no_id_is_accepted_because_the_comment_says_what_to_plan', () => {
+    const accepted = PlanRequest.from(
+      '{"user_comment":"añade el endpoint de salud","repo":"owner/name","path":"/repo/checkout"}'
+    )
+
+    expect(accepted.outcome).toBe(PlanRequestOutcome.ACCEPTED)
+    expect(accepted.story).toBeNull()
+  })
+
+  it('a_comment_that_is_not_text_or_is_only_whitespace_is_refused_before_it_becomes_an_issue_body', () => {
+    const refused = [
+      '{"user_comment":123,"repo":"owner/name","path":"/repo/checkout"}',
+      '{"user_comment":null,"repo":"owner/name","path":"/repo/checkout"}',
+      '{"user_comment":"","repo":"owner/name","path":"/repo/checkout"}',
+      '{"user_comment":"   ","repo":"owner/name","path":"/repo/checkout"}',
+    ].map((raw) => PlanRequest.from(raw).outcome)
+
+    expect(refused).toEqual(Array(4).fill(PlanRequestOutcome.MALFORMED_USER_COMMENT))
+  })
+
+  it('a_malformed_id_is_reported_before_the_comment_so_the_first_thing_wrong_is_what_gets_named', () => {
+    expect(PlanRequest.from('{"id":"nope","user_comment":123}').outcome)
+      .toBe(PlanRequestOutcome.MALFORMED_ID)
+  })
+
+  it('an_accepted_body_hands_back_the_comment_as_a_domain_value_and_not_as_the_raw_string', () => {
+    const accepted = PlanRequest.from(
+      '{"user_comment":"añade el endpoint de salud","repo":"josemerca/ct-loop-sandbox","path":"/repo/checkout"}'
+    )
+
+    expect(accepted.comment).toBeInstanceOf(PlanComment)
+    expect(accepted.comment.text).toBe('añade el endpoint de salud')
   })
 })

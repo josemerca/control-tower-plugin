@@ -28,6 +28,7 @@ describe('CmuxActivePlan', () => {
     null,
     { ...CURRENT, title: 'another-workspace' },
     { ...CURRENT, title: 'ct-plan-jjponz__repo-pulse-not-a-story' },
+    { ...CURRENT, title: 'ct-plan-jjponz__repo-pulse-issue-0' },
     { ...CURRENT, title: 'ct-plan-not-a-repository-ABC-123' },
     { ...CURRENT, cwd: '/repo' },
     { ...CURRENT, cwd: 'repo/.worktrees/45' },
@@ -36,6 +37,21 @@ describe('CmuxActivePlan', () => {
     { ...CURRENT, ref: null },
     { ...CURRENT, ref: 'surface:9' },
   ])('ignores_a_malformed_or_unknown_entry %#', (entry) => {
+    expect(CmuxActivePlan.parse(entry)).toBe(null)
+  })
+
+  it('a_tab_named_after_its_issue_comes_back_as_a_plan_with_no_user_story', () => {
+    const entry = { ...CURRENT, title: 'ct-plan-jjponz__repo-pulse-issue-45' }
+
+    const watch = CmuxActivePlan.parse(entry)
+
+    expect(watch.storyText()).toBe(null)
+    expect(watch.issue.number).toBe(45)
+  })
+
+  it('a_tab_whose_tail_is_neither_a_story_key_nor_an_issue_number_is_still_ignored', () => {
+    const entry = { ...CURRENT, title: 'ct-plan-jjponz__repo-pulse-review-3' }
+
     expect(CmuxActivePlan.parse(entry)).toBe(null)
   })
 })

@@ -7,7 +7,8 @@ import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
 import { WorkspaceLocation } from '../domain/value-objects/workspace-location.js'
 
 export class CmuxActivePlan {
-  static #TITLE = /^ct-plan-(.+)-([A-Z][A-Z0-9_]*-\d+)$/
+  static #TITLE = new RegExp(`^ct-plan-(.+)-(${CmuxPlanAgents.NO_STORY_PREFIX}[1-9]\\d*|[A-Z][A-Z0-9_]*-\\d+)$`)
+  static #NO_STORY = new RegExp(`^${CmuxPlanAgents.NO_STORY_PREFIX}[1-9]\\d*$`)
   static #WORKTREE = /^(.+)\/\.worktrees\/([1-9]\d*)$/
 
   static parse(entry) {
@@ -18,14 +19,17 @@ export class CmuxActivePlan {
     if (named === null || located === null) return null
 
     const repositoryText = named[1].replace('__', '/')
-    if (!RepositoryName.isWellFormed(repositoryText) || !UserStoryKey.isWellFormed(named[2])) return null
+    if (!RepositoryName.isWellFormed(repositoryText)) return null
     const repository = new RepositoryName(repositoryText)
-    const story = new UserStoryKey(named[2])
-    if (CmuxPlanAgents.nameFor(story, repository) !== entry.title) return null
+    const tail = named[2]
+    const hasNoStory = CmuxActivePlan.#NO_STORY.test(tail)
+    if (!hasNoStory && !UserStoryKey.isWellFormed(tail)) return null
+    const story = hasNoStory ? null : new UserStoryKey(tail)
     if (!CheckoutRoot.isWellFormed(located[1])) return null
     const root = new CheckoutRoot(located[1])
     const issueNumber = Number(located[2])
     if (!Number.isInteger(issueNumber)) return null
+    if (CmuxPlanAgents.nameFor({ story, repository, issueNumber }) !== entry.title) return null
 
     return new PlanWatch({
       story,

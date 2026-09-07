@@ -8,6 +8,7 @@ import { CheckoutRegistry } from '../../src/domain/ports/checkout-registry.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { UserStory } from '../../src/domain/value-objects/user-story.js'
 import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
+import { PlanComment } from '../../src/domain/value-objects/plan-comment.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 import { CheckoutRoot } from '../../src/domain/value-objects/checkout-root.js'
@@ -54,8 +55,8 @@ class PlanIssuesDouble extends PlanIssues {
     })
   }
 
-  async open({ story, repository }) {
-    this.asked.push({ story, repository })
+  async open({ story, comment, repository }) {
+    this.asked.push({ story, comment, repository })
     if (this.answer instanceof Error) throw this.answer
     return this.answer
   }
@@ -152,6 +153,7 @@ class PlanAgentsDouble extends PlanAgents {
 
 class Flow {
   static STORY = new UserStoryKey('MO_SHOP-42')
+  static COMMENT = new PlanComment('añade un modo oscuro al panel')
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
   static ROOT = new CheckoutRoot('/repo')
 
@@ -166,10 +168,18 @@ class Flow {
     this.workspace.steps = this.steps
   }
 
-  async run(story = Flow.STORY) {
+  async run(story = Flow.STORY, comment = null) {
     return new StartPlan(this).execute(
-      new StartPlanParams({ story, repository: Flow.REPOSITORY, root: Flow.ROOT })
+      new StartPlanParams({ story, comment, repository: Flow.REPOSITORY, root: Flow.ROOT })
     )
+  }
+
+  async runWithComment() {
+    return this.run(Flow.STORY, Flow.COMMENT)
+  }
+
+  async runWithOnlyAComment() {
+    return this.run(null, Flow.COMMENT)
   }
 
   async refusal(story = Flow.STORY) {
@@ -428,5 +438,35 @@ describe('StartPlan claims the issue so no second dispatcher takes it', () => {
     await expect(new PlanIssues().requeue({
       issue: PlanIssuesDouble.OPENED, repository: Flow.REPOSITORY,
     })).rejects.toThrow(/must implement requeue/)
+  })
+})
+
+describe('StartPlan plans from a comment when there is no user story', () => {
+  it('a_plan_asked_for_with_only_a_comment_never_asks_jira_for_anything', async () => {
+    const flow = new Flow()
+
+    await flow.runWithOnlyAComment()
+
+    expect(flow.userStories.asked).toEqual([])
+    expect(flow.planIssues.asked[0]).toEqual({ story: null, comment: Flow.COMMENT, repository: Flow.REPOSITORY })
+  })
+
+  it('the_comment_reaches_the_issue_beside_the_story_when_both_were_asked_for', async () => {
+    const flow = new Flow()
+
+    await flow.runWithComment()
+
+    const [asked] = flow.planIssues.asked
+    expect(asked.comment).toBe(Flow.COMMENT)
+    expect(asked.story.key).toBe(Flow.STORY)
+  })
+
+  it('a_plan_asked_for_with_only_a_story_opens_its_issue_with_no_comment_at_all', async () => {
+    const flow = new Flow()
+
+    await flow.run()
+
+    const [asked] = flow.planIssues.asked
+    expect(asked.comment).toBe(null)
   })
 })

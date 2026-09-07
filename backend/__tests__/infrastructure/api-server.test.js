@@ -59,11 +59,20 @@ class StartPlanSpy {
   }
 
   async execute(params) {
-    this.asked.push(params.story.text)
+    this.asked.push(params.story === null ? null : params.story.text)
     this.repositories.push(params.repository.text)
     this.roots.push(params.root.text)
     if (this.failing) throw new PlanAgentNotLaunched('cmux is not reachable')
-    return new StartPlanResult({ agent: StartPlanSpy.AGENT, watch: StartPlanSpy.WATCH })
+    return new StartPlanResult({
+      agent: StartPlanSpy.AGENT,
+      watch: new PlanWatch({
+        story: params.story,
+        issue: StartPlanSpy.ISSUE,
+        located: StartPlanSpy.LOCATED,
+        repository: params.repository,
+        agent: StartPlanSpy.AGENT,
+      }),
+    })
   }
 }
 
@@ -550,13 +559,28 @@ describe('ApiServer', () => {
     )
   })
 
-  it('a_body_with_no_id_is_refused_because_there_is_nothing_to_plan_without_one', async () => {
+  it('a_body_with_neither_an_id_nor_a_comment_is_refused_because_nothing_says_what_to_plan', async () => {
     const port = await RunningApi.listening()
 
     const response = await RunningApi.startPlan(port, '{}')
 
     expect(response.status).toBe(400)
-    expect(await response.text()).toBe('{"code":"malformed-id","detail":"id must be a user story key such as ABC-123"}')
+    expect(await response.text()).toBe(
+      '{"code":"nothing-to-plan","detail":"either id or user_comment must say what to plan"}'
+    )
+  })
+
+  it('a_body_with_only_a_comment_is_accepted_with_a_null_id_because_there_is_no_user_story', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(
+      port,
+      '{"user_comment":"añade el endpoint de salud","repo":"owner/name","path":"/repo/checkout"}'
+    )
+
+    expect(response.status).toBe(202)
+    expect(await response.text()).toBe(RunningApi.ANSWER.replace('"id":"ABC-123"', '"id":null'))
+    expect(RunningApi.spy.asked).toEqual([null])
   })
 
   it('an_id_that_is_not_shaped_like_a_story_key_is_refused_before_it_ever_becomes_a_branch_name', async () => {

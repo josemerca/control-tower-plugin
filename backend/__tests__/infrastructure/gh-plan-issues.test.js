@@ -126,12 +126,12 @@ class GhDouble {
     return this.changesAskedFor(issue).catch((cause) => cause)
   }
 
-  async openFor(story = GhDouble.story()) {
-    return this.issues().open({ story, repository: GhDouble.REPOSITORY })
+  async openFor({ story = GhDouble.story(), comment = null } = {}) {
+    return this.issues().open({ story, comment, repository: GhDouble.REPOSITORY })
   }
 
-  async refusalFor(story = GhDouble.story()) {
-    return this.openFor(story).catch((cause) => cause)
+  async refusalFor({ story = GhDouble.story(), comment = null } = {}) {
+    return this.openFor({ story, comment }).catch((cause) => cause)
   }
 
   get commands() {
@@ -144,13 +144,13 @@ describe('GhPlanIssues', () => {
     const gh = GhDouble.created()
     const story = GhDouble.story()
 
-    await gh.openFor(story)
+    await gh.openFor({ story })
 
     expect(gh.calls).toEqual([[
       'issue', 'create',
       '--repo', 'josemerca/ct-loop-sandbox',
       '--title', 'MO_SHOP-42 El buscador acepta acentos',
-      '--body', PlanIssueBody.of(story),
+      '--body', PlanIssueBody.of({ story, comment: null }),
       '--label', 'gate:plan',
       '--label', 'status:ready',
     ]])

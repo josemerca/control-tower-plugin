@@ -60,12 +60,12 @@ export class ActivePlans {
     return {
       phase,
       request: {
-        id: watch.story.text,
+        id: watch.storyText(),
         repo: watch.repository.text,
         path: watch.located.root,
       },
       plan: {
-        id: watch.story.text,
+        id: watch.storyText(),
         repo: watch.repository.text,
         issue: { number: watch.issue.number, url: watch.issue.url },
         agent: watch.agent,
