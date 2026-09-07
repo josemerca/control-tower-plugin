@@ -109,4 +109,9 @@ export class ImplementProgressRoute {
       })
     }
   }
+
+  static refuseOtherMethods(request, response) {
+    response.setHeader('Allow', ImplementProgressRoute.METHOD)
+    Answer.refuse(response, 405, 'method-not-allowed', 'method not allowed')
+  }
 }

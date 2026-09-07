@@ -196,6 +196,20 @@ describe('ImplementProgressRoute', () => {
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ code: 'request-failed', detail: 'request failed' })
   })
+
+  it('a_verb_this_route_does_not_serve_is_refused_naming_the_one_it_does', async () => {
+    const running = await RunningApi.listening()
+
+    const response = await fetch(
+      `http://127.0.0.1:${running.port}${RunningApi.PATH}?root=${encodeURIComponent(RunningApi.ROOT)}`,
+      { method: 'POST' },
+    )
+
+    expect(response.status).toBe(405)
+    expect(response.headers.get('Allow')).toBe('GET')
+    expect(await response.json()).toEqual({ code: 'method-not-allowed', detail: 'method not allowed' })
+    expect(running.spy.asked).toEqual([])
+  })
 })
 
 describe('ProgressRefusal', () => {

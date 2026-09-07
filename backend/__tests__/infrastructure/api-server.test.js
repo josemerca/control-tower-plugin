@@ -798,6 +798,19 @@ describe('ApiServer', () => {
     }
   })
 
+  it('a_verb_the_plan_events_stream_does_not_serve_is_refused_naming_the_one_it_does', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await fetch(
+      `http://127.0.0.1:${port}/plan-events/7?repo=${encodeURIComponent(RunningApi.REPO)}`,
+      { method: 'POST' },
+    )
+
+    expect(response.status).toBe(405)
+    expect(response.headers.get('Allow')).toBe('GET')
+    expect(await response.json()).toEqual({ code: 'method-not-allowed', detail: 'method not allowed' })
+  })
+
   it('a_plan_events_request_for_an_issue_nobody_started_is_a_400_instead_of_an_open_stream', async () => {
     const { planEvents } = ProgressSpy.events(PlanState.READY)
     const port = await RunningApi.listening({ planEvents })

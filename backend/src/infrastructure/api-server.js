@@ -88,6 +88,7 @@ export class ApiServer {
       Browsers.turnAwayForeign,
       PlanEventsRoute.handledBy(this.sessions, this.planEvents)
     )
+    app.all(PlanEventsRoute.PATH, PlanEventsRoute.refuseOtherMethods)
     app.get(
       ActivePlansRoute.PATH,
       Browsers.turnAwayForeign,
@@ -99,6 +100,7 @@ export class ApiServer {
       Browsers.turnAwayForeign,
       ImplementProgressRoute.handledBy(this.implementProgress)
     )
+    app.all(ImplementProgressRoute.PATH, ImplementProgressRoute.refuseOtherMethods)
     app.use(Failures.nothingMatched)
     app.use(Failures.answer)
 
