@@ -525,13 +525,15 @@ Una por una, y ninguna es un número suelto:
 - `agents/ct-reconciler.md:46`: "the five documents of the plugin's `conventions/`" → "the documents of the plugin's `conventions/`".
 - `writing-plans-prescriptive/SKILL.md:59` y `:248`: igual, y en `:248` revisar además la frase que dice que §3 nombra los tres primeros por ruta, que con el orden nuevo ya no describe nada.
 
-- [ ] **Step 4: Renombrar el `it` que dice cinco**
+- [ ] **Step 4: Renombrar los dos `it` que cuentan documentos en `ct-step-vara-y-telemetria.test.js`**
 
-En `ct-step-vara-y-telemetria.test.js:198`, el test itera `PluginYardstick.FILES` y por tanto ya cubre ocho; sólo su nombre miente:
+El de `:198` itera `PluginYardstick.FILES` y por tanto ya cubre ocho; sólo su nombre miente:
 
 ```js
 it('el brief termina con los documentos de la vara, DETRÁS de la tarea', () => {
 ```
+
+Y el de `:238` —**reasignado aquí desde la revisión de la Tarea 2**— dice "los otros cuatro" y su bucle enumera cuatro documentos cuando ya viajan más. Es una comprobación de subconjunto, así que sigue verde mientras miente: renómbralo y haz que su lista salga de `PluginYardstick.FILES` menos los que la tarea no alcanza, en vez de estar escrita a mano. Un nombre que lleva la cuenta volverá a mentir en el octavo documento, así que el nombre nuevo no la lleva.
 
 - [ ] **Step 5: Correr los tests y verlos pasar**
 
