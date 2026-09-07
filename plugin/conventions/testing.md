@@ -82,6 +82,71 @@ Whoever writes the assertion runs it. Whoever judges the diff has nothing to run
 with, so applies this by reading: ask whether that assertion could fail for the
 reason its name gives, and if it could not, that is the finding.
 
+## Three rules, and everything below follows from them
+
+1. **A use case is a black box.** Its ports are doubled at construction,
+   and the assertion is on what each port received and what it returned.
+   The domain has no tests of its own: every value object and policy is
+   reached through the use case that carries it.
+2. **An adapter is tested by cutting right before the external system.**
+   The one exception is an adapter that *is* the call — a database
+   repository, where once the external system is doubled there is nothing
+   left to assert. That one runs the real thing, and is the only one that
+   does.
+3. **Integration from the edge covers the happy path, and only that.** One
+   whole request reaches the first real collaborator; every refusal,
+   collision and cut is measured at the layer that owns it, or not at all.
+
+## How each layer is tested
+
+| Layer | Doubled | The assertion is on |
+|---|---|---|
+| Controller | the use case, by construction | the status and the literal body of the answer, through a real server that is listening and a real client — never calling the handler as a function |
+| Application | every port, by construction | what each port received and what the use case returned; the order is pinned by cut points |
+| Domain | — | nothing |
+| Adapters | the external system, as a scripted conversation | the literal request sent, and the parse of literal recorded output |
+| Edge payloads | nothing | fed to the real reader on the other side, when it lives in this repository |
+
+- **A refusal never reaches a double**: every controller test of a refused
+  request also asserts that the use case was not asked.
+- **Both failure causes of every adapter are told apart in its tests**: the
+  external system refusing, and the external system answering something
+  unreadable — the test proves one is not an instance of the other.
+
+## The mutation sweep
+
+After each round, mutate the production code **one change at a time**, run
+the whole suite, and hunt **the mutations that leave it green**: each one
+is a line no test is watching.
+
+The discipline, learned from its own false negatives:
+
+- A substitution that does not take must fail loudly;
+  a silent miss is a green that measured nothing.
+- The tree is committed clean before a mutation is introduced by hand,
+  and the file is restored and verified identical afterwards — a sweep
+  stopped half-way must never leave a mutation glued to the tree.
+- A mutation that hangs the suite instead of failing it is its own
+  finding: something kept running without ever reaching the assertion
+  that would have caught it.
+
+A surviving mutation has two possible repairs, not one:
+**the test nobody wrote, or the line nobody needs.** Deciding between them
+is what this sweep is for.
+
+## What stays unmeasured, on purpose
+
+The values a policy carries — a wait, a retry count, a limit — are policy,
+not mechanism: the mutation sweep measures the mechanism, and the numbers
+are a decision recorded once, not its target.
+
+An assertion that can only fail if the language itself breaks is not
+written: it would test the platform underneath this program, not the
+program.
+
+What is left out is declared here, with its reason, so nobody spends a
+round chasing a mutation that was never going to die.
+
 ## Antipatterns
 
 - A test named after the method it calls.
@@ -95,3 +160,7 @@ reason its name gives, and if it could not, that is the finding.
 - A test of the domain reachable from the application layer.
 - A test that launches a real subprocess without its marker.
 - An assertion that stays green once the one thing it names has been broken by hand.
+- An integration test that measures a refusal.
+- An adapter whose two failure causes are not told apart in its tests.
+- A round delivered with no mutation sweep behind it.
+- A surviving mutation left with neither of its two repairs chosen.

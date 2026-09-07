@@ -194,6 +194,41 @@ describe('testing.md separates "seen to fail for its reason" from the cycle\'s r
   }
 })
 
+describe('testing.md pins how each layer is measured, and hunts what no test watches', () => {
+  const AFIRMACIONES = {
+    'el caso de uso es una caja negra y el dominio no tiene tests propios':
+      () => expect(Documento.texto('testing.md')).toContain('A use case is a black box'),
+    'el adaptador se corta justo antes del sistema externo':
+      () => expect(Documento.texto('testing.md')).toContain('cutting right before the external system'),
+    'declara la excepcion del adaptador que ES la llamada':
+      () => expect(Documento.texto('testing.md')).toContain('an adapter that *is* the call'),
+    'la integracion desde el borde cubre solo el camino feliz':
+      () => expect(Documento.texto('testing.md')).toContain('covers the happy path, and only that'),
+    'el controlador se mide por un servidor de verdad, no llamando al handler':
+      () => expect(Documento.texto('testing.md')).toContain('never calling the handler as a function'),
+    'un rechazo nunca llega a un doble':
+      () => expect(Documento.texto('testing.md')).toContain('A refusal never reaches a double'),
+    'las dos causas de fallo de un adaptador se distinguen en sus tests':
+      () => expect(Documento.texto('testing.md')).toContain('proves one is not an instance of the other'),
+    'exige la barrida de mutacion y dice que caza la linea que nadie mira':
+      () => expect(Documento.texto('testing.md')).toContain('hunt **the mutations that leave it green**'),
+    'lleva la disciplina del harness: una sustitucion que no encaja falla ruidosa':
+      () => expect(Documento.texto('testing.md')).toContain('a silent miss is a green that measured nothing'),
+    'lleva la disciplina del harness: el fichero se restaura y se verifica':
+      () => expect(Documento.texto('testing.md')).toContain('restored and verified identical afterwards'),
+    'da las dos reparaciones posibles de una mutacion que sobrevive':
+      () => expect(Documento.texto('testing.md')).toContain('the test nobody wrote, or the line nobody needs'),
+    'obliga a declarar lo que se deja sin medir, con su motivo':
+      () => expect(Documento.texto('testing.md')).toContain('What stays unmeasured, on purpose'),
+  }
+
+  for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
+    it(`testing.md ${afirmacion}`, () => {
+      comprobar()
+    })
+  }
+})
+
 describe('simplicity.md carries the burden of proof, and says where it ends', () => {
   const AFIRMACIONES = {
     'declara la regla única, y que se descarga contra el problema de hoy':
