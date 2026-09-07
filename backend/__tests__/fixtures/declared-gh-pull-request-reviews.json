@@ -2,11 +2,13 @@
   "reviews": [
     { "id": 101, "state": "CHANGES_REQUESTED", "body": "varias cosas que arreglar" },
     { "id": 102, "state": "COMMENTED", "body": "" },
-    { "id": 103, "state": "APPROVED", "body": "por mi parte bien" }
+    { "id": 103, "state": "APPROVED", "body": "por mi parte bien" },
+    { "id": 104, "state": "CHANGES_REQUESTED", "body": "" }
   ],
   "comments": [
     { "body": "revienta con []", "path": "src/foo.js", "line": 42, "pull_request_review_id": 101 },
     { "body": "esto sobra", "path": "src/bar.js", "line": 17, "pull_request_review_id": 101 },
-    { "body": "esta linea sobra", "path": "src/baz.js", "line": 9, "pull_request_review_id": 102 }
+    { "body": "esta linea sobra", "path": "src/baz.js", "line": 9, "pull_request_review_id": 102 },
+    { "body": "y esto no se distingue", "path": "src/qux.js", "line": 3, "pull_request_review_id": 104 }
   ]
 }

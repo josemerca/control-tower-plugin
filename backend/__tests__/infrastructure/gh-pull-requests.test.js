@@ -184,6 +184,27 @@ describe('GhPullRequests', () => {
     expect(asked).toEqual([new ChangeAsked({ id: '102', text: 'src/foo.js:9: esta linea sobra' })])
   })
 
+  it('a_lone_comment_that_carries_the_state_of_the_review_before_it_is_a_change_all_the_same', async () => {
+    const gh = new GhDouble([
+      new ProcessOutput({
+        code: 0,
+        stdout: JSON.stringify([[{ id: 104, state: 'CHANGES_REQUESTED', body: '' }]]),
+        stderr: '',
+      }),
+      new ProcessOutput({
+        code: 0,
+        stdout: JSON.stringify([[
+          { body: 'y esto no se distingue', path: 'src/qux.js', line: 3, pull_request_review_id: 104 },
+        ]]),
+        stderr: '',
+      }),
+    ])
+
+    const asked = await gh.fixesAsked()
+
+    expect(asked).toEqual([new ChangeAsked({ id: '104', text: 'src/qux.js:3: y esto no se distingue' })])
+  })
+
   it('a_comment_with_no_line_is_anchored_to_its_file_alone', async () => {
     const gh = new GhDouble([
       new ProcessOutput({
@@ -282,7 +303,7 @@ describe('GhPullRequests', () => {
     expect(refusal).toBeInstanceOf(PullRequestNotUnderstood)
   })
 
-  it('the_shape_declared_by_this_fixture_flattens_the_body_and_the_two_reviews_it_carries_comments_for', async () => {
+  it('the_shape_declared_by_this_fixture_flattens_the_body_and_the_three_reviews_that_ask_for_a_change', async () => {
     const asked = await GhDouble.declaring().fixesAsked()
 
     expect(asked).toEqual([
@@ -291,6 +312,7 @@ describe('GhPullRequests', () => {
         text: 'varias cosas que arreglar\nsrc/foo.js:42: revienta con []\nsrc/bar.js:17: esto sobra',
       }),
       new ChangeAsked({ id: '102', text: 'src/baz.js:9: esta linea sobra' }),
+      new ChangeAsked({ id: '104', text: 'src/qux.js:3: y esto no se distingue' }),
     ])
   })
 })
