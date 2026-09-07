@@ -288,6 +288,27 @@ describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
   })
 })
 
+// Tarea 8: el juez de slice mide estado final, coherencia y señal — no
+// código regla a regla —, así que de la vara entera sólo le toca la que
+// mide precisamente eso: `simplicity.md` (la carga de la prueba está en lo
+// que se añade), la vara de su ítem `observabilidad`. Una sola ruta, no el
+// documento pegado: `## Vara` va PRIMERA, delante incluso de `## Señal`,
+// por el mismo motivo que `## Señal` va delante del diff -U10.
+describe('el paquete de slice trae la ruta de simplicity.md, no el documento entero', () => {
+  it('la sección "## Vara" es la primera del paquete y trae la ruta absoluta de simplicity.md', () => {
+    tareaOk('uno.txt')
+    tareaOk('dos.txt')
+    ct('reconcile')
+    ct('global')
+    ct('next')
+    const paquete = readFileSync(join(repo, '.agent', 'run-7', 'slice-review.diff'), 'utf8')
+    expect(paquete).toMatch(/## Vara/)
+    expect(paquete.indexOf('## Vara')).toBeLessThan(paquete.indexOf('## Señal'))
+    const ruta = join(PLUGIN_ROOT_TEST, PluginYardstick.DIRECTORY, 'simplicity.md')
+    expect(paquete).toContain(ruta)
+  })
+})
+
 // H7a (#92): la telemetría anotaba `brief_bytes` del paso `implement` y nada
 // más. El tamaño del agente despachado, el de las skills que su prompt le manda
 // cargar y el del paquete que recibe no se medían, así que el ahorro de

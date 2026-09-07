@@ -535,12 +535,18 @@ describe('el juez de slice (§3.7-B)', () => {
     expect(texto).toMatch(/There is no `review_token` for you to write/)
   })
 
-  it('SLICE_PACKAGE_SECTIONS abre con Señal y no puede divergir de la rúbrica', () => {
+  it('SLICE_PACKAGE_SECTIONS abre con Vara y no puede divergir de la rúbrica', () => {
     expect(SLICE_PACKAGE_SECTIONS).toEqual(seccionesDelPaqueteDeSlice())
-    // Slice 10: `Señal` PRIMERA, porque es la vara del ítem `observabilidad`
-    // — detrás del diff -U10 quedaría enterrada. La atadura de arriba obliga
-    // a que paquete y agente cambien en la MISMA tarea.
-    expect(SLICE_PACKAGE_SECTIONS).toEqual(['Señal', 'Commits', 'Files changed', 'Diff'])
+    // Tarea 8: `Vara` PRIMERA, delante incluso de `Señal`, por el mismo
+    // motivo que `Señal` iba delante del diff -U10: enterrada detrás no la
+    // lee nadie. La atadura de arriba obliga a que paquete y agente cambien
+    // en la MISMA tarea.
+    expect(SLICE_PACKAGE_SECTIONS).toEqual(['Vara', 'Señal', 'Commits', 'Files changed', 'Diff'])
+  })
+
+  it('el paquete del juez de slice abre con la ruta de simplicity.md, que es la vara de su ítem observabilidad', () => {
+    expect(SLICE_PACKAGE_SECTIONS[0]).toBe('Vara')
+    expect(SLICE_PACKAGE_SECTIONS).toEqual(['Vara', 'Señal', 'Commits', 'Files changed', 'Diff'])
   })
 
   it('el esquema del recorrido de slice no duplica los identificadores: los toma de SLICE_VERDICT_RULES', () => {

@@ -18,7 +18,13 @@ agent, and not you.
 
 ## What you are given
 
-- **The slice review package.** `## Señal` is the observability signal this
+- **The slice review package.** `## Vara` is the one path this judge is given
+  from the yardstick that travels with this plugin: the absolute path to
+  `simplicity.md`, open it with `Read`. It travels alone, not the whole
+  yardstick, because this judge measures the end state, the coherence
+  between tasks and the declared signal — not code quality rule by rule —
+  and it is exactly the rule your `observabilidad` item measures against.
+  `## Señal` is the observability signal this
   slice's issue declared, pasted by the program from the dispatch state — no
   agent wrote it; `## Commits` lists every commit of this slice, oldest first,
   one line each; `## Files changed` is `git diff --stat` between the base of
@@ -105,7 +111,9 @@ commit.
 observability signal this slice's issue declared, pasted by the program
 from the dispatch state with no agent in the middle — against the
 accumulated `## Diff`, and against the repository itself for how this
-repo already instruments.
+repo already instruments. The yardstick for this question is the `## Vara`
+section: it names one path, `simplicity.md` — open it with `Read`, and cite
+it in a finding the same way you would cite any other document.
 
 **What settles it:** three checks, and only these three — and then one
 smell, after them, that settles nothing and never blocks.
