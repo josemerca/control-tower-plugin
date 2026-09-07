@@ -5,7 +5,7 @@ import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-location.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
-import { PlanChangesNotRead, PlanAgentNotResumed } from '../../src/domain/exceptions.js'
+import { PlanChangesNotRead, PlanAgentNotResumed, SliceNotReopened } from '../../src/domain/exceptions.js'
 
 class WatchDouble {
   static LABEL = 'plan review watch'
@@ -346,5 +346,63 @@ describe('ReviewWatch telling two plans apart', () => {
 
     expect(two.sounded).toEqual([])
     expect(two.reviews.live.size).toBe(0)
+  })
+})
+
+describe('ReviewWatch delivering while the gate can close underneath it', () => {
+  class GateContention {
+    constructor() {
+      this.busy = false
+      this.tick = 0
+      this.reviewed = []
+      this.warnings = []
+      this.watch = null
+    }
+
+    static racing() {
+      return new GateContention()
+    }
+
+    #asked() {
+      this.tick += 1
+      if (this.tick === 1) {
+        return Promise.resolve({ changes: [WatchDouble.A_CHANGE, WatchDouble.ANOTHER_CHANGE] })
+      }
+      if (this.tick === 2) {
+        this.busy = false
+        return Promise.resolve({ changes: [WatchDouble.ANOTHER_CHANGE] })
+      }
+      this.watch.stop(WatchDouble.STOPPING)
+      return Promise.resolve({ changes: [] })
+    }
+
+    #review() {
+      if (this.busy) return Promise.reject(new SliceNotReopened('sigue en status:in-progress'))
+      this.busy = true
+      this.reviewed.push('delivered')
+
+      return Promise.resolve()
+    }
+
+    async run() {
+      this.watch = new ReviewWatch({
+        asked: () => this.#asked(),
+        review: () => this.#review(),
+        sleep: () => Promise.resolve(),
+        stderr: (line) => this.warnings.push(line),
+        label: WatchDouble.LABEL,
+      })
+
+      return this.watch.start(WatchDouble.SUBJECT)
+    }
+  }
+
+  it('two_changes_read_in_the_same_tick_are_delivered_one_at_a_time_so_the_gate_closing_after_the_first_does_not_lose_the_second', async () => {
+    const race = GateContention.racing()
+
+    await race.run()
+
+    expect(race.reviewed).toHaveLength(2)
+    expect(race.warnings).toEqual([])
   })
 })

@@ -40,12 +40,11 @@ export class ReviewWatch {
   async #attend(watch, key, attended) {
     const read = await this.#sound(watch)
     if (read === null) return
-    for (const change of read.changes) {
-      if (!this.live.has(key)) return
-      if (attended.has(change.id)) continue
-      attended.add(change.id)
-      await this.#deliver(watch, change)
-    }
+    const change = read.changes.find((candidate) => !attended.has(candidate.id))
+    if (change === undefined) return
+    if (!this.live.has(key)) return
+    attended.add(change.id)
+    await this.#deliver(watch, change)
   }
 
   async #sound(watch) {
