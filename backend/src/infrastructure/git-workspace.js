@@ -1,6 +1,7 @@
 import { isAbsolute } from 'node:path'
 import { SLICE_REL_PATH, excludeContentWith } from '../../../plugin/scripts/state-paths.js'
 import { renderState } from '../../../plugin/scripts/state.js'
+import { BaselineOutcome, BaselineResult } from '../../../plugin/scripts/baseline.js'
 import { GhPlanIssues } from './gh-plan-issues.js'
 import { Workspace } from '../domain/ports/workspace.js'
 import { CheckoutRoot } from '../domain/value-objects/checkout-root.js'
@@ -22,10 +23,12 @@ export class SliceSeed {
     'Ojo: la sección "## Gates" del issue describe el carril de /ct-next y aquí no aplica.'
   static EXCLUDE_PATH = 'info/exclude'
   static EXCLUDE_RULE = SliceSeed.RELATIVE_PATH
+  static NOT_MEASURED = BaselineResult.notMeasured('nobody ran the baseline while sowing this seed')
 
-  static textFor({ issue, branch, base, cut }) {
+  static textFor({ issue, branch, base, cut, baseline = SliceSeed.NOT_MEASURED }) {
     return renderState({
       meta: {
+        baseline: baseline.seedField,
         task: `escribir el plan del issue #${issue.number}`,
         role: 'slice-agent: escribes el plan de este slice contra el código real y PARAS. No implementas nada.',
         status: 'in_progress',
@@ -96,12 +99,13 @@ export class GitWorkspace extends Workspace {
   static #DECLARED = /^refs\/remotes\/origin\/(.+)$/
   static #NAMED = /^(?:git@github\.com:|https:\/\/github\.com\/)([^/]+\/[^/]+?)(?:\.git)?$/
 
-  constructor({ run, write, read, stderr }) {
+  constructor({ run, write, read, stderr, baseline }) {
     super()
     this.run = run
     this.write = write
     this.read = read
     this.stderr = stderr
+    this.baseline = baseline
   }
 
   static branchFor(issue) {
@@ -272,11 +276,25 @@ export class GitWorkspace extends Workspace {
   async #seed(located, issue, base) {
     await this.#exclude(located)
     const cut = await this.#cutOf(located)
+    const baseline = await this.#baselineOf(located)
     await this.write(
       `${located.path}/${SliceSeed.RELATIVE_PATH}`,
-      SliceSeed.textFor({ issue, branch: located.branch, base, cut })
+      SliceSeed.textFor({ issue, branch: located.branch, base, cut, baseline })
     )
     await this.#verifyHidden(located)
+  }
+
+  async #baselineOf(located) {
+    const measured = await this.baseline.measure(located.path)
+    if (measured.outcome !== BaselineOutcome.GREEN) {
+      this.stderr(
+        `git workspace: the baseline of ${located.path} is ${measured.outcome}: ${measured.summary}. ` +
+        `It is sown into ${SliceSeed.RELATIVE_PATH} as it stands, and the session starts anyway: ` +
+        'whether to work on a baseline that is not green is a decision for a person.\n'
+      )
+    }
+
+    return measured
   }
 
   async #exclude(located) {
