@@ -26,6 +26,7 @@ export const PlanRequestOutcome = Object.freeze({
   MALFORMED_REPO: 'malformed-repo',
   MALFORMED_PATH: 'malformed-path',
   REPO_LISTED_TWICE: 'repo-listed-twice',
+  NO_PLAN_STARTED: 'no-plan-started',
 })
 
 export class PlanRequest {
@@ -210,6 +211,11 @@ export class PlanRefusal {
       code: PlanRequestOutcome.REPO_LISTED_TWICE,
       detail: `${PlanRequest.REPO_LIST_FIELD} names ${asked.named} twice`,
     })],
+    [PlanRequestOutcome.NO_PLAN_STARTED, () => new Refusal({
+      status: 400,
+      code: PlanRequestOutcome.NO_PLAN_STARTED,
+      detail: `no plan started: every repository of ${PlanRequest.REPO_LIST_FIELD} failed`,
+    })],
     [PlanRequestOutcome.UNKNOWN_FIELD, (asked) => new Refusal({
       status: 400,
       code: PlanRequestOutcome.UNKNOWN_FIELD,
@@ -314,6 +320,12 @@ export class StartPlanRoute {
       const collapse = PlanCollapse.of(notStarted.cause)
       return { [PlanRequest.REPO_FIELD]: notStarted.repository.text, code: collapse.code, detail: collapse.detail }
     })
+
+    if (started.length === 0) {
+      const refusal = PlanRefusal.of(PlanRequest.refused(PlanRequestOutcome.NO_PLAN_STARTED))
+      Answer.send(response, 400, { code: refusal.code, detail: refusal.detail, failed })
+      return
+    }
 
     Answer.send(response, 202, { status: 'started', started, failed })
   }

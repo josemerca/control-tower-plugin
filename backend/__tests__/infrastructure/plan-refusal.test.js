@@ -28,7 +28,7 @@ describe('PlanRefusal', () => {
     expect(refusal.detail).toBe('unknown field: b, a')
   })
 
-  it('the_three_refusals_a_repo_list_can_earn_carry_the_literal_words_the_decision_closed', () => {
+  it('the_four_refusals_a_repo_list_can_earn_carry_the_literal_words_the_decision_closed', () => {
     const targetSaidTwice = PlanRefusal.of(PlanRequest.refused(PlanRequestOutcome.TARGET_SAID_TWICE))
     expect(targetSaidTwice.code).toBe('target-said-twice')
     expect(targetSaidTwice.detail).toBe(
@@ -42,6 +42,10 @@ describe('PlanRefusal', () => {
     const listedTwice = PlanRefusal.of(PlanRequest.refused(PlanRequestOutcome.REPO_LISTED_TWICE, 'owner/name'))
     expect(listedTwice.code).toBe('repo-listed-twice')
     expect(listedTwice.detail).toBe('repo_list names owner/name twice')
+
+    const noPlanStarted = PlanRefusal.of(PlanRequest.refused(PlanRequestOutcome.NO_PLAN_STARTED))
+    expect(noPlanStarted.code).toBe('no-plan-started')
+    expect(noPlanStarted.detail).toBe('no plan started: every repository of repo_list failed')
   })
 })
 
