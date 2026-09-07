@@ -2,8 +2,9 @@ import { FormEvent, useRef, useState } from 'react'
 import { StartPlanClient } from 'app/start-plan/client'
 import { LocalPath } from 'app/start-plan/LocalPath'
 import { RepositoryName } from 'app/start-plan/RepositoryName'
-import { StartPlanOutcome, StartedPlan, StartPlanRequest } from 'app/start-plan/StartPlan.types'
+import { StartPlanOutcome, StartedPlan, StartPlanRequest, StartPlanSubmission } from 'app/start-plan/StartPlan.types'
 import { TicketKey } from 'app/start-plan/TicketKey'
+import { UserComment } from 'app/start-plan/UserComment'
 import { Banner } from 'system-ui/banner'
 import { Button } from 'system-ui/button'
 import { FormField } from 'system-ui/form-field'
@@ -22,14 +23,20 @@ type StartPlanFormProps = {
 
 const StartPlanForm = ({ onStarted, onBackendUnreachable, onInteraction, isLocked, request }: StartPlanFormProps) => {
   const [ticketKey, setTicketKey] = useState('')
+  const [userComment, setUserComment] = useState('')
   const [repository, setRepository] = useState('')
   const [path, setPath] = useState('')
   const [isSending, setIsSending] = useState(false)
   const isSendingRef = useRef(false)
   const [refusal, setRefusal] = useState<StartPlanRefusal | null>(null)
 
+  const hasWellFormedTicket = TicketKey.isWellFormed(ticketKey)
+  const ticketBlocksStart = ticketKey !== '' && !hasWellFormedTicket
+  const hasSomethingToPlan = hasWellFormedTicket || UserComment.isWellFormed(userComment)
+
   const canStart =
-    TicketKey.isWellFormed(ticketKey) &&
+    !ticketBlocksStart &&
+    hasSomethingToPlan &&
     RepositoryName.isWellFormed(repository) &&
     LocalPath.isWellFormed(path) &&
     !isSending &&
@@ -42,8 +49,14 @@ const StartPlanForm = ({ onStarted, onBackendUnreachable, onInteraction, isLocke
     isSendingRef.current = true
     setIsSending(true)
     setRefusal(null)
-    const submitted = { id: ticketKey, repo: repository, path: LocalPath.normalize(path) }
-    const outcome = await StartPlanClient.start(submitted)
+    const submission: StartPlanSubmission = {
+      id: hasWellFormedTicket ? ticketKey : null,
+      userComment: UserComment.isWellFormed(userComment) ? UserComment.normalize(userComment) : null,
+      repo: repository,
+      path: LocalPath.normalize(path),
+    }
+    const submitted: StartPlanRequest = { id: submission.id, repo: submission.repo, path: submission.path }
+    const outcome = await StartPlanClient.start(submission)
     isSendingRef.current = false
     setIsSending(false)
     if (outcome.kind === 'started') {
@@ -55,12 +68,23 @@ const StartPlanForm = ({ onStarted, onBackendUnreachable, onInteraction, isLocke
   }
 
   if (isLocked) {
+    const shownTicket = request?.id ?? (ticketKey !== '' ? ticketKey : null)
+    const shownComment = userComment.trim() !== '' ? userComment : null
+
     return (
       <dl className="start-plan-form__summary">
-        <div>
-          <dt>Ticket</dt>
-          <dd>{request?.id ?? ticketKey}</dd>
-        </div>
+        {shownTicket !== null && (
+          <div>
+            <dt>Ticket</dt>
+            <dd>{shownTicket}</dd>
+          </div>
+        )}
+        {shownComment !== null && (
+          <div>
+            <dt>Comentario</dt>
+            <dd>{shownComment}</dd>
+          </div>
+        )}
         <div>
           <dt>Repositorio</dt>
           <dd><code>{request?.repo ?? repository}</code></dd>
@@ -75,7 +99,10 @@ const StartPlanForm = ({ onStarted, onBackendUnreachable, onInteraction, isLocke
 
   return (
     <form className="start-plan-form" onSubmit={startPlan}>
-      <FormField label="Clave del ticket" message={`Con la forma ${TicketKey.EXAMPLE}`}>
+      <FormField
+        label="Clave del ticket"
+        message={`Con la forma ${TicketKey.EXAMPLE}. Déjalo vacío si escribes un comentario`}
+      >
         <Input
           placeholder={TicketKey.EXAMPLE}
           value={ticketKey}
@@ -84,6 +111,18 @@ const StartPlanForm = ({ onStarted, onBackendUnreachable, onInteraction, isLocke
           onChange={(event) => {
             onInteraction()
             setTicketKey(event.target.value)
+          }}
+        />
+      </FormField>
+      <FormField label="Comentario" message="Qué hay que planificar. Déjalo vacío si das un ticket">
+        <Input
+          placeholder="Qué hay que planificar"
+          value={userComment}
+          disabled={isSending || isLocked}
+          autoComplete="off"
+          onChange={(event) => {
+            onInteraction()
+            setUserComment(event.target.value)
           }}
         />
       </FormField>
