@@ -59,11 +59,20 @@ class StartPlanSpy {
   }
 
   async execute(params) {
-    this.asked.push(params.story.text)
+    this.asked.push(params.story === null ? null : params.story.text)
     this.repositories.push(params.repository.text)
     this.roots.push(params.root.text)
     if (this.failing) throw new PlanAgentNotLaunched('cmux is not reachable')
-    return new StartPlanResult({ agent: StartPlanSpy.AGENT, watch: StartPlanSpy.WATCH })
+    return new StartPlanResult({
+      agent: StartPlanSpy.AGENT,
+      watch: new PlanWatch({
+        story: params.story,
+        issue: StartPlanSpy.ISSUE,
+        located: StartPlanSpy.LOCATED,
+        repository: params.repository,
+        agent: StartPlanSpy.AGENT,
+      }),
+    })
   }
 }
 

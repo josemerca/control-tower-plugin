@@ -186,7 +186,7 @@ export class StartPlanRoute {
     reviews.start(started.watch)
     Answer.send(response, 202, {
       status: 'started',
-      [PlanRequest.ID_FIELD]: asked.story.text,
+      [PlanRequest.ID_FIELD]: started.watch.storyText(),
       [PlanRequest.REPO_FIELD]: asked.repository.text,
       issue: { number: started.watch.issue.number, url: started.watch.issue.url },
       agent: started.agent,

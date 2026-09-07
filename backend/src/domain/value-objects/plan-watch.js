@@ -7,4 +7,8 @@ export class PlanWatch {
     this.agent = agent
     Object.freeze(this)
   }
+
+  storyText() {
+    return this.story === null ? null : this.story.text
+  }
 }
