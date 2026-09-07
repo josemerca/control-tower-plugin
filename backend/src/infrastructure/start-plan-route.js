@@ -34,13 +34,14 @@ export class PlanRequest {
     PlanRequest.ID_FIELD, PlanRequest.COMMENT_FIELD, PlanRequest.REPO_FIELD, PlanRequest.PATH_FIELD,
   ])
 
-  constructor({ outcome, story, comment, repository, root, fields }) {
+  constructor({ outcome, story, comment, repository, root, fields, named = null }) {
     this.outcome = outcome
     this.story = story
     this.comment = comment
     this.repository = repository
     this.root = root
     this.fields = Object.freeze([...fields])
+    this.named = named
     Object.freeze(this)
   }
 
@@ -48,8 +49,10 @@ export class PlanRequest {
     return new PlanRequest({ outcome: PlanRequestOutcome.ACCEPTED, story, comment, repository, root, fields: [] })
   }
 
-  static refused(outcome) {
-    return new PlanRequest({ outcome, story: null, comment: null, repository: null, root: null, fields: [] })
+  static refused(outcome, named = null) {
+    return new PlanRequest({
+      outcome, story: null, comment: null, repository: null, root: null, fields: [], named,
+    })
   }
 
   static withUnknownFields(fields) {
@@ -87,11 +90,11 @@ export class PlanRequest {
     }
     const asked = parsed[PlanRequest.REPO_FIELD]
     if (!RepositoryName.isWellFormed(asked)) {
-      return PlanRequest.refused(PlanRequestOutcome.MALFORMED_REPO)
+      return PlanRequest.refused(PlanRequestOutcome.MALFORMED_REPO, PlanRequest.REPO_FIELD)
     }
     const where = parsed[PlanRequest.PATH_FIELD]
     if (!CheckoutRoot.isWellFormed(where)) {
-      return PlanRequest.refused(PlanRequestOutcome.MALFORMED_PATH)
+      return PlanRequest.refused(PlanRequestOutcome.MALFORMED_PATH, PlanRequest.PATH_FIELD)
     }
     return PlanRequest.accepted(
       idGiven ? new UserStoryKey(given) : null,
@@ -124,15 +127,15 @@ export class PlanRefusal {
       code: PlanRequestOutcome.NOTHING_TO_PLAN,
       detail: `either ${PlanRequest.ID_FIELD} or ${PlanRequest.COMMENT_FIELD} must say what to plan`,
     })],
-    [PlanRequestOutcome.MALFORMED_REPO, () => new Refusal({
+    [PlanRequestOutcome.MALFORMED_REPO, (asked) => new Refusal({
       status: 400,
       code: PlanRequestOutcome.MALFORMED_REPO,
-      detail: `${PlanRequest.REPO_FIELD} must be a repository such as ${RepositoryName.EXAMPLE}`,
+      detail: `${asked.named} must be a repository such as ${RepositoryName.EXAMPLE}`,
     })],
-    [PlanRequestOutcome.MALFORMED_PATH, () => new Refusal({
+    [PlanRequestOutcome.MALFORMED_PATH, (asked) => new Refusal({
       status: 400,
       code: PlanRequestOutcome.MALFORMED_PATH,
-      detail: `${PlanRequest.PATH_FIELD} must be an absolute path`,
+      detail: `${asked.named} must be an absolute path`,
     })],
     [PlanRequestOutcome.UNKNOWN_FIELD, (asked) => new Refusal({
       status: 400,

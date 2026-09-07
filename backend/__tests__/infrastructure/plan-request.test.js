@@ -137,4 +137,10 @@ describe('PlanRequest', () => {
     expect(accepted.comment).toBeInstanceOf(PlanComment)
     expect(accepted.comment.text).toBe('añade el endpoint de salud')
   })
+
+  it('the_refusal_about_a_field_carries_the_name_of_the_field_it_is_about', () => {
+    expect(PlanRequest.from('{"id":"ABC-1"}').named).toBe('repo')
+    expect(PlanRequest.from('{"id":"ABC-1","repo":"owner/name"}').named).toBe('path')
+    expect(PlanRequest.from('{"repo":"owner/name","path":"/repo/checkout"}').named).toBeNull()
+  })
 })
