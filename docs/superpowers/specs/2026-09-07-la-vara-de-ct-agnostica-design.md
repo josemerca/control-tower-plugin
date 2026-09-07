@@ -377,11 +377,11 @@ Dos de ellos no son un número que cambiar:
   columna, así que el cambio es de lectura y no de cálculo.
 - **`ct-step.mjs:1459` refuerza su propio argumento.** Ahí está escrito por qué
   el reconciliador recibe rutas y no documentos pegados: cinco documentos
-  enteros son 24 KB delante de un conflicto. Con ocho son unos 41 KB —
-  **medido al cerrar el plan, no estimado: 40.822 bytes.** La estimación que
-  esta sección llevaba escrita mientras el plan corría (35 KB) se hizo antes de
-  que las dos últimas tareas hicieran crecer `architecture.md` y `testing.md`,
-  y quedó corta.
+  enteros son 24 KB delante de un conflicto. Con ocho son unos 41 KB, y el
+  argumento se refuerza. La estimación que esta sección llevaba mientras el plan
+  corría (35 KB) se hizo antes de que las dos últimas tareas hicieran crecer
+  `architecture.md` y `testing.md`, y quedó corta: es el motivo por el que §5.3
+  ya no cita bytes exactos.
 
 Y uno que ya está resuelto de antemano, comprobado: `briefVaraCtMeasures`
 (`run-metrics.js:375`) cuenta las cabeceras `## Vara de ct: conventions/` que
@@ -400,15 +400,24 @@ sesenta líneas cada uno, con la regla y la pregunta que la decide, sin las
 facturas largas. El juez de tarea y el reconciliador siguen recibiéndolos por
 ruta.
 
-**Lo que costó de verdad, medido al cerrar el plan y no estimado.** El "orden de
-sesenta líneas" no se cumplió: `simplicity.md` son 83, `domain.md` 66 y
-`boundaries.md` 102 — 251 en total. Los siete documentos de todo diff suman
-31.977 bytes y los ocho 40.822, así que el brief pegado de una tarea que no
-estrena módulo pasó de 22.094 a unos 32 KB, y el de una que sí, a unos 43 KB
-con la cabecera de precedencia. La decisión se mantiene con esa cifra delante:
-lo que se compró es que el borde rija todo diff, y `boundaries.md` se aceptó
-entero en su ronda de revisión con la instrucción expresa de no recortar
-ninguna regla pagada para cumplir un presupuesto de líneas puesto a ojo.
+**Lo que costó de verdad, y por qué esta sección no lleva la cifra exacta.** El
+"orden de sesenta líneas" no se cumplió: los tres documentos nuevos rondan las
+250 líneas entre ellos, y la vara pegada de una tarea que no estrena módulo
+pasó de 22 KB a unos 32, la de una que sí a unos 43. **Las cifras exactas se
+miden, no se citan aquí**: este documento las tuvo tres veces y las tres
+envejecieron en la misma rama —dos veces porque una tarea posterior hizo crecer
+un documento, y la tercera por 183 bytes que entraron en la última ola de
+arreglos, después de que yo corrigiera el número—. Quien necesite el dato lo
+saca del disco:
+
+```
+wc -c plugin/conventions/*.md
+```
+
+La decisión se mantiene con la magnitud delante: lo que se compró es que el
+borde rija todo diff, y `boundaries.md` se aceptó entero en su ronda de revisión
+con la instrucción expresa de no recortar ninguna regla pagada para cumplir un
+presupuesto de líneas puesto a ojo.
 
 ## 6. Los roles
 
