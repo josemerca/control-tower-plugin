@@ -223,7 +223,7 @@ describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
 
   // EL ALCANCE DE CADA DOCUMENTO decide si viaja. `architecture.md` rige los
   // MÓDULOS NUEVOS —lo dice su propia cabecera `Applies to:`— así que a una
-  // tarea que sólo modifica lo que ya estaba no le llega: son unos 6,3 KB que
+  // tarea que sólo modifica lo que ya estaba no le llega: son unos 8,6 KB que
   // el implementador lee en cada tarea sin que ninguno de sus párrafos pueda
   // medir su diff.
   const conLaUnoModificando = () => {

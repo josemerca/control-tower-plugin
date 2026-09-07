@@ -1463,7 +1463,7 @@ function escribirPaqueteDeReconciliacion({ rama, ronda, intento }) {
   }
   writeFileSync(paquete, lineas.join('\n'))
   // POR RUTA Y NO PEGADA: el reconciliador tiene `Read` (RECONCILER_TOOLS), y
-  // los ocho documentos enteros delante de un conflicto son unos 35 KB de
+  // los ocho documentos enteros delante de un conflicto son unos 41 KB de
   // material fijo que no dependen del conflicto. Sin tarea que acote el
   // alcance, van todos: una fusión puede tocar cualquier fichero, incluido
   // uno nuevo.

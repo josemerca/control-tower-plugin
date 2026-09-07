@@ -35,7 +35,8 @@ crosses the edge is this document's subject.
 - **The conversion to the domain lives in the boundary model, with one door**:
   what the other side sent goes in, the domain object comes out, and back the
   same way; a model that leaves the adapter to map field by field is that type
-  written twice.
+  written twice. The same conversion lives there both ways, never as a
+  mapping helper inside a use case.
 - **You enter by the contract's name, not by the field's name**, and everything
   the other side sees comes from there: the schema sent to it, the validation of
   what it returns, and what gets emitted.
@@ -85,7 +86,8 @@ crosses the edge is this document's subject.
   the program**, and that vocabulary has two shapes. In **a program that ends**
   it is the exit code, the result on the standard channel and the diagnosis on
   the error channel, always separate; in **a service that answers** it is the
-  response, and the translator is called a handler.
+  response, and the translator is called a handler — the one place that maps a
+  domain error to an answer, and nothing else answers outwards.
 - **One code per decision of whoever receives, not one per error.** The
   yardstick is what the receiver does differently: exit codes and the codes of a
   response are counted the same way.

@@ -76,6 +76,16 @@ Gh (idiom)      what only `gh` writes
 
 ## The layout
 
+The root folder is `src/`. Inside it, `domain/value-objects`, `domain/ports`
+and `domain/policies` are the three kinds of domain inhabitant apart from
+each other, and `application/actions` and `application/queries` are the two
+kinds of use case. Every domain exception lives together in the one file
+`exceptions.js`, the catalogue exemption `plugin/conventions/architecture.md`
+allows for a kind declared together on purpose.
+
+A controller under `infrastructure/` is named `<endpoint>-route.js`, one
+file per endpoint.
+
 What each file under `infrastructure/` is, concretely, in this backend — the
 repository's own choice of names, not a pattern:
 

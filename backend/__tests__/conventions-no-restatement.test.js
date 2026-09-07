@@ -33,6 +33,7 @@ class Subjects {
     'Jira, GitHub, cmux, acli and gh exist only in',
     'ToolRunner      launches a binary with its budget',
     'The flag is named `safeToRepeat`.** `gh issue create` never gets `true`.',
+    'A controller under `infrastructure/` is named `<endpoint>-route.js`, one\nfile per endpoint.',
   ]
 
   static ownDocument() {
