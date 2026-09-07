@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { GhPlanIssues } from '../../src/infrastructure/gh-plan-issues.js'
 import { ChangeAsked } from '../../src/domain/value-objects/change-asked.js'
+import { PlanIssueStatus } from '../../src/domain/value-objects/plan-issue-status.js'
 import { Gh } from '../../src/infrastructure/gh.js'
 import { PlanIssueBody } from '../../src/infrastructure/gh-plan-issues.js'
 import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
@@ -139,8 +140,8 @@ class GhDouble {
     return GhDouble.created(JSON.stringify({ labels: names.map((name) => ({ name })) }))
   }
 
-  async inReviewFor(issue = GhDouble.OPENED) {
-    return this.issues().isInReview({ issueNumber: issue.number, repository: GhDouble.REPOSITORY })
+  async statusFor(issue = GhDouble.OPENED) {
+    return this.issues().statusOf({ issueNumber: issue.number, repository: GhDouble.REPOSITORY })
   }
 
   get commands() {
@@ -608,34 +609,46 @@ describe('GhPlanIssues reading the changes asked for on the issue', () => {
     expect(await GhDouble.printing('{"comments":[]}').changesAskedFor()).toEqual([])
   })
 
-  it('asking_whether_an_issue_is_in_review_reads_its_labels_and_nothing_else', async () => {
+  it('asking_where_an_issue_stands_reads_its_labels_and_nothing_else', async () => {
     const gh = GhDouble.labelled('status:in-review')
 
-    await gh.inReviewFor()
+    await gh.statusFor()
 
     expect(gh.calls).toEqual([[
       'issue', 'view', '7', '--repo', 'josemerca/ct-loop-sandbox', '--json', 'labels',
     ]])
   })
 
-  it('an_issue_carrying_only_the_in_review_label_is_in_review', async () => {
-    expect(await GhDouble.labelled('status:in-review').inReviewFor()).toBe(true)
+  it.each([
+    ['status:in-review', PlanIssueStatus.IN_REVIEW],
+    ['status:in-progress', PlanIssueStatus.IN_PROGRESS],
+    ['status:ready', PlanIssueStatus.READY],
+    ['status:backlog', PlanIssueStatus.BACKLOG],
+  ])('the_label_%s_comes_back_as_the_status_the_loop_calls_it', async (label, named) => {
+    expect(await GhDouble.labelled(label).statusFor()).toBe(named)
   })
 
-  it('an_issue_in_progress_is_not_in_review_so_the_gate_stays_shut_while_it_is_being_fixed', async () => {
-    expect(await GhDouble.labelled('status:in-progress').inReviewFor()).toBe(false)
+  it('an_issue_wearing_no_status_label_stands_at_none_which_is_a_status_and_not_an_absence', async () => {
+    expect(await GhDouble.labelled('area:plan').statusFor()).toBe(PlanIssueStatus.NONE)
   })
 
-  it('an_issue_carrying_two_status_labels_at_once_is_not_in_review_because_that_state_is_ambiguous', async () => {
-    expect(await GhDouble.labelled('status:in-review', 'status:in-progress').inReviewFor()).toBe(false)
+  it('an_issue_wearing_two_status_labels_travels_out_as_not_understood_instead_of_picking_one', async () => {
+    const refusal = await GhDouble.labelled('status:in-review', 'status:in-progress')
+      .statusFor().catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(PlanChangesNotUnderstood)
+    expect(refusal.message).toMatch(/wears more than one status label/)
   })
 
-  it('an_issue_with_no_status_label_is_not_in_review', async () => {
-    expect(await GhDouble.labelled('area:plan').inReviewFor()).toBe(false)
+  it('a_status_label_the_loop_never_declared_travels_out_as_not_understood_instead_of_passing_for_none', async () => {
+    const refusal = await GhDouble.labelled('status:blocked').statusFor().catch((cause) => cause)
+
+    expect(refusal).toBeInstanceOf(PlanChangesNotUnderstood)
+    expect(refusal.message).toMatch(/status:blocked/)
   })
 
-  it('gh_refusing_to_read_the_labels_travels_out_typed_instead_of_answering_false', async () => {
-    const refusal = await GhDouble.refusing('HTTP 404').inReviewFor().catch((cause) => cause)
+  it('gh_refusing_to_read_the_labels_travels_out_typed_instead_of_answering_a_status', async () => {
+    const refusal = await GhDouble.refusing('HTTP 404').statusFor().catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(PlanChangesNotRead)
     expect(refusal).not.toBeInstanceOf(PlanChangesNotUnderstood)
@@ -643,7 +656,7 @@ describe('GhPlanIssues reading the changes asked for on the issue', () => {
   })
 
   it('labels_gh_sent_in_a_shape_this_cannot_read_travel_out_as_not_understood', async () => {
-    const refusal = await GhDouble.created('{"labels":"ninguna"}').inReviewFor().catch((cause) => cause)
+    const refusal = await GhDouble.created('{"labels":"ninguna"}').statusFor().catch((cause) => cause)
 
     expect(refusal).toBeInstanceOf(PlanChangesNotUnderstood)
     expect(refusal).not.toBeInstanceOf(PlanChangesNotRead)

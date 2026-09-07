@@ -27,10 +27,10 @@ export class ReadFixesAsked {
     })
     if (pullRequest === null) return new ReadFixesAskedResult({ changes: [] })
 
-    const inReview = await this.planIssues.isInReview({
+    const status = await this.planIssues.statusOf({
       issueNumber: params.issue.number, repository: params.repository,
     })
-    if (DeliveryPolicy.of({ pullRequest, inReview }) !== DeliveryState.IN_REVIEW) {
+    if (DeliveryPolicy.of({ status }) !== DeliveryState.IN_REVIEW) {
       return new ReadFixesAskedResult({ changes: [] })
     }
 
