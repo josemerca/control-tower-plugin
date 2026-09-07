@@ -40,8 +40,10 @@ Un run cae en una de cuatro clases, y la diferencia importa:
   equivocada. Lo segundo cuenta como fallo a propósito: la telemetría del loop cuenta hallazgos
   por regla, y un FAIL por `alcance` sobre un defecto de `asercion-tdd` no es el mismo juez.
 - **descarte** — el veredicto no pasa `VERDICT_SCHEMA` (el mismo `readVerdict` que aplica
-  `ct-step verdict`, no una copia), o no copia el `Review token:` del paquete. En un run de
-  verdad esto cuesta una vuelta pagada; aquí es una columna.
+  `ct-step verdict`, no una copia), o trae un `review_token` que no es el del paquete. Que **no
+  lo traiga** no es un descarte, igual que en el camino real: ese campo lo escribe el programa y
+  `ct-judge.md` le dice al juez que no lo copie. En un run de verdad un descarte cuesta una
+  vuelta pagada; aquí es una columna.
 - **no ejecutado** — `claude` no llegó a contestar (autenticación, cuota, tope de gasto). No es
   un dato sobre el juez y no se mezcla con los otros tres.
 

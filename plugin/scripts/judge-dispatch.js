@@ -1,5 +1,4 @@
 import { join } from 'node:path'
-import { REVIEW_TOKEN_LABEL } from './step-contracts.js'
 
 export class JudgeRun {
   constructor({ caseName, attempt, cwd, argv, prompt, briefPath, packagePath, verdictPath }) {
@@ -86,7 +85,6 @@ export class JudgeDispatch {
       `  - el brief de la tarea: ${paths.brief}`,
       '  - los logs de los controles, YA en verde, por si los quiere: (ninguno)',
       `  - escribe tu veredicto en: ${paths.verdict}`,
-      `  - y COPIA en tu veredicto, campo "review_token", el "${REVIEW_TOKEN_LABEL}:" con el que abre ese paquete: es lo que hace comprobable que tu veredicto es sobre ESE código`,
     ].join('\n')
   }
 }
