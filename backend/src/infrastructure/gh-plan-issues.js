@@ -75,6 +75,10 @@ export class GhPlanIssues extends PlanIssues {
     return ['label', 'create', label, '--repo', repository.text, '--force']
   }
 
+  static labelsArgvFor({ issue, repository }) {
+    return ['issue', 'view', String(issue.number), '--repo', repository.text, '--json', 'labels']
+  }
+
   async open({ story, repository }) {
     const outcome = await this.#sowing({
       argv: GhPlanIssues.argvFor({ story, repository }),
@@ -169,6 +173,27 @@ export class GhPlanIssues extends PlanIssues {
     )
   }
 
+  static #onlyStatusIn(printed, issue) {
+    let parsed
+    try {
+      parsed = JSON.parse(printed)
+    } catch {
+      throw new PlanChangesNotUnderstood(
+        `${Gh.BIN} answered something that is not json for the labels of ${issue.number}, it printed ${JSON.stringify(printed)}`
+      )
+    }
+    if (!Array.isArray(parsed?.labels)) {
+      throw new PlanChangesNotUnderstood(
+        `${Gh.BIN} answered without the labels of ${issue.number}, it printed ${JSON.stringify(printed)}`
+      )
+    }
+    const status = parsed.labels
+      .map((label) => label?.name)
+      .filter((name) => typeof name === 'string' && name.startsWith('status:'))
+
+    return status.length === 1 ? status[0] : null
+  }
+
   async answerGo({ issueNumber, repository, nonce }) {
     const outcome = await this.gh.run(
       GhPlanIssues.goArgvFor({ issueNumber, repository, nonce }), { safeToRepeat: false }
@@ -176,6 +201,17 @@ export class GhPlanIssues extends PlanIssues {
     if (outcome.failed) {
       throw new PlanGoNotAnswered(`${Gh.BIN} issue comment failed: ${outcome.stderr.trim()}`)
     }
+  }
+
+  async isInReview({ issue, repository }) {
+    const outcome = await this.gh.run(
+      GhPlanIssues.labelsArgvFor({ issue, repository }), { safeToRepeat: true }
+    )
+    if (outcome.failed) {
+      throw new PlanChangesNotRead(`${Gh.BIN} issue view failed: ${outcome.stderr.trim()}`)
+    }
+
+    return GhPlanIssues.#onlyStatusIn(outcome.stdout, issue) === GhPlanIssues.IN_REVIEW_LABEL
   }
 
   async #sowForTheRelease(repository) {
