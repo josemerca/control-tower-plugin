@@ -5,6 +5,7 @@ import { PlanWatch } from '../domain/value-objects/plan-watch.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
 import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
 import { WorkspaceLocation } from '../domain/value-objects/workspace-location.js'
+import { ImplementationProgressFailure } from '../domain/exceptions.js'
 
 export class CmuxActivePlan {
   static #TITLE = new RegExp(`^ct-plan-(.+)-(${CmuxPlanAgents.NO_STORY_PREFIX}[1-9]\\d*|[A-Z][A-Z0-9_]*-\\d+)$`)
@@ -45,10 +46,13 @@ export class CmuxActivePlan {
 }
 
 export class ActivePlanRecovery {
-  constructor({ list, implementationStarts, goRegistry, sessions, reviews, activePlans, checkouts }) {
+  constructor({
+    list, implementationStarts, goRegistry, implementationProgress, sessions, reviews, activePlans, checkouts,
+  }) {
     this.list = list
     this.implementationStarts = implementationStarts
     this.goRegistry = goRegistry
+    this.implementationProgress = implementationProgress
     this.sessions = sessions
     this.reviews = reviews
     this.activePlans = activePlans
@@ -56,7 +60,18 @@ export class ActivePlanRecovery {
     this.conclusive = false
   }
 
-  recover() {
+  async #workIsUnderway(watch) {
+    try {
+      await this.implementationProgress.of({ root: new CheckoutRoot(watch.located.root), issue: watch.issue.number })
+
+      return true
+    } catch (cause) {
+      if (cause instanceof ImplementationProgressFailure) return false
+      throw cause
+    }
+  }
+
+  async recover() {
     if (this.conclusive) return true
     const entries = this.list()
     if (entries === null) return false
@@ -74,7 +89,11 @@ export class ActivePlanRecovery {
         continue
       }
       if (this.goRegistry.matches(watch)) {
-        this.activePlans.rememberUncertain(watch)
+        if (await this.#workIsUnderway(watch)) {
+          this.activePlans.rememberImplementing(watch)
+        } else {
+          this.activePlans.rememberUncertain(watch)
+        }
         continue
       }
       this.sessions.remember(watch)

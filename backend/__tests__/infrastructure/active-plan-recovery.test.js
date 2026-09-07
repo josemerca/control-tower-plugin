@@ -4,6 +4,8 @@ import { ActivePlans } from '../../src/infrastructure/active-plans-route.js'
 import { PlanSessions } from '../../src/infrastructure/plan-events-route.js'
 import { MemoryCheckoutRegistry } from '../../src/infrastructure/memory-checkout-registry.js'
 import { DiskImplementationStartRegistry } from '../../src/infrastructure/disk-implementation-start-registry.js'
+import { ImplementationState, ImplementationStep } from '../../src/domain/value-objects/implementation-state.js'
+import { ImplementationProgressNotRead } from '../../src/domain/exceptions.js'
 
 const CURRENT = Object.freeze({
   title: 'ct-plan-jjponz__repo-pulse-ABC-123',
@@ -64,6 +66,9 @@ describe('ActivePlanRecovery', () => {
 
   function fixture({
     entries = [CURRENT], marker = null, go = false, regular = true, readFailure = null,
+    implementationProgress = { of: vi.fn(async () => {
+      throw new ImplementationProgressNotRead('no run file was recorded for this plan')
+    }) },
   } = {}) {
     const sessions = new PlanSessions()
     const activePlans = new ActivePlans({ sessions })
@@ -85,6 +90,7 @@ describe('ActivePlanRecovery', () => {
       list: vi.fn(() => entries),
       implementationStarts,
       goRegistry: { matches: vi.fn(() => go) },
+      implementationProgress,
       sessions,
       reviews,
       activePlans,
@@ -94,20 +100,20 @@ describe('ActivePlanRecovery', () => {
     return { recovery, sessions, activePlans, reviews, checkouts }
   }
 
-  it('a_plan_with_no_go_and_no_implementation_marker_recovers_as_planning', () => {
+  it('a_plan_with_no_go_and_no_implementation_marker_recovers_as_planning', async () => {
     const recovered = fixture()
 
-    recovered.recovery.recover()
+    await recovered.recovery.recover()
 
     expect(recovered.sessions.known()).toHaveLength(1)
     expect(recovered.reviews.startRecovered).toHaveBeenCalledWith(recovered.sessions.known()[0])
     expect(recovered.activePlans.known()[0].phase).toBe('planning')
   })
 
-  it('a_valid_go_without_an_implementation_marker_recovers_as_uncertain', () => {
+  it('a_valid_go_without_an_implementation_marker_recovers_as_uncertain', async () => {
     const recovered = fixture({ go: true })
 
-    expect(recovered.recovery.recover()).toBe(true)
+    expect(await recovered.recovery.recover()).toBe(true)
 
     expect(recovered.sessions.known()).toEqual([])
     expect(recovered.reviews.startRecovered).not.toHaveBeenCalled()
@@ -115,10 +121,36 @@ describe('ActivePlanRecovery', () => {
     expect(recovered.checkouts.known().map((root) => root.text)).toEqual(['/repo'])
   })
 
-  it('exposes_a_plan_with_a_matching_marker_as_implementing_without_restarting_its_watches', () => {
+  it('a_go_that_predates_the_implementation_marker_registry_recovers_as_implementing_when_the_run_file_shows_work_underway', async () => {
+    const runState = ImplementationState.of({
+      step: ImplementationStep.SLICE_JUDGE, task: 8, totalTasks: 8, name: null, attempt: 1, discards: 0,
+    })
+    const implementationProgress = { of: vi.fn(async () => runState) }
+    const recovered = fixture({ go: true, implementationProgress })
+
+    expect(await recovered.recovery.recover()).toBe(true)
+
+    expect(implementationProgress.of).toHaveBeenCalledWith({ root: expect.objectContaining({ text: '/repo' }), issue: 45 })
+    expect(recovered.sessions.known()).toEqual([])
+    expect(recovered.reviews.startRecovered).not.toHaveBeenCalled()
+    expect(recovered.activePlans.known()[0].phase).toBe('implementing')
+  })
+
+  it('a_go_whose_run_file_cannot_be_read_stays_uncertain_instead_of_being_assumed_clean', async () => {
+    const implementationProgress = { of: vi.fn(async () => {
+      throw new ImplementationProgressNotRead('the worktree is not there, so its run cannot be read')
+    }) }
+    const recovered = fixture({ go: true, implementationProgress })
+
+    expect(await recovered.recovery.recover()).toBe(true)
+
+    expect(recovered.activePlans.known()[0].phase).toBe('uncertain')
+  })
+
+  it('exposes_a_plan_with_a_matching_marker_as_implementing_without_restarting_its_watches', async () => {
     const recovered = fixture({ marker: VALID_MARKER })
 
-    recovered.recovery.recover()
+    await recovered.recovery.recover()
 
     expect(recovered.sessions.known()).toEqual([])
     expect(recovered.reviews.startRecovered).not.toHaveBeenCalled()
@@ -137,61 +169,61 @@ describe('ActivePlanRecovery', () => {
     ['mismatched root', VALID_MARKER.replace('"/repo"', '"/other"')],
     ['mismatched branch', VALID_MARKER.replace('feat/45', 'feat/44')],
     ['mismatched worktree', VALID_MARKER.replace('/repo/.worktrees/45', '/repo/.worktrees/44')],
-  ])('keeps_a_plan_with_an_%s_marker_in_planning', (description, marker) => {
+  ])('keeps_a_plan_with_an_%s_marker_in_planning', async (description, marker) => {
     const recovered = fixture({ marker })
 
-    recovered.recovery.recover()
+    await recovered.recovery.recover()
 
     expect(recovered.activePlans.known()[0].phase).toBe('planning')
     expect(recovered.reviews.startRecovered).toHaveBeenCalledOnce()
   })
 
-  it('keeps_a_plan_with_a_marker_path_that_is_a_directory_in_planning', () => {
+  it('keeps_a_plan_with_a_marker_path_that_is_a_directory_in_planning', async () => {
     const recovered = fixture({ marker: VALID_MARKER, regular: false })
 
-    recovered.recovery.recover()
+    await recovered.recovery.recover()
 
     expect(recovered.activePlans.known()[0].phase).toBe('planning')
   })
 
-  it('keeps_a_plan_with_an_unreadable_marker_in_planning_without_stopping_startup', () => {
+  it('keeps_a_plan_with_an_unreadable_marker_in_planning_without_stopping_startup', async () => {
     const recovered = fixture({ marker: VALID_MARKER, readFailure: new Error('EACCES') })
 
-    expect(() => recovered.recovery.recover()).not.toThrow()
+    await expect(recovered.recovery.recover()).resolves.not.toThrow()
     expect(recovered.activePlans.known()[0].phase).toBe('planning')
   })
 
-  it('deduplicates_cmux_entries_for_the_same_repository_and_issue', () => {
+  it('deduplicates_cmux_entries_for_the_same_repository_and_issue', async () => {
     const recovered = fixture({ entries: [CURRENT, { ...CURRENT, ref: 'workspace:10' }] })
 
-    recovered.recovery.recover()
+    await recovered.recovery.recover()
 
     expect(recovered.sessions.known()).toHaveLength(1)
     expect(recovered.reviews.startRecovered).toHaveBeenCalledOnce()
   })
 
-  it('does_not_start_a_second_review_when_recovery_is_repeated', () => {
+  it('does_not_start_a_second_review_when_recovery_is_repeated', async () => {
     const recovered = fixture()
 
-    expect(recovered.recovery.recover()).toBe(true)
-    expect(recovered.recovery.recover()).toBe(true)
+    expect(await recovered.recovery.recover()).toBe(true)
+    expect(await recovered.recovery.recover()).toBe(true)
 
     expect(recovered.sessions.known()).toHaveLength(1)
     expect(recovered.reviews.startRecovered).toHaveBeenCalledOnce()
   })
 
-  it('restores_the_checkout_root_for_a_recovered_planning_session', () => {
+  it('restores_the_checkout_root_for_a_recovered_planning_session', async () => {
     const recovered = fixture()
 
-    recovered.recovery.recover()
+    await recovered.recovery.recover()
 
     expect(recovered.checkouts.known().map((root) => root.text)).toEqual(['/repo'])
   })
 
-  it('recovers_nothing_when_the_cmux_query_is_not_conclusive', () => {
+  it('recovers_nothing_when_the_cmux_query_is_not_conclusive', async () => {
     const recovered = fixture({ entries: null })
 
-    expect(recovered.recovery.recover()).toBe(false)
+    expect(await recovered.recovery.recover()).toBe(false)
     expect(recovered.activePlans.known()).toEqual([])
     expect(recovered.reviews.startRecovered).not.toHaveBeenCalled()
   })
