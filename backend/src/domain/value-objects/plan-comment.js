@@ -12,8 +12,4 @@ export class PlanComment {
   static isWellFormed(text) {
     return typeof text === 'string' && text.trim().length > 0
   }
-
-  toString() {
-    return this.text
-  }
 }

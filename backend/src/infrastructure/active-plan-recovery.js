@@ -7,7 +7,7 @@ import { UserStoryKey } from '../domain/value-objects/user-story-key.js'
 import { WorkspaceLocation } from '../domain/value-objects/workspace-location.js'
 
 export class CmuxActivePlan {
-  static #TITLE = /^ct-plan-(.+)-(issue-[1-9]\d*|[A-Z][A-Z0-9_]*-\d+)$/
+  static #TITLE = new RegExp(`^ct-plan-(.+)-(${CmuxPlanAgents.NO_STORY_PREFIX}[1-9]\\d*|[A-Z][A-Z0-9_]*-\\d+)$`)
   static #NO_STORY = new RegExp(`^${CmuxPlanAgents.NO_STORY_PREFIX}[1-9]\\d*$`)
   static #WORKTREE = /^(.+)\/\.worktrees\/([1-9]\d*)$/
 

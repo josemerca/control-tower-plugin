@@ -222,25 +222,25 @@ describe('an issue with no user story is born from the comment alone', () => {
 
     expect(PlanIssueBody.titleFor(Opened.commentOnly(exactly72))).toBe(exactly72)
     expect(PlanIssueBody.titleFor(Opened.commentOnly(oneOver)))
-      .toBe(`${'a'.repeat(71)}${PlanIssueBody.HEADLINE_CUT}`)
+      .toBe(`${'a'.repeat(71)}…`)
   })
 
   it('the_first_line_of_a_body_with_no_story_says_the_plan_was_asked_by_hand_instead_of_naming_a_key', () => {
     const [firstLine] = PlanIssueBody.of(Opened.commentOnly()).split('\n')
 
-    expect(firstLine).toBe(PlanIssueBody.NO_STORY_LINE)
+    expect(firstLine).toBe('> Plan pedido a mano: no hay historia de usuario en Jira.')
   })
 
   it('a_body_with_no_story_says_there_is_no_jira_story_where_the_epic_context_goes', () => {
     const body = PlanIssueBody.of(Opened.commentOnly())
 
-    expect(body).toContain(`## Contexto del epic\n${PlanIssueBody.NO_STORY_EPIC_CONTEXT}`)
+    expect(body).toContain('## Contexto del epic\n_El plan no viene de una historia de usuario de Jira._')
   })
 
   it('a_comment_whose_first_line_carries_no_words_says_so_instead_of_leaving_the_description_blank', () => {
     const body = PlanIssueBody.of(Opened.commentOnly('—'))
 
-    expect(body).toContain(`## Descripción\n${PlanIssueBody.NO_HEADLINE}`)
+    expect(body).toContain('## Descripción\n_El comentario no trae una primera línea que resuma lo que se pide._')
   })
 })
 

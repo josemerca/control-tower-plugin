@@ -123,7 +123,7 @@ Consumes: the plugin's own renderers and headings, already imported by `gh-plan-
 Nothing new is imported from the plugin, and the plugin gains no reader of this field.
 
 Produces:
-`PlanComment` — `new PlanComment(text)`, `PlanComment.isWellFormed(text)`, `toString()`.
+`PlanComment` — `new PlanComment(text)`, `PlanComment.isWellFormed(text)`; read through `.text`.
 `PlanWatch.storyText()` — the story's text, or `null` when the plan has no story.
 `PlanIssues.open({ story, comment, repository })` — `story` and `comment` are each either their
 value object or `null`, never both `null`.
@@ -180,7 +180,7 @@ export class PlanComment {
   static EXAMPLE = 'un texto que diga qué hay que planificar'
   constructor(text)                  // this.text = text.trim(); frozen; throws quoting what it got
   static isWellFormed(text)          // typeof text === 'string' && text.trim().length > 0
-  toString()                         // this.text
+  // no toString(): every reader takes `.text` (backend/conventions/simplicity.md)
 }
 ```
 
@@ -190,11 +190,9 @@ this.userStories.detail(params.story)` — and opens with
 `{ story, comment: params.comment, repository }`. `PlanBriefing` and `PlanWatch` keep receiving
 `params.story`, now possibly `null`; neither gains the comment, because neither has a reader for it.
 `PlanIssues.open` becomes `open({ story, comment, repository })` and its unimplemented message keeps
-naming `story?.key`. `null` is the one representation of "absent" for both fields. And
-`StartPlanRoute.#accept` passes `comment: null` into `StartPlanParams` until Task 7 hands it the
-comment the body carried: between the two, a request that works today builds the same params it
-builds now, and no `undefined` ever reaches `open` — that is the only line of the route this task
-touches.
+naming `story?.key`. `null` is the one representation of "absent" for both fields.
+`StartPlanRoute.#accept` passes `comment: null` until Task 7 hands it the body's comment, so no
+`undefined` reaches `open` in between — the only line of the route this task touches.
 
 **TDD:** red first — `it('a_plan_asked_for_with_only_a_comment_never_asks_jira_for_anything')`,
 asserting `userStories.asked` is empty **and** that `planIssues.asked[0]` carries
@@ -395,7 +393,11 @@ Then `it('the_marker_of_a_plan_with_no_user_story_still_matches_itself_after_a_r
 
 **Tests:** added: the two above, plus `WATCH_WITHOUT_A_STORY` beside the existing `WATCH`. Modified:
 `StartPlanSpy.execute` in `api-server.test.js` records `params.story === null ? null :
-params.story.text`, so a comment-only request can reach it in Task 7. Removed on purpose: none — the
+params.story.text`, so a comment-only request can reach it in Task 7, and builds the `PlanWatch` it
+answers from `params.story` and `params.repository` — as the real `StartPlan` does — instead of
+answering the fixed `StartPlanSpy.WATCH`: the 202 now reads the watch, so a body carrying
+`MO_SHOP-42` has to come back as `MO_SHOP-42` and a comment-only body as `null`. `StartPlanSpy.WATCH`
+stays as the expected value of `reviews.started`. Removed on purpose: none — the
 202 and `/active-plans` assertions keep their literal `"id":"ABC-123"`, which is what proves this
 task changed nothing for a plan that has a story.
 
@@ -439,8 +441,11 @@ static nameFor({ story, repository, issueNumber })
 Contract (backend/src/infrastructure/active-plan-recovery.js):
 
 ```javascript
-static #TITLE = /^ct-plan-(.+)-(issue-[1-9]\d*|[A-Z][A-Z0-9_]*-\d+)$/
+static #TITLE = new RegExp(`^ct-plan-(.+)-(${CmuxPlanAgents.NO_STORY_PREFIX}[1-9]\\d*|[A-Z][A-Z0-9_]*-\\d+)$`)
 static #NO_STORY = new RegExp(`^${CmuxPlanAgents.NO_STORY_PREFIX}[1-9]\\d*$`)
+  // both derive the prefix from its one declaration: a retyped `issue-` here would be the
+  // decision written twice, and a changed prefix would leave `nameFor` writing a tab that
+  // `#TITLE` no longer reads back
 ```
 
 `argvFor(briefing, typed)` passes `{ story: briefing.story, repository: briefing.repository,
