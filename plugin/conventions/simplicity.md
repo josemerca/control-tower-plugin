@@ -6,7 +6,7 @@ One rule, and the rest of this document is the shapes it takes: **the burden of 
 it is discharged against the problem being solved today**. "It might one day"
 does not discharge it.
 
-**Nothing here authorises skipping a layer.** The boundaries between the parts
+**Nothing here authorises dropping a layer.** The boundaries between the parts
 of a system, the ports between them and the types that make a value what it is
 are how a system is built, not complexity to trim. What is trimmed is what
 defends against what cannot happen.

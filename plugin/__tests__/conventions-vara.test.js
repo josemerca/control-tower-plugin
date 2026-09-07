@@ -67,7 +67,7 @@ describe('the documents in conventions/', () => {
   it('none repeats a rule that a rubric item already owns', () => {
     const todo = Object.keys(ALCANCES).map(Documento.texto).join('\n')
     for (const [item, terminos] of Object.entries({
-      'manipulacion-tests': [/\bskip\b/i, /xfail/i, /pre-existing test/i, /flaky/i],
+      'manipulacion-tests': [/skip/i, /xfail/i, /pre-existing test/i, /flaky/i],
       'test-desiderata': [/deterministic/i, /\bisolated\b/i, /call count/i, /real behaviou?r/i],
       alcance: [/no sentence of the task/i, /speculative/i, /scaffolding/i],
     })) {
@@ -200,7 +200,7 @@ describe('simplicity.md carries the burden of proof, and says where it ends', ()
     'dice que lo que no se puede descargar vuelve como hallazgo y no se implementa':
       () => expect(Documento.texto('simplicity.md')).toContain('goes back as a finding for a human to decide, and is not implemented meanwhile'),
     'lleva el cortafuegos, para que no se lea como permiso para saltarse una capa':
-      () => expect(Documento.texto('simplicity.md')).toContain('Nothing here authorises skipping a layer'),
+      () => expect(Documento.texto('simplicity.md')).toContain('Nothing here authorises dropping a layer'),
     'declara su frontera con el item alcance de la rubrica, que pregunta otra cosa':
       () => expect(Documento.texto('simplicity.md')).toContain('What the plan asked for is a different question from this one'),
   }
