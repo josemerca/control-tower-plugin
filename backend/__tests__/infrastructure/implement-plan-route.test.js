@@ -70,12 +70,12 @@ class RunningApi {
     sleep: () => Promise.resolve(),
   })
 
-  static async listening(spy = new ImplementPlanSpy()) {
+  static async listening(spy = new ImplementPlanSpy(), { watched = true } = {}) {
     RunningApi.spy = spy
     RunningApi.reviews = new ReviewsSpy()
     RunningApi.pullRequestReviews = new ReviewsSpy()
     RunningApi.sessions = new PlanSessions()
-    RunningApi.sessions.remember(RunningApi.WATCHED)
+    if (watched) RunningApi.sessions.remember(RunningApi.WATCHED)
     const server = new ApiServer({
       port: 0,
       startPlan: null,
@@ -330,8 +330,7 @@ describe('implementing the plan lifts the watch on its issue', () => {
   })
 
   it('an_implementation_of_an_issue_nobody_is_watching_answers_the_same_and_starts_nothing', async () => {
-    const port = await RunningApi.listening()
-    RunningApi.sessions.forget({ issue: 33, repository: RunningApi.WATCHED.repository })
+    const port = await RunningApi.listening(new ImplementPlanSpy(), { watched: false })
 
     const answered = await RunningApi.post(port, RunningApi.ACCEPTED_BODY)
 

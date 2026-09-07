@@ -19,10 +19,6 @@ export class PlanSessions {
   find({ issue, repository }) {
     return this.live.get(PlanSessions.#keyFor(repository, issue)) ?? null
   }
-
-  forget({ issue, repository }) {
-    this.live.delete(PlanSessions.#keyFor(repository, issue))
-  }
 }
 
 export const EventsRequestOutcome = Object.freeze({

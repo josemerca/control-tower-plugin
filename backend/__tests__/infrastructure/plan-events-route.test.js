@@ -109,14 +109,6 @@ describe('PlanSessions', () => {
     expect(new PlanSessions().find({ repository: EventsDouble.SUBJECT.repository, issue: 404 })).toBe(null)
   })
 
-  it('a_watch_it_was_told_to_forget_is_answered_with_nothing_the_same_as_one_that_never_started', () => {
-    const sessions = Watched.sessions()
-
-    sessions.forget({ issue: 42, repository: EventsDouble.SUBJECT.repository })
-
-    expect(sessions.find({ repository: EventsDouble.SUBJECT.repository, issue: 42 })).toBe(null)
-  })
-
   it('two_repositories_planning_the_same_issue_number_are_told_apart_by_the_repository_asked', () => {
     const sessions = Watched.sessions()
     const otherRepository = new RepositoryName('other/name')
