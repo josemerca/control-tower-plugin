@@ -275,8 +275,13 @@ describe('simplicity.md carries the burden of proof, and says where it ends', ()
       () => expect(Documento.texto('simplicity.md')).toContain('who reads this, and where'),
     'dice que una petición de una revisión o de un juicio no exime':
       () => expect(Documento.texto('simplicity.md')).toContain('does not move when the addition is asked for by a reviewer'),
-    'dice que lo que no se puede descargar vuelve como hallazgo y no se implementa':
-      () => expect(Documento.texto('simplicity.md')).toContain('goes back as a finding for a human to decide, and is not implemented meanwhile'),
+    'lo que no se puede descargar se declara en el informe de la tarea y la decision queda para una persona':
+      () =>
+        expect(
+          Documento.clausulaDe('simplicity.md', '## A request from a review or a judgement is not exempt')
+        ).toContain(
+          "that is declared in the task's report, where whoever judges reads it, and the decision is left to a person."
+        ),
     'lleva el cortafuegos, para que no se lea como permiso para saltarse una capa':
       () => expect(Documento.texto('simplicity.md')).toContain('Nothing here authorises dropping a layer'),
     'declara su frontera con el item alcance de la rubrica, que pregunta otra cosa':
@@ -376,6 +381,7 @@ describe('architecture.md kept nothing of the edge, so no rule is written twice'
     'An adapter is named after its implementation',
     'An adapter does not decide policy',
     "the contract's name",
+    'mapping helper inside a use case',
   ]
 
   for (const encabezado of ENCABEZADOS_QUE_DESAPARECEN) {

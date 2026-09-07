@@ -152,7 +152,6 @@ extract.
 - The domain importing from application or from infrastructure.
 - A use case importing from infrastructure, or depending on an adapter.
 - A use case with a suffix on its type, its parameters or its result.
-- A mapping helper in the use case instead of in the boundary model.
 - A conditional in the conductor that translates a step's result.
 - A policy that returns a boolean instead of the whole effect.
 - A policy with a catch-all branch for an input it does not describe.

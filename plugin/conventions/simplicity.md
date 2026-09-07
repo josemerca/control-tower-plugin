@@ -59,7 +59,9 @@ a field a caller. A review that looks for what is missing finds it, and
 complying costs less than answering — which is how these accumulate, each one
 reasonable on its own.
 
-Where the burden cannot be discharged, the request goes back as a finding for a human to decide, and is not implemented meanwhile.
+Where the burden cannot be discharged, that is declared in the task's
+report, where whoever judges reads it, and the decision is left to a
+person.
 
 ## What other documents own, and this one does not repeat
 

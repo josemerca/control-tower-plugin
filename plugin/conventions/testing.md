@@ -177,5 +177,4 @@ round chasing a mutation that was never going to die.
 - An assertion that stays green once the one thing it names has been broken by hand.
 - An integration test that measures a refusal.
 - An adapter whose two failure causes are not told apart in its tests.
-- A round delivered with no mutation sweep behind it.
 - A surviving mutation left with neither of its two repairs chosen.
