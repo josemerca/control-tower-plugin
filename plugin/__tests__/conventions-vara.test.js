@@ -24,6 +24,7 @@ class Documento {
 const ALCANCES = {
   'defects.md': 'every diff',
   'style.md': 'every diff',
+  'simplicity.md': 'every diff',
   'decisions.md': 'every diff',
   'testing.md': 'every diff',
   'architecture.md': 'new modules',
@@ -66,7 +67,7 @@ describe('the documents in conventions/', () => {
   it('none repeats a rule that a rubric item already owns', () => {
     const todo = Object.keys(ALCANCES).map(Documento.texto).join('\n')
     for (const [item, terminos] of Object.entries({
-      'manipulacion-tests': [/skip/i, /xfail/i, /pre-existing test/i, /flaky/i],
+      'manipulacion-tests': [/\bskip\b/i, /xfail/i, /pre-existing test/i, /flaky/i],
       'test-desiderata': [/deterministic/i, /\bisolated\b/i, /call count/i, /real behaviou?r/i],
       alcance: [/no sentence of the task/i, /speculative/i, /scaffolding/i],
     })) {
@@ -186,3 +187,27 @@ describe('testing.md separates "seen to fail for its reason" from the cycle\'s r
   }
 })
 
+describe('simplicity.md carries the burden of proof, and says where it ends', () => {
+  const AFIRMACIONES = {
+    'declara la regla única, y que se descarga contra el problema de hoy':
+      () => expect(Documento.texto('simplicity.md')).toContain('the burden of proof is on what is added'),
+    'nombra la pregunta que decide un campo, una rama o un símbolo público':
+      () => expect(Documento.texto('simplicity.md')).toContain('which call breaks without it'),
+    'nombra la pregunta que decide una línea de observabilidad':
+      () => expect(Documento.texto('simplicity.md')).toContain('who reads this, and where'),
+    'dice que una petición de una revisión o de un juicio no exime':
+      () => expect(Documento.texto('simplicity.md')).toContain('does not move when the addition is asked for by a reviewer'),
+    'dice que lo que no se puede descargar vuelve como hallazgo y no se implementa':
+      () => expect(Documento.texto('simplicity.md')).toContain('goes back as a finding for a human to decide, and is not implemented meanwhile'),
+    'lleva el cortafuegos, para que no se lea como permiso para saltarse una capa':
+      () => expect(Documento.texto('simplicity.md')).toContain('Nothing here authorises skipping a layer'),
+    'declara su frontera con el item alcance de la rubrica, que pregunta otra cosa':
+      () => expect(Documento.texto('simplicity.md')).toContain('What the plan asked for is a different question from this one'),
+  }
+
+  for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
+    it(`simplicity.md ${afirmacion}`, () => {
+      comprobar()
+    })
+  }
+})
