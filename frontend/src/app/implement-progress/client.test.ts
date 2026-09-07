@@ -21,7 +21,7 @@ describe('ImplementProgressClient', () => {
 
     expect(outcome).toEqual({
       kind: 'read',
-      state: { step: 'judge', task: 3, totalTasks: 7, name: 'el lector del plan', attempt: 2, discards: 0 },
+      state: { step: 'judge', task: 3, totalTasks: 7, name: 'el lector del plan', attempt: 2, discards: 0, pullRequest: null },
     })
   })
 
@@ -32,7 +32,56 @@ describe('ImplementProgressClient', () => {
 
     expect(outcome).toEqual({
       kind: 'read',
-      state: { step: 'implement', task: 1, totalTasks: 8, name: null, attempt: 1, discards: 0 },
+      state: { step: 'implement', task: 1, totalTasks: 8, name: null, attempt: 1, discards: 0, pullRequest: null },
+    })
+  })
+
+  it('should read the number and the url of the pull request once the plan is in review', async () => {
+    answerWith(ImplementProgressMother.inReview())
+
+    const outcome = await get()
+
+    expect(outcome).toEqual({
+      kind: 'read',
+      state: {
+        step: 'in-review',
+        task: null,
+        totalTasks: 7,
+        name: null,
+        attempt: null,
+        discards: 0,
+        pullRequest: { number: 31, url: 'https://github.com/owner/name/pull/31' },
+      },
+    })
+  })
+
+  it('should treat a pull request without a url as absent instead of showing it half done', async () => {
+    answerWith(ImplementProgressMother.inReviewWithMalformedPullRequest())
+
+    const outcome = await get()
+
+    expect(outcome).toEqual({
+      kind: 'read',
+      state: { step: 'in-review', task: null, totalTasks: 7, name: null, attempt: null, discards: 0, pullRequest: null },
+    })
+  })
+
+  it('should read the real backend answer for a plan whose pull request is in review', async () => {
+    answerWith(ImplementProgressMother.realWorldInReview())
+
+    const outcome = await get()
+
+    expect(outcome).toEqual({
+      kind: 'read',
+      state: {
+        step: 'in-review',
+        task: null,
+        totalTasks: 8,
+        name: null,
+        attempt: null,
+        discards: 0,
+        pullRequest: { number: 46, url: 'https://github.com/jjponz/repo-pulse/pull/46' },
+      },
     })
   })
 
