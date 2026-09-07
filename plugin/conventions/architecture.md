@@ -30,9 +30,11 @@ The layers and what lives inside them **show in the tree**: one folder per
 layer, and inside each layer one folder per kind of inhabitant — the value
 objects, the ports and the policies apart from each other inside domain; the
 actions apart from the queries inside application; the adapters apart from
-the controllers inside infrastructure. Which name the root folder gets and
-what a file is called is the repository's own choice; what this rule fixes is
-that **the folder is the discriminator, never a suffix on the name.**
+the controllers inside infrastructure. A kind whose inhabitants are one
+catalogue, declared together on purpose, does not need a folder of its own.
+Which name the root folder gets and what a file is called is the
+repository's own choice; what this rule fixes is that
+**the folder is the discriminator, never a suffix on the name.**
 
 ## One concept per module
 
@@ -50,9 +52,8 @@ stretches to justify any grouping by habit.
 ## A new type has the burden of proof
 
 New behaviour defaults to **a method on a type that already exists**, and a
-new type defaults to **inside the module that consumes it**. A type earns a
-module of its own only when something else constructs it, another module
-consumes it, or it carries its own algebra — and "the tests build it" grants
+new type defaults to **inside the module that consumes it**; only a life of
+its own, by the test above, earns it one. And "the tests build it" grants
 nothing: **a test double is not a consumer**, and tests are not a layer.
 
 This was paid for, so it is a rule and not a taste: three types once shipped
@@ -62,10 +63,9 @@ said "over-designed" while the count of concepts did not.
 The calls already made, kept so they are not relitigated:
 
 - **The payload only its owner constructs shares the owner's file.**
-- **The model that converts what an adapter receives or sends shares that
-  adapter's file while the adapter is its only consumer.** The day a second
-  adapter needs the same conversion, it is extracted along that line, and
-  the split is declared in the history.
+- **A boundary model shares its adapter's file while the adapter is its
+  only consumer.** The day a second adapter needs the same conversion, it
+  is extracted along that line, and the split is declared in the history.
 - **A class nobody instantiates is a namespace**, tolerated only because
   `conventions/style.md` bans loose functions — never a reason to grant it
   a module of its own. A namespace with one consumer lives inside it.
@@ -75,10 +75,10 @@ The calls already made, kept so they are not relitigated:
 
 The route, its request model with the closed vocabulary of outcomes, and the
 projections that turn each outcome and each failure into an answer travel
-together in one module — the same relation Params and Result keep with
-their use case. The next endpoint is one new file and one line that wires it
-in. What every endpoint would otherwise repeat lives in a module of its own,
-never inside an endpoint's own file.
+together in one module — the same relation a parameters object and a
+result object keep with their use case. The next endpoint is one new file
+and one line that wires it in. What every endpoint would otherwise repeat
+lives in a module of its own, never inside an endpoint's own file.
 
 ## The shape of a use case
 

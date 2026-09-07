@@ -332,7 +332,7 @@ describe('architecture.md says where a new thing goes, and makes the layers visi
       () => expect(Documento.texto('architecture.md')).toContain('a method on a type that already exists'),
     'dice que un test no es un consumidor':
       () => expect(Documento.texto('architecture.md')).toContain('a test double is not a consumer'),
-    'deja el payload de un solo dueño en el fichero de su dueño':
+    'deja el payload de un unico propietario en el fichero de ese propietario':
       () => expect(Documento.texto('architecture.md')).toContain("shares the owner's file"),
     'dice que una clase que nadie instancia es un namespace y eso no le gana un modulo':
       () => expect(Documento.texto('architecture.md')).toContain('A class nobody instantiates is a namespace'),
@@ -375,7 +375,7 @@ describe('the yardstick names no language and no tool', () => {
     }
   })
 
-  it('nadie en el plugin sigue diciendo que esto son cinco piezas', () => {
+  it('nadie en el plugin sigue diciendo que son cinco', () => {
     const fuentes = ['scripts/run-metrics.js', 'scripts/ct-next.mjs', 'scripts/kickoff.js', 'scripts/ct-step.mjs',
       'agents/ct-reconciler.md', 'skills/writing-plans-prescriptive/SKILL.md']
     for (const ruta of fuentes) {
