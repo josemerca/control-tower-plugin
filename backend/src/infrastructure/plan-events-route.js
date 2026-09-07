@@ -1,6 +1,6 @@
 import { Answer, Refusal } from './http.js'
 import { Projection } from './projection.js'
-import { PlanProgressFailure } from '../domain/exceptions.js'
+import { PlanFailure } from '../domain/exceptions.js'
 import { RepositoryName } from '../domain/value-objects/repository-name.js'
 
 export class PlanSessions {
@@ -97,20 +97,26 @@ export class EventsRefusal {
 }
 
 export class PlanEvents {
-  constructor({ read, sleep }) {
+  constructor({ read, readDelivery, sleep }) {
     this.read = read
+    this.readDelivery = readDelivery
     this.sleep = sleep
   }
 
   static ERROR_EVENT = 'error'
   static PROGRESS_NOT_READ = 'plan-progress-not-read'
+  static DELIVERY_NOT_READ = 'delivery-progress-not-read'
 
-  static frameFor(state) {
-    return `data: ${JSON.stringify({ state })}\n\n`
+  static frameFor(state, pullRequest = null) {
+    const said = pullRequest === null
+      ? { state }
+      : { state, pullRequest: { number: pullRequest.number, url: pullRequest.url } }
+
+    return `data: ${JSON.stringify(said)}\n\n`
   }
 
-  static failureFrameFor(cause) {
-    return `event: ${PlanEvents.ERROR_EVENT}\ndata: ${JSON.stringify({ code: PlanEvents.PROGRESS_NOT_READ, detail: cause.message })}\n\n`
+  static failureFrameFor(cause, code) {
+    return `event: ${PlanEvents.ERROR_EVENT}\ndata: ${JSON.stringify({ code, detail: cause.message })}\n\n`
   }
 
   async *stream(session, cancelled) {
@@ -118,15 +124,17 @@ export class PlanEvents {
     for (;;) {
       let read
       try {
-        read = await this.read(session)
+        read = session.delivering ? await this.readDelivery(session) : await this.read(session)
       } catch (cause) {
-        if (!(cause instanceof PlanProgressFailure)) throw cause
-        yield PlanEvents.failureFrameFor(cause)
+        if (!(cause instanceof PlanFailure)) throw cause
+        yield PlanEvents.failureFrameFor(cause, session.delivering
+          ? PlanEvents.DELIVERY_NOT_READ
+          : PlanEvents.PROGRESS_NOT_READ)
         return
       }
       if (read.state !== last) {
         last = read.state
-        yield PlanEvents.frameFor(read.state)
+        yield PlanEvents.frameFor(read.state, read.pullRequest ?? null)
       }
       await this.sleep()
       if (cancelled()) return

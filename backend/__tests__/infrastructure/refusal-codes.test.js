@@ -38,7 +38,7 @@ class CodesRememberedByHandFromHttpAndApiServer {
 }
 
 class EventStreamCodes {
-  static VALUES = Object.freeze([PlanEvents.PROGRESS_NOT_READ])
+  static VALUES = Object.freeze([PlanEvents.PROGRESS_NOT_READ, PlanEvents.DELIVERY_NOT_READ])
 }
 
 describe('the codes the api can emit', () => {

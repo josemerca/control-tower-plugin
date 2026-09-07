@@ -5,7 +5,8 @@ import { WorkspaceLocation } from '../../src/domain/value-objects/workspace-loca
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
-import { PlanProgressNotRead } from '../../src/domain/exceptions.js'
+import { PlanProgressNotRead, PullRequestNotRead } from '../../src/domain/exceptions.js'
+import { DeliveryState } from '../../src/domain/policies/delivery-policy.js'
 
 class EventsDouble {
   static SUBJECT = new PlanWatch({
@@ -14,13 +15,31 @@ class EventsDouble {
     repository: new RepositoryName('owner/name'),
   })
 
+  static DELIVERING = new PlanWatch({
+    issue: new PlanIssue({ number: 42, url: 'https://github.com/owner/name/issues/42' }),
+    located: new WorkspaceLocation({ path: '/repo/.worktrees/42', branch: 'feat/42' }),
+    repository: new RepositoryName('owner/name'),
+    delivering: true,
+  })
+
+  static PULL_REQUEST = { number: 42, url: 'https://github.com/owner/name/pull/42' }
+
   constructor(answers) {
     this.answers = [...answers]
     this.slept = 0
+    this.planReads = 0
   }
 
   static unable(said) {
     return new EventsDouble([new PlanProgressNotRead(said)])
+  }
+
+  static delivering(...answers) {
+    return new EventsDouble(answers)
+  }
+
+  static inReview() {
+    return { state: DeliveryState.IN_REVIEW, pullRequest: EventsDouble.PULL_REQUEST }
   }
 
   events() {
@@ -30,6 +49,7 @@ class EventsDouble {
         return Promise.resolve()
       },
       read: () => {
+        this.planReads += 1
         if (this.answers.length === 0) {
           throw new Error('the progress was read more times than this test scripted an answer for')
         }
@@ -38,6 +58,16 @@ class EventsDouble {
         if (answer instanceof Error) return Promise.reject(answer)
 
         return Promise.resolve({ state: answer })
+      },
+      readDelivery: () => {
+        if (this.answers.length === 0) {
+          throw new Error('the delivery was read more times than this test scripted an answer for')
+        }
+
+        const answer = this.answers.shift()
+        if (answer instanceof Error) return Promise.reject(answer)
+
+        return Promise.resolve(answer)
       },
     })
   }
@@ -49,6 +79,13 @@ class EventsDouble {
   async collected(cancelled = () => false) {
     const frames = []
     for await (const frame of this.events().stream(EventsDouble.SUBJECT, cancelled)) frames.push(frame)
+
+    return frames
+  }
+
+  async collectedDelivering(cancelled = () => false) {
+    const frames = []
+    for await (const frame of this.events().stream(EventsDouble.DELIVERING, cancelled)) frames.push(frame)
 
     return frames
   }
@@ -176,5 +213,59 @@ describe('PlanEvents', () => {
 
     expect(frames).toEqual([PlanEvents.frameFor(PlanState.WRITING)])
     expect(events.slept).toBe(2)
+  })
+
+  it('a_session_that_is_delivering_is_read_by_the_delivery_reader_and_never_by_the_plan_one', async () => {
+    const double = EventsDouble.delivering(EventsDouble.inReview())
+
+    const frames = await double.collectedDelivering(double.cancellingWhenExhausted())
+
+    expect(double.planReads).toBe(0)
+    expect(frames[0]).toContain('"state":"in-review"')
+  })
+
+  it('the_frame_of_a_delivery_carries_the_number_and_the_url_of_its_pull_request', async () => {
+    const double = EventsDouble.delivering(EventsDouble.inReview())
+
+    const frames = await double.collectedDelivering(double.cancellingWhenExhausted())
+
+    expect(frames[0]).toContain('"number":42')
+    expect(frames[0]).toContain('"url":"https://github.com/owner/name/pull/42"')
+  })
+
+  it('the_frame_of_a_plan_still_carries_the_state_alone', async () => {
+    const frames = await new EventsDouble([PlanState.WRITING]).collected(() => true)
+
+    expect(frames[0]).toBe('data: {"state":"writing"}\n\n')
+  })
+
+  it('a_delivery_that_could_not_be_read_ends_the_stream_with_its_own_code', async () => {
+    const double = EventsDouble.delivering(new PullRequestNotRead('HTTP 502'))
+
+    const frames = await double.collectedDelivering()
+
+    expect(frames.at(-1)).toContain(PlanEvents.DELIVERY_NOT_READ)
+    expect(frames.at(-1)).toContain('HTTP 502')
+  })
+
+  it('the_same_delivery_state_twice_running_is_sent_once', async () => {
+    const double = EventsDouble.delivering(EventsDouble.inReview(), EventsDouble.inReview())
+
+    const frames = await double.collectedDelivering(double.cancellingWhenExhausted())
+
+    expect(frames.filter((frame) => frame.includes('"state":"in-review"'))).toHaveLength(1)
+  })
+
+  it('a_pull_request_that_appears_moves_the_delivery_on_without_a_second_frame_of_the_old_state', async () => {
+    const double = EventsDouble.delivering(
+      { state: DeliveryState.IMPLEMENTING, pullRequest: null },
+      EventsDouble.inReview(),
+    )
+
+    const frames = await double.collectedDelivering(double.cancellingWhenExhausted())
+
+    expect(frames).toHaveLength(2)
+    expect(frames[0]).toContain('"state":"implementing"')
+    expect(frames[1]).toContain('"state":"in-review"')
   })
 })
