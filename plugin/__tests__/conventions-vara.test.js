@@ -324,6 +324,31 @@ describe('architecture.md kept nothing of the edge, so no rule is written twice'
   }
 })
 
+describe('architecture.md says where a new thing goes, and makes the layers visible', () => {
+  const AFIRMACIONES = {
+    'exige que las capas y sus habitantes se vean en el arbol':
+      () => expect(Documento.texto('architecture.md')).toContain('the folder is the discriminator, never a suffix on the name'),
+    'pone la carga de la prueba en el tipo nuevo, con el metodo como respuesta por defecto':
+      () => expect(Documento.texto('architecture.md')).toContain('a method on a type that already exists'),
+    'dice que un test no es un consumidor':
+      () => expect(Documento.texto('architecture.md')).toContain('a test double is not a consumer'),
+    'deja el payload de un solo dueño en el fichero de su dueño':
+      () => expect(Documento.texto('architecture.md')).toContain("shares the owner's file"),
+    'dice que una clase que nadie instancia es un namespace y eso no le gana un modulo':
+      () => expect(Documento.texto('architecture.md')).toContain('A class nobody instantiates is a namespace'),
+    'exige un cliente por sistema externo, nunca uno por llamada':
+      () => expect(Documento.texto('architecture.md')).toContain('never a client per call'),
+    'exige un controlador por endpoint, con su modelo y sus proyecciones dentro':
+      () => expect(Documento.texto('architecture.md')).toContain('One controller per endpoint'),
+  }
+
+  for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
+    it(`architecture.md ${afirmacion}`, () => {
+      comprobar()
+    })
+  }
+})
+
 describe('the yardstick names no language and no tool', () => {
   const PROHIBIDOS = [
     /vitest/i, /pytest/i, /jest/i, /execFile/, /\bnpx\b/, /\bnpm\b/, /\bnode\b/i,
