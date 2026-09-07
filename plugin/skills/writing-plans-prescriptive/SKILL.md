@@ -245,10 +245,8 @@ to hold for Task 1 and easy to lose by Task 6; step 5 is what keeps them in view
 1. Read `.agent/SLICE.md` and the issue: acceptance criteria, "Out of scope / Protected",
    "Contexto del epic", "Contexto heredado", "Dependencias".
 2. Read the files this slice touches, one analogous file, this repo's convention documents, and
-   the documents of `conventions/` — §3 names the analogous file and this repo's convention
-   documents by path, and `--check-plan` reads every path §3 names (not §4's: those can be
-   `(create)` rows the slice has not written yet); §4 names the files this slice touches, and the
-   last of these four is ct's own yardstick, at the path your kickoff gave you.
+   the documents of `conventions/`. `--check-plan` reads §3's paths, not §4's — `(create)` rows
+   can be unwritten. §4 names the files touched; the last is ct's yardstick, at kickoff's path.
 3. Copy `plan-template.md`, next to this skill, and save it straight away as
    `docs/superpowers/plans/YYYY-MM-DD-issue-<n>-<slug>.md`, where `<n>` is `github_issue` in
    `.agent/SLICE.md`. The `issue-<n>-` segment is how the release gate finds the plan — keep it.
