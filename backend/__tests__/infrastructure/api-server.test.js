@@ -826,16 +826,16 @@ describe('ApiServer', () => {
     expect(await RunningApi.firstFrame(again)).toBe(PlanEvents.frameFor(PlanState.READY))
   })
 
-  it('a_subscription_after_a_progress_nobody_could_read_is_not_watched_any_more_because_the_stream_that_broke_forgot_it', async () => {
-    const { planEvents } = ProgressSpy.unable()
+  it('a_subscription_after_a_progress_that_could_not_be_read_still_finds_its_watch_because_a_transient_failure_does_not_forget_the_session', async () => {
+    const { planEvents } = ProgressSpy.unable({ sleepMs: 5 })
     const port = await RunningApi.listening({ planEvents })
 
     await RunningApi.accepted(port)
-    await fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`)
-    const again = await fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`)
+    const first = await RunningApi.watching(port)
+    await RunningApi.firstFrame(first)
+    const again = await RunningApi.watching(port)
 
-    expect(again.status).toBe(400)
-    expect((await again.json()).code).toBe('not-watched')
+    expect(again.status).toBe(200)
   })
 
   it('a_page_that_hangs_up_while_the_plan_is_still_being_written_keeps_its_watch_so_it_can_come_back', async () => {
@@ -872,19 +872,17 @@ describe('ApiServer', () => {
     expect(spy.asked).toBe(0)
   })
 
-  it('a_progress_nobody_could_read_reaches_the_page_as_an_error_frame_and_closes_instead_of_hanging_open', async () => {
-    const { spy, planEvents } = ProgressSpy.unable()
+  it('a_progress_nobody_could_read_reaches_the_page_as_an_error_frame_and_the_page_is_the_one_that_disconnects', async () => {
+    const { spy, planEvents } = ProgressSpy.unable({ sleepMs: 5 })
     const port = await RunningApi.listening({ planEvents })
 
     await RunningApi.accepted(port)
-    const response = await fetch(`http://127.0.0.1:${port}${RunningApi.eventsPath()}`, {
-      headers: { Origin: `http://127.0.0.1:${port}` },
-    })
+    const response = await RunningApi.watching(port)
+    const frame = await RunningApi.firstFrame(response)
 
     expect(response.status).toBe(200)
-    expect(await response.text())
-      .toBe(`event: error\ndata: {"code":"plan-progress-not-read","detail":"${ProgressSpy.UNREADABLE}"}\n\n`)
-    expect(spy.asked).toBe(1)
+    expect(frame).toBe(`event: error\ndata: {"code":"plan-progress-not-read","detail":"${ProgressSpy.UNREADABLE}"}\n\n`)
+    expect(spy.asked).toBeGreaterThanOrEqual(1)
   })
 
   it('closing_the_connection_from_the_client_stops_the_progress_port_from_being_asked_again', async () => {

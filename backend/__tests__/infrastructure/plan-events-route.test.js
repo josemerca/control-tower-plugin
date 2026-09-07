@@ -179,19 +179,26 @@ describe('PlanEvents', () => {
   })
 
   it('a_progress_that_could_not_be_read_reaches_the_page_as_one_error_frame_and_not_as_a_state', async () => {
-    const frames = await EventsDouble.unable('git status refused').collected()
+    const events = EventsDouble.unable('git status refused')
+
+    const frames = await events.collected(events.cancellingWhenExhausted())
 
     expect(frames).toEqual(['event: error\ndata: {"code":"plan-progress-not-read","detail":"git status refused"}\n\n'])
   })
 
-  it('a_progress_that_could_not_be_read_ends_the_stream_instead_of_launching_two_subprocesses_forever', async () => {
+  it('a_progress_that_could_not_be_read_does_not_end_the_stream_so_a_transient_failure_recovers_on_the_next_tick', async () => {
     const events = new EventsDouble([
-      PlanState.WRITING, new PlanProgressNotRead('git status refused'),
+      PlanState.WRITING, new PlanProgressNotRead('git status refused'), PlanState.READY,
     ])
 
-    const frames = await events.collected()
+    const frames = await events.collected(events.cancellingWhenExhausted())
 
-    expect(frames).toHaveLength(2)
+    expect(frames).toEqual([
+      PlanEvents.frameFor(PlanState.WRITING),
+      'event: error\ndata: {"code":"plan-progress-not-read","detail":"git status refused"}\n\n',
+      PlanEvents.frameFor(PlanState.READY),
+    ])
+    expect(events.slept).toBe(3)
     expect(events.answers).toEqual([])
   })
 
@@ -239,10 +246,10 @@ describe('PlanEvents', () => {
     expect(frames[0]).toBe('data: {"state":"writing"}\n\n')
   })
 
-  it('a_delivery_that_could_not_be_read_ends_the_stream_with_its_own_code', async () => {
+  it('a_delivery_that_could_not_be_read_reaches_the_page_with_its_own_code', async () => {
     const double = EventsDouble.delivering(new PullRequestNotRead('HTTP 502'))
 
-    const frames = await double.collectedDelivering()
+    const frames = await double.collectedDelivering(double.cancellingWhenExhausted())
 
     expect(frames.at(-1)).toContain(PlanEvents.DELIVERY_NOT_READ)
     expect(frames.at(-1)).toContain('HTTP 502')

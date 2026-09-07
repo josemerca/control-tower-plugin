@@ -122,7 +122,7 @@ export class PlanEvents {
   async *stream(session, cancelled) {
     let last = null
     for (;;) {
-      let read
+      let read = null
       try {
         read = session.delivering ? await this.readDelivery(session) : await this.read(session)
       } catch (cause) {
@@ -130,9 +130,8 @@ export class PlanEvents {
         yield PlanEvents.failureFrameFor(cause, session.delivering
           ? PlanEvents.DELIVERY_NOT_READ
           : PlanEvents.PROGRESS_NOT_READ)
-        return
       }
-      if (read.state !== last) {
+      if (read !== null && read.state !== last) {
         last = read.state
         yield PlanEvents.frameFor(read.state, read.pullRequest ?? null)
       }
@@ -177,7 +176,6 @@ export class PlanEventsRoute {
       for await (const frame of events.stream(asked.watched, disconnected)) {
         response.write(frame)
       }
-      if (!disconnected()) sessions.forget({ issue: asked.watched.issue.number, repository: asked.watched.repository })
       response.end()
     }
   }
