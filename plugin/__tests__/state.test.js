@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
-import { parseState, parseStateSafe, renderState, composeHydration, readBlocked, blockNotice, fieldReadingGuide, describeStopRelation, classifyStopState } from '../scripts/state.js'
+import { parseState, parseStateSafe, renderState, composeHydration, readBlocked, blockNotice, fieldReadingGuide, describeStopRelation, classifyStopState, noticeDecision, NOTICE_REPEAT_EVERY_TURNS } from '../scripts/state.js'
 import { SLICE_REL_PATH } from '../scripts/state-paths.js'
+import { readFileSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const SAMPLE = `---
 task: "OAuth login"
@@ -554,5 +557,99 @@ describe('classifyStopState', () => {
     const v = verdict('behind', { count: 1, branch: '' })
     expect(v.reason).toMatch(/desprendido/)
     expect(v.reason).not.toMatch(/rama `/)
+  })
+})
+
+// ===========================================================================
+// #95/H10 — la hidratación inyectaba el frontmatter ENTERO, comentarios
+// incluidos: unos 1.200 B de `#` de la plantilla que el modelo pagaba en cada
+// startup|resume|clear|compact sin que le dijeran nada que `fieldReadingGuide`
+// no diga ya cuando aplica.
+// ===========================================================================
+describe('composeHydration: los comentarios del frontmatter no viajan', () => {
+  const CON_COMENTARIOS = [
+    '---',
+    'task: "X"',
+    '# role: quién eres en el loop. Hay DOS sesiones vivas por repo',
+    '#   - Este fichero es el del CHECKOUT PRINCIPAL',
+    'role: "coordinador"',
+    'verify: "grep \'#\' fichero devuelve 3 líneas"',
+    '---',
+    '## Current State',
+    '# esto es un encabezado del cuerpo, no un comentario',
+    'voy por T7',
+  ].join('\n')
+
+  it('las líneas que empiezan por # dentro del frontmatter desaparecen', () => {
+    const out = composeHydration(CON_COMENTARIOS, '')
+    expect(out).not.toContain('quién eres en el loop')
+    expect(out).not.toContain('CHECKOUT PRINCIPAL')
+  })
+  it('los campos del frontmatter y el cuerpo siguen enteros, incluido un # dentro de un valor y un encabezado del cuerpo', () => {
+    const out = composeHydration(CON_COMENTARIOS, '')
+    expect(out).toContain('task: "X"')
+    expect(out).toContain('role: "coordinador"')
+    expect(out).toContain('verify: "grep \'#\' fichero devuelve 3 líneas"')
+    expect(out).toContain('# esto es un encabezado del cuerpo, no un comentario')
+    expect(out).toContain('voy por T7')
+  })
+  it('la plantilla vacía hidrata en menos de 1.000 bytes', () => {
+    const tpl = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'state-template', 'STATE.template.md'), 'utf8')
+    expect(Buffer.byteLength(tpl, 'utf8')).toBeGreaterThan(1000)
+    expect(Buffer.byteLength(composeHydration(tpl, ''), 'utf8')).toBeLessThan(1000)
+  })
+})
+
+// ===========================================================================
+// #95/H8 — el aviso no bloqueante salía en CADA turno mientras durase la
+// anomalía. La insistencia era deliberada, pero el propio proyecto ya tiene
+// escrita la sentencia que la desmonta: «un aviso que sale siempre es un aviso
+// que nadie lee» (la cabecera de `blocked`, en este mismo módulo).
+// ===========================================================================
+describe('noticeDecision: el aviso sale la primera vez, cuando cambia, y cada N turnos', () => {
+  const rel = { kind: 'ahead', stateSha: OTHER }
+
+  it('el primer turno de la anomalía siempre avisa', () => {
+    expect(noticeDecision({ relation: rel, previous: null }).emit).toBe(true)
+  })
+
+  it('los turnos siguientes callan hasta que se cumple el periodo', () => {
+    let previous = null
+    const emitidos = []
+    for (let turno = 1; turno <= 5; turno++) {
+      const d = noticeDecision({ relation: rel, previous })
+      if (d.emit) emitidos.push(turno)
+      previous = d.next
+    }
+    expect(emitidos).toEqual([1])
+  })
+
+  it('a los N turnos vuelve a salir, y el periodo empieza de nuevo', () => {
+    let previous = null
+    const emitidos = []
+    for (let turno = 1; turno <= NOTICE_REPEAT_EVERY_TURNS * 2; turno++) {
+      const d = noticeDecision({ relation: rel, previous })
+      if (d.emit) emitidos.push(turno)
+      previous = d.next
+    }
+    expect(emitidos).toEqual([1, NOTICE_REPEAT_EVERY_TURNS + 1])
+  })
+
+  it('cambiar de relación avisa aunque el periodo no se haya cumplido: es otra anomalía', () => {
+    const primera = noticeDecision({ relation: rel, previous: null })
+    const segunda = noticeDecision({ relation: { kind: 'diverged', stateSha: OTHER }, previous: primera.next })
+    expect(segunda.emit).toBe(true)
+  })
+
+  it('el mismo tipo apuntando a OTRO commit también es otra anomalía', () => {
+    const primera = noticeDecision({ relation: rel, previous: null })
+    const segunda = noticeDecision({ relation: { kind: 'ahead', stateSha: HEAD }, previous: primera.next })
+    expect(segunda.emit).toBe(true)
+  })
+
+  it('un marcador ilegible o de otra forma no silencia nada: se avisa', () => {
+    for (const previous of ['no es json', 42, {}, { kind: 'ahead' }]) {
+      expect(noticeDecision({ relation: rel, previous }).emit).toBe(true)
+    }
   })
 })

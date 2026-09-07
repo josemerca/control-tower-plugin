@@ -39,6 +39,7 @@ class NacidosConformes {
     '__tests__/ct-harvest-bq-real-process.test.js',
     'scripts/slice-harvest.js',
     '__tests__/slice-harvest.test.js',
+    'scripts/ct-step-commit.js',
     'scripts/dispatch-gate.js',
     'hooks/dispatch-guard.js',
     '__tests__/dispatch-gate.test.js',
