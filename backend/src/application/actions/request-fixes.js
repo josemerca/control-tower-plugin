@@ -1,7 +1,7 @@
 export class RequestFixesParams {
   constructor({ agent, issue, repository, changes }) {
     this.agent = agent
-    this.issue = issue
+    this.issueNumber = issue
     this.repository = repository
     this.changes = changes
     Object.freeze(this)
@@ -15,10 +15,10 @@ export class RequestFixes {
   }
 
   async execute(params) {
-    await this.workbench.reopen({ issue: params.issue, repository: params.repository })
+    await this.workbench.reopen({ issueNumber: params.issueNumber, repository: params.repository })
     await this.planAgents.fix({
       agent: params.agent,
-      issue: params.issue.number,
+      issue: params.issueNumber,
       repository: params.repository,
       changes: params.changes,
     })

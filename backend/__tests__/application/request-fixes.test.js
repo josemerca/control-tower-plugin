@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest'
 import { RequestFixes, RequestFixesParams } from '../../src/application/actions/request-fixes.js'
 import { Workbench } from '../../src/domain/ports/workbench.js'
 import { PlanAgents } from '../../src/domain/ports/plan-agents.js'
-import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { SliceNotReopened, PlanAgentNotResumed } from '../../src/domain/exceptions.js'
 
@@ -42,9 +41,7 @@ class PlanAgentsDouble extends PlanAgents {
 
 class Flow {
   static AGENT = 'workspace:20'
-  static ISSUE = new PlanIssue({
-    number: 7, url: 'https://github.com/josemerca/ct-loop-sandbox/issues/7',
-  })
+  static ISSUE_NUMBER = 7
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
   static CHANGES = 'src/foo.js:42: revienta con []'
 
@@ -64,7 +61,7 @@ class Flow {
   async run() {
     return new RequestFixes(this).execute(new RequestFixesParams({
       agent: Flow.AGENT,
-      issue: Flow.ISSUE,
+      issue: Flow.ISSUE_NUMBER,
       repository: Flow.REPOSITORY,
       changes: Flow.CHANGES,
     }))
@@ -77,10 +74,10 @@ describe('RequestFixes', () => {
 
     await flow.run()
 
-    expect(flow.workbench.asked).toEqual([{ issue: Flow.ISSUE, repository: Flow.REPOSITORY }])
+    expect(flow.workbench.asked).toEqual([{ issueNumber: Flow.ISSUE_NUMBER, repository: Flow.REPOSITORY }])
     expect(flow.planAgents.asked).toEqual([{
       agent: Flow.AGENT,
-      issue: Flow.ISSUE.number,
+      issue: Flow.ISSUE_NUMBER,
       repository: Flow.REPOSITORY,
       changes: Flow.CHANGES,
     }])
@@ -116,7 +113,7 @@ describe('RequestFixes', () => {
 
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
     await expect(new PlanAgents().fix({
-      agent: Flow.AGENT, issue: Flow.ISSUE.number, repository: Flow.REPOSITORY, changes: Flow.CHANGES,
+      agent: Flow.AGENT, issue: Flow.ISSUE_NUMBER, repository: Flow.REPOSITORY, changes: Flow.CHANGES,
     })).rejects.toThrow(/must implement fix/)
   })
 })

@@ -5,7 +5,6 @@ import { fileURLToPath } from 'url'
 import { DispatchCheckWorkbench } from '../../src/infrastructure/dispatch-check-workbench.js'
 import { Workbench } from '../../src/domain/ports/workbench.js'
 import { ProcessOutput } from '../../src/infrastructure/tool-runner.js'
-import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { SliceNotReopened, ReopenNotUnderstood } from '../../src/domain/exceptions.js'
 
@@ -43,9 +42,7 @@ class PluginContract {
 
 class NodeDouble {
   static DISPATCH_CHECK = '/plugin/scripts/dispatch-check.mjs'
-  static ISSUE = new PlanIssue({
-    number: 7, url: 'https://github.com/josemerca/ct-loop-sandbox/issues/7',
-  })
+  static ISSUE_NUMBER = 7
   static REPOSITORY = new RepositoryName('josemerca/ct-loop-sandbox')
 
   constructor(answer) {
@@ -69,7 +66,7 @@ class NodeDouble {
   }
 
   async reopen() {
-    return this.workbench().reopen({ issue: NodeDouble.ISSUE, repository: NodeDouble.REPOSITORY })
+    return this.workbench().reopen({ issueNumber: NodeDouble.ISSUE_NUMBER, repository: NodeDouble.REPOSITORY })
   }
 
   async refusal() {
@@ -134,7 +131,7 @@ describe('DispatchCheckWorkbench', () => {
 
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
     await expect(new Workbench().reopen({
-      issue: NodeDouble.ISSUE, repository: NodeDouble.REPOSITORY,
+      issueNumber: NodeDouble.ISSUE_NUMBER, repository: NodeDouble.REPOSITORY,
     })).rejects.toThrow(/must implement reopen/)
   })
 })

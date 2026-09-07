@@ -1,7 +1,7 @@
 export class Workbench {
-  async reopen({ issue, repository }) {
+  async reopen({ issueNumber, repository }) {
     throw new Error(
-      `${this.constructor.name} must implement reopen({ issue, repository }), asked for ${issue?.number} in ${repository}`
+      `${this.constructor.name} must implement reopen({ issueNumber, repository }), asked for ${issueNumber} in ${repository}`
     )
   }
 }
