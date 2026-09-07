@@ -68,6 +68,7 @@ describe('ActivePlanRecovery', () => {
     const sessions = new PlanSessions()
     const activePlans = new ActivePlans({ sessions })
     const reviews = { startRecovered: vi.fn() }
+    const pullRequestReviews = { startRecovered: vi.fn() }
     const checkouts = new MemoryCheckoutRegistry()
     const implementationStarts = new DiskImplementationStartRegistry({
       read: vi.fn(() => {
@@ -87,11 +88,12 @@ describe('ActivePlanRecovery', () => {
       goRegistry: { matches: vi.fn(() => go) },
       sessions,
       reviews,
+      pullRequestReviews,
       activePlans,
       checkouts,
     })
 
-    return { recovery, sessions, activePlans, reviews, checkouts }
+    return { recovery, sessions, activePlans, reviews, pullRequestReviews, checkouts }
   }
 
   it('a_plan_with_no_go_and_no_implementation_marker_recovers_as_planning', () => {
@@ -115,7 +117,7 @@ describe('ActivePlanRecovery', () => {
     expect(recovered.checkouts.known().map((root) => root.text)).toEqual(['/repo'])
   })
 
-  it('exposes_a_plan_with_a_matching_marker_as_implementing_without_restarting_its_watches', () => {
+  it('a_plan_with_a_matching_marker_recovers_as_implementing_and_its_plan_watch_stays_off', () => {
     const recovered = fixture({ marker: VALID_MARKER })
 
     recovered.recovery.recover()
@@ -124,6 +126,26 @@ describe('ActivePlanRecovery', () => {
     expect(recovered.reviews.startRecovered).not.toHaveBeenCalled()
     expect(recovered.activePlans.known()[0].phase).toBe('implementing')
     expect(recovered.checkouts.known().map((root) => root.text)).toEqual(['/repo'])
+  })
+
+  it('a_plan_that_was_already_implementing_gets_its_pull_request_watched_again', () => {
+    const recovered = fixture({ marker: VALID_MARKER })
+
+    recovered.recovery.recover()
+
+    expect(recovered.pullRequestReviews.startRecovered).toHaveBeenCalledOnce()
+    expect(recovered.pullRequestReviews.startRecovered).toHaveBeenCalledWith(CmuxActivePlan.parse(CURRENT))
+  })
+
+  it('a_plan_that_never_started_implementing_gets_no_pull_request_watch', () => {
+    const planning = fixture()
+    const uncertain = fixture({ go: true })
+
+    planning.recovery.recover()
+    uncertain.recovery.recover()
+
+    expect(planning.pullRequestReviews.startRecovered).not.toHaveBeenCalled()
+    expect(uncertain.pullRequestReviews.startRecovered).not.toHaveBeenCalled()
   })
 
   it.each([

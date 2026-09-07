@@ -45,12 +45,15 @@ export class CmuxActivePlan {
 }
 
 export class ActivePlanRecovery {
-  constructor({ list, implementationStarts, goRegistry, sessions, reviews, activePlans, checkouts }) {
+  constructor({
+    list, implementationStarts, goRegistry, sessions, reviews, pullRequestReviews, activePlans, checkouts,
+  }) {
     this.list = list
     this.implementationStarts = implementationStarts
     this.goRegistry = goRegistry
     this.sessions = sessions
     this.reviews = reviews
+    this.pullRequestReviews = pullRequestReviews
     this.activePlans = activePlans
     this.checkouts = checkouts
     this.conclusive = false
@@ -71,6 +74,7 @@ export class ActivePlanRecovery {
       if (this.activePlans.find({ issue: watch.issue.number, repository: watch.repository }) !== null) continue
       if (this.implementationStarts.matches(watch)) {
         this.activePlans.rememberImplementing(watch)
+        this.pullRequestReviews.startRecovered(watch)
         continue
       }
       if (this.goRegistry.matches(watch)) {
