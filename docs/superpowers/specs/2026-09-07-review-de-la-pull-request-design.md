@@ -112,12 +112,23 @@ puerto y un cliente por herramienta.
 
 ```js
 export class Workbench {
-  async reopen({ issue, repository })   // in-review -> in-progress
+  async reopen({ issueNumber, repository })   // in-review -> in-progress
 }
 ```
 
 Es el hermano exacto de `Harvest.collect()`, que también es un `dispatch-check`
-detrás de un puerto propio.
+detrás de un puerto propio — y de ahí que tome `issueNumber` y no `issue`: en este
+backend `issue` nombra el objeto `PlanIssue` y `issueNumber` el número desnudo, y
+`Harvest.collect` ya usaba el segundo.
+
+**Límite conocido de ese vocabulario.** `RequestFixesParams` recibe la clave
+`issue` con un número dentro y la guarda como `issueNumber`, porque el vigilante
+—compartido con el carril del plan— aplana el issue antes de entregar. Es el único
+Params del backend que renombra su entrada, y la misma instancia del vigilante
+pasa el objeto a su lectura y el número a su entrega bajo la misma clave. Para
+este carril no hay ambigüedad, y está medido por el test de composición; para un
+consumidor nuevo de `RequestFixesParams`, sí. Cerrarlo pedía tocar el fichero que
+comparten los dos carriles y no se pagó.
 
 `domain/ports/pull-requests.js`, un colaborador con dos preguntas:
 
@@ -244,9 +255,17 @@ Se instancia dos veces:
 | plan | `ReadChangesAsked` | `ReviewPlan` | `plan review watch` |
 | pull request | `ReadFixesAsked` | `RequestFixes` | `pull request review watch` |
 
-El bucle no cambia. Su comportamiento ante un fallo de entrega tampoco: un
-cambio se marca como atendido antes de entregarse, y una entrega que falló no se
-reintenta. Es una decisión tomada, fijada por
+El bucle cambia en una cosa, y no estaba previsto aquí: **entrega como máximo un
+cambio por tick**. Hacía falta porque en este carril entregar muta la puerta —el
+`--reopen` mueve la etiqueta—, así que un segundo cambio de la misma lectura moría
+contra ella y se perdía, rompiendo la promesa de §5.3. El carril del plan hereda
+la restricción sin necesitarla (allí entregar no toca la puerta): no pierde nada,
+porque un cambio no entregado no se marca como atendido y se relee, pero cada
+cambio extra le cuesta un tick.
+
+Su comportamiento ante un fallo de entrega no cambia: un cambio se marca como
+atendido antes de entregarse, y una entrega que falló no se reintenta. Es una
+decisión tomada, fijada por
 `a_delivery_that_failed_is_not_retried_forever_and_says_so`, y se respeta.
 
 ### 5.2 El tick
@@ -284,7 +303,7 @@ siguiente, cuando el agente haya liberado. No se atropella y no se pierde.
 `application/actions/request-fixes.js`:
 
 ```js
-await workbench.reopen({ issue, repository })                  // in-review -> in-progress
+await workbench.reopen({ issueNumber, repository })             // in-review -> in-progress
 await planAgents.fix({ agent, issue, repository, changes })    // cmux send + Enter
 ```
 
@@ -462,6 +481,26 @@ sin código nuevo. Decisión tomada: no se parchea hasta saber si ocurre.
 
 **Un comentario en la pestaña Conversation no llega.** Sólo cuenta lo que GitHub
 modela como review, según la tabla de la sección 3.
+
+**El vigilante de la pull request no se para nunca.** Arranca en el relevo y nadie
+llama a su `stop()`: vive lo que viva el proceso. Tras el merge, `openOf` devuelve
+`null` y su tick sigue costando una llamada a `gh` por vuelta, por cada plan que
+se haya implementado en esa sesión. El del plan sí se para explícitamente. El
+punto natural para pararlo es el botón de "Arrancar otro plan", y queda sin
+construir.
+
+**El cuarto paso rotula mal en dos ventanas.** `openOf` filtra `--state open`, así
+que una pull request ya **mergeada** se lee como `null`, sale `IMPLEMENTING` y la
+interfaz dice "Implementando…" con el paso de Revisión clavado en activo: quien
+mira no puede saber que el trabajo terminó. Y en la ventana entre `gh pr create` y
+el `--release` hay pull request abierta con el issue todavía en `in-progress`, así
+que sale `FIXING` y dice "Corrigiendo lo pedido…" cuando nadie corrige — para
+siempre si el agente nunca libera.
+
+La causa de las dos es la misma y es una decisión de la sección 6.1: el stream
+reusa `DeliveryPolicy`, que se diseñó para la puerta del vigilante. Como puerta es
+correcta —ante duda, no se teclea—, y como rótulo se equivoca. Separarlas pedía un
+segundo vocabulario y no se pagó.
 
 ## 9. Lo que queda nombrado para después
 
