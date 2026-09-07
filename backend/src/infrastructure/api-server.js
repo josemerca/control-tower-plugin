@@ -88,6 +88,7 @@ export class ApiServer {
       Browsers.turnAwayForeign,
       PlanEventsRoute.handledBy(this.sessions, this.planEvents)
     )
+    app.all(PlanEventsRoute.PATH, PlanEventsRoute.refuseOtherMethods)
     app.get(
       ActivePlansRoute.PATH,
       Browsers.turnAwayForeign,

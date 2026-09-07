@@ -177,4 +177,9 @@ export class PlanEventsRoute {
       response.end()
     }
   }
+
+  static refuseOtherMethods(request, response) {
+    response.setHeader('Allow', PlanEventsRoute.METHOD)
+    Answer.refuse(response, 405, 'method-not-allowed', 'method not allowed')
+  }
 }
