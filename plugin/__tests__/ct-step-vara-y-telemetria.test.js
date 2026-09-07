@@ -195,7 +195,7 @@ describe('la vara del repo viaja en el brief, sin agente en medio', () => {
 describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
   const briefDeLaUno = () => readFileSync(join(repo, '.agent', 'run-7', 'task-1-brief.md'), 'utf8')
 
-  it('el brief termina con los cinco documentos, DETRÁS de la tarea', () => {
+  it('el brief termina con los documentos de la vara, DETRÁS de la tarea', () => {
     ct('next')
     const brief = briefDeLaUno()
     expect(brief).toMatch(/\*\*La vara de ct\*\*/)
@@ -223,20 +223,20 @@ describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
 
   // EL ALCANCE DE CADA DOCUMENTO decide si viaja. `architecture.md` rige los
   // MÓDULOS NUEVOS —lo dice su propia cabecera `Applies to:`— así que a una
-  // tarea que sólo modifica lo que ya estaba no le llega: son 9,3 KB que el
-  // implementador lee en cada tarea sin que ninguno de sus párrafos pueda
+  // tarea que sólo modifica lo que ya estaba no le llega: son unos 8,6 KB que
+  // el implementador lee en cada tarea sin que ninguno de sus párrafos pueda
   // medir su diff.
   const conLaUnoModificando = () => {
     const plan = readFileSync(join(repo, 'plan.md'), 'utf8').replace('`uno.txt` (create)', '`uno.txt` (modify)')
     writeFileSync(join(repo, 'plan.md'), plan)
   }
 
-  it('una tarea que no estrena módulo no se lleva architecture.md, y sí los otros cuatro', () => {
+  it('una tarea que no estrena módulo no se lleva architecture.md, y sí el resto de la vara', () => {
     conLaUnoModificando()
     ct('next')
     const brief = briefDeLaUno()
     expect(brief).not.toContain('## Vara de ct: conventions/architecture.md')
-    for (const nombre of ['defects.md', 'style.md', 'decisions.md', 'testing.md']) {
+    for (const nombre of PluginYardstick.FILES.filter((f) => f !== 'architecture.md')) {
       expect(brief, `${nombre} tendría que seguir viajando`).toContain(`## Vara de ct: conventions/${nombre}`)
     }
   })
@@ -285,6 +285,28 @@ describe('la vara de ct viaja en el brief, y va delante de la del repo', () => {
     } finally {
       rmSyncBestEffort(fake)
     }
+  })
+})
+
+// Tarea 8: el juez de slice mide estado final, coherencia y señal — no
+// código regla a regla —, así que de la vara entera sólo le toca la que
+// mide precisamente eso: `simplicity.md` (la carga de la prueba está en lo
+// que se añade), la vara de su ítem `observabilidad`. Una sola ruta, no el
+// documento pegado: `## Vara` va PRIMERA, delante incluso de `## Señal`,
+// por el mismo motivo que `## Señal` va delante del diff -U10.
+describe('el paquete de slice trae la ruta de simplicity.md, no el documento entero', () => {
+  it('la sección "## Vara" es la primera del paquete y trae la ruta absoluta de simplicity.md', () => {
+    tareaOk('uno.txt')
+    tareaOk('dos.txt')
+    ct('reconcile')
+    ct('global')
+    ct('next')
+    const paquete = readFileSync(join(repo, '.agent', 'run-7', 'slice-review.diff'), 'utf8')
+    expect(paquete).toMatch(/## Vara/)
+    expect(paquete.indexOf('## Vara')).toBeLessThan(paquete.indexOf('## Señal'))
+    const seccionVara = paquete.slice(paquete.indexOf('## Vara'), paquete.indexOf('## Señal'))
+    const ruta = join(PLUGIN_ROOT_TEST, PluginYardstick.DIRECTORY, 'simplicity.md')
+    expect(seccionVara).toContain(ruta)
   })
 })
 

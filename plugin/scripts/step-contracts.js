@@ -471,17 +471,22 @@ export const SLICE_JUDGE_TOOLS = 'Read, Grep, Glob, Write'
 // impide que las dos diverjan es el test, no el código.
 export const RECONCILER_TOOLS = 'Read, Grep, Glob, Edit'
 
-// Los cuatro encabezados del paquete de SLICE que escribe `escribirPaqueteDeSlice`
-// en `scripts/ct-step.mjs`: la señal de observabilidad que el issue del slice
-// declaró (Slice 10 — PRIMERA porque es la vara del ítem `observabilidad`:
-// detrás del diff `-U10` quedaría enterrada), el registro de commits de la
-// slice (que no existe en el paquete por tarea, porque una tarea es UN commit
-// sin historia propia que mostrar), el resumen de ficheros tocados y el diff
-// acumulado desde la base. Mismo cruce que `PACKAGE_SECTIONS`: la rúbrica de
+// Los cinco encabezados del paquete de SLICE que escribe `escribirPaqueteDeSlice`
+// en `scripts/ct-step.mjs`. El juez de slice mide estado final, coherencia y
+// señal — no código regla a regla, y a propósito tiene menos herramientas —
+// así que no recibe la vara entera: recibe UNA sola ruta, la de
+// `simplicity.md`, porque es exactamente la regla que su ítem
+// `observabilidad` mide (una traza nombra a su lector). `Vara` PRIMERA, por
+// el mismo motivo que `Señal` va delante del diff `-U10`: enterrada detrás de
+// un diff así no la lee nadie. Le siguen la señal de observabilidad que el
+// issue del slice declaró, el registro de commits de la slice (que no existe
+// en el paquete por tarea, porque una tarea es UN commit sin historia propia
+// que mostrar), el resumen de ficheros tocados y el diff acumulado desde la
+// base. Mismo cruce que `PACKAGE_SECTIONS`: la rúbrica de
 // `agents/ct-slice-judge.md` los cita por su nombre, y sin este test un
 // encabezado renombrado deja al juez señalando una sección que no existe — el
 // test que los ata obliga a que paquete y agente cambien en la MISMA tarea.
-export const SLICE_PACKAGE_SECTIONS = ['Señal', 'Commits', 'Files changed', 'Diff']
+export const SLICE_PACKAGE_SECTIONS = ['Vara', 'Señal', 'Commits', 'Files changed', 'Diff']
 
 // EL CONSEJERO (H9, `agents/ct-advisor.md`), con UNA sola herramienta: `Read`.
 // No escribe su respuesta a un fichero como los dos jueces —la devuelve por

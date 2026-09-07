@@ -18,13 +18,19 @@ global`), and its result is a fact you inherit.
 
 ## What you are given
 
-- **The slice review package.** `## Señal` is the observability signal this
-  slice's issue declared, pasted by the program from the dispatch state — a
-  program wrote it, verbatim; `## Commits` lists every commit of this slice,
-  oldest first, one line each; `## Files changed` is `git diff --stat` between
-  the base of the slice and the last commit; `## Diff` is the accumulated diff
-  of every task, `-U10`. This is the whole slice at once — the staged change of
-  one task lives elsewhere, because by now every task is committed.
+- **The slice review package.** `## Vara` is the one path this judge is given
+  from the yardstick that travels with this plugin: the absolute path to
+  `simplicity.md`, which you open with `Read`. That one document travels on its
+  own because this judge measures the end state, the coherence between tasks
+  and the declared signal rather than code quality rule by rule, and it is
+  exactly the rule your `observabilidad` item measures against.
+  `## Señal` is the observability signal this slice's issue declared, pasted
+  by the program from the dispatch state — a program wrote it, verbatim;
+  `## Commits` lists every commit of this slice, oldest first, one line each;
+  `## Files changed` is `git diff --stat` between the base of the slice and the
+  last commit; `## Diff` is the accumulated diff of every task, `-U10`. This is
+  the whole slice at once — the staged change of one task lives elsewhere,
+  because by now every task is committed.
   The package opens with a `Review token:` line: the sha256 of exactly the
   accumulated diff printed below it. **There is no `review_token` for you to
   write** — `ct-step slice-verdict` writes that field into your verdict itself,
@@ -104,6 +110,9 @@ task in isolation, and these live only in the relationship between commits.
 observability signal this slice's issue declared, pasted by the program
 from the dispatch state, verbatim — against the accumulated `## Diff`,
 and against the repository itself for how this repo already instruments.
+The yardstick for this question is the `## Vara` section: it names one
+path, `simplicity.md` — open it with `Read`, and cite it in a finding the
+same way you cite any other document.
 
 **The slice complies when** three checks, and only these three, hold — and
 then there is one smell, after them, that settles nothing and never

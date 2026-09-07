@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { PluginYardstick } from '../scripts/plugin-yardstick.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -24,12 +25,19 @@ class Documento {
 const ALCANCES = {
   'defects.md': 'every diff',
   'style.md': 'every diff',
+  'simplicity.md': 'every diff',
   'decisions.md': 'every diff',
   'testing.md': 'every diff',
   'architecture.md': 'new modules',
+  'domain.md': 'every diff',
+  'boundaries.md': 'every diff',
 }
 
 describe('the documents in conventions/', () => {
+  it('ALCANCES nombra exactamente lo que PluginYardstick.FILES declara, ni uno mas ni uno menos', () => {
+    expect(Object.keys(ALCANCES).sort()).toEqual([...PluginYardstick.FILES].sort())
+  })
+
   for (const [nombre, alcance] of Object.entries(ALCANCES)) {
     it(`${nombre} declares its scope in the header`, () => {
       const cabecera = Documento.cabeceraDe(nombre)
@@ -186,3 +194,270 @@ describe('testing.md separates "seen to fail for its reason" from the cycle\'s r
   }
 })
 
+describe('testing.md pins how each layer is measured, and hunts what no test watches', () => {
+  const tresReglas = () =>
+    Documento.clausulaDe('testing.md', '## Three rules, and everything below follows from them')
+  const tabla = () => Documento.clausulaDe('testing.md', '## How each layer is tested')
+
+  const AFIRMACIONES = {
+    'el caso de uso es una caja negra y el dominio no tiene tests propios':
+      () => expect(Documento.texto('testing.md')).toContain('A use case is a black box'),
+    'el adaptador se corta justo antes del sistema externo':
+      () => expect(Documento.texto('testing.md')).toContain('cutting right before the external system'),
+    'la salida del adaptador se declara en el test y sale de una captura real, sin pedirsela al servicio mientras corre la suite':
+      () => {
+        expect(
+          tresReglas(),
+          'testing.md no dice que la forma declarada se escribe en el test y jamas se pide mientras corre la suite'
+        ).toContain('The shape is written in the test and never requested while the suite runs')
+        expect(
+          tresReglas(),
+          'testing.md no exige que la forma declarada venga de una captura real y no de la imaginacion'
+        ).toContain('the shape it declares comes from a real capture, never from imagination')
+      },
+    'el test dice de donde sale su captura, para que quien lee el diff juzgue esa declaracion':
+      () => {
+        expect(
+          tresReglas(),
+          'testing.md no obliga al test a decir de donde sale la captura de su forma declarada'
+        ).toContain('the test names where its capture came from')
+        expect(
+          tresReglas(),
+          'testing.md no dice que quien juzga lee esa declaracion, como en la barrida y en la asercion vista fallar'
+        ).toContain('whoever judges reads that declaration, the same way the mutation sweep and the assertion seen to fail are read')
+      },
+    'la tabla mide el adaptador contra la misma forma declarada, con su captura y sin pedirsela al servicio mientras corre la suite':
+      () =>
+        expect(
+          tabla(),
+          'la tabla ya no mide el adaptador contra la forma declarada, su captura y el servicio al que no se le pide'
+        ).toContain(
+          '| Adapters | the external system, as a scripted conversation | the literal request sent, ' +
+            'and the parse of a declared output shape — written in the test from a real capture it names, ' +
+            'and never requested while the suite runs |'
+        ),
+    'declara la excepcion del adaptador que ES la llamada':
+      () => expect(tresReglas()).toContain('an adapter that *is* the call'),
+    'la integracion desde el borde cubre solo el camino feliz':
+      () => expect(Documento.texto('testing.md')).toContain('covers the happy path, and only that'),
+    'el controlador se mide por un servidor de verdad, no llamando al handler':
+      () => expect(Documento.texto('testing.md')).toContain('never calling the handler as a function'),
+    'un rechazo nunca llega a un doble':
+      () => expect(Documento.texto('testing.md')).toContain('A refusal never reaches a double'),
+    'las dos causas de fallo de un adaptador se distinguen en sus tests':
+      () => expect(Documento.texto('testing.md')).toContain('proves one is not an instance of the other'),
+    'exige la barrida de mutacion y dice que caza la linea que nadie mira':
+      () => expect(Documento.texto('testing.md')).toContain('hunt **the mutations that leave it green**'),
+    'lleva la disciplina del harness: una sustitucion que no encaja falla ruidosa':
+      () => expect(Documento.texto('testing.md')).toContain('a silent miss is a green that measured nothing'),
+    'lleva la disciplina del harness: el fichero se restaura y se verifica':
+      () => expect(Documento.texto('testing.md')).toContain('restored and verified identical afterwards'),
+    'da las dos reparaciones posibles de una mutacion que sobrevive':
+      () => expect(Documento.texto('testing.md')).toContain('the test nobody wrote, or the line nobody needs'),
+    'obliga a declarar lo que se deja sin medir, con su motivo':
+      () => expect(Documento.texto('testing.md')).toContain('What stays unmeasured, on purpose'),
+  }
+
+  for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
+    it(`testing.md ${afirmacion}`, () => {
+      comprobar()
+    })
+  }
+})
+
+describe('simplicity.md carries the burden of proof, and says where it ends', () => {
+  const AFIRMACIONES = {
+    'declara la regla única, y que se descarga contra el problema de hoy':
+      () => expect(Documento.texto('simplicity.md')).toContain('the burden of proof is on what is added'),
+    'nombra la pregunta que decide un campo, una rama o un símbolo público':
+      () => expect(Documento.texto('simplicity.md')).toContain('which call breaks without it'),
+    'nombra la pregunta que decide una línea de observabilidad':
+      () => expect(Documento.texto('simplicity.md')).toContain('who reads this, and where'),
+    'dice que una petición de una revisión o de un juicio no exime':
+      () => expect(Documento.texto('simplicity.md')).toContain('does not move when the addition is asked for by a reviewer'),
+    'lo que no se puede descargar se declara en el informe de la tarea y la decision queda para una persona':
+      () =>
+        expect(
+          Documento.clausulaDe('simplicity.md', '## A request from a review or a judgement is not exempt')
+        ).toContain(
+          "that is declared in the task's report, where whoever judges reads it, and the decision is left to a person."
+        ),
+    'lleva el cortafuegos, para que no se lea como permiso para saltarse una capa':
+      () => expect(Documento.texto('simplicity.md')).toContain('Nothing here authorises dropping a layer'),
+    'declara su frontera con el item alcance de la rubrica, que pregunta otra cosa':
+      () => expect(Documento.texto('simplicity.md')).toContain('What the plan asked for is a different question from this one'),
+  }
+
+  for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
+    it(`simplicity.md ${afirmacion}`, () => {
+      comprobar()
+    })
+  }
+})
+
+describe('domain.md keeps the tools out of the domain', () => {
+  const AFIRMACIONES = {
+    'declara que el port dice lo que el dominio necesita, no lo que el adaptador sabe hacer':
+      () => expect(Documento.texto('domain.md')).toContain('The port declares what the domain needs, not what the adapter knows how to do'),
+    'da el test que decide un nombre: cambiar el adaptador convierte el nombre en mentira':
+      () => expect(Documento.texto('domain.md')).toContain('makes the name a lie'),
+    'corta el port por quien esta al otro lado y no por paso del flujo':
+      () => expect(Documento.texto('domain.md')).toContain('never by step of the flow'),
+    'identifica al colaborador por lo que se le pide, no por lo que responde':
+      () => expect(Documento.texto('domain.md')).toContain('identified by what is asked of it'),
+    'dice que lo que nunca se duplica es la intencion, no la forma':
+      () => expect(Documento.texto('domain.md')).toContain('Repeated shape is not the subject'),
+    'dice cual es la guarda del value object, y que se queda aunque hoy nadie la necesite':
+      () => expect(Documento.texto('domain.md')).toContain('what makes them this value and not any value'),
+    'excluye la segunda opinion sobre lo que otro tipo ya garantiza':
+      () => expect(Documento.texto('domain.md')).toContain('re-verifies what another type already guarantees'),
+    'separa las dos causas de fallo porque se reparan en sitios distintos':
+      () => expect(Documento.texto('domain.md')).toContain('they are repaired in different places'),
+    'remite a simplicity.md para lo que pasa aguas abajo de una puerta':
+      () => expect(Documento.texto('domain.md')).toContain('`conventions/simplicity.md`'),
+    'y simplicity.md ya remite aqui para la guarda propia del value object':
+      () => expect(Documento.texto('simplicity.md')).toContain('`conventions/domain.md`'),
+  }
+
+  for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
+    it(`domain.md ${afirmacion}`, () => {
+      comprobar()
+    })
+  }
+})
+
+describe('boundaries.md owns the outer edge, in both shapes a program has', () => {
+  const AFIRMACIONES = {
+    'quien llama declara si su llamada es segura de repetir':
+      () => expect(Documento.texto('boundaries.md')).toContain('The caller declares whether its call is safe to repeat'),
+    'el tronco sabe el idioma de la red y la especializacion el de su sistema':
+      () => expect(Documento.texto('boundaries.md')).toContain("the subclass knows the tool's"),
+    'un sistema sin idioma medido hereda el tronco desnudo':
+      () => expect(Documento.texto('boundaries.md')).toContain('inventing markers nobody measured is a preference dressed as a rule'),
+    'un rate limit no es un blip':
+      () => expect(Documento.texto('boundaries.md')).toContain('A rate limit is not a blip'),
+    'el fallo del sistema externo vuelve como dato':
+      () => expect(Documento.texto('boundaries.md')).toContain('is data, not an exception'),
+    'ningun sistema externo se llama sin tope, y el adaptador no lo elige':
+      () => expect(Documento.texto('boundaries.md')).toContain('the adapter does not choose the cap'),
+    'la conversion al dominio vive en el modelo del borde, con una puerta':
+      () => expect(Documento.texto('boundaries.md')).toContain('The conversion to the domain lives in the'),
+    'el texto de otro sistema entra con su sintaxis activa aquietada':
+      () => expect(Documento.texto('boundaries.md')).toContain('gets its active syntax quieted'),
+    'la proyeccion del vocabulario hacia fuera es exhaustiva y devuelve un value object':
+      () => expect(Documento.texto('boundaries.md')).toContain('is exhaustive and returns a value object'),
+    'el codigo de una respuesta se declara y no se deriva del nombre de una clase':
+      () => expect(Documento.texto('boundaries.md')).toContain("never derived from an exception's class name"),
+    'el borde exterior es el unico que ensambla el grafo':
+      () => expect(Documento.texto('boundaries.md')).toContain('the only place that assembles the dependency graph'),
+    'nombra las DOS formas del borde, no solo el programa que termina':
+      () => {
+        const texto = Documento.texto('boundaries.md')
+        expect(texto).toContain('a program that ends')
+        expect(texto).toContain('a service that answers')
+      },
+    'conserva la regla que vale en las dos formas':
+      () => expect(Documento.texto('boundaries.md')).toContain('One code per decision of whoever receives'),
+  }
+
+  for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
+    it(`boundaries.md ${afirmacion}`, () => {
+      comprobar()
+    })
+  }
+})
+
+describe('architecture.md kept nothing of the edge, so no rule is written twice', () => {
+  const ENCABEZADOS_QUE_DESAPARECEN = ['## The boundary', '## The entrypoint']
+
+  const REGLAS_QUE_SE_MUDAN = [
+    'exit codes',
+    'assembles the dependency graph',
+    'An unknown key is a rejection',
+    'validated by projection',
+    'a cast checks nothing',
+    'without a cap',
+    'is data, not an exception',
+    'An adapter is named after its implementation',
+    'An adapter does not decide policy',
+    "the contract's name",
+    'mapping helper inside a use case',
+  ]
+
+  for (const encabezado of ENCABEZADOS_QUE_DESAPARECEN) {
+    it(`architecture.md ya no tiene la seccion ${encabezado}`, () => {
+      expect(Documento.texto('architecture.md')).not.toContain(encabezado)
+    })
+  }
+
+  for (const regla of REGLAS_QUE_SE_MUDAN) {
+    it(`no queda en architecture.md: ${regla}`, () => {
+      expect(Documento.texto('architecture.md')).not.toContain(regla)
+    })
+
+    it(`y esta en boundaries.md: ${regla}`, () => {
+      expect(Documento.texto('boundaries.md')).toContain(regla)
+    })
+  }
+})
+
+describe('architecture.md says where a new thing goes, and makes the layers visible', () => {
+  const AFIRMACIONES = {
+    'exige que las capas y sus habitantes se vean en el arbol':
+      () => expect(Documento.texto('architecture.md')).toContain('the folder is the discriminator, never a suffix on the name'),
+    'pone la carga de la prueba en el tipo nuevo, con el metodo como respuesta por defecto':
+      () => expect(Documento.texto('architecture.md')).toContain('a method on a type that already exists'),
+    'dice que un test no es un consumidor':
+      () => expect(Documento.texto('architecture.md')).toContain('a test double is not a consumer'),
+    'deja el payload de un unico propietario en el fichero de ese propietario':
+      () => expect(Documento.texto('architecture.md')).toContain("shares the owner's file"),
+    'dice que una clase que nadie instancia es un namespace y eso no le gana un modulo':
+      () => expect(Documento.texto('architecture.md')).toContain('A class nobody instantiates is a namespace'),
+    'exige un cliente por sistema externo, nunca uno por llamada':
+      () => expect(Documento.texto('architecture.md')).toContain('never a client per call'),
+    'exige un controlador por endpoint, con su modelo y sus proyecciones dentro':
+      () => expect(Documento.texto('architecture.md')).toContain('One controller per endpoint'),
+  }
+
+  for (const [afirmacion, comprobar] of Object.entries(AFIRMACIONES)) {
+    it(`architecture.md ${afirmacion}`, () => {
+      comprobar()
+    })
+  }
+})
+
+describe('the yardstick names no language and no tool', () => {
+  const PROHIBIDOS = [
+    /vitest/i, /pytest/i, /jest/i, /execFile/, /\bnpx\b/, /\bnpm\b/, /\bnode\b/i,
+    /Object\.freeze/, /\bfetch\b/, /\.m?jsx?\b/, /\.tsx?\b/, /\bnode_modules\b/,
+    /\bpython\b/i, /\bjavascript\b/i, /\btypescript\b/i, /\bruby\b/i, /\brust\b/i,
+    /\bjava\b/i, /\bkotlin\b/i, /\bswift\b/i, /\bgolang\b/i, /\bphp\b/i, /\bperl\b/i,
+    /c\+\+/i, /\bc#/i,
+  ]
+
+  for (const nombre of Object.keys(ALCANCES)) {
+    for (const prohibido of PROHIBIDOS) {
+      it(`${nombre} no nombra ${prohibido}`, () => {
+        expect(Documento.texto(nombre)).not.toMatch(prohibido)
+      })
+    }
+  }
+
+  it('cuando se habla de un codigo de salida, se nombra tambien la otra forma del borde', () => {
+    for (const nombre of Object.keys(ALCANCES)) {
+      const texto = Documento.texto(nombre)
+      if (!/exit code/i.test(texto)) continue
+      expect(texto, `${nombre} habla de exit code sin nombrar el servicio que atiende`)
+        .toContain('a service that answers')
+    }
+  })
+
+  it('nadie en el plugin sigue diciendo que son cinco', () => {
+    const fuentes = ['scripts/run-metrics.js', 'scripts/ct-next.mjs', 'scripts/kickoff.js', 'scripts/ct-step.mjs',
+      'agents/ct-reconciler.md', 'skills/writing-plans-prescriptive/SKILL.md']
+    for (const ruta of fuentes) {
+      const texto = readFileSync(join(root, ruta), 'utf8')
+      expect(texto, `${ruta} sigue diciendo cinco`).not.toMatch(/cinco documentos|five documents/i)
+    }
+  })
+})

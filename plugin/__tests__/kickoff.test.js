@@ -401,14 +401,16 @@ describe('el primer acto nombra la vara de ct', () => {
     expect(k).toContain('/plugin/conventions')
   })
 
-  // La orden de LEER LOS CINCO en crudo se quitó: son 24 KB delante de un plan
-  // que no los cita casi nunca, y lo que el plan tiene que seleccionar es la
-  // vara del REPO en el `Rules to obey:` de §3. La de ct la lleva el programa a
-  // cada tarea sin que el plan pueda quitarla.
-  it('no manda leer los cinco documentos antes de planificar', () => {
+  // La orden de LEERLOS TODOS en crudo se quitó: son unos 41 KB delante de un
+  // plan que no los cita casi nunca, y lo que el plan tiene que seleccionar es
+  // la vara del REPO en el `Rules to obey:` de §3. La de ct la lleva el
+  // programa a cada tarea sin que el plan pueda quitarla.
+  it('no manda leer la vara entera, pero nombra los dos que el plan no puede no haber abierto', () => {
     const k = renderKickoff(SLICE, OPTS_CON_VARA)
     expect(k).not.toMatch(/LEE la vara de ct/)
-    expect(k).not.toMatch(/los cinco documentos de/)
+    expect(k).not.toMatch(/No hace falta que abras/)
+    expect(k).toContain('simplicity.md')
+    expect(k).toContain('decisions.md')
   })
 
   it('la orden cae ANTES de la entrada que manda escribir el plan', () => {
