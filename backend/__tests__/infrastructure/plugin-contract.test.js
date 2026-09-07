@@ -128,7 +128,13 @@ describe('the status labels this backend writes and the plugin reads', () => {
   })
 
   it('the_statuses_a_plan_issue_can_stand_at_are_the_rungs_of_the_loops_own_ladder', () => {
-    expect(PlanIssueStatus.declared()).toEqual(STATUS_LADDER)
+    const rungs = Object.values(PlanIssueStatus).filter((status) => status !== PlanIssueStatus.NONE)
+
+    expect(rungs).toEqual(STATUS_LADDER)
+  })
+
+  it('standing_at_none_is_this_backends_own_member_and_not_a_rung_the_loop_declares', () => {
+    expect(STATUS_LADDER).not.toContain(PlanIssueStatus.NONE)
   })
 
   it('the_prefix_this_backend_reads_a_status_by_is_the_one_every_label_of_the_ladder_wears', () => {
