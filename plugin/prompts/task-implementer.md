@@ -87,8 +87,8 @@ this prompt or in the files it names.
    you add to it follows the style of its host and that too is the rule being
    satisfied. Both documents close the same hole the same way: an old file
    shelters what genuinely extends what was already there, and
-   **a new concept is a new module and is born conforming** — which is also the
-   one place `defects.md` keeps binding whatever the host looks like.
+   **a new concept is a new module and is born conforming.** And `defects.md`
+   binds on every diff, old module and new alike: both exemptions stop at it.
    Which of the two you are writing is already decided for you by the `(create)`
    and `(modify)` marks of the `**Files:**` line.
 
