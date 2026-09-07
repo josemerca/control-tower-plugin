@@ -16,7 +16,7 @@ describe('useImplementProgress', () => {
     vi.stubGlobal('fetch', fetching)
     vi.useFakeTimers()
 
-    renderHook(() => useImplementProgress(ImplementProgressMother.ISSUE, ImplementProgressMother.ROOT))
+    renderHook(() => useImplementProgress(ImplementProgressMother.ISSUE, ImplementProgressMother.ROOT, ImplementProgressMother.REPO))
     await vi.waitFor(() => expect(fetching).toHaveBeenCalledTimes(1))
 
     await vi.advanceTimersByTimeAsync(3000)
@@ -29,7 +29,7 @@ describe('useImplementProgress', () => {
     vi.stubGlobal('fetch', fetching)
     vi.useFakeTimers()
 
-    renderHook(() => useImplementProgress(ImplementProgressMother.ISSUE, ImplementProgressMother.ROOT))
+    renderHook(() => useImplementProgress(ImplementProgressMother.ISSUE, ImplementProgressMother.ROOT, ImplementProgressMother.REPO))
     await vi.waitFor(() => expect(fetching).toHaveBeenCalledTimes(1))
 
     await vi.advanceTimersByTimeAsync(15000)
@@ -42,7 +42,7 @@ describe('useImplementProgress', () => {
     vi.stubGlobal('fetch', fetching)
     vi.useFakeTimers()
 
-    renderHook(() => useImplementProgress(ImplementProgressMother.ISSUE, ImplementProgressMother.ROOT))
+    renderHook(() => useImplementProgress(ImplementProgressMother.ISSUE, ImplementProgressMother.ROOT, ImplementProgressMother.REPO))
     await vi.waitFor(() => expect(fetching).toHaveBeenCalledTimes(1))
 
     await vi.advanceTimersByTimeAsync(15000)
@@ -55,7 +55,7 @@ describe('useImplementProgress', () => {
     vi.stubGlobal('fetch', fetching)
     vi.useFakeTimers()
 
-    const { unmount } = renderHook(() => useImplementProgress(ImplementProgressMother.ISSUE, ImplementProgressMother.ROOT))
+    const { unmount } = renderHook(() => useImplementProgress(ImplementProgressMother.ISSUE, ImplementProgressMother.ROOT, ImplementProgressMother.REPO))
     await vi.waitFor(() => expect(fetching).toHaveBeenCalledTimes(1))
 
     unmount()

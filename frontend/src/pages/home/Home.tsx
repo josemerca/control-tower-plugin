@@ -340,6 +340,7 @@ const Home = () => {
               key={`${workflow.plan.repo}:${workflow.plan.issue.number}`}
               issue={workflow.plan.issue.number}
               root={workflow.plan.root ?? workflow.request.path}
+              repo={workflow.plan.repo}
             />
           )}
           {workflow?.phase === 'implementing' && restoredIsConfirmed && (

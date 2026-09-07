@@ -2,6 +2,7 @@ import { ImplementationProgressState, ImplementationStep, ImplementProgressOutco
 
 const PATH = (issue: number) => `/implement-progress/${issue}`
 const ROOT_FIELD = 'root'
+const REPO_FIELD = 'repo'
 const NOT_READ_CODE = 'implementation-progress-not-read'
 const KNOWN_STEPS: readonly string[] = Object.values(ImplementationStep)
 
@@ -43,10 +44,12 @@ const toState = (wire: ImplementationProgressWire): ImplementationProgressState 
 const isRefusal = (value: unknown): value is { code: string; detail: string } =>
   isRecord(value) && typeof value.code === 'string' && typeof value.detail === 'string'
 
-const get = async ({ issue, root }: { issue: number; root: string }): Promise<ImplementProgressOutcome> => {
+const get = async ({ issue, root, repo }: { issue: number; root: string; repo: string }): Promise<ImplementProgressOutcome> => {
   let response: Response
   try {
-    response = await fetch(`${PATH(issue)}?${ROOT_FIELD}=${encodeURIComponent(root)}`)
+    response = await fetch(
+      `${PATH(issue)}?${ROOT_FIELD}=${encodeURIComponent(root)}&${REPO_FIELD}=${encodeURIComponent(repo)}`,
+    )
   } catch {
     return { kind: 'backend-unreachable' }
   }

@@ -52,7 +52,7 @@ describe('Home · implement progress', () => {
 
     await waitFor(() =>
       expect(fetching).toHaveBeenCalledWith(
-        `/implement-progress/${StartPlanMother.ISSUE.number}?root=${encodeURIComponent(StartPlanMother.NON_CANONICAL_ROOT)}`,
+        `/implement-progress/${StartPlanMother.ISSUE.number}?root=${encodeURIComponent(StartPlanMother.NON_CANONICAL_ROOT)}&repo=${encodeURIComponent(StartPlanMother.REPO)}`,
       ),
     )
   })
@@ -69,7 +69,7 @@ describe('Home · implement progress', () => {
     await screen.findByText('Implementación en curso')
     await waitFor(() =>
       expect(fetching).toHaveBeenCalledWith(
-        `/implement-progress/${StartPlanMother.ISSUE.number}?root=${encodeURIComponent(StartPlanMother.PATH)}`,
+        `/implement-progress/${StartPlanMother.ISSUE.number}?root=${encodeURIComponent(StartPlanMother.PATH)}&repo=${encodeURIComponent(StartPlanMother.REPO)}`,
       ),
     )
   })

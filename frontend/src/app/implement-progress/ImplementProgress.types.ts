@@ -10,6 +10,8 @@ const ImplementationStep = Object.freeze({
   SLICE_JUDGE: 'slice-judge',
   E2E: 'e2e',
   DELIVERED: 'delivered',
+  IN_REVIEW: 'in-review',
+  FIXING: 'fixing',
 } as const)
 
 type ImplementationStep = (typeof ImplementationStep)[keyof typeof ImplementationStep]

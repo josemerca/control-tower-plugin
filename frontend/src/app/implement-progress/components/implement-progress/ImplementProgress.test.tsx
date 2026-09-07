@@ -6,7 +6,7 @@ const answerWith = (answer: { status: number; body: string }) => {
   vi.stubGlobal('fetch', vi.fn(async () => new Response(answer.body, { status: answer.status })))
 }
 
-const renderProgress = () => render(<ImplementProgress issue={ImplementProgressMother.ISSUE} root={ImplementProgressMother.ROOT} />)
+const renderProgress = () => render(<ImplementProgress issue={ImplementProgressMother.ISSUE} root={ImplementProgressMother.ROOT} repo={ImplementProgressMother.REPO} />)
 
 describe('ImplementProgress', () => {
   afterEach(() => vi.unstubAllGlobals())
@@ -56,5 +56,21 @@ describe('ImplementProgress', () => {
     renderProgress()
 
     expect(await screen.findByRole('alert')).toHaveTextContent('No se pudo contactar con el backend')
+  })
+
+  it('should name the review the delivered plan is standing in', async () => {
+    answerWith(ImplementProgressMother.inReview())
+
+    renderProgress()
+
+    expect(await screen.findByText(/En revisión/)).toHaveAttribute('role', 'status')
+  })
+
+  it('should name the work of fixing what the review asked for', async () => {
+    answerWith(ImplementProgressMother.fixing())
+
+    renderProgress()
+
+    expect(await screen.findByText(/Corrigiendo lo pedido en la revisión/)).toHaveAttribute('role', 'status')
   })
 })

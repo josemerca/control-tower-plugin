@@ -1,11 +1,24 @@
 const ISSUE = 7
 const ROOT = '/Users/pedro/code/name'
+const REPO = 'owner/name'
 const NOT_READ_DETAIL = 'the worktree /Users/pedro/code/name/.worktrees/7 is not there, so its run cannot be read'
 const MALFORMED_ROOT_DETAIL = 'root is an absolute path such as /Users/you/repos/name'
 
 const progress = () => ({
   status: 200,
   body: '{"step":"judge","task":3,"total_tasks":7,"name":"el lector del plan","attempt":2,"discards":0}',
+})
+
+const inReview = () => ({
+  status: 200,
+  body: '{"step":"in-review","task":null,"total_tasks":7,"name":null,"attempt":null,"discards":0,' +
+    '"pull_request":{"number":31,"url":"https://github.com/owner/name/pull/31"}}',
+})
+
+const fixing = () => ({
+  status: 200,
+  body: '{"step":"fixing","task":null,"total_tasks":7,"name":null,"attempt":null,"discards":0,' +
+    '"pull_request":{"number":31,"url":"https://github.com/owner/name/pull/31"}}',
 })
 
 const delivered = () => ({
@@ -31,9 +44,12 @@ const malformedRoot = () => ({
 export const ImplementProgressMother = {
   ISSUE,
   ROOT,
+  REPO,
   NOT_READ_DETAIL,
   MALFORMED_ROOT_DETAIL,
   progress,
+  inReview,
+  fixing,
   delivered,
   withoutTaskName,
   notRead,

@@ -19,15 +19,18 @@ const STEP_LABELS: Record<ImplementationStep, string> = {
   [ImplementationStep.SLICE_JUDGE]: 'Evaluando el slice',
   [ImplementationStep.E2E]: 'Ejecutando pruebas end-to-end',
   [ImplementationStep.DELIVERED]: 'Entregado',
+  [ImplementationStep.IN_REVIEW]: 'En revisión',
+  [ImplementationStep.FIXING]: 'Corrigiendo lo pedido en la revisión',
 }
 
 type ImplementProgressProps = {
   issue: number
   root: string
+  repo: string
 }
 
-const ImplementProgress = ({ issue, root }: ImplementProgressProps) => {
-  const progress = useImplementProgress(issue, root)
+const ImplementProgress = ({ issue, root, repo }: ImplementProgressProps) => {
+  const progress = useImplementProgress(issue, root, repo)
 
   return (
     <section className="implement-progress" aria-label="Progreso de la implementación">

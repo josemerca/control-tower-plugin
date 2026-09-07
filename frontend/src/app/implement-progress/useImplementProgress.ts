@@ -22,7 +22,7 @@ const toProgress = (outcome: ImplementProgressOutcome): ImplementProgress => {
 const isFinal = (progress: ImplementProgress): boolean =>
   progress.phase === 'failed' || (progress.phase === 'progress' && progress.step === ImplementationStep.DELIVERED)
 
-const useImplementProgress = (issue: number, root: string): ImplementProgress => {
+const useImplementProgress = (issue: number, root: string, repo: string): ImplementProgress => {
   const [progress, setProgress] = useState<ImplementProgress>(CONNECTING)
 
   useEffect(() => {
@@ -31,7 +31,7 @@ const useImplementProgress = (issue: number, root: string): ImplementProgress =>
     let timer: number | undefined
 
     const poll = async () => {
-      const outcome = await ImplementProgressClient.get({ issue, root })
+      const outcome = await ImplementProgressClient.get({ issue, root, repo })
       if (cancelled) return
 
       const next = toProgress(outcome)
@@ -45,7 +45,7 @@ const useImplementProgress = (issue: number, root: string): ImplementProgress =>
       cancelled = true
       if (timer !== undefined) window.clearTimeout(timer)
     }
-  }, [issue, root])
+  }, [issue, root, repo])
 
   return progress
 }
