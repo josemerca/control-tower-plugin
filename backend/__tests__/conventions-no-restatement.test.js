@@ -13,9 +13,26 @@ class Subjects {
     'the burden of proof is on what is added',
     'which call breaks without it',
     'makes the name a lie',
-    'is data, not an exception',
+    'The failure of the external system is data, not an exception',
     'cutting right before the external system',
     'hunt **the mutations that leave it green**',
+    'the folder is the discriminator, never a suffix on the name',
+    'A class nobody instantiates is a namespace',
+    'a test double is not a consumer',
+  ]
+
+  static RULES_NO_OTHER_REPOSITORY_CAN_RECOVER = [
+    'no declared debt in `backend/`',
+    'never sow a label that is not ours',
+    'killed in `afterEach`, not after the assertion',
+    'PlanFailure',
+    'kebab-case',
+    'invocation.js',
+    'backend-best-practices',
+    'owner/repo#N',
+    'Jira, GitHub, cmux, acli and gh exist only in',
+    'ToolRunner',
+    'safeToRepeat',
   ]
 
   static ownDocument() {
@@ -23,8 +40,9 @@ class Subjects {
   }
 
   static everyTravellingRule() {
-    return readdirSync(Subjects.TRAVELLING_YARDSTICK)
-      .map((file) => readFileSync(join(Subjects.TRAVELLING_YARDSTICK, file), 'utf8'))
+    return readdirSync(Subjects.TRAVELLING_YARDSTICK, { withFileTypes: true })
+      .filter((entry) => entry.isFile())
+      .map((entry) => readFileSync(join(Subjects.TRAVELLING_YARDSTICK, entry.name), 'utf8'))
       .join('\n')
   }
 }
@@ -35,7 +53,7 @@ describe('this repository declares only what no other repository inherits', () =
   })
 
   it('it_keeps_the_ubiquitous_language_that_no_other_repository_can_inherit', () => {
-    for (const term of ['User story', 'Plan issue', 'Plan agent', 'GO', 'Harvest ledger']) {
+    for (const term of ['User story', 'Plan issue', 'Plan agent', '**GO**', 'Harvest ledger']) {
       expect(Subjects.ownDocument(), `${term} left the repository with nothing to replace it`).toContain(term)
     }
   })
@@ -50,6 +68,12 @@ describe('this repository declares only what no other repository inherits', () =
     const everyRule = Subjects.everyTravellingRule()
     for (const rule of Subjects.RULES_THAT_WENT_UP) {
       expect(everyRule, `nobody carries this rule any more: ${rule}`).toContain(rule)
+    }
+  })
+
+  it('it_keeps_every_rule_no_other_repository_could_recover', () => {
+    for (const rule of Subjects.RULES_NO_OTHER_REPOSITORY_CAN_RECOVER) {
+      expect(Subjects.ownDocument(), `${rule} left the repository with nothing to replace it`).toContain(rule)
     }
   })
 })

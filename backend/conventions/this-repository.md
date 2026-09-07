@@ -1,8 +1,26 @@
 # What only this repository decides
 
-What binds here and does not travel with the plugin. The travelling yardstick
-of `plugin/conventions/` binds on every diff under `backend/` too; the header
-every brief carries already states how the two resolve when they clash.
+What binds here and does not travel with the plugin.
+
+## Precedence
+
+1. This document — what is specific to this backend.
+2. `plugin/conventions/` — the travelling yardstick; it binds on every diff
+   here too, and this document never restates it. The header every brief
+   carries states how the two resolve when they clash.
+3. The `backend-best-practices` skill — general guidance; it yields to both.
+   Where it shows something else — its Object Mothers section illustrates
+   with a test of a domain entity on its own — the travelling yardstick's
+   three outside-in testing rules win. An example teaches by imitation; this
+   is the rule.
+
+## No declared debt
+
+There is no declared debt in `backend/`: every rule that binds here binds on
+every diff, old module or new. `plugin/conventions/style.md` and
+`plugin/conventions/defects.md` grant a declared-debt exemption to a module
+that was already there — the one exemption in the whole travelling
+yardstick — and this repository does not take it.
 
 ## Ubiquitous language
 
@@ -18,6 +36,18 @@ every brief carries already states how the two resolve when they clash.
 | **Harvest** | Collecting what a delivered slice left behind — its worktree, its branch, its agent — once its pull request merged; the plugin's `dispatch-check --collect` does it, the backend only decides when |
 | **Harvest ledger** | The BigQuery table where every harvested slice leaves its row, shared by every team and told apart by `repo`; the plugin loads it, the backend only says which table (`CT_HARVEST_BQ_TABLE`) |
 
+## Naming an exception family
+
+Every family under `PlanFailure` separates the two things a tool can do
+wrong, because they are repaired in different places: **the command failed**
+(`*NotRead`, `*NotCreated`, `*NotLaunched` — the reason is in its error
+channel) and **it answered something we cannot read** (`*NotUnderstood`,
+`*NotNamed` — our contract with the tool broke). A caller that does not care
+catches the family; the boundary projects each cause to its own `code`.
+
+Jira, GitHub, cmux, acli and gh exist only in `infrastructure/`: none of
+their nouns belongs in a port, a value object or an exception name.
+
 ## The backend leans on the plugin, never the reverse
 
 `backend/` imports the plugin's pure renderers and readers
@@ -28,6 +58,29 @@ never import from `backend/`. What the plugin does not export is copied here
 as a literal, with a contract test that renders the plugin's own output and
 compares — `backend/__tests__/infrastructure/plugin-contract.test.js` — the
 declared-copy rule for the one contract that crosses this boundary.
+
+## Talking to a tool
+
+Four steps, each with one job — the concrete types of this backend:
+
+```
+ToolRunner      launches a binary with its budget; never throws: the exit code is data
+ExternalTool    the conversation: asks the policy whether a failure is worth retrying
+Gh (idiom)      extends the trunk with what only that tool writes
+<tool>-<port>   the adapter: the argv, the parsing, the typed errors
+```
+
+- **The caller declares whether its call is safe to repeat**, with a named
+  flag (`safeToRepeat: true`). A read is; `gh issue create` is not — a lost
+  answer may be an answer that created the issue, and the retry opens a
+  second one.
+- **A missing label is a datum, not a failure**: read which one, sow it with
+  `--force` (the benign-race argument is `ct-groom.mjs`'s), retry the
+  creation, and never sow a label that is not ours.
+- **Text from another system gets its active syntax quieted before it
+  reaches GitHub.** Bare `#N`, `owner/repo#N`, GitHub URLs and `@handles` are
+  fenced as code; what was already code stays; an email does not split at
+  its `@`.
 
 ## The layout
 
@@ -41,6 +94,8 @@ infrastructure/
   http.js            generic plumbing: answering, routing hygiene, the origin filter, the body reader
   harvest-clock.js   the sweep: every minute, asks a registry which clones
                       it served a plan for and surveys each in turn
+  invocation.js      logic that can be observed without a process, moved out
+                      of the entrypoint until it can be — the reason it exists
 ```
 
 ## Answering HTTP in this API
@@ -57,5 +112,12 @@ infrastructure/
   that does not exist. That one is not a decision about a request that reached
   the application; its body is `{code, detail}` too, so the shape stays one
   across the whole API.
+- **A `code` is declared explicitly, in kebab-case**, next to the `detail` it
+  comes with.
 - **An `Origin` is admitted only when it is the page this server hosts**,
   vouched by a loopback `Host`; any other page on any port is a foreign site.
+
+## Testing: a failing test must not leak a process
+
+This suite launches real processes by design. Every spawned child is
+killed in `afterEach`, not after the assertion.
