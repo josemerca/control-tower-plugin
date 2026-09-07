@@ -1,5 +1,6 @@
 import { isAbsolute } from 'node:path'
 import { SLICE_REL_PATH, excludeContentWith } from '../../../plugin/scripts/state-paths.js'
+import { LOOP_BRANCH_PREFIX } from '../../../plugin/scripts/conventions.js'
 import { renderState } from '../../../plugin/scripts/state.js'
 import { BaselineOutcome, BaselineResult } from '../../../plugin/scripts/baseline.js'
 import { GhPlanIssues } from './gh-plan-issues.js'
@@ -109,7 +110,7 @@ export class GitWorkspace extends Workspace {
   }
 
   static branchFor(issue) {
-    return `feat/${issue.number}`
+    return `${LOOP_BRANCH_PREFIX}${issue.number}`
   }
 
   static pathFor(root, issue) {
