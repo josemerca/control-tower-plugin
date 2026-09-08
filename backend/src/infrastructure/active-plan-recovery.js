@@ -1,3 +1,4 @@
+import { LOOP_BRANCH_PREFIX } from '../../../plugin/scripts/conventions.js'
 import { CmuxPlanAgents } from './cmux-plan-agents.js'
 import { CheckoutRoot } from '../domain/value-objects/checkout-root.js'
 import { PlanIssue } from '../domain/value-objects/plan-issue.js'
@@ -39,7 +40,7 @@ export class CmuxActivePlan {
         number: issueNumber,
         url: `https://github.com/${repository.text}/issues/${issueNumber}`,
       }),
-      located: new WorkspaceLocation({ root: root.text, path: entry.cwd, branch: `feat/${issueNumber}` }),
+      located: new WorkspaceLocation({ root: root.text, path: entry.cwd, branch: `${LOOP_BRANCH_PREFIX}${issueNumber}` }),
       repository,
       agent: entry.ref,
     })

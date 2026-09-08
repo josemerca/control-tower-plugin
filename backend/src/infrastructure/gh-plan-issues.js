@@ -8,10 +8,12 @@ import {
   renderGatesContent,
   renderProtectedLine,
 } from '../../../plugin/scripts/groom.js'
-import { gatesOf } from '../../../plugin/scripts/groom.js'
+import { gatesOf, LOOP_STATUS_LABELS } from '../../../plugin/scripts/groom.js'
+import { STATUS_LADDER } from '../../../plugin/scripts/harvest.js'
 import { gateLabels } from '../../../plugin/scripts/gates.js'
 import { PlanIssues } from '../domain/ports/plan-issues.js'
 import { PlanIssue } from '../domain/value-objects/plan-issue.js'
+import { PlanIssueStatus } from '../domain/value-objects/plan-issue-status.js'
 import { ChangeAsked } from '../domain/value-objects/change-asked.js'
 import {
   PlanIssueNotCreated, PlanIssueNotNamed, PlanIssueNotClaimed, PlanGoNotAnswered,
@@ -21,8 +23,12 @@ import { Gh } from './gh.js'
 
 export class GhPlanIssues extends PlanIssues {
   static CHANGES_TOKEN = '-REVIEW'
-  static IN_PROGRESS_LABEL = 'status:in-progress'
-  static IN_REVIEW_LABEL = 'status:in-review'
+  static STATUS_PREFIX = 'status:'
+  static #LABEL_BY_STATUS = new Map(STATUS_LADDER.map((named, at) => [named, LOOP_STATUS_LABELS[at]]))
+  static #STATUS_BY_LABEL = new Map(STATUS_LADDER.map((named, at) => [LOOP_STATUS_LABELS[at], named]))
+  static IN_PROGRESS_LABEL = GhPlanIssues.#LABEL_BY_STATUS.get(PlanIssueStatus.IN_PROGRESS)
+  static IN_REVIEW_LABEL = GhPlanIssues.#LABEL_BY_STATUS.get(PlanIssueStatus.IN_REVIEW)
+  static READY_LABEL = GhPlanIssues.#LABEL_BY_STATUS.get(PlanIssueStatus.READY)
   static GO_TOKEN = '-OK'
   static #REF = /\/issues\/([1-9]\d*)\s*$/
 
@@ -105,7 +111,7 @@ export class GhPlanIssues extends PlanIssues {
     const { outcome } = await this.#swapping({
       issue, repository,
       adding: GhPlanIssues.IN_PROGRESS_LABEL,
-      removing: PlanIssueBody.READY_LABEL,
+      removing: GhPlanIssues.READY_LABEL,
     })
     if (outcome.failed) {
       throw new PlanIssueNotClaimed(`${Gh.BIN} issue edit failed: ${outcome.stderr.trim()}`)
@@ -115,7 +121,7 @@ export class GhPlanIssues extends PlanIssues {
   async requeue({ issue, repository }) {
     const { argv, outcome } = await this.#swapping({
       issue, repository,
-      adding: PlanIssueBody.READY_LABEL,
+      adding: GhPlanIssues.READY_LABEL,
       removing: GhPlanIssues.IN_PROGRESS_LABEL,
     })
     if (outcome.failed) this.#warn({ issue, argv, said: outcome.stderr.trim() })
@@ -173,7 +179,7 @@ export class GhPlanIssues extends PlanIssues {
     )
   }
 
-  static #onlyStatusIn(printed, issueNumber) {
+  static #statusIn(printed, issueNumber) {
     let parsed
     try {
       parsed = JSON.parse(printed)
@@ -187,11 +193,23 @@ export class GhPlanIssues extends PlanIssues {
         `${Gh.BIN} answered without the labels of ${issueNumber}, it printed ${JSON.stringify(printed)}`
       )
     }
-    const status = parsed.labels
+    const worn = parsed.labels
       .map((label) => label?.name)
-      .filter((name) => typeof name === 'string' && name.startsWith('status:'))
+      .filter((name) => typeof name === 'string' && name.startsWith(GhPlanIssues.STATUS_PREFIX))
+    if (worn.length === 0) return PlanIssueStatus.NONE
+    if (worn.length > 1) {
+      throw new PlanChangesNotUnderstood(
+        `${issueNumber} wears more than one status label (${worn.join(', ')}), so which one it stands at cannot be read`
+      )
+    }
+    const named = GhPlanIssues.#STATUS_BY_LABEL.get(worn[0])
+    if (named === undefined) {
+      throw new PlanChangesNotUnderstood(
+        `${issueNumber} wears ${worn[0]}, which the loop does not declare: it stands at none of ${STATUS_LADDER.join(', ')}`
+      )
+    }
 
-    return status.length === 1 ? status[0] : null
+    return named
   }
 
   async answerGo({ issueNumber, repository, nonce }) {
@@ -203,7 +221,7 @@ export class GhPlanIssues extends PlanIssues {
     }
   }
 
-  async isInReview({ issueNumber, repository }) {
+  async statusOf({ issueNumber, repository }) {
     const outcome = await this.gh.run(
       GhPlanIssues.labelsArgvFor({ issueNumber, repository }), { safeToRepeat: true }
     )
@@ -211,7 +229,7 @@ export class GhPlanIssues extends PlanIssues {
       throw new PlanChangesNotRead(`${Gh.BIN} issue view --json labels failed: ${outcome.stderr.trim()}`)
     }
 
-    return GhPlanIssues.#onlyStatusIn(outcome.stdout, issueNumber) === GhPlanIssues.IN_REVIEW_LABEL
+    return GhPlanIssues.#statusIn(outcome.stdout, issueNumber)
   }
 
   async #sowForTheRelease(repository) {
@@ -269,13 +287,12 @@ export class PlanIssueBody {
   static #ACTIVE =
     /((?<![\w])[\w.-]+\/[\w.-]+#\d+|(?<![\w])#\d+|(?<![\w.])@[A-Za-z0-9][A-Za-z0-9-]*|https?:\/\/\S*github\.com\/\S+)/g
   static #CODE_SPAN = /(`[^`]*`)/
-  static READY_LABEL = 'status:ready'
   static CHANGES_LINE =
     `> Para pedir cambios en el plan, comenta en este issue empezando por \`${GhPlanIssues.CHANGES_TOKEN}\`: ` +
     'lo que escribas detrás es lo que se le pide al agente, y publicará el plan rehecho aquí mismo.'
 
   static labels({ story, comment }) {
-    return [...gateLabels(gatesOf(PlanIssueBody.rowFor({ story, comment })).gates), PlanIssueBody.READY_LABEL]
+    return [...gateLabels(gatesOf(PlanIssueBody.rowFor({ story, comment })).gates), GhPlanIssues.READY_LABEL]
   }
 
   static titleFor({ story, comment }) {

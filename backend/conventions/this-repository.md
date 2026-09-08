@@ -35,6 +35,11 @@ yardstick — and this repository does not take it.
 | **Prepared workspace** | A worktree `.worktrees/<n>` on branch `feat/<n>` that a plan agent works in |
 | **Harvest** | Collecting what a delivered slice left behind — its worktree, its branch, its agent — once its pull request merged; the plugin's `dispatch-check --collect` does it, the backend only decides when |
 | **Harvest ledger** | The BigQuery table where every harvested slice leaves its row, shared by every team and told apart by `repo`; the plugin loads it, the backend only says which table (`CT_HARVEST_BQ_TABLE`) |
+| **Pull request** | Where a delivered slice waits for a person: the agent opens it on `feat/<n>` and stops |
+| **Change asked** | One thing a person asked for on that pull request, with its anchors `file:line`; GitHub's native reviews are where it is read from |
+| **Plan issue status** | Which rung of the loop's ladder the issue stands at — `backlog`, `ready`, `in-progress`, `in-review` — or none, which is a status too and not an absence |
+| **Delivery state** | What that status means once a pull request is open: waiting for a person (`in-review`), fixing what was asked (`fixing`), or nobody on it (`unattended`) |
+| **Workbench** | Where a slice goes back to when a person asks for changes; the plugin's `dispatch-check --reopen` puts it there, and the backend only decides when |
 
 ## Naming an exception family
 

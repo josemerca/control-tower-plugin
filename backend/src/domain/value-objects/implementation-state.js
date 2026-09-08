@@ -43,8 +43,8 @@ export class ImplementationState {
 
   underReview({ step, pullRequest }) {
     return ImplementationState.of({
-      step, task: null, totalTasks: this.totalTasks, name: null, attempt: null,
-      discards: this.discards, pullRequest,
+      step, task: this.task, totalTasks: this.totalTasks, name: this.name,
+      attempt: this.attempt, discards: this.discards, pullRequest,
     })
   }
 

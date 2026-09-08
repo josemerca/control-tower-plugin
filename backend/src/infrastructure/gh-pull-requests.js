@@ -1,3 +1,4 @@
+import { LOOP_BRANCH_PREFIX } from '../../../plugin/scripts/conventions.js'
 import { PullRequests } from '../domain/ports/pull-requests.js'
 import { ChangeAsked } from '../domain/value-objects/change-asked.js'
 import { PullRequestNotRead, PullRequestNotUnderstood } from '../domain/exceptions.js'
@@ -21,7 +22,7 @@ export class GhPullRequests extends PullRequests {
   }
 
   static #branchOf(issueNumber) {
-    return `feat/${issueNumber}`
+    return `${LOOP_BRANCH_PREFIX}${issueNumber}`
   }
 
   static #listArgvFor({ issueNumber, repository }) {

@@ -21,7 +21,6 @@ import { ReviewWatch } from './review-watch.js'
 import { GhPullRequests } from './gh-pull-requests.js'
 import { DispatchCheckWorkbench } from './dispatch-check-workbench.js'
 import { RunFileProgress } from './run-file-progress.js'
-import { ReviewedImplementationProgress } from './reviewed-implementation-progress.js'
 import { ActivePlans } from './active-plans-route.js'
 import { ActivePlanRecovery } from './active-plan-recovery.js'
 import { DiskImplementationStartRegistry } from './disk-implementation-start-registry.js'
@@ -344,11 +343,9 @@ class CtApi {
         planAgents,
       }),
       implementProgress: new ReadImplementationProgress({
-        implementationProgress: new ReviewedImplementationProgress({
-          implemented: runFileProgress,
-          pullRequests,
-          planIssues,
-        }),
+        implementationProgress: runFileProgress,
+        pullRequests,
+        planIssues,
       }),
       planEvents: CtApi.#planEvents(git),
       sessions,

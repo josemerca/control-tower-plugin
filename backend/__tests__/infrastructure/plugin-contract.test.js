@@ -8,6 +8,7 @@ import { readGoCommitment, goPath } from '../../../plugin/scripts/go-registry.js
 import { matchesGo } from '../../../plugin/scripts/go-response.js'
 import { controlTowerDir } from '../../../plugin/scripts/run-metrics.js'
 import { LOOP_STATUS_LABELS } from '../../../plugin/scripts/groom.js'
+import { STATUS_LADDER } from '../../../plugin/scripts/harvest.js'
 import {
   STEPS, RUN_STATES, OUTCOMES, DEFAULT_BUDGETS, newRun, after, deliveredRun,
 } from '../../../plugin/scripts/run-machine.js'
@@ -22,6 +23,7 @@ import { UserStoryKey } from '../../src/domain/value-objects/user-story-key.js'
 import { Invocation, InvocationOutcome } from '../../src/infrastructure/invocation.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { ImplementationStep } from '../../src/domain/value-objects/implementation-state.js'
+import { PlanIssueStatus } from '../../src/domain/value-objects/plan-issue-status.js'
 import { CheckoutRoot } from '../../src/domain/value-objects/checkout-root.js'
 
 class Both {
@@ -122,7 +124,23 @@ describe('the directory both halves write the go into', () => {
 describe('the status labels this backend writes and the plugin reads', () => {
   it('both_ends_of_the_claim_are_labels_the_loop_declares_instead_of_names_invented_here', () => {
     expect(LOOP_STATUS_LABELS).toContain(GhPlanIssues.IN_PROGRESS_LABEL)
-    expect(LOOP_STATUS_LABELS).toContain(PlanIssueBody.READY_LABEL)
+    expect(LOOP_STATUS_LABELS).toContain(GhPlanIssues.READY_LABEL)
+  })
+
+  it('the_statuses_a_plan_issue_can_stand_at_are_the_rungs_of_the_loops_own_ladder', () => {
+    const rungs = Object.values(PlanIssueStatus).filter((status) => status !== PlanIssueStatus.NONE)
+
+    expect(rungs).toEqual(STATUS_LADDER)
+  })
+
+  it('standing_at_none_is_this_backends_own_member_and_not_a_rung_the_loop_declares', () => {
+    expect(STATUS_LADDER).not.toContain(PlanIssueStatus.NONE)
+  })
+
+  it('the_prefix_this_backend_reads_a_status_by_is_the_one_every_label_of_the_ladder_wears', () => {
+    for (const label of LOOP_STATUS_LABELS) {
+      expect(label.startsWith(GhPlanIssues.STATUS_PREFIX)).toBe(true)
+    }
   })
 })
 

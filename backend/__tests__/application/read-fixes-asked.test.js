@@ -4,6 +4,7 @@ import { PullRequests } from '../../src/domain/ports/pull-requests.js'
 import { PlanIssues } from '../../src/domain/ports/plan-issues.js'
 import { ChangeAsked } from '../../src/domain/value-objects/change-asked.js'
 import { PlanIssue } from '../../src/domain/value-objects/plan-issue.js'
+import { PlanIssueStatus } from '../../src/domain/value-objects/plan-issue-status.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { PullRequestNotRead } from '../../src/domain/exceptions.js'
 
@@ -32,16 +33,16 @@ class PullRequestsDouble extends PullRequests {
 }
 
 class PlanIssuesDouble extends PlanIssues {
-  constructor(inReview = true) {
+  constructor(status = PlanIssueStatus.IN_REVIEW) {
     super()
-    this.inReview = inReview
+    this.status = status
     this.asked = []
   }
 
-  async isInReview(subject) {
+  async statusOf(subject) {
     this.asked.push(subject)
 
-    return this.inReview
+    return this.status
   }
 }
 
@@ -67,14 +68,21 @@ class Flow {
   static inReview(asked = [Flow.A_CHANGE]) {
     return new Flow({
       pullRequests: new PullRequestsDouble({ open: Flow.PULL_REQUEST, asked }),
-      planIssues: new PlanIssuesDouble(true),
+      planIssues: new PlanIssuesDouble(PlanIssueStatus.IN_REVIEW),
     })
   }
 
   static fixing() {
     return new Flow({
       pullRequests: new PullRequestsDouble({ open: Flow.PULL_REQUEST, asked: [Flow.A_CHANGE] }),
-      planIssues: new PlanIssuesDouble(false),
+      planIssues: new PlanIssuesDouble(PlanIssueStatus.IN_PROGRESS),
+    })
+  }
+
+  static requeued() {
+    return new Flow({
+      pullRequests: new PullRequestsDouble({ open: Flow.PULL_REQUEST, asked: [Flow.A_CHANGE] }),
+      planIssues: new PlanIssuesDouble(PlanIssueStatus.READY),
     })
   }
 
@@ -106,6 +114,15 @@ describe('ReadFixesAsked', () => {
 
   it('an_issue_still_being_fixed_hands_nothing_over_so_nothing_is_typed_over_a_busy_agent', async () => {
     const flow = Flow.fixing()
+
+    const read = await flow.run()
+
+    expect(read.changes).toEqual([])
+    expect(flow.pullRequests.read).toEqual([])
+  })
+
+  it('an_issue_requeued_with_its_pull_request_still_open_hands_nothing_over_because_nobody_is_on_it', async () => {
+    const flow = Flow.requeued()
 
     const read = await flow.run()
 
@@ -152,7 +169,7 @@ describe('ReadFixesAsked', () => {
   it('a_port_that_nobody_implemented_says_so_instead_of_answering_undefined', async () => {
     await expect(new PullRequests().openOf({ issueNumber: Flow.ISSUE.number, repository: Flow.REPOSITORY }))
       .rejects.toThrow(/must implement openOf/)
-    await expect(new PlanIssues().isInReview({ issueNumber: Flow.ISSUE.number, repository: Flow.REPOSITORY }))
-      .rejects.toThrow(/must implement isInReview/)
+    await expect(new PlanIssues().statusOf({ issueNumber: Flow.ISSUE.number, repository: Flow.REPOSITORY }))
+      .rejects.toThrow(/must implement statusOf/)
   })
 })

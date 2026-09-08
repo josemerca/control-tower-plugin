@@ -29,9 +29,9 @@ export class PlanIssues {
     )
   }
 
-  async isInReview({ issueNumber, repository }) {
+  async statusOf({ issueNumber, repository }) {
     throw new Error(
-      `${this.constructor.name} must implement isInReview({ issueNumber, repository }), asked for ${issueNumber} in ${repository}`
+      `${this.constructor.name} must implement statusOf({ issueNumber, repository }), asked for ${issueNumber} in ${repository}`
     )
   }
 }

@@ -164,6 +164,34 @@ describe('ImplementProgressRoute', () => {
     expect(spy.asked).toEqual([])
   })
 
+  it('a_call_with_no_repo_is_refused_and_the_progress_is_never_read', async () => {
+    const spy = ReadImplementationProgressSpy.answering(RunningApi.IN_THE_MIDDLE_OF_A_TASK)
+
+    const { response } = await RunningApi.asking(`${RunningApi.PATH}?root=${RunningApi.ROOT}`, spy)
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      code: 'malformed-progress-repo',
+      detail: 'repo must be a repository such as owner/name',
+    })
+    expect(spy.asked).toEqual([])
+  })
+
+  it('a_repo_that_is_not_owner_slash_name_is_refused_the_same_way', async () => {
+    const spy = ReadImplementationProgressSpy.answering(RunningApi.IN_THE_MIDDLE_OF_A_TASK)
+
+    const { response } = await RunningApi.asking(
+      `${RunningApi.PATH}?root=${RunningApi.ROOT}&repo=${encodeURIComponent('--flag')}`, spy
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({
+      code: 'malformed-progress-repo',
+      detail: 'repo must be a repository such as owner/name',
+    })
+    expect(spy.asked).toEqual([])
+  })
+
   it('a_worktree_that_is_not_there_collapses_into_a_progress_that_could_not_be_read', async () => {
     const spy = ReadImplementationProgressSpy.failingWith(
       new ImplementationProgressNotRead('no worktree at /checkout/.worktrees/99')
