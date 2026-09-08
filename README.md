@@ -5,7 +5,7 @@ Tres piezas, un repo, y solo una de ellas se distribuye:
 | Directorio | Qué es | ¿Se distribuye? |
 |---|---|---|
 | [`plugin/`](plugin/) | El plugin **control-tower-loop** de Claude Code: el loop entero (hidratación, gates, dispatch, jueces) y su suite | **Sí** — es el `source` del marketplace |
-| [`backend/`](backend/) | La API HTTP local que la interfaz consume (`POST /start-plan`, `GET /plan-events/:issue`, `POST /implement-plan`, `GET /implement-progress/:issue`); además barre cada minuto los clones que ha atendido y cosecha con `dispatch-check --collect` lo que dejó cada slice cuya PR ya se mergeó | No |
+| [`backend/`](backend/) | La API HTTP local que la interfaz consume — cinco endpoints, documentados en [`backend/API.md`](backend/API.md); además barre cada minuto los clones que ha atendido y cosecha con `dispatch-check --collect` lo que dejó cada slice cuya PR ya se mergeó | No |
 | [`frontend/`](frontend/) | El front que consume esa API | No |
 
 La unidad de distribución de un plugin es el directorio `source` de
@@ -16,6 +16,7 @@ npm sin imponérselas a ningún repo gobernado. Un test lo vigila
 (`plugin/__tests__/manifest.test.js`): si el `source` vuelve a `"./"`, falla.
 
 La documentación del plugin está en [`plugin/README.md`](plugin/README.md).
+El contrato de la API que consume el front, en [`backend/API.md`](backend/API.md).
 El diseño de la fusión con la app companion, con su nota de divergencia, en
 [`docs/superpowers/specs/`](docs/superpowers/specs/).
 
