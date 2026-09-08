@@ -91,13 +91,13 @@ describe('Home · restore workflow', () => {
     await streamFrame(PlanEventsMother.ready())
     const implementing = backendAnswering(ImplementPlanMother.implementing())
     await user.click(screen.getByRole('button', { name: 'Implementar plan' }))
-    await screen.findByText('Implementación en curso')
+    await screen.findByText('Agente asignado')
 
     unmount()
     backendRecovering(activePlansAnswer(activePlan('implementing')))
     openHome()
 
-    expect(await screen.findByText('Implementación en curso')).toBeInTheDocument()
+    expect(await screen.findByText('Agente asignado')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Arrancar otro plan' })).toBeEnabled()
     expect(screen.queryByRole('button', { name: 'Implementar plan' })).toBeNull()
     expect(implementing).toHaveBeenCalledTimes(1)
@@ -242,7 +242,7 @@ describe('Home · restore workflow', () => {
 
     openHome()
 
-    expect(await screen.findByText('Implementación en curso')).toBeInTheDocument()
+    expect(await screen.findByText('Agente asignado')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Arrancar otro plan' })).toBeEnabled()
     expect(screen.queryByRole('button', { name: 'Implementar plan' })).toBeNull()
     expect(FakeEventSource.opened).toHaveLength(0)
@@ -300,7 +300,7 @@ describe('Home · restore workflow', () => {
     expect(choices[1]).toHaveAccessibleName(/ABC-123, owner\/other-name, issue #9/)
     await user.click(choices[1])
 
-    expect(screen.getByText('Implementación en curso')).toBeInTheDocument()
+    expect(screen.getByText('Agente asignado')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Arrancar otro plan' })).toBeEnabled()
     expect(FakeEventSource.opened).toHaveLength(0)
   })

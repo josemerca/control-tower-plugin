@@ -29,7 +29,7 @@ describe('ImplementPlanAction', () => {
 
     expect(onImplementationStarted).not.toHaveBeenCalled()
     answer(new Response(ImplementPlanMother.implementing().body, { status: 202 }))
-    expect(await screen.findByText('Implementación en curso')).toBeInTheDocument()
+    expect(await screen.findByText('Agente asignado')).toBeInTheDocument()
     expect(onImplementationStarted).toHaveBeenCalledTimes(1)
   })
 
@@ -41,7 +41,7 @@ describe('ImplementPlanAction', () => {
     await user.click(screen.getByRole('button', IMPLEMENT_BUTTON))
 
     const status = await screen.findByRole('status')
-    expect(status).toHaveTextContent('Información: Implementación en curso')
+    expect(status).toHaveTextContent('Información: Agente asignado')
     expect(status).toHaveTextContent(ImplementPlanMother.AGENT)
   })
 

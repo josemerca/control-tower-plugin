@@ -34,10 +34,10 @@ const ImplementPlanAction = ({ plan, onImplementationStarted, isImplementationSt
       <div className="implement-plan-action">
         <Banner
           type="informative"
-          title="Implementación en curso"
+          title="Agente asignado"
           description={
             <span className="implement-plan-action__facts">
-              El agente <code>{outcome?.kind === 'implementing' ? outcome.agent : plan.agent}</code> implementa el plan
+              El agente <code>{outcome?.kind === 'implementing' ? outcome.agent : plan.agent}</code> lleva este plan
             </span>
           }
         />

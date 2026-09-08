@@ -48,7 +48,7 @@ describe('Home · implement progress', () => {
     await screen.findByRole('status')
     await streamFrame(PlanEventsMother.ready())
     await user.click(screen.getByRole('button', IMPLEMENT_BUTTON))
-    await screen.findByText('Implementación en curso')
+    await screen.findByText('Agente asignado')
 
     await waitFor(() =>
       expect(fetching).toHaveBeenCalledWith(
@@ -66,7 +66,7 @@ describe('Home · implement progress', () => {
 
     openHome()
 
-    await screen.findByText('Implementación en curso')
+    await screen.findByText('Agente asignado')
     await waitFor(() =>
       expect(fetching).toHaveBeenCalledWith(
         `/implement-progress/${StartPlanMother.ISSUE.number}?root=${encodeURIComponent(StartPlanMother.PATH)}&repo=${encodeURIComponent(StartPlanMother.REPO)}`,
@@ -87,6 +87,37 @@ describe('Home · implement progress', () => {
 
     expect(await screen.findByText(/Tarea 3 de 7/)).toBeInTheDocument()
     expect(screen.getByText(/el lector del plan/)).toBeInTheDocument()
+  })
+
+  it('should not claim the agent is implementing once the review is the real step', async () => {
+    stubFetchByPath((url) => {
+      if (url === '/active-plans') {
+        return { status: 200, body: JSON.stringify({ plans: [activePlanImplementing(StartPlanMother.PATH)] }) }
+      }
+      if (url.startsWith('/implement-progress/')) return ImplementProgressMother.inReview()
+      throw new Error(`unexpected fetch to ${url}`)
+    })
+
+    openHome()
+
+    await screen.findByText(/En revisión/)
+    expect(screen.queryByText(/\bimplementa\b/i)).toBeNull()
+  })
+
+  it('should keep naming the agent while the real step is the implementation itself', async () => {
+    stubFetchByPath((url) => {
+      if (url === '/active-plans') {
+        return { status: 200, body: JSON.stringify({ plans: [activePlanImplementing(StartPlanMother.PATH)] }) }
+      }
+      if (url.startsWith('/implement-progress/')) return ImplementProgressMother.progress()
+      throw new Error(`unexpected fetch to ${url}`)
+    })
+
+    openHome()
+
+    expect(await screen.findByText(/Tarea 3 de 7/)).toBeInTheDocument()
+    expect(screen.getByText('Agente asignado')).toBeInTheDocument()
+    expect(screen.getByText(StartPlanMother.AGENT)).toBeInTheDocument()
   })
 
   it('should stop polling once the page is left', async () => {
