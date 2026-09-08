@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { gzipSync } from 'node:zlib'
 import { ApiServer } from '../../src/infrastructure/api-server.js'
 import { ReviewsSpy } from '../reviews-spy.js'
-import { StartPlanResult } from '../../src/application/actions/start-plan.js'
+import { StartPlanResult, PlanStarted, PlanNotStarted } from '../../src/application/actions/start-plan.js'
 import { PlanWatch } from '../../src/domain/value-objects/plan-watch.js'
 import { RepositoryName } from '../../src/domain/value-objects/repository-name.js'
 import { PlanEvents, EventsRefusal, PlanSessions } from '../../src/infrastructure/plan-events-route.js'
@@ -58,20 +58,69 @@ class StartPlanSpy {
     return spy
   }
 
+  static failingOne() {
+    const spy = new StartPlanSpy()
+    spy.execute = async (params) => {
+      const [succeeding, failing] = params.targets
+
+      return new StartPlanResult({
+        started: [new PlanStarted({
+          repository: succeeding.repository,
+          agent: StartPlanSpy.AGENT,
+          watch: new PlanWatch({
+            story: params.story,
+            issue: StartPlanSpy.ISSUE,
+            located: StartPlanSpy.LOCATED,
+            repository: succeeding.repository,
+            agent: StartPlanSpy.AGENT,
+          }),
+        })],
+        failed: [new PlanNotStarted({
+          repository: failing.repository,
+          cause: new WorkspaceNotPrepared('branch is taken'),
+        })],
+      })
+    }
+
+    return spy
+  }
+
+  static failingAll() {
+    const spy = new StartPlanSpy()
+    spy.execute = async (params) => {
+      const [first, second] = params.targets
+
+      return new StartPlanResult({
+        started: [],
+        failed: [
+          new PlanNotStarted({ repository: first.repository, cause: new WorkspaceNotPrepared('branch is taken') }),
+          new PlanNotStarted({ repository: second.repository, cause: new UserStoryNotRead('acli is not authenticated') }),
+        ],
+      })
+    }
+
+    return spy
+  }
+
   async execute(params) {
     this.asked.push(params.story === null ? null : params.story.text)
-    this.repositories.push(params.repository.text)
-    this.roots.push(params.root.text)
+    const [target] = params.targets
+    this.repositories.push(target.repository.text)
+    this.roots.push(target.root.text)
     if (this.failing) throw new PlanAgentNotLaunched('cmux is not reachable')
     return new StartPlanResult({
-      agent: StartPlanSpy.AGENT,
-      watch: new PlanWatch({
-        story: params.story,
-        issue: StartPlanSpy.ISSUE,
-        located: StartPlanSpy.LOCATED,
-        repository: params.repository,
+      started: [new PlanStarted({
+        repository: target.repository,
         agent: StartPlanSpy.AGENT,
-      }),
+        watch: new PlanWatch({
+          story: params.story,
+          issue: StartPlanSpy.ISSUE,
+          located: StartPlanSpy.LOCATED,
+          repository: target.repository,
+          agent: StartPlanSpy.AGENT,
+        }),
+      })],
+      failed: [],
     })
   }
 }
@@ -275,6 +324,80 @@ describe('ApiServer', () => {
     expect(await response.text()).toBe(RunningApi.ANSWER)
   })
 
+  it('a_plan_asked_for_across_two_repositories_answers_what_started_and_what_did_not', async () => {
+    const sessions = new PlanSessions()
+    const server = RunningApi.server({ startPlan: StartPlanSpy.failingOne(), sessions })
+    const port = await server.start()
+
+    try {
+      const response = await RunningApi.post(
+        port,
+        '/start-plan',
+        '{"id":"ABC-123","repo_list":[' +
+          '{"repo":"owner/name","path":"/repo/checkout"},' +
+          '{"repo":"owner/other","path":"/repo/other-checkout"}' +
+          ']}'
+      )
+
+      expect(response.status).toBe(202)
+      expect(await response.text()).toBe(
+        '{"status":"started","started":[{"id":"ABC-123","repo":"owner/name",' +
+          '"issue":{"number":7,"url":"https://github.com/owner/name/issues/7"},"agent":"workspace:4",' +
+          '"branch":"feat/7","worktree":"/repo/checkout/.worktrees/7","root":"/repo/checkout"}],' +
+          '"failed":[{"repo":"owner/other","code":"workspace-not-prepared","detail":"branch is taken"}]}'
+      )
+      expect(RunningApi.reviews.started).toEqual([StartPlanSpy.WATCH])
+      expect(sessions.known()).toEqual([StartPlanSpy.WATCH])
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('a_listed_request_whose_every_repository_failed_is_not_a_202', async () => {
+    const server = RunningApi.server({ startPlan: StartPlanSpy.failingAll() })
+    const port = await server.start()
+
+    try {
+      const response = await RunningApi.post(
+        port,
+        '/start-plan',
+        '{"id":"ABC-123","repo_list":[' +
+          '{"repo":"owner/name","path":"/repo/checkout"},' +
+          '{"repo":"owner/other","path":"/repo/other-checkout"}' +
+          ']}'
+      )
+
+      expect(response.status).toBe(400)
+      expect(await response.text()).toBe(
+        '{"code":"no-plan-started","detail":"no plan started: every repository of repo_list failed",' +
+          '"failed":[{"repo":"owner/name","code":"workspace-not-prepared","detail":"branch is taken"},' +
+          '{"repo":"owner/other","code":"user-story-not-read","detail":"acli is not authenticated"}]}'
+      )
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('a_listed_request_where_one_of_the_two_started_is_still_a_202', async () => {
+    const server = RunningApi.server({ startPlan: StartPlanSpy.failingOne() })
+    const port = await server.start()
+
+    try {
+      const response = await RunningApi.post(
+        port,
+        '/start-plan',
+        '{"id":"ABC-123","repo_list":[' +
+          '{"repo":"owner/name","path":"/repo/checkout"},' +
+          '{"repo":"owner/other","path":"/repo/other-checkout"}' +
+          ']}'
+      )
+
+      expect(response.status).toBe(202)
+    } finally {
+      await server.stop()
+    }
+  })
+
   it('an_agent_that_cannot_be_launched_is_reported_as_such_instead_of_a_generic_failure', async () => {
     RunningApi.spy = new StartPlanSpy({ failing: true })
     const server = RunningApi.server({ startPlan: RunningApi.spy })
@@ -296,7 +419,6 @@ describe('ApiServer', () => {
     const causes = [
       { cause: new UserStoryNotRead('acli is not authenticated'), code: 'user-story-not-read' },
       { cause: new PlanIssueNotCreated('label not found'), code: 'plan-issue-not-created' },
-      { cause: new WorkspaceNotPrepared('branch is taken'), code: 'workspace-not-prepared' },
     ]
 
     for (const { cause, code } of causes) {
@@ -311,6 +433,50 @@ describe('ApiServer', () => {
       } finally {
         await server.stop()
       }
+    }
+  })
+
+  it('a_plan_issue_that_could_not_be_created_after_the_preflight_is_answered_by_its_own_code', async () => {
+    const spy = new StartPlanSpy()
+    spy.execute = async () => new StartPlanResult({
+      started: [],
+      failed: [new PlanNotStarted({
+        repository: new RepositoryName(RunningApi.REPO),
+        cause: new PlanIssueNotCreated('label not found'),
+      })],
+    })
+    const server = RunningApi.server({ startPlan: spy })
+    const port = await server.start()
+
+    try {
+      const response = await RunningApi.accepted(port)
+
+      expect(response.status).toBe(400)
+      expect(await response.text()).toBe('{"code":"plan-issue-not-created","detail":"label not found"}')
+    } finally {
+      await server.stop()
+    }
+  })
+
+  it('a_workspace_that_cannot_be_prepared_after_the_preflight_is_answered_by_its_own_code', async () => {
+    const spy = new StartPlanSpy()
+    spy.execute = async () => new StartPlanResult({
+      started: [],
+      failed: [new PlanNotStarted({
+        repository: new RepositoryName(RunningApi.REPO),
+        cause: new WorkspaceNotPrepared('branch is taken'),
+      })],
+    })
+    const server = RunningApi.server({ startPlan: spy })
+    const port = await server.start()
+
+    try {
+      const response = await RunningApi.accepted(port)
+
+      expect(response.status).toBe(400)
+      expect(await response.text()).toBe('{"code":"workspace-not-prepared","detail":"branch is taken"}')
+    } finally {
+      await server.stop()
     }
   })
 
@@ -682,6 +848,23 @@ describe('ApiServer', () => {
 
     expect(response.status).toBe(400)
     expect(await response.text()).toBe('{"code":"malformed-repo","detail":"repo must be a repository such as owner/name"}')
+  })
+
+  it('a_malformed_repo_inside_a_listed_request_is_refused_naming_its_position', async () => {
+    const port = await RunningApi.listening()
+
+    const response = await RunningApi.startPlan(
+      port,
+      '{"id":"ABC-123","repo_list":[' +
+        '{"repo":"owner/name","path":"/repo/checkout"},' +
+        '{"repo":"nope","path":"/repo/other-checkout"}' +
+        ']}'
+    )
+
+    expect(response.status).toBe(400)
+    expect(await response.text()).toBe(
+      '{"code":"malformed-repo","detail":"repo_list[1].repo must be a repository such as owner/name"}'
+    )
   })
 
   it('a_repo_that_is_not_shaped_like_one_is_refused_before_it_ever_becomes_an_argument_of_gh', async () => {

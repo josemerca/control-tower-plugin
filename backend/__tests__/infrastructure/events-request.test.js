@@ -127,7 +127,9 @@ describe('EventsRefusal', () => {
   it('a_repository_that_is_missing_or_malformed_is_refused_with_the_same_words_start_plan_uses_for_the_same_field', () => {
     const missing = EventsRefusal.of(EventsRequest.from('42', undefined, Watched.none()))
     const malformed = EventsRefusal.of(EventsRequest.from('42', 'nope', Watched.none()))
-    const startPlanMalformedRepo = PlanRefusal.of(PlanRequest.refused(PlanRequestOutcome.MALFORMED_REPO))
+    const startPlanMalformedRepo = PlanRefusal.of(
+      PlanRequest.refused(PlanRequestOutcome.MALFORMED_REPO, PlanRequest.REPO_FIELD)
+    )
 
     expect(missing.status).toBe(400)
     expect(missing.code).toBe(startPlanMalformedRepo.code)
